@@ -1,17 +1,17 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { WebSocket } from 'ws';
-import { createByokServer } from '../index';
+import { createByokServer, type ByokServer } from '../index';
 import {
   generateFakeDeviceIdentity,
   pairFakeDaemon,
   startServer,
   stopServer,
-  TEST_TENANT_ID,
   testPairingClaims,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
+/** Short enough that a rejected poll answers immediately instead of holding. */
+const SHORT_HOLD_MS = 200;
 
 async function requestChallenge(baseUrl: string, deviceId: string): Promise<{ status: number; nonce?: string }> {
   const res = await fetch(`${baseUrl}/byok/challenge`, {
@@ -42,21 +42,27 @@ async function requestToken(
 
 describe('Auth v2: challenge/token renewal + revocation (§6)', () => {
   let server: HttpServer | undefined;
-  let ws: WebSocket | undefined;
+  let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    ws?.terminate();
+    byok?.stop();
+    byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
-    ws = undefined;
     vi.useRealTimers();
   });
 
-  it('challenge -> sign -> token happy path mints a fresh access token', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
+  async function start(): Promise<{ byok: ByokServer; baseUrl: string }> {
+    const instance = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
+    const started = await startServer(instance);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    byok = instance;
+    return { byok: instance, baseUrl: started.baseUrl };
+  }
+
+  it('challenge -> sign -> token happy path mints a fresh access token', async () => {
+    const started = await start();
+    const { code } = await started.byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const identity = generateFakeDeviceIdentity();
     const { deviceId } = await pairFakeDaemon(started.baseUrl, code, { identity });
 
@@ -72,10 +78,8 @@ describe('Auth v2: challenge/token renewal + revocation (§6)', () => {
   });
 
   it('rejects a token request with an invalid signature (wrong key)', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const started = await start();
+    const { code } = await started.byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const identity = generateFakeDeviceIdentity();
     const impostor = generateFakeDeviceIdentity();
     const { deviceId } = await pairFakeDaemon(started.baseUrl, code, { identity });
@@ -87,10 +91,8 @@ describe('Auth v2: challenge/token renewal + revocation (§6)', () => {
   });
 
   it('rejects a replayed nonce (single-use)', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const started = await start();
+    const { code } = await started.byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const identity = generateFakeDeviceIdentity();
     const { deviceId } = await pairFakeDaemon(started.baseUrl, code, { identity });
 
@@ -108,10 +110,8 @@ describe('Auth v2: challenge/token renewal + revocation (§6)', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
 
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const started = await start();
+    const { code } = await started.byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const identity = generateFakeDeviceIdentity();
     const { deviceId } = await pairFakeDaemon(started.baseUrl, code, { identity });
 
@@ -124,11 +124,9 @@ describe('Auth v2: challenge/token renewal + revocation (§6)', () => {
     expect(token.status).toBe(401);
   });
 
-  it('revoking a device 401s its next challenge, token, WS, and authed-HTTP calls', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+  it('revoking a device 401s its next challenge, token, and authed-HTTP calls', async () => {
+    const started = await start();
+    const { code } = await started.byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const identity = generateFakeDeviceIdentity();
     const { deviceId, accessToken } = await pairFakeDaemon(started.baseUrl, code, { identity });
 
@@ -137,7 +135,7 @@ describe('Auth v2: challenge/token renewal + revocation (§6)', () => {
     const { nonce } = await requestChallenge(started.baseUrl, deviceId);
     const signature = identity.signNonce(nonce!);
 
-    byok.devices.revoke(TEST_TENANT_ID, deviceId);
+    await started.byok.devices.revoke(deviceId);
 
     // Surface 1: /byok/challenge
     const challengeAfterRevoke = await requestChallenge(started.baseUrl, deviceId);
@@ -147,21 +145,18 @@ describe('Auth v2: challenge/token renewal + revocation (§6)', () => {
     const tokenAfterRevoke = await requestToken(started.baseUrl, deviceId, nonce!, signature);
     expect(tokenAfterRevoke.status).toBe(401);
 
-    // Surface 3: WSS upgrade, using the (still otherwise-valid) pre-revocation access token
-    const badWs = new WebSocket(`ws://127.0.0.1:${started.port}/byok/ws`, {
-      headers: { authorization: `Bearer ${accessToken}` },
-    });
-    ws = badWs;
-    const closeOrError = await new Promise<'error' | number>((resolve) => {
-      badWs.once('unexpected-response', (_req, res) => resolve(res.statusCode ?? -1));
-      badWs.once('error', () => resolve('error'));
-    });
-    expect(closeOrError === 401 || closeOrError === 'error').toBe(true);
-
-    // Surface 4: authed HTTP (events long-poll), same pre-revocation access token
+    // Surface 3: authed HTTP (events long-poll), same pre-revocation access token
     const eventsRes = await fetch(`${started.baseUrl}/byok/events?cursor=0`, {
       headers: { authorization: `Bearer ${accessToken}` },
     });
     expect(eventsRes.status).toBe(401);
+
+    // Surface 4: authed HTTP (inbound messages), same token
+    const messagesRes = await fetch(`${started.baseUrl}/byok/messages`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [] }),
+    });
+    expect(messagesRes.status).toBe(401);
   });
 });

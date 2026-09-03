@@ -3,20 +3,16 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   AGENT_HOME_PROJECTION_CAPABILITY,
   byokAgentHomeProjectionCompletionPath,
+  type Envelope,
 } from '@byok-sdk/protocol';
-import type { WebSocket } from 'ws';
-import { createByokServer } from '../index';
-import {
-  connectFakeDaemon,
-  nextEnvelope,
-  startServer,
-  stopServer,
-  testPairingClaims,
-} from './test-support';
+import { createByokServer, type ByokServer } from '../index';
+import { connectFakeDaemonLongPoll, startServer, stopServer, type FakeLongPollDaemon } from './test-support';
 
 const PRODUCT_ID = 'agent-home-projection-test';
 const REQUEST_ID = '00000000-0000-4000-8000-000000000001';
 const HASH = `sha256:${'a'.repeat(64)}`;
+/** Short injected hold so a long-poll in these tests never waits out the real ~50s default. */
+const SHORT_HOLD_MS = 150;
 
 function desired() {
   return {
@@ -27,45 +23,65 @@ function desired() {
   } as const;
 }
 
+/**
+ * Drain the device's mailbox until an envelope matching `predicate` appears.
+ *
+ * The long-poll replacement for the deleted `nextEnvelope(ws)`: every control
+ * this file enqueues is a durable mailbox row written inside the awaited
+ * host call, so the poll that follows returns it without racing anything.
+ */
+async function awaitEnvelope(
+  daemon: FakeLongPollDaemon,
+  predicate: (envelope: Envelope) => boolean,
+  timeoutMs = 5_000,
+): Promise<Envelope> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    for (const envelope of await daemon.next()) if (predicate(envelope)) return envelope;
+    if (Date.now() > deadline) throw new Error('awaitEnvelope: no matching envelope was delivered');
+  }
+}
+
 describe('reference task-free Agent-home projection', () => {
   let server: HttpServer | undefined;
-  const sockets: WebSocket[] = [];
+  let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    for (const socket of sockets.splice(0)) socket.terminate();
+    byok?.stop();
+    byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
   });
 
-  it('fails capability admission before any task or projection state is created', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
+  async function start(): Promise<{ byok: ByokServer; baseUrl: string }> {
+    const instance = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
+    byok = instance;
+    const started = await startServer(instance);
     server = started.server;
-    const pairing = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, pairing.code, {
+    return { byok: instance, baseUrl: started.baseUrl };
+  }
+
+  it('fails capability admission before any task or projection state is created', async () => {
+    const started = await start();
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
       productId: PRODUCT_ID,
       capabilities: ['agent-home-contract'],
     });
-    sockets.push(daemon.ws);
 
-    await expect(byok.enqueueAgentHomeProjection({ deviceId: daemon.deviceId, payload: desired() }))
+    await expect(started.byok.enqueueAgentHomeProjection({ deviceId: daemon.deviceId, payload: desired() }))
       .rejects.toThrow(AGENT_HOME_PROJECTION_CAPABILITY);
-    expect(byok.readAgentHomeProjection(daemon.deviceId, REQUEST_ID)).toBeUndefined();
-    expect(byok.tasks.list()).toHaveLength(0);
+    expect(await started.byok.readAgentHomeProjection(daemon.deviceId, REQUEST_ID)).toBeUndefined();
+    expect((await started.byok.tasks.list()).tasks).toHaveLength(0);
   });
 
   it('delivers one exact non-task control, records an exact authenticated completion, and rejects changed terminal facts', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const pairing = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, pairing.code, {
+    const started = await start();
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
       productId: PRODUCT_ID,
       capabilities: ['agent-home-contract', AGENT_HOME_PROJECTION_CAPABILITY],
     });
-    sockets.push(daemon.ws);
 
-    const pending = await byok.enqueueAgentHomeProjection({ deviceId: daemon.deviceId, payload: desired() });
+    const pending = await started.byok.enqueueAgentHomeProjection({ deviceId: daemon.deviceId, payload: desired() });
     expect(pending).toMatchObject({
       deviceId: daemon.deviceId,
       requestId: REQUEST_ID,
@@ -73,16 +89,17 @@ describe('reference task-free Agent-home projection', () => {
       agentRef: desired().agentRef,
       projectionHash: HASH,
     });
-    const envelope = await nextEnvelope(daemon.ws);
-    expect(envelope.type).toBe('agent.home.projection');
+    const envelope = await awaitEnvelope(daemon, (e) => e.type === 'agent.home.projection');
     if (envelope.type !== 'agent.home.projection') throw new Error('unreachable');
     expect(envelope.task_id).toBeUndefined();
     expect(envelope.payload).toEqual(desired());
-    expect(byok.tasks.list()).toHaveLength(0);
+    expect((await started.byok.tasks.list()).tasks).toHaveLength(0);
 
-    const beforeReplay = byok.stats().envelopesOut;
-    await byok.enqueueAgentHomeProjection({ deviceId: daemon.deviceId, payload: desired() });
-    expect(byok.stats().envelopesOut).toBe(beforeReplay);
+    // An exact replay of the same request is accepted rather than refused. The
+    // pre-fold pin that it enqueued no SECOND envelope was written against
+    // `stats().envelopesOut`, which is deleted with the in-process outbox that
+    // produced it (WP3B 2a deviation 3) — see the notes' 2d-server-2 section.
+    await started.byok.enqueueAgentHomeProjection({ deviceId: daemon.deviceId, payload: desired() });
 
     const completion = {
       requestId: REQUEST_ID,
@@ -106,8 +123,8 @@ describe('reference task-free Agent-home projection', () => {
       status: 'applied',
       completedAt: expect.any(String),
     });
-    expect(byok.readAgentHomeProjection(daemon.deviceId, REQUEST_ID)).toEqual(readback);
-    expect(byok.tasks.list()).toHaveLength(0);
+    expect(await started.byok.readAgentHomeProjection(daemon.deviceId, REQUEST_ID)).toEqual(readback);
+    expect((await started.byok.tasks.list()).tasks).toHaveLength(0);
 
     const changed = await fetch(`${started.baseUrl}${byokAgentHomeProjectionCompletionPath(REQUEST_ID)}`, {
       method: 'PUT',
@@ -118,28 +135,24 @@ describe('reference task-free Agent-home projection', () => {
       body: JSON.stringify({ ...completion, outcome: 'conflict' }),
     });
     expect(changed.status).toBe(409);
-    expect(byok.readAgentHomeProjection(daemon.deviceId, REQUEST_ID)).toEqual(readback);
+    expect(await started.byok.readAgentHomeProjection(daemon.deviceId, REQUEST_ID)).toEqual(readback);
   });
 
   it('does not allow another authenticated device to complete the exact target request', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const targetPairing = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const target = await connectFakeDaemon(started.baseUrl, started.port, targetPairing.code, {
+    const started = await start();
+    const target = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
       productId: PRODUCT_ID,
+      deviceName: 'target-laptop',
       capabilities: ['agent-home-contract', AGENT_HOME_PROJECTION_CAPABILITY],
     });
-    sockets.push(target.ws);
-    const otherPairing = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const other = await connectFakeDaemon(started.baseUrl, started.port, otherPairing.code, {
+    const other = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
       productId: PRODUCT_ID,
+      deviceName: 'other-laptop',
       capabilities: ['agent-home-contract', AGENT_HOME_PROJECTION_CAPABILITY],
     });
-    sockets.push(other.ws);
 
-    await byok.enqueueAgentHomeProjection({ deviceId: target.deviceId, payload: desired() });
-    await nextEnvelope(target.ws);
+    await started.byok.enqueueAgentHomeProjection({ deviceId: target.deviceId, payload: desired() });
+    await awaitEnvelope(target, (e) => e.type === 'agent.home.projection');
     const response = await fetch(`${started.baseUrl}${byokAgentHomeProjectionCompletionPath(REQUEST_ID)}`, {
       method: 'PUT',
       headers: {
@@ -154,6 +167,6 @@ describe('reference task-free Agent-home projection', () => {
       }),
     });
     expect(response.status).toBe(404);
-    expect(byok.readAgentHomeProjection(target.deviceId, REQUEST_ID)?.status).toBe('pending');
+    expect((await started.byok.readAgentHomeProjection(target.deviceId, REQUEST_ID))?.status).toBe('pending');
   });
 });

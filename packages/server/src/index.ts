@@ -1,14 +1,40 @@
-import type { Server as HttpServer } from 'node:http';
-import type { Hono } from 'hono';
-import { RESULT_DOCUMENT_MAX_BYTES } from '@byok-sdk/protocol';
-import { createHmacTokenSigner, DeviceRegistry, NonceStore, type TenantId } from './auth';
-import { LocalDiskBlobStore } from './blob-store';
-import { buildHonoApp } from './http';
-import { ConnectionHub } from './hub';
-import { PairingManager, type PairingCodeClaims, type PairingCodeInfo } from './pairing';
-import { RateLimiter } from './rate-limiter';
-import { InMemoryTaskStore } from './task-store';
-import { attachWebSocket as attachWsUpgrade } from './ws-server';
+import { Hono } from 'hono';
+import {
+  agentHomeProjectionRequestKey,
+  createByokCloud,
+  createHmacTokenSigner,
+  fullCapabilityDeclaration,
+  pendingApproval,
+  type ByokCloud,
+  type PairingCodeInfo,
+  type PendingApproval,
+  type TaskAttempt,
+  type TenantId,
+  type TerminalResult,
+} from '@byok-sdk/cloud';
+import {
+  AgentContentReadPayloadSchema,
+  AgentEgressPolicySchema,
+  AgentHomeProjectionPayloadSchema,
+  AgentMessageEgressRequirementSchema,
+  AgentMessageServerContextSchema,
+  AgentRefSchema,
+  DispatchSelectionSchema,
+  RequiredToolsetsSchema,
+  STRICT_AGENT_ONLY_CAPABILITY,
+  TASK_STATES,
+  TerminalProjectionSelectionSchema,
+  type AgentHomeProjectionPayload,
+  type PermissionPolicy,
+  type TaskState,
+} from '@byok-sdk/protocol';
+import type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
+import { DeviceConnections } from './connections';
+import { pickFirstConnectedDevice, type DeviceCandidate } from './device-selection';
+import { TaskEventRelay } from './relay';
+import { toMachineInfo, toTaskResult, toTaskSnapshot, type DispatchFacts } from './snapshot';
+import { composeFacadeStores, serverTenantId, DEFAULT_MAX_BLOB_SIZE_BYTES } from './stores';
+import { createTaskHandle } from './task-handle';
 import type {
   ByokServerEvent,
   AgentContentReadRequest,
@@ -21,6 +47,7 @@ import type {
   HubStats,
   MachineInfo,
   TaskHandle,
+  TaskResult,
   TaskSnapshot,
 } from './types';
 
@@ -40,94 +67,97 @@ export type {
   TaskResult,
   TaskSnapshot,
 } from './types';
-export type { CreateTaskInput, TaskRecord, TaskStore } from './task-store';
-export { IllegalTaskTransitionError, InMemoryTaskStore } from './task-store';
 /**
- * M5 (approval targeting, docs/protocol.md §5.3): previously unreachable via
- * this package's public entry point (only importable from the internal
- * `./hub` path) — `TaskHandle.approve`/`reject`'s `opts.approvalId` targeting
- * (`types.ts`) throws this, so a caller needs it exported here to
- * `instanceof`-check/inspect it. See `hub.ts`'s own doc comment for the full
- * staleness semantics.
+ * M5 (approval targeting, docs/protocol.md §5.3): `TaskHandle.approve`/`reject`'s
+ * `opts.approvalId` targeting throws this when the id names an approval the
+ * task has already superseded, so a caller needs it to `instanceof`-check and
+ * inspect the two ids. Re-exported from `@byok-sdk/cloud`, which owns the gate
+ * both the embedded and the hosted surface are decided by — one class, one
+ * `instanceof` that works across both.
  */
-export { StaleApprovalError } from './hub';
+export { StaleApprovalError } from '@byok-sdk/cloud';
 /**
- * S0 (GAP-002): `TaskHandle.steer` (`types.ts`) throws this when the runtime
- * that claimed the task cannot be steered, when the task isn't running, or
- * when it's already terminal — a caller needs the class to `instanceof`-check
- * it and the code union to switch on. See `hub.ts`'s own doc comments for the
- * full gate order and the fail-closed-on-unknown rationale.
+ * S0 (GAP-002): `TaskHandle.steer` throws this when the runtime that claimed
+ * the task cannot be steered, when the task isn't running, or when it's already
+ * terminal. The GATE is the kernel's — it reads the claim-time capability
+ * snapshot and nothing else — and so is the `code`. The CLASS is this
+ * package's, because it carries `state: TaskState`, the wire vocabulary this
+ * surface speaks and the kernel deliberately has no field for. See
+ * `task-handle.ts` for the full reasoning and for why `SteerRejectionCode` and
+ * {@link StaleApprovalError} stay kernel re-exports.
  */
-export { SteerRejectedError } from './hub';
-export type { SteerRejectionCode } from './hub';
-export { AgentHomeProjectionCompletionError } from './hub';
-export type { AgentHomeProjectionCompletionErrorCode } from './hub';
-export { PairingAttemptConflictError, PairingCodeInvalidError } from './pairing';
-export type { PairingAttemptBinding, PairingCodeClaims, PairingCodeInfo, PairingCompletion } from './pairing';
-export type {
-  AccessTokenClaims,
-  AuthenticatedDevice,
-  DeviceRecord,
-  TenantId,
-  TokenSigner,
-} from './auth';
+export { SteerRejectedError } from './task-handle';
+export type { SteerRejectionCode } from '@byok-sdk/cloud';
 /**
- * S1: `DeviceRegistry` itself is deliberately NOT exported. Its
- * tenant-scoped surface is reachable through `ByokServer.devices` (below),
- * and the one method that resolves a device without a tenant in scope
- * (`resolveByDeviceId`, for the two pre-tenant wire endpoints) exists only
- * inside this package — exporting the class would hand every embedder a
- * cross-tenant device oracle for free.
+ * Auth v2 types an embedder needs to talk about devices and tokens. All owned
+ * by `@byok-sdk/cloud` now — this package no longer has an auth plane of its
+ * own to keep in agreement with one.
  */
-export { createHmacTokenSigner } from './auth';
-export type {
-  BlobStore,
-  BlobUploadReservation,
-  CreateUploadInput,
-  ReadContentResult,
-  WriteContentResult,
-} from './blob-store';
-export { LocalDiskBlobStore } from './blob-store';
-export type { SqliteTaskStoreOptions } from './sqlite-task-store';
-export { SqliteTaskStore } from './sqlite-task-store';
-export type { SqliteBlobStoreOptions } from './sqlite-blob-store';
-export { SqliteBlobStore } from './sqlite-blob-store';
+export type { AccessTokenClaims, DeviceRecord, PairingCodeInfo, TenantId, TokenSigner } from '@byok-sdk/cloud';
+export { createHmacTokenSigner } from '@byok-sdk/cloud';
+/** Cutoffs and result of {@link ByokServer.mailbox.collectRetired}, owned by `@byok-sdk/core`. */
+export type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
 export { SqliteUnavailableError } from './sqlite-support';
 export type { RateLimiterOptions } from './rate-limiter';
+export { DEFAULT_TASK_EVENT_BUFFER_LIMIT, DEFAULT_TASK_EVENT_RETENTION_MS } from './relay';
 
-/** Per-product blob size ceiling (§7): 100MB unless overridden. */
-const DEFAULT_MAX_BLOB_SIZE_BYTES = 100 * 1024 * 1024;
 /** `GET /byok/events` hold duration (§8): ~50s unless overridden (e.g. for tests). */
 const DEFAULT_LONG_POLL_HOLD_MS = 50_000;
-/**
- * Task lease ceiling (M2, Decision: `Failed(retryable:true)` on dark-device
- * timeout — no new task state, no new wire message; see `ConnectionHub`'s
- * lease-reaper doc comment in `hub.ts` for the full design). Deliberately
- * generous — 30 minutes, i.e. far larger than any realistic single task
- * turn — since it exists purely as a backstop for a device that never
- * reconnects at all, not a normal-latency timeout.
- */
-const DEFAULT_TASK_LEASE_MS = 30 * 60_000;
-/** Authenticated WS admission defaults — finite even when an embedder configures nothing. */
-const DEFAULT_WEBSOCKET_HELLO_TIMEOUT_MS = 5_000;
-const DEFAULT_MAX_PENDING_WEBSOCKETS = 32;
-/** Largest protocol document plus fixed envelope/metadata headroom. */
-const DEFAULT_MAX_WEBSOCKET_PAYLOAD_BYTES = RESULT_DOCUMENT_MAX_BYTES + 64 * 1024;
+/** Ceiling on how often a held poll re-reads the mailbox, ms. */
+const MAX_LONG_POLL_INTERVAL_MS = 250;
+/** Floor on the same, so a short test hold still re-reads several times. */
+const MIN_LONG_POLL_INTERVAL_MS = 5;
+/** Attempts a held poll makes across its window; sets the re-read interval with the hold. */
+const LONG_POLL_READS_PER_HOLD = 8;
+/** Bytes of HMAC secret minted when an embedder supplies no {@link TokenSigner}. */
+const TOKEN_SECRET_BYTES = 32;
+/** Page size `tasks.list()` uses when the caller names none. */
+export const DEFAULT_TASK_PAGE_LIMIT = 100;
+
+/** Input to {@link ByokServer.pairing.createPairingCode}. */
+export interface CreatePairingCodeInput {
+  /**
+   * The product the redeeming device pairs into. Must be this instance's own
+   * `productId`: an embedded server serves exactly one product, and a code for
+   * some other product would mint a device every bearer-authed route then
+   * refuses (`instanceProductId`, `@byok-sdk/cloud`). Fail closed rather than
+   * silently issuing an unusable code.
+   *
+   * The TENANT is not a parameter: it is derived from `productId` once, at
+   * construction (`serverTenantId`, `stores.ts`), because this surface has no
+   * second tenant to name.
+   */
+  readonly productId: string;
+  /** Overrides the default single-use code lifetime. */
+  readonly ttlMs?: number;
+}
+
+/** One bounded page of this server's tasks. */
+export interface TaskPage {
+  readonly tasks: readonly TaskSnapshot[];
+  /**
+   * Pass as the next call's `cursor`. ABSENT means the walk is over — a caller
+   * stops on absence, not on an empty page, so a page that exactly fills
+   * `limit` with nothing after it still terminates.
+   */
+  readonly nextCursor?: string;
+}
+
+/** Query for {@link ByokServer.tasks.list}. */
+export interface TaskListQuery {
+  /** Maximum snapshots in the page. Defaults to {@link DEFAULT_TASK_PAGE_LIMIT}. */
+  readonly limit?: number;
+  /** The `nextCursor` from the previous page; absent starts at the beginning. */
+  readonly cursor?: string;
+}
 
 /** The object `createByokServer` returns — the SaaS-embedder-facing surface. */
 export interface ByokServer {
-  /** Hono app exposing the pair/challenge/token/blob/events HTTP routes. Mount it, or use its `.fetch` with `@hono/node-server`. */
+  /** Hono app exposing every device route, plus the opt-in `/healthz`. Mount it, or use its `.fetch` with `@hono/node-server`. */
   hono: Hono;
-  /** Wire up the `GET /byok/ws` upgrade on the raw Node HTTP server serving `hono`. */
-  attachWebSocket(server: HttpServer): void;
   pairing: {
-    /**
-     * S1: minting a code REQUIRES the tenant and product the redeeming
-     * device will be paired into (docs/protocol.md §6.1) — the SaaS's own
-     * auth/device-flow UI is the only party that knows them, and the device
-     * never gets to name its own. There is no claimless overload.
-     */
-    createPairingCode(claims: PairingCodeClaims): PairingCodeInfo;
+    /** Mint a single-use pairing code for this server's product and tenant (docs/protocol.md §6.1). */
+    createPairingCode(input: CreatePairingCodeInput): Promise<PairingCodeInfo>;
   };
   dispatch(input: DispatchInput): Promise<TaskHandle>;
   /** Dispatch a fresh Agent execution whose runtime will mint its session after start. */
@@ -136,18 +166,24 @@ export interface ByokServer {
   requestAgentContentRead(input: AgentContentReadRequest): Promise<void>;
   /** Enqueue one task-free, exact-device Agent-home projection. */
   enqueueAgentHomeProjection(input: AgentHomeProjectionRequest): Promise<AgentHomeProjectionStatusReadback>;
-  /** Reference-only in-process status readback; production durability belongs to @byok-sdk/cloud stores. */
-  readAgentHomeProjection(deviceId: string, requestId: string): AgentHomeProjectionStatusReadback | undefined;
+  /** Durable desired-state and terminal-outcome readback for one projection request. */
+  readAgentHomeProjection(deviceId: string, requestId: string): Promise<AgentHomeProjectionStatusReadback | undefined>;
   tasks: {
-    get(taskId: string): TaskSnapshot | undefined;
-    list(): TaskSnapshot[];
+    get(taskId: string): Promise<TaskSnapshot | undefined>;
+    /**
+     * One bounded page, keyset-paged by task id. Paged rather than "all of
+     * them" because the underlying store is: an unbounded `list()` would have
+     * to walk every page internally and hand back a snapshot that was never
+     * consistent at any single instant.
+     */
+    list(query?: TaskListQuery): Promise<TaskPage>;
   };
-  /** Reference-server reliable egress receipt readback. */
+  /** Reliable Agent egress receipt readback. */
   egress: {
-    get(deviceId: string, eventId: string): AgentEgressReceipt | undefined;
+    get(deviceId: string, eventId: string): Promise<AgentEgressReceipt | undefined>;
   };
   machines: {
-    list(): MachineInfo[];
+    list(): Promise<MachineInfo[]>;
   };
   events: {
     subscribe(): AsyncIterable<ByokServerEvent>;
@@ -155,150 +191,616 @@ export interface ByokServer {
   /**
    * Device revocation (§6.3) — server-side only, no wire message. Revoking a
    * device DELETES its registration, so its next `/byok/challenge`,
-   * `/byok/token`, WSS connect, or authed HTTP call gets a 401 — the same
-   * answer as for a device id that was never registered — and its only
-   * recourse is to re-run `/byok/pair`. The device-scoped state the row
-   * owned (outstanding challenge nonces, presence, inbound dedup) is deleted
-   * with it; what the device DID (tasks, receipts) is history and survives.
+   * `/byok/token`, or authed HTTP call gets a 401 — the same answer as for a
+   * device id that was never registered — and its only recourse is to re-run
+   * `/byok/pair`. The device-scoped state the row owned (outstanding challenge
+   * nonces, presence, inbound dedup) is deleted with it; what the device DID
+   * (tasks, receipts) is history and survives.
    *
-   * S1: tenant-first, and a tenant can only revoke a device it owns — a
-   * `(tenantId, deviceId)` pair belonging to someone else resolves to
-   * nothing and this is a silent no-op rather than a cross-tenant write.
+   * DEVICE-ID ONLY. The hosted control plane's own revocation is tenant-first
+   * (a tenant may only revoke a device it owns), but an embedded server owns
+   * exactly ONE tenant and binds it here itself: `TenantId` is a branded type an
+   * embedder cannot mint, and nothing on this surface — `ByokServer`,
+   * `MachineInfo`, `PairingCodeInfo` — hands one back, so a tenant-first
+   * parameter would make this method uncallable from outside the package rather
+   * than safer. The scoping it provided is unchanged, just not the caller's to
+   * state: a device id this server does not know resolves to nothing and is a
+   * silent no-op.
    */
   devices: {
-    revoke(tenantId: TenantId, deviceId: string): void;
+    revoke(deviceId: string): Promise<void>;
   };
   /**
-   * Stop background timers owned by this server instance — currently just
-   * the task-lease reaper (`ConnectionHub.stopLeaseReaper`, `hub.ts`). Call
-   * this on shutdown so nothing keeps the process alive or leaks a handle in
-   * tests; safe to call more than once.
+   * Mailbox retention for this server's tenant — the host control-plane
+   * operation core defines (`MailboxStore.collectRetired`), forwarded verbatim.
+   *
+   * A pass-through, deliberately, and NOT a retention policy: the caller names
+   * both cutoffs, so this package invents no TTL, runs no timer, and holds no
+   * second opinion about when a device's undelivered work is declared lost.
+   * Nothing in `@byok-sdk/core`, `@byok-sdk/cloud` or this façade drives the
+   * sweep on its own, which is exactly why an embedder needs a way to reach it:
+   * without one, an embedded server retires nothing, ever, and the
+   * `cursor_too_old` floor can never move.
+   *
+   * Acked rows appended before `ackedBefore` are DELETED; unacked rows appended
+   * before `expireUnackedBefore` are dead-lettered as `expired` and stay
+   * visible, which is what moves `recoverableFrom` and turns a device polling
+   * from a lost cursor into a `409 cursor_too_old` resync instead of a silently
+   * short page. Both cutoffs must be canonical ISO-8601 UTC.
+   */
+  mailbox: {
+    collectRetired(input: MailboxRetentionInput): Promise<MailboxRetentionResult>;
+  };
+  /**
+   * Release what this instance holds: the relay's per-task feeds and their
+   * reclamation timers, and the connection observations. Call it on shutdown so
+   * nothing keeps the process alive or leaks a handle in tests; safe to call
+   * more than once.
    */
   stop(): void;
   /**
-   * M4 Phase 4 (part B.1): a plain, serializable in-process snapshot of this
-   * hub's current state — connected device count, task counts by state,
-   * envelope in/out totals, dedup drops, rate-limit events, and uptime. See
-   * {@link HubStats} for the full contract. Deliberately in-process only —
-   * never exposed over HTTP by this SDK itself (see
-   * `CreateByokServerOptions.healthzRoute`'s doc comment); an embedder that
-   * wants any of this surfaced remotely builds its own authenticated route
-   * around this method.
+   * A plain, serializable snapshot of this server's current state. See
+   * {@link HubStats} for the field-by-field contract.
+   *
+   * Async because `taskCountsByState` is COMPUTED from the durable task store
+   * on every call rather than mirrored into a counter this package would then
+   * have to keep in agreement with it — that mirror was the second task
+   * authority the fold exists to remove. Deliberately in-process only: never
+   * exposed over HTTP by this SDK itself (see
+   * `CreateByokServerOptions.healthzRoute`); an embedder that wants any of it
+   * surfaced remotely builds its own authenticated route around this method.
    */
-  stats(): HubStats;
+  stats(): Promise<HubStats>;
 }
 
 /**
- * In-memory reference implementation of the SaaS-side coordinator: Auth v2
- * device pairing/renewal/revocation, a WS + long-poll connection hub with
- * at-least-once redelivery, a local-disk blob store, and task dispatch/
- * lifecycle tracking. See the per-module doc comments (`auth.ts`,
- * `blob-store.ts`, `hub.ts`, `pairing.ts`, `ws-server.ts`) for what's a
- * pinned wire/HTTP contract (docs/protocol.md) versus a reference-impl
- * choice a SaaS embedder might swap out (`tokenSigner`, `blobStore`,
- * `taskStore` — the latter two default to in-memory/local-disk and lose all
- * state on restart; see `sqlite-task-store.ts`/`sqlite-blob-store.ts` for
- * persistent M3 alternatives implementing the same interfaces).
+ * Embedded reference coordinator: a thin façade over `@byok-sdk/cloud`'s
+ * kernel, composed against in-memory stores.
+ *
+ * What that means concretely — and it is the whole point of WP3B — is that this
+ * package owns NO coordination semantics any more. Pairing, tokens, the inbound
+ * gate, task ownership, first-terminal-wins, approvals, steering, cancellation,
+ * long-poll redelivery and the `cursor_too_old` floor are all the kernel's, and
+ * a device cannot tell this from a hosted deployment. What is left here is the
+ * embedded shape: one product, one tenant, a `TaskHandle` for hosts that want
+ * one, an in-process notification relay, and the observability an embedder used
+ * to get from the hub.
+ *
+ * State is in-memory and dies with the process. A deployment that needs it to
+ * survive a restart composes `createByokCloud` with durable stores directly.
  */
 export function createByokServer(opts: CreateByokServerOptions): ByokServer {
-  const pairing = new PairingManager();
-  const devices = new DeviceRegistry();
-  const nonces = new NonceStore();
-  const tokenSigner = opts.tokenSigner ?? createHmacTokenSigner();
-  const blobStore = opts.blobStore ?? new LocalDiskBlobStore();
+  const startedAtMs = Date.now();
+  const tenant = serverTenantId(opts.productId);
   const maxBlobSizeBytes = opts.maxBlobSizeBytes ?? DEFAULT_MAX_BLOB_SIZE_BYTES;
   const longPollHoldMs = opts.longPollHoldMs ?? DEFAULT_LONG_POLL_HOLD_MS;
-  const taskLeaseMs = opts.taskLeaseMs ?? DEFAULT_TASK_LEASE_MS;
-  const webSocketHelloTimeoutMs = positiveSafeInteger(
-    opts.webSocketHelloTimeoutMs ?? DEFAULT_WEBSOCKET_HELLO_TIMEOUT_MS,
-    'webSocketHelloTimeoutMs',
-  );
-  const maxPendingWebSockets = positiveSafeInteger(
-    opts.maxPendingWebSockets ?? DEFAULT_MAX_PENDING_WEBSOCKETS,
-    'maxPendingWebSockets',
-  );
-  const maxWebSocketPayloadBytes = positiveSafeInteger(
-    opts.maxWebSocketPayloadBytes ?? DEFAULT_MAX_WEBSOCKET_PAYLOAD_BYTES,
-    'maxWebSocketPayloadBytes',
-  );
 
-  const rateLimiter = new RateLimiter(opts.rateLimit);
+  const connections = new DeviceConnections();
+  const relay = new TaskEventRelay({
+    connections,
+    ...(opts.taskEventBufferLimit === undefined ? {} : { taskEventBufferLimit: opts.taskEventBufferLimit }),
+    ...(opts.taskEventRetentionMs === undefined ? {} : { taskEventRetentionMs: opts.taskEventRetentionMs }),
+  });
 
-  const taskStore = opts.taskStore ?? new InMemoryTaskStore();
-  const hub = new ConnectionHub(taskStore, devices, taskLeaseMs, rateLimiter, opts.agentMessage);
-  const hono = buildHonoApp({
-    pairing,
-    devices,
-    nonces,
+  const composition = composeFacadeStores({
+    tenant,
+    maxBlobSizeBytes,
+    ...(opts.rateLimit === undefined ? {} : { rateLimit: opts.rateLimit }),
+    connections,
+    onRateLimited: (deviceId, at) => relay.emitServerEvent({ kind: 'device.rate_limited', deviceId, at }),
+  });
+
+  const tokenSigner =
+    opts.tokenSigner ??
+    createHmacTokenSigner(
+      globalThis.crypto.getRandomValues(new Uint8Array(TOKEN_SECRET_BYTES)),
+      composition.clock,
+    );
+
+  const cloud: ByokCloud = createByokCloud({
+    core: composition.core,
+    cloud: composition.cloud,
+    blobContentProxy: composition.blobContentProxy,
+    crypto: composition.crypto,
     tokenSigner,
-    // S1: the product this instance serves is part of `authenticateBearer`'s
-    // decision (`auth.ts`), not just of the WS hello gate — so every
-    // bearer-authed route gets the same instance-equality guarantee the WS
-    // upgrade already had transitively.
-    productId: opts.productId,
-    blobStore,
+    clock: composition.clock,
+    capabilities: fullCapabilityDeclaration(),
+    // S1: the product this instance serves is part of every bearer-authed
+    // route's decision, not just of the pairing claims.
+    instanceProductId: opts.productId,
+    observer: relay,
+    ...(opts.agentMessage === undefined ? {} : { agentMessage: opts.agentMessage }),
     maxBlobSizeBytes,
     longPollHoldMs,
-    hub,
-    healthzRoute: opts.healthzRoute ?? false,
+    longPollIntervalMs: longPollInterval(longPollHoldMs),
   });
+
+  /**
+   * Dispatch input the kernel does not persist. See `DispatchFacts` for why
+   * this exists and why it is not TTL-reclaimed.
+   */
+  const dispatched = new Map<string, DispatchFacts>();
+
+  const hono = new Hono();
+  if (opts.healthzRoute === true) {
+    // Deliberately UNAUTHENTICATED and minimal: a liveness probe must not need
+    // a device credential, and the body carries no device ids and no counts.
+    // `stats()` is the richer surface and is never routed anywhere by this SDK.
+    hono.get('/healthz', (c) => c.json({ ok: true, uptimeMs: Date.now() - startedAtMs }, 200));
+  }
+  // Everything else IS the kernel. Mounted as a fallthrough rather than
+  // re-declared route by route so this package can never publish a route the
+  // kernel does not serve, or shadow one it does.
+  hono.all('*', (c) => cloud.fetch(c.req.raw));
+
+  async function readPending(taskId: string): Promise<PendingApproval | undefined> {
+    return pendingApproval(await cloud.readApprovalTimeline(tenant, taskId));
+  }
+
+  async function readTerminal(taskId: string): Promise<TerminalResult | undefined> {
+    return cloud.readTaskResult(tenant, taskId);
+  }
+
+  async function projectTask(attempt: TaskAttempt): Promise<TaskSnapshot> {
+    const [pending, terminal] = await Promise.all([readPending(attempt.taskId), readTerminal(attempt.taskId)]);
+    return toTaskSnapshot(attempt, pending, terminal, dispatched.get(attempt.taskId));
+  }
+
+  /**
+   * The state `byok.tasks.get(taskId)` would report right now.
+   *
+   * Deliberately routed through `projectTask` rather than re-deriving it: a
+   * refused steer reports the same `TaskState` the snapshot does, because it is
+   * literally the snapshot's, read at the moment of the refusal.
+   */
+  async function readTaskState(taskId: string): Promise<TaskState | undefined> {
+    const attempt = await cloud.readTaskAttempt(tenant, taskId);
+    return attempt === undefined ? undefined : (await projectTask(attempt)).state;
+  }
+
+  /**
+   * Write a host-side approval decision onto the task's durable approval
+   * timeline.
+   *
+   * The pending-approval slot is DERIVED from that timeline — by this package's
+   * snapshot projection and by the kernel's own staleness gate, from the same
+   * fold. So a host decision that stayed unrecorded would leave both of them
+   * insisting an approval is still outstanding that the operator already
+   * answered, and `approve()` would silently enqueue a second `task.approve`
+   * every time it was called. Recording it in the one authority is what keeps
+   * those two readers agreeing; a private "already resolved" set beside the
+   * timeline would be a second authority for exactly one datum.
+   *
+   * A pre-M5 daemon reported `task.await_approval` with no `approvalId`. Its
+   * untargeted host decision is retained as an explicit id-less resolution;
+   * no local identity is synthesized, and the one pending slot still clears.
+   */
+  async function recordHostApproval(
+    taskId: string,
+    decision: 'approve' | 'reject',
+    approvalId: string | undefined,
+    sourceEnvelopeId: string,
+  ): Promise<void> {
+    await composition.cloud.approvals.append(tenant, {
+      taskId,
+      sourceEnvelopeId,
+      event: {
+        type: 'approval_resolved',
+        ...(approvalId === undefined ? {} : { approvalId }),
+        decision,
+        resolvedBy: 'host',
+        at: new Date().toISOString(),
+      },
+    });
+  }
+
+  /**
+   * M4 Phase 3 hardening: the daemon resolved a pending approval entirely
+   * locally and never sent `task.approval_resolved`, but its next
+   * progress/artifact message proves, after the fact, that it did. Recorded on
+   * the same timeline as any other resolution so the read model resumes, and
+   * announced as `task.approval_resolved_implicit` so an embedder can tell the
+   * inferred path from the reported one.
+   *
+   * Runs off the relay's request path, not on it: it needs a store read, and
+   * the kernel's observer contract is synchronous and inline. A failure here
+   * changes nothing durable — the next message re-runs the same check.
+   */
+  relay.onTaskActivity = (taskId: string): void => {
+    void (async () => {
+      const pending = await readPending(taskId);
+      if (pending?.approvalId === undefined) return;
+      const at = new Date().toISOString();
+      await composition.cloud.approvals.append(tenant, {
+        taskId,
+        sourceEnvelopeId: `implicit-approval:${taskId}:${pending.approvalId}`,
+        event: { type: 'approval_resolved', approvalId: pending.approvalId, decision: 'approve', resolvedBy: 'host', at },
+      });
+      relay.emitImplicitApprovalResolved(taskId, at);
+    })().catch(() => undefined);
+  };
+
+  async function candidatesInObservationOrder(): Promise<DeviceCandidate[]> {
+    const candidates: DeviceCandidate[] = [];
+    for (const deviceId of connections.ids()) {
+      if (!connections.isConnected(deviceId)) continue;
+      const device = await composition.cloud.devices.get(tenant, deviceId);
+      if (device === undefined || device.revoked) continue;
+      candidates.push({
+        deviceId,
+        capabilities: device.capabilities,
+        configuredToolsets: connections.get(deviceId)?.configuredToolsets,
+      });
+    }
+    return candidates;
+  }
+
+  async function deviceCapabilities(deviceId: string): Promise<readonly string[] | undefined> {
+    return (await composition.cloud.devices.get(tenant, deviceId))?.capabilities;
+  }
+
+  async function requireConnected(deviceId: string): Promise<void> {
+    if (!connections.isConnected(deviceId)) throw new Error(`device ${deviceId} is not connected`);
+  }
+
+  async function dispatchInternal(
+    input: DispatchInput | FreshAgentEgressDispatchInput,
+    freshAgentEgress: boolean,
+  ): Promise<TaskHandle> {
+    const sessionRef = 'sessionRef' in input ? input.sessionRef : undefined;
+    const agentRef = input.agentRef === undefined ? undefined : AgentRefSchema.parse(input.agentRef);
+    const egressPolicy =
+      input.egressPolicy === undefined ? undefined : AgentEgressPolicySchema.parse(input.egressPolicy);
+    const messageEgress =
+      input.messageEgress === undefined ? undefined : AgentMessageEgressRequirementSchema.parse(input.messageEgress);
+    const terminalProjection =
+      input.terminalProjection === undefined
+        ? undefined
+        : TerminalProjectionSelectionSchema.parse(input.terminalProjection);
+    if (messageEgress === undefined && input.agentMessageContext !== undefined) {
+      throw new Error('agentMessageContext requires messageEgress');
+    }
+    const agentMessageContext =
+      messageEgress === undefined ? undefined : AgentMessageServerContextSchema.parse(input.agentMessageContext);
+    const dispatchSelection =
+      input.dispatchSelection === undefined ? undefined : DispatchSelectionSchema.parse(input.dispatchSelection);
+    const requiredToolsets =
+      input.requiredToolsets === undefined ? undefined : RequiredToolsetsSchema.parse(input.requiredToolsets);
+
+    if (agentRef !== undefined && input.deviceId === undefined) {
+      throw new Error('Agent-bound dispatch requires an explicit deviceId for capability admission');
+    }
+    if (egressPolicy !== undefined && agentRef === undefined) {
+      throw new Error('Agent egress policy requires an explicit AgentRef; legacy task dispatch cannot consume it');
+    }
+    if (messageEgress !== undefined && egressPolicy === undefined) {
+      throw new Error('Agent message egress requires the typed Agent egress offer path');
+    }
+
+    const deviceId =
+      input.deviceId ??
+      pickFirstConnectedDevice(await candidatesInObservationOrder(), {
+        ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
+        allowStrictAgentOnly: agentRef !== undefined,
+      });
+    // No queue-until-connect: reject clearly instead of silently enqueuing a
+    // task nothing will ever claim.
+    if (deviceId === undefined) {
+      throw new Error('no connected device to dispatch to (M0 does not queue tasks until a device connects)');
+    }
+    await requireConnected(deviceId);
+
+    // The gates the kernel does not run, in the pre-fold order. Everything
+    // below the kernel DOES run (strict-agent-only, agent-home-contract, the
+    // egress/message/terminal-projection capabilities) is left to it rather
+    // than duplicated here, so there is one place each admission is decided.
+    const capabilities = await deviceCapabilities(deviceId);
+    if (dispatchSelection !== undefined && !(capabilities?.includes('dispatch-selection') ?? false)) {
+      throw new Error(
+        `device ${deviceId} did not advertise dispatch-selection capability; refusing authoritative provider/model dispatch`,
+      );
+    }
+    if (requiredToolsets !== undefined) {
+      if (!(capabilities?.includes('toolset-selection') ?? false)) {
+        throw new Error(
+          `device ${deviceId} did not advertise toolset-selection capability; refusing a task whose semantics require local MCP tools`,
+        );
+      }
+      const configuredToolsets = connections.get(deviceId)?.configuredToolsets;
+      if (configuredToolsets === undefined) {
+        throw new Error(
+          `device ${deviceId} did not advertise its configured toolset inventory; refusing to guess from runtime capability`,
+        );
+      }
+      const configured = new Set(configuredToolsets);
+      const missing = requiredToolsets.filter((toolsetId) => !configured.has(toolsetId));
+      if (missing.length > 0) {
+        throw new Error(`device ${deviceId} is missing required MCP toolset(s): ${missing.join(', ')}`);
+      }
+    }
+    if (
+      dispatchSelection !== undefined &&
+      input.runtime !== undefined &&
+      input.runtime !== dispatchSelection.runtimeId
+    ) {
+      throw new Error(
+        `dispatch runtime ${input.runtime} does not match dispatchSelection.runtimeId ${dispatchSelection.runtimeId}`,
+      );
+    }
+    if (agentRef === undefined && capabilities?.includes(STRICT_AGENT_ONLY_CAPABILITY) === true) {
+      throw new Error(
+        `device ${deviceId} advertises strict-agent-only; legacy task dispatch is refused before enqueue`,
+      );
+    }
+
+    const policy: PermissionPolicy = input.policy ?? { mode: 'confirm' };
+    const runtime = dispatchSelection?.runtimeId ?? input.runtime;
+    const common = {
+      instruction: input.instruction,
+      policy,
+      ...(runtime === undefined ? {} : { runtime }),
+      ...(dispatchSelection === undefined ? {} : { dispatchSelection }),
+    };
+
+    const enqueued = await (async () => {
+      if (agentRef !== undefined && egressPolicy !== undefined && freshAgentEgress) {
+        return cloud.enqueueFreshAgentEgressOffer(tenant, deviceId, {
+          payload: {
+            ...common,
+            agentRef,
+            egressPolicy,
+            ...(terminalProjection === undefined ? {} : { terminalProjection }),
+            ...(messageEgress === undefined ? {} : { messageEgress }),
+            ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
+          },
+          ...(agentMessageContext === undefined ? {} : { agentMessageContext }),
+        });
+      }
+      if (agentRef !== undefined && egressPolicy !== undefined) {
+        if (sessionRef === undefined) {
+          throw new Error(
+            'Agent egress resume dispatch requires an exact sessionRef; use dispatchFreshAgentEgress for fresh execution',
+          );
+        }
+        return cloud.enqueueAgentEgressOffer(tenant, deviceId, {
+          payload: {
+            ...common,
+            sessionRef,
+            agentRef,
+            egressPolicy,
+            ...(terminalProjection === undefined ? {} : { terminalProjection }),
+            ...(messageEgress === undefined ? {} : { messageEgress }),
+            ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
+          },
+          ...(agentMessageContext === undefined ? {} : { agentMessageContext }),
+        });
+      }
+      if (agentRef !== undefined) {
+        return cloud.enqueueAgentOffer(tenant, deviceId, {
+          payload: {
+            ...common,
+            agentRef,
+            ...(sessionRef === undefined ? {} : { sessionRef }),
+            ...(terminalProjection === undefined ? {} : { terminalProjection }),
+            ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
+          },
+        });
+      }
+      if (requiredToolsets !== undefined) {
+        return cloud.enqueueToolsetOffer(tenant, deviceId, {
+          payload: { ...common, ...(sessionRef === undefined ? {} : { sessionRef }), requiredToolsets },
+        });
+      }
+      return cloud.enqueueOffer(tenant, deviceId, {
+        payload: { ...common, ...(sessionRef === undefined ? {} : { sessionRef }) },
+      });
+    })();
+
+    // The offer envelope's own timestamp, so the feed and the snapshot agree on
+    // when the task began rather than each stamping its own "now".
+    const createdAt = enqueued.envelope.ts;
+    dispatched.set(enqueued.taskId, {
+      createdAt,
+      ...(sessionRef === undefined ? {} : { sessionRef }),
+    });
+    relay.noteDispatched(enqueued.taskId, createdAt);
+    return handleFor(enqueued.taskId);
+  }
+
+  function handleFor(taskId: string): TaskHandle {
+    return createTaskHandle(taskId, {
+      tenant,
+      cloud,
+      relay,
+      recordHostApproval,
+      readState: readTaskState,
+      readResult: async (id) => toTaskResult(await readTerminal(id)),
+    });
+  }
 
   return {
     hono,
-    attachWebSocket(server: HttpServer): void {
-      attachWsUpgrade(server, {
-        devices,
-        tokenSigner,
-        hub,
-        productId: opts.productId,
-        heartbeatIntervalMs: opts.heartbeatIntervalMs,
-        helloTimeoutMs: webSocketHelloTimeoutMs,
-        maxPendingWebSockets,
-        maxPayloadBytes: maxWebSocketPayloadBytes,
-      });
-    },
+
     pairing: {
-      createPairingCode: (claims: PairingCodeClaims) => pairing.createPairingCode(claims),
-    },
-    dispatch: (input: DispatchInput) => hub.dispatch(input),
-    dispatchFreshAgentEgress: (input: FreshAgentEgressDispatchInput) => hub.dispatchFreshAgentEgress(input),
-    requestAgentContentRead: (input: AgentContentReadRequest) => hub.requestAgentContentRead(input),
-    enqueueAgentHomeProjection: (input: AgentHomeProjectionRequest) => hub.enqueueAgentHomeProjection(input),
-    readAgentHomeProjection: (deviceId: string, requestId: string) => hub.readAgentHomeProjection(deviceId, requestId),
-    tasks: {
-      get: (taskId: string) => hub.getTask(taskId),
-      list: () => hub.listTasks(),
-    },
-    egress: {
-      get: (deviceId: string, eventId: string) => hub.getAgentEgressReceipt(deviceId, eventId),
-    },
-    machines: {
-      list: () => hub.listMachines(),
-    },
-    events: {
-      subscribe: () => hub.subscribeServerEvents(),
-    },
-    devices: {
-      revoke: (tenantId: TenantId, deviceId: string): void => {
-        // §6.3: the registration and the device-scoped state that only
-        // existed to serve it go together. `DeviceRegistry.revoke` reports
-        // whether a row was actually removed, so revoking a device this
-        // tenant does not own (or one that never existed) touches nothing at
-        // all — no nonce, no presence entry, no dedup ring — and stays
-        // indistinguishable from a revoke that did nothing.
-        if (!devices.revoke(tenantId, deviceId)) return;
-        nonces.deleteForDevice(deviceId);
-        hub.forgetDevice(deviceId);
+      // `async`, not a plain function that throws: the declared contract is a
+      // promise, and a guard that threw synchronously would refuse a
+      // cross-product mint through a channel no `await`/`.catch()` caller of a
+      // promise-returning method handles. Fail closed, on the same channel as
+      // every other failure of this method.
+      async createPairingCode(input: CreatePairingCodeInput): Promise<PairingCodeInfo> {
+        if (input.productId !== opts.productId) {
+          throw new Error(
+            `pairing code product ${input.productId} does not match this server's product ${opts.productId}`,
+          );
+        }
+        return cloud.createPairingCode(tenant, {
+          productId: input.productId,
+          ...(input.ttlMs === undefined ? {} : { ttlMs: input.ttlMs }),
+        });
       },
     },
-    stop(): void {
-      hub.stopLeaseReaper();
+
+    dispatch(input: DispatchInput): Promise<TaskHandle> {
+      return dispatchInternal(input, false);
     },
-    stats: () => hub.stats(),
+
+    dispatchFreshAgentEgress(input: FreshAgentEgressDispatchInput): Promise<TaskHandle> {
+      if (Object.prototype.hasOwnProperty.call(input, 'sessionRef')) {
+        throw new Error('fresh Agent egress dispatch must not carry sessionRef');
+      }
+      if (typeof input.deviceId !== 'string' || input.deviceId.length === 0) {
+        throw new Error('fresh Agent egress dispatch requires an explicit deviceId');
+      }
+      if (input.agentRef === undefined || input.egressPolicy === undefined) {
+        throw new Error('fresh Agent egress dispatch requires exact AgentRef and egress policy');
+      }
+      return dispatchInternal(input, true);
+    },
+
+    async requestAgentContentRead(input: AgentContentReadRequest): Promise<void> {
+      const payload = AgentContentReadPayloadSchema.parse(input.payload);
+      await requireConnected(input.deviceId);
+      await cloud.enqueueAgentContentRead(tenant, input.deviceId, { payload });
+    },
+
+    async enqueueAgentHomeProjection(
+      input: AgentHomeProjectionRequest,
+    ): Promise<AgentHomeProjectionStatusReadback> {
+      const payload = AgentHomeProjectionPayloadSchema.parse(input.payload);
+      await requireConnected(input.deviceId);
+      return (await cloud.enqueueAgentHomeProjection(tenant, input.deviceId, payload)).status;
+    },
+
+    async readAgentHomeProjection(
+      deviceId: string,
+      requestId: string,
+    ): Promise<AgentHomeProjectionStatusReadback | undefined> {
+      // The kernel's readback is keyed by the WHOLE immutable request identity
+      // (`requestId` + `agentRef` + `projectionHash`) so a status read can never
+      // be answered for a different desired state that happens to share an id.
+      // A host holding only the id gets the rest from the durable request the
+      // enqueue recorded — one authority, read twice, not a second index.
+      const stored = await composition.cloud.receipts.get(
+        tenant,
+        agentHomeProjectionRequestKey(deviceId, requestId),
+      );
+      if (stored === undefined) return undefined;
+      let desired: AgentHomeProjectionPayload;
+      try {
+        desired = AgentHomeProjectionPayloadSchema.parse(JSON.parse(stored.body));
+      } catch {
+        return undefined;
+      }
+      return cloud.getAgentHomeProjectionStatus(tenant, deviceId, {
+        requestId: desired.requestId,
+        agentRef: desired.agentRef,
+        projectionHash: desired.projectionHash,
+      });
+    },
+
+    tasks: {
+      async get(taskId: string): Promise<TaskSnapshot | undefined> {
+        const attempt = await cloud.readTaskAttempt(tenant, taskId);
+        return attempt === undefined ? undefined : projectTask(attempt);
+      },
+      async list(query: TaskListQuery = {}): Promise<TaskPage> {
+        const page = await cloud.listTaskAttempts(tenant, {
+          limit: query.limit ?? DEFAULT_TASK_PAGE_LIMIT,
+          ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
+        });
+        return {
+          tasks: await Promise.all(page.attempts.map((attempt) => projectTask(attempt))),
+          ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
+        };
+      },
+    },
+
+    egress: {
+      async get(deviceId: string, eventId: string): Promise<AgentEgressReceipt | undefined> {
+        const record = await cloud.readAgentEgress(tenant, deviceId, eventId);
+        return record === undefined
+          ? undefined
+          : {
+              deviceId: record.deviceId,
+              payload: record.payload,
+              receiptId: record.receiptId,
+              recordedAt: record.recordedAt,
+            };
+      },
+    },
+
+    machines: {
+      async list(): Promise<MachineInfo[]> {
+        const devices = await cloud.listDevices(tenant);
+        return devices.map((device) => toMachineInfo(device, connections.get(device.deviceId)));
+      },
+    },
+
+    events: {
+      subscribe: () => relay.serverEvents(),
+    },
+
+    devices: {
+      async revoke(deviceId: string): Promise<void> {
+        // §6.3: a tenant can only revoke a device it owns. This server owns one
+        // tenant and supplies it here, so a device id belonging to nobody
+        // addresses nothing and touches nothing.
+        await cloud.revokeDevice(tenant, deviceId);
+        connections.forget(deviceId);
+      },
+    },
+
+    mailbox: {
+      collectRetired(input: MailboxRetentionInput): Promise<MailboxRetentionResult> {
+        return composition.core.mailbox.collectRetired(tenant, input);
+      },
+    },
+
+    stop(): void {
+      relay.stop();
+      dispatched.clear();
+    },
+
+    async stats(): Promise<HubStats> {
+      const taskCountsByState = Object.fromEntries(TASK_STATES.map((state) => [state, 0])) as Record<
+        TaskState,
+        number
+      >;
+      let cursor: string | undefined;
+      do {
+        const page = await cloud.listTaskAttempts(tenant, {
+          limit: DEFAULT_TASK_PAGE_LIMIT,
+          ...(cursor === undefined ? {} : { cursor }),
+        });
+        for (const attempt of page.attempts) {
+          taskCountsByState[toStateForCount(attempt, await readPending(attempt.taskId))] += 1;
+        }
+        cursor = page.nextCursor;
+      } while (cursor !== undefined);
+
+      return {
+        connectedDeviceCount: connections.connectedCount(),
+        taskCountsByState,
+        envelopesIn: composition.counters.envelopesIn,
+        dedupDrops: composition.counters.dedupDrops,
+        rateLimitEvents: composition.counters.rateLimitEvents,
+        uptimeMs: Date.now() - startedAtMs,
+      };
+    },
   };
 }
 
-function positiveSafeInteger(value: number, name: string): number {
-  if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError(`${name} must be a positive safe integer`);
-  return value;
+/** Same projection `tasks.get` uses; named so the count and the snapshot can never disagree. */
+function toStateForCount(attempt: TaskAttempt, pending: PendingApproval | undefined): TaskState {
+  return toTaskSnapshot(attempt, pending, undefined, undefined).state;
+}
+
+/**
+ * A held poll re-reads the mailbox on a fraction of its own window, clamped so
+ * a long production hold does not busy-loop and a short test hold still gets
+ * several reads instead of exactly one.
+ */
+function longPollInterval(holdMs: number): number {
+  const derived = Math.floor(holdMs / LONG_POLL_READS_PER_HOLD);
+  return Math.max(MIN_LONG_POLL_INTERVAL_MS, Math.min(MAX_LONG_POLL_INTERVAL_MS, derived));
 }

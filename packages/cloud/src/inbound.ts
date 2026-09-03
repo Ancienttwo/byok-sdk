@@ -549,11 +549,12 @@ async function applyLifecycle(
       });
       return;
     case 'task.decline':
-      await stores.tasks.recordStatus({
-        taskId,
-        status: 'failed',
-        ...(persistedAgentRef === undefined ? {} : { agentRef: persistedAgentRef }),
-      });
+      // A decline is a terminal (§3.2, `Offered -> Failed`), so it takes the
+      // same path as complete/fail/cancelled: one terminal receipt under the
+      // same key, first-terminal-wins, and therefore a readable result.
+      // Recording only the coarse `failed` status here left an attempt that a
+      // reader could see reach a terminal and then find no result to read.
+      await recordTerminal(stores, taskId, envelope, 'failed');
       return;
     case 'task.progress':
       if (envelope.payload.events.length > 0) {
@@ -661,7 +662,11 @@ async function recordTerminal(
   }
   if (!created) return;
   const cause =
-    envelope.type === 'task.fail' || envelope.type === 'task.cancelled' ? envelope.payload.reason : undefined;
+    envelope.type === 'task.fail' ||
+    envelope.type === 'task.cancelled' ||
+    envelope.type === 'task.decline'
+      ? envelope.payload.reason
+      : undefined;
   const recordedAttempt = await stores.tasks.recordStatus({
     taskId,
     status,

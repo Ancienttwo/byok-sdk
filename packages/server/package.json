@@ -44,14 +44,10 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@byok-sdk/cloud": "workspace:*",
     "@byok-sdk/core": "workspace:*",
     "@byok-sdk/protocol": "workspace:*",
     "@hono/node-server": "^2.0.10",
-    "hono": "^4.12.30",
-    "jose": "^6.2.3",
-    "ws": "^8.21.1"
-  },
-  "devDependencies": {
-    "@types/ws": "^8.18.1"
+    "hono": "^4.12.30"
   }
 }

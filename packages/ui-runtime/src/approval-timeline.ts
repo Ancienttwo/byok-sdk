@@ -134,6 +134,25 @@ function unpairedRequest(observation: ApprovalObservation): ApprovalProjectionIt
   });
 }
 
+function unpairedResolution(observation: ApprovalObservation): ApprovalProjectionItem {
+  const event = observation.event;
+  if (event.type !== 'approval_resolved') {
+    fail('approval_input_invalid', 'Only approval resolutions may omit native approval identity.');
+  }
+  return freezeItem({
+    kind: 'approval',
+    lifecycle: 'approval-responded',
+    status: event.decision === 'approve' ? 'approved' : 'rejected',
+    correlation: 'unpaired-resolution',
+    firstRevision: observation.revision,
+    sourceRevisions: [observation.revision],
+    sourceEnvelopeIds: [observation.sourceEnvelopeId],
+    decision: event.decision,
+    resolvedBy: event.resolvedBy,
+    resolvedAt: event.at,
+  });
+}
+
 function projectItems(observations: readonly ApprovalObservation[]): readonly ApprovalProjectionItem[] {
   const items: ApprovalProjectionItem[] = [];
   const identified = new Map<string, ApprovalAccumulator>();
@@ -145,9 +164,13 @@ function projectItems(observations: readonly ApprovalObservation[]): readonly Ap
       continue;
     }
 
+    if (event.type === 'approval_resolved' && event.approvalId === undefined) {
+      items.push(unpairedResolution(observation));
+      continue;
+    }
     const approvalId = event.approvalId;
     if (approvalId === undefined) {
-      fail('approval_input_invalid', 'Approval resolution requires native approval identity.');
+      fail('approval_input_invalid', 'Approval identity was not handled by its explicit unpaired path.');
     }
     const accumulator = identified.get(approvalId) ?? { approvalId, observations: [] };
     identified.set(approvalId, accumulator);

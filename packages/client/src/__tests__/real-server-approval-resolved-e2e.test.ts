@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ByokServerEvent } from '@byok-sdk/server';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { connectControlClient } from '../bin/control-client';
@@ -25,21 +25,23 @@ async function waitForServerEvent(
 
 /**
  * M4 (additive-minor, `task.approval_resolved`): the full end-to-end pass —
- * a REAL `@byok-sdk/server` and a REAL `@byok-sdk/client` daemon, wired together over
- * a real WS connection (not the lightweight `TestServer`/hand-rolled fake
- * this package's other approval tests use, and not a manually-crafted
- * server-side envelope the way `hub-approval-resolved.test.ts` exercises the
- * server in isolation) — because this specific scenario's whole point is
- * proving the REAL capability negotiation (the real server actually
- * advertises `approval_resolved` in its real `conn.ack`; the real daemon
- * actually reads it back via `ConnectionManager.getServerCapabilities`) and
- * the REAL local-CLI-equivalent resolve path (`approvals.resolve` over the
- * real control socket) produce the correct real-server state progression:
- * local CLI approve -> task.approval_resolved observed at the server ->
- * record Running BEFORE any progress arrives -> task completes -> record
- * Complete, with the pre-existing implicit-resume path never firing for
- * this resolution (see `hub.ts`'s `onApprovalResolved`/
- * `resumeIfImplicitlyApproved` doc comments for why the two can't both fire).
+ * a REAL `@byok-sdk/server` and a REAL `@byok-sdk/client` daemon — because
+ * this specific scenario's whole point is proving the REAL capability
+ * negotiation (the real server actually advertises `approval_resolved`; the
+ * real daemon actually reads it back via
+ * `ConnectionManager.getServerCapabilities`) and the REAL
+ * local-CLI-equivalent resolve path (`approvals.resolve` over the real
+ * control socket) produce the correct real-server state progression: local
+ * CLI approve -> task.approval_resolved observed at the server -> record
+ * Running BEFORE any progress arrives -> task completes -> record Complete,
+ * with the pre-existing implicit-resume path never firing for this
+ * resolution (the two are mutually exclusive: whichever mechanism the server
+ * processes first clears the pending slot on the approval timeline).
+ *
+ * WP3B Step 2: the transport is long-poll (the real server serves no WS
+ * upgrade any more), which is where the capability advertisement now comes
+ * from — each successful `GET /byok/events` response carries it — rather than
+ * from a WS `conn.ack`. The body below is the long-poll rewrite.
  */
 describe('M4 (additive-minor) end-to-end: local CLI approve -> task.approval_resolved -> real server state', () => {
   let real: RealServerHandle;
@@ -50,8 +52,15 @@ describe('M4 (additive-minor) end-to-end: local CLI approve -> task.approval_res
     await real.close();
   });
 
+  // 2d-client-followup: the kernel now advertises `approval_resolved`
+  // (`CLOUD_PROTOCOL_CAPABILITIES`, `packages/cloud/src/handlers/events.ts:35`),
+  // which is the flag `TaskRunner.sendApprovalResolved`
+  // (`packages/client/src/daemon/task-runner.ts:3319`) gates on, so the REAL
+  // negotiation this case exists to prove now happens over long-poll: the
+  // advertisement rides each `GET /byok/events` response instead of a WS
+  // `conn.ack`. Un-skipped.
   it('local approvals.resolve over the real control socket reaches the real server as task.approval_resolved BEFORE any progress, moves the record straight to Running, and the task completes without the implicit-resume path ever firing', async () => {
-    real = await startRealServer({ productId: 'test-product' });
+    real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
 
     const workspaceRoot = await tmpDir('byok-e2e-approval-resolved-workspace-');
     const storeDir = await tmpDir('byok-e2e-approval-resolved-store-');
@@ -60,12 +69,19 @@ describe('M4 (additive-minor) end-to-end: local CLI approve -> task.approval_res
     daemon = createDaemonWithAdapters(
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
+      {
+        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
+        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+      },
     );
 
-    const pairing = real.createPairingCode();
-    await daemon.pair(pairing.code);
+    const pairing = await real.createPairingCode();
+    const record = await daemon.pair(pairing.code);
     await daemon.start();
-    expect(daemon.status().connected).toBe(true);
+    expect(daemon.status().degraded).toBe(true); // long-poll: the real server serves no WS upgrade
+    await vi.waitFor(async () => {
+      expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
+    });
 
     const handle = await real.byok.dispatch({
       instruction: 'do a thing that needs approval',
@@ -110,7 +126,7 @@ describe('M4 (additive-minor) end-to-end: local CLI approve -> task.approval_res
     expect(resolvedEvent.approvalId).toBe(approvalId);
     expect(resolvedEvent.decision).toBe('approve');
     expect(resolvedEvent.resolvedBy).toBe('local');
-    expect(real.byok.tasks.get(taskId)?.state).toBe('Running');
+    expect((await real.byok.tasks.get(taskId))?.state).toBe('Running');
 
     // The stubbed runtime continues on its own after being unblocked and
     // finishes its turn normally.
@@ -119,7 +135,7 @@ describe('M4 (additive-minor) end-to-end: local CLI approve -> task.approval_res
 
     const result = await handle.result();
     expect(result.state).toBe('Complete');
-    expect(real.byok.tasks.get(taskId)?.state).toBe('Complete');
+    expect((await real.byok.tasks.get(taskId))?.state).toBe('Complete');
 
     // The pre-existing implicit-resume path must never have fired for this
     // task — the explicit report already moved it out of AwaitApproval
@@ -134,5 +150,5 @@ describe('M4 (additive-minor) end-to-end: local CLI approve -> task.approval_res
 
     conn.client.close();
     cliConn.client.close();
-  });
+  }, 15000);
 });

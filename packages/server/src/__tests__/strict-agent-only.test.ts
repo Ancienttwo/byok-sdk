@@ -1,65 +1,66 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { WebSocket } from 'ws';
-import { createByokServer } from '../index';
-import {
-  connectFakeDaemon,
-  nextEnvelope,
-  startServer,
-  stopServer,
-  testPairingClaims,
-} from './test-support';
+import { createByokServer, type ByokServer } from '../index';
+import { connectFakeDaemonLongPoll, nextEnvelope, startServer, stopServer } from './test-support';
 
 const PRODUCT_ID = 'strict-agent-only-test';
+/** Short enough that a poll expecting nothing answers in ~200ms instead of ~50s. */
+const SHORT_HOLD_MS = 200;
 
 describe('strict-agent-only producer scheduling defence', () => {
   let server: HttpServer | undefined;
-  const sockets: WebSocket[] = [];
+  let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    sockets.splice(0).forEach((socket) => socket.terminate());
+    byok?.stop();
+    byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
   });
 
-  it('rejects an explicit legacy dispatch before TaskStore/outbox mutation', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
+  async function start(): Promise<{ byok: ByokServer; baseUrl: string }> {
+    const instance = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
+    const started = await startServer(instance);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const strict = await connectFakeDaemon(started.baseUrl, started.port, code, {
+    byok = instance;
+    return { byok: instance, baseUrl: started.baseUrl };
+  }
+
+  it('rejects an explicit legacy dispatch before task store/mailbox mutation', async () => {
+    const started = await start();
+    const strict = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
       productId: PRODUCT_ID,
       capabilities: ['strict-agent-only', 'agent-home-contract'],
     });
-    sockets.push(strict.ws);
 
-    await expect(byok.dispatch({ deviceId: strict.deviceId, instruction: 'legacy' })).rejects.toThrow(/strict-agent-only/i);
-    expect(byok.tasks.list()).toEqual([]);
+    await expect(started.byok.dispatch({ deviceId: strict.deviceId, instruction: 'legacy' })).rejects.toThrow(
+      /strict-agent-only/i,
+    );
+    expect((await started.byok.tasks.list()).tasks).toEqual([]);
   });
 
   it('skips strict devices in implicit legacy selection but admits Agent offers to them', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const strictCode = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const regularCode = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const strict = await connectFakeDaemon(started.baseUrl, started.port, strictCode.code, {
+    const started = await start();
+    const strict = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
       productId: PRODUCT_ID,
       capabilities: ['strict-agent-only', 'agent-home-contract'],
     });
-    const regular = await connectFakeDaemon(started.baseUrl, started.port, regularCode.code, { productId: PRODUCT_ID, capabilities: [] });
-    sockets.push(strict.ws, regular.ws);
+    const regular = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
+      productId: PRODUCT_ID,
+      deviceName: 'regular-laptop',
+      capabilities: [],
+    });
 
-    const legacy = await byok.dispatch({ instruction: 'implicit legacy' });
-    expect(byok.tasks.get(legacy.taskId)?.deviceId).toBe(regular.deviceId);
-    await expect(nextEnvelope(regular.ws)).resolves.toMatchObject({ type: 'task.offer' });
+    const legacy = await started.byok.dispatch({ instruction: 'implicit legacy' });
+    expect((await started.byok.tasks.get(legacy.taskId))?.deviceId).toBe(regular.deviceId);
+    await expect(nextEnvelope(regular)).resolves.toMatchObject({ type: 'task.offer' });
 
-    const agent = await byok.dispatch({
+    const agent = await started.byok.dispatch({
       deviceId: strict.deviceId,
       instruction: 'Agent work',
       agentRef: { agentId: 'agent-1', profileRevision: 'r1' },
     });
-    expect(byok.tasks.get(agent.taskId)?.deviceId).toBe(strict.deviceId);
-    await expect(nextEnvelope(strict.ws)).resolves.toMatchObject({ type: 'task.offer_for_agent' });
+    expect((await started.byok.tasks.get(agent.taskId))?.deviceId).toBe(strict.deviceId);
+    await expect(nextEnvelope(strict)).resolves.toMatchObject({ type: 'task.offer_for_agent' });
   });
 });

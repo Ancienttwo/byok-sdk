@@ -1,79 +1,96 @@
-import type { WebSocket } from 'ws';
-import { describe, expect, it } from 'vitest';
-import { createEnvelope } from '@byok-sdk/protocol';
-import { DeviceRegistry } from '../auth';
-import { ConnectionHub } from '../hub';
-import { RateLimiter } from '../rate-limiter';
-import { InMemoryTaskStore } from '../task-store';
+import type { Server as HttpServer } from 'node:http';
+import { afterEach, describe, expect, it } from 'vitest';
+import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { createByokServer, type ByokServer, type ByokServerEvent } from '../index';
+import { connectFakeDaemonLongPoll, startServer, stopServer, type FakeLongPollDaemon } from './test-support';
+
+const PRODUCT_ID = 'acme';
+/** Short injected hold so a long-poll in this file never waits out the real ~50s default. */
+const SHORT_HOLD_MS = 150;
+
+/**
+ * Collect every `device.rate_limited` event published up to (and including)
+ * the point at which `barrierTaskId`'s `task.created` appears on the
+ * cross-task feed.
+ *
+ * The barrier is a real, uniquely-identifiable server event rather than a
+ * sleep: `AsyncEventQueue.subscribe()` (`event-queue.ts`) always replays from
+ * the start of the retained buffer, and every rate-limit refusal is published
+ * synchronously inside the `POST /byok/messages` request that caused it, so a
+ * `dispatch()` awaited AFTER those requests have returned publishes a
+ * `task.created` that is strictly later than all of them.
+ */
+async function rateLimitedEventsUpTo(byok: ByokServer, barrierTaskId: string): Promise<ByokServerEvent[]> {
+  const seen: ByokServerEvent[] = [];
+  for await (const event of byok.events.subscribe()) {
+    if (event.kind === 'device.rate_limited') seen.push(event);
+    if (event.kind === 'task.created' && event.taskId === barrierTaskId) return seen;
+  }
+  throw new Error('server event stream ended before the barrier task was seen');
+}
+
+/** One over-budget send: a claim for a task id nothing owns, which the gate debits at step 0 before it looks anything up. */
+function floodEnvelope(daemon: FakeLongPollDaemon): Envelope {
+  return createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: 'bogus-task-coalesce-2' });
+}
 
 describe('M4 Phase 4: rate-limit episode recovery', () => {
+  let server: HttpServer | undefined;
+  let byok: ByokServer | undefined;
+
+  afterEach(async () => {
+    byok?.stop();
+    byok = undefined;
+    if (server) await stopServer(server);
+    server = undefined;
+  });
+
   it('a NEW over-budget episode (after the device genuinely recovers under budget in between) gets its own fresh device.rate_limited event, not coalesced with the earlier one', async () => {
-    const taskStore = new InMemoryTaskStore();
-    // Fast refill (1000/s) + tiny burst (1) so the mutable clock can let the
-    // device recover between the two flood episodes without a real-time sleep.
-    const rateLimiter = new RateLimiter({ messagesPerSecond: 1000, burst: 1 });
-    const hub = new ConnectionHub(taskStore, new DeviceRegistry(), 30 * 60_000, rateLimiter);
-    try {
-      const deviceId = 'device-coalesce-2';
-      const fakeWs = { close: () => {}, send: () => {} } as unknown as WebSocket;
-      hub.registerConnection(deviceId, fakeWs, undefined);
+    // 1 token/s with a burst of 2: the fixture's own `conn.hello` spends one,
+    // the first send below spends the other, and everything after that is over
+    // budget until the bucket refills — no clock stubbing needed, and the
+    // recovery below is driven by a real (bounded) admission poll rather than
+    // a fixed sleep.
+    const instance = createByokServer({
+      productId: PRODUCT_ID,
+      longPollHoldMs: SHORT_HOLD_MS,
+      rateLimit: { messagesPerSecond: 1, burst: 2 },
+    });
+    byok = instance;
+    const started = await startServer(instance);
+    server = started.server;
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, instance, { productId: PRODUCT_ID });
+    // The barrier the deleted `device.connected` event used to provide: the
+    // device is present because its `conn.hello` was accepted, which
+    // `machines.list()` reports directly.
+    expect((await instance.machines.list()).map((machine) => machine.deviceId)).toEqual([daemon.deviceId]);
 
-      const rateLimitedEvents: unknown[] = [];
-      const serverEvents = hub.subscribeServerEvents()[Symbol.asyncIterator]();
-      const nextServerEvent = async () => {
-        let timer!: ReturnType<typeof setTimeout>;
-        try {
-          return await Promise.race([
-            serverEvents.next(),
-            new Promise<never>((_, reject) => {
-              timer = setTimeout(() => reject(new Error('timed out waiting for server event')), 1000);
-            }),
-          ]);
-        } finally {
-          clearTimeout(timer);
-        }
-      };
-      const drainThroughBarrier = async (barrierDeviceId: string): Promise<void> => {
-        for (;;) {
-          const event = await nextServerEvent();
-          if (event.done) throw new Error(`server event stream closed before barrier ${barrierDeviceId}`);
-          if (event.value.kind === 'device.rate_limited') rateLimitedEvents.push(event.value);
-          if (event.value.kind === 'device.connected' && event.value.deviceId === barrierDeviceId) return;
-        }
-      };
+    const envelope = floodEnvelope(daemon);
 
-      const envelope = createEnvelope('task.claim', { deviceId }, { taskId: 'bogus-task-coalesce-2' });
+    // Episode 1: the last burst token is spent, then two refusals — the first
+    // opens the episode, the second is coalesced into it.
+    expect((await daemon.send(envelope)).status).toBe(200);
+    expect((await daemon.send(envelope)).status).toBe(429);
+    expect((await daemon.send(envelope)).status).toBe(429);
 
-      const originalDateNow = Date.now;
-      let nowMs = originalDateNow();
-      try {
-        Date.now = () => nowMs;
+    const episode1Barrier = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'episode-1 barrier' });
+    expect(await rateLimitedEventsUpTo(instance, episode1Barrier.taskId)).toHaveLength(1);
 
-        // Episode 1: burst=1, so call #1 succeeds and call #2 floods.
-        hub.handleInbound(deviceId, envelope);
-        hub.handleInbound(deviceId, envelope);
-        const episode1Barrier = 'device-coalesce-2-episode-1-barrier';
-        hub.registerConnection(episode1Barrier, fakeWs, undefined);
-        await drainThroughBarrier(episode1Barrier);
-        expect(rateLimitedEvents).toHaveLength(1);
-
-        // Let the bucket refill (1000/s — a few ms is plenty) so the NEXT
-        // call genuinely succeeds, clearing the coalescing suppression.
-        nowMs += 20;
-        hub.handleInbound(deviceId, envelope); // succeeds — back under budget
-
-        // Episode 2: flood again — a fresh, distinct embedder event.
-        hub.handleInbound(deviceId, envelope);
-        hub.handleInbound(deviceId, envelope);
-        const episode2Barrier = 'device-coalesce-2-episode-2-barrier';
-        hub.registerConnection(episode2Barrier, fakeWs, undefined);
-        await drainThroughBarrier(episode2Barrier);
-        expect(rateLimitedEvents).toHaveLength(2);
-      } finally {
-        Date.now = originalDateNow;
-      }
-    } finally {
-      hub.stopLeaseReaper();
+    // Let the bucket refill (1 token/s) so the NEXT send genuinely succeeds,
+    // clearing the coalescing suppression. Bounded poll on the wire's own
+    // answer — never a fixed sleep, and every refusal it absorbs stays inside
+    // episode 1.
+    for (;;) {
+      const attempt = await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: 'bogus-task-recovery' }));
+      if (attempt.status === 200) break;
+      expect(attempt.status).toBe(429);
     }
+
+    // Episode 2: flood again — a fresh, distinct embedder event.
+    expect((await daemon.send(envelope)).status).toBe(429);
+    expect((await daemon.send(envelope)).status).toBe(429);
+
+    const episode2Barrier = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'episode-2 barrier' });
+    expect(await rateLimitedEventsUpTo(instance, episode2Barrier.taskId)).toHaveLength(2);
   });
 });

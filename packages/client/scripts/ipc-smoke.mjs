@@ -31,7 +31,11 @@
 //   5. The control socket/pipe and its token file are gone afterward.
 //
 // Uses the REAL `@byok-sdk/server` reference implementation (not a hand-rolled
-// stub) to give the daemon something genuine to pair/connect against — both
+// stub) to give the daemon something genuine to pair/connect against. That
+// server is a self-hosted façade over the `@byok-sdk/cloud` kernel and serves
+// the wire over HTTP only (WP3B Step 2 removed the WS attachment), so the
+// daemon here runs the protocol §8 long-poll transport. What this script
+// asserts is the LOCAL control socket, which is transport-independent — both
 // `@byok-sdk/server` and `@hono/node-server` are already `@byok-sdk/client`
 // devDependencies (see `src/__tests__/fixtures/real-server.ts`, which this
 // mirrors) and are built by the same `bun run build` this script requires
@@ -78,7 +82,12 @@ const workspaceRoot = path.join(workDir, 'workspace');
 const configPath = path.join(workDir, 'config.json');
 await fs.mkdir(workspaceRoot, { recursive: true });
 
-const byok = createByokServer({ productId });
+// A short hold keeps the daemon's in-flight `GET /byok/events` from
+// outliving the shutdown this script asserts on: `LongPollClient.stop()`
+// ends the loop but does not abort the request already in flight, so with
+// the ~50s production default the `start` child would linger for the
+// remainder of that hold after the control socket confirmed its exit.
+const byok = createByokServer({ productId, longPollHoldMs: 500 });
 /** @type {import('node:http').Server} */
 let httpServer;
 let startChild;
@@ -133,15 +142,12 @@ function waitForStartupLine(child, marker, timeoutMs) {
 
 try {
   const port = await new Promise((resolve) => {
-    httpServer = serve({ fetch: byok.hono.fetch, port: 0 }, (info) => {
-      byok.attachWebSocket(httpServer);
-      resolve(info.port);
-    });
+    httpServer = serve({ fetch: byok.hono.fetch, port: 0 }, (info) => resolve(info.port));
   });
   const serverUrl = `http://127.0.0.1:${port}`;
   log(`==> real @byok-sdk/server reference implementation listening at ${serverUrl}`);
 
-  const { code: pairingCode } = byok.pairing.createPairingCode({ tenantId: 'tenant-smoke', productId });
+  const { code: pairingCode } = await byok.pairing.createPairingCode({ productId });
 
   await fs.writeFile(
     configPath,

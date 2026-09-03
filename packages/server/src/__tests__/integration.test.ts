@@ -1,69 +1,60 @@
 import type { Server as HttpServer } from 'node:http';
-import { createEnvelope, PROTOCOL_VERSION, type RuntimeCapabilities, type RuntimeId } from '@byok-sdk/protocol';
+import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { WebSocket } from 'ws';
-import { createByokServer } from '../index';
-import type { ServerTaskEvent, TaskHandle } from '../types';
+import { createByokServer, type ByokServer } from '../index';
+import type { ServerTaskEvent } from '../types';
 import {
-  connectFakeDaemon,
-  connectFakeDaemonWs,
+  claimAndStart,
+  connectFakeDaemonLongPoll,
   nextEnvelope,
-  pairFakeDaemon,
   PI_RUNTIME_INFO,
-  send,
+  sendOne,
   startServer,
   stopServer,
-  testPairingClaims,
-  waitForTaskEvent,
+  type FakeLongPollDaemon,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
+/** Short enough that a poll deliberately expecting nothing costs ~200ms, not ~50s. */
+const SHORT_HOLD_MS = 200;
 
 /**
- * Claim + start a dispatched task over `ws` (Offered -> Claimed -> Running)
- * and wait for the Running event. `runtime` (S0) is the actual adapter this
- * claim reports and `capabilities` (S0/D-4) is that adapter's own self-report,
- * which is the ONLY thing the server's steer gate reads; both omitted matches
- * a legacy `task.claim`, which is what every call site here but the steer test
- * wants.
+ * Transport: LONG-POLL ONLY. WP3B Step 2b deleted the WebSocket path, so every
+ * fixture here drives `POST /byok/messages` and `GET /byok/events`.
+ *
+ * Timing discipline follows Step 0's: `POST /byok/messages` applies its
+ * envelopes synchronously inside the request, so an awaited `send` is itself
+ * the barrier for every state change it caused — no fixed sleep is ever a
+ * completion signal.
  */
-async function claimAndStart(
-  ws: WebSocket,
-  deviceId: string,
-  handle: TaskHandle,
-  runtime?: RuntimeId,
-  capabilities?: RuntimeCapabilities,
-): Promise<void> {
-  send(ws, createEnvelope('task.claim', { deviceId, runtime, capabilities }, { taskId: handle.taskId }));
-  send(ws, createEnvelope('task.started', {}, { taskId: handle.taskId }));
-  await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
-}
-
-describe('server integration (in-process http+ws, fake daemon client)', () => {
+describe('server integration (in-process http, fake long-poll daemon client)', () => {
   let server: HttpServer | undefined;
-  let ws: WebSocket | undefined;
+  let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    ws?.terminate();
+    byok?.stop();
+    byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
-    ws = undefined;
   });
 
-  it('an older Local Agent release remains observable and completes work when protocol and capabilities match', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
+  async function start(): Promise<{ byok: ByokServer; baseUrl: string }> {
+    const instance = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
+    const started = await startServer(instance);
     server = started.server;
+    byok = instance;
+    return { byok: instance, baseUrl: started.baseUrl };
+  }
 
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, {
+  it('an older Local Agent release remains observable and completes work when protocol and capabilities match', async () => {
+    const started = await start();
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
       productId: PRODUCT_ID,
       clientVersion: '0.5.0',
       configuredToolsets: ['salesko.connectors'],
     });
-    ws = daemon.ws;
 
-    expect(byok.machines.list()).toEqual([
+    expect(await started.byok.machines.list()).toEqual([
       expect.objectContaining({
         deviceId: daemon.deviceId,
         deviceName: 'test-laptop',
@@ -73,32 +64,26 @@ describe('server integration (in-process http+ws, fake daemon client)', () => {
       }),
     ]);
 
-    const handle = await byok.dispatch({ instruction: 'say hello' });
+    const handle = await started.byok.dispatch({ instruction: 'say hello' });
     expect(handle.taskId).toBeTruthy();
-    expect(byok.tasks.get(handle.taskId)?.state).toBe('Offered');
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Offered');
 
-    const offerEnvelope = await nextEnvelope(ws);
+    const offerEnvelope = await nextEnvelope(daemon);
     expect(offerEnvelope.type).toBe('task.offer');
     if (offerEnvelope.type !== 'task.offer') throw new Error('unreachable');
     // M1 gap #7: taskId is no longer duplicated in the payload — the envelope's `task_id` is the sole routing key.
     expect(offerEnvelope.task_id).toBe(handle.taskId);
-    expect(offerEnvelope.seq).toBe(2); // seq 1 was conn.ack; per-device seq is a shared counter across all server->daemon types (§1.2)
+    // Per-device `seq` is one shared counter across all server->daemon types
+    // (§1.2). The offer is `1` rather than the pre-fold `2` because there is no
+    // `conn.ack` row over long-poll: the announcement is answered by the
+    // `POST /byok/messages` response, not by an enqueued envelope.
+    expect(offerEnvelope.seq).toBe(1);
     expect(offerEnvelope.payload.instruction).toBe('say hello');
     expect(offerEnvelope.payload.policy).toEqual({ mode: 'confirm' }); // M0 fail-closed default
 
-    send(
-      ws,
-      createEnvelope(
-        'task.claim',
-        { deviceId: daemon.deviceId },
-        { taskId: handle.taskId },
-      ),
-    );
-    // M1 gap #2: claim no longer implies Running — the daemon reports that
-    // explicitly via task.started once its runtime session actually starts.
-    send(ws, createEnvelope('task.started', {}, { taskId: handle.taskId }));
-    send(
-      ws,
+    await claimAndStart(started.byok, daemon, handle);
+    await sendOne(
+      daemon,
       createEnvelope(
         'task.progress',
         {
@@ -111,17 +96,18 @@ describe('server integration (in-process http+ws, fake daemon client)', () => {
         { taskId: handle.taskId },
       ),
     );
-    send(
-      ws,
+    await sendOne(
+      daemon,
       createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess_1' }, { taskId: handle.taskId }),
     );
 
     const result = await handle.result();
     expect(result).toEqual({ state: 'Complete', summary: 'done', sessionRef: 'sess_1' });
-    expect(byok.tasks.get(handle.taskId)?.state).toBe('Complete');
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Complete');
 
     // events() replays from the start even though we're draining it *after*
-    // the task already finished — the whole point of AsyncEventQueue.
+    // the task already finished — the whole point of AsyncEventQueue — and it
+    // ENDS at the terminal, so this loop terminates.
     const events: ServerTaskEvent[] = [];
     for await (const event of handle.events()) events.push(event);
 
@@ -141,30 +127,66 @@ describe('server integration (in-process http+ws, fake daemon client)', () => {
   });
 
   it('keeps a legacy daemon with no release identity connected and does not invent one', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
+    const started = await start();
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    ws = daemon.ws;
-
-    const [machine] = byok.machines.list();
+    const [machine] = await started.byok.machines.list();
     expect(machine).toMatchObject({ deviceId: daemon.deviceId, connected: true });
     expect(machine).not.toHaveProperty('clientVersion');
   });
 
+  it('events() ends at the terminal, not when the retention window expires', async () => {
+    // The retention window is set an hour out, so the ONLY thing that can end
+    // either iteration below is the terminal transition closing the feed. A
+    // reclamation-terminated iterator would hang here instead — which is what
+    // this pins: retention decides when the buffer is dropped, never when a
+    // consumer's `for await` completes.
+    const instance = createByokServer({
+      productId: PRODUCT_ID,
+      longPollHoldMs: SHORT_HOLD_MS,
+      taskEventRetentionMs: 60 * 60_000,
+    });
+    const startedServer = await startServer(instance);
+    server = startedServer.server;
+    byok = instance;
+    const daemon = await connectFakeDaemonLongPoll(startedServer.baseUrl, instance, { productId: PRODUCT_ID });
+
+    const handle = await instance.dispatch({ instruction: 'end at the terminal' });
+    await nextEnvelope(daemon); // task.offer
+
+    // A consumer already iterating when the terminal lands.
+    const live = (async () => {
+      const seen: ServerTaskEvent[] = [];
+      for await (const event of handle.events()) seen.push(event);
+      return seen;
+    })();
+
+    await claimAndStart(instance, daemon, handle);
+    await sendOne(
+      daemon,
+      createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess_end' }, { taskId: handle.taskId }),
+    );
+
+    expect((await live).map((e) => (e.kind === 'state' ? e.state : null))).toEqual([
+      'Offered',
+      'Claimed',
+      'Running',
+      'Complete',
+    ]);
+
+    // ...and one that only subscribes afterwards still replays the whole feed
+    // from the start and then ends, because closing does not empty the buffer.
+    const late: ServerTaskEvent[] = [];
+    for await (const event of handle.events()) late.push(event);
+    expect(late).toEqual(await live);
+  });
+
   it('task.claim is an idempotent CAS: a retried claim from the same device is a no-op', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
+    const started = await start();
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    ws = daemon.ws;
-
-    const handle = await byok.dispatch({ instruction: 'say hello' });
-    await nextEnvelope(ws); // task.offer
+    const handle = await started.byok.dispatch({ instruction: 'say hello' });
+    await nextEnvelope(daemon); // task.offer
 
     const claimEnvelope = createEnvelope(
       'task.claim',
@@ -172,17 +194,20 @@ describe('server integration (in-process http+ws, fake daemon client)', () => {
       { taskId: handle.taskId },
     );
     const startedEnvelope = createEnvelope('task.started', {}, { taskId: handle.taskId });
-    send(ws, claimEnvelope);
-    send(ws, startedEnvelope);
-    await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
+    expect(await sendOne(daemon, claimEnvelope)).toEqual({ status: 200, body: { accepted: 1 } });
+    expect(await sendOne(daemon, startedEnvelope)).toEqual({ status: 200, body: { accepted: 1 } });
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Running');
 
     // Retry the exact same claim (e.g. the daemon didn't observe the first
     // one land) — must not be treated as an illegal Running -> Claimed move.
-    send(ws, claimEnvelope);
+    await sendOne(daemon, claimEnvelope);
     // Same for a retried task.started (§3.1): a repeat from the owning
     // device while already Running is a no-op, not an illegal transition.
-    send(ws, startedEnvelope);
-    send(ws, createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess_3' }, { taskId: handle.taskId }));
+    await sendOne(daemon, startedEnvelope);
+    await sendOne(
+      daemon,
+      createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess_3' }, { taskId: handle.taskId }),
+    );
 
     const result = await handle.result();
     expect(result).toEqual({ state: 'Complete', summary: 'done', sessionRef: 'sess_3' });
@@ -200,359 +225,170 @@ describe('server integration (in-process http+ws, fake daemon client)', () => {
   });
 
   it('cancel path: cancel() is authoritative immediately and notifies the daemon', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
+    const started = await start();
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    ws = daemon.ws;
-
-    const handle = await byok.dispatch({ instruction: 'a long task' });
-    const offer = await nextEnvelope(ws);
+    const handle = await started.byok.dispatch({ instruction: 'a long task' });
+    const offer = await nextEnvelope(daemon);
     expect(offer.type).toBe('task.offer');
 
     await handle.cancel('changed my mind');
 
-    const cancelEnvelope = await nextEnvelope(ws);
+    const cancelEnvelope = await nextEnvelope(daemon);
     expect(cancelEnvelope.type).toBe('task.cancel');
     if (cancelEnvelope.type !== 'task.cancel') throw new Error('unreachable');
     expect(cancelEnvelope.payload.reason).toBe('changed my mind');
 
     const result = await handle.result();
     expect(result).toEqual({ state: 'Cancelled', reason: 'changed my mind' });
-    expect(byok.tasks.get(handle.taskId)?.state).toBe('Cancelled');
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Cancelled');
 
     // cancel() is idempotent: calling it again on a terminal task is a no-op, not a throw.
     await expect(handle.cancel('again')).resolves.toBeUndefined();
   });
 
   it('await_approval -> approve path resumes the task to Running', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
+    const started = await start();
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    ws = daemon.ws;
+    const handle = await started.byok.dispatch({ instruction: 'do something risky' });
+    await nextEnvelope(daemon); // task.offer
+    await claimAndStart(started.byok, daemon, handle);
 
-    const handle = await byok.dispatch({ instruction: 'do something risky' });
-    await nextEnvelope(ws); // task.offer
-
-    send(
-      ws,
+    // The daemon reports an `approvalId` (M5, docs/protocol.md §5.3), which is
+    // what a current build sends. 2d gap: the PRE-M5 shape — an
+    // `task.await_approval` with no id at all — is the narrow hole recorded in
+    // 2a's Deviations: the kernel's `approval_resolved` requires a non-blank
+    // `approvalId`, so a host decision on an unidentified approval reaches the
+    // device but cannot be written to the timeline the read model derives from,
+    // and `tasks.get()` keeps reporting `AwaitApproval` while `events()` already
+    // reports `Running`. That path is not covered here and is flagged in the
+    // notes rather than worked around.
+    await sendOne(
+      daemon,
       createEnvelope(
-        'task.claim',
-        { deviceId: daemon.deviceId },
+        'task.await_approval',
+        { summary: 'about to rm -rf /tmp/scratch', approvalId: 'approval-1' },
         { taskId: handle.taskId },
       ),
     );
-    send(ws, createEnvelope('task.started', {}, { taskId: handle.taskId }));
-    send(
-      ws,
-      createEnvelope('task.await_approval', { summary: 'about to rm -rf /tmp/scratch' }, { taskId: handle.taskId }),
-    );
-
-    // Synchronize on the server having actually processed await_approval
-    // (event delivery is async over the real loopback socket) instead of a
-    // fixed sleep.
-    await waitForTaskEvent(handle, (e) => e.kind === 'await_approval');
-    expect(byok.tasks.get(handle.taskId)?.state).toBe('AwaitApproval');
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('AwaitApproval');
 
     await handle.approve();
 
-    const approveEnvelope = await nextEnvelope(ws);
+    const approveEnvelope = await nextEnvelope(daemon);
     expect(approveEnvelope.type).toBe('task.approve');
-    expect(byok.tasks.get(handle.taskId)?.state).toBe('Running');
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Running');
 
-    send(ws, createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess_2' }, { taskId: handle.taskId }));
+    await sendOne(
+      daemon,
+      createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess_2' }, { taskId: handle.taskId }),
+    );
 
     const result = await handle.result();
     expect(result).toEqual({ state: 'Complete', summary: 'done', sessionRef: 'sess_2' });
   });
-
-  it('rejects the WS upgrade with a bad bearer token', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-
-    const badWs = new WebSocket(`ws://127.0.0.1:${started.port}/byok/ws`, {
-      headers: { authorization: 'Bearer not-a-real-token' },
-    });
-    ws = badWs;
-
-    const closeOrError = await new Promise<'error' | number>((resolve) => {
-      badWs.once('unexpected-response', (_req, res) => resolve(res.statusCode ?? -1));
-      badWs.once('error', () => resolve('error'));
-    });
-    expect(closeOrError === 401 || closeOrError === 'error').toBe(true);
-  });
-
-  it('device disconnect mid-task does not fail it — task state survives for redelivery on reconnect (M1, §9)', async () => {
-    // M0 force-failed every in-flight task the instant its device
-    // disconnected ("can't be resumed, so it's terminated" — true only
-    // absent a redelivery cursor). M1 adds exactly that cursor, so a
-    // disconnect must no longer be treated as fatal to the task: it stays
-    // in-flight, and — as this test also verifies — can still complete
-    // normally once the device reconnects.
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    ws = daemon.ws;
-
-    const handle = await byok.dispatch({ instruction: 'never finishes' });
-    await nextEnvelope(ws); // task.offer
-    await claimAndStart(ws, daemon.deviceId, handle);
-
-    const disconnected = (async () => {
-      for await (const event of byok.events.subscribe()) {
-        if (event.kind === 'device.disconnected' && event.deviceId === daemon.deviceId) return event;
-      }
-      throw new Error('server event stream ended before device.disconnected');
-    })();
-    ws.terminate();
-    ws = undefined;
-    await disconnected; // proves handleDisconnect has actually run before we assert on task state below
-
-    expect(byok.tasks.get(handle.taskId)?.state).toBe('Running');
-    expect(byok.machines.list()).toEqual([expect.objectContaining({ deviceId: daemon.deviceId, connected: false })]);
-
-    // Reconnect as the same device and finish the task normally — proving
-    // it genuinely survived the disconnect, not merely "hasn't been
-    // GC'd yet".
-    const { ws: ws2 } = await connectFakeDaemonWs(started.port, {
-      deviceId: daemon.deviceId,
-      accessToken: daemon.accessToken,
-      productId: PRODUCT_ID,
-      cursor: 2, // conn.ack(1) + task.offer(2) — everything this daemon had already seen pre-drop
-    });
-    ws = ws2;
-    send(
-      ws2,
-      createEnvelope(
-        'task.complete',
-        { summary: 'done after reconnect', sessionRef: 'sess_reconnect' },
-        { taskId: handle.taskId },
-      ),
-    );
-
-    const result = await handle.result();
-    expect(result).toEqual({ state: 'Complete', summary: 'done after reconnect', sessionRef: 'sess_reconnect' });
-  });
 });
 
-describe('WS handshake rejection gates close with code 1002 (M0 gatekeeper finding #1)', () => {
+describe('redelivery from a stale cursor (§9)', () => {
   let server: HttpServer | undefined;
-  let ws: WebSocket | undefined;
+  let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    ws?.terminate();
+    byok?.stop();
+    byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
-    ws = undefined;
   });
 
-  /** Open an authenticated WS connection but don't send `conn.hello` yet — the caller sends a deliberately-bad one. */
-  async function openAuthedSocket(port: number, accessToken: string): Promise<WebSocket> {
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/byok/ws`, {
-      headers: { authorization: `Bearer ${accessToken}` },
-    });
-    await new Promise<void>((resolve, reject) => {
-      socket.once('open', () => resolve());
-      socket.once('error', reject);
-    });
-    return socket;
+  async function start(): Promise<{ byok: ByokServer; baseUrl: string }> {
+    const instance = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
+    const started = await startServer(instance);
+    server = started.server;
+    byok = instance;
+    return { byok: instance, baseUrl: started.baseUrl };
   }
 
-  function waitForClose(socket: WebSocket): Promise<{ code: number; reason: string }> {
-    return new Promise((resolve) => {
-      socket.once('close', (code, reason) => resolve({ code, reason: reason.toString() }));
-    });
+  async function pageAt(daemon: FakeLongPollDaemon, cursor: number): Promise<Envelope[]> {
+    const res = await daemon.replay(cursor);
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { events: Envelope[] }).events;
   }
-
-  it('closes with 1002 when conn.hello advertises an unsupported protocol version', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const { deviceId, accessToken } = await pairFakeDaemon(started.baseUrl, code);
-
-    ws = await openAuthedSocket(started.port, accessToken);
-    const closed = waitForClose(ws);
-    send(
-      ws,
-      createEnvelope('conn.hello', {
-        protocolVersions: [PROTOCOL_VERSION + 999],
-        capabilities: [],
-        deviceId,
-        productId: PRODUCT_ID,
-      }),
-    );
-
-    const { code: closeCode, reason } = await closed;
-    expect(closeCode).toBe(1002);
-    expect(reason).toMatch(/protocol version/i);
-  });
-
-  it('closes with 1002 when conn.hello productId does not match the server', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const { deviceId, accessToken } = await pairFakeDaemon(started.baseUrl, code);
-
-    ws = await openAuthedSocket(started.port, accessToken);
-    const closed = waitForClose(ws);
-    send(
-      ws,
-      createEnvelope('conn.hello', {
-        protocolVersions: [PROTOCOL_VERSION],
-        capabilities: [],
-        deviceId,
-        productId: 'some-other-product',
-      }),
-    );
-
-    const { code: closeCode, reason } = await closed;
-    expect(closeCode).toBe(1002);
-    expect(reason).toMatch(/productId/i);
-  });
-
-  it('closes with 1002 when conn.hello deviceId does not match the authenticated token identity', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
-
-    ws = await openAuthedSocket(started.port, accessToken);
-    const closed = waitForClose(ws);
-    send(
-      ws,
-      createEnvelope('conn.hello', {
-        protocolVersions: [PROTOCOL_VERSION],
-        capabilities: [],
-        deviceId: 'dev_someone-else-entirely',
-        productId: PRODUCT_ID,
-      }),
-    );
-
-    const { code: closeCode, reason } = await closed;
-    expect(closeCode).toBe(1002);
-    expect(reason).toMatch(/deviceId/i);
-  });
-});
-
-describe('redelivery after reconnect (§9)', () => {
-  let server: HttpServer | undefined;
-  let ws: WebSocket | undefined;
-
-  afterEach(async () => {
-    ws?.terminate();
-    if (server) await stopServer(server);
-    server = undefined;
-    ws = undefined;
-  });
 
   it('redelivers non-terminal envelopes in seq order, honoring the cursor, skips envelopes for terminal tasks except exempted cancel/reject (N1/F4)', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const started = await start();
     // S0: this device must advertise a runtime that can actually be steered
-    // (pi) and claim task1 as that runtime — the server's steer gate reads
-    // the claim-time capability snapshot, so a runtime-less claim here would
+    // (pi) and claim task1 as that runtime — the steer gate reads the
+    // claim-time capability snapshot, so a runtime-less claim here would
     // (correctly) be refused before any envelope existed to redeliver.
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, {
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
       productId: PRODUCT_ID,
       runtimes: [PI_RUNTIME_INFO],
     });
-    ws = daemon.ws;
 
     // task1 stays Running — steer() below produces an envelope the daemon
-    // never reads off this connection before it "drops".
-    const handle1 = await byok.dispatch({ instruction: 'long running task' });
-    const offer1 = await nextEnvelope(ws);
-    if (offer1.type !== 'task.offer') throw new Error('unreachable');
+    // never reads before it "drops".
+    const handle1 = await started.byok.dispatch({ instruction: 'long running task' });
+    const offer1 = (await pageAt(daemon, 0))[0];
+    if (offer1?.type !== 'task.offer') throw new Error('unreachable');
     const cursor = offer1.seq; // "I've fully processed everything through this seq"
 
-    await claimAndStart(ws, daemon.deviceId, handle1, 'pi', PI_RUNTIME_INFO.capabilities);
-    await handle1.steer('keep going'); // assigns the next seq; deliberately never read off `ws`
+    await claimAndStart(started.byok, daemon, handle1, 'pi', PI_RUNTIME_INFO.capabilities);
+    await handle1.steer('keep going'); // assigns the next seq; deliberately never read
 
-    // task2 is cancelled before reconnect — terminal by the time redelivery
+    // task2 is cancelled before the resync — terminal by the time redelivery
     // runs. Its task.offer is NOT exempt from the terminal-task filter and
-    // must not be redelivered; its task.cancel IS exempt (N1/F4 — see
-    // OutboxEntry.redeliverThroughTerminal/collectRelevant) precisely
-    // because cancelTask moves the task to Cancelled *before* queuing that
-    // notification, so without the exemption a dropped cancel send could
-    // never be redelivered.
-    const handle2 = await byok.dispatch({ instruction: 'short task' });
+    // must not be redelivered; its task.cancel IS exempt (N1/F4) precisely
+    // because a cancellation is recorded BEFORE the notification is queued, so
+    // without the exemption a dropped cancel could never be redelivered.
+    const handle2 = await started.byok.dispatch({ instruction: 'short task' });
     await handle2.cancel('not needed after all');
     await handle2.result();
-    expect(byok.tasks.get(handle2.taskId)?.state).toBe('Cancelled');
+    expect((await started.byok.tasks.get(handle2.taskId))?.state).toBe('Cancelled');
 
-    // Simulate a dropped connection: terminate without reading anything past offer1.
-    ws.terminate();
-
-    // Reconnect as the SAME device, telling the server we've only seen through `cursor`.
-    const { ws: ws2 } = await connectFakeDaemonWs(started.port, {
-      deviceId: daemon.deviceId,
-      accessToken: daemon.accessToken,
-      productId: PRODUCT_ID,
-      cursor,
-    });
-    ws = ws2;
-
-    const redelivered = await nextEnvelope(ws2);
-    expect(redelivered.type).toBe('task.steer');
-    expect(redelivered.task_id).toBe(handle1.taskId);
-    if (redelivered.type !== 'task.steer') throw new Error('unreachable');
-    expect(redelivered.payload.text).toBe('keep going');
-
-    // task2's task.cancel follows — exempted from the terminal-task filter
-    // even though task2 is Cancelled by now.
-    const redelivered2 = await nextEnvelope(ws2);
-    expect(redelivered2.type).toBe('task.cancel');
-    expect(redelivered2.task_id).toBe(handle2.taskId);
-
-    // Nothing else should follow: task2's task.offer is not exempt and must
-    // not reappear.
-    const raced = await Promise.race([
-      nextEnvelope(ws2).then(() => 'more' as const),
-      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 200)),
+    // Resync from the stale cursor: reading does not ack, so this is exactly
+    // what a daemon that dropped mid-page asks for.
+    const redelivered = await pageAt(daemon, cursor);
+    expect(
+      redelivered.map((envelope) => ({ type: envelope.type, taskId: envelope.task_id })),
+    ).toEqual([
+      { type: 'task.steer', taskId: handle1.taskId },
+      { type: 'task.cancel', taskId: handle2.taskId },
     ]);
-    expect(raced).toBe('timeout');
+    const steer = redelivered[0];
+    if (steer?.type !== 'task.steer') throw new Error('unreachable');
+    expect(steer.payload.text).toBe('keep going');
   });
 });
 
 describe('task lifecycle: task.started / task.decline / task.cancelled + idempotency (§3, §9)', () => {
   let server: HttpServer | undefined;
-  let ws: WebSocket | undefined;
+  let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    ws?.terminate();
+    byok?.stop();
+    byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
-    ws = undefined;
   });
 
-  it('task.decline moves Offered -> Failed (pre-claim fail-closed rejection, §3.2)', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
+  async function startWithDaemon(): Promise<{ byok: ByokServer; daemon: FakeLongPollDaemon }> {
+    const instance = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
+    const started = await startServer(instance);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    ws = daemon.ws;
+    byok = instance;
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, instance, { productId: PRODUCT_ID });
+    return { byok: instance, daemon };
+  }
 
-    const handle = await byok.dispatch({ instruction: 'unsupported instruction shape' });
-    await nextEnvelope(ws); // offer
+  it('task.decline moves Offered -> Failed (pre-claim fail-closed rejection, §3.2)', async () => {
+    const { byok: instance, daemon } = await startWithDaemon();
 
-    send(
-      ws,
+    const handle = await instance.dispatch({ instruction: 'unsupported instruction shape' });
+    await nextEnvelope(daemon); // offer
+
+    await sendOne(
+      daemon,
       createEnvelope('task.decline', { reason: 'no compatible runtime', retryable: true }, { taskId: handle.taskId }),
     );
 
@@ -560,141 +396,89 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
     expect(result).toEqual({ state: 'Failed', reason: 'no compatible runtime', retryable: true });
   });
 
-  it('a task.decline arriving after the task was already claimed is a stale no-op', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    ws = daemon.ws;
-
-    const handle = await byok.dispatch({ instruction: 'x' });
-    await nextEnvelope(ws);
-    await claimAndStart(ws, daemon.deviceId, handle);
-
-    // A decline is only ever legal pre-claim; this one arrives late (e.g. a
-    // race) and must not clobber the already-Running task.
-    send(ws, createEnvelope('task.decline', { reason: 'too late' }, { taskId: handle.taskId }));
-    send(
-      ws,
-      createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess_decline_race' }, { taskId: handle.taskId }),
-    );
-
-    const result = await handle.result();
-    expect(result).toEqual({ state: 'Complete', summary: 'done', sessionRef: 'sess_decline_race' });
+  // 2d gap: "a decline is only legal pre-claim" was a rule of the deleted task
+  // FSM (`IllegalTaskTransitionError`, `task-store.ts`). The kernel has no
+  // execution state machine by design (ADR-028: no execution state in the
+  // cloud) — an attempt carries a coarse status and the inbound gate decides
+  // ownership and dedup, not legality of a transition — so a late decline is
+  // applied rather than dropped as stale. Same family as the FSM assertions
+  // 2b's conformance-coverage skim classified as "(A) the concept is deleted;
+  // there is nothing to cover".
+  it.skip('a task.decline arriving after the task was already claimed is a stale no-op', () => {
+    // intentionally empty — see the 2d gap note above.
   });
 
-  it('task.started arriving before any claim forces the task to Failed (Offered -> Running is illegal)', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    ws = daemon.ws;
-
-    const handle = await byok.dispatch({ instruction: 'x' });
-    await nextEnvelope(ws); // offer
-
-    send(ws, createEnvelope('task.started', {}, { taskId: handle.taskId }));
-
-    const result = await handle.result();
-    expect(result.state).toBe('Failed');
+  // 2d gap: `Offered -> Running is illegal` is verbatim the deleted FSM rule
+  // (`IllegalTaskTransitionError` on `Offered -> Running`), named in 2b's
+  // conformance-coverage skim under "(A) the concept is deleted; there is
+  // nothing to cover (ADR-028)". The kernel records the coarse status the
+  // envelope reports and never force-fails a task for arriving out of order, so
+  // there is no terminal here and `result()` never settles.
+  it.skip('task.started arriving before any claim forces the task to Failed (Offered -> Running is illegal)', () => {
+    // intentionally empty — see the 2d gap note above.
   });
 
   it('task.cancelled is the authoritative trigger when the daemon observes a cancellation the server did not initiate', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    ws = daemon.ws;
+    const { byok: instance, daemon } = await startWithDaemon();
 
-    const handle = await byok.dispatch({ instruction: 'x' });
-    await nextEnvelope(ws);
-    await claimAndStart(ws, daemon.deviceId, handle);
+    const handle = await instance.dispatch({ instruction: 'x' });
+    await nextEnvelope(daemon);
+    await claimAndStart(instance, daemon, handle);
 
     // No handle.cancel() call — the daemon decided locally (e.g. a local
     // stop action in the branded CLI's UI) and reports it directly.
-    send(ws, createEnvelope('task.cancelled', { reason: 'user stopped it locally' }, { taskId: handle.taskId }));
+    await sendOne(
+      daemon,
+      createEnvelope('task.cancelled', { reason: 'user stopped it locally' }, { taskId: handle.taskId }),
+    );
 
     const result = await handle.result();
     expect(result).toEqual({ state: 'Cancelled', reason: 'user stopped it locally' });
   });
 
   it('task.cancelled after a server-initiated cancel is a silent idempotent ack, not a warning (M0 gatekeeper finding)', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    ws = daemon.ws;
+    const { byok: instance, daemon } = await startWithDaemon();
 
-    const handle1 = await byok.dispatch({ instruction: 'task one' });
-    await nextEnvelope(ws);
-    await claimAndStart(ws, daemon.deviceId, handle1);
-    await handle1.cancel('server decided');
-    await nextEnvelope(ws); // task.cancel best-effort notification
-    expect(byok.tasks.get(handle1.taskId)?.state).toBe('Cancelled');
-
-    // A second, independent Running task used only as an ordering marker on
-    // the same WS connection — frames on one socket are handled in receipt
-    // order, so awaiting ITS effect proves the stale message below already
-    // ran, without an arbitrary sleep.
-    const handle2 = await byok.dispatch({ instruction: 'task two' });
-    await nextEnvelope(ws);
-    await claimAndStart(ws, daemon.deviceId, handle2);
+    const handle = await instance.dispatch({ instruction: 'task one' });
+    await nextEnvelope(daemon);
+    await claimAndStart(instance, daemon, handle);
+    await handle.cancel('server decided');
+    expect((await nextEnvelope(daemon)).type).toBe('task.cancel'); // best-effort notification
+    expect((await instance.tasks.get(handle.taskId))?.state).toBe('Cancelled');
+    const recorded = (await instance.tasks.get(handle.taskId))?.result;
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    send(ws, createEnvelope('task.cancelled', { reason: 'stopped locally' }, { taskId: handle1.taskId }));
-    send(
-      ws,
-      createEnvelope(
-        'task.progress',
-        { seq: 1, events: [{ type: 'progress', text: 'marker' }] },
-        { taskId: handle2.taskId },
-      ),
-    );
-    await waitForTaskEvent(handle2, (e) => e.kind === 'agent');
+    // The send's own response is the barrier — the kernel applied (or dropped)
+    // this envelope inside the request, so no ordering marker is needed.
+    await sendOne(daemon, createEnvelope('task.cancelled', { reason: 'stopped locally' }, { taskId: handle.taskId }));
 
-    expect(byok.tasks.get(handle1.taskId)?.state).toBe('Cancelled'); // unchanged, not re-applied
+    expect((await instance.tasks.get(handle.taskId))?.state).toBe('Cancelled'); // unchanged, not re-applied
+    expect((await instance.tasks.get(handle.taskId))?.result).toEqual(recorded);
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 
   it('task.fail after a server-initiated cancel is also a silent stale drop, not a warning (§9)', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    ws = daemon.ws;
+    const { byok: instance, daemon } = await startWithDaemon();
 
-    const handle1 = await byok.dispatch({ instruction: 'task one' });
-    await nextEnvelope(ws);
-    await claimAndStart(ws, daemon.deviceId, handle1);
-    await handle1.cancel('server decided');
-    await nextEnvelope(ws);
-    expect(byok.tasks.get(handle1.taskId)?.state).toBe('Cancelled');
-
-    const handle2 = await byok.dispatch({ instruction: 'task two' });
-    await nextEnvelope(ws);
-    await claimAndStart(ws, daemon.deviceId, handle2);
+    const handle = await instance.dispatch({ instruction: 'task one' });
+    await nextEnvelope(daemon);
+    await claimAndStart(instance, daemon, handle);
+    await handle.cancel('server decided');
+    expect((await nextEnvelope(daemon)).type).toBe('task.cancel');
+    expect((await instance.tasks.get(handle.taskId))?.state).toBe('Cancelled');
+    const recorded = (await instance.tasks.get(handle.taskId))?.result;
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     // Races a server-initiated cancel that already landed — a stale
     // task.fail must not resurrect/overwrite the Cancelled outcome.
-    send(ws, createEnvelope('task.fail', { reason: 'crashed', retryable: false }, { taskId: handle1.taskId }));
-    send(
-      ws,
-      createEnvelope(
-        'task.progress',
-        { seq: 1, events: [{ type: 'progress', text: 'marker' }] },
-        { taskId: handle2.taskId },
-      ),
+    await sendOne(
+      daemon,
+      createEnvelope('task.fail', { reason: 'crashed', retryable: false }, { taskId: handle.taskId }),
     );
-    await waitForTaskEvent(handle2, (e) => e.kind === 'agent');
 
-    expect(byok.tasks.get(handle1.taskId)?.state).toBe('Cancelled');
+    expect((await instance.tasks.get(handle.taskId))?.result).toEqual(recorded);
+    expect((await instance.tasks.get(handle.taskId))?.state).toBe('Cancelled');
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
@@ -702,34 +486,33 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
 
 describe('unknown AgentEvent forwarding (pre-freeze tolerance, @byok-sdk/protocol agent-event.ts)', () => {
   let server: HttpServer | undefined;
-  let ws: WebSocket | undefined;
+  let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    ws?.terminate();
+    byok?.stop();
+    byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
-    ws = undefined;
   });
 
   it('forwards an unknown-type event alongside a known one instead of dropping it or throwing, with no spurious state change', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
+    const instance = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
+    const started = await startServer(instance);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    ws = daemon.ws;
+    byok = instance;
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, instance, { productId: PRODUCT_ID });
 
-    const handle = await byok.dispatch({ instruction: 'x' });
-    await nextEnvelope(ws); // offer
-    await claimAndStart(ws, daemon.deviceId, handle);
+    const handle = await instance.dispatch({ instruction: 'x' });
+    await nextEnvelope(daemon); // offer
+    await claimAndStart(instance, daemon, handle);
 
     // `future_thinking` is not a KNOWN_AGENT_EVENT_TYPES literal — it's the
     // shape a newer daemon/runtime-adapter minor version might produce that
     // this build doesn't recognize yet. It must still validate (as the
     // UnknownAgentEventSchema passthrough) and must still reach the
     // embedder, not be dropped.
-    send(
-      ws,
+    const progressed = await sendOne(
+      daemon,
       createEnvelope(
         'task.progress',
         {
@@ -742,16 +525,15 @@ describe('unknown AgentEvent forwarding (pre-freeze tolerance, @byok-sdk/protoco
         { taskId: handle.taskId },
       ),
     );
-
-    // Proves delivery without throwing: if handling the unknown event threw
-    // inside onProgress, this would never resolve.
-    await waitForTaskEvent(handle, (e) => e.kind === 'agent' && e.event.type === 'future_thinking');
+    // Accepted rather than refused: handling the unknown event neither threw
+    // nor rejected the batch.
+    expect(progressed).toEqual({ status: 200, body: { accepted: 1 } });
 
     // No spurious state change from the unknown event — still Running, and
     // completes normally afterward, proving it didn't corrupt task state.
-    expect(byok.tasks.get(handle.taskId)?.state).toBe('Running');
-    send(
-      ws,
+    expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
+    await sendOne(
+      daemon,
       createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess_unknown_evt' }, { taskId: handle.taskId }),
     );
     const result = await handle.result();

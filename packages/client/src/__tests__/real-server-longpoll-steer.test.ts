@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { startRealServerWithoutWebSocket, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
+import { startRealServer, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -44,7 +44,7 @@ describe('S0/H-010: task.steer over a pure long-poll transport (no WebSocket, re
   });
 
   it('a steer-capable adapter claiming over long-poll is steerable: the capability rides task.claim and the steer reaches the session', async () => {
-    real = await startRealServerWithoutWebSocket({ productId: 'test-product', longPollHoldMs: 150 });
+    real = await startRealServer({ productId: 'test-product', longPollHoldMs: 150 });
 
     const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
@@ -62,12 +62,12 @@ describe('S0/H-010: task.steer over a pure long-poll transport (no WebSocket, re
       },
     );
 
-    const pairing = real.createPairingCode();
+    const pairing = await real.createPairingCode();
     const record = await daemon.pair(pairing.code);
     await daemon.start();
 
-    await vi.waitFor(() => {
-      expect(real.byok.machines.list().find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
+    await vi.waitFor(async () => {
+      expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });
 
     const handle = await real.byok.dispatch({ instruction: 'run over long-poll', policy: { mode: 'auto' } });
@@ -79,7 +79,7 @@ describe('S0/H-010: task.steer over a pure long-poll transport (no WebSocket, re
     // round trip — and it is the adapter's own value, not a server-side guess:
     // `runtime` is undefined here (a custom adapter id has no `RuntimeId` to
     // name it), so there was nothing for the server to infer a default from.
-    const snapshot = real.byok.tasks.get(handle.taskId);
+    const snapshot = await real.byok.tasks.get(handle.taskId);
     expect(snapshot?.claimedRuntime).toBeUndefined();
     expect(snapshot?.claimedRuntimeCapabilities).toEqual({
       steer: true,
@@ -110,7 +110,7 @@ describe('S0/H-010: task.steer over a pure long-poll transport (no WebSocket, re
     // The fail-closed half, over the same transport: nothing about long-poll
     // makes the gate permissive — it reads the same claim-carried self-report
     // and refuses when that report says `steer: false`.
-    real = await startRealServerWithoutWebSocket({ productId: 'test-product', longPollHoldMs: 150 });
+    real = await startRealServer({ productId: 'test-product', longPollHoldMs: 150 });
 
     const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
@@ -130,12 +130,12 @@ describe('S0/H-010: task.steer over a pure long-poll transport (no WebSocket, re
       },
     );
 
-    const pairing = real.createPairingCode();
+    const pairing = await real.createPairingCode();
     const record = await daemon.pair(pairing.code);
     await daemon.start();
 
-    await vi.waitFor(() => {
-      expect(real.byok.machines.list().find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
+    await vi.waitFor(async () => {
+      expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });
 
     const handle = await real.byok.dispatch({ instruction: 'run over long-poll', policy: { mode: 'auto' } });
@@ -143,7 +143,7 @@ describe('S0/H-010: task.steer over a pure long-poll transport (no WebSocket, re
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const session = adapter.sessions[0]!;
 
-    expect(real.byok.tasks.get(handle.taskId)?.claimedRuntimeCapabilities?.steer).toBe(false);
+    expect((await real.byok.tasks.get(handle.taskId))?.claimedRuntimeCapabilities?.steer).toBe(false);
 
     const err = await handle.steer('please stop').catch((e: unknown) => e);
     expect((err as { code?: string }).code).toBe('steer_unsupported_runtime');

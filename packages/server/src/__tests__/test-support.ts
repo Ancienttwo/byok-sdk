@@ -3,10 +3,7 @@ import { generateKeyPairSync, sign as signEd25519 } from 'node:crypto';
 import { serve } from '@hono/node-server';
 import {
   createEnvelope,
-  decodeEnvelope,
-  encodeEnvelope,
   PROTOCOL_VERSION,
-  type ConnAckPayload,
   type Envelope,
   type EventsPollResponse,
   type RuntimeCapabilities,
@@ -14,12 +11,18 @@ import {
   type RuntimeInfo,
   type ToolsetId,
 } from '@byok-sdk/protocol';
-import { WebSocket, type RawData } from 'ws';
-import { NONCE_SIGNING_DOMAIN } from '../auth';
-import type { ByokServer, ByokServerEvent, PairingCodeClaims, ServerTaskEvent, TaskHandle } from '../index';
+import { NONCE_SIGNING_DOMAIN, tenantId as brandTenantId, type TenantId } from '@byok-sdk/cloud';
+import { expect } from 'vitest';
+import type {
+  ByokServer,
+  ByokServerEvent,
+  CreatePairingCodeInput,
+  ServerTaskEvent,
+  TaskHandle,
+} from '../index';
 
 /**
- * Start `byok.hono` on an ephemeral port and wire up its WS upgrade.
+ * Start `byok.hono` on an ephemeral port.
  *
  * `hostname` is pinned to the same `127.0.0.1` the returned `baseUrl` (and
  * every WS url below) dials. Without it Node binds the IPv6 wildcard `::`,
@@ -34,7 +37,6 @@ export async function startServer(
 ): Promise<{ server: HttpServer; port: number; baseUrl: string }> {
   return new Promise((resolve) => {
     const server = serve({ fetch: byok.hono.fetch, port: 0, hostname: '127.0.0.1' }, (info) => {
-      byok.attachWebSocket(server as HttpServer);
       resolve({ server: server as HttpServer, port: info.port, baseUrl: `http://127.0.0.1:${info.port}` });
     });
   });
@@ -56,88 +58,6 @@ export async function startServer(
 export async function stopServer(server: HttpServer): Promise<void> {
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
-}
-
-function toEnvelope(data: RawData): Envelope {
-  let bytes: Uint8Array;
-  if (typeof data === 'string') {
-    return decodeEnvelope(data);
-  } else if (Buffer.isBuffer(data)) {
-    bytes = data;
-  } else if (Array.isArray(data)) {
-    bytes = Buffer.concat(data);
-  } else {
-    bytes = new Uint8Array(data);
-  }
-  return decodeEnvelope(bytes);
-}
-
-interface SocketQueueState {
-  buffer: Envelope[];
-  waiters: Array<{ resolve: (env: Envelope) => void; reject: (err: Error) => void }>;
-  closed: boolean;
-  closeError?: Error;
-}
-
-// Keyed per-socket so back-to-back sends (e.g. the server's conn.ack
-// immediately followed by a redelivered envelope, both written within the
-// same synchronous handler and often arriving in the same TCP read chunk)
-// are buffered instead of dropped. A naive `ws.once('message', ...)` per
-// call would lose the second frame if it fires before the *next* call
-// attaches its listener — a real race, not a hypothetical one.
-const socketQueues = new WeakMap<WebSocket, SocketQueueState>();
-
-function getSocketQueue(ws: WebSocket): SocketQueueState {
-  let state = socketQueues.get(ws);
-  if (state) return state;
-
-  state = { buffer: [], waiters: [], closed: false };
-  socketQueues.set(ws, state);
-
-  const fail = (err: Error) => {
-    state!.closed = true;
-    state!.closeError = err;
-    for (const waiter of state!.waiters.splice(0)) waiter.reject(err);
-  };
-
-  ws.on('message', (data: RawData) => {
-    let envelope: Envelope;
-    try {
-      envelope = toEnvelope(data);
-    } catch (err) {
-      const waiter = state!.waiters.shift();
-      if (waiter) waiter.reject(err as Error);
-      return;
-    }
-    const waiter = state!.waiters.shift();
-    if (waiter) {
-      waiter.resolve(envelope);
-    } else {
-      state!.buffer.push(envelope);
-    }
-  });
-  ws.on('close', () => fail(new Error('ws closed before expected message')));
-  ws.on('error', (err: Error) => fail(err));
-
-  return state;
-}
-
-/** Wait for the next envelope on `ws` (rejects if the socket errors/closes first). Buffers ahead-of-time arrivals — see {@link getSocketQueue}. */
-export function nextEnvelope(ws: WebSocket): Promise<Envelope> {
-  const state = getSocketQueue(ws);
-  if (state.buffer.length > 0) {
-    return Promise.resolve(state.buffer.shift()!);
-  }
-  if (state.closed) {
-    return Promise.reject(state.closeError ?? new Error('ws closed before expected message'));
-  }
-  return new Promise((resolve, reject) => {
-    state.waiters.push({ resolve, reject });
-  });
-}
-
-export function send(ws: WebSocket, envelope: Envelope): void {
-  ws.send(encodeEnvelope(envelope));
 }
 
 /**
@@ -173,23 +93,19 @@ export const CODEX_RUNTIME_INFO: RuntimeInfo = {
 };
 
 /**
- * S1: the tenant every fixture-paired device lands in unless a test names its
- * own. Tests that care about isolation (`tenant-pairing-isolation.test.ts`)
- * mint their own claims for a SECOND tenant; everything else just needs a
- * device to exist somewhere, and this is that somewhere.
+ * The input a fixture-minted pairing code carries.
+ *
+ * The TENANT is no longer a parameter: an embedded `createByokServer` serves
+ * exactly one tenant, derived from its own `productId` (`stores.ts`'s
+ * `serverTenantId`), so a fixture cannot name one. `productId` stays a
+ * parameter because it must agree with the server instance under test
+ * (`createByokServer({ productId })`) AND with the `conn.hello.productId` the
+ * fake daemon announces — the hello gate compares the announced product
+ * against the DEVICE ROW, so a fixture that quietly defaulted it would make
+ * every hello a coin flip.
  */
-export const TEST_TENANT_ID = 'tenant-test';
-
-/**
- * The claims a fixture-minted pairing code carries. `productId` is a
- * parameter rather than a constant because it must agree with the server
- * instance under test (`createByokServer({ productId })`) AND with the
- * `conn.hello.productId` the fake daemon announces — the S1 hello gate
- * compares the announced product against the DEVICE ROW, so a fixture that
- * quietly defaulted it would make every hello a coin flip.
- */
-export function testPairingClaims(productId: string): PairingCodeClaims {
-  return { tenantId: TEST_TENANT_ID, productId };
+export function testPairingClaims(productId: string): CreatePairingCodeInput {
+  return { productId };
 }
 
 /** A fake device's Ed25519 identity (Auth v2, §6) — the private key never leaves this helper, mirroring the real daemon. */
@@ -225,7 +141,7 @@ export async function pairFakeDaemon(
   baseUrl: string,
   pairingCode: string,
   opts: { deviceName?: string; identity?: FakeDeviceIdentity } = {},
-): Promise<{ deviceId: string; accessToken: string; identity: FakeDeviceIdentity }> {
+): Promise<{ deviceId: string; accessToken: string; identity: FakeDeviceIdentity; tenantId: TenantId }> {
   const identity = opts.identity ?? generateFakeDeviceIdentity();
   const pairRes = await fetch(`${baseUrl}/byok/pair`, {
     method: 'POST',
@@ -239,96 +155,13 @@ export async function pairFakeDaemon(
   if (!pairRes.ok) {
     throw new Error(`pairing failed: ${pairRes.status} ${await pairRes.text()}`);
   }
-  const { deviceId, accessToken } = (await pairRes.json()) as { deviceId: string; accessToken: string };
-  return { deviceId, accessToken, identity };
-}
-
-/**
- * Open a WS connection for an already-paired device and complete the
- * `conn.hello` -> `conn.ack` handshake. Split out from {@link connectFakeDaemon}
- * so reconnect/redelivery tests can reuse the same deviceId+accessToken
- * across multiple connections instead of re-pairing.
- */
-export async function connectFakeDaemonWs(
-  port: number,
-  opts: {
-    deviceId: string;
-    accessToken: string;
-    productId: string;
-    clientVersion?: string;
-    capabilities?: string[];
-    runtimes?: RuntimeInfo[];
-    configuredToolsets?: ToolsetId[];
-    cursor?: number;
-  },
-): Promise<{ ws: WebSocket; ack: ConnAckPayload }> {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/byok/ws`, {
-    headers: { authorization: `Bearer ${opts.accessToken}` },
-  });
-  await new Promise<void>((resolve, reject) => {
-    ws.once('open', () => resolve());
-    ws.once('error', reject);
-  });
-
-  send(
-    ws,
-    createEnvelope('conn.hello', {
-      protocolVersions: [PROTOCOL_VERSION],
-      capabilities: opts.capabilities ?? [],
-      deviceId: opts.deviceId,
-      productId: opts.productId,
-      clientVersion: opts.clientVersion,
-      runtimes: opts.runtimes,
-      configuredToolsets: opts.configuredToolsets,
-      cursor: opts.cursor,
-    }),
-  );
-  const ackEnvelope = await nextEnvelope(ws);
-  if (ackEnvelope.type !== 'conn.ack') {
-    throw new Error(`expected conn.ack, got ${ackEnvelope.type}`);
-  }
-
-  return { ws, ack: ackEnvelope.payload };
-}
-
-/**
- * Pair a new fake daemon via `POST /byok/pair`, then connect over WS and
- * complete the `conn.hello` -> `conn.ack` handshake. `pairingCode` must come
- * from `byok.pairing.createPairingCode()` (the SaaS side of the pairing flow).
- */
-export async function connectFakeDaemon(
-  baseUrl: string,
-  port: number,
-  pairingCode: string,
-  opts: {
-    deviceName?: string;
-    productId: string;
-    clientVersion?: string;
-    capabilities?: string[];
-    runtimes?: RuntimeInfo[];
-    configuredToolsets?: ToolsetId[];
-    cursor?: number;
-    identity?: FakeDeviceIdentity;
-  },
-): Promise<{
-  ws: WebSocket;
-  deviceId: string;
-  accessToken: string;
-  identity: FakeDeviceIdentity;
-  ack: ConnAckPayload;
-}> {
-  const { deviceId, accessToken, identity } = await pairFakeDaemon(baseUrl, pairingCode, opts);
-  const { ws, ack } = await connectFakeDaemonWs(port, {
-    deviceId,
-    accessToken,
-    productId: opts.productId,
-    clientVersion: opts.clientVersion,
-    capabilities: opts.capabilities,
-    runtimes: opts.runtimes,
-    configuredToolsets: opts.configuredToolsets,
-    cursor: opts.cursor,
-  });
-  return { ws, deviceId, accessToken, identity, ack };
+  const body = (await pairRes.json()) as { deviceId: string; accessToken: string; tenantId: string };
+  // The ENROLLMENT's own tenant, straight off the pair response — the only
+  // public way to learn the one tenant an embedded server serves, and therefore
+  // the only legal input to `byok.devices.revoke`. Deliberately not re-derived
+  // from `productId` here: that derivation is the façade's, and a fixture
+  // copying it would be a second authority for the same datum.
+  return { deviceId: body.deviceId, accessToken: body.accessToken, identity, tenantId: brandTenantId(body.tenantId) };
 }
 
 /**
@@ -372,80 +205,35 @@ export async function waitForServerEvent(
 }
 
 /**
- * Claim + start a dispatched task over `ws` (Offered -> Claimed -> Running)
- * and wait for the Running event. Shared by every hub-level test that needs a
- * task actually running before driving it further (approve/reject,
- * implicit-approval-resume, etc).
- *
- * `runtime` (S0, GAP-002): the ACTUAL adapter this claim reports.
- * `capabilities` (S0/D-4): that adapter's own capability self-report, which is
- * the ONLY input the server's steer gate reads — the connection's `conn.hello`
- * runtimes are discovery and feed nothing here. Both omitted matches a legacy
- * daemon's `task.claim` — which is exactly what every pre-S0 call site here
- * already did, so their behavior is unchanged. Pass them (see
- * {@link PI_RUNTIME_INFO}'s `capabilities`) when the test needs the server to
- * have a claim-time capability snapshot to gate on.
- */
-export async function claimAndStart(
-  ws: WebSocket,
-  deviceId: string,
-  handle: TaskHandle,
-  runtime?: RuntimeId,
-  capabilities?: RuntimeCapabilities,
-): Promise<void> {
-  send(ws, createEnvelope('task.claim', { deviceId, runtime, capabilities }, { taskId: handle.taskId }));
-  send(ws, createEnvelope('task.started', {}, { taskId: handle.taskId }));
-  await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
-}
-
-/**
- * Drives a task to AwaitApproval over `ws` and waits for the server to
- * actually apply it. Shared by every hub-level test that needs a task
- * parked in AwaitApproval (approve/reject, implicit-approval-resume, etc).
- *
- * `approvalId` (M5, approval targeting): optional — omitted entirely
- * matches every pre-M5 call site's behavior (a legacy daemon that never
- * reports one); passed through verbatim when a test needs the server to
- * have recorded a specific `pendingApprovalId` for the task.
- */
-export async function moveToAwaitApproval(
-  ws: WebSocket,
-  handle: TaskHandle,
-  summary = 'needs a human ok',
-  approvalId?: string,
-): Promise<void> {
-  send(ws, createEnvelope('task.await_approval', { summary, approvalId }, { taskId: handle.taskId }));
-  await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'AwaitApproval');
-}
-
-/**
  * WP3B Step 0 (characterization): a fake daemon that speaks the long-poll
  * transport (§8) and NOTHING else — `POST /byok/pair` -> `POST
  * /byok/challenge` -> `POST /byok/token` -> `GET /byok/events` for inbound,
- * `POST /byok/messages` for outbound. No WebSocket is ever constructed here,
- * which is the whole point: it is the transport the server keeps after
- * `attachWebSocket` is deleted, so a behaviour pin written against this
- * fixture survives the fold unchanged.
+ * `POST /byok/messages` for outbound. As of WP3B Step 2b it is the ONLY
+ * fixture in this package: the WebSocket transport and its two fixtures are
+ * deleted, so nothing here can construct a socket even by accident.
  *
- * Split of responsibilities against the two WS fixtures above:
- * {@link pairFakeDaemon} still owns the `/byok/pair` half (reused verbatim);
- * the challenge/token renewal that {@link connectFakeDaemonWs} never needed
- * (a WS device dials with its pairing token) happens here because the
- * long-poll path is the one a real daemon renews on. The returned
- * `accessToken` is the RENEWED one, not the pairing response's.
+ * {@link pairFakeDaemon} still owns the `/byok/pair` half. The challenge/token
+ * renewal happens here rather than there because the long-poll path is the one
+ * a real daemon renews on; the returned `accessToken` is the RENEWED one, not
+ * the pairing response's.
  *
  * Cursor discipline (deliberate, and the reason `next`/`replay` are two
  * methods rather than one): the server's `EventsPollResponse.cursor` is the
- * highest `seq` it has ASSIGNED to this device, which can run ahead of the
- * page it just handed back (`collectRelevant` filters terminal-task
- * entries). `next()` takes that value as the device's new ack point, exactly
- * as a real daemon does. `replay(cursor)` deliberately does NOT touch the
- * fixture's own cursor and hands back the raw `Response`, so a test can
- * re-read an arbitrary point of the retained tail and inspect a 409
- * `cursor_too_old` body rather than having it thrown away.
+ * highest `seq` it has handed this device, which can run ahead of the page it
+ * just returned (the kernel scans past filtered cancelled offers). `next()`
+ * takes that value as the device's new ack point, exactly as a real daemon
+ * does — and, exactly as for a real daemon, the ack only lands when the NEXT
+ * poll carries it. `replay(cursor)` deliberately does NOT touch the fixture's
+ * own cursor and hands back the raw `Response`, so a test can re-read an
+ * arbitrary point of the retained window and inspect a 409 `cursor_too_old`
+ * body rather than having it thrown away.
  */
 export interface FakeLongPollDaemon {
   readonly deviceId: string;
+  /** The enrollment's tenant, as the `POST /byok/pair` response reported it. */
+  readonly tenantId: TenantId;
+  /** The device's own signing identity, so a test can re-sign a later challenge. */
+  readonly identity: FakeDeviceIdentity;
   /** The token minted by `POST /byok/token` (the renewal), not the one `POST /byok/pair` returned. */
   readonly accessToken: string;
   /** Highest server `seq` this fake daemon has acked so far — `0` until the first {@link next}. */
@@ -463,7 +251,7 @@ export interface FakeLongPollDaemonOptions {
   deviceName?: string;
   identity?: FakeDeviceIdentity;
   clientVersion?: string;
-  /** Connection-level capability flags, published in `conn.hello` exactly like {@link connectFakeDaemonWs}'s. */
+  /** Connection-level capability flags, published in the `conn.hello` this fixture posts. */
   capabilities?: string[];
   /** Connection-level runtime discovery block — see {@link PI_RUNTIME_INFO} and friends. */
   runtimes?: RuntimeInfo[];
@@ -483,8 +271,8 @@ export async function connectFakeDaemonLongPoll(
   byok: ByokServer,
   opts: FakeLongPollDaemonOptions,
 ): Promise<FakeLongPollDaemon> {
-  const { code } = byok.pairing.createPairingCode(testPairingClaims(opts.productId));
-  const { deviceId, identity } = await pairFakeDaemon(baseUrl, code, {
+  const { code } = await byok.pairing.createPairingCode(testPairingClaims(opts.productId));
+  const { deviceId, identity, tenantId } = await pairFakeDaemon(baseUrl, code, {
     deviceName: opts.deviceName,
     identity: opts.identity,
   });
@@ -546,6 +334,8 @@ export async function connectFakeDaemonLongPoll(
 
   return {
     deviceId,
+    tenantId,
+    identity,
     accessToken,
     cursor: () => cursor,
     async next(): Promise<Envelope[]> {
@@ -560,4 +350,150 @@ export async function connectFakeDaemonLongPoll(
     replay,
     send,
   };
+}
+
+/**
+ * Re-publish `conn.hello` on an already-connected fake daemon.
+ *
+ * The long-poll equivalent of "the same device reconnects and announces a
+ * different runtime set": there is no socket to drop, so a fresh announcement
+ * IS the reconnect. `DeviceConnections.announce` replaces the discovery block
+ * wholesale (`connections.ts`), which is exactly what a restarted daemon does.
+ */
+export async function announceHello(
+  daemon: FakeLongPollDaemon,
+  opts: {
+    productId: string;
+    capabilities?: string[];
+    runtimes?: RuntimeInfo[];
+    clientVersion?: string;
+    configuredToolsets?: ToolsetId[];
+  },
+): Promise<void> {
+  const res = await daemon.send(
+    createEnvelope('conn.hello', {
+      protocolVersions: [PROTOCOL_VERSION],
+      capabilities: opts.capabilities ?? [],
+      deviceId: daemon.deviceId,
+      productId: opts.productId,
+      clientVersion: opts.clientVersion,
+      runtimes: opts.runtimes,
+      configuredToolsets: opts.configuredToolsets,
+    }),
+  );
+  if (!res.ok) throw new Error(`conn.hello re-publish failed: ${res.status} ${await res.text()}`);
+  const body = (await res.json()) as { accepted: number };
+  if (body.accepted !== 1) throw new Error(`conn.hello was not accepted: ${JSON.stringify(body)}`);
+}
+
+/**
+ * `POST /byok/messages` carrying exactly one envelope, decoded.
+ *
+ * The response IS the barrier: the kernel applies an accepted envelope inside
+ * the request, so an awaited send is itself the synchronization point for every
+ * state change it caused. Nothing in this file ever sleeps to "let the server
+ * catch up".
+ */
+export async function sendOne(
+  daemon: FakeLongPollDaemon,
+  envelope: Envelope,
+): Promise<{ status: number; body: unknown }> {
+  const res = await daemon.send(envelope);
+  return { status: res.status, body: await res.json() };
+}
+
+/**
+ * One envelope at a time off the long-poll transport.
+ *
+ * `GET /byok/events` answers in PAGES, so this keeps the undelivered remainder
+ * of the last page per daemon and only polls again once it is empty. The buffer
+ * is keyed by the daemon object rather than held on it so
+ * {@link FakeLongPollDaemon} stays the shape a real daemon implements.
+ *
+ * Throws instead of hanging when the poll's own hold window expires with
+ * nothing to hand back — a test that expects an envelope and gets silence must
+ * fail, not stall. Servers under test set a short `longPollHoldMs` so that
+ * failure is fast.
+ */
+const pendingEnvelopes = new WeakMap<FakeLongPollDaemon, Envelope[]>();
+
+export async function nextEnvelope(daemon: FakeLongPollDaemon): Promise<Envelope> {
+  const buffered = pendingEnvelopes.get(daemon) ?? [];
+  if (buffered.length === 0) {
+    const page = await daemon.next();
+    if (page.length === 0) throw new Error('long-poll window closed before any envelope arrived');
+    buffered.push(...page);
+  }
+  const next = buffered.shift();
+  pendingEnvelopes.set(daemon, buffered);
+  if (next === undefined) throw new Error('unreachable: non-empty buffer produced nothing');
+  return next;
+}
+
+/** Assert nothing more is owed: the buffer is empty AND a full poll window returns an empty page. */
+export async function expectNoMoreEnvelopes(daemon: FakeLongPollDaemon): Promise<void> {
+  expect(pendingEnvelopes.get(daemon) ?? []).toEqual([]);
+  expect(await daemon.next()).toEqual([]);
+}
+
+/**
+ * Offered -> Claimed -> Running over the long-poll send path, asserting each
+ * hop landed. Lifted verbatim from WP3B Step 0's `claimAndStartOverLongPoll`
+ * (`coordination-characterization.test.ts`), which keeps its own copy: that
+ * file is a frozen pin and must not depend on a shared fixture that could drift
+ * under it.
+ *
+ * `runtime` (S0) is the actual adapter the claim reports and `capabilities`
+ * (S0/D-4) is that adapter's own self-report — the ONLY input the steer gate
+ * reads. Both omitted matches a legacy `task.claim`.
+ */
+export async function claimAndStart(
+  byok: ByokServer,
+  daemon: FakeLongPollDaemon,
+  handle: TaskHandle,
+  runtime?: RuntimeId,
+  capabilities?: RuntimeCapabilities,
+): Promise<void> {
+  const claim = await sendOne(
+    daemon,
+    createEnvelope('task.claim', { deviceId: daemon.deviceId, runtime, capabilities }, { taskId: handle.taskId }),
+  );
+  expect(claim).toEqual({ status: 200, body: { accepted: 1 } });
+  expect((await byok.tasks.get(handle.taskId))?.state).toBe('Claimed');
+
+  const started = await sendOne(daemon, createEnvelope('task.started', {}, { taskId: handle.taskId }));
+  expect(started).toEqual({ status: 200, body: { accepted: 1 } });
+  expect((await byok.tasks.get(handle.taskId))?.state).toBe('Running');
+}
+
+/** Drive an already-Running task into `AwaitApproval` by reporting one, asserting it landed. */
+export async function moveToAwaitApproval(
+  byok: ByokServer,
+  daemon: FakeLongPollDaemon,
+  handle: TaskHandle,
+  opts: { summary?: string; approvalId?: string } = {},
+): Promise<void> {
+  const reported = await sendOne(
+    daemon,
+    createEnvelope(
+      'task.await_approval',
+      {
+        summary: opts.summary ?? 'needs a human ok',
+        ...(opts.approvalId === undefined ? {} : { approvalId: opts.approvalId }),
+      },
+      { taskId: handle.taskId },
+    ),
+  );
+  expect(reported).toEqual({ status: 200, body: { accepted: 1 } });
+  expect((await byok.tasks.get(handle.taskId))?.state).toBe('AwaitApproval');
+}
+
+/** Poll a public read until it holds, or fail loudly at `timeoutMs`. Never a completion signal for a state change the test itself caused. */
+export async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 10_000): Promise<void> {
+  const startedAt = Date.now();
+  for (;;) {
+    if (await check()) return;
+    if (Date.now() - startedAt > timeoutMs) throw new Error('waitFor: condition never became true');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }

@@ -93,6 +93,23 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
         recordedAt: receipt.recordedAt,
       };
+    // `task.decline` is the pre-claim terminal (§3.2, `Offered -> Failed`).
+    // It projects onto the same `failed` state as `task.fail` — there is no
+    // separate declined state — and carries the device's own `retryable`
+    // verbatim, exactly like `task.fail` does; this projection never decides
+    // that a decline is retryable on the device's behalf.
+    case 'task.decline':
+      return {
+        taskId,
+        state: 'failed',
+        ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
+        reason: envelope.payload.reason,
+        terminalCause: envelope.payload.reason,
+        ...(envelope.payload.retryable !== undefined
+          ? { retryable: envelope.payload.retryable }
+          : {}),
+        recordedAt: receipt.recordedAt,
+      };
     case 'task.cancelled':
       return {
         taskId,

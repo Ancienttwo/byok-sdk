@@ -100,26 +100,27 @@ byok-agent workspaces [--show-paths] [--config <path>]
 Paths are hidden by default and are shown only with `--show-paths`. The private ledger is not uploaded to the server. To roll back, remove `gitWorkspace` from the config and restart the daemon; existing workspaces and ledger records are preserved for manual salvage.
 
 
-By default this demo's task/blob state is in-memory + local-disk and is lost
-whenever the server process restarts. Set `BYOK_STORE=sqlite` to swap in
-`@byok-sdk/server`'s `node:sqlite`-backed reference stores (`SqliteTaskStore`/
-`SqliteBlobStore`) instead — task **records** and blob bytes then survive a
-restart, persisted under `examples/basic/data/` (gitignored):
+This demo's task/blob state is in-memory and is lost whenever the server
+process restarts. There is no persistent mode right now: WP3B Step 2 folded
+`@byok-sdk/server` into a façade over the `@byok-sdk/cloud` coordination
+kernel and deleted this package's own SQLite task/blob stores and its
+local-disk blob store, and the kernel's `node:sqlite` store adapters land in
+Step 3.
 
-> Note: this is **record persistence**, not live-task recovery. A restarted
-> server recovers the stored task/blob rows, but an *in-flight* task is not
-> resumed — the fresh process has no live runtime connection, event queue,
-> result promise, or device session for it, and previously paired devices
-> reconnect as new sessions. Reconnection/resume of active work is out of
-> scope for the M3 reference stores.
+Until then `BYOK_STORE=sqlite` **fails closed at startup** rather than quietly
+demoting a run that asked for persistence into one that loses everything:
 
 ```sh
 BYOK_STORE=sqlite bun run --filter @byok-sdk/example-basic dev
+# byok example: BYOK_STORE=sqlite is not available — SQLite persistence
+# returns in WP3B Step 3. Unset BYOK_STORE to run the in-memory demo.
 ```
 
-The repository's Node.js 22.22+ baseline includes `node:sqlite`; unsupported
-runtimes still fail fast with a clear capability error (see
-`packages/server/src/sqlite-support.ts`).
+One demo route is unavailable for the same reason and answers `501` with an
+explanatory body: `GET /api/blobs/:blobId/url` needed the embedder-held blob
+store handle. Device revocation remains available through
+`POST /api/machines/:deviceId/revoke`; the façade binds its single tenant and
+accepts only the device id.
 
 ## Provider API key (for a *real* pi run)
 

@@ -43,7 +43,8 @@ export interface ApprovalProjectionItem {
   readonly sourceEnvelopeIds: readonly string[];
   readonly summary?: string;
   readonly decision?: 'approve' | 'reject';
-  readonly resolvedBy?: 'local';
+  /** The authority that resolved the request on the cloud approval timeline. */
+  readonly resolvedBy?: 'local' | 'host';
   readonly resolvedAt?: string;
 }
 

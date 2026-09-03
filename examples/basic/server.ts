@@ -5,24 +5,13 @@
 // This is the "examples/ (不发布)" app from the plan's 服务端参考实现 section:
 // pair -> list machines -> dispatch a task -> stream progress -> show the
 // result -> approve/cancel. See README.md for how to run the whole loop.
-import { mkdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import type { Server as HttpServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import {
-  createByokServer,
-  LocalDiskBlobStore,
-  SqliteBlobStore,
-  SqliteTaskStore,
-  type BlobStore,
-  type DispatchInput,
-  type TaskHandle,
-  type TaskStore,
-} from '@byok-sdk/server';
+import { createByokServer, type DispatchInput, type TaskHandle } from '@byok-sdk/server';
 
 const exampleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -32,12 +21,10 @@ const PORT = Number(process.env.PORT ?? 8787);
 // config uses.
 const PRODUCT_ID = process.env.BYOK_EXAMPLE_PRODUCT_ID ?? 'byok-example-basic';
 
-// S1: every pairing code — and therefore every device row it creates — is
-// minted for an explicit tenant. A real product resolves this from whoever is
-// logged into the page that clicked "pair"; this demo has no accounts, so it
-// pins one demo tenant and revokes within it (see `/api/machines/:deviceId/revoke`
-// below). There is deliberately no "no tenant" path to fall back to.
-const DEMO_TENANT_ID = process.env.BYOK_EXAMPLE_TENANT_ID ?? 'tenant-demo';
+// The tenant is no longer a parameter anywhere on this surface: an embedded
+// server serves exactly one product and derives its one tenant from
+// `productId` at construction, so `createPairingCode` takes only the product.
+// `BYOK_EXAMPLE_TENANT_ID` is therefore no longer read.
 
 // `RuntimeId` from @byok-sdk/protocol is 'pi' | 'claude' | 'codex'; M0 only ships
 // the pi adapter (see plan: 里程碑 M0), but the wire/select still names all
@@ -46,40 +33,22 @@ const DEMO_TENANT_ID = process.env.BYOK_EXAMPLE_TENANT_ID ?? 'tenant-demo';
 // rather than pulling in @byok-sdk/protocol just for this one array.
 const KNOWN_RUNTIMES = new Set(['pi', 'claude', 'codex']);
 
-// Constructing our own `blobStore` (rather than letting `createByokServer`
-// default one internally) is the M1 `CreateByokServerOptions.blobStore`
-// override in action: it gives this embedder a handle to the exact store
-// instance in use, so `/api/blobs/:blobId/url` below can mint a download URL
-// for the browser directly — the browser has no device bearer token of its
-// own, so it can't call the bearer-authed `GET /byok/blobs/:id/url` route on
-// `byok.hono` itself (see docs/protocol.md §7).
-//
-// Storage mode (M3): `BYOK_STORE=sqlite` swaps both reference stores for
-// their `node:sqlite`-backed persistent counterparts (`SqliteTaskStore`/
-// `SqliteBlobStore`, from `@byok-sdk/server`) so task RECORDS and blob bytes
-// survive a restart of this demo process (record persistence only — an
-// in-flight task is not resumed/reconnected; see the README) — data lands
-// under `examples/basic/data/`
-// (gitignored). Requires Node.js 22.5+ (`node:sqlite`'s minimum — see
-// `packages/server/src/sqlite-support.ts`). Anything else, including unset,
-// keeps the zero-setup default: in-memory tasks + local-disk blobs, both
-// lost on restart.
-const STORE_MODE = process.env.BYOK_STORE === 'sqlite' ? 'sqlite' : 'memory';
-
-let blobStore: BlobStore;
-let taskStore: TaskStore | undefined; // undefined -> createByokServer's own in-memory default
-
-if (STORE_MODE === 'sqlite') {
-  const dataDir = path.join(exampleDir, 'data');
-  mkdirSync(dataDir, { recursive: true });
-  blobStore = new SqliteBlobStore({ path: path.join(dataDir, 'blobs.db') });
-  taskStore = new SqliteTaskStore({ path: path.join(dataDir, 'tasks.db') });
-  console.log(`byok example: BYOK_STORE=sqlite — persisting to ${dataDir}`);
-} else {
-  blobStore = new LocalDiskBlobStore();
+// Storage mode: WP3B Step 2 folded `@byok-sdk/server` into a façade over the
+// `@byok-sdk/cloud` kernel and deleted this package's own SQLite task/blob
+// stores and its local-disk blob store. The kernel's `node:sqlite` store
+// adapters land in Step 3; until then the ONLY mode is the zero-setup
+// in-memory one, so `BYOK_STORE=sqlite` fails closed at startup rather than
+// silently demoting a run that asked for persistence into one that loses
+// everything on restart.
+if (process.env.BYOK_STORE === 'sqlite') {
+  console.error(
+    'byok example: BYOK_STORE=sqlite is not available — SQLite persistence returns in WP3B Step 3. ' +
+      'Unset BYOK_STORE to run the in-memory demo.',
+  );
+  process.exit(1);
 }
 
-const byok = createByokServer({ productId: PRODUCT_ID, blobStore, taskStore });
+const byok = createByokServer({ productId: PRODUCT_ID });
 
 // `createByokServer`'s public surface only exposes read-only task snapshots
 // (`tasks.get`/`tasks.list`) — the live `TaskHandle` (events/approve/reject/
@@ -87,6 +56,16 @@ const byok = createByokServer({ productId: PRODUCT_ID, blobStore, taskStore });
 // that wants to act on a task again later (a second HTTP request) has to
 // keep its own map from taskId -> handle; this is that map.
 const handles = new Map<string, TaskHandle>();
+
+// `TaskSnapshot` no longer carries `instruction`/`runtime`/`policy`: the
+// coordination kernel stores a task's OUTCOME, not the host's input, so
+// re-reading them off a snapshot would mean the kernel keeping a second copy
+// of this demo's own form fields. Correct ownership is here — the dispatcher
+// already has them — so the list view joins them back in by taskId.
+const dispatched = new Map<
+  string,
+  { instruction: string; runtime?: DispatchInput['runtime']; policy: DispatchInput['policy'] }
+>();
 
 const publicDir = path.join(exampleDir, 'public');
 const indexHtml = await readFile(path.join(publicDir, 'index.html'), 'utf8');
@@ -99,27 +78,29 @@ app.route('/', byok.hono);
 
 app.get('/', (c) => c.html(indexHtml));
 
-app.post('/api/pair', (c) =>
-  c.json(byok.pairing.createPairingCode({ tenantId: DEMO_TENANT_ID, productId: PRODUCT_ID })),
-);
+app.post('/api/pair', async (c) => c.json(await byok.pairing.createPairingCode({ productId: PRODUCT_ID })));
 
-app.get('/api/machines', (c) => c.json(byok.machines.list()));
+app.get('/api/machines', async (c) => c.json(await byok.machines.list()));
 
 // M1 §6.3: revocation is server-side only, no wire message — the daemon's
 // next challenge/token/WS attempt gets a 401 and its only recourse is to
 // re-pair. Nothing else to await here; the effect shows up next time the
 // device tries to renew or reconnect (see public/index.html's revoke button).
-app.post('/api/machines/:deviceId/revoke', (c) => {
-  byok.devices.revoke(DEMO_TENANT_ID, c.req.param('deviceId'));
+app.post('/api/machines/:deviceId/revoke', async (c) => {
+  await byok.devices.revoke(c.req.param('deviceId'));
   return c.json({ ok: true });
 });
 
-app.get('/api/tasks', (c) => c.json(byok.tasks.list()));
+app.get('/api/tasks', async (c) => {
+  const { tasks, nextCursor } = await byok.tasks.list();
+  return c.json({ tasks: tasks.map((task) => ({ ...task, ...dispatched.get(task.taskId) })), nextCursor });
+});
 
-app.get('/api/tasks/:taskId', (c) => {
-  const snapshot = byok.tasks.get(c.req.param('taskId'));
+app.get('/api/tasks/:taskId', async (c) => {
+  const taskId = c.req.param('taskId');
+  const snapshot = await byok.tasks.get(taskId);
   if (!snapshot) return c.json({ error: 'unknown taskId' }, 404);
-  return c.json(snapshot);
+  return c.json({ ...snapshot, ...dispatched.get(taskId) });
 });
 
 app.post('/api/tasks', async (c) => {
@@ -160,6 +141,11 @@ app.post('/api/tasks', async (c) => {
   try {
     const handle = await byok.dispatch(input);
     handles.set(handle.taskId, handle);
+    dispatched.set(handle.taskId, {
+      instruction: input.instruction,
+      ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
+      policy: input.policy,
+    });
     return c.json({ taskId: handle.taskId });
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : String(err) }, 409);
@@ -172,11 +158,15 @@ app.post('/api/tasks', async (c) => {
 // `blobStore` handle instead of requiring the browser to hold a device
 // token. Used by the UI when an `artifact` event carries a `blobRef` (a
 // >64KB artifact — see task.artifact's inline-vs-blob split).
-app.get('/api/blobs/:blobId/url', async (c) => {
-  const downloadUrl = await blobStore.getDownloadUrl(DEMO_TENANT_ID, c.req.param('blobId'));
-  if (!downloadUrl) return c.json({ error: 'blob not found' }, 404);
-  return c.json({ downloadUrl });
-});
+app.get('/api/blobs/:blobId/url', (c) =>
+  c.json(
+    {
+      error:
+        'browser-facing blob download is unavailable in this build — the embedder-held blob store returns in WP3B Step 3',
+    },
+    501,
+  ),
+);
 
 app.get('/api/tasks/:taskId/events', (c) => {
   const handle = handles.get(c.req.param('taskId'));
@@ -267,7 +257,6 @@ app.post('/api/tasks/:taskId/cancel', async (c) => {
   }
 });
 
-const server = serve({ fetch: app.fetch, port: PORT }, (info) => {
-  byok.attachWebSocket(server as HttpServer);
+serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log(`byok example server listening on http://localhost:${info.port} (productId=${PRODUCT_ID})`);
 });

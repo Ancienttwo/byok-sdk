@@ -216,3 +216,69 @@ export class RateLimiter {
     if (oldestKey !== undefined) this.buckets.delete(oldestKey);
   }
 }
+
+/**
+ * The counting `InboundRateLimiter` (`@byok-sdk/cloud`'s store port) this
+ * package composes the kernel with.
+ *
+ * Position matters and is not this adapter's choice: the kernel debits one
+ * token at step 0 of its inbound gate, BEFORE the type-allow check, for every
+ * envelope that reaches it. That is exactly the choke point the old
+ * `ConnectionHub.handleInbound` occupied, which is why both `envelopesIn` (one
+ * per envelope, every outcome) and `rateLimitEvents` (one per REJECTED
+ * envelope, never coalesced) are counted here and nowhere else.
+ *
+ * The `device.rate_limited` embedder event is the one thing that IS coalesced,
+ * matching the pre-fold rule: an episode fires exactly one event, and only a
+ * subsequent SUCCESSFUL consume by that device re-arms it. So a flood produces
+ * one event and N counter increments, and a device that recovers and floods
+ * again produces a second, distinct event.
+ */
+export interface InboundRateLimiterCounters {
+  /** Every envelope handed to the kernel's inbound gate, whatever the gate then decides. */
+  envelopesIn: number;
+  /** Envelopes the bucket refused. Per envelope — see the episode rule above. */
+  rateLimitEvents: number;
+}
+
+export interface CountingInboundRateLimiter {
+  /** The port `CloudStores.rateLimiter` is composed with. */
+  readonly limiter: { consume(tenant: string, deviceId: string): Promise<boolean> };
+  readonly counters: InboundRateLimiterCounters;
+}
+
+/**
+ * Adapt a {@link RateLimiter} to the kernel's `(tenant, deviceId)` port.
+ *
+ * The bucket key is `${tenant}:${deviceId}` rather than the bare device id: a
+ * device id is only unique within its tenant, and a shared key space would let
+ * one tenant's flood spend another's budget for a colliding id.
+ */
+export function createCountingInboundRateLimiter(
+  limiter: RateLimiter,
+  onRateLimited: (deviceId: string, at: string) => void,
+): CountingInboundRateLimiter {
+  const counters: InboundRateLimiterCounters = { envelopesIn: 0, rateLimitEvents: 0 };
+  /** Devices currently inside a rate-limit episode — see the coalescing rule above. */
+  const episodes = new Set<string>();
+
+  return {
+    counters,
+    limiter: {
+      async consume(tenant: string, deviceId: string): Promise<boolean> {
+        counters.envelopesIn += 1;
+        const key = `${tenant}:${deviceId}`;
+        if (limiter.consume(key)) {
+          episodes.delete(key);
+          return true;
+        }
+        counters.rateLimitEvents += 1;
+        if (!episodes.has(key)) {
+          episodes.add(key);
+          onRateLimited(deviceId, new Date().toISOString());
+        }
+        return false;
+      },
+    },
+  };
+}

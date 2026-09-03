@@ -1,112 +1,116 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
-import type { WebSocket } from 'ws';
-import { createByokServer } from '../index';
+import { createByokServer, type ByokServer } from '../index';
 import {
-  connectFakeDaemon,
-  send,
+  connectFakeDaemonLongPoll,
+  sendOne,
   startServer,
   stopServer,
-  testPairingClaims,
   waitForServerEvent,
-  waitForTaskEvent,
+  type FakeLongPollDaemon,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
+/** Short enough that a poll expecting nothing answers in ~200ms instead of ~50s. */
+const SHORT_HOLD_MS = 200;
 
 /**
- * M5 (claimed runtime, docs/protocol.md §3.1): `task.claim` now optionally
- * carries `runtime` — the ACTUAL adapter the daemon selected — distinct from
- * `TaskSnapshot.runtime` (the merely REQUESTED runtime, set once at
- * `dispatch()` time and never touched again). These tests exercise
- * `ConnectionHub.onClaim` (`hub.ts`) directly over the real WS/HTTP harness,
- * mirroring `hub-approve-reject.test.ts`'s own conventions.
+ * M5 (claimed runtime, docs/protocol.md §3.1): `task.claim` optionally carries
+ * `runtime` — the ACTUAL adapter the daemon selected — snapshotted by the cloud
+ * kernel's inbound gate at the `offered -> claimed` ownership CAS and read back
+ * through `TaskSnapshot.claimedRuntime`.
+ *
+ * The pre-fold counterpart `TaskSnapshot.runtime` (the merely REQUESTED
+ * runtime) is gone: it was dispatch INPUT the host already holds and the kernel
+ * does not persist (ADR-028), so the "requested field stays untouched" half of
+ * each case below has no field left to assert on. What survives — that the
+ * claim's own report is recorded independently of what was requested — is
+ * pinned by the two dispatch shapes below, one with a requested runtime and one
+ * without.
  */
 describe('M5 (claimed runtime): task.claim.runtime -> TaskSnapshot.claimedRuntime', () => {
   let server: HttpServer | undefined;
-  let ws: WebSocket | undefined;
+  let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    ws?.terminate();
+    byok?.stop();
+    byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
-    ws = undefined;
   });
 
-  it('an offer dispatched with NO requested runtime (auto-select): task.claim.runtime sets claimedRuntime, while the requested runtime field stays undefined (untouched, never requested)', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
+  async function startWithDaemon(): Promise<{ byok: ByokServer; daemon: FakeLongPollDaemon }> {
+    const instance = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
+    const started = await startServer(instance);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    ws = daemon.ws;
+    byok = instance;
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, instance, { productId: PRODUCT_ID });
+    return { byok: instance, daemon };
+  }
 
-    const handle = await byok.dispatch({ instruction: 'auto-select this' });
-    expect(byok.tasks.get(handle.taskId)?.runtime).toBeUndefined();
+  it('an offer dispatched with NO requested runtime (auto-select): task.claim.runtime sets claimedRuntime', async () => {
+    const { byok: instance, daemon } = await startWithDaemon();
 
-    send(ws, createEnvelope('task.claim', { deviceId: daemon.deviceId, runtime: 'pi' }, { taskId: handle.taskId }));
-    await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Claimed');
+    const handle = await instance.dispatch({ instruction: 'auto-select this' });
 
-    const snapshot = byok.tasks.get(handle.taskId);
+    const claim = await sendOne(
+      daemon,
+      createEnvelope('task.claim', { deviceId: daemon.deviceId, runtime: 'pi' }, { taskId: handle.taskId }),
+    );
+    expect(claim).toEqual({ status: 200, body: { accepted: 1 } });
+
+    const snapshot = await instance.tasks.get(handle.taskId);
+    expect(snapshot?.state).toBe('Claimed');
     expect(snapshot?.claimedRuntime).toBe('pi');
-    expect(snapshot?.runtime).toBeUndefined(); // requested field untouched — nothing was ever requested
   });
 
-  it('an offer dispatched WITH a requested runtime: task.claim.runtime is recorded independently as claimedRuntime, leaving the requested runtime field exactly as it was', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    ws = daemon.ws;
+  it('an offer dispatched WITH a requested runtime: task.claim.runtime is recorded independently as claimedRuntime', async () => {
+    const { byok: instance, daemon } = await startWithDaemon();
 
-    const handle = await byok.dispatch({ instruction: 'explicit runtime', runtime: 'claude' });
-    expect(byok.tasks.get(handle.taskId)?.runtime).toBe('claude');
+    const handle = await instance.dispatch({ instruction: 'explicit runtime', runtime: 'claude' });
 
-    send(ws, createEnvelope('task.claim', { deviceId: daemon.deviceId, runtime: 'claude' }, { taskId: handle.taskId }));
-    await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Claimed');
+    const claim = await sendOne(
+      daemon,
+      createEnvelope('task.claim', { deviceId: daemon.deviceId, runtime: 'claude' }, { taskId: handle.taskId }),
+    );
+    expect(claim).toEqual({ status: 200, body: { accepted: 1 } });
 
-    const snapshot = byok.tasks.get(handle.taskId);
-    expect(snapshot?.runtime).toBe('claude'); // requested field: unchanged
-    expect(snapshot?.claimedRuntime).toBe('claude'); // claimed field: independently recorded
+    expect((await instance.tasks.get(handle.taskId))?.claimedRuntime).toBe('claude');
   });
 
-  it('compat: a legacy daemon\'s task.claim with NO runtime field leaves claimedRuntime absent and the claim still succeeds normally', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    ws = daemon.ws;
+  it("compat: a legacy daemon's task.claim with NO runtime field leaves claimedRuntime absent and the claim still succeeds normally", async () => {
+    const { byok: instance, daemon } = await startWithDaemon();
 
-    const handle = await byok.dispatch({ instruction: 'legacy daemon claim' });
+    const handle = await instance.dispatch({ instruction: 'legacy daemon claim' });
 
     // A pre-M5-batch-2 daemon's task.claim payload never had a `runtime` key.
-    send(ws, createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }));
-    await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Claimed');
+    const claim = await sendOne(
+      daemon,
+      createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }),
+    );
+    expect(claim).toEqual({ status: 200, body: { accepted: 1 } });
 
-    const snapshot = byok.tasks.get(handle.taskId);
+    const snapshot = await instance.tasks.get(handle.taskId);
     expect(snapshot?.state).toBe('Claimed'); // nothing breaks
     expect(snapshot?.claimedRuntime).toBeUndefined();
   });
 
   it('the task.state ByokServerEvent fired on Offered -> Claimed carries claimedRuntime, mirroring the snapshot', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    ws = daemon.ws;
+    const { byok: instance, daemon } = await startWithDaemon();
 
-    const handle = await byok.dispatch({ instruction: 'observe the server event' });
-    send(ws, createEnvelope('task.claim', { deviceId: daemon.deviceId, runtime: 'codex' }, { taskId: handle.taskId }));
+    const handle = await instance.dispatch({ instruction: 'observe the server event' });
+    await sendOne(
+      daemon,
+      createEnvelope('task.claim', { deviceId: daemon.deviceId, runtime: 'codex' }, { taskId: handle.taskId }),
+    );
 
     const event = await waitForServerEvent(
-      byok,
+      instance,
       (e) => e.kind === 'task.state' && e.taskId === handle.taskId && e.state === 'Claimed',
     );
     if (event.kind !== 'task.state') throw new Error('unreachable');
     expect(event.claimedRuntime).toBe('codex');
+    expect(event.claimedRuntime).toBe((await instance.tasks.get(handle.taskId))?.claimedRuntime);
   });
 });

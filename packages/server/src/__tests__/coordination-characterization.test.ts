@@ -32,8 +32,8 @@ import {
  * expressed would be a Step 1 gap, recorded in the notes, not a licence to
  * reach inside.
  *
- * Transport: LONG-POLL ONLY. {@link startHttpOnlyServer} deliberately does
- * NOT call `byok.attachWebSocket`, so no WS upgrade handler exists on any
+ * Transport: LONG-POLL ONLY. {@link startHttpOnlyServer} deliberately mounts
+ * only `byok.hono.fetch`, so no WS upgrade handler exists on any
  * server in this file and no `ws` client is ever constructed — the WS
  * transport is deleted in Step 2b, and a pin that depended on it would die
  * with it. This is also what makes case 1's "no WS ever opened" a structural
@@ -55,11 +55,18 @@ const PRODUCT_ID = 'acme';
  * change.
  */
 const SHORT_HOLD_MS = 200;
+/**
+ * Retention cutoff for case 7's sweep: a canonical ISO-8601 UTC instant far
+ * enough ahead that every row appended before the call is past it, so the sweep
+ * depends on nothing about how fast the test ran. Retention is a TIME cutoff,
+ * never a count — that is the whole difference from the replay ring this case
+ * used to pin.
+ */
+const SWEEP_EVERYTHING_BEFORE = '2999-01-01T00:00:00.000Z';
 
 /**
- * `startServer` from `test-support.ts` attaches the WS upgrade; this file
- * needs a server that provably cannot speak WS at all (see the file header),
- * so it serves `byok.hono.fetch` and nothing else. Hostname pinning matches
+ * This file needs a server that provably cannot speak WS at all (see the file
+ * header), so it serves `byok.hono.fetch` and nothing else. Hostname pinning matches
  * `startServer`'s for the same reason it does there (`port-shadowing.test.ts`).
  */
 async function startHttpOnlyServer(
@@ -104,11 +111,11 @@ async function claimAndStartOverLongPoll(
     ),
   );
   expect(claim).toEqual({ status: 200, body: { accepted: 1 } });
-  expect(byok.tasks.get(handle.taskId)?.state).toBe('Claimed');
+  expect((await byok.tasks.get(handle.taskId))?.state).toBe('Claimed');
 
   const started = await sendOne(daemon, createEnvelope('task.started', {}, { taskId: handle.taskId }));
   expect(started).toEqual({ status: 200, body: { accepted: 1 } });
-  expect(byok.tasks.get(handle.taskId)?.state).toBe('Running');
+  expect((await byok.tasks.get(handle.taskId))?.state).toBe('Running');
 }
 
 describe('WP3B Step 0: coordination characterization (public surface, long-poll only)', () => {
@@ -146,7 +153,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
 
     // conn.hello over `POST /byok/messages` is the long-poll equivalent of
     // the WS handshake: presence is established with no socket at all.
-    expect(started.byok.machines.list()).toEqual([
+    expect(await started.byok.machines.list()).toEqual([
       expect.objectContaining({ deviceId: daemon.deviceId, connected: true }),
     ]);
 
@@ -157,7 +164,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     expect(page.map((envelope) => envelope.type)).toEqual(['task.offer']);
     expect(page[0]?.task_id).toBe(handle.taskId);
     expect(daemon.cursor()).toBeGreaterThan(0);
-    expect(started.byok.tasks.get(handle.taskId)?.state).toBe('Offered');
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Offered');
   });
 
   // -------------------------------------------------------------------
@@ -183,7 +190,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     expect(complete).toEqual({ status: 200, body: { accepted: 1 } });
 
     const result = await handle.result();
-    const snapshot = started.byok.tasks.get(handle.taskId);
+    const snapshot = await started.byok.tasks.get(handle.taskId);
     if (snapshot === undefined) throw new Error('tasks.get() lost the task it just completed');
 
     // Field by field, both directions — the handle must never be a second
@@ -206,7 +213,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
 
     // Re-reading is stable: `result()` is not a one-shot drain.
     expect(await handle.result()).toEqual(snapshot.result);
-    expect(started.byok.tasks.list()).toEqual([snapshot]);
+    expect((await started.byok.tasks.list()).tasks).toEqual([snapshot]);
   });
 
   // -------------------------------------------------------------------
@@ -226,7 +233,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
       createEnvelope('task.complete', { summary: 'first', sessionRef: 'session-first' }, { taskId: handle.taskId }),
     );
     expect(first).toEqual({ status: 200, body: { accepted: 1 } });
-    const recorded = started.byok.tasks.get(handle.taskId)?.result;
+    const recorded = (await started.byok.tasks.get(handle.taskId))?.result;
     expect(recorded).toEqual({ state: 'Complete', summary: 'first', sessionRef: 'session-first', artifactRefs: undefined, document: undefined });
 
     // A distinct envelope (own `id`, different payload) for an
@@ -239,9 +246,9 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     );
     expect(second).toEqual({ status: 200, body: { accepted: 1 } });
 
-    expect(started.byok.tasks.get(handle.taskId)?.result).toEqual(recorded);
-    expect(started.byok.tasks.get(handle.taskId)?.state).toBe('Complete');
-    expect(started.byok.tasks.get(handle.taskId)?.sessionRef).toBe('session-first');
+    expect((await started.byok.tasks.get(handle.taskId))?.result).toEqual(recorded);
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Complete');
+    expect((await started.byok.tasks.get(handle.taskId))?.sessionRef).toBe('session-first');
     expect(await handle.result()).toEqual(recorded);
   });
 
@@ -258,7 +265,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     await claimAndStartOverLongPoll(started.byok, daemon, handle);
 
     await handle.cancel('operator stopped it');
-    expect(started.byok.tasks.get(handle.taskId)?.state).toBe('Cancelled');
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Cancelled');
 
     const late = await sendOne(
       daemon,
@@ -275,8 +282,8 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     expect(result.reason).toBe('operator stopped it');
     expect(result.summary).toBeUndefined();
     expect(result.document).toBeUndefined();
-    expect(started.byok.tasks.get(handle.taskId)?.result).toEqual(result);
-    expect(started.byok.tasks.get(handle.taskId)?.sessionRef).toBeUndefined();
+    expect((await started.byok.tasks.get(handle.taskId))?.result).toEqual(result);
+    expect((await started.byok.tasks.get(handle.taskId))?.sessionRef).toBeUndefined();
 
     // The cancellation notification is still redelivered through the
     // terminal state (N1/F4) — the device is told to stop local work.
@@ -302,12 +309,12 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
         createEnvelope('task.await_approval', { summary: 'round one', approvalId: 'approval-1' }, { taskId: handle.taskId }),
       ),
     ).toEqual({ status: 200, body: { accepted: 1 } });
-    expect(started.byok.tasks.get(handle.taskId)?.pendingApprovalId).toBe('approval-1');
+    expect((await started.byok.tasks.get(handle.taskId))?.pendingApprovalId).toBe('approval-1');
     await handle.approve({ approvalId: 'approval-1' });
-    expect(started.byok.tasks.get(handle.taskId)?.state).toBe('Running');
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Running');
     // Leaving AwaitApproval clears the id centrally, so round two can never
     // inherit it.
-    expect(started.byok.tasks.get(handle.taskId)?.pendingApprovalId).toBeUndefined();
+    expect((await started.byok.tasks.get(handle.taskId))?.pendingApprovalId).toBeUndefined();
 
     // Round two.
     expect(
@@ -316,7 +323,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
         createEnvelope('task.await_approval', { summary: 'round two', approvalId: 'approval-2' }, { taskId: handle.taskId }),
       ),
     ).toEqual({ status: 200, body: { accepted: 1 } });
-    expect(started.byok.tasks.get(handle.taskId)?.pendingApprovalId).toBe('approval-2');
+    expect((await started.byok.tasks.get(handle.taskId))?.pendingApprovalId).toBe('approval-2');
 
     const stale = await handle.approve({ approvalId: 'approval-1' }).catch((error: unknown) => error);
     expect(stale).toBeInstanceOf(StaleApprovalError);
@@ -326,12 +333,12 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     expect(stale.currentApprovalId).toBe('approval-2');
 
     // Zero side effects: no transition, and nothing new in the mailbox.
-    expect(started.byok.tasks.get(handle.taskId)?.state).toBe('AwaitApproval');
-    expect(started.byok.tasks.get(handle.taskId)?.pendingApprovalId).toBe('approval-2');
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('AwaitApproval');
+    expect((await started.byok.tasks.get(handle.taskId))?.pendingApprovalId).toBe('approval-2');
 
     await handle.approve({ approvalId: 'approval-2' });
-    expect(started.byok.tasks.get(handle.taskId)?.state).toBe('Running');
-    expect(started.byok.tasks.get(handle.taskId)?.pendingApprovalId).toBeUndefined();
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Running');
+    expect((await started.byok.tasks.get(handle.taskId))?.pendingApprovalId).toBeUndefined();
 
     // Exactly one `task.approve` per successful approval reached the device
     // (the stale attempt contributed none).
@@ -349,15 +356,15 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
       productId: PRODUCT_ID,
       runtimes: [PI_RUNTIME_INFO, CLAUDE_RUNTIME_INFO],
     });
-    expect(started.byok.machines.list()[0]?.runtimes).toEqual([PI_RUNTIME_INFO, CLAUDE_RUNTIME_INFO]);
-    expect(started.byok.machines.list()[0]?.runtimes?.some((info) => info.capabilities?.steer === true)).toBe(true);
+    expect((await started.byok.machines.list())[0]?.runtimes).toEqual([PI_RUNTIME_INFO, CLAUDE_RUNTIME_INFO]);
+    expect((await started.byok.machines.list())[0]?.runtimes?.some((info) => info.capabilities?.steer === true)).toBe(true);
 
     const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'steer me' });
     await daemon.next();
     // The CLAIM reports claude (`steer: false`) — that is the authority.
     await claimAndStartOverLongPoll(started.byok, daemon, handle, 'claude', CLAUDE_RUNTIME_INFO.capabilities);
-    expect(started.byok.tasks.get(handle.taskId)?.claimedRuntime).toBe('claude');
-    expect(started.byok.tasks.get(handle.taskId)?.claimedRuntimeCapabilities).toEqual(CLAUDE_RUNTIME_INFO.capabilities);
+    expect((await started.byok.tasks.get(handle.taskId))?.claimedRuntime).toBe('claude');
+    expect((await started.byok.tasks.get(handle.taskId))?.claimedRuntimeCapabilities).toEqual(CLAUDE_RUNTIME_INFO.capabilities);
 
     const rejection = await handle.steer('change course').catch((error: unknown) => error);
     expect(rejection).toBeInstanceOf(SteerRejectedError);
@@ -368,14 +375,42 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
 
     // Refused BEFORE any envelope exists: the device's next page is empty.
     expect(await daemon.next()).toEqual([]);
-    expect(started.byok.tasks.get(handle.taskId)?.state).toBe('Running');
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Running');
   });
 
   // -------------------------------------------------------------------
   // §5.7 — GAP-3.
+  //
+  // RE-PINNED in WP3B Step 2 (the ONE Step 0 case that was, see the packet's
+  // §5 item 7 and §8). The original pin was written against `hub.ts`'s
+  // in-process outbox, which kept a 500-entry ring of ALREADY-ACKED entries and
+  // replayed them: "the same cursor twice returns a byte-identical page" held
+  // even after those rows had been consumed, and the only way to move the
+  // recoverable floor was to overflow that ring by count.
+  //
+  // The kernel's mailbox is a different, stronger contract, and it is the one
+  // hosted production already runs on:
+  //
+  //   - READING IS NOT ACKING. `readAfter` mutates nothing, so two reads at the
+  //     same cursor return the same page for as long as nothing was acked.
+  //   - THE ACK IS MONOTONIC AND IRREVERSIBLE. The only ack is the cursor the
+  //     daemon brings back on its NEXT poll; it retires the rows at or below it,
+  //     and a later poll from a LOWER cursor neither un-acks them nor sees them
+  //     again. Consumed is not lost.
+  //   - THE FLOOR MOVES ON EXPIRY, NOT ON CAPACITY. `recoverableFrom` is one
+  //     past the highest row DEAD-LETTERED by a retention sweep, so `409
+  //     cursor_too_old` is reachable only through expiry — never by appending
+  //     more rows. The 500-entry replay ring is dropped, not rebuilt: a second
+  //     count-bounded store beside the mailbox would be a second retention
+  //     authority for the same rows.
+  //
+  // Every assertion below is on the same public surface as before
+  // (`GET /byok/events` status + body). `byok.mailbox.collectRetired` is the
+  // host control-plane sweep core defines and this façade forwards verbatim —
+  // it names no policy, and nothing in the stack runs it on a timer.
   // -------------------------------------------------------------------
 
-  it('case 7: cursor replay is stable and monotonic, and a cursor below the recoverable floor fails closed with 409 cursor_too_old', async () => {
+  it('case 7: reading does not ack, an ack is irreversible, and a cursor below rows lost to expiry fails closed with 409 cursor_too_old', async () => {
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
@@ -392,33 +427,50 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
 
     const expectedIds = handles.map((handle) => handle.taskId);
 
-    // Same cursor twice: byte-identical page, same order.
+    // (a) Reading is not acking: the same cursor twice, byte-identical page.
     const firstRead = await readPage(0);
     const secondRead = await readPage(0);
     expect(firstRead.status).toBe(200);
     expect(firstRead.taskIds).toEqual(expectedIds);
     expect(secondRead).toEqual(firstRead);
 
-    // A higher cursor returns the strict tail, in the same order.
-    const tail = await readPage(firstRead.cursor - 1);
-    expect(tail.status).toBe(200);
-    expect(tail.taskIds).toEqual(expectedIds.slice(-1));
+    // (b) The ONLY ack is the cursor the daemon brings back on its next poll.
+    // `next()` reads at 0 and adopts the returned cursor; the `next()` after it
+    // is the poll that carries it, and that is what retires rows 1..3.
+    await daemon.next();
+    expect(daemon.cursor()).toBe(firstRead.cursor);
+    expect(await daemon.next()).toEqual([]);
 
-    // Going BACK to a lower cursor after a higher one returns the same
-    // retained tail in the same order — never a different order, never a
-    // partial page. Acked cursors are monotonic in the response, not in what
-    // the caller is allowed to ask for.
+    // A row appended after the ack is still pending and still owed.
+    const afterAck = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'after-ack' });
+
+    // Going BACK below the ack watermark returns ONLY what is still pending —
+    // the acked rows are gone from the delivery set, not replayed — and does
+    // not un-ack them...
     const backwards = await readPage(0);
-    expect(backwards).toEqual(firstRead);
-    expect(tail.cursor).toBe(firstRead.cursor);
+    expect(backwards.status).toBe(200);
+    expect(backwards.taskIds).toEqual([afterAck.taskId]);
 
-    // Overflow the retained ring so the floor genuinely moves. There is no
-    // public option for the ring size, so the only way to reach the
-    // eviction path from out here is to dispatch past it (501 total offers
-    // to one device); this is the ONLY case in this file that does it.
-    for (let index = 3; index < 501; index++) {
-      await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: `overflow-${String(index)}` });
-    }
+    // ...which the next poll at the higher cursor proves: nothing that was
+    // acked is re-delivered, only the row that was never acked.
+    const forwards = await readPage(firstRead.cursor);
+    expect(forwards.status).toBe(200);
+    expect(forwards.taskIds).toEqual([afterAck.taskId]);
+
+    // (c) The floor moves only when rows are LOST. `after-ack` was delivered
+    // twice and never acked, so the sweep dead-letters it (the acked rows above
+    // it are deleted, which is not a loss and moves nothing); the cutoff is a
+    // timestamp, so a canonical far-future instant retires everything appended
+    // so far and nothing appended later.
+    const swept = await started.byok.mailbox.collectRetired({
+      deviceId: daemon.deviceId,
+      ackedBefore: SWEEP_EVERYTHING_BEFORE,
+      expireUnackedBefore: SWEEP_EVERYTHING_BEFORE,
+    });
+    expect(swept.expiredCount).toBe(1);
+
+    // A row that arrives after the sweep is inside the retained window.
+    const afterSweep = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'after-sweep' });
 
     const gapRes = await daemon.replay(0);
     expect(gapRes.status).toBe(409);
@@ -426,16 +478,14 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     expect(gapBody.error).toBe('cursor_too_old');
     expect(gapBody.recoverableFrom).toBeGreaterThan(1);
 
-    // `recoverableFrom - 1` is still serviceable — a caller sitting exactly
-    // at the floor can still receive the first retained entry.
-    const recovered = await daemon.replay(gapBody.recoverableFrom - 1);
-    expect(recovered.status).toBe(200);
-    const recoveredBody = (await recovered.json()) as { events: Envelope[]; cursor: number };
-    expect(recoveredBody.events.length).toBeGreaterThan(0);
-    expect(recoveredBody.events[0]?.seq).toBe(gapBody.recoverableFrom);
-
-    // And one below it still fails, i.e. the floor is a boundary, not a hint.
+    // The floor is a boundary, not a hint: one below it still fails closed.
     expect((await daemon.replay(gapBody.recoverableFrom - 2)).status).toBe(409);
+
+    // `recoverableFrom - 1` is still serviceable — a caller sitting exactly at
+    // the floor is served the retained tail rather than forced to resync.
+    const recovered = await readPage(gapBody.recoverableFrom - 1);
+    expect(recovered.status).toBe(200);
+    expect(recovered.taskIds).toEqual([afterSweep.taskId]);
   });
 
   // -------------------------------------------------------------------
@@ -464,32 +514,32 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     );
 
     expect(await sendOne(owner, awaitApproval)).toEqual({ status: 200, body: { accepted: 1 } });
-    expect(started.byok.tasks.get(handle.taskId)?.state).toBe('AwaitApproval');
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('AwaitApproval');
 
     await handle.approve();
-    expect(started.byok.tasks.get(handle.taskId)?.state).toBe('Running');
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Running');
 
-    const dedupBefore = started.byok.stats().dedupDrops;
+    const dedupBefore = (await started.byok.stats()).dedupDrops;
     // Replaying it must NOT drive the task back into AwaitApproval — that
     // observable difference is what proves it applied exactly once. The wire
     // still answers `{ accepted: 1 }`: a dedup'd replay is a wire-level
     // success (§8.2/§9), only the counter distinguishes it.
     expect(await sendOne(owner, awaitApproval)).toEqual({ status: 200, body: { accepted: 1 } });
-    expect(started.byok.tasks.get(handle.taskId)?.state).toBe('Running');
-    expect(started.byok.stats().dedupDrops).toBe(dedupBefore + 1);
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Running');
+    expect((await started.byok.stats()).dedupDrops).toBe(dedupBefore + 1);
 
     // A different, paired, authenticated device cannot terminate a task it
     // does not own — and this one IS separately rejected, not silently
     // absorbed.
-    const snapshotBefore = started.byok.tasks.get(handle.taskId);
+    const snapshotBefore = await started.byok.tasks.get(handle.taskId);
     const foreign = await sendOne(
       stranger,
       createEnvelope('task.complete', { summary: 'not mine', sessionRef: 'session-stranger' }, { taskId: handle.taskId }),
     );
     expect(foreign).toEqual({ status: 200, body: { accepted: 0, rejected: 1 } });
-    expect(started.byok.tasks.get(handle.taskId)).toEqual(snapshotBefore);
-    expect(started.byok.tasks.get(handle.taskId)?.state).toBe('Running');
-    expect(started.byok.tasks.get(handle.taskId)?.result).toBeUndefined();
+    expect(await started.byok.tasks.get(handle.taskId)).toEqual(snapshotBefore);
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Running');
+    expect((await started.byok.tasks.get(handle.taskId))?.result).toBeUndefined();
   });
 
   // -------------------------------------------------------------------
@@ -502,7 +552,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
       productId: PRODUCT_ID,
       capabilities: [], // no `agent-home-contract`
     });
-    expect(started.byok.machines.list()[0]?.connected).toBe(true);
+    expect((await started.byok.machines.list())[0]?.connected).toBe(true);
 
     await expect(
       started.byok.dispatch({
@@ -513,8 +563,8 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     ).rejects.toThrow(/agent-home-contract/);
 
     // Nothing was created...
-    expect(started.byok.tasks.list()).toEqual([]);
-    expect(started.byok.stats().taskCountsByState).toEqual({
+    expect((await started.byok.tasks.list()).tasks).toEqual([]);
+    expect((await started.byok.stats()).taskCountsByState).toEqual({
       Offered: 0,
       Claimed: 0,
       Running: 0,
@@ -545,7 +595,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     // dependence on how fast the two requests happen to be.
     const started = await start({ productId: PRODUCT_ID, rateLimit: { messagesPerSecond: 1, burst: 2 } });
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
-    expect(started.byok.stats().rateLimitEvents).toBe(0);
+    expect((await started.byok.stats()).rateLimitEvents).toBe(0);
 
     const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'rate limited' });
     await daemon.next(); // `GET /byok/events` is not on the inbound bucket at all.
@@ -555,23 +605,23 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
       createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }),
     );
     expect(admitted).toEqual({ status: 200, body: { accepted: 1 } });
-    expect(started.byok.stats().rateLimitEvents).toBe(0);
+    expect((await started.byok.stats()).rateLimitEvents).toBe(0);
 
     // Over budget: the documented long-poll enforcement is a whole-request
     // 429 (a WS device would instead be closed 1008 — there is no WS here).
     const firstRejected = await sendOne(daemon, createEnvelope('task.started', {}, { taskId: handle.taskId }));
     expect(firstRejected).toEqual({ status: 429, body: { error: 'rate limit exceeded' } });
-    expect(started.byok.stats().rateLimitEvents).toBe(1);
+    expect((await started.byok.stats()).rateLimitEvents).toBe(1);
 
     // The counter is PER REJECTED ENVELOPE, not per episode — the
     // once-per-episode coalescing applies to the `device.rate_limited`
     // embedder event, never to `stats().rateLimitEvents`.
     const secondRejected = await sendOne(daemon, createEnvelope('task.started', {}, { taskId: handle.taskId }));
     expect(secondRejected).toEqual({ status: 429, body: { error: 'rate limit exceeded' } });
-    expect(started.byok.stats().rateLimitEvents).toBe(2);
+    expect((await started.byok.stats()).rateLimitEvents).toBe(2);
 
     // Nothing rejected ever reached a handler.
-    expect(started.byok.tasks.get(handle.taskId)?.state).toBe('Claimed');
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Claimed');
 
     // Once the bucket refills the same device is admitted again — the limiter
     // is a window, not a latch. Bounded poll, no fixed sleep.
@@ -586,7 +636,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
       return true;
     });
 
-    expect(started.byok.tasks.get(handle.taskId)?.state).toBe('Running');
-    expect(started.byok.stats().rateLimitEvents).toBe(2 + rateLimitedWhileRecovering);
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Running');
+    expect((await started.byok.stats()).rateLimitEvents).toBe(2 + rateLimitedWhileRecovering);
   });
 });

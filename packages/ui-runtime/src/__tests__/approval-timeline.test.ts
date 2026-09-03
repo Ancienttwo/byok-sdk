@@ -64,6 +64,39 @@ describe('approval timeline projection', () => {
     });
   });
 
+  it('projects a host resolution without rewriting it as a local device decision', () => {
+    const snapshot = replayApprovalTimeline(tail([
+      observation(1, { type: 'approval_requested', approvalId: 'approval-host', summary: 'Deploy?' }),
+      observation(2, {
+        type: 'approval_resolved', approvalId: 'approval-host', decision: 'reject',
+        resolvedBy: 'host', at: '2026-08-16T12:01:00.000Z',
+      }),
+    ]));
+
+    expect(snapshot.items).toMatchObject([{
+      approvalId: 'approval-host', status: 'rejected', decision: 'reject', resolvedBy: 'host',
+    }]);
+  });
+
+  it('keeps an id-less pre-M5 host resolution explicitly unpaired', () => {
+    const snapshot = replayApprovalTimeline(tail([
+      observation(1, { type: 'approval_requested', summary: 'Legacy approval' }),
+      observation(2, {
+        type: 'approval_resolved', decision: 'approve', resolvedBy: 'host',
+        at: '2026-08-16T12:01:00.000Z',
+      }),
+    ]));
+
+    expect(snapshot.items).toMatchObject([
+      { lifecycle: 'approval-requested', status: 'pending', correlation: 'unpaired-request' },
+      {
+        lifecycle: 'approval-responded', status: 'approved', correlation: 'unpaired-resolution',
+        decision: 'approve', resolvedBy: 'host',
+      },
+    ]);
+    expect(snapshot.items.every((item) => item.approvalId === undefined)).toBe(true);
+  });
+
   it('converges for resolution-before-request and out-of-order incremental folding', () => {
     const request = observation(2, {
       type: 'approval_requested', approvalId: 'approval-1', summary: 'Continue?',

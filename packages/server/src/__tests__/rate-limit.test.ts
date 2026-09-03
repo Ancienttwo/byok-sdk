@@ -1,26 +1,20 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
-import type { WebSocket } from 'ws';
-import { DeviceRegistry } from '../auth';
-import { ConnectionHub } from '../hub';
-import { createByokServer } from '../index';
+import { createByokServer, type ByokServer, type ByokServerEvent } from '../index';
 import { RateLimiter } from '../rate-limiter';
-import { InMemoryTaskStore } from '../task-store';
 import {
-  claimAndStart,
-  connectFakeDaemon,
-  connectFakeDaemonWs,
-  pairFakeDaemon,
-  send,
+  connectFakeDaemonLongPoll,
   startServer,
   stopServer,
-  testPairingClaims,
   waitForServerEvent,
   waitForTaskEvent,
+  type FakeLongPollDaemon,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
+/** Short injected hold so a long-poll in these tests never waits out the real ~50s default. */
+const SHORT_HOLD_MS = 150;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -29,154 +23,153 @@ function sleep(ms: number): Promise<void> {
 /**
  * `RateLimiter.buckets` is a private implementation detail (TS `private` is
  * compile-time-only) — reaching into it directly is the only way to observe
- * idle-eviction sweeps from outside, mirroring `task-lease.test.ts`'s own
- * `taskActivityMap` helper for the same reason. Used only by the
- * constructor-validation and idle-eviction tests below.
+ * idle-eviction sweeps from outside. Used only by the constructor-validation
+ * and idle-eviction tests below, which drive `RateLimiter` in isolation.
  */
 function bucketsMap(limiter: RateLimiter): Map<string, { tokens: number; lastRefillMs: number }> {
   return (limiter as unknown as { buckets: Map<string, { tokens: number; lastRefillMs: number }> }).buckets;
 }
 
-/** Mirrors `integration.test.ts`'s identical helper — resolves once `socket` actually closes, with its close code/reason. */
-function waitForClose(socket: WebSocket): Promise<{ code: number; reason: string }> {
-  return new Promise((resolve) => {
-    socket.once('close', (code, reason) => resolve({ code, reason: reason.toString() }));
-  });
+/**
+ * Collect every `device.rate_limited` event published up to (and including)
+ * the point at which `barrierTaskId`'s `task.created` appears on the cross-task
+ * feed.
+ *
+ * The barrier is a real, uniquely-identifiable server event rather than a
+ * sleep: `AsyncEventQueue.subscribe()` (`event-queue.ts`) always replays from
+ * the start of the retained buffer, and every rate-limit refusal is published
+ * synchronously inside the `POST /byok/messages` request that caused it, so a
+ * `dispatch()` awaited AFTER those requests have returned publishes a
+ * `task.created` that is strictly later than all of them.
+ */
+async function rateLimitedEventsUpTo(byok: ByokServer, barrierTaskId: string): Promise<ByokServerEvent[]> {
+  const seen: ByokServerEvent[] = [];
+  for await (const event of byok.events.subscribe()) {
+    if (event.kind === 'device.rate_limited') seen.push(event);
+    if (event.kind === 'task.created' && event.taskId === barrierTaskId) return seen;
+  }
+  throw new Error('server event stream ended before the barrier task was seen');
+}
+
+/** Offered -> Claimed -> Running over the long-poll send path. */
+async function claimAndStart(daemon: FakeLongPollDaemon, taskId: string): Promise<void> {
+  await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId }));
+  await daemon.send(createEnvelope('task.started', {}, { taskId }));
 }
 
 /**
- * M4 Phase 4 (part A): `ConnectionHub`'s per-device inbound-envelope token
- * bucket (`rate-limiter.ts`), enforced at the single `handleInbound` choke
- * point both WS and long-poll traffic pass through. Every test picks a
- * small, fast-refilling `rateLimit` config so the relevant behavior is
- * deterministic well within normal CI scheduling jitter — see each test's
- * own comment for the specific margin reasoning.
+ * M4 Phase 4 (part A): the per-device inbound-envelope token bucket
+ * (`rate-limiter.ts`), composed into the cloud kernel as its
+ * `InboundRateLimiter` and debited at step 0 of the one inbound gate every
+ * `POST /byok/messages` envelope passes through. Every test picks a small,
+ * fast-refilling `rateLimit` config so the relevant behavior is deterministic
+ * well within normal CI scheduling jitter — see each test's own comment for
+ * the specific margin reasoning.
  */
 describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
   let server: HttpServer | undefined;
-  let sockets: WebSocket[] = [];
+  let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    for (const ws of sockets) ws.terminate();
-    sockets = [];
+    byok?.stop();
+    byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
   });
 
-  it('sustained-rate traffic (comfortably at/under the configured rate) is never rate-limited and never disconnects the device', async () => {
+  async function start(rateLimit: { messagesPerSecond?: number; burst?: number }): Promise<{
+    byok: ByokServer;
+    baseUrl: string;
+  }> {
+    const instance = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS, rateLimit });
+    byok = instance;
+    const started = await startServer(instance);
+    server = started.server;
+    return { byok: instance, baseUrl: started.baseUrl };
+  }
+
+  it('sustained-rate traffic (comfortably at/under the configured rate) is never rate-limited and never drops the device', async () => {
     // messagesPerSecond=1000 means ~1 token/ms; a 5ms real sleep between
     // sends regenerates ~5 tokens against only 1 consumed, so the bucket
     // only grows (capped at burst) regardless of CI scheduling jitter —
     // slower-than-expected wall-clock time only ever means MORE refill,
     // never less, so this can't flake toward a false rate-limit trip.
-    const byok = createByokServer({ productId: PRODUCT_ID, rateLimit: { messagesPerSecond: 1000, burst: 10 } });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    sockets.push(daemon.ws);
+    const started = await start({ messagesPerSecond: 1000, burst: 10 });
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const handle = await byok.dispatch({ instruction: 'sustained rate' });
-    await claimAndStart(daemon.ws, daemon.deviceId, handle);
+    const handle = await started.byok.dispatch({ instruction: 'sustained rate' });
+    await claimAndStart(daemon, handle.taskId);
 
     for (let i = 0; i < 25; i++) {
-      send(
-        daemon.ws,
+      const res = await daemon.send(
         createEnvelope('task.progress', { seq: i + 1, events: [{ type: 'progress', text: `tick-${i}` }] }, { taskId: handle.taskId }),
       );
+      expect(res.status).toBe(200);
       await sleep(5);
     }
     await waitForTaskEvent(handle, (e) => e.kind === 'agent' && e.event.type === 'progress' && e.event.text === 'tick-24');
 
-    expect(byok.stats().rateLimitEvents).toBe(0);
-    expect(byok.machines.list().find((m) => m.deviceId === daemon.deviceId)?.connected).toBe(true);
+    expect((await started.byok.stats()).rateLimitEvents).toBe(0);
+    expect((await started.byok.machines.list()).find((m) => m.deviceId === daemon.deviceId)?.connected).toBe(true);
   });
 
-  it('burst exceed disconnects the WS connection and emits a device.rate_limited event with deviceId + at — never a silent drop', async () => {
-    // burst=3, messagesPerSecond=5 (slow refill, 1 token/200ms): sending 8
-    // envelopes back-to-back in a synchronous loop takes microseconds, so
-    // essentially zero refill happens mid-burst — the first 3 always
-    // succeed and the rest are deterministically rate-limited regardless of
-    // CI speed.
-    const byok = createByokServer({ productId: PRODUCT_ID, rateLimit: { messagesPerSecond: 5, burst: 3 } });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    sockets.push(daemon.ws);
+  it('burst exceed answers 429 and emits a device.rate_limited event with deviceId + at — never a silent drop', async () => {
+    // burst=3, messagesPerSecond=5 (slow refill, 1 token/200ms): the fixture's
+    // own conn.hello spends one and the two sends below spend the rest, so
+    // everything after that is deterministically rate-limited regardless of CI
+    // speed.
+    const started = await start({ messagesPerSecond: 5, burst: 3 });
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const handle = await byok.dispatch({ instruction: 'burst' });
-    const closePromise = waitForClose(daemon.ws);
+    const handle = await started.byok.dispatch({ instruction: 'burst' });
 
+    const statuses: number[] = [];
     for (let i = 0; i < 8; i++) {
-      send(daemon.ws, createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }));
+      const res = await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }));
+      statuses.push(res.status);
     }
+    expect(statuses).toContain(429);
 
-    const rateLimitedEvent = await waitForServerEvent(byok, (e) => e.kind === 'device.rate_limited');
+    const rateLimitedEvent = await waitForServerEvent(started.byok, (e) => e.kind === 'device.rate_limited');
     expect(rateLimitedEvent).toMatchObject({ kind: 'device.rate_limited', deviceId: daemon.deviceId, at: expect.any(String) });
 
-    const closed = await closePromise;
-    expect(closed.code).toBe(1008);
-    expect(closed.reason).toBe('rate limit exceeded');
-
-    expect(byok.stats().rateLimitEvents).toBeGreaterThan(0);
+    expect((await started.byok.stats()).rateLimitEvents).toBeGreaterThan(0);
     // The one claim that got through before the limit tripped still landed.
-    expect(byok.tasks.get(handle.taskId)?.state).toBe('Claimed');
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Claimed');
   });
 
-  it('recovers after reconnect: the device is not permanently bricked — a fresh connection resumes normal traffic once tokens refill', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID, rateLimit: { messagesPerSecond: 20, burst: 3 } });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    sockets.push(daemon.ws);
+  it('recovers once tokens refill: the device is not permanently bricked and resumes normal traffic', async () => {
+    const started = await start({ messagesPerSecond: 20, burst: 3 });
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const handle = await byok.dispatch({ instruction: 'recovers after reconnect' });
-    const closePromise = waitForClose(daemon.ws);
+    const handle = await started.byok.dispatch({ instruction: 'recovers after refill' });
     for (let i = 0; i < 6; i++) {
-      send(daemon.ws, createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }));
+      await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }));
     }
-    await closePromise;
-    expect(byok.tasks.get(handle.taskId)?.state).toBe('Claimed'); // the first (in-budget) claim landed
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Claimed'); // the first (in-budget) claim landed
 
-    // The bucket persists across reconnect BY DESIGN (see rate-limiter.ts's
-    // own doc comment) — a real client's backoff+reconnect delay is what
-    // naturally gives it time to refill; mirror that with a Date-only clock
-    // jump (all network/WebSocket timers remain real).
-    const refillStartedAt = Date.now();
-    try {
-      vi.useFakeTimers({ toFake: ['Date'] });
-      // 20/sec => 50ms/token, so 200ms comfortably regenerates the full
-      // burst=3 again.
-      vi.setSystemTime(refillStartedAt + 200);
-
-      const reconnected = await connectFakeDaemonWs(started.port, {
-        deviceId: daemon.deviceId,
-        accessToken: daemon.accessToken,
-        productId: PRODUCT_ID,
-      });
-      sockets.push(reconnected.ws);
-
-      // A fresh envelope on the new connection must be accepted normally, not
-      // immediately re-rate-limited/disconnected.
-      send(reconnected.ws, createEnvelope('task.started', {}, { taskId: handle.taskId }));
-      await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
-      expect(byok.machines.list().find((m) => m.deviceId === daemon.deviceId)?.connected).toBe(true);
-    } finally {
-      vi.useRealTimers();
+    // The bucket persists across the refusal window BY DESIGN (see
+    // rate-limiter.ts's own doc comment); a real client's backoff is what
+    // naturally gives it time to refill. Bounded poll on the wire's own answer
+    // at 20/sec (50ms/token) — never a fixed sleep.
+    for (;;) {
+      const attempt = await daemon.send(createEnvelope('task.started', {}, { taskId: handle.taskId }));
+      if (attempt.status === 200) break;
+      expect(attempt.status).toBe(429);
     }
+    await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
+    expect((await started.byok.machines.list()).find((m) => m.deviceId === daemon.deviceId)?.connected).toBe(true);
   });
 
-  it('long-poll device gets an HTTP 429 (not a silent 200) once its budget is exhausted, matching the transport\'s existing {error} response shape', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID, rateLimit: { messagesPerSecond: 5, burst: 3 } });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    // No WS/long-poll connection needed at all — handleInbound's rate-limit
-    // gate runs before any taskStore lookup, so a bogus taskId is enough to
-    // exercise it purely over POST /byok/messages.
-    const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
+  it("long-poll device gets an HTTP 429 (not a silent 200) once its budget is exhausted, matching the transport's existing {error} response shape", async () => {
+    const started = await start({ messagesPerSecond: 5, burst: 3 });
+    // No conn.hello at all — the gate's rate-limit step runs before any task
+    // lookup, so a bogus taskId is enough to exercise it purely over
+    // POST /byok/messages.
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
+      productId: PRODUCT_ID,
+      announce: false,
+    });
 
     const envelopes = Array.from({ length: 6 }, () =>
       createEnvelope('task.claim', { deviceId: 'unused' }, { taskId: 'task_bogus' }),
@@ -184,88 +177,83 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
 
     const res = await fetch(`${started.baseUrl}/byok/messages`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${daemon.accessToken}` },
       body: JSON.stringify({ messages: envelopes }),
     });
 
     expect(res.status).toBe(429);
     const body = (await res.json()) as { error: string };
     expect(body).toHaveProperty('error');
-    expect(byok.stats().rateLimitEvents).toBeGreaterThan(0);
+    expect((await started.byok.stats()).rateLimitEvents).toBeGreaterThan(0);
   });
 
   it('isolates rate limits per device: device A flooding past its burst never throttles device B', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID, rateLimit: { messagesPerSecond: 5, burst: 3 } });
-    const started = await startServer(byok);
-    server = started.server;
+    const started = await start({ messagesPerSecond: 5, burst: 3 });
+    const deviceA = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
+      productId: PRODUCT_ID,
+      deviceName: 'device-a',
+    });
+    const deviceB = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
+      productId: PRODUCT_ID,
+      deviceName: 'device-b',
+    });
 
-    const codeA = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID)).code;
-    const deviceA = await connectFakeDaemon(started.baseUrl, started.port, codeA, { productId: PRODUCT_ID, deviceName: 'device-a' });
-    sockets.push(deviceA.ws);
-    const codeB = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID)).code;
-    const deviceB = await connectFakeDaemon(started.baseUrl, started.port, codeB, { productId: PRODUCT_ID, deviceName: 'device-b' });
-    sockets.push(deviceB.ws);
+    const handleA = await started.byok.dispatch({ instruction: 'flood', deviceId: deviceA.deviceId });
+    const handleB = await started.byok.dispatch({ instruction: 'untouched', deviceId: deviceB.deviceId });
 
-    const handleA = await byok.dispatch({ instruction: 'flood', deviceId: deviceA.deviceId });
-    const handleB = await byok.dispatch({ instruction: 'untouched', deviceId: deviceB.deviceId });
-
-    const closeA = waitForClose(deviceA.ws);
+    const statuses: number[] = [];
     for (let i = 0; i < 8; i++) {
-      send(deviceA.ws, createEnvelope('task.claim', { deviceId: deviceA.deviceId }, { taskId: handleA.taskId }));
+      const res = await deviceA.send(createEnvelope('task.claim', { deviceId: deviceA.deviceId }, { taskId: handleA.taskId }));
+      statuses.push(res.status);
     }
-    await closeA;
-    expect(byok.stats().rateLimitEvents).toBeGreaterThan(0);
+    expect(statuses).toContain(429);
+    expect((await started.byok.stats()).rateLimitEvents).toBeGreaterThan(0);
 
-    // Device B was never touched — full burst still available, no
-    // disconnect, and its own task proceeds completely normally.
-    await claimAndStart(deviceB.ws, deviceB.deviceId, handleB);
-    expect(byok.tasks.get(handleB.taskId)?.state).toBe('Running');
-    expect(byok.machines.list().find((m) => m.deviceId === deviceB.deviceId)?.connected).toBe(true);
+    // Device B was never touched — its own bucket is untouched, and its own
+    // task proceeds completely normally.
+    await claimAndStart(deviceB, handleB.taskId);
+    expect((await started.byok.tasks.get(handleB.taskId))?.state).toBe('Running');
+    expect((await started.byok.machines.list()).find((m) => m.deviceId === deviceB.deviceId)?.connected).toBe(true);
   });
 
   /**
-   * Gatekeeper LOW advisory: a single flood can call `handleInbound` (and
-   * therefore `handleRateLimited`) many times in a row for one device —
-   * without coalescing, an embedder subscribed to `events.subscribe()`
-   * would see one `device.rate_limited` event per hit for what is really
-   * ONE ongoing episode. Driven directly against `ConnectionHub`
-   * (mirroring `task-lease.test.ts`'s own "drive the hub directly" style)
-   * for full determinism — no WS-close-timing races, every call is
-   * synchronous.
+   * Gatekeeper LOW advisory: a flood can hit the gate's rate-limit step many
+   * times in a row for one device — without coalescing, an embedder subscribed
+   * to `events.subscribe()` would see one `device.rate_limited` event per hit
+   * for what is really ONE ongoing episode. Driven entirely over the public
+   * surface: one envelope per request, so each refusal is its own counted hit
+   * (a batch abandons the rest of its envelopes on the first refusal — see
+   * `handlers/messages.ts`).
    */
   it('coalesces to ONE device.rate_limited embedder event per over-budget episode, while stats().rateLimitEvents keeps counting every single hit', async () => {
-    const taskStore = new InMemoryTaskStore();
-    const rateLimiter = new RateLimiter({ messagesPerSecond: 5, burst: 3 });
-    const hub = new ConnectionHub(taskStore, new DeviceRegistry(), 30 * 60_000, rateLimiter);
-    try {
-      const deviceId = 'device-coalesce-1';
-      const fakeWs = { close: () => {}, send: () => {} } as unknown as WebSocket;
-      hub.registerConnection(deviceId, fakeWs, undefined);
+    const started = await start({ messagesPerSecond: 5, burst: 3 });
+    // The flooding device publishes no conn.hello, so its whole burst is spent
+    // by the loop below and the arithmetic stays exactly "10 envelopes, 3
+    // admitted, 7 refused".
+    const flooder = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
+      productId: PRODUCT_ID,
+      deviceName: 'device-coalesce-1',
+      announce: false,
+    });
+    // A second, announced device exists only to carry the ordering barrier —
+    // `dispatch()` needs a connected target, and its own bucket is separate.
+    const barrierDevice = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
+      productId: PRODUCT_ID,
+      deviceName: 'device-coalesce-barrier',
+    });
 
-      const rateLimitedEvents: unknown[] = [];
-      void (async () => {
-        for await (const event of hub.subscribeServerEvents()) {
-          if (event.kind === 'device.rate_limited') rateLimitedEvents.push(event);
-        }
-      })();
-
-      const envelope = createEnvelope('task.claim', { deviceId }, { taskId: 'bogus-task-coalesce' });
-      // 10 calls against burst=3: the first 3 succeed (rate-limiter-wise),
-      // the remaining 7 all hit the limit — 7 raw hits, but they're all
-      // the SAME continuous episode (nothing in between ever succeeds).
-      for (let i = 0; i < 10; i++) {
-        hub.handleInbound(deviceId, envelope);
-      }
-
-      await vi.waitFor(() => {
-        expect(rateLimitedEvents.length).toBeGreaterThanOrEqual(1);
-      });
-
-      expect(hub.stats().rateLimitEvents).toBe(7); // every hit counted
-      expect(rateLimitedEvents).toHaveLength(1); // coalesced to exactly one embedder event
-    } finally {
-      hub.stopLeaseReaper();
+    // 10 calls against burst=3: the first 3 succeed (rate-limiter-wise), the
+    // remaining 7 all hit the limit — 7 raw hits, but they're all the SAME
+    // continuous episode (nothing in between ever succeeds).
+    for (let i = 0; i < 10; i++) {
+      await flooder.send(createEnvelope('task.claim', { deviceId: flooder.deviceId }, { taskId: 'bogus-task-coalesce' }));
     }
+
+    const barrier = await started.byok.dispatch({ deviceId: barrierDevice.deviceId, instruction: 'coalesce barrier' });
+    const rateLimitedEvents = await rateLimitedEventsUpTo(started.byok, barrier.taskId);
+
+    expect((await started.byok.stats()).rateLimitEvents).toBe(7); // every hit counted
+    expect(rateLimitedEvents).toHaveLength(1); // coalesced to exactly one embedder event
   });
 });
 

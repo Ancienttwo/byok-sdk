@@ -31,14 +31,53 @@ import { isCoreConflictError } from '@byok-sdk/core';
 import { decodeEnvelope, type Envelope, type EventsPollResponse } from '@byok-sdk/protocol';
 import { authenticateDevice, type DeviceRouteDeps } from './shared';
 
-/** Protocol features this cloud build accepts from a long-poll daemon. */
+/**
+ * Protocol features this cloud build accepts from a long-poll daemon.
+ *
+ * This response is the ONLY advertisement a long-poll daemon ever sees — there
+ * is no WS `conn.ack` on this transport — and the daemon hard-gates outgoing
+ * messages on it (`TaskRunner.sendApprovalResolved`,
+ * `packages/client/src/daemon/task-runner.ts:3319`;
+ * `TaskRunner.resultDocumentSupported`, same file `:3849`;
+ * `AgentEgressController`,
+ * `packages/client/src/daemon/agent-egress-controller.ts:122,285`). An entry
+ * missing here is therefore not cosmetic: it silently disables an inbound wire
+ * path the kernel already implements.
+ *
+ * The list is deliberately the kernel's INBOUND acceptance set, not the union
+ * of `@byok-sdk/protocol`'s `CAPABILITY_FLAGS` (which the deleted reference
+ * server advertised wholesale, `packages/server/src/http.ts:382` on
+ * `origin/main`). Excluded on purpose, each for a reason:
+ *
+ * - server-to-daemon message types the daemon never gates on — `steer`,
+ *   `interactive-approval`, `approval-targeting`, `toolset-selection`;
+ * - device-side flags the kernel reads off `conn.hello` instead —
+ *   `strict-agent-only` (`packages/cloud/src/cloud.ts:967`),
+ *   `terminal-projection-selection` (`packages/cloud/src/cloud.ts:1356`);
+ * - deployment-conditional routes a static const cannot honestly promise —
+ *   `blob-upload`, whose handlers mount only when the declaration carries
+ *   `blobs.presigned` (`packages/cloud/src/cloud.ts:787`);
+ * - flags with no kernel implementation at all — `dispatch-selection`,
+ *   `provider-profile-binding`.
+ *
+ * Exact-list drift guard: `packages/cloud/src/__tests__/protocol-capabilities.test.ts`.
+ */
 const CLOUD_PROTOCOL_CAPABILITIES = [
   'result-document',
+  // The kernel's inbound handles `task.approval_resolved` on both the plain
+  // and the approval-timeline paths (`packages/cloud/src/inbound.ts:576,610`).
+  // Without this flag `TaskRunner.sendApprovalResolved` returns early and a
+  // locally-resolved approval is never reported on the wire at all.
+  'approval_resolved',
   'agent-home-contract',
   'agent-home-projection',
   'agent-egress-policy',
   'agent-egress-reliable-ack',
   'agent-egress-fresh-session',
+  // `handleAgentMessagePublish` accepts `agent.message_egress` gated on exactly
+  // this capability (`packages/cloud/src/inbound.ts:124`) — the same inbound
+  // family as the three egress flags above, omitted by the same drift.
+  'agent-message-egress',
   'agent-content-workspace-read',
   'agent-content-transcript-read',
   'agent-content-artifact-read',

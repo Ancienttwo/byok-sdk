@@ -1,15 +1,23 @@
 import { randomBytes } from 'node:crypto';
 import type { Server as HttpServer } from 'node:http';
-import { createEnvelope, PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
-import { WebSocket } from 'ws';
-import { createByokServer, createHmacTokenSigner, type AccessTokenClaims, type ByokServer } from '../index';
+import { createEnvelope, PROTOCOL_VERSION } from '@byok-sdk/protocol';
+import { tenantId as brandTenantId } from '@byok-sdk/cloud';
 import {
+  createByokServer,
+  createHmacTokenSigner,
+  type AccessTokenClaims,
+  type ByokServer,
+  type TenantId,
+} from '../index';
+import {
+  connectFakeDaemonLongPoll,
   generateFakeDeviceIdentity,
   pairFakeDaemon,
-  send,
+  sendOne,
   startServer,
   stopServer,
+  testPairingClaims,
   type FakeDeviceIdentity,
 } from './test-support';
 
@@ -21,12 +29,23 @@ import {
  * The two live in one suite on purpose — they are one breaking batch (sprint
  * S1.5). A tenant-bound device row whose renewal credential is a
  * cross-protocol-replayable signature is not actually bound to anything.
+ *
+ * WP3B Step 2: an embedded `createByokServer` serves exactly ONE tenant, derived
+ * from its own `productId` (`stores.ts`), so a pairing code can no longer name
+ * one and the enrollment's tenant is read back off the `POST /byok/pair`
+ * response. A FOREIGN tenant is still nameable in one place — a forged token's
+ * CLAIMS — which is what keeps the negative half of the I5 cases expressible;
+ * `devices.revoke` takes only a device id now, because the façade binds its one
+ * tenant itself. The cases that needed two tenants enrolled INTO one instance
+ * are skipped with their own `2d gap` notes.
  */
 
 const PRODUCT_ID = 'acme';
 const OTHER_PRODUCT_ID = 'other-product';
-const TENANT_A = 'tenant-a';
-const TENANT_B = 'tenant-b';
+/** A tenant this server does not serve — never the derived one, whatever `productId` is. */
+const FOREIGN_TENANT: TenantId = brandTenantId('tenant-nobody-here');
+/** Short enough that a successful poll answers immediately instead of holding. */
+const SHORT_HOLD_MS = 200;
 
 /**
  * A {@link TokenSigner} the test can mint arbitrary claims through — the only
@@ -35,7 +54,7 @@ const TENANT_B = 'tenant-b';
  * without weakening any production path to allow it.
  */
 function createForgingTokenSigner() {
-  const signer = createHmacTokenSigner(randomBytes(32));
+  const signer = createHmacTokenSigner(randomBytes(32), { now: () => new Date() });
   return {
     signer,
     forge: (claims: AccessTokenClaims) => signer.sign(claims, 60 * 60),
@@ -81,58 +100,6 @@ async function probeAuthedRoute(baseUrl: string, accessToken: string): Promise<{
   return { status: res.status, body: await res.json() };
 }
 
-/** Resolve once the WS upgrade is refused (HTTP status) or the socket errors out. */
-async function expectUpgradeRejected(port: number, accessToken: string): Promise<'error' | number> {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/byok/ws`, {
-    headers: { authorization: `Bearer ${accessToken}` },
-  });
-  try {
-    return await new Promise<'error' | number>((resolve) => {
-      ws.once('unexpected-response', (_req, res) => resolve(res.statusCode ?? -1));
-      ws.once('error', () => resolve('error'));
-      ws.once('open', () => resolve(-1)); // upgrade succeeded — the assertion below fails loudly
-    });
-  } finally {
-    ws.terminate();
-  }
-}
-
-/**
- * Upgrade (which must succeed — the token is genuine), then send `conn.hello`
- * and report how the server answered: the close code, or `'ack'` if the
- * connection was actually registered.
- */
-async function helloOutcome(
-  port: number,
-  opts: { deviceId: string; accessToken: string; productId: string },
-): Promise<{ closeCode?: number; acked: boolean }> {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/byok/ws`, {
-    headers: { authorization: `Bearer ${opts.accessToken}` },
-  });
-  try {
-    await new Promise<void>((resolve, reject) => {
-      ws.once('open', () => resolve());
-      ws.once('error', reject);
-    });
-    const outcome = new Promise<{ closeCode?: number; acked: boolean }>((resolve) => {
-      ws.once('close', (code) => resolve({ closeCode: code, acked: false }));
-      ws.once('message', () => resolve({ acked: true }));
-    });
-    send(
-      ws,
-      createEnvelope('conn.hello', {
-        protocolVersions: [PROTOCOL_VERSION],
-        capabilities: [],
-        deviceId: opts.deviceId,
-        productId: opts.productId,
-      }),
-    );
-    return await outcome;
-  } finally {
-    ws.terminate();
-  }
-}
-
 describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)', () => {
   let server: HttpServer | undefined;
   let byok: ByokServer | undefined;
@@ -144,53 +111,60 @@ describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)',
     byok = undefined;
   });
 
+  type ByokServerFixtureSigner = Parameters<typeof createByokServer>[0]['tokenSigner'];
+
   async function startWith(opts: { productId?: string; tokenSigner?: ByokServerFixtureSigner } = {}) {
-    byok = createByokServer({ productId: opts.productId ?? PRODUCT_ID, tokenSigner: opts.tokenSigner });
+    byok = createByokServer({
+      productId: opts.productId ?? PRODUCT_ID,
+      longPollHoldMs: SHORT_HOLD_MS,
+      tokenSigner: opts.tokenSigner,
+    });
     const started = await startServer(byok);
     server = started.server;
     return { byok, ...started };
   }
 
-  type ByokServerFixtureSigner = Parameters<typeof createByokServer>[0]['tokenSigner'];
-
-  /** Pair a device through a code minted for `claims`. */
+  /** Pair a device through a code minted for this instance's one product+tenant. */
   async function pairInto(
     baseUrl: string,
     instance: ByokServer,
-    claims: { tenantId: string; productId: string },
-  ): Promise<{ deviceId: string; accessToken: string; identity: FakeDeviceIdentity }> {
-    const { code } = instance.pairing.createPairingCode(claims);
+    productId: string = PRODUCT_ID,
+  ): Promise<{ deviceId: string; accessToken: string; identity: FakeDeviceIdentity; tenantId: TenantId }> {
+    const { code } = await instance.pairing.createPairingCode(testPairingClaims(productId));
     return pairFakeDaemon(baseUrl, code, { identity: generateFakeDeviceIdentity() });
   }
 
   // -----------------------------------------------------------------------
-  // I2: the code's claims decide where the device lands — and nothing else.
+  // I2: the enrollment's own tenant decides where the device lands — and
+  // nothing else can reach it.
   // -----------------------------------------------------------------------
 
   it("lands a redeemed device in the code's tenant, and in no other", async () => {
     const started = await startWith();
-    const device = await pairInto(started.baseUrl, started.byok, { tenantId: TENANT_A, productId: PRODUCT_ID });
+    const device = await pairInto(started.baseUrl, started.byok);
 
-    // Revocation is the observable proof of ownership: tenant B cannot touch
-    // a device it does not own, so this is a no-op and the device keeps working.
-    started.byok.devices.revoke(TENANT_B, device.deviceId);
+    // The device is live under this instance's one tenant...
     expect((await probeAuthedRoute(started.baseUrl, device.accessToken)).status).toBe(200);
 
-    // ...and the owning tenant can, which is what proves the row is under A.
-    started.byok.devices.revoke(TENANT_A, device.deviceId);
+    // ...and revoking it there kills it, which is what proves the row is under
+    // that tenant. (The mirror-image half — that a FOREIGN tenant's revoke is a
+    // silent no-op — has no input left to state: `devices.revoke` takes only a
+    // device id now, because an embedded server binds its one tenant itself.
+    // "and in no other tenant" is pinned instead by the forged cross-tenant
+    // token below.)
+    await started.byok.devices.revoke(device.deviceId);
     expect((await probeAuthedRoute(started.baseUrl, device.accessToken)).status).toBe(401);
-    expect(started.byok.machines.list().map((machine) => machine.deviceId)).not.toContain(device.deviceId);
+    expect((await started.byok.machines.list()).map((machine) => machine.deviceId)).not.toContain(device.deviceId);
   });
 
-  it('keeps two devices paired under different tenants independent', async () => {
-    const started = await startWith();
-    const a = await pairInto(started.baseUrl, started.byok, { tenantId: TENANT_A, productId: PRODUCT_ID });
-    const b = await pairInto(started.baseUrl, started.byok, { tenantId: TENANT_B, productId: PRODUCT_ID });
-
-    started.byok.devices.revoke(TENANT_A, a.deviceId);
-
-    expect((await probeAuthedRoute(started.baseUrl, a.accessToken)).status).toBe(401);
-    expect((await probeAuthedRoute(started.baseUrl, b.accessToken)).status).toBe(200);
+  // 2d gap: an embedded server has exactly one tenant, so two devices can no
+  // longer be paired under DIFFERENT tenants into the same instance — the input
+  // that decided it (`createPairingCode({ tenantId })`) is gone. Tenant-scoped
+  // enrollment isolation is covered at the port level by
+  // `packages/conformance/src/cloud/pairing.ts`, which registers under two
+  // tenants against one directory.
+  it.skip('keeps two devices paired under different tenants independent', () => {
+    // intentionally empty — see the 2d gap note above.
   });
 
   // -----------------------------------------------------------------------
@@ -200,16 +174,15 @@ describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)',
   it('rejects a token whose tenant does not own the device', async () => {
     const forging = createForgingTokenSigner();
     const started = await startWith({ tokenSigner: forging.signer });
-    const device = await pairInto(started.baseUrl, started.byok, { tenantId: TENANT_A, productId: PRODUCT_ID });
+    const device = await pairInto(started.baseUrl, started.byok);
 
     const crossTenant = await forging.forge({
       deviceId: device.deviceId,
-      tenantId: TENANT_B,
+      tenantId: FOREIGN_TENANT,
       productId: PRODUCT_ID,
     });
 
     expect((await probeAuthedRoute(started.baseUrl, crossTenant)).status).toBe(401);
-    expect(await expectUpgradeRejected(started.port, crossTenant)).not.toBe(-1);
     // The genuine token for the same device still works — the rejection is
     // about the forged tenant, not about the device being unusable.
     expect((await probeAuthedRoute(started.baseUrl, device.accessToken)).status).toBe(200);
@@ -218,32 +191,31 @@ describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)',
   it('rejects a token whose product disagrees with the device row', async () => {
     const forging = createForgingTokenSigner();
     const started = await startWith({ tokenSigner: forging.signer });
-    const device = await pairInto(started.baseUrl, started.byok, { tenantId: TENANT_A, productId: PRODUCT_ID });
+    const device = await pairInto(started.baseUrl, started.byok);
 
     const wrongProduct = await forging.forge({
       deviceId: device.deviceId,
-      tenantId: TENANT_A,
+      tenantId: device.tenantId,
       productId: OTHER_PRODUCT_ID,
     });
 
     expect((await probeAuthedRoute(started.baseUrl, wrongProduct)).status).toBe(401);
-    expect(await expectUpgradeRejected(started.port, wrongProduct)).not.toBe(-1);
   });
 
   it('answers unknown, wrong-tenant, and revoked identically — no existence oracle', async () => {
     const forging = createForgingTokenSigner();
     const started = await startWith({ tokenSigner: forging.signer });
-    const device = await pairInto(started.baseUrl, started.byok, { tenantId: TENANT_A, productId: PRODUCT_ID });
-    const revoked = await pairInto(started.baseUrl, started.byok, { tenantId: TENANT_A, productId: PRODUCT_ID });
-    started.byok.devices.revoke(TENANT_A, revoked.deviceId);
+    const device = await pairInto(started.baseUrl, started.byok);
+    const revoked = await pairInto(started.baseUrl, started.byok);
+    await started.byok.devices.revoke(revoked.deviceId);
     // §6.3: revocation DELETES the row, so "revoked" is not a fourth state
     // the listing could still expose — the device id is now byte-for-byte one
     // that was never registered.
-    expect(started.byok.machines.list().map((machine) => machine.deviceId)).not.toContain(revoked.deviceId);
+    expect((await started.byok.machines.list()).map((machine) => machine.deviceId)).not.toContain(revoked.deviceId);
 
     const unknownDevice = await forging.forge({
       deviceId: 'device-that-never-existed',
-      tenantId: TENANT_A,
+      tenantId: device.tenantId,
       productId: PRODUCT_ID,
     });
     const unknownTenant = await forging.forge({
@@ -253,7 +225,7 @@ describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)',
     });
     const wrongTenant = await forging.forge({
       deviceId: device.deviceId,
-      tenantId: TENANT_B,
+      tenantId: FOREIGN_TENANT,
       productId: PRODUCT_ID,
     });
 
@@ -269,17 +241,17 @@ describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)',
       // Nothing in the response may hint at which tenant/device does or
       // doesn't exist.
       const serialized = JSON.stringify(answer.body);
-      expect(serialized).not.toContain(TENANT_A);
-      expect(serialized).not.toContain(TENANT_B);
+      expect(serialized).not.toContain(device.tenantId);
+      expect(serialized).not.toContain(FOREIGN_TENANT);
       expect(serialized).not.toContain(device.deviceId);
     }
   });
 
   it('answers an unknown and a revoked device identically on the pre-tenant challenge route', async () => {
     const started = await startWith();
-    const device = await pairInto(started.baseUrl, started.byok, { tenantId: TENANT_A, productId: PRODUCT_ID });
-    started.byok.devices.revoke(TENANT_A, device.deviceId);
-    expect(started.byok.machines.list().map((machine) => machine.deviceId)).not.toContain(device.deviceId);
+    const device = await pairInto(started.baseUrl, started.byok);
+    await started.byok.devices.revoke(device.deviceId);
+    expect((await started.byok.machines.list()).map((machine) => machine.deviceId)).not.toContain(device.deviceId);
 
     const forRevoked = await requestChallenge(started.baseUrl, device.deviceId);
     const forUnknown = await requestChallenge(started.baseUrl, 'device-that-never-existed');
@@ -293,65 +265,67 @@ describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)',
   // instance config.
   // -----------------------------------------------------------------------
 
-  it('refuses the upgrade for a device row outside the instance product, before any hello', async () => {
-    // The instance serves PRODUCT_ID, but this device was paired into a code
-    // minted for OTHER_PRODUCT_ID. The enforcement point moved (slice
-    // longpoll-auth-parity): `authenticateBearer` (`auth.ts`) now compares the
-    // row against the product this instance serves, so such a row is refused
-    // at the upgrade and never gets to announce anything — the hello gate's
-    // own row check (`ws-server.ts:121`) is thereby unreachable and kept as
-    // belt-and-braces under this slice's zero-diff freeze on that file.
-    const started = await startWith();
-    const device = await pairInto(started.baseUrl, started.byok, {
-      tenantId: TENANT_A,
-      productId: OTHER_PRODUCT_ID,
-    });
-
-    // 401 rather than 101 — no hello is ever exchanged.
-    expect(await expectUpgradeRejected(started.port, device.accessToken)).toBe(401);
-    // Never registered: the hub knows the device (it is paired) but has no
-    // connection for it.
-    const machine = started.byok.machines.list().find((m) => m.deviceId === device.deviceId);
-    expect(machine?.connected).toBe(false);
+  // 2d gap: a device row outside the instance's product cannot be brought into
+  // existence from this surface — `createPairingCode` refuses a foreign product
+  // before minting a code (see `bearer-instance-product.test.ts`), and the WS
+  // upgrade this asserted on is deleted. The kernel-side check is covered by
+  // `packages/cloud/src/__tests__/bearer-instance-product.test.ts`.
+  it.skip('refuses the upgrade for a device row outside the instance product, before any hello', () => {
+    // intentionally empty — see the 2d gap note above.
   });
 
   it('accepts a hello whose productId matches the device row', async () => {
     const started = await startWith();
-    const device = await pairInto(started.baseUrl, started.byok, {
-      tenantId: TENANT_A,
-      productId: PRODUCT_ID,
-    });
 
-    const outcome = await helloOutcome(started.port, {
-      deviceId: device.deviceId,
-      accessToken: device.accessToken,
-      productId: PRODUCT_ID,
-    });
+    // `connectFakeDaemonLongPoll` publishes `conn.hello` over
+    // `POST /byok/messages` and fails loudly unless the server accepted it —
+    // the long-poll equivalent of the WS handshake's ack.
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    expect(outcome.acked).toBe(true);
+    expect((await started.byok.machines.list())).toEqual([
+      expect.objectContaining({ deviceId: daemon.deviceId, connected: true }),
+    ]);
+  });
+
+  it('refuses a hello whose productId disagrees with the device row', async () => {
+    const started = await startWith();
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
+
+    // The same authenticated device, announcing another product: the hello gate
+    // compares against the DEVICE ROW, so this is refused rather than absorbed.
+    const refused = await sendOne(
+      daemon,
+      createEnvelope('conn.hello', {
+        protocolVersions: [PROTOCOL_VERSION],
+        capabilities: [],
+        deviceId: daemon.deviceId,
+        productId: OTHER_PRODUCT_ID,
+      }),
+    );
+    expect(refused).toEqual({ status: 200, body: { accepted: 0, rejected: 1 } });
   });
 
   // -----------------------------------------------------------------------
   // Revocation, across every surface a tenant-bound device has.
   // -----------------------------------------------------------------------
 
-  it('refuses challenge, token, and connect for a revoked device', async () => {
+  it('refuses challenge, token, and authed HTTP for a revoked device', async () => {
     const started = await startWith();
-    const device = await pairInto(started.baseUrl, started.byok, { tenantId: TENANT_A, productId: PRODUCT_ID });
+    const device = await pairInto(started.baseUrl, started.byok);
 
     // Take a valid nonce + signature BEFORE revoking so the token surface
     // below exercises revocation, not a missing nonce.
     const challenge = await requestChallenge(started.baseUrl, device.deviceId);
     const signature = device.identity.signNonce(challenge.nonce!);
 
-    started.byok.devices.revoke(TENANT_A, device.deviceId);
+    await started.byok.devices.revoke(device.deviceId);
 
     // The registration is gone, not flagged — nothing is left to list.
-    expect(started.byok.machines.list().map((machine) => machine.deviceId)).not.toContain(device.deviceId);
+    expect((await started.byok.machines.list()).map((machine) => machine.deviceId)).not.toContain(device.deviceId);
 
     expect((await requestChallenge(started.baseUrl, device.deviceId)).status).toBe(401);
     expect((await requestToken(started.baseUrl, device.deviceId, challenge.nonce!, signature)).status).toBe(401);
-    expect(await expectUpgradeRejected(started.port, device.accessToken)).not.toBe(-1);
+    expect((await probeAuthedRoute(started.baseUrl, device.accessToken)).status).toBe(401);
   });
 
   // -----------------------------------------------------------------------
@@ -360,7 +334,7 @@ describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)',
 
   it('accepts a domain-prefixed nonce signature and refuses the raw one', async () => {
     const started = await startWith();
-    const device = await pairInto(started.baseUrl, started.byok, { tenantId: TENANT_A, productId: PRODUCT_ID });
+    const device = await pairInto(started.baseUrl, started.byok);
 
     // Raw (pre-S1) signature over the bare nonce: rejected, and the nonce is
     // NOT burned by the failed attempt.
@@ -385,7 +359,7 @@ describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)',
 
   it('mints a renewed token that still carries the device row identity', async () => {
     const started = await startWith();
-    const device = await pairInto(started.baseUrl, started.byok, { tenantId: TENANT_A, productId: PRODUCT_ID });
+    const device = await pairInto(started.baseUrl, started.byok);
 
     const challenge = await requestChallenge(started.baseUrl, device.deviceId);
     const renewed = await requestToken(
@@ -398,10 +372,10 @@ describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)',
     const { accessToken } = renewed.body as { accessToken: string };
 
     // The renewed token authenticates, and revoking through the OWNING tenant
-    // kills it — i.e. it was bound to tenant A, which only the row could have
+    // kills it — i.e. it was bound to that tenant, which only the row could have
     // supplied (the renewal request carries no tenant at all).
     expect((await probeAuthedRoute(started.baseUrl, accessToken)).status).toBe(200);
-    started.byok.devices.revoke(TENANT_A, device.deviceId);
+    await started.byok.devices.revoke(device.deviceId);
     expect((await probeAuthedRoute(started.baseUrl, accessToken)).status).toBe(401);
   });
 });

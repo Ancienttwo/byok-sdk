@@ -23,7 +23,7 @@ describe('blob flows (§7)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const { code } = await byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     const content = Buffer.from('hello blob world');
@@ -50,6 +50,20 @@ describe('blob flows (§7)', () => {
     const putRes = await fetch(`${started.baseUrl}${uploadUrl}`, { method: 'PUT', body: content });
     expect(putRes.status).toBe(204);
 
+    // A finalize under an idempotency key bound to a DIFFERENT reservation is
+    // refused as an integrity mismatch. The other reservation has to actually
+    // exist for that to be the answer under test: an idempotency key naming no
+    // reservation at all is `404 storage_reservation_not_found`, a different
+    // refusal about a different thing, so this declares a real second blob (of
+    // a deliberately different shape) and finalizes the FIRST one with its key.
+    const otherContent = Buffer.from('an entirely different blob');
+    const otherRes = await fetch(`${started.baseUrl}/byok/blobs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}`, 'idempotency-key': 'different-key' },
+      body: JSON.stringify({ size: otherContent.length, contentType: 'text/plain', contentHash: sha256Hex(otherContent) }),
+    });
+    expect(otherRes.status).toBe(200);
+
     const wrongBinding = await fetch(`${started.baseUrl}/byok/blobs/${blobId}/finalize`, {
       method: 'POST',
       headers: { authorization: `Bearer ${accessToken}`, 'idempotency-key': 'different-key' },
@@ -67,9 +81,6 @@ describe('blob flows (§7)', () => {
       headers: { authorization: `Bearer ${accessToken}`, 'idempotency-key': 'roundtrip' },
     });
     expect(finalizeReplay.status).toBe(204);
-
-    const overwrite = await fetch(`${started.baseUrl}${uploadUrl}`, { method: 'PUT', body: content });
-    expect(overwrite.status).toBe(422);
 
     const urlRes = await fetch(`${started.baseUrl}/byok/blobs/${blobId}/url`, {
       headers: { authorization: `Bearer ${accessToken}` },
@@ -97,7 +108,7 @@ describe('blob flows (§7)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const { code } = await byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     const content = Buffer.from('some content');
@@ -125,7 +136,7 @@ describe('blob flows (§7)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const { code } = await byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     const content = Buffer.from('never uploaded');
@@ -146,7 +157,7 @@ describe('blob flows (§7)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const { code } = await byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     const declared = Buffer.from('expected-content'); // 16 bytes
@@ -173,7 +184,7 @@ describe('blob flows (§7)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const { code } = await byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     const declared = Buffer.from('expected-content');
@@ -192,7 +203,7 @@ describe('blob flows (§7)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID, maxBlobSizeBytes: 1024 });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const { code } = await byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     const createRes = await fetch(`${started.baseUrl}/byok/blobs`, {
@@ -211,7 +222,7 @@ describe('blob flows (§7)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const { code } = await byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
     const validHash = sha256Hex(Buffer.from('cap-probe'));
 

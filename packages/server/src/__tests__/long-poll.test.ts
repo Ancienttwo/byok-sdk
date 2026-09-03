@@ -1,11 +1,9 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
-import type { WebSocket } from 'ws';
-import { createByokServer } from '../index';
+import { createByokServer, type ByokServer } from '../index';
 import {
-  connectFakeDaemon,
-  connectFakeDaemonWs,
+  connectFakeDaemonLongPoll,
   pairFakeDaemon,
   startServer,
   stopServer,
@@ -17,40 +15,47 @@ const PRODUCT_ID = 'acme';
 /** Short injected hold so the empty-timeout case doesn't take the real ~50s default. */
 const SHORT_HOLD_MS = 150;
 
-async function waitUntil(check: () => boolean, timeoutMs = 2000): Promise<void> {
+/** Poll a public read until it holds, or fail loudly. Never a completion signal for a state change the test itself caused. */
+async function waitUntil(check: () => boolean | Promise<boolean>, timeoutMs = 2000): Promise<void> {
   const start = Date.now();
-  while (!check()) {
+  while (!(await check())) {
     if (Date.now() - start > timeoutMs) throw new Error('waitUntil: condition never became true');
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
 }
 
-describe('long-poll fallback (§8)', () => {
+describe('long-poll transport (§8)', () => {
   let server: HttpServer | undefined;
+  let byok: ByokServer | undefined;
 
   afterEach(async () => {
+    byok?.stop();
+    byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
   });
 
   it('resolves immediately once an event arrives, without waiting out the hold', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
-    const started = await startServer(byok);
+    const instance = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
+    byok = instance;
+    const started = await startServer(instance);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const { code } = await instance.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { deviceId, accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     // Start the poll before there's anything to deliver, then confirm the
     // server has actually registered this device as long-polling (so
     // dispatch() below is targeting a "connected" device) before triggering
-    // the event — avoids racing the HTTP request's own arrival.
+    // the event — avoids racing the HTTP request's own arrival. No
+    // `conn.hello` is published here on purpose: polling ALONE must establish
+    // presence.
     const pollPromise = fetch(`${started.baseUrl}/byok/events?cursor=0`, {
       headers: { authorization: `Bearer ${accessToken}` },
     });
-    await waitUntil(() => byok.machines.list().some((m) => m.deviceId === deviceId && m.connected));
+    await waitUntil(async () => (await instance.machines.list()).some((m) => m.deviceId === deviceId && m.connected));
 
     const triggeredAt = Date.now();
-    const handle = await byok.dispatch({ instruction: 'x', deviceId });
+    const handle = await instance.dispatch({ instruction: 'x', deviceId });
     const pollRes = await pollPromise;
     const elapsedMs = Date.now() - triggeredAt;
 
@@ -63,10 +68,11 @@ describe('long-poll fallback (§8)', () => {
   });
 
   it('returns an empty events array once the hold elapses with nothing pending', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
-    const started = await startServer(byok);
+    const instance = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
+    byok = instance;
+    const started = await startServer(instance);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const { code } = await instance.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     const startedAt = Date.now();
@@ -82,65 +88,10 @@ describe('long-poll fallback (§8)', () => {
     expect(elapsedMs).toBeGreaterThanOrEqual(SHORT_HOLD_MS - 20); // actually held for ~the configured duration, not an immediate return
   });
 
-  it('a long-poll supersedes an existing WS connection for the same device (last one wins, §8)', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-
-    const wsClosed = new Promise<{ code: number }>((resolve) => {
-      daemon.ws.once('close', (closeCode) => resolve({ code: closeCode }));
-    });
-
-    const pollPromise = fetch(`${started.baseUrl}/byok/events?cursor=0`, {
-      headers: { authorization: `Bearer ${daemon.accessToken}` },
-    });
-
-    const { code: closeCode } = await wsClosed;
-    expect(closeCode).toBe(1000);
-
-    const pollRes = await pollPromise;
-    expect(pollRes.status).toBe(200); // still answered normally even though it superseded a live WS
-  });
-
-  it('reconnecting via WS resolves a pending long-poll immediately (last one wins, §8)', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: 10_000 }); // deliberately long — proves WS reconnect wins the race, not the hold timing out
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const { deviceId, accessToken } = await pairFakeDaemon(started.baseUrl, code);
-
-    const pollPromise = fetch(`${started.baseUrl}/byok/events?cursor=0`, {
-      headers: { authorization: `Bearer ${accessToken}` },
-    });
-    await waitUntil(() => byok.machines.list().some((m) => m.deviceId === deviceId && m.connected));
-
-    let ws: WebSocket | undefined;
-    try {
-      const startedAt = Date.now();
-      // Reconnect as the SAME already-paired device — the pairing code was
-      // single-use and was already redeemed above.
-      const { ws: reconnected } = await connectFakeDaemonWs(started.port, {
-        deviceId,
-        accessToken,
-        productId: PRODUCT_ID,
-      });
-      ws = reconnected;
-
-      const pollRes = await pollPromise;
-      const elapsedMs = Date.now() - startedAt;
-
-      expect(pollRes.status).toBe(200);
-      expect(elapsedMs).toBeLessThan(10_000); // resolved on takeover, not the (long) hold timeout
-    } finally {
-      ws?.terminate();
-    }
-  });
-
   it('rejects an unauthenticated poll', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
-    const started = await startServer(byok);
+    const instance = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
+    byok = instance;
+    const started = await startServer(instance);
     server = started.server;
 
     const res = await fetch(`${started.baseUrl}/byok/events?cursor=0`);
@@ -149,55 +100,56 @@ describe('long-poll fallback (§8)', () => {
 });
 
 /**
- * Finding F6: `POST /byok/messages` is the daemon's outbound send path while
- * long-polling — a device has no live WS to carry `task.claim`/`progress`/
- * etc in that mode. Each accepted envelope must be routed through the exact
- * same inbound gate (`hub.handleInbound`) a WS connection's messages get,
- * not some parallel/lesser path.
+ * Finding F6: `POST /byok/messages` is the daemon's outbound send path — a
+ * device has no other way to carry `task.claim`/`progress`/etc. Each accepted
+ * envelope must be routed through the cloud kernel's one inbound gate.
  */
 describe('POST /byok/messages (§8, finding F6)', () => {
   let server: HttpServer | undefined;
+  let byok: ByokServer | undefined;
 
   afterEach(async () => {
+    byok?.stop();
+    byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
   });
 
-  it('routes a batched task.claim through the same inbound path as WS, advancing real task state', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
-    const started = await startServer(byok);
+  it('routes a batched task.claim through the inbound gate, advancing real task state', async () => {
+    const instance = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
+    byok = instance;
+    const started = await startServer(instance);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const { deviceId, accessToken } = await pairFakeDaemon(started.baseUrl, code);
-
-    // A device only counts as "connected" (and thus dispatchable) once it
-    // has actually shown up over one of the two transports — simulate the
-    // long-poll equivalent of that with the same fire-and-forget-poll +
-    // waitUntil pattern the sibling GET /byok/events tests above use (not
-    // awaited directly: with nothing yet to deliver, it would otherwise
-    // hang for the full hold duration).
-    void fetch(`${started.baseUrl}/byok/events?cursor=0`, { headers: { authorization: `Bearer ${accessToken}` } });
-    await waitUntil(() => byok.machines.list().some((m) => m.deviceId === deviceId && m.connected));
-
-    const handle = await byok.dispatch({ instruction: 'x', deviceId });
-    const claim = createEnvelope('task.claim', { deviceId }, { taskId: handle.taskId });
-
-    const res = await fetch(`${started.baseUrl}/byok/messages`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify({ messages: [claim] }),
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, instance, {
+      productId: PRODUCT_ID,
+      announce: false,
     });
+
+    // A device only counts as "connected" (and thus dispatchable) once it has
+    // actually shown up — with no `conn.hello` published, a poll is the only
+    // signal, so drive one (not awaited directly: with nothing yet to deliver
+    // it would otherwise hold for the full hold duration).
+    // Swallowed deliberately: this poll is a presence signal, not a read —
+    // the fixture tears the server down underneath it at the end of the test.
+    void daemon.next().catch(() => undefined);
+    await waitUntil(async () =>
+      (await instance.machines.list()).some((m) => m.deviceId === daemon.deviceId && m.connected),
+    );
+
+    const handle = await instance.dispatch({ instruction: 'x', deviceId: daemon.deviceId });
+    const res = await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }));
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ accepted: 1 });
 
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Claimed');
-    expect(byok.tasks.get(handle.taskId)?.state).toBe('Claimed');
+    expect((await instance.tasks.get(handle.taskId))?.state).toBe('Claimed');
   });
 
   it('rejects an unauthenticated send', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
+    const instance = createByokServer({ productId: PRODUCT_ID });
+    byok = instance;
+    const started = await startServer(instance);
     server = started.server;
 
     const res = await fetch(`${started.baseUrl}/byok/messages`, {
@@ -209,10 +161,11 @@ describe('POST /byok/messages (§8, finding F6)', () => {
   });
 
   it('rejects a malformed body (messages not an array of envelopes)', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
+    const instance = createByokServer({ productId: PRODUCT_ID });
+    byok = instance;
+    const started = await startServer(instance);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const { code } = await instance.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     const res = await fetch(`${started.baseUrl}/byok/messages`, {

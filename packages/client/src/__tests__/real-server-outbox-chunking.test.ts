@@ -7,7 +7,7 @@ import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { DeviceStore } from '../daemon/store';
-import { startRealServerWithoutWebSocket, type RealServerHandle } from './fixtures/real-server';
+import { startRealServer, type RealServerHandle } from './fixtures/real-server';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -52,7 +52,7 @@ describe('drainOutbox chunks outbound sends to the server batch cap (finding P1,
     // burst would otherwise legitimately throttle; a generous explicit
     // override here keeps that unrelated feature from interfering with what
     // this test actually verifies.
-    real = await startRealServerWithoutWebSocket({
+    real = await startRealServer({
       productId: 'test-product',
       longPollHoldMs: 200,
       rateLimit: { messagesPerSecond: 1000, burst: 500 },
@@ -60,7 +60,7 @@ describe('drainOutbox chunks outbound sends to the server batch cap (finding P1,
 
     const storeDir = await tmpDir('byok-outbox-chunk-store-');
     const auth = new AuthManager({ serverUrl: real.url, store: new DeviceStore(storeDir) });
-    const pairing = real.createPairingCode();
+    const pairing = await real.createPairingCode();
     const record = await auth.pair(pairing.code);
     const cursorStore = new CursorStore(storeDir);
 
@@ -107,7 +107,7 @@ describe('drainOutbox chunks outbound sends to the server batch cap (finding P1,
 
     await connection.start();
     await connection.waitForAck();
-    expect(connection.isTransportDegraded()).toBe(true); // long-poll-only, per startRealServerWithoutWebSocket
+    expect(connection.isTransportDegraded()).toBe(true); // long-poll-only: the real server serves no WS upgrade
 
     const totalEnvelopes = MAX_MESSAGES_PER_BATCH + 44; // comfortably over the cap — forces >= 2 chunked POSTs
     const sentIds = new Set<string>();

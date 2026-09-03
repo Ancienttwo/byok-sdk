@@ -14,42 +14,49 @@ import {
  * lightweight `TestServer` stub the rest of this package's tests use) on an
  * ephemeral loopback port, for the small set of tests that specifically
  * need genuine cross-package client<->server behavior rather than a
- * hand-rolled approximation of it — e.g. finding F2 (redelivery ordering
- * depends on the real server's exact `conn.ack`-before-backlog sequencing)
- * and finding F5 (a fresh `deviceId` per `/byok/pair` call is the real
- * server's actual behavior, which the client-side `TestServer` stub
- * deliberately does not reproduce — see its own doc comment).
+ * hand-rolled approximation of it — e.g. finding F2 (redelivery depends on
+ * the real server's exact mailbox cursor semantics) and finding F5 (a fresh
+ * `deviceId` per `/byok/pair` call is the real server's actual behavior,
+ * which the client-side `TestServer` stub deliberately does not reproduce —
+ * see its own doc comment).
+ *
+ * WP3B Step 2: `@byok-sdk/server` is now a façade over `@byok-sdk/cloud` and
+ * serves `GET /byok/events` + `POST /byok/messages` and nothing else — there
+ * is no WebSocket upgrade handler anywhere in the package any more, so there
+ * is exactly ONE start mode here (this one) rather than the three the WS era
+ * needed (eager-WS / never-WS / deferred-WS). A daemon pointed at this server
+ * therefore reaches long-poll through its own ordinary `wsFailureThreshold`
+ * fallback: its WS upgrade attempt gets Node's default behavior for an
+ * unhandled `'upgrade'` event (the raw socket is destroyed), which is a
+ * genuine, real WS failure — not a simulated one — exactly as it would be
+ * against a real deployment with no reachable WS endpoint.
  */
 /**
  * The one address these fixtures both bind and dial. Passing it as `hostname`
  * matters: without it Node binds the IPv6 wildcard `::`, which coexists with a
  * foreign process already holding the more specific `127.0.0.1:<port>`, so the
  * drawn ephemeral port can be answered by that stranger instead of by byok.
- * Binding the address we dial turns a collision into a loud `EADDRINUSE`. See
- * `packages/server/src/__tests__/port-shadowing.test.ts`.
+ * Binding the address we dial turns a collision into a loud `EADDRINUSE`.
  */
 const LOOPBACK = '127.0.0.1';
-
-/**
- * S1: the tenant every device paired through these fixtures lands in. The
- * client-side tests are not about isolation — they are about real
- * client<->server behavior — so they all share one tenant; what matters here
- * is that a pairing code cannot be minted without naming one at all.
- */
-export const TEST_TENANT_ID = 'tenant-test';
 
 export interface RealServerHandle {
   byok: ByokServer;
   httpServer: HttpServer;
   url: string;
   /**
-   * Mint a pairing code carrying {@link TEST_TENANT_ID} and the SAME
-   * `productId` this server instance was started with (S1). Bound to the
-   * handle rather than left to each call site so a test can't accidentally
-   * pair a device into a product its own `conn.hello` then contradicts — the
-   * server's hello gate compares the announced product against the device row.
+   * Mint a single-use pairing code for the SAME `productId` this server
+   * instance was started with (S1). Bound to the handle rather than left to
+   * each call site so a test can't accidentally pair a device into a product
+   * its own `conn.hello` then contradicts — the kernel's hello gate compares
+   * the announced product against this instance's `instanceProductId`.
+   *
+   * The tenant is no longer named here: an embedded server derives exactly one
+   * tenant from its `productId` (`serverTenantId`, `packages/server/src/stores.ts`),
+   * so `createPairingCode` takes the product alone — and is async, like every
+   * other kernel-backed member of this surface.
    */
-  createPairingCode(): PairingCodeInfo;
+  createPairingCode(): Promise<PairingCodeInfo>;
   close(): Promise<void>;
 }
 
@@ -59,10 +66,9 @@ export interface RealServerHandle {
  * real server (by design) holds open for up to `longPollHoldMs` (~50s
  * default) waiting for events that, at test teardown time, are never
  * coming. `closeAllConnections()` (Node >=18.2) forcibly ends those so
- * teardown does not hang for the remainder of a long-poll hold — tests that
- * exercise long-poll should also pass a short `longPollHoldMs` themselves
- * (see finding F6's test) so any *mid-test* wait stays short too, but this
- * is the backstop for teardown regardless.
+ * teardown does not hang for the remainder of a long-poll hold — tests should
+ * also pass a short `longPollHoldMs` themselves so any *mid-test* wait stays
+ * short too, but this is the backstop for teardown regardless.
  */
 function closeServer(httpServer: HttpServer): Promise<void> {
   return new Promise((resolve) => {
@@ -75,83 +81,17 @@ export async function startRealServer(opts: CreateByokServerOptions): Promise<Re
   const byok = createByokServer(opts);
   return new Promise((resolve) => {
     const httpServer = serve({ fetch: byok.hono.fetch, port: 0, hostname: LOOPBACK }, (info) => {
-      byok.attachWebSocket(httpServer as HttpServer);
       resolve({
         byok,
         httpServer: httpServer as HttpServer,
         url: `http://${LOOPBACK}:${info.port}`,
-        createPairingCode: () =>
-          byok.pairing.createPairingCode({ tenantId: TEST_TENANT_ID, productId: opts.productId }),
-        close: () => closeServer(httpServer as HttpServer),
-      });
-    });
-  });
-}
-
-/**
- * Same as {@link startRealServer}, but deliberately never wires up the WS
- * upgrade — used for finding F6's "long-poll only, WS never connects" test.
- * Any WS upgrade attempt against this server gets Node's default behavior
- * for an unhandled 'upgrade' event (the raw socket is destroyed), which is a
- * genuine, real WS failure — not a simulated one — so the daemon's normal
- * `wsFailureThreshold` fallback logic drives it into long-poll mode exactly
- * as it would against a real deployment with no reachable WS endpoint.
- */
-export async function startRealServerWithoutWebSocket(opts: CreateByokServerOptions): Promise<RealServerHandle> {
-  const byok = createByokServer(opts);
-  return new Promise((resolve) => {
-    const httpServer = serve({ fetch: byok.hono.fetch, port: 0, hostname: LOOPBACK }, (info) => {
-      resolve({
-        byok,
-        httpServer: httpServer as HttpServer,
-        url: `http://${LOOPBACK}:${info.port}`,
-        createPairingCode: () =>
-          byok.pairing.createPairingCode({ tenantId: TEST_TENANT_ID, productId: opts.productId }),
-        close: () => closeServer(httpServer as HttpServer),
-      });
-    });
-  });
-}
-
-export interface DeferredWebSocketServerHandle extends RealServerHandle {
-  /**
-   * Wire up the `GET /byok/ws` upgrade now (previously deferred) — the exact
-   * same call {@link startRealServer} makes eagerly at startup, just made
-   * available on demand. Used by the Wave 2 outbox-not-stranded-on-switch
-   * test (finding N4) to simulate WS becoming available partway through a
-   * test: before this is called, any WS upgrade attempt gets Node's default
-   * behavior for an unhandled `'upgrade'` event (the raw socket is
-   * destroyed) — a genuine WS failure, same as {@link startRealServerWithoutWebSocket}
-   * — so the daemon starts out long-poll-only exactly as it would against a
-   * real deployment with no reachable WS endpoint yet, and can then
-   * genuinely recover once this is called.
-   */
-  enableWebSocket(): void;
-}
-
-/**
- * Same as {@link startRealServer}, but the WS upgrade handler isn't wired up
- * until the caller explicitly calls {@link DeferredWebSocketServerHandle.enableWebSocket} —
- * lets a test start a device long-poll-only (like
- * {@link startRealServerWithoutWebSocket}) and then flip WS availability on
- * later, against the SAME real server/task state, to exercise a genuine
- * long-poll -> WS transport recovery mid-test (finding N4's
- * outbox-not-stranded-on-switch coverage).
- */
-export async function startRealServerWithDeferredWebSocket(
-  opts: CreateByokServerOptions,
-): Promise<DeferredWebSocketServerHandle> {
-  const byok = createByokServer(opts);
-  return new Promise((resolve) => {
-    const httpServer = serve({ fetch: byok.hono.fetch, port: 0, hostname: LOOPBACK }, (info) => {
-      resolve({
-        byok,
-        httpServer: httpServer as HttpServer,
-        url: `http://${LOOPBACK}:${info.port}`,
-        createPairingCode: () =>
-          byok.pairing.createPairingCode({ tenantId: TEST_TENANT_ID, productId: opts.productId }),
-        close: () => closeServer(httpServer as HttpServer),
-        enableWebSocket: () => byok.attachWebSocket(httpServer as HttpServer),
+        createPairingCode: () => byok.pairing.createPairingCode({ productId: opts.productId }),
+        close: async () => {
+          // Releases the relay's per-task feeds and their reclamation timers
+          // before the socket goes away, so nothing outlives the test file.
+          byok.stop();
+          await closeServer(httpServer as HttpServer);
+        },
       });
     });
   });

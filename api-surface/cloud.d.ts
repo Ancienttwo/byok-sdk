@@ -302,12 +302,13 @@ export declare const ApprovalTimelineEventSchema: z.ZodDiscriminatedUnion<[z.Zod
     approvalId: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"approval_resolved">;
-    approvalId: z.ZodString;
+    approvalId: z.ZodOptional<z.ZodString>;
     decision: z.ZodEnum<{
         approve: "approve";
         reject: "reject";
     }>;
     resolvedBy: z.ZodEnum<{
+        host: "host";
         local: "local";
     }>;
     at: z.ZodISODateTime;
@@ -324,12 +325,13 @@ export declare const ApprovalObservationSchema: z.ZodObject<{
         approvalId: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"approval_resolved">;
-        approvalId: z.ZodString;
+        approvalId: z.ZodOptional<z.ZodString>;
         decision: z.ZodEnum<{
             approve: "approve";
             reject: "reject";
         }>;
         resolvedBy: z.ZodEnum<{
+            host: "host";
             local: "local";
         }>;
         at: z.ZodISODateTime;

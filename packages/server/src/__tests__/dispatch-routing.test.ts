@@ -22,11 +22,11 @@ describe('dispatch() routing (no live connection)', () => {
     const byok = createByokServer({ productId: 'acme' });
 
     await expect(byok.dispatch({ instruction: 'anything' })).rejects.toThrow();
-    expect(byok.tasks.list()).toEqual([]);
+    expect((await byok.tasks.list()).tasks).toEqual([]);
   });
 
-  it('machines.list() is empty when nothing has ever paired', () => {
+  it('machines.list() is empty when nothing has ever paired', async () => {
     const byok = createByokServer({ productId: 'acme' });
-    expect(byok.machines.list()).toEqual([]);
+    expect(await byok.machines.list()).toEqual([]);
   });
 });

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { startRealServerWithoutWebSocket, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
+import { startRealServer, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -15,7 +15,7 @@ async function tmpDir(prefix: string): Promise<string> {
  * lost/fails exactly once must be safely retried with the SAME batch (same
  * envelope `id`s — `ConnectionManager.drainOutbox` never rebuilds an
  * envelope on resend, finding F1) so the server's per-(deviceId,id) dedup
- * (Wave 1's `ConnectionHub.handleInbound`) makes the resend a no-op replay,
+ * (now the cloud kernel's inbound gate) makes the resend a no-op replay,
  * not a second application — exactly-once processing despite an
  * at-least-once send.
  *
@@ -28,9 +28,9 @@ async function tmpDir(prefix: string): Promise<string> {
  * otherwise let the task limp into an inconsistent state instead of a clean
  * `AwaitApproval -> Running -> Complete` progression.
  *
- * Run against the REAL `@byok-sdk/server`, forced long-poll-only
- * (`startRealServerWithoutWebSocket`) so every daemon->server envelope
- * genuinely travels over `POST /byok/messages`. The "lost response" is
+ * Run against the REAL `@byok-sdk/server`, which since WP3B Step 2 serves no
+ * WS upgrade at all, so every daemon->server envelope genuinely travels over
+ * `POST /byok/messages`. The "lost response" is
  * simulated by monkey-patching `globalThis.fetch` to fail exactly the first
  * POST whose body contains a `task.await_approval` envelope, then
  * delegating to the real fetch for everything else (including the retry).
@@ -47,7 +47,7 @@ describe('a lost/failed long-poll POST is retried with the identical batch, exac
   });
 
   it('the retried POST carries the same envelope ids as the failed attempt, and the task reaches Complete via a clean AwaitApproval, not Failed', async () => {
-    real = await startRealServerWithoutWebSocket({ productId: 'test-product', longPollHoldMs: 200 });
+    real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
 
     const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
@@ -62,12 +62,12 @@ describe('a lost/failed long-poll POST is retried with the identical batch, exac
       },
     );
 
-    const pairing = real.createPairingCode();
+    const pairing = await real.createPairingCode();
     const record = await daemon.pair(pairing.code);
     await daemon.start();
     expect(daemon.status().degraded).toBe(true);
-    await vi.waitFor(() => {
-      expect(real.byok.machines.list().find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
+    await vi.waitFor(async () => {
+      expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });
 
     // Intercept fetch: fail exactly the first POST to /byok/messages whose
@@ -103,7 +103,7 @@ describe('a lost/failed long-poll POST is retried with the identical batch, exac
     // — proving the retry landed and was accepted, not silently dropped or
     // force-failed via an illegal-transition/duplicate-id mismatch.
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'AwaitApproval');
-    expect(real.byok.tasks.get(handle.taskId)?.state).toBe('AwaitApproval'); // NOT Failed
+    expect((await real.byok.tasks.get(handle.taskId))?.state).toBe('AwaitApproval'); // NOT Failed
 
     // Exactly one failed attempt, and the retry resent the IDENTICAL batch
     // (same ids, same length) — never rebuilt via a fresh createEnvelope

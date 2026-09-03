@@ -17,9 +17,24 @@ export const ApprovalTimelineEventSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     type: z.literal('approval_resolved'),
-    approvalId: NonBlankIdSchema,
+    // Absent only when a host resolves the single outstanding request from a
+    // pre-M5 daemon, which never supplied native approval identity. This is
+    // explicit unpaired source data; no id is synthesized.
+    approvalId: NonBlankIdSchema.optional(),
     decision: z.enum(['approve', 'reject']),
-    resolvedBy: z.enum(['local']),
+    /**
+     * WHO resolved it. `'local'` is the daemon's own `task.approval_resolved`
+     * (the wire value, `TaskApprovalResolvedPayloadSchema`); no device can
+     * produce anything else. `'host'` is the control plane resolving it
+     * through `ByokCloud.approveTask`/`rejectTask` — an embedded composition
+     * (`@byok-sdk/server`) treats a host decision as authoritative the moment
+     * it is enqueued, and the pending-approval slot is DERIVED from this tail
+     * (`approval-control.ts`), so a host resolution left unrecorded would make
+     * the one authority keep claiming an approval is outstanding that the
+     * operator has already answered. Additive: `pendingApproval`'s fold reads
+     * both values identically and no gate branches on this field.
+     */
+    resolvedBy: z.enum(['local', 'host']),
     at: z.iso.datetime({ offset: true }),
   }),
 ]);

@@ -15,56 +15,61 @@ async function tmpDir(prefix: string): Promise<string> {
  * `@byok-sdk/server` + a REAL `@byok-sdk/client` daemon in-process (not the
  * lightweight `TestServer` stub the rest of this file's siblings use) —
  * this bug is specifically about the exact interaction between the real
- * server's `sendConnAck`-then-`redeliverAfterReconnect` sequencing (both in
- * `packages/server/src/hub.ts`) and the client's cursor bookkeeping, which a
+ * server's delivery sequencing and the client's cursor bookkeeping, which a
  * hand-rolled stub server would not reliably reproduce.
  *
- * Root cause (confirmed empirically before fixing — see the task report):
- * `conn.ack` carries a `seq` for schema uniformity (every server->daemon
- * envelope does), and the server always assigns it the NEXT per-device
- * counter value — i.e. higher than any backlog envelope about to be
- * redelivered right after it. The old client code advanced its redelivery
- * cursor from ANY envelope's `seq`, including `conn.ack`'s. So on
- * reconnect: `conn.ack` (high seq) arrives first and wrongly advances the
- * cursor, then the redelivered backlog (lower seqs, sent before the drop)
- * all look already-processed and get silently dropped.
+ * WP3B Step 2 restates the scenario on the one transport that still exists.
+ * The original drop was a WebSocket going silent and reconnecting, and the
+ * original root cause was WS-shaped: `conn.ack` carries a `seq` higher than
+ * any backlog envelope about to be redelivered right after it, and the old
+ * client advanced its cursor from ANY envelope's seq, so the reconnect ack
+ * wrongly skipped the backlog. Over long-poll the daemon has no `conn.ack`
+ * at all — the equivalent gap is the daemon simply not receiving for a while
+ * (`GET /byok/events` failing at the network layer, a genuine transport
+ * outage, not a simulated one) — but the FACT under test is the same one and
+ * is the reason the finding mattered: a server-side action taken while the
+ * daemon is not receiving must still reach it, in full, once it is receiving
+ * again, and must land on the SAME still-alive session rather than a fresh one.
+ *
+ * The send path is deliberately left untouched by the interception: only the
+ * receive half goes dark, so the task's own in-flight state is undisturbed
+ * and the only thing under test is delivery of the envelope enqueued during
+ * the gap.
  */
-describe('redelivery across a real reconnect (finding F2, real @byok-sdk/server + real @byok-sdk/client)', () => {
+describe('redelivery across a real receive outage (finding F2, real @byok-sdk/server + real @byok-sdk/client)', () => {
   let real: RealServerHandle;
   let daemon: Daemon | undefined;
+  let originalFetch: typeof globalThis.fetch;
 
   afterEach(async () => {
+    globalThis.fetch = originalFetch;
     await daemon?.stop();
     await real.close();
   });
 
-  it('a task.approve sent while the daemon is disconnected is redelivered on reconnect and the task completes', async () => {
-    real = await startRealServer({ productId: 'test-product' });
+  it('a task.approve sent while the daemon is not polling is delivered when polling resumes, and the task completes', async () => {
+    real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
 
     const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
     const adapter = new StubRuntimeAdapter();
 
-    // A short liveness timeout + prompt backoff lets the daemon's own
-    // liveness check self-detect a silent connection (rather than needing a
-    // server-side "kill this socket" test hook, which the real server does
-    // not expose) and reconnect automatically, all within the same daemon
-    // instance/process — i.e. a genuine transport drop-and-reconnect, not a
-    // process restart (which would also lose the in-flight session this
-    // test needs to still be there after reconnecting).
     daemon = createDaemonWithAdapters(
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
-        liveness: { timeoutMs: 150, checkIntervalMs: 20 },
-        backoff: { baseMs: 150, maxMs: 300, factor: 2 },
+        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
+        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
       },
     );
 
-    const pairing = real.createPairingCode();
-    await daemon.pair(pairing.code);
+    const pairing = await real.createPairingCode();
+    const record = await daemon.pair(pairing.code);
     await daemon.start();
-    expect(daemon.status().connected).toBe(true);
+    expect(daemon.status().degraded).toBe(true); // long-poll: the real server serves no WS upgrade
+    await vi.waitFor(async () => {
+      expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
+    });
 
     const handle = await real.byok.dispatch({
       instruction: 'do a thing that needs approval',
@@ -79,24 +84,41 @@ describe('redelivery across a real reconnect (finding F2, real @byok-sdk/server 
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'AwaitApproval');
     expect(session.resolveApprovalCalls).toHaveLength(0); // not yet — nothing has approved it
 
-    // Wait for the daemon's own liveness check to notice the (real, silent)
-    // connection has gone quiet and drop it — the actual "drop socket
-    // mid-task" step, driven by the daemon's real, already-public liveness
-    // mechanism rather than a server-side test hook.
-    await vi.waitFor(() => expect(daemon?.status().connected).toBe(false), { timeout: 5000 });
+    // Take the RECEIVE half of the transport down: every `GET /byok/events`
+    // fails at the network layer (the daemon's own long-poll retry loop keeps
+    // trying against it), while `POST /byok/messages` is left alone. This is
+    // the long-poll shape of "the daemon is not receiving right now" — a real
+    // failure the transport must recover from on its own, not a test hook on
+    // the server.
+    originalFetch = globalThis.fetch;
+    let receiveDown = true;
+    let blockedPolls = 0;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
+      if (receiveDown && url.includes('/byok/events')) {
+        blockedPolls += 1;
+        throw new TypeError('simulated network failure — receive path down');
+      }
+      return originalFetch(input, init);
+    }) as typeof globalThis.fetch;
 
-    // Approve WHILE disconnected: the server's own state moves immediately
-    // (protocol §4 — "server state is authoritative on its own action"),
-    // but the `task.approve` envelope has nowhere live to go right now and
-    // must sit in the server's per-device outbox for redelivery.
+    // Prove the gap is real before acting through it: at least one poll has
+    // already failed, so nothing the server enqueues from here can have been
+    // delivered on an in-flight request that predates the outage.
+    await vi.waitFor(() => expect(blockedPolls).toBeGreaterThan(0));
+
+    // Approve WHILE the daemon is not receiving: the server's own state moves
+    // immediately (protocol §4 — "server state is authoritative on its own
+    // action"), but the `task.approve` envelope has nowhere to go right now
+    // and must sit un-acked in the device's mailbox until a poll succeeds.
     await handle.approve();
+    expect(session.resolveApprovalCalls).toHaveLength(0); // still nothing — it cannot have arrived
 
-    // Reconnect happens on its own (backoff above); this is exactly the
-    // conn.ack-then-backlog sequence finding F2 is about.
-    await vi.waitFor(() => expect(daemon?.status().connected).toBe(true), { timeout: 5000 });
+    // Receiving resumes; the daemon's own retry loop picks the poll back up.
+    receiveDown = false;
 
-    // Proof the redelivered task.approve actually reached the SAME
-    // still-alive session (not a fresh one) and resumed it.
+    // Proof the queued task.approve actually reached the SAME still-alive
+    // session (not a fresh one) and resumed it.
     await vi.waitFor(() => expect(session.resolveApprovalCalls).toEqual([{ approved: true }]), { timeout: 5000 });
 
     session.emit({ type: 'progress', text: 'finishing up' });

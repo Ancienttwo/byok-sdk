@@ -213,7 +213,8 @@ createByokServer()
 4. **cancel 压过后到终态**：`cancel()` 后 device 再发 `task.complete`，`result().state === 'Cancelled'`。
 5. **approve 定向 + 陈旧拒绝**：两轮 `await_approval`，用第一轮的 `approvalId` 在第二轮 approve → `StaleApprovalError`。
 6. **steer 的 runtime 门**：claim 声明不支持 steer 的 runtime → `SteerRejectedError('steer_unsupported_runtime')`；连接期声明 steer 不改变结论。
-7. **cursor 重放**：断开、重放旧 cursor、同页原样返回；ack 单调；超回收区返 409 `cursor_too_old`（锁 GAP-3）。
+7. **cursor 语义（Step 2 重钉，见 §8）**：读不 ack——同一 cursor 连读两次返回同一页；ack 单调且不可逆——唯一的 ack 是 daemon 下一次轮询带回的 cursor，它退休该水位及以下的行，之后从更低 cursor 读只返回仍 pending 的行，既不 un-ack 也不重放已 ack 的行；floor 只由 expiry 移动——`recoverableFrom` 是保留清扫 dead-letter 的最高行 +1，所以 409 `cursor_too_old` 只能经 expiry 到达，追加再多行都不会触发（锁 GAP-3）。
+   原稿写的是 `hub.ts` 的 500 条 in-process 重放环（重放已 ack 的行、按条数溢出移动 floor）。kernel 的 mailbox 语义更强（§2 表格同一行），且 hosted 生产已经跑在它上面，所以重放环随 `hub.ts` 一起删，不重建：在 mailbox 旁边再放一个按条数有界的保留窗口，等于对同一批行设第二个保留权威。
 8. **inbound dedup + 跨设备 ownership 拒绝**：同 `message_id` 二次提交为 duplicate；非 owner 设备的 `task.complete` 被拒。
 9. **capability 准入在 mailbox append 之前**：缺 Agent capability 的设备被拒时，`tasks.list()` 无该 task、mailbox 无行（锁 `cloud.ts:814-819` 的顺序）。
 10. **rate limit episode**：超限 → 拒 + `stats().rateLimitEvents` **每个被拒 envelope +1**（episode 级合并只作用于 `device.rate_limited` 事件；Step 0 case 10 已钉实际行为，原稿「增 1」措辞有误）→ 恢复后放行（锁 GAP-5 不被 allow-all 悄悄吃掉）。
@@ -355,6 +356,8 @@ WP3A 与 WP3B 是并发排期的两把刀，下列路径两包都会写，**每�
 **R5 — SQLite 范围蔓延。** `CloudStores` 是 14 个 port 的 all-or-nothing bundle（`ports.ts:577-582`），加 core 7 个共 21 个；Postgres 版是 9,358 行。若 Step 3 被理解成「完整 SQLite 部署」，本刀翻三倍并推迟 WP4。**明确边界：只做 4 个 port，混装 in-memory，持久化范围与今天逐字相同。**
 
 **10x 首先失效的**：`TaskEventRelay` 的 per-task 无界缓冲（`event-queue.ts:45-47` 从 0 重放且不释放）——10k 并发 task 时 OOM，且今天的 `hub.ts` 同形状。§3 已给出同刀修法（有界环 + 显式截断标记 + 终态 TTL 回收）。第二个是 `tasks.list()` 的全表返回，§6 已改成游标分页。
+
+**Step 2 里唯一被重裁的 Step 0 用例**：case 7。其余九条在 fold 之后逐字通过，只有 case 7 钉的是 `hub.ts` 的重放环（重放已 ack 的行 + 按条数溢出移动 floor），而那是被删的实现件本身，不是协调语义；kernel 的 mailbox 在同一位置给出更强的契约（读不 ack / ack 不可逆 / floor 只由 expiry 移动），Step 2 把该用例改钉在这条契约上，仍然全部打在公开面。重建重放环才是行为倒退——那会在 mailbox 之外再立一个保留权威。详见 §5 第 7 条。
 
 **必需验证**：每步 `bun run build && bun run typecheck && bun run test`；Step 1 追加 `packages/conformance` 全套；Step 2 追加 `node packages/client/scripts/control-socket-check.mjs`、`adapter-task-smoke.mjs`；Step 3 追加 `BYOK_STORE=sqlite` 重启读回；全流程末尾 `repo-harness run check-task-workflow --strict` 与 `node scripts/release/check-package-graph.mjs`。Step 0 的 10 条在 Step 2/3/4 之后必须**零改动**通过——任何一条需要改写，都说明这是行为变更而非重构，须回到本包补裁。
 

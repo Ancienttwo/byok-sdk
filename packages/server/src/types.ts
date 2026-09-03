@@ -21,10 +21,8 @@ import type {
   ToolsetId,
   TerminalProjectionSelection,
 } from '@byok-sdk/protocol';
-import type { BlobStore } from './blob-store';
+import type { TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { RateLimiterOptions } from './rate-limiter';
-import type { TaskStore } from './task-store';
-import type { TokenSigner } from './auth';
 
 /** Options for {@link createByokServer}. */
 export interface CreateByokServerOptions {
@@ -35,86 +33,83 @@ export interface CreateByokServerOptions {
    * mismatched daemon is rejected at handshake time.
    */
   productId: string;
-  /** WS-native ping interval, ms (§ heartbeat). Default 30s. */
-  heartbeatIntervalMs?: number;
-  /** Deadline for one authenticated socket to present a valid `conn.hello`. Default 5s. */
-  webSocketHelloTimeoutMs?: number;
-  /** Global cap for authenticated sockets that have not completed `conn.hello`. Default 32. */
-  maxPendingWebSockets?: number;
-  /** Maximum inbound WS message bytes before envelope decoding. Default accommodates the largest protocol document envelope. */
-  maxWebSocketPayloadBytes?: number;
   /** How long `GET /byok/events` holds an empty poll open before returning, ms (§8). Default ~50s; override for tests. */
   longPollHoldMs?: number;
   /** Per-product blob size ceiling in bytes (§7). Default 100MB. */
   maxBlobSizeBytes?: number;
-  /** Override the reference {@link BlobStore} (e.g. a real object-store-backed implementation, or `sqlite-blob-store.ts`'s `SqliteBlobStore` for a persistent single-node deployment). */
-  blobStore?: BlobStore;
-  /** Override the reference {@link TaskStore} (e.g. `sqlite-task-store.ts`'s `SqliteTaskStore` for a persistent single-node deployment). Defaults to an in-memory store that loses all task state on restart. */
-  taskStore?: TaskStore;
   /** Override the reference {@link TokenSigner} (e.g. an org-wide/KMS-backed signer). */
   tokenSigner?: TokenSigner;
   /**
-   * How long a `Claimed`/`Running`/`AwaitApproval` task may sit with no
-   * inbound `task.*` activity from its owning device while that device is
-   * dark (disconnected, or long-poll-silent) before the server reaps it to
-   * `Failed(retryable: true, reason: 'lease-expired')` — no new task state,
-   * no new wire message; the embedder is expected to re-dispatch as a
-   * brand-new task, same as any other retryable failure. Deliberately
-   * generous — it exists purely as a backstop for a device that never
-   * reconnects at all (M1's redelivery, docs/protocol.md §9, already covers
-   * "came back within the window"), so it must stay far larger than any
-   * realistic task duration or it will race and fail perfectly healthy
-   * long-running tasks. A task on a *connected*, actively-progressing
-   * device is never touched regardless of this value — see
-   * `ConnectionHub`'s lease-reaper doc comment (`hub.ts`) for the full
-   * design and its accepted residual risk. Default 30 minutes.
+   * How many {@link ServerTaskEvent}s one task's `TaskHandle.events()` buffer
+   * retains before the OLDEST are dropped and a single
+   * `{ kind: 'error', reason: 'events_truncated' }` marker is appended. The
+   * feed is a notification relay, not a second record of what happened — the
+   * durable facts stay in the cloud stores (`tasks.get`, `result()`) — so a
+   * consumer that stops reading costs bounded memory rather than unbounded
+   * growth. Default 1000.
    */
-  taskLeaseMs?: number;
+  taskEventBufferLimit?: number;
   /**
-   * M4 Phase 4 (part A): per-device inbound-envelope token bucket, enforced
-   * by `ConnectionHub.handleInbound` (`hub.ts`) — the single choke point
-   * both WS (`ws-server.ts`) and long-poll (`POST /byok/messages`, `http.ts`)
-   * inbound traffic passes through. Defaults: 50 msg/s sustained, burst 100
-   * (see `rate-limiter.ts`'s own defaults). Exceeding it never drops
-   * silently: it counts in `ConnectionHub.stats()`'s `rateLimitEvents`, and
-   * emits a `device.rate_limited` {@link ByokServerEvent} — see that
-   * variant's own doc comment for the per-transport enforcement shape (WS
-   * close vs. long-poll 429). Blob upload/download routes (`http.ts`) are
-   * deliberately NOT covered by this same bucket — see that file's own
-   * comment on why a shared limiter didn't drop in cleanly there.
+   * How long after a task reaches a terminal its relay buffer and terminal
+   * promise are RETAINED before being reclaimed, ms. A late `events()` reader
+   * within this window still replays the whole feed; past it, the durable read
+   * model (`tasks.get`) is the only answer. Default 5 minutes.
    *
-   * Honest caveat (no code change changes this — it's an inherent property
-   * of an abrupt WS close, not something rate limiting adds): a
-   * flood-triggered 1008 close is not special. Envelopes the daemon's own
-   * WS transport already handed off to its socket write between the moment
-   * the device exceeded budget and the close actually landing share the
-   * ordinary at-most-once exposure of ANY abrupt WS disconnect (network
-   * blip, server restart, etc.) — the wire's at-least-once guarantee
-   * (docs/protocol.md §9) is specified for the server->daemon direction
-   * only; daemon->server has no redelivery cursor to begin with, so this
-   * was already true before rate limiting existed. A flood just makes that
-   * pre-existing window more likely to have something in flight at the
-   * exact moment of a close.
+   * Retention never decides when a feed ENDS: {@link TaskHandle.events}
+   * completes at the terminal event itself, whenever that happens, so a
+   * `for await` over it is never left waiting on this timer.
+   */
+  taskEventRetentionMs?: number;
+  /**
+   * M4 Phase 4 (part A): per-device inbound-envelope token bucket, enforced at
+   * step 0 of the cloud kernel's inbound gate (`@byok-sdk/cloud`'s
+   * `inbound.ts`) — the single choke point every daemon -> server envelope
+   * passes through, debited BEFORE the type-allow check so a flood of
+   * garbage-typed envelopes costs the same budget as a flood of well-formed
+   * ones. Defaults: 50 msg/s sustained, burst 100 (see `rate-limiter.ts`).
+   *
+   * Exceeding it never drops silently: the occurrence counts in
+   * {@link HubStats.rateLimitEvents} (per REFUSED envelope), and the first
+   * refusal of an episode emits a `device.rate_limited`
+   * {@link ByokServerEvent} — coalesced per episode, re-armed only by a later
+   * successful consume by the same device. Enforcement on the wire is a
+   * whole-request `429` from `POST /byok/messages`; `GET /byok/events` is not
+   * on this bucket, and neither are the blob upload/download routes.
    */
   rateLimit?: RateLimiterOptions;
   /**
-   * M4 Phase 4 (part B.2): opt-in `GET /healthz` liveness route on the Hono
-   * app (`http.ts`) — deliberately unauthenticated (no bearer check) and
-   * carrying no sensitive data (no device ids, no counts), just
-   * `{ok:true, uptimeMs}`; see `http.ts`'s own comment on that route for the
-   * full auth-posture rationale. Default `false` (no route mounted at all).
-   * `ConnectionHub.stats()` (richer, in-process-only detail) is never
+   * M4 Phase 4 (part B.2): opt-in `GET /healthz` liveness route layered on the
+   * Hono app in front of the kernel — deliberately unauthenticated (no bearer
+   * check) and carrying no sensitive data (no device ids, no counts), just
+   * `{ok:true, uptimeMs}`, because a container orchestrator's liveness probe
+   * must not need a device credential. Server-local rather than a kernel route
+   * because it reports deployment liveness, not coordination. Default `false`
+   * (no route mounted at all). `ByokServer.stats()` (richer detail) is never
    * exposed over HTTP by this SDK regardless of this flag — an embedder that
    * wants that surfaced remotely builds its own authenticated route around
-   * `stats()`.
+   * it.
    */
   healthzRoute?: boolean;
-  /** Product-owned, authenticated task destination consumer. */
+  /**
+   * Product-owned, authenticated task destination consumer.
+   *
+   * The cloud kernel's admission shape verbatim (`ByokCloudOptions.agentMessage`,
+   * `@byok-sdk/cloud`): async, and carrying the tenant the message was
+   * authenticated under. This façade forwards the hook to the kernel unchanged
+   * rather than wrapping a second shape around it — one contract, documented in
+   * one place. A one-shot break for embedders (WP3B §6); there is no adapter.
+   */
   agentMessage?: {
-    consume(input: { readonly deviceId: string; readonly taskId: string; readonly context: AgentMessageServerContext; readonly payload: AgentMessagePublishPayload }): {
+    consume(input: {
+      readonly tenant: TenantId;
+      readonly deviceId: string;
+      readonly taskId: string;
+      readonly context: AgentMessageServerContext;
+      readonly payload: AgentMessagePublishPayload;
+    }): Promise<{
       readonly outcome: 'accepted' | 'held' | 'refused';
       readonly reasonCode?: string;
-    };
+    }>;
   };
 }
 
@@ -206,10 +201,10 @@ export interface TaskResult {
    * no `resultDocument` extractor configured and a pre-`result-document`
    * daemon build that has no notion of the field at all.
    *
-   * Persisted WITH `summary`/`artifactRefs` rather than beside them: the
-   * whole `TaskResult` is stored as a single `result_json` document
-   * (`sqlite-task-store.ts`), so this field reaches durable storage with
-   * exact parity and introduces no second authority for it.
+   * Not stored by this package at all: the durable fact is the first terminal
+   * receipt the kernel recorded (`readTerminalReceipt`/`readTaskResult`,
+   * `@byok-sdk/cloud`), and every field here is projected off it on demand, so
+   * there is no second authority for it to drift from.
    */
   document?: unknown;
 }
@@ -245,10 +240,13 @@ export interface TaskHandle {
    * M5 (approval targeting, docs/protocol.md §5.3): `opts.approvalId`
    * targets a SPECIFIC pending approval rather than "whichever one is
    * currently pending" (the default when `opts` is omitted, unchanged from
-   * pre-M5). Thin wrapper over `ConnectionHub.approveTask` (`hub.ts`) — see
-   * that method's own doc comment for the full targeting/staleness
-   * semantics, including when this throws `StaleApprovalError` (exported
-   * from the package index for a caller to catch/inspect).
+   * pre-M5). Thin wrapper over `ByokCloud.approveTask` (`@byok-sdk/cloud`) —
+   * see that method's own doc comment for the full targeting/staleness
+   * semantics, including when this throws `StaleApprovalError` (re-exported
+   * from this package's index for a caller to catch/inspect). The host's
+   * decision is authoritative immediately: it is recorded on the task's
+   * durable approval timeline, so the task reads `Running` again without
+   * waiting for the runtime to report back.
    */
   approve(opts?: { approvalId?: string }): Promise<void>;
   /** M5: same `opts.approvalId` targeting semantics as {@link approve} above. */
@@ -271,24 +269,28 @@ export interface MachineInfo {
   configuredToolsets?: ToolsetId[];
 }
 
-/** Snapshot of a task as tracked by the in-memory {@link TaskStore}. */
+/**
+ * Projection of one task, read back from the cloud kernel's durable authority
+ * (`TaskAttempt` plus its terminal receipt and approval timeline,
+ * `@byok-sdk/cloud`) on every call — never a mirrored record this package
+ * maintains alongside it.
+ *
+ * Deliberately smaller than it used to be: `instruction`, `runtime`, `policy`
+ * and `requiredToolsets` were DISPATCH INPUT the host already holds and the
+ * kernel does not persist (ADR-028 — an attempt records ownership and
+ * disposition, not the request that produced it). A host that wants them back
+ * keeps its own map keyed by `taskId`; this snapshot never re-derives them.
+ */
 export interface TaskSnapshot {
   taskId: string;
-  state: TaskState;
-  instruction: string;
   /**
-   * The REQUESTED runtime — `DispatchInput.runtime`, forwarded verbatim into
-   * `task.offer.runtime`. Set once at `dispatch()` time and never touched
-   * again afterward, regardless of what the daemon actually ends up running.
-   * `undefined` means "no preference was expressed" (the daemon auto-selects,
-   * pi-first) — NOT "the daemon ran no runtime". Contrast with
-   * {@link claimedRuntime}, the ACTUAL runtime the daemon reports having
-   * picked; see that field's own doc comment for the full requested-vs-
-   * claimed distinction (docs/protocol.md §3.1).
+   * The wire {@link TaskState} this attempt projects to. Derived, in this
+   * order: an accepted host cancellation is `Cancelled` whatever the runtime
+   * later says; a terminal attempt is its own terminal; otherwise an
+   * unresolved approval on the task's timeline is `AwaitApproval`; otherwise
+   * the attempt's own coarse status.
    */
-  runtime?: RuntimeId;
-  policy: PermissionPolicy;
-  requiredToolsets?: ToolsetId[];
+  state: TaskState;
   deviceId?: string;
   sessionRef?: string;
   /** Exact Agent identity for an Agent-bound task; absent for legacy tasks. */
@@ -298,22 +300,24 @@ export interface TaskSnapshot {
   result?: TaskResult;
   /**
    * M5 (approval targeting, docs/protocol.md §5.3): the daemon-reported
-   * `approvalId` for the CURRENT `AwaitApproval` cycle, if this server has
-   * learned one (`ConnectionHub.onAwaitApproval`, `hub.ts`) — `undefined`
-   * whenever the task isn't currently awaiting approval, OR it is but no id
-   * was ever reported for it (a legacy daemon). Cleared centrally the
-   * instant the task LEAVES `AwaitApproval` (`ConnectionHub`'s
-   * `transitionTask`), so a later `AwaitApproval` cycle for the same task
-   * never inherits a stale id from a previous one. `approveTask`/
-   * `rejectTask` compare an operator-supplied target id against this field
-   * to decide whether a decision is stale (`StaleApprovalError`) — see
-   * `hub.ts` for the full mechanism.
+   * `approvalId` for the CURRENT `AwaitApproval` cycle, if one is pending —
+   * `undefined` whenever the task isn't currently awaiting approval, OR it is
+   * but no id was ever reported for it (a legacy daemon).
+   *
+   * DERIVED, not stored: it is `pendingApproval()`'s fold over the task's
+   * durable approval timeline (`@byok-sdk/cloud`), the same single authority
+   * the kernel's `approveTask`/`rejectTask` staleness gate reads. A resolution
+   * — reported by the daemon, or recorded by this façade when the host
+   * resolves one — clears the slot there, so a later `AwaitApproval` cycle can
+   * never inherit a stale id and this projection can never disagree with the
+   * gate.
    */
   pendingApprovalId?: string;
   /**
    * M5 (claimed runtime, docs/protocol.md §3.1): the ACTUAL adapter the
    * daemon reports having selected for this task (`task.claim.runtime`,
-   * `ConnectionHub.onClaim` — `hub.ts`) — covers both the explicit-runtime
+   * snapshotted by the kernel's inbound gate at the `offered -> claimed`
+   * ownership CAS) — covers both the explicit-runtime
    * path (echoes {@link runtime}) and the auto-select/pi-first path (a value
    * where {@link runtime} is `undefined`, since no preference was ever
    * requested). `undefined` until the first `task.claim` for this task
@@ -322,29 +326,30 @@ export interface TaskSnapshot {
    * `Offered -> Claimed` transition, and never modified again afterward — a
    * retried/idempotent claim from the same device is a no-op that never
    * reaches `onClaim`'s patch at all (see `onClaim`'s own doc comment), so
-   * this can never be silently overwritten by a redelivered claim.
+   * this can never be silently overwritten by a redelivered claim. Read
+   * straight off `TaskAttempt.claimedRuntime` (`@byok-sdk/cloud`).
    */
   claimedRuntime?: RuntimeId;
   /**
    * S0/D-4 (runtime-honest control surface): the capability block the
    * CLAIMING adapter reported for itself on its own `task.claim`
    * (`TaskClaimPayload.capabilities`, `@byok-sdk/protocol`), snapshotted at the
-   * exact moment of the `Offered -> Claimed` transition
-   * (`ConnectionHub.onClaim`, `hub.ts`).
+   * exact moment of the `Offered -> Claimed` transition and read straight off
+   * `TaskAttempt.claimedRuntimeCapabilities` (`@byok-sdk/cloud`).
    *
    * Sourced from the claim and from nothing else. The connection-level
    * `conn.hello.runtimes[].capabilities` is discovery data — it describes a
    * device rather than the adapter that claimed this task — so it is never
-   * read here or by the gate; see
-   * `SteerRejectedError` (`hub.ts`) for the full argument.
+   * read here or by the gate; see `SteerRejectedError`
+   * (`@byok-sdk/cloud`'s `steer-control.ts`) for the full argument.
    *
    * A SNAPSHOT, deliberately — not a live read of anything: the same device
    * can reconnect later with a different adapter set (a runtime upgraded,
    * removed, or newly installed mid-task), and a task that is already running
    * must keep being judged against what was true when it was claimed.
-   * `ConnectionHub.steerTask` is the consumer: it fails closed with a
-   * `SteerRejectedError` (`hub.ts`) unless this snapshot says `steer === true`,
-   * BEFORE any `task.steer` envelope exists.
+   * `ByokCloud.steerTask` is the consumer: it fails closed with a
+   * `SteerRejectedError` unless this snapshot says `steer === true`, BEFORE
+   * any `task.steer` envelope exists.
    *
    * `undefined` means "this server does not know" — never "supported" and
    * never "unsupported as a fact". It stays `undefined` when the claim carried
@@ -360,14 +365,20 @@ export interface TaskSnapshot {
 }
 
 /**
- * Cross-cutting server event feed (device connects/disconnects, task
- * creation/state changes) — the "event hub" from the plan's 服务端参考实现
- * section, as opposed to `TaskHandle.events()` which is scoped to one task.
- * Not part of the pinned wire contract; a server-embedder-facing convenience.
+ * Cross-cutting server event feed (task creation/state changes, approval
+ * resolutions, rate-limit episodes) — the "event hub" from the plan's
+ * 服务端参考实现 section, as opposed to `TaskHandle.events()` which is scoped
+ * to one task. Not part of the pinned wire contract; a server-embedder-facing
+ * convenience.
+ *
+ * `device.connected` / `device.disconnected` are deliberately GONE (WP3B §1.2
+ * option A). Both were edges of a live WebSocket registration; over the
+ * long-poll transport the only honest connection signals are a device's own
+ * `conn.hello` and its polling, and synthesising edges out of a TTL would
+ * publish transitions no device ever made. `machines.list()` reports the
+ * observation itself instead.
  */
 export type ByokServerEvent =
-  | { kind: 'device.connected'; deviceId: string; at: string }
-  | { kind: 'device.disconnected'; deviceId: string; at: string }
   | { kind: 'task.created'; taskId: string; at: string }
   | {
       kind: 'task.state';
@@ -390,10 +401,10 @@ export type ByokServerEvent =
    * pending approval entirely locally (M4 Phase 3's local `approvals.resolve`
    * control-socket path) — no wire `task.approve`/`task.reject` ever reached
    * the server for it. This fires when daemon-originated task traffic
-   * (`task.progress`/`task.artifact`/`task.complete`) for a task the server's
-   * own record still has as `AwaitApproval` proves, after the fact, that the
-   * approval was resolved on the device — see `ConnectionHub`'s
-   * `resumeIfImplicitlyApproved` (hub.ts) for the state-machine side of this.
+   * (`task.progress`/`task.artifact`) for a task whose approval timeline still
+   * shows an unresolved request proves, after the fact, that the approval was
+   * resolved on the device. The façade records that resolution on the same
+   * timeline, so the read model resumes from the one authority.
    * Deliberately NOT a wire message (no `packages/protocol` change) — a
    * first-class `task.approval_resolved` wire notification is a deferred
    * v1.1 candidate; this is purely an embedder-facing observability signal
@@ -405,8 +416,8 @@ export type ByokServerEvent =
    * M4 (additive-minor): the EXPLICIT counterpart to
    * `task.approval_resolved_implicit` above — fires when the daemon reports
    * a locally-resolved approval via the wire `task.approval_resolved`
-   * message (`ConnectionHub.onApprovalResolved`, `hub.ts`) rather than the
-   * server having to infer it from later task traffic. Carries the same
+   * message rather than the server having to infer it from later task
+   * traffic. Carries the same
    * `approvalId`/`decision`/`resolvedBy` the daemon reported, so an embedder
    * can render/audit exactly what was resolved and by which path, not just
    * that a resolution happened. `resolvedBy` is currently always `'local'`
@@ -414,10 +425,8 @@ export type ByokServerEvent =
    * enum today, future-proofed for an additional value later without a
    * version bump). Mutually exclusive with `task.approval_resolved_implicit`
    * for the same resolution: whichever mechanism the server processes first
-   * performs the actual `AwaitApproval -> Running` transition, and the other
-   * is already a no-op by the time it would otherwise run — see
-   * `onApprovalResolved`'s own doc comment (`hub.ts`) for the full
-   * relationship.
+   * clears the pending slot on the approval timeline, and the other finds
+   * nothing left to clear by the time it would otherwise run.
    */
   | ({
       kind: 'task.approval_resolved';
@@ -428,47 +437,51 @@ export type ByokServerEvent =
        * REPORTING device advertised the `approval-targeting` capability flag
        * (`version.ts`) in its `conn.hello` — an observability-only signal
        * (see that flag's own doc comment: it never gates matching, which is
-       * always decided by field presence on the specific message). `false`
-       * for a legacy daemon, or one whose connection capabilities this hub
-       * never recorded (see `ConnectionHub.getDeviceCapabilities`).
+       * always decided by field presence on the specific message). Always
+       * `false` now: that flag was a property of the device's LIVE WebSocket
+       * registration, which no longer exists, and the durable capability list
+       * is a device-BUILD fact rather than a per-report one.
        */
       targeted: boolean;
     } & Pick<TaskApprovalResolvedPayload, 'approvalId' | 'decision' | 'resolvedBy'>)
   /**
    * M4 Phase 4 (part A): `deviceId` exceeded its inbound-envelope rate limit
-   * (`CreateByokServerOptions.rateLimit`, enforced in
-   * `ConnectionHub.handleInbound`, `hub.ts`) — fired for every envelope that
-   * arrives once the bucket is empty, not just the first. Never a silent
-   * drop: this event fires AND the occurrence is counted in
-   * `ConnectionHub.stats()`'s `rateLimitEvents`. Per-transport enforcement
-   * differs (both still emit this same event): a WS connection is closed
-   * (policy-violation close code) right after, so the client's existing
-   * backoff+reconnect (protocol §9's redelivery covers the rest); a
-   * long-poll device has no live connection to close, so `POST
-   * /byok/messages` (`http.ts`) instead answers that request with HTTP 429.
+   * (`CreateByokServerOptions.rateLimit`, enforced at step 0 of the cloud
+   * kernel's inbound gate) — fired ONCE PER EPISODE, not once per refused
+   * envelope: the first refusal emits it, and only a later successful consume
+   * by the same device re-arms it, so a flood is one event and a device that
+   * recovers and floods again is a second, distinct one. Never a silent drop
+   * either way: every refused envelope counts in
+   * {@link HubStats.rateLimitEvents}, and the request that carried it is
+   * answered `429` by `POST /byok/messages`.
    */
   | { kind: 'device.rate_limited'; deviceId: string; at: string };
 
 /**
- * Plain, serializable in-process snapshot returned by
- * `ConnectionHub.stats()` (`hub.ts`) — M4 Phase 4 (part B.1). Deliberately
+ * Plain, serializable snapshot returned by `ByokServer.stats()` — M4 Phase 4
+ * (part B.1).
+ *
+ * `envelopesOut` went with the in-process outbox that produced it: server ->
+ * daemon envelopes are durable mailbox rows owned by the cloud kernel now, and
+ * a counter here would be a second, weaker authority over a fact the mailbox
+ * already holds exactly.
+ *
+ * Deliberately
  * NOT exposed over HTTP by this SDK (see `CreateByokServerOptions.healthzRoute`'s
  * doc comment): an embedder that wants any of this surfaced remotely builds
  * its own authenticated route around `ByokServer.stats()`.
  */
 export interface HubStats {
-  /** Devices with a currently-live WS or long-poll connection. */
+  /** Devices this server has observed alive and not since forgotten — see {@link MachineInfo.connected}. */
   connectedDeviceCount: number;
   /** Every {@link TaskState} mapped to how many known tasks currently sit in it. */
   taskCountsByState: Record<TaskState, number>;
-  /** Total inbound daemon->server envelopes {@link ConnectionHub.handleInbound} has ever been called with (every outcome, including rejected/rate-limited). */
+  /** Total inbound daemon->server envelopes the cloud kernel's inbound gate has been handed (every outcome, including rejected/rate-limited), counted at the gate's own step 0. */
   envelopesIn: number;
-  /** Total server->daemon envelopes ever constructed via {@link ConnectionHub}'s single outbound choke point (`sendToDevice`), regardless of whether a live transport was available to flush them immediately. */
-  envelopesOut: number;
   /** Inbound envelopes recognized as an already-seen `(deviceId, id)` pair (N3) — a no-op wire-level success, counted here for observability. */
   dedupDrops: number;
   /** Inbound envelopes rejected for exceeding a device's rate limit — see `device.rate_limited` on {@link ByokServerEvent}. */
   rateLimitEvents: number;
-  /** Milliseconds since this `ConnectionHub` was constructed. */
+  /** Milliseconds since `createByokServer` returned this instance. */
   uptimeMs: number;
 }

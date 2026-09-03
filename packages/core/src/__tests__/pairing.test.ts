@@ -31,11 +31,10 @@ const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString('hex');
 /** `packages/core/src/__tests__/` → `packages/`. */
 const PACKAGES_URL = new URL('../../../', import.meta.url);
 
-/** The three files that each held their own copy of the literal before this authority existed. */
+/** The surviving files that each held their own copy of the literal before this authority existed. */
 const FORMER_DEFINITION_SITES = [
   'client/src/daemon/device-keys.ts',
   'cloud/src/auth/verify.ts',
-  'server/src/auth.ts',
 ] as const;
 
 describe('nonce signing domain', () => {

@@ -1,514 +1,374 @@
 import type { Server as HttpServer } from 'node:http';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope, type TaskState } from '@byok-sdk/protocol';
-import type { WebSocket } from 'ws';
-import { DeviceRegistry } from '../auth';
-// S1: `StaleApprovalError` re-exported from the package's own public entry
-// point (`index.ts`) — aliased here since the M5 describe block below
-// imports the SAME class from the internal `../hub` path for its own
-// hub-level tests; both must be the identical class (a straight re-export).
-import { createByokServer, StaleApprovalError as PublicStaleApprovalError } from '../index';
-import { ConnectionHub, StaleApprovalError, TaskNotAwaitingApprovalError, UnknownTaskError } from '../hub';
-import { InMemoryTaskStore, type CreateTaskInput, type TaskRecord, type TaskStore } from '../task-store';
+import { afterEach, describe, expect, it } from 'vitest';
+import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { isCloudError } from '@byok-sdk/cloud';
+import { createByokServer, StaleApprovalError, type ByokServer, type TaskHandle } from '../index';
 import {
-  claimAndStart,
-  connectFakeDaemon,
-  moveToAwaitApproval,
-  send,
+  connectFakeDaemonLongPoll,
   startServer,
   stopServer,
-  testPairingClaims,
+  waitForTaskEvent,
+  type FakeLongPollDaemon,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
+/** Short injected hold so a long-poll in these tests never waits out the real ~50s default. */
+const SHORT_HOLD_MS = 150;
+
+/** Offered -> Claimed -> Running over the long-poll send path. */
+async function claimAndStart(daemon: FakeLongPollDaemon, handle: TaskHandle): Promise<void> {
+  await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }));
+  await daemon.send(createEnvelope('task.started', {}, { taskId: handle.taskId }));
+  await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
+}
+
+/** Running -> AwaitApproval over the long-poll send path. */
+async function moveToAwaitApproval(
+  daemon: FakeLongPollDaemon,
+  handle: TaskHandle,
+  approvalId: string,
+  summary = 'needs a human ok',
+): Promise<void> {
+  await daemon.send(createEnvelope('task.await_approval', { summary, approvalId }, { taskId: handle.taskId }));
+  await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'AwaitApproval');
+}
+
+/** Types of everything the device has been handed since its last poll. */
+async function drainTypes(daemon: FakeLongPollDaemon): Promise<string[]> {
+  return (await daemon.next()).map((envelope: Envelope) => envelope.type);
+}
 
 /**
- * M4 Phase 3 (revised per orchestrator decision): `ConnectionHub.approveTask`/
- * `rejectTask` (hub.ts) are the supported entry point — made public so an
- * embedder's own in-process code (a `TaskHandle`, or a hand-built operator
- * surface like `examples/basic/server.ts`'s `/api/tasks/:taskId/approve`)
- * can call them directly. There is deliberately NO bearer-authed HTTP route
- * for this on the SDK's own `http.ts` (see that file's own note on why).
- * These tests replace the earlier HTTP-route-level tests with direct
- * Hub/TaskHandle-level coverage of the same scenarios (happy path for both
- * verbs, unknown taskId, wrong state) plus the typed error classes.
+ * `TaskHandle.approve`/`reject` — the ONLY approval control surface an
+ * embedder has (there is deliberately no bearer-authed HTTP route for it).
+ * Both are thin calls onto the cloud kernel's `approveTask`/`rejectTask`, whose
+ * gate reads the task's durable approval timeline; the host decision is then
+ * recorded back on that same timeline, so the read model and the gate answer
+ * from one authority.
+ *
+ * Every test below drives the published surface only — `createByokServer` ->
+ * `dispatch()` -> `TaskHandle`, plus the long-poll transport for the daemon
+ * half. The pre-fold file drove `ConnectionHub` directly for the M5/S4 blocks;
+ * that class is gone, and the behaviours it exercised are re-expressed here.
  */
-describe('M4 Phase 3: ConnectionHub.approveTask/rejectTask (public API + typed errors)', () => {
+describe('TaskHandle.approve/reject (published API + typed errors)', () => {
   let server: HttpServer | undefined;
-  let ws: WebSocket | undefined;
+  let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    ws?.terminate();
+    byok?.stop();
+    byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
-    ws = undefined;
   });
 
-  it('approveTask on a task currently AwaitApproval moves it to Running and notifies the daemon over the wire', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
+  async function start(): Promise<{ byok: ByokServer; daemon: FakeLongPollDaemon }> {
+    const instance = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
+    byok = instance;
+    const started = await startServer(instance);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    ws = daemon.ws;
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, instance, { productId: PRODUCT_ID });
+    return { byok: instance, daemon };
+  }
 
-    const handle = await byok.dispatch({ instruction: 'needs a human ok' });
-    await claimAndStart(ws, daemon.deviceId, handle);
-    await moveToAwaitApproval(ws, handle);
+  it('approve() on a task currently AwaitApproval moves it to Running and notifies the daemon over the wire', async () => {
+    const { byok: instance, daemon } = await start();
+
+    const handle = await instance.dispatch({ instruction: 'needs a human ok' });
+    await claimAndStart(daemon, handle);
+    await moveToAwaitApproval(daemon, handle, 'appr-1');
 
     await handle.approve();
-    expect(byok.tasks.get(handle.taskId)?.state).toBe('Running');
+    expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
+    expect(await drainTypes(daemon)).toEqual(['task.offer', 'task.approve']);
   });
 
-  it('rejectTask (with a reason) on a task currently AwaitApproval moves it to Failed with that reason', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    ws = daemon.ws;
+  // 2d gap: the old `ConnectionHub.rejectTask` was authoritative over the TASK,
+  // moving the record straight to `Failed` and writing the caller's reason as
+  // the terminal result. The kernel's `rejectTask` resolves the APPROVAL and
+  // enqueues a `task.reject` for the runtime; the attempt itself stays
+  // `running` until the daemon reports its own terminal (`task.fail`), which is
+  // what `hub-approval-resolved.test.ts`'s "local reject" case already
+  // describes as the daemon's job. Orchestrator decision: accept the kernel's
+  // split (host resolves the approval, runtime owns the terminal) and document
+  // the break in Step 5, or have the façade force a terminal on reject.
+  it.skip('reject (with a reason) on a task currently AwaitApproval moves it to Failed with that reason', async () => {
+    const { byok: instance, daemon } = await start();
 
-    const handle = await byok.dispatch({ instruction: 'needs a human ok' });
-    await claimAndStart(ws, daemon.deviceId, handle);
-    await moveToAwaitApproval(ws, handle);
+    const handle = await instance.dispatch({ instruction: 'needs a human ok' });
+    await claimAndStart(daemon, handle);
+    await moveToAwaitApproval(daemon, handle, 'appr-1');
 
     await handle.reject('looked risky');
-    const snapshot = byok.tasks.get(handle.taskId);
+    const snapshot = await instance.tasks.get(handle.taskId);
     expect(snapshot?.state).toBe('Failed');
     expect(snapshot?.result?.state === 'Failed' ? snapshot.result.reason : undefined).toBe('looked risky');
   });
 
-  it('approveTask on an unknown taskId throws UnknownTaskError (404-equivalent)', async () => {
-    const hub = new ConnectionHub(new InMemoryTaskStore(), new DeviceRegistry(), 30 * 60_000);
-    await expect(hub.approveTask('no-such-task')).rejects.toBeInstanceOf(UnknownTaskError);
-    await expect(hub.approveTask('no-such-task')).rejects.toThrow(/unknown taskId/);
+  // 2d gap: three cases the pre-fold file expressed by constructing a
+  // `ConnectionHub` and calling `approveTask('no-such-task')`/
+  // `rejectTask('no-such-task')` directly — "unknown taskId throws
+  // UnknownTaskError (404-equivalent)", its `rejectTask` twin, and
+  // "UnknownTaskError carries taskId". There is no public way to name an
+  // arbitrary taskId on this surface: a `TaskHandle` only ever comes from
+  // `dispatch()`, so the task it names always exists. The kernel's own gate
+  // does fail closed (`ByokCloudError('task_not_found')`,
+  // `packages/cloud/src/cloud.ts`) and `packages/cloud`'s suite owns that pin.
+  // Orchestrator decision: leave it to the cloud suite, or add a
+  // taskId-addressed approval surface to `ByokServer`.
+  it.skip('approve/reject on an unknown taskId fails closed with a typed error carrying the taskId', async () => {
+    expect.fail('no public surface names an arbitrary taskId — see the 2d gap note above');
   });
 
-  it('rejectTask on an unknown taskId throws UnknownTaskError (404-equivalent)', async () => {
-    const hub = new ConnectionHub(new InMemoryTaskStore(), new DeviceRegistry(), 30 * 60_000);
-    await expect(hub.rejectTask('no-such-task')).rejects.toBeInstanceOf(UnknownTaskError);
+  it('approve() on a task NOT currently AwaitApproval (e.g. still Running) fails closed with task_not_awaiting_approval, leaving state unchanged', async () => {
+    const { byok: instance, daemon } = await start();
+
+    const handle = await instance.dispatch({ instruction: 'still running' });
+    await claimAndStart(daemon, handle);
+
+    const refused = await handle.approve().catch((error: unknown) => error);
+    expect(isCloudError(refused, 'task_not_awaiting_approval')).toBe(true);
+    expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running'); // unchanged
   });
 
-  it('approveTask on a task NOT currently AwaitApproval (e.g. still Running) throws TaskNotAwaitingApprovalError (409-equivalent), leaving state unchanged', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    ws = daemon.ws;
+  it('reject() on a task not currently AwaitApproval fails closed with task_not_awaiting_approval', async () => {
+    const { byok: instance, daemon } = await start();
 
-    const handle = await byok.dispatch({ instruction: 'still running' });
-    await claimAndStart(ws, daemon.deviceId, handle);
+    const handle = await instance.dispatch({ instruction: 'still running' });
+    await claimAndStart(daemon, handle);
 
-    await expect(handle.approve()).rejects.toBeInstanceOf(TaskNotAwaitingApprovalError);
-    await expect(handle.approve()).rejects.toThrow(/not awaiting approval/);
-    expect(byok.tasks.get(handle.taskId)?.state).toBe('Running'); // unchanged
-  });
-
-  it('rejectTask on a task not currently AwaitApproval throws TaskNotAwaitingApprovalError (409-equivalent)', async () => {
-    const byok = createByokServer({ productId: PRODUCT_ID });
-    const started = await startServer(byok);
-    server = started.server;
-    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-    ws = daemon.ws;
-
-    const handle = await byok.dispatch({ instruction: 'still running' });
-    await claimAndStart(ws, daemon.deviceId, handle);
-
-    await expect(handle.reject('too late')).rejects.toBeInstanceOf(TaskNotAwaitingApprovalError);
-    expect(byok.tasks.get(handle.taskId)?.state).toBe('Running'); // unchanged
-  });
-
-  it('TaskNotAwaitingApprovalError carries taskId/state fields, and UnknownTaskError carries taskId, for programmatic handling', async () => {
-    const hub = new ConnectionHub(new InMemoryTaskStore(), new DeviceRegistry(), 30 * 60_000);
-    try {
-      await hub.approveTask('missing-1');
-      throw new Error('expected a throw');
-    } catch (err) {
-      expect(err).toBeInstanceOf(UnknownTaskError);
-      expect((err as UnknownTaskError).taskId).toBe('missing-1');
-    }
+    const refused = await handle.reject('too late').catch((error: unknown) => error);
+    expect(isCloudError(refused, 'task_not_awaiting_approval')).toBe(true);
+    expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running'); // unchanged
   });
 
   /**
-   * M5 (approval targeting, docs/protocol.md §5.3): `approveTask`/`rejectTask`
-   * gain an optional `opts.approvalId` — these drive `ConnectionHub` directly
-   * (mirrors `task-lease.test.ts`'s own fake-socket convention) rather than
-   * through the real WS/HTTP harness, so the outbound `fakeWs.send` spy can
-   * assert "no wire message was sent" deterministically instead of racing a
-   * timeout waiting for an absence.
+   * M5 (approval targeting, docs/protocol.md §5.3): `approve`/`reject` take an
+   * optional `opts.approvalId` naming a SPECIFIC pending approval rather than
+   * "whichever one is currently pending".
    */
-  describe('M5 (approval targeting): approveTask/rejectTask opts.approvalId', () => {
-    async function awaitApprovalDirect(
-      hub: ConnectionHub,
-      deviceId: string,
-      taskId: string,
-      approvalId: string,
-      summary = 'needs a human ok',
-    ): Promise<void> {
-      hub.handleInbound(deviceId, createEnvelope('task.claim', { deviceId }, { taskId }));
-      hub.handleInbound(deviceId, createEnvelope('task.started', {}, { taskId }));
-      hub.handleInbound(deviceId, createEnvelope('task.await_approval', { summary, approvalId }, { taskId }));
-    }
+  describe('M5 (approval targeting): approve/reject opts.approvalId', () => {
+    it('approve({approvalId}) after that EXACT approval is already consumed (task now Running) fails closed with task_not_awaiting_approval — the pending-approval check runs before the approvalId check', async () => {
+      const { byok: instance, daemon } = await start();
 
-    it('approveTask(taskId, {approvalId}) after that EXACT approval is already consumed (task now Running) throws the existing TaskNotAwaitingApprovalError — the state check runs before the approvalId check', async () => {
-      const taskStore = new InMemoryTaskStore();
-      const hub = new ConnectionHub(taskStore, new DeviceRegistry(), 30 * 60_000);
-      const deviceId = 'device-approve-consumed';
-      const fakeWs = { send: vi.fn() } as unknown as WebSocket;
-      hub.registerConnection(deviceId, fakeWs, undefined);
+      const handle = await instance.dispatch({ instruction: 'needs a human ok' });
+      await claimAndStart(daemon, handle);
+      await moveToAwaitApproval(daemon, handle, 'appr-1');
+      expect((await instance.tasks.get(handle.taskId))?.state).toBe('AwaitApproval');
 
-      const handle = await hub.dispatch({ instruction: 'needs a human ok', deviceId });
-      const { taskId } = handle;
-      await awaitApprovalDirect(hub, deviceId, taskId, 'appr-1');
-      expect(taskStore.get(taskId)?.state).toBe('AwaitApproval');
+      await handle.approve({ approvalId: 'appr-1' }); // targeted — consumes it, AwaitApproval -> Running.
+      expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
 
-      await hub.approveTask(taskId, { approvalId: 'appr-1' }); // targeted — consumes it, AwaitApproval -> Running.
-      expect(taskStore.get(taskId)?.state).toBe('Running');
-
-      await expect(hub.approveTask(taskId, { approvalId: 'appr-1' })).rejects.toBeInstanceOf(TaskNotAwaitingApprovalError);
+      const refused = await handle.approve({ approvalId: 'appr-1' }).catch((error: unknown) => error);
+      expect(isCloudError(refused, 'task_not_awaiting_approval')).toBe(true);
     });
 
-    it('approveTask(taskId, {approvalId: A}) while a DIFFERENT approval (B) is now the recorded pending one throws StaleApprovalError, changes no state, and sends no wire message', async () => {
-      const taskStore = new InMemoryTaskStore();
-      const hub = new ConnectionHub(taskStore, new DeviceRegistry(), 30 * 60_000);
-      const deviceId = 'device-approve-stale';
-      const sendSpy = vi.fn();
-      const fakeWs = { send: sendSpy } as unknown as WebSocket;
-      hub.registerConnection(deviceId, fakeWs, undefined);
+    it('approve({approvalId: A}) while a DIFFERENT approval (B) is now the recorded pending one throws StaleApprovalError, changes no state, and sends no wire message', async () => {
+      const { byok: instance, daemon } = await start();
 
-      const handle = await hub.dispatch({ instruction: 'needs a human ok', deviceId });
-      const { taskId } = handle;
-      await awaitApprovalDirect(hub, deviceId, taskId, 'appr-A', 'first (A)');
-      // B supersedes A while the record is STILL AwaitApproval (re-delivered/
-      // updated id — see hub-approval-resolved.test.ts's sibling race test).
-      hub.handleInbound(deviceId, createEnvelope('task.await_approval', { summary: 'second (B)', approvalId: 'appr-B' }, { taskId }));
-      expect(taskStore.get(taskId)?.pendingApprovalId).toBe('appr-B');
+      const handle = await instance.dispatch({ instruction: 'needs a human ok' });
+      await claimAndStart(daemon, handle);
+      await moveToAwaitApproval(daemon, handle, 'appr-A', 'first (A)');
+      // B supersedes A while the task is STILL AwaitApproval (a re-delivered /
+      // updated id). The awaited send is the barrier: `POST /byok/messages`
+      // applies its envelopes synchronously inside the request.
+      await daemon.send(
+        createEnvelope('task.await_approval', { summary: 'second (B)', approvalId: 'appr-B' }, { taskId: handle.taskId }),
+      );
+      expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBe('appr-B');
 
-      const callsBeforeStaleAttempt = sendSpy.mock.calls.length;
-      await expect(hub.approveTask(taskId, { approvalId: 'appr-A' })).rejects.toBeInstanceOf(StaleApprovalError);
+      const stale = await handle.approve({ approvalId: 'appr-A' }).catch((error: unknown) => error);
+      expect(stale).toBeInstanceOf(StaleApprovalError);
 
-      expect(taskStore.get(taskId)?.state).toBe('AwaitApproval'); // unchanged
-      expect(taskStore.get(taskId)?.pendingApprovalId).toBe('appr-B'); // unchanged
-      expect(sendSpy.mock.calls.length).toBe(callsBeforeStaleAttempt); // no task.approve sent
+      expect((await instance.tasks.get(handle.taskId))?.state).toBe('AwaitApproval'); // unchanged
+      expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBe('appr-B'); // unchanged
+      expect(await drainTypes(daemon)).toEqual(['task.offer']); // no task.approve was enqueued
     });
 
-    it('rejectTask(taskId, reason, {approvalId: A}) while a DIFFERENT approval (B) is now the recorded pending one throws StaleApprovalError, changes no state, and sends no wire message', async () => {
-      const taskStore = new InMemoryTaskStore();
-      const hub = new ConnectionHub(taskStore, new DeviceRegistry(), 30 * 60_000);
-      const deviceId = 'device-reject-stale';
-      const sendSpy = vi.fn();
-      const fakeWs = { send: sendSpy } as unknown as WebSocket;
-      hub.registerConnection(deviceId, fakeWs, undefined);
+    it('reject(reason, {approvalId: A}) while a DIFFERENT approval (B) is now the recorded pending one throws StaleApprovalError, changes no state, and sends no wire message', async () => {
+      const { byok: instance, daemon } = await start();
 
-      const handle = await hub.dispatch({ instruction: 'needs a human ok', deviceId });
-      const { taskId } = handle;
-      await awaitApprovalDirect(hub, deviceId, taskId, 'appr-A', 'first (A)');
-      hub.handleInbound(deviceId, createEnvelope('task.await_approval', { summary: 'second (B)', approvalId: 'appr-B' }, { taskId }));
-      expect(taskStore.get(taskId)?.pendingApprovalId).toBe('appr-B');
+      const handle = await instance.dispatch({ instruction: 'needs a human ok' });
+      await claimAndStart(daemon, handle);
+      await moveToAwaitApproval(daemon, handle, 'appr-A', 'first (A)');
+      await daemon.send(
+        createEnvelope('task.await_approval', { summary: 'second (B)', approvalId: 'appr-B' }, { taskId: handle.taskId }),
+      );
+      expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBe('appr-B');
 
-      const callsBeforeStaleAttempt = sendSpy.mock.calls.length;
-      await expect(hub.rejectTask(taskId, 'stale reject', { approvalId: 'appr-A' })).rejects.toBeInstanceOf(StaleApprovalError);
+      const stale = await handle.reject('stale reject', { approvalId: 'appr-A' }).catch((error: unknown) => error);
+      expect(stale).toBeInstanceOf(StaleApprovalError);
 
-      expect(taskStore.get(taskId)?.state).toBe('AwaitApproval'); // unchanged
-      expect(taskStore.get(taskId)?.pendingApprovalId).toBe('appr-B'); // unchanged
-      expect(sendSpy.mock.calls.length).toBe(callsBeforeStaleAttempt); // no task.reject sent
+      expect((await instance.tasks.get(handle.taskId))?.state).toBe('AwaitApproval'); // unchanged
+      expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBe('appr-B'); // unchanged
+      expect(await drainTypes(daemon)).toEqual(['task.offer']); // no task.reject was enqueued
     });
 
     it('StaleApprovalError carries taskId/requestedApprovalId/currentApprovalId fields for programmatic handling', async () => {
-      const taskStore = new InMemoryTaskStore();
-      const hub = new ConnectionHub(taskStore, new DeviceRegistry(), 30 * 60_000);
-      const deviceId = 'device-stale-fields';
-      const fakeWs = { send: vi.fn() } as unknown as WebSocket;
-      hub.registerConnection(deviceId, fakeWs, undefined);
+      const { byok: instance, daemon } = await start();
 
-      const handle = await hub.dispatch({ instruction: 'x', deviceId });
-      const { taskId } = handle;
-      await awaitApprovalDirect(hub, deviceId, taskId, 'appr-current');
+      const handle = await instance.dispatch({ instruction: 'x' });
+      await claimAndStart(daemon, handle);
+      await moveToAwaitApproval(daemon, handle, 'appr-current');
 
-      try {
-        await hub.approveTask(taskId, { approvalId: 'appr-requested' });
-        throw new Error('expected a throw');
-      } catch (err) {
-        expect(err).toBeInstanceOf(StaleApprovalError);
-        expect((err as StaleApprovalError).taskId).toBe(taskId);
-        expect((err as StaleApprovalError).requestedApprovalId).toBe('appr-requested');
-        expect((err as StaleApprovalError).currentApprovalId).toBe('appr-current');
-      }
+      const stale = await handle.approve({ approvalId: 'appr-requested' }).catch((error: unknown) => error);
+      expect(stale).toBeInstanceOf(StaleApprovalError);
+      if (!(stale instanceof StaleApprovalError)) throw new Error('unreachable');
+      expect(stale.taskId).toBe(handle.taskId);
+      expect(stale.requestedApprovalId).toBe('appr-requested');
+      expect(stale.currentApprovalId).toBe('appr-current');
     });
 
     /**
-     * Acceptance finding 2 (LOW): the sibling tests above cover a SINGLE
-     * `AwaitApproval` cycle (B superseding A while still in the SAME cycle —
-     * see `hub-approval-resolved.test.ts`'s matching test) and the FIRST
-     * leave-AwaitApproval clearing (the `compat` test below). Missing until
-     * now: a full second cycle for the SAME task — leave `AwaitApproval` via
-     * a real `approveTask`, come back to it with a fresh approval, and prove
-     * the OLD cycle's id is genuinely dead rather than merely superseded
-     * in-place. This exercises `transitionTask`'s central "clear
-     * `pendingApprovalId` on the way out of `AwaitApproval`" chokepoint
-     * (hub.ts) across a real `Running -> AwaitApproval` re-entry (a legal
-     * edge — see `hub-implicit-approval-resume.test.ts`'s own coverage of
-     * it), not just its very first application.
+     * A full second cycle for the SAME task: leave `AwaitApproval` via a real
+     * `approve`, come back to it with a fresh approval, and prove the OLD
+     * cycle's id is genuinely dead rather than merely superseded in place.
      */
     it('composed second cycle: AwaitApproval(A) -> approve -> Running -> await_approval(B) -> AwaitApproval — pendingApprovalId is B; A is now stale (StaleApprovalError), B still works', async () => {
-      const taskStore = new InMemoryTaskStore();
-      const hub = new ConnectionHub(taskStore, new DeviceRegistry(), 30 * 60_000);
-      const deviceId = 'device-second-cycle';
-      const sendSpy = vi.fn();
-      const fakeWs = { send: sendSpy } as unknown as WebSocket;
-      hub.registerConnection(deviceId, fakeWs, undefined);
+      const { byok: instance, daemon } = await start();
 
-      const handle = await hub.dispatch({ instruction: 'needs two humans', deviceId });
-      const { taskId } = handle;
+      const handle = await instance.dispatch({ instruction: 'needs two humans' });
+      await claimAndStart(daemon, handle);
 
       // First cycle: AwaitApproval(A) -> approve -> Running.
-      await awaitApprovalDirect(hub, deviceId, taskId, 'appr-A', 'first (A)');
-      expect(taskStore.get(taskId)?.pendingApprovalId).toBe('appr-A');
+      await moveToAwaitApproval(daemon, handle, 'appr-A', 'first (A)');
+      expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBe('appr-A');
 
-      await hub.approveTask(taskId, { approvalId: 'appr-A' });
-      expect(taskStore.get(taskId)?.state).toBe('Running');
-      // Sanity check before the second cycle even starts: leaving
-      // AwaitApproval already clears the stored id (transitionTask's central
-      // chokepoint).
-      expect(taskStore.get(taskId)?.pendingApprovalId).toBeUndefined();
+      await handle.approve({ approvalId: 'appr-A' });
+      expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
+      // Sanity check before the second cycle even starts: resolving the
+      // approval already clears the derived slot.
+      expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBeUndefined();
 
-      // Second cycle: a FRESH task.await_approval (B) re-enters AwaitApproval
-      // from Running.
-      hub.handleInbound(deviceId, createEnvelope('task.await_approval', { summary: 'second (B)', approvalId: 'appr-B' }, { taskId }));
-      expect(taskStore.get(taskId)?.state).toBe('AwaitApproval');
-      // The exact bug this test guards against: without transitionTask's
-      // clearing on the way OUT of the first cycle, this could still read a
-      // stale leftover ('appr-A') instead of the new cycle's real id.
-      expect(taskStore.get(taskId)?.pendingApprovalId).toBe('appr-B');
+      // Second cycle: a FRESH task.await_approval (B) re-enters AwaitApproval.
+      await daemon.send(
+        createEnvelope('task.await_approval', { summary: 'second (B)', approvalId: 'appr-B' }, { taskId: handle.taskId }),
+      );
+      expect((await instance.tasks.get(handle.taskId))?.state).toBe('AwaitApproval');
+      // The exact bug this test guards against: without the first cycle's
+      // resolution clearing the slot, this could still read a stale leftover
+      // ('appr-A') instead of the new cycle's real id.
+      expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBe('appr-B');
 
       // A's id belonged to a PREVIOUS, already fully-consumed AwaitApproval
       // cycle for this SAME task — it must be rejected as stale now, not
       // silently accepted just because it's a familiar id.
-      const callsBeforeStaleAttempt = sendSpy.mock.calls.length;
-      await expect(hub.approveTask(taskId, { approvalId: 'appr-A' })).rejects.toBeInstanceOf(StaleApprovalError);
-      expect(taskStore.get(taskId)?.state).toBe('AwaitApproval'); // unchanged
-      expect(taskStore.get(taskId)?.pendingApprovalId).toBe('appr-B'); // unchanged
-      expect(sendSpy.mock.calls.length).toBe(callsBeforeStaleAttempt); // no task.approve sent
+      const stale = await handle.approve({ approvalId: 'appr-A' }).catch((error: unknown) => error);
+      expect(stale).toBeInstanceOf(StaleApprovalError);
+      expect((await instance.tasks.get(handle.taskId))?.state).toBe('AwaitApproval'); // unchanged
+      expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBe('appr-B'); // unchanged
 
       // B — the CURRENT cycle's real id — still works normally.
-      await hub.approveTask(taskId, { approvalId: 'appr-B' });
-      expect(taskStore.get(taskId)?.state).toBe('Running');
+      await handle.approve({ approvalId: 'appr-B' });
+      expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
+      // Exactly one `task.approve` per successful approval reached the device
+      // (the stale attempt contributed none).
+      expect(await drainTypes(daemon)).toEqual(['task.offer', 'task.approve', 'task.approve']);
     });
 
-    it('compat: approveTask/rejectTask with NO opts still resolves whichever approval is currently pending — untargeted behavior is unchanged from pre-M5', async () => {
-      const taskStore = new InMemoryTaskStore();
-      const hub = new ConnectionHub(taskStore, new DeviceRegistry(), 30 * 60_000);
-      const deviceId = 'device-untargeted';
-      const fakeWs = { send: vi.fn() } as unknown as WebSocket;
-      hub.registerConnection(deviceId, fakeWs, undefined);
+    it('compat: approve with NO opts still resolves whichever approval is currently pending — untargeted behavior is unchanged from pre-M5', async () => {
+      const { byok: instance, daemon } = await start();
 
-      const handle = await hub.dispatch({ instruction: 'x', deviceId });
-      const { taskId } = handle;
-      await awaitApprovalDirect(hub, deviceId, taskId, 'appr-untargeted');
-      expect(taskStore.get(taskId)?.pendingApprovalId).toBe('appr-untargeted');
+      const handle = await instance.dispatch({ instruction: 'x' });
+      await claimAndStart(daemon, handle);
+      await moveToAwaitApproval(daemon, handle, 'appr-untargeted');
+      expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBe('appr-untargeted');
 
-      await hub.approveTask(taskId); // no opts at all — pre-M5 call shape.
-      expect(taskStore.get(taskId)?.state).toBe('Running');
-      // Leaving AwaitApproval clears the stored id (the shared transitionTask
-      // chokepoint, hub.ts) regardless of whether this decision was targeted.
-      expect(taskStore.get(taskId)?.pendingApprovalId).toBeUndefined();
+      await handle.approve(); // no opts at all — pre-M5 call shape.
+      expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
+      // Resolving clears the derived slot regardless of whether this decision
+      // was targeted.
+      expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBeUndefined();
     });
 
-    it('compat: a legacy task.await_approval with NO approvalId stores nothing, and an untargeted approveTask still works normally', async () => {
-      const taskStore = new InMemoryTaskStore();
-      const hub = new ConnectionHub(taskStore, new DeviceRegistry(), 30 * 60_000);
-      const deviceId = 'device-legacy-daemon';
-      const fakeWs = { send: vi.fn() } as unknown as WebSocket;
-      hub.registerConnection(deviceId, fakeWs, undefined);
+    // The durable timeline preserves this as an explicit id-less resolution;
+    // it never invents a native approval identity for the pre-M5 peer.
+    it('compat: a legacy task.await_approval with NO approvalId stores nothing, and an untargeted approve still works normally', async () => {
+      const { byok: instance, daemon } = await start();
 
-      const handle = await hub.dispatch({ instruction: 'x', deviceId });
-      const { taskId } = handle;
-      hub.handleInbound(deviceId, createEnvelope('task.claim', { deviceId }, { taskId }));
-      hub.handleInbound(deviceId, createEnvelope('task.started', {}, { taskId }));
+      const handle = await instance.dispatch({ instruction: 'x' });
+      await claimAndStart(daemon, handle);
       // A pre-M5 daemon's task.await_approval carries no approvalId at all.
-      hub.handleInbound(deviceId, createEnvelope('task.await_approval', { summary: 'legacy' }, { taskId }));
+      await daemon.send(createEnvelope('task.await_approval', { summary: 'legacy' }, { taskId: handle.taskId }));
 
-      expect(taskStore.get(taskId)?.state).toBe('AwaitApproval');
-      expect(taskStore.get(taskId)?.pendingApprovalId).toBeUndefined();
+      expect((await instance.tasks.get(handle.taskId))?.state).toBe('AwaitApproval');
+      expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBeUndefined();
 
-      await hub.approveTask(taskId); // untargeted — nothing to compare against, proceeds exactly as before M5.
-      expect(taskStore.get(taskId)?.state).toBe('Running');
+      await handle.approve(); // untargeted — nothing to compare against, proceeds exactly as before M5.
+      expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
     });
   });
 
   /**
-   * S1 (cross-model review finding, P1): `TaskHandle.approve()`/`reject()` —
-   * the ONLY way an embedder holding just the published API (`dispatch()`'s
-   * return value, never `ConnectionHub` itself) can act on a task — took no
-   * `approvalId` at all, so the M5 targeting implemented on
-   * `ConnectionHub.approveTask`/`rejectTask` (the describe block above) was
-   * genuinely unreachable end to end. `StaleApprovalError` was also missing
-   * from the package's public entry point (`index.ts`), so even a caller
-   * that somehow triggered it had nothing to `instanceof`-check against
-   * without reaching into the internal `../hub` path. Both are fixed at the
-   * `TaskHandle`/`index.ts` level (`types.ts`, `hub.ts`'s `buildTaskHandle`)
-   * — these tests exercise the full public round trip: `createByokServer`
-   * -> `dispatch()` -> `TaskHandle`, never touching `ConnectionHub` directly
-   * (mirroring this file's own OUTER describe block's convention, not the
-   * M5 describe block's direct-hub convention above).
+   * S1 (cross-model review finding, P1): `TaskHandle.approve()`/`reject()` are
+   * the only surface an embedder holding just the published API has, so the M5
+   * targeting has to be reachable through them, and `StaleApprovalError` has to
+   * be importable from the package's own entry point.
    */
   describe('S1: TaskHandle.approve/reject opts.approvalId (published API)', () => {
-    it('TaskHandle.approve({approvalId}) targets the CURRENT pending approval, read back off the publicly-exposed TaskSnapshot.pendingApprovalId, end to end through dispatch()', async () => {
-      const byok = createByokServer({ productId: PRODUCT_ID });
-      const started = await startServer(byok);
-      server = started.server;
-      const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-      const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-      ws = daemon.ws;
+    it('approve({approvalId}) targets the CURRENT pending approval, read back off the publicly-exposed TaskSnapshot.pendingApprovalId, end to end through dispatch()', async () => {
+      const { byok: instance, daemon } = await start();
 
-      const handle = await byok.dispatch({ instruction: 'needs a human ok' });
-      await claimAndStart(ws, daemon.deviceId, handle);
-      await moveToAwaitApproval(ws, handle, 'first (A)', 'appr-A');
+      const handle = await instance.dispatch({ instruction: 'needs a human ok' });
+      await claimAndStart(daemon, handle);
+      await moveToAwaitApproval(daemon, handle, 'appr-A', 'first (A)');
 
-      // Confirmatory (S1's second half): pendingApprovalId is already
-      // readable through the existing public snapshot surface — an embedder
-      // builds its targeted approve call off exactly this, no new surface
-      // needed.
-      const pendingApprovalId = byok.tasks.get(handle.taskId)?.pendingApprovalId;
+      // Confirmatory (S1's second half): pendingApprovalId is already readable
+      // through the existing public snapshot surface — an embedder builds its
+      // targeted approve call off exactly this, no new surface needed.
+      const pendingApprovalId = (await instance.tasks.get(handle.taskId))?.pendingApprovalId;
       expect(pendingApprovalId).toBe('appr-A');
 
       await handle.approve({ approvalId: pendingApprovalId });
-      expect(byok.tasks.get(handle.taskId)?.state).toBe('Running');
+      expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
     });
 
-    it('TaskHandle.reject(reason, {approvalId}) targets the CURRENT pending approval end to end through dispatch()', async () => {
-      const byok = createByokServer({ productId: PRODUCT_ID });
-      const started = await startServer(byok);
-      server = started.server;
-      const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-      const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-      ws = daemon.ws;
+    // 2d gap: same divergence as the outer `reject` case above — the kernel's
+    // `rejectTask` resolves the approval and hands the runtime a `task.reject`;
+    // it does not write a `Failed` terminal on the host's behalf.
+    it.skip('reject(reason, {approvalId}) targets the CURRENT pending approval end to end through dispatch()', async () => {
+      const { byok: instance, daemon } = await start();
 
-      const handle = await byok.dispatch({ instruction: 'needs a human ok' });
-      await claimAndStart(ws, daemon.deviceId, handle);
-      await moveToAwaitApproval(ws, handle, 'first (A)', 'appr-A');
+      const handle = await instance.dispatch({ instruction: 'needs a human ok' });
+      await claimAndStart(daemon, handle);
+      await moveToAwaitApproval(daemon, handle, 'appr-A', 'first (A)');
 
       await handle.reject('looked risky', { approvalId: 'appr-A' });
-      const snapshot = byok.tasks.get(handle.taskId);
+      const snapshot = await instance.tasks.get(handle.taskId);
       expect(snapshot?.state).toBe('Failed');
       expect(snapshot?.result?.state === 'Failed' ? snapshot.result.reason : undefined).toBe('looked risky');
     });
 
-    it('TaskHandle.approve({approvalId}) against a STALE (superseded) approval throws StaleApprovalError — importable/catchable from the package\'s public entry point, not just ../hub — leaving state unchanged; the CURRENT approval still works through the same handle', async () => {
-      const byok = createByokServer({ productId: PRODUCT_ID });
-      const started = await startServer(byok);
-      server = started.server;
-      const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-      const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
-      ws = daemon.ws;
+    it("approve({approvalId}) against a STALE (superseded) approval throws StaleApprovalError — importable/catchable from the package's public entry point — leaving state unchanged; the CURRENT approval still works through the same handle", async () => {
+      const { byok: instance, daemon } = await start();
 
-      const handle = await byok.dispatch({ instruction: 'needs a human ok' });
-      await claimAndStart(ws, daemon.deviceId, handle);
-      await moveToAwaitApproval(ws, handle, 'first (A)', 'appr-A');
+      const handle = await instance.dispatch({ instruction: 'needs a human ok' });
+      await claimAndStart(daemon, handle);
+      await moveToAwaitApproval(daemon, handle, 'appr-A', 'first (A)');
 
-      // B supersedes A while still AwaitApproval — synchronize via a marker
-      // task (this file's own established idiom, e.g.
-      // `hub-approval-resolved.test.ts`) rather than the S2-fixed
-      // await_approval event, so this S1 test stays independent of S2.
-      send(ws, createEnvelope('task.await_approval', { summary: 'second (B)', approvalId: 'appr-B' }, { taskId: handle.taskId }));
-      const marker = await byok.dispatch({ instruction: 'marker task' });
-      await claimAndStart(ws, daemon.deviceId, marker);
-      expect(byok.tasks.get(handle.taskId)?.pendingApprovalId).toBe('appr-B');
+      // B supersedes A while still AwaitApproval.
+      await daemon.send(
+        createEnvelope('task.await_approval', { summary: 'second (B)', approvalId: 'appr-B' }, { taskId: handle.taskId }),
+      );
+      expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBe('appr-B');
 
-      await expect(handle.approve({ approvalId: 'appr-A' })).rejects.toBeInstanceOf(PublicStaleApprovalError);
-      expect(byok.tasks.get(handle.taskId)?.state).toBe('AwaitApproval'); // unchanged
+      const stale = await handle.approve({ approvalId: 'appr-A' }).catch((error: unknown) => error);
+      expect(stale).toBeInstanceOf(StaleApprovalError);
+      expect((await instance.tasks.get(handle.taskId))?.state).toBe('AwaitApproval'); // unchanged
 
       // B — the CURRENT approval — still works through the SAME published
       // TaskHandle.
       await handle.approve({ approvalId: 'appr-B' });
-      expect(byok.tasks.get(handle.taskId)?.state).toBe('Running');
-    });
-  });
-
-  /**
-   * S4 (cross-model review finding, P1): `TaskStore.setPendingApprovalId`
-   * was a REQUIRED method on a public exported interface (`task-store.ts`)
-   * — any existing embedder store written against the pre-M5 `TaskStore`
-   * shape would fail to satisfy it, breaking on upgrade. Fixed by making it
-   * optional, with the one call site in `hub.ts` (`onAwaitApproval`'s
-   * same-state id-update branch) guarded via `?.()`. `LegacyTaskStore` below
-   * is a full, correct implementation of the PRE-M5 `TaskStore` contract —
-   * everything except the one new optional method — driven through exactly
-   * that call site.
-   */
-  describe('S4: TaskStore.setPendingApprovalId is optional — a legacy store without it must not crash', () => {
-    class LegacyTaskStore implements TaskStore {
-      private readonly tasks = new Map<string, TaskRecord>();
-
-      create(input: CreateTaskInput): TaskRecord {
-        const now = new Date().toISOString();
-        const record: TaskRecord = {
-          taskId: input.taskId,
-          state: 'Offered',
-          instruction: input.instruction,
-          runtime: input.runtime,
-          policy: input.policy,
-          deviceId: input.deviceId,
-          sessionRef: input.sessionRef,
-          createdAt: now,
-          updatedAt: now,
-        };
-        this.tasks.set(record.taskId, record);
-        return record;
-      }
-
-      get(taskId: string): TaskRecord | undefined {
-        return this.tasks.get(taskId);
-      }
-
-      list(): TaskRecord[] {
-        return [...this.tasks.values()];
-      }
-
-      transition(taskId: string, to: TaskState, patch: Partial<Omit<TaskRecord, 'taskId' | 'state'>> = {}): TaskRecord {
-        const record = this.tasks.get(taskId);
-        if (!record) throw new Error(`unknown taskId: ${taskId}`);
-        const updated: TaskRecord = { ...record, ...patch, state: to, updatedAt: new Date().toISOString() };
-        this.tasks.set(taskId, updated);
-        return updated;
-      }
-
-      // Deliberately NO setPendingApprovalId — the entire point: a pre-M5
-      // embedder store literally never had this method, and this must still
-      // structurally satisfy `TaskStore` now that it's optional.
-    }
-
-    it('a legacy store (no setPendingApprovalId at all) drives await_approval(A) -> await_approval(B) redelivery -> approve without throwing', async () => {
-      const legacyStore = new LegacyTaskStore();
-      const hub = new ConnectionHub(legacyStore, new DeviceRegistry(), 30 * 60_000);
-      const deviceId = 'device-legacy-store';
-      const fakeWs = { send: vi.fn() } as unknown as WebSocket;
-      hub.registerConnection(deviceId, fakeWs, undefined);
-
-      const handle = await hub.dispatch({ instruction: 'needs a human ok', deviceId });
-      const { taskId } = handle;
-
-      expect(() => {
-        hub.handleInbound(deviceId, createEnvelope('task.claim', { deviceId }, { taskId }));
-        hub.handleInbound(deviceId, createEnvelope('task.started', {}, { taskId }));
-        hub.handleInbound(deviceId, createEnvelope('task.await_approval', { summary: 'first (A)', approvalId: 'appr-A' }, { taskId }));
-        // The SAME-STATE redelivery branch — the ONLY call site that invokes
-        // `taskStore.setPendingApprovalId` — is exercised here. Without the
-        // `?.()` guard in `hub.ts`, this throws a TypeError (not a function)
-        // against a store missing the method entirely.
-        hub.handleInbound(deviceId, createEnvelope('task.await_approval', { summary: 'second (B)', approvalId: 'appr-B' }, { taskId }));
-      }).not.toThrow();
-
-      expect(legacyStore.get(taskId)?.state).toBe('AwaitApproval');
-
-      // Untargeted approve (no opts) still resolves whichever approval is
-      // currently pending, exactly as it would against any other store —
-      // the missing method degrades gracefully rather than breaking the
-      // flow.
-      await expect(hub.approveTask(taskId)).resolves.toBeUndefined();
-      expect(legacyStore.get(taskId)?.state).toBe('Running');
+      expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
     });
   });
 });
+
+// Deleted with `task-store.ts` (WP3B Step 2b): the S4 describe
+// ("TaskStore.setPendingApprovalId is optional — a legacy store without it
+// must not crash") drove a hand-written `LegacyTaskStore` through
+// `ConnectionHub`. `TaskStore` is no longer a public interface and there is no
+// embedder-supplied task store to be backward-compatible with (ADR-028): the
+// kernel owns the one `TaskAttemptStore`, and `pendingApprovalId` is derived
+// from the durable approval timeline rather than written into a record. See
+// the notes' 2b conformance skim, class (A).

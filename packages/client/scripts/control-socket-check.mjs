@@ -35,6 +35,7 @@
 //   --winsw-bin   required on win32 only (see lifecycle/winsw.ts).
 
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -79,9 +80,17 @@ const storeDir = path.join(workDir, 'store');
 const workspaceRoot = path.join(workDir, 'workspace');
 const logDir = path.join(workDir, 'logs');
 const configPath = path.join(workDir, 'config.json');
+// The OS credential provider is intentionally outside `workDir`. Give every
+// smoke run its own product authority so a prior interrupted run cannot make
+// this nominally-unpaired service start from a retained credential.
+const productId = `${name}-${randomUUID()}`;
 await fs.mkdir(workspaceRoot, { recursive: true });
 
-const byok = createByokServer({ productId: name });
+// Short long-poll hold: this façade serves the wire over HTTP only (WP3B
+// Step 2 removed the WS attachment), so the service-launched daemon runs the
+// protocol §8 long-poll transport, and an in-flight `GET /byok/events` at the
+// ~50s production default would outlive this script's own teardown.
+const byok = createByokServer({ productId, longPollHoldMs: 500 });
 let httpServer;
 let lifecycle;
 let failed = false;
@@ -92,20 +101,17 @@ async function runCli(args, timeoutMs = 15000) {
 
 try {
   const port = await new Promise((resolve) => {
-    httpServer = serve({ fetch: byok.hono.fetch, port: 0 }, (info) => {
-      byok.attachWebSocket(httpServer);
-      resolve(info.port);
-    });
+    httpServer = serve({ fetch: byok.hono.fetch, port: 0 }, (info) => resolve(info.port));
   });
   const serverUrl = `http://127.0.0.1:${port}`;
   console.log(`==> real @byok-sdk/server reference implementation listening at ${serverUrl}`);
 
-  const { code: pairingCode } = byok.pairing.createPairingCode({ tenantId: 'tenant-smoke', productId: name });
+  const { code: pairingCode } = await byok.pairing.createPairingCode({ productId });
   await fs.writeFile(
     configPath,
     JSON.stringify({
       productName: 'Control Socket Check',
-      productId: name,
+      productId,
       serverUrl,
       workspaceRoot,
       storeDir,
@@ -176,6 +182,10 @@ try {
     throw new Error('expected a live "live: pid=..." control-socket status line from the service-launched daemon');
   }
   console.log('PASS: control socket answered a live status request from a SERVICE-launched daemon');
+
+  console.log('==> byok-agent unpair --yes (clears the per-run OS credential authority)');
+  await runCli(['unpair', '--yes', '--config', configPath]);
+  console.log('PASS: service stopped and per-run device credential cleared');
 } catch (err) {
   failed = true;
   console.error('FAIL:', err instanceof Error ? err.stack : err);

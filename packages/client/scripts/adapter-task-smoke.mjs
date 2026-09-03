@@ -84,6 +84,14 @@ function processExists(pid) {
   }
 }
 
+async function waitForAsync(predicate, label, ms = timeoutMs) {
+  const deadline = Date.now() + ms;
+  while (!(await predicate())) {
+    if (Date.now() >= deadline) throw new Error(`${label} timed out after ${ms}ms`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 async function waitFor(predicate, label, ms = timeoutMs) {
   const deadline = Date.now() + ms;
   while (!predicate()) {
@@ -167,12 +175,17 @@ try {
   ]);
 
   const productId = `byok-adapter-task-smoke-${process.pid}`;
-  byok = createByokServer({ productId, heartbeatIntervalMs: 100 });
+  // The server is a self-hosted façade over the `@byok-sdk/cloud` kernel and
+  // serves the wire over HTTP only (WP3B Step 2 removed the WS attachment), so
+  // the daemon below runs the protocol §8 long-poll transport. A short hold
+  // keeps each empty poll cheap and keeps an in-flight poll from outliving
+  // this script's own teardown.
+  // The default task-event retention is intentional here: `handle.events()`
+  // must end at the terminal event itself, independently of when the relay
+  // later reclaims its retained buffer.
+  byok = createByokServer({ productId, longPollHoldMs: 200 });
   const listening = await new Promise((resolve) => {
-    httpServer = serve({ fetch: byok.hono.fetch, port: 0 }, (info) => {
-      byok.attachWebSocket(httpServer);
-      resolve(info);
-    });
+    httpServer = serve({ fetch: byok.hono.fetch, port: 0 }, (info) => resolve(info));
   });
   const serverUrl = `http://127.0.0.1:${listening.port}`;
   console.log(`real @byok-sdk/server listening at ${serverUrl}`);
@@ -209,7 +222,7 @@ try {
     })),
   ];
 
-  const pairingCode = byok.pairing.createPairingCode({ tenantId: 'tenant-smoke', productId }).code;
+  const pairingCode = (await byok.pairing.createPairingCode({ productId })).code;
   daemon = client.createDaemonWithAdapters(
     {
       localAgentRelease: { version: '0.0.0-adapter-smoke' },
@@ -231,6 +244,10 @@ try {
     {
       backoff: { baseMs: 10, maxMs: 100, factor: 1.5 },
       liveness: { timeoutMs: 5_000, checkIntervalMs: 250 },
+      // Reach the long-poll transport on the first failed WS probe instead of
+      // burning the default three-failure budget against a server that has no
+      // WS endpoint at all.
+      longPoll: { wsFailureThreshold: 1, retryDelayMs: 10, idleDelayMs: 10, wsRetryIntervalMs: 60_000 },
     },
   );
   const localEvents = [];
@@ -238,11 +255,22 @@ try {
 
   await withTimeout(daemon.pair(pairingCode), 'pair');
   await withTimeout(daemon.start(), 'daemon start');
-  assert(daemon.status().connected, 'daemon did not reach connected state');
+  // `connected` is the WS-open predicate; on long-poll the daemon reports
+  // `degraded` (transport fact only — it is a full transport). The server-side
+  // proof is what actually matters here: the device is observed connected once
+  // its first `GET /byok/events` poll lands.
+  await waitFor(() => daemon.status().degraded, 'daemon long-poll transport');
+  const deviceId = daemon.status().deviceId;
+  assert(deviceId !== undefined, 'daemon did not report a paired deviceId');
+  await waitForAsync(
+    async () => (await byok.machines.list()).some((machine) => machine.deviceId === deviceId && machine.connected),
+    'server-observed device connection',
+  );
 
   const preAdmissionPiSpawns = piSpawnCount;
   const rejected = await withTimeout(
     byok.dispatch({
+      deviceId,
       instruction: 'adapter task smoke: missing Pi BYOK launcher',
       dispatchSelection: {
         lane: 'byok',
@@ -259,7 +287,7 @@ try {
     Promise.all([rejectedEventsPromise, rejected.result()]),
     'Pi BYOK missing-launcher lifecycle',
   );
-  const rejectedSnapshot = byok.tasks.get(rejected.taskId);
+  const rejectedSnapshot = await byok.tasks.get(rejected.taskId);
   const rejectedLocalKinds = localEvents
     .filter((event) => event.taskId === rejected.taskId)
     .map((event) => event.kind);
@@ -273,7 +301,7 @@ try {
 
   for (const runtime of runtimes) {
     const handle = await withTimeout(
-      byok.dispatch({ instruction: `adapter task smoke: ${runtime}`, runtime, policy: { mode: 'auto' } }),
+      byok.dispatch({ deviceId, instruction: `adapter task smoke: ${runtime}`, runtime, policy: { mode: 'auto' } }),
       `${runtime} dispatch`,
     );
     const taskEventsPromise = collectTaskEvents(handle);
@@ -281,7 +309,7 @@ try {
       Promise.all([taskEventsPromise, handle.result()]),
       `${runtime} task lifecycle`,
     );
-    const snapshot = byok.tasks.get(handle.taskId);
+    const snapshot = await byok.tasks.get(handle.taskId);
     const serverStates = stateNames(serverEvents);
     const localTask = daemon.tasks().find((task) => task.taskId === handle.taskId);
     const localClaim = localEvents.find((event) => event.taskId === handle.taskId && event.kind === 'claimed');
@@ -323,7 +351,7 @@ try {
     process.env[envNames.hang] = '1';
     try {
       const handle = await withTimeout(
-        byok.dispatch({ instruction: `adapter lifecycle smoke: ${runtime}`, runtime, policy: { mode: 'auto' } }),
+        byok.dispatch({ deviceId, instruction: `adapter lifecycle smoke: ${runtime}`, runtime, policy: { mode: 'auto' } }),
         `${runtime} lifecycle dispatch`,
       );
       await waitFor(

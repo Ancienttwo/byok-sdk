@@ -152,11 +152,13 @@ describe('tenant isolation across every device-class resource', () => {
       cursor: 0,
       capabilities: [
         'result-document',
+        'approval_resolved',
         'agent-home-contract',
         'agent-home-projection',
         'agent-egress-policy',
         'agent-egress-reliable-ack',
         'agent-egress-fresh-session',
+        'agent-message-egress',
         'agent-content-workspace-read',
         'agent-content-transcript-read',
         'agent-content-artifact-read',

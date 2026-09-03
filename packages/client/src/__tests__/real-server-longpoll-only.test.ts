@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { startRealServerWithoutWebSocket, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
+import { startRealServer, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -15,12 +15,11 @@ async function tmpDir(prefix: string): Promise<string> {
  * — offer, claim, started, progress, complete — carried entirely over
  * `GET /byok/events` (receive) + `POST /byok/messages` (send), with the WS
  * transport never once connecting. Run against the REAL `@byok-sdk/server`
- * (not the client's own `TestServer` stub) via
- * `startRealServerWithoutWebSocket`, which genuinely never wires up the WS
- * upgrade at all — a real WS failure, not a simulated one — so the
- * daemon's ordinary `wsFailureThreshold` fallback drives it into long-poll
- * mode exactly as it would against a real deployment with no reachable WS
- * endpoint.
+ * (not the client's own `TestServer` stub) via `startRealServer`. Since
+ * WP3B Step 2 that server has no WS upgrade handler at all — a real WS
+ * failure, not a simulated one — so the daemon's ordinary
+ * `wsFailureThreshold` fallback drives it into long-poll mode exactly as it
+ * would against a real deployment with no reachable WS endpoint.
  */
 describe('a full task lifecycle over long-poll only, WS never connects (finding F6, real @byok-sdk/server)', () => {
   let real: RealServerHandle;
@@ -35,7 +34,7 @@ describe('a full task lifecycle over long-poll only, WS never connects (finding 
     // A short longPollHoldMs keeps every GET /byok/events request (and thus
     // teardown) fast — the real default (~50s) is meant for production, not
     // a test that wants prompt polling cadence.
-    real = await startRealServerWithoutWebSocket({ productId: 'test-product', longPollHoldMs: 200 });
+    real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
 
     const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
@@ -53,7 +52,7 @@ describe('a full task lifecycle over long-poll only, WS never connects (finding 
       },
     );
 
-    const pairing = real.createPairingCode();
+    const pairing = await real.createPairingCode();
     const record = await daemon.pair(pairing.code);
     await daemon.start();
 
@@ -69,8 +68,8 @@ describe('a full task lifecycle over long-poll only, WS never connects (finding 
     // "conn.hello semantics implicitly" via however the HTTP layer
     // establishes the per-device session). Wait for that explicitly rather
     // than racing `dispatch()` against it.
-    await vi.waitFor(() => {
-      expect(real.byok.machines.list().find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
+    await vi.waitFor(async () => {
+      expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });
 
     const handle = await real.byok.dispatch({ instruction: 'do it over long-poll', policy: { mode: 'auto' } });
@@ -96,7 +95,7 @@ describe('a full task lifecycle over long-poll only, WS never connects (finding 
   }, 15000);
 
   it('publishes agent-home-contract over long-poll before Agent dispatch admission', async () => {
-    real = await startRealServerWithoutWebSocket({ productId: 'test-product', longPollHoldMs: 200 });
+    real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
     const workspaceRoot = await tmpDir('byok-agent-longpoll-workspace-');
     const storeDir = await tmpDir('byok-agent-longpoll-store-');
     const hostStorageRoot = await tmpDir('byok-agent-longpoll-home-');
@@ -119,7 +118,7 @@ describe('a full task lifecycle over long-poll only, WS never connects (finding 
       },
     );
 
-    const record = await daemon.pair(real.createPairingCode().code);
+    const record = await daemon.pair((await real.createPairingCode()).code);
     await daemon.start();
     expect(daemon.status().degraded).toBe(true);
 
