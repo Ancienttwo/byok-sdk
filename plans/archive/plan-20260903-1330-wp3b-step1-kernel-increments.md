@@ -1,6 +1,6 @@
 # Plan: WP3B Step 1: cloud kernel increments (GAP-1/2/3/4/6 + observer)
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260903-1330
 > **Slug**: wp3b-step1-kernel-increments
 > **Artifact Level**: work-package
