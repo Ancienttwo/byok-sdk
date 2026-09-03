@@ -48,6 +48,8 @@ export interface InMemoryByokCloudOptions {
   readonly tokenSigner?: TokenSigner;
   readonly capabilities?: CapabilityDeclaration;
   readonly operatorId?: string;
+  /** Single-product instance authority; absent leaves the device row as the whole product authority. */
+  readonly instanceProductId?: string;
   readonly maxBlobSizeBytes?: number;
   readonly longPollHoldMs?: number;
   readonly longPollIntervalMs?: number;
@@ -128,6 +130,9 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
       ? {}
       : { truthObjectDownloads: options.truthObjectDownloads }),
     ...(options.operatorId !== undefined ? { operatorId: options.operatorId } : {}),
+    ...(options.instanceProductId === undefined
+      ? {}
+      : { instanceProductId: options.instanceProductId }),
     ...(options.agentMessage === undefined ? {} : { agentMessage: options.agentMessage }),
     ...(options.agentMemoryProjectionAuthorizer === undefined
       ? {}
