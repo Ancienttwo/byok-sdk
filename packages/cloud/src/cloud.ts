@@ -226,6 +226,14 @@ export interface ByokCloudOptions {
   readonly capabilities: CapabilityDeclaration;
   /** Recorded on the control-plane principal every host-side call is made under. */
   readonly operatorId?: string;
+  /**
+   * The ONE product this deployment serves, when it serves exactly one — the
+   * embedded shape. Supplying it makes every bearer-authed route additionally
+   * require the token to name this product; omitting it leaves the device row
+   * as the whole product authority. Two deployment shapes, two explicit
+   * authorities: see `BearerAuthDeps.instanceProductId` (`auth/bearer.ts`).
+   */
+  readonly instanceProductId?: string;
   /** Product-owned consumer; destination lookup is keyed by authenticated task context, never model input. */
   readonly agentMessage?: {
     consume(input: {
@@ -471,7 +479,13 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
   const deviceRouteDeps = {
     root,
-    bearer: { tokenSigner: options.tokenSigner, devices: options.cloud.devices },
+    bearer: {
+      tokenSigner: options.tokenSigner,
+      devices: options.cloud.devices,
+      ...(options.instanceProductId === undefined
+        ? {}
+        : { instanceProductId: options.instanceProductId }),
+    },
   };
 
   const registry = new CloudRouteRegistry();
