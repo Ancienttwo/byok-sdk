@@ -1,7 +1,13 @@
+> **Archived**: 2026-09-03 14:54
+> **Related Plan**: plans/archive/plan-20260903-1330-wp3b-step1-kernel-increments.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260903-1454
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: (archive-workflow)
+> **Updated**: 2026-09-03 13:33
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.

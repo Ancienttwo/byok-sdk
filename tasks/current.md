@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-09-03T13:12:25+0800 -->
+<!-- updated_at: 2026-09-03T14:54:11+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Idle
-> **Updated At**: 2026-09-03T13:12:25+0800
-> **Source Branch**: codex/wp3b-step0-characterization
-> **Source Commit**: 46a0ddd
+> **Updated At**: 2026-09-03T14:54:11+0800
+> **Source Branch**: codex/wp3b-step1-kernel-increments
+> **Source Commit**: 038976b
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -51,16 +51,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260903-1129-wp3b-step0-characterization.md
- D tasks/contracts/20260903-1129-wp3b-step0-characterization.contract.md
- D tasks/notes/20260903-1129-wp3b-step0-characterization.notes.md
- D tasks/reviews/20260903-1129-wp3b-step0-characterization.review.md
+ D plans/plan-20260903-1330-wp3b-step1-kernel-increments.md
+ D tasks/contracts/20260903-1330-wp3b-step1-kernel-increments.contract.md
+ D tasks/notes/20260903-1330-wp3b-step1-kernel-increments.notes.md
+ D tasks/reviews/20260903-1330-wp3b-step1-kernel-increments.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260903-1129-wp3b-step0-characterization.md
-?? tasks/archive/contract-20260903-1312-wp3b-step0-characterization.md
-?? tasks/archive/notes-20260903-1312-wp3b-step0-characterization.md
-?? tasks/archive/review-20260903-1312-wp3b-step0-characterization.md
-?? tasks/archive/todo-20260903-1312-wp3b-step0-characterization.md
+?? plans/archive/plan-20260903-1330-wp3b-step1-kernel-increments.md
+?? tasks/archive/contract-20260903-1454-wp3b-step1-kernel-increments.md
+?? tasks/archive/notes-20260903-1454-wp3b-step1-kernel-increments.md
+?? tasks/archive/review-20260903-1454-wp3b-step1-kernel-increments.md
+?? tasks/archive/todo-20260903-1454-wp3b-step1-kernel-increments.md
 ```
 
 ## Source Artifacts
