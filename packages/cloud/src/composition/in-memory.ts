@@ -81,6 +81,8 @@ export interface InMemoryByokCloudOptions {
   readonly skillPacks?: SkillPackStore;
   readonly skillPackPageLimit?: number;
   readonly agentMessage?: ByokCloudOptions['agentMessage'];
+  /** Post-commit relay; absent means nothing is watching. */
+  readonly observer?: ByokCloudOptions['observer'];
   readonly agentMemoryProjectionAuthorizer?: AgentMemoryProjectionAuthorizer;
   readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
 }
@@ -134,6 +136,7 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
       ? {}
       : { instanceProductId: options.instanceProductId }),
     ...(options.agentMessage === undefined ? {} : { agentMessage: options.agentMessage }),
+    ...(options.observer === undefined ? {} : { observer: options.observer }),
     ...(options.agentMemoryProjectionAuthorizer === undefined
       ? {}
       : { agentMemoryProjectionAuthorizer: options.agentMemoryProjectionAuthorizer }),

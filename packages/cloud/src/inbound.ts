@@ -26,6 +26,10 @@
  *
  * A duplicate is still a wire-level success (§8.2): it just did not re-run
  * anything. Only `rejected`/`rate_limited` are excluded from `accepted`.
+ *
+ * 5. **observe** — an optional {@link ByokCloudObserver} is told, once, about
+ *    each envelope whose write committed. It runs after step 4 has returned,
+ *    it cannot change the outcome, and it is not the admission hook.
  */
 import {
   AGENT_CONTENT_ARTIFACT_READ_CAPABILITY,
@@ -48,6 +52,7 @@ import {
   type Envelope,
   type MessageType,
 } from '@byok-sdk/protocol';
+import type { TenantId } from '@byok-sdk/core';
 import {
   validateActivityBatch,
   appendActivityEvents,
@@ -63,6 +68,39 @@ import { projectTerminalToReview } from './board-projection';
 import type { TenantStores } from './tenant-stores';
 
 export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected' | 'rate_limited';
+
+/**
+ * One envelope whose write COMMITTED, handed to {@link ByokCloudObserver}.
+ *
+ * `outcome` is constant by construction — `accepted` is the only outcome that
+ * committed anything — and is carried anyway because it names the fact in the
+ * gate's own vocabulary rather than leaving the reader to infer it from the
+ * hook's name. A `duplicate` re-ran nothing, a `rejected` and a `rate_limited`
+ * wrote nothing; none of them appear here.
+ */
+export interface InboundCommitted {
+  readonly tenantId: TenantId;
+  readonly deviceId: string;
+  readonly envelope: Envelope;
+  readonly outcome: Extract<InboundOutcome, 'accepted'>;
+}
+
+/**
+ * Post-commit relay for the host (the `TaskHandle` fan-out `@byok-sdk/server`
+ * drives off its live hub).
+ *
+ * Deliberately NOT the admission hook. `ByokCloudOptions.agentMessage.consume`
+ * runs BEFORE a write and decides whether it happens; this runs AFTER one and
+ * cannot decide anything: it returns `void`, it is called inside a `try`, and
+ * a throw from it is swallowed with the outcome already fixed. An observer
+ * that wants to refuse work has the admission hook; an observer here is
+ * watching, not gating.
+ *
+ * Synchronous and cheap by contract — it runs inline on the request path.
+ */
+export interface ByokCloudObserver {
+  onInboundCommitted(input: InboundCommitted): void;
+}
 
 export async function handleAgentMessagePublish(
   stores: TenantStores,
@@ -301,6 +339,37 @@ export async function handleInboundEnvelope(
   envelope: Envelope,
   activityBounds: ActivityBounds = DEFAULT_ACTIVITY_BOUNDS,
   agentMessageConsume?: Parameters<typeof handleAgentMessagePublish>[4],
+  observer?: ByokCloudObserver,
+): Promise<InboundOutcome> {
+  const outcome = await applyInboundGate(
+    stores,
+    deviceId,
+    envelope,
+    activityBounds,
+    agentMessageConsume,
+  );
+  // One notification per envelope whose write committed, at the ONE exit the
+  // gate has. Firing from the gate's own return points instead would have to
+  // be repeated at each of them and would be one edit away from firing twice
+  // or not at all.
+  if (outcome === 'accepted' && observer !== undefined) {
+    try {
+      observer.onInboundCommitted({ tenantId: stores.tenant, deviceId, envelope, outcome });
+    } catch {
+      // The write already committed. A relay that throws is the host's problem
+      // to see in its own instrumentation; it cannot retract a durable fact, so
+      // it does not get to change what this route answers either.
+    }
+  }
+  return outcome;
+}
+
+async function applyInboundGate(
+  stores: TenantStores,
+  deviceId: string,
+  envelope: Envelope,
+  activityBounds: ActivityBounds,
+  agentMessageConsume: Parameters<typeof handleAgentMessagePublish>[4] | undefined,
 ): Promise<InboundOutcome> {
   if (!(await stores.rateLimiter.consume(deviceId))) return 'rate_limited';
 
