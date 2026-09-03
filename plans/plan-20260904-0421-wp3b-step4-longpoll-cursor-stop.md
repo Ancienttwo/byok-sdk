@@ -1,6 +1,6 @@
 # Plan: WP3B Step 4a: durable long-poll ack and cancellable stop
 
-> **Status**: Fulfilled
+> **Status**: Executing
 > **Created**: 20260904-0421
 > **Slug**: wp3b-step4-longpoll-cursor-stop
 > **Artifact Level**: work-package
