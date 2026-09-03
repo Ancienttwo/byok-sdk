@@ -1,6 +1,6 @@
 # Implementation Notes: wp3b-step4-longpoll-cursor-stop
 
-> **Status**: Verified
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md
 > **Contract**: tasks/contracts/20260904-0421-wp3b-step4-longpoll-cursor-stop.contract.md
 > **Review**: tasks/reviews/20260904-0421-wp3b-step4-longpoll-cursor-stop.review.md
@@ -46,7 +46,7 @@
 - `git diff --check`: passed.
 - `repo-harness run check-task-workflow --strict`: passed.
 - `repo-harness run verify-contract --contract tasks/contracts/20260904-0421-wp3b-step4-longpoll-cursor-stop.contract.md --strict`: 27/27 passed; contract status `Fulfilled`.
-- Exact-subject acceptance remains pending until the artifacts are finalized and committed.
+- Exact-subject gate and typed `external_pass` AcceptanceReceipt passed against the published Step 2 base.
 
 ## Deviations From Plan Or Spec
 

@@ -1,6 +1,6 @@
 # Plan: WP3B Step 4a: durable long-poll ack and cancellable stop
 
-> **Status**: Review
+> **Status**: Fulfilled
 > **Created**: 20260904-0421
 > **Slug**: wp3b-step4-longpoll-cursor-stop
 > **Artifact Level**: work-package
@@ -64,4 +64,4 @@
 - [x] T1 Restore the five skipped redelivery guards and add a held-GET stop regression; capture pre-fix failures.
 - [x] T2 Route long-poll acknowledgement through the successfully processed cursor and preserve stalled/no-progress backoff.
 - [x] T3 Abort the active long-poll GET on stop without classifying intentional cancellation as an operational route failure.
-- [ ] T4 Run focused tests, client suite, repository required checks, review, and workflow acceptance.
+- [x] T4 Run focused tests, client suite, repository required checks, review, and workflow acceptance.
