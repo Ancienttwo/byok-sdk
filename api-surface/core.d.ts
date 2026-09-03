@@ -1156,6 +1156,26 @@ export interface MailboxPage {
      */
     readonly nextSeq: number;
     readonly hasMore: boolean;
+    /**
+     * The earliest seq a reader can still recover from: one past the highest row
+     * this device LOST. A caller at `recoverableFrom - 1` can still be handed
+     * the first row it has any claim to; a caller below that has a gap it cannot
+     * see, and resuming it would hand back a partial tail indistinguishable from
+     * a complete one.
+     *
+     * Lost means `expired` — a row that aged out before anyone acked it. An
+     * `acked` row is consumed, not lost, so acking never moves this and never
+     * turns a re-poll from an old cursor into a failure; that distinction is the
+     * whole point of the field.
+     *
+     * `1` for a mailbox that has lost nothing, so a fresh device's cursor `0` is
+     * always inside the window. Monotonic for as long as dead-lettered rows are
+     * retained, which §12.7.5 requires.
+     *
+     * This is a READ of the retained window, never a second retention authority:
+     * `collectRetired` decides what is retained, this reports what it cost.
+     */
+    readonly recoverableFrom: number;
 }
 export interface MailboxAdvanceCursorInput {
     readonly deviceId: string;

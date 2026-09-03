@@ -22,7 +22,7 @@ Add to `@byok-sdk/cloud` (and `@byok-sdk/core` for the mailbox port): `approveTa
 
 ## Scope
 
-- In scope: the six sub-steps above under `packages/cloud/src/**`, `packages/core/src/**`, `packages/cloud-dataplane/src/**`, `deploy/sql/**`, `packages/conformance/src/**`; the three additive goldens; two packet corrections; notes.
+- In scope: the six sub-steps above under `packages/cloud/src/**`, `packages/core/src/**`, `packages/cloud-dataplane/src/**`, `deploy/sql/**` (plus the one-line migration claim in `tests/sql/control_plane_invariants.sql` that `check:deploy-sql` requires), `packages/conformance/src/**`; the three additive goldens; two packet corrections; notes.
 - Out of scope: any change under `packages/server/**` or `packages/client/**` (Step 2/4); GAP-5 rate limiter (Step 2a); docs/CHANGELOG/README (Step 5); `api-surface/server.d.ts` and `client.d.ts`; release, publish.
 - Taste constraints: no compatibility fallbacks (absent `instanceProductId` is a distinct explicit authority, not a fallback); observer is void and post-commit; one store authority per datum; sub-steps must not be merged into one commit.
 
@@ -83,6 +83,7 @@ allowed_paths:
   - packages/cloud-dataplane/src/
   - packages/conformance/src/
   - deploy/sql/
+  - tests/sql/control_plane_invariants.sql
   - api-surface/cloud.d.ts
   - api-surface/core.d.ts
   - api-surface/cloud-dataplane.d.ts
