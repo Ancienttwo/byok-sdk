@@ -1,6 +1,6 @@
 # Plan: WP3B Step 0: server coordination characterization tests
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260903-1129
 > **Slug**: wp3b-step0-characterization
 > **Artifact Level**: work-package
