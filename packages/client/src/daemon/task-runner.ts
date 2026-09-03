@@ -302,6 +302,16 @@ function resultDocumentRejectionDetail(check: Extract<ResultDocumentCheck, { ok:
  */
 export const DEFAULT_MAX_TASK_OUTPUT_BYTES = 64 * 1024 * 1024;
 
+/**
+ * WP0: default number of Attempts allowed to execute concurrently in one
+ * canonical Agent home. One — the canonical home is every Agent session's
+ * cwd, so a second concurrent Attempt is a second writer of the same
+ * `MEMORY.md`, `notes/` and `.git`. Raising it is an explicit host choice
+ * (`DaemonConfig.maxConcurrentMutableSessionsPerAgentHome`) that re-enables
+ * the 0.12.0 co-writing exposure; there is no implicit fallback to it.
+ */
+export const DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME = 1;
+
 export interface TaskRunnerDeps {
   adapters: RuntimeAdapter[];
   runtimeAllowlist?: string[];
@@ -327,6 +337,13 @@ export interface TaskRunnerDeps {
   agentHome?: AgentHomeManager;
   /** Local authority: legacy offers are declined after journal/dedup/cancel precedence. */
   strictAgentOnly?: boolean;
+  /**
+   * WP0: how many Attempts may execute concurrently in ONE canonical Agent
+   * home — see `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome`'s own
+   * doc comment (`create-daemon.ts`) for the validated contract. Unset
+   * defaults to {@link DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME}.
+   */
+  maxConcurrentMutableSessionsPerAgentHome?: number;
   /** Exact host-selected policy accepted by `task.offer_for_agent_with_egress`. */
   agentEgressPolicy?: Readonly<AgentEgressPolicy>;
   /** Always-present projection/sanitizer consumer; it defaults to metadata-only. */
@@ -1125,6 +1142,12 @@ export class TaskRunner {
     return this.deps.maxTaskOutputBytes ?? DEFAULT_MAX_TASK_OUTPUT_BYTES;
   }
 
+  /** WP0: effective per-canonical-Agent-home Attempt cap — see {@link DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME}. */
+  private get maxConcurrentMutableSessionsPerAgentHome(): number {
+    return this.deps.maxConcurrentMutableSessionsPerAgentHome
+      ?? DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME;
+  }
+
   /**
    * M4 Phase 4 (part B.3, observability): per-active-task queue watermarks
    * for the control socket's `status` result — see
@@ -1570,6 +1593,49 @@ export class TaskRunner {
         this.addStrictDeclinedTaskId(taskId);
         decline('strict Agent-only daemon refuses legacy task offers', false);
         return;
+      }
+
+      // WP0 (canonical Agent home single writer): execution is serialized per
+      // canonical Agent home. Placed exactly here — after the receive, dedup,
+      // pre-cancel and strict-Agent-only precedence above, before adapter
+      // preparation, the workspace, the claim, or any process side effect —
+      // so a duplicate or pre-cancelled offer returns above without ever
+      // consuming a slot, and a busy home costs the offer nothing beyond this
+      // count.
+      //
+      // Counted per HOME, not per lane: two different runtimes on two
+      // different lanes still share `MEMORY.md`, `notes/` and `.git` in that
+      // one directory, and only a per-home count stops them co-writing it.
+      // The decline reason carries counts only — never a path, never prompt
+      // text — because `task.decline` leaves this device.
+      //
+      // The count read here is still the count when `acquireExecution` runs
+      // below: `ConnectionManager` chains every envelope through one serial
+      // promise chain (`processingChain`), so two `handleOffer` calls for the
+      // same daemon never interleave between this check and that acquire.
+      //
+      // The count key is derived with `canonicalHomePath()`, NOT `resolve()`:
+      // this gate runs before the host's own admission veto, so it must not
+      // create `agents/<agentId>` or bind an Agent identity for an offer that
+      // is about to be declined. `resolve()` still runs later, on the
+      // admission path, for an offer that actually executes.
+      if (agentRef !== undefined) {
+        const limit = this.maxConcurrentMutableSessionsPerAgentHome;
+        let canonicalHome: string;
+        try {
+          canonicalHome = await this.deps.agentHome!.layout.canonicalHomePath(agentRef);
+        } catch (error) {
+          decline(
+            `Agent home admission failed: ${errorMessage(error)}`,
+            !(error instanceof AgentHomeResolutionError),
+          );
+          return;
+        }
+        const active = this.deps.agentHome!.executionLeaseManager.activeAttemptCount(canonicalHome);
+        if (active >= limit) {
+          decline(`agent home busy: ${active} active attempt(s)`, true);
+          return;
+        }
       }
 
       // S3b (L-002): the pre-claim admission veto stays after the strict
