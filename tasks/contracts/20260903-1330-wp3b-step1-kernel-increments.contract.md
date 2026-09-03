@@ -1,6 +1,6 @@
 # Task Contract: wp3b-step1-kernel-increments
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260903-1330-wp3b-step1-kernel-increments.md
 > **Task Profile**: code-change
 > **Workflow Profile**: strict
