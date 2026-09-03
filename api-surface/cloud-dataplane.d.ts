@@ -1252,8 +1252,9 @@ export declare class PostgresRequestReceiptStore implements RequestReceiptStore 
  * `claim` and `recordStatus` on a task this tenant never offered write nothing
  * and return `undefined`.
  */
-import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptStatus, type TaskAttemptStore } from '@byok-sdk/cloud';
+import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptListQuery, type TaskAttemptPage, type TaskAttemptStatus, type TaskAttemptStore } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
+import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import type { Pool } from 'pg';
 export interface TaskRow {
     readonly tenant_id: string;
@@ -1267,9 +1268,11 @@ export interface TaskRow {
     readonly cancel_requested_at: Date | null;
     readonly cancel_reason: string | null;
     readonly cancel_message_id: string | null;
+    readonly claimed_runtime: string | null;
+    readonly claimed_runtime_capabilities: RuntimeCapabilities | null;
     readonly updated_at: Date;
 }
-export declare const TASK_SELECT_COLUMNS = "tenant_id, task_id, device_id, agent_id, agent_profile_revision, owner_device_id, status, terminal_cause, cancel_requested_at, cancel_reason, cancel_message_id, updated_at";
+export declare const TASK_SELECT_COLUMNS = "tenant_id, task_id, device_id, agent_id, agent_profile_revision, owner_device_id, status, terminal_cause, cancel_requested_at, cancel_reason, cancel_message_id, claimed_runtime, claimed_runtime_capabilities, updated_at";
 export declare function taskRowToAttempt(row: TaskRow): TaskAttempt;
 export declare class PostgresTaskAttemptStore implements TaskAttemptStore {
     #private;
@@ -1308,9 +1311,12 @@ export declare class PostgresTaskAttemptStore implements TaskAttemptStore {
     }): Promise<AgentMessageAdmission | undefined>;
     get(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
     getMany(tenant: TenantId, taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
+    list(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
     claim(tenant: TenantId, input: {
         readonly taskId: string;
         readonly deviceId: string;
+        readonly runtime?: RuntimeId;
+        readonly capabilities?: RuntimeCapabilities;
     }): Promise<TaskAttempt | undefined>;
     recordStatus(tenant: TenantId, input: {
         readonly taskId: string;

@@ -218,6 +218,78 @@ export interface AgentMemoryProjectionStore {
         readonly agentId: string;
     }): Promise<AgentMemoryProjectionEraseResult>;
 }
+// ==== @byok-sdk/cloud dist/approval-control.d.ts ====
+/**
+ * Host-side approval resolution: the one rule that decides WHICH approval a
+ * `cloud.approveTask`/`rejectTask` call is allowed to resolve.
+ *
+ * `@byok-sdk/server` keeps this as a single mutable slot on its task record
+ * (`TaskSnapshot.pendingApprovalId`, `packages/server/src/hub.ts`) that
+ * `task.await_approval` overwrites and `task.approval_resolved` clears. Cloud
+ * holds no session state and no second store: the SAME two observations are
+ * already durable in the `ApprovalTimelineStore` tail
+ * (`approval-timeline.ts`), appended by the inbound gate, so the slot is
+ * DERIVED from that tail on each call rather than mirrored into a record that
+ * could then disagree with it.
+ *
+ * The derivation is a fold over the tail's entries in revision order, holding
+ * exactly one slot — deliberately the server's shape, not a set of concurrently
+ * pending approvals:
+ *
+ *   - `approval_requested` SETS the slot, superseding whatever it held. A
+ *     daemon that dispatched a fresh approval without this cloud ever seeing
+ *     the previous one resolved has moved on, and the newest request is what
+ *     an operator is being asked about (`hub.ts:1399`).
+ *   - `approval_resolved(X)` CLEARS the slot when the slot's own id is `X`, or
+ *     when the slot has no id at all (a pre-M5 daemon never reported one, so
+ *     the resolution can only be about the single outstanding request). A
+ *     resolution naming some OTHER id is about an approval already superseded
+ *     and leaves the current slot standing (`hub.ts:1569`).
+ *
+ * Two ways there is legitimately nothing pending: the tail has no unresolved
+ * request, or the tail is gone entirely — it is a bounded, TTL'd observation
+ * ring, not an authority that keeps facts forever. Both answer `undefined`,
+ * and the callers fail closed on it. A dropped-then-expired approval is not
+ * silently approved.
+ */
+import type { ApprovalTimelineTail } from './approval-timeline';
+/**
+ * M5 (approval targeting): thrown by `ByokCloud.approveTask`/`rejectTask` when
+ * the caller supplied an `approvalId` that does NOT match the approval this
+ * task currently has pending — the caller is targeting a SPECIFIC approval the
+ * daemon has already superseded with a newer one.
+ *
+ * Distinct from the `task_not_awaiting_approval` `ByokCloudError` (there
+ * is no pending approval at all, checked FIRST so it still wins when both would
+ * apply): this error means the task genuinely IS awaiting an approval, just not
+ * the one the caller thinks it is. Thrown before any mailbox row is allocated —
+ * a stale-id call has zero side effects.
+ *
+ * A distinct class rather than a `CloudErrorCode`, unlike the rest of
+ * this package's failures, because it carries the two ids the caller needs to
+ * re-target: a code alone cannot say what the pending approval actually is.
+ */
+export declare class StaleApprovalError extends Error {
+    readonly taskId: string;
+    readonly requestedApprovalId: string;
+    readonly currentApprovalId: string | undefined;
+    constructor(taskId: string, requestedApprovalId: string, currentApprovalId: string | undefined);
+}
+/** The one approval a task currently has outstanding. */
+export interface PendingApproval {
+    /**
+     * The daemon's own id for this approval. ABSENT for a pre-M5 daemon that
+     * reported `task.await_approval` without one — the approval is still pending
+     * and still resolvable, it just cannot be targeted, so a caller-supplied
+     * `approvalId` proceeds untargeted exactly as it does on the server.
+     */
+    readonly approvalId?: string;
+}
+/**
+ * The task's current pending approval, or `undefined` when it has none — see
+ * this module's own doc comment for the fold and why it holds one slot.
+ */
+export declare function pendingApproval(tail: ApprovalTimelineTail | undefined): PendingApproval | undefined;
 // ==== @byok-sdk/cloud dist/approval-timeline.d.ts ====
 import { type TenantId } from '@byok-sdk/core';
 import { z } from 'zod';
@@ -316,6 +388,23 @@ import type { TokenSigner } from './tokens';
 export interface BearerAuthDeps {
     readonly tokenSigner: TokenSigner;
     readonly devices: DeviceDirectory;
+    /**
+     * The ONE product this deployment serves, when it serves exactly one.
+     *
+     * Two deployment shapes, two explicit authorities — not a default and a
+     * fallback. A multi-product hosted control plane leaves this absent, and the
+     * row is the whole product authority (`device.productId === claims.productId`
+     * below). A single-product instance supplies it — that is the embedded shape,
+     * where `createByokServer({ productId })` always has one — and the token must
+     * then name THAT product as well, so a device paired through a code minted
+     * for another product cannot reach this instance's bearer-authed routes at
+     * all.
+     *
+     * Absent it, a cross-product device whose token and row agree with each other
+     * authenticates on every `device` route the deployment mounts, which is
+     * precisely the drift this closes for the embedded shape.
+     */
+    readonly instanceProductId?: string;
 }
 export declare function extractBearerToken(header: string | undefined): string | undefined;
 export declare function authenticateBearer(header: string | undefined, deps: BearerAuthDeps): Promise<DevicePrincipal | undefined>;
@@ -606,13 +695,14 @@ export declare function declares(declaration: CapabilityDeclaration, capability:
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { type Envelope, type AgentContentReadPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
+import { type Envelope, type AgentContentReadPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
+import { type ByokCloudObserver } from './inbound';
 import { type AgentHomeProjectionReceiptInput } from './agent-home-projections';
 import type { AgentMemoryProjectionAuthorizer, AgentMemoryProjectionStore } from './agent-memory-projection';
-import type { BlobContentProxy, CloudStores, DeviceRecord, AgentEgressRecord, PairingCodeInfo, RequestReceipt, TaskAttempt } from './stores/ports';
+import type { BlobContentProxy, CloudStores, DeviceRecord, AgentEgressRecord, PairingCodeInfo, RequestReceipt, TaskAttempt, TaskAttemptListQuery, TaskAttemptPage } from './stores/ports';
 import { type TerminalResult } from './terminal-result';
 import type { TruthCommitter, TruthObjectDownloads } from './truth/contract';
 /** Matches the reference server's ceiling (§7). */
@@ -656,6 +746,14 @@ export interface ByokCloudOptions {
     readonly capabilities: CapabilityDeclaration;
     /** Recorded on the control-plane principal every host-side call is made under. */
     readonly operatorId?: string;
+    /**
+     * The ONE product this deployment serves, when it serves exactly one — the
+     * embedded shape. Supplying it makes every bearer-authed route additionally
+     * require the token to name this product; omitting it leaves the device row
+     * as the whole product authority. Two deployment shapes, two explicit
+     * authorities: see `BearerAuthDeps.instanceProductId` (`auth/bearer.ts`).
+     */
+    readonly instanceProductId?: string;
     /** Product-owned consumer; destination lookup is keyed by authenticated task context, never model input. */
     readonly agentMessage?: {
         consume(input: {
@@ -669,6 +767,14 @@ export interface ByokCloudOptions {
             readonly reasonCode?: string;
         }>;
     };
+    /**
+     * Post-commit relay for envelopes this cloud durably accepted. Read-only by
+     * construction: it is told after the write, it returns `void`, and a throw
+     * from it is swallowed — the outcome is already fixed. Distinct from
+     * {@link ByokCloudOptions.agentMessage}, which is admission and runs BEFORE
+     * a write, deciding whether it happens at all.
+     */
+    readonly observer?: ByokCloudObserver;
     /** Embedder-owned grant and consent authority for optional hosted Agent-memory projection. */
     readonly agentMemoryProjectionAuthorizer?: AgentMemoryProjectionAuthorizer;
     /** Durable snapshot + immutable metering receipt authority for optional hosted Agent-memory projection. */
@@ -741,6 +847,20 @@ export interface AgentContentReadInput {
 export type AgentHomeProjectionInput = AgentHomeProjectionPayload;
 /** Exact request identity a host must echo to read back durable projection status. */
 export type AgentHomeProjectionStatusInput = AgentHomeProjectionReceiptInput;
+/** Optional targeting for {@link ByokCloud.approveTask}. */
+export interface ApproveTaskOptions {
+    /**
+     * Resolve THIS specific approval rather than whichever one is pending.
+     * A mismatch against the task's current pending approval throws
+     * {@link StaleApprovalError} instead of resolving the wrong thing.
+     */
+    readonly approvalId?: string;
+}
+/** Optional targeting and refusal cause for {@link ByokCloud.rejectTask}. */
+export interface RejectTaskOptions extends ApproveTaskOptions {
+    /** Carried to the runtime verbatim; absent stays absent on the wire. */
+    readonly reason?: string;
+}
 export interface EnqueuedAgentControl {
     readonly seq: number;
     readonly envelope: Envelope;
@@ -812,7 +932,78 @@ export interface ByokCloud {
     eraseAgentMemoryProjection(tenant: TenantId, agentId: string): Promise<AgentMemoryProjectionEraseResult>;
     /** Host control plane: durably request cancellation by tenant/task id. Idempotent. */
     cancelTask(tenant: TenantId, taskId: string, reason?: string): Promise<TaskAttempt>;
+    /**
+     * Host control plane: resolve the approval a paused task is waiting on, by
+     * enqueueing `task.approve` to the device that claimed it.
+     *
+     * WHICH approval is a derived fact, not a stored one — see
+     * `approval-control.ts` for the fold over the durable timeline that produces
+     * it, and why cloud adds no second authority for it. Gate order mirrors the
+     * reference server (`packages/server/src/hub.ts`), and every gate is
+     * evaluated in full before a mailbox row is allocated, so a refused call has
+     * zero side effects:
+     *
+     *   1. no such task for this tenant -> `task_not_found`;
+     *   2. nothing to resolve -> `task_not_awaiting_approval`, which covers a
+     *      terminal attempt, an unclaimed one, and a timeline with no unresolved
+     *      request (expired or never written). Checked BEFORE targeting, so it
+     *      still wins when both would apply;
+     *   3. `opts.approvalId` names an approval this task has already superseded
+     *      -> {@link StaleApprovalError}. When the daemon never reported an id
+     *      at all, the call proceeds untargeted, exactly as on the server.
+     *
+     * Delivery is a best-effort notification, the same contract the wire message
+     * has always had (`TaskApprovePayloadSchema`, `@byok-sdk/protocol`): the
+     * enqueued envelope is durable, the runtime's response to it is observable
+     * only through that task's own later messages. The outgoing `approvalId` is
+     * the caller's when given, else the pending one, else omitted.
+     */
+    approveTask(tenant: TenantId, taskId: string, opts?: ApproveTaskOptions): Promise<EnqueuedAgentControl>;
+    /**
+     * Host control plane: refuse the approval a paused task is waiting on, by
+     * enqueueing `task.reject` to the device that claimed it. Same gates, same
+     * targeting, and the same best-effort delivery contract as
+     * {@link ByokCloud.approveTask} — `opts.reason` is carried to the runtime
+     * verbatim and is never synthesized when absent.
+     */
+    rejectTask(tenant: TenantId, taskId: string, opts?: RejectTaskOptions): Promise<EnqueuedAgentControl>;
+    /**
+     * Host control plane: inject steering text into a RUNNING task, by enqueueing
+     * `task.steer` to the device that claimed it.
+     *
+     * Gated on the claim-time capability snapshot and on nothing else — see
+     * `steer-control.ts` for why that is the only admissible input and why an
+     * absent snapshot refuses. Gate order mirrors the reference server
+     * (`ConnectionHub.steerTask`, `packages/server/src/hub.ts`), and every gate is
+     * evaluated in full before a mailbox row is allocated, so a refused call has
+     * zero side effects:
+     *
+     *   1. no such task for this tenant -> `task_not_found` ({@link ByokCloudError});
+     *   2. terminal attempt -> {@link SteerRejectedError} `task_terminal`,
+     *      checked BEFORE the running check so a steer racing a terminal
+     *      transition always resolves terminal-first;
+     *   3. not running (or running with no owning device) ->
+     *      {@link SteerRejectedError} `task_not_running`;
+     *   4. the claim snapshot does not positively say `steer: true` ->
+     *      {@link SteerRejectedError} `steer_unsupported_runtime`, including when
+     *      there is no snapshot at all.
+     *
+     * Delivery is the same best-effort notification every control message has:
+     * the enqueued envelope is durable, and whether the runtime acted on it is
+     * observable only through that task's own later messages.
+     */
+    steerTask(tenant: TenantId, taskId: string, payload: TaskSteerPayload): Promise<EnqueuedAgentControl>;
     readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
+    /**
+     * Host control plane: one bounded page of this tenant's task attempts,
+     * keyset-paged by `taskId` — see {@link TaskAttemptListQuery} for why the key
+     * is the task id and not a timestamp, and why the walk terminates on an
+     * absent `nextCursor` rather than on an empty page.
+     *
+     * A non-positive or non-integer `limit` is rejected
+     * (`coordination_input_invalid`), never defaulted: the host names the bound.
+     */
+    listTaskAttempts(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
     /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
     readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
     /** Exact durable egress fact and receipt selected by (tenant, device, event id). */
@@ -866,6 +1057,8 @@ export interface InMemoryByokCloudOptions {
     readonly tokenSigner?: TokenSigner;
     readonly capabilities?: CapabilityDeclaration;
     readonly operatorId?: string;
+    /** Single-product instance authority; absent leaves the device row as the whole product authority. */
+    readonly instanceProductId?: string;
     readonly maxBlobSizeBytes?: number;
     readonly longPollHoldMs?: number;
     readonly longPollIntervalMs?: number;
@@ -897,6 +1090,8 @@ export interface InMemoryByokCloudOptions {
     readonly skillPacks?: SkillPackStore;
     readonly skillPackPageLimit?: number;
     readonly agentMessage?: ByokCloudOptions['agentMessage'];
+    /** Post-commit relay; absent means nothing is watching. */
+    readonly observer?: ByokCloudOptions['observer'];
     readonly agentMemoryProjectionAuthorizer?: AgentMemoryProjectionAuthorizer;
     readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
 }
@@ -1023,6 +1218,14 @@ export declare function assertBoardLabels(channel: string, title: string, limits
     readonly channelMaxBytes: number;
     readonly titleMaxBytes: number;
 }): void;
+/**
+ * The page bound on {@link TaskAttemptStore.list}. Fail-closed rather than
+ * defaulted or clamped: a caller that asks for `0`, `-1`, `2.5`, or `Infinity`
+ * has a bug, and answering it with a silently substituted limit hides that bug
+ * behind a plausible page. Enforced in the STORE rather than only at the
+ * façade, because the port is reachable directly by a host composition.
+ */
+export declare function assertTaskAttemptListLimit(limit: number): void;
 export declare function validateActivityEvents(events: readonly AgentEventOrUnknown[], dropped: number, bounds: ActivityBounds): void;
 export declare function validateActivityBatch(input: Omit<ActivityAppendInput, 'ttlMs' | 'capacity'>, bounds: ActivityBounds): void;
 export declare function appendActivityEvents(activity: TenantBoundActivity, input: {
@@ -1152,6 +1355,15 @@ export declare const CLOUD_ERROR_CODES: {
     readonly activity_batch_too_large: 'activity_batch_too_large';
     /** Host control-plane task lookup is tenant-closed and found no task. */
     readonly task_not_found: 'task_not_found';
+    /**
+     * A host `approveTask`/`rejectTask` names a task with no approval to
+     * resolve: the durable timeline holds no unresolved `approval_requested`
+     * (including a tail that has expired or was never written), the attempt has
+     * already reached a terminal status, or no device ever claimed it so there
+     * is nothing to notify. Fail-closed by construction — cloud never invents a
+     * pending approval to make the call succeed.
+     */
+    readonly task_not_awaiting_approval: 'task_not_awaiting_approval';
     /** Durable target-device capability is absent, revoked, or unavailable. */
     readonly agent_capability_missing: 'agent_capability_missing';
     /** Inbound Agent identity did not exactly match the offered identity. */
@@ -1340,11 +1552,47 @@ export declare function truthPutHandler(deps: TruthRouteDeps): (c: Context) => P
  *
  * A duplicate is still a wire-level success (§8.2): it just did not re-run
  * anything. Only `rejected`/`rate_limited` are excluded from `accepted`.
+ *
+ * 5. **observe** — an optional {@link ByokCloudObserver} is told, once, about
+ *    each envelope whose write committed. It runs after step 4 has returned,
+ *    it cannot change the outcome, and it is not the admission hook.
  */
 import { type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type Envelope } from '@byok-sdk/protocol';
+import type { TenantId } from '@byok-sdk/core';
 import { type ActivityBounds } from './coordination';
 import type { TenantStores } from './tenant-stores';
 export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected' | 'rate_limited';
+/**
+ * One envelope whose write COMMITTED, handed to {@link ByokCloudObserver}.
+ *
+ * `outcome` is constant by construction — `accepted` is the only outcome that
+ * committed anything — and is carried anyway because it names the fact in the
+ * gate's own vocabulary rather than leaving the reader to infer it from the
+ * hook's name. A `duplicate` re-ran nothing, a `rejected` and a `rate_limited`
+ * wrote nothing; none of them appear here.
+ */
+export interface InboundCommitted {
+    readonly tenantId: TenantId;
+    readonly deviceId: string;
+    readonly envelope: Envelope;
+    readonly outcome: Extract<InboundOutcome, 'accepted'>;
+}
+/**
+ * Post-commit relay for the host (the `TaskHandle` fan-out `@byok-sdk/server`
+ * drives off its live hub).
+ *
+ * Deliberately NOT the admission hook. `ByokCloudOptions.agentMessage.consume`
+ * runs BEFORE a write and decides whether it happens; this runs AFTER one and
+ * cannot decide anything: it returns `void`, it is called inside a `try`, and
+ * a throw from it is swallowed with the outcome already fixed. An observer
+ * that wants to refuse work has the admission hook; an observer here is
+ * watching, not gating.
+ *
+ * Synchronous and cheap by contract — it runs inline on the request path.
+ */
+export interface ByokCloudObserver {
+    onInboundCommitted(input: InboundCommitted): void;
+}
 export declare function handleAgentMessagePublish(stores: TenantStores, deviceId: string, taskId: string, payload: AgentMessagePublishPayload, consume: ((input: {
     readonly tenant: TenantStores['tenant'];
     readonly deviceId: string;
@@ -1362,7 +1610,7 @@ export declare function handleAgentMessagePublish(stores: TenantStores, deviceId
 export declare function readAgentMessageDisposition(stores: TenantStores, deviceId: string, taskId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
 /** Receipt key a task's terminal is recorded under — the idempotency seam S3b's journal will share. */
 export declare function terminalReceiptKey(taskId: string): string;
-export declare function handleInboundEnvelope(stores: TenantStores, deviceId: string, envelope: Envelope, activityBounds?: ActivityBounds, agentMessageConsume?: Parameters<typeof handleAgentMessagePublish>[4]): Promise<InboundOutcome>;
+export declare function handleInboundEnvelope(stores: TenantStores, deviceId: string, envelope: Envelope, activityBounds?: ActivityBounds, agentMessageConsume?: Parameters<typeof handleAgentMessagePublish>[4], observer?: ByokCloudObserver): Promise<InboundOutcome>;
 // ==== @byok-sdk/cloud dist/index.d.ts ====
 /**
  * `@byok-sdk/cloud` — the hosted device surface.
@@ -1381,7 +1629,7 @@ export declare function handleInboundEnvelope(stores: TenantStores, deviceId: st
 export { isTenantId, tenantId } from '@byok-sdk/core';
 export type { TenantId } from '@byok-sdk/core';
 export { createByokCloud } from './cloud';
-export type { ByokCloud, ByokCloudOptions, AgentDispatchInput, AgentEgressDispatchInput, AgentEgressFreshSessionDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, AgentHomeProjectionStatusInput, EnqueueOfferInput, EnqueueToolsetOfferInput, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedOffer, } from './cloud';
+export type { ByokCloud, ByokCloudOptions, AgentDispatchInput, AgentEgressDispatchInput, AgentEgressFreshSessionDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, AgentHomeProjectionStatusInput, ApproveTaskOptions, EnqueueOfferInput, EnqueueToolsetOfferInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedOffer, } from './cloud';
 export { agentHomeProjectionCompletionKey, agentHomeProjectionRequestKey, readAgentHomeProjectionStatus, recordAgentHomeProjectionCompletion, } from './agent-home-projections';
 export type { AgentHomeProjectionReceiptInput } from './agent-home-projections';
 export { AGENT_HOME_CONTRACT_CAPABILITY, DEFAULT_EVENTS_PAGE_LIMIT, DEFAULT_LONG_POLL_HOLD_MS, DEFAULT_LONG_POLL_INTERVAL_MS, DEFAULT_MAX_BLOB_SIZE_BYTES, } from './cloud';
@@ -1411,14 +1659,18 @@ export type { AuthPlane, AuthPlaneDeps, MintedAccessToken, PairInput } from './a
 export { createWebCrypto } from './crypto/web-crypto';
 export type { CloudCrypto } from './crypto/port';
 export { handleInboundEnvelope, terminalReceiptKey } from './inbound';
-export type { InboundOutcome } from './inbound';
+export type { ByokCloudObserver, InboundCommitted, InboundOutcome } from './inbound';
 export { projectTerminalResult } from './terminal-result';
 export type { TerminalResult } from './terminal-result';
 export { tenantStoresFor } from './tenant-stores';
 export type { TenantBoundActivity, TenantBoundApprovalTimeline, TenantBoundBoard, CloudRootStores, TenantBoundBlobs, TenantBoundDedup, TenantBoundDevices, TenantBoundMailbox, TenantBoundPresence, TenantBoundQuota, TenantBoundRateLimiter, TenantBoundReceipts, TenantBoundTaskAttempts, TenantStores, } from './tenant-stores';
 export { ApprovalObservationSchema, ApprovalTimelineEventSchema, APPROVAL_SUMMARY_MAX_BYTES, DEFAULT_APPROVAL_TIMELINE_CAPACITY, DEFAULT_APPROVAL_TIMELINE_TTL_MS, approvalTimelineCursor, parseApprovalObservations, validateApprovalTimelineAppend, } from './approval-timeline';
 export type { ApprovalObservation, ApprovalTimelineAppendInput, ApprovalTimelineEvent, ApprovalTimelineStore, ApprovalTimelineTail, } from './approval-timeline';
-export { DEFAULT_ACTIVITY_BOUNDS, DEFAULT_ACTIVITY_CAPACITY, DEFAULT_ACTIVITY_MAX_BYTES, DEFAULT_ACTIVITY_MAX_EVENTS, DEFAULT_ACTIVITY_TTL_MS, DEFAULT_BOARD_CHANNEL_MAX_BYTES, DEFAULT_BOARD_TITLE_MAX_BYTES, DEFAULT_PRESENCE_DETAIL_MAX_BYTES, DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS, DEFAULT_PRESENCE_TTL_MS, } from './coordination';
+export { StaleApprovalError, pendingApproval } from './approval-control';
+export type { PendingApproval } from './approval-control';
+export { SteerRejectedError } from './steer-control';
+export type { SteerRejectionCode } from './steer-control';
+export { assertTaskAttemptListLimit, DEFAULT_ACTIVITY_BOUNDS, DEFAULT_ACTIVITY_CAPACITY, DEFAULT_ACTIVITY_MAX_BYTES, DEFAULT_ACTIVITY_MAX_EVENTS, DEFAULT_ACTIVITY_TTL_MS, DEFAULT_BOARD_CHANNEL_MAX_BYTES, DEFAULT_BOARD_TITLE_MAX_BYTES, DEFAULT_PRESENCE_DETAIL_MAX_BYTES, DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS, DEFAULT_PRESENCE_TTL_MS, } from './coordination';
 export type { ActivityBounds } from './coordination';
 export { TimelineEventSchema, ActivityAppendRequestSchema, activityCursor, parseTimelineEvents, projectTimelineEvents, validateActivityAppend, } from './activity';
 export type { ActivityAppendInput, ActivityCursor, ActivityStore, ActivityTail, TimelineEvent, } from './activity';
@@ -1431,7 +1683,7 @@ export { TruthCommitError, isTruthCommitError } from './truth/errors';
 export type { TruthCommitErrorCode } from './truth/errors';
 export { BLOB_READ_ERROR_CODES, CLOUD_STORE_NAMES, TASK_ATTEMPT_STATUSES, } from './stores/ports';
 export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract';
-export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RequestReceipt, RequestReceiptStore, TaskAttempt, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports';
+export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RequestReceipt, RequestReceiptStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports';
 export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryBlobs, createInMemoryCloudStores, } from './stores/in-memory/index';
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index';
 // ==== @byok-sdk/cloud dist/router/registry.d.ts ====
@@ -1490,6 +1742,88 @@ export declare class CloudRouteRegistry {
         readonly path: string;
     }[];
     get fetch(): (request: Request, ...rest: unknown[]) => Response | Promise<Response>;
+}
+// ==== @byok-sdk/cloud dist/steer-control.d.ts ====
+/**
+ * GAP-2: why a `cloud.steerTask` call was refused, and the one input that
+ * decides it.
+ *
+ * The reference server (`ConnectionHub.steerTask`, `packages/server/src/hub.ts`)
+ * reaches this decision from `TaskSnapshot.claimedRuntimeCapabilities` — the
+ * capability block the CLAIMING adapter reported for itself on its own
+ * `task.claim`, frozen at the `Offered -> Claimed` transition. Cloud keeps the
+ * same single source: {@link TaskAttempt.claimedRuntimeCapabilities}, written by
+ * the claim that wins the ownership CAS (`stores/ports.ts`) and never again.
+ *
+ * The gap this closes is not cosmetic: only pi's adapter implements steering,
+ * and Claude's and Codex's THROW on receiving `task.steer`, which stalls that
+ * device's redelivery cursor at that seq forever. So the refusal has to happen
+ * before an envelope exists, from a fact that shares a lifecycle with the
+ * task-to-runtime binding.
+ *
+ * Fail-closed on unknown, deliberately: `steer_unsupported_runtime` covers both
+ * "the claiming adapter reported `steer: false`" and "this attempt carries no
+ * capability snapshot at all" (a daemon whose claim predates the field, an
+ * attempt claimed before migration `0018`). Refusing an unknown is a
+ * recoverable, operator-visible error; guessing "supported" reintroduces the
+ * permanent cursor stall this gate exists to prevent. There is deliberately NO
+ * runtime-id allow-list here either — a table mapping `pi -> steerable` would be
+ * a second capability authority in the coordination plane, drifting the moment a
+ * runtime gains or loses the feature, and the daemon already reports the truth.
+ *
+ * SINGLE SOURCE, deliberately: the gate reads the claim snapshot and NOTHING
+ * from the connection layer. Cloud's connection-level equivalent is
+ * `DeviceRecord.capabilities`, written from a bearer-authenticated `conn.hello`
+ * (`inbound.ts`) — discovery data describing a device BUILD, not the adapter
+ * that took this task. A device can reconnect later with a different adapter
+ * set; a task already running must keep being judged against what was true when
+ * it was claimed. Same pin the reference server holds in
+ * `packages/server/src/__tests__/steer-runtime-capability-gate.test.ts`.
+ */
+import type { RuntimeId } from '@byok-sdk/protocol';
+import type { TaskAttemptStatus } from './stores/ports';
+/**
+ * Stable strings a caller switches on (an operator UI, an HTTP surface mapping
+ * this to a status code) rather than matching error text. Byte-identical to the
+ * reference server's `SteerRejectionCode` (`packages/server/src/hub.ts`), so a
+ * host that moves from the embedded server to the hosted kernel keeps its own
+ * mapping unchanged.
+ *
+ * - `task_terminal` — the attempt already reached `complete`/`failed`/
+ *   `cancelled`. Checked FIRST, so a terminal attempt that is also (obviously)
+ *   not running reports the more specific truth, and a steer racing a terminal
+ *   transition always resolves terminal-first.
+ * - `task_not_running` — the attempt exists and is live, but is `offered`/
+ *   `claimed`/`cancel_requested`; there is no running turn to steer yet.
+ * - `steer_unsupported_runtime` — the runtime that CLAIMED this attempt cannot
+ *   be steered, per the claim-time capability snapshot. A MISSING snapshot
+ *   rejects under this same code: unknown is not supported.
+ */
+export type SteerRejectionCode = 'steer_unsupported_runtime' | 'task_not_running' | 'task_terminal';
+/**
+ * Thrown by `ByokCloud.steerTask` instead of a generic `Error`, so a caller can
+ * tell WHY a steer was refused without matching on message text — the same
+ * typed-error idiom as `StaleApprovalError` (`approval-control.ts`).
+ *
+ * A distinct class rather than a `CloudErrorCode`, for the same reason as
+ * `StaleApprovalError`: it carries the state and the runtime the caller needs to
+ * explain the refusal, and a code alone cannot.
+ *
+ * Thrown before any mailbox row is allocated — a refused steer is a NON-EVENT,
+ * exactly like a refused approval.
+ */
+export declare class SteerRejectedError extends Error {
+    readonly taskId: string;
+    readonly code: SteerRejectionCode;
+    /** The attempt's status at the moment the steer was refused. */
+    readonly status: TaskAttemptStatus;
+    /** {@link TaskAttempt.claimedRuntime} — `undefined` when nothing was ever recorded, which is itself a reason `steer_unsupported_runtime` can fire. */
+    readonly runtime: RuntimeId | undefined;
+    constructor(taskId: string, code: SteerRejectionCode, 
+    /** The attempt's status at the moment the steer was refused. */
+    status: TaskAttemptStatus, 
+    /** {@link TaskAttempt.claimedRuntime} — `undefined` when nothing was ever recorded, which is itself a reason `steer_unsupported_runtime` can fire. */
+    runtime: RuntimeId | undefined);
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/activity.d.ts ====
 import type { Clock, TenantId } from '@byok-sdk/core';
@@ -1856,7 +2190,8 @@ export declare class InMemoryRequestReceiptStore implements RequestReceiptStore 
  * unfalsifiable.
  */
 import { type Clock, type TenantId } from '@byok-sdk/core';
-import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptStatus, type TaskAttemptStore } from '../ports';
+import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
+import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptListQuery, type TaskAttemptPage, type TaskAttemptStatus, type TaskAttemptStore } from '../ports';
 export declare class InMemoryTaskAttemptStore implements TaskAttemptStore {
     #private;
     constructor(clock: Clock, state?: InMemoryTaskAttemptState);
@@ -1894,9 +2229,12 @@ export declare class InMemoryTaskAttemptStore implements TaskAttemptStore {
     }): Promise<AgentMessageAdmission | undefined>;
     get(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
     getMany(tenant: TenantId, taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
+    list(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
     claim(tenant: TenantId, input: {
         taskId: string;
         deviceId: string;
+        runtime?: RuntimeId;
+        capabilities?: RuntimeCapabilities;
     }): Promise<TaskAttempt | undefined>;
     recordStatus(tenant: TenantId, input: {
         readonly taskId: string;
@@ -1982,7 +2320,7 @@ export declare const CLOUD_PORT_INTERFACES: Readonly<Record<CloudStoreName, stri
  * bytes (see the blobs section below).
  */
 import type { MailboxBody, MailboxMessage, PresenceStore, StorageReservation, TenantId, TenantReadiness } from '@byok-sdk/core';
-import type { AgentEgressReliablePayload, AgentRef } from '@byok-sdk/protocol';
+import type { AgentEgressReliablePayload, AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 export type { AgentEgressReliablePayload, AgentRef } from '@byok-sdk/protocol';
 import type { ActivityStore } from '../activity';
 import type { ApprovalTimelineStore } from '../approval-timeline';
@@ -2158,6 +2496,40 @@ export interface TaskAttempt {
     /** Set by `task.claim`, and only by the first one. Legacy attempts remain claimable by any tenant device until then; strict Agent attempts are target-device bound before this field is consulted. */
     readonly ownerDeviceId?: string;
     readonly status: TaskAttemptStatus;
+    /**
+     * The runtime the CLAIMING daemon reported for itself on its own
+     * `task.claim` (`TaskClaimPayload.runtime`), snapshotted at the
+     * `offered -> claimed` transition and never written again — a redelivered or
+     * losing claim leaves it exactly as the winning claim left it.
+     *
+     * ADR-028 forbids cloud holding EXECUTION state (a live `running`/`thinking`
+     * phase, a turn, a PID, the current tool call) — quantities that keep
+     * changing while an attempt runs. This is not one: it is written once, at
+     * the moment ownership is decided, and is an attribution fact about the
+     * attempt. Byte-for-byte the same semantics as the reference server's
+     * `TaskSnapshot.claimedRuntime` (`packages/server/src/types.ts`).
+     *
+     * Absent for a daemon whose `task.claim` carried no `runtime` at all.
+     */
+    readonly claimedRuntime?: RuntimeId;
+    /**
+     * The capability block the CLAIMING adapter reported for ITSELF on that same
+     * `task.claim` (`TaskClaimPayload.capabilities`), snapshotted under exactly
+     * the same write-once rule as {@link TaskAttempt.claimedRuntime}.
+     *
+     * This is the ONLY input to the steer gate (`steer-control.ts`,
+     * `ByokCloud.steerTask`). The connection-level snapshot cloud keeps —
+     * `DeviceRecord.capabilities`, written from `conn.hello`
+     * (`inbound.ts`) — describes a device BUILD and never feeds it: a device can
+     * reconnect later with a different adapter set, while a task that is already
+     * running must keep being judged against what was true when it was claimed.
+     * Same single-source rule the reference server pins
+     * (`packages/server/src/__tests__/steer-runtime-capability-gate.test.ts`).
+     *
+     * Absent for a daemon that predates the field, which the gate reads as
+     * "unknown" and refuses — unknown is not supported.
+     */
+    readonly claimedRuntimeCapabilities?: RuntimeCapabilities;
     /** Runtime-reported terminal cause from the first winning terminal. */
     readonly terminalCause?: string;
     /** Durable host cancellation authority. Its presence outranks later device terminal receipts. */
@@ -2166,6 +2538,43 @@ export interface TaskAttempt {
         readonly reason?: string;
     };
     readonly updatedAt: string;
+}
+/**
+ * One bounded page request over a tenant's task attempts.
+ *
+ * Keyset-paged by `taskId` ASCENDING, deliberately, and NOT chronologically: an
+ * attempt carries no monotonic sequence, and `updatedAt` moves under an
+ * in-flight page (a status transition would re-order rows mid-walk and let a
+ * caller skip or repeat one). `taskId` is `task_<uuid>` — stable, unique per
+ * tenant, and never rewritten — so it is the only column that gives a walk the
+ * exactly-once property. The order is therefore arbitrary but TOTAL, which is
+ * what a paged read model needs; a caller that wants recency sorts a page
+ * itself.
+ *
+ * Adding a sequence column to get chronological order was rejected: it is a
+ * migration across every composition to serve a read-model nicety, and a second
+ * ordering authority to keep consistent with the row it decorates.
+ */
+export interface TaskAttemptListQuery {
+    /** Maximum attempts in the page. Required and fail-closed: a non-positive or non-integer limit is rejected, never silently defaulted or clamped. */
+    readonly limit: number;
+    /**
+     * The `nextCursor` from the previous page — opaque to the caller, and an
+     * EXCLUSIVE lower bound on `taskId`. Absent starts at the beginning. A cursor
+     * naming a task that has since been deleted still resolves: it is a bound,
+     * not a lookup.
+     */
+    readonly cursor?: string;
+}
+export interface TaskAttemptPage {
+    readonly attempts: readonly TaskAttempt[];
+    /**
+     * Pass as the next request's `cursor`. ABSENT means this page is the end of
+     * the walk — not "start over" — so a caller stops on absence rather than on
+     * an empty page, and a page that exactly fills `limit` with nothing after it
+     * still terminates.
+     */
+    readonly nextCursor?: string;
 }
 export interface TaskAttemptStore {
     /** Called when an offer is enqueued: records the pending attempt with no owner yet. */
@@ -2216,10 +2625,28 @@ export interface TaskAttemptStore {
     get(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
     /** Batch lookup used by mailbox projection; implementations must not turn one poll into N queries. */
     getMany(tenant: TenantId, taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
-    /** First claim wins the ownership; a later claim by the same device is idempotent. No-op (returns `undefined`) for a task this tenant never offered. */
+    /**
+     * One bounded page of this tenant's attempts, keyset-paged by `taskId` — see
+     * {@link TaskAttemptListQuery} for why that key and not a timestamp.
+     * Implementations must read one page in one query (`taskId > cursor ORDER BY
+     * taskId LIMIT limit + 1`), never the whole tenant filtered in memory.
+     */
+    list(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
+    /**
+     * First claim wins the ownership; a later claim by the same device is
+     * idempotent. No-op (returns `undefined`) for a task this tenant never
+     * offered.
+     *
+     * `runtime`/`capabilities` are the claiming daemon's self-report, written
+     * ONLY by the claim that actually wins the ownership CAS — an idempotent
+     * re-claim (and a losing one) must leave the recorded snapshot untouched,
+     * including when it carries a different or absent value.
+     */
     claim(tenant: TenantId, input: {
         readonly taskId: string;
         readonly deviceId: string;
+        readonly runtime?: RuntimeId;
+        readonly capabilities?: RuntimeCapabilities;
     }): Promise<TaskAttempt | undefined>;
     /** Record a lifecycle transition. No-op (returns `undefined`) for an unknown task — same shape as the reference server's per-type handlers. */
     recordStatus(tenant: TenantId, input: {
@@ -2474,6 +2901,7 @@ export type CloudStoreName = (typeof CLOUD_STORE_NAMES)[number];
  * device-facing handler must not be able to reach them.
  */
 import { type BoardClaimInput, type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type BoardStatusUpdateInput, type BoardUnclaimInput, type CoreStores, type MailboxAdvanceCursorInput, type MailboxAppendInput, type MailboxCursorState, type MailboxMessage, type MailboxPage, type MailboxReadQuery, type MailboxRecordDeliveryInput, type Principal, type PresenceHint, type PresenceHintInput, type TenantReadiness, type StorageFinalizeInput, type StorageFinalizeResult, type StorageReservation, type StorageReservationInput, type TenantId } from '@byok-sdk/core';
+import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import type { ActivityAppendInput, ActivityTail } from './activity';
 import type { ApprovalTimelineAppendInput, ApprovalTimelineTail } from './approval-timeline';
 import type { BlobObservation, CloudStores, DeviceRecord, AgentEgressRecord, RequestReceipt, TaskCancellationMutation, TaskCancellationRequest, TaskAttempt, TaskAttemptStatus } from './stores/ports';
@@ -2551,9 +2979,12 @@ export interface TenantBoundTaskAttempts {
     }): Promise<import('./stores/ports').AgentMessageAdmission | undefined>;
     get(taskId: string): Promise<TaskAttempt | undefined>;
     getMany(taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
+    list(query: import('./stores/ports').TaskAttemptListQuery): Promise<import('./stores/ports').TaskAttemptPage>;
     claim(input: {
         readonly taskId: string;
         readonly deviceId: string;
+        readonly runtime?: RuntimeId;
+        readonly capabilities?: RuntimeCapabilities;
     }): Promise<TaskAttempt | undefined>;
     recordStatus(input: {
         readonly taskId: string;

@@ -102,7 +102,7 @@ fold 本身**不需要**它：cloud 的 `enqueueOffer`/`enqueueToolsetOffer`/`en
 - **GAP-1 `approveTask` / `rejectTask`**：新增两个 host control-plane 函数，形如 `approveTask(tenant, taskId, opts?: {approvalId?})`。实现 = 读 `ApprovalTimelineStore` tail 取当前 pending `approvalId` 做 staleness 判定（不新增 store），复用 `enqueueAgentControlEnvelope`（`cloud.ts:849`）投递 `task.approve`/`task.reject`。`StaleApprovalError` 语义搬 `hub.ts:380` 与 `hub.ts:2315,2337` 的门序。
 - **GAP-2 `steerTask` + `TaskAttempt.claimedRuntime`**：steer 的正确门是「claim 时快照的 runtime 是否声明 `steer`」（`steer-runtime-capability-gate.test.ts:129,304`：连接期声明**不**参与判定）。`TaskAttempt` 无此字段 → 加 `readonly claimedRuntime?: RuntimeId`，由 `inbound.ts` 的 `task.claim` 分支写入。牵连：`stores/in-memory/task-attempts.ts`、`cloud-dataplane/src/stores/task-attempts.ts` + 仓库根 `deploy/sql/0018_*.sql`（migration 目录在 **repo root `deploy/sql/`**，不在 `packages/cloud-dataplane/` 下；今天存在 `0001`–`0017`，最新 `0017_agent_message_admission.sql`，故下一号是 0018——verified）、`conformance/src/cloud/task-attempts.ts` 一条用例。
   **为什么 `claimedRuntime` 不违反 ADR-028**：它是 **claim 时刻的一次性快照**，与 server 侧同名字段语义逐字相同（`packages/server/src/types.ts:327`：在 `Offered -> Claimed` 转换的那一刻记下 claim 设备自报的 runtime，重投的幂等 claim 不会覆盖它）；ADR-028 禁的是云端持有**运行中中间态**（`running`/`thinking`/`awaiting_approval`/live turn/PID/当前工具调用），即随 Attempt 执行过程持续变化的量。`claimedRuntime` 写入一次、此后不变，是 Attempt 的归属事实而非执行态，落在 ADR-028 允许的范围内。
-- **GAP-3 `cursor_too_old`**：`MailboxStore.collectRetired` 会把未 ack 行标 `expired`（`mailbox.ts:116-138`），但 `handlers/events.ts` 不区分「cursor 落在已回收区」与「空页」，返回 200 空。client 有该分支（`long-poll-transport.ts:578`）却永远收不到 → **今天就是 embedded/hosted 的行为分叉**。最小补法：`readAfter` 返回 `recoverableFrom`（页里最早可恢复 seq），`events.ts` 在 `cursor < recoverableFrom` 时返 409 `{error:'cursor_too_old', recoverableFrom}`，与 `http.ts:386` 同形。
+- **GAP-3 `cursor_too_old`**：`MailboxStore.collectRetired` 会把未 ack 行标 `expired`（**`packages/core/src/mailbox.ts`**，port 在 core 不在 cloud；in-memory 实现 `packages/core/src/in-memory/mailbox.ts`，dataplane 实现 `packages/cloud-dataplane/src/stores/core/mailbox.ts`——Step 1c 已按此落地），但 `handlers/events.ts` 不区分「cursor 落在已回收区」与「空页」，返回 200 空。client 有该分支（`long-poll-transport.ts:578`）却永远收不到 → **今天就是 embedded/hosted 的行为分叉**。最小补法：`readAfter` 返回 `recoverableFrom`（页里最早可恢复 seq），`events.ts` 在 `cursor < recoverableFrom` 时返 409 `{error:'cursor_too_old', recoverableFrom}`，与 `http.ts:386` 同形。
 - **GAP-4 `TaskAttemptStore.list(tenant, {limit, cursor})`**：有界游标分页。三处实现 + conformance 一条。
 - **GAP-5 真实 `InboundRateLimiter`**：把 `rate-limiter.ts:81` 的 token bucket 改造成 `InboundRateLimiter` 实现，**放在 `@byok-sdk/server`**（它是自托管部署的策略选择；hosted 的预算在边缘，`stores/in-memory/rate-limiter.ts:4-7` 已说明）。cloud 不动。
 - **GAP-6（安全，必须同刀）** `auth/bearer.ts` 的 instance-product 检查：本刀让 embedded 部署走 cloud 的 bearer 路径，`tasks/todos.md:17` 记录的「两侧安全姿态不对齐」会从「文档已知」变成「embedded 实际降级」。裁法：给 `createByokCloud` 增一个 **可选** `instanceProductId`；给定时 bearer 强制 `claims.productId === instanceProductId`，不给定时维持 row==claims。`createByokServer({productId})` 永远传它 → embedded 侧行为等价保持。不是 fallback：两种部署形态各有一个显式权威值。
@@ -216,7 +216,7 @@ createByokServer()
 7. **cursor 重放**：断开、重放旧 cursor、同页原样返回；ack 单调；超回收区返 409 `cursor_too_old`（锁 GAP-3）。
 8. **inbound dedup + 跨设备 ownership 拒绝**：同 `message_id` 二次提交为 duplicate；非 owner 设备的 `task.complete` 被拒。
 9. **capability 准入在 mailbox append 之前**：缺 Agent capability 的设备被拒时，`tasks.list()` 无该 task、mailbox 无行（锁 `cloud.ts:814-819` 的顺序）。
-10. **rate limit episode**：超限 → 拒 + `stats().rateLimitEvents` 增 1 → 恢复后放行（锁 GAP-5 不被 allow-all 悄悄吃掉）。
+10. **rate limit episode**：超限 → 拒 + `stats().rateLimitEvents` **每个被拒 envelope +1**（episode 级合并只作用于 `device.rate_limited` 事件；Step 0 case 10 已钉实际行为，原稿「增 1」措辞有误）→ 恢复后放行（锁 GAP-5 不被 allow-all 悄悄吃掉）。
 
 ---
 
@@ -265,7 +265,7 @@ readAgentHomeProjection(deviceId, requestId): Promise<AgentHomeProjectionStatusR
   回滚：revert 三个 commit；migration 未在任何环境应用前可直接删文件，已应用则补 `0019` 反向 migration（本子步是唯一一处需要正向/反向两支的地方）。
 
 - **Step 1c — `cursor_too_old`（GAP-3）**
-  改动：`MailboxStore.readAfter` 返回 `recoverableFrom`（`mailbox.ts:116-138` 的 `collectRetired` 已把未 ack 行标 `expired`）；`handlers/events.ts` 在 `cursor < recoverableFrom` 时返 409 `{error:'cursor_too_old', recoverableFrom}`，与 `http.ts:386` 同形。
+  改动：`MailboxStore.readAfter` 返回 `recoverableFrom`（`packages/core/src/mailbox.ts` 的 `collectRetired` 已把未 ack 行标 `expired`；floor 只随 expiry 移动，ack 后 retire 不动——与 `hub.ts` ring eviction 语义一致）；`handlers/events.ts` 在 `cursor < recoverableFrom` 时返 409 `{error:'cursor_too_old', recoverableFrom}`，与 `http.ts:386` 同形。
   出口：`bun run build && bun run typecheck && bun run test`；conformance 新增「cursor 落在已回收区 → 409 而非 200 空页」；client 侧 `long-poll-transport.ts:578` 的分支从死码变为可达（本子步只证明 kernel 端会发，client 侧不改）。
   回滚：单 commit revert（回到今天的 200 空页行为）。
 
