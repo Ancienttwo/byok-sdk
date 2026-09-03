@@ -1,7 +1,13 @@
+> **Archived**: 2026-09-03 08:47
+> **Related Plan**: plans/archive/plan-20260903-0436-agent-home-single-writer.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260903-0847
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: (archive-workflow)
+> **Updated**: 2026-08-26 14:08
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.

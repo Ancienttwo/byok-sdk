@@ -1,6 +1,6 @@
 # Plan: Canonical Agent home single active Attempt gate (WP0)
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260903-0436
 > **Slug**: agent-home-single-writer
 > **Artifact Level**: work-package

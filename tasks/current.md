@@ -1,13 +1,23 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-09-01T21:01:50+0800 -->
+<<<<<<< HEAD
+<!-- updated_at: 2026-09-03T08:43:37+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-09-01T21:01:50+0800
-> **Source Branch**: codex/issues-112-121-ci-regate
-> **Source Commit**: 322bb08
+> **Updated At**: 2026-09-03T08:43:37+0800
+> **Source Branch**: codex/api-surface-golden
+> **Source Commit**: ed39e49
+=======
+<!-- updated_at: 2026-09-03T08:47:56+0800 -->
+<!-- stale_after: 24h -->
+
+> **Status**: Idle
+> **Updated At**: 2026-09-03T08:47:56+0800
+> **Source Branch**: codex/agent-home-single-writer
+> **Source Commit**: fe4ac5a
+>>>>>>> 21a3658 (chore(workflow): archive agent-home-single-writer closeout)
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -17,11 +27,11 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Current Focus
 
-- Status: ManualClearedWithActiveWork
+- Status: Idle
 - Active Plan: (none)
 - Plan Status: (none)
-- Next Task: inspect active worktree marker(s)
-- Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
+- Next Task: (none)
+- Clear Note: (none)
 
 ## Mainline Snapshot Reading
 
@@ -31,8 +41,12 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- linked-worktree-97eccea44efe: plans/plan-20260826-1405-agent-provider-profile-binding.md
-- linked-worktree-97eccea44efe: active-worktree owner -> self
+<<<<<<< HEAD
+- linked-worktree-f1e0ca263dd8: plans/plan-20260903-0436-agent-home-single-writer.md
+- linked-worktree-f1e0ca263dd8: active-worktree owner -> self
+=======
+- (none)
+>>>>>>> 21a3658 (chore(workflow): archive agent-home-single-writer closeout)
 ## Active Sprint
 
 - Sprint: (none)
@@ -41,7 +55,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: Stage the completed module diff first; then run /check and let canonical workflow gates determine whether review, external acceptance, verification, or worktree finish is next. Command: /check
+- Exact Next Step: (none)
 
 ## Checks
 
@@ -52,16 +66,29 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260901-1128-issues-112-121-security-reliability-batch.md
- D tasks/contracts/20260901-1128-issues-112-121-security-reliability-batch.contract.md
- D tasks/notes/20260901-1128-issues-112-121-security-reliability-batch.notes.md
- D tasks/reviews/20260901-1128-issues-112-121-security-reliability-batch.review.md
+<<<<<<< HEAD
+ D plans/plan-20260903-0410-api-surface-golden.md
+ D tasks/contracts/20260903-0410-api-surface-golden.contract.md
+ D tasks/notes/20260903-0410-api-surface-golden.notes.md
+ D tasks/reviews/20260903-0410-api-surface-golden.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260901-1128-issues-112-121-security-reliability-batch.md
-?? tasks/archive/contract-20260901-2101-issues-112-121-security-reliability-batch.md
-?? tasks/archive/notes-20260901-2101-issues-112-121-security-reliability-batch.md
-?? tasks/archive/review-20260901-2101-issues-112-121-security-reliability-batch.md
-?? tasks/archive/todo-20260901-2101-issues-112-121-security-reliability-batch.md
+?? plans/archive/plan-20260903-0410-api-surface-golden.md
+?? tasks/archive/contract-20260903-0843-api-surface-golden.md
+?? tasks/archive/notes-20260903-0843-api-surface-golden.md
+?? tasks/archive/review-20260903-0843-api-surface-golden.md
+?? tasks/archive/todo-20260903-0843-api-surface-golden.md
+=======
+ D plans/plan-20260903-0436-agent-home-single-writer.md
+ D tasks/contracts/20260903-0436-agent-home-single-writer.contract.md
+ D tasks/notes/20260903-0436-agent-home-single-writer.notes.md
+ D tasks/reviews/20260903-0436-agent-home-single-writer.review.md
+ M tasks/todos.md
+?? plans/archive/plan-20260903-0436-agent-home-single-writer.md
+?? tasks/archive/contract-20260903-0847-agent-home-single-writer.md
+?? tasks/archive/notes-20260903-0847-agent-home-single-writer.md
+?? tasks/archive/review-20260903-0847-agent-home-single-writer.md
+?? tasks/archive/todo-20260903-0847-agent-home-single-writer.md
+>>>>>>> 21a3658 (chore(workflow): archive agent-home-single-writer closeout)
 ```
 
 ## Source Artifacts
