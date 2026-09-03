@@ -1,7 +1,7 @@
 /**
  * `GET /byok/events?cursor=N` — the long-poll receive half (§8).
  *
- * Three properties the daemon's transport depends on, reproduced against the
+ * Four properties the daemon's transport depends on, reproduced against the
  * core mailbox rather than an in-process outbox:
  *
  * - **Reading is not acknowledging.** `readAfter` never moves the cursor. The
@@ -19,6 +19,12 @@
  *   registered waiter: a waiter map is exactly the cross-request state a
  *   stateless handler may not keep (S3.5 boxes 14-15), and a second cloud
  *   instance would not see it anyway.
+ * - **A lost cursor fails closed.** A cursor below the mailbox's retained
+ *   window is answered `409 { error: 'cursor_too_old', recoverableFrom }`, the
+ *   same body the reference server returns (`packages/server/src/http.ts:386`)
+ *   and the only one the daemon's transport can turn into a resync. Serving
+ *   such a caller a 200 would hand it a partial tail it has no way to tell
+ *   apart from a complete one.
  */
 import type { Context } from 'hono';
 import { isCoreConflictError } from '@byok-sdk/core';
@@ -88,6 +94,17 @@ export function eventsHandler(deps: EventsRouteDeps) {
           afterSeq: scanCursor,
           limit: deps.pageLimit,
         });
+        // The replay floor, against the cursor the CALLER brought — never
+        // `scanCursor`, which this request moves on its own. Same rule as the
+        // reference server's `assertReplayAvailable`
+        // (`packages/server/src/hub.ts:2519`): a caller at `recoverableFrom - 1`
+        // can still be handed the first retained row, anything lower has lost
+        // rows and must resync rather than silently resume from a partial tail.
+        // Evaluated on every read, so a sweep that lands mid-hold ends the hold
+        // with the 409 the caller now deserves instead of an empty 200.
+        if (cursor < page.recoverableFrom - 1) {
+          return c.json({ error: 'cursor_too_old', recoverableFrom: page.recoverableFrom }, 409);
+        }
         if (page.messages.length === 0) break;
         const decoded: Envelope[] = page.messages.map((message) => decodeEnvelope(message.body));
         const offeredTaskIds = decoded.flatMap((event) =>

@@ -196,7 +196,35 @@ export class PostgresMailboxStore implements MailboxStore {
       // The returned position is a READ cursor and moves no ack.
       nextSeq: page.at(-1)?.seq ?? query.afterSeq,
       hasMore: result.rows.length > page.length,
+      recoverableFrom: await this.#recoverableFrom(tenant, query.deviceId),
     };
+  }
+
+  /**
+   * One past the highest row this device lost, which is exactly the highest
+   * `expired` seq — `1` when it has lost nothing.
+   *
+   * No column and no migration, because `collectRetired` never deletes an
+   * unacked row: §12.7.5 keeps the dead letter, so the loss is already durable
+   * in `outbox` and a stored floor would be a second authority free to drift
+   * from the sweep that moved it. Whatever eventually reaps dead letters (S4B,
+   * O-009) is the change that has to carry this floor forward instead.
+   *
+   * `acked` rows are not counted: a consumed row is not a lost one.
+   *
+   * Read AFTER the page on purpose. A sweep landing between the two reads can
+   * only report a floor HIGHER than the page it accompanies, which makes the
+   * caller fail closed over a page that may already be missing rows; reading
+   * the floor first would report one too low and serve that gap silently.
+   */
+  async #recoverableFrom(tenant: TenantId, deviceId: string): Promise<number> {
+    const result = await this.#pool.query<{ readonly recoverable_from: bigint }>(
+      `SELECT (COALESCE(MAX(seq), 0) + 1)::bigint AS recoverable_from
+         FROM outbox
+        WHERE tenant_id = $1 AND device_id = $2 AND state = 'expired'`,
+      [tenant, deviceId],
+    );
+    return Number(result.rows[0]!.recoverable_from);
   }
 
   async advanceCursor(
