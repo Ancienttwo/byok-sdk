@@ -1,6 +1,6 @@
 # Plan: Domain model and authority ADR ledger (WP2)
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260903-0442
 > **Slug**: domain-model-adr
 > **Artifact Level**: work-package

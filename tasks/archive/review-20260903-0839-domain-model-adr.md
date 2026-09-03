@@ -1,3 +1,9 @@
+> **Archived**: 2026-09-03 08:39
+> **Related Plan**: plans/archive/plan-20260903-0442-domain-model-adr.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260903-0839
+
 # Task Review: domain-model-adr
 
 > **Status**: Accepted

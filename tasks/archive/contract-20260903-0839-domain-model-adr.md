@@ -1,6 +1,12 @@
+> **Archived**: 2026-09-03 08:39
+> **Related Plan**: plans/archive/plan-20260903-0442-domain-model-adr.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260903-0839
+
 # Task Contract: domain-model-adr
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260903-0442-domain-model-adr.md
 > **Task Profile**: docs-only
 > **Workflow Profile**: strict
