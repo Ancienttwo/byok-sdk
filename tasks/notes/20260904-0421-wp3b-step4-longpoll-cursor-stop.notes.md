@@ -9,7 +9,7 @@
 
 ## Baseline
 
-- Dependent base: accepted WP3B Step 2 head `426c1161b76d28648d26a77bf8b6950dac16834c`.
+- Published base: WP3B Step 2 main publication `10bb9fc76b0a1ee3a533f50a42e869235c5c7bd1`; the original accepted worktree head `426c1161b76d28648d26a77bf8b6950dac16834c` was replaced by its tree-equivalent publication during closeout.
 - Worktree: `/Users/kito/Projects/byok-sdk-wt-wp3b-step4-daemon-longpoll`.
 - Branch: `codex/wp3b-step4-daemon-longpoll`.
 

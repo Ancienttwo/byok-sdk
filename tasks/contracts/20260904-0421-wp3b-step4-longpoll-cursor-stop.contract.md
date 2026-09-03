@@ -157,5 +157,5 @@ exit_criteria:
 
 ## Rollback Point
 
-- Commit / checkpoint: `426c1161b76d28648d26a77bf8b6950dac16834c`
+- Commit / checkpoint: `10bb9fc76b0a1ee3a533f50a42e869235c5c7bd1`
 - Revert strategy: revert the single Step 4a commit; no wire or kernel migration exists.

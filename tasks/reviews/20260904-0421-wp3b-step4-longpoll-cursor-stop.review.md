@@ -10,7 +10,7 @@
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: pending exact commit
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: `426c1161b76d28648d26a77bf8b6950dac16834c`
+> **Reviewed Target Revision**: `10bb9fc76b0a1ee3a533f50a42e869235c5c7bd1`
 
 ## Human Review Card
 
@@ -45,7 +45,7 @@
 > **Actor**: not-applicable
 > **Reviewed Subject SHA256**: pending
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: `426c1161b76d28648d26a77bf8b6950dac16834c`
+> **Reviewed Target Revision**: `10bb9fc76b0a1ee3a533f50a42e869235c5c7bd1`
 > **Verification Evidence SHA256**: pending
 > **Issued At**: pending
 

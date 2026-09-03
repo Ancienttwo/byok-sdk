@@ -1,12 +1,12 @@
 # Plan: WP3B Step 4a: durable long-poll ack and cancellable stop
 
-> **Status**: Verifying
+> **Status**: Review
 > **Created**: 20260904-0421
 > **Slug**: wp3b-step4-longpoll-cursor-stop
 > **Artifact Level**: work-package
 > **Promotion Reason**: Owner approved the bounded next slice on 2026-09-04: long-poll read/ack separation and `LongPollClient.stop()` cancellation, including restoration of the five deferred end-to-end guards.
 > **Verification Boundary**: focused client regression set, full client suite, then repository required checks.
-> **Rollback Surface**: one dependent commit on `codex/wp3b-step4-daemon-longpoll`, based on accepted Step 2 head `426c116`.
+> **Rollback Surface**: one commit on `codex/wp3b-step4-daemon-longpoll`, based on published Step 2 main `10bb9fc`.
 > **Task Contract**: `tasks/contracts/20260904-0421-wp3b-step4-longpoll-cursor-stop.contract.md`
 > **Task Review**: `tasks/reviews/20260904-0421-wp3b-step4-longpoll-cursor-stop.review.md`
 > **Implementation Notes**: `tasks/notes/20260904-0421-wp3b-step4-longpoll-cursor-stop.notes.md`
@@ -48,7 +48,7 @@
 - Pre-fix evidence: `tasks/notes/20260904-0421-wp3b-step4-longpoll-cursor-stop.pre-fix.txt` contains the named guard command and non-zero `PRE_FIX_EXIT`.
 - Evaluator rubric: five formerly skipped real-kernel cases execute and pass; held GET ends promptly after stop; no protocol/cloud/server diff.
 - Stop condition: any required wire/kernel change or failure to make the existing guards non-vacuous.
-- Rollback surface: one dependent commit based on `426c116`.
+- Rollback surface: one commit based on published Step 2 main `10bb9fc`.
 
 ## Promotion Gate
 
