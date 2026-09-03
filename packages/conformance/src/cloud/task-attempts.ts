@@ -14,7 +14,7 @@
  * in the tenant it guessed into.
  */
 import { describe, expect, it } from 'vitest';
-import { TENANT_A } from './fixtures';
+import { TENANT_A, TENANT_B } from './fixtures';
 import { withCloudComposition, type CloudCompositionFactory } from './harness';
 
 export function runTaskAttemptConformance(factory: CloudCompositionFactory): void {
@@ -167,6 +167,84 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
         const stored = await stores.tasks.get(TENANT_A, 'task-1');
         expect(stored?.claimedRuntime).toBe('pi');
         expect(stored?.claimedRuntimeCapabilities).toEqual({ steer: true });
+      });
+    });
+
+    /**
+     * `list` is the tenant-level read model the host façade pages over. The
+     * property that matters is the WALK: every attempt exactly once, no gaps and
+     * no repeats, across page boundaries. Keyset by `taskId` is what buys it —
+     * a chronological cursor would re-order rows under an in-flight walk every
+     * time a status transition restamped `updatedAt`.
+     */
+    it('pages the whole tenant exactly once, in taskId order, with no gaps or repeats', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        // Deliberately opened out of order: the page order must come from the
+        // key, not from insertion.
+        const ids = ['task-3', 'task-1', 'task-5', 'task-2', 'task-4'];
+        for (const taskId of ids) {
+          await stores.tasks.open(TENANT_A, { taskId, deviceId: 'device-1' });
+        }
+
+        const walked: string[] = [];
+        let cursor: string | undefined;
+        let pages = 0;
+        do {
+          const page = await stores.tasks.list(TENANT_A, {
+            limit: 2,
+            ...(cursor === undefined ? {} : { cursor }),
+          });
+          expect(page.attempts.length).toBeLessThanOrEqual(2);
+          walked.push(...page.attempts.map((attempt) => attempt.taskId));
+          cursor = page.nextCursor;
+          pages += 1;
+          expect(pages).toBeLessThan(10);
+        } while (cursor !== undefined);
+
+        expect(walked).toEqual([...ids].sort());
+      });
+    });
+
+    it('ends the walk on an absent cursor, including when the last page exactly fills the limit', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        await stores.tasks.open(TENANT_A, { taskId: 'task-1', deviceId: 'device-1' });
+        await stores.tasks.open(TENANT_A, { taskId: 'task-2', deviceId: 'device-1' });
+
+        const full = await stores.tasks.list(TENANT_A, { limit: 2 });
+        expect(full.attempts.map((attempt) => attempt.taskId)).toEqual(['task-1', 'task-2']);
+        expect(full.nextCursor).toBeUndefined();
+      });
+    });
+
+    it('answers an empty tenant with an empty page and no cursor', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        const page = await stores.tasks.list(TENANT_A, { limit: 10 });
+        expect(page.attempts).toEqual([]);
+        expect(page.nextCursor).toBeUndefined();
+      });
+    });
+
+    it('never pages one tenant into another', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        await stores.tasks.open(TENANT_A, { taskId: 'task-1', deviceId: 'device-1' });
+        await stores.tasks.open(TENANT_B, { taskId: 'task-2', deviceId: 'device-2' });
+
+        const a = await stores.tasks.list(TENANT_A, { limit: 10 });
+        expect(a.attempts.map((attempt) => attempt.taskId)).toEqual(['task-1']);
+        const b = await stores.tasks.list(TENANT_B, { limit: 10 });
+        expect(b.attempts.map((attempt) => attempt.taskId)).toEqual(['task-2']);
+
+        // A cursor from one tenant's walk cannot pull the other tenant's rows in.
+        const crossed = await stores.tasks.list(TENANT_A, { limit: 10, cursor: 'task-1' });
+        expect(crossed.attempts).toEqual([]);
+      });
+    });
+
+    it('rejects a non-positive or non-integer limit instead of defaulting one', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        for (const limit of [0, -1, 2.5, Number.NaN]) {
+          await expect(stores.tasks.list(TENANT_A, { limit })).rejects.toThrow();
+        }
       });
     });
 

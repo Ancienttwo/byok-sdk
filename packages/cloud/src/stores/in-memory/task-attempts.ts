@@ -17,10 +17,13 @@
  */
 import { tenantKey, type Clock, type TenantId } from '@byok-sdk/core';
 import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
+import { assertTaskAttemptListLimit } from '../../coordination';
 import {
   type AgentMessageAdmission,
   type AgentRef,
   type TaskAttempt,
+  type TaskAttemptListQuery,
+  type TaskAttemptPage,
   type TaskAttemptStatus,
   type TaskAttemptStore,
 } from '../ports';
@@ -152,6 +155,27 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
       const attempt = this.#state.attempts.get(tenantKey(tenant, taskId));
       return attempt === undefined ? [] : [attempt];
     });
+  }
+
+  async list(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage> {
+    assertTaskAttemptListLimit(query.limit);
+    const cursor = query.cursor;
+    // Filtered on the row's OWN tenant rather than on a key prefix: the
+    // attempt carries its tenant, so this cannot be widened by a tenant id that
+    // happens to prefix another.
+    const matches = [...this.#state.attempts.values()]
+      .filter((attempt) => attempt.tenantId === tenant)
+      .filter((attempt) => cursor === undefined || attempt.taskId > cursor)
+      .sort((left, right) => (left.taskId < right.taskId ? -1 : left.taskId > right.taskId ? 1 : 0));
+    // One over the limit is what tells "this page is full" apart from "there is
+    // more" without a second count query.
+    const attempts = matches.slice(0, query.limit);
+    const hasMore = matches.length > attempts.length;
+    const last = attempts.at(-1);
+    return {
+      attempts,
+      ...(hasMore && last !== undefined ? { nextCursor: last.taskId } : {}),
+    };
   }
 
   async claim(

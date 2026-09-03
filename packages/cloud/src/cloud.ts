@@ -178,6 +178,8 @@ import type {
   PairingCodeInfo,
   RequestReceipt,
   TaskAttempt,
+  TaskAttemptListQuery,
+  TaskAttemptPage,
   TaskAttemptStatus,
 } from './stores/ports';
 import { projectTerminalResult, type TerminalResult } from './terminal-result';
@@ -528,6 +530,16 @@ export interface ByokCloud {
     payload: TaskSteerPayload,
   ): Promise<EnqueuedAgentControl>;
   readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
+  /**
+   * Host control plane: one bounded page of this tenant's task attempts,
+   * keyset-paged by `taskId` — see {@link TaskAttemptListQuery} for why the key
+   * is the task id and not a timestamp, and why the walk terminates on an
+   * absent `nextCursor` rather than on an empty page.
+   *
+   * A non-positive or non-integer `limit` is rejected
+   * (`coordination_input_invalid`), never defaulted: the host names the bound.
+   */
+  listTaskAttempts(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
   /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
   readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
   /** Exact durable egress fact and receipt selected by (tenant, device, event id). */
@@ -1553,6 +1565,10 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     readTaskAttempt(tenant, taskId) {
       return tenantStoresFor(controlPlane(tenant), root).tasks.get(taskId);
+    },
+
+    listTaskAttempts(tenant, query) {
+      return tenantStoresFor(controlPlane(tenant), root).tasks.list(query);
     },
 
     readTerminalReceipt(tenant, taskId) {

@@ -53,6 +53,22 @@ export function assertBoardLabels(
   }
 }
 
+/**
+ * The page bound on {@link TaskAttemptStore.list}. Fail-closed rather than
+ * defaulted or clamped: a caller that asks for `0`, `-1`, `2.5`, or `Infinity`
+ * has a bug, and answering it with a silently substituted limit hides that bug
+ * behind a plausible page. Enforced in the STORE rather than only at the
+ * façade, because the port is reachable directly by a host composition.
+ */
+export function assertTaskAttemptListLimit(limit: number): void {
+  if (!Number.isSafeInteger(limit) || limit <= 0) {
+    throw new ByokCloudError(
+      'coordination_input_invalid',
+      `Task attempt list limit must be a positive integer; received ${String(limit)}.`,
+    );
+  }
+}
+
 export function validateActivityEvents(
   events: readonly AgentEventOrUnknown[],
   dropped: number,

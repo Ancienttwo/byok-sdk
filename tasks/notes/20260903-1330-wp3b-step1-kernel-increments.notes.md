@@ -4,7 +4,7 @@
 > **Plan**: plans/plan-20260903-1330-wp3b-step1-kernel-increments.md
 > **Contract**: tasks/contracts/20260903-1330-wp3b-step1-kernel-increments.contract.md
 > **Review**: tasks/reviews/20260903-1330-wp3b-step1-kernel-increments.review.md
-> **Last Updated**: 2026-09-03 14:15
+> **Last Updated**: 2026-09-03 14:30
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -200,9 +200,115 @@ git diff --stat origin/main..HEAD -- packages/server  -> empty
 
 - `bun run check:api-surface` fails on `@byok-sdk/cloud` and `@byok-sdk/core`, **additive-only** (0 removed lines across both diffs): core gains `MailboxPage.recoverableFrom`; cloud gains `ByokCloudObserver`, `InboundCommitted`, `ByokCloudOptions.observer`, on top of 1a/1e's additions. `@byok-sdk/cloud-dataplane` is unaffected — `#recoverableFrom` is a private method. Goldens are regenerated once at the end of the slice per the plan's T2; deliberately not touched here.
 
+## Sub-step 1b — `claimedRuntime` + migration 0018 + `steerTask` (GAP-2)
+
+Commit `934ad14` — `feat(cloud): TaskAttempt.claimedRuntime at claim and steerTask gated on it`
+
+Files touched:
+
+- `packages/cloud/src/stores/ports.ts` — `TaskAttempt.claimedRuntime?: RuntimeId` and `TaskAttempt.claimedRuntimeCapabilities?: RuntimeCapabilities`; `TaskAttemptStore.claim` takes optional `runtime`/`capabilities`.
+- `packages/cloud/src/stores/in-memory/task-attempts.ts` — snapshot written inside the branch that already decides the ownership CAS.
+- `packages/cloud-dataplane/src/stores/task-attempts.ts` — snapshot written by the SAME guarded `UPDATE`; two columns added to `TaskRow`, `TASK_SELECT_COLUMNS`, and `taskRowToAttempt`.
+- `deploy/sql/0018_task_attempt_claimed_runtime.sql` — new, two nullable columns, no backfill.
+- `tests/sql/control_plane_invariants.sql` — one header line claiming 0018 (see Deviations).
+- `packages/cloud/src/inbound.ts` — the `task.claim` branch forwards `payload.runtime` / `payload.capabilities`.
+- `packages/cloud/src/tenant-stores.ts` — `TenantBoundTaskAttempts.claim` widened.
+- `packages/cloud/src/steer-control.ts` — new: `SteerRejectionCode`, `SteerRejectedError`.
+- `packages/cloud/src/cloud.ts` — `ByokCloud.steerTask` + the private gate.
+- `packages/cloud/src/index.ts` — exports `SteerRejectedError`, `SteerRejectionCode`.
+- `packages/conformance/src/cloud/task-attempts.ts` — two cases (write-once snapshot; absent stays absent).
+- `packages/cloud/src/__tests__/steer-control.test.ts` — new, 9 cases.
+
+### The steer-capability source (the decision the brief asked to record)
+
+The brief allowed either a runtime-info/capability table or the claim payload's declared capabilities, and forbade a hard-coded runtime list. Cloud has **no** capability table — `grep -rn "steer\|RuntimeCapabilities" packages/cloud/src packages/core/src` was empty before this commit — so the snapshot is **the claim payload's own `capabilities` block**, stored as `TaskAttempt.claimedRuntimeCapabilities` and read by the gate as `?.steer !== true`.
+
+That is byte-for-byte what the reference server does (`hub.ts` `onClaim` writes `TaskSnapshot.claimedRuntimeCapabilities` from `TaskClaimPayload.capabilities`; `steerTask` reads `record.claimedRuntimeCapabilities?.steer !== true`). Two consequences worth stating:
+
+- **`claimedRuntime` alone is not enough for the gate.** It is an id, and mapping `pi -> steerable` would be a second capability authority in the coordination plane that drifts the moment a runtime gains or loses the feature. `claimedRuntime` is still stored and carried on the error, because the operator-facing message needs to name the runtime; the DECISION reads only the capability block.
+- **Fail-closed on absent.** No snapshot (a daemon predating the field, an attempt claimed before 0018) refuses under `steer_unsupported_runtime`. Unknown is not supported; guessing reintroduces the permanent redelivery-cursor stall the gate exists to prevent.
+
+### Connection-level declarations cannot reach the gate
+
+Cloud's analogue of `conn.hello` state is `DeviceRecord.capabilities`, written by the bearer-authenticated `conn.hello` branch in `inbound.ts`. It is never read by the gate, as a source or as a fallback. Two tests drive the two layers to disagree in both directions and assert the claim wins — the same pin as `packages/server/src/__tests__/steer-runtime-capability-gate.test.ts:129,304`:
+
+- `conn.hello advertising steer does not flip a claim that reported steer: false`
+- `conn.hello advertising steer does not open the gate for a claim that carried nothing` (also asserts nothing was harvested into the attempt)
+
+### Gate order and error taxonomy
+
+`task_not_found` (`ByokCloudError`, matching `approveTask`) -> `task_terminal` -> `task_not_running` -> `steer_unsupported_runtime`, all before a mailbox row is allocated; every refusal case asserts the device's next poll is empty. Two deltas from the server's shape, both deliberate:
+
+- `SteerRejectedError.status` carries a `TaskAttemptStatus`, not the server's `TaskState` — cloud's vocabulary for the same fact. The three `code` strings are byte-identical, so a host's mapping survives the move off the embedded server.
+- The "no owning device" narrowing rides `task_not_running` rather than getting a fourth code: an attempt with no owner has no runtime paused on a turn, which is what that code already says. Unreachable in practice while `running` implies a prior claim.
+
+### Migration 0018
+
+Two nullable columns (`claimed_runtime text`, `claimed_runtime_capabilities jsonb`), additive, **no backfill**. A task claimed before this migration has no snapshot to reconstruct, and inventing one would open the gate on a guess; NULL reads as unknown and refuses.
+
+### Verification (1b)
+
+```
+bun run build             -> all packages, 0 errors
+bun run typecheck         -> 15 packages, 0 errors
+bun run test              -> cloud 34 files / 306 tests; server 37 files / 289 tests (unchanged); conformance 151; all packages green
+bun run --cwd packages/conformance test -> 4 files / 151 tests
+bun run check:deploy-sql  -> [deploy-sql] OK
+git diff --check          -> clean
+git diff --stat origin/main..HEAD -- packages/server -> empty
+```
+
+## Sub-step 1d — `TaskAttemptStore.list` keyset paging (GAP-4)
+
+Commit — `feat(cloud): TaskAttemptStore.list keyset paging by taskId` (the commit carrying this notes update; its own SHA cannot be written into itself)
+
+Files touched:
+
+- `packages/cloud/src/stores/ports.ts` — `TaskAttemptListQuery`, `TaskAttemptPage`, `TaskAttemptStore.list`.
+- `packages/cloud/src/stores/ports-contract.ts` — `list` added to the `tasks` method inventory.
+- `packages/cloud/src/coordination.ts` — `assertTaskAttemptListLimit`.
+- `packages/cloud/src/stores/in-memory/task-attempts.ts`, `packages/cloud-dataplane/src/stores/task-attempts.ts` — the two implementations.
+- `packages/cloud/src/tenant-stores.ts` — `TenantBoundTaskAttempts.list`.
+- `packages/cloud/src/cloud.ts` — `ByokCloud.listTaskAttempts` (pure passthrough; no unit test, per the brief).
+- `packages/cloud/src/index.ts` — exports the two types and the validator.
+- `packages/conformance/src/cloud/task-attempts.ts` — five cases.
+
+### The cursor design (the decision the brief asked to record)
+
+Keyset by **`taskId` ascending**, cursor = the last `taskId` of the previous page, used as an exclusive lower bound. Stable and total, but **not chronological**, and that is the trade:
+
+- An attempt carries no monotonic sequence. `updatedAt` moves under an in-flight walk — a status transition re-orders rows mid-page and lets a caller skip or repeat one — so a timestamp cursor cannot give exactly-once.
+- `taskId` is `task_<uuid>`: unique per tenant and never rewritten. Arbitrary order, but a total one, which is what a paged read model actually needs. A caller that wants recency sorts a page itself.
+- Adding a seq column was rejected (plan P3 iii): a migration across every composition plus a second ordering authority, to serve a read-model nicety.
+
+SQL is `WHERE tenant_id = $1 AND ($2::text IS NULL OR task_id > $2) ORDER BY task_id LIMIT $3` with `$3 = limit + 1`. The `(tenant_id, task_id)` primary key already orders exactly this way, so no new index. The extra row is what tells "page is full" apart from "there is more" without a second count query; `nextCursor` is absent on the last page, so a walk terminates on an absent cursor rather than on an empty page — a page that exactly fills `limit` with nothing after it still ends.
+
+`limit` is a **required** positive integer, validated in the STORE (`assertTaskAttemptListLimit`, throwing `coordination_input_invalid`) rather than only at the façade, because the port is reachable directly by a host composition. `0`, `-1`, `2.5`, `NaN` all reject; nothing is defaulted or clamped.
+
+The in-memory implementation filters on the row's own `tenantId` rather than on a key prefix, so it cannot be widened by a tenant id that happens to prefix another.
+
+### Verification (1d)
+
+```
+bun run build             -> all packages, 0 errors
+bun run typecheck         -> 15 packages, 0 errors
+bun run test              -> cloud 34 files / 306 tests; server 37 files / 289 tests (unchanged); conformance 156; all packages green
+bun run --cwd packages/conformance test -> 4 files / 156 tests
+bun run check:deploy-sql  -> [deploy-sql] OK
+git diff --check          -> clean
+git diff --stat origin/main..HEAD -- packages/server -> empty
+```
+
+### Known, out of scope (1b + 1d)
+
+- **The Postgres leg is UNVERIFIED locally.** `docker info` fails on this machine, so all 25 `@byok-sdk/cloud-dataplane` suites skip and the cloud conformance suite ran on the in-memory composition only. What was actually verified for `PostgresTaskAttemptStore`: it typechecks against the port, and the SQL was written against the existing `task` DDL (`deploy/sql/0001_cloud_local.sql`) plus migration 0018. The claim-snapshot `UPDATE`, the `jsonb` round trip, and the keyset `list` have NOT been executed against a real Postgres here — they need the dataplane suite in CI.
+- `bun run check:api-surface` still fails additively on `cloud`, `core`, and now `cloud-dataplane` (`TASK_SELECT_COLUMNS` is exported, so its literal type changed). Goldens are regenerated once at the end of the slice per the plan's T2; `api-surface/**` deliberately untouched here.
+
 ## Deviations From Plan Or Spec
 
 - **1c adds no `deploy/sql` migration** (the brief allowed one "if the dataplane store needs schema to know the floor"). It does not: dead-lettered rows are retained by contract, so the floor is derivable from `outbox` alone. `0018_task_attempt_claimed_runtime.sql` therefore remains sub-step 1b's number and the next worker uses 0018, not 0019.
+- **1b edits `tests/sql/control_plane_invariants.sql`, which is NOT in the contract's `allowed_paths`.** One line, forced: `check-deploy-sql-order` refuses any migration that is not claimed in that file (`SQL migration must be referenced by tests/sql/control_plane_invariants.sql`), and the contract's own exit criteria require both `deploy/sql/0018_task_attempt_claimed_runtime.sql` to exist and `bun run check:deploy-sql` to pass. The two are only jointly satisfiable there. Shape follows the precedent for a nullable-column migration (`0006_device_presence_toolsets.sql`): a header claim line, no new `DO $$` assertion — and deliberately no unverifiable assertion, since Postgres cannot run locally.
+- **1b stores a second field, `claimedRuntimeCapabilities`, alongside `claimedRuntime`.** The contract names only `claimedRuntime`, but the gate's authority is the capability block, not the runtime id; the alternative — a hard-coded `pi -> steerable` table — was explicitly forbidden. Reasoning under Sub-step 1b.
 - **1c's floor semantics are loss-only, not retention-only.** The brief phrased the floor as "lost rows to retirement/expiry"; retirement of *acked* rows is excluded, because counting it contradicts both the reference server (`hub.ts` moves the floor on eviction only) and an existing cloud assertion. Reasoning under "The load-bearing decision" above.
 
 ## Tradeoffs Considered

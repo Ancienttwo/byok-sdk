@@ -191,6 +191,7 @@ export { SteerRejectedError } from './steer-control';
 export type { SteerRejectionCode } from './steer-control';
 
 export {
+  assertTaskAttemptListLimit,
   DEFAULT_ACTIVITY_BOUNDS,
   DEFAULT_ACTIVITY_CAPACITY,
   DEFAULT_ACTIVITY_MAX_BYTES,
@@ -300,6 +301,8 @@ export type {
   RequestReceipt,
   RequestReceiptStore,
   TaskAttempt,
+  TaskAttemptListQuery,
+  TaskAttemptPage,
   TaskAttemptStatus,
   TaskAttemptStore,
   AgentRef,
