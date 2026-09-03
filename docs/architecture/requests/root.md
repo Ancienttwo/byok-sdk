@@ -2,10 +2,10 @@
 
 > **Status**: Pending
 > **Detected**: 2026-08-28T02:25:31+0800
-> **Updated**: 2026-08-29T20:31:44+0800
+> **Updated**: 2026-09-03T12:16:59+0800
 > **Severity**: high
 > **Change Type**: source-change
-> **File**: `packages/client/src/__tests__/agent-memory-entry-constraints.test.ts`
+> **File**: `packages/client/src/__tests__/fixtures/process-tree-descendant.mjs`
 > **Functional Block**: `packages`
 > **Capability ID**: `root`
 > **Matched Prefix**: `packages`
@@ -16,7 +16,7 @@
 > **Contract Files**: `packages/AGENTS.md`, `packages/CLAUDE.md`
 > **Contract Sync Required**: false
 > **Spawn Recommended**: true
-> **Open Edits**: 75
+> **Open Edits**: 88
 
 ## Required Follow-up
 
@@ -33,6 +33,19 @@
 
 | Last Event | Severity | Change Type | File | Event Key |
 | --- | --- | --- | --- | --- |
+| 2026-09-03T12:16:59+0800 | low | source-change | `packages/client/src/__tests__/fixtures/process-tree-descendant.mjs` | `sha256:6f7147e545762bfa5bf03022216ad88e3e24ef1f2395eb8542b6b168346c777d` |
+| 2026-09-03T12:16:58+0800 | low | source-change | `packages/client/src/__tests__/fixtures/probe-mcp-server.mjs` | `sha256:d960f4e1d764ceaaece558c4e3f294c01106504964cf616672e641e5189eafb4` |
+| 2026-09-03T12:16:57+0800 | low | source-change | `packages/client/src/__tests__/fixtures/prepared-operation.ts` | `sha256:58006b5eebfbd7c7f07880ccd3a79d39dce9b5acbc4b65eacf4b0185bb3bd930` |
+| 2026-09-03T12:16:56+0800 | low | source-change | `packages/client/src/__tests__/fixtures/pi-rpc-0.84.2-live-probe.mjs` | `sha256:f896227a2cdd2f011106d15cc092c5dfab6f2a163612a7424eeff42f7d90defc` |
+| 2026-09-03T12:16:54+0800 | low | source-change | `packages/client/src/__tests__/fixtures/native-agent-message-mcp.mjs` | `sha256:8d7ad21919a4041df03d8a6b88213519005a8f204c00340bafe8c109b552d465` |
+| 2026-09-03T12:16:53+0800 | low | source-change | `packages/client/src/__tests__/fixtures/fake-salesko-mcp.mjs` | `sha256:7dedc82f4c10ff90e067aed5a2d950fa96047f6e5149d79c24bc97926d809878` |
+| 2026-09-03T12:16:52+0800 | low | source-change | `packages/client/src/__tests__/fixtures/fake-pi.mjs` | `sha256:62e19f661981349ae11f3680fca1124a23eb096f4ee4d4aea1a82e8ebb1d0a61` |
+| 2026-09-03T12:16:18+0800 | low | source-change | `packages/client/src/__tests__/control-server.test.ts` | `sha256:fb07a74151d7de8a849332d49645ff3acb64fa361e4e1231bc26ba6398167049` |
+| 2026-09-03T12:16:11+0800 | low | source-change | `packages/client/src/__tests__/codex-permission-mapping.test.ts` | `sha256:f0d70a506523b2fcebee3cbb9b4838d3079f775c1efd70628ab79dabaab9d98c` |
+| 2026-09-03T12:16:09+0800 | low | source-change | `packages/client/src/__tests__/codex-agent-message-permission.test.ts` | `sha256:71c05c57e0f2e4540ab006332f7d65e036cdf7025714cf6eeab9ca84cea9d324` |
+| 2026-09-03T12:16:06+0800 | low | source-change | `packages/client/src/__tests__/claude-permission-mapping.test.ts` | `sha256:0470b1c75e12099696eef03cfcdf32a0280c4da4752cf3a945161f4b55465d2c` |
+| 2026-09-03T12:15:48+0800 | low | source-change | `packages/client/src/__tests__/agent-provider-profile-binding.test.ts` | `sha256:2b6d8d413b07d80168be8346dab4b521fce6ee76773b95a47d09fac4eb4d5a1c` |
+| 2026-09-03T12:15:30+0800 | low | source-change | `packages/client/src/__tests__/agent-home-single-writer.test.ts` | `sha256:1a503bd3d919e7a981ca0bb5547de26675f9a1dff2a84c5b288cf238d6f3a3ae` |
 | 2026-08-29T20:31:44+0800 | low | source-change | `packages/client/src/__tests__/agent-memory-entry-constraints.test.ts` | `sha256:19c548a891fe019dd789bff5859248fe604fe0f4c8b6a8837627ca8181d98fdc` |
 | 2026-08-29T20:31:43+0800 | low | source-change | `packages/client/src/__tests__/agent-memory-embedded-entry.test.ts` | `sha256:18a7039c876675eaba27801730374d0aa5282b661dffdfc507ce8e2b3a6e8b70` |
 | 2026-08-28T02:38:32+0800 | low | source-change | `packages/client/src/__tests__/fixtures/fake-codex.mjs` | `sha256:c816c6de17eadc23292e5751508ef3eed20481e99aa611f789be847693a5d65d` |
@@ -113,8 +126,8 @@
 
 ```json
 {
-  "ts": "2026-08-29T20:31:44+0800",
-  "file_path": "packages/client/src/__tests__/agent-memory-entry-constraints.test.ts",
+  "ts": "2026-09-03T12:16:59+0800",
+  "file_path": "packages/client/src/__tests__/fixtures/process-tree-descendant.mjs",
   "severity": "low",
   "functional_block": "packages",
   "capability_id": "root",
@@ -129,7 +142,7 @@
   "request_file": "docs/architecture/requests/root.md",
   "spawn_recommended": false,
   "contract_sync_required": false,
-  "event_key": "sha256:19c548a891fe019dd789bff5859248fe604fe0f4c8b6a8837627ca8181d98fdc"
+  "event_key": "sha256:6f7147e545762bfa5bf03022216ad88e3e24ef1f2395eb8542b6b168346c777d"
 }
 ```
 
@@ -137,6 +150,253 @@
 
 ```json
 [
+  {
+    "ts": "2026-09-03T12:16:59+0800",
+    "file_path": "packages/client/src/__tests__/fixtures/process-tree-descendant.mjs",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:6f7147e545762bfa5bf03022216ad88e3e24ef1f2395eb8542b6b168346c777d"
+  },
+  {
+    "ts": "2026-09-03T12:16:58+0800",
+    "file_path": "packages/client/src/__tests__/fixtures/probe-mcp-server.mjs",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:d960f4e1d764ceaaece558c4e3f294c01106504964cf616672e641e5189eafb4"
+  },
+  {
+    "ts": "2026-09-03T12:16:57+0800",
+    "file_path": "packages/client/src/__tests__/fixtures/prepared-operation.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:58006b5eebfbd7c7f07880ccd3a79d39dce9b5acbc4b65eacf4b0185bb3bd930"
+  },
+  {
+    "ts": "2026-09-03T12:16:56+0800",
+    "file_path": "packages/client/src/__tests__/fixtures/pi-rpc-0.84.2-live-probe.mjs",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:f896227a2cdd2f011106d15cc092c5dfab6f2a163612a7424eeff42f7d90defc"
+  },
+  {
+    "ts": "2026-09-03T12:16:54+0800",
+    "file_path": "packages/client/src/__tests__/fixtures/native-agent-message-mcp.mjs",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:8d7ad21919a4041df03d8a6b88213519005a8f204c00340bafe8c109b552d465"
+  },
+  {
+    "ts": "2026-09-03T12:16:53+0800",
+    "file_path": "packages/client/src/__tests__/fixtures/fake-salesko-mcp.mjs",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:7dedc82f4c10ff90e067aed5a2d950fa96047f6e5149d79c24bc97926d809878"
+  },
+  {
+    "ts": "2026-09-03T12:16:52+0800",
+    "file_path": "packages/client/src/__tests__/fixtures/fake-pi.mjs",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:62e19f661981349ae11f3680fca1124a23eb096f4ee4d4aea1a82e8ebb1d0a61"
+  },
+  {
+    "ts": "2026-09-03T12:16:18+0800",
+    "file_path": "packages/client/src/__tests__/control-server.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:fb07a74151d7de8a849332d49645ff3acb64fa361e4e1231bc26ba6398167049"
+  },
+  {
+    "ts": "2026-09-03T12:16:11+0800",
+    "file_path": "packages/client/src/__tests__/codex-permission-mapping.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:f0d70a506523b2fcebee3cbb9b4838d3079f775c1efd70628ab79dabaab9d98c"
+  },
+  {
+    "ts": "2026-09-03T12:16:09+0800",
+    "file_path": "packages/client/src/__tests__/codex-agent-message-permission.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:71c05c57e0f2e4540ab006332f7d65e036cdf7025714cf6eeab9ca84cea9d324"
+  },
+  {
+    "ts": "2026-09-03T12:16:06+0800",
+    "file_path": "packages/client/src/__tests__/claude-permission-mapping.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:0470b1c75e12099696eef03cfcdf32a0280c4da4752cf3a945161f4b55465d2c"
+  },
+  {
+    "ts": "2026-09-03T12:15:48+0800",
+    "file_path": "packages/client/src/__tests__/agent-provider-profile-binding.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:2b6d8d413b07d80168be8346dab4b521fce6ee76773b95a47d09fac4eb4d5a1c"
+  },
+  {
+    "ts": "2026-09-03T12:15:30+0800",
+    "file_path": "packages/client/src/__tests__/agent-home-single-writer.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:1a503bd3d919e7a981ca0bb5547de26675f9a1dff2a84c5b288cf238d6f3a3ae"
+  },
   {
     "ts": "2026-08-29T20:31:44+0800",
     "file_path": "packages/client/src/__tests__/agent-memory-entry-constraints.test.ts",

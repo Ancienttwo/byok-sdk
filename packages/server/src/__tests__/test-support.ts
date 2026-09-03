@@ -8,6 +8,7 @@ import {
   PROTOCOL_VERSION,
   type ConnAckPayload,
   type Envelope,
+  type EventsPollResponse,
   type RuntimeCapabilities,
   type RuntimeId,
   type RuntimeInfo,
@@ -415,4 +416,148 @@ export async function moveToAwaitApproval(
 ): Promise<void> {
   send(ws, createEnvelope('task.await_approval', { summary, approvalId }, { taskId: handle.taskId }));
   await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'AwaitApproval');
+}
+
+/**
+ * WP3B Step 0 (characterization): a fake daemon that speaks the long-poll
+ * transport (§8) and NOTHING else — `POST /byok/pair` -> `POST
+ * /byok/challenge` -> `POST /byok/token` -> `GET /byok/events` for inbound,
+ * `POST /byok/messages` for outbound. No WebSocket is ever constructed here,
+ * which is the whole point: it is the transport the server keeps after
+ * `attachWebSocket` is deleted, so a behaviour pin written against this
+ * fixture survives the fold unchanged.
+ *
+ * Split of responsibilities against the two WS fixtures above:
+ * {@link pairFakeDaemon} still owns the `/byok/pair` half (reused verbatim);
+ * the challenge/token renewal that {@link connectFakeDaemonWs} never needed
+ * (a WS device dials with its pairing token) happens here because the
+ * long-poll path is the one a real daemon renews on. The returned
+ * `accessToken` is the RENEWED one, not the pairing response's.
+ *
+ * Cursor discipline (deliberate, and the reason `next`/`replay` are two
+ * methods rather than one): the server's `EventsPollResponse.cursor` is the
+ * highest `seq` it has ASSIGNED to this device, which can run ahead of the
+ * page it just handed back (`collectRelevant` filters terminal-task
+ * entries). `next()` takes that value as the device's new ack point, exactly
+ * as a real daemon does. `replay(cursor)` deliberately does NOT touch the
+ * fixture's own cursor and hands back the raw `Response`, so a test can
+ * re-read an arbitrary point of the retained tail and inspect a 409
+ * `cursor_too_old` body rather than having it thrown away.
+ */
+export interface FakeLongPollDaemon {
+  readonly deviceId: string;
+  /** The token minted by `POST /byok/token` (the renewal), not the one `POST /byok/pair` returned. */
+  readonly accessToken: string;
+  /** Highest server `seq` this fake daemon has acked so far — `0` until the first {@link next}. */
+  cursor(): number;
+  /** One long-poll round trip at the current cursor, advancing it from the response. Throws on any non-200. */
+  next(): Promise<Envelope[]>;
+  /** Raw `GET /byok/events?cursor=<cursor>` at an EXPLICIT cursor; never advances this fixture's cursor. */
+  replay(cursor: number): Promise<Response>;
+  /** `POST /byok/messages` carrying exactly one envelope. */
+  send(envelope: Envelope): Promise<Response>;
+}
+
+export interface FakeLongPollDaemonOptions {
+  productId: string;
+  deviceName?: string;
+  identity?: FakeDeviceIdentity;
+  clientVersion?: string;
+  /** Connection-level capability flags, published in `conn.hello` exactly like {@link connectFakeDaemonWs}'s. */
+  capabilities?: string[];
+  /** Connection-level runtime discovery block — see {@link PI_RUNTIME_INFO} and friends. */
+  runtimes?: RuntimeInfo[];
+  configuredToolsets?: ToolsetId[];
+  /**
+   * Publish the `conn.hello` snapshot over `POST /byok/messages` (the
+   * long-poll equivalent of the WS handshake, and the admission authority
+   * for connection-scoped features). Default `true`. Set `false` for a
+   * device that only ever polls — it still counts as connected, because
+   * `GET /byok/events` alone registers presence.
+   */
+  announce?: boolean;
+}
+
+export async function connectFakeDaemonLongPoll(
+  baseUrl: string,
+  byok: ByokServer,
+  opts: FakeLongPollDaemonOptions,
+): Promise<FakeLongPollDaemon> {
+  const { code } = byok.pairing.createPairingCode(testPairingClaims(opts.productId));
+  const { deviceId, identity } = await pairFakeDaemon(baseUrl, code, {
+    deviceName: opts.deviceName,
+    identity: opts.identity,
+  });
+
+  const challengeRes = await fetch(`${baseUrl}/byok/challenge`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ deviceId }),
+  });
+  if (!challengeRes.ok) {
+    throw new Error(`challenge failed: ${challengeRes.status} ${await challengeRes.text()}`);
+  }
+  const { nonce } = (await challengeRes.json()) as { nonce: string };
+
+  const tokenRes = await fetch(`${baseUrl}/byok/token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ deviceId, nonce, signature: identity.signNonce(nonce) }),
+  });
+  if (!tokenRes.ok) {
+    throw new Error(`token renewal failed: ${tokenRes.status} ${await tokenRes.text()}`);
+  }
+  const { accessToken } = (await tokenRes.json()) as { accessToken: string };
+
+  let cursor = 0;
+
+  const send = (envelope: Envelope): Promise<Response> =>
+    fetch(`${baseUrl}/byok/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ messages: [envelope] }),
+    });
+
+  const replay = (at: number): Promise<Response> =>
+    fetch(`${baseUrl}/byok/events?cursor=${String(at)}`, {
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+
+  if (opts.announce !== false) {
+    const helloRes = await send(
+      createEnvelope('conn.hello', {
+        protocolVersions: [PROTOCOL_VERSION],
+        capabilities: opts.capabilities ?? [],
+        deviceId,
+        productId: opts.productId,
+        clientVersion: opts.clientVersion,
+        runtimes: opts.runtimes,
+        configuredToolsets: opts.configuredToolsets,
+      }),
+    );
+    if (!helloRes.ok) {
+      throw new Error(`conn.hello publish failed: ${helloRes.status} ${await helloRes.text()}`);
+    }
+    const helloBody = (await helloRes.json()) as { accepted: number; rejected?: number };
+    if (helloBody.accepted !== 1) {
+      throw new Error(`conn.hello was not accepted: ${JSON.stringify(helloBody)}`);
+    }
+  }
+
+  return {
+    deviceId,
+    accessToken,
+    cursor: () => cursor,
+    async next(): Promise<Envelope[]> {
+      const res = await replay(cursor);
+      if (res.status !== 200) {
+        throw new Error(`long-poll failed: ${res.status} ${await res.text()}`);
+      }
+      const body = (await res.json()) as EventsPollResponse;
+      cursor = body.cursor;
+      return body.events;
+    },
+    replay,
+    send,
+  };
 }
