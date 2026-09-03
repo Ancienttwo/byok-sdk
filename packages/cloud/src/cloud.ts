@@ -32,6 +32,7 @@ import {
 } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
+import { StaleApprovalError, pendingApproval } from './approval-control';
 import {
   BYOK_ACTIVITY_PATH,
   BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE,
@@ -175,6 +176,7 @@ import type {
   PairingCodeInfo,
   RequestReceipt,
   TaskAttempt,
+  TaskAttemptStatus,
 } from './stores/ports';
 import { projectTerminalResult, type TerminalResult } from './terminal-result';
 import { tenantStoresFor, type CloudRootStores, type TenantStores } from './tenant-stores';
@@ -190,6 +192,15 @@ export const DEFAULT_LONG_POLL_INTERVAL_MS = 250;
 export const DEFAULT_EVENTS_PAGE_LIMIT = 50;
 /** Device capability required by the strict Agent offer path. */
 export const AGENT_HOME_CONTRACT_CAPABILITY = 'agent-home-contract';
+
+/**
+ * Attempt statuses past which there is nothing left to approve or refuse. A
+ * predicate rather than a `Set`: `constraints.test.ts` keeps every in-process
+ * collection inside a store class, and this needs none.
+ */
+function isTerminalAttemptStatus(status: TaskAttemptStatus): boolean {
+  return status === 'complete' || status === 'failed' || status === 'cancelled';
+}
 
 function sameAgentRef(expected: AgentRef, actual: AgentRef | undefined): boolean {
   return actual?.agentId === expected.agentId && actual.profileRevision === expected.profileRevision;
@@ -325,6 +336,22 @@ export type AgentHomeProjectionInput = AgentHomeProjectionPayload;
 /** Exact request identity a host must echo to read back durable projection status. */
 export type AgentHomeProjectionStatusInput = AgentHomeProjectionReceiptInput;
 
+/** Optional targeting for {@link ByokCloud.approveTask}. */
+export interface ApproveTaskOptions {
+  /**
+   * Resolve THIS specific approval rather than whichever one is pending.
+   * A mismatch against the task's current pending approval throws
+   * {@link StaleApprovalError} instead of resolving the wrong thing.
+   */
+  readonly approvalId?: string;
+}
+
+/** Optional targeting and refusal cause for {@link ByokCloud.rejectTask}. */
+export interface RejectTaskOptions extends ApproveTaskOptions {
+  /** Carried to the runtime verbatim; absent stays absent on the wire. */
+  readonly reason?: string;
+}
+
 export interface EnqueuedAgentControl {
   readonly seq: number;
   readonly envelope: Envelope;
@@ -417,6 +444,49 @@ export interface ByokCloud {
   eraseAgentMemoryProjection(tenant: TenantId, agentId: string): Promise<AgentMemoryProjectionEraseResult>;
   /** Host control plane: durably request cancellation by tenant/task id. Idempotent. */
   cancelTask(tenant: TenantId, taskId: string, reason?: string): Promise<TaskAttempt>;
+  /**
+   * Host control plane: resolve the approval a paused task is waiting on, by
+   * enqueueing `task.approve` to the device that claimed it.
+   *
+   * WHICH approval is a derived fact, not a stored one — see
+   * `approval-control.ts` for the fold over the durable timeline that produces
+   * it, and why cloud adds no second authority for it. Gate order mirrors the
+   * reference server (`packages/server/src/hub.ts`), and every gate is
+   * evaluated in full before a mailbox row is allocated, so a refused call has
+   * zero side effects:
+   *
+   *   1. no such task for this tenant -> `task_not_found`;
+   *   2. nothing to resolve -> `task_not_awaiting_approval`, which covers a
+   *      terminal attempt, an unclaimed one, and a timeline with no unresolved
+   *      request (expired or never written). Checked BEFORE targeting, so it
+   *      still wins when both would apply;
+   *   3. `opts.approvalId` names an approval this task has already superseded
+   *      -> {@link StaleApprovalError}. When the daemon never reported an id
+   *      at all, the call proceeds untargeted, exactly as on the server.
+   *
+   * Delivery is a best-effort notification, the same contract the wire message
+   * has always had (`TaskApprovePayloadSchema`, `@byok-sdk/protocol`): the
+   * enqueued envelope is durable, the runtime's response to it is observable
+   * only through that task's own later messages. The outgoing `approvalId` is
+   * the caller's when given, else the pending one, else omitted.
+   */
+  approveTask(
+    tenant: TenantId,
+    taskId: string,
+    opts?: ApproveTaskOptions,
+  ): Promise<EnqueuedAgentControl>;
+  /**
+   * Host control plane: refuse the approval a paused task is waiting on, by
+   * enqueueing `task.reject` to the device that claimed it. Same gates, same
+   * targeting, and the same best-effort delivery contract as
+   * {@link ByokCloud.approveTask} — `opts.reason` is carried to the runtime
+   * verbatim and is never synthesized when absent.
+   */
+  rejectTask(
+    tenant: TenantId,
+    taskId: string,
+    opts?: RejectTaskOptions,
+  ): Promise<EnqueuedAgentControl>;
   readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
   /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
   readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
@@ -890,6 +960,68 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     return { seq: message.seq, envelope };
   }
 
+  /**
+   * The shared body of `approveTask`/`rejectTask` — one gate order, two
+   * decisions, so the two host calls cannot drift apart. See
+   * {@link ByokCloud.approveTask} for what each gate refuses and why the whole
+   * gate runs before any durable allocation.
+   */
+  async function resolveApproval(
+    tenant: TenantId,
+    taskId: string,
+    decision: 'approve' | 'reject',
+    opts: RejectTaskOptions | undefined,
+  ): Promise<EnqueuedAgentControl> {
+    const stores = tenantStoresFor(controlPlane(tenant), root);
+    const attempt = await stores.tasks.get(taskId);
+    if (attempt === undefined) {
+      throw new ByokCloudError('task_not_found', `Task ${taskId} was not found for this tenant.`);
+    }
+    if (isTerminalAttemptStatus(attempt.status)) {
+      throw new ByokCloudError(
+        'task_not_awaiting_approval',
+        `Task ${taskId} already reached ${attempt.status}; there is no approval left to ${decision}.`,
+      );
+    }
+    const pending = pendingApproval(await stores.approvals.read(taskId));
+    if (pending === undefined) {
+      throw new ByokCloudError(
+        'task_not_awaiting_approval',
+        `Task ${taskId} has no pending approval to ${decision}.`,
+      );
+    }
+    // Untargeted when the daemon never reported an id: there is nothing to
+    // disagree with, and the pending approval is the only one there is.
+    if (
+      opts?.approvalId !== undefined &&
+      pending.approvalId !== undefined &&
+      opts.approvalId !== pending.approvalId
+    ) {
+      throw new StaleApprovalError(taskId, opts.approvalId, pending.approvalId);
+    }
+    // The claiming device, not the offered one: an approval belongs to the
+    // runtime that is actually paused on it.
+    const ownerDeviceId = attempt.ownerDeviceId;
+    if (ownerDeviceId === undefined) {
+      throw new ByokCloudError(
+        'task_not_awaiting_approval',
+        `Task ${taskId} has no owning device; no runtime is paused on an approval to ${decision}.`,
+      );
+    }
+    const approvalId = opts?.approvalId ?? pending.approvalId;
+    const messageId = options.crypto.randomUuid();
+    const targeting = approvalId === undefined ? {} : { approvalId };
+    return enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>
+      decision === 'approve'
+        ? createEnvelope('task.approve', targeting, { id: messageId, taskId, seq })
+        : createEnvelope(
+            'task.reject',
+            { ...targeting, ...(opts?.reason === undefined ? {} : { reason: opts.reason }) },
+            { id: messageId, taskId, seq },
+          ),
+    );
+  }
+
   async function getAgentHomeProjectionStatus(
     tenant: TenantId,
     deviceId: string,
@@ -1290,6 +1422,14 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     completeAgentHomeProjection,
     eraseAgentMemoryProjection,
+
+    approveTask(tenant, taskId, opts) {
+      return resolveApproval(tenant, taskId, 'approve', opts);
+    },
+
+    rejectTask(tenant, taskId, opts) {
+      return resolveApproval(tenant, taskId, 'reject', opts);
+    },
 
     async cancelTask(tenant, taskId, reason) {
       const stores = tenantStoresFor(controlPlane(tenant), root);
