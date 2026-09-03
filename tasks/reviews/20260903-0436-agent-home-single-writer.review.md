@@ -8,7 +8,7 @@
 > **Last Updated**: 2026-09-03 04:44
 > **Recommendation**: pass
 > **Review Rubric Version**: 2
-> **Reviewed Subject SHA256**: sha256:a96f4a3916930a5bf2af4b329fd58c38c6e6a0fc749bb2b9e1123867328cf040
+> **Reviewed Subject SHA256**: sha256:32405f09a1b8866c310bcd3ff2d2fa88854b93253a84f50bf78173c07e3cd9e2
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 2e01c9af990a2b0b5fe43e2ad2fac27f0128c593
 
@@ -53,11 +53,11 @@ screenshot/artifact path, or reviewer observation.
 > **Reviewer**: User
 > **Source**: user-waiver
 > **Actor**: kito
-> **Reviewed Subject SHA256**: sha256:a96f4a3916930a5bf2af4b329fd58c38c6e6a0fc749bb2b9e1123867328cf040
+> **Reviewed Subject SHA256**: sha256:32405f09a1b8866c310bcd3ff2d2fa88854b93253a84f50bf78173c07e3cd9e2
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 2e01c9af990a2b0b5fe43e2ad2fac27f0128c593
-> **Verification Evidence SHA256**: sha256:3304467ee1ab414c7928c7644817ba4cfb20894f6f82dcdfff9c83ef0eeb5534
-> **Issued At**: 2026-09-02T21:31:56.781Z
+> **Verification Evidence SHA256**: sha256:a2e84b69c4e2bbcdd6c3e27ce687f09d1bfda1743d795ebcf9e1213dbfc28bc3
+> **Issued At**: 2026-09-03T00:38:44.885Z
 
 - Summary: gatekeeper: product code verified (gate placement, release semantics, config validation, counts-only status, retryable decline); M1 fixed with non-mutating canonicalHomePath + veto test, M2 barrier fixed; owner-delegated acceptance 2026-09-03
 - Findings: none
