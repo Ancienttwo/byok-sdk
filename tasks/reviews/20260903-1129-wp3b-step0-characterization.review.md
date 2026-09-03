@@ -1,16 +1,16 @@
 # Task Review: wp3b-step0-characterization
 
-> **Status**: Pending
+> **Status**: Accepted
 > **Plan**: plans/plan-20260903-1129-wp3b-step0-characterization.md
 > **Contract**: tasks/contracts/20260903-1129-wp3b-step0-characterization.contract.md
 > **Notes File**: tasks/notes/20260903-1129-wp3b-step0-characterization.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
 > **Last Updated**: 2026-09-03 12:29
-> **Recommendation**: fail
+> **Recommendation**: pass
 > **Review Rubric Version**: 2
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:82075e7c5e53f962658abfc6d0c7a366defbe589a479b072e5e72f293ca12275
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
+> **Reviewed Target Revision**: a0b183df7d29e2072248702e3132febf80f3e296
 
 ## Human Review Card
 
@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
-> **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Disposition**: user_waiver
+> **Reviewer**: User
+> **Source**: user-waiver
+> **Actor**: kito
+> **Reviewed Subject SHA256**: sha256:82075e7c5e53f962658abfc6d0c7a366defbe589a479b072e5e72f293ca12275
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: a0b183df7d29e2072248702e3132febf80f3e296
+> **Verification Evidence SHA256**: sha256:bd0e265f79cc3a7bdc394a0443df729063d84a8ec37a98e1a08f72f8f6549b58
+> **Issued At**: 2026-09-03T04:52:30.468Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: WP3B Step 0 characterization: 10 cases + long-poll fixture, zero production diff
 - Findings: none
 
 ## Behavior Diff Notes
