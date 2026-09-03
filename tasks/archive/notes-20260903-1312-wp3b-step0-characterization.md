@@ -1,3 +1,9 @@
+> **Archived**: 2026-09-03 13:12
+> **Related Plan**: plans/archive/plan-20260903-1129-wp3b-step0-characterization.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260903-1312
+
 # Implementation Notes: wp3b-step0-characterization
 
 > **Status**: Active

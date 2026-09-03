@@ -1,23 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<<<<<<< HEAD
-<!-- updated_at: 2026-09-03T08:43:37+0800 -->
-<!-- stale_after: 24h -->
-
-> **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-09-03T08:43:37+0800
-> **Source Branch**: codex/api-surface-golden
-> **Source Commit**: ed39e49
-=======
-<!-- updated_at: 2026-09-03T08:47:56+0800 -->
+<!-- updated_at: 2026-09-03T13:12:25+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Idle
-> **Updated At**: 2026-09-03T08:47:56+0800
-> **Source Branch**: codex/agent-home-single-writer
-> **Source Commit**: fe4ac5a
->>>>>>> 21a3658 (chore(workflow): archive agent-home-single-writer closeout)
+> **Updated At**: 2026-09-03T13:12:25+0800
+> **Source Branch**: codex/wp3b-step0-characterization
+> **Source Commit**: 46a0ddd
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -41,12 +31,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-<<<<<<< HEAD
-- linked-worktree-f1e0ca263dd8: plans/plan-20260903-0436-agent-home-single-writer.md
-- linked-worktree-f1e0ca263dd8: active-worktree owner -> self
-=======
 - (none)
->>>>>>> 21a3658 (chore(workflow): archive agent-home-single-writer closeout)
 ## Active Sprint
 
 - Sprint: (none)
@@ -66,29 +51,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
-<<<<<<< HEAD
- D plans/plan-20260903-0410-api-surface-golden.md
- D tasks/contracts/20260903-0410-api-surface-golden.contract.md
- D tasks/notes/20260903-0410-api-surface-golden.notes.md
- D tasks/reviews/20260903-0410-api-surface-golden.review.md
+ D plans/plan-20260903-1129-wp3b-step0-characterization.md
+ D tasks/contracts/20260903-1129-wp3b-step0-characterization.contract.md
+ D tasks/notes/20260903-1129-wp3b-step0-characterization.notes.md
+ D tasks/reviews/20260903-1129-wp3b-step0-characterization.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260903-0410-api-surface-golden.md
-?? tasks/archive/contract-20260903-0843-api-surface-golden.md
-?? tasks/archive/notes-20260903-0843-api-surface-golden.md
-?? tasks/archive/review-20260903-0843-api-surface-golden.md
-?? tasks/archive/todo-20260903-0843-api-surface-golden.md
-=======
- D plans/plan-20260903-0436-agent-home-single-writer.md
- D tasks/contracts/20260903-0436-agent-home-single-writer.contract.md
- D tasks/notes/20260903-0436-agent-home-single-writer.notes.md
- D tasks/reviews/20260903-0436-agent-home-single-writer.review.md
- M tasks/todos.md
-?? plans/archive/plan-20260903-0436-agent-home-single-writer.md
-?? tasks/archive/contract-20260903-0847-agent-home-single-writer.md
-?? tasks/archive/notes-20260903-0847-agent-home-single-writer.md
-?? tasks/archive/review-20260903-0847-agent-home-single-writer.md
-?? tasks/archive/todo-20260903-0847-agent-home-single-writer.md
->>>>>>> 21a3658 (chore(workflow): archive agent-home-single-writer closeout)
+?? plans/archive/plan-20260903-1129-wp3b-step0-characterization.md
+?? tasks/archive/contract-20260903-1312-wp3b-step0-characterization.md
+?? tasks/archive/notes-20260903-1312-wp3b-step0-characterization.md
+?? tasks/archive/review-20260903-1312-wp3b-step0-characterization.md
+?? tasks/archive/todo-20260903-1312-wp3b-step0-characterization.md
 ```
 
 ## Source Artifacts
