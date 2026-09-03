@@ -46,10 +46,10 @@
 > **Reviewed Subject SHA256**: sha256:5dbb9838e3b0b41fa4a1bd3a80fe4295d5a95bf767ea984e6268bdd6e88155c5
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 10bb9fc76b0a1ee3a533f50a42e869235c5c7bd1
-> **Verification Evidence SHA256**: sha256:a92d160b59996ad05e60bd56c07312cdc0fcfdf3b0f81e49aebf9831fce12ead
-> **Issued At**: 2026-09-03T21:03:05.580Z
+> **Verification Evidence SHA256**: sha256:eec03f0b4f3a45499d45ddd89bc878ab08f8216a4fa92f9cf7e57aae1ffac0c8
+> **Issued At**: 2026-09-03T21:10:19.586Z
 
-- Summary: WP3B Step 4a accepted after published-base rebase; durable long-poll acknowledgement, bounded local dedup, and cancellable stop passed exact-subject review.
+- Summary: WP3B Step 4a accepted on the published facade base; durable long-poll acknowledgement, bounded local dedup, cancellable stop, and completed workflow checks passed exact-subject review.
 - Findings: none
 
 ## Behavior Diff Notes
