@@ -141,12 +141,9 @@ describe('task-free Agent-home projection', () => {
     expect(attempts).toBe(3);
   });
 
-  // 2d gap: this is the same kernel long-poll read/ack mismatch as the four
-  // stalled-handler redelivery cases. The poll request advances the kernel's
-  // irreversible mailbox ack before this completion handler settles, so a
-  // restart cannot redeliver the projection whose completion returned 503.
-  // WP3B Step 4 owns the transport/wire correction and re-enables this guard.
-  it.skip('keeps the mailbox cursor behind exact completion and redelivers after daemon restart without starting a runtime', async () => {
+  // Step 4 regression: a rejected completion must leave the kernel ack behind
+  // so a fresh daemon can consume the same projection row.
+  it('keeps the mailbox cursor behind exact completion and redelivers after daemon restart without starting a runtime', async () => {
     const real = await startRealServer({ productId: 'agent-home-projection-test', longPollHoldMs: 200 });
     servers.push(real);
     const workspaceRoot = await makeRoot();
@@ -171,7 +168,9 @@ describe('task-free Agent-home projection', () => {
       // through a full default backoff sequence — same configuration as
       // `real-server-longpoll-only.test.ts`.
       backoff: { baseMs: 20, maxMs: 50, factor: 2 },
-      longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+      // Keep the first daemon from completing an automatic retry before the
+      // test can stop it; the second daemon must be the successful redelivery.
+      longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 1_000, idleDelayMs: 20 },
     });
     daemons.push(daemonA);
     const pairing = await real.createPairingCode();
@@ -232,7 +231,10 @@ describe('task-free Agent-home projection', () => {
       expect((await real.byok.readAgentHomeProjection(record.deviceId, desired('1').requestId))?.status).toBe('idempotent');
     }, { timeout: 10_000 });
     await vi.waitFor(async () => {
-      expect(await new CursorStore(storeDir).load(real.url, record.deviceId)).toBe(2);
+      // This task-free projection is the kernel mailbox's first and only row;
+      // the successful retry acknowledges that same seq rather than minting
+      // a second delivery position.
+      expect(await new CursorStore(storeDir).load(real.url, record.deviceId)).toBe(1);
     }, { timeout: 10_000 });
     expect(hookCwds).toHaveLength(2);
     expect(hookCwds[0]).toBe(path.join(await fs.realpath(hostStorageRoot), 'agents', 'agent-one'));

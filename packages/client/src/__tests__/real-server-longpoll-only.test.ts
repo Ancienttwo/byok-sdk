@@ -26,9 +26,46 @@ describe('a full task lifecycle over long-poll only, WS never connects (finding 
   let daemon: Daemon | undefined;
 
   afterEach(async () => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     await daemon?.stop();
     await real.close();
   });
+
+  it('aborts the active held GET when the daemon stops', async () => {
+    real = await startRealServer({ productId: 'test-product', longPollHoldMs: 5_000 });
+    const workspaceRoot = await tmpDir('byok-stop-workspace-');
+    const storeDir = await tmpDir('byok-stop-store-');
+    const adapter = new StubRuntimeAdapter();
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const nativeFetch = globalThis.fetch;
+    let activePollSignal: AbortSignal | null | undefined;
+    vi.stubGlobal('fetch', ((input: string | URL | Request, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes('/byok/events')) activePollSignal = init?.signal;
+      return nativeFetch(input, init);
+    }) as typeof fetch);
+
+    daemon = createDaemonWithAdapters(
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      [adapter],
+      {
+        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
+        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+      },
+    );
+
+    const pairing = await real.createPairingCode();
+    await daemon.pair(pairing.code);
+    await daemon.start();
+    await vi.waitFor(() => expect(activePollSignal).toBeDefined());
+    expect(activePollSignal?.aborted).toBe(false);
+
+    await daemon.stop();
+    daemon = undefined;
+    expect(activePollSignal?.aborted).toBe(true);
+    expect(warnings.mock.calls.some((call) => String(call[0]).includes('/byok/events failed'))).toBe(false);
+  }, 15_000);
 
   it('offer -> claim -> started -> progress -> complete all travel over GET /byok/events + POST /byok/messages', async () => {
     // A short longPollHoldMs keeps every GET /byok/events request (and thus

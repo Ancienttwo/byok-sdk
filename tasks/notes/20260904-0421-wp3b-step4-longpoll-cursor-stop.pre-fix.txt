@@ -1,0 +1,25 @@
+PRE-FIX REGRESSION RUN
+
+Command:
+bun run --cwd packages/client test -- real-server-longpoll-redelivery real-server-longpoll-stall-dedup agent-home-projection real-server-longpoll-only
+
+Regression guards:
+packages/client/src/__tests__/real-server-longpoll-redelivery.test.ts
+packages/client/src/__tests__/real-server-longpoll-stall-dedup.test.ts
+packages/client/src/__tests__/agent-home-projection.test.ts
+packages/client/src/__tests__/real-server-longpoll-only.test.ts
+
+Observed summary on unfixed 426c116 source after restoring the guards:
+Test Files  4 failed (4)
+Tests       5 failed | 8 passed (13)
+
+Failures:
+- agent-home-projection: expected pending projection to redeliver to idempotent; remained pending.
+- real-server-longpoll-only: active GET had no AbortSignal.
+- real-server-longpoll-redelivery: transient task.steer attempt count remained 1; no retry arrived.
+- real-server-longpoll-stall-dedup persistent handler: attempt count remained 1 instead of reaching 5.
+- real-server-longpoll-stall-dedup one-shot handler: attempt count remained 1 instead of reaching retry 2.
+
+The in-flight task.offer guard passed and its new wire-read counter proved the same offer was returned at least twice, so that pass was non-vacuous.
+
+PRE_FIX_EXIT=1

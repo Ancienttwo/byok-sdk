@@ -115,10 +115,9 @@ export class ConnectionManager {
    * (see `advanceCursor`) — that semantics is unchanged. `deliveredSeq`
    * advances eagerly, the instant a `task.*` envelope is admitted past
    * dedup (see `deliver`/`noteDelivered`), independent of whether its
-   * handler has even started, let alone succeeded. It exists so a
-   * long-poll re-query (`LongPollClient`'s `getCursor`) doesn't re-pull an
-   * envelope that's already been delivered once and is still in flight —
-   * `handleOffer` is NOT idempotent and must never be re-pulled while a
+   * handler has even started, let alone succeeded. It exists so a repeated
+   * read at the durable cursor does not re-dispatch an envelope already in
+   * flight — `handleOffer` must not start a second adapter session while a
    * first attempt is still running. On WS this same field is written the
    * same way, but since a live WS connection only ever pushes a given `seq`
    * once, it never has an observable effect there beyond mirroring
@@ -249,13 +248,12 @@ export class ConnectionManager {
     this.longPoll = new LongPollClient({
       serverUrl: opts.serverUrl,
       auth: opts.auth,
-      // Design A: the query cursor for the NEXT `GET /byok/events` is the
-      // same watermark `deliver()` dedupes against (see `dedupWatermark`) —
-      // normally the eager `deliveredSeq` (so an in-flight envelope isn't
-      // re-pulled), but the durable `cursor` while `stalledAtSeq` is set, so
-      // the failed envelope (and everything after it) IS re-pulled and
-      // re-attempted.
-      getCursor: () => this.dedupWatermark(),
+      // The long-poll query cursor is also the kernel's irreversible ack.
+      // Only report the successfully processed cursor here. `deliveredSeq`
+      // remains a local dedup watermark; using it on the wire would ack an
+      // in-flight envelope before its handler settles and make a later
+      // failure impossible to redeliver.
+      getCursor: () => this.cursor,
       onEnvelope: (envelope) => this.deliver(envelope),
       onServerCapabilities: (capabilities) => {
         // A WS probe can ack and switch `mode` while an older long-poll GET
@@ -599,10 +597,10 @@ export class ConnectionManager {
    *   redelivery re-attempts it — safe because every server->daemon type is
    *   documented idempotent (protocol §9).
    */
-  private deliver(envelope: Envelope): void {
+  private deliver(envelope: Envelope): boolean {
     const tracked = isCursorEnvelopeType(envelope.type) && typeof envelope.seq === 'number';
     const watermark = this.dedupWatermark();
-    if (tracked && watermark !== undefined && envelope.seq! <= watermark) return; // redelivered — idempotent skip (protocol §9)
+    if (tracked && watermark !== undefined && envelope.seq! <= watermark) return false; // redelivered — idempotent skip (protocol §9)
 
     if (tracked) {
       const seq = envelope.seq!;
@@ -615,18 +613,20 @@ export class ConnectionManager {
       // from `inFlightSeqs` in `process()`'s `finally`, never added to
       // `processedSeqs` since it failed) — that's exactly the redelivery
       // this whole mechanism exists to let through for a fresh retry.
-      if (this.inFlightSeqs.has(seq) || this.processedSeqs.has(seq)) return;
+      if (this.inFlightSeqs.has(seq) || this.processedSeqs.has(seq)) return false;
       this.inFlightSeqs.add(seq);
       this.noteDelivered(seq);
     }
 
     this.processingChain = this.processingChain.then(() => this.process(envelope, tracked));
+    return true;
   }
 
   /**
-   * Design A: the watermark `deliver()` dedupes inbound `task.*` envelopes
-   * against, and the same value `LongPollClient` queries the next
-   * `GET /byok/events` cursor with (see the constructor). Normally this is
+   * The local watermark `deliver()` dedupes inbound `task.*` envelopes
+   * against. It is deliberately NOT the long-poll query cursor: that query
+   * is the kernel acknowledgement and uses only the successfully processed
+   * `cursor` (see the constructor). Normally this local watermark is
    * `deliveredSeq` — which is always >= `cursor` (every envelope that
    * reaches `advanceCursor` already passed through `noteDelivered` first,
    * see `deliver`) — so this is the literal `max(cursor, deliveredSeq)` the
@@ -645,7 +645,7 @@ export class ConnectionManager {
    * every redelivery path (long-poll re-query AND a WS reconnect's
    * backlog replay alike), and NOT resetting it unconditionally on every
    * reconnect is what lets `deliveredSeq` keep doing its job of not
-   * re-pulling/re-dispatching something already in flight across a
+   * re-dispatching something already in flight across a
    * reconnect that happens to land while a handler is still running.
    */
   private dedupWatermark(): number | undefined {
@@ -738,7 +738,7 @@ export class ConnectionManager {
    * `noteDelivered` (the eager, in-memory watermark) stays UNCHAINED —
    * called immediately, unconditionally, regardless of `stalledAtSeq` —
    * matching `deliver()`'s own eager, unconditional call for a real
-   * envelope: its only job is "don't re-pull something already handed off,"
+   * envelope: its only job is "don't re-dispatch something already handed off,"
    * independent of outcome, and that property does not depend on FIFO
    * ordering the way the DURABLE cursor does.
    *

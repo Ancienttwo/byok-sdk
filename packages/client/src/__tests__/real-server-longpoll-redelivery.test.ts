@@ -46,22 +46,9 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
     await real.close();
   });
 
-  // 2d gap: the WP3B Step 2 façade delegates delivery to the cloud kernel's
-  // mailbox, whose ack is IRREVERSIBLE (`packages/core/src/in-memory/mailbox.ts`
-  // `readAfter` returns only `pending` rows; `advanceCursor` marks everything at
-  // or below the cursor `acked` and the old hub's 500-entry replay ring is gone —
-  // see the case 7 ruling in
-  // `tasks/notes/20260903-1505-wp3b-step2-facade-fold.notes.md`). The long-poll
-  // client acks OPTIMISTICALLY: `ConnectionManager.dedupWatermark()` returns the
-  // delivered high-water while unstalled, so the poll issued immediately after a
-  // batch is delivered carries that seq as its cursor and acks the envelope
-  // BEFORE its handler has settled. Observed against this server: poll
-  // `cursor=1` -> `[[2,'task.steer']]`, next poll `cursor=2` (ack), and every
-  // later poll at the rolled-back `cursor=1` returns `[]` forever. A stalled
-  // handler's envelope is therefore never redelivered, so the fact this case
-  // pins cannot be produced end-to-end any more. Skipped rather than loosened:
-  // the client-side optimistic ack is a real gap, not a test artifact.
-  it.skip('a polled task.steer whose handler throws leaves the persisted cursor unadvanced; a re-poll redelivers it and only then advances', async () => {
+  // Step 4 regression: the wire cursor is the kernel ack and must remain at
+  // the last successfully processed seq until this handler retry succeeds.
+  it('a polled task.steer whose handler throws leaves the persisted cursor unadvanced; a re-poll redelivers it and only then advances', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
 
     const workspaceRoot = await tmpDir('byok-e2e-workspace-');

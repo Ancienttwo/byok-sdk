@@ -46,7 +46,8 @@ export interface LongPollClientOptions {
   serverUrl: string;
   auth: AuthManager;
   getCursor: () => number | undefined;
-  onEnvelope: (envelope: Envelope) => void;
+  /** Returns false when the envelope was a local duplicate and no handler was queued. */
+  onEnvelope: (envelope: Envelope) => boolean | void;
   /**
    * Capabilities advertised by the server that produced the current poll
    * response. Called before any envelopes from that response are delivered.
@@ -127,7 +128,7 @@ export interface LongPollClientOptions {
    * `ConnectionManager` always supplies it.
    */
   isStalled?: () => boolean;
-  /** Backoff between failed poll attempts (network/HTTP errors), AND between cycles that made no cursor progress while stalled (finding P2/Fix 2a — see {@link isStalled}). The reference server holds each successful, non-stalled request open ~50s itself (protocol §8), so this only matters when a request errors outright or is stalled. Default 2s. */
+  /** Backoff between failed poll attempts (network/HTTP errors), stalled cycles, and duplicate-only cycles that made no cursor progress. The reference server holds a genuinely idle request open ~50s itself (protocol §8). Default 2s. */
   retryDelayMs?: number;
   /** Deterministic delay authority for automatic failed/stalled cycles. */
   retryDelayForAttempt?: (attempt: number, baseDelayMs: number) => number;
@@ -234,6 +235,8 @@ function extractSkippableSeq(raw: unknown): number | undefined {
  */
 export class LongPollClient {
   private running = false;
+  /** Owns exactly one active loop generation, including its held GET and retry delays. */
+  private loopAbortController: AbortController | undefined;
   /**
    * Finding R1: seqs this loop has already `console.warn`'d about for a
    * validation-failed (recognized-type, invalid-payload) entry — a poison
@@ -301,6 +304,7 @@ export class LongPollClient {
   private noteRevoked(err: unknown): boolean {
     if (!(err instanceof DeviceRevokedError)) return false;
     this.running = false;
+    this.loopAbortController?.abort();
     this.opts.onRevoked?.();
     return true;
   }
@@ -308,11 +312,16 @@ export class LongPollClient {
   start(): void {
     if (this.running) return;
     this.running = true;
-    void this.loop();
+    const controller = new AbortController();
+    this.loopAbortController = controller;
+    void this.loop(controller.signal).finally(() => {
+      if (this.loopAbortController === controller) this.loopAbortController = undefined;
+    });
   }
 
   stop(): void {
     this.running = false;
+    this.loopAbortController?.abort();
   }
 
   /**
@@ -374,9 +383,9 @@ export class LongPollClient {
     return true;
   }
 
-  private async loop(): Promise<void> {
+  private async loop(signal: AbortSignal): Promise<void> {
     let retryAttempt = 0;
-    while (this.running) {
+    while (this.running && !signal.aborted) {
       try {
         // Phase 1 — credentials. A failure here happens BEFORE any request to
         // `/byok/events` is made, so it is NOT a route failure and must not be
@@ -397,8 +406,11 @@ export class LongPollClient {
         // on are {@link LongPollRouteError}s.
         let res: Response;
         try {
-          res = await authedFetch(url, { method: 'GET' }, this.opts.auth);
+          res = await authedFetch(url, { method: 'GET', signal }, this.opts.auth);
         } catch (err) {
+          // `stop()` owns this abort. It is lifecycle completion, not a route
+          // outage, so it must not warn or publish an operational failure.
+          if (signal.aborted) return;
           // No response was ever produced (the `fetch` itself rejected) — the
           // one case where `status: undefined` is structurally true.
           if (!(err instanceof DeviceRevokedError)) {
@@ -421,7 +433,7 @@ export class LongPollClient {
           this.opts.onServerCapabilities?.([]);
           this.opts.onOperationalOutcome?.('failure');
           const baseMs = this.opts.retryDelayMs ?? 2000;
-          await sleep(this.opts.retryDelayForAttempt?.(retryAttempt++, baseMs) ?? baseMs);
+          await sleep(this.opts.retryDelayForAttempt?.(retryAttempt++, baseMs) ?? baseMs, signal);
           continue;
         }
 
@@ -432,7 +444,8 @@ export class LongPollClient {
         // effects resolve successfully (see `ConnectionManager.process`),
         // identically on both transports; `parsed.cursor` (the server's own
         // batch high-water) is intentionally not consulted for that — the
-        // client tracks its own delivery/dedup watermark instead (Design A).
+        // wire acknowledgement uses the processed cursor while the eager
+        // delivery watermark remains local to duplicate suppression.
         //
         // M4 Phase 4 (version-negotiation drill fix): the outer shape
         // (`events` array + `cursor`) is validated loosely; each entry is
@@ -493,6 +506,7 @@ export class LongPollClient {
         // in `isStalled()` starting from the NEXT cycle) without this local
         // flag closing that one-cycle gap.
         let hadValidationFailureThisBatch = false;
+        let acceptedAnyEntry = false;
         for (const raw of parsed.events) {
           let envelope: Envelope;
           try {
@@ -500,7 +514,10 @@ export class LongPollClient {
           } catch (err) {
             if (err instanceof UnknownMessageTypeError) {
               const skippableSeq = extractSkippableSeq(raw);
-              if (skippableSeq !== undefined) this.opts.onSkippedSeq?.(skippableSeq);
+              if (skippableSeq !== undefined) {
+                this.opts.onSkippedSeq?.(skippableSeq);
+                acceptedAnyEntry = true;
+              }
             } else {
               const failedSeq = extractSkippableSeq(raw);
               if (failedSeq !== undefined) {
@@ -525,14 +542,18 @@ export class LongPollClient {
             }
             continue;
           }
-          this.opts.onEnvelope(envelope);
+          if (this.opts.onEnvelope(envelope) !== false) acceptedAnyEntry = true;
         }
 
         if (parsed.events.length === 0) {
           retryAttempt = 0;
           this.opts.onOperationalOutcome?.('success');
-          await sleep(this.opts.idleDelayMs ?? 250);
-        } else if (this.opts.isStalled?.() || hadValidationFailureThisBatch) {
+          await sleep(this.opts.idleDelayMs ?? 250, signal);
+        } else if (
+          this.opts.isStalled?.() ||
+          hadValidationFailureThisBatch ||
+          (!acceptedAnyEntry && this.opts.getCursor() === cursor)
+        ) {
           // Finding P2 (Fix 2a) / R1: a non-empty batch while stalled (or
           // one that just NOW triggered the stall — see
           // `hadValidationFailureThisBatch`'s own doc comment for why that
@@ -541,7 +562,7 @@ export class LongPollClient {
           // HTTP attempt gets, instead of looping back immediately at RTT.
           this.opts.onOperationalOutcome?.('failure');
           const baseMs = this.opts.retryDelayMs ?? 2000;
-          await sleep(this.opts.retryDelayForAttempt?.(retryAttempt++, baseMs) ?? baseMs);
+          await sleep(this.opts.retryDelayForAttempt?.(retryAttempt++, baseMs) ?? baseMs, signal);
         } else {
           retryAttempt = 0;
           this.opts.onOperationalOutcome?.('success');
@@ -555,10 +576,10 @@ export class LongPollClient {
         // the mis-attribution this split removed.
         this.opts.onServerCapabilities?.([]);
         if (this.noteRevoked(err)) return;
-        if (!this.running) return;
+        if (!this.running || signal.aborted) return;
         this.opts.onOperationalOutcome?.('failure');
         const baseMs = this.opts.retryDelayMs ?? 2000;
-        await sleep(this.opts.retryDelayForAttempt?.(retryAttempt++, baseMs) ?? baseMs);
+        await sleep(this.opts.retryDelayForAttempt?.(retryAttempt++, baseMs) ?? baseMs, signal);
       }
     }
   }
@@ -585,6 +606,15 @@ async function parseReplayCursorTooOld(res: Response): Promise<ReplayCursorTooOl
   return new ReplayCursorTooOldError(recoverableFrom);
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    signal.addEventListener('abort', finish, { once: true });
+  });
 }

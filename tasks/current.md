@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-09-04T13:05:37+0800 -->
+<!-- updated_at: 2026-09-04T13:21:37+0800 -->
 <!-- stale_after: 24h -->
 
-> **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-09-04T13:05:37+0800
-> **Source Branch**: codex/wp3b-step3-sqlite-atomic
-> **Source Commit**: 6b2828b
+> **Status**: Idle
+> **Updated At**: 2026-09-04T13:21:37+0800
+> **Source Branch**: codex/wp3b-step4-daemon-longpoll
+> **Source Commit**: 6a4cae5
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -17,11 +17,11 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Current Focus
 
-- Status: ManualClearedWithActiveWork
+- Status: Idle
 - Active Plan: (none)
 - Plan Status: (none)
-- Next Task: inspect active worktree marker(s)
-- Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
+- Next Task: (none)
+- Clear Note: (none)
 
 ## Mainline Snapshot Reading
 
@@ -31,8 +31,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- linked-worktree-e9985012af7d: plans/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md
-- linked-worktree-e9985012af7d: active-worktree owner -> self
+- (none)
 ## Active Sprint
 
 - Sprint: (none)
@@ -52,16 +51,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260904-1237-wp3b-step3-sqlite-atomic.md
- D tasks/contracts/20260904-1237-wp3b-step3-sqlite-atomic.contract.md
- D tasks/notes/20260904-1237-wp3b-step3-sqlite-atomic.notes.md
- D tasks/reviews/20260904-1237-wp3b-step3-sqlite-atomic.review.md
+ D plans/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md
+ D tasks/contracts/20260904-0421-wp3b-step4-longpoll-cursor-stop.contract.md
+ D tasks/notes/20260904-0421-wp3b-step4-longpoll-cursor-stop.notes.md
+ D tasks/reviews/20260904-0421-wp3b-step4-longpoll-cursor-stop.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260904-1237-wp3b-step3-sqlite-atomic.md
-?? tasks/archive/contract-20260904-1305-wp3b-step3-sqlite-atomic.md
-?? tasks/archive/notes-20260904-1305-wp3b-step3-sqlite-atomic.md
-?? tasks/archive/review-20260904-1305-wp3b-step3-sqlite-atomic.md
-?? tasks/archive/todo-20260904-1305-wp3b-step3-sqlite-atomic.md
+?? plans/archive/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md
+?? tasks/archive/contract-20260904-1321-wp3b-step4-longpoll-cursor-stop.md
+?? tasks/archive/notes-20260904-1321-wp3b-step4-longpoll-cursor-stop.md
+?? tasks/archive/review-20260904-1321-wp3b-step4-longpoll-cursor-stop.md
+?? tasks/archive/todo-20260904-1321-wp3b-step4-longpoll-cursor-stop.md
 ```
 
 ## Source Artifacts
