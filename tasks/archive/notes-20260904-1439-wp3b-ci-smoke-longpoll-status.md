@@ -1,9 +1,19 @@
+> **Archived**: 2026-09-04 14:39
+> **Related Plan**: plans/archive/plan-20260904-1428-wp3b-ci-smoke-longpoll-status.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260904-1439
+> **Archive Projection V1**: `plans/plan-20260904-1428-wp3b-ci-smoke-longpoll-status.md` => `plans/archive/plan-20260904-1428-wp3b-ci-smoke-longpoll-status.md`
+> **Archive Projection V1**: `tasks/notes/20260904-1428-wp3b-ci-smoke-longpoll-status.notes.md` => `tasks/archive/notes-20260904-1439-wp3b-ci-smoke-longpoll-status.md`
+> **Archive Projection V1**: `tasks/contracts/20260904-1428-wp3b-ci-smoke-longpoll-status.contract.md` => `tasks/archive/contract-20260904-1439-wp3b-ci-smoke-longpoll-status.md`
+> **Archive Projection V1**: `tasks/reviews/20260904-1428-wp3b-ci-smoke-longpoll-status.review.md` => `tasks/archive/review-20260904-1439-wp3b-ci-smoke-longpoll-status.md`
+
 # Implementation Notes: wp3b-ci-smoke-longpoll-status
 
 > **Status**: Active
-> **Plan**: plans/plan-20260904-1428-wp3b-ci-smoke-longpoll-status.md
-> **Contract**: tasks/contracts/20260904-1428-wp3b-ci-smoke-longpoll-status.contract.md
-> **Review**: tasks/reviews/20260904-1428-wp3b-ci-smoke-longpoll-status.review.md
+> **Plan**: plans/archive/plan-20260904-1428-wp3b-ci-smoke-longpoll-status.md
+> **Contract**: tasks/archive/contract-20260904-1439-wp3b-ci-smoke-longpoll-status.md
+> **Review**: tasks/archive/review-20260904-1439-wp3b-ci-smoke-longpoll-status.md
 > **Last Updated**: 2026-09-04 14:29
 > **Lifecycle**: notes
 

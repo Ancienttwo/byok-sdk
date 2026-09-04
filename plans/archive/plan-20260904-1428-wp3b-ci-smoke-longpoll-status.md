@@ -1,6 +1,16 @@
+> **Archived**: 2026-09-04 14:39
+> **Related Plan**: plans/archive/plan-20260904-1428-wp3b-ci-smoke-longpoll-status.md
+> **Outcome**: Completed
+> **Lifecycle**: plan
+> **Parent Run ID**: run-20260904-1439
+> **Archive Projection V1**: `plans/plan-20260904-1428-wp3b-ci-smoke-longpoll-status.md` => `plans/archive/plan-20260904-1428-wp3b-ci-smoke-longpoll-status.md`
+> **Archive Projection V1**: `tasks/notes/20260904-1428-wp3b-ci-smoke-longpoll-status.notes.md` => `tasks/archive/notes-20260904-1439-wp3b-ci-smoke-longpoll-status.md`
+> **Archive Projection V1**: `tasks/contracts/20260904-1428-wp3b-ci-smoke-longpoll-status.contract.md` => `tasks/archive/contract-20260904-1439-wp3b-ci-smoke-longpoll-status.md`
+> **Archive Projection V1**: `tasks/reviews/20260904-1428-wp3b-ci-smoke-longpoll-status.review.md` => `tasks/archive/review-20260904-1439-wp3b-ci-smoke-longpoll-status.md`
+
 # Plan: WP3B CI smoke long-poll status closeout
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260904-1428
 > **Slug**: wp3b-ci-smoke-longpoll-status
 > **Artifact Level**: work-package
@@ -8,9 +18,9 @@
 > **Verification Boundary**: focused built adapter smoke, credential-audit unit coverage, client/full required gates, exact-subject review, then GitHub CI.
 > **Rollback Surface**: one CI-oracle script/comment correction on the existing WP3B PR branch.
 > **Spec**: `docs/spec.md`
-> **Task Contract**: `tasks/contracts/20260904-1428-wp3b-ci-smoke-longpoll-status.contract.md`
-> **Task Review**: `tasks/reviews/20260904-1428-wp3b-ci-smoke-longpoll-status.review.md`
-> **Implementation Notes**: `tasks/notes/20260904-1428-wp3b-ci-smoke-longpoll-status.notes.md`
+> **Task Contract**: `tasks/archive/contract-20260904-1439-wp3b-ci-smoke-longpoll-status.md`
+> **Task Review**: `tasks/archive/review-20260904-1439-wp3b-ci-smoke-longpoll-status.md`
+> **Implementation Notes**: `tasks/archive/notes-20260904-1439-wp3b-ci-smoke-longpoll-status.md`
 
 ## P1 Architecture Map
 
