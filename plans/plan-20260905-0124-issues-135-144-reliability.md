@@ -13,7 +13,7 @@
 - Client lane: `ConnectionManager`, `LongPollClient`, the cursor store, and the `/byok/messages` response contract own durable inbound acknowledgement and outbound batch outcomes.
 - Cloud inbound lane: `handleInboundEnvelope` and its tenant-bound task, receipt, board, activity, approval, egress, and dedup stores own retry convergence for daemon lifecycle facts.
 - Offer/server lane: `ByokCloud` task publication, `TaskEventRelay`, `TaskHandle`, and approval timeline/control own pre-publication registration and idempotent host decisions.
-- Deployment invariant: one tenant may own many devices, and each task/offer/approval remains bound to its exact `deviceId` plus optional exact `AgentRef`; no tenant-wide Profile shortcut is valid.
+- Deployment invariant: tenant is `1:N` devices and `1:N` agents; one device may host `1:N` active AgentPlacements, while each agent currently has at most one active placement. Each task/offer/approval remains bound to exact `tenantId + deviceId + AgentRef`; no tenant-wide Profile shortcut or one-device-one-Agent key is valid.
 - Out of scope: protocol v2, compatibility shims, Profile/Placement decomposition, cross-device migration, Salesko `hostedJournal` composition/E2E, `ws/wss` cleanup, npm publication, production migration/deploy, tracker closure, and unrelated architecture/package-topology WIP.
 
 ## P2 Concrete Traces
@@ -30,7 +30,7 @@
 - Make lifecycle retries converge under stable envelope identity: dedup becomes a completed-fact marker, terminal projections resume from the first receipt, and unknown terminals fail before side effects.
 - Reserve legacy attempts and relay state before offers become observable. Use stable identities and idempotent/resumable writes rather than swapping one partial-write window for another.
 - Host approval retries reuse one stable decision identity, and id-less pre-M5 recovery preserves missing protocol identity while using stored request identity/revision for idempotency.
-- Stable task/decision identity must retain exact device and AgentRef binding under tenant multi-device concurrency; it must not derive a single Profile from tenant identity.
+- Stable task/decision identity must retain exact `tenantId + deviceId + AgentRef` binding under multi-device and same-device multi-Agent concurrency; it must not derive a single Profile from tenant or device identity.
 - At 10x load, serialized store and client FIFO latency is the first pressure point; this slice does not add a second authority or unbounded retry loop.
 
 ## Parallel Ownership
