@@ -244,10 +244,7 @@ try {
     {
       backoff: { baseMs: 10, maxMs: 100, factor: 1.5 },
       liveness: { timeoutMs: 5_000, checkIntervalMs: 250 },
-      // Reach the long-poll transport on the first failed WS probe instead of
-      // burning the default three-failure budget against a server that has no
-      // WS endpoint at all.
-      longPoll: { wsFailureThreshold: 1, retryDelayMs: 10, idleDelayMs: 10, wsRetryIntervalMs: 60_000 },
+      longPoll: { retryDelayMs: 10, idleDelayMs: 10 },
     },
   );
   const localEvents = [];
@@ -255,11 +252,10 @@ try {
 
   await withTimeout(daemon.pair(pairingCode), 'pair');
   await withTimeout(daemon.start(), 'daemon start');
-  // `connected` is the WS-open predicate; on long-poll the daemon reports
-  // `degraded` (transport fact only — it is a full transport). The server-side
-  // proof is what actually matters here: the device is observed connected once
-  // its first `GET /byok/events` poll lands.
-  await waitFor(() => daemon.status().degraded, 'daemon long-poll transport');
+  // `connected` means the first authenticated long-poll response completed.
+  // Retain the independent server-side observation below so this public status
+  // cannot become the smoke's only authority for a live transport.
+  await waitFor(() => daemon.status().connected, 'daemon long-poll transport');
   const deviceId = daemon.status().deviceId;
   assert(deviceId !== undefined, 'daemon did not report a paired deviceId');
   await waitForAsync(

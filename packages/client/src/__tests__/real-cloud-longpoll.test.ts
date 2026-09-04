@@ -17,7 +17,7 @@ async function tmpDir(prefix: string): Promise<string> {
  *
  * This is deliberately the SAME shape as
  * `real-server-longpoll-only.test.ts` — same daemon construction, same
- * long-poll fallback path, same lifecycle, same assertions about what
+ * long-poll transport path, same lifecycle, same assertions about what
  * `daemon.status()` reports — with only the server swapped underneath. Not one
  * line of daemon production code is involved in the difference, and the only
  * new client-side code is the fixture that boots the other implementation. If
@@ -49,9 +49,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: cloud.url, workspaceRoot, storeDir },
       [adapter],
       {
-        // Fail over to long-poll after one failed WS attempt: cloud has no WS
-        // endpoint at all, so waiting out a full backoff sequence proves
-        // nothing this test is about.
+        // Keep retries short while exercising the only daemon transport.
         longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
       },
     );
@@ -60,8 +58,8 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     const record = await daemon.pair(pairing.code);
     await daemon.start();
 
-    // WS never connects — the daemon settled via its ordinary long-poll
-    // fallback, with no cloud-specific handling anywhere.
+    // The daemon settled through the ordinary long-poll path, with no
+    // cloud-specific handling anywhere.
     expect(daemon.status().connected).toBe(true);
 
     // The hosted control-plane input. Unlike the embedded server's
