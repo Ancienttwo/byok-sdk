@@ -2367,6 +2367,10 @@ export interface ConnectionManagerOptions {
     onOperationalOutcome?: (outcome: 'success' | 'failure', source: 'reconnect' | 'upload') => void;
     onTerminalError?: (error: ReplayCursorTooOldError) => void;
 }
+export interface RejectedOutboundEnvelope {
+    readonly envelope: Envelope;
+    readonly reason: 'inbound_rejected';
+}
 /**
  * Owns the daemon's one authenticated long-poll connection to the server.
  * Every received envelope passes through the same cursor-dedupe/persistence
@@ -2426,6 +2430,8 @@ export declare class ConnectionManager {
      * application (protocol §9).
      */
     private readonly outbox;
+    /** Terminally rejected outbound envelopes, retained as a bounded observable quarantine. */
+    private readonly rejectedOutboundEnvelopes;
     /**
      * Finding F5(b): how many envelopes `drainOutbox` has
      * currently spliced OUT of `this.outbox` for an in-flight (not yet
@@ -2592,6 +2598,8 @@ export declare class ConnectionManager {
      * for the one case (a hung POST) this finding exists to catch honestly.
      */
     outboxLength(): number;
+    /** A bounded terminal quarantine for operator inspection; these entries are never retried. */
+    rejectedOutbox(): readonly RejectedOutboundEnvelope[];
     /**
      * Finding F5(b): polls {@link outboxLength} (not `this.outbox.length`
      * alone — see that method's own doc comment for why a spliced-out,
@@ -2762,6 +2770,7 @@ export declare class ConnectionManager {
      */
     private noteValidationFailure;
     private advanceCursor;
+    private quarantineRejectedOutbound;
     private notifySettled;
     private noteConnected;
     private noteDisconnected;

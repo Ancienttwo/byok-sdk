@@ -213,6 +213,54 @@ describe('inbound lifecycle recovery', () => {
     await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope, undefined, consume)).resolves.toBe('duplicate');
   });
 
+  it('keeps two exact AgentRefs on one device isolated by their task attempts and terminal receipts', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const stores = storesFor(harness, device.deviceId);
+    const first = { taskId: 'task-placement-first', agentRef: { agentId: 'agent-first', profileRevision: 'profile-first' } } as const;
+    const second = { taskId: 'task-placement-second', agentRef: { agentId: 'agent-second', profileRevision: 'profile-second' } } as const;
+    await Promise.all(
+      [first, second].map(({ taskId, agentRef }) =>
+        harness.stores.tasks.reserveAgentOffer(TENANT_A, { taskId, deviceId: device.deviceId, agentRef }),
+      ),
+    );
+
+    const crossAgentTerminal = createEnvelope(
+      'task.fail',
+      { reason: 'wrong Agent must not write this task', agentRef: second.agentRef },
+      { taskId: first.taskId, id: '10000000-0000-4000-8000-000000001139' },
+    );
+    await expect(handleInboundEnvelope(stores, device.deviceId, crossAgentTerminal)).resolves.toBe('rejected');
+
+    const terminals = [first, second].map(({ taskId, agentRef }, index) =>
+      createEnvelope(
+        'task.complete',
+        { summary: `completed by ${agentRef.agentId}`, sessionRef: `session-${agentRef.agentId}`, agentRef },
+        { taskId, id: `10000000-0000-4000-8000-00000000114${index}` },
+      ),
+    );
+    await expect(handleInboundEnvelope(stores, device.deviceId, terminals[0]!)).resolves.toBe('accepted');
+    await expect(handleInboundEnvelope(stores, device.deviceId, terminals[0]!)).resolves.toBe('duplicate');
+    await expect(handleInboundEnvelope(stores, device.deviceId, terminals[1]!)).resolves.toBe('accepted');
+
+    await expect(harness.cloud.readTaskAttempt(TENANT_A, first.taskId)).resolves.toMatchObject({
+      deviceId: device.deviceId,
+      agentRef: first.agentRef,
+      status: 'complete',
+    });
+    await expect(harness.cloud.readTaskAttempt(TENANT_A, second.taskId)).resolves.toMatchObject({
+      deviceId: device.deviceId,
+      agentRef: second.agentRef,
+      status: 'complete',
+    });
+    await expect(harness.cloud.readTerminalReceipt(TENANT_A, first.taskId)).resolves.toMatchObject({
+      key: terminalReceiptKey(first.taskId),
+    });
+    await expect(harness.cloud.readTerminalReceipt(TENANT_A, second.taskId)).resolves.toMatchObject({
+      key: terminalReceiptKey(second.taskId),
+    });
+  });
+
   it.each(['receipt', 'status', 'board'] as const)(
     'resumes the winning terminal receipt through the %s projection fault',
     async (faultPoint) => {

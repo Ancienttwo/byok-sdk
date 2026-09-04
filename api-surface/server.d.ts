@@ -457,8 +457,10 @@ export interface TaskEventRelayOptions {
  * `task.state` event stream because the pre-fold feed carried it there; the
  * authoritative copy is `TaskAttempt.claimedRuntime`).
  *
- * It is told about a task only by {@link noteDispatched}. An envelope naming a
- * task this server never dispatched is folded for nobody and allocates nothing —
+ * Dispatch first {@link provision}s a known task id, then activates it with
+ * {@link noteDispatched} after the kernel has accepted its offer. Envelopes
+ * that arrive in that narrow interval are buffered, not dropped. An envelope
+ * naming a task this server never dispatched is folded for nobody and allocates nothing —
  * otherwise a device could grow this map without bound by guessing task ids,
  * and the kernel's gate deliberately treats such an envelope as a harmless
  * store no-op rather than a rejection.
@@ -475,12 +477,16 @@ export declare class TaskEventRelay implements ByokCloudObserver {
      * The composition uses it to run the implicit-approval-resume check, which
      * needs a store read and therefore cannot happen inline here.
      */
-    onTaskActivity: ((taskId: string) => void) | undefined;
+    onTaskActivity: ((taskId: string, pendingRequestSourceEnvelopeId: string | undefined, activitySourceEnvelopeId: string, activityAt: string) => void) | undefined;
     constructor(options: TaskEventRelayOptions);
     /** The cross-task embedder feed backing `ByokServer.events.subscribe()`. */
     serverEvents(): AsyncIterable<ByokServerEvent>;
     /** Publish one cross-task event (rate-limit episodes, host-side transitions). */
     emitServerEvent(event: ByokServerEvent): void;
+    /** Pre-register a task id before its offer enqueue can become observable. */
+    provision(taskId: string): void;
+    /** Forget an enqueue that failed before it produced an offer. */
+    abort(taskId: string): void;
     /**
      * Open the relay for a task this server just dispatched, and publish its
      * `Offered` origin on both feeds. `at` is the offer envelope's own timestamp,
@@ -651,13 +657,6 @@ export interface TaskHandleDeps {
      * gone. The snapshot projection itself — never a second derivation.
      */
     readonly readState: (taskId: string) => Promise<TaskState | undefined>;
-    /**
-     * Record a host-side approval decision on the task's durable approval
-     * timeline — the same authority the kernel's own staleness gate reads. See
-     * `index.ts` for why the façade writes it rather than keeping a private
-     * "already resolved" set beside it.
-     */
-    readonly recordHostApproval: (taskId: string, decision: 'approve' | 'reject', approvalId: string | undefined, sourceEnvelopeId: string) => Promise<void>;
     /** The read-back this handle's `result()` answers with. */
     readonly readResult: (taskId: string) => Promise<TaskResult | undefined>;
 }

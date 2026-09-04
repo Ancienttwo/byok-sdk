@@ -4005,19 +4005,33 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
     }, z.core.$strip>], "type">>;
 }, z.core.$strip>;
 export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
-/**
- * `accepted` counts every envelope `ConnectionHub.handleInbound` returned
- * `'accepted'` *or* `'duplicate'` for (finding P2) — a dedup'd replay is a
- * wire-level success (§9's idempotency window), even though no handler ran
- * for it a second time. `rejected` (a type outside `DAEMON_TO_SERVER_TYPES`,
- * or an ownership mismatch — N2) is a separate, additive count: omitted
- * entirely when zero, so a batch with nothing rejected keeps the pre-P2
- * `{ accepted }` shape callers already depend on.
- */
+/** One exact terminal disposition for one daemon-originated envelope. */
+export declare const MessagesSendOutcomeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+    id: z.ZodUUID;
+    outcome: z.ZodLiteral<"accepted">;
+}, z.core.$strict>, z.ZodObject<{
+    id: z.ZodUUID;
+    outcome: z.ZodLiteral<"duplicate">;
+}, z.core.$strict>, z.ZodObject<{
+    id: z.ZodUUID;
+    outcome: z.ZodLiteral<"rejected">;
+    reason: z.ZodLiteral<"inbound_rejected">;
+}, z.core.$strict>], "outcome">;
+export type MessagesSendOutcome = z.infer<typeof MessagesSendOutcomeSchema>;
+/** A 200 only acknowledges these exact ids; rejected entries are terminal. */
 export declare const MessagesSendResponseSchema: z.ZodObject<{
-    accepted: z.ZodNumber;
-    rejected: z.ZodOptional<z.ZodNumber>;
-}, z.core.$strip>;
+    outcomes: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        id: z.ZodUUID;
+        outcome: z.ZodLiteral<"accepted">;
+    }, z.core.$strict>, z.ZodObject<{
+        id: z.ZodUUID;
+        outcome: z.ZodLiteral<"duplicate">;
+    }, z.core.$strict>, z.ZodObject<{
+        id: z.ZodUUID;
+        outcome: z.ZodLiteral<"rejected">;
+        reason: z.ZodLiteral<"inbound_rejected">;
+    }, z.core.$strict>], "outcome">>;
+}, z.core.$strict>;
 export type MessagesSendResponse = z.infer<typeof MessagesSendResponseSchema>;
 export declare const AgentHomeProjectionCompletionRequestSchema: z.ZodObject<{
     requestId: z.ZodUUID;

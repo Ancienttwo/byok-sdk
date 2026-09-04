@@ -213,14 +213,12 @@ export class TaskEventRelay implements ByokCloudObserver {
         return;
       case 'task.progress':
         for (const event of envelope.payload.events) state.queue.push({ kind: 'agent', event });
-        if (envelope.payload.events.length > 0) {
-          this.onTaskActivity?.(
-            taskId,
-            state.latestApprovalRequestSourceEnvelopeId,
-            envelope.id,
-            envelope.ts,
-          );
-        }
+        this.onTaskActivity?.(
+          taskId,
+          state.latestApprovalRequestSourceEnvelopeId,
+          envelope.id,
+          envelope.ts,
+        );
         return;
       case 'task.artifact':
         state.queue.push({ kind: 'artifact', artifact: envelope.payload });
