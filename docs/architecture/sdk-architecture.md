@@ -109,7 +109,7 @@ flowchart LR
 
 ### 1.2 Monorepo 与依赖图
 
-仓库以 Bun 1.4.0 管理 workspace 与 lockfile，Node `>=22.22.0` 仍是 dispatch/runtime authority。当前有十三个 workspace package：八个 public dispatch manifest（六个 dispatch package、`byok-sdk` umbrella、`@byok-sdk/testkit`）、独立 public `@byok-sdk/keys`、三个 private examples 与一个只供测试使用的 private `@byok-sdk/conformance`。npm registry tarball 仍由 isolated npm install + Node import smoke 验证；下图画实际 runtime、release 与 test-only edges。
+仓库以 Bun 1.4.0 管理 workspace 与 lockfile，Node `>=22.22.0` 仍是 dispatch/runtime authority。当前有十五个 workspace package：十个 public npm manifest（七个 dispatch ownership package、`@byok-sdk/testkit`、`byok-sdk` umbrella、独立版本的 `@byok-sdk/keys`）、四个 private examples 与一个只供测试使用的 private `@byok-sdk/conformance`。ADR-035 保留有独立 Node/Hono 部署职责的 `@byok-sdk/server`，并裁定在另行批准的 breaking cutover 中退出无独立能力的 `byok-sdk` umbrella；实施完成后 public artifacts 才从 10 降到 9，当前 manifest 事实仍是 10。npm registry tarball 仍由 isolated npm install + Node import smoke 验证；下图画当前 runtime、release 与 test-only edges。
 
 ```mermaid
 flowchart LR
@@ -126,7 +126,7 @@ flowchart LR
   Core(["@byok-sdk/core<br/>zod-only composable contracts"]):::contract
   Cloud(["@byok-sdk/cloud<br/>stateless hosted surface + domain kernel"]):::runtime
   CloudPg(["@byok-sdk/cloud-dataplane<br/>Postgres + R2 composition"]):::runtime
-  SDK(["byok-sdk<br/>six namespace umbrella"]):::example
+  SDK(["byok-sdk<br/>seven namespace umbrella<br/>ADR-035: retire at breaking cutover"]):::example
   Conformance(["@byok-sdk/conformance<br/>private test authority"]):::dev
   Basic(["examples/basic<br/>E2E SaaS demo"]):::example
   Packaging(["examples/packaging<br/>single-file probe"]):::example
@@ -165,7 +165,7 @@ flowchart LR
 | core | 23 / 3,467 | 5 / 1,019 | S2 契约层；InMemory 参考实现，consumer 是 `cloud` 与 `client`；共享 conformance 已移到独立 package |
 | cloud | 42 / 5,045 | 10 / 3,003 | async domain kernel + stateless hosted surface；device/board/truth handlers + InMemory 组合，消费 `core` 与 `protocol` |
 | cloud-dataplane | 22 / 6,309 | 14 / 3,533 | production Postgres + R2 composition；事务、quota、GC 与 reconciliation authority |
-| sdk | 1 / 12 | 1 / 16 | public namespace umbrella；依赖六个 dispatch package，明确排除 keys |
+| sdk | 1 / 12 | 1 / 16 | 当前 public namespace umbrella；依赖七个 dispatch ownership package、明确排除 keys；ADR-035 已裁定后续 breaking cutover 退出 |
 | conformance | 26 / 2,842 | 2 / 84 | private shared assertion authority；不得进入发布依赖树 |
 
 统计口径：生产列排除 `*.test.ts`、`*.spec.ts` 与 `src/__tests__/` 整棵子树；test 列取 `src/*.test.ts`、`*.spec.ts` 与 `src/__tests__/` 下的全部 `.ts`，因此 `server` 的 test 列含 `src/__tests__/test-support.ts`、`client` 的含 `src/__tests__/fixtures/*.ts` 这类不含断言的测试支撑文件。各 package 的复算命令：
@@ -2146,5 +2146,6 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR-032 | `@byok-sdk/server` 折叠为 cloud domain kernel 的 embedded façade，删除独立协调状态机与旧 transport | Accepted，Supersedes ADR-004（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-033 | `local-first-v1` 为默认数据 policy profile，contentful 进 `shared-observability-v1`；结果事务权威是 `SessionResultCommitter` | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-034 | legacy `task.offer*` / `strictAgentOnly` / 旧 gitWorkspace authority / ambient 选设备在一次 v2 cutover 中删除，无双读双写 | Accepted，Supersedes ADR-002（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
+| ADR-035 | 保留 `@byok-sdk/server` 的 self-hosted Node/Hono deployment boundary；无独立能力的 `byok-sdk` umbrella 在另行批准的 breaking cutover 中退出，public artifacts 由 10 降为 9 | Accepted；implementation deferred（详见 `adr-2026-09-05-public-package-topology.md`） |
 
 - Completed workstream evidence: `tasks/workstreams/root/20260904-sdk-root.md`

@@ -37,8 +37,8 @@ Owns the root capability boundary declared in .ai/context/capabilities.json.
 - Architecture domain: `sdk`
 - Architecture capability: `sdk-root`
 - Architecture module: `docs/architecture/sdk-architecture.md`
-- Last architecture event: 2026-09-05T00:36:46+0800
-- Last changed path: `packages/client/src/__tests__/daemon-longpoll.test.ts`
+- Last architecture event: 2026-09-05T01:22:18+0800
+- Last changed path: `packages/client/src/__tests__/control-server.test.ts`
 - Severity: low
 - Change type: source-change
 - Module responsibility: Keep this block aligned with the local boundary described by surrounding human-owned context.
@@ -54,7 +54,10 @@ Owns the root capability boundary declared in .ai/context/capabilities.json.
 
 ## Active Workstreams
 
-- (none yet)
+- `tasks/workstreams/root/20260904-sdk-root.md`
+  - status: completed
+  - current_slice: complete
+  - source_plan: (none)
 
 ## Current Session Projection
 
