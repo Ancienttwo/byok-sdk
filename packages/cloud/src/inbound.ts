@@ -389,10 +389,10 @@ async function applyInboundGate(
     if (device === undefined || device.revoked || device.productId !== envelope.payload.productId) {
       return 'rejected';
     }
-    if (await stores.dedup.checkAndRecord(deviceId, envelope.id)) return 'duplicate';
-    return (await stores.devices.recordCapabilities({ capabilities: envelope.payload.capabilities })) === undefined
-      ? 'rejected'
-      : 'accepted';
+    if ((await stores.devices.recordCapabilities({ capabilities: envelope.payload.capabilities })) === undefined) {
+      return 'rejected';
+    }
+    return completeInboundEnvelope(stores, deviceId, envelope.id, undefined);
   }
 
   if (!(DAEMON_TO_SERVER_TYPES as readonly MessageType[]).includes(envelope.type)) return 'rejected';

@@ -41,6 +41,41 @@ async function offeredTask() {
 }
 
 describe('inbound lifecycle recovery', () => {
+  it('does not complete conn.hello dedup before its capability snapshot converges', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const stores = storesFor(harness, device.deviceId);
+    const envelope = createEnvelope('conn.hello', {
+      deviceId: device.deviceId,
+      productId: 'test-product',
+      clientVersion: '0.0.0-test',
+      protocolVersions: [1],
+      runtimes: [],
+      capabilities: ['recovered-capability'],
+    });
+    let fault = true;
+    const recoveryStores: TenantStores = {
+      ...stores,
+      devices: {
+        ...stores.devices,
+        recordCapabilities: async (input) => {
+          if (fault) {
+            fault = false;
+            throw new Error('fault before capability snapshot');
+          }
+          return stores.devices.recordCapabilities(input);
+        },
+      },
+    };
+
+    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope)).rejects.toThrow(
+      'fault before capability snapshot',
+    );
+    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope)).resolves.toBe('accepted');
+    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope)).resolves.toBe('duplicate');
+    expect((await stores.devices.get(device.deviceId))?.capabilities).toEqual(['recovered-capability']);
+  });
+
   it('completes a claim after its authoritative write succeeds but the delivery faults, then observes only the completed commit', async () => {
     const { harness, device, stores, taskId } = await offeredTask();
     const envelope = claim(taskId, device.deviceId);
