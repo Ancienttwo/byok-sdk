@@ -19,14 +19,14 @@
 ## P2 Concrete Traces
 
 1. Successful inbound handler -> cursor persistence -> next GET query cursor -> irreversible mailbox acknowledgement.
-2. POST batch -> per-envelope cloud outcome -> typed response -> client outbox removal/quarantine/retry decision.
+2. POST batch -> frozen-v1 accepted/rejected counts -> bounded binary isolation -> client outbox removal/quarantine/retry decision.
 3. Daemon envelope -> ownership/attempt gate -> resumable lifecycle mutation -> completed dedup fact -> post-commit notification.
 4. Host dispatch/approval -> stable task or decision identity -> task reservation/relay registration -> mailbox publication -> durable read-back.
 
 ## P3 Decision
 
 - Wire acknowledgement exposes only the last successfully persisted cursor. Storage failure remains observable and cannot advance the server acknowledgement.
-- Replace count-only POST outcomes with exact per-envelope outcomes so accepted entries and rejected entries have deterministic, non-blocking handling.
+- Preserve the frozen-v1 count response. On a mixed rejection, recursively split the immutable batch until each rejected envelope is isolated; duplicate replay is the existing idempotency authority, not a second response shape.
 - Make lifecycle retries converge under stable envelope identity: dedup becomes a completed-fact marker, terminal projections resume from the first receipt, and unknown terminals fail before side effects.
 - Reserve legacy attempts and relay state before offers become observable. Use stable identities and idempotent/resumable writes rather than swapping one partial-write window for another.
 - Host approval retries reuse one stable decision identity, and id-less pre-M5 recovery preserves missing protocol identity while using stored request identity/revision for idempotency.

@@ -4005,33 +4005,17 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
     }, z.core.$strip>], "type">>;
 }, z.core.$strip>;
 export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
-/** One exact terminal disposition for one daemon-originated envelope. */
-export declare const MessagesSendOutcomeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
-    id: z.ZodUUID;
-    outcome: z.ZodLiteral<"accepted">;
-}, z.core.$strict>, z.ZodObject<{
-    id: z.ZodUUID;
-    outcome: z.ZodLiteral<"duplicate">;
-}, z.core.$strict>, z.ZodObject<{
-    id: z.ZodUUID;
-    outcome: z.ZodLiteral<"rejected">;
-    reason: z.ZodLiteral<"inbound_rejected">;
-}, z.core.$strict>], "outcome">;
-export type MessagesSendOutcome = z.infer<typeof MessagesSendOutcomeSchema>;
-/** A 200 only acknowledges these exact ids; rejected entries are terminal. */
+/**
+ * `accepted` counts every envelope `ConnectionHub.handleInbound` returned
+ * `'accepted'` *or* `'duplicate'` for — a deduped replay is a wire-level
+ * success even though the business mutation did not run a second time.
+ * `rejected` is additive and omitted when zero, preserving frozen v1's
+ * `{ accepted }` response shape.
+ */
 export declare const MessagesSendResponseSchema: z.ZodObject<{
-    outcomes: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
-        id: z.ZodUUID;
-        outcome: z.ZodLiteral<"accepted">;
-    }, z.core.$strict>, z.ZodObject<{
-        id: z.ZodUUID;
-        outcome: z.ZodLiteral<"duplicate">;
-    }, z.core.$strict>, z.ZodObject<{
-        id: z.ZodUUID;
-        outcome: z.ZodLiteral<"rejected">;
-        reason: z.ZodLiteral<"inbound_rejected">;
-    }, z.core.$strict>], "outcome">>;
-}, z.core.$strict>;
+    accepted: z.ZodNumber;
+    rejected: z.ZodOptional<z.ZodNumber>;
+}, z.core.$strip>;
 export type MessagesSendResponse = z.infer<typeof MessagesSendResponseSchema>;
 export declare const AgentHomeProjectionCompletionRequestSchema: z.ZodObject<{
     requestId: z.ZodUUID;

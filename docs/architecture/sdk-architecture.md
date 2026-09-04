@@ -864,7 +864,7 @@ flowchart LR
   classDef gate fill:#0f766e,stroke:#99f6e4,stroke-width:2px,color:#fff
 
   Outbox[("Client single outbox")]:::store
-  Poll(["GET /events<br/>POST /messages exact per-id outcomes"]):::primary
+  Poll(["GET /events<br/>POST /messages frozen-v1 counts"]):::primary
   Cloud(["Same cloud-kernel inbound gate"]):::gate
   Cursor[("Persisted task-envelope cursor")]:::store
   Dedup[("Completed-envelope dedup<br/>plus resumable semantic writes")]:::store
@@ -878,9 +878,10 @@ flowchart LR
 long-poll 是唯一的完整双向 transport：`GET /byok/events` 读取 mailbox，
 `POST /byok/messages` 发送 `conn.hello` 与 daemon→server envelopes。cursor 只在
 handler 成功且同一 cursor 已成功落盘后才对下一次 GET 可见；save 失败或未完成时
-wire acknowledgement 保持旧值。POST 200 为每个 envelope id 返回 exact
-`accepted | duplicate | rejected` outcome；只有前两者离开 outbox，permanent reject
-进入 bounded observable quarantine，不阻塞后续 valid envelope。unknown `task.*`
+wire acknowledgement 保持旧值。POST 200 保留 frozen-v1 `accepted/rejected`
+counts；mixed rejection 由 client 对 immutable envelope ids 做 bounded binary
+isolation，重复提交以 cloud dedup 收敛，最终只有 rejected singleton 进入 bounded
+observable quarantine，不阻塞后续 valid envelope。unknown `task.*`
 只在 safe、non-negative、page-bounded 且有序的 seq 上 forward-skip，malformed page
 不推进 cursor。失败时 watermark 冻结并 backoff，后续重放依靠 TaskRunner 与 cloud
 kernel 的 idempotency。旧版本曾有第二种 socket
