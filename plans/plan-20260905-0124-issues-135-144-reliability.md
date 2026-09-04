@@ -1,6 +1,6 @@
 # Plan: Issues #135–#144 reliability closure
 
-> **Status**: Completed
+> **Status**: Executing
 > **Created**: 20260905-0124
 > **Slug**: issues-135-144-reliability
 > **Artifact Level**: work-package
@@ -65,4 +65,4 @@
 - [x] T3 Implement and verify #141–#144 in the isolated offer/server lane.
 - [x] T4 Integrate the three frozen lane commits and resolve only proven cross-lane contract conflicts.
 - [x] T5 Run focused crash/fault matrix and all repository required checks.
-- [x] T6 Record architecture/task evidence and independent acceptance verdict.
+- [ ] T6 Record architecture/task evidence and independent acceptance verdict.
