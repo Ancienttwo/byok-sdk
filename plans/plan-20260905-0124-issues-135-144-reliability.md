@@ -66,5 +66,5 @@
 - [x] T3 Implement and verify #141–#144 in the isolated offer/server lane.
 - [x] T4 Integrate the three frozen lane commits and resolve only proven cross-lane contract conflicts.
 - [x] T5 Run focused crash/fault matrix and all repository required checks.
-- [ ] T6 Record architecture/task evidence and independent acceptance verdict.
-- [ ] T7 Bind same-device Agent replay/idempotency keys to exact AgentRef and replace the superseded acceptance evidence.
+- [x] T6 Record architecture/task evidence and independent acceptance verdict.
+- [x] T7 Bind same-device Agent replay/idempotency keys to exact AgentRef and replace the superseded acceptance evidence.
