@@ -40,11 +40,29 @@
 - Offer/server writer: `packages/cloud/src/cloud.ts`, `packages/cloud/src/approval-control.ts`, `packages/server/**`, and directly related tests for #141–#144.
 - Any newly discovered shared production file is handed back to the integration owner before editing.
 
+## Evidence Contract
+
+- **State/progress path**: this plan, its contract, notes, workstream, and review.
+- **Verification evidence**: three pre-fix failure artifacts; focused client/cloud/server regression suites; frozen protocol guard; root build, typecheck, test, API/version checks; strict workflow; one independent gatekeeper verdict.
+- **Evaluator rubric**: durable cursor before wire acknowledgement; rejected-envelope isolation under frozen v1 counts; lifecycle retry convergence; attempt/relay registration before observable offer; stable approval identity; exact `tenantId + deviceId + AgentRef` admission and same-device multi-Agent isolation.
+- **Stop condition**: every Task Breakdown row is evidenced, the independent gate passes, and repo-harness permits handoff.
+- **Rollback surface**: the integration commits after baseline `aa44bb9`; no external system mutation.
+
+## Promotion Gate
+
+- **Merge/PR unit**: one #135–#144 SDK/cloud reliability slice assembled from the three isolated lanes.
+- **Rollback surface**: client long-poll, cloud inbound/store contracts, server offer/relay/approval changes, tests, and generated API declaration.
+- **Verification boundary**: exact frozen diff plus focused fault regressions, frozen-v1 protocol guard, all root required checks, and independent read-only review.
+- **Review/acceptance boundary**: one gatekeeper evaluates the frozen subject; no merge, push, PR, issue close, publish, deploy, or migration is authorized.
+- **High-risk surface**: durable acknowledgement, cross-store recovery, task publication ordering, approval idempotency, and multi-Agent placement identity.
+- **Why not checklist row**: ten cross-module failure schedules require a bugfix contract, pre-fix evidence, architecture projection, and independent semantic acceptance.
+- **Evidence ceiling**: this proves SDK/cloud behavior only; Salesko journal-before-ack E2E remains outside this branch.
+
 ## Task Breakdown
 
-- [ ] T1 Implement and verify #135–#137 in the isolated client lane.
-- [ ] T2 Implement and verify #138–#140 in the isolated cloud inbound lane.
-- [ ] T3 Implement and verify #141–#144 in the isolated offer/server lane.
-- [ ] T4 Integrate the three frozen lane commits and resolve only proven cross-lane contract conflicts.
-- [ ] T5 Run focused crash/fault matrix and all repository required checks.
+- [x] T1 Implement and verify #135–#137 in the isolated client lane.
+- [x] T2 Implement and verify #138–#140 in the isolated cloud inbound lane.
+- [x] T3 Implement and verify #141–#144 in the isolated offer/server lane.
+- [x] T4 Integrate the three frozen lane commits and resolve only proven cross-lane contract conflicts.
+- [x] T5 Run focused crash/fault matrix and all repository required checks.
 - [ ] T6 Record architecture/task evidence and independent acceptance verdict.
