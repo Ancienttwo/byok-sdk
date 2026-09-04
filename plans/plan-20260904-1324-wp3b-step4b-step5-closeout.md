@@ -52,8 +52,8 @@
 
 ## Task Breakdown
 
-- [ ] T1 Delete client WS transport and make `ConnectionManager` long-poll-only without compatibility paths.
-- [ ] T2 Update tests and public types for the narrowed connection lifecycle.
-- [ ] T3 Update current architecture/protocol/security/example/release documentation and API goldens.
-- [ ] T4 Resolve the accumulated root architecture request with the refreshed architecture module and run all local gates.
+- [x] T1 Delete client WS transport and make `ConnectionManager` long-poll-only without compatibility paths.
+- [x] T2 Update tests and public types for the narrowed connection lifecycle.
+- [x] T3 Update current architecture/protocol/security/example/release documentation and API goldens.
+- [x] T4 Resolve the accumulated root architecture request with the refreshed architecture module and run all local gates.
 - [ ] T5 Record exact-subject acceptance, push PR, wait for exact-SHA CI, merge, and refresh local/remote main.

@@ -1,8 +1,8 @@
 # Task Contract: wp3b-step4b-step5-closeout
 
-> **Status**: Executing
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260904-1324-wp3b-step4b-step5-closeout.md
-> **Task Profile**: implementation
+> **Task Profile**: code-change
 > **Owner**: kito
 > **Capability ID**: root
 > **Last Updated**: 2026-09-04 13:24

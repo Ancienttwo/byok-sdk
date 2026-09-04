@@ -1,6 +1,6 @@
 # Implementation Notes: wp3b-step4b-step5-closeout
 
-> **Status**: Executing
+> **Status**: Verified
 > **Plan**: plans/plan-20260904-1324-wp3b-step4b-step5-closeout.md
 > **Contract**: tasks/contracts/20260904-1324-wp3b-step4b-step5-closeout.contract.md
 > **Review**: tasks/reviews/20260904-1324-wp3b-step4b-step5-closeout.review.md
@@ -14,7 +14,12 @@
 
 ## Verification Evidence
 
-- Pending implementation and exact-subject gate.
+- `repo-harness run verify-contract --contract tasks/contracts/20260904-1324-wp3b-step4b-step5-closeout.contract.md --strict`: 19/19 checks passed; contract status `Fulfilled`.
+- Full client suite: 164 files passed, 2 skipped; 1603 tests passed, 11 skipped.
+- Root `build`, `typecheck`, and full package test suites passed.
+- API surface, version authority, package graph, strict task workflow, architecture sync, and `git diff --check` passed.
+- Zero-reference falsifiers passed for WS production symbols and current-document WS claims; architecture queue reports `pending=0`, `blocking=0`.
+- Exact-subject acceptance and GitHub CI remain in T5.
 
 ## Implemented Change
 
