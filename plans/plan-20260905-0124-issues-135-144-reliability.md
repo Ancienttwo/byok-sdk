@@ -38,6 +38,7 @@
 - Client writer: `packages/client/**`, `packages/protocol/src/http-api.ts`, `packages/cloud/src/handlers/messages.ts`, and directly related tests for #135–#137.
 - Inbound writer: `packages/cloud/src/inbound.ts` and directly related cloud tests for #138–#140.
 - Offer/server writer: `packages/cloud/src/cloud.ts`, `packages/cloud/src/approval-control.ts`, `packages/server/**`, and directly related tests for #141–#144.
+- Agent reliability identity follow-up: strict Agent dedup, egress, content-request, and message-admission keys plus their store migrations/tests; this is a reliability-key correction, not a Profile/Placement authority cutover.
 - Any newly discovered shared production file is handed back to the integration owner before editing.
 
 ## Evidence Contract
@@ -66,3 +67,4 @@
 - [x] T4 Integrate the three frozen lane commits and resolve only proven cross-lane contract conflicts.
 - [x] T5 Run focused crash/fault matrix and all repository required checks.
 - [ ] T6 Record architecture/task evidence and independent acceptance verdict.
+- [ ] T7 Bind same-device Agent replay/idempotency keys to exact AgentRef and replace the superseded acceptance evidence.
