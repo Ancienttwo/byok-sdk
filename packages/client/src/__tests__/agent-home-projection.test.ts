@@ -202,7 +202,7 @@ describe('task-free Agent-home projection', () => {
     const pending = await real.byok.enqueueAgentHomeProjection({ deviceId: record.deviceId, payload: desired('1') });
     expect(pending.status).toBe('pending');
     await vi.waitFor(() => expect(rejectedCompletions).toBeGreaterThan(0));
-    expect((await real.byok.readAgentHomeProjection(record.deviceId, desired('1').requestId))?.status).toBe('pending');
+    expect((await real.byok.readAgentHomeProjection(record.deviceId, desired('1').agentRef, desired('1').requestId))?.status).toBe('pending');
     await expect(new CursorStore(storeDir).load(real.url, record.deviceId)).resolves.toBe(0);
     expect(adapterA.sessions).toHaveLength(0);
     expect((await real.byok.tasks.list()).tasks).toHaveLength(0);
@@ -226,7 +226,7 @@ describe('task-free Agent-home projection', () => {
     await daemonB.start();
 
     await vi.waitFor(async () => {
-      expect((await real.byok.readAgentHomeProjection(record.deviceId, desired('1').requestId))?.status).toBe('idempotent');
+      expect((await real.byok.readAgentHomeProjection(record.deviceId, desired('1').agentRef, desired('1').requestId))?.status).toBe('idempotent');
     }, { timeout: 10_000 });
     await vi.waitFor(async () => {
       // This task-free projection is the kernel mailbox's first and only row;

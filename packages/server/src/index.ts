@@ -26,6 +26,7 @@ import {
   TASK_STATES,
   TerminalProjectionSelectionSchema,
   type AgentHomeProjectionPayload,
+  type AgentRef,
   type PermissionPolicy,
   type TaskState,
 } from '@byok-sdk/protocol';
@@ -169,8 +170,12 @@ export interface ByokServer {
   requestAgentContentRead(input: AgentContentReadRequest): Promise<void>;
   /** Enqueue one task-free, exact-device Agent-home projection. */
   enqueueAgentHomeProjection(input: AgentHomeProjectionRequest): Promise<AgentHomeProjectionStatusReadback>;
-  /** Durable desired-state and terminal-outcome readback for one projection request. */
-  readAgentHomeProjection(deviceId: string, requestId: string): Promise<AgentHomeProjectionStatusReadback | undefined>;
+  /** Durable desired-state and terminal-outcome readback for one exact device-and-Agent request. */
+  readAgentHomeProjection(
+    deviceId: string,
+    agentRef: AgentRef,
+    requestId: string,
+  ): Promise<AgentHomeProjectionStatusReadback | undefined>;
   tasks: {
     get(taskId: string): Promise<TaskSnapshot | undefined>;
     /**
@@ -187,7 +192,7 @@ export interface ByokServer {
   };
   /** Reliable Agent egress receipt readback. */
   egress: {
-    get(deviceId: string, eventId: string): Promise<AgentEgressReceipt | undefined>;
+    get(deviceId: string, agentRef: AgentRef, eventId: string): Promise<AgentEgressReceipt | undefined>;
   };
   machines: {
     list(): Promise<MachineInfo[]>;
@@ -705,16 +710,14 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
 
     async readAgentHomeProjection(
       deviceId: string,
+      agentRef: AgentRef,
       requestId: string,
     ): Promise<AgentHomeProjectionStatusReadback | undefined> {
-      // The kernel's readback is keyed by the WHOLE immutable request identity
-      // (`requestId` + `agentRef` + `projectionHash`) so a status read can never
-      // be answered for a different desired state that happens to share an id.
-      // A host holding only the id gets the rest from the durable request the
-      // enqueue recorded — one authority, read twice, not a second index.
+      // The durable request lookup is exact to the device and AgentRef. The
+      // stored request remains the authority for the projection hash.
       const stored = await composition.cloud.receipts.get(
         tenant,
-        agentHomeProjectionRequestKey(deviceId, requestId),
+        agentHomeProjectionRequestKey(deviceId, agentRef, requestId),
       );
       if (stored === undefined) return undefined;
       let desired: AgentHomeProjectionPayload;
@@ -754,8 +757,8 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     },
 
     egress: {
-      async get(deviceId: string, eventId: string): Promise<AgentEgressReceipt | undefined> {
-        const record = await cloud.readAgentEgress(tenant, deviceId, eventId);
+      async get(deviceId: string, agentRef: AgentRef, eventId: string): Promise<AgentEgressReceipt | undefined> {
+        const record = await cloud.readAgentEgress(tenant, deviceId, agentRef, eventId);
         return record === undefined
           ? undefined
           : {
