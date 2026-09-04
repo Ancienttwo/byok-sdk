@@ -1,4 +1,5 @@
 $ vitest run src/__tests__/server-reliability-regression.test.ts
+REGRESSION_GUARD=packages/server/src/__tests__/server-reliability-regression.test.ts
 
  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issues-141-144-server/packages/server
 
