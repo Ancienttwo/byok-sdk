@@ -49,5 +49,8 @@
     "@byok-sdk/protocol": "workspace:*",
     "@hono/node-server": "^2.0.10",
     "hono": "^4.12.30"
+  },
+  "devDependencies": {
+    "@byok-sdk/conformance": "workspace:*"
   }
 }

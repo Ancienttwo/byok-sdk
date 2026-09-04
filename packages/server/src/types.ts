@@ -24,6 +24,17 @@ import type {
 import type { TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { RateLimiterOptions } from './rate-limiter';
 
+/** Mutually-exclusive storage authority for the embedded reference server. */
+export type ByokServerStorage =
+  | { readonly kind: 'memory' }
+  | {
+      readonly kind: 'sqlite';
+      /** File-backed SQLite database. `:memory:` is accepted for tests only. */
+      readonly path: string;
+      /** Lifetime of signed blob upload/download URLs. Default 15 minutes. */
+      readonly urlTtlMs?: number;
+    };
+
 /** Options for {@link createByokServer}. */
 export interface CreateByokServerOptions {
   /**
@@ -33,6 +44,12 @@ export interface CreateByokServerOptions {
    * mismatched daemon is rejected at handshake time.
    */
   productId: string;
+  /**
+   * Embedded storage authority. Defaults to process-local memory. SQLite is
+   * selected explicitly and fails closed if it cannot be opened; it never
+   * falls back to memory.
+   */
+  storage?: ByokServerStorage;
   /** How long `GET /byok/events` holds an empty poll open before returning, ms (§8). Default ~50s; override for tests. */
   longPollHoldMs?: number;
   /** Per-product blob size ceiling in bytes (§7). Default 100MB. */

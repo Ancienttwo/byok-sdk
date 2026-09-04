@@ -75,7 +75,7 @@ import { Hono } from 'hono';
 import { type PairingCodeInfo } from '@byok-sdk/cloud';
 import type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
 import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, TaskHandle, TaskSnapshot } from './types';
-export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, ServerTaskEvent, TaskHandle, TaskResult, TaskSnapshot, } from './types';
+export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, ServerTaskEvent, TaskHandle, TaskResult, TaskSnapshot, } from './types';
 /**
  * M5 (approval targeting, docs/protocol.md §5.3): `TaskHandle.approve`/`reject`'s
  * `opts.approvalId` targeting throws this when the id names an approval the
@@ -172,6 +172,10 @@ export interface ByokServer {
          */
         list(query?: TaskListQuery): Promise<TaskPage>;
     };
+    /** Trusted embedder access to committed blob download grants. */
+    blobs: {
+        getDownloadUrl(blobId: string): Promise<string | undefined>;
+    };
     /** Reliable Agent egress receipt readback. */
     egress: {
         get(deviceId: string, eventId: string): Promise<AgentEgressReceipt | undefined>;
@@ -229,9 +233,12 @@ export interface ByokServer {
      * Release what this instance holds: the relay's per-task feeds and their
      * reclamation timers, and the connection observations. Call it on shutdown so
      * nothing keeps the process alive or leaks a handle in tests; safe to call
-     * more than once.
+     * more than once. SQLite embedders that need to await handle release should
+     * call {@link ByokServer.close} instead.
      */
     stop(): void;
+    /** Drain pending store calls and release the selected storage authority. */
+    close(): Promise<void>;
     /**
      * A plain, serializable snapshot of this server's current state. See
      * {@link HubStats} for the field-by-field contract.
@@ -248,7 +255,7 @@ export interface ByokServer {
 }
 /**
  * Embedded reference coordinator: a thin façade over `@byok-sdk/cloud`'s
- * kernel, composed against in-memory stores.
+ * kernel, composed against the explicitly selected embedded stores.
  *
  * What that means concretely — and it is the whole point of WP3B — is that this
  * package owns NO coordination semantics any more. Pairing, tokens, the inbound
@@ -259,8 +266,9 @@ export interface ByokServer {
  * one, an in-process notification relay, and the observability an embedder used
  * to get from the hub.
  *
- * State is in-memory and dies with the process. A deployment that needs it to
- * survive a restart composes `createByokCloud` with durable stores directly.
+ * State is in-memory by default. Explicit SQLite mode persists the six
+ * coordination interfaces whose contracts cross a process restart; all other
+ * ports remain process-local.
  */
 export declare function createByokServer(opts: CreateByokServerOptions): ByokServer;
 // ==== @byok-sdk/server dist/rate-limiter.d.ts ====
@@ -516,12 +524,12 @@ export declare function closeSqliteDatabaseAfterInitializationFailure(db: Databa
  * Thrown when `node:sqlite` isn't available in the running Node.js binary.
  * `node:sqlite` shipped in Node.js 22.5.0 (https://nodejs.org/api/sqlite.html)
  * and remains marked experimental there (an `ExperimentalWarning` on stderr
- * is expected and harmless — not an error). The SQLite-backed reference
- * stores in this package (`SqliteTaskStore`, `SqliteBlobStore`) deliberately
+ * is expected and harmless — not an error). The SQLite-backed embedded store
+ * composition deliberately
  * depend on nothing else — no `better-sqlite3` or other native module —
  * because staying at zero native dependencies is required to keep
  * `@byok-sdk/server` trivially packageable across platforms. The tradeoff is
- * that these stores simply don't work below Node 22.5; this error says so
+ * that this composition simply doesn't work below Node 22.5; this error says so
  * clearly and up front, instead of letting a cryptic `Cannot find module
  * 'node:sqlite'` surface from deep inside a query.
  */
@@ -668,6 +676,16 @@ export declare function createTaskHandle(taskId: string, deps: TaskHandleDeps): 
 import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, PermissionPolicy, RuntimeCapabilities, RuntimeId, RuntimeInfo, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskState, ToolsetId, TerminalProjectionSelection } from '@byok-sdk/protocol';
 import type { TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { RateLimiterOptions } from './rate-limiter';
+/** Mutually-exclusive storage authority for the embedded reference server. */
+export type ByokServerStorage = {
+    readonly kind: 'memory';
+} | {
+    readonly kind: 'sqlite';
+    /** File-backed SQLite database. `:memory:` is accepted for tests only. */
+    readonly path: string;
+    /** Lifetime of signed blob upload/download URLs. Default 15 minutes. */
+    readonly urlTtlMs?: number;
+};
 /** Options for {@link createByokServer}. */
 export interface CreateByokServerOptions {
     /**
@@ -677,6 +695,12 @@ export interface CreateByokServerOptions {
      * mismatched daemon is rejected at handshake time.
      */
     productId: string;
+    /**
+     * Embedded storage authority. Defaults to process-local memory. SQLite is
+     * selected explicitly and fails closed if it cannot be opened; it never
+     * falls back to memory.
+     */
+    storage?: ByokServerStorage;
     /** How long `GET /byok/events` holds an empty poll open before returning, ms (§8). Default ~50s; override for tests. */
     longPollHoldMs?: number;
     /** Per-product blob size ceiling in bytes (§7). Default 100MB. */

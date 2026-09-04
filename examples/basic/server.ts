@@ -1,5 +1,5 @@
-// BYOK SDK example: a hono server embedding `@byok-sdk/server`'s in-memory M0
-// reference implementation, plus a plain HTML/JS demo UI (no frontend build
+// BYOK SDK example: a hono server embedding `@byok-sdk/server`'s M0 reference
+// implementation, plus a plain HTML/JS demo UI (no frontend build
 // step — the page is served as a static file with inline <script>).
 //
 // This is the "examples/ (不发布)" app from the plan's 服务端参考实现 section:
@@ -33,22 +33,20 @@ const PRODUCT_ID = process.env.BYOK_EXAMPLE_PRODUCT_ID ?? 'byok-example-basic';
 // rather than pulling in @byok-sdk/protocol just for this one array.
 const KNOWN_RUNTIMES = new Set(['pi', 'claude', 'codex']);
 
-// Storage mode: WP3B Step 2 folded `@byok-sdk/server` into a façade over the
-// `@byok-sdk/cloud` kernel and deleted this package's own SQLite task/blob
-// stores and its local-disk blob store. The kernel's `node:sqlite` store
-// adapters land in Step 3; until then the ONLY mode is the zero-setup
-// in-memory one, so `BYOK_STORE=sqlite` fails closed at startup rather than
-// silently demoting a run that asked for persistence into one that loses
-// everything on restart.
-if (process.env.BYOK_STORE === 'sqlite') {
-  console.error(
-    'byok example: BYOK_STORE=sqlite is not available — SQLite persistence returns in WP3B Step 3. ' +
-      'Unset BYOK_STORE to run the in-memory demo.',
-  );
-  process.exit(1);
+const storageMode = process.env.BYOK_STORE ?? 'memory';
+if (storageMode !== 'memory' && storageMode !== 'sqlite') {
+  throw new Error(`BYOK_STORE must be "memory" or "sqlite"; received ${JSON.stringify(storageMode)}`);
 }
-
-const byok = createByokServer({ productId: PRODUCT_ID });
+const byok = createByokServer({
+  productId: PRODUCT_ID,
+  storage:
+    storageMode === 'sqlite'
+      ? {
+          kind: 'sqlite',
+          path: process.env.BYOK_SQLITE_PATH ?? path.join(exampleDir, 'data', 'byok.sqlite'),
+        }
+      : { kind: 'memory' },
+});
 
 // `createByokServer`'s public surface only exposes read-only task snapshots
 // (`tasks.get`/`tasks.list`) — the live `TaskHandle` (events/approve/reject/
@@ -158,15 +156,12 @@ app.post('/api/tasks', async (c) => {
 // `blobStore` handle instead of requiring the browser to hold a device
 // token. Used by the UI when an `artifact` event carries a `blobRef` (a
 // >64KB artifact — see task.artifact's inline-vs-blob split).
-app.get('/api/blobs/:blobId/url', (c) =>
-  c.json(
-    {
-      error:
-        'browser-facing blob download is unavailable in this build — the embedder-held blob store returns in WP3B Step 3',
-    },
-    501,
-  ),
-);
+app.get('/api/blobs/:blobId/url', async (c) => {
+  const downloadUrl = await byok.blobs.getDownloadUrl(c.req.param('blobId'));
+  return downloadUrl === undefined
+    ? c.json({ error: 'blob not found' }, 404)
+    : c.json({ downloadUrl });
+});
 
 app.get('/api/tasks/:taskId/events', (c) => {
   const handle = handles.get(c.req.param('taskId'));
@@ -257,6 +252,20 @@ app.post('/api/tasks/:taskId/cancel', async (c) => {
   }
 });
 
-serve({ fetch: app.fetch, port: PORT }, (info) => {
-  console.log(`byok example server listening on http://localhost:${info.port} (productId=${PRODUCT_ID})`);
+const server = serve({ fetch: app.fetch, port: PORT }, (info) => {
+  console.log(
+    `byok example server listening on http://localhost:${info.port} ` +
+      `(productId=${PRODUCT_ID}, storage=${storageMode})`,
+  );
 });
+
+let closing = false;
+async function shutdown(): Promise<void> {
+  if (closing) return;
+  closing = true;
+  server.close();
+  await byok.close();
+}
+
+process.once('SIGINT', () => void shutdown());
+process.once('SIGTERM', () => void shutdown());

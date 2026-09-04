@@ -35,12 +35,12 @@ export function closeSqliteDatabaseAfterInitializationFailure(
  * Thrown when `node:sqlite` isn't available in the running Node.js binary.
  * `node:sqlite` shipped in Node.js 22.5.0 (https://nodejs.org/api/sqlite.html)
  * and remains marked experimental there (an `ExperimentalWarning` on stderr
- * is expected and harmless — not an error). The SQLite-backed reference
- * stores in this package (`SqliteTaskStore`, `SqliteBlobStore`) deliberately
+ * is expected and harmless — not an error). The SQLite-backed embedded store
+ * composition deliberately
  * depend on nothing else — no `better-sqlite3` or other native module —
  * because staying at zero native dependencies is required to keep
  * `@byok-sdk/server` trivially packageable across platforms. The tradeoff is
- * that these stores simply don't work below Node 22.5; this error says so
+ * that this composition simply doesn't work below Node 22.5; this error says so
  * clearly and up front, instead of letting a cryptic `Cannot find module
  * 'node:sqlite'` surface from deep inside a query.
  */
@@ -48,9 +48,9 @@ export class SqliteUnavailableError extends Error {
   constructor(cause: unknown) {
     super(
       'node:sqlite is unavailable in this Node.js runtime. The SQLite-backed reference ' +
-        'stores (SqliteTaskStore/SqliteBlobStore) require Node.js 22.5+ with the built-in ' +
+        'store composition requires Node.js 22.5+ with the built-in ' +
         '`node:sqlite` module (no native dependency is used or allowed here). Upgrade Node.js, ' +
-        'or use the default InMemoryTaskStore / LocalDiskBlobStore instead.',
+        'or select the default in-memory server storage instead.',
     );
     this.name = 'SqliteUnavailableError';
     this.cause = cause;

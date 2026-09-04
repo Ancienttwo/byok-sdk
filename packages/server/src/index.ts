@@ -41,6 +41,7 @@ import type {
   AgentHomeProjectionRequest,
   AgentHomeProjectionStatusReadback,
   AgentEgressReceipt,
+  ByokServerStorage,
   CreateByokServerOptions,
   DispatchInput,
   FreshAgentEgressDispatchInput,
@@ -57,6 +58,7 @@ export type {
   AgentHomeProjectionRequest,
   AgentHomeProjectionStatusReadback,
   AgentEgressReceipt,
+  ByokServerStorage,
   CreateByokServerOptions,
   DispatchInput,
   FreshAgentEgressDispatchInput,
@@ -178,6 +180,10 @@ export interface ByokServer {
      */
     list(query?: TaskListQuery): Promise<TaskPage>;
   };
+  /** Trusted embedder access to committed blob download grants. */
+  blobs: {
+    getDownloadUrl(blobId: string): Promise<string | undefined>;
+  };
   /** Reliable Agent egress receipt readback. */
   egress: {
     get(deviceId: string, eventId: string): Promise<AgentEgressReceipt | undefined>;
@@ -235,9 +241,12 @@ export interface ByokServer {
    * Release what this instance holds: the relay's per-task feeds and their
    * reclamation timers, and the connection observations. Call it on shutdown so
    * nothing keeps the process alive or leaks a handle in tests; safe to call
-   * more than once.
+   * more than once. SQLite embedders that need to await handle release should
+   * call {@link ByokServer.close} instead.
    */
   stop(): void;
+  /** Drain pending store calls and release the selected storage authority. */
+  close(): Promise<void>;
   /**
    * A plain, serializable snapshot of this server's current state. See
    * {@link HubStats} for the field-by-field contract.
@@ -255,7 +264,7 @@ export interface ByokServer {
 
 /**
  * Embedded reference coordinator: a thin façade over `@byok-sdk/cloud`'s
- * kernel, composed against in-memory stores.
+ * kernel, composed against the explicitly selected embedded stores.
  *
  * What that means concretely — and it is the whole point of WP3B — is that this
  * package owns NO coordination semantics any more. Pairing, tokens, the inbound
@@ -266,8 +275,9 @@ export interface ByokServer {
  * one, an in-process notification relay, and the observability an embedder used
  * to get from the hub.
  *
- * State is in-memory and dies with the process. A deployment that needs it to
- * survive a restart composes `createByokCloud` with durable stores directly.
+ * State is in-memory by default. Explicit SQLite mode persists the six
+ * coordination interfaces whose contracts cross a process restart; all other
+ * ports remain process-local.
  */
 export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   const startedAtMs = Date.now();
@@ -285,6 +295,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   const composition = composeFacadeStores({
     tenant,
     maxBlobSizeBytes,
+    ...(opts.storage === undefined ? {} : { storage: opts.storage }),
     ...(opts.rateLimit === undefined ? {} : { rateLimit: opts.rateLimit }),
     connections,
     onRateLimited: (deviceId, at) => relay.emitServerEvent({ kind: 'device.rate_limited', deviceId, at }),
@@ -715,6 +726,12 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       },
     },
 
+    blobs: {
+      getDownloadUrl(blobId: string): Promise<string | undefined> {
+        return composition.cloud.blobs.getDownloadUrl(tenant, blobId);
+      },
+    },
+
     egress: {
       async get(deviceId: string, eventId: string): Promise<AgentEgressReceipt | undefined> {
         const record = await cloud.readAgentEgress(tenant, deviceId, eventId);
@@ -759,6 +776,13 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     stop(): void {
       relay.stop();
       dispatched.clear();
+      void composition.close();
+    },
+
+    async close(): Promise<void> {
+      relay.stop();
+      dispatched.clear();
+      await composition.close();
     },
 
     async stats(): Promise<HubStats> {

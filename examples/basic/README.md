@@ -1,7 +1,7 @@
 # @byok-sdk/example-basic
 
 End-to-end walking-skeleton demo for the BYOK SDK (see `docs`/plan: 里程碑 M0).
-A hono server embeds `@byok-sdk/server`'s in-memory reference implementation and
+A hono server embeds `@byok-sdk/server`'s reference implementation and
 serves a single plain-HTML/JS page (no frontend build step). A separate
 `byok-agent` daemon process (from `@byok-sdk/client`) runs on "the user's
 machine" and drives the local `pi` coding-agent runtime.
@@ -100,25 +100,30 @@ byok-agent workspaces [--show-paths] [--config <path>]
 Paths are hidden by default and are shown only with `--show-paths`. The private ledger is not uploaded to the server. To roll back, remove `gitWorkspace` from the config and restart the daemon; existing workspaces and ledger records are preserved for manual salvage.
 
 
-This demo's task/blob state is in-memory and is lost whenever the server
-process restarts. There is no persistent mode right now: WP3B Step 2 folded
-`@byok-sdk/server` into a façade over the `@byok-sdk/cloud` coordination
-kernel and deleted this package's own SQLite task/blob stores and its
-local-disk blob store, and the kernel's `node:sqlite` store adapters land in
-Step 3.
-
-Until then `BYOK_STORE=sqlite` **fails closed at startup** rather than quietly
-demoting a run that asked for persistence into one that loses everything:
+The default is zero-setup, process-local memory. To persist the embedded
+coordination subset across restarts, select SQLite explicitly:
 
 ```sh
 BYOK_STORE=sqlite bun run --filter @byok-sdk/example-basic dev
-# byok example: BYOK_STORE=sqlite is not available — SQLite persistence
-# returns in WP3B Step 3. Unset BYOK_STORE to run the in-memory demo.
 ```
 
-One demo route is unavailable for the same reason and answers `501` with an
-explanatory body: `GET /api/blobs/:blobId/url` needed the embedder-held blob
-store handle. Device revocation remains available through
+The default database is `examples/basic/data/byok.sqlite` (ignored by Git);
+override it with `BYOK_SQLITE_PATH=/absolute/path/to/byok.sqlite`. SQLite mode
+persists task attempts, cancellation delivery/mailbox state, object manifests,
+blob metadata, and blob bytes in one database. Pairing, device presence,
+receipts, quota counters, and the other ports remain in-memory by design, so a
+daemon must pair again after a server restart. An unavailable or invalid
+SQLite database aborts startup; there is no fallback to memory.
+
+To exercise restart readback manually, dispatch a task in SQLite mode, stop the
+server with `Ctrl-C`, and run the same command again with the same
+`BYOK_SQLITE_PATH`. The task snapshot remains in `/api/tasks`; pair the daemon
+again because device enrollment is intentionally outside the durable subset.
+Committed artifact links continue to resolve from the same database.
+
+`GET /api/blobs/:blobId/url` now uses the trusted embedder blob surface and
+returns a committed blob's signed URL, or `404` when no downloadable blob is
+owned by this server. Device revocation remains available through
 `POST /api/machines/:deviceId/revoke`; the façade binds its single tenant and
 accepts only the device id.
 

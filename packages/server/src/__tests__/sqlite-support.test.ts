@@ -37,8 +37,8 @@ describe('SQLite availability guard', () => {
     expect(err.name).toBe('SqliteUnavailableError');
     expect(err.message).toMatch(/node:sqlite is unavailable/i);
     expect(err.message).toMatch(/22\.5/);
-    expect(err.message).toMatch(/InMemoryTaskStore/);
-    expect(err.message).toMatch(/LocalDiskBlobStore/);
+    expect(err.message).toMatch(/embedded|composition/i);
+    expect(err.message).toMatch(/in-memory server storage/i);
     expect(err.cause).toBe(cause);
   });
 

@@ -308,9 +308,9 @@ readAgentHomeProjection(deviceId, requestId): Promise<AgentHomeProjectionStatusR
   出口：`bun run build && bun run typecheck && bun run test` 全绿；`packages/server/src/__tests__` 中不再有任何 `attachWebSocket` / WS fixture 引用（`grep` 零命中）；`bearer-instance-product.test.ts`(197) 绿（它是 GAP-6 的哨兵，靠 Step 1e 而非放宽断言变绿）。
   回滚：单 commit revert。
 
-**Step 3 — SQLite adapter + examples**（允许路径：`packages/server/src/stores/sqlite/**`、`examples/basic/**`）
-只做今天已有的持久化范围：`TaskAttemptStore`、`CloudBlobStore`、`BlobContentProxy`、core `ObjectStore` 四个 port 的 `node:sqlite` 实现，其余保持 in-memory（与今天「task 记录 + blob 字节持久，outbox 不持久」完全等价，`examples/basic/server.ts:59-67` 已如此声明）。用 `runCloudConformance`/`runCoreConformance`（`conformance/src/index.ts:16-19`）验收。`examples/basic` 按 §6 迁移。
-出口：conformance 绿；`BYOK_STORE=sqlite` 重启后 task 记录与 blob 字节可读回。回滚：删目录 + examples 退回 in-memory-only。
+**Step 3 — SQLite adapter + examples**（允许路径：`packages/server/src/stores/sqlite/**`、`packages/server/src/{stores,index,types}.ts`、`examples/basic/**`）
+实现一个显式、互斥的 `memory | sqlite` embedded composition。SQLite 的持久化边界是六个互相依赖的接口：`TaskAttemptStore`、`TaskCancellationStore`、core `MailboxStore`、core `ObjectStore`、`CloudBlobStore`、`BlobContentProxy`；它们共用一个数据库和串行 transaction coordinator。其余 port 保持 in-memory；其中 in-memory `QuotaStore` 必须绑定 SQLite `ObjectStore`，不能保留一份隐藏的 in-memory object authority。2026-09-04 takeover audit 证明原四接口方案会把 task attempt 与 cancellation/mailbox 分属不同 authority，违反 cancellation tombstone + delivery 的 commit-both-or-neither contract；owner 已批准此更正。用未修改的 `runCloudConformance`/`runCoreConformance`（`conformance/src/index.ts:16-19`）验收，并加 cancellation 中途失败 rollback 与 restart readback guard。`examples/basic` 按 §6 迁移。
+出口：conformance 绿；注入 cancellation task-update 失败时 tombstone 与 mailbox delivery 均不提交；`BYOK_STORE=sqlite` 重启后 task、mailbox、object manifest、blob metadata 与 blob bytes 可读回。回滚：删目录 + examples 退回 in-memory-only。
 
 **Step 4 — 删 daemon WS transport**（允许路径：`packages/client/src/daemon/**`、`packages/client/src/index.ts`、`packages/protocol/src/*`）
 删 `ws-transport.ts`(341)；`connection-manager.ts`(982) 去掉 WS 分支与 `degraded` 态（`:228,296,348,442,462,518,898-965`）；`url.ts` 去 `toWsUrl`；`BYOK_WS_PATH` 常量删；`ConnectionState` 联合收窄（`client/src/index.ts:347` 导出形状 breaking）。
@@ -353,7 +353,7 @@ WP3A 与 WP3B 是并发排期的两把刀，下列路径两包都会写，**每�
 
 **R4 — GAP-6 若不同刀，本刀会让 embedded 部署的 bearer 安全姿态**从「有 instance-product 检查」（`index.ts:234-238`）**降级**到 cloud 的 row==claims。`bearer-instance-product.test.ts`(197) 会红，这是好的——它是这条风险的哨兵，不要为了让它绿而放宽断言。
 
-**R5 — SQLite 范围蔓延。** `CloudStores` 是 14 个 port 的 all-or-nothing bundle（`ports.ts:577-582`），加 core 7 个共 21 个；Postgres 版是 9,358 行。若 Step 3 被理解成「完整 SQLite 部署」，本刀翻三倍并推迟 WP4。**明确边界：只做 4 个 port，混装 in-memory，持久化范围与今天逐字相同。**
+**R5 — SQLite 范围蔓延。** `CloudStores` 是 14 个 port 的 all-or-nothing bundle（`ports.ts:577-582`），加 core 7 个共 21 个；Postgres 版是 9,358 行。若 Step 3 被理解成「完整 SQLite 部署」，本刀翻三倍并推迟 WP4。**更正后的明确边界：只持久化六个原子关联接口（task、cancellation、mailbox、object、blob grant、blob bytes），其余混装 in-memory；不扩成 21-port SQLite bundle。**
 
 **10x 首先失效的**：`TaskEventRelay` 的 per-task 无界缓冲（`event-queue.ts:45-47` 从 0 重放且不释放）——10k 并发 task 时 OOM，且今天的 `hub.ts` 同形状。§3 已给出同刀修法（有界环 + 显式截断标记 + 终态 TTL 回收）。第二个是 `tasks.list()` 的全表返回，§6 已改成游标分页。
 
@@ -365,4 +365,4 @@ WP3A 与 WP3B 是并发排期的两把刀，下列路径两包都会写，**每�
 
 ---
 
-RECOMMENDATION: Execute WP3B as six ≤1-day steps — characterization tests first, then five cloud kernel additions (approve/reject, steer + `claimedRuntime`, `cursor_too_old`, `TaskAttempt` list, instance-product bearer) plus one post-commit observer hook, then reimplement `createByokServer` over `createInMemoryByokCloud` with a read-back-authoritative `TaskHandle` relay, deleting ~5,200 lines including `hub.ts` and both WS transports, with SQLite scoped to exactly today's four-port durability — confidence: HIGH
+RECOMMENDATION: Execute WP3B as six ≤1-day steps — characterization tests first, then five cloud kernel additions (approve/reject, steer + `claimedRuntime`, `cursor_too_old`, `TaskAttempt` list, instance-product bearer) plus one post-commit observer hook, then reimplement `createByokServer` over `createInMemoryByokCloud` with a read-back-authoritative `TaskHandle` relay, deleting ~5,200 lines including `hub.ts` and both WS transports, with SQLite scoped to the corrected six-interface atomic durability boundary — confidence: HIGH

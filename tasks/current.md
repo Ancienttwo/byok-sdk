@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-09-04T04:56:03+0800 -->
+<!-- updated_at: 2026-09-04T13:05:37+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-09-04T04:56:03+0800
-> **Source Branch**: codex/wp3b-step2-facade-fold
-> **Source Commit**: 426c116
+> **Updated At**: 2026-09-04T13:05:37+0800
+> **Source Branch**: codex/wp3b-step3-sqlite-atomic
+> **Source Commit**: 6b2828b
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -52,16 +52,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260903-1505-wp3b-step2-facade-fold.md
- D tasks/contracts/20260903-1505-wp3b-step2-facade-fold.contract.md
- D tasks/notes/20260903-1505-wp3b-step2-facade-fold.notes.md
- D tasks/reviews/20260903-1505-wp3b-step2-facade-fold.review.md
+ D plans/plan-20260904-1237-wp3b-step3-sqlite-atomic.md
+ D tasks/contracts/20260904-1237-wp3b-step3-sqlite-atomic.contract.md
+ D tasks/notes/20260904-1237-wp3b-step3-sqlite-atomic.notes.md
+ D tasks/reviews/20260904-1237-wp3b-step3-sqlite-atomic.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260903-1505-wp3b-step2-facade-fold.md
-?? tasks/archive/contract-20260904-0455-wp3b-step2-facade-fold.md
-?? tasks/archive/notes-20260904-0455-wp3b-step2-facade-fold.md
-?? tasks/archive/review-20260904-0455-wp3b-step2-facade-fold.md
-?? tasks/archive/todo-20260904-0455-wp3b-step2-facade-fold.md
+?? plans/archive/plan-20260904-1237-wp3b-step3-sqlite-atomic.md
+?? tasks/archive/contract-20260904-1305-wp3b-step3-sqlite-atomic.md
+?? tasks/archive/notes-20260904-1305-wp3b-step3-sqlite-atomic.md
+?? tasks/archive/review-20260904-1305-wp3b-step3-sqlite-atomic.md
+?? tasks/archive/todo-20260904-1305-wp3b-step3-sqlite-atomic.md
 ```
 
 ## Source Artifacts

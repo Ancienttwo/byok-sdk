@@ -16,6 +16,8 @@ import {
 } from '@byok-sdk/cloud';
 import { RateLimiter, createCountingInboundRateLimiter, type RateLimiterOptions } from './rate-limiter';
 import type { DeviceConnections } from './connections';
+import { createSqliteEmbeddedStores } from './stores/sqlite';
+import type { ByokServerStorage } from './types';
 
 /**
  * The store composition this façade hands the cloud kernel.
@@ -80,11 +82,13 @@ export interface FacadeStoreComposition {
   readonly clock: Clock;
   readonly crypto: CloudCrypto;
   readonly counters: FacadeCounters;
+  close(): Promise<void>;
 }
 
 export interface FacadeStoreOptions {
   readonly tenant: TenantId;
   readonly maxBlobSizeBytes: number;
+  readonly storage?: ByokServerStorage;
   readonly rateLimit?: RateLimiterOptions;
   /** Where a device's own liveness observations are recorded. */
   readonly connections: DeviceConnections;
@@ -95,8 +99,22 @@ export interface FacadeStoreOptions {
 export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreComposition {
   const clock = systemClock();
   const crypto = createWebCrypto();
-  const core = createInMemoryCoreStores({ clock }).stores;
-  const { stores, blobContentProxy } = createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox);
+  const sqlite =
+    options.storage?.kind === 'sqlite'
+      ? createSqliteEmbeddedStores(
+          {
+            path: options.storage.path,
+            ...(options.storage.urlTtlMs === undefined ? {} : { urlTtlMs: options.storage.urlTtlMs }),
+          },
+          { clock, crypto },
+        )
+      : undefined;
+  const inMemoryCore = sqlite === undefined ? createInMemoryCoreStores({ clock }).stores : undefined;
+  const core = sqlite?.core ?? inMemoryCore!;
+  const inMemoryCloud =
+    sqlite === undefined ? createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox) : undefined;
+  const stores = sqlite?.cloud ?? inMemoryCloud!.stores;
+  const blobContentProxy = sqlite?.blobContentProxy ?? inMemoryCloud!.blobContentProxy;
 
   const rateLimiter = createCountingInboundRateLimiter(
     new RateLimiter(options.rateLimit),
@@ -137,6 +155,7 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
     clock,
     crypto,
     counters,
+    close: () => sqlite?.close() ?? Promise.resolve(),
   };
 }
 
