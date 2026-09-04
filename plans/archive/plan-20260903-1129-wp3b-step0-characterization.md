@@ -109,7 +109,7 @@ See P2 trace.
 - Owner decision recorded 2026-09-03 (「同意」): design packet §8 R2 — the lease reaper is deleted with `hub.ts` in WP3B Step 2; a dark device's task stays `pending` and the host owns timeout + `cancel()` (matches today's hosted cloud semantics). Consequence for this slice: none. Consequence for Step 2d: `packages/server/src/__tests__/task-lease.test.ts` is deleted whole, and the replacement contract (host-side timeout + `cancel()`) is documented in `docs/` under Step 5.
 
 ## Task Breakdown
-- [ ] T1 `connectFakeDaemonLongPoll()` in `test-support.ts`
-- [ ] T2 Cases 1–5 (pairing/long-poll, TaskHandle ≡ tasks.get, first-terminal-wins, cancel precedence, stale approval)
-- [ ] T3 Cases 6–10 (steer gate, cursor replay + `cursor_too_old`, dedup + ownership, capability admission before mailbox, rate-limit episode)
-- [ ] T4 Verification boundary; notes; confirm zero production diff
+- [x] T1 `connectFakeDaemonLongPoll()` in `test-support.ts`
+- [x] T2 Cases 1–5 (pairing/long-poll, TaskHandle ≡ tasks.get, first-terminal-wins, cancel precedence, stale approval)
+- [x] T3 Cases 6–10 (steer gate, cursor replay + `cursor_too_old`, dedup + ownership, capability admission before mailbox, rate-limit episode)
+- [x] T4 Verification boundary; notes; confirm zero production diff

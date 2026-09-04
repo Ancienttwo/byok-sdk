@@ -100,10 +100,10 @@ See P2 trace.
 - Resolved 2026-09-03: `scripts/api-surface/check-api-surface.mjs` gates `cloud`, `cloud-dataplane`, `core` (byte-for-byte against `api-surface/<pkg>.d.ts`). The new exports are additive, so T2 regenerates exactly those three goldens with `bun run check:api-surface -- --update` and the diff must contain only the new symbols; `api-surface/{cloud,core,cloud-dataplane}.d.ts` join allowed paths. `server.d.ts`/`client.d.ts` stay untouched (Step 5 owns their breaking diff per §7 write-order table).
 
 ## Task Breakdown
-- [ ] T1e instance-product bearer (`instanceProductId`) + tests (D1)
-- [ ] T1a `approveTask`/`rejectTask` + `StaleApprovalError` + tests (D1)
-- [ ] T1c `cursor_too_old` 409 via `MailboxPage.recoverableFrom` + conformance (D2)
-- [ ] T1f `observer.onInboundCommitted` post-commit hook + tests (D2)
-- [ ] T1b `claimedRuntime` + migration 0018 + `steerTask` + conformance + tests (D3)
-- [ ] T1d `TaskAttemptStore.list` keyset paging + conformance (D3)
-- [ ] T2 packet corrections (§5.10, GAP-3 path), notes, zero `packages/server` diff, gate, PR (rebase-merge)
+- [x] T1e instance-product bearer (`instanceProductId`) + tests (D1)
+- [x] T1a `approveTask`/`rejectTask` + `StaleApprovalError` + tests (D1)
+- [x] T1c `cursor_too_old` 409 via `MailboxPage.recoverableFrom` + conformance (D2)
+- [x] T1f `observer.onInboundCommitted` post-commit hook + tests (D2)
+- [x] T1b `claimedRuntime` + migration 0018 + `steerTask` + conformance + tests (D3)
+- [x] T1d `TaskAttemptStore.list` keyset paging + conformance (D3)
+- [x] T2 packet corrections (§5.10, GAP-3 path), notes, zero `packages/server` diff, gate, PR (rebase-merge)

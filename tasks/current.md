@@ -1,16 +1,16 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-09-04T14:40:07+0800 -->
+<!-- updated_at: 2026-09-05T00:32:32+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Idle
-> **Updated At**: 2026-09-04T14:40:07+0800
-> **Source Branch**: codex/wp3b-step4b-step5-closeout
-> **Source Commit**: 736c2c9
+> **Updated At**: 2026-09-05T00:32:32+0800
+> **Source Branch**: codex/wp3b-workflow-closeout
+> **Source Commit**: 0436341
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: archive-workflow
+> **Reason**: wp3b-workflow-closeout
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
@@ -37,7 +37,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Sprint: (none)
 ## Workstreams
 
-- `tasks/workstreams/root/20260904-sdk-root.md`: status=active, current_slice=todo-01, source_plan=(none)
+- `tasks/workstreams/root/20260904-sdk-root.md`: status=completed, current_slice=complete, source_plan=(none)
 ## Handoff
 
 - Exact Next Step: (none)
