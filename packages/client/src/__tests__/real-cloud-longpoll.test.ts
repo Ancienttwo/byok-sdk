@@ -78,7 +78,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     await vi.waitFor(async () => {
       expect((await cloud.readTaskAttempt(offer.taskId))?.status).toBe('running');
     });
-    expect(daemon.status().connected).toBe(true); // still false throughout — WS never came up
+    expect(daemon.status().connected).toBe(true); // stays connected across the long-poll task lifecycle
 
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const session = adapter.sessions[0]!;
