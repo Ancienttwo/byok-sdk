@@ -115,4 +115,4 @@ See P2.
 - [x] T2d-server (D3a): 23 kept tests on long-poll fixture; `task-lease.test.ts` deleted; `device.connected` consumers reworked
 - [x] T2d-client (D3b): `real-server.ts` fixture without WS; 4 tests rewritten; `outbox-switch` deleted; client suite green
 - [x] T2c (D4): 3 `.mjs` scripts; `examples/basic` minimal; packet corrections
-- [ ] T3 closeout: `api-surface/server.d.ts`; notes; gate; PR; squash-merge
+- [x] T3 closeout: `api-surface/server.d.ts`; notes; gate; PR; squash-merge

@@ -1,7 +1,7 @@
 # BYOK SDK 架构文档
 
-> 状态：CURRENT；当前 source 已完成 WP3B Step 2/3/4a，Step 4b 的 daemon transport
-> 收敛与本文件同一工作包交付。
+> 状态：CURRENT；当前 source 已完成 WP3B Step 0–5，daemon transport 已收敛为
+> HTTP long-poll-only。
 > Version split: 发布、registry、tag/Release 与部署状态仍以实时系统为准；本文件只描述
 > 当前 workspace 的架构边界。
 > Verified against: 当前 checkout 的 source、public package surface 与 required docs checks
@@ -2147,4 +2147,4 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR-033 | `local-first-v1` 为默认数据 policy profile，contentful 进 `shared-observability-v1`；结果事务权威是 `SessionResultCommitter` | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-034 | legacy `task.offer*` / `strictAgentOnly` / 旧 gitWorkspace authority / ambient 选设备在一次 v2 cutover 中删除，无双读双写 | Accepted，Supersedes ADR-002（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 
-- `tasks/workstreams/root/20260904-sdk-root.md`
+- Completed workstream evidence: `tasks/workstreams/root/20260904-sdk-root.md`
