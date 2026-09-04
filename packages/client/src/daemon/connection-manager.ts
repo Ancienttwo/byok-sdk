@@ -789,6 +789,7 @@ export class ConnectionManager {
   private enterRevoked(): void {
     if (this.revoked) return;
     this.revoked = true;
+    this.serverCapabilities = [];
     this.longPoll.stop();
     this.connected = false;
     // Finding P3: the outbox drain must stop too, not just the receive
