@@ -56,4 +56,4 @@
 - [x] T2 Update tests and public types for the narrowed connection lifecycle.
 - [x] T3 Update current architecture/protocol/security/example/release documentation and API goldens.
 - [x] T4 Resolve the accumulated root architecture request with the refreshed architecture module and run all local gates.
-- [ ] T5 Record exact-subject acceptance, push PR, wait for exact-SHA CI, merge, and refresh local/remote main.
+- [x] T5 Record exact-subject acceptance and freeze the branch for the authorized PR delivery boundary.
