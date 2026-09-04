@@ -107,9 +107,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
         body: JSON.stringify({ messages: batch }),
       });
       expect(firstRes.status).toBe(200);
-      expect(await firstRes.json()).toEqual({
-        outcomes: batch.map((envelope) => ({ id: envelope.id, outcome: 'accepted' })),
-      });
+      expect(await firstRes.json()).toEqual({ accepted: 4 }); // no `rejected` key: nothing was rejected
 
       const claimed = await iter.next();
       expect(claimed.value).toMatchObject({ kind: 'state', state: 'Claimed' });
@@ -135,11 +133,10 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
         body: JSON.stringify({ messages: batch }),
       });
       expect(secondRes.status).toBe(200);
-      // An idempotent replay is a wire-level duplicate outcome even though
-      // nothing reprocessed.
-      expect(await secondRes.json()).toEqual({
-        outcomes: batch.map((envelope) => ({ id: envelope.id, outcome: 'duplicate' })),
-      });
+      // Duplicates still count as `accepted` on the wire (§8.2) — an
+      // idempotent replay is a wire-level success even though nothing
+      // reprocessed.
+      expect(await secondRes.json()).toEqual({ accepted: 4 });
 
       await expectNoMoreEvents(iter);
       expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('AwaitApproval'); // NOT Failed
@@ -194,7 +191,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
   });
 
   describe('cross-device task injection is rejected (N2, security)', () => {
-    it("device B POSTing task.progress/complete/await_approval for device A's task leaves A's state and event stream untouched, and every envelope receives a rejected outcome", async () => {
+    it("device B POSTing task.progress/complete/await_approval for device A's task leaves A's state and event stream untouched, and every envelope is counted rejected", async () => {
       const started = await start();
       const deviceA = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
         productId: PRODUCT_ID,
@@ -232,9 +229,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
         body: JSON.stringify({ messages: injected }),
       });
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({
-        outcomes: injected.map((envelope) => ({ id: envelope.id, outcome: 'rejected', reason: 'inbound_rejected' })),
-      });
+      expect(await res.json()).toEqual({ accepted: 0, rejected: 3 });
 
       // Dropped, never force-failed: a force-fail here would be a DoS an
       // attacker (device B, having merely guessed A's taskId) could use to
@@ -245,7 +240,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
   });
 
   describe('POST /byok/messages restricts to daemon->server task.* types (P2)', () => {
-    it('a task.offer or conn.ack in the batch receives a rejected outcome and has no side effect', async () => {
+    it('a task.offer or conn.ack in the batch is rejected, not counted accepted, and has no side effect', async () => {
       const started = await start();
       const { code } = await started.byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
       const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
@@ -268,9 +263,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       });
 
       expect(res.status).toBe(200); // tolerant batch parsing (P2): wrong-direction types are per-envelope rejected, not a whole-batch 400
-      expect(await res.json()).toEqual({
-        outcomes: [connAck, taskOffer].map((envelope) => ({ id: envelope.id, outcome: 'rejected', reason: 'inbound_rejected' })),
-      });
+      expect(await res.json()).toEqual({ accepted: 0, rejected: 2 });
       expect(await started.byok.tasks.get('task_forged')).toBeUndefined(); // never reached the task store at all
     });
 
@@ -292,12 +285,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
         body: JSON.stringify({ messages: [claim, forgedOffer] }),
       });
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({
-        outcomes: [
-          { id: claim.id, outcome: 'accepted' },
-          { id: forgedOffer.id, outcome: 'rejected', reason: 'inbound_rejected' },
-        ],
-      });
+      expect(await res.json()).toEqual({ accepted: 1, rejected: 1 });
 
       await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Claimed');
       expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Claimed');

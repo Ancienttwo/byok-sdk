@@ -187,9 +187,7 @@ describe('observer.onInboundCommitted', () => {
       body: JSON.stringify({ messages }),
     });
 
-    expect(await response.json()).toEqual({
-      outcomes: messages.map((message) => ({ id: message.id, outcome: 'accepted' })),
-    });
+    expect(await response.json()).toEqual({ accepted: 3 });
     expect(seen.map((input) => input.envelope.id)).toEqual(messages.map((message) => message.id));
     expect(seen.map((input) => input.tenantId)).toEqual([TENANT_A, TENANT_A, TENANT_A]);
     expect(seen.map((input) => input.deviceId)).toEqual(Array(3).fill(device.deviceId));
@@ -212,8 +210,8 @@ describe('observer.onInboundCommitted', () => {
       // One envelope that commits and one the gate refuses, so the comparison
       // covers both halves of the response body.
       const messages = [
-        createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId, id: '10000000-0000-4000-8000-000000000200' }),
-        createEnvelope('task.cancel', {}, { taskId, seq: 9, id: '10000000-0000-4000-8000-000000000201' }),
+        claim(taskId, device.deviceId),
+        createEnvelope('task.cancel', {}, { taskId, seq: 9 }),
       ];
       const response = await harness.request('/byok/messages', {
         method: 'POST',
@@ -224,15 +222,7 @@ describe('observer.onInboundCommitted', () => {
     }
 
     expect(await runBatch(thrower)).toEqual(await runBatch(undefined));
-    expect(await runBatch(thrower)).toEqual({
-      status: 200,
-      body: {
-        outcomes: [
-          { id: '10000000-0000-4000-8000-000000000200', outcome: 'accepted' },
-          { id: '10000000-0000-4000-8000-000000000201', outcome: 'rejected', reason: 'inbound_rejected' },
-        ],
-      },
-    });
+    expect(await runBatch(thrower)).toEqual({ status: 200, body: { accepted: 1, rejected: 1 } });
   });
 
   it('is absent by default: nothing observes and nothing changes', async () => {

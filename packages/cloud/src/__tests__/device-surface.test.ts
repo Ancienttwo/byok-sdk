@@ -1,7 +1,7 @@
 /**
  * The device surface at the HTTP level: what a daemon actually sends and what
  * it gets back. Response SHAPES are as much a part of the frozen contract as
- * the envelopes — exact per-envelope outcomes keyed by id, a 429 for the whole
+ * the envelopes — `{ accepted }` without a `rejected` key, a 429 for the whole
  * batch, a relative presigned URL — so they are asserted against the protocol
  * package's own schemas rather than by eye.
  */
@@ -37,42 +37,35 @@ function sha256(data: Uint8Array): string {
 }
 
 describe('POST /byok/messages', () => {
-  it('returns an exact accepted outcome keyed by every envelope id', async () => {
+  it('counts accepted envelopes and omits `rejected` entirely when nothing was rejected', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
 
-    const claim = createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId });
-    const started = createEnvelope('task.started', {}, { taskId });
-    const response = await send(harness, device.authorization, [claim, started]);
+    const response = await send(harness, device.authorization, [
+      createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId }),
+      createEnvelope('task.started', {}, { taskId }),
+    ]);
 
     expect(response.status).toBe(200);
     const body = MessagesSendResponseSchema.parse(await response.json());
-    expect(body).toEqual({
-      outcomes: [
-        { id: claim.id, outcome: 'accepted' },
-        { id: started.id, outcome: 'accepted' },
-      ],
-    });
+    expect(body).toEqual({ accepted: 2 });
   });
 
-  it('distinguishes duplicate and terminal rejection outcomes by envelope id', async () => {
+  it('counts a duplicate as accepted and a gate rejection separately', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
     const claim = createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId });
 
     await send(harness, device.authorization, [claim]);
-    const rejected = createEnvelope('task.cancel', {}, { taskId, seq: 1 });
-    const response = await send(harness, device.authorization, [claim, rejected]);
+    const response = await send(harness, device.authorization, [
+      claim,
+      createEnvelope('task.cancel', {}, { taskId, seq: 1 }),
+    ]);
 
     const body = MessagesSendResponseSchema.parse(await response.json());
-    expect(body).toEqual({
-      outcomes: [
-        { id: claim.id, outcome: 'duplicate' },
-        { id: rejected.id, outcome: 'rejected', reason: 'inbound_rejected' },
-      ],
-    });
+    expect(body).toEqual({ accepted: 1, rejected: 1 });
   });
 
   it('answers the WHOLE request 429 the moment one envelope is rate limited', async () => {
@@ -123,9 +116,7 @@ describe('POST /byok/messages', () => {
 
     const response = await send(harness, device.authorization, batch);
     expect(response.status).toBe(200);
-    expect(MessagesSendResponseSchema.parse(await response.json())).toEqual({
-      outcomes: batch.map((envelope) => ({ id: envelope.id, outcome: 'accepted' })),
-    });
+    expect(MessagesSendResponseSchema.parse(await response.json())).toEqual({ accepted: MAX_MESSAGES_PER_BATCH });
   });
 
   it('401s without a bearer token', async () => {

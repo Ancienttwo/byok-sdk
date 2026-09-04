@@ -300,6 +300,31 @@ export class ConnectionManager {
   private async drainOutbox(): Promise<void> {
     if (!this.started || this.draining) return;
     this.draining = true;
+    // Frozen v1 has no rejected ids. A finite FIFO therefore replays an
+    // immutable rejected segment by halves; accepted replays are server-dedup
+    // success and a rejected singleton reaches bounded quarantine. A missing
+    // response returns the same current segment plus untouched siblings for
+    // the ordinary backoff path below. At most 2n - 1 POSTs occur per batch.
+    const isolateRejectedBatch = async (batch: readonly Envelope[]): Promise<Envelope[] | undefined> => {
+      const pending: Envelope[][] = [[...batch]];
+      while (pending.length > 0) {
+        if (this.stopped || this.revoked) return pending.flat();
+
+        const segment = pending.shift()!;
+        const result = await this.longPoll.postBatch(segment);
+        if (result === undefined) return [...segment, ...pending.flat()];
+
+        if ((result.rejected ?? 0) === 0) continue;
+        if (segment.length === 1) {
+          this.quarantineRejectedOutbound(segment[0]!, 'inbound_rejected');
+          continue;
+        }
+
+        const midpoint = Math.floor(segment.length / 2);
+        pending.unshift(segment.slice(0, midpoint), segment.slice(midpoint));
+      }
+      return undefined;
+    };
     try {
       while (this.outbox.length > 0) {
         if (this.stopped || this.revoked) return;
@@ -312,26 +337,21 @@ export class ConnectionManager {
         // a stalled/hung `postBatch` call means: neither queued nor
         // delivered, just stuck). See `outboxLength`'s own doc comment.
         this.inFlightBatchSize = batch.length;
-        let result: Awaited<ReturnType<LongPollClient['postBatch']>>;
+        let retrySegments: Envelope[] | undefined;
         try {
-          result = await this.longPoll.postBatch(batch);
+          retrySegments = await isolateRejectedBatch(batch);
         } finally {
           this.inFlightBatchSize = 0;
         }
-        if (result !== undefined) {
+        if (retrySegments === undefined) {
           this.uploadRetryAttempt = 0;
           this.opts.onOperationalOutcome?.('success', 'upload');
-          for (const outcome of result.outcomes) {
-            if (outcome.outcome === 'rejected') {
-              this.quarantineRejectedOutbound(batch.find((envelope) => envelope.id === outcome.id)!, outcome.reason);
-            }
-          }
           continue;
         }
 
         this.opts.onOperationalOutcome?.('failure', 'upload');
 
-        this.outbox.unshift(...batch); // retry, preserving order — same objects, same ids (finding F1)
+        this.outbox.unshift(...retrySegments); // retry, preserving order — same objects, same ids (finding F1)
         // Finding P3: a revoked device can never recover without a fresh
         // pair() — retrying (and thus scheduling another backoff timer)
         // would spin forever and keep the process alive for no reason.

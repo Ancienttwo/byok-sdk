@@ -199,7 +199,7 @@ describe('hosted Agent-home contract', () => {
       body: JSON.stringify({ messages: [hello] }),
     });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ outcomes: [{ id: hello.id, outcome: 'accepted' }] });
+    expect(await response.json()).toEqual({ accepted: 1 });
     expect((await harness.stores.devices.get(TENANT_A, device.deviceId))?.capabilities).toEqual([
       AGENT_HOME_CONTRACT_CAPABILITY,
     ]);

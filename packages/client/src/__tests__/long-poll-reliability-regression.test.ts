@@ -170,7 +170,7 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
     expect(cursorsBeforeSecondDurableSave).not.toContain('2');
   });
 
-  it('#136 returns exact outcomes, retries unreadable 200 bodies, and quarantines a permanent rejection without blocking later sends', async () => {
+  it('#136 validates frozen-v1 counts, retries unreadable bodies, and binary-isolates poison envelopes', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const auth = await seededAuth();
@@ -179,64 +179,88 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({
-        outcomes: [
-          { id: accepted.id, outcome: 'accepted' },
-          { id: rejected.id, outcome: 'rejected', reason: 'inbound_rejected' },
-        ],
-      }), { status: 200, headers: { 'content-type': 'application/json' } }),
+      new Response(JSON.stringify({ accepted: 1, rejected: 1 }), { status: 200, headers: { 'content-type': 'application/json' } }),
     );
     const client = new LongPollClient({ serverUrl: 'http://example.invalid', auth, getCursor: () => 0, onEnvelope: () => {} });
-    await expect(client.postBatch([accepted, rejected])).resolves.toEqual({
-      outcomes: [
-        { id: accepted.id, outcome: 'accepted' },
-        { id: rejected.id, outcome: 'rejected', reason: 'inbound_rejected' },
-      ],
-    });
+    await expect(client.postBatch([accepted, rejected])).resolves.toEqual({ accepted: 1, rejected: 1 });
 
     fetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => { throw new Error('body read failed'); } } as unknown as Response);
     await expect(client.postBatch([accepted])).resolves.toBeUndefined();
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ accepted: 1 }), { status: 200 }));
+    await expect(client.postBatch([accepted, rejected])).resolves.toBeUndefined();
 
     vi.unstubAllGlobals();
-    vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const cursorStore = { load: async () => undefined, save: async () => undefined } as unknown as CursorStore;
-    let failUnreadableResponseOnce = false;
+    const poisonFirst = createEnvelope('task.started', {}, { taskId: 'poison-first' });
+    const poisonSecond = createEnvelope('task.started', {}, { taskId: 'poison-second' });
+    const acceptedBeforePoison = createEnvelope('task.claim', { deviceId: 'device-reliability' }, { taskId: 'accepted-before-poison' });
+    const laterValid = createEnvelope('task.claim', { deviceId: 'device-reliability' }, { taskId: 'later-valid' });
+    const poisonIds = new Set([poisonFirst.id, poisonSecond.id]);
+    const businessExecutions: string[] = [];
+    const businessDedup = new Set<string>();
+    let releaseHello!: () => void;
+    const heldHello = new Promise<void>((resolve) => {
+      releaseHello = resolve;
+    });
+    let holdInitialHello = true;
+    let dropFirstMixedResponse = true;
     const postBatch = vi.spyOn(LongPollClient.prototype, 'postBatch').mockImplementation(async (batch) => {
-      if (failUnreadableResponseOnce) {
-        failUnreadableResponseOnce = false;
+      if (holdInitialHello) {
+        holdInitialHello = false;
+        await heldHello;
+        return { accepted: 1 };
+      }
+
+      let acceptedCount = 0;
+      let rejectedCount = 0;
+      for (const envelope of batch) {
+        if (poisonIds.has(envelope.id)) {
+          rejectedCount += 1;
+          continue;
+        }
+        acceptedCount += 1;
+        if (!businessDedup.has(envelope.id)) {
+          businessDedup.add(envelope.id);
+          businessExecutions.push(envelope.id);
+        }
+      }
+
+      if (dropFirstMixedResponse && batch.length === 4) {
+        dropFirstMixedResponse = false;
         return undefined;
       }
-      return {
-        outcomes: batch.map((envelope) => envelope.task_id === 'permanently-rejected'
-          ? { id: envelope.id, outcome: 'rejected' as const, reason: 'inbound_rejected' as const }
-          : { id: envelope.id, outcome: 'accepted' as const }),
-      } as never;
+      return rejectedCount > 0 ? { accepted: acceptedCount, rejected: rejectedCount } : { accepted: acceptedCount };
     });
-    await startConnection(cursorStore);
-    await vi.waitFor(() => expect(connection!.outboxLength()).toBe(0)); // the initial conn.hello
-    postBatch.mockClear();
-    failUnreadableResponseOnce = true;
-    const permanentlyRejected = createEnvelope('task.started', {}, { taskId: 'permanently-rejected' });
-    const laterValid = createEnvelope('task.started', {}, { taskId: 'later-valid' });
-    connection!.send(permanentlyRejected);
+    const starting = startConnection(cursorStore);
+    await vi.waitFor(() => expect(postBatch).toHaveBeenCalledTimes(1));
+    connection!.send(poisonFirst);
+    connection!.send(poisonSecond);
+    connection!.send(acceptedBeforePoison);
+    connection!.send(laterValid);
+    releaseHello();
+    await starting;
 
     const rejectionView = connection as unknown as {
       rejectedOutbox: () => readonly { envelope: Envelope; reason: string }[];
     };
     await vi.waitFor(() => expect(rejectionView.rejectedOutbox()).toEqual([
-      { envelope: permanentlyRejected, reason: 'inbound_rejected' },
+      { envelope: poisonFirst, reason: 'inbound_rejected' },
+      { envelope: poisonSecond, reason: 'inbound_rejected' },
     ]), { timeout: 600 });
     await vi.waitFor(() => expect(connection!.outboxLength()).toBe(0));
-    expect(postBatch).toHaveBeenCalledTimes(2);
-    // The unreadable 200 requeues and retries the same immutable envelope;
-    // terminal quarantine then permits a later valid envelope to drain.
-    expect(postBatch.mock.calls[0]?.[0]).toEqual([permanentlyRejected]);
-    expect(postBatch.mock.calls[1]?.[0]).toEqual([permanentlyRejected]);
-    postBatch.mockClear();
-    connection!.send(laterValid);
-    await vi.waitFor(() => expect(connection!.outboxLength()).toBe(0));
-    expect(postBatch.mock.calls).toHaveLength(1);
-    expect(postBatch.mock.calls[0]?.[0]).toEqual([laterValid]);
+    expect(postBatch.mock.calls.map(([batch]) => batch.map((envelope) => envelope.id))).toEqual([
+      expect.any(Array),
+      [poisonFirst.id, poisonSecond.id, acceptedBeforePoison.id, laterValid.id],
+      [poisonFirst.id, poisonSecond.id, acceptedBeforePoison.id, laterValid.id],
+      [poisonFirst.id, poisonSecond.id],
+      [poisonFirst.id],
+      [poisonSecond.id],
+      [acceptedBeforePoison.id, laterValid.id],
+    ]);
+    // The first mixed response is deliberately unreadable after the server's
+    // business effects. Its identical retry and the later accepted sub-batch
+    // are deduped, so each valid business envelope executes once.
+    expect(businessExecutions).toEqual([acceptedBeforePoison.id, laterValid.id]);
   });
 
   it.each([

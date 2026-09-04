@@ -97,7 +97,7 @@ describe('agent-home-contract reference server', () => {
       body: JSON.stringify({ messages: [hello] }),
     });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ outcomes: [{ id: hello.id, outcome: 'accepted' }] });
+    expect(await response.json()).toEqual({ accepted: 1 });
     await expect(
       started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'agent over long-poll', agentRef }),
     ).resolves.toMatchObject({ taskId: expect.any(String) });
@@ -112,15 +112,14 @@ describe('agent-home-contract reference server', () => {
 
     const claimMismatch = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'claim mismatch', agentRef });
     await awaitEnvelope(daemon, (e) => e.task_id === claimMismatch.taskId);
-    const claimMismatchEnvelope = createEnvelope(
-      'task.claim',
-      { deviceId: daemon.deviceId, agentRef: { ...agentRef, profileRevision: 'wrong' } },
-      { taskId: claimMismatch.taskId },
+    const claimRes = await daemon.send(
+      createEnvelope(
+        'task.claim',
+        { deviceId: daemon.deviceId, agentRef: { ...agentRef, profileRevision: 'wrong' } },
+        { taskId: claimMismatch.taskId },
+      ),
     );
-    const claimRes = await daemon.send(claimMismatchEnvelope);
-    expect(await claimRes.json()).toEqual({
-      outcomes: [{ id: claimMismatchEnvelope.id, outcome: 'rejected', reason: 'inbound_rejected' }],
-    });
+    expect(await claimRes.json()).toEqual({ accepted: 0, rejected: 1 });
     expect((await started.byok.tasks.get(claimMismatch.taskId))?.state).toBe('Offered'); // never claimed
 
     const terminalMismatch = await started.byok.dispatch({
@@ -132,15 +131,14 @@ describe('agent-home-contract reference server', () => {
     await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId, agentRef }, { taskId: terminalMismatch.taskId }));
     await daemon.send(createEnvelope('task.started', {}, { taskId: terminalMismatch.taskId }));
     await waitForTaskEvent(terminalMismatch, (event) => event.kind === 'state' && event.state === 'Running');
-    const terminalMismatchEnvelope = createEnvelope(
-      'task.complete',
-      { summary: 'done', sessionRef: 'sess-1', agentRef: { ...agentRef, profileRevision: 'wrong' } },
-      { taskId: terminalMismatch.taskId },
+    const terminalRes = await daemon.send(
+      createEnvelope(
+        'task.complete',
+        { summary: 'done', sessionRef: 'sess-1', agentRef: { ...agentRef, profileRevision: 'wrong' } },
+        { taskId: terminalMismatch.taskId },
+      ),
     );
-    const terminalRes = await daemon.send(terminalMismatchEnvelope);
-    expect(await terminalRes.json()).toEqual({
-      outcomes: [{ id: terminalMismatchEnvelope.id, outcome: 'rejected', reason: 'inbound_rejected' }],
-    });
+    expect(await terminalRes.json()).toEqual({ accepted: 0, rejected: 1 });
     expect((await started.byok.tasks.get(terminalMismatch.taskId))?.state).toBe('Running'); // no terminal was written
     expect((await started.byok.tasks.get(terminalMismatch.taskId))?.result).toBeUndefined();
   });
@@ -194,16 +192,11 @@ describe('agent-home-contract reference server', () => {
       agentRef,
     });
     await awaitEnvelope(target, (e) => e.task_id === claimTarget.taskId);
-    const claimEnvelope = createEnvelope(
-      'task.claim',
-      { deviceId: attacker.deviceId, agentRef },
-      { taskId: claimTarget.taskId },
+    const claimResponse = await attacker.send(
+      createEnvelope('task.claim', { deviceId: attacker.deviceId, agentRef }, { taskId: claimTarget.taskId }),
     );
-    const claimResponse = await attacker.send(claimEnvelope);
     expect(claimResponse.status).toBe(200);
-    expect(await claimResponse.json()).toEqual({
-      outcomes: [{ id: claimEnvelope.id, outcome: 'rejected', reason: 'inbound_rejected' }],
-    });
+    expect(await claimResponse.json()).toEqual({ accepted: 0, rejected: 1 });
     expect((await started.byok.tasks.get(claimTarget.taskId))?.state).toBe('Offered');
 
     const declineTarget = await started.byok.dispatch({
@@ -212,20 +205,19 @@ describe('agent-home-contract reference server', () => {
       agentRef,
     });
     await awaitEnvelope(target, (e) => e.task_id === declineTarget.taskId);
-    const declineEnvelope = createEnvelope(
-      'task.decline',
-      {
-        reason: 'cross-device attempt',
-        retryable: false,
-        agentRef: { ...agentRef, profileRevision: 'wrong' },
-      },
-      { taskId: declineTarget.taskId },
+    const declineResponse = await attacker.send(
+      createEnvelope(
+        'task.decline',
+        {
+          reason: 'cross-device attempt',
+          retryable: false,
+          agentRef: { ...agentRef, profileRevision: 'wrong' },
+        },
+        { taskId: declineTarget.taskId },
+      ),
     );
-    const declineResponse = await attacker.send(declineEnvelope);
     expect(declineResponse.status).toBe(200);
-    expect(await declineResponse.json()).toEqual({
-      outcomes: [{ id: declineEnvelope.id, outcome: 'rejected', reason: 'inbound_rejected' }],
-    });
+    expect(await declineResponse.json()).toEqual({ accepted: 0, rejected: 1 });
     expect((await started.byok.tasks.get(declineTarget.taskId))?.state).toBe('Offered');
   });
 });

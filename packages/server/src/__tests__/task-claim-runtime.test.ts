@@ -54,16 +54,11 @@ describe('M5 (claimed runtime): task.claim.runtime -> TaskSnapshot.claimedRuntim
 
     const handle = await instance.dispatch({ instruction: 'auto-select this' });
 
-    const claimEnvelope = createEnvelope(
-      'task.claim',
-      { deviceId: daemon.deviceId, runtime: 'pi' },
-      { taskId: handle.taskId },
+    const claim = await sendOne(
+      daemon,
+      createEnvelope('task.claim', { deviceId: daemon.deviceId, runtime: 'pi' }, { taskId: handle.taskId }),
     );
-    const claim = await sendOne(daemon, claimEnvelope);
-    expect(claim).toEqual({
-      status: 200,
-      body: { outcomes: [{ id: claimEnvelope.id, outcome: 'accepted' }] },
-    });
+    expect(claim).toEqual({ status: 200, body: { accepted: 1 } });
 
     const snapshot = await instance.tasks.get(handle.taskId);
     expect(snapshot?.state).toBe('Claimed');
@@ -75,16 +70,11 @@ describe('M5 (claimed runtime): task.claim.runtime -> TaskSnapshot.claimedRuntim
 
     const handle = await instance.dispatch({ instruction: 'explicit runtime', runtime: 'claude' });
 
-    const claimEnvelope = createEnvelope(
-      'task.claim',
-      { deviceId: daemon.deviceId, runtime: 'claude' },
-      { taskId: handle.taskId },
+    const claim = await sendOne(
+      daemon,
+      createEnvelope('task.claim', { deviceId: daemon.deviceId, runtime: 'claude' }, { taskId: handle.taskId }),
     );
-    const claim = await sendOne(daemon, claimEnvelope);
-    expect(claim).toEqual({
-      status: 200,
-      body: { outcomes: [{ id: claimEnvelope.id, outcome: 'accepted' }] },
-    });
+    expect(claim).toEqual({ status: 200, body: { accepted: 1 } });
 
     expect((await instance.tasks.get(handle.taskId))?.claimedRuntime).toBe('claude');
   });
@@ -95,16 +85,11 @@ describe('M5 (claimed runtime): task.claim.runtime -> TaskSnapshot.claimedRuntim
     const handle = await instance.dispatch({ instruction: 'legacy daemon claim' });
 
     // A pre-M5-batch-2 daemon's task.claim payload never had a `runtime` key.
-    const claimEnvelope = createEnvelope(
-      'task.claim',
-      { deviceId: daemon.deviceId },
-      { taskId: handle.taskId },
+    const claim = await sendOne(
+      daemon,
+      createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }),
     );
-    const claim = await sendOne(daemon, claimEnvelope);
-    expect(claim).toEqual({
-      status: 200,
-      body: { outcomes: [{ id: claimEnvelope.id, outcome: 'accepted' }] },
-    });
+    expect(claim).toEqual({ status: 200, body: { accepted: 1 } });
 
     const snapshot = await instance.tasks.get(handle.taskId);
     expect(snapshot?.state).toBe('Claimed'); // nothing breaks

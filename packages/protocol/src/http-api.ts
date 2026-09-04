@@ -234,20 +234,17 @@ export const MessagesSendRequestSchema = z.object({
 });
 export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
 
-/** One exact terminal disposition for one daemon-originated envelope. */
-export const MessagesSendOutcomeSchema = z.discriminatedUnion('outcome', [
-  z.object({ id: z.uuid(), outcome: z.literal('accepted') }).strict(),
-  z.object({ id: z.uuid(), outcome: z.literal('duplicate') }).strict(),
-  // The HTTP boundary exposes no gate details. This stable reason tells the
-  // daemon not to retry the immutable envelope without leaking task or auth facts.
-  z.object({ id: z.uuid(), outcome: z.literal('rejected'), reason: z.literal('inbound_rejected') }).strict(),
-]);
-export type MessagesSendOutcome = z.infer<typeof MessagesSendOutcomeSchema>;
-
-/** A 200 only acknowledges these exact ids; rejected entries are terminal. */
+/**
+ * `accepted` counts every envelope `ConnectionHub.handleInbound` returned
+ * `'accepted'` *or* `'duplicate'` for — a deduped replay is a wire-level
+ * success even though the business mutation did not run a second time.
+ * `rejected` is additive and omitted when zero, preserving frozen v1's
+ * `{ accepted }` response shape.
+ */
 export const MessagesSendResponseSchema = z.object({
-  outcomes: z.array(MessagesSendOutcomeSchema).max(MAX_MESSAGES_PER_BATCH),
-}).strict();
+  accepted: z.number().int().nonnegative(),
+  rejected: z.number().int().nonnegative().optional(),
+});
 export type MessagesSendResponse = z.infer<typeof MessagesSendResponseSchema>;
 
 // ---------------------------------------------------------------------------

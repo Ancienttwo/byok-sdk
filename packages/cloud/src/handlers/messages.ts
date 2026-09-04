@@ -83,7 +83,8 @@ export function messagesHandler(deps: MessagesRouteDeps) {
     const parsed = MessagesSendRequestSchema.safeParse(body.body);
     if (!parsed.success) return c.json({ error: 'messages must be an array of envelopes' }, 400);
 
-    const outcomes: MessagesSendResponse['outcomes'] = [];
+    let accepted = 0;
+    let rejected = 0;
     for (const envelope of parsed.data.messages) {
       const outcome = await handleInboundEnvelope(
         stores,
@@ -110,17 +111,13 @@ export function messagesHandler(deps: MessagesRouteDeps) {
       if (envelope.type === 'agent.content.receipt' && (outcome === 'accepted' || outcome === 'duplicate')) {
         await deps.appendContentReceiptAck(stores, device.deviceId, envelope.payload);
       }
-      // A duplicate is still a wire-level success (§8.2/§9's idempotency
-      // window). A rejection is terminal for this immutable envelope and
-      // exposes only a stable, non-sensitive reason to the device.
-      outcomes.push(
-        outcome === 'rejected'
-          ? { id: envelope.id, outcome, reason: 'inbound_rejected' }
-          : { id: envelope.id, outcome },
-      );
+      // A duplicate is a wire-level success (§8.2/§9's idempotency window),
+      // even though its business mutation did not execute a second time.
+      if (outcome === 'rejected') rejected += 1;
+      else accepted += 1;
     }
 
-    const response: MessagesSendResponse = { outcomes };
+    const response: MessagesSendResponse = rejected > 0 ? { accepted, rejected } : { accepted };
     return c.json(response, 200);
   };
 }

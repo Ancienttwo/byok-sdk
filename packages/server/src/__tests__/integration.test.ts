@@ -194,14 +194,8 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
       { taskId: handle.taskId },
     );
     const startedEnvelope = createEnvelope('task.started', {}, { taskId: handle.taskId });
-    expect(await sendOne(daemon, claimEnvelope)).toEqual({
-      status: 200,
-      body: { outcomes: [{ id: claimEnvelope.id, outcome: 'accepted' }] },
-    });
-    expect(await sendOne(daemon, startedEnvelope)).toEqual({
-      status: 200,
-      body: { outcomes: [{ id: startedEnvelope.id, outcome: 'accepted' }] },
-    });
+    expect(await sendOne(daemon, claimEnvelope)).toEqual({ status: 200, body: { accepted: 1 } });
+    expect(await sendOne(daemon, startedEnvelope)).toEqual({ status: 200, body: { accepted: 1 } });
     expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Running');
 
     // Retry the exact same claim (e.g. the daemon didn't observe the first
@@ -517,24 +511,23 @@ describe('unknown AgentEvent forwarding (pre-freeze tolerance, @byok-sdk/protoco
     // this build doesn't recognize yet. It must still validate (as the
     // UnknownAgentEventSchema passthrough) and must still reach the
     // embedder, not be dropped.
-    const progressedEnvelope = createEnvelope(
-      'task.progress',
-      {
-        seq: 1,
-        events: [
-          { type: 'progress', text: 'known' },
-          { type: 'future_thinking', budget: 42 },
-        ],
-      },
-      { taskId: handle.taskId },
+    const progressed = await sendOne(
+      daemon,
+      createEnvelope(
+        'task.progress',
+        {
+          seq: 1,
+          events: [
+            { type: 'progress', text: 'known' },
+            { type: 'future_thinking', budget: 42 },
+          ],
+        },
+        { taskId: handle.taskId },
+      ),
     );
-    const progressed = await sendOne(daemon, progressedEnvelope);
     // Accepted rather than refused: handling the unknown event neither threw
     // nor rejected the batch.
-    expect(progressed).toEqual({
-      status: 200,
-      body: { outcomes: [{ id: progressedEnvelope.id, outcome: 'accepted' }] },
-    });
+    expect(progressed).toEqual({ status: 200, body: { accepted: 1 } });
 
     // No spurious state change from the unknown event — still Running, and
     // completes normally afterward, proving it didn't corrupt task state.

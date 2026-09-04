@@ -159,9 +159,10 @@ interface LooseEventsPollResponse {
   capabilities: string[];
 }
 
-/** A fully-read, exact disposition for the batch that was actually posted. */
+/** A fully-read frozen-v1 count acknowledgement for the batch that was posted. */
 export interface MessageBatchPostResult {
-  readonly outcomes: readonly MessagesSendResponse['outcomes'][number][];
+  readonly accepted: number;
+  readonly rejected?: number;
 }
 
 /** Finding R1: soft cap on `LongPollClient`'s own `warnedValidationFailureSeqs` bookkeeping — see that field's own doc comment for why this is a simple "clear outright" reset rather than an eviction policy: a rare/pathological path, not a hot one. */
@@ -266,10 +267,10 @@ function extractSkippableSeq(raw: unknown): number | undefined {
  *
  * Design B (finding N4): this is a stateless drainer; it holds no outbound
  * queue of its own. `ConnectionManager` owns the single shared outbox;
- * `postBatch` is a single POST attempt, reporting an exact terminal outcome
- * for every envelope when its response body can be read. All retry/backoff
- * policy (and re-checking which transport is currently active) lives in the
- * caller (`ConnectionManager.drainOutbox`).
+ * `postBatch` is a single POST attempt, reporting only frozen-v1 accepted and
+ * rejected counts after its response body has been read and validated. All
+ * retry/backoff and rejection isolation policy lives in the caller
+ * (`ConnectionManager.drainOutbox`).
  */
 export class LongPollClient {
   private running = false;
@@ -368,8 +369,8 @@ export class LongPollClient {
    * `envelopes` is routed through the server's single inbound gate
    * (`ConnectionHub.handleInbound`), so a resend of the SAME batch (same
    * envelope `id`s — the caller must never rebuild them) is deduped
-   * server-side into a safe no-op rather than reprocessed (§9). Returns the
-   * exact per-envelope outcomes only after a readable, valid response body.
+   * server-side into a safe no-op rather than reprocessed (§9). Returns
+   * validated frozen-v1 counts only after a readable response body.
    */
   async postBatch(envelopes: Envelope[]): Promise<MessageBatchPostResult | undefined> {
     // Phase 1 — credentials. This happens BEFORE the route request exists, so
@@ -411,21 +412,10 @@ export class LongPollClient {
     }
     try {
       const response = MessagesSendResponseSchema.parse(await res.json());
-      if (response.outcomes.length !== envelopes.length) {
-        throw new Error('messages response did not return one outcome per posted envelope');
+      if (response.accepted + (response.rejected ?? 0) !== envelopes.length) {
+        throw new Error('messages response counts do not match the posted batch length');
       }
-      const requestedIds = new Set(envelopes.map((envelope) => envelope.id));
-      if (requestedIds.size !== envelopes.length) {
-        throw new Error('messages batch contains duplicate envelope ids');
-      }
-      const outcomesById = new Map<string, MessagesSendResponse['outcomes'][number]>();
-      for (const outcome of response.outcomes) {
-        if (!requestedIds.has(outcome.id) || outcomesById.has(outcome.id)) {
-          throw new Error('messages response outcomes do not exactly match the posted envelope ids');
-        }
-        outcomesById.set(outcome.id, outcome);
-      }
-      return { outcomes: envelopes.map((envelope) => outcomesById.get(envelope.id)!) };
+      return response;
     } catch (err) {
       // The response DID exist and the server DID accept the request line —
       // it is its body that is unusable, so this carries that response's own

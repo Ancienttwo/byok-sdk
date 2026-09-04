@@ -6,7 +6,6 @@ import {
   PROTOCOL_VERSION,
   type Envelope,
   type EventsPollResponse,
-  type MessagesSendResponse,
   type RuntimeCapabilities,
   type RuntimeId,
   type RuntimeInfo,
@@ -313,25 +312,22 @@ export async function connectFakeDaemonLongPoll(
     });
 
   if (opts.announce !== false) {
-    const hello = createEnvelope('conn.hello', {
-      protocolVersions: [PROTOCOL_VERSION],
-      capabilities: opts.capabilities ?? [],
-      deviceId,
-      productId: opts.productId,
-      clientVersion: opts.clientVersion,
-      runtimes: opts.runtimes,
-      configuredToolsets: opts.configuredToolsets,
-    });
-    const helloRes = await send(hello);
+    const helloRes = await send(
+      createEnvelope('conn.hello', {
+        protocolVersions: [PROTOCOL_VERSION],
+        capabilities: opts.capabilities ?? [],
+        deviceId,
+        productId: opts.productId,
+        clientVersion: opts.clientVersion,
+        runtimes: opts.runtimes,
+        configuredToolsets: opts.configuredToolsets,
+      }),
+    );
     if (!helloRes.ok) {
       throw new Error(`conn.hello publish failed: ${helloRes.status} ${await helloRes.text()}`);
     }
-    const helloBody = (await helloRes.json()) as MessagesSendResponse;
-    if (
-      helloBody.outcomes.length !== 1 ||
-      helloBody.outcomes[0]?.id !== hello.id ||
-      helloBody.outcomes[0]?.outcome !== 'accepted'
-    ) {
+    const helloBody = (await helloRes.json()) as { accepted: number; rejected?: number };
+    if (helloBody.accepted !== 1) {
       throw new Error(`conn.hello was not accepted: ${JSON.stringify(helloBody)}`);
     }
   }
@@ -374,25 +370,20 @@ export async function announceHello(
     configuredToolsets?: ToolsetId[];
   },
 ): Promise<void> {
-  const hello = createEnvelope('conn.hello', {
-    protocolVersions: [PROTOCOL_VERSION],
-    capabilities: opts.capabilities ?? [],
-    deviceId: daemon.deviceId,
-    productId: opts.productId,
-    clientVersion: opts.clientVersion,
-    runtimes: opts.runtimes,
-    configuredToolsets: opts.configuredToolsets,
-  });
-  const res = await daemon.send(hello);
+  const res = await daemon.send(
+    createEnvelope('conn.hello', {
+      protocolVersions: [PROTOCOL_VERSION],
+      capabilities: opts.capabilities ?? [],
+      deviceId: daemon.deviceId,
+      productId: opts.productId,
+      clientVersion: opts.clientVersion,
+      runtimes: opts.runtimes,
+      configuredToolsets: opts.configuredToolsets,
+    }),
+  );
   if (!res.ok) throw new Error(`conn.hello re-publish failed: ${res.status} ${await res.text()}`);
-  const body = (await res.json()) as MessagesSendResponse;
-  if (
-    body.outcomes.length !== 1 ||
-    body.outcomes[0]?.id !== hello.id ||
-    body.outcomes[0]?.outcome !== 'accepted'
-  ) {
-    throw new Error(`conn.hello was not accepted: ${JSON.stringify(body)}`);
-  }
+  const body = (await res.json()) as { accepted: number };
+  if (body.accepted !== 1) throw new Error(`conn.hello was not accepted: ${JSON.stringify(body)}`);
 }
 
 /**
@@ -463,18 +454,15 @@ export async function claimAndStart(
   runtime?: RuntimeId,
   capabilities?: RuntimeCapabilities,
 ): Promise<void> {
-  const claimEnvelope = createEnvelope(
-    'task.claim',
-    { deviceId: daemon.deviceId, runtime, capabilities },
-    { taskId: handle.taskId },
+  const claim = await sendOne(
+    daemon,
+    createEnvelope('task.claim', { deviceId: daemon.deviceId, runtime, capabilities }, { taskId: handle.taskId }),
   );
-  const claim = await sendOne(daemon, claimEnvelope);
-  expect(claim).toEqual({ status: 200, body: { outcomes: [{ id: claimEnvelope.id, outcome: 'accepted' }] } });
+  expect(claim).toEqual({ status: 200, body: { accepted: 1 } });
   expect((await byok.tasks.get(handle.taskId))?.state).toBe('Claimed');
 
-  const startedEnvelope = createEnvelope('task.started', {}, { taskId: handle.taskId });
-  const started = await sendOne(daemon, startedEnvelope);
-  expect(started).toEqual({ status: 200, body: { outcomes: [{ id: startedEnvelope.id, outcome: 'accepted' }] } });
+  const started = await sendOne(daemon, createEnvelope('task.started', {}, { taskId: handle.taskId }));
+  expect(started).toEqual({ status: 200, body: { accepted: 1 } });
   expect((await byok.tasks.get(handle.taskId))?.state).toBe('Running');
 }
 
@@ -485,16 +473,18 @@ export async function moveToAwaitApproval(
   handle: TaskHandle,
   opts: { summary?: string; approvalId?: string } = {},
 ): Promise<void> {
-  const reportedEnvelope = createEnvelope(
-    'task.await_approval',
-    {
-      summary: opts.summary ?? 'needs a human ok',
-      ...(opts.approvalId === undefined ? {} : { approvalId: opts.approvalId }),
-    },
-    { taskId: handle.taskId },
+  const reported = await sendOne(
+    daemon,
+    createEnvelope(
+      'task.await_approval',
+      {
+        summary: opts.summary ?? 'needs a human ok',
+        ...(opts.approvalId === undefined ? {} : { approvalId: opts.approvalId }),
+      },
+      { taskId: handle.taskId },
+    ),
   );
-  const reported = await sendOne(daemon, reportedEnvelope);
-  expect(reported).toEqual({ status: 200, body: { outcomes: [{ id: reportedEnvelope.id, outcome: 'accepted' }] } });
+  expect(reported).toEqual({ status: 200, body: { accepted: 1 } });
   expect((await byok.tasks.get(handle.taskId))?.state).toBe('AwaitApproval');
 }
 

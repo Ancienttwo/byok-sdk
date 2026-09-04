@@ -136,10 +136,9 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
     const rate = vi.spyOn(harness.stores.rateLimiter, 'consume');
     const dedup = vi.spyOn(harness.stores.dedup, 'checkAndRecord');
 
-    const first = message(taskId);
-    const response = await postMessage(harness, device.authorization, first);
+    const response = await postMessage(harness, device.authorization, message(taskId));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ outcomes: [{ id: first.id, outcome: 'accepted' }] });
+    expect(await response.json()).toEqual({ accepted: 1 });
     expect(rate).toHaveBeenCalledTimes(1);
     expect(dedup).toHaveBeenCalledTimes(1);
     expect(consumed).toHaveLength(1);
@@ -154,10 +153,9 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
     expect((await postMessage(harness, device.authorization, first)).status).toBe(200);
     await harness.stores.tasks.recordStatus(TENANT_A, { taskId, status: 'complete', agentRef: AGENT_REF });
 
-    const replayMessage = message(taskId, '10000000-0000-4000-8000-000000001121');
-    const replay = await postMessage(harness, device.authorization, replayMessage);
+    const replay = await postMessage(harness, device.authorization, message(taskId, '10000000-0000-4000-8000-000000001121'));
     expect(replay.status).toBe(200);
-    expect(await replay.json()).toEqual({ outcomes: [{ id: replayMessage.id, outcome: 'accepted' }] });
+    expect(await replay.json()).toEqual({ accepted: 1 });
 
     const terminalBody = 'new terminal side effect';
     const newMessage = createEnvelope('agent.message.publish', {
@@ -168,9 +166,7 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
       contentHash: `sha256:${createHash('sha256').update(terminalBody).digest('hex')}`,
     }, { taskId });
     const terminal = await postMessage(harness, device.authorization, newMessage);
-    expect(await terminal.json()).toEqual({
-      outcomes: [{ id: newMessage.id, outcome: 'rejected', reason: 'inbound_rejected' }],
-    });
+    expect(await terminal.json()).toEqual({ accepted: 0, rejected: 1 });
     expect(consumed).toHaveLength(1);
 
     const receipts = await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 });
@@ -188,11 +184,8 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
       cancellation: { reason: 'operator cancelled' },
     });
 
-    const cancelledMessage = message(taskId);
-    const cancelled = await postMessage(harness, device.authorization, cancelledMessage);
-    expect(await cancelled.json()).toEqual({
-      outcomes: [{ id: cancelledMessage.id, outcome: 'rejected', reason: 'inbound_rejected' }],
-    });
+    const cancelled = await postMessage(harness, device.authorization, message(taskId));
+    expect(await cancelled.json()).toEqual({ accepted: 0, rejected: 1 });
     expect(consumed).toBe(0);
   });
 
@@ -204,27 +197,22 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
     const harness = createHarness({ clock, agentMessage: { consume: async () => { consumed += 1; await gate; return { outcome: 'accepted' }; } } });
     const device = await harness.pairDevice(TENANT_A);
     const taskId = await admitMessageEgress(harness, device.deviceId);
-    const firstMessage = message(taskId, '10000000-0000-4000-8000-000000001123');
-    const first = postMessage(harness, device.authorization, firstMessage);
+    const first = postMessage(harness, device.authorization, message(taskId, '10000000-0000-4000-8000-000000001123'));
     await vi.waitFor(() => expect(consumed).toBe(1));
     clock.advance(60_000);
-    const secondMessage = message(taskId, '10000000-0000-4000-8000-000000001124');
-    const second = postMessage(harness, device.authorization, secondMessage);
+    const second = postMessage(harness, device.authorization, message(taskId, '10000000-0000-4000-8000-000000001124'));
     // Give the competing request a chance to pass the first await in the
     // handler while the first consumer is still held. The unfixed route invokes
     // it a second time here; a durable reservation returns pending instead.
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(consumed).toBe(1);
     const pending = await second;
-    expect(await pending.json()).toEqual({
-      outcomes: [{ id: secondMessage.id, outcome: 'rejected', reason: 'inbound_rejected' }],
-    });
+    expect(await pending.json()).toEqual({ accepted: 0, rejected: 1 });
     release!();
     expect((await first).status).toBe(200);
     expect(consumed).toBe(1);
-    const replayMessage = message(taskId, '10000000-0000-4000-8000-000000001126');
-    const replay = await postMessage(harness, device.authorization, replayMessage);
-    expect(await replay.json()).toEqual({ outcomes: [{ id: replayMessage.id, outcome: 'accepted' }] });
+    const replay = await postMessage(harness, device.authorization, message(taskId, '10000000-0000-4000-8000-000000001126'));
+    expect(await replay.json()).toEqual({ accepted: 1 });
     expect(consumed).toBe(1);
   });
 
@@ -242,13 +230,10 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
     const taskId = await admitMessageEgress(harness, device.deviceId);
     const first = message(taskId);
 
-    expect(await (await postMessage(harness, device.authorization, first)).json()).toEqual({
-      outcomes: [{ id: first.id, outcome: 'accepted' }],
-    });
+    expect(await (await postMessage(harness, device.authorization, first)).json()).toEqual({ accepted: 1 });
     expect(consumed).toBe(1);
-    const consumerReplayMessage = message(taskId, '10000000-0000-4000-8000-000000001125');
-    const consumerReplay = await postMessage(harness, device.authorization, consumerReplayMessage);
-    expect(await consumerReplay.json()).toEqual({ outcomes: [{ id: consumerReplayMessage.id, outcome: 'accepted' }] });
+    const consumerReplay = await postMessage(harness, device.authorization, message(taskId, '10000000-0000-4000-8000-000000001125'));
+    expect(await consumerReplay.json()).toEqual({ accepted: 1 });
     expect(consumed).toBe(1);
     const mailbox = await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 });
     const dispositions = mailbox.messages

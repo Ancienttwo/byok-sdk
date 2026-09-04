@@ -505,7 +505,7 @@ export class TestServer {
     if (!this.requireBearer(req, res)) return;
     const body = (await readJsonBody(req)) as { messages?: unknown };
     const rawMessages = Array.isArray(body.messages) ? body.messages : [];
-    const outcomes: Array<{ id: string; outcome: 'accepted' }> = [];
+    let accepted = 0;
     for (const raw of rawMessages) {
       let envelope: Envelope;
       try {
@@ -514,9 +514,9 @@ export class TestServer {
         continue; // malformed entry — mirrors the real server's schema-validation gate
       }
       this.recordReceivedEnvelope(envelope);
-      outcomes.push({ id: envelope.id, outcome: 'accepted' });
+      accepted += 1;
     }
-    respondJson(res, 200, { outcomes });
+    respondJson(res, 200, { accepted });
   }
 
   private requireBearer(req: IncomingMessage, res: ServerResponse): boolean {
