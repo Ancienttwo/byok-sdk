@@ -514,7 +514,7 @@ import { MESSAGE_PAYLOAD_SCHEMAS, type MessageType } from './messages';
 export declare function parseMessage(data: unknown): Envelope;
 /**
  * Decode a single NDJSON line into a validated {@link Envelope}. Accepts a
- * string or raw bytes (e.g. a WebSocket binary frame) — isomorphic, no
+ * string or raw bytes (e.g. a binary transport frame) — isomorphic, no
  * stream handling required of the caller.
  */
 export declare function decodeEnvelope(line: string | Uint8Array): Envelope;
@@ -1771,12 +1771,12 @@ import { z } from 'zod';
  * HTTP-side request/response shapes for the reference server's auth and blob
  * endpoints (M1 Part B). These are plain HTTP bodies, not wire envelopes —
  * kept in a separate module from `envelope.ts`/`messages.ts` because they
- * never travel over the WSS connection. Documented in full in
- * docs/protocol.md ("Auth flows", "Blob flows", "Long-poll fallback").
+ * are HTTP request/response bodies rather than mailbox envelopes. Documented
+ * in full in docs/protocol.md ("Auth flows", "Blob flows", "Long-poll").
  *
  * The wire protocol version (`v:1`) is unaffected by any of this: pairing,
- * token renewal, and blob transfer are out-of-band HTTP calls that happen
- * before/alongside the WSS connection, not envelope types.
+ * token renewal, and blob transfer are separate HTTP calls around the
+ * long-poll mailbox lifecycle, not envelope types.
  */
 export declare const PairRequestSchema: z.ZodObject<{
     pairingCode: z.ZodString;
@@ -1851,7 +1851,7 @@ export type PresencePublishRequest = z.infer<typeof PresencePublishRequestSchema
 /**
  * Revocation is server-side only (dashboard/API call on the SaaS's own
  * device registry) — there is no wire message for it. A revoked device's
- * next `/byok/challenge` or `/byok/token` call (or WSS connect) gets a 401;
+ * next `/byok/challenge`, `/byok/token`, or authenticated mailbox call gets a 401;
  * the daemon's only recourse is to re-run `/byok/pair` from scratch.
  */
 /** POST /byok/blobs request: declare a blob before uploading it. `contentHash` must be the canonical `sha256:<64 lowercase hex>` form (finding F9) — the server rejects anything else outright, no normalization. */
@@ -4117,8 +4117,6 @@ export declare const AgentMemoryProjectionCommitResponseSchema: z.ZodObject<{
     }, z.core.$strict>;
 }, z.core.$strict>;
 export type AgentMemoryProjectionCommitResponse = z.infer<typeof AgentMemoryProjectionCommitResponseSchema>;
-/** `GET /byok/ws` — WebSocket upgrade path. */
-export declare const BYOK_WS_PATH = "/byok/ws";
 /** `POST /byok/pair` — one-time device pairing (§6). */
 export declare const BYOK_PAIR_PATH = "/byok/pair";
 /** `POST /byok/challenge` — token-renewal challenge (§6.3). */
@@ -4209,7 +4207,7 @@ export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
 export { encodeEnvelope, decodeEnvelope, createEnvelope, parseMessage } from './codec';
 export type { CreateEnvelopeOptions } from './codec';
-export { PairRequestSchema, PairResponseTenantIdSchema, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH, PairResponseSchema, ChallengeRequestSchema, ChallengeResponseSchema, TokenRequestSchema, TokenResponseSchema, PresencePublishRequestSchema, CreateBlobRequestSchema, CreateBlobResponseSchema, BlobDownloadUrlResponseSchema, EventsPollQuerySchema, EventsPollResponseSchema, MessagesSendRequestSchema, MessagesSendResponseSchema, AgentHomeProjectionCompletionRequestSchema, AgentHomeProjectionStatusSchema, AgentHomeProjectionReadbackSchema, AgentMemoryProjectionCommitRequestSchema, AgentMemoryProjectionCommitResponseSchema, MAX_MESSAGES_PER_BATCH, BYOK_WS_PATH, BYOK_PAIR_PATH, BYOK_CHALLENGE_PATH, BYOK_TOKEN_PATH, BYOK_CAPABILITIES_PATH, BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, BYOK_AGENT_HOME_PROJECTIONS_PATH, BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE, byokAgentHomeProjectionCompletionPath, BYOK_AGENT_MEMORY_PROJECTIONS_PATH, BYOK_PRESENCE_PATH, BYOK_ACTIVITY_PATH, BYOK_BOARD_PATH, BYOK_BOARD_STREAM_PATH, BYOK_BOARD_CLAIM_ROUTE, BYOK_BOARD_UNCLAIM_ROUTE, BYOK_BOARD_STATUS_ROUTE, BYOK_RECORDS_PATH, BYOK_RECORD_ROUTE, byokRecordPath, BYOK_SKILL_PACKS_PATH, BYOK_SKILL_PACK_FILE_ROUTE, byokSkillPackFilePath, BYOK_BLOBS_PATH, BYOK_BLOB_FINALIZE_ROUTE, BYOK_BLOB_URL_ROUTE, BYOK_BLOB_CONTENT_ROUTE, byokBlobFinalizePath, byokBlobUrlPath, byokBlobContentPath, } from './http-api';
+export { PairRequestSchema, PairResponseTenantIdSchema, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH, PairResponseSchema, ChallengeRequestSchema, ChallengeResponseSchema, TokenRequestSchema, TokenResponseSchema, PresencePublishRequestSchema, CreateBlobRequestSchema, CreateBlobResponseSchema, BlobDownloadUrlResponseSchema, EventsPollQuerySchema, EventsPollResponseSchema, MessagesSendRequestSchema, MessagesSendResponseSchema, AgentHomeProjectionCompletionRequestSchema, AgentHomeProjectionStatusSchema, AgentHomeProjectionReadbackSchema, AgentMemoryProjectionCommitRequestSchema, AgentMemoryProjectionCommitResponseSchema, MAX_MESSAGES_PER_BATCH, BYOK_PAIR_PATH, BYOK_CHALLENGE_PATH, BYOK_TOKEN_PATH, BYOK_CAPABILITIES_PATH, BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, BYOK_AGENT_HOME_PROJECTIONS_PATH, BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE, byokAgentHomeProjectionCompletionPath, BYOK_AGENT_MEMORY_PROJECTIONS_PATH, BYOK_PRESENCE_PATH, BYOK_ACTIVITY_PATH, BYOK_BOARD_PATH, BYOK_BOARD_STREAM_PATH, BYOK_BOARD_CLAIM_ROUTE, BYOK_BOARD_UNCLAIM_ROUTE, BYOK_BOARD_STATUS_ROUTE, BYOK_RECORDS_PATH, BYOK_RECORD_ROUTE, byokRecordPath, BYOK_SKILL_PACKS_PATH, BYOK_SKILL_PACK_FILE_ROUTE, byokSkillPackFilePath, BYOK_BLOBS_PATH, BYOK_BLOB_FINALIZE_ROUTE, BYOK_BLOB_URL_ROUTE, BYOK_BLOB_CONTENT_ROUTE, byokBlobFinalizePath, byokBlobUrlPath, byokBlobContentPath, } from './http-api';
 export type { PairRequest, PairResponse, ChallengeRequest, ChallengeResponse, TokenRequest, TokenResponse, PresencePublishRequest, CreateBlobRequest, CreateBlobResponse, BlobDownloadUrlResponse, EventsPollQuery, EventsPollResponse, MessagesSendRequest, MessagesSendResponse, AgentHomeProjectionCompletionRequest, AgentHomeProjectionStatus, AgentHomeProjectionReadback, AgentMemoryProjectionCommitRequest, AgentMemoryProjectionCommitResponse, } from './http-api';
 // ==== @byok-sdk/protocol dist/messages.d.ts ====
 import { z } from 'zod';

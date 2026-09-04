@@ -66,15 +66,10 @@ import {
  *      schema itself never referees which entries "count" — that's a
  *      semantic decision, not a shape constraint), and `conn.ack` can only
  *      ever express a SINGLE agreed-upon `protocolVersion`, which is what
- *      makes "agrees on 1" a well-formed reply at all. The actual
- *      accept-or-reject NEGOTIATION DECISION is `ws-server.ts`'s own
- *      handshake code (`packages/server`) — protocol has no dependency on
- *      that package either, so per this drill's own instructions ("find the
- *      real negotiation code ... and test through it, not through a
- *      reimplementation") that behavioral test lives in
- *      `packages/server/src/__tests__/version-negotiation.test.ts`, driven
- *      against the real `attachWebSocket`/`ConnectionHub` handshake over a
- *      real WS connection.
+ *      makes "agrees on 1" a well-formed reply at all. Runtime transport
+ *      admission is outside this schema-only drill; after WP3B Step 4b the
+ *      daemon has no socket handshake and sends its connection snapshot over
+ *      the authenticated long-poll message path.
  */
 describe('M4 Phase 4 version-negotiation drill', () => {
   describe('item 1: unknown additive fields on observability-class payloads are tolerated (parsed, field stripped, no throw)', () => {

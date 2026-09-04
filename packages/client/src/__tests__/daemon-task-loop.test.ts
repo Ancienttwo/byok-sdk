@@ -12,7 +12,7 @@ async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
-describe('daemon task loop (stub adapter + in-process WS server)', () => {
+describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
   let server: TestServer;
   let daemon: Daemon | undefined;
 
@@ -131,7 +131,10 @@ describe('daemon task loop (stub adapter + in-process WS server)', () => {
 
   it('cancel does not flush/send buffered-but-unsent progress (unobservable server-side anyway — M1-4 e2e finding)', async () => {
     const adapter = new StubRuntimeAdapter();
-    await setupDaemon(adapter);
+    // Keep the batching deadline well outside the long-poll delivery window so
+    // the test controls the intended precondition instead of racing the
+    // transport scheduler.
+    await setupDaemon(adapter, { progressBatch: { flushIntervalMs: 5_000 } });
 
     server.send(
       createEnvelope(
@@ -144,8 +147,7 @@ describe('daemon task loop (stub adapter + in-process WS server)', () => {
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const [session] = adapter.sessions;
 
-    // Buffered but (per the batcher's own 250ms-or-10-events flush policy)
-    // not yet sent when the cancel arrives.
+    // Buffered but not yet sent when the cancel arrives.
     session?.emit({ type: 'progress', text: 'partial work before cancel' });
     server.send(
       createEnvelope('task.cancel', { reason: 'cancel while buffered' }, { taskId: 'task-cancel-buffered', seq: server.nextSeq() }),

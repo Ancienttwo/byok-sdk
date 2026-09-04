@@ -1155,7 +1155,7 @@ export declare function createAgentHomeProjectionConsumer(apply: AgentHomeProjec
  *
  * 2. The transport. Nothing reachable from this entry may import `ws`, the
  *    daemon composition, or any transport module. Importing a single memory
- *    symbol from the root entry drags the WebSocket transport into a host
+ *    symbol from the root entry drags daemon transport into a host
  *    bundle; the subpath exists so it does not. `__tests__/agent-memory-entry-
  *    constraints.test.ts` walks this module graph and `scripts/check-agent-
  *    memory-entry.mjs` re-checks the built bundle.
@@ -2331,6 +2331,443 @@ export declare class BlobClient implements BlobResolver {
         readonly idempotencyKey?: string;
     }): Promise<BlobRef>;
 }
+// ==== @byok-sdk/client dist/daemon/connection-manager.d.ts ====
+import { type CapabilityFlag, type Envelope, type RuntimeInfo, type ToolsetId } from '@byok-sdk/protocol';
+import { AuthManager } from './auth-manager';
+import type { CursorStore } from './cursor-store';
+import { type FleetJitter } from './deterministic-jitter';
+import { ReplayCursorTooOldError } from './replay-cursor';
+export { ReplayCursorTooOldError } from './replay-cursor';
+/** The lifecycle of the daemon's one long-poll connection. */
+export type ConnectionState = 'connecting' | 'open' | 'closed' | 'revoked';
+export interface ConnectionManagerOptions {
+    serverUrl: string;
+    deviceId: string;
+    productId: string;
+    capabilities: CapabilityFlag[];
+    /** U4a Local Agent release version, sent unchanged in `conn.hello`. */
+    clientVersion?: string;
+    runtimes: RuntimeInfo[];
+    /** Reads current sorted logical IDs from the validated local registry for every `conn.hello`. */
+    getConfiguredToolsets?: () => readonly ToolsetId[];
+    auth: AuthManager;
+    cursorStore: CursorStore;
+    /**
+     * May return a promise; `ConnectionManager` awaits it before considering
+     * this envelope "processed" (findings F2/F3 — see `deliver`/`process`
+     * below). A handler that throws/rejects is caught here, not propagated.
+     */
+    onEnvelope: (envelope: Envelope) => void | Promise<void>;
+    onStateChange?: (state: ConnectionState) => void;
+    /** Backoff between failed long-poll HTTP attempts. Default 2s. */
+    longPollRetryDelayMs?: number;
+    /** Minimum delay before the next long-poll request after an empty (no-events) response. Default 250ms. */
+    longPollIdleDelayMs?: number;
+    fleetJitter?: FleetJitter;
+    onOperationalOutcome?: (outcome: 'success' | 'failure', source: 'reconnect' | 'upload') => void;
+    onTerminalError?: (error: ReplayCursorTooOldError) => void;
+}
+/**
+ * Owns the daemon's one authenticated long-poll connection to the server.
+ * Every received envelope passes through the same cursor-dedupe/persistence
+ * logic (protocol §9), so redelivery remains safe after an HTTP retry or a
+ * daemon restart.
+ *
+ * `send()` (Design B, finding N4) pushes onto a single shared outbox this
+ * class owns and drains through `POST /byok/messages`; long-poll is a full
+ * bidirectional transport, not a receive-only path. See `drainOutbox`.
+ */
+export declare class ConnectionManager {
+    private readonly opts;
+    private readonly fleetJitter;
+    private readonly longPoll;
+    private uploadRetryAttempt;
+    private started;
+    private connected;
+    private cursor;
+    /**
+     * Finding F3 (at-most-once redelivery): the lowest `task.*` envelope `seq`
+     * whose handler failed and hasn't yet been successfully reprocessed. While
+     * set, the cursor is frozen at its pre-failure value even if later
+     * envelopes succeed — advancing past a still-unresolved failure would
+     * mean a future reconnect's redelivery skips it forever (it's <= the
+     * persisted cursor), which is exactly the bug this fixes. Cleared once an
+     * envelope carrying this exact seq is reprocessed (via redelivery after a
+     * reconnect) and succeeds; everything from there back up to the new
+     * cursor gets safely re-attempted too, relying on the idempotency
+     * guarantees in docs/protocol.md §9.
+     */
+    private stalledAtSeq;
+    /**
+     * Design A (Wave 2, F3-on-long-poll): the second, in-memory watermark
+     * alongside the durable `cursor`. `cursor` only ever advances AFTER a
+     * `task.*` handler's side effects resolve successfully, and is persisted
+     * (see `advanceCursor`) — that semantics is unchanged. `deliveredSeq`
+     * advances eagerly, the instant a `task.*` envelope is admitted past
+     * dedup (see `deliver`/`noteDelivered`), independent of whether its
+     * handler has even started, let alone succeeded. It exists so a repeated
+     * read at the durable cursor does not re-dispatch an envelope already in
+     * flight — `handleOffer` must not start a second adapter session while a
+     * first attempt is still running. On WS this same field is written the
+     * same way, but since a live WS connection only ever pushes a given `seq`
+     * once, it never has an observable effect there beyond mirroring
+     * `cursor` (see `dedupWatermark`'s doc comment for why redelivery
+     * correctness doesn't depend on resetting it anywhere).
+     */
+    private deliveredSeq;
+    /** Finding F3: serializes `onEnvelope` calls into a per-connection FIFO — one envelope's handler always fully settles before the next one starts. */
+    private processingChain;
+    /**
+     * Design B (finding N4): the ONE outbound queue holds `Envelope` OBJECTS,
+     * never re-encoded/rebuilt strings, so a
+     * resend after a failed send attempt is byte-identical to the original
+     * (same `id`), which is what lets the server's per-(deviceId,id) dedup
+     * (Wave 1) recognize it as a safe no-op retry rather than a second
+     * application (protocol §9).
+     */
+    private readonly outbox;
+    /**
+     * Finding F5(b): how many envelopes `drainOutbox` has
+     * currently spliced OUT of `this.outbox` for an in-flight (not yet
+     * confirmed delivered) `postBatch` call — 0 the rest of the time. See
+     * `outboxLength`'s own doc comment for why this needs to be tracked
+     * separately from `this.outbox.length` at all.
+     */
+    private inFlightBatchSize;
+    private draining;
+    private stopped;
+    private revoked;
+    private terminalError;
+    private settledWaiters;
+    private pendingCursorSave;
+    /**
+     * Finding P2 (Fix 2b): seqs currently admitted into `processingChain` but
+     * not yet settled — added in `deliver()` the moment a `task.*` envelope is
+     * accepted past the ordinary watermark check, removed in `process()`'s
+     * `finally` once that specific attempt resolves (success OR failure).
+     * While stalled, `dedupWatermark()` deliberately stays frozen below
+     * already-delivered seqs (see its own doc comment) so the failed seq's own
+     * redelivery can get through — but that same frozen watermark also means
+     * every OTHER seq above it rides along on every re-poll too. Without this,
+     * a seq already mid-flight (e.g. a `task.offer` whose prepared operation start()
+     * hasn't resolved yet) would be re-enqueued into `processingChain` on
+     * every such re-poll, piling up duplicate copies that — once the first
+     * finally resolves and the chain unwinds through them — run its handler
+     * again; for `task.offer` specifically, a second adapter session
+     * orphaning the first (`TaskRunner`'s own `this.tasks.has` guard, finding
+     * P2c, is the second, independent layer against exactly that).
+     */
+    private readonly inFlightSeqs;
+    /**
+     * Finding P2 (Fix 2b): seqs whose handler has already resolved
+     * successfully at least once this session, tracked only while a stall is
+     * in effect — cleared the moment `stalledAtSeq` itself clears (see
+     * `process()`), since once unstalled the ordinary watermark check via
+     * `deliveredSeq` already covers everything delivered so far, making this
+     * redundant. Needed because the stall-gap-prevention rule in `process()`
+     * deliberately does NOT advance `cursor` past a seq above the
+     * still-unresolved `stalledAtSeq`, even once that seq's own handler
+     * succeeds — so `dedupWatermark()` alone can't distinguish "already
+     * succeeded, don't re-run" from "never yet attempted" for anything in
+     * that gap.
+     */
+    private readonly processedSeqs;
+    /**
+     * Finding P3: the pending `drainOutbox` long-poll retry backoff, if any —
+     * cancellable so `enterRevoked()` can unblock it immediately instead of
+     * waiting out the rest of the delay before the loop notices `revoked` and
+     * exits. See `drainRetryDelay`.
+     */
+    private cancelPendingDrainRetry;
+    /**
+     * The capabilities the current server response advertised — untyped
+     * `string[]` for forward compatibility. An advertisement is scoped to the
+     * current long-poll response stream and is cleared after an HTTP failure,
+     * terminal shutdown, or revocation. This keeps capability-gated outbound
+     * messages fail-closed until the current server has explicitly advertised
+     * support.
+     */
+    private serverCapabilities;
+    constructor(opts: ConnectionManagerOptions);
+    start(): Promise<void>;
+    /**
+     * Design B (finding N4): push onto the single shared outbox and try to
+     * drain it now. Never routes directly to either transport itself — see
+     * `drainOutbox`.
+     */
+    send(envelope: Envelope): void;
+    /** Publish a fresh local configuration snapshot while this daemon is running. */
+    refreshHello(): void;
+    /**
+     * POSTs the outbox through long-poll in chunks of at most
+     * `MAX_MESSAGES_PER_BATCH` (finding P1) — the server hard-caps a single
+     * `/byok/messages` batch there (`MessagesSendRequestSchema`, protocol
+     * §8.2) and 400s the WHOLE request if it's exceeded, which — before this
+     * fix — meant more than that queued during an outage produced an oversize
+     * batch that the server would reject forever, since the client re-queued
+     * and retried the identical (still oversize) batch unchanged. Each chunk
+     * is one `LongPollClient.postBatch` call; on success the loop continues
+     * (more may still be queued, or the next chunk still needs sending), on
+     * failure that SAME chunk is unshifted back (order-preserving, same
+     * Envelope objects/ids — never rebuilt, so a retry is exactly the resend
+     * Wave 1's server-side dedup expects) and retried after a short backoff,
+     * Re-entrancy is guarded by `draining`: a call arriving while a drain is
+     * already in progress just returns — the in-progress loop's own
+     * `while (this.outbox.length > 0)` check picks up anything newly pushed.
+     */
+    private drainOutbox;
+    /**
+     * Finding P3: backoff delay for `drainOutbox`'s long-poll retry loop.
+     * Unlike a plain `setTimeout`-based wait, this is (a) cancellable —
+     * `enterRevoked()` calls `cancelPendingDrainRetry()` to unblock an
+     * in-flight wait immediately instead of leaving `drainOutbox` parked here
+     * for up to the rest of the delay before it next checks `this.revoked` —
+     * and (b) unref'd, so the timer never keeps the Node process alive by
+     * itself while nothing else (such as the live long-poll GET) legitimately is.
+     */
+    private drainRetryDelay;
+    /**
+     * The capabilities the latest successful `GET /byok/events` response
+     * advertised. Empty before a successful response and after a failed one.
+     */
+    getServerCapabilities(): readonly string[];
+    getTerminalError(): ReplayCursorTooOldError | undefined;
+    isConnected(): boolean;
+    isRevoked(): boolean;
+    /**
+     * Resolves after the first successful long-poll response establishes the
+     * authenticated connection.
+     *
+     * Rejects with {@link DeviceRevokedError} — instead of hanging until
+     * `timeoutMs` — if the device turns out to be revoked while settling (or
+     * already was): a cold `daemon.start()` against an already-revoked device
+     * must fail fast, not surface a generic timeout (protocol §6.3).
+     */
+    waitForConnection(timeoutMs?: number): Promise<void>;
+    /**
+     * Stops the long-poll transport and waits for every in-flight envelope handler
+     * (the F3 FIFO chain) and the most recent cursor write to actually land on
+     * disk — otherwise a `stop()` racing a just-processed envelope's
+     * persistence could lose that cursor advance, or leave a handler running
+     * unobserved after the daemon reports itself stopped.
+     *
+     * Finding F5(b) (cross-model adversarial review): `drainTimeoutMs`, when
+     * passed, bounds how long this waits for the shared outbox (`this.outbox`
+     * — Design B) to actually finish draining BEFORE flipping `this.stopped`
+     * and stopping the transport. Before this fix, `stop()` set `stopped`
+     * synchronously and never waited for `drainOutbox` at all: an envelope
+     * `send()` had just pushed moments earlier (e.g. `TaskRunner.shutdownTask`'s
+     * own `task.fail`, sent right before `create-daemon.ts`'s
+     * `performControlShutdown` calls this) could still be sitting UNSENT in
+     * `this.outbox` — mid long-poll retry backoff, or simply not yet picked up
+     * by the fire-and-forget `drainOutbox()` `send()` kicked off — and this
+     * method would happily proceed to `stopped = true` regardless,
+     * after which NOTHING ever drains it again: silently lost, even though
+     * `TaskRunner` believed it had been sent. `drainTimeoutMs` omitted (the
+     * default) preserves the EXACT prior behavior for every other existing
+     * caller (an ordinary `daemon.stop()`/`unpair()`) — only the control-socket
+     * shutdown path opts into the bounded wait (see `create-daemon.ts`'s
+     * `performControlShutdown`). This can never claim delivery that didn't
+     * happen: on a timeout, whatever's still queued stays exactly where it is
+     * (readable via {@link outboxLength} immediately after this resolves) —
+     * it does NOT force-flush or pretend success.
+     */
+    stop(drainTimeoutMs?: number): Promise<void>;
+    /**
+     * Finding F5(b): how many envelopes are neither confirmed delivered NOR
+     * safely re-queued — meant to be read right after a bounded {@link stop}
+     * call returns, to know honestly whether the drain actually finished (0)
+     * or timed out with something still stuck (>0). See `create-daemon.ts`'s
+     * `performControlShutdown`, which surfaces this on the `shutdown-complete`
+     * audit event rather than silently claiming everything was delivered.
+     *
+     * Deliberately `this.outbox.length + this.inFlightBatchSize`, NOT just
+     * `this.outbox.length` alone: `drainOutbox`'s long-poll branch SPLICES a
+     * batch out of `this.outbox` before awaiting `postBatch` (so a concurrent
+     * `send()` sees an accurate, non-double-counted queue) — while that POST
+     * is in flight (or, this finding's whole point, genuinely STALLED and
+     * never resolving), those envelopes have already left `this.outbox` but
+     * are not delivered either. Reading `this.outbox.length` alone at exactly
+     * that moment would undercount to 0 — silently implying full delivery
+     * for the one case (a hung POST) this finding exists to catch honestly.
+     */
+    outboxLength(): number;
+    /**
+     * Finding F5(b): polls {@link outboxLength} (not `this.outbox.length`
+     * alone — see that method's own doc comment for why a spliced-out,
+     * in-flight batch would otherwise be invisible here) rather than hooking
+     * a single `drainOutbox()` promise directly — a drain in progress can
+     * itself loop through multiple retry/backoff cycles (`drainRetryDelay`)
+     * while the server is unreachable, and a fresh, INDEPENDENT
+     * `drainOutbox()` call can also be triggered concurrently (`send()`) —
+     * polling the one thing
+     * that actually matters (is anything still undelivered) can never go
+     * stale the way capturing one specific in-flight promise reference
+     * could. Kicks off one more `drainOutbox()` attempt itself first
+     * (harmless no-op if one is already running — see its own re-entrancy
+     * guard) in case nothing is currently actively retrying, so this bounded
+     * wait isn't just passively hoping something else happens to be making
+     * progress.
+     */
+    private waitForOutboxDrained;
+    /**
+     * Findings F2 + F3. Two rules, both pinned in docs/protocol.md §1.2/§9:
+     *
+     * - F2 (redelivery dead on reconnect): cursor accounting covers ONLY
+     *   `task.*` envelopes. `conn.ack` carries a `seq` too (required by the
+     *   schema for schema uniformity across every server->daemon type), but a
+     *   reconnecting server sends it BEFORE replaying the backlog and always
+     *   assigns it the next (i.e. highest-so-far) per-device seq — advancing
+     *   the cursor for it would make every backlog envelope's (necessarily
+     *   lower) seq look already-delivered and drop it. `conn.*` envelopes
+     *   never advance the cursor.
+     * - F3 (at-most-once): the old code persisted the cursor advance BEFORE
+     *   `onEnvelope` even ran (fire-and-forget) — a handler that then failed
+     *   left a redelivery-proof envelope permanently marked processed. Inbound
+     *   envelopes are now serialized through `processingChain` (one handler
+     *   fully settles before the next starts) and the cursor only advances
+     *   AFTER the handler resolves successfully; a rejection leaves the
+     *   cursor where it was (see `stalledAtSeq`), so a future reconnect's
+     *   redelivery re-attempts it — safe because every server->daemon type is
+     *   documented idempotent (protocol §9).
+     */
+    private deliver;
+    /**
+     * The local watermark `deliver()` dedupes inbound `task.*` envelopes
+     * against. It is deliberately NOT the long-poll query cursor: that query
+     * is the kernel acknowledgement and uses only the successfully processed
+     * `cursor` (see the constructor). Normally this local watermark is
+     * `deliveredSeq` — which is always >= `cursor` (every envelope that
+     * reaches `advanceCursor` already passed through `noteDelivered` first,
+     * see `deliver`) — so this is the literal `max(cursor, deliveredSeq)` the
+     * design calls for, just expressed via that invariant rather than an
+     * explicit `Math.max`.
+     *
+     * While `stalledAtSeq` is set, this collapses to the durable `cursor`
+     * alone, deliberately ignoring however far `deliveredSeq` had already run
+     * ahead before the failure was known: that's what lets the stalled
+     * envelope's own redelivery (and everything after it, right up to a
+     * fresh success) get past this same dedup check instead of being
+     * self-deduped by the client's own earlier eager tracking of envelopes
+     * whose outcome wasn't known yet. No separate "reset deliveredSeq on
+     * reconnect" step is needed for this to be correct — collapsing to
+     * `cursor` exactly while stalled already produces the right answer on
+     * every long-poll retry path. NOT resetting it unconditionally on every
+     * retry lets `deliveredSeq` keep doing its job of not re-dispatching
+     * something already in flight while a handler is still running.
+     */
+    private dedupWatermark;
+    /** Design A: eagerly advance the in-memory delivery watermark — called for every `task.*` envelope `deliver()` admits past dedup, regardless of transport or of whether its handler has even started yet. */
+    private noteDelivered;
+    private process;
+    /**
+     * M4 Phase 4 (version-negotiation drill fix): `LongPollClient` calls this
+     * for a batch entry it could not parse into a known `Envelope` at all (an
+     * unrecognized message type (see `long-poll-transport.ts`'s own doc
+     * comment on `parseLooseEventsPollResponse`) but which still carried a numeric,
+     * task-class envelope-level `seq` (the caller only invokes this for a
+     * `task.`-prefixed type — see `long-poll-transport.ts`'s own
+     * `extractSkippableSeq`; `conn.*`-shaped or type-less entries never reach
+     * here at all, mirroring F2's "conn.* is never cursor-tracked" rule).
+     * There is no real `Envelope` to hand to a handler — a genuinely
+     * unrecognized type has nothing this build could ever act on.
+     *
+     * GATEKEEPER-CAUGHT REGRESSION (fixed here): this used to call
+     * `advanceCursor(seq)` DIRECTLY, synchronously, the instant a skip was
+     * detected in `LongPollClient.loop()`'s per-entry for-loop. That is NOT
+     * "instantaneous and race-free" the way the previous version of this
+     * comment claimed — the hazard was never the skip racing against itself,
+     * it was the skip racing AHEAD of an EARLIER real envelope in the SAME
+     * batch that is still in flight on `processingChain` (`deliver()`, above,
+     * only ever CHAINS `process()` onto that promise chain — it never awaits
+     * it before returning). Concretely, batch `[real seq1, unknown seq2]`:
+     * `deliver(seq1)` chains `process(seq1)` but returns immediately without
+     * running it; the for-loop then reaches `seq2` and (pre-fix) called
+     * `advanceCursor(2)` synchronously, BEFORE `process(seq1)` had even
+     * started, let alone failed. If `seq1`'s handler then failed,
+     * `stalledAtSeq` became 1 — but the durable cursor was already 2, so
+     * `dedupWatermark()` returned 2, and every future redelivery of seq1 was
+     * dedup-dropped as "already past the cursor" forever: permanent envelope
+     * loss, exactly the F3 bug class the whole `stalledAtSeq`/frozen-watermark
+     * mechanism exists to prevent.
+     *
+     * Fix: the cursor-advancing half is now CHAINED onto `processingChain`
+     * too, exactly like `process()`'s own post-handler bookkeeping — so it
+     * only ever runs once every earlier envelope already queued ahead of it
+     * has fully settled (success or failure), and can observe `stalledAtSeq`'s
+     * REAL, up-to-date value rather than whatever it happened to be at the
+     * instant the skip was first noticed. The guard mirrors `process()`'s own
+     * success-path guard exactly: never advance past a still-unresolved
+     * earlier failure, unless (degenerate, cannot really happen for a skip)
+     * this exact seq IS the stalled one.
+     *
+     * `noteDelivered` (the eager, in-memory watermark) stays UNCHAINED —
+     * called immediately, unconditionally, regardless of `stalledAtSeq` —
+     * matching `deliver()`'s own eager, unconditional call for a real
+     * envelope: its only job is "don't re-dispatch something already handed off,"
+     * independent of outcome, and that property does not depend on FIFO
+     * ordering the way the DURABLE cursor does.
+     *
+     * Deliberately NO top-level `dedupWatermark() <= seq` early-return before
+     * queuing the chained callback (an earlier draft of this fix had one, and
+     * it was itself subtly wrong): `deliveredSeq` can already reflect a seq
+     * from the FIRST time it was ever seen, while the DURABLE cursor is still
+     * behind it because a stall intervened before that seq's chained
+     * advancement ran — a pre-check keyed on `deliveredSeq` would then
+     * wrongly treat a LATER redelivery of the same seq (arriving once the
+     * stall has since cleared) as "already accounted for" and never queue
+     * another attempt, permanently stranding the cursor one seq short. Always
+     * queuing is safe and cheap: `advanceCursor`'s own `seq <= this.cursor`
+     * guard already makes a genuinely-redundant call a no-op, so there is no
+     * correctness reason to short-circuit earlier, only a (here, unnecessary)
+     * micro-optimization one.
+     */
+    private noteSkippedSeq;
+    /**
+     * Finding R1 (cross-model re-review — was NOT-CLOSED against F1):
+     * `LongPollClient` calls this for a batch entry whose `type` it
+     * recognized but whose payload failed schema validation
+     * ({@link EnvelopeValidationError}) — a genuine delivery failure at that
+     * seq, unlike `noteSkippedSeq`'s forward-compat case. Deliberately mirrors
+     * `process()`'s own catch block (`if (tracked && this.stalledAtSeq ===
+     * undefined) this.stalledAtSeq = envelope.seq;`) as closely as possible:
+     * the SAME "only the lowest unresolved failure holds the stall" rule, the
+     * SAME resulting freeze of `dedupWatermark()` at the durable cursor
+     * (protocol §9 keeps this seq alive), and — because it's the SAME
+     * `stalledAtSeq` field `process()`'s own post-success guard already
+     * checks — anything ELSE delivered after this seq (same batch or a later
+     * one) is automatically held back from advancing the cursor too, with
+     * zero changes needed to `process()` itself.
+     *
+     * Chained onto `processingChain` for exactly the reason `noteSkippedSeq`
+     * documents for its own identical chaining (see that method's sibling
+     * doc comment on `LongPollClient`, "GATEKEEPER-CAUGHT REGRESSION"): an
+     * EARLIER real envelope in the SAME batch may still be in flight on that
+     * FIFO chain when this is called (`deliver()` only ever chains
+     * `process()` onto it, never awaits before returning) — mutating
+     * `stalledAtSeq` synchronously here could race ahead of that still-
+     * unresolved earlier envelope. Chaining instead guarantees this only
+     * takes effect once every earlier-queued envelope has already settled,
+     * and reads `stalledAtSeq`'s real, up-to-date value rather than whatever
+     * it happened to be the instant the failure was first noticed.
+     *
+     * No `noteDelivered` call here (contrast `noteSkippedSeq`, which does
+     * call it): a validation-failed entry never becomes a real `Envelope` and
+     * never reaches `deliver()`, so it was never "delivered" in the eager
+     * in-memory-watermark sense that field tracks — there is nothing for it
+     * to eagerly mark. Once a corrected redelivery of this exact seq DOES
+     * arrive as a real envelope, it flows through the ordinary `deliver()`
+     * path (which calls `noteDelivered` itself) and, on success, clears the
+     * stall via `process()`'s own existing logic — no special-casing needed.
+     */
+    private noteValidationFailure;
+    private advanceCursor;
+    private notifySettled;
+    private noteConnected;
+    private noteDisconnected;
+    private enterReplayCursorTooOld;
+    private enterRevoked;
+}
 // ==== @byok-sdk/client dist/daemon/control-protocol.d.ts ====
 import type { TaskState } from '@byok-sdk/protocol';
 import type { ApprovalDecision, PendingApproval } from './approvals';
@@ -2587,7 +3024,7 @@ export interface ControlStatusResult {
     uptimeMs: number;
     paired: boolean;
     deviceId?: string;
-    /** The connection state machine's own current value (`ws-transport.ts`'s `ConnectionState`) — e.g. `'open'`, `'degraded'` (long-poll fallback), `'revoked'`, `'closed'`, `'connecting'`. */
+    /** The connection state machine's current value: `'open'`, `'revoked'`, `'closed'`, or `'connecting'`. */
     transport: string;
     activeTasks: ControlActiveTask[];
     runtimeIds: string[];
@@ -2808,7 +3245,6 @@ import type { RuntimeAdapter, GitWorkspaceConfig, McpToolsetConfig, McpToolsetOb
 import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agent-home';
 import type { AgentRef } from '../agent-home';
 import { type LocalAgentReleaseIdentity } from '../release-identity';
-import type { BackoffOptions, LivenessOptions } from './ws-transport';
 import { type OperationalHealthSnapshot } from './operational-health';
 import { type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
 import { GitWorkspaceManager } from './git-workspace';
@@ -3081,7 +3517,7 @@ export interface DaemonConfig {
     /**
      * M5: explicit escape hatch for `url.ts`'s `assertServerUrlAllowed` — see
      * that function's own doc comment for the full allow/deny rule. Default
-     * (unset/`false`): a `serverUrl` using plaintext `ws:`/`http:` is only
+     * (unset/`false`): a `serverUrl` using plaintext `http:` is only
      * accepted when its host is loopback (`localhost`/`*.localhost`,
      * `127.0.0.0/8`, `::1`); anything else over plaintext throws a typed
      * `InsecureServerUrlError` from `pair()`/`start()` below, BEFORE any
@@ -3092,7 +3528,7 @@ export interface DaemonConfig {
      * server) — doing so also logs a loud `console.warn` (see
      * `checkServerUrl`, this file) every time it actually changes the
      * outcome. Never overrides an unsupported scheme (anything other than
-     * `http:`/`https:`/`ws:`/`wss:`), which is refused unconditionally.
+     * `http:`/`https:`), which is refused unconditionally.
      */
     dangerouslyAllowInsecureRemote?: boolean;
     /**
@@ -3299,8 +3735,6 @@ export interface DaemonStatus {
     localAgentRelease: Readonly<LocalAgentReleaseIdentity>;
     paired: boolean;
     connected: boolean;
-    /** True once the connection has fallen back to long-poll (protocol §8) — transport info only (finding F6): long-poll is a full transport, so work still proceeds normally while this holds; outbound envelopes POST to /byok/messages instead of going out over WS. */
-    degraded: boolean;
     /** True once the server has revoked this device (401 on challenge/token, protocol §6.3). The only recourse is calling `pair()` again — the daemon does not keep retrying on its own. */
     revoked: boolean;
     deviceId?: string;
@@ -3364,10 +3798,8 @@ export interface Daemon {
     /** M3-2a: same as {@link approve} but rejects — see that method's doc comment. */
     reject(taskId: string, reason?: string): Promise<void>;
 }
-/** Internal seam so tests can substitute stub adapters / faster backoff+batch+liveness+long-poll timing. `createDaemonWithAdapters` (which takes this) is also the real entry point for products supplying a hand-built adapter set `createDaemon` can't construct on its own — e.g. custom adapter options, or an adapter that REPLACES a bundled runtime's implementation under the same id. Honest limit: an adapter id outside `pi`/`claude`/`codex` cannot pass wire validation today — `RuntimeIdSchema` (`@byok-sdk/protocol`) is a closed `z.enum(['pi', 'claude', 'codex'])`, and `isRuntimeId` filtering below (see `detectRuntimes`) drops any detected adapter outside that set before it ever reaches a wire-visible field. A genuinely fourth/namespaced runtime id is a future protocol change, not something this seam enables today. */
+/** Internal seam so tests can substitute stub adapters / faster batch and long-poll timing. `createDaemonWithAdapters` (which takes this) is also the real entry point for products supplying a hand-built adapter set `createDaemon` can't construct on its own — e.g. custom adapter options, or an adapter that REPLACES a bundled runtime's implementation under the same id. Honest limit: an adapter id outside `pi`/`claude`/`codex` cannot pass wire validation today — `RuntimeIdSchema` (`@byok-sdk/protocol`) is a closed `z.enum(['pi', 'claude', 'codex'])`, and `isRuntimeId` filtering below (see `detectRuntimes`) drops any detected adapter outside that set before it ever reaches a wire-visible field. A genuinely fourth/namespaced runtime id is a future protocol change, not something this seam enables today. */
 export interface DaemonOverrides {
-    backoff?: BackoffOptions;
-    liveness?: LivenessOptions;
     /** M4 Phase 3: overrides `TaskRunner`'s default out-of-band approval wait (`DEFAULT_APPROVAL_TIMEOUT_MS`, 10 minutes) before an unanswered `requestApproval` force-resolves as a fail-closed rejection. */
     approvalTimeoutMs?: number;
     /** Finding F5: overrides for the control-socket shutdown path's own bounded waits — see `TaskRunner.shutdownTask`'s and `ConnectionManager.stop`'s own doc comments. Both default to 5s; neither affects an ordinary (non-shutdown-RPC) `daemon.stop()` call. */
@@ -3378,10 +3810,6 @@ export interface DaemonOverrides {
         outboxDrainTimeoutMs?: number;
     };
     longPoll?: {
-        /** Consecutive never-acked WS connect failures before falling back to long-poll. Default 3. */
-        wsFailureThreshold?: number;
-        /** While long-polling, how often to retry establishing WS. Default 5 minutes. */
-        wsRetryIntervalMs?: number;
         /** Backoff between failed long-poll HTTP attempts. Default 2s. */
         retryDelayMs?: number;
         /** Minimum delay before the next long-poll request after an empty (no-events) response — avoids busy-looping against a server that responds instantly. Default 250ms. */
@@ -3481,6 +3909,58 @@ export declare function buildDaemonWithAdapters(config: DaemonConfig, adapters: 
  * in-house runtime, test stubs) use `createDaemonWithAdapters` directly.
  */
 export declare function createDaemon(config: DaemonConfig): Daemon;
+// ==== @byok-sdk/client dist/daemon/cursor-store.d.ts ====
+/**
+ * Persists the highest processed server->daemon envelope `seq` per
+ * (server, device) pair (protocol §9, at-least-once redelivery), so a
+ * restarted daemon can send an accurate `conn.hello.cursor` and the server
+ * can skip re-delivering envelopes it already knows were handled. Keyed by a
+ * hash of `serverUrl` + `deviceId` together (not just `serverUrl`) so
+ * filenames stay filesystem-safe regardless of scheme/port/path.
+ *
+ * Finding F5 (stale cursor across re-pair): `POST /byok/pair` always mints a
+ * brand new `deviceId` (see `packages/server/src/http.ts`), including on a
+ * re-pair against the same `serverUrl` (e.g. recovering from revocation,
+ * protocol §6.3). A cursor keyed by `serverUrl` alone would hand the fresh
+ * device's very first connection a stale, unrelated cursor value left over
+ * from whatever device previously used this URL — the new device's own
+ * server-side outbox starts its `seq` counter back at 1, so that stale
+ * cursor would make the server's redelivery filter (`seq > cursor`) throw
+ * away every legitimate envelope sent to it. Keying by the pair means a new
+ * deviceId always starts with a genuinely fresh (absent) cursor entry;
+ * `clear()` additionally lets `create-daemon.ts`'s `pair()` proactively wipe
+ * the previous device's entry for this `serverUrl` as a hygiene measure.
+ */
+export declare class CursorStore {
+    private readonly storeDir;
+    constructor(storeDir: string);
+    private fileFor;
+    load(serverUrl: string, deviceId: string): Promise<number | undefined>;
+    save(serverUrl: string, deviceId: string, cursor: number): Promise<void>;
+    /** Remove any persisted cursor for (serverUrl, deviceId) — a no-op if none exists. Called from `pair()` (finding F5) so a device that's about to be replaced never leaves a cursor a future, unrelated device could somehow inherit. */
+    clear(serverUrl: string, deviceId: string): Promise<void>;
+}
+// ==== @byok-sdk/client dist/daemon/deterministic-jitter.d.ts ====
+export type JitterDomain = 'reconnect' | 'upload' | 'maintenance';
+export interface DeterministicJitterInput {
+    seed: string;
+    domain: JitterDomain;
+    sequence: number;
+    baseMs: number;
+    ratio?: number;
+}
+/**
+ * Stable, domain-separated fleet jitter. The same identity/domain/sequence
+ * always produces the same integer delay, while a different domain cannot
+ * accidentally reuse the same hash stream. There is deliberately no random
+ * fallback: callers must have loaded the device identity before constructing
+ * an automatic retry loop.
+ */
+export declare function deterministicJitterMs(input: DeterministicJitterInput): number;
+export interface FleetJitter {
+    delay(domain: JitterDomain, sequence: number, baseMs: number): number;
+}
+export declare function createFleetJitter(productId: string, deviceId: string): FleetJitter;
 // ==== @byok-sdk/client dist/daemon/device-credential-store.d.ts ====
 /** Secret fields inside the internal complete enrollment authority. */
 export interface DeviceCredentials {
@@ -4948,7 +5428,7 @@ export declare const AGENT_MEMORY_GUIDANCE: string;
 export declare function prependAgentMemoryGuidance(instruction: string): string;
 // ==== @byok-sdk/client dist/daemon/observer.d.ts ====
 import { type AgentEvent, type BlobRef, type Envelope, type RuntimeInfo, type TaskState } from '@byok-sdk/protocol';
-import type { ConnectionState } from './ws-transport';
+import type { ConnectionState } from './connection-manager';
 /**
  * M3-2a: local observability for the daemon — the seam a CLI (M3-2b) drives a
  * live task feed, a task list, and approve/reject/unpair from, all LOCALLY
@@ -7314,234 +7794,6 @@ export declare class TruthMemoryClient {
     writeSnapshot(input: TruthSnapshotWriteInput): Promise<TruthWriteResult>;
     writeTerminal(input: TruthTerminalWriteInput): Promise<TruthWriteResult>;
 }
-// ==== @byok-sdk/client dist/daemon/url.d.ts ====
-/** Normalize a configured `serverUrl` (http/https/ws/wss, any path) to an http(s) base with no path/query. */
-export declare function toHttpBase(serverUrl: string): string;
-/** Derive the `/byok/ws` WebSocket URL from a configured `serverUrl`. */
-export declare function toWsUrl(serverUrl: string): string;
-/**
- * Which route a transport diagnostic is about, in the only two fields that
- * are safe to keep: the host (with port) and the path.
- *
- * Both are read off a parsed `URL` in {@link describeEndpoint}, so the
- * redaction is STRUCTURAL rather than a scrub pass — userinfo, query and
- * fragment are the only places a bearer token or a presigned signature ever
- * travels in this SDK, and none of the three survive the projection onto
- * these two fields. There is exactly one construction site, so a future
- * diagnostic cannot accidentally reintroduce a credential-bearing component
- * by formatting a raw URL of its own.
- */
-export interface TransportEndpoint {
-    readonly transport: 'ws' | 'long-poll';
-    /** `URL.host` — hostname plus port when non-default. Never userinfo. */
-    readonly host: string;
-    /** `URL.pathname` — no query, no fragment. */
-    readonly path: string;
-}
-/** The single construction site for {@link TransportEndpoint} — see that interface's own doc comment for why it is the only one. */
-export declare function describeEndpoint(transport: TransportEndpoint['transport'], url: string | URL): TransportEndpoint;
-/**
- * The only URL projection used by validation errors. Reading from the parsed
- * structure means userinfo, query, and fragment never enter the diagnostic.
- */
-/** The sole secret-safe projection for a configured server URL diagnostic. */
-export declare function formatServerUrl(value: string | URL): string;
-/**
- * M5: thrown by {@link assertServerUrlAllowed} — see that function's own doc
- * comment for the full allow/deny rule this names. Deliberately ONE error
- * type for every way the gate can refuse a `serverUrl` (plaintext-to-remote,
- * or a scheme this SDK's transport has no meaning for at all): a catching
- * caller only ever needs "the configured server URL failed the
- * transport-security gate", never which specific sub-case fired — the
- * message text (not the type) carries that detail.
- */
-export declare class InsecureServerUrlError extends Error {
-    constructor(message: string);
-}
-export interface AssertServerUrlAllowedOptions {
-    /**
-     * Explicit escape hatch: when `true`, a `http:`/`ws:` `serverUrl` whose
-     * host is NOT loopback is allowed through instead of throwing. Does
-     * nothing for an unsupported scheme (see {@link assertServerUrlAllowed}'s
-     * own doc comment) — that rejection is unconditional. Threaded from
-     * `DaemonConfig.dangerouslyAllowInsecureRemote`; this function itself
-     * never logs anything when the hatch is exercised — it stays a pure,
-     * synchronous, easily-unit-testable gate — so a caller that sets this
-     * true is expected to emit its own warning (see `create-daemon.ts`'s
-     * `checkServerUrl`).
-     */
-    dangerouslyAllowInsecureRemote?: boolean;
-}
-/**
- * M5: transport-security gate for a configured `serverUrl` — refuses
- * plaintext (`ws:`/`http:`) transport to any non-loopback host, so a device
- * can never be talked into pairing with (and sending its pairing code /
- * device credentials to) a remote host in the clear. Call this ONCE at each
- * real entry point a raw, operator-supplied `serverUrl` first enters the
- * client (`create-daemon.ts`'s `pair()`/`start()`) rather than inside
- * `toHttpBase`/`toWsUrl` themselves: ws-transport, the long-poll fallback,
- * and blob-client all read `serverUrl` from that SAME `DaemonConfig`, never
- * an independently-supplied URL of their own, so those two call sites are
- * already the single common path every one of them goes through.
- *
- * Rules, checked in order:
- *  - `https:`/`wss:` — always allowed, any host (TLS is the actual
- *    plaintext-network defense; this gate has nothing further to add there).
- *  - `http:`/`ws:` — allowed only when the hostname is loopback: exactly
- *    `localhost` or any `*.localhost` subdomain, an IPv4 literal in
- *    `127.0.0.0/8`, or the IPv6 loopback `::1` — see {@link isLoopbackHostname}.
- *  - `http:`/`ws:` to any other host — refused with a clear, typed
- *    {@link InsecureServerUrlError} naming the redacted scheme/host/path and the fix
- *    (use `wss:`/`https:`, or pass `dangerouslyAllowInsecureRemote: true` if
- *    this is a deliberate, understood exception) — UNLESS
- *    `opts.dangerouslyAllowInsecureRemote` is `true`.
- *  - Any other scheme (or a `serverUrl` that fails to parse as a URL at
- *    all) — always refused, regardless of `dangerouslyAllowInsecureRemote`:
- *    the escape hatch is specifically for "plaintext to a remote host I
- *    understand the risk of", not "a scheme this transport doesn't
- *    implement at all".
- */
-export declare function assertServerUrlAllowed(rawUrl: string, opts?: AssertServerUrlAllowedOptions): void;
-// ==== @byok-sdk/client dist/daemon/ws-transport.d.ts ====
-import { type CapabilityFlag, type Envelope, type RuntimeInfo, type ToolsetId } from '@byok-sdk/protocol';
-import { type TransportEndpoint } from './url';
-export type ConnectionState = 'connecting' | 'open' | 'closed' | 'degraded' | 'revoked';
-/**
- * The WS upgrade itself was rejected with a non-101 HTTP status (e.g. 401 for
- * an expired/invalid bearer token). Surfaced via `onConnectOutcome` so
- * `ConnectionManager` can force a reactive token renewal before the next
- * attempt (protocol §6.2, "reactively on 401").
- *
- * Carries the {@link TransportEndpoint} the rejected upgrade was aimed at, so
- * a 401 in a log names WHICH server and path refused it instead of leaving
- * the reader to guess between a stale `serverUrl` and a genuinely expired
- * token. The endpoint's own construction is what keeps the bearer token out
- * of this message — see {@link describeEndpoint}.
- */
-export declare class WsUnexpectedStatusError extends Error {
-    readonly status: number;
-    readonly endpoint: TransportEndpoint;
-    constructor(status: number, endpoint: TransportEndpoint);
-}
-export interface BackoffOptions {
-    baseMs?: number;
-    maxMs?: number;
-    factor?: number;
-}
-export interface LivenessOptions {
-    /** Terminate and reconnect if no data/ping arrives for this long. Default 75s (server pings every 30s per the pinned heartbeat convention). */
-    timeoutMs?: number;
-    /** How often to check for silence. Default: timeoutMs/3, floored at 1s. */
-    checkIntervalMs?: number;
-}
-export interface WsTransportOptions {
-    serverUrl: string;
-    /** Resolves the current valid bearer token; called fresh before every connect attempt (initial and every reconnect) so a proactively-renewed token is always used. */
-    getToken: () => Promise<string>;
-    deviceId: string;
-    productId: string;
-    capabilities: CapabilityFlag[];
-    /** U4a Local Agent release version; the sole client-version authority. */
-    clientVersion?: string;
-    /** Detected runtimes, sent on every `conn.hello` (protocol §10 gap #4/#11). */
-    runtimes?: RuntimeInfo[];
-    /** Reads current sorted logical IDs for every hello; no executable definition crosses the wire. */
-    getConfiguredToolsets?: () => readonly ToolsetId[];
-    /** The redelivery cursor to send as `conn.hello.cursor` (protocol §9) — read fresh on every connect so a value learned mid-connection is used on the next reconnect. */
-    getCursor?: () => number | undefined;
-    onEnvelope: (envelope: Envelope) => void;
-    onStateChange?: (state: ConnectionState) => void;
-    /**
-     * Fired the moment `conn.ack` is processed and the connection becomes
-     * usable — independent of `onConnectOutcome`, which only fires on close (a
-     * healthy, still-open connection never reaches it). Carries the ack's own
-     * `capabilities` (untyped `string[]` on the wire, forward-compat — a
-     * server may advertise a flag this build doesn't recognize yet), so a
-     * caller can learn what the CURRENTLY connected server understands (e.g.
-     * the `approval_resolved` capability flag — see
-     * `ConnectionManager.getServerCapabilities`) instead of it being silently
-     * discarded after the handshake completes.
-     */
-    onAcked?: (capabilities: string[]) => void;
-    /**
-     * Fired once per connection attempt when the socket closes, reporting
-     * whether that attempt ever reached `conn.ack` (`acked`) before closing,
-     * and the causing error when the attempt failed before a socket even
-     * opened (e.g. `getToken()` rejecting). Used by `ConnectionManager` to
-     * count consecutive failures for the long-poll fallback (protocol §8).
-     *
-     * `endpoint` names the route this attempt was aimed at (computed once per
-     * `openSocket()`, so every outcome site reports the same one) — a
-     * consecutive-failure count in a log is only actionable once it says WHICH
-     * server kept refusing.
-     */
-    onConnectOutcome?: (acked: boolean, err: unknown, endpoint: TransportEndpoint) => void;
-    backoff?: BackoffOptions;
-    liveness?: LivenessOptions;
-    /** Deterministic automatic reconnect delay. Manual `connect({auto:false})` never reaches this scheduler. */
-    reconnectDelayMs?: (attempt: number, baseDelayMs: number) => number;
-}
-/**
- * One canonical authenticated capability snapshot for both transports.
- * Long-poll sends this envelope through `POST /byok/messages`; WS sends the
- * same shape as its opening frame. Keeping construction here prevents one
- * transport from silently omitting a newly added daemon capability.
- */
-export declare function createConnectionHelloEnvelope(opts: Pick<WsTransportOptions, 'deviceId' | 'productId' | 'capabilities' | 'clientVersion' | 'runtimes' | 'getConfiguredToolsets' | 'getCursor'>): Envelope;
-/**
- * The daemon's outbound-only WS connection: opens, sends `conn.hello`, waits
- * for `conn.ack`, and reconnects with capped exponential backoff + jitter on
- * drop.
- *
- * Design B (finding N4): this transport is a stateless drainer — it holds no
- * outbound queue of its own. `ConnectionManager` owns the single shared
- * outbox both transports drain from (so a transport switch never strands a
- * queued envelope); `sendNow` just attempts to hand one envelope to the
- * live socket right now and reports back whether that actually happened,
- * leaving all queueing/retry policy to the caller.
- *
- * Auto-reconnect can be paused (`stopAutoReconnect`) and single attempts
- * made on demand (`connect({ auto: false })`) — used by `ConnectionManager`
- * to probe WS recovery every few minutes while long-polling, without this
- * transport's own backoff loop fighting that cadence.
- */
-export declare class WsTransport {
-    private readonly opts;
-    private socket;
-    private closedByUser;
-    private autoReconnect;
-    private acked;
-    private everAckedThisAttempt;
-    private reconnectAttempt;
-    private reconnectTimer;
-    private livenessTimer;
-    private lastActivity;
-    private lastUnexpectedStatus;
-    private ackWaiters;
-    constructor(opts: WsTransportOptions);
-    connect(opts?: {
-        auto?: boolean;
-    }): void;
-    /** Stop scheduling further reconnect attempts (any pending one is cancelled too); the current socket, if any, is left alone. Used when handing retry ownership to a slower external cadence (e.g. the long-poll fallback's periodic WS probe). */
-    stopAutoReconnect(): void;
-    /** Resume normal auto-reconnect-on-close behavior (does not itself trigger a connect — only affects future closes). */
-    resumeAutoReconnect(): void;
-    get isOpen(): boolean;
-    /**
-     * Attempt to send ONE envelope right now; returns whether it actually went
-     * out. `false` means the socket isn't currently open+acked — the caller
-     * (`ConnectionManager.drainOutbox`, Design B/finding N4) owns re-queueing
-     * and retrying later (e.g. on the next `onAcked`), since this transport no
-     * longer buffers anything itself.
-     */
-    sendNow(envelope: Envelope): boolean;
-    waitForAck(timeoutMs?: number): Promise<void>;
-    close(): void;
-    private openSocket;
-    private scheduleReconnect;
-    private startLivenessCheck;
-    private stopLivenessCheck;
-}
 // ==== @byok-sdk/client dist/index.d.ts ====
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, Session, GitWorkspaceConfig, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
 export type { AgentRef } from './agent-home';
@@ -7606,7 +7858,7 @@ export { SKILL_PACKS_CAPABILITY, SKILL_PACKS_DIRNAME, SKILL_PACK_AUDIT_FILENAME,
 export type { InstallSkillPacksOptions, InstalledSkillPack, ProjectedSkillPack, SkillPackInstallErrorCode, SkillPackInstallResult, SkillPackLock, } from './daemon/skill-pack-installer';
 export { TruthMemoryClient, TruthMemoryClientError } from './daemon/truth-memory-client';
 export type { LocalMemoryFilter, MemorySelector, TruthManifestQueryInput, TruthManifestRecord, TruthMemoryClientErrorCode, TruthMemoryClientOptions, TruthMemoryMetric, TruthSnapshotCandidateInput, TruthSnapshotWriteInput, TruthTerminalWriteInput, TruthWriteBody, TruthWriteResult, VerifiedTruthRecord, } from './daemon/truth-memory-client';
-export type { ConnectionState } from './daemon/ws-transport';
+export type { ConnectionState } from './daemon/connection-manager';
 export { ReplayCursorTooOldError } from './daemon/replay-cursor';
 export { BlobClient, BlobRequestAbortedError } from './daemon/blob-client';
 export type { BlobClientOptions, BlobRequestAbortReason, BlobRequestOptions, BlobResolver } from './daemon/blob-client';
