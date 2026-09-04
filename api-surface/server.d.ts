@@ -73,6 +73,7 @@ export declare class DeviceConnections {
 // ==== @byok-sdk/server dist/index.d.ts ====
 import { Hono } from 'hono';
 import { type PairingCodeInfo } from '@byok-sdk/cloud';
+import { type AgentRef } from '@byok-sdk/protocol';
 import type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
 import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, TaskHandle, TaskSnapshot } from './types';
 export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, ServerTaskEvent, TaskHandle, TaskResult, TaskSnapshot, } from './types';
@@ -160,8 +161,8 @@ export interface ByokServer {
     requestAgentContentRead(input: AgentContentReadRequest): Promise<void>;
     /** Enqueue one task-free, exact-device Agent-home projection. */
     enqueueAgentHomeProjection(input: AgentHomeProjectionRequest): Promise<AgentHomeProjectionStatusReadback>;
-    /** Durable desired-state and terminal-outcome readback for one projection request. */
-    readAgentHomeProjection(deviceId: string, requestId: string): Promise<AgentHomeProjectionStatusReadback | undefined>;
+    /** Durable desired-state and terminal-outcome readback for one exact device-and-Agent request. */
+    readAgentHomeProjection(deviceId: string, agentRef: AgentRef, requestId: string): Promise<AgentHomeProjectionStatusReadback | undefined>;
     tasks: {
         get(taskId: string): Promise<TaskSnapshot | undefined>;
         /**
@@ -178,7 +179,7 @@ export interface ByokServer {
     };
     /** Reliable Agent egress receipt readback. */
     egress: {
-        get(deviceId: string, eventId: string): Promise<AgentEgressReceipt | undefined>;
+        get(deviceId: string, agentRef: AgentRef, eventId: string): Promise<AgentEgressReceipt | undefined>;
     };
     machines: {
         list(): Promise<MachineInfo[]>;

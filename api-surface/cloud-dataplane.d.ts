@@ -337,6 +337,7 @@ export declare class PostgresActivityStore implements ActivityStore {
     read(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/agent-egress.d.ts ====
+import { type AgentEgressReliablePayload } from '@byok-sdk/protocol';
 import type { AgentEgressRecord, AgentEgressStore } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
@@ -349,7 +350,7 @@ export declare class PostgresAgentEgressStore implements AgentEgressStore {
         readonly record: AgentEgressRecord;
         readonly created: boolean;
     }>;
-    get(tenant: TenantId, deviceId: string, eventId: string): Promise<AgentEgressRecord | undefined>;
+    get(tenant: TenantId, deviceId: string, agentRef: AgentEgressReliablePayload['agentRef'], eventId: string): Promise<AgentEgressRecord | undefined>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/agent-memory-projection.d.ts ====
 /**
@@ -742,19 +743,22 @@ export declare class PostgresTruthStore implements TruthStore {
  * primary key does the deciding, and zero returned rows means "already seen".
  *
  * Reclaim runs only on the path that actually grew the table, and it deletes
- * oldest-first down to `DEDUP_RING_CAPACITY` rows for that device — the same
- * bound the in-memory ring holds. The ids most likely to be redelivered are the
- * recent ones, so dropping the oldest is the retention that matches the wire's
- * behavior. An unbounded set would pass every duplicate assertion and still let
- * one chatty device grow this table without limit.
+ * oldest-first down to `DEDUP_RING_CAPACITY` rows for that exact physical or
+ * Agent-bound key — the same bound the in-memory ring holds. The ids most
+ * likely to be redelivered are the recent ones, so dropping the oldest is the
+ * retention that matches the wire's behavior. An unbounded set would pass every
+ * duplicate assertion and still let one chatty device or Agent grow this table
+ * without limit.
  */
 import { type InboundDedupStore } from '@byok-sdk/cloud';
 import type { TenantId } from '@byok-sdk/core';
+import type { AgentRef } from '@byok-sdk/protocol';
 import type { Pool } from 'pg';
 export declare class PostgresInboundDedupStore implements InboundDedupStore {
     #private;
     constructor(pool: Pool, capacity?: number);
     checkAndRecord(tenant: TenantId, deviceId: string, envelopeId: string): Promise<boolean>;
+    checkAndRecordAgent(tenant: TenantId, deviceId: string, agentRef: AgentRef, envelopeId: string): Promise<boolean>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/device-assertion-replay.d.ts ====
 import type { DeviceAssertionReplayAuthority, DeviceAssertionReplayConsumeInput } from '@byok-sdk/core';
