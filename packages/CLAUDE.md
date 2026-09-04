@@ -50,7 +50,7 @@ Owns the root capability boundary declared in .ai/context/capabilities.json.
 - Verification: Use root required checks plus local commands recorded in this capability contract.
 - Latest snapshot: `(none yet)`
 - Semantic diagram source: `docs/architecture/sdk-architecture.md`
-- Pending architecture request: `docs/architecture/requests/root.md`
+- Pending architecture request: `(none)`
 
 ## Active Workstreams
 
