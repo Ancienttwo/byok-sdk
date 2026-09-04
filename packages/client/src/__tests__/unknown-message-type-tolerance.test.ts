@@ -21,16 +21,14 @@ async function tmpDir(prefix: string): Promise<string> {
  * the frozen `MESSAGE_TYPES` set — "distinctly skippable from a validation
  * failure" is that test's own framing. What it does NOT prove is what a REAL
  * client transport actually does with that thrown error: does it really
- * skip the frame (connection survives, later traffic still flows), or does
- * it escape and do something worse? `envelope-tolerance.test.ts` (this
- * package) reasons about `ws-transport.ts`'s WS handler from reading its
- * source rather than exercising it; this file drives the REAL transports
- * (`ConnectionManager`/`WsTransport`/`LongPollClient`) against a fake server
+ * skip the entry (connection survives, later traffic still flows), or does
+ * it escape and do something worse? This file drives the real long-poll
+ * path (`ConnectionManager`/`LongPollClient`) against a fake server
  * that can emit a wire payload no CURRENT `@byok-sdk/protocol` build recognizes
  * — simulating a hypothetical future minor server's new message type —
  * because `createEnvelope` (the frozen, validated constructor) would itself
- * reject any attempt to build one. `TestServer.sendRaw`/
- * `pushRawLongPollEvent` (fixtures/test-server.ts) are the deliberate
+ * reject any attempt to build one. `TestServer.pushRawLongPollEvent`
+ * (fixtures/test-server.ts) is the deliberate
  * escape hatches that make this possible without reimplementing any
  * decode/dispatch logic.
  *
@@ -40,8 +38,7 @@ async function tmpDir(prefix: string): Promise<string> {
  * single unrecognized-type entry, discarding every other, otherwise-valid
  * entry alongside it, and stalling that device's cursor against a real
  * (retain-and-redeliver) server. Fixed in `long-poll-transport.ts`
- * (per-entry `parseMessage`, mirroring `ws-transport.ts`'s identical
- * per-frame tolerance) and `connection-manager.ts` (`noteSkippedSeq`, so the
+ * (per-entry `parseMessage`) and `connection-manager.ts` (`noteSkippedSeq`, so the
  * cursor advances past a skipped entry even with nothing valid after it).
  * The tests below now assert the fix directly instead of documenting the
  * stall — see docs/protocol.md §13 for the updated drill narrative.
@@ -55,75 +52,13 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     await server.close();
   });
 
-  it('WS: a raw frame with an unrecognized message type is silently skipped by WsTransport — the connection stays open and a subsequent legitimate envelope still arrives normally', async () => {
-    server = await TestServer.start();
-    const storeDir = await tmpDir('byok-unknown-type-ws-store-');
-    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
-    const record = await auth.pair('pairing-code');
-    const cursorStore = new CursorStore(storeDir);
-
-    const received: Envelope[] = [];
-    connection = new ConnectionManager({
-      serverUrl: server.url,
-      deviceId: record.deviceId,
-      productId: 'test-product',
-      capabilities: [],
-      runtimes: [],
-      auth,
-      cursorStore,
-      onEnvelope: (envelope) => {
-        received.push(envelope);
-      },
-    });
-
-    await connection.start();
-    await connection.waitForAck();
-    expect(connection.isConnected()).toBe(true);
-
-    // A hypothetical future minor server's brand-new message type — sent as
-    // a raw, hand-crafted line via `sendRaw` (bypassing `createEnvelope`'s
-    // own validation on purpose): this is exactly the payload shape a real
-    // future server would put on the wire, which this build's frozen
-    // `EnvelopeSchema` cannot classify as any known branch.
-    server.sendRaw({
-      v: 1,
-      id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
-      ts: new Date().toISOString(),
-      type: 'task.brand_new_future_type',
-      task_id: 'task-future-1',
-      payload: { someFutureField: 'x' },
-    });
-
-    // The connection must not drop or error over this — give it a moment
-    // then confirm it's still healthy.
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(connection.isConnected()).toBe(true);
-
-    // A subsequent, legitimate envelope still arrives normally — proof the
-    // unknown one was skipped, not fatal to the stream (it never even
-    // reaches `onEnvelope`, since `decodeEnvelope` throws before that).
-    const taskId = 'task-known-1';
-    server.send(
-      createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId, seq: server.nextSeq() }),
-    );
-    await vi.waitFor(() => {
-      expect(received.some((e) => e.type === 'task.offer' && e.task_id === taskId)).toBe(true);
-    });
-
-    // conn.ack (handshake) + this one task.offer — the unknown-type frame
-    // never became a THIRD `onEnvelope` call at all (it never successfully
-    // decodes into an `Envelope` in the first place).
-    expect(received.map((e) => e.type)).toEqual(['conn.ack', 'task.offer']);
-  });
-
-  /** Shared setup for the long-poll regression tests below: a real degraded (long-poll-only) `ConnectionManager` against `TestServer`, plus a `CursorStore` handle to inspect the PERSISTED cursor directly. */
+  /** Shared setup for the long-poll regression tests below: a `ConnectionManager` against `TestServer`, plus a `CursorStore` handle to inspect the persisted cursor directly. */
   async function startLongPollOnly(prefix: string): Promise<{
     record: { deviceId: string };
     cursorStore: CursorStore;
     received: Envelope[];
   }> {
     server = await TestServer.start();
-    server.setRejectWs(true); // force long-poll from the very first attempt
     const storeDir = await tmpDir(prefix);
     const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
@@ -141,14 +76,12 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       onEnvelope: (envelope) => {
         received.push(envelope);
       },
-      wsFailureThreshold: 1,
       longPollRetryDelayMs: 15,
       longPollIdleDelayMs: 15,
     });
 
     await connection.start();
-    await connection.waitForAck();
-    expect(connection.isTransportDegraded()).toBe(true);
+    await connection.waitForConnection();
     return { record, cursorStore, received };
   }
 
@@ -211,12 +144,8 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // whose `PermissionPolicy` rejected an unknown constraint. That
     // silently, permanently acked a control message the daemon never
     // actually understood: the server would stop redelivering it and
-    // whatever it was offering got stuck forever. WS never had this
-    // hazard — an unparseable WS frame has no skip-side cursor bookkeeping
-    // at all, so it simply gets redelivered later (see ws-transport.ts) —
-    // this test proves long-poll now matches that same "no silent
-    // permanent ack" property for a malformed (not just unrecognized)
-    // entry.
+    // whatever it was offering got stuck forever. This test proves a
+    // malformed (not just unrecognized) entry is never silently acknowledged.
     const { record, cursorStore, received } = await startLongPollOnly('byok-unknown-type-lp-malformed-store-');
 
     const before = createEnvelope('task.offer', { instruction: 'before', policy: { mode: 'auto' } }, { taskId: 'known-before-2', seq: 1 });
@@ -271,8 +200,6 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       expect(await cursorStore.load(server.url, record.deviceId)).toBe(2);
     });
     expect(received).toHaveLength(2); // before + corrected — the malformed attempt itself never counted as delivered
-
-    expect(connection?.isTransportDegraded()).toBe(true); // connection itself entirely unaffected throughout
   });
 
   it('long-poll (d, finding R1 — the F1 fix alone was NOT-CLOSED): [bad known-type seq2, valid seq3] in ONE batch engages the SAME stall a real handler failure would — the cursor freezes BEFORE 2 even though seq3 is fully processed, i.e. no INDIRECT permanent ack via a later envelope\'s own success', async () => {
@@ -324,8 +251,6 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(await cursorStore.load(server.url, record.deviceId)).toBe(1);
     expect(received).toHaveLength(2); // before + the valid seq3 — the malformed entry never became a THIRD onEnvelope call
-
-    expect(connection?.isTransportDegraded()).toBe(true); // connection itself entirely unaffected
   });
 
   it('long-poll (e, finding R1): once a corrected redelivery of seq2 succeeds, the stall clears and the cursor advances to exactly 2 — reaching any HIGHER already-processed seq (here, 3) requires a later, genuinely-new envelope, mirroring the pre-existing stalledAtSeq/deliveredSeq contract for a real thrown-handler stall', async () => {
@@ -405,8 +330,6 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     server.pushLongPollEvent(fresh);
     await vi.waitFor(() => expect(received.some((e) => e.task_id === 'r1b-fresh-4')).toBe(true));
     await vi.waitFor(async () => expect(await cursorStore.load(server.url, record.deviceId)).toBe(4));
-
-    expect(connection?.isTransportDegraded()).toBe(true);
   });
 
   it('long-poll (f, finding R1): a persistently-redelivered validation-failed entry is only console.warn\'d ONCE per seq, never once per poll', async () => {
@@ -526,7 +449,6 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
    */
   it('CRITICAL fix: an in-flight real envelope in the SAME batch as a later skip is never masked — the durable cursor stays behind a still-unresolved failure, a redelivery is retried and succeeds, and only THEN does the cursor advance past both', async () => {
     server = await TestServer.start();
-    server.setRejectWs(true);
     const storeDir = await tmpDir('byok-critical-skip-order-store-');
     const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
@@ -549,14 +471,12 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
         }
         // second+ attempt succeeds
       },
-      wsFailureThreshold: 1,
       longPollRetryDelayMs: 15,
       longPollIdleDelayMs: 15,
     });
 
     await connection.start();
-    await connection.waitForAck();
-    expect(connection.isTransportDegraded()).toBe(true);
+    await connection.waitForConnection();
 
     const realSeq1 = createEnvelope(
       'task.offer',

@@ -100,14 +100,12 @@ describe('drainOutbox chunks outbound sends to the server batch cap (finding P1,
       auth,
       cursorStore,
       onEnvelope: () => {},
-      wsFailureThreshold: 1,
       longPollRetryDelayMs: 20,
       longPollIdleDelayMs: 20,
     });
 
     await connection.start();
-    await connection.waitForAck();
-    expect(connection.isTransportDegraded()).toBe(true); // long-poll-only: the real server serves no WS upgrade
+    await connection.waitForConnection();
 
     const totalEnvelopes = MAX_MESSAGES_PER_BATCH + 44; // comfortably over the cap — forces >= 2 chunked POSTs
     const sentIds = new Set<string>();

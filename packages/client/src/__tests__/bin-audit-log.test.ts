@@ -20,7 +20,7 @@ async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
-function connectionEvent(state: 'open' | 'closed' | 'connecting' | 'degraded' | 'revoked', ts: string): DaemonEvent {
+function connectionEvent(state: 'open' | 'closed' | 'connecting' | 'revoked', ts: string): DaemonEvent {
   return { kind: 'connection', ts, state };
 }
 

@@ -153,7 +153,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
       pair: vi.fn(),
       start: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn().mockResolvedValue(undefined),
-      status: vi.fn().mockReturnValue({ paired: true, connected: true, degraded: false, revoked: false, activeTaskCount: 1 }),
+      status: vi.fn().mockReturnValue({ paired: true, connected: true, revoked: false, activeTaskCount: 1 }),
       reloadMcpToolsets: vi.fn(),
       reportMcpToolsetObservation: vi.fn(),
       subscribe: (listener) => {
@@ -203,7 +203,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
       pair: vi.fn(),
       start: vi.fn().mockRejectedValue(new Error('boom-start')),
       stop,
-      status: vi.fn().mockReturnValue({ paired: true, connected: false, degraded: false, revoked: false, activeTaskCount: 0 }),
+      status: vi.fn().mockReturnValue({ paired: true, connected: false, revoked: false, activeTaskCount: 0 }),
       reloadMcpToolsets: vi.fn(),
       reportMcpToolsetObservation: vi.fn(),
       subscribe: (listener) => {

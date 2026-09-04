@@ -4,12 +4,9 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager } from '../daemon/auth-manager';
 import { BlobClient } from '../daemon/blob-client';
-import { ConnectionManager, ReplayCursorTooOldError } from '../daemon/connection-manager';
-import { CursorStore } from '../daemon/cursor-store';
 import { LongPollClient } from '../daemon/long-poll-transport';
 import { DeviceStore } from '../daemon/store';
 import { formatServerUrl } from '../daemon/url';
-import { TestServer } from './fixtures/test-server';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -103,41 +100,6 @@ describe('Issues #112/#113/#116/#121 client security and reliability guards', ()
     }
   });
 
-  it('#116 treats the WebSocket cursor_too_old close as terminal and never enters long-poll fallback', async () => {
-    const server = await TestServer.start();
-    const storeDir = await tmpDir('byok-ws-replay-gap-');
-    const auth = new AuthManager({
-      serverUrl: server.url,
-      store: new DeviceStore(storeDir),
-    });
-    const record = await auth.pair('pairing-code');
-    const connection = new ConnectionManager({
-      serverUrl: server.url,
-      deviceId: record.deviceId,
-      productId: 'test-product',
-      capabilities: [],
-      runtimes: [],
-      auth,
-      cursorStore: new CursorStore(storeDir),
-      onEnvelope: () => undefined,
-      wsFailureThreshold: 1,
-      backoff: { baseMs: 1, maxMs: 1, factor: 1 },
-    });
-    try {
-      await connection.start();
-      await connection.waitForAck();
-      server.socket?.close(1008, 'cursor_too_old');
-      await vi.waitFor(() => expect(connection.getTerminalError()).toBeInstanceOf(ReplayCursorTooOldError));
-      expect(connection.getTerminalError()).toMatchObject({
-        recoverableFrom: undefined,
-      });
-      expect(connection.getMode()).toBe('ws');
-    } finally {
-      await connection.stop();
-      await auth.stop();
-      await server.close();
-    }
-  });
 
   it('#121 gives every BlobClient response-body read a deadline with stable typed classification', async () => {
     const client = new BlobClient('https://byok.test', pairedAuth(), {

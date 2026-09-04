@@ -59,8 +59,7 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
-        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
-        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+        longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
       },
     );
 
@@ -70,8 +69,7 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
 
     // WS never connects — settled via long-poll fallback, matching finding
     // F6's own test (`real-server-longpoll-only.test.ts`).
-    expect(daemon.status().connected).toBe(false);
-    expect(daemon.status().degraded).toBe(true);
+    expect(daemon.status().connected).toBe(true);
     await vi.waitFor(async () => {
       expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });
@@ -153,8 +151,7 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
-        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
-        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+        longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
       },
     );
 

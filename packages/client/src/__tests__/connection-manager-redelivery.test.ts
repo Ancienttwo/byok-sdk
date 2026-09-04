@@ -71,11 +71,10 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
         }
         received.push(envelope);
       },
-      backoff: { baseMs: 20, maxMs: 100, factor: 2 },
     });
 
     await connection.start();
-    await connection.waitForAck();
+    await connection.waitForConnection();
 
     const taskId = 'task-flaky-handler';
     // `server.nextSeq()` (not a hardcoded literal): `conn.ack` already
@@ -140,10 +139,9 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
           if (contentAttempts === 1) throw new Error('transient content receipt failure');
         }
       },
-      backoff: { baseMs: 20, maxMs: 100, factor: 2 },
     });
     await connection.start();
-    await connection.waitForAck();
+    await connection.waitForConnection();
 
     // The handshake's conn.ack has a seq but must never be cursor-tracked.
     await expect(cursorStore.load(server.url, record.deviceId)).resolves.toBeUndefined();

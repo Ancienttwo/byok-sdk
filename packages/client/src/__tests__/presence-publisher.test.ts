@@ -63,7 +63,7 @@ describe('PresencePublisher', () => {
     }) as typeof globalThis.fetch;
 
     const publisher = new PresencePublisher({
-      serverUrl: 'wss://example.test/some/path',
+      serverUrl: 'https://example.test/some/path',
       auth: stubAuth(),
       intervalMs: 30_000,
     });
@@ -294,8 +294,7 @@ describe('daemon presence wiring against the real @byok-sdk/cloud', () => {
       },
       [adapter],
       {
-        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
-        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+        longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
       },
     );
     const pairing = await handle.createPairingCode();
@@ -468,7 +467,7 @@ describe('presence re-discovery on reconnect', () => {
         presence: { intervalMs: 50, minimumIntervalMs: 10, ttlMs: 2_000 },
       },
       [new StubRuntimeAdapter()],
-      { backoff: { baseMs: 20, maxMs: 100, factor: 2 } },
+      {} ,
     );
     await started.pair('code');
     await started.start();
@@ -488,8 +487,9 @@ describe('presence re-discovery on reconnect', () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(seen.discoveries()).toBe(1);
     expect(seen.presenceRequests()).toBe(0);
-
-    server.dropConnection();
+    server.setFailEventsPolls(true);
+    await vi.waitFor(() => expect(daemon?.status().connected).toBe(false), { timeout: 5_000 });
+    server.setFailEventsPolls(false);
     await vi.waitFor(() => expect(seen.presenceRequests()).toBeGreaterThan(0), { timeout: 5_000 });
   }, 20000);
 
@@ -501,8 +501,9 @@ describe('presence re-discovery on reconnect', () => {
     daemon = await startDaemon(server.url);
 
     await vi.waitFor(() => expect(seen.presenceRequests()).toBeGreaterThan(0), { timeout: 5_000 });
-
-    server.dropConnection();
+    server.setFailEventsPolls(true);
+    await vi.waitFor(() => expect(daemon?.status().connected).toBe(false), { timeout: 5_000 });
+    server.setFailEventsPolls(false);
     await vi.waitFor(() => expect(seen.discoveries()).toBeGreaterThanOrEqual(2), { timeout: 5_000 });
 
     // Let any beat that was already in flight land, then prove the cadence is
@@ -520,8 +521,9 @@ describe('presence re-discovery on reconnect', () => {
     daemon = await startDaemon(server.url);
 
     await vi.waitFor(() => expect(seen.presenceRequests()).toBe(2), { timeout: 5_000 });
-
-    server.dropConnection();
+    server.setFailEventsPolls(true);
+    await vi.waitFor(() => expect(daemon?.status().connected).toBe(false), { timeout: 5_000 });
+    server.setFailEventsPolls(false);
     await vi.waitFor(() => expect(seen.discoveries()).toBeGreaterThanOrEqual(2), { timeout: 5_000 });
 
     // The fresh declaration still contains `presence.hints`; the latch, not the

@@ -13,15 +13,11 @@ async function tmpDir(prefix: string): Promise<string> {
 /**
  * Finding F6 (long-poll can receive but never send): a full task lifecycle
  * — offer, claim, started, progress, complete — carried entirely over
- * `GET /byok/events` (receive) + `POST /byok/messages` (send), with the WS
- * transport never once connecting. Run against the REAL `@byok-sdk/server`
- * (not the client's own `TestServer` stub) via `startRealServer`. Since
- * WP3B Step 2 that server has no WS upgrade handler at all — a real WS
- * failure, not a simulated one — so the daemon's ordinary
- * `wsFailureThreshold` fallback drives it into long-poll mode exactly as it
- * would against a real deployment with no reachable WS endpoint.
+ * `GET /byok/events` (receive) + `POST /byok/messages` (send). Run against
+ * the real `@byok-sdk/server` (not the client's own `TestServer` stub) via
+ * `startRealServer`.
  */
-describe('a full task lifecycle over long-poll only, WS never connects (finding F6, real @byok-sdk/server)', () => {
+describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/server)', () => {
   let real: RealServerHandle;
   let daemon: Daemon | undefined;
 
@@ -50,8 +46,7 @@ describe('a full task lifecycle over long-poll only, WS never connects (finding 
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
-        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
-        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+        longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
       },
     );
 
@@ -81,11 +76,8 @@ describe('a full task lifecycle over long-poll only, WS never connects (finding 
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
-        // Fail over to long-poll after just 1 failed WS attempt so the test
-        // doesn't wait through a full default backoff sequence — WS is
-        // never going to succeed here regardless (no upgrade handler at all).
-        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
-        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+        // Keep retry delays short for the test.
+        longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
       },
     );
 
@@ -93,18 +85,10 @@ describe('a full task lifecycle over long-poll only, WS never connects (finding 
     const record = await daemon.pair(pairing.code);
     await daemon.start();
 
-    // WS never connects — the daemon settled via the long-poll fallback path.
-    expect(daemon.status().connected).toBe(false);
-    expect(daemon.status().degraded).toBe(true);
+    // The daemon settled through the long-poll path.
+    expect(daemon.status().connected).toBe(true);
 
-    // `daemon.start()` settles as soon as the daemon itself commits to
-    // long-poll mode, which can be a tick before its first `GET
-    // /byok/events` request actually lands at the server (the request is
-    // fired-and-forget from `enterLongPoll()`) — the server only marks a
-    // device "connected" once that first poll arrives (protocol §8's
-    // "conn.hello semantics implicitly" via however the HTTP layer
-    // establishes the per-device session). Wait for that explicitly rather
-    // than racing `dispatch()` against it.
+    // Wait until the server observes the first events poll before dispatching.
     await vi.waitFor(async () => {
       expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });
@@ -116,7 +100,7 @@ describe('a full task lifecycle over long-poll only, WS never connects (finding 
     // (there is no other path for it to have arrived).
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Claimed');
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
-    expect(daemon.status().connected).toBe(false); // still true throughout — WS never came up
+    expect(daemon.status().connected).toBe(true); // still true throughout — WS never came up
 
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const session = adapter.sessions[0]!;
@@ -127,8 +111,7 @@ describe('a full task lifecycle over long-poll only, WS never connects (finding 
     expect(result.state).toBe('Complete');
     expect(result.summary).toBe('working over long-poll');
 
-    expect(daemon.status().connected).toBe(false);
-    expect(daemon.status().degraded).toBe(true);
+    expect(daemon.status().connected).toBe(true);
   }, 15000);
 
   it('publishes agent-home-contract over long-poll before Agent dispatch admission', async () => {
@@ -150,14 +133,12 @@ describe('a full task lifecycle over long-poll only, WS never connects (finding 
       },
       [adapter],
       {
-        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
-        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+        longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
       },
     );
 
     const record = await daemon.pair((await real.createPairingCode()).code);
     await daemon.start();
-    expect(daemon.status().degraded).toBe(true);
 
     let handle: Awaited<ReturnType<typeof real.byok.dispatch>> | undefined;
     await vi.waitFor(async () => {

@@ -346,7 +346,7 @@ describe('device assertion broker: assertion.issue', () => {
   });
 
   it('refuses with revoked once the server has revoked this device', async () => {
-    const built = await pairedAndStarted('acme-assert-revoked', {}, { backoff: { baseMs: 20, maxMs: 100, factor: 2 } });
+    const built = await pairedAndStarted('acme-assert-revoked', {}, {} );
     daemon = built.daemon;
     const client = await control(built.storeDir, built.config.productId);
     const record = await readDeviceRecord(built.storeDir);
@@ -357,7 +357,6 @@ describe('device assertion broker: assertion.issue', () => {
     // it finds out on its next authenticated round trip, exactly as in
     // production. Dropping the connection is what forces that round trip now.
     server.revokeDevice(record.deviceId);
-    server.dropConnection();
     await vi.waitFor(() => expect(daemon?.status().revoked).toBe(true), { timeout: 10_000 });
 
     const err = await expectControlError(client.request('assertion.issue', { audience: ALLOWED_AUDIENCE }));

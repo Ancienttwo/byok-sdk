@@ -423,7 +423,7 @@ export interface ControlStatusResult {
   uptimeMs: number;
   paired: boolean;
   deviceId?: string;
-  /** The connection state machine's own current value (`ws-transport.ts`'s `ConnectionState`) — e.g. `'open'`, `'degraded'` (long-poll fallback), `'revoked'`, `'closed'`, `'connecting'`. */
+  /** The connection state machine's current value: `'open'`, `'revoked'`, `'closed'`, or `'connecting'`. */
   transport: string;
   activeTasks: ControlActiveTask[];
   runtimeIds: string[];

@@ -294,8 +294,7 @@ describe.skipIf(!isSqliteAvailable())('S3.4 crash matrix, points 1-6', () => {
         [adapter],
         {
           hostedJournal: { journal },
-          backoff: { baseMs: 20, maxMs: 50, factor: 2 },
-          longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+          longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
         },
       );
 

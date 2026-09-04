@@ -318,9 +318,6 @@ export type AgentMemoryProjectionCommitResponse = z.infer<typeof AgentMemoryProj
 //     byte-for-byte, including whether a segment is `encodeURIComponent`-encoded.
 // ---------------------------------------------------------------------------
 
-/** `GET /byok/ws` — WebSocket upgrade path. */
-export const BYOK_WS_PATH = '/byok/ws';
-
 /** `POST /byok/pair` — one-time device pairing (§6). */
 export const BYOK_PAIR_PATH = '/byok/pair';
 /** `POST /byok/challenge` — token-renewal challenge (§6.3). */

@@ -11,8 +11,7 @@ async function tmpDir(prefix: string): Promise<string> {
 }
 
 const LONG_POLL_DAEMON_OPTIONS = {
-  backoff: { baseMs: 20, maxMs: 50, factor: 2 },
-  longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+  longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
 } as const;
 
 /**
@@ -24,9 +23,7 @@ const LONG_POLL_DAEMON_OPTIONS = {
  * deviceId for an already-seen public key — see its own doc comment), so it
  * can't exercise this bug at all; only the real server's actual behavior can.
  *
- * WP3B Step 2: the real server has no WebSocket any more, so the daemon runs
- * over long-poll here (its own `wsFailureThreshold` fallback, against a server
- * that genuinely serves no upgrade). The finding is transport-independent —
+ * The daemon runs over long-poll here. The finding is transport-independent —
  * the cursor is keyed by `(serverUrl, deviceId)` in the client's own
  * `CursorStore` either way — and what makes the stale-cursor bug OBSERVABLE is
  * unchanged too: device B's mailbox starts at seq 1, so its very first

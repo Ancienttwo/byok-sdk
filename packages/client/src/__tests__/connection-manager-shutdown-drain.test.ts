@@ -44,7 +44,6 @@ describe('ConnectionManager.stop(drainTimeoutMs) — bounded outbox drain before
 
   async function startDegraded(prefix: string): Promise<{ deviceId: string }> {
     server = await TestServer.start();
-    server.setRejectWs(true); // force long-poll from the very first attempt
     const storeDir = await tmpDir(prefix);
     const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
@@ -59,15 +58,13 @@ describe('ConnectionManager.stop(drainTimeoutMs) — bounded outbox drain before
       auth,
       cursorStore,
       onEnvelope: () => {},
-      wsFailureThreshold: 1,
       longPollRetryDelayMs: 20,
       longPollIdleDelayMs: 20,
     });
 
     await connection.start();
-    await connection.waitForAck();
-    expect(connection.isTransportDegraded()).toBe(true);
-    // `waitForAck()` reflects the server capability snapshot carried by the
+    await connection.waitForConnection();
+    // `waitForConnection()` reflects the server capability snapshot carried by the
     // poll response. Long-poll's own authenticated `conn.hello` is an
     // independent outbound envelope, so freeze this test only after that
     // opening snapshot has drained; the assertions below remain about the

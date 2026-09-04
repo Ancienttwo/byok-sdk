@@ -30,9 +30,8 @@ function delay(ms: number): Promise<void> {
  * does not play safely with this test's async chain (a mocked-`fetch`-driven
  * loop). Rather than keep sinking time into that one specific technique,
  * this uses REAL timers with fast, deterministic delays instead — the SAME
- * convention this codebase's own other backoff tests already establish
- * (see e.g. `daemon-reconnect.test.ts`'s `backoff: {baseMs: 20, maxMs:
- * 100}`) — and asserts on real (small, generously-margined) wall-clock
+ * convention this codebase's long-poll retry tests already establish — and
+ * asserts on real (small, generously-margined) wall-clock
  * windows instead of a mocked clock. This proves the identical observable
  * property (no full-RTT-speed hot loop; the configured `retryDelayMs` is
  * actually honored) just via a different, working mechanism.

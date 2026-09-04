@@ -115,7 +115,7 @@ describe('Agent memory helper P1 regressions', () => {
         localAgentRelease: { version: '0.0.0-test' },
         productName: 'Agent memory Linux helper regression guard',
         productId: 'agent-memory-linux-helper-regression-guard',
-        serverUrl: 'ws://localhost:1',
+        serverUrl: 'http://localhost:1',
         workspaceRoot: path.join(process.cwd(), '.tmp-agent-memory-linux-helper-workspace'),
         agentHome: { hostStorageRoot: path.join(process.cwd(), '.tmp-agent-memory-linux-helper-home') },
         agentMemory: {},

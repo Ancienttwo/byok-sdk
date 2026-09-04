@@ -19,8 +19,7 @@ async function tmpDir(prefix: string): Promise<string> {
  * client-side redelivery machinery (`ConnectionManager.deliver`/`process`).
  *
  * WP3B Step 2 restates the scenario on the one transport that still exists.
- * The original drop was a WebSocket going silent and reconnecting; over
- * long-poll the equivalent gap is the daemon simply not receiving for a while
+ * Over long-poll the equivalent gap is the daemon simply not receiving for a while
  * (`GET /byok/events` failing at the network layer — a genuine transport
  * outage, not a simulated one), with the send half deliberately left alone so
  * the in-flight session is undisturbed. The facts under test are unchanged:
@@ -56,15 +55,13 @@ describe('a task.cancel sent while the daemon is not polling is delivered when p
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
-        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
-        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+        longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
       },
     );
 
     const pairing = await real.createPairingCode();
     const record = await daemon.pair(pairing.code);
     await daemon.start();
-    expect(daemon.status().degraded).toBe(true); // long-poll: the real server serves no WS upgrade
     await vi.waitFor(async () => {
       expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });

@@ -52,8 +52,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
         // Fail over to long-poll after one failed WS attempt: cloud has no WS
         // endpoint at all, so waiting out a full backoff sequence proves
         // nothing this test is about.
-        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
-        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+        longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
       },
     );
 
@@ -63,8 +62,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
 
     // WS never connects — the daemon settled via its ordinary long-poll
     // fallback, with no cloud-specific handling anywhere.
-    expect(daemon.status().connected).toBe(false);
-    expect(daemon.status().degraded).toBe(true);
+    expect(daemon.status().connected).toBe(true);
 
     // The hosted control-plane input. Unlike the embedded server's
     // `dispatch()`, this returns no handle to await — the offer is bytes in a
@@ -82,7 +80,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     await vi.waitFor(async () => {
       expect((await cloud.readTaskAttempt(offer.taskId))?.status).toBe('running');
     });
-    expect(daemon.status().connected).toBe(false); // still false throughout — WS never came up
+    expect(daemon.status().connected).toBe(true); // still false throughout — WS never came up
 
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const session = adapter.sessions[0]!;
@@ -105,8 +103,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
       expect(envelope.payload.summary).toBe('working over long-poll');
     }
 
-    expect(daemon.status().connected).toBe(false);
-    expect(daemon.status().degraded).toBe(true);
+    expect(daemon.status().connected).toBe(true);
   }, 15000);
 
   it('admits and runs an Agent offer only after long-poll publishes agent-home-contract', async () => {
@@ -127,8 +124,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
       },
       [adapter],
       {
-        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
-        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+        longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
       },
     );
 
@@ -178,8 +174,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
       },
       [adapter],
       {
-        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
-        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+        longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
       },
     );
 

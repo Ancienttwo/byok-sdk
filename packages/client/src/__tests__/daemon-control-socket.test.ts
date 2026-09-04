@@ -315,19 +315,15 @@ describe('M4 Phase 2: control socket end-to-end', () => {
   }, 10000);
 
   it('finding F5(b) end-to-end: a stalled long-poll POST during a REAL control-socket shutdown bounds the wait and the shutdown-complete audit event honestly records the undelivered task.fail — it never claims delivery that did not happen', async () => {
-    server.setRejectWs(true); // force long-poll from the very first attempt
     const adapter = new StubRuntimeAdapter('pi');
     const built = await pairedAndStarted('acme-ctl-shutdown-stalled-drain', adapter, {
-      longPoll: { wsFailureThreshold: 1, retryDelayMs: 20, idleDelayMs: 20 },
+      longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
       shutdown: { outboxDrainTimeoutMs: 150 },
     });
     daemon = built.daemon;
-    expect(daemon.status().degraded).toBe(true);
 
-    // `server.send` only ever writes to a LIVE WS socket (none exists here —
-    // `setRejectWs(true)` above forces this daemon onto long-poll from the
-    // start) — `pushLongPollEvent` is the long-poll-mode equivalent (mirrors
-    // `unknown-message-type-tolerance.test.ts`'s own `startLongPollOnly` convention).
+    // `pushLongPollEvent` queues the inbound offer for the daemon's next
+    // events response.
     server.pushLongPollEvent(
       createEnvelope('task.offer', { instruction: 'long task', policy: { mode: 'auto' } }, { taskId: 't-stalled', seq: server.nextSeq() }),
     );

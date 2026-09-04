@@ -345,7 +345,7 @@ export type {
   TruthWriteResult,
   VerifiedTruthRecord,
 } from './daemon/truth-memory-client';
-export type { ConnectionState } from './daemon/ws-transport';
+export type { ConnectionState } from './daemon/connection-manager';
 export { ReplayCursorTooOldError } from './daemon/replay-cursor';
 export { BlobClient, BlobRequestAbortedError } from './daemon/blob-client';
 export type { BlobClientOptions, BlobRequestAbortReason, BlobRequestOptions, BlobResolver } from './daemon/blob-client';

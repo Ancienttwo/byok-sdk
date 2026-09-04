@@ -36,11 +36,9 @@ import {
  *      each package's `package.json`), so per this drill's own instructions
  *      those assertions live in
  *      `packages/client/src/__tests__/unknown-message-type-tolerance.test.ts`
- *      instead, driven against the REAL `ConnectionManager`/`WsTransport`/
- *      `LongPollClient` — not a reimplementation. That file FOUND AND FIXED a
- *      genuine asymmetry: WS tolerates an unknown frame type per-message
- *      (skip and continue) — the pre-existing, correct behavior — but
- *      long-poll's whole-batch `EventsPollResponseSchema.parse()` used to
+ *      instead, driven against the real `ConnectionManager`/`LongPollClient`
+ *      path — not a reimplementation. That file found and fixed a genuine
+ *      asymmetry: long-poll's whole-batch `EventsPollResponseSchema.parse()` used to
  *      fail the ENTIRE poll batch on a single unrecognized-type entry. Fixed
  *      client-side (`long-poll-transport.ts`/`connection-manager.ts`,
  *      per-entry `parseMessage` + cursor-advance-past-a-skip), zero wire/

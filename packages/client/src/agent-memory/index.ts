@@ -30,7 +30,7 @@
  *
  * 2. The transport. Nothing reachable from this entry may import `ws`, the
  *    daemon composition, or any transport module. Importing a single memory
- *    symbol from the root entry drags the WebSocket transport into a host
+ *    symbol from the root entry drags daemon transport into a host
  *    bundle; the subpath exists so it does not. `__tests__/agent-memory-entry-
  *    constraints.test.ts` walks this module graph and `scripts/check-agent-
  *    memory-entry.mjs` re-checks the built bundle.

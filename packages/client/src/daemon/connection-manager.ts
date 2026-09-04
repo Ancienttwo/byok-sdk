@@ -1,5 +1,7 @@
 import {
   MAX_MESSAGES_PER_BATCH,
+  createEnvelope,
+  PROTOCOL_VERSION,
   type CapabilityFlag,
   type Envelope,
   type RuntimeInfo,
@@ -10,17 +12,11 @@ import type { CursorStore } from './cursor-store';
 import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
 import { LongPollClient } from './long-poll-transport';
 import { ReplayCursorTooOldError } from './replay-cursor';
-import {
-  createConnectionHelloEnvelope,
-  WsTransport,
-  WsUnexpectedStatusError,
-  type BackoffOptions,
-  type ConnectionState,
-  type LivenessOptions,
-} from './ws-transport';
 
-export type { ConnectionState } from './ws-transport';
 export { ReplayCursorTooOldError } from './replay-cursor';
+
+/** The lifecycle of the daemon's one long-poll connection. */
+export type ConnectionState = 'connecting' | 'open' | 'closed' | 'revoked';
 
 /**
  * Server work requiring durable handler completion before acknowledgement.
@@ -34,15 +30,35 @@ function isCursorEnvelopeType(type: Envelope['type']): boolean {
     type === 'agent.home.projection';
 }
 
+function createConnectionHelloEnvelope(
+  opts: Pick<
+    ConnectionManagerOptions,
+    'deviceId' | 'productId' | 'capabilities' | 'clientVersion' | 'runtimes' | 'getConfiguredToolsets'
+  >,
+  getCursor: () => number | undefined,
+): Envelope {
+  const configuredToolsets = opts.getConfiguredToolsets?.();
+  return createEnvelope('conn.hello', {
+    protocolVersions: [PROTOCOL_VERSION],
+    capabilities: opts.capabilities,
+    deviceId: opts.deviceId,
+    productId: opts.productId,
+    clientVersion: opts.clientVersion,
+    runtimes: opts.runtimes,
+    configuredToolsets: configuredToolsets === undefined ? undefined : [...configuredToolsets],
+    cursor: getCursor(),
+  });
+}
+
 export interface ConnectionManagerOptions {
   serverUrl: string;
   deviceId: string;
   productId: string;
   capabilities: CapabilityFlag[];
-  /** U4a Local Agent release version; passed unchanged to both transports. */
+  /** U4a Local Agent release version, sent unchanged in `conn.hello`. */
   clientVersion?: string;
   runtimes: RuntimeInfo[];
-  /** Reads current sorted logical IDs from the validated local registry for every WS hello. */
+  /** Reads current sorted logical IDs from the validated local registry for every `conn.hello`. */
   getConfiguredToolsets?: () => readonly ToolsetId[];
   auth: AuthManager;
   cursorStore: CursorStore;
@@ -53,12 +69,6 @@ export interface ConnectionManagerOptions {
    */
   onEnvelope: (envelope: Envelope) => void | Promise<void>;
   onStateChange?: (state: ConnectionState) => void;
-  backoff?: BackoffOptions;
-  liveness?: LivenessOptions;
-  /** Consecutive never-acked WS connect failures before falling back to long-poll (protocol §8). Default 3. */
-  wsFailureThreshold?: number;
-  /** While long-polling, how often to retry establishing WS (protocol §8, "e.g. every 5 min"). Default 5 minutes. */
-  wsRetryIntervalMs?: number;
   /** Backoff between failed long-poll HTTP attempts. Default 2s. */
   longPollRetryDelayMs?: number;
   /** Minimum delay before the next long-poll request after an empty (no-events) response. Default 250ms. */
@@ -69,31 +79,21 @@ export interface ConnectionManagerOptions {
 }
 
 /**
- * Owns the daemon's one logical connection to the server, which may be
- * backed by either transport the wire protocol defines: WS (the normal
- * path) or long-poll (protocol §8's fallback for environments where an
- * outbound WSS connection isn't viable). Both funnel every received
- * envelope through the same cursor-dedupe/persistence logic (protocol §9),
- * so redelivery is safe regardless of which transport happens to deliver a
- * given envelope — including during the brief overlap window when handing
- * off between them.
+ * Owns the daemon's one authenticated long-poll connection to the server.
+ * Every received envelope passes through the same cursor-dedupe/persistence
+ * logic (protocol §9), so redelivery remains safe after an HTTP retry or a
+ * daemon restart.
  *
  * `send()` (Design B, finding N4) pushes onto a single shared outbox this
- * class owns and drains through whichever transport is currently active —
- * WS raw-sends while acked, `POST /byok/messages` while long-polling
- * (finding F6, long-poll is a full transport, not receive-only; see
- * docs/protocol.md §8) — so a transport switch mid-flight never strands a
- * queued envelope. See `drainOutbox`.
+ * class owns and drains through `POST /byok/messages`; long-poll is a full
+ * bidirectional transport, not a receive-only path. See `drainOutbox`.
  */
 export class ConnectionManager {
   private readonly fleetJitter: FleetJitter;
-  private readonly ws: WsTransport;
   private readonly longPoll: LongPollClient;
-  private mode: 'ws' | 'long-poll' = 'ws';
-  private consecutiveFailures = 0;
-  private wsRetryTimer: ReturnType<typeof setInterval> | undefined;
-  private wsProbeSequence = 0;
   private uploadRetryAttempt = 0;
+  private started = false;
+  private connected = false;
   private cursor: number | undefined;
   /**
    * Finding F3 (at-most-once redelivery): the lowest `task.*` envelope `seq`
@@ -128,18 +128,16 @@ export class ConnectionManager {
   /** Finding F3: serializes `onEnvelope` calls into a per-connection FIFO — one envelope's handler always fully settles before the next one starts. */
   private processingChain: Promise<void> = Promise.resolve();
   /**
-   * Design B (finding N4): the ONE outbound queue both transports drain
-   * from — holds `Envelope` OBJECTS, never re-encoded/rebuilt strings, so a
+   * Design B (finding N4): the ONE outbound queue holds `Envelope` OBJECTS,
+   * never re-encoded/rebuilt strings, so a
    * resend after a failed send attempt is byte-identical to the original
    * (same `id`), which is what lets the server's per-(deviceId,id) dedup
    * (Wave 1) recognize it as a safe no-op retry rather than a second
-   * application (protocol §9). A transport switch (long-poll <-> WS) never
-   * touches this queue — see `drainOutbox` — so nothing queued while one
-   * transport was active is ever stranded when the other takes over.
+   * application (protocol §9).
    */
   private readonly outbox: Envelope[] = [];
   /**
-   * Finding F5(b): how many envelopes `drainOutbox`'s long-poll branch has
+   * Finding F5(b): how many envelopes `drainOutbox` has
    * currently spliced OUT of `this.outbox` for an in-flight (not yet
    * confirmed delivered) `postBatch` call — 0 the rest of the time. See
    * `outboxLength`'s own doc comment for why this needs to be tracked
@@ -192,59 +190,17 @@ export class ConnectionManager {
    */
   private cancelPendingDrainRetry: (() => void) | undefined;
   /**
-   * The capabilities the CURRENT transport's server advertised — untyped
-   * `string[]` for forward compatibility. WS populates it from `conn.ack`;
-   * long-poll populates it from each successful events response. Empty until
-   * the active transport supplies an advertisement.
-   *
-   * Finding R2 (cross-model re-review — was P1): strictly PER-CONNECTION,
-   * not per-daemon-lifetime. Cleared to `[]` the instant the acked WS
-   * connection ends for ANY reason — an ordinary disconnect (`onWsOutcome`'s
-   * `acked` branch), `stop()`, or a transport switch to long-poll
-   * (`enterLongPoll`) — and only repopulated by a fresh advertisement from
-   * the transport that is still current.
-   * The previous version of this doc comment claimed long-poll mode simply
-   * "stays at whatever the last real WS `conn.ack` said" — that was the bug:
-   * a daemon that once learned e.g. `approval_resolved` from an earlier WS
-   * session kept believing it applied to whatever it's connected to NOW,
-   * even after a disconnect/degrade where nothing has actually confirmed
-   * that's still true (a reconnect could land on a DIFFERENT server behind a
-   * load balancer). Concretely, `TaskRunner.sendApprovalResolved` gates
-   * `task.approval_resolved` on this list — sending it to a server that
-   * doesn't actually understand it over the long-poll path would get a
-   * batch-level 400 from `MessagesSendRequestSchema` (protocol §8.2), which
-   * `drainOutbox`'s retry-the-same-batch-forever loop then head-of-line
-   * blocks EVERY envelope queued behind it on, permanently. Clearing this
-   * eagerly means that gate reliably fails closed (falls back to the
-   * pre-existing implicit-resume inference, unconditionally — see
-   * `sendApprovalResolved`'s own doc comment) the moment the connection that
-   * advertised the capability is no longer the one actually in use.
+   * The capabilities the current server response advertised — untyped
+   * `string[]` for forward compatibility. An advertisement is scoped to the
+   * current long-poll response stream and is cleared after an HTTP failure,
+   * terminal shutdown, or revocation. This keeps capability-gated outbound
+   * messages fail-closed until the current server has explicitly advertised
+   * support.
    */
   private serverCapabilities: string[] = [];
 
   constructor(private readonly opts: ConnectionManagerOptions) {
     this.fleetJitter = opts.fleetJitter ?? createFleetJitter(opts.productId, opts.deviceId);
-    this.ws = new WsTransport({
-      serverUrl: opts.serverUrl,
-      getToken: () => opts.auth.getValidAccessToken(),
-      deviceId: opts.deviceId,
-      productId: opts.productId,
-      capabilities: opts.capabilities,
-      clientVersion: opts.clientVersion,
-      runtimes: opts.runtimes,
-      getConfiguredToolsets: opts.getConfiguredToolsets,
-      getCursor: () => this.cursor,
-      onEnvelope: (envelope) => this.deliver(envelope),
-      onStateChange: (state) => {
-        if (!this.stopped && !this.revoked) this.opts.onStateChange?.(state);
-      },
-      onAcked: (capabilities) => this.onAcked(capabilities),
-      onConnectOutcome: (acked, err) => this.onWsOutcome(acked, err),
-      backoff: opts.backoff,
-      liveness: opts.liveness,
-      reconnectDelayMs: (attempt, baseMs) => this.fleetJitter.delay('reconnect', attempt, baseMs),
-    });
-
     this.longPoll = new LongPollClient({
       serverUrl: opts.serverUrl,
       auth: opts.auth,
@@ -256,12 +212,13 @@ export class ConnectionManager {
       getCursor: () => this.cursor,
       onEnvelope: (envelope) => this.deliver(envelope),
       onServerCapabilities: (capabilities) => {
-        // A WS probe can ack and switch `mode` while an older long-poll GET
-        // is still resolving. Only the transport that remains authoritative
-        // may publish its capabilities; otherwise that stale HTTP response
-        // could overwrite the fresh `conn.ack` from the restored socket.
-        if (this.mode === 'long-poll') this.serverCapabilities = capabilities;
+        this.serverCapabilities = capabilities;
+        this.noteConnected();
       },
+      onServerCapabilitiesInvalidated: () => {
+        this.serverCapabilities = [];
+      },
+      onPollFailure: () => this.noteDisconnected(),
       onRevoked: () => this.enterRevoked(),
       onReplayCursorTooOld: (error) => this.enterReplayCursorTooOld(error),
       // M4 Phase 4 (version-negotiation drill fix): a batch entry
@@ -291,7 +248,11 @@ export class ConnectionManager {
   async start(): Promise<void> {
     if (this.terminalError) throw this.terminalError;
     this.cursor = await this.opts.cursorStore.load(this.opts.serverUrl, this.opts.deviceId);
-    this.ws.connect({ auto: true });
+    this.started = true;
+    this.opts.onStateChange?.('connecting');
+    this.longPoll.start();
+    this.outbox.unshift(createConnectionHelloEnvelope(this.opts, () => this.cursor));
+    void this.drainOutbox();
   }
 
   /**
@@ -304,17 +265,14 @@ export class ConnectionManager {
     void this.drainOutbox();
   }
 
+  /** Publish a fresh local configuration snapshot while this daemon is running. */
+  refreshHello(): void {
+    if (!this.started || this.stopped || this.revoked || this.terminalError) return;
+    this.send(createConnectionHelloEnvelope(this.opts, () => this.cursor));
+  }
+
   /**
-   * Design B (finding N4): drain the shared outbox through whichever
-   * transport is currently active, re-checking `this.mode` fresh on every
-   * iteration so a transport switch mid-drain is picked up immediately
-   * rather than fighting a stale decision made before the switch.
-   *
-   * WS: a synchronous, one-at-a-time `sendNow` per envelope while open+
-   * acked; stops (without dropping anything — the remainder stays queued)
-   * the moment it isn't, and is re-invoked once `onAcked` fires.
-   *
-   * Long-poll: POSTs the outbox in chunks of at most
+   * POSTs the outbox through long-poll in chunks of at most
    * `MAX_MESSAGES_PER_BATCH` (finding P1) — the server hard-caps a single
    * `/byok/messages` batch there (`MessagesSendRequestSchema`, protocol
    * §8.2) and 400s the WHOLE request if it's exceeded, which — before this
@@ -326,29 +284,16 @@ export class ConnectionManager {
    * failure that SAME chunk is unshifted back (order-preserving, same
    * Envelope objects/ids — never rebuilt, so a retry is exactly the resend
    * Wave 1's server-side dedup expects) and retried after a short backoff,
-   * re-reading `this.mode` each time so a WS recovery that happens
-   * mid-retry is honored on the very next loop iteration instead of only
-   * after this attempt's backoff chain gives up.
-   *
    * Re-entrancy is guarded by `draining`: a call arriving while a drain is
    * already in progress just returns — the in-progress loop's own
-   * `while (this.outbox.length > 0)` check will pick up anything newly
-   * pushed (or left over after a mode switch) on its very next iteration.
+   * `while (this.outbox.length > 0)` check picks up anything newly pushed.
    */
   private async drainOutbox(): Promise<void> {
-    if (this.draining) return;
+    if (!this.started || this.draining) return;
     this.draining = true;
     try {
       while (this.outbox.length > 0) {
         if (this.stopped || this.revoked) return;
-
-        if (this.mode === 'ws') {
-          if (!this.ws.isOpen) return; // onAcked() re-invokes drainOutbox() once it is
-          const envelope = this.outbox[0]!;
-          if (!this.ws.sendNow(envelope)) return; // defensive; isOpen already checked above
-          this.outbox.shift();
-          continue;
-        }
 
         const batch = this.outbox.splice(0, MAX_MESSAGES_PER_BATCH);
         // Finding F5(b): tracked for the DURATION of the `postBatch` await —
@@ -396,8 +341,7 @@ export class ConnectionManager {
    * in-flight wait immediately instead of leaving `drainOutbox` parked here
    * for up to the rest of the delay before it next checks `this.revoked` —
    * and (b) unref'd, so the timer never keeps the Node process alive by
-   * itself while nothing else (a live long-poll GET, an open WS connection)
-   * legitimately is.
+   * itself while nothing else (such as the live long-poll GET) legitimately is.
    */
   private drainRetryDelay(ms: number): Promise<void> {
     return new Promise((resolve) => {
@@ -414,15 +358,9 @@ export class ConnectionManager {
     });
   }
 
-  isTransportDegraded(): boolean {
-    return this.mode === 'long-poll';
-  }
-
   /**
-   * The capabilities the CURRENT transport's server advertised: from
-   * `conn.ack` on WS, or the latest successful `GET /byok/events` response
-   * on long-poll. Empty before either transport has supplied its current
-   * advertisement, and cleared across disconnect/switch boundaries.
+   * The capabilities the latest successful `GET /byok/events` response
+   * advertised. Empty before a successful response and after a failed one.
    */
   getServerCapabilities(): readonly string[] {
     return this.serverCapabilities;
@@ -432,12 +370,8 @@ export class ConnectionManager {
     return this.terminalError;
   }
 
-  getMode(): 'ws' | 'long-poll' {
-    return this.mode;
-  }
-
   isConnected(): boolean {
-    return this.mode === 'ws' && this.ws.isOpen;
+    return this.connected;
   }
 
   isRevoked(): boolean {
@@ -445,26 +379,23 @@ export class ConnectionManager {
   }
 
   /**
-   * Resolves once the connection has settled — either a working, acked WS
-   * connection, or the long-poll fallback taking over (protocol §8). This
-   * lets `daemon.start()` return promptly even when WS is unavailable from
-   * the very first attempt, rather than hanging until a WS `conn.ack` that
-   * may never come.
+   * Resolves after the first successful long-poll response establishes the
+   * authenticated connection.
    *
    * Rejects with {@link DeviceRevokedError} — instead of hanging until
    * `timeoutMs` — if the device turns out to be revoked while settling (or
    * already was): a cold `daemon.start()` against an already-revoked device
    * must fail fast, not surface a generic timeout (protocol §6.3).
    */
-  waitForAck(timeoutMs = 10_000): Promise<void> {
-    if (this.ws.isOpen || this.mode === 'long-poll') return Promise.resolve();
+  waitForConnection(timeoutMs = 10_000): Promise<void> {
+    if (this.connected) return Promise.resolve();
     if (this.terminalError) return Promise.reject(this.terminalError);
     if (this.revoked) return Promise.reject(new DeviceRevokedError());
     return new Promise((resolve, reject) => {
       let settle: (err?: unknown) => void = () => {};
       const timer = setTimeout(() => {
         this.settledWaiters = this.settledWaiters.filter((w) => w !== settle);
-        reject(new Error('Timed out waiting for the connection to settle (WS ack or long-poll fallback)'));
+        reject(new Error('Timed out waiting for the long-poll connection to settle'));
       }, timeoutMs);
       settle = (err?: unknown) => {
         clearTimeout(timer);
@@ -476,7 +407,7 @@ export class ConnectionManager {
   }
 
   /**
-   * Stops both transports and waits for every in-flight envelope handler
+   * Stops the long-poll transport and waits for every in-flight envelope handler
    * (the F3 FIFO chain) and the most recent cursor write to actually land on
    * disk — otherwise a `stop()` racing a just-processed envelope's
    * persistence could lose that cursor advance, or leave a handler running
@@ -485,14 +416,14 @@ export class ConnectionManager {
    * Finding F5(b) (cross-model adversarial review): `drainTimeoutMs`, when
    * passed, bounds how long this waits for the shared outbox (`this.outbox`
    * — Design B) to actually finish draining BEFORE flipping `this.stopped`
-   * and closing the transports. Before this fix, `stop()` set `stopped`
+   * and stopping the transport. Before this fix, `stop()` set `stopped`
    * synchronously and never waited for `drainOutbox` at all: an envelope
    * `send()` had just pushed moments earlier (e.g. `TaskRunner.shutdownTask`'s
    * own `task.fail`, sent right before `create-daemon.ts`'s
    * `performControlShutdown` calls this) could still be sitting UNSENT in
    * `this.outbox` — mid long-poll retry backoff, or simply not yet picked up
    * by the fire-and-forget `drainOutbox()` `send()` kicked off — and this
-   * method would happily proceed to `stopped = true` / `ws.close()` regardless,
+   * method would happily proceed to `stopped = true` regardless,
    * after which NOTHING ever drains it again: silently lost, even though
    * `TaskRunner` believed it had been sent. `drainTimeoutMs` omitted (the
    * default) preserves the EXACT prior behavior for every other existing
@@ -512,9 +443,9 @@ export class ConnectionManager {
     // server last advertised no longer applies to anything (there's nothing
     // left to send to). See `serverCapabilities`'s own doc comment.
     this.serverCapabilities = [];
-    if (this.wsRetryTimer) clearInterval(this.wsRetryTimer);
     this.longPoll.stop();
-    this.ws.close();
+    this.connected = false;
+    this.opts.onStateChange?.('closed');
     await this.processingChain;
     await this.pendingCursorSave;
   }
@@ -548,15 +479,14 @@ export class ConnectionManager {
    * a single `drainOutbox()` promise directly — a drain in progress can
    * itself loop through multiple retry/backoff cycles (`drainRetryDelay`)
    * while the server is unreachable, and a fresh, INDEPENDENT
-   * `drainOutbox()` call can also be triggered concurrently (`send()`, a
-   * mode switch's own `void this.drainOutbox()`) — polling the one thing
+   * `drainOutbox()` call can also be triggered concurrently (`send()`) —
+   * polling the one thing
    * that actually matters (is anything still undelivered) can never go
    * stale the way capturing one specific in-flight promise reference
    * could. Kicks off one more `drainOutbox()` attempt itself first
    * (harmless no-op if one is already running — see its own re-entrancy
-   * guard) in case nothing is currently actively retrying (e.g. WS just
-   * dropped and long-poll hasn't taken over yet), so this bounded wait
-   * isn't just passively hoping something else happens to be making
+   * guard) in case nothing is currently actively retrying, so this bounded
+   * wait isn't just passively hoping something else happens to be making
    * progress.
    */
   private waitForOutboxDrained(timeoutMs: number): Promise<void> {
@@ -642,11 +572,9 @@ export class ConnectionManager {
    * whose outcome wasn't known yet. No separate "reset deliveredSeq on
    * reconnect" step is needed for this to be correct — collapsing to
    * `cursor` exactly while stalled already produces the right answer on
-   * every redelivery path (long-poll re-query AND a WS reconnect's
-   * backlog replay alike), and NOT resetting it unconditionally on every
-   * reconnect is what lets `deliveredSeq` keep doing its job of not
-   * re-dispatching something already in flight across a
-   * reconnect that happens to land while a handler is still running.
+   * every long-poll retry path. NOT resetting it unconditionally on every
+   * retry lets `deliveredSeq` keep doing its job of not re-dispatching
+   * something already in flight while a handler is still running.
    */
   private dedupWatermark(): number | undefined {
     return this.stalledAtSeq !== undefined ? this.cursor : (this.deliveredSeq ?? this.cursor);
@@ -696,9 +624,8 @@ export class ConnectionManager {
   /**
    * M4 Phase 4 (version-negotiation drill fix): `LongPollClient` calls this
    * for a batch entry it could not parse into a known `Envelope` at all (an
-   * unrecognized message type — mirrors `ws-transport.ts`'s identical
-   * per-frame tolerance, see `long-poll-transport.ts`'s own doc comment on
-   * `parseLooseEventsPollResponse`) but which still carried a numeric,
+   * unrecognized message type (see `long-poll-transport.ts`'s own doc
+   * comment on `parseLooseEventsPollResponse`) but which still carried a numeric,
    * task-class envelope-level `seq` (the caller only invokes this for a
    * `task.`-prefixed type — see `long-poll-transport.ts`'s own
    * `extractSkippableSeq`; `conn.*`-shaped or type-less entries never reach
@@ -829,92 +756,21 @@ export class ConnectionManager {
       });
   }
 
-  /**
-   * Fires the moment a connection attempt reaches `conn.ack` — independent
-   * of whether/when it later closes. This is the ONLY place that can
-   * reliably detect "WS is back up" while long-polling: a healthy
-   * connection stays open indefinitely, so it never reaches `onWsOutcome`
-   * (which is close-only) at all.
-   */
-  private onAcked(capabilities: string[]): void {
-    if (this.terminalError) return;
-    this.serverCapabilities = capabilities;
-    this.consecutiveFailures = 0;
-    this.notifySettled();
-    this.opts.onOperationalOutcome?.('success', 'reconnect');
-    if (this.mode === 'long-poll') this.exitLongPoll();
-    void this.drainOutbox(); // Design B: pick up anything queued while WS was (re)connecting
-  }
-
-  private onWsOutcome(acked: boolean, err?: unknown): void {
-    if (err instanceof ReplayCursorTooOldError) {
-      this.enterReplayCursorTooOld(err);
-      return;
-    }
-    if (this.stopped || this.revoked) return;
-
-    // Finding R2: this specific attempt WAS acked at some point but has now
-    // closed — the connection that advertised `serverCapabilities` is gone.
-    // Cleared BEFORE the `if (acked) return;` early-out below, so this runs
-    // on every acked-then-closed outcome regardless of what happens next
-    // (a fast auto-reconnect, a slower one, or none at all pending
-    // `enterLongPoll`) — only a FRESH `conn.ack` (`onAcked`) repopulates it.
-    if (acked) this.serverCapabilities = [];
-
-    if (err instanceof WsUnexpectedStatusError && err.status === 401) {
-      // Reactive renewal (protocol §6.2): the cached token was rejected on
-      // the wire even though our own expiry bookkeeping thought it was
-      // still good. Force a renewal now so the next attempt (this one just
-      // failed) uses a fresh token; a genuinely revoked device surfaces via
-      // handleUnauthorized() throwing DeviceRevokedError below.
-      this.opts.auth.handleUnauthorized().catch((renewErr: unknown) => {
-        if (renewErr instanceof DeviceRevokedError) this.enterRevoked();
-      });
-    }
-
-    // acked===true here just means "this now-closed attempt was healthy at
-    // some point" — `onAcked()` already handled resetting failures/exiting
-    // long-poll the moment that happened, so there's nothing left to do.
-    if (acked) return;
-
-    this.opts.onOperationalOutcome?.('failure', 'reconnect');
-    this.consecutiveFailures += 1;
-    if (this.mode === 'ws' && this.consecutiveFailures >= (this.opts.wsFailureThreshold ?? 3)) {
-      this.enterLongPoll();
-    }
-  }
-
   private notifySettled(err?: unknown): void {
     for (const waiter of this.settledWaiters.splice(0)) waiter(err);
   }
 
-  private enterLongPoll(): void {
-    this.mode = 'long-poll';
-    // Finding R2: defensive/belt-and-suspenders — in practice the acked
-    // disconnect that precedes this already cleared it via `onWsOutcome`
-    // above. The first successful poll will provide this transport's fresh
-    // advertisement; until then it must never observe stale WS capabilities.
-    this.serverCapabilities = [];
-    this.ws.stopAutoReconnect();
-    this.opts.onStateChange?.('degraded');
-    this.longPoll.start();
-    // Long-poll is a complete transport, not an implicit old-daemon mode.
-    // Publish the same authenticated capability snapshot WS sends, ahead of
-    // every queued task message, so an Agent offer cannot race capability
-    // admission or silently fall back to task-only workspace semantics.
-    this.outbox.unshift(createConnectionHelloEnvelope({
-      deviceId: this.opts.deviceId,
-      productId: this.opts.productId,
-      capabilities: this.opts.capabilities,
-      clientVersion: this.opts.clientVersion,
-      runtimes: this.opts.runtimes,
-      getConfiguredToolsets: this.opts.getConfiguredToolsets,
-      getCursor: () => this.cursor,
-    }));
+  private noteConnected(): void {
+    if (this.connected || this.stopped || this.revoked || this.terminalError) return;
+    this.connected = true;
+    this.opts.onStateChange?.('open');
     this.notifySettled();
-    void this.drainOutbox(); // Design B: anything already queued now drains over the freshly-started long-poll POST path
+  }
 
-    this.scheduleWsProbe();
+  private noteDisconnected(): void {
+    if (!this.connected || this.stopped || this.revoked || this.terminalError) return;
+    this.connected = false;
+    this.opts.onStateChange?.('connecting');
   }
 
   private enterReplayCursorTooOld(error: ReplayCursorTooOldError): void {
@@ -922,47 +778,19 @@ export class ConnectionManager {
     this.terminalError = error;
     this.stopped = true;
     this.serverCapabilities = [];
-    if (this.wsRetryTimer) clearInterval(this.wsRetryTimer);
     this.longPoll.stop();
-    this.ws.stopAutoReconnect();
-    this.ws.close();
+    this.connected = false;
     this.cancelPendingDrainRetry?.();
     this.notifySettled(error);
     this.opts.onStateChange?.('closed');
     this.opts.onTerminalError?.(error);
   }
 
-  private exitLongPoll(): void {
-    if (this.wsRetryTimer) {
-      clearInterval(this.wsRetryTimer);
-      this.wsRetryTimer = undefined;
-    }
-    this.longPoll.stop();
-    this.mode = 'ws';
-    this.consecutiveFailures = 0;
-    this.ws.resumeAutoReconnect();
-    void this.drainOutbox(); // Design B: anything still queued from long-poll now drains over WS
-  }
-
-  private scheduleWsProbe(): void {
-    const baseMs = this.opts.wsRetryIntervalMs ?? 5 * 60 * 1000;
-    const delayMs = this.fleetJitter.delay('reconnect', this.wsProbeSequence++, baseMs);
-    const timer = setTimeout(() => {
-      this.wsRetryTimer = undefined;
-      if (this.stopped || this.revoked || this.mode !== 'long-poll') return;
-      this.ws.connect({ auto: false });
-      this.scheduleWsProbe();
-    }, delayMs);
-    timer.unref?.();
-    this.wsRetryTimer = timer;
-  }
-
   private enterRevoked(): void {
     if (this.revoked) return;
     this.revoked = true;
-    if (this.wsRetryTimer) clearInterval(this.wsRetryTimer);
     this.longPoll.stop();
-    this.ws.close(); // stop all reconnection attempts entirely — never a retry loop (protocol §6.3)
+    this.connected = false;
     // Finding P3: the outbox drain must stop too, not just the receive
     // side — otherwise a queued send keeps retrying (and re-arming a
     // backoff timer) forever, since a revoked device can never recover
@@ -973,8 +801,8 @@ export class ConnectionManager {
     // the rest of the delay.
     this.cancelPendingDrainRetry?.();
     this.opts.onStateChange?.('revoked');
-    // Unblock a cold start()'s pending waitForAck() immediately with the
-    // typed error instead of leaving it to time out (see waitForAck doc). A
+    // Unblock a cold start()'s pending waitForConnection() immediately with
+    // the typed error instead of leaving it to time out. A
     // no-op if the connection already settled earlier (settledWaiters empty)
     // — e.g. revocation discovered while already connected/running.
     this.notifySettled(new DeviceRevokedError());

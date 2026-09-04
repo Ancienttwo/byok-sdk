@@ -24,7 +24,7 @@ describe('createDaemonWithAdapters: DaemonConfig.maxTaskOutputBytes validation',
     return {
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
       productId: 'test-product-resource-limits',
-      serverUrl: 'ws://localhost:1',
+      serverUrl: 'http://localhost:1',
       workspaceRoot: await tmpDir('byok-resource-limits-workspace-'),
       storeDir: await tmpDir('byok-resource-limits-store-'),
       maxTaskOutputBytes,
@@ -67,7 +67,7 @@ describe('createDaemonWithAdapters: DaemonConfig.progressBatch validation', () =
     return {
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
       productId: 'test-product-progress-batch',
-      serverUrl: 'ws://localhost:1',
+      serverUrl: 'http://localhost:1',
       workspaceRoot: await tmpDir('byok-progress-batch-workspace-'),
       storeDir: await tmpDir('byok-progress-batch-store-'),
       progressBatch,

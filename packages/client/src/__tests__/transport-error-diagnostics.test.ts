@@ -1,21 +1,12 @@
 /**
- * Typed transport error diagnostics: proves that a WS upgrade rejection and a
- * long-poll route failure each carry the route they happened on
- * (`{transport, host, path}`), and that the endpoint projection is
- * structurally credential-free.
- *
- * The WS half runs against a REAL `node:http` server that answers the upgrade
- * with a 401 rather than a mocked socket: `WsUnexpectedStatusError` is only
- * ever constructed from the `ws` client's own `unexpected-response` event, so
- * a stubbed socket would assert the constructor, not the path that reaches it.
- * The long-poll half mocks `global.fetch` (setup mirrors
+ * Typed long-poll route diagnostics prove a route failure carries its
+ * credential-free `{transport, host, path}` endpoint projection. The tests
+ * mock `global.fetch` (setup mirrors
  * `long-poll-validation-stall.test.ts`) because its two routes fail on the
  * HTTP response alone — no server behavior is involved beyond the status.
  */
 import { generateKeyPairSync } from 'node:crypto';
 import { promises as fs } from 'node:fs';
-import http from 'node:http';
-import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -25,59 +16,10 @@ import { LongPollClient, LongPollRouteError } from '../daemon/long-poll-transpor
 import { DeviceStore } from '../daemon/store';
 import { seedDeviceEnrollment } from './fixtures/device-enrollment';
 import { describeEndpoint } from '../daemon/url';
-import { WsTransport, WsUnexpectedStatusError } from '../daemon/ws-transport';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
-
-describe('WsUnexpectedStatusError carries the rejected upgrade endpoint', () => {
-  let server: http.Server;
-  let port: number;
-
-  beforeEach(async () => {
-    server = http.createServer((_req, res) => {
-      res.writeHead(404).end();
-    });
-    // Reject the upgrade the way a server with an expired/invalid bearer
-    // token does: a plain HTTP response instead of the 101 switch, which is
-    // exactly what makes `ws` emit 'unexpected-response'.
-    server.on('upgrade', (_req, socket) => {
-      socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
-    });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    port = (server.address() as AddressInfo).port;
-  });
-
-  afterEach(async () => {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  });
-
-  it('reports status 401 plus {transport, host, path} for the refused upgrade', async () => {
-    const outcome = new Promise<{ acked: boolean; err: unknown }>((resolve) => {
-      const transport = new WsTransport({
-        serverUrl: `http://127.0.0.1:${port}`,
-        getToken: async () => 'tok-expired',
-        deviceId: 'dev-1',
-        productId: 'prod-1',
-        capabilities: [],
-        onEnvelope: () => {},
-        onConnectOutcome: (acked, err) => {
-          transport.close();
-          resolve({ acked, err });
-        },
-      });
-      transport.connect({ auto: false });
-    });
-
-    const { acked, err } = await outcome;
-    expect(acked).toBe(false);
-    expect(err).toBeInstanceOf(WsUnexpectedStatusError);
-    const wsErr = err as WsUnexpectedStatusError;
-    expect(wsErr.status).toBe(401);
-    expect(wsErr.endpoint).toEqual({ transport: 'ws', host: `127.0.0.1:${port}`, path: '/byok/ws' });
-  });
-});
 
 describe('LongPollRouteError names the failing route', () => {
   let auth: AuthManager;
