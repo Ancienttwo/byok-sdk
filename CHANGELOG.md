@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Breaking (WP3B coordination transport):** `@byok-sdk/server` is now the
+  self-hosted Hono/HTTP façade over the shared `@byok-sdk/cloud` domain kernel,
+  with the bounded in-memory/SQLite composition beneath it. The daemon's
+  remote channel is authenticated long-poll HTTP for both receive and send;
+  the legacy socket transport, alternate connection states, and transport
+  switching surface are removed. Consumers must use the long-poll routes and
+  await the async server read APIs.
 - **Breaking (Agent home execution):** the default returns to one active
   Attempt per canonical Agent home; 0.12.0-style concurrent sessions in one
   home require explicit

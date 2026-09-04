@@ -2,8 +2,8 @@
 
 BYOK SDK lets a SaaS product dispatch work to coding-agent runtimes already
 authenticated on an end user's machine. It includes a local daemon, a
-self-hosted reference coordinator, and a hosted multi-tenant composition over
-Postgres and R2.
+self-hosted server façade over the cloud kernel, and a hosted multi-tenant
+composition over Postgres and R2.
 
 ## Current release
 
@@ -48,9 +48,11 @@ same modules are also directly installable as `@byok-sdk/client`,
 
 ## Choose a composition
 
-- Self-hosted: use `server` for the in-memory coordinator and `client` for the
-  local daemon. This is the smallest complete deployment and does not require
-  Postgres or object storage.
+- Self-hosted: use `server` as the Hono/HTTP façade over the shared `cloud`
+  domain kernel, and `client` for the local daemon. The daemon uses the
+  authenticated long-poll HTTP path for both receive and send. This is the
+  smallest complete deployment and does not require Postgres or object
+  storage.
 - Hosted: use `cloud` for stateless device routes and `cloudDataplane` for the
   durable Postgres + R2 data plane. The host owns authentication, scheduling,
   migration execution, deployment, signing, updater channels, and operations.

@@ -78,10 +78,11 @@ CLI release and, when reachable, the running daemon release, so a mismatch is
 observable without becoming a gate. An older local-control peer that predates
 the field is rendered as `unknown`; the CLI does not infer a replacement.
 
-The same version is projected as optional `clientVersion` in WS hello and
-hosted presence. The self-hosted server retains the WS value in its live
-connection state and exposes it through `machines.list()`; omission remains
-legacy/unknown and is never replaced by a server-inferred version.
+The same version is projected as optional `clientVersion` in the authenticated
+`conn.hello` snapshot and hosted presence. The self-hosted server retains the
+value in its device/presence projection and exposes it through `machines.list()`;
+omission remains legacy/unknown and is never replaced by a server-inferred
+version.
 
 Whether a release can run is decided by wire-protocol compatibility and the
 capabilities/runtime/toolsets required by the concrete action. Being behind a
@@ -607,9 +608,9 @@ Busy, containment, hook, fsync, transport, or readback mismatch leaves the
 cursor at its prior value and redelivers after reconnect/restart. No fake task,
 runtime, session, terminal event, or task journal record is created.
 
-The daemon publishes the same authenticated `conn.hello` capability snapshot
-on WS and long-poll; the hosted composition persists that snapshot before an
-Agent offer can be enqueued. Runtime-session terminal evidence is normally
+The daemon publishes the authenticated `conn.hello` capability snapshot as the
+first long-poll message; the hosted composition persists that snapshot before
+an Agent offer can be enqueued. Runtime-session terminal evidence is normally
 fsynced before the exact wire terminal. If the local evidence store remains
 unavailable after bounded retries, the daemon reports that audit failure and
 still publishes the exact AgentRef terminal so the cloud attempt and Agent
@@ -622,7 +623,7 @@ authorized. The additive Agent egress path consumes one exact, revisioned
 `AgentEgressPolicy`: activity defaults to metadata/status latest-value
 projection; contentful trajectory requires explicit host selection plus the
 `agent-egress-policy` capability. Every outbound envelope passes the same
-fail-closed sanitizer boundary before WS or long-poll encoding. A rejected or
+fail-closed sanitizer boundary before long-poll encoding. A rejected or
 throwing sanitizer emits no original bytes.
 
 The tenant used by Agent egress and hosted local journaling is not editable

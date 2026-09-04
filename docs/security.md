@@ -1,6 +1,7 @@
 # Security: Threat Model
 
-Scope: the BYOK SDK as built through M5 (device auth, WSS/long-poll transport,
+Scope: the BYOK SDK as built through WP3B Step 4b (device auth, long-poll-only
+transport,
 local control socket, claude realtime approval, rate limiting, service
 lifecycle, runtime environment allowlists, plaintext transport gating, runtime
 selection, resource limits, and unified graceful shutdown). This is a threat
@@ -26,11 +27,10 @@ back to a provider kind or another profile, and neither protocol/manifests nor
 validation errors include Base URLs or credential values.
 
 - **The SaaS server is a proposer, never an executor.** It offers tasks,
-  can approve/reject/cancel them over the wire, and observes progress — it
-  never runs code itself. `packages/server/src/hub.ts`'s own doc comment on
-  `resumeIfImplicitlyApproved` states this directly: "the daemon is the
-  execution authority in this security model (the SaaS only ever
-  *proposes*)".
+  can approve/reject/cancel them over the authenticated long-poll wire, and
+  observes progress — it never runs code itself. The self-hosted server is a
+  façade over the cloud domain kernel; the daemon remains the execution
+  authority in this security model (the SaaS only ever proposes).
 - **The daemon, plus whatever `PermissionPolicy` the device owner's own
   policy allows, is the authority.** Every runtime adapter maps an offered
   policy to the real CLI's own flags and fails closed — rejects the task
@@ -171,7 +171,7 @@ To roll back operationally, remove `gitWorkspace` from the local configuration a
 |---|---|---|
 | Device enrollment authority | One SDK-internal OS credential entry (Keychain / Credential Manager / Secret Service) containing authenticated device/tenant/public-key metadata, expiry, access token, and private key | Daemon only. Keeping the full record in one replaceable entry prevents crash-time identity/key mixing. The private key signs **domain-separated** nonces at renewal time (`byok-nonce-v1\n` + nonce, S1); no plaintext fallback exists. |
 | Device metadata projection | `<storeDir>/device.json` (0600), exactly `{deviceId, tenantId, devicePublicKey}` | Credential-blind CLI/status and diagnostics only. It is deterministically repaired from the OS authority and never authors enrollment or secret bytes. |
-| Pairing code | Server-side only, minted out of band by the SaaS's own auth/device-flow UI | Server mints it already bound to `{tenantId, productId}` (S1); single-use, ~10min TTL. `PairRequest` carries neither field, so a device can never choose or influence the tenant it lands in (`packages/server/src/pairing.ts`, `docs/protocol.md` §6.1) |
+| Pairing code | Server-side only, minted out of band by the SaaS's own auth/device-flow UI | Server mints it already bound to `{tenantId, productId}` (S1); single-use, ~10min TTL. `PairRequest` carries neither field, so a device can never choose or influence the tenant it lands in (`@byok-sdk/cloud` pairing authority, `docs/protocol.md` §6.1) |
 | Control-socket HMAC token | `<storeDir>/control.token` (0600) | Daemon (generates + holds) and any local process that can read it and speak the handshake (`packages/client/src/daemon/control-protocol.ts`) |
 | Audit log | `<storeDir>/audit.jsonl` (0600) | Daemon appends a **redacted** projection only — see below |
 | The user's own runtime credentials (`~/.claude`, `~/.codex`, `~/.pi` auth state) | The user's home directory, owned entirely by the installed `claude`/`codex`/`pi` CLI | **The daemon never reads, proxies, or forwards these** — see the credential-isolation rule below and `docs/security-review-m4.md` for the empirical audit |
@@ -309,46 +309,34 @@ residue to clean up.
 
 ### 1. Wire (daemon ↔ SaaS server)
 
-Transport: WSS with a long-poll fallback (`packages/client/src/daemon/
-ws-transport.ts`, `long-poll-transport.ts`); at-least-once delivery with a
-redelivery cursor and dedup on both sides (`docs/protocol.md` §9); per-device
-rate limiting (`packages/server/src/rate-limiter.ts`, keyed and isolated by
-`deviceId` in `hub.ts`'s `handleInbound`).
+Transport: authenticated long-poll HTTP only (`GET /byok/events` and
+`POST /byok/messages`); at-least-once delivery with a redelivery cursor and
+dedup on both sides (`docs/protocol.md` §9); per-device rate limiting
+(`packages/server/src/rate-limiter.ts`, keyed and isolated by `deviceId` in
+the cloud-kernel inbound gate).
 
 | Attacker position | Can | Cannot |
 |---|---|---|
-| Remote network, no valid device credentials | Attempt connections, flood a device's inbound budget (isolated per-device — see `rate-limit.test.ts`'s isolation test) | Forge a JWT (HS256, server-held random secret — `auth.ts`'s `createHmacTokenSigner`); forge an Ed25519 device signature; reuse a device signature produced for a different purpose (S1: nonce signatures are domain-separated under `byok-nonce-v1\n`, and an unprefixed signature is rejected — `auth.ts`'s `verifyNonceSignature`); replay a pairing code (single-use, ~10min TTL — `pairing.ts`) or a challenge nonce (single-use, ~5min TTL, bound to `deviceId` — `auth.ts`'s `NonceStore`) |
-| Holder of one tenant's valid device credentials | Everything that tenant's own devices can do | Reach another tenant's device on any surface (S1: `DeviceRegistry` is keyed by `(tenantId, deviceId)`, so a mismatched tenant finds nothing rather than finding a row it then fails a check against); revoke or enumerate another tenant's devices (`devices.revoke(tenantId, deviceId)` — no naked deviceId lookup is exported); learn whether another tenant's device exists — unknown device, wrong tenant, product mismatch, and revoked all return the same `401` with the same body, so there is no existence oracle (`auth.ts`'s `authenticateBearer`) |
+| Remote network, no valid device credentials | Attempt connections, flood a device's inbound budget (isolated per-device — see `rate-limit.test.ts`'s isolation test) | Forge a JWT (HS256, server-held random secret — cloud `createHmacTokenSigner`); forge an Ed25519 device signature; reuse a device signature produced for a different purpose (S1: nonce signatures are domain-separated under `byok-nonce-v1\n`, and an unprefixed signature is rejected — cloud nonce verifier); replay a pairing code (single-use, ~10min TTL) or a challenge nonce (single-use, ~5min TTL, bound to `deviceId`) |
+| Holder of one tenant's valid device credentials | Everything that tenant's own devices can do | Reach another tenant's device on any surface (S1: cloud `DeviceRegistry` is keyed by `(tenantId, deviceId)`, so a mismatched tenant finds nothing rather than finding a row it then fails a check against); revoke or enumerate another tenant's devices (`devices.revoke(tenantId, deviceId)` — no naked deviceId lookup is exported); learn whether another tenant's device exists — unknown device, wrong tenant, product mismatch, and revoked all return the same `401` with the same body, so there is no existence oracle (`authenticateBearer`) |
 | Malicious or compromised SaaS | Offer any task/policy it wants; send `task.approve`/`task.reject`/`task.cancel` for tasks it itself offered (this is the wire's legitimate approve channel — see the approval-path section on why this isn't a privilege escalation) | Read the device's private key or forge its signature; force an adapter to run with a looser effective policy than offered (fail-closed mapping — `docs/protocol.md` §11.1); reach the daemon's local control socket or audit log (no network path to a Unix socket/named pipe) |
 | Same-user local process | Read the non-secret `device.json` projection; invoke OS credential APIs subject to the user's OS credential-store policy | Bypass whatever access-control/prompt policy the selected OS credential provider enforces |
 | Other local user | — | Read `device.json` (0600), anything else under `storeDir` (0700), or the owning user's OS credential entry |
 
 TLS termination itself is a deployment concern, not something this SDK
-provides: `packages/client/src/daemon/url.ts` maps whatever scheme is
-configured (`ws:`/`wss:`, `http:`/`https:`) — running a production deployment
-over plain `ws:`/`http:` is an operator misconfiguration this code does not
-prevent.
+provides: `packages/client/src/daemon/url.ts` accepts the configured HTTP(S)
+server URL. Production deployments should use HTTPS; plain HTTP is intended
+for loopback development and is rejected for remote hosts.
 
-**Transport-security gate (M5)**: the paragraph above is now narrower than it
-used to be. `url.ts`'s `assertServerUrlAllowed` is called at both real entry
-points a configured `serverUrl` reaches (`create-daemon.ts`'s `pair()` and
-`start()`, which between them cover ws-transport, the long-poll fallback, and
-blob-client — all three read the same `DaemonConfig.serverUrl`, never a URL
-of their own) — `https:`/`wss:` are always allowed, but plain `ws:`/`http:`
-is now accepted only when the host is loopback (`localhost`/`*.localhost`,
-`127.0.0.0/8`, `::1`); a plaintext URL to any other host is refused with a
-typed `InsecureServerUrlError` before `pair()`/`start()` ever attempt a
-network call, so a device can no longer be pointed at a genuinely remote host
-in the clear by accident. The one remaining escape hatch is explicit and
-opt-in: `DaemonConfig.dangerouslyAllowInsecureRemote: true` — intended only
-for a deliberately-understood exception (e.g. a private network with no TLS
-terminator in front of the server) — and every time it actually changes the
-outcome (as opposed to being set but inert against an already-loopback URL),
-the daemon logs a loud `console.warn` naming the offending URL. This gate
-does not add encryption of its own; it only closes off the plaintext-to-
-remote combination by default. An unsupported scheme (anything other than
-`http:`/`https:`/`ws:`/`wss:`) is refused unconditionally, regardless of that
-escape hatch.
+**Transport-security gate (WP3B Step 4b)**: `url.ts`'s
+`assertServerUrlAllowed` is called at both real entry points a configured
+`serverUrl` reaches (`create-daemon.ts`'s `pair()` and `start()`). HTTPS is
+always allowed. Plain HTTP is accepted only for loopback hosts
+(`localhost`/`*.localhost`, `127.0.0.0/8`, `::1`); a plaintext URL to any
+other host is refused with a typed `InsecureServerUrlError` before
+`pair()`/`start()` ever attempt a network call. An unsupported scheme is
+refused unconditionally. This gate does not add encryption; it prevents an
+accidental remote clear-text long-poll connection.
 
 ### 2. Control socket (local IPC)
 
@@ -472,8 +460,8 @@ device's daemon over the control socket (`approvals.request`) and answers
   `ApprovalRegistry.resolve()` — whichever arrives first wins; the loser is
   a clean, audited no-op, never a crash or a double-resolution
   (`approvals.ts`, `task-runner.ts`'s `handleApprove`/`handleReject`
-  `NoPendingApprovalError` branch, mirrored server-side by `hub.ts`'s
-  `resumeIfImplicitlyApproved` terminal-state guard).
+  `NoPendingApprovalError` branch, mirrored server-side by the cloud kernel's
+  terminal-state guard).
 - **Per-task FIFO, not overwrite**: only one approval per task is ever
   actually dispatched at a time; a second concurrent request for the same
   task queues behind it (bounded at 16 — `MAX_PENDING_APPROVALS_PER_TASK`)
@@ -499,7 +487,7 @@ docs/protocol.md §5.2):** the row above used to read "racing (not
 overriding)" without qualification — that was optimistic. Before this
 addition, the server had no way to learn about a LOCAL resolution until the
 daemon's next `task.progress`/`task.artifact`/`task.complete` proved it,
-after the fact (`ConnectionHub.resumeIfImplicitlyApproved`, `hub.ts`) — in
+after the fact (the cloud kernel's implicit-resolution guard) — in
 that window, a SaaS `task.approve`/`task.reject` genuinely could override the
 server's own authoritative record out from under a local decision the daemon
 had already acted on. The daemon now reports a local resolution explicitly
@@ -507,8 +495,8 @@ and immediately (`task.approval_resolved`, gated on both sides supporting
 it), narrowing that window from "however long until the next progress
 message" down to ordinary network latency. It is a narrowing, not an
 elimination: a SaaS decision already in flight when the local resolution
-happens can still land first and win — both sides (`hub.ts`'s
-`onApprovalResolved`, `task-runner.ts`'s `handleApprove`/`handleReject`)
+happens can still land first and win — both sides (the cloud kernel's
+`onApprovalResolved` and `task-runner.ts`'s `handleApprove`/`handleReject`)
 treat the loser as a clean, audited stale no-op either way, never a crash or
 a double-apply, and the only residual divergence is the server's terminal
 record disagreeing with a daemon that already stopped or continued its own
@@ -695,13 +683,12 @@ explicitly.
   verifier's own mandatory recheck and `jti` burn at exchange time. Nothing in
   this SDK delivers synchronous invalidation on its own, and the feature is
   off by default precisely so a deployment opts into that trade knowingly.
-- **An abrupt WS close can lose an unacknowledged tail of traffic.**
-  `docs/protocol.md` (§ Version-negotiation drill / rate-limit section)
-  states this directly: rate limiting's own abrupt WS close on
-  over-budget "is not a new at-most-once risk... shares the ordinary
-  at-most-once exposure of ANY abrupt WS disconnect." At-least-once
-  delivery is a reconnect-and-redeliver guarantee, not an
-  every-byte-before-a-hard-close guarantee.
+- **A long-poll request can terminate between delivery and cursor
+  acknowledgement.** At-least-once delivery is a cursor-and-redelivery
+  guarantee: if the daemon has not durably advanced the cursor, the next
+  authenticated poll may return the same envelope and local dedup/idempotency
+  must make that replay safe. It is not an at-most-once guarantee for an HTTP
+  response that was interrupted in flight.
 - **A SaaS decision can still race a local approval resolution and win, in a
   narrowed (network-latency-sized) window.** Stated in full above (§3,
   "Narrowed race, honestly stated") — `task.approval_resolved` closes the
