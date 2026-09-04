@@ -1,13 +1,23 @@
+> **Archived**: 2026-09-04 14:23
+> **Related Plan**: plans/archive/plan-20260904-1324-wp3b-step4b-step5-closeout.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260904-1423
+> **Archive Projection V1**: `plans/plan-20260904-1324-wp3b-step4b-step5-closeout.md` => `plans/archive/plan-20260904-1324-wp3b-step4b-step5-closeout.md`
+> **Archive Projection V1**: `tasks/notes/20260904-1324-wp3b-step4b-step5-closeout.notes.md` => `tasks/archive/notes-20260904-1423-wp3b-step4b-step5-closeout.md`
+> **Archive Projection V1**: `tasks/contracts/20260904-1324-wp3b-step4b-step5-closeout.contract.md` => `tasks/archive/contract-20260904-1423-wp3b-step4b-step5-closeout.md`
+> **Archive Projection V1**: `tasks/reviews/20260904-1324-wp3b-step4b-step5-closeout.review.md` => `tasks/archive/review-20260904-1423-wp3b-step4b-step5-closeout.md`
+
 # Task Contract: wp3b-step4b-step5-closeout
 
 > **Status**: Fulfilled
-> **Plan**: plans/plan-20260904-1324-wp3b-step4b-step5-closeout.md
+> **Plan**: plans/archive/plan-20260904-1324-wp3b-step4b-step5-closeout.md
 > **Task Profile**: code-change
 > **Owner**: kito
 > **Capability ID**: root
 > **Last Updated**: 2026-09-04 13:24
-> **Review File**: `tasks/reviews/20260904-1324-wp3b-step4b-step5-closeout.review.md`
-> **Notes File**: `tasks/notes/20260904-1324-wp3b-step4b-step5-closeout.notes.md`
+> **Review File**: `tasks/archive/review-20260904-1423-wp3b-step4b-step5-closeout.md`
+> **Notes File**: `tasks/archive/notes-20260904-1423-wp3b-step4b-step5-closeout.md`
 
 ## Why
 
@@ -43,10 +53,10 @@ Any production import/reference to `WsTransport`, `ws-transport`, `BYOK_WS_PATH`
 
 ```yaml
 allowed_paths:
-  - plans/plan-20260904-1324-wp3b-step4b-step5-closeout.md
-  - tasks/contracts/20260904-1324-wp3b-step4b-step5-closeout.contract.md
-  - tasks/reviews/20260904-1324-wp3b-step4b-step5-closeout.review.md
-  - tasks/notes/20260904-1324-wp3b-step4b-step5-closeout.notes.md
+  - plans/archive/plan-20260904-1324-wp3b-step4b-step5-closeout.md
+  - tasks/archive/contract-20260904-1423-wp3b-step4b-step5-closeout.md
+  - tasks/archive/review-20260904-1423-wp3b-step4b-step5-closeout.md
+  - tasks/archive/notes-20260904-1423-wp3b-step4b-step5-closeout.md
   - tasks/current.md
   - tasks/todos.md
   - tasks/workstreams/root/

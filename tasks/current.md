@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-09-04T13:21:37+0800 -->
+<!-- updated_at: 2026-09-04T14:23:54+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Idle
-> **Updated At**: 2026-09-04T13:21:37+0800
-> **Source Branch**: codex/wp3b-step4-daemon-longpoll
-> **Source Commit**: 6a4cae5
+> **Updated At**: 2026-09-04T14:23:54+0800
+> **Source Branch**: codex/wp3b-step4b-step5-closeout
+> **Source Commit**: b3c2238
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -37,7 +37,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Sprint: (none)
 ## Workstreams
 
-- (none)
+- `tasks/workstreams/root/20260904-sdk-root.md`: status=active, current_slice=todo-01, source_plan=(none)
 ## Handoff
 
 - Exact Next Step: (none)
@@ -48,19 +48,18 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 10 changed/untracked path(s)
+- Summary: 9 changed/untracked path(s)
 
 ```
- D plans/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md
- D tasks/contracts/20260904-0421-wp3b-step4-longpoll-cursor-stop.contract.md
- D tasks/notes/20260904-0421-wp3b-step4-longpoll-cursor-stop.notes.md
- D tasks/reviews/20260904-0421-wp3b-step4-longpoll-cursor-stop.review.md
- M tasks/todos.md
-?? plans/archive/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md
-?? tasks/archive/contract-20260904-1321-wp3b-step4-longpoll-cursor-stop.md
-?? tasks/archive/notes-20260904-1321-wp3b-step4-longpoll-cursor-stop.md
-?? tasks/archive/review-20260904-1321-wp3b-step4-longpoll-cursor-stop.md
-?? tasks/archive/todo-20260904-1321-wp3b-step4-longpoll-cursor-stop.md
+ D plans/plan-20260904-1324-wp3b-step4b-step5-closeout.md
+ D tasks/contracts/20260904-1324-wp3b-step4b-step5-closeout.contract.md
+ D tasks/notes/20260904-1324-wp3b-step4b-step5-closeout.notes.md
+ D tasks/reviews/20260904-1324-wp3b-step4b-step5-closeout.review.md
+?? plans/archive/plan-20260904-1324-wp3b-step4b-step5-closeout.md
+?? tasks/archive/contract-20260904-1423-wp3b-step4b-step5-closeout.md
+?? tasks/archive/notes-20260904-1423-wp3b-step4b-step5-closeout.md
+?? tasks/archive/review-20260904-1423-wp3b-step4b-step5-closeout.md
+?? tasks/archive/todo-20260904-1423-wp3b-step4b-step5-closeout.md
 ```
 
 ## Source Artifacts

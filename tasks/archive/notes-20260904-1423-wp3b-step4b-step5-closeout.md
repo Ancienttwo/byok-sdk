@@ -1,9 +1,19 @@
+> **Archived**: 2026-09-04 14:23
+> **Related Plan**: plans/archive/plan-20260904-1324-wp3b-step4b-step5-closeout.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260904-1423
+> **Archive Projection V1**: `plans/plan-20260904-1324-wp3b-step4b-step5-closeout.md` => `plans/archive/plan-20260904-1324-wp3b-step4b-step5-closeout.md`
+> **Archive Projection V1**: `tasks/notes/20260904-1324-wp3b-step4b-step5-closeout.notes.md` => `tasks/archive/notes-20260904-1423-wp3b-step4b-step5-closeout.md`
+> **Archive Projection V1**: `tasks/contracts/20260904-1324-wp3b-step4b-step5-closeout.contract.md` => `tasks/archive/contract-20260904-1423-wp3b-step4b-step5-closeout.md`
+> **Archive Projection V1**: `tasks/reviews/20260904-1324-wp3b-step4b-step5-closeout.review.md` => `tasks/archive/review-20260904-1423-wp3b-step4b-step5-closeout.md`
+
 # Implementation Notes: wp3b-step4b-step5-closeout
 
 > **Status**: Verified
-> **Plan**: plans/plan-20260904-1324-wp3b-step4b-step5-closeout.md
-> **Contract**: tasks/contracts/20260904-1324-wp3b-step4b-step5-closeout.contract.md
-> **Review**: tasks/reviews/20260904-1324-wp3b-step4b-step5-closeout.review.md
+> **Plan**: plans/archive/plan-20260904-1324-wp3b-step4b-step5-closeout.md
+> **Contract**: tasks/archive/contract-20260904-1423-wp3b-step4b-step5-closeout.md
+> **Review**: tasks/archive/review-20260904-1423-wp3b-step4b-step5-closeout.md
 > **Last Updated**: 2026-09-04 13:24
 
 ## Baseline
@@ -14,7 +24,7 @@
 
 ## Verification Evidence
 
-- `repo-harness run verify-contract --contract tasks/contracts/20260904-1324-wp3b-step4b-step5-closeout.contract.md --strict`: 19/19 checks passed; contract status `Fulfilled`.
+- `repo-harness run verify-contract --contract tasks/archive/contract-20260904-1423-wp3b-step4b-step5-closeout.md --strict`: 19/19 checks passed; contract status `Fulfilled`.
 - Full client suite: 164 files passed, 2 skipped; 1603 tests passed, 11 skipped.
 - Root `build`, `typecheck`, and full package test suites passed.
 - API surface, version authority, package graph, strict task workflow, architecture sync, and `git diff --check` passed.

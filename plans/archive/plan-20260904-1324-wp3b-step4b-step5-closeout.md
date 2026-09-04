@@ -1,15 +1,25 @@
+> **Archived**: 2026-09-04 14:23
+> **Related Plan**: plans/archive/plan-20260904-1324-wp3b-step4b-step5-closeout.md
+> **Outcome**: Completed
+> **Lifecycle**: plan
+> **Parent Run ID**: run-20260904-1423
+> **Archive Projection V1**: `plans/plan-20260904-1324-wp3b-step4b-step5-closeout.md` => `plans/archive/plan-20260904-1324-wp3b-step4b-step5-closeout.md`
+> **Archive Projection V1**: `tasks/notes/20260904-1324-wp3b-step4b-step5-closeout.notes.md` => `tasks/archive/notes-20260904-1423-wp3b-step4b-step5-closeout.md`
+> **Archive Projection V1**: `tasks/contracts/20260904-1324-wp3b-step4b-step5-closeout.contract.md` => `tasks/archive/contract-20260904-1423-wp3b-step4b-step5-closeout.md`
+> **Archive Projection V1**: `tasks/reviews/20260904-1324-wp3b-step4b-step5-closeout.review.md` => `tasks/archive/review-20260904-1423-wp3b-step4b-step5-closeout.md`
+
 # Plan: WP3B Step 4b + Step 5: long-poll-only daemon and documentation closeout
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260904-1324
 > **Slug**: wp3b-step4b-step5-closeout
 > **Artifact Level**: work-package
 > **Promotion Reason**: Owner authorized completing all remaining WP3B Sprint work, including merge, push, and PR. Step 4b changes the public client transport surface, so Step 5 documentation and API golden updates must land in the same coherent PR.
 > **Verification Boundary**: full client suite, repository required checks, API/version/package-graph gates, architecture sync, exact-subject review, and GitHub CI.
 > **Rollback Surface**: one PR based on the accepted Step 4a head; revert the PR as a unit because the code, public declaration golden, and current-state documentation must remain aligned.
-> **Task Contract**: `tasks/contracts/20260904-1324-wp3b-step4b-step5-closeout.contract.md`
-> **Task Review**: `tasks/reviews/20260904-1324-wp3b-step4b-step5-closeout.review.md`
-> **Implementation Notes**: `tasks/notes/20260904-1324-wp3b-step4b-step5-closeout.notes.md`
+> **Task Contract**: `tasks/archive/contract-20260904-1423-wp3b-step4b-step5-closeout.md`
+> **Task Review**: `tasks/archive/review-20260904-1423-wp3b-step4b-step5-closeout.md`
+> **Implementation Notes**: `tasks/archive/notes-20260904-1423-wp3b-step4b-step5-closeout.md`
 
 ## P1 Architecture Map
 
@@ -32,7 +42,7 @@
 
 ## Evidence Contract
 
-- State/progress path: `tasks/notes/20260904-1324-wp3b-step4b-step5-closeout.notes.md` and this plan's Task Breakdown.
+- State/progress path: `tasks/archive/notes-20260904-1423-wp3b-step4b-step5-closeout.md` and this plan's Task Breakdown.
 - Verification evidence: `.ai/harness/checks/latest.json`, full client/root command output, API/version/package-graph checks, and the final GitHub exact-head checks.
 - Evaluator rubric: no WS product authority remains; long-poll lifecycle/redelivery/shutdown tests pass; built declarations and current docs match the cutover; architecture queue is clear.
 - Stop condition: any required cloud/server semantic change, compatibility path, wire-v2 change, or failure to preserve ack-after-processing and bounded shutdown.

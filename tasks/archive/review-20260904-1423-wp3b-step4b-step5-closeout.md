@@ -1,9 +1,19 @@
+> **Archived**: 2026-09-04 14:23
+> **Related Plan**: plans/archive/plan-20260904-1324-wp3b-step4b-step5-closeout.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260904-1423
+> **Archive Projection V1**: `plans/plan-20260904-1324-wp3b-step4b-step5-closeout.md` => `plans/archive/plan-20260904-1324-wp3b-step4b-step5-closeout.md`
+> **Archive Projection V1**: `tasks/notes/20260904-1324-wp3b-step4b-step5-closeout.notes.md` => `tasks/archive/notes-20260904-1423-wp3b-step4b-step5-closeout.md`
+> **Archive Projection V1**: `tasks/contracts/20260904-1324-wp3b-step4b-step5-closeout.contract.md` => `tasks/archive/contract-20260904-1423-wp3b-step4b-step5-closeout.md`
+> **Archive Projection V1**: `tasks/reviews/20260904-1324-wp3b-step4b-step5-closeout.review.md` => `tasks/archive/review-20260904-1423-wp3b-step4b-step5-closeout.md`
+
 # Task Review: wp3b-step4b-step5-closeout
 
 > **Status**: Accepted
-> **Plan**: plans/plan-20260904-1324-wp3b-step4b-step5-closeout.md
-> **Contract**: tasks/contracts/20260904-1324-wp3b-step4b-step5-closeout.contract.md
-> **Notes File**: tasks/notes/20260904-1324-wp3b-step4b-step5-closeout.notes.md
+> **Plan**: plans/archive/plan-20260904-1324-wp3b-step4b-step5-closeout.md
+> **Contract**: tasks/archive/contract-20260904-1423-wp3b-step4b-step5-closeout.md
+> **Notes File**: tasks/archive/notes-20260904-1423-wp3b-step4b-step5-closeout.md
 > **Checks File**: .ai/harness/checks/latest.json
 > **Last Updated**: 2026-09-04 13:24
 > **Recommendation**: pass
