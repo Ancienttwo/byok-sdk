@@ -102,7 +102,7 @@ export function messagesHandler(deps: MessagesRouteDeps) {
         }
       }
       if (envelope.type === 'agent.egress.reliable' && (outcome === 'accepted' || outcome === 'duplicate')) {
-        const record = await stores.egress.get(device.deviceId, envelope.payload.eventId);
+        const record = await stores.egress.get(device.deviceId, envelope.payload.agentRef, envelope.payload.eventId);
         if (record === undefined) {
           throw new Error(`Accepted reliable egress ${envelope.payload.eventId} has no durable receipt record.`);
         }
