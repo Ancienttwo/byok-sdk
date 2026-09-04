@@ -387,7 +387,7 @@ export declare class PostgresAgentMemoryProjectionStore implements AgentMemoryPr
 /** Build the runtime-safe Postgres implementation of the optional cloud port. */
 export declare function createPostgresAgentMemoryProjectionStore(options: PostgresAgentMemoryProjectionStoreOptions): AgentMemoryProjectionStore;
 // ==== @byok-sdk/cloud-dataplane dist/stores/approval-timeline.d.ts ====
-import { type ApprovalTimelineAppendInput, type ApprovalTimelineStore, type ApprovalTimelineTail } from '@byok-sdk/cloud';
+import { type ApprovalTimelineAppendInput, type ApprovalTimelineResolvePendingInput, type ApprovalTimelineResolvePendingResult, type ApprovalTimelineStore, type ApprovalTimelineTail } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 export declare class PostgresApprovalTimelineStore implements ApprovalTimelineStore {
@@ -395,6 +395,7 @@ export declare class PostgresApprovalTimelineStore implements ApprovalTimelineSt
     private readonly clock;
     constructor(pool: Pool, clock: Clock);
     append(tenant: TenantId, input: ApprovalTimelineAppendInput): Promise<ApprovalTimelineTail>;
+    resolvePending(tenant: TenantId, input: ApprovalTimelineResolvePendingInput): Promise<ApprovalTimelineResolvePendingResult>;
     read(tenant: TenantId, taskId: string): Promise<ApprovalTimelineTail | undefined>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/core/board.d.ts ====

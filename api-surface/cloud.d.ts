@@ -297,6 +297,10 @@ export interface PendingApproval {
      * `approvalId` proceeds untargeted exactly as it does on the server.
      */
     readonly approvalId?: string;
+    /** Immutable daemon envelope identity for this exact request observation. */
+    readonly sourceEnvelopeId: string;
+    /** Monotonic timeline revision for this exact request observation. */
+    readonly revision: number;
 }
 /**
  * The task's current pending approval, or `undefined` when it has none — see
@@ -367,8 +371,31 @@ export interface ApprovalTimelineAppendInput {
     readonly ttlMs?: number;
     readonly capacity?: number;
 }
+/**
+ * One host decision against the exact unresolved request it observed.
+ *
+ * The expected source/revision pair is the durable request identity.  A
+ * resolver must not turn a stale read into a decision for a request which has
+ * since been superseded, and it must not split one logical decision into
+ * several mailbox controls.  Implementations serialize this comparison and
+ * append under the timeline's per-task authority.
+ */
+export interface ApprovalTimelineResolvePendingInput extends ApprovalTimelineAppendInput {
+    readonly expectedSourceEnvelopeId: string;
+    readonly expectedRevision: number;
+}
+/** Result of a conditional host-decision append. Logical conflicts are data, not transport failures. */
+export type ApprovalTimelineResolvePendingResult = {
+    readonly status: 'applied' | 'replayed';
+    readonly tail: ApprovalTimelineTail;
+} | {
+    readonly status: 'conflict' | 'superseded' | 'absent';
+    readonly tail?: ApprovalTimelineTail;
+};
 export interface ApprovalTimelineStore {
     append(tenant: TenantId, input: ApprovalTimelineAppendInput): Promise<ApprovalTimelineTail>;
+    /** Atomically append one host resolution only if its request remains current. */
+    resolvePending(tenant: TenantId, input: ApprovalTimelineResolvePendingInput): Promise<ApprovalTimelineResolvePendingResult>;
     read(tenant: TenantId, taskId: string): Promise<ApprovalTimelineTail | undefined>;
 }
 export interface ValidatedApprovalTimelineAppend {
@@ -377,6 +404,7 @@ export interface ValidatedApprovalTimelineAppend {
     readonly event: ApprovalTimelineEvent;
 }
 export declare function validateApprovalTimelineAppend(input: ApprovalTimelineAppendInput): ValidatedApprovalTimelineAppend;
+export declare function validateApprovalTimelineResolve(input: ApprovalTimelineResolvePendingInput): ValidatedApprovalTimelineAppend;
 export declare function approvalTimelineKey(tenant: TenantId, taskId: string): string;
 export declare function parseApprovalObservations(value: unknown): readonly ApprovalObservation[];
 export declare function approvalTimelineCursor(entries: readonly ApprovalObservation[]): number | undefined;
@@ -1681,8 +1709,8 @@ export { projectTerminalResult } from './terminal-result';
 export type { TerminalResult } from './terminal-result';
 export { tenantStoresFor } from './tenant-stores';
 export type { TenantBoundActivity, TenantBoundApprovalTimeline, TenantBoundBoard, CloudRootStores, TenantBoundBlobs, TenantBoundDedup, TenantBoundDevices, TenantBoundMailbox, TenantBoundPresence, TenantBoundQuota, TenantBoundRateLimiter, TenantBoundReceipts, TenantBoundTaskAttempts, TenantStores, } from './tenant-stores';
-export { ApprovalObservationSchema, ApprovalTimelineEventSchema, APPROVAL_SUMMARY_MAX_BYTES, DEFAULT_APPROVAL_TIMELINE_CAPACITY, DEFAULT_APPROVAL_TIMELINE_TTL_MS, approvalTimelineCursor, parseApprovalObservations, validateApprovalTimelineAppend, } from './approval-timeline';
-export type { ApprovalObservation, ApprovalTimelineAppendInput, ApprovalTimelineEvent, ApprovalTimelineStore, ApprovalTimelineTail, } from './approval-timeline';
+export { ApprovalObservationSchema, ApprovalTimelineEventSchema, APPROVAL_SUMMARY_MAX_BYTES, DEFAULT_APPROVAL_TIMELINE_CAPACITY, DEFAULT_APPROVAL_TIMELINE_TTL_MS, approvalTimelineCursor, parseApprovalObservations, validateApprovalTimelineAppend, validateApprovalTimelineResolve, } from './approval-timeline';
+export type { ApprovalObservation, ApprovalTimelineAppendInput, ApprovalTimelineEvent, ApprovalTimelineResolvePendingInput, ApprovalTimelineResolvePendingResult, ApprovalTimelineStore, ApprovalTimelineTail, } from './approval-timeline';
 export { StaleApprovalError, pendingApproval } from './approval-control';
 export type { PendingApproval } from './approval-control';
 export { SteerRejectedError } from './steer-control';
@@ -1897,12 +1925,13 @@ export declare class InMemoryAgentMemoryProjectionAuthorizer implements AgentMem
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/approval-timeline.d.ts ====
 import type { Clock, TenantId } from '@byok-sdk/core';
-import { type ApprovalTimelineAppendInput, type ApprovalTimelineStore, type ApprovalTimelineTail } from '../../approval-timeline';
+import { type ApprovalTimelineAppendInput, type ApprovalTimelineResolvePendingInput, type ApprovalTimelineResolvePendingResult, type ApprovalTimelineStore, type ApprovalTimelineTail } from '../../approval-timeline';
 export declare class InMemoryApprovalTimelineStore implements ApprovalTimelineStore {
     #private;
     private readonly clock;
     constructor(clock: Clock);
     append(tenant: TenantId, input: ApprovalTimelineAppendInput): Promise<ApprovalTimelineTail>;
+    resolvePending(tenant: TenantId, input: ApprovalTimelineResolvePendingInput): Promise<ApprovalTimelineResolvePendingResult>;
     read(tenant: TenantId, taskId: string): Promise<ApprovalTimelineTail | undefined>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/blobs.d.ts ====

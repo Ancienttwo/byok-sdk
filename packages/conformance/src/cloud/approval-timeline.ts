@@ -86,6 +86,67 @@ export function runApprovalTimelineConformance(
       });
     });
 
+    it('atomically resolves one exact pending request, replays its stable decision, and rejects conflicts', async () => {
+      await withComposition(factory, async ({ store }) => {
+        const request = await store.append(TENANT_A, {
+          taskId: 'task-conditional-resolution',
+          sourceEnvelopeId: 'request-conditional',
+          event: requested('approval-conditional'),
+        });
+        const resolution = {
+          taskId: 'task-conditional-resolution',
+          expectedSourceEnvelopeId: 'request-conditional',
+          expectedRevision: request.cursor!,
+          sourceEnvelopeId: '10000000-0000-8000-8000-000000000001',
+          event: {
+            type: 'approval_resolved' as const,
+            approvalId: 'approval-conditional',
+            decision: 'approve' as const,
+            resolvedBy: 'host' as const,
+            at: '2026-09-05T00:00:00.000Z',
+          },
+        };
+        await expect(store.resolvePending(TENANT_A, resolution)).resolves.toMatchObject({ status: 'applied' });
+        await expect(store.resolvePending(TENANT_A, resolution)).resolves.toMatchObject({ status: 'replayed' });
+        await expect(
+          store.resolvePending(TENANT_A, {
+            ...resolution,
+            event: { ...resolution.event, decision: 'reject' },
+          }),
+        ).resolves.toMatchObject({ status: 'conflict' });
+      });
+    });
+
+    it('refuses a stale expected request after the daemon superseded it', async () => {
+      await withComposition(factory, async ({ store }) => {
+        const first = await store.append(TENANT_A, {
+          taskId: 'task-superseded-resolution',
+          sourceEnvelopeId: 'request-first',
+          event: requested('approval-first'),
+        });
+        await store.append(TENANT_A, {
+          taskId: 'task-superseded-resolution',
+          sourceEnvelopeId: 'request-second',
+          event: requested('approval-second'),
+        });
+        await expect(
+          store.resolvePending(TENANT_A, {
+            taskId: 'task-superseded-resolution',
+            expectedSourceEnvelopeId: 'request-first',
+            expectedRevision: first.cursor!,
+            sourceEnvelopeId: '10000000-0000-8000-8000-000000000003',
+            event: {
+              type: 'approval_resolved',
+              approvalId: 'approval-first',
+              decision: 'approve',
+              resolvedBy: 'host',
+              at: '2026-09-05T00:00:00.000Z',
+            },
+          }),
+        ).resolves.toMatchObject({ status: 'superseded' });
+      });
+    });
+
     it('fails closed when one source envelope identity claims another lifecycle event', async () => {
       await withComposition(factory, async ({ store }) => {
         await store.append(TENANT_A, {

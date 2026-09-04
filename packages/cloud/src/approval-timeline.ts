@@ -69,8 +69,32 @@ export interface ApprovalTimelineAppendInput {
   readonly capacity?: number;
 }
 
+/**
+ * One host decision against the exact unresolved request it observed.
+ *
+ * The expected source/revision pair is the durable request identity.  A
+ * resolver must not turn a stale read into a decision for a request which has
+ * since been superseded, and it must not split one logical decision into
+ * several mailbox controls.  Implementations serialize this comparison and
+ * append under the timeline's per-task authority.
+ */
+export interface ApprovalTimelineResolvePendingInput extends ApprovalTimelineAppendInput {
+  readonly expectedSourceEnvelopeId: string;
+  readonly expectedRevision: number;
+}
+
+/** Result of a conditional host-decision append. Logical conflicts are data, not transport failures. */
+export type ApprovalTimelineResolvePendingResult =
+  | { readonly status: 'applied' | 'replayed'; readonly tail: ApprovalTimelineTail }
+  | { readonly status: 'conflict' | 'superseded' | 'absent'; readonly tail?: ApprovalTimelineTail };
+
 export interface ApprovalTimelineStore {
   append(tenant: TenantId, input: ApprovalTimelineAppendInput): Promise<ApprovalTimelineTail>;
+  /** Atomically append one host resolution only if its request remains current. */
+  resolvePending(
+    tenant: TenantId,
+    input: ApprovalTimelineResolvePendingInput,
+  ): Promise<ApprovalTimelineResolvePendingResult>;
   read(tenant: TenantId, taskId: string): Promise<ApprovalTimelineTail | undefined>;
 }
 
@@ -120,6 +144,25 @@ export function validateApprovalTimelineAppend(
     );
   }
   return { capacity, ttlMs, event: parsed.data.event };
+}
+
+export function validateApprovalTimelineResolve(
+  input: ApprovalTimelineResolvePendingInput,
+): ValidatedApprovalTimelineAppend {
+  const validated = validateApprovalTimelineAppend(input);
+  const expected = z
+    .object({
+      expectedSourceEnvelopeId: NonBlankIdSchema,
+      expectedRevision: z.number().int().positive(),
+    })
+    .safeParse(input);
+  if (!expected.success || validated.event.type !== 'approval_resolved' || validated.event.resolvedBy !== 'host') {
+    throw new ByokCloudError(
+      'coordination_input_invalid',
+      'Host approval resolution requires an exact pending source/revision and a host resolution event.',
+    );
+  }
+  return validated;
 }
 
 export function approvalTimelineKey(tenant: TenantId, taskId: string): string {

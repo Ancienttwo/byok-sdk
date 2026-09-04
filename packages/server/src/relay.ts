@@ -22,6 +22,9 @@ interface TaskRelayState {
   readonly terminal: Promise<void>;
   settleTerminal: () => void;
   terminalSettled: boolean;
+  provisional: boolean;
+  readonly early: Array<{ readonly envelope: InboundCommitted['envelope']; readonly at: string }>;
+  latestApprovalRequestSourceEnvelopeId?: string;
   claimedRuntime?: RuntimeId;
   reclaimTimer?: ReturnType<typeof setTimeout>;
 }
@@ -51,8 +54,10 @@ export interface TaskEventRelayOptions {
  * `task.state` event stream because the pre-fold feed carried it there; the
  * authoritative copy is `TaskAttempt.claimedRuntime`).
  *
- * It is told about a task only by {@link noteDispatched}. An envelope naming a
- * task this server never dispatched is folded for nobody and allocates nothing —
+ * Dispatch first {@link provision}s a known task id, then activates it with
+ * {@link noteDispatched} after the kernel has accepted its offer. Envelopes
+ * that arrive in that narrow interval are buffered, not dropped. An envelope
+ * naming a task this server never dispatched is folded for nobody and allocates nothing —
  * otherwise a device could grow this map without bound by guessing task ids,
  * and the kernel's gate deliberately treats such an envelope as a harmless
  * store no-op rather than a rejection.
@@ -75,7 +80,12 @@ export class TaskEventRelay implements ByokCloudObserver {
    * The composition uses it to run the implicit-approval-resume check, which
    * needs a store read and therefore cannot happen inline here.
    */
-  onTaskActivity: ((taskId: string) => void) | undefined;
+  onTaskActivity: ((
+    taskId: string,
+    pendingRequestSourceEnvelopeId: string | undefined,
+    activitySourceEnvelopeId: string,
+    activityAt: string,
+  ) => void) | undefined;
 
   constructor(options: TaskEventRelayOptions) {
     this.#connections = options.connections;
@@ -99,15 +109,35 @@ export class TaskEventRelay implements ByokCloudObserver {
     this.#serverEvents.push(event);
   }
 
+  /** Pre-register a task id before its offer enqueue can become observable. */
+  provision(taskId: string): void {
+    this.#open(taskId, true);
+  }
+
+  /** Forget an enqueue that failed before it produced an offer. */
+  abort(taskId: string): void {
+    const state = this.#tasks.get(taskId);
+    if (state === undefined || !state.provisional) return;
+    if (state.reclaimTimer !== undefined) clearTimeout(state.reclaimTimer);
+    state.settleTerminal();
+    state.queue.close();
+    this.#tasks.delete(taskId);
+  }
+
   /**
    * Open the relay for a task this server just dispatched, and publish its
    * `Offered` origin on both feeds. `at` is the offer envelope's own timestamp,
    * so the feed and the snapshot agree on when the task began.
    */
   noteDispatched(taskId: string, at: string): void {
-    const state = this.#open(taskId);
+    const existing = this.#tasks.get(taskId);
+    const state = existing ?? this.#open(taskId);
+    if (existing !== undefined && !state.provisional) return;
+    state.provisional = false;
     state.queue.push({ kind: 'state', state: 'Offered', at });
     this.emitServerEvent({ kind: 'task.created', taskId, at });
+    const early = state.early.splice(0);
+    for (const input of early) this.#handleTaskEnvelope(state, taskId, input.envelope, input.at);
   }
 
   /** The per-task feed backing `TaskHandle.events()`, replayed from the start of what is retained. */
@@ -160,6 +190,19 @@ export class TaskEventRelay implements ByokCloudObserver {
     const state = this.#tasks.get(taskId);
     if (state === undefined) return;
 
+    if (state.provisional) {
+      state.early.push({ envelope, at });
+      return;
+    }
+    this.#handleTaskEnvelope(state, taskId, envelope, at);
+  }
+
+  #handleTaskEnvelope(
+    state: TaskRelayState,
+    taskId: string,
+    envelope: InboundCommitted['envelope'],
+    at: string,
+  ): void {
     switch (envelope.type) {
       case 'task.claim':
         if (envelope.payload.runtime !== undefined) state.claimedRuntime = envelope.payload.runtime;
@@ -170,13 +213,26 @@ export class TaskEventRelay implements ByokCloudObserver {
         return;
       case 'task.progress':
         for (const event of envelope.payload.events) state.queue.push({ kind: 'agent', event });
-        this.onTaskActivity?.(taskId);
+        if (envelope.payload.events.length > 0) {
+          this.onTaskActivity?.(
+            taskId,
+            state.latestApprovalRequestSourceEnvelopeId,
+            envelope.id,
+            envelope.ts,
+          );
+        }
         return;
       case 'task.artifact':
         state.queue.push({ kind: 'artifact', artifact: envelope.payload });
-        this.onTaskActivity?.(taskId);
+        this.onTaskActivity?.(
+          taskId,
+          state.latestApprovalRequestSourceEnvelopeId,
+          envelope.id,
+          envelope.ts,
+        );
         return;
       case 'task.await_approval':
+        state.latestApprovalRequestSourceEnvelopeId = envelope.id;
         state.queue.push({ kind: 'await_approval', summary: envelope.payload.summary });
         this.#transition(state, taskId, 'AwaitApproval', at);
         return;
@@ -276,7 +332,7 @@ export class TaskEventRelay implements ByokCloudObserver {
     state.reclaimTimer = timer;
   }
 
-  #open(taskId: string): TaskRelayState {
+  #open(taskId: string, provisional = false): TaskRelayState {
     const existing = this.#tasks.get(taskId);
     if (existing !== undefined) return existing;
     let settleTerminal!: () => void;
@@ -291,6 +347,8 @@ export class TaskEventRelay implements ByokCloudObserver {
       terminal,
       settleTerminal,
       terminalSettled: false,
+      provisional,
+      early: [],
     };
     this.#tasks.set(taskId, created);
     return created;

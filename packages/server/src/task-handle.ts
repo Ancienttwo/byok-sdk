@@ -102,18 +102,6 @@ export interface TaskHandleDeps {
    * gone. The snapshot projection itself — never a second derivation.
    */
   readonly readState: (taskId: string) => Promise<TaskState | undefined>;
-  /**
-   * Record a host-side approval decision on the task's durable approval
-   * timeline — the same authority the kernel's own staleness gate reads. See
-   * `index.ts` for why the façade writes it rather than keeping a private
-   * "already resolved" set beside it.
-   */
-  readonly recordHostApproval: (
-    taskId: string,
-    decision: 'approve' | 'reject',
-    approvalId: string | undefined,
-    sourceEnvelopeId: string,
-  ) => Promise<void>;
   /** The read-back this handle's `result()` answers with. */
   readonly readResult: (taskId: string) => Promise<TaskResult | undefined>;
 }
@@ -151,16 +139,19 @@ export function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHand
     },
 
     async approve(opts?: { approvalId?: string }): Promise<void> {
-      const enqueued = await deps.cloud.approveTask(deps.tenant, taskId, opts);
-      await settleHostDecision(deps, taskId, 'approve', enqueued.envelope);
+      await deps.cloud.approveTask(deps.tenant, taskId, opts);
+      // Cloud atomically records the host decision in the one approval
+      // timeline before this notification is enqueued. The relay remains a
+      // notification projection, never a second writer for that authority.
+      deps.relay.noteHostTransition(taskId, 'Running', new Date().toISOString());
     },
 
     async reject(reason?: string, opts?: { approvalId?: string }): Promise<void> {
-      const enqueued = await deps.cloud.rejectTask(deps.tenant, taskId, {
+      await deps.cloud.rejectTask(deps.tenant, taskId, {
         ...(opts?.approvalId === undefined ? {} : { approvalId: opts.approvalId }),
         ...(reason === undefined ? {} : { reason }),
       });
-      await settleHostDecision(deps, taskId, 'reject', enqueued.envelope);
+      deps.relay.noteHostTransition(taskId, 'Running', new Date().toISOString());
     },
 
     async steer(text: string): Promise<void> {
@@ -179,6 +170,11 @@ export function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHand
     },
 
     async result(): Promise<TaskResult> {
+      // Notification delivery is not terminal liveness authority. A terminal
+      // can be durable before a TaskHandle is constructed (or after relay
+      // reclamation), so always ask the durable projection before waiting.
+      const alreadyRecorded = await deps.readResult(taskId);
+      if (alreadyRecorded !== undefined) return alreadyRecorded;
       await terminal;
       const result = await deps.readResult(taskId);
       if (result === undefined) {
@@ -190,21 +186,4 @@ export function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHand
       return result;
     },
   };
-}
-
-async function settleHostDecision(
-  deps: TaskHandleDeps,
-  taskId: string,
-  decision: 'approve' | 'reject',
-  envelope: { readonly id: string; readonly type: string; readonly payload: unknown },
-): Promise<void> {
-  const approvalId =
-    envelope.type === 'task.approve' || envelope.type === 'task.reject'
-      ? (envelope.payload as { readonly approvalId?: string }).approvalId
-      : undefined;
-  await deps.recordHostApproval(taskId, decision, approvalId, envelope.id);
-  // The task resumes on the host's decision, exactly as it did before the fold:
-  // an operator who approved is not left looking at a paused task until the
-  // runtime happens to report back.
-  deps.relay.noteHostTransition(taskId, 'Running', new Date().toISOString());
 }

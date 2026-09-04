@@ -73,6 +73,10 @@ export interface PendingApproval {
    * `approvalId` proceeds untargeted exactly as it does on the server.
    */
   readonly approvalId?: string;
+  /** Immutable daemon envelope identity for this exact request observation. */
+  readonly sourceEnvelopeId: string;
+  /** Monotonic timeline revision for this exact request observation. */
+  readonly revision: number;
 }
 
 /**
@@ -87,7 +91,11 @@ export function pendingApproval(
   for (const entry of tail.entries) {
     const event = entry.event;
     if (event.type === 'approval_requested') {
-      pending = event.approvalId === undefined ? {} : { approvalId: event.approvalId };
+      pending = {
+        sourceEnvelopeId: entry.sourceEnvelopeId,
+        revision: entry.revision,
+        ...(event.approvalId === undefined ? {} : { approvalId: event.approvalId }),
+      };
       continue;
     }
     if (pending === undefined) continue;

@@ -25,11 +25,9 @@ async function claimAndStart(daemon: FakeLongPollDaemon, handle: TaskHandle): Pr
 /**
  * Running -> AwaitApproval over the long-poll send path.
  *
- * `approvalId` is REQUIRED here, unlike the deleted WS helper's optional
- * parameter: the implicit-resume check reads the durable approval timeline's
- * pending slot and can only record a resolution against a reported id
- * (`index.ts`'s `relay.onTaskActivity`). The pre-M5 no-id variant is pinned as
- * a `2d gap:` at the bottom of this file.
+ * `approvalId` is optional: the timeline's request source/revision, rather
+ * than a synthesized approval id, pins the exact pending request an activity
+ * may resolve.
  */
 async function moveToAwaitApproval(
   daemon: FakeLongPollDaemon,
@@ -132,7 +130,13 @@ describe('M4 Phase 3: implicit approval resume (daemon traffic while the read mo
     // waitForTaskEvent always replays from the start of the task's whole
     // history, so re-waiting on the same predicate would just re-match that
     // EARLIER event instead of waiting for this one.
-    await daemon.send(createEnvelope('task.progress', { seq: 1, events: [] }, { taskId: handle.taskId }));
+    await daemon.send(
+      createEnvelope(
+        'task.progress',
+        { seq: 1, events: [{ type: 'progress', text: 'continued after local approval' }] },
+        { taskId: handle.taskId },
+      ),
+    );
     await waitForServerEvent(instance, (e) => e.kind === 'task.approval_resolved_implicit' && e.taskId === handle.taskId);
     expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
 
@@ -162,18 +166,7 @@ describe('M4 Phase 3: implicit approval resume (daemon traffic while the read mo
     expect((await instance.tasks.get(handle1.taskId))?.state).toBe('Cancelled'); // unchanged, not resumed/re-failed
   });
 
-  // 2d gap: the pre-M5 (no `approvalId`) variant of case (a). The deleted hub
-  // held `pendingApprovalId` as one mutable slot on its own task record and
-  // resumed on ANY later daemon traffic, id or not. The façade's resume
-  // (`index.ts`'s `relay.onTaskActivity`) records the resolution on the durable
-  // approval timeline, whose `approval_resolved` entry REQUIRES an
-  // `approvalId` (`packages/cloud/src/approval-timeline.ts`), so a legacy
-  // daemon's id-less approval stays pending and the task keeps reading
-  // `AwaitApproval` for ever. Same family as the notes' 2a "narrow known hole"
-  // for a HOST decision on a pre-M5 approval. Orchestrator decision: let the
-  // timeline carry an id-less resolution, or declare pre-M5 approvals
-  // unresolvable and document the break in Step 5.
-  it.skip('(a-legacy) task.progress arriving while AwaitApproval with NO reported approvalId still implicitly resumes to Running', async () => {
+  it('(a-legacy) task.progress arriving while AwaitApproval with NO reported approvalId still implicitly resumes to Running', async () => {
     const { byok: instance, daemon } = await start();
 
     const handle = await instance.dispatch({ instruction: 'legacy daemon, no approvalId' });

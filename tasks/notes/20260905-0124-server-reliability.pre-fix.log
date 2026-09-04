@@ -1,0 +1,89 @@
+$ vitest run src/__tests__/server-reliability-regression.test.ts
+
+ RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issues-141-144-server/packages/server
+
+ ❯ src/__tests__/server-reliability-regression.test.ts (4 tests | 4 failed) 1122ms
+     × #141 reserves a legacy attempt before mailbox visibility and retries one stable offer only 8ms
+     × #142 result() returns an already-durable terminal without waiting for a relay notification 31ms
+     × #143 retries the same host approval outcome and does not enqueue another executable control 50ms
+     × #144 resolves an id-less pending approval only after a later committed activity 1032ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/server-reliability-regression.test.ts > issues #141-#144 server reliability regressions > #141 reserves a legacy attempt before mailbox visibility and retries one stable offer only
+AssertionError: expected undefined to match object { taskId: 'task-legacy-retry', …(1) }
+
+- Expected:
+{
+  "deviceId": "device-a",
+  "taskId": "task-legacy-retry",
+}
+
++ Received:
+undefined
+
+ ❯ src/__tests__/server-reliability-regression.test.ts:94:57
+     92|
+     93|     await expect(cloud.enqueueOffer(TENANT, 'device-a', input)).reject…
+     94|     expect(await cloud.readTaskAttempt(TENANT, taskId)).toMatchObject(…
+       |                                                         ^
+     95|
+     96|     await cloud.enqueueOffer(TENANT, 'device-a', input);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/__tests__/server-reliability-regression.test.ts > issues #141-#144 server reliability regressions > #142 result() returns an already-durable terminal without waiting for a relay notification
+AssertionError: promise rejected "Error: relay liveness wait" instead of resolving
+ ❯ src/__tests__/server-reliability-regression.test.ts:123:6
+    121|         new Promise<never>((_resolve, reject) => setTimeout(() => reje…
+    122|       ]),
+    123|     ).resolves.toEqual({ state: 'Complete', summary: 'durably complete…
+       |      ^
+    124|     relay.stop();
+    125|   });
+
+Caused by: Error: relay liveness wait
+ ❯ Timeout._onTimeout src/__tests__/server-reliability-regression.test.ts:121:74
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/__tests__/server-reliability-regression.test.ts > issues #141-#144 server reliability regressions > #143 retries the same host approval outcome and does not enqueue another executable control
+AssertionError: promise rejected "ByokCloudError: Task task_6d9f4a8b-e392-4… { code: '…' }" instead of resolving
+ ❯ src/__tests__/server-reliability-regression.test.ts:134:67
+    132|
+    133|     await handle.approve({ approvalId: 'approval-retry' });
+    134|     await expect(handle.approve({ approvalId: 'approval-retry' })).res…
+       |                                                                   ^
+    135|     await expect(handle.reject('conflicting decision', { approvalId: '…
+    136|       code: 'coordination_input_invalid',
+
+Caused by: ByokCloudError: Task task_6d9f4a8b-e392-40b8-9d05-69811455dd13 has no pending approval to approve.
+ ❯ resolveApproval ../cloud/src/cloud.ts:1041:13
+ ❯ Object.approve src/task-handle.ts:154:24
+ ❯ src/__tests__/server-reliability-regression.test.ts:134:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'task_not_awaiting_approval' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  src/__tests__/server-reliability-regression.test.ts > issues #141-#144 server reliability regressions > #144 resolves an id-less pending approval only after a later committed activity
+Error: waitFor: condition never became true
+ ❯ waitFor src/__tests__/test-support.ts:496:51
+    494|   for (;;) {
+    495|     if (await check()) return;
+    496|     if (Date.now() - startedAt > timeoutMs) throw new Error('waitFor: …
+       |                                                   ^
+    497|     await new Promise((resolve) => setTimeout(resolve, 10));
+    498|   }
+ ❯ src/__tests__/server-reliability-regression.test.ts:158:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed (4)
+   Start at  01:36:51
+   Duration  1.59s (transform 192ms, setup 0ms, import 306ms, tests 1.12s, environment 0ms)
+
+error: script "test" exited with code 1
+PRE_FIX_EXIT=1

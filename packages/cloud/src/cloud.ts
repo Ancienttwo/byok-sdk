@@ -32,7 +32,7 @@ import {
 } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { StaleApprovalError, pendingApproval } from './approval-control';
+import { StaleApprovalError, pendingApproval, type PendingApproval } from './approval-control';
 import {
   BYOK_ACTIVITY_PATH,
   BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE,
@@ -208,6 +208,33 @@ function isTerminalAttemptStatus(status: TaskAttemptStatus): boolean {
 
 function sameAgentRef(expected: AgentRef, actual: AgentRef | undefined): boolean {
   return actual?.agentId === expected.agentId && actual.profileRevision === expected.profileRevision;
+}
+
+/**
+ * The wire requires UUID-shaped envelope ids, while retries need a stable
+ * identity.  Reserve UUIDv8 for this opaque sha256-derived namespace rather
+ * than pretending a fresh random UUID can identify the same logical action.
+ */
+function uuidFromSha256(value: string): string {
+  const match = /^sha256:([0-9a-f]{64})$/.exec(value);
+  if (match === null) throw new Error('CloudCrypto.sha256 must return canonical sha256 hex');
+  const digest = match[1];
+  if (digest === undefined) throw new Error('CloudCrypto.sha256 must return canonical sha256 hex');
+  const hex = digest.slice(0, 32).split('');
+  hex[12] = '8';
+  hex[16] = ['8', '9', 'a', 'b'][Number.parseInt(hex[16]!, 16) & 0x03]!;
+  return `${hex.slice(0, 8).join('')}-${hex.slice(8, 12).join('')}-${hex.slice(12, 16).join('')}-${hex.slice(16, 20).join('')}-${hex.slice(20).join('')}`;
+}
+
+function sameOfferEnvelope(expected: Envelope, actual: Envelope): boolean {
+  // `ts` is deliberately excluded: it records when this particular producer
+  // invocation ran, not the task body that a stable message identity names.
+  return (
+    expected.id === actual.id &&
+    expected.type === actual.type &&
+    expected.task_id === actual.task_id &&
+    JSON.stringify(expected.payload) === JSON.stringify(actual.payload)
+  );
 }
 
 export interface ByokCloudOptions {
@@ -851,72 +878,93 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   ): Promise<EnqueuedOffer> {
     const stores = tenantStoresFor(controlPlane(tenant), root);
     const taskId = requestedTaskId ?? `task_${options.crypto.randomUuid()}`;
-    const messageId = options.crypto.randomUuid();
-    // Strict Agent attempts reserve their identity before delivery allocation.
-    // This makes concurrent re-enqueues converge on one durable AgentRef
-    // instead of allowing two mailbox bodies to race a later task.open.
+    const messageId = uuidFromSha256(
+      await options.crypto.sha256(
+        new TextEncoder().encode(
+          JSON.stringify({ domain: 'byok:task-offer', tenant, taskId, deviceId, agentRef }),
+        ),
+      ),
+    );
+    // An attempt is the task authority, so reserve/open it BEFORE the offer is
+    // observable in a mailbox.  The stable message identity then makes an
+    // append failure retry converge on the one offer rather than allocating a
+    // second executable body.
     const reservation =
       agentRef === undefined
         ? undefined
         : await stores.tasks.reserveAgentOffer({ taskId, deviceId, agentRef });
-    const openedBeforeAppend = reservation?.attempt;
+    const openedBeforeAppend =
+      reservation?.attempt ??
+      (agentRef === undefined ? await stores.tasks.open({ taskId, deviceId }) : undefined);
     if (
-      agentRef !== undefined &&
-      (openedBeforeAppend === undefined ||
-        openedBeforeAppend.deviceId !== deviceId ||
-        openedBeforeAppend.agentRef === undefined ||
-        !sameAgentRef(agentRef, openedBeforeAppend.agentRef))
+      openedBeforeAppend === undefined ||
+      openedBeforeAppend.deviceId !== deviceId ||
+      (agentRef === undefined
+        ? openedBeforeAppend.agentRef !== undefined
+        : openedBeforeAppend.agentRef === undefined || !sameAgentRef(agentRef, openedBeforeAppend.agentRef))
     ) {
       throw new ByokCloudError(
-        'agent_ref_mismatch',
-        `Task ${taskId} already has a different durable Agent identity or target device.`,
+        agentRef === undefined ? 'coordination_input_invalid' : 'agent_ref_mismatch',
+        `Task ${taskId} already has a different durable target or Agent identity.`,
       );
     }
-    if (reservation !== undefined && !reservation.created) {
+
+    const offerReceiptKey = `task-offer:${messageId}`;
+    const deliveryReceiptKey = `task-offer-delivered:${messageId}`;
+    // Existing strict dispatch keeps its observable one-winner behavior once
+    // an offer is delivered. A missing delivery marker is the sole retryable
+    // state: it is how an append failure can be retried without treating a
+    // completed Agent placement as a second dispatch.
+    if (
+      agentRef !== undefined &&
+      reservation?.created === false &&
+      (await stores.receipts.get(deliveryReceiptKey)) !== undefined
+    ) {
       throw new ByokCloudError(
         'agent_task_already_exists',
         `Task ${taskId} already has a durable Agent attempt and cannot be enqueued again.`,
       );
     }
 
-    let message;
-    try {
-      await beforeMailbox?.(stores, taskId);
-      message = await stores.mailbox.append({
-        deviceId,
-        messageId,
-        materialize: async (seq) => {
-          // Core stays protocol-free: the mailbox reserves the one authoritative
-          // delivery number, then asks this producer to build opaque bytes while
-          // allocation and insertion are still serialized per device.
-          const envelope = buildEnvelope(taskId, seq, messageId);
-          const body = encodeEnvelope(envelope);
-          const bytes = new TextEncoder().encode(body);
-          return {
-            body,
-            bodyHash: contentHash(await options.crypto.sha256(bytes)),
-            byteSize: BigInt(bytes.length),
-          };
-        },
-      });
-    } catch (error) {
-      if (openedBeforeAppend !== undefined) {
-        try {
-          await stores.tasks.recordStatus({
-            taskId,
-            status: 'failed',
-            agentRef,
-            terminalCause: 'mailbox append failed before Agent offer delivery',
-          });
-        } catch (cleanupError) {
-          throw new AggregateError(
-            [error, cleanupError],
-            `Agent task ${taskId} could not be delivered or durably closed`,
-          );
-        }
-      }
-      throw error;
+    // Reserve the immutable executable semantics before a fallible mailbox
+    // append. The attempt intentionally contains no payload; this existing
+    // idempotent receipt authority supplies the missing comparison so a retry
+    // after append failure cannot silently replace an undelivered body.
+    const proposed = buildEnvelope(taskId, 0, messageId);
+    const proposedBody = JSON.stringify({
+      deviceId,
+      type: proposed.type,
+      payload: proposed.payload,
+    });
+    const recorded = await stores.receipts.record({
+      key: offerReceiptKey,
+      body: proposedBody,
+    });
+    if (!recorded.created && recorded.receipt.body !== proposedBody) {
+      throw new ByokCloudError(
+        'coordination_input_invalid',
+        `Task ${taskId} already has a different executable offer body.`,
+      );
     }
+
+    await beforeMailbox?.(stores, taskId);
+    const message = await stores.mailbox.append({
+      deviceId,
+      messageId,
+      materialize: async (seq) => {
+        // Core stays protocol-free: the mailbox reserves the one authoritative
+        // delivery number, then asks this producer to build opaque bytes while
+        // allocation and insertion are still serialized per device.
+        const envelope = buildEnvelope(taskId, seq, messageId);
+        const body = encodeEnvelope(envelope);
+        const bytes = new TextEncoder().encode(body);
+        return {
+          body,
+          bodyHash: contentHash(await options.crypto.sha256(bytes)),
+          byteSize: BigInt(bytes.length),
+        };
+      },
+    });
     const envelope = decodeEnvelope(message.body);
     if (envelope.seq !== message.seq) {
       throw new ByokCloudError(
@@ -924,14 +972,22 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         `Mailbox stored offer seq ${String(envelope.seq)} at row ${message.seq}; the daemon's redelivery cursor would be wrong.`,
       );
     }
-
-    const attempt =
-      openedBeforeAppend ??
-      (await stores.tasks.open({
-        taskId,
-        deviceId,
-      }));
-    return { taskId, seq: message.seq, envelope, attempt };
+    if (!sameOfferEnvelope(buildEnvelope(taskId, message.seq, messageId), envelope)) {
+      throw new ByokCloudError(
+        'coordination_input_invalid',
+        `Task ${taskId} already has a different executable offer body.`,
+      );
+    }
+    if (agentRef !== undefined) {
+      const delivered = await stores.receipts.record({ key: deliveryReceiptKey, body: messageId });
+      if (reservation?.created === false && !delivered.created) {
+        throw new ByokCloudError(
+          'agent_task_already_exists',
+          `Task ${taskId} already has a durable Agent attempt and cannot be enqueued again.`,
+        );
+      }
+    }
+    return { taskId, seq: message.seq, envelope, attempt: openedBeforeAppend };
   }
 
   async function assertAgentCapabilities(
@@ -1013,6 +1069,74 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     return { seq: message.seq, envelope };
   }
 
+  async function approvalDecisionSource(
+    tenant: TenantId,
+    taskId: string,
+    attempt: TaskAttempt,
+    pending: PendingApproval,
+    decision: 'approve' | 'reject',
+  ): Promise<string> {
+    const agent = attempt.agentRef;
+    return uuidFromSha256(
+      await options.crypto.sha256(
+        new TextEncoder().encode(
+          JSON.stringify({
+            domain: 'byok:approval-decision',
+            tenant,
+            taskId,
+            deviceId: attempt.deviceId,
+            ownerDeviceId: attempt.ownerDeviceId,
+            agentRef: agent,
+            requestSourceEnvelopeId: pending.sourceEnvelopeId,
+            requestRevision: pending.revision,
+            decision,
+          }),
+        ),
+      ),
+    );
+  }
+
+  function latestApprovalRequest(tail: ApprovalTimelineTail | undefined): PendingApproval | undefined {
+    if (tail === undefined) return undefined;
+    for (let index = tail.entries.length - 1; index >= 0; index -= 1) {
+      const entry = tail.entries[index]!;
+      if (entry.event.type !== 'approval_requested') continue;
+      return {
+        sourceEnvelopeId: entry.sourceEnvelopeId,
+        revision: entry.revision,
+        ...(entry.event.approvalId === undefined ? {} : { approvalId: entry.event.approvalId }),
+      };
+    }
+    return undefined;
+  }
+
+  async function recordedHostDecision(
+    tenant: TenantId,
+    taskId: string,
+    attempt: TaskAttempt,
+    tail: ApprovalTimelineTail | undefined,
+    request: PendingApproval,
+  ): Promise<{ readonly decision: 'approve' | 'reject'; readonly approvalId?: string } | undefined> {
+    for (const decision of ['approve', 'reject'] as const) {
+      const sourceEnvelopeId = await approvalDecisionSource(tenant, taskId, attempt, request, decision);
+      const index = tail?.entries.findIndex((candidate) => candidate.sourceEnvelopeId === sourceEnvelopeId) ?? -1;
+      const entry = index < 0 ? undefined : tail!.entries[index];
+      if (entry?.event.type !== 'approval_resolved' || entry.event.resolvedBy !== 'host') continue;
+      const laterResolution = tail!.entries.slice(index + 1).some(
+        (candidate) =>
+          candidate.event.type === 'approval_resolved' &&
+          (request.approvalId === undefined || candidate.event.approvalId === request.approvalId),
+      );
+      if (!laterResolution) {
+        return {
+          decision,
+          ...(entry.event.approvalId === undefined ? {} : { approvalId: entry.event.approvalId }),
+        };
+      }
+    }
+    return undefined;
+  }
+
   /**
    * The shared body of `approveTask`/`rejectTask` — one gate order, two
    * decisions, so the two host calls cannot drift apart. See
@@ -1036,8 +1160,42 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         `Task ${taskId} already reached ${attempt.status}; there is no approval left to ${decision}.`,
       );
     }
-    const pending = pendingApproval(await stores.approvals.read(taskId));
+    const tail = await stores.approvals.read(taskId);
+    const pending = pendingApproval(tail);
+    const latestRequest = latestApprovalRequest(tail);
     if (pending === undefined) {
+      // A response may have been lost after the conditional timeline commit or
+      // after mailbox append.  Re-read the stable decision source and replay
+      // the exact logical outcome; an opposite decision remains fail-closed.
+      if (latestRequest !== undefined) {
+        const recorded = await recordedHostDecision(tenant, taskId, attempt, tail, latestRequest);
+        if (recorded !== undefined) {
+          if (recorded.decision !== decision) {
+            throw new ByokCloudError(
+              'coordination_input_invalid',
+              `Task ${taskId} already has the opposite host approval decision.`,
+            );
+          }
+          const ownerDeviceId = attempt.ownerDeviceId;
+          if (ownerDeviceId === undefined) {
+            throw new ByokCloudError(
+              'task_not_awaiting_approval',
+              `Task ${taskId} has no owning device to receive its recorded ${decision}.`,
+            );
+          }
+          const messageId = await approvalDecisionSource(tenant, taskId, attempt, latestRequest, decision);
+          const targeting = recorded.approvalId === undefined ? {} : { approvalId: recorded.approvalId };
+          return enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>
+            decision === 'approve'
+              ? createEnvelope('task.approve', targeting, { id: messageId, taskId, seq })
+              : createEnvelope(
+                  'task.reject',
+                  { ...targeting, ...(opts?.reason === undefined ? {} : { reason: opts.reason }) },
+                  { id: messageId, taskId, seq },
+                ),
+          );
+        }
+      }
       throw new ByokCloudError(
         'task_not_awaiting_approval',
         `Task ${taskId} has no pending approval to ${decision}.`,
@@ -1061,9 +1219,56 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         `Task ${taskId} has no owning device; no runtime is paused on an approval to ${decision}.`,
       );
     }
+    // A pre-M5 request has no native id to validate against, so a caller's
+    // optional target remains an untargeted control payload exactly as the
+    // legacy API promised. The durable decision identity remains the request
+    // source/revision, never that caller-supplied value.
     const approvalId = opts?.approvalId ?? pending.approvalId;
-    const messageId = options.crypto.randomUuid();
-    const targeting = approvalId === undefined ? {} : { approvalId };
+    const messageId = await approvalDecisionSource(tenant, taskId, attempt, pending, decision);
+    const event = {
+      type: 'approval_resolved' as const,
+      ...(approvalId === undefined ? {} : { approvalId }),
+      decision,
+      resolvedBy: 'host' as const,
+      at: new Date().toISOString(),
+    };
+    const resolved = await root.cloud.approvals.resolvePending(tenant, {
+      taskId,
+      sourceEnvelopeId: messageId,
+      expectedSourceEnvelopeId: pending.sourceEnvelopeId,
+      expectedRevision: pending.revision,
+      event,
+    });
+    let deliveredApprovalId = approvalId;
+    if (resolved.status === 'conflict' || resolved.status === 'superseded' || resolved.status === 'absent') {
+      const currentTail = resolved.tail ?? (await stores.approvals.read(taskId));
+      const currentPending = pendingApproval(currentTail);
+      const recorded = await recordedHostDecision(tenant, taskId, attempt, currentTail, pending);
+      if (recorded?.decision === decision) {
+        // A concurrent identical resolver won first. Its event timestamp is
+        // intentionally not a competing identity; the stable decision source
+        // is, and mailbox append below replays that source exactly once.
+        deliveredApprovalId = recorded.approvalId;
+      } else if (recorded !== undefined) {
+        throw new ByokCloudError(
+          'coordination_input_invalid',
+          `Task ${taskId} already has the opposite host approval decision.`,
+        );
+      } else if (
+        currentPending !== undefined &&
+        opts?.approvalId !== undefined &&
+        currentPending.approvalId !== undefined &&
+        currentPending.approvalId !== opts.approvalId
+      ) {
+        throw new StaleApprovalError(taskId, opts.approvalId, currentPending.approvalId);
+      } else {
+        throw new ByokCloudError(
+          'task_not_awaiting_approval',
+          `Task ${taskId} no longer has the pending approval to ${decision}.`,
+        );
+      }
+    }
+    const targeting = deliveredApprovalId === undefined ? {} : { approvalId: deliveredApprovalId };
     return enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>
       decision === 'approve'
         ? createEnvelope('task.approve', targeting, { id: messageId, taskId, seq })
