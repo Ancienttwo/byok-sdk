@@ -10,7 +10,7 @@
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: sha256:5dbb9838e3b0b41fa4a1bd3a80fe4295d5a95bf767ea984e6268bdd6e88155c5
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: 10bb9fc76b0a1ee3a533f50a42e869235c5c7bd1
+> **Reviewed Target Revision**: 4894bc7c7b8a816e959fba840c6c2a3028828116
 
 ## Human Review Card
 
@@ -45,11 +45,11 @@
 > **Actor**: not-applicable
 > **Reviewed Subject SHA256**: sha256:5dbb9838e3b0b41fa4a1bd3a80fe4295d5a95bf767ea984e6268bdd6e88155c5
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: 10bb9fc76b0a1ee3a533f50a42e869235c5c7bd1
-> **Verification Evidence SHA256**: sha256:eec03f0b4f3a45499d45ddd89bc878ab08f8216a4fa92f9cf7e57aae1ffac0c8
-> **Issued At**: 2026-09-03T21:10:19.586Z
+> **Reviewed Target Revision**: 4894bc7c7b8a816e959fba840c6c2a3028828116
+> **Verification Evidence SHA256**: sha256:a0220301831c269ff7816277ad875bb481d9c7660dc97060d0a1dbc49c3fa84b
+> **Issued At**: 2026-09-04T05:21:18.021Z
 
-- Summary: WP3B Step 4a accepted on the published facade base; durable long-poll acknowledgement, bounded local dedup, cancellable stop, and completed workflow checks passed exact-subject review.
+- Summary: WP3B Step 4a accepted after rebasing onto the integrated Step 3 main; durable long-poll acknowledgement, bounded dedup, and cancellable stop passed exact-subject gates.
 - Findings: none
 
 ## Behavior Diff Notes
