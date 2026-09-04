@@ -128,6 +128,28 @@ export function runActivityConformance(
       });
     });
 
+    it('returns the existing tail for an exact source batch replay and rejects a conflicting replay', async () => {
+      await withActivityComposition(factory, async ({ store }) => {
+        const input = {
+          taskId: 'task-source-replay',
+          sourceEnvelopeId: 'envelope-replay',
+          batchSeq: 9,
+          events: [progress('first'), { type: 'turn_end' }],
+          dropped: 2,
+          ttlMs: 300_000,
+          capacity: 4,
+        } as const;
+        const first = await store.append(TENANT_A, input);
+        await expect(store.append(TENANT_A, input)).resolves.toEqual(first);
+        await expect(
+          store.append(TENANT_A, { ...input, events: [progress('changed'), { type: 'turn_end' }] }),
+        ).rejects.toThrow();
+        await expect(
+          store.append(TENANT_A, { ...input, dropped: 3 }),
+        ).rejects.toThrow();
+      });
+    });
+
     it('treats an expired tail as absent', async () => {
       await withActivityComposition(factory, async (handle) => {
         await handle.store.append(TENANT_A, {

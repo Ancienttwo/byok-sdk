@@ -208,6 +208,7 @@ export {
   TimelineEventSchema,
   ActivityAppendRequestSchema,
   activityCursor,
+  activitySourceBatchState,
   parseTimelineEvents,
   projectTimelineEvents,
   validateActivityAppend,

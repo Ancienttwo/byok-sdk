@@ -50,6 +50,7 @@ export declare const TimelineEventSchema: z.ZodObject<{
     sourceEnvelopeId: z.ZodString;
     batchSeq: z.ZodNumber;
     eventIndex: z.ZodNumber;
+    sourceDropped: z.ZodOptional<z.ZodNumber>;
     receivedAt: z.ZodISODateTime;
     event: z.ZodUnion<readonly [z.ZodDiscriminatedUnion<[z.ZodObject<{
         type: z.ZodLiteral<"progress">;
@@ -112,11 +113,23 @@ export interface ActivityAppendInput {
     readonly capacity?: number;
 }
 export interface ActivityStore {
+    /**
+     * `sourceEnvelopeId` is the per-envelope idempotency authority. Repeating
+     * its exact canonical batch returns the existing tail; changing any batch
+     * fact under that identity is rejected rather than appended as a second
+     * observation.
+     */
     append(tenant: TenantId, input: ActivityAppendInput): Promise<ActivityTail>;
     read(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined>;
 }
 export declare function validateActivityAppend(input: ActivityAppendInput): number;
 export declare function projectTimelineEvents(input: ActivityAppendInput, receivedAt: string): readonly TimelineEvent[];
+/**
+ * Whether one live tail already contains this source envelope's canonical
+ * batch. `conflict` includes a partially retained source: its missing events
+ * are not evidence that a different batch may reuse the same source identity.
+ */
+export declare function activitySourceBatchState(entries: readonly TimelineEvent[], input: ActivityAppendInput): 'absent' | 'same' | 'conflict';
 export declare function parseTimelineEvents(value: unknown): readonly TimelineEvent[];
 export declare function compareTimelineEvents(left: TimelineEvent, right: TimelineEvent): number;
 export declare function activityCursor(entries: readonly TimelineEvent[]): ActivityCursor | undefined;
@@ -1548,9 +1561,11 @@ export declare function truthPutHandler(deps: TruthRouteDeps): (c: Context) => P
  *    is not rejected here — the store's own no-op-on-missing behavior covers
  *    the latter, and it covers it per tenant, so a guessed id from another
  *    tenant writes nothing anywhere.
- * 3. **dedup** — an envelope id already seen from this device is a no-op. The
- *    wire is at-least-once (§9); this makes processing at-most-once.
- * 4. **apply** — the lifecycle write.
+ * 3. **apply/recover** — every lifecycle side effect is idempotent under the
+ *    envelope's own durable identity. A retry after a partial failure resumes
+ *    this step rather than being hidden by transport admission.
+ * 4. **dedup** — only after every authoritative side effect converged do we
+ *    mark the envelope complete. The next retry is then a no-op.
  *
  * A duplicate is still a wire-level success (§8.2): it just did not re-run
  * anything. Only `rejected`/`rate_limited` are excluded from `accepted`.
@@ -1674,7 +1689,7 @@ export { SteerRejectedError } from './steer-control';
 export type { SteerRejectionCode } from './steer-control';
 export { assertTaskAttemptListLimit, DEFAULT_ACTIVITY_BOUNDS, DEFAULT_ACTIVITY_CAPACITY, DEFAULT_ACTIVITY_MAX_BYTES, DEFAULT_ACTIVITY_MAX_EVENTS, DEFAULT_ACTIVITY_TTL_MS, DEFAULT_BOARD_CHANNEL_MAX_BYTES, DEFAULT_BOARD_TITLE_MAX_BYTES, DEFAULT_PRESENCE_DETAIL_MAX_BYTES, DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS, DEFAULT_PRESENCE_TTL_MS, } from './coordination';
 export type { ActivityBounds } from './coordination';
-export { TimelineEventSchema, ActivityAppendRequestSchema, activityCursor, parseTimelineEvents, projectTimelineEvents, validateActivityAppend, } from './activity';
+export { TimelineEventSchema, ActivityAppendRequestSchema, activityCursor, activitySourceBatchState, parseTimelineEvents, projectTimelineEvents, validateActivityAppend, } from './activity';
 export type { ActivityAppendInput, ActivityCursor, ActivityStore, ActivityTail, TimelineEvent, } from './activity';
 export { BoardFeedClient, BoardFeedRetryableError, BoardFeedStoppedError } from './coordination-client';
 export type { BoardFeedClientOptions, BoardFeedItem, BoardFeedMode, BoardFeedPage, BoardFeedRead, } from './coordination-client';

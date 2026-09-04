@@ -1,6 +1,7 @@
 import {
   ByokCloudError,
   activityCursor,
+  activitySourceBatchState,
   parseTimelineEvents,
   projectTimelineEvents,
   validateActivityAppend,
@@ -47,11 +48,41 @@ export class PostgresActivityStore implements ActivityStore {
     const incoming = projectTimelineEvents(input, receivedAt);
     const expiresAt = new Date(now.getTime() + input.ttlMs).toISOString();
 
-    // The conflict arm reads activity_tail only after Postgres acquires the row
-    // lock. It sorts the combined typed DTOs by the stable order key before
-    // trimming, so concurrent or delayed batches have the same observable tail
-    // as the in-memory reference.
-    const result = await this.pool.query<TailRow>(
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      // A source-envelope replay must observe the exact row that will be
+      // updated. The advisory lock also serializes first writers, when no row
+      // exists for SELECT ... FOR UPDATE to lock yet.
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1 || E'\\x1f' || $2, 0))`,
+        [tenant, input.taskId],
+      );
+      const locked = await client.query<TailRow>(
+        `SELECT tenant_id, task_id, entries, dropped, capacity, expires_at
+           FROM activity_tail
+          WHERE tenant_id = $1 AND task_id = $2
+          FOR UPDATE`,
+        [tenant, input.taskId],
+      );
+      const stored = locked.rows[0];
+      const live = stored !== undefined && receivedAt < stored.expires_at ? toTail(stored) : undefined;
+      const sourceState = activitySourceBatchState(live?.entries ?? [], input);
+      if (sourceState === 'same') {
+        await client.query('COMMIT');
+        return live!;
+      }
+      if (sourceState === 'conflict') {
+        throw new ByokCloudError(
+          'coordination_input_invalid',
+          `Activity source envelope ${input.sourceEnvelopeId} already belongs to another canonical batch.`,
+        );
+      }
+
+      // The conflict arm reads activity_tail only after the per-tail lock. It
+      // sorts the combined typed DTOs by stable order key before trimming, so
+      // concurrent or delayed batches match the in-memory reference.
+      const result = await client.query<TailRow>(
       `WITH incoming AS (
          SELECT entry
            FROM jsonb_array_elements($4::jsonb) AS element(entry)
@@ -120,15 +151,22 @@ export class PostgresActivityStore implements ActivityStore {
            )
        RETURNING tenant_id, task_id, entries, dropped, capacity, expires_at`,
       [tenant, input.taskId, receivedAt, JSON.stringify(incoming), input.dropped, capacity, expiresAt],
-    );
-    const row = result.rows[0];
-    if (row === undefined) {
-      throw new ByokCloudError(
-        'coordination_input_invalid',
-        `Activity batch ${input.batchSeq} conflicts with the existing typed tail authority.`,
       );
+      const row = result.rows[0];
+      if (row === undefined) {
+        throw new ByokCloudError(
+          'coordination_input_invalid',
+          `Activity batch ${input.batchSeq} conflicts with the existing typed tail authority.`,
+        );
+      }
+      await client.query('COMMIT');
+      return toTail(row);
+    } catch (caught) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw caught;
+    } finally {
+      client.release();
     }
-    return toTail(row);
   }
 
   async read(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined> {

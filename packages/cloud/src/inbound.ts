@@ -20,9 +20,11 @@
  *    is not rejected here — the store's own no-op-on-missing behavior covers
  *    the latter, and it covers it per tenant, so a guessed id from another
  *    tenant writes nothing anywhere.
- * 3. **dedup** — an envelope id already seen from this device is a no-op. The
- *    wire is at-least-once (§9); this makes processing at-most-once.
- * 4. **apply** — the lifecycle write.
+ * 3. **apply/recover** — every lifecycle side effect is idempotent under the
+ *    envelope's own durable identity. A retry after a partial failure resumes
+ *    this step rather than being hidden by transport admission.
+ * 4. **dedup** — only after every authoritative side effect converged do we
+ *    mark the envelope complete. The next retry is then a no-op.
  *
  * A duplicate is still a wire-level success (§8.2): it just did not re-run
  * anything. Only `rejected`/`rate_limited` are excluded from `accepted`.
@@ -40,6 +42,7 @@ import {
   AGENT_MESSAGE_EGRESS_CAPABILITY,
   AgentContentReadPayloadSchema,
   DAEMON_TO_SERVER_TYPES,
+  decodeEnvelope,
   encodeEnvelope,
   PROTOCOL_VERSION,
   type AgentRef,
@@ -393,15 +396,17 @@ async function applyInboundGate(
   if (!(DAEMON_TO_SERVER_TYPES as readonly MessageType[]).includes(envelope.type)) return 'rejected';
 
   if (envelope.type === 'agent.message.publish') {
-    const alreadyDeduplicated = await stores.dedup.checkAndRecord(deviceId, envelope.id);
-    return (await handleAgentMessagePublish(
+    const message = await handleAgentMessagePublish(
       stores,
       deviceId,
       envelope.task_id,
       envelope.payload,
       agentMessageConsume,
-      alreadyDeduplicated,
-    )).outcome;
+      false,
+    );
+    return message.outcome === 'rejected'
+      ? 'rejected'
+      : completeInboundEnvelope(stores, deviceId, envelope.id);
   }
 
   if (envelope.type === 'agent.egress.reliable') {
@@ -418,11 +423,8 @@ async function applyInboundGate(
       payload: envelope.payload,
       receiptId: crypto.randomUUID(),
     });
-    return outcome.created || sameReliableEgress(outcome.record.payload, envelope.payload)
-      ? outcome.created
-        ? 'accepted'
-        : 'duplicate'
-      : 'rejected';
+    if (!outcome.created && !sameReliableEgress(outcome.record.payload, envelope.payload)) return 'rejected';
+    return completeInboundEnvelope(stores, deviceId, envelope.id);
   }
 
   if (envelope.type === 'agent.content.receipt') {
@@ -445,7 +447,8 @@ async function applyInboundGate(
     // BlobRef metadata is rejected as a conflicting second receipt.
     const body = JSON.stringify(envelope.payload);
     const receipt = await stores.receipts.record({ key, body });
-    return receipt.created ? 'accepted' : receipt.receipt.body === body ? 'duplicate' : 'rejected';
+    if (!receipt.created && receipt.receipt.body !== body) return 'rejected';
+    return completeInboundEnvelope(stores, deviceId, envelope.id);
   }
 
   const taskId = envelope.task_id;
@@ -469,6 +472,10 @@ async function applyInboundGate(
   ) {
     return 'rejected';
   }
+  // Unlike the existing unknown-progress no-op, an unknown terminal must not
+  // create a receipt or consume an envelope id: either would make a guessed
+  // task terminal durable.
+  if (terminalStatus(envelope) !== undefined && attempt === undefined) return 'rejected';
 
   if (envelope.type === 'task.progress' && envelope.payload.events.length > 0) {
     try {
@@ -503,10 +510,17 @@ async function applyInboundGate(
     }
   }
 
-  if (await stores.dedup.checkAndRecord(deviceId, envelope.id)) return 'duplicate';
-
   await applyLifecycle(stores, deviceId, taskId, envelope, activityBounds, attempt?.agentRef);
-  return 'accepted';
+  return completeInboundEnvelope(stores, deviceId, envelope.id);
+}
+
+/** Marks an envelope complete only after all of its authoritative facts converged. */
+async function completeInboundEnvelope(
+  stores: TenantStores,
+  deviceId: string,
+  envelopeId: string,
+): Promise<InboundOutcome> {
+  return (await stores.dedup.checkAndRecord(deviceId, envelopeId)) ? 'duplicate' : 'accepted';
 }
 
 /**
@@ -554,7 +568,7 @@ async function applyLifecycle(
       // same key, first-terminal-wins, and therefore a readable result.
       // Recording only the coarse `failed` status here left an attempt that a
       // reader could see reach a terminal and then find no result to read.
-      await recordTerminal(stores, taskId, envelope, 'failed');
+      await recordTerminal(stores, taskId, envelope);
       return;
     case 'task.progress':
       if (envelope.payload.events.length > 0) {
@@ -578,13 +592,13 @@ async function applyLifecycle(
       await stores.approvals.append(approvalTimelineAppendInput(taskId, envelope)!);
       return;
     case 'task.complete':
-      await recordTerminal(stores, taskId, envelope, 'complete');
+      await recordTerminal(stores, taskId, envelope);
       return;
     case 'task.fail':
-      await recordTerminal(stores, taskId, envelope, 'failed');
+      await recordTerminal(stores, taskId, envelope);
       return;
     case 'task.cancelled':
-      await recordTerminal(stores, taskId, envelope, 'cancelled');
+      await recordTerminal(stores, taskId, envelope);
       return;
     default:
       return;
@@ -643,15 +657,21 @@ async function recordTerminal(
   stores: TenantStores,
   taskId: string,
   envelope: Envelope,
-  status: 'complete' | 'failed' | 'cancelled',
 ): Promise<void> {
-  const attempt = await stores.tasks.get(taskId);
-  const { created } = await stores.receipts.record({
+  const receipt = await stores.receipts.record({
     key: terminalReceiptKey(taskId),
     body: encodeEnvelope(envelope),
   });
+  // Receipt insertion and the status/board projections are separate durable
+  // writes. A retry resumes from the winning receipt instead of returning just
+  // because the receipt was already present.
+  const winner = terminalReceiptBinding(taskId, receipt.receipt.body);
+  if (winner === undefined) {
+    throw new Error(`terminal receipt for ${taskId} is not a canonical terminal binding`);
+  }
+  const attempt = await stores.tasks.get(taskId);
   if (attempt?.cancellation !== undefined) {
-    if (status === 'cancelled') {
+    if (winner.status === 'cancelled') {
       await stores.tasks.recordStatus({
         taskId,
         status: 'cancelled',
@@ -660,22 +680,48 @@ async function recordTerminal(
     }
     return;
   }
-  if (!created) return;
-  const cause =
-    envelope.type === 'task.fail' ||
-    envelope.type === 'task.cancelled' ||
-    envelope.type === 'task.decline'
-      ? envelope.payload.reason
-      : undefined;
   const recordedAttempt = await stores.tasks.recordStatus({
     taskId,
-    status,
+    status: winner.status,
     ...(attempt?.agentRef === undefined ? {} : { agentRef: attempt.agentRef }),
-    ...(cause === undefined ? {} : { terminalCause: cause }),
+    ...(winner.cause === undefined ? {} : { terminalCause: winner.cause }),
   });
   // The attempt mutation is the ordering CAS. Cancellation may have landed
   // after the read above but before this write; in that race the store returns
   // the cancellation-bearing attempt and no business projection is allowed.
-  if (recordedAttempt?.status !== status || recordedAttempt.cancellation !== undefined) return;
+  if (recordedAttempt?.status !== winner.status || recordedAttempt.cancellation !== undefined) return;
   await projectTerminalToReview(stores.board, taskId);
+}
+
+function terminalStatus(envelope: Envelope): 'complete' | 'failed' | 'cancelled' | undefined {
+  switch (envelope.type) {
+    case 'task.complete':
+      return 'complete';
+    case 'task.fail':
+    case 'task.decline':
+      return 'failed';
+    case 'task.cancelled':
+      return 'cancelled';
+    default:
+      return undefined;
+  }
+}
+
+function terminalReceiptBinding(
+  taskId: string,
+  body: string,
+): { readonly status: 'complete' | 'failed' | 'cancelled'; readonly cause?: string } | undefined {
+  let envelope: Envelope;
+  try {
+    envelope = decodeEnvelope(body);
+  } catch {
+    return undefined;
+  }
+  const status = terminalStatus(envelope);
+  if (status === undefined || envelope.task_id !== taskId || encodeEnvelope(envelope) !== body) return undefined;
+  const cause =
+    envelope.type === 'task.fail' || envelope.type === 'task.cancelled' || envelope.type === 'task.decline'
+      ? envelope.payload.reason
+      : undefined;
+  return { status, ...(cause === undefined ? {} : { cause }) };
 }
