@@ -403,7 +403,10 @@ transport-specific state machine remains beside the kernel.
 - Daemon inbound dedup marks an envelope complete only after its lifecycle
   writes converge. Activity append is exact-idempotent by source envelope;
   terminal retries validate the first receipt and resume task/board projection;
-  unknown terminals allocate no receipt or dedup-completed fact.
+  unknown terminals allocate no receipt or dedup-completed fact. Agent-bound
+  dedup and reliable egress keys include exact `(tenant, device, AgentRef)`;
+  device-level facts such as `conn.hello` use a separate non-Agent keyspace and
+  commit their capability snapshot before the completed-envelope marker.
 - Legacy offers reserve their exact attempt before mailbox publication. Offer,
   host-decision, and implicit-approval identities bind tenant, task, device and
   exact AgentRef. Tenant and device identity never imply one Profile: a tenant
