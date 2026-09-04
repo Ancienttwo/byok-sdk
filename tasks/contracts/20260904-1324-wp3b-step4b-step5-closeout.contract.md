@@ -55,6 +55,7 @@ allowed_paths:
   - packages/protocol/src/**
   - bun.lock
   - api-surface/client.d.ts
+  - api-surface/protocol.d.ts
   - api-surface/server.d.ts
   - docs/**
   - README.md

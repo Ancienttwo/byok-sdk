@@ -8,15 +8,20 @@
 
 ## Baseline
 
-- Parent: accepted and archived Step 4a head `ad0aa2ba81d39202b741b4b8ca0bc3a4ae631cd6`.
-- Target after dependency merge: `main` containing Step 3 and Step 4a.
+- Parent: merged Step 4a PR #132, `main@c7c53357e138bd82f716243589157dd58cbaa038`.
+- Target: `main` containing Step 3 and Step 4a.
 - Branch: `codex/wp3b-step4b-step5-closeout`.
 
 ## Verification Evidence
 
 - Pending implementation and exact-subject gate.
 
+## Implemented Change
+
+- Removed the client WebSocket transport, WS route constant, WS URL derivation, retry/fallback/probe state, and the direct `ws`/`@types/ws` package edges.
+- `ConnectionManager` now owns a single long-poll lifecycle and exports the narrowed connection state; current capabilities come only from the active poll response.
+- Updated tests, current architecture/protocol/security/spec/example documentation, changelog, and public declaration goldens as one breaking cutover.
+
 ## Deviations From Plan Or Spec
 
 - None.
-
