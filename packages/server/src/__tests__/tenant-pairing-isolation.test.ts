@@ -293,16 +293,17 @@ describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)',
 
     // The same authenticated device, announcing another product: the hello gate
     // compares against the DEVICE ROW, so this is refused rather than absorbed.
-    const refused = await sendOne(
-      daemon,
-      createEnvelope('conn.hello', {
-        protocolVersions: [PROTOCOL_VERSION],
-        capabilities: [],
-        deviceId: daemon.deviceId,
-        productId: OTHER_PRODUCT_ID,
-      }),
-    );
-    expect(refused).toEqual({ status: 200, body: { accepted: 0, rejected: 1 } });
+    const refusedEnvelope = createEnvelope('conn.hello', {
+      protocolVersions: [PROTOCOL_VERSION],
+      capabilities: [],
+      deviceId: daemon.deviceId,
+      productId: OTHER_PRODUCT_ID,
+    });
+    const refused = await sendOne(daemon, refusedEnvelope);
+    expect(refused).toEqual({
+      status: 200,
+      body: { outcomes: [{ id: refusedEnvelope.id, outcome: 'rejected', reason: 'inbound_rejected' }] },
+    });
   });
 
   // -----------------------------------------------------------------------

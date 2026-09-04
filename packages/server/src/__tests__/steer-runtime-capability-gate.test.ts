@@ -211,15 +211,16 @@ describe("S0 (GAP-002): task.steer is gated by the claimed runtime's capability 
   it('a Claimed (not yet started) task is task_not_running — the state gate fires before the capability gate even for a steerable runtime', async () => {
     harness = await startHarness([PI_RUNTIME_INFO]);
     const handle = await harness.byok.dispatch({ instruction: 'claimed but not started' });
-    const claim = await sendOne(
-      harness.daemon,
-      createEnvelope(
-        'task.claim',
-        { deviceId: harness.daemon.deviceId, runtime: 'pi', capabilities: PI_RUNTIME_INFO.capabilities },
-        { taskId: handle.taskId },
-      ),
+    const claimEnvelope = createEnvelope(
+      'task.claim',
+      { deviceId: harness.daemon.deviceId, runtime: 'pi', capabilities: PI_RUNTIME_INFO.capabilities },
+      { taskId: handle.taskId },
     );
-    expect(claim).toEqual({ status: 200, body: { accepted: 1 } });
+    const claim = await sendOne(harness.daemon, claimEnvelope);
+    expect(claim).toEqual({
+      status: 200,
+      body: { outcomes: [{ id: claimEnvelope.id, outcome: 'accepted' }] },
+    });
     expect((await harness.byok.tasks.get(handle.taskId))?.state).toBe('Claimed');
 
     const err = asSteerRejection(await handle.steer('too early').catch((e: unknown) => e));
@@ -357,15 +358,16 @@ describe('S0 (GAP-002): claim-time capability snapshot on the task record', () =
   it("the Offered -> Claimed transition records the claim's own reported capabilities verbatim, alongside claimedRuntime", async () => {
     harness = await startHarness([PI_RUNTIME_INFO, CLAUDE_RUNTIME_INFO]);
     const handle = await harness.byok.dispatch({ instruction: 'snapshot me' });
-    const claim = await sendOne(
-      harness.daemon,
-      createEnvelope(
-        'task.claim',
-        { deviceId: harness.daemon.deviceId, runtime: 'pi', capabilities: PI_RUNTIME_INFO.capabilities },
-        { taskId: handle.taskId },
-      ),
+    const claimEnvelope = createEnvelope(
+      'task.claim',
+      { deviceId: harness.daemon.deviceId, runtime: 'pi', capabilities: PI_RUNTIME_INFO.capabilities },
+      { taskId: handle.taskId },
     );
-    expect(claim).toEqual({ status: 200, body: { accepted: 1 } });
+    const claim = await sendOne(harness.daemon, claimEnvelope);
+    expect(claim).toEqual({
+      status: 200,
+      body: { outcomes: [{ id: claimEnvelope.id, outcome: 'accepted' }] },
+    });
 
     const snapshot = await harness.byok.tasks.get(handle.taskId);
     expect(snapshot?.state).toBe('Claimed');

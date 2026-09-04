@@ -1,7 +1,7 @@
 /**
  * The device surface at the HTTP level: what a daemon actually sends and what
  * it gets back. Response SHAPES are as much a part of the frozen contract as
- * the envelopes — `{ accepted }` without a `rejected` key, a 429 for the whole
+ * the envelopes — exact per-envelope outcomes keyed by id, a 429 for the whole
  * batch, a relative presigned URL — so they are asserted against the protocol
  * package's own schemas rather than by eye.
  */

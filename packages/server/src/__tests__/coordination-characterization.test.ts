@@ -102,19 +102,24 @@ async function claimAndStartOverLongPoll(
   runtime?: 'pi' | 'claude' | 'codex',
   capabilities?: { steer?: boolean; resume?: boolean; approvalInteractive?: boolean; permissionModes?: string[] },
 ): Promise<void> {
-  const claim = await sendOne(
-    daemon,
-    createEnvelope(
-      'task.claim',
-      { deviceId: daemon.deviceId, runtime, capabilities: capabilities as never },
-      { taskId: handle.taskId },
-    ),
+  const claimEnvelope = createEnvelope(
+    'task.claim',
+    { deviceId: daemon.deviceId, runtime, capabilities: capabilities as never },
+    { taskId: handle.taskId },
   );
-  expect(claim).toEqual({ status: 200, body: { accepted: 1 } });
+  const claim = await sendOne(daemon, claimEnvelope);
+  expect(claim).toEqual({
+    status: 200,
+    body: { outcomes: [{ id: claimEnvelope.id, outcome: 'accepted' }] },
+  });
   expect((await byok.tasks.get(handle.taskId))?.state).toBe('Claimed');
 
-  const started = await sendOne(daemon, createEnvelope('task.started', {}, { taskId: handle.taskId }));
-  expect(started).toEqual({ status: 200, body: { accepted: 1 } });
+  const startedEnvelope = createEnvelope('task.started', {}, { taskId: handle.taskId });
+  const started = await sendOne(daemon, startedEnvelope);
+  expect(started).toEqual({
+    status: 200,
+    body: { outcomes: [{ id: startedEnvelope.id, outcome: 'accepted' }] },
+  });
   expect((await byok.tasks.get(handle.taskId))?.state).toBe('Running');
 }
 
@@ -179,15 +184,16 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     await daemon.next();
     await claimAndStartOverLongPoll(started.byok, daemon, handle);
 
-    const complete = await sendOne(
-      daemon,
-      createEnvelope(
-        'task.complete',
-        { summary: 'all done', sessionRef: 'session-abc', document: { ok: true, items: [1, 2, 3] } },
-        { taskId: handle.taskId },
-      ),
+    const completeEnvelope = createEnvelope(
+      'task.complete',
+      { summary: 'all done', sessionRef: 'session-abc', document: { ok: true, items: [1, 2, 3] } },
+      { taskId: handle.taskId },
     );
-    expect(complete).toEqual({ status: 200, body: { accepted: 1 } });
+    const complete = await sendOne(daemon, completeEnvelope);
+    expect(complete).toEqual({
+      status: 200,
+      body: { outcomes: [{ id: completeEnvelope.id, outcome: 'accepted' }] },
+    });
 
     const result = await handle.result();
     const snapshot = await started.byok.tasks.get(handle.taskId);
@@ -228,23 +234,32 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     await daemon.next();
     await claimAndStartOverLongPoll(started.byok, daemon, handle);
 
-    const first = await sendOne(
-      daemon,
-      createEnvelope('task.complete', { summary: 'first', sessionRef: 'session-first' }, { taskId: handle.taskId }),
+    const firstEnvelope = createEnvelope(
+      'task.complete',
+      { summary: 'first', sessionRef: 'session-first' },
+      { taskId: handle.taskId },
     );
-    expect(first).toEqual({ status: 200, body: { accepted: 1 } });
+    const first = await sendOne(daemon, firstEnvelope);
+    expect(first).toEqual({
+      status: 200,
+      body: { outcomes: [{ id: firstEnvelope.id, outcome: 'accepted' }] },
+    });
     const recorded = (await started.byok.tasks.get(handle.taskId))?.result;
     expect(recorded).toEqual({ state: 'Complete', summary: 'first', sessionRef: 'session-first', artifactRefs: undefined, document: undefined });
 
     // A distinct envelope (own `id`, different payload) for an
-    // already-terminal task: the wire answers it as a wire-level SUCCESS —
-    // `{ accepted: 1 }`, not `rejected` — and the handler drops it silently
-    // (§9 stale-terminal rule). "Ignored", not "refused", is the pin.
-    const second = await sendOne(
-      daemon,
-      createEnvelope('task.complete', { summary: 'second', sessionRef: 'session-second' }, { taskId: handle.taskId }),
+    // already-terminal task: the fresh envelope is accepted while the handler
+    // drops it silently (§9 stale-terminal rule).
+    const secondEnvelope = createEnvelope(
+      'task.complete',
+      { summary: 'second', sessionRef: 'session-second' },
+      { taskId: handle.taskId },
     );
-    expect(second).toEqual({ status: 200, body: { accepted: 1 } });
+    const second = await sendOne(daemon, secondEnvelope);
+    expect(second).toEqual({
+      status: 200,
+      body: { outcomes: [{ id: secondEnvelope.id, outcome: 'accepted' }] },
+    });
 
     expect((await started.byok.tasks.get(handle.taskId))?.result).toEqual(recorded);
     expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Complete');
@@ -267,15 +282,16 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     await handle.cancel('operator stopped it');
     expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Cancelled');
 
-    const late = await sendOne(
-      daemon,
-      createEnvelope(
-        'task.complete',
-        { summary: 'finished anyway', sessionRef: 'session-late', document: { applied: true } },
-        { taskId: handle.taskId },
-      ),
+    const lateEnvelope = createEnvelope(
+      'task.complete',
+      { summary: 'finished anyway', sessionRef: 'session-late', document: { applied: true } },
+      { taskId: handle.taskId },
     );
-    expect(late).toEqual({ status: 200, body: { accepted: 1 } });
+    const late = await sendOne(daemon, lateEnvelope);
+    expect(late).toEqual({
+      status: 200,
+      body: { outcomes: [{ id: lateEnvelope.id, outcome: 'accepted' }] },
+    });
 
     const result = await handle.result();
     expect(result.state).toBe('Cancelled');
@@ -303,12 +319,15 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     await claimAndStartOverLongPoll(started.byok, daemon, handle);
 
     // Round one.
-    expect(
-      await sendOne(
-        daemon,
-        createEnvelope('task.await_approval', { summary: 'round one', approvalId: 'approval-1' }, { taskId: handle.taskId }),
-      ),
-    ).toEqual({ status: 200, body: { accepted: 1 } });
+    const roundOneEnvelope = createEnvelope(
+      'task.await_approval',
+      { summary: 'round one', approvalId: 'approval-1' },
+      { taskId: handle.taskId },
+    );
+    expect(await sendOne(daemon, roundOneEnvelope)).toEqual({
+      status: 200,
+      body: { outcomes: [{ id: roundOneEnvelope.id, outcome: 'accepted' }] },
+    });
     expect((await started.byok.tasks.get(handle.taskId))?.pendingApprovalId).toBe('approval-1');
     await handle.approve({ approvalId: 'approval-1' });
     expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Running');
@@ -317,12 +336,15 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     expect((await started.byok.tasks.get(handle.taskId))?.pendingApprovalId).toBeUndefined();
 
     // Round two.
-    expect(
-      await sendOne(
-        daemon,
-        createEnvelope('task.await_approval', { summary: 'round two', approvalId: 'approval-2' }, { taskId: handle.taskId }),
-      ),
-    ).toEqual({ status: 200, body: { accepted: 1 } });
+    const roundTwoEnvelope = createEnvelope(
+      'task.await_approval',
+      { summary: 'round two', approvalId: 'approval-2' },
+      { taskId: handle.taskId },
+    );
+    expect(await sendOne(daemon, roundTwoEnvelope)).toEqual({
+      status: 200,
+      body: { outcomes: [{ id: roundTwoEnvelope.id, outcome: 'accepted' }] },
+    });
     expect((await started.byok.tasks.get(handle.taskId))?.pendingApprovalId).toBe('approval-2');
 
     const stale = await handle.approve({ approvalId: 'approval-1' }).catch((error: unknown) => error);
@@ -513,7 +535,10 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
       { taskId: handle.taskId },
     );
 
-    expect(await sendOne(owner, awaitApproval)).toEqual({ status: 200, body: { accepted: 1 } });
+    expect(await sendOne(owner, awaitApproval)).toEqual({
+      status: 200,
+      body: { outcomes: [{ id: awaitApproval.id, outcome: 'accepted' }] },
+    });
     expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('AwaitApproval');
 
     await handle.approve();
@@ -522,9 +547,11 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     const dedupBefore = (await started.byok.stats()).dedupDrops;
     // Replaying it must NOT drive the task back into AwaitApproval — that
     // observable difference is what proves it applied exactly once. The wire
-    // still answers `{ accepted: 1 }`: a dedup'd replay is a wire-level
-    // success (§8.2/§9), only the counter distinguishes it.
-    expect(await sendOne(owner, awaitApproval)).toEqual({ status: 200, body: { accepted: 1 } });
+    // identifies the replay as a duplicate (§8.2/§9).
+    expect(await sendOne(owner, awaitApproval)).toEqual({
+      status: 200,
+      body: { outcomes: [{ id: awaitApproval.id, outcome: 'duplicate' }] },
+    });
     expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Running');
     expect((await started.byok.stats()).dedupDrops).toBe(dedupBefore + 1);
 
@@ -532,11 +559,16 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     // does not own — and this one IS separately rejected, not silently
     // absorbed.
     const snapshotBefore = await started.byok.tasks.get(handle.taskId);
-    const foreign = await sendOne(
-      stranger,
-      createEnvelope('task.complete', { summary: 'not mine', sessionRef: 'session-stranger' }, { taskId: handle.taskId }),
+    const foreignEnvelope = createEnvelope(
+      'task.complete',
+      { summary: 'not mine', sessionRef: 'session-stranger' },
+      { taskId: handle.taskId },
     );
-    expect(foreign).toEqual({ status: 200, body: { accepted: 0, rejected: 1 } });
+    const foreign = await sendOne(stranger, foreignEnvelope);
+    expect(foreign).toEqual({
+      status: 200,
+      body: { outcomes: [{ id: foreignEnvelope.id, outcome: 'rejected', reason: 'inbound_rejected' }] },
+    });
     expect(await started.byok.tasks.get(handle.taskId)).toEqual(snapshotBefore);
     expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Running');
     expect((await started.byok.tasks.get(handle.taskId))?.result).toBeUndefined();
@@ -600,11 +632,16 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'rate limited' });
     await daemon.next(); // `GET /byok/events` is not on the inbound bucket at all.
 
-    const admitted = await sendOne(
-      daemon,
-      createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }),
+    const admittedEnvelope = createEnvelope(
+      'task.claim',
+      { deviceId: daemon.deviceId },
+      { taskId: handle.taskId },
     );
-    expect(admitted).toEqual({ status: 200, body: { accepted: 1 } });
+    const admitted = await sendOne(daemon, admittedEnvelope);
+    expect(admitted).toEqual({
+      status: 200,
+      body: { outcomes: [{ id: admittedEnvelope.id, outcome: 'accepted' }] },
+    });
     expect((await started.byok.stats()).rateLimitEvents).toBe(0);
 
     // Over budget: the documented long-poll enforcement is a whole-request
@@ -627,12 +664,16 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     // is a window, not a latch. Bounded poll, no fixed sleep.
     let rateLimitedWhileRecovering = 0;
     await waitFor(async () => {
-      const attempt = await sendOne(daemon, createEnvelope('task.started', {}, { taskId: handle.taskId }));
+      const attemptEnvelope = createEnvelope('task.started', {}, { taskId: handle.taskId });
+      const attempt = await sendOne(daemon, attemptEnvelope);
       if (attempt.status === 429) {
         rateLimitedWhileRecovering++;
         return false;
       }
-      expect(attempt).toEqual({ status: 200, body: { accepted: 1 } });
+      expect(attempt).toEqual({
+        status: 200,
+        body: { outcomes: [{ id: attemptEnvelope.id, outcome: 'accepted' }] },
+      });
       return true;
     });
 

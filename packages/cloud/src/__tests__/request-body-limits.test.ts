@@ -224,7 +224,7 @@ describe('Cloud JSON request-body limits', () => {
     ));
 
     expect(exact.status).toBe(200);
-    expect(await exact.json()).toEqual({ accepted: 0 });
+    expect(await exact.json()).toEqual({ outcomes: [] });
     expect(plusOne.status).toBe(413);
 
     const malformed = await harness.cloud.fetch(requestWithStream(

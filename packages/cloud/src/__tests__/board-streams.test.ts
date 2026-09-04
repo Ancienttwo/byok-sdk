@@ -163,7 +163,16 @@ describe('board coordination surface', () => {
       { taskId: 'projected' },
     );
     const sent = await harness.json('/byok/messages', jsonInit(device, { messages: [claim, progress, complete] }));
-    expect(sent).toEqual({ status: 200, body: { accepted: 3 } });
+    expect(sent).toEqual({
+      status: 200,
+      body: {
+        outcomes: [
+          { id: claim.id, outcome: 'accepted' },
+          { id: progress.id, outcome: 'accepted' },
+          { id: complete.id, outcome: 'accepted' },
+        ],
+      },
+    });
 
     expect((await harness.cloud.listBoardItems(TENANT_A, { afterSeq: 0 })).items[0]!.status).toBe(
       'in_review',
