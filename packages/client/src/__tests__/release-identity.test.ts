@@ -54,7 +54,7 @@ describe('LocalAgentReleaseIdentity', () => {
       {
         productName: 'Release Test',
         productId: 'release-test',
-        serverUrl: 'ws://127.0.0.1:1',
+        serverUrl: 'http://127.0.0.1:1',
         workspaceRoot,
         storeDir,
         localAgentRelease: input,
@@ -73,7 +73,7 @@ describe('LocalAgentReleaseIdentity', () => {
     expect(() => createDaemonWithAdapters({
       productName: 'Release Test',
       productId: 'release-test-missing',
-      serverUrl: 'ws://127.0.0.1:1',
+      serverUrl: 'http://127.0.0.1:1',
       workspaceRoot,
       localAgentRelease: undefined,
     } as never, [new StubRuntimeAdapter()])).toThrow(/localAgentRelease/);

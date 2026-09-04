@@ -33,7 +33,7 @@ export interface SupportBundle {
         status: 'online';
         pid: number;
         uptimeMs: number;
-        transport: 'connecting' | 'open' | 'closed' | 'degraded' | 'revoked' | 'unavailable';
+        transport: 'connecting' | 'open' | 'closed' | 'revoked' | 'unavailable';
         activeTaskCount: number;
         pendingApprovalCount: number;
         operationalHealth:
@@ -187,8 +187,8 @@ async function recentAuditFacts(storeDir: string): Promise<SupportBundle['recent
 
 function projectControl(control: DiagnosticsSnapshot['control']): SupportBundle['control'] {
   if (control.status === 'offline') return { status: 'offline' };
-  const transport = ['connecting', 'open', 'closed', 'degraded', 'revoked'].includes(control.transport)
-    ? (control.transport as 'connecting' | 'open' | 'closed' | 'degraded' | 'revoked')
+  const transport = ['connecting', 'open', 'closed', 'revoked'].includes(control.transport)
+    ? (control.transport as 'connecting' | 'open' | 'closed' | 'revoked')
     : 'unavailable';
   const operationalHealth =
     control.operationalHealth.availability === 'available'

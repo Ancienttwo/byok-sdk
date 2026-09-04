@@ -4,7 +4,7 @@
  * This subpath exists for one reason: an embedded host — a product that runs
  * no daemon and owns no control socket — needs to compose the Agent-memory
  * service itself. Importing any memory symbol from the root entry instead
- * drags the daemon composition and the WebSocket transport in with it (the
+ * drags the daemon composition and transport layer in with it (the
  * root bundle is ~800 KB; this one is ~38 KB). That difference is not visible
  * in any behavioral test: it shows up as a host bundle that suddenly ships a
  * transport it never calls, or — much worse — as `connectControlClient`
@@ -122,7 +122,6 @@ describe('the embedded agent-memory entry module graph', () => {
       'control-client',
       'control-server',
       'control-protocol',
-      'ws-transport',
       'long-poll-transport',
       'connection-manager',
       'http-client',
@@ -139,11 +138,10 @@ describe('the embedded agent-memory entry module graph', () => {
     }
   });
 
-  it('names no control-client or WebSocket symbol in any reachable source', () => {
+  it('names no control-client or daemon composition symbol in any reachable source', () => {
     for (const [module, text] of GRAPH.sources) {
       expect(text, module).not.toContain('connectControlClient');
       expect(text, module).not.toMatch(/\bControlClient\b/);
-      expect(text, module).not.toMatch(/\bWebSocket\b/);
       expect(text, module).not.toContain('createDaemon');
       expect(text, module).not.toMatch(/from\s+'ws'/);
     }

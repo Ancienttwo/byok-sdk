@@ -214,9 +214,9 @@ describe('bin/tasks-view: lastConnectionState', () => {
     const events: DaemonEvent[] = [
       { kind: 'connection', ts: '2026-01-01T00:00:00.000Z', state: 'connecting' },
       { kind: 'connection', ts: '2026-01-01T00:00:01.000Z', state: 'open' },
-      { kind: 'connection', ts: '2026-01-01T00:00:02.000Z', state: 'degraded' },
+      { kind: 'connection', ts: '2026-01-01T00:00:02.000Z', state: 'closed' },
     ];
-    expect(lastConnectionState(events)).toEqual({ state: 'degraded', ts: '2026-01-01T00:00:02.000Z' });
+    expect(lastConnectionState(events)).toEqual({ state: 'closed', ts: '2026-01-01T00:00:02.000Z' });
   });
 });
 

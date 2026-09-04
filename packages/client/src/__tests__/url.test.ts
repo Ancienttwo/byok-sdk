@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { assertServerUrlAllowed, InsecureServerUrlError } from '../daemon/url';
 
 /**
- * M5: transport-security gate — refuses plaintext (`ws:`/`http:`) transport
+ * M5: transport-security gate — refuses plaintext (`http:`) transport
  * to any non-loopback host. See `url.ts`'s own doc comment on
  * `assertServerUrlAllowed` for the full allow/deny rule; entry-point
  * coverage (`create-daemon.ts`'s `pair()`/`start()`, and the warning emitted
@@ -11,19 +11,17 @@ import { assertServerUrlAllowed, InsecureServerUrlError } from '../daemon/url';
  * synchronous gate function in isolation.
  */
 describe('url.ts: assertServerUrlAllowed', () => {
-  describe('https:/wss: — always allowed, any host', () => {
+  describe('https: — always allowed, any host', () => {
     it.each([
       'https://example.com',
       'https://192.168.1.10',
       'https://any-remote-host.example',
-      'wss://example.com',
-      'wss://192.168.1.10',
     ])('%s does not throw', (url) => {
       expect(() => assertServerUrlAllowed(url)).not.toThrow();
     });
   });
 
-  describe('http:/ws: to a loopback host — allowed', () => {
+  describe('http: to a loopback host — allowed', () => {
     it.each([
       'http://localhost',
       'http://localhost:4000',
@@ -33,15 +31,12 @@ describe('url.ts: assertServerUrlAllowed', () => {
       'http://127.9.9.9',
       'http://[::1]',
       'http://[::1]:4000',
-      'ws://localhost',
-      'ws://127.0.0.1:4000',
-      'ws://[::1]:4000',
     ])('%s does not throw', (url) => {
       expect(() => assertServerUrlAllowed(url)).not.toThrow();
     });
   });
 
-  describe('http:/ws: to a non-loopback host — rejected', () => {
+  describe('http: to a non-loopback host — rejected', () => {
     it('rejects a public hostname with a typed InsecureServerUrlError', () => {
       expect(() => assertServerUrlAllowed('http://example.com')).toThrow(InsecureServerUrlError);
     });
@@ -50,11 +45,7 @@ describe('url.ts: assertServerUrlAllowed', () => {
       expect(() => assertServerUrlAllowed('http://192.168.1.10')).toThrow(InsecureServerUrlError);
     });
 
-    it('rejects ws: the same way http: is rejected', () => {
-      expect(() => assertServerUrlAllowed('ws://example.com')).toThrow(InsecureServerUrlError);
-    });
-
-    it('the error message names the redacted endpoint and the fix (wss:/https: or the escape hatch)', () => {
+    it('the error message names the redacted endpoint and the fix (https: or the escape hatch)', () => {
       let caught: unknown;
       try {
         assertServerUrlAllowed('http://example.com');
@@ -64,7 +55,7 @@ describe('url.ts: assertServerUrlAllowed', () => {
       expect(caught).toBeInstanceOf(InsecureServerUrlError);
       const message = (caught as Error).message;
       expect(message).toContain('http://example.com');
-      expect(message).toMatch(/wss:|https:/);
+      expect(message).toContain('https:');
       expect(message).toContain('dangerouslyAllowInsecureRemote');
     });
 
@@ -92,7 +83,7 @@ describe('url.ts: assertServerUrlAllowed', () => {
     });
   });
 
-  describe('dangerouslyAllowInsecureRemote: true — admits an otherwise-rejected http:/ws: URL', () => {
+  describe('dangerouslyAllowInsecureRemote: true — admits an otherwise-rejected http: URL', () => {
     it('admits a public hostname', () => {
       expect(() => assertServerUrlAllowed('http://example.com', { dangerouslyAllowInsecureRemote: true })).not.toThrow();
     });
@@ -107,6 +98,10 @@ describe('url.ts: assertServerUrlAllowed', () => {
   });
 
   describe('unknown scheme — rejected unconditionally', () => {
+    it.each(['ws://example.com', 'wss://example.com'])('rejects removed transport scheme %s', (url) => {
+      expect(() => assertServerUrlAllowed(url)).toThrow(InsecureServerUrlError);
+    });
+
     it('rejects ftp:', () => {
       expect(() => assertServerUrlAllowed('ftp://example.com')).toThrow(InsecureServerUrlError);
     });

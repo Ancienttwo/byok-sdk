@@ -506,7 +506,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     daemon = createDaemonWithAdapters(
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter()],
-      { backoff: { baseMs: 20, maxMs: 100, factor: 2 } },
+      {} ,
     );
 
     const record = await daemon.pair('pairing-code');
@@ -514,7 +514,6 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     expect(daemon.status().connected).toBe(true);
 
     server.rotateDeviceToken(record.deviceId);
-    server.dropConnection(); // force a reconnect attempt that will present the now-stale cached token
 
     await vi.waitFor(() => expect(server.httpRequests.some((r) => r.pathname === '/byok/challenge')).toBe(true), {
       timeout: 5000,
@@ -960,7 +959,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     daemon = createDaemonWithAdapters(
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter()],
-      { backoff: { baseMs: 20, maxMs: 100, factor: 2 } },
+      {} ,
     );
 
     const record = await daemon.pair('pairing-code');
@@ -968,15 +967,14 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     expect(daemon.status().connected).toBe(true);
 
     server.revokeDevice(record.deviceId);
-    server.dropConnection();
 
     await vi.waitFor(() => expect(daemon?.status().revoked).toBe(true), { timeout: 5000 });
     expect(daemon.status().connected).toBe(false);
 
-    // Never a retry loop: once revoked, WS upgrade attempts must stop.
-    const attemptsAfterRevoked = server.wsUpgradeAttempts;
+    // Never a retry loop: once revoked, events polls must stop.
+    const pollsAfterRevoked = server.httpRequests.filter((request) => request.pathname === '/byok/events').length;
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(server.wsUpgradeAttempts).toBe(attemptsAfterRevoked);
+    expect(server.httpRequests.filter((request) => request.pathname === '/byok/events')).toHaveLength(pollsAfterRevoked);
 
     // Recourse is re-pairing from scratch (same keypair, reused per §6.3) —
     // this must actually recover the device, not just clear the flag.
@@ -999,13 +997,13 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
 
     const startedAt = Date.now();
     await expect(daemon.start()).rejects.toBeInstanceOf(DeviceRevokedError);
-    expect(Date.now() - startedAt).toBeLessThan(2000); // well under waitForAck's 10s default timeout
+    expect(Date.now() - startedAt).toBeLessThan(2000); // well under the startup timeout
 
     expect(daemon.status().revoked).toBe(true);
 
-    // Never a retry loop: once settled as revoked, no further WS upgrade attempts.
-    const attemptsAfterRevoked = server.wsUpgradeAttempts;
+    // Never a retry loop: once settled as revoked, no further events polls.
+    const pollsAfterRevoked = server.httpRequests.filter((request) => request.pathname === '/byok/events').length;
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(server.wsUpgradeAttempts).toBe(attemptsAfterRevoked);
+    expect(server.httpRequests.filter((request) => request.pathname === '/byok/events')).toHaveLength(pollsAfterRevoked);
   });
 });

@@ -12,6 +12,11 @@ document and the schemas in `packages/protocol/src/` describe a closed
 contract — see "Freeze rule" immediately below for exactly what "frozen"
 does and doesn't allow.
 
+> Current transport (WP3B Step 4b): the daemon uses authenticated long-poll
+> HTTP only. `GET /byok/events` receives server envelopes and
+> `POST /byok/messages` sends daemon envelopes; no socket transport or
+> transport fallback is part of this contract.
+
 ## Freeze rule
 
 **Additive-minor-only after freeze.** `PROTOCOL_VERSION` stays `1`. Any of the
@@ -191,10 +196,12 @@ exists purely so a reconnecting daemon can tell the server "replay anything
 I might have missed after N." See [§9](#9-at-least-once-delivery--idempotency)
 for the full redelivery procedure.
 
-Server → daemon types (`seq` required): `conn.ack`, all `task.*` control
-messages, `agent.egress.ack`, `agent.content.read`, and
-`agent.home.projection`. Every daemon → server type leaves `seq` optional —
-M1 only specifies server-to-daemon redelivery, not the reverse.
+Server → daemon types (`seq` required): all `task.*` control messages,
+`agent.egress.ack`, `agent.content.read`, and `agent.home.projection`.
+Every daemon → server type leaves `seq` optional — M1 only specifies
+server-to-daemon redelivery, not the reverse. The frozen `conn.ack` schema is
+retained for decoding older envelopes, but the current long-poll server does
+not emit it; capability advertisement is carried by the poll response.
 
 **Do not confuse this with `task.progress`'s payload-level `seq`.** That field
 (`TaskProgressPayload.seq`) is unrelated — it orders progress batches *within
@@ -203,22 +210,15 @@ Two different counters happen to share the field name `seq` at two different
 levels (envelope vs. payload) for two different purposes; keep them separate
 in your head and in any redelivery/ordering code.
 
-**`conn.*` envelopes never advance the redelivery cursor.** `conn.ack`
-carries a `seq` (required, like every other server → daemon type) purely for
-schema uniformity — it is not tied to any task and must never be treated as
-"the highest seq processed so far" for the purposes of the `cursor` a daemon
-reports back in a future `conn.hello` (§9). A daemon that advances its
-cursor from `conn.ack`'s `seq` breaks redelivery outright: on reconnect, the
-server always assigns `conn.ack` the *next* (i.e. currently highest)
-per-device `seq` value, sent immediately before replaying any backlog still
-queued for this device (§9) — so `conn.ack`'s `seq` is always higher than
-every backlog envelope about to follow it. Advancing the cursor to
-`conn.ack`'s value before that backlog even arrives makes every one of those
-(necessarily lower) backlog `seq`s look already-delivered, and a
-cursor-dedupe check silently drops all of them. Cursor accounting covers every
-server → daemon control that requires durable handler completion, including
-`task.*`, `agent.egress.ack`, `agent.content.read`, and
-`agent.home.projection`; it excludes `conn.*`.
+**`conn.*` envelopes never advance the redelivery cursor.** The current
+`conn.hello` is submitted as the first daemon→server long-poll message and
+has no cursor-advancing side effect. The frozen `conn.ack` schema is retained
+for decoding older envelopes, but its historical `seq` must never be treated
+as "the highest seq processed so far" for a future `conn.hello` (§9). Current
+capability advertisement arrives in `EventsPollResponse.capabilities`, and
+cursor accounting covers every server → daemon control that requires durable
+handler completion, including `task.*`, `agent.egress.ack`,
+`agent.content.read`, and `agent.home.projection`; it excludes `conn.*`.
 
 ### 1.3 `session_ref`
 
@@ -261,8 +261,8 @@ append/send; receipt and ack are delivery facts, not session authority.
 
 | Type | Dir | `task_id` | `seq` | Payload | Sent when |
 |---|---|---|---|---|---|
-| `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]`, `deviceId`, `productId`, `clientVersion?`, `runtimes?`, `configuredToolsets?`, `cursor?` | Opening (or reopening) the authenticated WS or long-poll connection snapshot |
-| `conn.ack` | S→D | optional | **required** | `protocolVersion`, `capabilities[]`, `serverTime` | Handshake acknowledgement |
+| `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]`, `deviceId`, `productId`, `clientVersion?`, `runtimes?`, `configuredToolsets?`, `cursor?` | First message on an authenticated long-poll session (including after reconnect) |
+| `conn.ack` | S→D | optional | **required** | `protocolVersion`, `capabilities[]`, `serverTime` | Historical handshake acknowledgement; current long-poll uses response metadata |
 | `task.offer` | S→D | **required** | **required** | `instruction`, `policy`, `runtime?`, `dispatchSelection?` (additive — see below), `sessionRef?`, `workspaceHint?` (reserved — see note below), `limits?` | `dispatch()` targets a device |
 | `task.offer_with_toolsets` | S→D | **required** | **required** | All `task.offer` fields plus `requiredToolsets` (1–16 logical ids) | A toolset-aware host targets a capable device |
 | `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `policy`, `agentRef`, `runtime?`, `dispatchSelection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
@@ -724,10 +724,10 @@ type); `seq` stays optional (daemon → server).
 
 **Gated on a new handshake capability flag, `approval_resolved`**
 (`CAPABILITY_FLAGS`, `version.ts`) — the N/N-1 answer for this message: an
-old server never advertises the flag in its `conn.ack`, so a new daemon
-talking to it never sends `task.approval_resolved` at all and silently falls
-back to the pre-existing implicit-inference path, unconditionally, exactly
-as before this message existed. Server-side handling
+old server never advertises the flag in its long-poll response capabilities,
+so a new daemon talking to it never sends `task.approval_resolved` at all and
+uses the pre-existing implicit-inference path, exactly as before this message
+existed. Server-side handling
 (`ConnectionHub.onApprovalResolved`, `hub.ts`): `AwaitApproval` legally
 transitions to `Running` (the same edge `approveTask` itself uses) and emits
 a `task.approval_resolved` `ByokServerEvent` carrying
@@ -859,9 +859,9 @@ silent misapplications — narrower, never zero.
 ## 6. Auth flows
 
 HTTP bodies for these live in `src/http-api.ts`; they are plain HTTP
-request/response shapes, not wire envelopes, and never touch the WSS
-connection. `v:1` is unaffected — pairing and token renewal are out-of-band
-calls that happen before/alongside the WSS connection.
+request/response shapes, not wire envelopes. `v:1` is unaffected — pairing and
+token renewal are out-of-band calls that happen before or alongside the
+authenticated long-poll session.
 
 Device identity is a locally generated Ed25519 keypair. The complete local
 enrollment record—authenticated device/tenant/public-key metadata, token,
@@ -992,8 +992,8 @@ tells the server which tenant and product the renewed token gets bound to.
 
 Revocation is server-side only — a dashboard/API action against the SaaS's
 own device registry. There is no wire message or HTTP body for it. A revoked
-device's next `/byok/challenge`, `/byok/token`, or WSS connect attempt gets a
-`401`; the daemon's only recourse is to re-run `/byok/pair` from scratch (a
+device's next `/byok/challenge`, `/byok/token`, or authenticated long-poll
+request gets a `401`; the daemon's only recourse is to re-run `/byok/pair` from scratch (a
 fresh device keypair is not required, but re-registering the existing public
 key is the simplest implementation and is an acceptable choice for M1).
 
@@ -1216,9 +1216,8 @@ exactly as designed) — and silently losing the task's primary structured
 result is data loss, not the harmless dropped-observability-hint case that
 tolerance exists for. So:
 
-- Old server, new daemon: the flag is absent from the current transport's
-  advertisement (`conn.ack.capabilities` on WS,
-  `EventsPollResponse.capabilities` on long-poll), so the daemon never sends
+- Old server, new daemon: the flag is absent from the long-poll response's
+  advertisement (`EventsPollResponse.capabilities`), so the daemon never sends
   `document`. If its extractor did produce one,
   the daemon reports `task.fail` (`retryable: false` — the same server will
   strip it on every retry too) with a reason prefixed `result document
@@ -1232,11 +1231,9 @@ tolerance exists for. So:
 
 The capability is read fresh at BOTH ends of the completion path — once when
 the document is resolved, and again immediately before the envelope is handed
-to the transport — because a reconnect in between can replace the connection
-with one whose current transport never advertised the flag (a daemon drops
-learned capabilities at every transport boundary, then only a fresh WS ack or
-successful poll response repopulates them). A rollback caught in that window is the same
-fail-closed `task.fail`, not a silent send.
+to the transport — because a reconnect in between can replace the long-poll
+session with one whose current response never advertised the flag. A rollback
+caught in that window is the same fail-closed `task.fail`, not a silent send.
 
 **Residual window (known, bounded, deliberately not worked around).** Even
 the second check runs before the envelope leaves the daemon's outbox. A
@@ -1309,13 +1306,12 @@ other terminal fact. Its typed result read model projects this object from the
 winning receipt unchanged; a later terminal cannot replace it. No raw-receipt
 consumer parses this object, and no `TenantStorageUsage` type is reused.
 
-## 8. Long-poll fallback
+## 8. Long-poll transport
 
-For environments where an outbound WSS connection isn't viable, long-poll is
-a full transport — both directions, not receive-only. A daemon that has
-fallen back to long-poll keeps making normal progress on tasks; "degraded"
-describes the transport, not a reason to decline new work or stop reporting
-task state.
+Authenticated long-poll HTTP is the daemon's sole bidirectional transport.
+The same session carries server-to-daemon delivery and daemon-to-server
+control messages; it is the normal operating mode, not a degraded or alternate
+path.
 
 ### 8.1 Receive — `GET /byok/events?cursor=N`
 
@@ -1326,32 +1322,29 @@ GET /byok/events?cursor=N
 ```
 
 Authed (bearer access token); holds the request open for ~50 seconds waiting
-for new events before returning an empty `events` array. Same cursor
-semantics as the WSS path (§9) — `cursor` in the query is "last seq I've
-seen," `cursor` in the response is "resume from here next time." A client
-using long-poll instead of WSS establishes its per-device session through the
-HTTP layer's bearer auth and sends the same bounded `conn.hello` capability
-snapshot as the first `POST /byok/messages` envelope. The route accepts that
-one non-task envelope only when its device, product, and protocol version
-exactly match the authenticated principal; it is ordered ahead of queued task
-messages. `capabilities` is the HTTP transport's equivalent of
-`conn.ack.capabilities`: it describes the server that produced THIS response,
-is refreshed on every successful poll, and is applied before the response's
+for new events before returning an empty `events` array. `cursor` in the query
+is "last seq I've seen," and `cursor` in the response is "resume from here
+next time." The daemon establishes its per-device session through the HTTP
+layer's bearer auth and sends the bounded `conn.hello` capability snapshot as
+the first `POST /byok/messages` envelope. The route accepts that one non-task
+envelope only when its device, product, and protocol version exactly match the
+authenticated principal; it is ordered ahead of queued task messages.
+`capabilities` is the server capability advertisement for THIS response, is
+refreshed on every successful poll, and is applied before the response's
 events are delivered. The field is additive and optional only for N/N-1 wire
 tolerance; a new daemon reads absence as `[]`, never as an assumed default.
 An HTTP/network/response-validation failure withdraws the last advertisement
-immediately: long-poll has no persistent peer whose earlier capability claim
-could remain authoritative across that failed request.
+immediately: no earlier request remains authoritative after that failure.
 Anything a server needs for a per-task decision must therefore
 travel on a `task.*` message, not be inferred from connection state — this is
 exactly why claim-time capabilities ride `task.claim` (§11.5) rather than
 `conn.hello.runtimes[]`. The event *shapes* returned are identical `Envelope`
-values regardless of transport.
+values for every long-poll response.
 
 ### 8.1.1 First-hop presence — `PUT /byok/presence`
 
 In addition to the authenticated `conn.hello` admission snapshot, a daemon
-using either transport publishes the same lossy first-hop presence snapshot:
+publishes the same lossy first-hop presence snapshot:
 
 ```
 PUT /byok/presence
@@ -1363,10 +1356,9 @@ PUT /byok/presence
 `clientVersion` is the U4a `localAgentRelease.version` value and is never
 derived from a package, runtime executable, or host. `runtimes[]` contains
 only the version/auth facts returned by the daemon's real local probe;
-unavailable fields are omitted. The WS `conn.hello` and this first HTTP
-presence publication use one frozen per-start snapshot, so switching to
-long-poll does not invent a second identity authority. Presence remains a
-lossy TTL hint and is not an execution or admission signal.
+unavailable fields are omitted. The `conn.hello` and this first HTTP presence
+publication use one frozen per-start snapshot, so identity has one authority.
+Presence remains a lossy TTL hint and is not an execution or admission signal.
 
 ### 8.2 Send — `POST /byok/messages`
 
@@ -1376,13 +1368,10 @@ POST /byok/messages
   Response (MessagesSendResponseSchema): { accepted: number, rejected?: number }
 ```
 
-Authed (bearer access token). A device long-polling for S→D traffic (§8.1)
-has no live WSS connection to carry its own D→S envelopes (`task.claim`,
-`task.progress`, `task.complete`, etc.) — this endpoint is that path while
-in that mode. Each envelope in `messages` is routed through the server's
-single inbound gate (the reference implementation's `handleInbound`) — the
-exact same gate a WSS connection's messages get, not a parallel or
-lesser-validated path.
+Authed (bearer access token). Each envelope in `messages` is routed through
+the server's single inbound gate (the reference implementation's
+`handleInbound`). The same gate applies to every daemon-to-server message; it
+is not a parallel or lesser-validated path.
 
 #### Agent-initiated message lane
 
@@ -1456,9 +1445,8 @@ above, or the ownership check (§9) — present in the response only when
 nonzero, so a batch with nothing rejected keeps the `{ accepted }`-only
 shape.
 
-A daemon that has fallen back to long-poll must send every D→S envelope
-this way instead of queueing them for a WSS connection that isn't coming
-back on its own.
+A daemon sends every D→S envelope this way; there is no alternate socket
+queue or transport selection to reconcile.
 
 **Chunking an oversized outbound queue is a client-side implementation
 detail, not a new wire rule.** A daemon that has accumulated more than
@@ -1471,20 +1459,14 @@ oversized batch unchanged, stall permanently. The reference client
 `MAX_MESSAGES_PER_BATCH` constant the schema enforces (exported from
 `@byok-sdk/protocol`, not a hard-coded copy), so the two can never drift apart.
 
-### 8.3 WS and long-poll are mutually exclusive — last transport wins (resolves a carried-forward pin)
+### 8.3 Historical transport note (pre-WP3B Step4b)
 
-**A device has exactly one live transport at a time, never both.** A WS
-connection completing its handshake supersedes any long-poll request
-currently held open for the same device: the reference server lets that
-long-poll request resolve immediately (with whatever it already had queued,
-possibly empty) instead of leaving it hanging until its own ~50s timeout, and
-all subsequent server→daemon delivery for that device goes out over the new
-WS connection. There is no dual-delivery window and no race to reconcile —
-the newest transport to successfully connect simply takes over. A daemon
-that falls back to long-poll after a WS drop, then later succeeds at
-re-establishing WS, does not need to explicitly "close" the long-poll side
-itself; its next in-flight long-poll request is settled server-side the
-moment the new WS connection registers.
+> Historical (pre-WP3B Step4b; non-normative): older releases implemented a
+> WebSocket transport alongside long-poll and specified that the two were
+> mutually exclusive, with the newest connection taking over. That socket
+> implementation, transport selection, and fallback behavior were removed in
+> WP3B Step 4b. Current daemons use only this section's long-poll contract;
+> this note remains only to explain older release notes and artifacts.
 
 ## 9. At-least-once delivery & idempotency
 
@@ -1494,11 +1476,13 @@ already processed) a redelivered envelope.
 
 ### Reconnection procedure
 
-1. Daemon reconnects, sends `conn.hello` with `cursor` set to the highest
-   `seq` it has successfully processed from this server (omitted on a
-   device's first-ever connection).
-2. Server responds `conn.ack` as usual.
-3. Server then redelivers, in `seq` order, every server → daemon envelope it
+1. Daemon reconnects and sends `conn.hello` as the first
+   `POST /byok/messages` envelope, with `cursor` set to the highest `seq` it
+   has successfully processed from this server (omitted on a device's
+   first-ever connection).
+2. The daemon issues an authenticated `GET /byok/events?cursor=N`; the
+   response advertises current capabilities and contains the redelivery page.
+3. The server then redelivers, in `seq` order, every server → daemon envelope it
    sent with `seq > cursor` that is **still relevant** — i.e. belongs to a
    task that has not since reached a terminal state on the server, **or is a
    `task.cancel`/`task.reject` notification** ([§4](#4-cancelapprovereject-wire-semantics-m1-gap-3)
@@ -1518,12 +1502,11 @@ server worker, not specified further here.
 (`task.*`, `agent.egress.ack`, `agent.content.read`, and
 `agent.home.projection`) counts toward the cursor a daemon reports as
 `conn.hello.cursor` in step 1 —
-`conn.ack` never does, even though it also carries a `seq`. Step 2 (server
-sends `conn.ack`) always happens immediately before step 3 (server
-redelivers the backlog) on the same reconnection, and `conn.ack`'s `seq` is
-always higher than everything in that backlog; a client that doesn't
-observe this scoping rule will drop its own redelivered backlog as
-already-seen.
+`conn.*` never does. The poll response's `cursor` and `capabilities` are
+transport metadata, not tracked envelopes; a daemon advances its durable
+cursor only from successfully handled server control messages. A client that
+treated a connection announcement or response metadata as a task sequence
+could drop its own redelivered backlog as already seen.
 
 Before the first tracked handler side effect, the daemon durably writes a zero
 resume baseline. Zero is not an acknowledgement; it ensures that a crash or
@@ -1640,6 +1623,10 @@ fresh envelope rather than resending the exact original bytes):
 
 ## 10. M0 → M1 breaking changes
 
+> Historical (M0→M1; non-normative): this section records the earlier wire
+> migration and its implementation fallout. The current transport and server
+> composition are defined in §§3 and 8 above.
+
 Wire is pre-freeze (`v` stays `1`); these are schema/behavior changes within
 that pre-freeze latitude. Every item below breaks the M0 server and/or
 client packages at compile time or at runtime — **this wave intentionally
@@ -1660,6 +1647,11 @@ does not fix server/client**; that is M1-2/M1-3's job against this document.
 | 11 | `src/http-api.ts` | Did not exist | **New module**: pair/challenge/token/blob/events-poll HTTP schemas (§6–8) |
 
 ### Fallout at the time (since resolved by M1-2/M1-3)
+
+> Historical (M0→M1; non-normative): the implementation paths named in this
+> subsection describe an earlier release and are retained as migration
+> archaeology. They are not current runtime components or current transport
+> requirements.
 
 This subsection is a historical migration record, not a statement of current
 build health. At the time this change landed, `pnpm -r typecheck` was run
@@ -1988,11 +1980,16 @@ no member of, but capabilities are a self-report any adapter can make
 honestly, and gating them would leave a custom steer-capable adapter
 permanently un-steerable.
 
-## 12. Task lease (M2)
+## 12. Historical task lease (M2; superseded by WP3B Step 2)
 
-A backstop for a device that goes dark mid-task and never comes back —
-distinct from, and layered on top of, §9's redelivery (which already handles
-"device reconnects within the window, nothing lost").
+> Historical (pre-WP3B Step 2; non-normative): the lease/reaper contract in
+> this section belonged to the earlier server implementation. The current
+> cloud kernel and self-hosted façade do not run this task lease reaper; this
+> record remains only for the M2 wire-history and its old failure semantics.
+
+The former backstop covered a device that went dark mid-task and never came
+back — distinct from, and layered on top of, §9's redelivery (which already
+handled "device reconnects within the window, nothing lost").
 
 **Rule: a `Claimed`/`Running`/`AwaitApproval` task whose owning device has
 been dark (disconnected outright, or long-poll-silent) AND has had no
@@ -2054,125 +2051,33 @@ real evidence:
    (parsed, field stripped, no throw) —
    `packages/protocol/src/__tests__/version-negotiation-drill.test.ts` and
    the adjacent AgentEvent-variant case already in `freeze-guard.test.ts`.
-2. **Unknown NEW message type — the ignore/skip behavior differed by
-   transport; a genuine asymmetry the drill FOUND AND FIXED:**
-   - WS (`ws-transport.ts`): tolerant per-frame — an unrecognized `type`
-     fails `decodeEnvelope` with a distinctly-catchable
-     `UnknownMessageTypeError`, the WS message handler's `catch` block
-     silently skips just that one frame, and the connection (and every
-     later, well-formed frame) is unaffected. Unchanged by this fix — it
-     was already correct.
-   - Long-poll (`long-poll-transport.ts`): **was NOT tolerant at the batch
-     level.** `EventsPollResponseSchema` used to validate the WHOLE polled
-     batch as one `z.array(EnvelopeSchema)`; a single unrecognized-type
-     entry anywhere in it failed the entire `.parse()` call, discarding
-     every other (otherwise-valid) envelope in that same batch. Because the
-     client's redelivery cursor only ever advances after a successful
-     parse, and the real server's outbox *retains and redelivers* an
-     un-acked envelope (§9) rather than dropping it after one attempt, a
-     real future-typed envelope stuck at the head of a device's backlog
-     would make that device's long-poll cursor stall on every retry — not a
-     crash, not an unbounded hang (the retry loop kept backing off exactly
-     as it does for any other failure), but a genuine, indefinite lack of
-     forward progress on that transport specifically. This is exactly the
-     failure class this drill exists to catch — a `v1.1` server adding one
-     new additive message type would have stranded every `v1.0` long-poll
-     device — so it was fixed rather than shipped as a documented gap.
-     **Fix (`long-poll-transport.ts`, `connection-manager.ts`):** the outer
-     batch shape (`events` array + `cursor`) is now validated loosely; each
-     entry is validated INDIVIDUALLY via `parseMessage` — the same
-     per-message validator `decodeEnvelope` (WS's own per-frame decode)
-     calls internally, so the two transports share one notion of "valid"
-     and cannot drift apart on it again. An entry that fails for ANY reason
-     is skipped for THIS batch — silently, no log line, batch and
-     connection otherwise unaffected — but (finding F1/R1, below) NOT every
-     failure class gets the same cursor treatment.
+2. **Unknown NEW message type — long-poll entries are skipped independently:**
+   the outer poll response (`events` plus `cursor`) is validated for shape,
+   then each event is parsed independently. An unrecognized `type` is skipped
+   for this batch without affecting later events or the session. When the
+   skipped envelope carries a numeric `seq`, the daemon advances its
+   skip-watermark past that entry so a persistently redelivered future message
+   cannot stall progress.
 
-     A skipped entry that fails with `UnknownMessageTypeError` (an entirely
-     unrecognized `type` — genuine forward-compat tolerance) and still
-     carries a numeric `seq` advances the cursor/watermark past it
-     (`ConnectionManager.noteSkippedSeq`), so a persistently-redelivered
-     unparseable entry can never stall progress again — verified directly:
-     the cursor keeps advancing through repeated redelivery of the same
-     poison payload, and a concurrent legitimate envelope is delivered with
-     no grace period needed.
+   A recognized type whose payload fails validation is different: it engages
+   `stalledAtSeq` and does not advance the cursor. Later events may still run
+   their handlers, but the durable cursor remains frozen until the malformed
+   entry is redelivered in corrected form. Once corrected, the cursor advances
+   to that sequence; a higher sequence already handled while stalled is not
+   retroactively acknowledged until a genuinely new event closes the gap.
+   This is fail-closed control-message handling, not a compatibility
+   reinterpretation.
 
-     **Finding F1 (cross-model adversarial review): a malformed-known-type
-     entry (a recognized `type` whose payload fails schema validation —
-     `EnvelopeValidationError`, e.g. a real `task.offer` whose
-     `PermissionPolicy` rejects an unknown constraint) must NOT get that
-     same cursor advance.** The original fix above forwarded EVERY
-     `parseMessage` failure to `onSkippedSeq` regardless of class, reasoning
-     (wrongly) that this "mirrored WS exactly". It does not: WS's blanket
-     `catch {}` drops the frame with no skip-side cursor bookkeeping AT ALL
-     (an unparseable WS frame never advances anything, so the server's
-     retain-and-redeliver semantics keep it alive on their own); long-poll's
-     `onSkippedSeq` call is an ACTIVE cursor advance with no WS equivalent.
-     Applied uniformly, it meant a genuinely malformed control message the
-     daemon never understood got silently, permanently acked — the server
-     would stop redelivering it and whatever it was offering was stuck for
-     good. F1's own fix narrowed `onSkippedSeq` to `UnknownMessageTypeError`
-     only, forwarding no `seq` at all for any other failure.
+   The regression suites in
+   `packages/client/src/__tests__/unknown-message-type-tolerance.test.ts` and
+   `packages/client/src/__tests__/long-poll-validation-stall.test.ts` cover
+   interleaved known/unknown events, persistent redelivery, malformed-known
+   stalls, cursor recovery, warning cadence, and poll backoff.
 
-     **Finding R1 (cross-model RE-review — F1's fix alone was NOT-CLOSED):
-     simply not forwarding the seq was insufficient.** A batch
-     `[bad seq2, valid seq3]` still let seq3's own INDEPENDENT success
-     silently drag the durable cursor to 3 once its handler resolved —
-     permanently acking seq2 one hop removed from the exact bug F1 set out
-     to fix, since the server would still conclude the daemon has
-     everything through 3 and stop redelivering seq2. Fix
-     (`ConnectionManager.noteValidationFailure`): a validation-failed
-     KNOWN-type entry now engages `stalledAtSeq` — the SAME machinery a
-     thrown handler failure already uses — freezing `dedupWatermark()` at
-     the durable cursor. Because `process()`'s own existing post-success
-     guard already refuses to advance the cursor past a still-unresolved
-     `stalledAtSeq` for ANY other envelope, this required zero changes to
-     `process()` itself: a later envelope in the same or a later batch
-     (seq3 above) is still delivered to its handler and its side effects
-     still run normally, but the cursor stays frozen until the stall
-     clears. `LongPollClient` additionally applies its `retryDelayMs`
-     backoff on the VERY SAME poll cycle the failure is first discovered
-     (not just from the next cycle onward — a local
-     `hadValidationFailureThisBatch` flag closes a one-cycle race a
-     synchronous read of `isStalled()` alone would miss, since the stall
-     mutation is itself deferred via `ConnectionManager`'s FIFO
-     `processingChain`), and `console.warn`s once per distinct poisoned
-     seq, never once per poll.
-
-     Explicit semantic (stated, not left implied): once the stall clears
-     (a corrected redelivery of the bad seq succeeds), the cursor advances
-     to EXACTLY that seq — it does NOT automatically jump forward to cover
-     a higher seq that already succeeded while stalled. That higher seq's
-     own `deliveredSeq` watermark already marks it "seen", so a further
-     redelivery of it is idempotently discarded before ever reaching
-     `process()` again (unlike an unknown-type SKIP, whose `onSkippedSeq`
-     callback has no redelivery dedup at all and so DOES get another
-     chance to nudge the cursor forward on a redelivery). The gap closes
-     the ordinary way any live connection closes it: a later, genuinely-new
-     envelope succeeds and its own `advanceCursor` call covers everything
-     up to that point. This is not a new limitation R1 introduces — it is
-     the pre-existing `stalledAtSeq`/`deliveredSeq` contract a real
-     thrown-handler stall already had (see this section's own "CRITICAL
-     fix" test below, which needed an explicit extra redelivery of ITS
-     skip entry to reach its own final cursor value) — R1 deliberately
-     reuses it as-is.
-
-     See `packages/client/src/__tests__/unknown-message-type-tolerance.test.ts`
-     for the full regression suite (against the real `ConnectionManager`/
-     `WsTransport`/`LongPollClient`): interleaved known/unknown/known
-     batches processed in order with the cursor advanced past all three
-     (including a trailing skip with nothing known after it, tested in
-     isolation), the persistent-redelivery/recovery case, the
-     malformed-known-type case proving the cursor stays frozen until a
-     corrected redelivery at the same seq is processed, and (R1) the
-     same-batch stall-engagement case plus the "reaching a higher seq
-     needs a later genuinely-new envelope" case above. The dedicated
-     `console.warn`-cadence and poll-backoff-timing assertions live in
-     `packages/client/src/__tests__/long-poll-validation-stall.test.ts`
-     (isolated from a real `TestServer` — see that file's own doc comment
-     for why, including a documented deviation from an original
-     fake-timer-based test plan that reproducibly hung this vitest/Node
-     combination).
+   > Historical (pre-WP3B Step4b; non-normative): the compatibility drill
+   > previously compared separate socket-frame and long-poll implementations.
+   > That dual-transport comparison is retained only in archived research;
+   > the current contract above has one long-poll path.
 3. **Unknown fields on control/security-class schemas
    (`PermissionPolicySchema`, the `instruction` blob-ref variant) are
    REJECTED, fail-closed** — already established by `freeze-guard.test.ts`;
@@ -2182,30 +2087,19 @@ real evidence:
 4. **Handshake version negotiation: a daemon advertising an overlapping set
    (e.g. `[1, 2]`) agrees on `1`; a disjoint set (e.g. `[2, 3]`) gets a
    clean, typed failure, not a hang.** The schema half (`conn.hello` accepts
-   either shape; `conn.ack` can only ever express one resolved version) is
-   in `version-negotiation-drill.test.ts`. The actual negotiation DECISION —
-   `ws-server.ts`'s handshake check,
-   `payload.protocolVersions.includes(PROTOCOL_VERSION)` — is exercised for
-   real (not reimplemented) in
-   `packages/server/src/__tests__/version-negotiation.test.ts`, including a
-   race against a timeout as direct "not a hang" evidence rather than
-   relying on the test runner's own global timeout to catch a hang
-   implicitly. Confirms today's actual negotiation rule is a simple
-   membership check against the server's single `PROTOCOL_VERSION`, not yet
-   the "highest common version across an N/N-1 range" policy the "Freeze
-   rule" section above already flags as "currently a no-op in practice"
-   until a real `v:2` exists.
+   either shape; `conn.ack` can only ever express one resolved version) is in
+   `version-negotiation-drill.test.ts`. The negotiated version is selected at
+   long-poll admission by checking whether the daemon advertises the server's
+   single `PROTOCOL_VERSION`; a disjoint set is rejected before any task
+   message is accepted. The real integration test exercises the rejection
+   path and a timeout race, so incompatibility is observable rather than a
+   hanging request. The "highest common version across an N/N-1 range" policy
+   remains future work until a real `v:2` exists.
 
-**Adjacent honest note (gatekeeper advisory, docs-only, no code change): rate
-limiting's abrupt WS close is not a new at-most-once risk.** M4 Phase 4's
-per-device rate limiter (`CreateByokServerOptions.rateLimit`) closes a
-flooding device's WS connection (1008). Any envelope the daemon's own WS
-transport already handed to its socket write between budget exhaustion and
-that close actually landing shares the ordinary at-most-once exposure of ANY
-abrupt WS disconnect — this section's own opening line scopes the
-at-least-once guarantee to the server→daemon direction; daemon→server has no
-redelivery cursor at all (`messages.ts`: "M1 only specifies at-least-once
-server->daemon redelivery, not a daemon->server one"), so this was already
-true before rate limiting existed. A flood just makes the pre-existing
-window more likely to have something in flight at the exact moment of a
-close — it introduces no new loss mode of its own.
+**Adjacent honest note (gatekeeper advisory, docs-only, no code change): an
+interrupted HTTP poll is not an at-most-once claim.** Rate limiting, network
+failure, or process shutdown can interrupt a request after a daemon has
+queued an outbound envelope. Daemon→server delivery has no redelivery cursor;
+the server's `accepted` response and the envelope's idempotency key are the
+only delivery facts. This was already true before the long-poll-only fold and
+does not add a second transport semantics.

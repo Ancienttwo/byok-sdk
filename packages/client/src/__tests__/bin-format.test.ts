@@ -150,7 +150,7 @@ describe('bin/format: formatDaemonEventLine', () => {
     const events: DaemonEvent[] = [
       { kind: 'offered', ts: 'T', taskId: 't1', runtime: 'pi' },
       { kind: 'progress', ts: 'T', taskId: 't1', event: { type: 'progress', text: 'hi' } },
-      { kind: 'connection', ts: 'T', state: 'degraded' },
+      { kind: 'connection', ts: 'T', state: 'closed' },
     ];
     for (const line of events.map((event) => formatDaemonEventLine(event))) {
       expect(line).not.toMatch(ANSI_ESCAPE_RE);

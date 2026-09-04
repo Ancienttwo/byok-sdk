@@ -11,75 +11,7 @@ async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
-describe('daemon reconnect after socket drop', () => {
-  let server: TestServer;
-  let daemon: Daemon | undefined;
-
-  afterEach(async () => {
-    await daemon?.stop();
-    await server.close();
-  });
-
-  it('reconnects and re-hellos/acks after the connection is forcibly dropped', async () => {
-    server = await TestServer.start();
-    const workspaceRoot = await tmpDir('byok-client-workspace-');
-    const storeDir = await tmpDir('byok-client-store-');
-    const adapter = new StubRuntimeAdapter();
-
-    daemon = createDaemonWithAdapters(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
-      [adapter],
-      { backoff: { baseMs: 20, maxMs: 100, factor: 2 } },
-    );
-
-    await daemon.pair('code');
-    await daemon.start();
-    expect(daemon.status().connected).toBe(true);
-
-    const countHellos = (): number => server.received.filter((e) => e.type === 'conn.hello').length;
-    expect(countHellos()).toBe(1);
-
-    server.dropConnection();
-
-    // Assert on the monotonic hello count rather than polling the
-    // connected boolean: with a fast test backoff, close->reconnect->ack can
-    // complete faster than a poll interval, so a transient "false" sample
-    // is not guaranteed to ever be observed — but a second conn.hello having
-    // arrived is unambiguous proof a reconnect happened.
-    await vi.waitFor(() => expect(countHellos()).toBe(2), { timeout: 5000 });
-    await vi.waitFor(() => expect(daemon?.status().connected).toBe(true), { timeout: 2000 });
-  });
-
-  it('terminates and reconnects when no data/ping arrives within the liveness timeout', async () => {
-    server = await TestServer.start();
-    const workspaceRoot = await tmpDir('byok-client-workspace-');
-    const storeDir = await tmpDir('byok-client-store-');
-    const adapter = new StubRuntimeAdapter();
-
-    daemon = createDaemonWithAdapters(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
-      [adapter],
-      { backoff: { baseMs: 20, maxMs: 100, factor: 2 }, liveness: { timeoutMs: 150, checkIntervalMs: 30 } },
-    );
-
-    await daemon.pair('code');
-    await daemon.start();
-    expect(daemon.status().connected).toBe(true);
-
-    const countHellos = (): number => server.received.filter((e) => e.type === 'conn.hello').length;
-    expect(countHellos()).toBe(1);
-
-    // No explicit drop this time — the server (correctly) sends nothing
-    // further, and the client's own liveness check must notice the silence,
-    // terminate, and reconnect on its own (server pings every 30s in
-    // production; this test just proves the client-side half of that
-    // contract without needing a real 75s/30s wait).
-    await vi.waitFor(() => expect(countHellos()).toBe(2), { timeout: 5000 });
-    await vi.waitFor(() => expect(daemon?.status().connected).toBe(true), { timeout: 2000 });
-  });
-});
-
-describe('redelivery cursor (protocol §9)', () => {
+ describe('redelivery cursor (protocol §9)', () => {
   let server: TestServer;
   let daemon: Daemon | undefined;
 
@@ -118,6 +50,7 @@ describe('redelivery cursor (protocol §9)', () => {
     daemon = daemon2;
     await daemon2.start();
 
+    await vi.waitFor(() => expect(server.received.filter((e) => e.type === 'conn.hello')).toHaveLength(2));
     const hellos = server.received.filter((e) => e.type === 'conn.hello');
     expect(hellos).toHaveLength(2);
     expect(hellos[1]?.payload).toMatchObject({ cursor: offerSeq });

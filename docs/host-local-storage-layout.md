@@ -108,8 +108,8 @@ request receives an exact durable readback.
 ## Admission and migration
 
 Agent execution uses the distinct `task.offer_for_agent` message and the
-additive `agent-home-contract` capability. The daemon sends the same
-authenticated `conn.hello` snapshot on WS and long-poll, before queued task
+additive `agent-home-contract` capability. The daemon sends the authenticated
+`conn.hello` snapshot as the first long-poll message, before queued task
 messages. The server and hosted cloud reject an Agent dispatch before task
 creation or mailbox enqueue when the selected device has no admitted
 declaration of that capability; the hosted composition persists the

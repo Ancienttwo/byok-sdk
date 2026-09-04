@@ -67,7 +67,7 @@ import {
 } from './presence-publisher';
 import { assertServerUrlAllowed, formatServerUrl, toHttpBase } from './url';
 import { mintDeviceAssertion } from './device-assertion-signer';
-import type { BackoffOptions, ConnectionState, LivenessOptions } from './ws-transport';
+import type { ConnectionState } from './connection-manager';
 import { AnotherControlServerRunningError, startControlServer } from './control-server';
 import type { ControlMethods, ControlServerHandle } from './control-server';
 import {
@@ -430,7 +430,7 @@ export interface DaemonConfig {
   /**
    * M5: explicit escape hatch for `url.ts`'s `assertServerUrlAllowed` — see
    * that function's own doc comment for the full allow/deny rule. Default
-   * (unset/`false`): a `serverUrl` using plaintext `ws:`/`http:` is only
+   * (unset/`false`): a `serverUrl` using plaintext `http:` is only
    * accepted when its host is loopback (`localhost`/`*.localhost`,
    * `127.0.0.0/8`, `::1`); anything else over plaintext throws a typed
    * `InsecureServerUrlError` from `pair()`/`start()` below, BEFORE any
@@ -441,7 +441,7 @@ export interface DaemonConfig {
    * server) — doing so also logs a loud `console.warn` (see
    * `checkServerUrl`, this file) every time it actually changes the
    * outcome. Never overrides an unsupported scheme (anything other than
-   * `http:`/`https:`/`ws:`/`wss:`), which is refused unconditionally.
+   * `http:`/`https:`), which is refused unconditionally.
    */
   dangerouslyAllowInsecureRemote?: boolean;
   /**
@@ -653,8 +653,6 @@ export interface DaemonStatus {
   localAgentRelease: Readonly<LocalAgentReleaseIdentity>;
   paired: boolean;
   connected: boolean;
-  /** True once the connection has fallen back to long-poll (protocol §8) — transport info only (finding F6): long-poll is a full transport, so work still proceeds normally while this holds; outbound envelopes POST to /byok/messages instead of going out over WS. */
-  degraded: boolean;
   /** True once the server has revoked this device (401 on challenge/token, protocol §6.3). The only recourse is calling `pair()` again — the daemon does not keep retrying on its own. */
   revoked: boolean;
   deviceId?: string;
@@ -727,10 +725,8 @@ export interface Daemon {
   reject(taskId: string, reason?: string): Promise<void>;
 }
 
-/** Internal seam so tests can substitute stub adapters / faster backoff+batch+liveness+long-poll timing. `createDaemonWithAdapters` (which takes this) is also the real entry point for products supplying a hand-built adapter set `createDaemon` can't construct on its own — e.g. custom adapter options, or an adapter that REPLACES a bundled runtime's implementation under the same id. Honest limit: an adapter id outside `pi`/`claude`/`codex` cannot pass wire validation today — `RuntimeIdSchema` (`@byok-sdk/protocol`) is a closed `z.enum(['pi', 'claude', 'codex'])`, and `isRuntimeId` filtering below (see `detectRuntimes`) drops any detected adapter outside that set before it ever reaches a wire-visible field. A genuinely fourth/namespaced runtime id is a future protocol change, not something this seam enables today. */
+/** Internal seam so tests can substitute stub adapters / faster batch and long-poll timing. `createDaemonWithAdapters` (which takes this) is also the real entry point for products supplying a hand-built adapter set `createDaemon` can't construct on its own — e.g. custom adapter options, or an adapter that REPLACES a bundled runtime's implementation under the same id. Honest limit: an adapter id outside `pi`/`claude`/`codex` cannot pass wire validation today — `RuntimeIdSchema` (`@byok-sdk/protocol`) is a closed `z.enum(['pi', 'claude', 'codex'])`, and `isRuntimeId` filtering below (see `detectRuntimes`) drops any detected adapter outside that set before it ever reaches a wire-visible field. A genuinely fourth/namespaced runtime id is a future protocol change, not something this seam enables today. */
 export interface DaemonOverrides {
-  backoff?: BackoffOptions;
-  liveness?: LivenessOptions;
   /** M4 Phase 3: overrides `TaskRunner`'s default out-of-band approval wait (`DEFAULT_APPROVAL_TIMEOUT_MS`, 10 minutes) before an unanswered `requestApproval` force-resolves as a fail-closed rejection. */
   approvalTimeoutMs?: number;
   /** Finding F5: overrides for the control-socket shutdown path's own bounded waits — see `TaskRunner.shutdownTask`'s and `ConnectionManager.stop`'s own doc comments. Both default to 5s; neither affects an ordinary (non-shutdown-RPC) `daemon.stop()` call. */
@@ -741,10 +737,6 @@ export interface DaemonOverrides {
     outboxDrainTimeoutMs?: number;
   };
   longPoll?: {
-    /** Consecutive never-acked WS connect failures before falling back to long-poll. Default 3. */
-    wsFailureThreshold?: number;
-    /** While long-polling, how often to retry establishing WS. Default 5 minutes. */
-    wsRetryIntervalMs?: number;
     /** Backoff between failed long-poll HTTP attempts. Default 2s. */
     retryDelayMs?: number;
     /** Minimum delay before the next long-poll request after an empty (no-events) response — avoids busy-looping against a server that responds instantly. Default 250ms. */
@@ -2202,23 +2194,19 @@ export function buildDaemonWithAdapters(
               return runner?.handleEnvelope(envelope) ?? Promise.resolve();
             },
       onStateChange: (state) => {
-        // A connection that re-settles (a fresh WS ack, or long-poll taking
-        // over) is the one moment this daemon knows it may be talking to a
-        // different deployment build than it last read a declaration from —
+        // A newly established long-poll connection is the moment this daemon
+        // knows it may be talking to a different deployment build than it last
+        // read a declaration from —
         // so it is also where re-discovery belongs. `runPresenceDiscovery` is
         // a no-op before `startPresenceProducer` arms it and after shutdown
         // disarms it, so the initial settle during `start()` is not a second
         // discovery pass.
-        const wasSettled = connectionState === 'open' || connectionState === 'degraded';
+        const wasSettled = connectionState === 'open';
         connectionState = state;
         observer.noteConnectionState(state);
-        if (!wasSettled && (state === 'open' || state === 'degraded')) runner?.retryRecoveredAgentMessages();
-        if (!wasSettled && (state === 'open' || state === 'degraded')) runPresenceDiscovery();
+        if (!wasSettled && state === 'open') runner?.retryRecoveredAgentMessages();
+        if (!wasSettled && state === 'open') runPresenceDiscovery();
       },
-      backoff: overrides.backoff,
-      liveness: overrides.liveness,
-      wsFailureThreshold: overrides.longPoll?.wsFailureThreshold,
-      wsRetryIntervalMs: overrides.longPoll?.wsRetryIntervalMs,
       longPollRetryDelayMs: overrides.longPoll?.retryDelayMs,
       longPollIdleDelayMs: overrides.longPoll?.idleDelayMs,
       fleetJitter,
@@ -2232,7 +2220,7 @@ export function buildDaemonWithAdapters(
       },
     });
     await connection.start();
-    await connection.waitForAck();
+    await connection.waitForConnection();
     runner.retryRecoveredAgentMessages();
     for (const record of agentEgress.retryableReliableRecords(connection.getServerCapabilities())) {
       dispatchReliableRecord(record);
@@ -3106,9 +3094,8 @@ export function buildDaemonWithAdapters(
         const minted = mintDeviceAssertion({
           record,
           // `toHttpBase` is the one place a configured serverUrl is normalized
-          // (ws:->http:, wss:->https:, path stripped), so an operator who
-          // configured the websocket spelling and one who configured the HTTP
-          // spelling of the same deployment produce the same issuer.
+          // (path stripped), so the issuer ignores an operator-provided path
+          // or query.
           issuer: new URL(toHttpBase(config.serverUrl)).origin,
           productId: config.productId,
           audience: parsed.audience,
@@ -3279,7 +3266,6 @@ export function buildDaemonWithAdapters(
       localAgentRelease,
       paired: auth.deviceId !== undefined,
       connected: connectionState === 'open',
-      degraded: connection?.isTransportDegraded() ?? false,
       revoked: connection?.isRevoked() ?? auth.isRevoked(),
       deviceId: auth.deviceId,
       activeTaskCount: runner?.activeTaskCount ?? 0,
@@ -3295,7 +3281,9 @@ export function buildDaemonWithAdapters(
     mcpToolsets: Record<string, McpToolsetConfig> | undefined,
     expectedRevision: string,
   ): McpToolsetReloadReceipt {
-    return toolsetRegistry.reload(mcpToolsets, expectedRevision);
+    const receipt = toolsetRegistry.reload(mcpToolsets, expectedRevision);
+    if (daemonStarted) connection?.refreshHello();
+    return receipt;
   }
 
   function reportMcpToolsetObservation(

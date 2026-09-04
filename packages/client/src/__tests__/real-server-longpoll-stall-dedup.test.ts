@@ -65,8 +65,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
-        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
-        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs, idleDelayMs: 20 },
+        longPoll: { retryDelayMs, idleDelayMs: 20 },
       },
     );
 
@@ -132,8 +131,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
-        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
-        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs, idleDelayMs: 20 },
+        longPoll: { retryDelayMs, idleDelayMs: 20 },
       },
     );
 
@@ -210,8 +208,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
-        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
-        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs, idleDelayMs: 20 },
+        longPoll: { retryDelayMs, idleDelayMs: 20 },
       },
     );
 

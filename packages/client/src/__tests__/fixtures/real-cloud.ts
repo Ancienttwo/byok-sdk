@@ -30,11 +30,8 @@ import {
  * Boots the REAL `@byok-sdk/cloud` in-memory composition on an ephemeral loopback
  * port, for the end-to-end test that drives the unchanged daemon against it.
  *
- * There is no WebSocket half at all — cloud is a stateless HTTP surface by
- * construction — so a daemon pointed here fails its WS attempts for real (Node
- * destroys the socket on an unhandled `upgrade`) and drops into long-poll
- * through its ordinary `wsFailureThreshold` path, exactly as it would against
- * a real hosted deployment.
+ * Cloud is a stateless HTTP surface by construction, so a daemon pointed here
+ * uses long-poll exactly as it would against a hosted deployment.
  */
 
 /**

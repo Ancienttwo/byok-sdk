@@ -70,15 +70,13 @@ describe('M4 (additive-minor) end-to-end: local CLI approve -> task.approval_res
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
-        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
-        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+        longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
       },
     );
 
     const pairing = await real.createPairingCode();
     const record = await daemon.pair(pairing.code);
     await daemon.start();
-    expect(daemon.status().degraded).toBe(true); // long-poll: the real server serves no WS upgrade
     await vi.waitFor(async () => {
       expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });

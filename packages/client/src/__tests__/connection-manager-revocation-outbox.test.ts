@@ -42,7 +42,7 @@ describe('a revoked device stops draining its outbox instead of retrying forever
 
   it('drainOutbox stops calling postBatch once revocation is discovered, even with envelopes still queued', async () => {
     server = await TestServer.start();
-    server.setRejectWs(true); // force long-poll from the very first attempt
+    server.setAckCapabilities(['approval_resolved']);
 
     const storeDir = await tmpDir('byok-revoke-outbox-store-');
     const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
@@ -60,14 +60,13 @@ describe('a revoked device stops draining its outbox instead of retrying forever
       auth,
       cursorStore,
       onEnvelope: () => {},
-      wsFailureThreshold: 1,
       longPollRetryDelayMs: 20,
       longPollIdleDelayMs: 20,
     });
 
     await connection.start();
-    await connection.waitForAck();
-    expect(connection.isTransportDegraded()).toBe(true);
+    await connection.waitForConnection();
+    expect(connection.getServerCapabilities()).toEqual(['approval_resolved']);
 
     // Revoke server-side, THEN queue outbound envelopes — the drain's very
     // first attempt discovers revocation (401 on the send, then on the
@@ -78,6 +77,7 @@ describe('a revoked device stops draining its outbox instead of retrying forever
 
     await vi.waitFor(() => expect(connection?.isRevoked()).toBe(true), { timeout: 2000 });
     await vi.waitFor(() => expect(postBatchSpy.mock.calls.length).toBeGreaterThanOrEqual(1));
+    expect(connection.getServerCapabilities()).toEqual([]);
 
     const callsAfterRevocationDetected = postBatchSpy.mock.calls.length;
 

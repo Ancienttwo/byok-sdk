@@ -56,10 +56,7 @@ describe('hosted Salesko MCP toolset over the real cloud transport', () => {
       },
       [adapter],
       {
-        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
         longPoll: {
-          wsFailureThreshold: 1,
-          wsRetryIntervalMs: 60_000,
           retryDelayMs: 20,
           idleDelayMs: 20,
         },

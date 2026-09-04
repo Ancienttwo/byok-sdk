@@ -40,7 +40,7 @@ export function parseMessage(data: unknown): Envelope {
 
 /**
  * Decode a single NDJSON line into a validated {@link Envelope}. Accepts a
- * string or raw bytes (e.g. a WebSocket binary frame) — isomorphic, no
+ * string or raw bytes (e.g. a binary transport frame) — isomorphic, no
  * stream handling required of the caller.
  */
 export function decodeEnvelope(line: string | Uint8Array): Envelope {

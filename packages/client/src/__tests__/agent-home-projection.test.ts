@@ -167,10 +167,9 @@ describe('task-free Agent-home projection', () => {
       // over to long-poll after a single failed attempt instead of waiting
       // through a full default backoff sequence — same configuration as
       // `real-server-longpoll-only.test.ts`.
-      backoff: { baseMs: 20, maxMs: 50, factor: 2 },
       // Keep the first daemon from completing an automatic retry before the
       // test can stop it; the second daemon must be the successful redelivery.
-      longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 1_000, idleDelayMs: 20 },
+      longPoll: { retryDelayMs: 1_000, idleDelayMs: 20 },
     });
     daemons.push(daemonA);
     const pairing = await real.createPairingCode();
@@ -221,8 +220,7 @@ describe('task-free Agent-home projection', () => {
       storeDir,
       agentHome: { hostStorageRoot, projection },
     }, [adapterB], {
-      backoff: { baseMs: 20, maxMs: 50, factor: 2 },
-      longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+      longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
     });
     daemons.push(daemonB);
     await daemonB.start();

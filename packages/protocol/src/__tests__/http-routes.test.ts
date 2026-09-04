@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  BYOK_WS_PATH,
   BYOK_PAIR_PATH,
   BYOK_CHALLENGE_PATH,
   BYOK_TOKEN_PATH,
@@ -49,7 +48,6 @@ describe('events poll capability advertisement is additive', () => {
  */
 describe('byok route paths: static constants match their prior call-site literals byte-for-byte', () => {
   it.each([
-    [BYOK_WS_PATH, '/byok/ws'],
     [BYOK_PAIR_PATH, '/byok/pair'],
     [BYOK_CHALLENGE_PATH, '/byok/challenge'],
     [BYOK_TOKEN_PATH, '/byok/token'],

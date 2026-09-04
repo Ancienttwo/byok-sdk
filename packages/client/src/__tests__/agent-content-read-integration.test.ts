@@ -146,7 +146,7 @@ async function startDaemon(
     config,
     [new StubRuntimeAdapter('pi')],
     longPoll
-      ? { longPoll: { wsFailureThreshold: 1, retryDelayMs: 10, idleDelayMs: 10, wsRetryIntervalMs: 100 } }
+      ? { longPoll: { retryDelayMs: 10, idleDelayMs: 10, } }
       : undefined,
   );
   if (pair) await daemon.pair('content-pair-code');
@@ -163,7 +163,7 @@ describe('agent.content.read daemon integration', () => {
     await fs.writeFile(path.join(home, 'notes.txt'), 'ws explicit bytes', 'utf8');
     await startDaemon(server, hostStorageRoot, storeDir);
 
-    const hello = server.received.find((envelope) => envelope.type === 'conn.hello');
+    const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello');
     expect(hello?.type).toBe('conn.hello');
     if (hello?.type !== 'conn.hello') throw new Error('missing conn.hello');
     expect(hello.payload.capabilities).toContain('agent-content-workspace-read');
@@ -216,7 +216,6 @@ describe('agent.content.read daemon integration', () => {
 
   it('uses the same exact Agent session/cwd mapping over long-poll and denies cross-Agent, profile, session, runtime, and cwd claims before reading', async () => {
     server = await TestServer.start();
-    server.setRejectWs(true);
     const hostStorageRoot = await tmpDir('byok-content-longpoll-home-');
     const storeDir = await tmpDir('byok-content-longpoll-store-');
     const home = await prepareAgentHome(hostStorageRoot);

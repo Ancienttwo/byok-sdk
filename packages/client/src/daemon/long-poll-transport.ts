@@ -54,6 +54,10 @@ export interface LongPollClientOptions {
    * An older responder omitting the additive field is reported as `[]`.
    */
   onServerCapabilities?: (capabilities: string[]) => void;
+  /** Called when a failed poll invalidates the preceding response's capability snapshot. */
+  onServerCapabilitiesInvalidated?: () => void;
+  /** Called after a poll fails and before the retry delay begins. */
+  onPollFailure?: () => void;
   /** Called once the device is found to be revoked (401 surfaced through {@link AuthManager}) — the loop stops itself rather than retrying. */
   onRevoked?: () => void;
   /** Called when the server cannot replay the durable cursor supplied to this poll. */
@@ -62,8 +66,7 @@ export interface LongPollClientOptions {
    * M4 Phase 4 (version-negotiation drill fix), scope narrowed by finding F1:
    * called ONLY for a batch entry that failed to parse because its `type`
    * is entirely unrecognized (`parseMessage` throwing
-   * {@link UnknownMessageTypeError} — mirrors `ws-transport.ts`'s identical
-   * per-frame tolerance for that SPECIFIC failure) and which still carries a
+   * {@link UnknownMessageTypeError}) and which still carries a
    * numeric envelope-level `seq` AND a recognizably task-class `type` (a
    * `task.` prefix — see `extractSkippableSeq`'s own doc comment for why a
    * `conn.*`-shaped or type-less entry is deliberately excluded, mirroring
@@ -81,11 +84,8 @@ export interface LongPollClientOptions {
    * not forward-compat tolerance — forwarding its `seq` here would
    * permanently ack a message the daemon never actually understood (the
    * server would stop redelivering it, silently stranding whatever it was
-   * offering). The WS path never had this hazard (an unparseable WS frame
-   * has no skip-side cursor bookkeeping at all — see
-   * `ws-transport.ts` — so it simply gets redelivered later); this callback
-   * being scoped to `UnknownMessageTypeError` only is what makes long-poll
-   * match that same "no silent permanent ack" property for real. Optional
+   * offering). This callback being scoped to `UnknownMessageTypeError` only
+   * preserves the no-silent-permanent-ack property. Optional
    * only for constructor/test convenience — `ConnectionManager` always
    * supplies it.
    */
@@ -164,14 +164,9 @@ const MAX_TRACKED_ROUTE_FAILURE_WARNINGS = 1000;
  * package's own `EventsPollResponseSchema` (`z.array(EnvelopeSchema)`)
  * used to be applied in one shot: that meant a SINGLE unrecognized-type
  * entry anywhere in the batch failed the ENTIRE `.parse()` call, silently
- * discarding every other, otherwise-valid entry right alongside it — a real
- * forward-compat gap the WS transport never had (`ws-transport.ts` decodes
- * and dispatches one frame at a time). Each entry is now validated
- * individually, right where it's consumed (`LongPollClient.loop`, below),
- * via `parseMessage` — the SAME per-message validator `decodeEnvelope`
- * (ws-transport.ts's own per-frame decode) calls internally — so the two
- * transports draw from one shared notion of "valid" and cannot drift apart
- * on it again.
+ * discarding every other, otherwise-valid entry right alongside it. Each
+ * entry is now validated individually, right where it's consumed
+ * (`LongPollClient.loop`, below), via `parseMessage`.
  */
 function parseLooseEventsPollResponse(raw: unknown): LooseEventsPollResponse {
   if (typeof raw !== 'object' || raw === null) {
@@ -219,16 +214,13 @@ function extractSkippableSeq(raw: unknown): number | undefined {
 }
 
 /**
- * Protocol §8 long-poll fallback: `GET /byok/events?cursor=N` in a loop,
- * used while WS connectivity is unavailable (see `ConnectionManager`), plus
- * `POST /byok/messages` for the daemon's own outbound envelopes while in
- * this mode (finding F6 — long-poll is a full transport, not receive-only:
- * see docs/protocol.md §8).
+ * Protocol §8 long-poll transport: `GET /byok/events?cursor=N` in a loop,
+ * plus `POST /byok/messages` for the daemon's own outbound envelopes
+ * (finding F6 — long-poll is a full transport, not receive-only: see
+ * docs/protocol.md §8).
  *
- * Design B (finding N4): this is a stateless drainer, symmetric with
- * `WsTransport.sendNow` — it holds no outbound queue of its own.
- * `ConnectionManager` owns the single shared outbox both transports drain
- * from (so a transport switch never strands a queued envelope);
+ * Design B (finding N4): this is a stateless drainer; it holds no outbound
+ * queue of its own. `ConnectionManager` owns the single shared outbox;
  * `postBatch` is a single POST attempt, reporting back whether the server
  * accepted it. All retry/backoff policy (and re-checking which transport is
  * currently active) lives in the caller (`ConnectionManager.drainOutbox`).
@@ -430,7 +422,8 @@ export class LongPollClient {
           // longer proves that the responder behind the NEXT request supports
           // what the last successful one advertised. Match WS disconnect
           // discipline and withdraw the advertisement immediately.
-          this.opts.onServerCapabilities?.([]);
+          this.opts.onServerCapabilitiesInvalidated?.();
+          this.opts.onPollFailure?.();
           this.opts.onOperationalOutcome?.('failure');
           const baseMs = this.opts.retryDelayMs ?? 2000;
           await sleep(this.opts.retryDelayForAttempt?.(retryAttempt++, baseMs) ?? baseMs, signal);
@@ -438,25 +431,22 @@ export class LongPollClient {
         }
 
         // Finding F3-on-long-poll: each polled envelope flows through
-        // `ConnectionManager.deliver()`/`process()` exactly like a WS-pushed
-        // one — no eager batch-level cursor advance here. The durable
+        // `ConnectionManager.deliver()`/`process()` — no eager batch-level
+        // cursor advance here. The durable
         // cursor now only ever advances AFTER a `task.*` handler's side
-        // effects resolve successfully (see `ConnectionManager.process`),
-        // identically on both transports; `parsed.cursor` (the server's own
-        // batch high-water) is intentionally not consulted for that — the
+        // effects resolve successfully (see `ConnectionManager.process`).
+        // `parsed.cursor` (the server's own batch high-water) is intentionally
+        // not consulted for that — the
         // wire acknowledgement uses the processed cursor while the eager
         // delivery watermark remains local to duplicate suppression.
         //
         // M4 Phase 4 (version-negotiation drill fix): the outer shape
         // (`events` array + `cursor`) is validated loosely; each entry is
-        // then validated INDIVIDUALLY via `parseMessage` — mirrors
-        // `ws-transport.ts`'s identical per-frame tolerance (see
-        // `parseLooseEventsPollResponse`'s own doc comment for the full
-        // rationale). An entry that fails for ANY reason is silently
+        // then validated INDIVIDUALLY via `parseMessage`. An entry that fails
+        // for ANY reason is silently
         // skipped for THIS batch — it never fails the rest of the batch —
         // but (finding F1, revised by finding R1) the two failure classes
-        // are NOT treated identically, unlike `ws-transport.ts`'s own
-        // blanket `catch {}`:
+        // are NOT treated identically:
         //   - `UnknownMessageTypeError` (an entirely unrecognized `type` —
         //     genuine forward-compat tolerance, e.g. a future minor
         //     server's new message type): recognizably task-class entries
@@ -574,9 +564,10 @@ export class LongPollClient {
         // warns itself: it cannot tell a route failure apart from a credential
         // failure or a throwing `onEnvelope` handler, and guessing is exactly
         // the mis-attribution this split removed.
-        this.opts.onServerCapabilities?.([]);
+        this.opts.onServerCapabilitiesInvalidated?.();
         if (this.noteRevoked(err)) return;
         if (!this.running || signal.aborted) return;
+        this.opts.onPollFailure?.();
         this.opts.onOperationalOutcome?.('failure');
         const baseMs = this.opts.retryDelayMs ?? 2000;
         await sleep(this.opts.retryDelayForAttempt?.(retryAttempt++, baseMs) ?? baseMs, signal);

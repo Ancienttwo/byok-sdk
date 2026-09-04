@@ -36,11 +36,9 @@ import {
  *      each package's `package.json`), so per this drill's own instructions
  *      those assertions live in
  *      `packages/client/src/__tests__/unknown-message-type-tolerance.test.ts`
- *      instead, driven against the REAL `ConnectionManager`/`WsTransport`/
- *      `LongPollClient` — not a reimplementation. That file FOUND AND FIXED a
- *      genuine asymmetry: WS tolerates an unknown frame type per-message
- *      (skip and continue) — the pre-existing, correct behavior — but
- *      long-poll's whole-batch `EventsPollResponseSchema.parse()` used to
+ *      instead, driven against the real `ConnectionManager`/`LongPollClient`
+ *      path — not a reimplementation. That file found and fixed a genuine
+ *      asymmetry: long-poll's whole-batch `EventsPollResponseSchema.parse()` used to
  *      fail the ENTIRE poll batch on a single unrecognized-type entry. Fixed
  *      client-side (`long-poll-transport.ts`/`connection-manager.ts`,
  *      per-entry `parseMessage` + cursor-advance-past-a-skip), zero wire/
@@ -68,15 +66,10 @@ import {
  *      schema itself never referees which entries "count" — that's a
  *      semantic decision, not a shape constraint), and `conn.ack` can only
  *      ever express a SINGLE agreed-upon `protocolVersion`, which is what
- *      makes "agrees on 1" a well-formed reply at all. The actual
- *      accept-or-reject NEGOTIATION DECISION is `ws-server.ts`'s own
- *      handshake code (`packages/server`) — protocol has no dependency on
- *      that package either, so per this drill's own instructions ("find the
- *      real negotiation code ... and test through it, not through a
- *      reimplementation") that behavioral test lives in
- *      `packages/server/src/__tests__/version-negotiation.test.ts`, driven
- *      against the real `attachWebSocket`/`ConnectionHub` handshake over a
- *      real WS connection.
+ *      makes "agrees on 1" a well-formed reply at all. Runtime transport
+ *      admission is outside this schema-only drill; after WP3B Step 4b the
+ *      daemon has no socket handshake and sends its connection snapshot over
+ *      the authenticated long-poll message path.
  */
 describe('M4 Phase 4 version-negotiation drill', () => {
   describe('item 1: unknown additive fields on observability-class payloads are tolerated (parsed, field stripped, no throw)', () => {

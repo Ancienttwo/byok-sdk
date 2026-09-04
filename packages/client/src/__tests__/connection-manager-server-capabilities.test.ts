@@ -16,11 +16,10 @@ async function tmpDir(prefix: string): Promise<string> {
 
 /**
  * Finding R2 (cross-model re-review, new P1): `ConnectionManager
- * .serverCapabilities` used to persist across a WS disconnect / degradation
- * to long-poll — a daemon that once learned e.g. `approval_resolved` from an
- * earlier handshake kept believing it applied indefinitely, even once
- * connected to (or degraded against) something that never actually
- * confirmed that. Concretely, `TaskRunner.sendApprovalResolved` gates
+ * .serverCapabilities` must never persist across a failed poll — a daemon
+ * that once learned e.g. `approval_resolved` must not keep believing it
+ * applies when a responder no longer confirms it. Concretely,
+ * `TaskRunner.sendApprovalResolved` gates
  * `task.approval_resolved` on this list; sending it to a server that
  * doesn't understand it over the long-poll `POST /byok/messages` path gets
  * a batch-level 400 (`MessagesSendRequestSchema`, protocol §8.2), which
@@ -31,9 +30,7 @@ async function tmpDir(prefix: string): Promise<string> {
  * `task-runner-approval-resolved.test.ts` — see its "capability absent"
  * case) is NOT what's under test here: this suite proves the thing THAT
  * gate actually depends on — `ConnectionManager.getServerCapabilities()`
- * itself — follows only the CURRENT transport's explicit advertisement:
- * empty before confirmation, populated by WS ack or long-poll response, and
- * never inherited across a transport switch.
+ * itself — follows only the current poll response's explicit advertisement.
  */
 describe('ConnectionManager.getServerCapabilities follows the current transport advertisement', () => {
   let server: TestServer;
@@ -61,32 +58,24 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
       auth,
       cursorStore,
       onEnvelope: () => {},
-      backoff: { baseMs: 20, maxMs: 50, factor: 2 },
     });
     await connection.start();
-    await connection.waitForAck();
+    await connection.waitForConnection();
   }
 
-  it('ack: capabilities are present immediately after a real conn.ack advertises them', async () => {
+  it('capabilities are present immediately after a real poll response advertises them', async () => {
     await connectAndAck();
     expect(connection!.getServerCapabilities()).toEqual(['approval_resolved']);
   });
 
-  it('WS drop: capabilities are cleared to [] once the acked connection ends, and STAY empty (not a transient blip)', async () => {
+  it('a response that omits capabilities clears the prior advertisement and keeps it empty', async () => {
     await connectAndAck();
     expect(connection!.getServerCapabilities()).toEqual(['approval_resolved']);
 
-    // Prevent any reconnect from re-acking so the cleared state is
-    // observed deterministically, not as a transient window a fast test
-    // backoff could race straight past (daemon-reconnect.test.ts's own doc
-    // comment documents this exact "close->reconnect->ack can complete
-    // faster than a poll interval" hazard for the identical fixture).
-    server.setRejectWs(true);
-    // Model an N-1 HTTP responder behind the degraded route. The old WS
-    // advertisement must be cleared and must not leak across the switch;
-    // a new responder's explicit long-poll advertisement is covered below.
+    // Model an N-1 HTTP responder. The old advertisement must not leak into
+    // its responses; a later response's explicit advertisement is covered
+    // below.
     server.setAdvertiseLongPollCapabilities(false);
-    server.dropConnection();
 
     await vi.waitFor(() => expect(connection!.getServerCapabilities()).toEqual([]));
     // Held empty across a real wait, not just caught mid-flicker.
@@ -94,21 +83,18 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
     expect(connection!.getServerCapabilities()).toEqual([]);
   });
 
-  it('reconnect + fresh ack: capabilities are present again after a NEW handshake', async () => {
+  it('a later poll response can advertise capabilities again', async () => {
     await connectAndAck();
-    server.setRejectWs(true);
-    server.dropConnection();
+    server.setAdvertiseLongPollCapabilities(false);
     await vi.waitFor(() => expect(connection!.getServerCapabilities()).toEqual([]));
-
-    server.setRejectWs(false);
+    server.setAdvertiseLongPollCapabilities(true);
     await vi.waitFor(() => expect(connection!.getServerCapabilities()).toEqual(['approval_resolved']), { timeout: 5000 });
     expect(connection!.isConnected()).toBe(true);
   });
 
-  it('a connection that degrades to long-poll learns capabilities from the current poll response without a WS ack', async () => {
+  it('an events response publishes capabilities before its envelopes reach the handler', async () => {
     server = await TestServer.start();
-    server.setAckCapabilities(['approval_resolved']); // would be advertised IF a WS handshake ever completed
-    server.setRejectWs(true); // force long-poll from the very first attempt — no ack ever happens
+    server.setAckCapabilities(['approval_resolved']);
     const storeDir = await tmpDir('byok-server-caps-degraded-store-');
     const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
@@ -133,14 +119,11 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
       onEnvelope: () => {
         capabilitiesSeenByHandler = connection?.getServerCapabilities();
       },
-      wsFailureThreshold: 1,
       longPollRetryDelayMs: 20,
       longPollIdleDelayMs: 20,
     });
     await connection.start();
-    await connection.waitForAck();
-
-    expect(connection.isTransportDegraded()).toBe(true);
+    await connection.waitForConnection();
     await vi.waitFor(() => expect(capabilitiesSeenByHandler).toEqual(['approval_resolved']));
     expect(connection.getServerCapabilities()).toEqual(['approval_resolved']);
 
@@ -148,9 +131,8 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
     await vi.waitFor(() => expect(connection!.getServerCapabilities()).toEqual([]));
   });
 
-  it('a long-poll transition publishes the exact daemon conn.hello snapshot before task messages', async () => {
+  it('publishes the exact daemon conn.hello snapshot before task messages', async () => {
     server = await TestServer.start();
-    server.setRejectWs(true);
     const storeDir = await tmpDir('byok-agent-capability-longpoll-');
     const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
@@ -165,12 +147,11 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
       auth,
       cursorStore: new CursorStore(storeDir),
       onEnvelope: () => {},
-      wsFailureThreshold: 1,
       longPollRetryDelayMs: 20,
       longPollIdleDelayMs: 20,
     });
     await connection.start();
-    await connection.waitForAck();
+    await connection.waitForConnection();
     connection.send(createEnvelope('task.fail', { reason: 'ordered after hello' }, { taskId: 'task-after-hello' }));
 
     await vi.waitFor(() => {
@@ -195,7 +176,6 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
     server = await TestServer.start();
     server.setAckCapabilities(['approval_resolved']);
     server.setAdvertiseLongPollCapabilities(false);
-    server.setRejectWs(true);
     const storeDir = await tmpDir('byok-server-caps-old-long-poll-');
     const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
@@ -209,14 +189,11 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
       auth,
       cursorStore: new CursorStore(storeDir),
       onEnvelope: () => {},
-      wsFailureThreshold: 1,
       longPollRetryDelayMs: 20,
       longPollIdleDelayMs: 20,
     });
     await connection.start();
-    await connection.waitForAck();
-
-    expect(connection.isTransportDegraded()).toBe(true);
+    await connection.waitForConnection();
     await vi.waitFor(() =>
       expect(server.httpRequests.some((request) => request.pathname === '/byok/events')).toBe(true),
     );

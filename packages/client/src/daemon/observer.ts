@@ -7,7 +7,7 @@ import {
   type RuntimeInfo,
   type TaskState,
 } from '@byok-sdk/protocol';
-import type { ConnectionState } from './ws-transport';
+import type { ConnectionState } from './connection-manager';
 
 /**
  * M3-2a: local observability for the daemon — the seam a CLI (M3-2b) drives a

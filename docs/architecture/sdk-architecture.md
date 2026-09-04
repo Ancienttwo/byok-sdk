@@ -1,8 +1,10 @@
 # BYOK SDK 架构文档
 
-> 状态：CURRENT；当前 main 为 `f8bccbd`，尚未作为 release 发布。
-> Version split: 已发布 `v0.4.2`（`de07001`）已包含 Live Activity、approval、ui-runtime 与 P5；当前 main 另含 device assertion authenticator 与 migration `0008`。
-> Verified against: main@f8bccbd + published `v0.4.2`@de07001
+> 状态：CURRENT；当前 source 已完成 WP3B Step 2/3/4a，Step 4b 的 daemon transport
+> 收敛与本文件同一工作包交付。
+> Version split: 发布、registry、tag/Release 与部署状态仍以实时系统为准；本文件只描述
+> 当前 workspace 的架构边界。
+> Verified against: 当前 checkout 的 source、public package surface 与 required docs checks
 > Verification scope: CURRENT sections + package graph + completed-slice status
 > Volatile workflow status: see tasks/current.md; not duplicated here
 > 面向对象：嵌入 BYOK 能力的 SaaS 开发者、SDK 维护者、安全审计与部署人员。
@@ -50,12 +52,12 @@ flowchart LR
   subgraph SaaS["宿主 SaaS / Node 后端"]
     direction TB
     App(["产品业务逻辑"]):::server
-    Server(["@byok-sdk/server<br/>Hono + ConnectionHub"]):::server
-    TaskStore[("TaskStore<br/>Memory / SQLite")]:::store
-    BlobStore[("BlobStore<br/>Local disk / SQLite")]:::store
+    Server(["@byok-sdk/server<br/>Hono + cloud kernel façade"]):::server
+    Kernel[("@byok-sdk/cloud<br/>async coordination kernel")]:::store
+    Embedded[("Embedded stores<br/>memory or atomic SQLite subset")]:::store
     App --> Server
-    Server --> TaskStore
-    Server --> BlobStore
+    Server --> Kernel
+    Server --> Embedded
   end
 
   subgraph Device["最终用户设备"]
@@ -83,7 +85,7 @@ flowchart LR
 
   Dev --> App
   Human --> Agent
-  Server <-->|"pair/auth HTTP<br/>WS 或 long-poll envelopes"| Agent
+  Server <-->|"pair/auth HTTP<br/>long-poll envelopes"| Agent
   Pi -->|"CLI 自有认证"| Provider
   Claude -->|"CLI 自有认证"| Provider
   Codex -->|"CLI 自有认证"| Provider
@@ -98,7 +100,7 @@ flowchart LR
 
 | 边界 | 入口 | 权威或最终副作用 |
 | --- | --- | --- |
-| SaaS embed | `createByokServer(options)` | 生成 Hono app、WS attach、dispatch/task/device/event/stats API |
+| SaaS embed | `createByokServer(options)` | 生成 Hono app、long-poll/device HTTP surface、dispatch/task/device/event/stats façade API |
 | 本机 library | `createDaemon()` / `createDaemonWithAdapters()` | 配对、连接、任务执行、observer、service lifecycle |
 | 本机 CLI | `byok-agent` | pair/start/status/runtimes/tasks/workspaces/unpair/approval/service commands |
 | Approval helper | `byok-approval-mcp` | Claude confirm 模式的 stdio MCP 子进程，经 control socket 回调 daemon |
@@ -118,11 +120,11 @@ flowchart LR
   classDef dev fill:#374151,stroke:#d1d5db,stroke-width:2px,color:#fff
 
   Protocol(["@byok-sdk/protocol<br/>zod-only wire contract"]):::contract
-  Server(["@byok-sdk/server<br/>embedded coordinator"]):::runtime
+  Server(["@byok-sdk/server<br/>embedded cloud façade"]):::runtime
   Client(["@byok-sdk/client<br/>local daemon + CLI"]):::runtime
   Keys(["@byok-sdk/keys<br/>provider credential plane"]):::key
   Core(["@byok-sdk/core<br/>zod-only composable contracts"]):::contract
-  Cloud(["@byok-sdk/cloud<br/>stateless hosted surface"]):::runtime
+  Cloud(["@byok-sdk/cloud<br/>stateless hosted surface + domain kernel"]):::runtime
   CloudPg(["@byok-sdk/cloud-dataplane<br/>Postgres + R2 composition"]):::runtime
   SDK(["byok-sdk<br/>six namespace umbrella"]):::example
   Conformance(["@byok-sdk/conformance<br/>private test authority"]):::dev
@@ -130,6 +132,7 @@ flowchart LR
   Packaging(["examples/packaging<br/>single-file probe"]):::example
 
   Server --> Protocol
+  Server --> Cloud
   Client --> Protocol
   Client --> Core
   Cloud --> Core
@@ -156,11 +159,11 @@ flowchart LR
 | package | 生产 TS files / LOC | test files / LOC | 设计压力 |
 | --- | ---: | ---: | --- |
 | protocol | 11 / 1,389 | 9 / 2,246 | 小而冻结；跨端契约变化风险最高 |
-| server | 16 / 4,926 | 26 / 6,638 | `ConnectionHub` 集中持有 embedded authority |
+| server | 16 / 4,926 | 26 / 6,638 | façade 只组合 cloud kernel、embedded stores 与 bounded live relay |
 | client | 75 / 21,313 | 101 / 23,655 | 最大模块；runtime、IPC、service、Git、transport 与 S6 local truth path 都在此包 |
 | keys | 18 / 2,718 | 15 / 2,958 | 独立 key-custody 安全模型 |
 | core | 23 / 3,467 | 5 / 1,019 | S2 契约层；InMemory 参考实现，consumer 是 `cloud` 与 `client`；共享 conformance 已移到独立 package |
-| cloud | 42 / 5,045 | 10 / 3,003 | stateless hosted surface；device/board/truth handlers + InMemory 组合，消费 `core` 与 `protocol` |
+| cloud | 42 / 5,045 | 10 / 3,003 | async domain kernel + stateless hosted surface；device/board/truth handlers + InMemory 组合，消费 `core` 与 `protocol` |
 | cloud-dataplane | 22 / 6,309 | 14 / 3,533 | production Postgres + R2 composition；事务、quota、GC 与 reconciliation authority |
 | sdk | 1 / 12 | 1 / 16 | public namespace umbrella；依赖六个 dispatch package，明确排除 keys |
 | conformance | 26 / 2,842 | 2 / 84 | private shared assertion authority；不得进入发布依赖树 |
@@ -175,7 +178,7 @@ find "$SDK_SRC" -type f \( -name '*.test.ts' -o -name '*.spec.ts' -o -path '*/__
 
 对两组结果分别执行 `wc -l` 得 file count，执行 `xargs wc -l` 取合计 LOC；替换 `SDK_SRC` 即可复算其余 package。
 
-强依赖是 `server → protocol`、`client → protocol/core`、`cloud → core/protocol`、`cloud-dataplane → cloud/core` 与 `byok-sdk → 六个 dispatch package`；弱依赖是 `client -dev→ server` 与 production packages 对 private conformance 的 test-only edge。当前的依赖 invariant 清单：
+强依赖是 `server → cloud/core/protocol`、`client → protocol/core`、`cloud → core/protocol`、`cloud-dataplane → cloud/core` 与 `byok-sdk → 六个 dispatch package`；弱依赖是 `client -dev→ server` 与 production packages 对 private conformance 的 test-only edge。当前的依赖 invariant 清单：
 
 - `core !→ protocol`、`core !→ node`：core 必须保持 protocol-free、Node-free，由包内 constraint test 执行（ADR-003）。
 - `client → core`（S6-c 当前事实）：只消费 proof canonicalizer 与 truth selector contracts，不依赖 cloud implementation。
@@ -313,7 +316,7 @@ stateDiagram-v2
 - observability unknown 可忽略；control/security unknown 必须 fail-closed。
 - server 支持 N 与 N-1 major。当前只有 v1，所以该能力目前是 no-op。
 
-## 3. `@byok-sdk/server`：embedded coordinator
+## 3. `@byok-sdk/server`：`@byok-sdk/cloud` domain kernel 的 self-hosted façade
 
 ### 3.1 组成与所有权
 
@@ -325,77 +328,75 @@ flowchart TB
   classDef support fill:#0f766e,stroke:#99f6e4,stroke-width:2px,color:#fff
 
   Factory(["createByokServer"]):::api
-  Hono(["http.ts<br/>Hono routes"]):::api
-  WS(["ws-server.ts<br/>upgrade + hello gate"]):::api
-  Hub(["ConnectionHub<br/>connection + task authority"]):::core
-  Pair(["PairingManager"]):::support
-  Auth(["DeviceRegistry + NonceStore<br/>TokenSigner"]):::support
-  Rate(["RateLimiter"]):::support
-  Heart(["heartbeat"]):::support
-  TaskPort(["TaskStore"]):::store
-  TaskMem[("InMemoryTaskStore")]:::store
-  TaskSql[("SqliteTaskStore")]:::store
-  BlobPort(["BlobStore"]):::store
-  BlobDisk[("LocalDiskBlobStore")]:::store
-  BlobSql[("SqliteBlobStore")]:::store
-  Events(["AsyncEventQueue"]):::support
+  Hono(["Hono HTTP routes<br/>auth, events, messages, blobs"]):::api
+  Cloud(["@byok-sdk/cloud<br/>async domain kernel"]):::core
+  Stores(["Cloud stores<br/>memory or atomic SQLite subset"]):::store
+  Relay(["TaskEventRelay<br/>bounded in-process live feed"]):::support
+  Snapshot(["server projections<br/>tasks, machines, results"]):::support
 
   Factory --> Hono
-  Factory --> WS
-  Factory --> Hub
-  Factory --> Pair
-  Factory --> Auth
-  Hono --> Hub
-  Hono --> Pair
-  Hono --> Auth
-  WS --> Hub
-  WS --> Auth
-  Hub --> Rate
-  Hub --> TaskPort
-  Hub --> Events
-  WS --> Heart
-  TaskPort --> TaskMem
-  TaskPort --> TaskSql
-  Factory --> BlobPort
-  BlobPort --> BlobDisk
-  BlobPort --> BlobSql
+  Factory --> Cloud
+  Factory --> Stores
+  Factory --> Relay
+  Hono --> Cloud
+  Cloud --> Stores
+  Cloud --> Snapshot
+  Cloud --> Relay
 ```
 
-`createByokServer()` 返回：
+`createByokServer()` is the embedded composition entrypoint. It returns the
+Hono HTTP surface, async pairing/dispatch/task/device/blob/mailbox APIs, the
+bounded in-process `events.subscribe()` relay, lifecycle controls, and
+presence-based machine projections. The façade does not own a second pairing,
+auth, task, cancellation, mailbox, or terminal state machine: those semantics
+belong to `@byok-sdk/cloud` and its injected stores.
 
-- `hono` 与 `attachWebSocket(server)`；
-- `pairing.createPairingCode()`；
-- `dispatch(input) → Promise<TaskHandle>`；
-- `tasks.get/list`、`machines.list`、`events.subscribe`；
-- `devices.revoke`、`stop`、`stats`。
+The default composition is in-memory. `BYOK_STORE=sqlite` selects the explicit
+SQLite composition for the six atomic interfaces that must share one database
+and transaction coordinator: task attempts, cancellation, mailbox, object
+manifests, blob metadata/grants, and blob bytes. Other ports remain in-memory
+by design. SQLite restores durable cloud records and mailbox state; it does not
+restore process-owned promises, live subscriptions, runtime processes, or
+connection lifecycle.
 
-默认是 `InMemoryTaskStore + LocalDiskBlobStore`；SQLite variants 是可注入持久层。`TaskStore` 是同步接口，`BlobStore` 是 async 接口。SQLite 只能恢复记录，不能恢复 hub 内的 promise、event queue、connection map 与 in-flight runtime。
+### 3.2 HTTP and kernel responsibilities
 
-### 3.2 HTTP、WS 与内核职责
-
-| 模块 | 已实现功能 |
+| Module | Current responsibility |
 | --- | --- |
-| `http.ts` | pair/challenge/token、blob upload/download/content、events poll、messages POST、可选 healthz |
-| `ws-server.ts` | Bearer upgrade、首帧 `conn.hello`、protocol/product/device 校验、heartbeat |
-| `hub.ts` | per-device transport、outbox/redelivery、inbound ownership/dedup/type gate、task transitions、approval/cancel/steer、lease reaper、stats |
-| `auth.ts` | HMAC JWT、Ed25519 signature verify、device revoke、single-use nonce |
-| `pairing.ts` | 约 10 分钟 TTL 的 single-use code |
-| `rate-limiter.ts` | per-device in-process token bucket |
-| `task-store.ts` | transition CAS-like validation 与 pending approval id |
-| `blob-store.ts` | signed URL、content write/read、size/hash boundary |
+| `index.ts` | Self-hosted façade, Hono routes, cloud-kernel composition, async public API |
+| `@byok-sdk/cloud` | Pairing/auth, capability admission, offer reservation, inbound ownership, cancellation, terminal authority, blobs, presence and mailbox handlers |
+| `stores.ts` / `stores/sqlite/` | Explicit memory or six-interface atomic SQLite composition |
+| `relay.ts` / `event-queue.ts` | Post-commit observer-fed, bounded in-process task event stream; not durable audit history |
+| `snapshot.ts` | Task result/snapshot and device-plus-presence projections |
+| `rate-limiter.ts` | Per-device inbound budget at the embedded edge |
 
-`ConnectionHub` 是 embedded 部署的真正权威；Hono 与 WS 层都把合法输入收敛到它。它不是可水平扩展的 cloud runtime：连接、outbox、dedup window、waiter、task activity 与 event queue 都在单进程内。
+The Hono layer is a self-hosted HTTP façade over the same cloud domain kernel
+used by hosted compositions. Device ingress and egress use authenticated
+long-poll endpoints: `GET /byok/events` reads the durable mailbox after a
+cursor, while `POST /byok/messages` carries the first `conn.hello` snapshot and
+all daemon-to-server envelopes through the single inbound gate. No embedded
+transport-specific state machine remains beside the kernel.
 
-### 3.3 已知边界
+### 3.3 Current boundaries
 
-> **2026-08-23 transport correction:** WS 与 long-poll 现在都会发布同形状的 authenticated `conn.hello`。下方关于 long-poll reach 的描述只记录 sprint D-4 当时的历史成因；当前仍成立的不变量是 scope：connection snapshot 描述设备，不能替代拿下这个 task 的 adapter 在 `task.claim.capabilities` 中给出的 task-level authority。
-
-- M0/M5 embedded 模式不支持 queue-until-connect；设备从未连上时 `dispatch` 直接失败。
-- task lease 只在设备已 dark 且 `Claimed/Running/AwaitApproval` 自最后活动满 `taskLeaseMs` 后触发，结果是 retryable failure。
-- `steer` 已是 **task-level gate（已实现、已接线）**：claim 时 hub 把 `task.claim.capabilities`——claiming adapter 在拿下这个 task 那一刻的自报——快照写入 task record（`TaskSnapshot.claimedRuntimeCapabilities`，SQLite 以 `claimed_runtime_capabilities_json` 列持久化），`steerTask()` 按 unknown task → 终态 `task_terminal` → 非 Running `task_not_running` → 快照 `steer !== true` 的顺序判定，最后一档抛 typed `SteerRejectedError`（code `steer_unsupported_runtime`），在构造 envelope 之前就拒绝，unsupported 时零 envelope 上 wire。
-- 快照**只有这一个来源**。hub 在 claim 和 steer 两处都不读任何 connection 状态：不读 `getDeviceCapabilities()` 的 connection-level flag，不读 `ConnectionState.runtimes`，claim 没带 capabilities 时也不回头去查。`conn.hello.runtimes[].capabilities` 退回纯 discovery——它描述的是设备而不是 task，而且是 transport-shaped：`conn.hello` 只有 WS transport 发（`ws-transport.ts`），long-poll-only daemon 从不发送，拿它当 gate 输入等于对整条 long-poll 部署面结构性失明（sprint D-4 的成因，机检守卫见 `steer-runtime-capability-gate.test.ts` 的「connection-advertised capabilities cannot feed the steer gate」块与 client 侧 `real-server-longpoll-steer.test.ts`）。
-- 快照缺失一律 fail-closed，不造默认值：pre-D-4 daemon 的 claim 不带 `capabilities`（wire 上是 additive optional 字段），S0 之前 claim 的旧 record 同样没有，两者都判为 unknown 而拒绝 steer。这是 fail-closed，不是 fallback——undefined 意为「本 server 不知道」，绝不等价于 true，也不按 runtime id 猜。
-- client 侧对仍然收到的 unsupported steer（伪造或 pre-gate 消息）记为非重试性 protocol/authority 错误并正常 ack，cursor 照常推进，不再冻结重放。
+- Pairing and token operations are out-of-band HTTP calls. A device's only
+  daemon transport is long-poll; there is no alternate transport mode or
+  recovery probe to reconcile.
+- `conn.hello` is a bounded session snapshot submitted as the first message on
+  the authenticated long-poll session. Presence is a lossy TTL hint, not an
+  execution, authorization, or connection-liveness authority.
+- `tasks.get()` and `tasks.list()` are asynchronous readbacks from
+  `TaskAttemptStore`; `list()` is bounded keyset pagination. The façade keeps
+  host-owned dispatch input outside the cloud snapshot rather than rebuilding a
+  second execution read model.
+- `machines.list()` joins durable device rows with unexpired presence hints.
+  Its `connected` projection means an unexpired hint, never a live socket.
+- `events.subscribe()` is an in-process live stream fed after cloud commits. It
+  is intentionally not a cross-process replay or audit stream; durable mailbox
+  and task readbacks remain the recovery authorities.
+- Claim-time runtime capabilities are persisted on the attempt and are the
+  sole input to task-level `steer` admission. Connection or presence
+  observations cannot authorize a task control.
 
 ## 4. `@byok-sdk/client`：本机 daemon、CLI 与 runtime boundary
 
@@ -524,7 +525,13 @@ resolve。`TaskRunner` 先冻结一次 semantic terminal，但在 close 成功�
 | daemon | `start` |
 | OS service | `install`、`uninstall`、`service-start`、`service-stop`、`service-status` |
 
-`@byok-sdk/client` 的 runtime dependencies 是 `@byok-sdk/protocol`、`@byok-sdk/core` 与 `ws`；core 只提供 frozen proof bytes 与 truth contract types，client 不依赖 `@byok-sdk/cloud`。Pi、Claude Code、Codex 均依赖用户本机独立安装且已登录的 CLI；client 不再安装 Node-22-only Pi optional dependency。`@byok-sdk/client/adapters` 提供不引入 daemon transport 的 adapter-only build/import surface。
+`@byok-sdk/client` 的 runtime dependencies 是 `@byok-sdk/protocol` 与
+`@byok-sdk/core`；core 只提供 frozen proof bytes 与 truth contract types，client
+不依赖 `@byok-sdk/cloud`。daemon 的远端双向通道固定为 authenticated long-poll
+HTTP；没有另一套 socket transport dependency。Pi、Claude Code、Codex 均依赖
+用户本机独立安装且已登录的 CLI；client 不再安装 Node-22-only Pi optional
+dependency。`@byok-sdk/client/adapters` 提供不引入 daemon transport 的
+adapter-only build/import surface。
 
 ### 4.3 Daemon 模块清单
 
@@ -532,8 +539,8 @@ resolve。`TaskRunner` 先冻结一次 semantic terminal，但在 close 成功�
 | --- | --- |
 | `create-daemon.ts` | config validation、adapter build/detect、stores、TaskRunner/ConnectionManager/control server 组装、统一 shutdown |
 | `auth-manager.ts` / `device-keys.ts` / `http-client.ts` | pair、challenge/token renew、Ed25519 key、401 revocation |
-| `connection-manager.ts` | 单一 client outbox、WS↔long-poll mode、ack/cursor、chunking、shutdown drain |
-| `ws-transport.ts` / `long-poll-transport.ts` | WebSocket heartbeat/reconnect 与 HTTP poll/post transport |
+| `connection-manager.ts` | 单一 client outbox、long-poll ack/cursor、chunking、shutdown drain |
+| `long-poll-transport.ts` | authenticated HTTP poll/post、cursor retry/backoff 与 cancellation |
 | `task-runner.ts` | offer admission、runtime selection、policy、workspace、Session event pump、approval/cancel/steer、resource limits |
 | `policy.ts` / `environment.ts` | device ceiling 合并、per-runtime env allowlist、`BYOK_*` hard deny |
 | `progress-batcher.ts` | normalized `AgentEvent` 批次与 task-level sequence |
@@ -545,7 +552,7 @@ resolve。`TaskRunner` 先冻结一次 semantic terminal，但在 close 成功�
 | `blob-client.ts` | signed URL 方式上传/下载 instruction/artifact |
 | `capabilities-client.ts` / `presence-publisher.ts` | 读取并校验 hosted capability declaration（ADR-010，fail-closed）；仅在声明含 `presence.hints` 时发 `online` 心跳，停机停发（见 §12.3 daemon presence producer） |
 | `device-proof-signer.ts` / `truth-memory-client.ts` | 显式 tenant/product/key proof、metadata-only manifest、本地 selector、selected fetch/rehash/filter 与 truth write |
-| `url.ts` | HTTP/WS URL conversion；remote plaintext 默认拒绝 |
+| `url.ts` | HTTP URL normalization；remote plaintext 默认拒绝 |
 | `util/*` | bounded async queue、atomic write、POSIX mode / Windows DACL hardening |
 
 ### 4.4 Runtime adapter capability matrix
@@ -576,7 +583,7 @@ capability 至少要分三层才能表达准确。三层现在都已接线：
 | runtime capabilities | 某个 adapter 能精确表达哪些 policy | 派工时的 runtime 选择 | 已实现、已接线（S0 起为 adapter 实际能力，不再硬编码） |
 | task capabilities | 本 task 的 claimed runtime 与 effective policy 落定后，还剩哪些操作可执行 | `task.steer` 等 task 级控制面 | 已实现、已接线（claim 时快照 + steer gate） |
 
-connection-level 的“至少一个 adapter 支持 steer”不能代表任意 running task 支持 steer，所以第三层不读任何连接级数据，而读 claim 时落在 task record 上的 `claimedRuntimeCapabilities` 快照（§3.3），其唯一来源是 `task.claim.capabilities`。gate 的输入必须与它裁决的对象同生命周期：claim 正是建立 task↔runtime 绑定的那条消息，每种 transport 都会发，所以快照对 WS 与 long-poll 一视同仁；connection 层则既错 scope（描述设备不描述 task）又缺 reach（long-poll 无 `conn.hello`）。快照而非实时查询同样是刻意的：设备重连换了一套 adapter，也不能追溯改变一个 running task 的可 steer 性。
+connection-level 的“至少一个 adapter 支持 steer”不能代表任意 running task 支持 steer，所以第三层不读任何连接级数据，而读 claim 时落在 task record 上的 `claimedRuntimeCapabilities` 快照（§3.3），其唯一来源是 `task.claim.capabilities`。gate 的输入必须与它裁决的对象同生命周期：claim 正是建立 task↔runtime 绑定的那条消息；long-poll 重连也不会改写该快照。快照而非实时查询同样是刻意的：设备重连换了一套 adapter，也不能追溯改变一个 running task 的可 steer 性。
 
 ### 4.5 启动与关闭
 
@@ -620,7 +627,7 @@ RPC 面据实是 6 个方法（`packages/client/src/daemon/create-daemon.ts:979-
 ```mermaid
 sequenceDiagram
   autonumber
-  participant S as SaaS / ConnectionHub
+  participant S as SaaS / server façade
   participant TR as TaskRunner
   participant C as Claude CLI
   participant MCP as byok-approval-mcp
@@ -631,13 +638,13 @@ sequenceDiagram
   C->>MCP: tool permission request over stdio MCP
   MCP->>IPC: approvals.request taskId plus summary
   IPC->>TR: register pending approvalId
-  TR-->>S: task.await_approval
+  TR-->>S: task.await_approval through long-poll
   alt SaaS-side decision
-    S-->>TR: task.approve or task.reject with approvalId
+    S-->>TR: task.approve or task.reject through long-poll
   else Local decision
     H->>IPC: byok-agent approve or reject
     IPC->>TR: approvals.resolve
-    TR-->>S: task.approval_resolved if server advertised support
+    TR-->>S: task.approval_resolved through long-poll
   end
   TR->>MCP: allow or deny
   MCP->>C: permission result
@@ -753,30 +760,28 @@ flowchart LR
 sequenceDiagram
   autonumber
   participant App as SaaS embedder
-  participant Pair as PairingManager
+  participant Server as server façade
   participant D as Local daemon
-  participant Auth as DeviceRegistry and NonceStore
-  participant WS as WS server
-  participant Hub as ConnectionHub
+  participant Cloud as cloud kernel
 
-  App->>Pair: createPairingCode
-  Pair-->>App: single-use code plus expiry
+  App->>Server: createPairingCode
+  Server->>Cloud: mint tenant/product-bound code
+  Cloud-->>Server: single-use code plus expiry
   D->>D: generate Ed25519 keypair
-  D->>Auth: POST /byok/pair with code and public key
-  Auth-->>D: deviceId and initial access token
-  D->>Auth: POST /byok/challenge with deviceId
-  Auth-->>D: single-use nonce
+  D->>Cloud: POST /byok/pair with code and public key
+  Cloud-->>D: deviceId and initial access token
+  D->>Cloud: POST /byok/challenge with deviceId
+  Cloud-->>D: single-use nonce
   D->>D: sign nonce with private key
-  D->>Auth: POST /byok/token with signature
-  Auth-->>D: renewed bearer token
-  D->>WS: bearer upgrade then conn.hello first frame
-  WS->>WS: verify protocol, product and device identity
-  WS->>Hub: registerConnection
-  Hub-->>D: conn.ack
-  Hub-->>D: replay task envelopes after cursor
+  D->>Cloud: POST /byok/token with signature
+  Cloud-->>D: renewed bearer token
+  D->>Cloud: POST /byok/messages with conn.hello snapshot
+  D->>Cloud: GET /byok/events?cursor=N
+  Cloud->>Cloud: verify bearer, product, device and protocol
+  Cloud-->>D: capabilities and task envelopes after cursor
 ```
 
-认证错误路径：无效/过期 pairing code、nonce replay、签名不符、token claims 不符都拒绝。device revoke 后 challenge/token/WS/authed HTTP 返回 401；daemon 清理本地身份并进入 `revoked`，不会无限重试。
+认证错误路径：无效/过期 pairing code、nonce replay、签名不符、token claims 不符都拒绝。device revoke 后 challenge/token/authed HTTP 与 long-poll 返回 401；daemon 清理本地身份并进入 `revoked`，不会无限重试。
 
 ### 8.2 Dispatch 到 terminal result
 
@@ -784,79 +789,85 @@ sequenceDiagram
 sequenceDiagram
   autonumber
   participant App as SaaS product
-  participant Hub as ConnectionHub
-  participant Store as TaskStore
+  participant Server as server façade
+  participant Cloud as cloud kernel
+  participant Store as TaskAttemptStore
   participant CM as ConnectionManager
   participant TR as TaskRunner
   participant AD as RuntimeAdapter
   participant Proc as Runtime process
 
-  App->>Hub: dispatch input
-  Hub->>Store: create Offered record
-  Hub-->>CM: task.offer with device seq
+  App->>Server: dispatch input
+  Server->>Cloud: reserve offer and mailbox row
+  Cloud->>Store: create Offered attempt
+  Cloud-->>CM: task.offer with device seq
   CM->>TR: handle envelope FIFO
   TR->>TR: dedup, policy, limits, frozen descriptor, toolset preflight
   TR->>AD: prepare offer with frozen descriptor (no side effects)
   alt pre-claim incompatibility
-    TR-->>Hub: task.decline retryable or not
-    Hub->>Store: Offered to Failed
+    TR-->>Cloud: task.decline retryable or not
+    Cloud->>Store: Offered to Failed
   else accepted
     TR->>TR: seal credential-free operation manifest
-    TR-->>Hub: task.claim with manifest runtime/capabilities
-    Hub->>Store: Offered to Claimed
+    TR-->>Cloud: task.claim with manifest runtime/capabilities
+    Cloud->>Store: Offered to Claimed
     TR->>AD: start prepared operation with manifest + runtime resources
     AD->>Proc: spawn official CLI
-    TR-->>Hub: task.started
-    Hub->>Store: Claimed to Running
+    TR-->>Cloud: task.started
+    Cloud->>Store: Claimed to Running
     loop Session events AsyncIterable
       Proc-->>AD: runtime-specific frames
       AD-->>TR: normalized AgentEvent
-      TR-->>Hub: batched task.progress
+      TR-->>Cloud: batched task.progress
     end
     alt turn_end
-      TR-->>Hub: task.complete
-      Hub->>Store: Running to Complete
+      TR-->>Cloud: task.complete
+      Cloud->>Store: Running to Complete
     else typed runtime execution failure
       AD-->>TR: RuntimeExecutionFailure phase/category/retry
-      TR-->>Hub: task.fail
-      Hub->>Store: non-terminal to Failed
+      TR-->>Cloud: task.fail
+      Cloud->>Store: non-terminal to Failed
     else cancel
-      TR-->>Hub: task.cancelled
-      Hub->>Store: non-terminal to Cancelled
+      TR-->>Cloud: task.cancelled
+      Cloud->>Store: non-terminal to Cancelled
     end
-    Hub-->>App: TaskHandle events and result
+    Server-->>App: TaskHandle events and result readback
   end
 ```
 
-关键 ownership 变化：SaaS 创建 task；Hub 持有 embedded task record；TaskRunner 决定是否能安全执行；adapter 只拿 effective policy 与 daemon-owned workspace；runtime process 产生原始事件；adapter 同时拥有 native event normalization 与 execution-failure classification；TaskRunner 只把显式 retry disposition 投影到既有 `task.fail` wire；server 只接受 owner device 的 daemon→server envelopes。
+关键 ownership 变化：SaaS 通过 server façade 创建 task；cloud kernel 持有
+durable attempt、mailbox 与 terminal authority；TaskRunner 决定是否能安全执行；
+adapter 只拿 effective policy 与 daemon-owned workspace；runtime process 产生原始
+事件；adapter 同时拥有 native event normalization 与 execution-failure
+classification；TaskRunner 只把显式 retry disposition 投影到既有 `task.fail` wire；
+cloud 只接受 owner device 的 daemon→server envelopes。
 
-### 8.3 WS、long-poll 与 redelivery
+### 8.3 Long-poll redelivery
 
 ```mermaid
 flowchart LR
   classDef primary fill:#1e40af,stroke:#bfdbfe,stroke-width:2px,color:#fff
-  classDef alternate fill:#5b21b6,stroke:#ddd6fe,stroke-width:2px,color:#fff
   classDef store fill:#9a3412,stroke:#fed7aa,stroke-width:2px,color:#fff
   classDef gate fill:#0f766e,stroke:#99f6e4,stroke-width:2px,color:#fff
 
   Outbox[("Client single outbox")]:::store
-  Mode{{"Current transport"}}:::gate
-  WS(["WebSocket send / receive"]):::primary
-  Poll(["GET /events<br/>POST /messages in chunks <=256"]):::alternate
-  Hub(["Same ConnectionHub inbound gate"]):::gate
+  Poll(["GET /events<br/>POST /messages in chunks <=256"]):::primary
+  Cloud(["Same cloud-kernel inbound gate"]):::gate
   Cursor[("Persisted task-envelope cursor")]:::store
   Dedup[("Per-device envelope-id ring<br/>plus semantic idempotency")]:::store
 
-  Outbox --> Mode
-  Mode -->|"open"| WS --> Hub
-  Mode -->|"degraded"| Poll --> Hub
-  Hub --> Dedup
-  Hub -->|"server-to-daemon task seq"| Cursor
-  Cursor -.->|"reconnect replay after last success"| WS
+  Outbox --> Poll --> Cloud
+  Cloud --> Dedup
+  Cloud -->|"server-to-daemon task seq"| Cursor
   Cursor -.->|"next poll query"| Poll
 ```
 
-两种 transport 对同一 device 互斥，last successfully connected transport wins。long-poll 是完整双向 transport，不是只读降级。cursor 只在 `task.*` handler 成功后推进；`conn.ack.seq` 不推进 cursor。失败时 watermark 冻结并 backoff，后续重放依靠 TaskRunner 与 Hub 的 idempotency。
+long-poll 是唯一的完整双向 transport：`GET /byok/events` 读取 mailbox，
+`POST /byok/messages` 发送 `conn.hello` 与 daemon→server envelopes。cursor 只在
+handler 成功且本机 durable 前置条件满足后推进；失败时 watermark 冻结并 backoff，
+后续重放依靠 TaskRunner 与 cloud kernel 的 idempotency。旧版本曾有第二种 socket
+transport 及其互斥/接管规则；该规则已随 WP3B Step 4b 删除，本段不再定义任何
+alternate transport mode。
 
 ## 9. 安全边界与资源治理
 
@@ -889,7 +900,7 @@ flowchart TB
 | 控制 | 保证 | 不保证 |
 | --- | --- | --- |
 | device auth | pairing single-use、Ed25519 nonce proof、bearer claims、revoke | 同一 OS user 读取本地 `device.json` |
-| transport gate | remote plaintext 默认拒绝；WSS/HTTPS 默认路径 | SDK 自己提供 TLS termination |
+| transport gate | remote plaintext 默认拒绝；HTTPS 默认路径（本地开发可用 loopback HTTP） | SDK 自己提供 TLS termination |
 | policy | device ceiling 合并；adapter 无法表达则 decline | kernel-level sandbox 或强制 filesystem confinement |
 | runtime credentials | subscription login store 与 BYOK key 都不由 dispatch daemon 读取；authoritative BYOK 走独立 launcher | 同一 OS user 无法调试/观察 launcher 或 Pi child process |
 | control socket | mutual HMAC、endpoint permission/DACL、method pre-auth unreachable | 同一 user 且能读 token 的恶意进程 |
@@ -987,7 +998,7 @@ CI 验证层次：
 | GAP-004 | nonce 签名无 domain separation | 同一把 device 私钥未来要签第二种消息时，缺域分隔就打开跨协议签名重用的口子 | 原证据：`auth.ts` 发裸 `randomBytes(24)`，`http.ts` 直接 `verifyEd25519Signature(pubkey, nonce, sig)`，无前缀 | **已修复（S1）**：修复形状是单一域常数 `NONCE_SIGNING_DOMAIN = 'byok-nonce-v1\n'`（`auth.ts`），server 侧只有 `verifyNonceSignature` 一个 nonce 签名检查点、前缀在函数内部施加，client `device-keys.ts` 的 `signNonce` 签同一字面量；裸签名 401，无双模、无 flag、无过渡窗口，两端同批交付 | 已收口 | S1（已交付） |
 | GAP-005 | `DeviceRecord` 无 structural tenant 绑定 | 设备身份不带租户维度，隔离只能靠 handler 自觉补条件 | 原证据：`auth.ts` 的 `DeviceRecord` 只有 `deviceId/deviceName/devicePublicKey/revoked` | **已修复（S1）**：修复形状是 required tenant——`DeviceRecord` 增加 required `tenantId`/`productId`（无 optional、无默认值），值只来自 server 铸造的 pairing claims；tenant-owned 公开面按 `(tenantId, deviceId)` 复合键且 tenant-first（`get`/`revoke` 均带 tenantId）。cloud 的 `DeviceDirectory.resolveByDeviceId(deviceId)` 是 challenge/token 两条 pre-tenant auth route 的窄端口，不进入 tenant facade；server package 入口不导出 naked lookup | 已收口 | S1（已交付） |
 | GAP-007 | **已收口（S4A/S4B）**：`deploy/sql` forward-only migrations、Postgres+R2 composition、compose substrate 与 hosted env/runbook 已落地 | 平台设计已有 real Postgres+MinIO 实证 | §12.7 | 保留 SQL order/checksum、hard env 与 deploy runbook gate | 已收口 | S4 |
-| GAP-010 | reconnect 缺确定性种子 | fleet 同时重连时退避不可复现，也无法按设备错峰 | S7-a 已新增 `daemon/deterministic-jitter.ts`，以 product/device identity、domain 与 sequence 派生稳定 delay；`deterministic-jitter.test.ts` 覆盖 domain separation、bounds、fleet peak 与真实 WS retry 接线 | **已收口（S7-a）**：automatic reconnect/upload/maintenance 使用 domain-separated deterministic jitter；operator immediate retry 不加 jitter | 已收口 | S7 |
+| GAP-010 | reconnect 缺确定性种子 | fleet 同时重连时退避不可复现，也无法按设备错峰 | S7-a 已新增 `daemon/deterministic-jitter.ts`，以 product/device identity、domain 与 sequence 派生稳定 delay；`deterministic-jitter.test.ts` 覆盖 domain separation、bounds、fleet peak 与真实 long-poll retry 接线 | **已收口（S7-a）**：automatic long-poll reconnect/upload/maintenance 使用 domain-separated deterministic jitter；operator immediate retry 不加 jitter | 已收口 | S7 |
 
 GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口，GAP-007 在 S4A/S4B 已收口，GAP-010 在 S7-a 已收口；这些行保留在表内是为了留下修复轨迹，不再是待办。
 
@@ -1030,7 +1041,7 @@ flowchart TB
   Cloud(["@byok-sdk/cloud<br/>stateless device + board + truth surface<br/>InMemory composition"]):::existing
   CloudPg(["@byok-sdk/cloud-dataplane<br/>Postgres + R2 production composition"]):::existing
   Client(["@byok-sdk/client<br/>existing local authority"]):::existing
-  Server(["@byok-sdk/server<br/>existing self-hosted option"]):::existing
+  Server(["@byok-sdk/server<br/>self-hosted cloud façade"]):::existing
   SDK(["byok-sdk<br/>six dispatch namespaces"]):::existing
   Conformance(["@byok-sdk/conformance<br/>private test authority"]):::planned
   Keys(["@byok-sdk/keys<br/>existing isolated key plane"]):::isolated
@@ -1043,7 +1054,8 @@ flowchart TB
   CloudPg --> Core
   Client --> Core
   Client --> Protocol
-  Server -.-> Core
+  Server --> Cloud
+  Server --> Core
   Server --> Protocol
   Keys -->|"P5: TruthStore contract"| Core
   Node --> CloudPg
@@ -1058,9 +1070,9 @@ flowchart TB
   SDK --> CloudPg
 ```
 
-`Core` 节点是实线：该 package 已于 2026-08-07（S2）落地，protocol-free、Node-free（tsup `platform: 'neutral'`）、runtime 依赖只有 `zod`。`Cloud` 节点也是实线：S3a 落 stateless frozen device surface，S5 落 board/presence/activity，S6-a/S6-b 落 proof/truth；durable local journal 由 S3b 落在 client。`CloudPostgres → Cloud/Core`、`Cloud → Core/Protocol` 与 `Client → Core/Protocol` 都是真实 import edge；client 的 core edge只用于 canonical proof bytes 与 truth contracts。`byok-sdk` 的六条边是 S7-c release distribution edge；`server → core` 仍是虚线目标边，`keys → core` 已由 post-RC P5 独立计划落地，且 package graph 明确禁止它继续穿透到 protocol。
+`Core` 节点是实线：该 package 已于 2026-08-07（S2）落地，protocol-free、Node-free（tsup `platform: 'neutral'`）、runtime 依赖只有 `zod`。`Cloud` 节点也是实线：S3a 落 stateless frozen device surface，S5 落 board/presence/activity，S6-a/S6-b 落 proof/truth；durable local journal 由 S3b 落在 client。`Server → Cloud/Core`、`CloudPostgres → Cloud/Core`、`Cloud → Core/Protocol` 与 `Client → Core/Protocol` 都是真实 import edge；client 的 core edge只用于 canonical proof bytes 与 truth contracts。`byok-sdk` 的六条边是 S7-c release distribution edge，`keys → core` 已由 post-RC P5 独立计划落地，且 package graph 明确禁止它继续穿透到 protocol。
 
-关键 invariant：`core` 必须 protocol-free，才能让现有 `keys → core` 不产生 `keys → protocol` 的间接依赖（S2 已把这条约束落成包内可执行的 constraint test）。`@byok-sdk/server` 留作 self-hosted embedded coordinator；`@byok-sdk/cloud` 才是 stateless hosted surface。主生产 composition 已裁定为 **Postgres + R2**（§12.7），D1 只保留为可选 compatibility adapter，不承担主线的容量、计费与 GC 语义。
+关键 invariant：`core` 必须 protocol-free，才能让现有 `keys → core` 不产生 `keys → protocol` 的间接依赖（S2 已把这条约束落成包内可执行的 constraint test）。`@byok-sdk/server` 是 `@byok-sdk/cloud` domain kernel 的 self-hosted façade；`@byok-sdk/cloud` 同时提供 hosted HTTP surface 与可复用 kernel。主生产 composition 已裁定为 **Postgres + R2**（§12.7），D1 只保留为可选 compatibility adapter，不承担主线的容量、计费与 GC 语义。
 
 ### 12.2 `@byok-sdk/core` 与 `@byok-sdk/cloud` 职责与状态
 
@@ -1146,7 +1158,11 @@ presence 是设备级最近提示，activity 是 task 级有损尾部。两者�
 `@byok-sdk/client` daemon 是第一方 presence producer，语义只有两条：**online 表示最近一个心跳周期内该设备发过 heartbeat；hint 过期即 absence，不是"值变旧了"**。因此停机不发布 `offline`——停止心跳本身就是离线信号，TTL 到期后 `list`/`read` 再也看不到这台设备，进程崩溃与优雅停机在读端表现一致。
 
 - 是否发布由 declaration 决定（ADR-010）：daemon 连接就绪后读 `GET /byok/capabilities`，用 core 的 `CapabilityDeclarationSchema` 校验，只有声明里含 `presence.hints` 才启动 publisher。读不到、非 200、非 JSON 或 schema 不通过一律 fail-closed：publisher 不启动、`console.warn` 留降级记录、daemon 其余功能不受影响。没有 404 探测分支，也没有"默认按常见能力猜"的回退。
-- declaration 在连接由未 settle（`connecting`/`closed`）重新回到 settled（`open` 或 `degraded`）时重读——`open → degraded` 这条 long-poll 接管边不算重新 settle，不触发重读：部署可能在长跑 daemon 之下完成一次 rollout。新声明不再含 `presence.hints` 就停发（clean stop，之后重新宣称可以再起）；启动时读取失败也只在下一次重连自愈——除此之外没有任何定时重试。设备吊销导致的永久停止不被再发现复活。
+- declaration 在连接由未 settle（`connecting`/`closed`）重新回到 `ready` 时重读。long-poll
+  没有 transport 接管边；部署可以在长跑 daemon 之下完成一次 rollout。新声明不再
+  含 `presence.hints` 就停发（clean stop，之后重新宣称可以再起）；启动时读取失败
+  也只在下一次重连自愈——除此之外没有任何定时重试。设备吊销导致的永久停止不被
+  再发现复活。
 - 心跳节奏必须满足 `minimumIntervalMs < intervalMs < ttlMs`，在 `DaemonConfig.presence` 构造时同步断言。默认 30s 心跳 / 90s TTL / 5s 最小间隔，与 cloud 侧默认和 §12.7.5 建议的 60–120s presence TTL 对齐；快于最小间隔会被 store 判为 `hint_rate_limited`，慢于 TTL 则设备在两次心跳之间闪断。
 - 认证复用 daemon 唯一的 device token lifecycle：401 由 `authedFetch` 续签一次并重试一次；设备被吊销（`DeviceRevokedError`，或续签后仍 401）则永久停止 publisher 并记录，绝不 retry spin。其余失败（429/5xx/网络）只记录，下一拍照常重试。
 - publisher 不读也不写任务状态，输入只有时钟——presence 永远不参与 execution/coordination 判断。
@@ -1904,7 +1920,7 @@ RAFT 是带自家 cloud/workspace 的完整产品；BYOK 是供宿主产品组�
 ### 14.1 为什么当前形状存在
 
 - `protocol` 小而冻结：让 Node server 与本机 daemon 共享一份 schema，不把 transport implementation 混入 contract。
-- `ConnectionHub` 集中：M0-M5 优先证明单节点 embedded lifecycle、reliability 与 runtime integration；代价是不能水平扩展。
+- `@byok-sdk/cloud` kernel 集中 durable coordination；self-hosted server 只保留 façade、store composition 与 bounded live relay，避免形成第二权威。
 - `client` 较大：它必须跨越 CLI process、local persistence、IPC、OS service 与三种 runtime 的真实差异；这些边界共享同一个 device authority。
 - `keys` 独立：key custodian 与 credential-isolated dispatcher 是相反安全承诺，package graph 必须阻止误耦合。
 - OS supervisor 而非 in-process supervisor：SDK 不拥有宿主机器的 release/update policy。
@@ -1913,7 +1929,7 @@ RAFT 是带自家 cloud/workspace 的完整产品；BYOK 是供宿主产品组�
 
 | 压力 | 最先失败处 | 已有/目标缓解 |
 | --- | --- | --- |
-| 单节点更多 devices/tasks | Hub in-memory maps、outbox ring、poll waiter、event queues | embedded 模式承认单 owner；hosted 目标转 mailbox/store ports |
+| 单节点更多 devices/tasks | embedded store、mailbox poller 与 per-task live relay | embedded 模式承认单 owner；hosted composition 使用 mailbox/store ports |
 | fleet reconnect | backoff cohort 仍可能聚簇重试 | **已实现（S7-a）**：`productId + deviceId` 稳定 seed，按 reconnect/upload/maintenance domain 分离的 ±20% deterministic jitter；10,000-device production-function simulation 对 bucket peak 设硬界 |
 | high-frequency UI hints | presence/activity SQL write amplification | bounded batch + TTL + dropped；必要时可单独换 KV/DO adapter |
 | board concurrency | per-tenant `board_seq` 与 claim hot rows | SQL CAS、索引、contract suite；P2 后再做 P3 board |
@@ -1930,8 +1946,8 @@ RAFT 是带自家 cloud/workspace 的完整产品；BYOK 是供宿主产品组�
 - client cursor 只在 handler 成功、且 hosted 模式下本机 journal 已 durable 之后才推进；
 - envelope id dedup 与语义幂等两者同时存在，不能只留一个；
 - terminal 与 truth 写入必须幂等；
-- long-poll 与 WS 共用同一个 inbound gate；
-- transport 切换不得产生两个并行 owner。
+- long-poll 的 inbound 与 outbound 都共用同一个 cloud-kernel gate；
+- 单一 long-poll lifecycle 不得产生两个并行 owner。
 
 #### 14.3.2 Reconnect：确定性 jitter
 
@@ -1939,7 +1955,7 @@ S7-a 已将 automatic retry 的 random/fixed fleet cadence 收敛到一个可复
 
 - seed 固定为已加载的 `productId + deviceId`；身份不存在就不构造 retry authority，不生成随机 fallback；
 - reconnect、upload、maintenance 使用 domain-separated SHA-256 stream，exponential backoff / base cadence 加 bounded ±20% deterministic offset；
-- automatic WS reconnect、long-poll failure/stall、outbox upload retry、long-poll→WS probe 与 storage maintenance 共用该 authority；显式 `connect({auto:false})` 不延迟；
+- automatic long-poll reconnect/failure/stall、outbox upload retry 与 storage maintenance 共用该 authority；显式 `connect({auto:false})` 不延迟；
 - 10,000-device fleet simulation 直接调用 production function 并约束 peak bucket；同 seed/domain/sequence 重算逐字一致；
 - revoked device 进入终态，不进入无限 reconnect；manual probe 也不接管 automatic scheduler；
 - HTTP retryability 的细分仍沿用既有 transport 行为，不由 jitter authority 改写；若未来收窄到特定 5xx/network timeout，必须以独立行为契约落地，不能只改本节文字。
@@ -2127,6 +2143,8 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR-029 | Attempt 由 store 原子铸造 `{attemptId, leaseEpoch}`；每次权威副作用校验当前 Attempt，旧 epoch 只进 audit | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-030 | capability 收敛为一个 FeatureRegistry + Deployment / Installation / Runtime 三个独立 authority，准入取交集 | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-031 | AgentHome / SessionState / Workspace 三分；mutable Workspace 单写者、同 Session Run 串行；backend 只有 plain-directory 与 git-worktree | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
-| ADR-032 | `@byok-sdk/server` 折叠为 cloud domain kernel 的 embedded façade，删 `hub.ts` 独立状态机与 WS | Accepted，Supersedes ADR-004（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
+| ADR-032 | `@byok-sdk/server` 折叠为 cloud domain kernel 的 embedded façade，删除独立协调状态机与旧 transport | Accepted，Supersedes ADR-004（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-033 | `local-first-v1` 为默认数据 policy profile，contentful 进 `shared-observability-v1`；结果事务权威是 `SessionResultCommitter` | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-034 | legacy `task.offer*` / `strictAgentOnly` / 旧 gitWorkspace authority / ambient 选设备在一次 v2 cutover 中删除，无双读双写 | Accepted，Supersedes ADR-002（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
+
+- `tasks/workstreams/root/20260904-sdk-root.md`

@@ -449,7 +449,7 @@ describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', 
       // The cursor cannot have advanced: it moves only when the envelope
       // handler resolves, and the handler rejected. Nothing was acked, so the
       // mailbox still owns this task.
-      expect(await cursorStore.load(server.url, record.deviceId)).toBe(cursorBefore);
+      expect(await cursorStore.load(server.url, record.deviceId)).toBe(cursorBefore ?? 0);
       // No half row anywhere: the transaction rolled back whole.
       expect(countRows(storeDir, 'journal_envelope')).toBe(0);
       expect(countRows(storeDir, 'journal_task')).toBe(0);

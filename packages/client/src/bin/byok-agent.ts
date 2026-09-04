@@ -337,7 +337,7 @@ async function main(): Promise<void> {
 main().catch((err: unknown) => {
   if (err instanceof DeviceRevokedError) {
     // A cold `daemon.start()` against an already-revoked device fails fast
-    // with this typed error (see ConnectionManager.waitForAck) instead of
+    // with this typed error (see ConnectionManager.waitForConnection) instead of
     // hanging for the ack timeout — give the operator a clear, actionable
     // message instead of a generic one.
     console.error('device revoked — re-pair needed (run: byok-agent pair <code> --server <url>)');

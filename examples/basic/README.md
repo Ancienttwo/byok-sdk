@@ -1,10 +1,12 @@
 # @byok-sdk/example-basic
 
 End-to-end walking-skeleton demo for the BYOK SDK (see `docs`/plan: 里程碑 M0).
-A hono server embeds `@byok-sdk/server`'s reference implementation and
-serves a single plain-HTML/JS page (no frontend build step). A separate
-`byok-agent` daemon process (from `@byok-sdk/client`) runs on "the user's
-machine" and drives the local `pi` coding-agent runtime.
+A hono server embeds `@byok-sdk/server`'s self-hosted façade over the shared
+`@byok-sdk/cloud` domain kernel and serves a single plain-HTML/JS page (no
+frontend build step). A separate `byok-agent` daemon process (from
+`@byok-sdk/client`) runs on "the user's machine", uses authenticated
+long-poll HTTP for both directions, and drives the local `pi` coding-agent
+runtime.
 
 Not published — this package is `private` and lives under `examples/`.
 
@@ -60,7 +62,7 @@ install for the demo.)
 
 `productId` in the daemon config **must** match the server's
 `BYOK_EXAMPLE_PRODUCT_ID` (defaults to `byok-example-basic` on both sides —
-see `server.ts`); a mismatch is rejected at the WS handshake.
+see `server.ts`); a mismatch is rejected by authenticated HTTP admission.
 
 **Browser:** open `http://localhost:8787`.
 

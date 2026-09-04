@@ -12,7 +12,7 @@ async function tmpDir(prefix: string): Promise<string> {
 
 /**
  * S0/H-010 — the positive long-poll steer path, end to end against the REAL
- * `@byok-sdk/server`, over a transport that has no WebSocket at all.
+ * `@byok-sdk/server`, over the long-poll transport.
  *
  * This is the regression the D-4 amendment exists for, and the one test that
  * would have caught the original design before it shipped. S0's steer gate
@@ -34,7 +34,7 @@ async function tmpDir(prefix: string): Promise<string> {
  * "connection-advertised capabilities cannot feed the steer gate" block)
  * covers the same invariant from the other side.
  */
-describe('S0/H-010: task.steer over a pure long-poll transport (no WebSocket, real @byok-sdk/server)', () => {
+describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
   let real: RealServerHandle;
   let daemon: Daemon | undefined;
 
@@ -57,8 +57,7 @@ describe('S0/H-010: task.steer over a pure long-poll transport (no WebSocket, re
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
-        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
-        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+        longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
       },
     );
 
@@ -125,8 +124,7 @@ describe('S0/H-010: task.steer over a pure long-poll transport (no WebSocket, re
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
-        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
-        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+        longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
       },
     );
 

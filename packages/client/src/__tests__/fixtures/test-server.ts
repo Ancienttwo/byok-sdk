@@ -1,13 +1,9 @@
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createPublicKey, randomUUID, verify as edVerify } from 'node:crypto';
-import { WebSocket, WebSocketServer } from 'ws';
 import {
   createEnvelope,
-  decodeEnvelope,
-  encodeEnvelope,
   parseMessage,
-  PROTOCOL_VERSION,
   type Envelope,
 } from '@byok-sdk/protocol';
 import { NONCE_SIGNING_DOMAIN } from '../../daemon/device-keys';
@@ -35,25 +31,20 @@ interface StoredBlob {
 
 /**
  * In-process stand-in for a SaaS server: serves the `/byok/*` HTTP surface
- * (pair v2, challenge/token renewal, blobs, long-poll events) and the
- * `/byok/ws` upgrade from the SAME origin (mirroring the real pinned server
- * contract), replies `conn.ack` to `conn.hello` automatically, and
- * records/dispatches every envelope for assertions.
+ * (pair v2, challenge/token renewal, blobs, long-poll events) and records
+ * every envelope for assertions.
  *
  * Auth is genuinely enforced (real Ed25519 signature verification on
- * `/byok/token`, bearer-token checks on the WS upgrade and every other
+ * `/byok/token` and every other
  * authed endpoint) so client-side auth-manager tests exercise real
  * round-trips rather than a server that rubber-stamps everything.
  */
 export class TestServer {
-  socket: WebSocket | undefined;
   readonly received: Envelope[] = [];
   /** Every HTTP request this server has handled, in order — lets tests assert e.g. "a /byok/token call happened" without caring about response bodies. */
   readonly httpRequests: Array<{ method: string; pathname: string }> = [];
   /** Every `/byok/pair` body received, verbatim — the only place a test can assert what the client actually PUT ON THE WIRE (e.g. an optional field omitted rather than sent as undefined). */
   readonly pairRequests: Array<Record<string, unknown>> = [];
-  /** Count of WS upgrade attempts (regardless of accept/reject) — used to assert "no retry loop" after revocation: this must stop growing. */
-  wsUpgradeAttempts = 0;
   private waiters: Waiter[] = [];
 
   private readonly devicesById = new Map<string, DeviceAuthState>();
@@ -83,35 +74,22 @@ export class TestServer {
   private pairGate: Promise<void> | undefined;
   /** One-shot gate that holds the next `/byok/challenge` handler open for auth-shutdown coverage. */
   private challengeGate: Promise<void> | undefined;
-  private rejectWs = false;
   private failEventsPolls = false;
   private failBlobUploads = false;
   private dropNextBlobFinalizeResponse = false;
-  /** Finding R2: capabilities advertised in every subsequent `conn.ack` — see `setAckCapabilities`. */
+  /** Capabilities advertised in every subsequent long-poll response. */
   private ackCapabilities: string[] = [];
   private advertiseLongPollCapabilities = true;
 
-  private constructor(
-    private readonly httpServer: http.Server,
-    private readonly wss: WebSocketServer,
-  ) {}
+  private constructor(private readonly httpServer: http.Server) {}
 
   static async start(): Promise<TestServer> {
     const httpServer = http.createServer();
-    const wss = new WebSocketServer({
-      server: httpServer,
-      path: '/byok/ws',
-      verifyClient: (info, callback) => {
-        server.handleVerifyClient(info.req, callback);
-      },
-    });
-    const server = new TestServer(httpServer, wss);
+    const server = new TestServer(httpServer);
 
     httpServer.on('request', (req, res) => {
       void server.handleRequest(req, res);
     });
-
-    wss.on('connection', (ws) => server.onConnection(ws));
 
     await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
     return server;
@@ -134,12 +112,7 @@ export class TestServer {
     this.pairingTenantIds.set(pairingCode, tenantId);
   }
 
-  /** Reject every WS upgrade attempt (503) while `true` — used to force the client into its long-poll fallback (protocol §8). */
-  setRejectWs(reject: boolean): void {
-    this.rejectWs = reject;
-  }
-
-  /** Finding R2: capabilities to advertise in every SUBSEQUENT `conn.ack` (default `[]`, matching the wire's real "additive-minor, absent means not understood" convention) — used to test capability-gated client behavior (e.g. `approval_resolved`) without needing the real `@byok-sdk/server`. */
+  /** Capabilities to advertise in every subsequent poll response (default `[]`, matching the wire's real additive-minor convention). */
   setAckCapabilities(capabilities: string[]): void {
     this.ackCapabilities = capabilities;
   }
@@ -164,7 +137,7 @@ export class TestServer {
     this.dropNextBlobFinalizeResponse = true;
   }
 
-  /** Mark a device revoked: its next `/byok/challenge`, `/byok/token`, or WS connect gets a 401 (protocol §6.3). */
+  /** Mark a device revoked: its next authenticated request gets a 401 (protocol §6.3). */
   revokeDevice(deviceId: string): void {
     const device = this.devicesById.get(deviceId);
     if (device) device.revoked = true;
@@ -235,16 +208,6 @@ export class TestServer {
     this.pendingLongPollEntries.push(raw);
   }
 
-  /**
-   * M4 Phase 4 (version-negotiation drill): send a RAW, untyped value over
-   * the live WS connection — bypassing `createEnvelope`'s validation (which
-   * would reject a `type` this package doesn't recognize). Mirrors
-   * `pushRawLongPollEvent`'s rationale for the WS transport.
-   */
-  sendRaw(raw: unknown): void {
-    this.socket?.send(`${JSON.stringify(raw)}\n`);
-  }
-
   /** The content currently stored for a blob (undefined until the presigned PUT lands). */
   blobContent(blobId: string): Buffer | undefined {
     return this.blobs.get(blobId)?.bytes;
@@ -256,13 +219,9 @@ export class TestServer {
     this.blobs.set(blobId, { blobId, contentType, contentHash: `sha256:seeded-${blobId}`, size: bytes.length, bytes });
   }
 
+  /** Queue a server-to-daemon envelope for the next long-poll response. */
   send(envelope: Envelope): void {
-    this.socket?.send(encodeEnvelope(envelope));
-  }
-
-  /** Force-drop the current client connection (simulates a network blip). */
-  dropConnection(): void {
-    this.socket?.terminate();
+    this.pushLongPollEvent(envelope);
   }
 
   async waitFor(predicate: (envelope: Envelope) => boolean, timeoutMs = 2000): Promise<Envelope> {
@@ -281,33 +240,7 @@ export class TestServer {
   }
 
   async close(): Promise<void> {
-    this.socket?.close();
-    await new Promise<void>((resolve) => this.wss.close(() => resolve()));
     await new Promise<void>((resolve) => this.httpServer.close(() => resolve()));
-  }
-
-  // --- WS -----------------------------------------------------------------
-
-  private handleVerifyClient(
-    req: IncomingMessage,
-    callback: (res: boolean, code?: number, message?: string) => void,
-  ): void {
-    this.wsUpgradeAttempts += 1;
-    if (this.rejectWs) {
-      callback(false, 503, 'ws temporarily unavailable');
-      return;
-    }
-    const token = bearerToken(req.headers.authorization);
-    if (!token) {
-      callback(false, 401, 'missing bearer token');
-      return;
-    }
-    const device = this.deviceByToken(token);
-    if (!device || device.revoked) {
-      callback(false, 401, 'invalid or revoked token');
-      return;
-    }
-    callback(true);
   }
 
   /** Per-connection monotonic counter for the redelivery `seq` (protocol §1.2) — shared across every server->daemon envelope type, matching the wire's single per-device sequence space. Tests constructing their own S->D envelopes (`task.offer`/`task.approve`/`task.reject`/`task.cancel`/`task.steer`) must call this too, so `seq` stays strictly increasing across the whole connection. */
@@ -316,34 +249,7 @@ export class TestServer {
     return this.seqCounter;
   }
 
-  private onConnection(ws: WebSocket): void {
-    this.socket = ws;
-    ws.on('message', (data, isBinary) => {
-      const bytes = isBinary || Buffer.isBuffer(data) ? (data as Buffer) : Buffer.from(String(data), 'utf8');
-      let envelope: Envelope;
-      try {
-        envelope = decodeEnvelope(bytes);
-      } catch {
-        return;
-      }
-
-      if (envelope.type === 'conn.hello') {
-        ws.send(
-          encodeEnvelope(
-            createEnvelope(
-              'conn.ack',
-              { protocolVersion: PROTOCOL_VERSION, capabilities: this.ackCapabilities, serverTime: new Date().toISOString() },
-              { seq: this.nextSeq() },
-            ),
-          ),
-        );
-      }
-
-      this.recordReceivedEnvelope(envelope);
-    });
-  }
-
-  /** Shared by both transports an envelope can arrive over: a live WS message, or a `POST /byok/messages` batch entry (finding F6). */
+  /** Record a daemon-to-server envelope received by `POST /byok/messages`. */
   private recordReceivedEnvelope(envelope: Envelope): void {
     this.received.push(envelope);
     const matched = this.waiters.filter((w) => w.predicate(envelope));
@@ -586,7 +492,7 @@ export class TestServer {
     });
   }
 
-  /** `POST /byok/messages` (finding F6): the daemon's outbound send path while long-polling — same recording/waiter-resolution as a live WS message. */
+  /** `POST /byok/messages`: the daemon's outbound send path. */
   private async handleMessagesSend(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!this.requireBearer(req, res)) return;
     const body = (await readJsonBody(req)) as { messages?: unknown };

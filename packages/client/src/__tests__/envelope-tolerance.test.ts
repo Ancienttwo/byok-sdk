@@ -44,8 +44,7 @@ const unusedBlobClient: BlobResolver = {
  * with it — both layers a real inbound frame would pass through:
  *
  * 1. Decode: `decodeEnvelope` (re-exported from `@byok-sdk/protocol`, the same
- *    function `ws-transport.ts`'s WS `message` handler and (transitively,
- *    via `EventsPollResponseSchema`) `long-poll-transport.ts` both use) —
+ *    function `long-poll-transport.ts` uses) —
  *    already unknown-tolerant for free, purely by virtue of the client
  *    depending on the frozen protocol package rather than a hand-rolled
  *    duplicate schema.
@@ -53,13 +52,8 @@ const unusedBlobClient: BlobResolver = {
  *    (no-op) for a `task.progress` envelope regardless of whether it
  *    decoded with known or unknown events inside it.
  *
- * `ws-transport.ts`'s own WS message handler is not separately exercised
- * here: reading its source confirms it is a thin, two-step wrapper —
- * `decodeEnvelope(bytes)` (wrapped in a try/catch that already treats ANY
- * decode failure, including a fully unknown envelope `type`, as "ignore for
- * forward-compat") followed by `this.opts.onEnvelope(envelope)` — so
- * composing steps 1 and 2 above directly already covers its full behavior
- * without needing a real WebSocket in this test.
+ * The transport is not separately exercised here; these two direct checks
+ * cover its decode and dispatch inputs without reimplementing the poll loop.
  */
 describe('unknown AgentEvent tolerance on the client inbound path (pre-freeze protocol addition)', () => {
   it('decodeEnvelope parses a task.progress envelope containing a mix of known and unknown-type events without throwing', () => {

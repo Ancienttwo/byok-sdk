@@ -20,12 +20,12 @@ import {
  * HTTP-side request/response shapes for the reference server's auth and blob
  * endpoints (M1 Part B). These are plain HTTP bodies, not wire envelopes —
  * kept in a separate module from `envelope.ts`/`messages.ts` because they
- * never travel over the WSS connection. Documented in full in
- * docs/protocol.md ("Auth flows", "Blob flows", "Long-poll fallback").
+ * are HTTP request/response bodies rather than mailbox envelopes. Documented
+ * in full in docs/protocol.md ("Auth flows", "Blob flows", "Long-poll").
  *
  * The wire protocol version (`v:1`) is unaffected by any of this: pairing,
- * token renewal, and blob transfer are out-of-band HTTP calls that happen
- * before/alongside the WSS connection, not envelope types.
+ * token renewal, and blob transfer are separate HTTP calls around the
+ * long-poll mailbox lifecycle, not envelope types.
  */
 
 // ---------------------------------------------------------------------------
@@ -153,7 +153,7 @@ export type PresencePublishRequest = z.infer<typeof PresencePublishRequestSchema
 /**
  * Revocation is server-side only (dashboard/API call on the SaaS's own
  * device registry) — there is no wire message for it. A revoked device's
- * next `/byok/challenge` or `/byok/token` call (or WSS connect) gets a 401;
+ * next `/byok/challenge`, `/byok/token`, or authenticated mailbox call gets a 401;
  * the daemon's only recourse is to re-run `/byok/pair` from scratch.
  */
 
@@ -185,10 +185,9 @@ export const BlobDownloadUrlResponseSchema = z.object({
 export type BlobDownloadUrlResponse = z.infer<typeof BlobDownloadUrlResponseSchema>;
 
 // ---------------------------------------------------------------------------
-// GET /byok/events?cursor=N — long-poll fallback for environments where WSS
-// is unavailable. Authed; holds the request open ~50s waiting for new
-// events, same at-least-once/cursor semantics as the WSS redelivery path
-// (see docs/protocol.md "At-least-once delivery").
+// GET /byok/events?cursor=N — the daemon's authenticated receive transport.
+// Holds the request open ~50s waiting for new events and uses the mailbox's
+// at-least-once/cursor semantics (see docs/protocol.md "At-least-once delivery").
 // ---------------------------------------------------------------------------
 
 export const EventsPollQuerySchema = z.object({
@@ -317,9 +316,6 @@ export type AgentMemoryProjectionCommitResponse = z.infer<typeof AgentMemoryProj
 //     the params for a client request. Each builder reproduces its call site
 //     byte-for-byte, including whether a segment is `encodeURIComponent`-encoded.
 // ---------------------------------------------------------------------------
-
-/** `GET /byok/ws` — WebSocket upgrade path. */
-export const BYOK_WS_PATH = '/byok/ws';
 
 /** `POST /byok/pair` — one-time device pairing (§6). */
 export const BYOK_PAIR_PATH = '/byok/pair';

@@ -475,7 +475,7 @@ describe('DaemonConfig.resultDocument end to end (real daemon + in-process serve
     expect('document' in terminalEnvelope.payload).toBe(false);
   });
 
-  it('fails the task when the server ROLLS BACK mid-task — capable at claim, not capable at completion (F3, real reconnect)', async () => {
+  it('fails the task when the server rolls back mid-task — capable at claim, not capable at completion', async () => {
     // Capable when the task starts...
     server.setAckCapabilities(['result-document']);
     const adapter = new StubRuntimeAdapter();
@@ -486,15 +486,14 @@ describe('DaemonConfig.resultDocument end to end (real daemon + in-process serve
     );
     await server.waitFor((e) => e.type === 'task.started');
 
-    // ...and rolled back to an older build before the task finishes. A real
-    // reconnect is what makes this observable: the daemon drops its learned
-    // capabilities the moment the acked connection closes, and the new
-    // handshake teaches it the older server's (empty) set.
-    const countHellos = (): number => server.received.filter((e) => e.type === 'conn.hello').length;
-    expect(countHellos()).toBe(1);
+    // ...and rolled back to an older build before the task finishes. The next
+    // successful events response is the server capability authority.
+    const pollsBeforeRollback = server.httpRequests.filter((request) => request.pathname === '/byok/events').length;
     server.setAckCapabilities([]);
-    server.dropConnection();
-    await vi.waitFor(() => expect(countHellos()).toBe(2), { timeout: 5000 });
+    await vi.waitFor(
+      () => expect(server.httpRequests.filter((request) => request.pathname === '/byok/events').length).toBeGreaterThan(pollsBeforeRollback),
+      { timeout: 5000 },
+    );
 
     const session = adapter.sessions[0]!;
     session.emit({ type: 'progress', text: 'all done' });

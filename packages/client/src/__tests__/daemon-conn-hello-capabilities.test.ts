@@ -139,7 +139,6 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       { mail: { mcpServers: { gmail: { command: '/private/device/gmail-connector' } } } },
       daemon.status().toolsets.revision,
     );
-    server.dropConnection();
     await vi.waitFor(
       () => expect(server.received.filter((envelope) => envelope.type === 'conn.hello')).toHaveLength(2),
       { timeout: 5_000 },

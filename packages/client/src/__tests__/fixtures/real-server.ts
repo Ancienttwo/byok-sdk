@@ -20,16 +20,9 @@ import {
  * which the client-side `TestServer` stub deliberately does not reproduce —
  * see its own doc comment).
  *
- * WP3B Step 2: `@byok-sdk/server` is now a façade over `@byok-sdk/cloud` and
- * serves `GET /byok/events` + `POST /byok/messages` and nothing else — there
- * is no WebSocket upgrade handler anywhere in the package any more, so there
- * is exactly ONE start mode here (this one) rather than the three the WS era
- * needed (eager-WS / never-WS / deferred-WS). A daemon pointed at this server
- * therefore reaches long-poll through its own ordinary `wsFailureThreshold`
- * fallback: its WS upgrade attempt gets Node's default behavior for an
- * unhandled `'upgrade'` event (the raw socket is destroyed), which is a
- * genuine, real WS failure — not a simulated one — exactly as it would be
- * against a real deployment with no reachable WS endpoint.
+ * `@byok-sdk/server` is a façade over `@byok-sdk/cloud` and serves
+ * `GET /byok/events` + `POST /byok/messages`. A daemon pointed at this
+ * server has one start mode: long-poll.
  */
 /**
  * The one address these fixtures both bind and dial. Passing it as `hostname`
