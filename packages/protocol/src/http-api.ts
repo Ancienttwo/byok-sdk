@@ -234,19 +234,20 @@ export const MessagesSendRequestSchema = z.object({
 });
 export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
 
-/**
- * `accepted` counts every envelope `ConnectionHub.handleInbound` returned
- * `'accepted'` *or* `'duplicate'` for (finding P2) — a dedup'd replay is a
- * wire-level success (§9's idempotency window), even though no handler ran
- * for it a second time. `rejected` (a type outside `DAEMON_TO_SERVER_TYPES`,
- * or an ownership mismatch — N2) is a separate, additive count: omitted
- * entirely when zero, so a batch with nothing rejected keeps the pre-P2
- * `{ accepted }` shape callers already depend on.
- */
+/** One exact terminal disposition for one daemon-originated envelope. */
+export const MessagesSendOutcomeSchema = z.discriminatedUnion('outcome', [
+  z.object({ id: z.uuid(), outcome: z.literal('accepted') }).strict(),
+  z.object({ id: z.uuid(), outcome: z.literal('duplicate') }).strict(),
+  // The HTTP boundary exposes no gate details. This stable reason tells the
+  // daemon not to retry the immutable envelope without leaking task or auth facts.
+  z.object({ id: z.uuid(), outcome: z.literal('rejected'), reason: z.literal('inbound_rejected') }).strict(),
+]);
+export type MessagesSendOutcome = z.infer<typeof MessagesSendOutcomeSchema>;
+
+/** A 200 only acknowledges these exact ids; rejected entries are terminal. */
 export const MessagesSendResponseSchema = z.object({
-  accepted: z.number().int().nonnegative(),
-  rejected: z.number().int().nonnegative().optional(),
-});
+  outcomes: z.array(MessagesSendOutcomeSchema).max(MAX_MESSAGES_PER_BATCH),
+}).strict();
 export type MessagesSendResponse = z.infer<typeof MessagesSendResponseSchema>;
 
 // ---------------------------------------------------------------------------

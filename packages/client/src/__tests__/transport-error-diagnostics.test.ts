@@ -118,7 +118,7 @@ describe('LongPollRouteError names the failing route', () => {
       getCursor: () => undefined,
       onEnvelope: vi.fn(),
     });
-    expect(await client.postBatch([])).toBe(false);
+    expect(await client.postBatch([])).toBeUndefined();
 
     const errors = warnedRouteErrors();
     expect(errors).toHaveLength(1);
@@ -179,7 +179,7 @@ describe('LongPollRouteError names the failing route', () => {
     client.stop();
 
     expect(warnedRouteErrors()).toHaveLength(0);
-    expect(await client.postBatch([])).toBe(false);
+    expect(await client.postBatch([])).toBeUndefined();
     expect(warnedRouteErrors()).toHaveLength(0);
   });
 
@@ -204,7 +204,7 @@ describe('LongPollRouteError names the failing route', () => {
     client.stop();
 
     expect(warnedRouteErrors()).toHaveLength(0);
-    expect(await client.postBatch([])).toBe(false);
+    expect(await client.postBatch([])).toBeUndefined();
     expect(warnedRouteErrors()).toHaveLength(0);
   });
 });

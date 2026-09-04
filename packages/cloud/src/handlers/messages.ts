@@ -83,8 +83,7 @@ export function messagesHandler(deps: MessagesRouteDeps) {
     const parsed = MessagesSendRequestSchema.safeParse(body.body);
     if (!parsed.success) return c.json({ error: 'messages must be an array of envelopes' }, 400);
 
-    let accepted = 0;
-    let rejected = 0;
+    const outcomes: MessagesSendResponse['outcomes'] = [];
     for (const envelope of parsed.data.messages) {
       const outcome = await handleInboundEnvelope(
         stores,
@@ -112,15 +111,16 @@ export function messagesHandler(deps: MessagesRouteDeps) {
         await deps.appendContentReceiptAck(stores, device.deviceId, envelope.payload);
       }
       // A duplicate is still a wire-level success (§8.2/§9's idempotency
-      // window) — it just did not re-run a handler. Only a gate rejection
-      // (wrong-direction type, or an ownership mismatch) is excluded.
-      if (outcome === 'rejected') rejected += 1;
-      else accepted += 1;
+      // window). A rejection is terminal for this immutable envelope and
+      // exposes only a stable, non-sensitive reason to the device.
+      outcomes.push(
+        outcome === 'rejected'
+          ? { id: envelope.id, outcome, reason: 'inbound_rejected' }
+          : { id: envelope.id, outcome },
+      );
     }
 
-    // `rejected` is additive and omitted entirely when zero, so a batch with
-    // nothing rejected keeps the `{ accepted }` shape callers depend on.
-    const response: MessagesSendResponse = rejected > 0 ? { accepted, rejected } : { accepted };
+    const response: MessagesSendResponse = { outcomes };
     return c.json(response, 200);
   };
 }

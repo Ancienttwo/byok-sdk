@@ -388,8 +388,8 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       id: 'ffffffff-ffff-4fff-8fff-fffffffffffe',
       ts: new Date().toISOString(),
       type: 'task.brand_new_future_type',
-      task_id: 'task-future-2',
-      seq: 5,
+      task_id: 'task-future-1',
+      seq: 1,
       payload: {},
     };
 
@@ -409,7 +409,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       // own `seq <= this.cursor` no-op guard makes repeat pushes of the
       // identical seq harmless).
       await vi.waitFor(async () => {
-        expect(await cursorStore.load(server.url, record.deviceId)).toBe(5);
+        expect(await cursorStore.load(server.url, record.deviceId)).toBe(1);
       });
     } finally {
       keepPoisoning = false;
@@ -422,14 +422,14 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // itself is skipped) gets through right away.
     const taskId = 'task-known-recover';
     server.pushLongPollEvent(
-      createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId, seq: 6 }),
+      createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId, seq: 2 }),
     );
 
     await vi.waitFor(() => {
       expect(received.some((e) => e.type === 'task.offer' && e.task_id === taskId)).toBe(true);
     });
     await vi.waitFor(async () => {
-      expect(await cursorStore.load(server.url, record.deviceId)).toBe(6);
+      expect(await cursorStore.load(server.url, record.deviceId)).toBe(2);
     });
   });
 
@@ -561,13 +561,13 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       ts: new Date().toISOString(),
       type: 'task.some_future_type',
       task_id: 'skip-task-class',
-      seq: 2,
+      seq: 1,
       payload: {},
     };
     server.pushRawLongPollEvent(taskLike);
 
     await vi.waitFor(async () => {
-      expect(await cursorStore.load(server.url, record.deviceId)).toBe(2);
+      expect(await cursorStore.load(server.url, record.deviceId)).toBe(1);
     });
   });
 });
