@@ -2149,3 +2149,5 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR-035 | 保留 `@byok-sdk/server` 的 self-hosted Node/Hono deployment boundary；无独立能力的 `byok-sdk` umbrella 在另行批准的 breaking cutover 中退出，public artifacts 由 10 降为 9 | Accepted；implementation deferred（详见 `adr-2026-09-05-public-package-topology.md`） |
 
 - Completed workstream evidence: `tasks/workstreams/root/20260904-sdk-root.md`
+
+- `tasks/workstreams/root/20260905-sdk-root.md`
