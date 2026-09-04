@@ -381,8 +381,10 @@ export interface TaskAttemptStore {
   /**
    * Atomically binds one message payload to a live task before an external
    * consumer can run. `pending` is an existing exact reservation whose terminal
-   * receipt has not been recorded yet; callers must fail closed rather than
-   * invoke the consumer again.
+   * receipt has not been recorded yet; callers retry the same product consumer
+   * contract so its own durable idempotency can reconcile a commit whose local
+   * finalization failed. Exact pending lookup precedes the live-task gate, while
+   * every new reservation remains lifecycle-gated.
    */
   reserveAgentMessage(
     tenant: TenantId,

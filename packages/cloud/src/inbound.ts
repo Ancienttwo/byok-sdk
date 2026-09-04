@@ -156,20 +156,25 @@ export async function handleAgentMessagePublish(
     messageId: payload.messageId,
     payloadBody,
   });
-  if (reservation === 'pending') return { outcome: 'rejected' };
-  if (reservation !== 'reserved') return { outcome: 'rejected' };
+  // Both a new reservation and an exact pending reservation may call the
+  // product consumer. The consumer owns durable product idempotency under the
+  // exact authenticated message identity; retrying it is what closes the
+  // crash window where that product commit succeeded but our terminal CAS did
+  // not. A conflicting or newly lifecycle-ineligible reservation still fails
+  // closed in the store.
+  if (reservation !== 'reserved' && reservation !== 'pending') return { outcome: 'rejected' };
 
   let decision: { readonly outcome: 'accepted' | 'held' | 'refused'; readonly reasonCode?: string };
   if (consume === undefined) {
+    if (reservation === 'pending') {
+      throw new Error('Agent message consumer is unavailable while reconciling an exact pending admission.');
+    }
     decision = { outcome: 'held', reasonCode: 'consumer_unavailable' };
   } else {
-    try {
-      decision = await consume({ tenant: stores.tenant, deviceId, taskId, context: frozen.context, payload });
-    } catch {
-      // A throwing consumer may have already crossed an external side-effect
-      // boundary. Freeze a held terminal rather than retrying that consumer.
-      decision = { outcome: 'held', reasonCode: 'consumer_failed' };
-    }
+    // A throw cannot author a disposition: the product may have committed
+    // immediately before the transport failed. Leave the exact reservation
+    // pending so the same idempotent consume contract can reconcile it.
+    decision = await consume({ tenant: stores.tenant, deviceId, taskId, context: frozen.context, payload });
   }
   const disposition = agentMessageDisposition(payload, decision);
   const admission = await stores.tasks.finalizeAgentMessage({

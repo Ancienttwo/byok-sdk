@@ -114,7 +114,10 @@ export interface CreateByokServerOptions {
    * `@byok-sdk/cloud`): async, and carrying the tenant the message was
    * authenticated under. This façade forwards the hook to the kernel unchanged
    * rather than wrapping a second shape around it — one contract, documented in
-   * one place. A one-shot break for embedders (WP3B §6); there is no adapter.
+   * one place. Delivery is at least once: the product must durably deduplicate
+   * exact message identity and return its original decision on replay, including
+   * concurrent calls and retries after an uncertain commit.
+   * A one-shot break for embedders (WP3B §6); there is no adapter.
    */
   agentMessage?: {
     consume(input: {

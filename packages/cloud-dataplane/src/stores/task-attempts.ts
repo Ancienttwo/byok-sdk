@@ -180,6 +180,22 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
         [tenant, input.taskId],
       );
       const attempt = selected.rows[0];
+      // Check the immutable admission only after taking the task lock. A
+      // concurrent first reservation may commit immediately before a
+      // cancellation; once this waiter owns the lock it must observe that
+      // exact pending fact before applying the task's newer lifecycle state.
+      const existing = await client.query<{ message_id: string; payload_body: string }>(
+        `SELECT message_id, payload_body FROM agent_message_admission
+          WHERE tenant_id = $1 AND device_id = $2 AND task_id = $3`,
+        [tenant, input.deviceId, input.taskId],
+      );
+      const admission = existing.rows[0];
+      if (admission !== undefined) {
+        await client.query('COMMIT');
+        return admission.message_id === input.messageId && admission.payload_body === input.payloadBody
+          ? 'pending'
+          : 'rejected';
+      }
       if (
         attempt === undefined ||
         attempt.device_id !== input.deviceId ||
@@ -201,14 +217,14 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
         await client.query('COMMIT');
         return 'reserved';
       }
-      const existing = await client.query<{ message_id: string; payload_body: string }>(
+      const raced = await client.query<{ message_id: string; payload_body: string }>(
         `SELECT message_id, payload_body FROM agent_message_admission
           WHERE tenant_id = $1 AND device_id = $2 AND task_id = $3`,
         [tenant, input.deviceId, input.taskId],
       );
-      const admission = existing.rows[0];
+      const racedAdmission = raced.rows[0];
       await client.query('COMMIT');
-      return admission?.message_id === input.messageId && admission.payload_body === input.payloadBody
+      return racedAdmission?.message_id === input.messageId && racedAdmission.payload_body === input.payloadBody
         ? 'pending'
         : 'rejected';
     } catch (cause) {

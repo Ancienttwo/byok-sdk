@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { createMutableClock } from '@byok-sdk/core';
 import { createEnvelope, decodeEnvelope, type AgentRef } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
+import { handleAgentMessagePublish } from '../inbound';
+import { tenantStoresFor } from '../tenant-stores';
 import { CLOUD_ORIGIN, TENANT_A, createDeviceKeys, createHarness, type CloudHarness } from './support/harness';
 
 const AGENT_REF = { agentId: 'issue-agent', profileRevision: 'issue-profile' } as const;
@@ -219,40 +220,177 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
     expect(consumed).toBe(0);
   });
 
-  it('atomically reserves a live message before the consumer so concurrent same-message publishes have one winner', async () => {
-    const clock = createMutableClock();
+  it('keeps one logical product effect when exact live publishes consume concurrently', async () => {
     let release: (() => void) | undefined;
     const gate = new Promise<void>((resolve) => { release = resolve; });
-    let consumed = 0;
-    const harness = createHarness({ clock, agentMessage: { consume: async () => { consumed += 1; await gate; return { outcome: 'accepted' }; } } });
+    const outcomes = new Map<string, { outcome: 'accepted' }>();
+    let invocations = 0;
+    let effects = 0;
+    const harness = createHarness({
+      agentMessage: {
+        consume: async (input) => {
+          invocations += 1;
+          const key = JSON.stringify([input.tenant, input.deviceId, input.taskId, input.payload.agentRef, input.payload.messageId]);
+          const existing = outcomes.get(key);
+          if (existing !== undefined) return existing;
+          const outcome = { outcome: 'accepted' as const };
+          outcomes.set(key, outcome);
+          effects += 1;
+          await gate;
+          return outcome;
+        },
+      },
+    });
     const device = await harness.pairDevice(TENANT_A);
     const taskId = await admitMessageEgress(harness, device.deviceId);
     const first = postMessage(harness, device.authorization, message(taskId, '10000000-0000-4000-8000-000000001123'));
-    await vi.waitFor(() => expect(consumed).toBe(1));
-    clock.advance(60_000);
+    await vi.waitFor(() => expect(invocations).toBe(1));
     const second = postMessage(harness, device.authorization, message(taskId, '10000000-0000-4000-8000-000000001124'));
-    // Give the competing request a chance to pass the first await in the
-    // handler while the first consumer is still held. The unfixed route invokes
-    // it a second time here; a durable reservation returns pending instead.
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(consumed).toBe(1);
-    const pending = await second;
-    expect(await pending.json()).toEqual({ accepted: 0, rejected: 1 });
+    expect(await (await second).json()).toEqual({ accepted: 1 });
+    expect(invocations).toBe(2);
+    expect(effects).toBe(1);
     release!();
     expect((await first).status).toBe(200);
-    expect(consumed).toBe(1);
+    expect(effects).toBe(1);
     const replay = await postMessage(harness, device.authorization, message(taskId, '10000000-0000-4000-8000-000000001126'));
     expect(await replay.json()).toEqual({ accepted: 1 });
-    expect(consumed).toBe(1);
+    expect(invocations).toBe(2);
+    expect(effects).toBe(1);
   });
 
-  it('terminalizes consumer failures without replaying the consumer', async () => {
-    let consumed = 0;
+  it('recovers an exact message after consumer success and pre-write finalization failure', async () => {
+    // This map models the product's durable, immutable outcome authority.
+    const outcomes = new Map<string, { outcome: 'accepted' }>();
+    let invocations = 0;
+    let effects = 0;
+    const createConsumer = () => async (
+      input: Parameters<NonNullable<NonNullable<Parameters<typeof createHarness>[0]>['agentMessage']>['consume']>[0],
+    ) => {
+      invocations += 1;
+      const key = JSON.stringify([input.tenant, input.deviceId, input.taskId, input.payload.agentRef, input.payload.messageId]);
+      if (!outcomes.has(key)) { outcomes.set(key, { outcome: 'accepted' }); effects += 1; }
+      return outcomes.get(key)!;
+    };
+    let activeConsumer = createConsumer();
     const harness = createHarness({
       agentMessage: {
-        consume: async () => {
-          consumed += 1;
-          throw new Error('consumer transport lost');
+        consume: (input) => activeConsumer(input),
+      },
+    });
+    const device = await harness.pairDevice(TENANT_A);
+    const taskId = await admitMessageEgress(harness, device.deviceId);
+    const envelope = message(taskId);
+    const finalize = harness.stores.tasks.finalizeAgentMessage.bind(harness.stores.tasks);
+    let fail = true;
+    harness.stores.tasks.finalizeAgentMessage = async (...args) => {
+      if (fail) { fail = false; throw new Error('injected pre-write finalization failure'); }
+      return finalize(...args);
+    };
+    const first = await postMessage(harness, device.authorization, envelope);
+    expect(first.status).toBe(500);
+    expect(effects).toBe(1);
+    const recomposedStores = tenantStoresFor(
+      { kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId: device.deviceId },
+      { core: harness.core, cloud: harness.stores },
+    );
+    await expect(handleAgentMessagePublish(
+      recomposedStores,
+      device.deviceId,
+      taskId,
+      envelope.payload,
+      undefined,
+      false,
+    )).rejects.toThrow('consumer is unavailable');
+    const pending = await recomposedStores.tasks.readAgentMessage({
+      taskId,
+      deviceId: device.deviceId,
+      messageId: envelope.payload.messageId,
+      payloadBody: JSON.stringify(envelope.payload),
+    });
+    expect(pending).toBeDefined();
+    expect(pending?.terminalBody).toBeUndefined();
+    activeConsumer = createConsumer();
+    const retry = await postMessage(harness, device.authorization, envelope);
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toEqual({ accepted: 1 });
+    expect(invocations).toBe(2);
+    expect(effects).toBe(1);
+    const replay = await postMessage(harness, device.authorization, envelope);
+    expect(await replay.json()).toEqual({ accepted: 1 });
+    expect(effects).toBe(1);
+    const rows = (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 })).messages;
+    const dispositions = rows.map((row) => decodeEnvelope(row.body)).filter((row) => row.type === 'agent.message.disposition');
+    expect(dispositions).toHaveLength(1);
+    expect(dispositions[0]!.payload.outcome).toBe('accepted');
+  });
+
+  it.each(['complete', 'cancel_requested'] as const)(
+    'recovers an existing exact pending message after %s while rejecting new and conflicting payloads',
+    async (terminalState) => {
+      const outcomes = new Map<string, { outcome: 'accepted' }>();
+      let effects = 0;
+      const harness = createHarness({
+        agentMessage: {
+          consume: async (input) => {
+            const key = JSON.stringify([input.tenant, input.deviceId, input.taskId, input.payload.agentRef, input.payload.messageId]);
+            if (!outcomes.has(key)) { outcomes.set(key, { outcome: 'accepted' }); effects += 1; }
+            return outcomes.get(key)!;
+          },
+        },
+      });
+      const device = await harness.pairDevice(TENANT_A);
+      const taskId = await admitMessageEgress(harness, device.deviceId);
+      const original = message(taskId);
+      const finalize = harness.stores.tasks.finalizeAgentMessage.bind(harness.stores.tasks);
+      let fail = true;
+      harness.stores.tasks.finalizeAgentMessage = async (...args) => {
+        if (fail) { fail = false; throw new Error('injected pending reservation'); }
+        return finalize(...args);
+      };
+
+      expect((await postMessage(harness, device.authorization, original)).status).toBe(500);
+      if (terminalState === 'complete') {
+        await harness.stores.tasks.recordStatus(TENANT_A, { taskId, status: 'complete', agentRef: AGENT_REF });
+      } else {
+        await harness.stores.tasks.claim(TENANT_A, { taskId, deviceId: device.deviceId });
+        await harness.cloud.cancelTask(TENANT_A, taskId, 'cancel after consume');
+      }
+
+      expect(await (await postMessage(harness, device.authorization, original)).json()).toEqual({ accepted: 1 });
+      expect(effects).toBe(1);
+
+      const newMessage = createEnvelope('agent.message.publish', {
+        ...original.payload,
+        messageId: '10000000-0000-4000-8000-000000001127',
+      }, { taskId });
+      expect(await (await postMessage(harness, device.authorization, newMessage)).json()).toEqual({ accepted: 0, rejected: 1 });
+
+      const conflictingBody = 'changed after reservation';
+      const conflicting = createEnvelope('agent.message.publish', {
+        ...original.payload,
+        body: conflictingBody,
+        byteCount: new TextEncoder().encode(conflictingBody).length,
+        contentHash: `sha256:${createHash('sha256').update(conflictingBody).digest('hex')}`,
+      }, { taskId });
+      expect(await (await postMessage(harness, device.authorization, conflicting)).json()).toEqual({ accepted: 0, rejected: 1 });
+      expect(effects).toBe(1);
+    },
+  );
+
+  it('retries an exact pending message when the consumer commits and then throws', async () => {
+    const outcomes = new Map<string, { outcome: 'accepted' }>();
+    let invocations = 0;
+    let effects = 0;
+    const harness = createHarness({
+      agentMessage: {
+        consume: async (input) => {
+          invocations += 1;
+          const key = JSON.stringify([input.tenant, input.deviceId, input.taskId, input.payload.agentRef, input.payload.messageId]);
+          const existing = outcomes.get(key);
+          if (existing !== undefined) return existing;
+          outcomes.set(key, { outcome: 'accepted' });
+          effects += 1;
+          throw new Error('consumer transport lost after commit');
         },
       },
     });
@@ -260,16 +398,19 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
     const taskId = await admitMessageEgress(harness, device.deviceId);
     const first = message(taskId);
 
-    expect(await (await postMessage(harness, device.authorization, first)).json()).toEqual({ accepted: 1 });
-    expect(consumed).toBe(1);
+    expect((await postMessage(harness, device.authorization, first)).status).toBe(500);
+    expect(invocations).toBe(1);
+    expect(effects).toBe(1);
     const consumerReplay = await postMessage(harness, device.authorization, message(taskId, '10000000-0000-4000-8000-000000001125'));
     expect(await consumerReplay.json()).toEqual({ accepted: 1 });
-    expect(consumed).toBe(1);
+    expect(invocations).toBe(2);
+    expect(effects).toBe(1);
+    expect(await (await postMessage(harness, device.authorization, first)).json()).toEqual({ accepted: 1 });
+    expect(invocations).toBe(2);
     const mailbox = await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 });
     const dispositions = mailbox.messages
       .map((row) => decodeEnvelope(row.body))
       .filter((row) => row.type === 'agent.message.disposition');
-    expect(dispositions.map((row) => row.payload.outcome)).toEqual(['held']);
-    expect(dispositions.map((row) => row.payload.reasonCode)).toEqual(['consumer_failed']);
+    expect(dispositions.map((row) => row.payload.outcome)).toEqual(['accepted']);
   });
 });

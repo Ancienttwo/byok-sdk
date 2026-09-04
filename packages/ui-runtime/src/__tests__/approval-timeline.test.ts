@@ -69,7 +69,7 @@ describe('approval timeline projection', () => {
       observation(1, { type: 'approval_requested', approvalId: 'approval-host', summary: 'Deploy?' }),
       observation(2, {
         type: 'approval_resolved', approvalId: 'approval-host', decision: 'reject',
-        resolvedBy: 'host', at: '2026-08-16T12:01:00.000Z',
+        resolvedBy: 'host', reason: null, at: '2026-08-16T12:01:00.000Z',
       }),
     ]));
 

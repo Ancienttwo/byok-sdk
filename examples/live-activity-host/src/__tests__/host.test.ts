@@ -326,7 +326,7 @@ describe('live activity host security boundary', () => {
     ],
     [
       'resolution decision',
-      (entry: ApprovalObservation) => entry.event.type === 'approval_resolved'
+      (entry: ApprovalObservation) => entry.event.type === 'approval_resolved' && entry.event.resolvedBy === 'local'
         ? { ...entry, event: { ...entry.event, decision: 'reject' as const } }
         : entry,
     ],

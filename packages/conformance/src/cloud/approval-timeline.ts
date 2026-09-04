@@ -1,5 +1,6 @@
 import {
   APPROVAL_SUMMARY_MAX_BYTES,
+  ApprovalTimelineEventSchema,
   type ApprovalTimelineStore,
 } from '@byok-sdk/cloud';
 import { describe, expect, it } from 'vitest';
@@ -86,7 +87,7 @@ export function runApprovalTimelineConformance(
       });
     });
 
-    it('atomically resolves one exact pending request, replays its stable decision, and rejects conflicts', async () => {
+    it('atomically persists a host rejection payload, replays it exactly, and rejects conflicts', async () => {
       await withComposition(factory, async ({ store }) => {
         const request = await store.append(TENANT_A, {
           taskId: 'task-conditional-resolution',
@@ -101,8 +102,9 @@ export function runApprovalTimelineConformance(
           event: {
             type: 'approval_resolved' as const,
             approvalId: 'approval-conditional',
-            decision: 'approve' as const,
+            decision: 'reject' as const,
             resolvedBy: 'host' as const,
+            reason: 'first reason' as const,
             at: '2026-09-05T00:00:00.000Z',
           },
         };
@@ -111,10 +113,37 @@ export function runApprovalTimelineConformance(
         await expect(
           store.resolvePending(TENANT_A, {
             ...resolution,
-            event: { ...resolution.event, decision: 'reject' },
+            event: { ...resolution.event, reason: 'second reason' },
           }),
         ).resolves.toMatchObject({ status: 'conflict' });
+        expect((await store.read(TENANT_A, 'task-conditional-resolution'))?.entries.at(-1)?.event).toMatchObject({
+          resolvedBy: 'host',
+          decision: 'reject',
+          reason: 'first reason',
+        });
       });
+    });
+
+    it('does not allow a local wire resolution to claim a host rejection payload', () => {
+      expect(
+        ApprovalTimelineEventSchema.safeParse({
+          type: 'approval_resolved',
+          approvalId: 'approval-local',
+          decision: 'reject',
+          resolvedBy: 'local',
+          reason: 'not a host command',
+          at: '2026-09-05T00:00:00.000Z',
+        }).success,
+      ).toBe(false);
+      expect(
+        ApprovalTimelineEventSchema.safeParse({
+          type: 'approval_resolved',
+          approvalId: 'approval-host',
+          decision: 'reject',
+          resolvedBy: 'host',
+          at: '2026-09-05T00:00:00.000Z',
+        }).success,
+      ).toBe(false);
     });
 
     it('refuses a stale expected request after the daemon superseded it', async () => {

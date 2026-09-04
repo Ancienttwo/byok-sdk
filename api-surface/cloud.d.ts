@@ -313,46 +313,66 @@ import { z } from 'zod';
 export declare const DEFAULT_APPROVAL_TIMELINE_CAPACITY = 50;
 export declare const DEFAULT_APPROVAL_TIMELINE_TTL_MS: number;
 export declare const APPROVAL_SUMMARY_MAX_BYTES: number;
-export declare const ApprovalTimelineEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+export declare const ApprovalTimelineEventSchema: z.ZodUnion<readonly [z.ZodObject<{
     type: z.ZodLiteral<"approval_requested">;
     summary: z.ZodString;
     approvalId: z.ZodOptional<z.ZodString>;
-}, z.core.$strip>, z.ZodObject<{
+}, z.core.$strict>, z.ZodObject<{
     type: z.ZodLiteral<"approval_resolved">;
     approvalId: z.ZodOptional<z.ZodString>;
     decision: z.ZodEnum<{
         approve: "approve";
         reject: "reject";
     }>;
-    resolvedBy: z.ZodEnum<{
-        host: "host";
-        local: "local";
-    }>;
+    resolvedBy: z.ZodLiteral<"local">;
     at: z.ZodISODateTime;
-}, z.core.$strip>], "type">;
+}, z.core.$strict>, z.ZodObject<{
+    type: z.ZodLiteral<"approval_resolved">;
+    approvalId: z.ZodOptional<z.ZodString>;
+    decision: z.ZodLiteral<"approve">;
+    resolvedBy: z.ZodLiteral<"host">;
+    at: z.ZodISODateTime;
+}, z.core.$strict>, z.ZodObject<{
+    type: z.ZodLiteral<"approval_resolved">;
+    approvalId: z.ZodOptional<z.ZodString>;
+    decision: z.ZodLiteral<"reject">;
+    resolvedBy: z.ZodLiteral<"host">;
+    reason: z.ZodNullable<z.ZodString>;
+    at: z.ZodISODateTime;
+}, z.core.$strict>]>;
 export type ApprovalTimelineEvent = Readonly<z.infer<typeof ApprovalTimelineEventSchema>>;
 export declare const ApprovalObservationSchema: z.ZodObject<{
     taskId: z.ZodString;
     sourceEnvelopeId: z.ZodString;
     revision: z.ZodNumber;
     receivedAt: z.ZodISODateTime;
-    event: z.ZodDiscriminatedUnion<[z.ZodObject<{
+    event: z.ZodUnion<readonly [z.ZodObject<{
         type: z.ZodLiteral<"approval_requested">;
         summary: z.ZodString;
         approvalId: z.ZodOptional<z.ZodString>;
-    }, z.core.$strip>, z.ZodObject<{
+    }, z.core.$strict>, z.ZodObject<{
         type: z.ZodLiteral<"approval_resolved">;
         approvalId: z.ZodOptional<z.ZodString>;
         decision: z.ZodEnum<{
             approve: "approve";
             reject: "reject";
         }>;
-        resolvedBy: z.ZodEnum<{
-            host: "host";
-            local: "local";
-        }>;
+        resolvedBy: z.ZodLiteral<"local">;
         at: z.ZodISODateTime;
-    }, z.core.$strip>], "type">;
+    }, z.core.$strict>, z.ZodObject<{
+        type: z.ZodLiteral<"approval_resolved">;
+        approvalId: z.ZodOptional<z.ZodString>;
+        decision: z.ZodLiteral<"approve">;
+        resolvedBy: z.ZodLiteral<"host">;
+        at: z.ZodISODateTime;
+    }, z.core.$strict>, z.ZodObject<{
+        type: z.ZodLiteral<"approval_resolved">;
+        approvalId: z.ZodOptional<z.ZodString>;
+        decision: z.ZodLiteral<"reject">;
+        resolvedBy: z.ZodLiteral<"host">;
+        reason: z.ZodNullable<z.ZodString>;
+        at: z.ZodISODateTime;
+    }, z.core.$strict>]>;
 }, z.core.$strip>;
 export type ApprovalObservation = Readonly<z.infer<typeof ApprovalObservationSchema>>;
 export interface ApprovalTimelineTail {
@@ -797,7 +817,16 @@ export interface ByokCloudOptions {
      * authorities: see `BearerAuthDeps.instanceProductId` (`auth/bearer.ts`).
      */
     readonly instanceProductId?: string;
-    /** Product-owned consumer; destination lookup is keyed by authenticated task context, never model input. */
+    /**
+     * Product-owned consumer; destination lookup uses authenticated task context.
+     * Delivery is at least once, including concurrent calls and retries after a
+     * process restart or an uncertain commit. The product must durably deduplicate
+     * the exact tenant/device/task/AgentRef/message identity and payload, producing
+     * one logical effect and the same outcome/reasonCode on every exact replay.
+     * A thrown error leaves admission pending for transport retry; only a returned
+     * outcome is a terminal product decision. Do not use callback invocation count
+     * as execution authority.
+     */
     readonly agentMessage?: {
         consume(input: {
             readonly tenant: TenantId;
@@ -2241,6 +2270,9 @@ export declare class InMemoryRequestReceiptStore implements RequestReceiptStore 
 import { type Clock, type TenantId } from '@byok-sdk/core';
 import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptListQuery, type TaskAttemptPage, type TaskAttemptStatus, type TaskAttemptStore } from '../ports';
+interface StoredAgentMessageAdmission extends AgentMessageAdmission {
+    readonly deviceId: string;
+}
 export declare class InMemoryTaskAttemptStore implements TaskAttemptStore {
     #private;
     constructor(clock: Clock, state?: InMemoryTaskAttemptState);
@@ -2296,12 +2328,13 @@ export declare class InMemoryTaskAttemptStore implements TaskAttemptStore {
 export declare class InMemoryTaskAttemptState {
     #private;
     readonly attempts: Map<string, TaskAttempt>;
-    readonly messageAdmissions: Map<string, AgentMessageAdmission>;
+    readonly messageAdmissions: Map<string, StoredAgentMessageAdmission>;
     constructor(clock: Clock);
     now(): string;
     /** Serialize every state-changing operation for one tenant/task key. */
     mutate<T>(key: string, operation: () => T | Promise<T>): Promise<T>;
 }
+export {};
 // ==== @byok-sdk/cloud dist/stores/in-memory/task-cancellations.d.ts ====
 import { type MailboxStore, type TenantId } from '@byok-sdk/core';
 import type { TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore } from '../ports';
@@ -2652,8 +2685,10 @@ export interface TaskAttemptStore {
     /**
      * Atomically binds one message payload to a live task before an external
      * consumer can run. `pending` is an existing exact reservation whose terminal
-     * receipt has not been recorded yet; callers must fail closed rather than
-     * invoke the consumer again.
+     * receipt has not been recorded yet; callers retry the same product consumer
+     * contract so its own durable idempotency can reconcile a commit whose local
+     * finalization failed. Exact pending lookup precedes the live-task gate, while
+     * every new reservation remains lifecycle-gated.
      */
     reserveAgentMessage(tenant: TenantId, input: {
         readonly taskId: string;

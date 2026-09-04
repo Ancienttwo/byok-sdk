@@ -277,7 +277,16 @@ export interface ByokCloudOptions {
    * authorities: see `BearerAuthDeps.instanceProductId` (`auth/bearer.ts`).
    */
   readonly instanceProductId?: string;
-  /** Product-owned consumer; destination lookup is keyed by authenticated task context, never model input. */
+  /**
+   * Product-owned consumer; destination lookup uses authenticated task context.
+   * Delivery is at least once, including concurrent calls and retries after a
+   * process restart or an uncertain commit. The product must durably deduplicate
+   * the exact tenant/device/task/AgentRef/message identity and payload, producing
+   * one logical effect and the same outcome/reasonCode on every exact replay.
+   * A thrown error leaves admission pending for transport retry; only a returned
+   * outcome is a terminal product decision. Do not use callback invocation count
+   * as execution authority.
+   */
   readonly agentMessage?: {
     consume(input: {
       readonly tenant: TenantId;
@@ -1134,7 +1143,11 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     attempt: TaskAttempt,
     tail: ApprovalTimelineTail | undefined,
     request: PendingApproval,
-  ): Promise<{ readonly decision: 'approve' | 'reject'; readonly approvalId?: string } | undefined> {
+  ): Promise<
+    | { readonly decision: 'approve'; readonly approvalId?: string }
+    | { readonly decision: 'reject'; readonly approvalId?: string; readonly reason: string | null }
+    | undefined
+  > {
     for (const decision of ['approve', 'reject'] as const) {
       const sourceEnvelopeId = await approvalDecisionSource(tenant, taskId, attempt, request, decision);
       const index = tail?.entries.findIndex((candidate) => candidate.sourceEnvelopeId === sourceEnvelopeId) ?? -1;
@@ -1146,8 +1159,15 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
           (request.approvalId === undefined || candidate.event.approvalId === request.approvalId),
       );
       if (!laterResolution) {
+        if (entry.event.decision === 'reject') {
+          return {
+            decision: 'reject',
+            ...(entry.event.approvalId === undefined ? {} : { approvalId: entry.event.approvalId }),
+            reason: entry.event.reason,
+          };
+        }
         return {
-          decision,
+          decision: 'approve',
           ...(entry.event.approvalId === undefined ? {} : { approvalId: entry.event.approvalId }),
         };
       }
@@ -1194,6 +1214,12 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
               `Task ${taskId} already has the opposite host approval decision.`,
             );
           }
+          if (recorded.decision === 'reject' && recorded.reason !== (opts?.reason ?? null)) {
+            throw new ByokCloudError(
+              'coordination_input_invalid',
+              `Task ${taskId} already has a host rejection with a different immutable reason.`,
+            );
+          }
           const ownerDeviceId = attempt.ownerDeviceId;
           if (ownerDeviceId === undefined) {
             throw new ByokCloudError(
@@ -1203,12 +1229,13 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
           }
           const messageId = await approvalDecisionSource(tenant, taskId, attempt, latestRequest, decision);
           const targeting = recorded.approvalId === undefined ? {} : { approvalId: recorded.approvalId };
+          const recordedReason = recorded.decision === 'reject' ? recorded.reason : undefined;
           return enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>
             decision === 'approve'
               ? createEnvelope('task.approve', targeting, { id: messageId, taskId, seq })
               : createEnvelope(
                   'task.reject',
-                  { ...targeting, ...(opts?.reason === undefined ? {} : { reason: opts.reason }) },
+                  { ...targeting, ...(recordedReason === null || recordedReason === undefined ? {} : { reason: recordedReason }) },
                   { id: messageId, taskId, seq },
                 ),
           );
@@ -1244,13 +1271,23 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     // source/revision.
     const approvalId = pending.approvalId;
     const messageId = await approvalDecisionSource(tenant, taskId, attempt, pending, decision);
-    const event = {
-      type: 'approval_resolved' as const,
-      ...(approvalId === undefined ? {} : { approvalId }),
-      decision,
-      resolvedBy: 'host' as const,
-      at: new Date().toISOString(),
-    };
+    const event =
+      decision === 'reject'
+        ? {
+            type: 'approval_resolved' as const,
+            ...(approvalId === undefined ? {} : { approvalId }),
+            decision: 'reject' as const,
+            resolvedBy: 'host' as const,
+            reason: opts?.reason ?? null,
+            at: new Date().toISOString(),
+          }
+        : {
+            type: 'approval_resolved' as const,
+            ...(approvalId === undefined ? {} : { approvalId }),
+            decision: 'approve' as const,
+            resolvedBy: 'host' as const,
+            at: new Date().toISOString(),
+          };
     const resolved = await root.cloud.approvals.resolvePending(tenant, {
       taskId,
       sourceEnvelopeId: messageId,
@@ -1259,6 +1296,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       event,
     });
     let deliveredApprovalId = approvalId;
+    let deliveredReason: string | null | undefined = decision === 'reject' ? opts?.reason ?? null : undefined;
     if (resolved.status === 'conflict' || resolved.status === 'superseded' || resolved.status === 'absent') {
       const currentTail = resolved.tail ?? (await stores.approvals.read(taskId));
       const currentPending = pendingApproval(currentTail);
@@ -1268,6 +1306,15 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         // intentionally not a competing identity; the stable decision source
         // is, and mailbox append below replays that source exactly once.
         deliveredApprovalId = recorded.approvalId;
+        if (recorded.decision === 'reject') {
+          if (recorded.reason !== deliveredReason) {
+            throw new ByokCloudError(
+              'coordination_input_invalid',
+              `Task ${taskId} already has a host rejection with a different immutable reason.`,
+            );
+          }
+          deliveredReason = recorded.reason;
+        }
       } else if (recorded !== undefined) {
         throw new ByokCloudError(
           'coordination_input_invalid',
@@ -1293,7 +1340,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         ? createEnvelope('task.approve', targeting, { id: messageId, taskId, seq })
         : createEnvelope(
             'task.reject',
-            { ...targeting, ...(opts?.reason === undefined ? {} : { reason: opts.reason }) },
+            { ...targeting, ...(deliveredReason === null || deliveredReason === undefined ? {} : { reason: deliveredReason }) },
             { id: messageId, taskId, seq },
           ),
     );

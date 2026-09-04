@@ -6,7 +6,7 @@
 > **Artifact Level**: work-package
 > **Promotion Reason**: Ten audited defects cross durable acknowledgement, inbound lifecycle, offer publication, relay liveness, and approval delivery boundaries.
 > **Verification Boundary**: focused fault-injection tests per lane, root required checks, API/version gates, strict workflow, and an independent final gate.
-> **Rollback Surface**: one integration branch assembled from three isolated lane commits; no push, issue close, publish, deploy, or migration is authorized.
+> **Rollback Surface**: one integration branch assembled from three isolated lane commits; no push, publish, deploy, or production migration is authorized. The owner subsequently authorized rework and issue closure only after acceptance passes.
 
 ## P1 Architecture Map
 
@@ -14,7 +14,7 @@
 - Cloud inbound lane: `handleInboundEnvelope` and its tenant-bound task, receipt, board, activity, approval, egress, and dedup stores own retry convergence for daemon lifecycle facts.
 - Offer/server lane: `ByokCloud` task publication, `TaskEventRelay`, `TaskHandle`, and approval timeline/control own pre-publication registration and idempotent host decisions.
 - Deployment invariant: tenant is `1:N` devices and `1:N` agents; one device may host `1:N` active AgentPlacements, while each agent currently has at most one active placement. Each task/offer/approval remains bound to exact `tenantId + deviceId + AgentRef`; no tenant-wide Profile shortcut or one-device-one-Agent key is valid.
-- Out of scope: protocol v2, compatibility shims, Profile/Placement decomposition, cross-device migration, Salesko `hostedJournal` composition/E2E, `ws/wss` cleanup, npm publication, production migration/deploy, tracker closure, and unrelated architecture/package-topology WIP.
+- Out of scope: protocol v2, compatibility shims, Profile/Placement decomposition, cross-device migration, Salesko `hostedJournal` composition/E2E, `ws/wss` cleanup, npm publication, production migration/deploy, and unrelated architecture/package-topology WIP. Tracker closure is conditional on replacement acceptance under the owner follow-up below.
 
 ## P2 Concrete Traces
 
@@ -44,7 +44,7 @@
 ## Evidence Contract
 
 - **State/progress path**: this plan, its contract, notes, workstream, and review.
-- **Verification evidence**: three pre-fix failure artifacts; focused client/cloud/server regression suites; frozen protocol guard; root build, typecheck, test, API/version checks; strict workflow; one independent gatekeeper verdict.
+- **Verification evidence**: three pre-fix failure artifacts; focused client/cloud/server regression suites; frozen protocol guard; root build, typecheck, test, API/version checks; strict workflow; one independent gatekeeper verdict after rework.
 - **Evaluator rubric**: durable cursor before wire acknowledgement; rejected-envelope isolation under frozen v1 counts; lifecycle retry convergence; attempt/relay registration before observable offer; stable approval identity; exact `tenantId + deviceId + AgentRef` admission and same-device multi-Agent isolation.
 - **Stop condition**: every Task Breakdown row is evidenced, the independent gate passes, and repo-harness permits handoff.
 - **Rollback surface**: the integration commits after baseline `aa44bb9`; no external system mutation.
@@ -54,7 +54,7 @@
 - **Merge/PR unit**: one #135–#144 SDK/cloud reliability slice assembled from the three isolated lanes.
 - **Rollback surface**: client long-poll, cloud inbound/store contracts, server offer/relay/approval changes, tests, and generated API declaration.
 - **Verification boundary**: exact frozen diff plus focused fault regressions, frozen-v1 protocol guard, all root required checks, and independent read-only review.
-- **Review/acceptance boundary**: one gatekeeper evaluates the frozen subject; no merge, push, PR, issue close, publish, deploy, or migration is authorized.
+- **Review/acceptance boundary**: one gatekeeper evaluates the frozen subject; no merge, push, PR, publish, deploy, or production migration is authorized; issue closure follows only after the owner-authorized replacement acceptance passes.
 - **High-risk surface**: durable acknowledgement, cross-store recovery, task publication ordering, approval idempotency, and multi-Agent placement identity.
 - **Why not checklist row**: ten cross-module failure schedules require a bugfix contract, pre-fix evidence, architecture projection, and independent semantic acceptance.
 - **Evidence ceiling**: this proves SDK/cloud behavior only; Salesko journal-before-ack E2E remains outside this branch.
@@ -66,5 +66,12 @@
 - [x] T3 Implement and verify #141–#144 in the isolated offer/server lane.
 - [x] T4 Integrate the three frozen lane commits and resolve only proven cross-lane contract conflicts.
 - [x] T5 Run focused crash/fault matrix and all repository required checks.
-- [x] T6 Record architecture/task evidence and independent acceptance verdict.
+- [ ] T6 Replace the superseded acceptance verdict after owner-requested rework and final verification.
 - [x] T7 Bind same-device Agent replay/idempotency keys to exact AgentRef and replace the superseded acceptance evidence.
+
+### Owner-authorized rework
+
+- [x] T8 Close #138 pending Agent-message recovery through the existing durably idempotent product consumer contract; preserve transport retry on unknown outcomes and never synthesize a terminal decision.
+- [x] T9 Freeze the complete #143 reject payload in the first-write approval authority and reject conflicting retries.
+- [ ] T10 Run fault regressions, freeze source, run required checks once, and obtain replacement independent acceptance.
+- [ ] T11 After acceptance passes, close #135-#144 with source-only evidence and read back tracker state; then resume the Salesko program through its WP0 published-SDK/exact-pin gate. Publication, deployment and production migration are separate authorization boundaries.

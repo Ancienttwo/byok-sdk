@@ -155,21 +155,21 @@ describe('issues #141-#144 server reliability regressions', () => {
     relay.stop();
   });
 
-  it('#143 retries the same host approval outcome and does not enqueue another executable control', async () => {
+  it('#143 retries the same host rejection payload and does not enqueue another executable control', async () => {
     const { byok: instance, daemon } = await start();
     const handle = await instance.dispatch({ instruction: 'approval retry' });
     await claimAndStart(instance, daemon, handle);
     await moveToAwaitApproval(instance, daemon, handle, { approvalId: 'approval-retry' });
 
-    await handle.approve({ approvalId: 'approval-retry' });
-    await expect(handle.approve({ approvalId: 'approval-retry' })).resolves.toBeUndefined();
-    await expect(handle.reject('conflicting decision', { approvalId: 'approval-retry' })).rejects.toMatchObject({
+    await handle.reject('first reason', { approvalId: 'approval-retry' });
+    await expect(handle.reject('first reason', { approvalId: 'approval-retry' })).resolves.toBeUndefined();
+    await expect(handle.reject('second reason', { approvalId: 'approval-retry' })).rejects.toMatchObject({
       code: 'coordination_input_invalid',
     });
 
     const controls = (await daemon.next()).filter((envelope) => envelope.type === 'task.approve' || envelope.type === 'task.reject');
     expect(controls).toHaveLength(1);
-    expect(controls[0]?.type).toBe('task.approve');
+    expect(controls[0]).toMatchObject({ type: 'task.reject', payload: { approvalId: 'approval-retry', reason: 'first reason' } });
   });
 
   it('#144 keeps host approval id-less when a pre-M5 request had no native approvalId', async () => {
