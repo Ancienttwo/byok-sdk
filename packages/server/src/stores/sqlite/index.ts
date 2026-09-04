@@ -317,12 +317,7 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
   ): Promise<'reserved' | 'pending' | 'rejected'> {
     return this.coordinator.run((db) => {
       const attempt = readTask(db, tenant, input.taskId);
-      if (
-        attempt === undefined ||
-        attempt.deviceId !== input.deviceId ||
-        attempt.cancellation !== undefined ||
-        !['offered', 'claimed', 'running'].includes(attempt.status)
-      ) return 'rejected';
+      if (attempt === undefined || attempt.deviceId !== input.deviceId) return 'rejected';
       const existing = db.prepare(
         'SELECT message_id, payload_body FROM agent_message_admission WHERE tenant_id = ? AND task_id = ?',
       ).get(tenant, input.taskId) as { message_id: string; payload_body: string } | undefined;
@@ -331,6 +326,13 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
           ? 'pending'
           : 'rejected';
       }
+      // The shared coordinator serializes cancellation and admission. An
+      // existing exact message can reconcile its product outcome after the
+      // task changes state; only a new reservation needs a live task.
+      if (
+        attempt.cancellation !== undefined ||
+        !['offered', 'claimed', 'running'].includes(attempt.status)
+      ) return 'rejected';
       db.prepare(
         `INSERT INTO agent_message_admission (tenant_id, task_id, message_id, payload_body)
          VALUES (?, ?, ?, ?)`,
