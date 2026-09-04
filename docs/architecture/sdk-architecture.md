@@ -393,10 +393,23 @@ transport-specific state machine remains beside the kernel.
   Its `connected` projection means an unexpired hint, never a live socket.
 - `events.subscribe()` is an in-process live stream fed after cloud commits. It
   is intentionally not a cross-process replay or audit stream; durable mailbox
-  and task readbacks remain the recovery authorities.
+  and task readbacks remain the recovery authorities. Dispatch provisions the
+  relay before mailbox publication, and `TaskHandle.result()` checks durable
+  terminal truth before waiting on notification, so relay timing is not a
+  terminal liveness authority.
 - Claim-time runtime capabilities are persisted on the attempt and are the
   sole input to task-level `steer` admission. Connection or presence
   observations cannot authorize a task control.
+- Daemon inbound dedup marks an envelope complete only after its lifecycle
+  writes converge. Activity append is exact-idempotent by source envelope;
+  terminal retries validate the first receipt and resume task/board projection;
+  unknown terminals allocate no receipt or dedup-completed fact.
+- Legacy offers reserve their exact attempt before mailbox publication. Offer,
+  host-decision, and implicit-approval identities bind tenant, task, device and
+  exact AgentRef. Tenant and device identity never imply one Profile: a tenant
+  has many devices and agents, one device may host many active AgentPlacements,
+  and the current separate placement contract limits each agent to at most one
+  active placement.
 
 ## 4. `@byok-sdk/client`：本机 daemon、CLI 与 runtime boundary
 
@@ -851,10 +864,10 @@ flowchart LR
   classDef gate fill:#0f766e,stroke:#99f6e4,stroke-width:2px,color:#fff
 
   Outbox[("Client single outbox")]:::store
-  Poll(["GET /events<br/>POST /messages in chunks <=256"]):::primary
+  Poll(["GET /events<br/>POST /messages exact per-id outcomes"]):::primary
   Cloud(["Same cloud-kernel inbound gate"]):::gate
   Cursor[("Persisted task-envelope cursor")]:::store
-  Dedup[("Per-device envelope-id ring<br/>plus semantic idempotency")]:::store
+  Dedup[("Completed-envelope dedup<br/>plus resumable semantic writes")]:::store
 
   Outbox --> Poll --> Cloud
   Cloud --> Dedup
@@ -864,8 +877,13 @@ flowchart LR
 
 long-poll 是唯一的完整双向 transport：`GET /byok/events` 读取 mailbox，
 `POST /byok/messages` 发送 `conn.hello` 与 daemon→server envelopes。cursor 只在
-handler 成功且本机 durable 前置条件满足后推进；失败时 watermark 冻结并 backoff，
-后续重放依靠 TaskRunner 与 cloud kernel 的 idempotency。旧版本曾有第二种 socket
+handler 成功且同一 cursor 已成功落盘后才对下一次 GET 可见；save 失败或未完成时
+wire acknowledgement 保持旧值。POST 200 为每个 envelope id 返回 exact
+`accepted | duplicate | rejected` outcome；只有前两者离开 outbox，permanent reject
+进入 bounded observable quarantine，不阻塞后续 valid envelope。unknown `task.*`
+只在 safe、non-negative、page-bounded 且有序的 seq 上 forward-skip，malformed page
+不推进 cursor。失败时 watermark 冻结并 backoff，后续重放依靠 TaskRunner 与 cloud
+kernel 的 idempotency。旧版本曾有第二种 socket
 transport 及其互斥/接管规则；该规则已随 WP3B Step 4b 删除，本段不再定义任何
 alternate transport mode。
 
