@@ -49,15 +49,15 @@ allowed_paths:
   - tasks/notes/20260904-1324-wp3b-step4b-step5-closeout.notes.md
   - tasks/current.md
   - tasks/todos.md
-  - tasks/workstreams/root/**
-  - packages/client/src/**
+  - tasks/workstreams/root/
+  - packages/client/src/
   - packages/client/package.json
-  - packages/protocol/src/**
+  - packages/protocol/src/
   - bun.lock
   - api-surface/client.d.ts
   - api-surface/protocol.d.ts
   - api-surface/server.d.ts
-  - docs/**
+  - docs/
   - README.md
   - CHANGELOG.md
   - examples/basic/README.md
