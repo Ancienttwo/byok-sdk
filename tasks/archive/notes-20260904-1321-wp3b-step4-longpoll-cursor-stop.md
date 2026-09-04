@@ -1,9 +1,19 @@
+> **Archived**: 2026-09-04 13:21
+> **Related Plan**: plans/archive/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260904-1321
+> **Archive Projection V1**: `plans/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md` => `plans/archive/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md`
+> **Archive Projection V1**: `tasks/notes/20260904-0421-wp3b-step4-longpoll-cursor-stop.notes.md` => `tasks/archive/notes-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
+> **Archive Projection V1**: `tasks/contracts/20260904-0421-wp3b-step4-longpoll-cursor-stop.contract.md` => `tasks/archive/contract-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
+> **Archive Projection V1**: `tasks/reviews/20260904-0421-wp3b-step4-longpoll-cursor-stop.review.md` => `tasks/archive/review-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
+
 # Implementation Notes: wp3b-step4-longpoll-cursor-stop
 
 > **Status**: Fulfilled
-> **Plan**: plans/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md
-> **Contract**: tasks/contracts/20260904-0421-wp3b-step4-longpoll-cursor-stop.contract.md
-> **Review**: tasks/reviews/20260904-0421-wp3b-step4-longpoll-cursor-stop.review.md
+> **Plan**: plans/archive/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md
+> **Contract**: tasks/archive/contract-20260904-1321-wp3b-step4-longpoll-cursor-stop.md
+> **Review**: tasks/archive/review-20260904-1321-wp3b-step4-longpoll-cursor-stop.md
 > **Last Updated**: 2026-09-04 04:34
 > **Lifecycle**: notes
 
@@ -45,7 +55,7 @@
 - `bun run check:version-authority`: passed for `byok-sdk@0.12.0` and `@byok-sdk/keys@0.3.9`.
 - `git diff --check`: passed.
 - `repo-harness run check-task-workflow --strict`: passed.
-- `repo-harness run verify-contract --contract tasks/contracts/20260904-0421-wp3b-step4-longpoll-cursor-stop.contract.md --strict`: 27/27 passed; contract status `Fulfilled`.
+- `repo-harness run verify-contract --contract tasks/archive/contract-20260904-1321-wp3b-step4-longpoll-cursor-stop.md --strict`: 27/27 passed; contract status `Fulfilled`.
 - Exact-subject gate and typed `external_pass` AcceptanceReceipt passed against the published Step 2 base.
 
 ## Deviations From Plan Or Spec

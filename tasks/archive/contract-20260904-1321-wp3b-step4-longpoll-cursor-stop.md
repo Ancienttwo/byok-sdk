@@ -1,13 +1,23 @@
+> **Archived**: 2026-09-04 13:21
+> **Related Plan**: plans/archive/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260904-1321
+> **Archive Projection V1**: `plans/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md` => `plans/archive/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md`
+> **Archive Projection V1**: `tasks/notes/20260904-0421-wp3b-step4-longpoll-cursor-stop.notes.md` => `tasks/archive/notes-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
+> **Archive Projection V1**: `tasks/contracts/20260904-0421-wp3b-step4-longpoll-cursor-stop.contract.md` => `tasks/archive/contract-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
+> **Archive Projection V1**: `tasks/reviews/20260904-0421-wp3b-step4-longpoll-cursor-stop.review.md` => `tasks/archive/review-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
+
 # Task Contract: wp3b-step4-longpoll-cursor-stop
 
 > **Status**: Fulfilled
-> **Plan**: plans/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md
+> **Plan**: plans/archive/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md
 > **Task Profile**: bugfix
 > **Owner**: kito
 > **Capability ID**: root
 > **Last Updated**: 2026-09-04 04:33
-> **Review File**: `tasks/reviews/20260904-0421-wp3b-step4-longpoll-cursor-stop.review.md`
-> **Notes File**: `tasks/notes/20260904-0421-wp3b-step4-longpoll-cursor-stop.notes.md`
+> **Review File**: `tasks/archive/review-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
+> **Notes File**: `tasks/archive/notes-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
 
 ## Why
@@ -43,10 +53,10 @@ Any restored guard remains skipped, a failed handler is not redelivered from the
 
 ## Workflow Inventory
 
-- Source plan: `plans/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md`
+- Source plan: `plans/archive/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md`
 - Deferred-goal ledger: `tasks/todos.md`
-- Review file: `tasks/reviews/20260904-0421-wp3b-step4-longpoll-cursor-stop.review.md`
-- Notes file: `tasks/notes/20260904-0421-wp3b-step4-longpoll-cursor-stop.notes.md`
+- Review file: `tasks/archive/review-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
+- Notes file: `tasks/archive/notes-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
 - Checks file: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
 - Scope gate: edit only paths listed under `allowed_paths`; update this contract before widening scope.
@@ -68,10 +78,10 @@ Any restored guard remains skipped, a failed handler is not redelivered from the
 
 ```yaml
 allowed_paths:
-  - plans/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md
-  - tasks/contracts/20260904-0421-wp3b-step4-longpoll-cursor-stop.contract.md
-  - tasks/reviews/20260904-0421-wp3b-step4-longpoll-cursor-stop.review.md
-  - tasks/notes/20260904-0421-wp3b-step4-longpoll-cursor-stop.notes.md
+  - plans/archive/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md
+  - tasks/archive/contract-20260904-1321-wp3b-step4-longpoll-cursor-stop.md
+  - tasks/archive/review-20260904-1321-wp3b-step4-longpoll-cursor-stop.md
+  - tasks/archive/notes-20260904-1321-wp3b-step4-longpoll-cursor-stop.md
   - tasks/notes/20260904-0421-wp3b-step4-longpoll-cursor-stop.pre-fix.txt
   - tasks/todos.md
   - tasks/current.md
@@ -131,7 +141,7 @@ exit_criteria:
     - packages/client/src/daemon/long-poll-transport.ts
   artifacts_exist:
     - tasks/notes/20260904-0421-wp3b-step4-longpoll-cursor-stop.pre-fix.txt
-    - tasks/notes/20260904-0421-wp3b-step4-longpoll-cursor-stop.notes.md
+    - tasks/archive/notes-20260904-1321-wp3b-step4-longpoll-cursor-stop.md
   tests_pass:
     - path: packages/client/src/__tests__/real-server-longpoll-redelivery.test.ts
     - path: packages/client/src/__tests__/real-server-longpoll-stall-dedup.test.ts

@@ -1,9 +1,19 @@
+> **Archived**: 2026-09-04 13:21
+> **Related Plan**: plans/archive/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260904-1321
+> **Archive Projection V1**: `plans/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md` => `plans/archive/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md`
+> **Archive Projection V1**: `tasks/notes/20260904-0421-wp3b-step4-longpoll-cursor-stop.notes.md` => `tasks/archive/notes-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
+> **Archive Projection V1**: `tasks/contracts/20260904-0421-wp3b-step4-longpoll-cursor-stop.contract.md` => `tasks/archive/contract-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
+> **Archive Projection V1**: `tasks/reviews/20260904-0421-wp3b-step4-longpoll-cursor-stop.review.md` => `tasks/archive/review-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
+
 # Task Review: wp3b-step4-longpoll-cursor-stop
 
 > **Status**: Accepted
-> **Plan**: plans/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md
-> **Contract**: tasks/contracts/20260904-0421-wp3b-step4-longpoll-cursor-stop.contract.md
-> **Notes File**: tasks/notes/20260904-0421-wp3b-step4-longpoll-cursor-stop.notes.md
+> **Plan**: plans/archive/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md
+> **Contract**: tasks/archive/contract-20260904-1321-wp3b-step4-longpoll-cursor-stop.md
+> **Notes File**: tasks/archive/notes-20260904-1321-wp3b-step4-longpoll-cursor-stop.md
 > **Checks File**: .ai/harness/checks/latest.json
 > **Last Updated**: 2026-09-04 04:36
 > **Recommendation**: pass

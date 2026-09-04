@@ -1,15 +1,25 @@
+> **Archived**: 2026-09-04 13:21
+> **Related Plan**: plans/archive/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md
+> **Outcome**: Completed
+> **Lifecycle**: plan
+> **Parent Run ID**: run-20260904-1321
+> **Archive Projection V1**: `plans/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md` => `plans/archive/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md`
+> **Archive Projection V1**: `tasks/notes/20260904-0421-wp3b-step4-longpoll-cursor-stop.notes.md` => `tasks/archive/notes-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
+> **Archive Projection V1**: `tasks/contracts/20260904-0421-wp3b-step4-longpoll-cursor-stop.contract.md` => `tasks/archive/contract-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
+> **Archive Projection V1**: `tasks/reviews/20260904-0421-wp3b-step4-longpoll-cursor-stop.review.md` => `tasks/archive/review-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
+
 # Plan: WP3B Step 4a: durable long-poll ack and cancellable stop
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260904-0421
 > **Slug**: wp3b-step4-longpoll-cursor-stop
 > **Artifact Level**: work-package
 > **Promotion Reason**: Owner approved the bounded next slice on 2026-09-04: long-poll read/ack separation and `LongPollClient.stop()` cancellation, including restoration of the five deferred end-to-end guards.
 > **Verification Boundary**: focused client regression set, full client suite, then repository required checks.
 > **Rollback Surface**: one commit on `codex/wp3b-step4-daemon-longpoll`, based on published Step 2 main `10bb9fc`.
-> **Task Contract**: `tasks/contracts/20260904-0421-wp3b-step4-longpoll-cursor-stop.contract.md`
-> **Task Review**: `tasks/reviews/20260904-0421-wp3b-step4-longpoll-cursor-stop.review.md`
-> **Implementation Notes**: `tasks/notes/20260904-0421-wp3b-step4-longpoll-cursor-stop.notes.md`
+> **Task Contract**: `tasks/archive/contract-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
+> **Task Review**: `tasks/archive/review-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
+> **Implementation Notes**: `tasks/archive/notes-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
 
 ## P1 Architecture Map
 
@@ -30,20 +40,20 @@
 
 ## Workflow Inventory
 
-- Active plan: `plans/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md`
-- Task contract: `tasks/contracts/20260904-0421-wp3b-step4-longpoll-cursor-stop.contract.md`
-- Review: `tasks/reviews/20260904-0421-wp3b-step4-longpoll-cursor-stop.review.md`
-- Notes: `tasks/notes/20260904-0421-wp3b-step4-longpoll-cursor-stop.notes.md`
+- Active plan: `plans/archive/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md`
+- Task contract: `tasks/archive/contract-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
+- Review: `tasks/archive/review-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
+- Notes: `tasks/archive/notes-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`
 - Deferred ledger: `tasks/todos.md`
 
 ## Task Contracts
 
 - Scope authority is the contract's `allowed_paths` list.
-- Verification command: `repo-harness run verify-contract --contract tasks/contracts/20260904-0421-wp3b-step4-longpoll-cursor-stop.contract.md --strict`.
+- Verification command: `repo-harness run verify-contract --contract tasks/archive/contract-20260904-1321-wp3b-step4-longpoll-cursor-stop.md --strict`.
 
 ## Evidence Contract
 
-- State/progress path: `tasks/notes/20260904-0421-wp3b-step4-longpoll-cursor-stop.notes.md`.
+- State/progress path: `tasks/archive/notes-20260904-1321-wp3b-step4-longpoll-cursor-stop.md`.
 - Verification evidence: focused and full command results recorded in the implementation notes, with final harness snapshots under `.ai/harness/runs/`.
 - Pre-fix evidence: `tasks/notes/20260904-0421-wp3b-step4-longpoll-cursor-stop.pre-fix.txt` contains the named guard command and non-zero `PRE_FIX_EXIT`.
 - Evaluator rubric: five formerly skipped real-kernel cases execute and pass; held GET ends promptly after stop; no protocol/cloud/server diff.
