@@ -172,6 +172,19 @@ describe('issues #141-#144 server reliability regressions', () => {
     expect(controls[0]?.type).toBe('task.approve');
   });
 
+  it('#144 keeps host approval id-less when a pre-M5 request had no native approvalId', async () => {
+    const { byok: instance, daemon } = await start();
+    const handle = await instance.dispatch({ instruction: 'id-less host approval' });
+    await claimAndStart(instance, daemon, handle);
+    await moveToAwaitApproval(instance, daemon, handle);
+
+    await handle.approve({ approvalId: 'caller-only-id' });
+
+    const controls = (await daemon.next()).filter((envelope) => envelope.type === 'task.approve');
+    expect(controls).toHaveLength(1);
+    expect(controls[0]?.payload).toEqual({});
+  });
+
   it('#144 resolves an id-less pending approval only after a later committed activity', async () => {
     const { byok: instance, daemon } = await start();
     const handle: TaskHandle = await instance.dispatch({ instruction: 'id-less approval' });

@@ -1219,11 +1219,12 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         `Task ${taskId} has no owning device; no runtime is paused on an approval to ${decision}.`,
       );
     }
-    // A pre-M5 request has no native id to validate against, so a caller's
-    // optional target remains an untargeted control payload exactly as the
-    // legacy API promised. The durable decision identity remains the request
-    // source/revision, never that caller-supplied value.
-    const approvalId = opts?.approvalId ?? pending.approvalId;
+    // A pre-M5 request has no native id to validate or deliver. A caller may
+    // supply a target because the public option is shared with M5 peers, but
+    // it cannot manufacture protocol identity: both the durable event and the
+    // control payload remain id-less. Decision identity is the request
+    // source/revision.
+    const approvalId = pending.approvalId;
     const messageId = await approvalDecisionSource(tenant, taskId, attempt, pending, decision);
     const event = {
       type: 'approval_resolved' as const,
