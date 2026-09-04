@@ -30,7 +30,7 @@ Any production import/reference to `WsTransport`, `ws-transport`, `BYOK_WS_PATH`
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[{"id":"longpoll-only-client","kind":"deterministic_test","paths":["packages/client/src/__tests__/real-server-longpoll-only.test.ts","packages/client/src/__tests__/connection-manager-server-capabilities.test.ts","packages/client/src/__tests__/connection-manager-shutdown-drain.test.ts"]},{"id":"public-api-golden","kind":"deterministic_test","paths":["api-surface/client.d.ts","api-surface/server.d.ts"]}]}
+{"protocol":1,"oracles":[{"id":"longpoll-only-client","kind":"deterministic_test","paths":["*"]},{"id":"real-server-longpoll-cutover","kind":"runtime_readback","paths":["*"]},{"id":"public-api-golden","kind":"deterministic_test","paths":["api-surface/client.d.ts","api-surface/server.d.ts"]}]}
 ```
 
 ## Acceptance Policy
