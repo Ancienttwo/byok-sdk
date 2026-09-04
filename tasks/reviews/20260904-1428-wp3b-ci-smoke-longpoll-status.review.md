@@ -1,12 +1,12 @@
 # Task Review: wp3b-ci-smoke-longpoll-status
 
-> **Status**: Pending
+> **Status**: Ready
 > **Plan**: plans/plan-20260904-1428-wp3b-ci-smoke-longpoll-status.md
 > **Contract**: tasks/contracts/20260904-1428-wp3b-ci-smoke-longpoll-status.contract.md
 > **Notes File**: tasks/notes/20260904-1428-wp3b-ci-smoke-longpoll-status.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
 > **Last Updated**: 2026-09-04 14:29
-> **Recommendation**: fail
+> **Recommendation**: external review required
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: pending
 > **Reviewed Subject Scope**: normalized-final-content
@@ -14,12 +14,12 @@
 
 ## Human Review Card
 
-- Verdict: pending
+- Verdict: ready for exact-subject review
 - Change type: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | frontend
-- Intended files changed:
-- Actual files changed:
-- Commands passed:
-- Residual risks:
+- Intended files changed: adapter smoke, one current long-poll integration-test comment surface, and workflow artifacts.
+- Actual files changed: matches intended scope.
+- Commands passed: strict contract 16/16, including built adapter smoke and full repository gates.
+- Residual risks: Linux strace wrapper remains GitHub-only evidence; it invokes the locally passing smoke unchanged.
 - Reviewer action required: inspect diff and card
 - Rollback:
 

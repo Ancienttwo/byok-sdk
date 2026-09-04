@@ -7,6 +7,13 @@
 > **Last Updated**: 2026-09-04 14:29
 > **Lifecycle**: notes
 
+## Verification Evidence
+
+- Pre-fix `bun run --filter @byok-sdk/client smoke:adapters`: failed after 20 seconds waiting for deleted `daemon.status().degraded`.
+- Corrected built smoke: passed all three adapter task lifecycles plus root/descendant/grandchild cancellation disposal.
+- Focused real-cloud long-poll test: 3/3 passed.
+- Strict contract: 16/16 passed, including root build, typecheck, full tests, API surface, version authority, workflow, architecture, and diff checks.
+
 ## Design Decisions
 
 - The built smoke must consume `DaemonStatus.connected`, the same public fact used by current integration tests.

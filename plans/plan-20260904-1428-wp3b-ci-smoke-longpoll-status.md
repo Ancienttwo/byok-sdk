@@ -48,5 +48,5 @@ CI builds packages, starts the real embedded server, constructs a daemon, pairs,
 ## Task Breakdown
 
 - [x] T1 Replace stale WS/degraded smoke configuration and predicate with the long-poll-only status contract.
-- [ ] T2 Run focused smoke and required local gates; record exact-subject acceptance.
+- [x] T2 Run focused smoke and required local gates; record exact-subject acceptance.
 - [ ] T3 Push PR #133 head, require exact-head CI green, and merge.
