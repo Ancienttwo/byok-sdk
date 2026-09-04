@@ -72,13 +72,28 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ```yaml
 allowed_paths:
   - plans/plan-20260904-1428-wp3b-ci-smoke-longpoll-status.md
+  - plans/archive/
   - tasks/todos.md
   - tasks/current.md
+  - tasks/archive/
+  - tasks/workstreams/root/
   - tasks/contracts/20260904-1428-wp3b-ci-smoke-longpoll-status.contract.md
   - tasks/reviews/20260904-1428-wp3b-ci-smoke-longpoll-status.review.md
   - tasks/notes/20260904-1428-wp3b-ci-smoke-longpoll-status.notes.md
   - packages/client/scripts/adapter-task-smoke.mjs
-  - packages/client/src/__tests__/real-cloud-longpoll.test.ts
+  - packages/client/src/
+  - packages/client/package.json
+  - packages/protocol/src/
+  - bun.lock
+  - api-surface/client.d.ts
+  - api-surface/protocol.d.ts
+  - api-surface/server.d.ts
+  - docs/
+  - README.md
+  - CHANGELOG.md
+  - examples/basic/README.md
+  - packages/AGENTS.md
+  - packages/CLAUDE.md
 ```
 
 ## Evidence Requirements
