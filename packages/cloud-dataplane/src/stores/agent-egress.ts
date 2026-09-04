@@ -73,7 +73,7 @@ export class PostgresAgentEgressStore implements AgentEgressStore {
     const inserted = await this.pool.query<AgentEgressRow>(
       `INSERT INTO agent_egress_event (${SELECT_COLUMNS})
        VALUES ($1, $2, $3::uuid, $4, $5, $6, $7, $8::bigint, $9::jsonb, $10, $11::integer, $12::uuid, $13)
-       ON CONFLICT (tenant_id, device_id, event_id) DO NOTHING
+       ON CONFLICT (tenant_id, device_id, agent_id, agent_profile_revision, event_id) DO NOTHING
        RETURNING ${SELECT_COLUMNS}`,
       [
         tenant,
@@ -93,17 +93,24 @@ export class PostgresAgentEgressStore implements AgentEgressStore {
     );
     const row = inserted.rows[0];
     if (row !== undefined) return { record: toRecord(row), created: true };
-    const existing = await this.get(tenant, input.deviceId, payload.eventId);
+    const existing = await this.get(tenant, input.deviceId, payload.agentRef, payload.eventId);
     if (existing === undefined) throw new Error(`Agent egress ${payload.eventId} vanished during first-write record.`);
     return { record: existing, created: false };
   }
 
-  async get(tenant: TenantId, deviceId: string, eventId: string): Promise<AgentEgressRecord | undefined> {
+  async get(
+    tenant: TenantId,
+    deviceId: string,
+    agentRef: AgentEgressReliablePayload['agentRef'],
+    eventId: string,
+  ): Promise<AgentEgressRecord | undefined> {
     const result = await this.pool.query<AgentEgressRow>(
       `SELECT ${SELECT_COLUMNS}
          FROM agent_egress_event
-        WHERE tenant_id = $1 AND device_id = $2 AND event_id = $3::uuid`,
-      [tenant, deviceId, eventId],
+        WHERE tenant_id = $1 AND device_id = $2
+          AND agent_id = $3 AND agent_profile_revision = $4
+          AND event_id = $5::uuid`,
+      [tenant, deviceId, agentRef.agentId, agentRef.profileRevision, eventId],
     );
     const row = result.rows[0];
     return row === undefined ? undefined : toRecord(row);

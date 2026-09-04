@@ -68,6 +68,7 @@ import {
 } from './approval-timeline';
 import { isCloudError } from './errors';
 import { projectTerminalToReview } from './board-projection';
+import { agentReliabilityKey } from './agent-reliability';
 import type { TenantStores } from './tenant-stores';
 
 export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected' | 'rate_limited';
@@ -274,12 +275,12 @@ function hasCapabilities(capabilities: readonly string[] | undefined, required: 
   return capabilities !== undefined && required.every((capability) => capabilities.includes(capability));
 }
 
-function contentRequestReceiptKey(deviceId: string, requestId: string): string {
-  return `agent-content-request:${deviceId}:${requestId}`;
+function contentRequestReceiptKey(deviceId: string, agentRef: AgentRef, requestId: string): string {
+  return agentReliabilityKey('agent-content-request', deviceId, agentRef, requestId);
 }
 
-function contentReceiptKey(deviceId: string, requestId: string): string {
-  return `agent-content:${deviceId}:${requestId}`;
+function contentReceiptKey(deviceId: string, agentRef: AgentRef, requestId: string): string {
+  return agentReliabilityKey('agent-content-receipt', deviceId, agentRef, requestId);
 }
 
 function matchesContentReadReceipt(request: AgentContentReadPayload, receipt: AgentContentReceiptPayload): boolean {
@@ -302,9 +303,10 @@ function matchesContentReadReceipt(request: AgentContentReadPayload, receipt: Ag
 async function readContentRequest(
   stores: TenantStores,
   deviceId: string,
+  agentRef: AgentRef,
   requestId: string,
 ): Promise<AgentContentReadPayload | undefined> {
-  const stored = await stores.receipts.get(contentRequestReceiptKey(deviceId, requestId));
+  const stored = await stores.receipts.get(contentRequestReceiptKey(deviceId, agentRef, requestId));
   if (stored === undefined) return undefined;
   try {
     return AgentContentReadPayloadSchema.parse(JSON.parse(stored.body));
@@ -406,7 +408,7 @@ async function applyInboundGate(
     );
     return message.outcome === 'rejected'
       ? 'rejected'
-      : completeInboundEnvelope(stores, deviceId, envelope.id);
+      : completeInboundEnvelope(stores, deviceId, envelope.id, envelope.payload.agentRef);
   }
 
   if (envelope.type === 'agent.egress.reliable') {
@@ -424,7 +426,7 @@ async function applyInboundGate(
       receiptId: crypto.randomUUID(),
     });
     if (!outcome.created && !sameReliableEgress(outcome.record.payload, envelope.payload)) return 'rejected';
-    return completeInboundEnvelope(stores, deviceId, envelope.id);
+    return completeInboundEnvelope(stores, deviceId, envelope.id, envelope.payload.agentRef);
   }
 
   if (envelope.type === 'agent.content.receipt') {
@@ -437,9 +439,9 @@ async function applyInboundGate(
     ) {
       return 'rejected';
     }
-    const request = await readContentRequest(stores, deviceId, envelope.payload.requestId);
+    const request = await readContentRequest(stores, deviceId, envelope.payload.agentRef, envelope.payload.requestId);
     if (request === undefined || !matchesContentReadReceipt(request, envelope.payload)) return 'rejected';
-    const key = contentReceiptKey(deviceId, envelope.payload.requestId);
+    const key = contentReceiptKey(deviceId, envelope.payload.agentRef, envelope.payload.requestId);
     // The durable fact is the protocol-validated payload, not a transport
     // envelope whose id/timestamp changes when the Agent replays its spool.
     // Zod has already projected this to its canonical field order, so equal
@@ -448,7 +450,7 @@ async function applyInboundGate(
     const body = JSON.stringify(envelope.payload);
     const receipt = await stores.receipts.record({ key, body });
     if (!receipt.created && receipt.receipt.body !== body) return 'rejected';
-    return completeInboundEnvelope(stores, deviceId, envelope.id);
+    return completeInboundEnvelope(stores, deviceId, envelope.id, envelope.payload.agentRef);
   }
 
   const taskId = envelope.task_id;
@@ -511,7 +513,7 @@ async function applyInboundGate(
   }
 
   await applyLifecycle(stores, deviceId, taskId, envelope, activityBounds, attempt?.agentRef);
-  return completeInboundEnvelope(stores, deviceId, envelope.id);
+  return completeInboundEnvelope(stores, deviceId, envelope.id, attempt?.agentRef);
 }
 
 /** Marks an envelope complete only after all of its authoritative facts converged. */
@@ -519,8 +521,12 @@ async function completeInboundEnvelope(
   stores: TenantStores,
   deviceId: string,
   envelopeId: string,
+  agentRef: AgentRef | undefined,
 ): Promise<InboundOutcome> {
-  return (await stores.dedup.checkAndRecord(deviceId, envelopeId)) ? 'duplicate' : 'accepted';
+  const duplicate = agentRef === undefined
+    ? await stores.dedup.checkAndRecord(deviceId, envelopeId)
+    : await stores.dedup.checkAndRecordAgent(deviceId, agentRef, envelopeId);
+  return duplicate ? 'duplicate' : 'accepted';
 }
 
 /**

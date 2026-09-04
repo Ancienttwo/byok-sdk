@@ -48,7 +48,7 @@ import {
   type StorageReservationInput,
   type TenantId,
 } from '@byok-sdk/core';
-import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
+import type { AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import type { ActivityAppendInput, ActivityTail } from './activity';
 import type {
   ApprovalTimelineAppendInput,
@@ -163,7 +163,10 @@ export interface TenantBoundTaskCancellations {
 }
 
 export interface TenantBoundDedup {
+  /** Device-physical envelope ledger. */
   checkAndRecord(deviceId: string, envelopeId: string): Promise<boolean>;
+  /** Strict Agent-bound envelope ledger. */
+  checkAndRecordAgent(deviceId: string, agentRef: AgentRef, envelopeId: string): Promise<boolean>;
 }
 
 export interface TenantBoundReceipts {
@@ -179,7 +182,7 @@ export interface TenantBoundAgentEgress {
     readonly record: AgentEgressRecord;
     readonly created: boolean;
   }>;
-  get(deviceId: string, eventId: string): Promise<AgentEgressRecord | undefined>;
+  get(deviceId: string, agentRef: AgentRef, eventId: string): Promise<AgentEgressRecord | undefined>;
 }
 
 export interface TenantBoundBlobs {
@@ -289,6 +292,8 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
     },
     dedup: {
       checkAndRecord: (deviceId, envelopeId) => cloud.dedup.checkAndRecord(tenant, deviceId, envelopeId),
+      checkAndRecordAgent: (deviceId, agentRef, envelopeId) =>
+        cloud.dedup.checkAndRecordAgent(tenant, deviceId, agentRef, envelopeId),
     },
     receipts: {
       record: (input) => cloud.receipts.record(tenant, input),
@@ -296,7 +301,7 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
     },
     egress: {
       record: (input) => cloud.egress.record(tenant, input),
-      get: (deviceId, eventId) => cloud.egress.get(tenant, deviceId, eventId),
+      get: (deviceId, agentRef, eventId) => cloud.egress.get(tenant, deviceId, agentRef, eventId),
     },
     blobs: {
       createUpload: (reservation) => cloud.blobs.createUpload(tenant, reservation),

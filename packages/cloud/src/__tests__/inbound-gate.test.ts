@@ -12,6 +12,7 @@ import { tenantId, type TenantId } from '@byok-sdk/core';
 import { DAEMON_TO_SERVER_TYPES, createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { handleInboundEnvelope, terminalReceiptKey } from '../inbound';
+import { agentReliabilityKey } from '../agent-reliability';
 import { tenantStoresFor, type TenantStores } from '../tenant-stores';
 import type { InboundRateLimiter } from '../stores/ports';
 import { TENANT_A, TENANT_B, createHarness, offerPayload, type CloudHarness } from './support/harness';
@@ -91,7 +92,12 @@ describe('the inbound gate', () => {
       const envelope = envelopeOfType(type, taskId, deviceId);
       if (envelope.type === 'agent.content.receipt') {
         await stores.receipts.record({
-          key: `agent-content-request:${deviceId}:${envelope.payload.requestId}`,
+          key: agentReliabilityKey(
+            'agent-content-request',
+            deviceId,
+            envelope.payload.agentRef,
+            envelope.payload.requestId,
+          ),
           body: JSON.stringify({
             requestId: envelope.payload.requestId,
             surface: envelope.payload.surface,
