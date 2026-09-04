@@ -151,8 +151,8 @@ export interface AgentHomeProjectionReceiptInput {
     readonly agentRef: AgentHomeProjectionPayload['agentRef'];
     readonly projectionHash: AgentHomeProjectionPayload['projectionHash'];
 }
-export declare function agentHomeProjectionRequestKey(deviceId: string, requestId: string): string;
-export declare function agentHomeProjectionCompletionKey(deviceId: string, requestId: string): string;
+export declare function agentHomeProjectionRequestKey(deviceId: string, agentRef: AgentHomeProjectionPayload['agentRef'], requestId: string): string;
+export declare function agentHomeProjectionCompletionKey(deviceId: string, agentRef: AgentHomeProjectionPayload['agentRef'], requestId: string): string;
 export declare function sameAgentHomeProjectionRequest(expected: AgentHomeProjectionPayload, actual: AgentHomeProjectionPayload): boolean;
 export declare function receiptMatchesAgentHomeProjection(request: AgentHomeProjectionPayload, receipt: AgentHomeProjectionCompletionRequest): boolean;
 export declare function statusInputMatchesAgentHomeProjection(request: AgentHomeProjectionPayload, input: AgentHomeProjectionReceiptInput): boolean;
@@ -738,7 +738,7 @@ export declare function declares(declaration: CapabilityDeclaration, capability:
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { type Envelope, type AgentContentReadPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
+import { type Envelope, type AgentRef, type AgentContentReadPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -1049,8 +1049,8 @@ export interface ByokCloud {
     listTaskAttempts(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
     /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
     readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
-    /** Exact durable egress fact and receipt selected by (tenant, device, event id). */
-    readAgentEgress(tenant: TenantId, deviceId: string, eventId: string): Promise<AgentEgressRecord | undefined>;
+    /** Exact durable egress fact and receipt selected by (tenant, device, AgentRef, event id). */
+    readAgentEgress(tenant: TenantId, deviceId: string, agentRef: AgentRef, eventId: string): Promise<AgentEgressRecord | undefined>;
     /**
      * Host control plane: the same first terminal, decoded into the typed read
      * model ({@link TerminalResult}) so a host reads result fields, not envelope
@@ -1891,7 +1891,7 @@ export declare class InMemoryAgentEgressStore implements AgentEgressStore {
         readonly record: AgentEgressRecord;
         readonly created: boolean;
     }>;
-    get(tenant: TenantId, deviceId: string, eventId: string): Promise<AgentEgressRecord | undefined>;
+    get(tenant: TenantId, deviceId: string, agentRef: AgentEgressRecord['payload']['agentRef'], eventId: string): Promise<AgentEgressRecord | undefined>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/agent-memory-projection.d.ts ====
 /** In-memory conformance implementation for the one-way hosted memory projection ports. */
@@ -2035,19 +2035,22 @@ export {};
 /**
  * In-memory {@link InboundDedupStore} (N3).
  *
- * A bounded ring per (tenant, device), not an unbounded set: the wire is
- * at-least-once (§9), so this makes processing at-most-once without letting a
- * chatty device grow memory without limit. Check-and-record is one call, so a
- * composition cannot accidentally split it into a racy read-then-write.
+ * A bounded ring per physical (tenant, device) or strict (tenant, device,
+ * AgentRef) fact, not an unbounded set: the wire is at-least-once (§9), so
+ * this makes processing at-most-once without letting a chatty device or Agent
+ * grow memory without limit. Check-and-record is one call, so a composition
+ * cannot accidentally split it into a racy read-then-write.
  */
 import { type TenantId } from '@byok-sdk/core';
+import type { AgentRef } from '@byok-sdk/protocol';
 import type { InboundDedupStore } from '../ports';
-/** Ids retained per device. Same order of magnitude as the reference server's ring. */
+/** Ids retained per physical or Agent-bound key. Same depth as the reference server's ring. */
 export declare const DEDUP_RING_CAPACITY = 1024;
 export declare class InMemoryInboundDedupStore implements InboundDedupStore {
     #private;
     constructor(capacity?: number);
     checkAndRecord(tenant: TenantId, deviceId: string, envelopeId: string): Promise<boolean>;
+    checkAndRecordAgent(tenant: TenantId, deviceId: string, agentRef: AgentRef, envelopeId: string): Promise<boolean>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/device-directory.d.ts ====
 /**
@@ -2517,12 +2520,17 @@ export interface NonceStore {
 }
 export interface InboundDedupStore {
     /**
-     * `true` when `envelopeId` was already seen for this (tenant, device);
-     * otherwise records it and returns `false`. Bounded per device — the wire is
-     * at-least-once (§9); this makes processing at-most-once without an
-     * unbounded set.
+     * Device-physical envelope ledger (`conn.hello` and facts with no Agent
+     * binding). `true` when `envelopeId` was already seen for this (tenant,
+     * device); otherwise records it and returns `false`.
      */
     checkAndRecord(tenant: TenantId, deviceId: string, envelopeId: string): Promise<boolean>;
+    /**
+     * Agent-bound envelope ledger. The AgentRef is required: a same-device
+     * second Agent must never resolve or suppress this Agent's completed fact.
+     * Retention remains bounded per exact (tenant, device, AgentRef).
+     */
+    checkAndRecordAgent(tenant: TenantId, deviceId: string, agentRef: AgentRef, envelopeId: string): Promise<boolean>;
 }
 export declare const TASK_ATTEMPT_STATUSES: readonly ['offered', 'claimed', 'running', 'cancel_requested', 'complete', 'failed', 'cancelled'];
 export type TaskAttemptStatus = (typeof TASK_ATTEMPT_STATUSES)[number];
@@ -2757,7 +2765,8 @@ export interface AgentEgressStore {
         readonly record: AgentEgressRecord;
         readonly created: boolean;
     }>;
-    get(tenant: TenantId, deviceId: string, eventId: string): Promise<AgentEgressRecord | undefined>;
+    /** Exact reliable fact lookup; device plus event id alone is ambiguous. */
+    get(tenant: TenantId, deviceId: string, agentRef: AgentRef, eventId: string): Promise<AgentEgressRecord | undefined>;
 }
 export interface ProofRequestReceipt {
     readonly tenantId: TenantId;
@@ -2947,7 +2956,7 @@ export type CloudStoreName = (typeof CLOUD_STORE_NAMES)[number];
  * device-facing handler must not be able to reach them.
  */
 import { type BoardClaimInput, type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type BoardStatusUpdateInput, type BoardUnclaimInput, type CoreStores, type MailboxAdvanceCursorInput, type MailboxAppendInput, type MailboxCursorState, type MailboxMessage, type MailboxPage, type MailboxReadQuery, type MailboxRecordDeliveryInput, type Principal, type PresenceHint, type PresenceHintInput, type TenantReadiness, type StorageFinalizeInput, type StorageFinalizeResult, type StorageReservation, type StorageReservationInput, type TenantId } from '@byok-sdk/core';
-import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
+import type { AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import type { ActivityAppendInput, ActivityTail } from './activity';
 import type { ApprovalTimelineAppendInput, ApprovalTimelineTail } from './approval-timeline';
 import type { BlobObservation, CloudStores, DeviceRecord, AgentEgressRecord, RequestReceipt, TaskCancellationMutation, TaskCancellationRequest, TaskAttempt, TaskAttemptStatus } from './stores/ports';
@@ -3043,7 +3052,10 @@ export interface TenantBoundTaskCancellations {
     request(input: TaskCancellationRequest): Promise<TaskCancellationMutation | undefined>;
 }
 export interface TenantBoundDedup {
+    /** Device-physical envelope ledger. */
     checkAndRecord(deviceId: string, envelopeId: string): Promise<boolean>;
+    /** Strict Agent-bound envelope ledger. */
+    checkAndRecordAgent(deviceId: string, agentRef: AgentRef, envelopeId: string): Promise<boolean>;
 }
 export interface TenantBoundReceipts {
     record(input: {
@@ -3060,7 +3072,7 @@ export interface TenantBoundAgentEgress {
         readonly record: AgentEgressRecord;
         readonly created: boolean;
     }>;
-    get(deviceId: string, eventId: string): Promise<AgentEgressRecord | undefined>;
+    get(deviceId: string, agentRef: AgentRef, eventId: string): Promise<AgentEgressRecord | undefined>;
 }
 export interface TenantBoundBlobs {
     createUpload(reservation: StorageReservation): Promise<{

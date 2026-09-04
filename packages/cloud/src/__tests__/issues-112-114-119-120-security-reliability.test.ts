@@ -1,16 +1,17 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createMutableClock } from '@byok-sdk/core';
-import { createEnvelope, decodeEnvelope } from '@byok-sdk/protocol';
+import { createEnvelope, decodeEnvelope, type AgentRef } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { CLOUD_ORIGIN, TENANT_A, createDeviceKeys, createHarness, type CloudHarness } from './support/harness';
 
 const AGENT_REF = { agentId: 'issue-agent', profileRevision: 'issue-profile' } as const;
+const OTHER_AGENT_REF = { agentId: 'issue-agent-other', profileRevision: 'issue-profile' } as const;
 const CONTENT_HASH = 'sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824';
 
-function message(taskId: string, envelopeId?: string) {
+function message(taskId: string, envelopeId?: string, agentRef: AgentRef = AGENT_REF) {
   return createEnvelope('agent.message.publish', {
-    agentRef: AGENT_REF,
+    agentRef,
     sessionRef: 'issue-session',
     contract: 'example.chat.v1',
     messageId: '10000000-0000-4000-8000-000000001120',
@@ -22,7 +23,7 @@ function message(taskId: string, envelopeId?: string) {
   }, { taskId, ...(envelopeId === undefined ? {} : { id: envelopeId }) });
 }
 
-async function admitMessageEgress(harness: CloudHarness, deviceId: string): Promise<string> {
+async function admitMessageEgress(harness: CloudHarness, deviceId: string, agentRef: AgentRef = AGENT_REF): Promise<string> {
   await harness.stores.devices.recordCapabilities(TENANT_A, {
     deviceId,
     capabilities: [
@@ -38,7 +39,7 @@ async function admitMessageEgress(harness: CloudHarness, deviceId: string): Prom
     payload: {
       instruction: 'send one message',
       policy: { mode: 'auto' },
-      agentRef: AGENT_REF,
+      agentRef,
       sessionRef: 'issue-session',
       egressPolicy: {
         policyRevision: 'issue-policy',
@@ -134,7 +135,7 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
     const device = await harness.pairDevice(TENANT_A);
     const taskId = await admitMessageEgress(harness, device.deviceId);
     const rate = vi.spyOn(harness.stores.rateLimiter, 'consume');
-    const dedup = vi.spyOn(harness.stores.dedup, 'checkAndRecord');
+    const dedup = vi.spyOn(harness.stores.dedup, 'checkAndRecordAgent');
 
     const response = await postMessage(harness, device.authorization, message(taskId));
     expect(response.status).toBe(200);
@@ -142,6 +143,35 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
     expect(rate).toHaveBeenCalledTimes(1);
     expect(dedup).toHaveBeenCalledTimes(1);
     expect(consumed).toHaveLength(1);
+  });
+
+  it('isolates the same message id across two exact Agent task attempts on one device', async () => {
+    const consumed: unknown[] = [];
+    const harness = createHarness({ agentMessage: { consume: async (input) => { consumed.push(input); return { outcome: 'accepted' }; } } });
+    const device = await harness.pairDevice(TENANT_A);
+    const firstTaskId = await admitMessageEgress(harness, device.deviceId, AGENT_REF);
+    const secondTaskId = await admitMessageEgress(harness, device.deviceId, OTHER_AGENT_REF);
+    const first = message(firstTaskId, '10000000-0000-4000-8000-000000001130', AGENT_REF);
+    const second = message(secondTaskId, '10000000-0000-4000-8000-000000001131', OTHER_AGENT_REF);
+
+    expect(first.payload.messageId).toBe(second.payload.messageId);
+    expect(await (await postMessage(harness, device.authorization, first)).json()).toEqual({ accepted: 1 });
+    expect(await (await postMessage(harness, device.authorization, second)).json()).toEqual({ accepted: 1 });
+    expect(await (await postMessage(
+      harness,
+      device.authorization,
+      message(firstTaskId, '10000000-0000-4000-8000-000000001132', AGENT_REF),
+    )).json()).toEqual({ accepted: 1 });
+    expect(consumed).toHaveLength(2);
+    expect(consumed).toEqual(expect.arrayContaining([
+      expect.objectContaining({ taskId: firstTaskId, payload: expect.objectContaining({ agentRef: AGENT_REF }) }),
+      expect.objectContaining({ taskId: secondTaskId, payload: expect.objectContaining({ agentRef: OTHER_AGENT_REF }) }),
+    ]));
+    const dispositions = (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 })).messages
+      .map((row) => decodeEnvelope(row.body))
+      .filter((envelope) => envelope.type === 'agent.message.disposition');
+    expect(dispositions).toHaveLength(2);
+    expect(dispositions.map((envelope) => envelope.payload.messageId)).toEqual([first.payload.messageId, second.payload.messageId]);
   });
 
   it('replays an existing receipt before terminal state, but never calls the consumer for a new terminal message', async () => {

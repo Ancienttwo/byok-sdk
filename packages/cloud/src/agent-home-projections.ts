@@ -14,6 +14,7 @@ import {
   type AgentHomeProjectionReadback,
 } from '@byok-sdk/protocol';
 import type { TenantId } from '@byok-sdk/core';
+import { agentReliabilityKey } from './agent-reliability';
 import { ByokCloudError } from './errors';
 import type { TenantBoundReceipts } from './tenant-stores';
 
@@ -23,12 +24,20 @@ export interface AgentHomeProjectionReceiptInput {
   readonly projectionHash: AgentHomeProjectionPayload['projectionHash'];
 }
 
-export function agentHomeProjectionRequestKey(deviceId: string, requestId: string): string {
-  return `agent-home-projection:v1:${deviceId}:${requestId}:request`;
+export function agentHomeProjectionRequestKey(
+  deviceId: string,
+  agentRef: AgentHomeProjectionPayload['agentRef'],
+  requestId: string,
+): string {
+  return agentReliabilityKey('agent-home-projection-request', deviceId, agentRef, requestId);
 }
 
-export function agentHomeProjectionCompletionKey(deviceId: string, requestId: string): string {
-  return `agent-home-projection:v1:${deviceId}:${requestId}:completion`;
+export function agentHomeProjectionCompletionKey(
+  deviceId: string,
+  agentRef: AgentHomeProjectionPayload['agentRef'],
+  requestId: string,
+): string {
+  return agentReliabilityKey('agent-home-projection-completion', deviceId, agentRef, requestId);
 }
 
 export function sameAgentHomeProjectionRequest(
@@ -98,7 +107,7 @@ export async function readAgentHomeProjectionStatus(
   deviceId: string,
   input: AgentHomeProjectionReceiptInput,
 ): Promise<AgentHomeProjectionReadback | undefined> {
-  const storedRequest = await receipts.get(agentHomeProjectionRequestKey(deviceId, input.requestId));
+  const storedRequest = await receipts.get(agentHomeProjectionRequestKey(deviceId, input.agentRef, input.requestId));
   if (storedRequest === undefined) return undefined;
 
   const request = parseRequestBody(storedRequest.body);
@@ -109,7 +118,7 @@ export async function readAgentHomeProjectionStatus(
     );
   }
 
-  const storedCompletion = await receipts.get(agentHomeProjectionCompletionKey(deviceId, input.requestId));
+  const storedCompletion = await receipts.get(agentHomeProjectionCompletionKey(deviceId, request.agentRef, input.requestId));
   if (storedCompletion === undefined) {
     return {
       tenantId: tenant,
@@ -146,7 +155,7 @@ export async function recordAgentHomeProjectionCompletion(
   receiptInput: AgentHomeProjectionCompletionRequest,
 ): Promise<AgentHomeProjectionReadback> {
   const receipt = AgentHomeProjectionCompletionRequestSchema.parse(receiptInput);
-  const storedRequest = await receipts.get(agentHomeProjectionRequestKey(deviceId, receipt.requestId));
+  const storedRequest = await receipts.get(agentHomeProjectionRequestKey(deviceId, receipt.agentRef, receipt.requestId));
   if (storedRequest === undefined) {
     throw new ByokCloudError(
       'agent_home_projection_request_not_found',
@@ -163,7 +172,7 @@ export async function recordAgentHomeProjectionCompletion(
 
   const body = JSON.stringify(receipt);
   const storedCompletion = await receipts.record({
-    key: agentHomeProjectionCompletionKey(deviceId, receipt.requestId),
+    key: agentHomeProjectionCompletionKey(deviceId, request.agentRef, receipt.requestId),
     body,
   });
   if (!storedCompletion.created && storedCompletion.receipt.body !== body) {

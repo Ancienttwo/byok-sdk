@@ -166,6 +166,7 @@ import {
   sameAgentHomeProjectionRequest,
   type AgentHomeProjectionReceiptInput,
 } from './agent-home-projections';
+import { agentReliabilityKey } from './agent-reliability';
 import type {
   AgentMemoryProjectionAuthorizer,
   AgentMemoryProjectionStore,
@@ -569,10 +570,11 @@ export interface ByokCloud {
   listTaskAttempts(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
   /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
   readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
-  /** Exact durable egress fact and receipt selected by (tenant, device, event id). */
+  /** Exact durable egress fact and receipt selected by (tenant, device, AgentRef, event id). */
   readAgentEgress(
     tenant: TenantId,
     deviceId: string,
+    agentRef: AgentRef,
     eventId: string,
   ): Promise<AgentEgressRecord | undefined>;
   /**
@@ -1067,6 +1069,22 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       );
     }
     return { seq: message.seq, envelope };
+  }
+
+  async function agentControlEnvelopeId(
+    domain: string,
+    tenant: TenantId,
+    deviceId: string,
+    agentRef: AgentRef,
+    logicalRequestId: string,
+  ): Promise<string> {
+    return uuidFromSha256(
+      await options.crypto.sha256(
+        new TextEncoder().encode(
+          JSON.stringify({ domain, tenant, deviceId, agentRef, logicalRequestId }),
+        ),
+      ),
+    );
   }
 
   async function approvalDecisionSource(
@@ -1645,7 +1663,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       ]);
       const stores = tenantStoresFor(controlPlane(tenant), root);
       const persisted = await stores.receipts.record({
-        key: `agent-content-request:${deviceId}:${payload.requestId}`,
+        key: agentReliabilityKey('agent-content-request', deviceId, payload.agentRef, payload.requestId),
         body: JSON.stringify(payload),
       });
       if (!persisted.created && persisted.receipt.body !== JSON.stringify(payload)) {
@@ -1654,8 +1672,15 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
           `Request ${payload.requestId} already exists with a different immutable content-read body.`,
         );
       }
-      const control = await enqueueAgentControlEnvelope(tenant, deviceId, payload.requestId, (seq) =>
-        createEnvelope('agent.content.read', payload, { id: payload.requestId, seq }),
+      const messageId = await agentControlEnvelopeId(
+        'byok:agent-content-read',
+        tenant,
+        deviceId,
+        payload.agentRef,
+        payload.requestId,
+      );
+      const control = await enqueueAgentControlEnvelope(tenant, deviceId, messageId, (seq) =>
+        createEnvelope('agent.content.read', payload, { id: messageId, seq }),
       );
       if (
         control.envelope.type !== 'agent.content.read' ||
@@ -1681,7 +1706,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       const stores = tenantStoresFor(controlPlane(tenant), root);
       const requestBody = JSON.stringify(payload);
       const persisted = await stores.receipts.record({
-        key: agentHomeProjectionRequestKey(deviceId, payload.requestId),
+        key: agentHomeProjectionRequestKey(deviceId, payload.agentRef, payload.requestId),
         body: requestBody,
       });
       const persistedPayload = AgentHomeProjectionPayloadSchema.parse(JSON.parse(persisted.receipt.body));
@@ -1691,8 +1716,15 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
           `Agent-home projection request ${payload.requestId} already exists with a different immutable desired body.`,
         );
       }
-      const control = await enqueueAgentControlEnvelope(tenant, deviceId, payload.requestId, (seq) =>
-        createEnvelope('agent.home.projection', payload, { id: payload.requestId, seq }),
+      const messageId = await agentControlEnvelopeId(
+        'byok:agent-home-projection',
+        tenant,
+        deviceId,
+        payload.agentRef,
+        payload.requestId,
+      );
+      const control = await enqueueAgentControlEnvelope(tenant, deviceId, messageId, (seq) =>
+        createEnvelope('agent.home.projection', payload, { id: messageId, seq }),
       );
       if (
         control.envelope.type !== 'agent.home.projection' ||
@@ -1781,8 +1813,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       return tenantStoresFor(controlPlane(tenant), root).receipts.get(terminalReceiptKey(taskId));
     },
 
-    readAgentEgress(tenant, deviceId, eventId) {
-      return tenantStoresFor(controlPlane(tenant), root).egress.get(deviceId, eventId);
+    readAgentEgress(tenant, deviceId, agentRef, eventId) {
+      return tenantStoresFor(controlPlane(tenant), root).egress.get(deviceId, agentRef, eventId);
     },
 
     async readTaskResult(tenant, taskId) {
