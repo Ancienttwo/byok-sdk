@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.13.0 / @byok-sdk/keys 0.3.10 — 2026-09-05
+
 - **Breaking (WP3B coordination transport):** `@byok-sdk/server` is now the
   self-hosted Hono/HTTP façade over the shared `@byok-sdk/cloud` domain kernel,
   with the bounded in-memory/SQLite composition beneath it. The daemon's
@@ -13,6 +15,24 @@
   Attempt per canonical Agent home; 0.12.0-style concurrent sessions in one
   home require explicit
   `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome > 1`.
+
+- **Reliability (#135–#144):** durable client cursors and rejected-batch isolation;
+  lifecycle-before-dedup recovery; first-write task-attempt reservations before
+  offers; atomic approval resolution; exact tenant/device/AgentRef replay keys.
+- **Agent message recovery:** an exact pending admission retries the existing
+  durably idempotent product consumer after an interrupted finalization, including
+  recovery after task cancellation. Consumer failures remain retryable; SDK does
+  not synthesize a terminal disposition.
+- **Breaking (approval rejection):** host rejection events persist the first
+  `reason` as a string or explicit `null`. Conflicting retries fail closed.
+  Historical host rejection rows without this field also fail closed: inventory
+  and settle or migrate them from authoritative facts before production rollout.
+- **Hosted migration prerequisite:** upgrade an existing 0.12.0 database through
+  `0018_task_attempt_claimed_runtime.sql`, `0019_agent_ref_replay_keys.sql`, and
+  `0020_agent_ref_request_keys.sql` in the migration runner's numeric order.
+  Migration execution and downstream deployment are separate from npm release.
+- `@byok-sdk/keys@0.3.10` advances independently to publish an exact
+  `@byok-sdk/core@0.13.0` dependency; already-published versions remain immutable.
 
 ## 0.12.0 / @byok-sdk/keys 0.3.9 — 2026-09-02
 
