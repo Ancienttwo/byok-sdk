@@ -24,6 +24,7 @@ interface Config {
   readonly action?: 'run' | 'unpair';
   readonly journalFault?: JournalFaultStep | 'append:after-commit';
   readonly recoveryFault?: 'terminal:before-send' | 'terminal:queued' | 'outbound:before-post' | 'outbound:after-ack';
+  readonly agentHome?: boolean;
 }
 
 const config = JSON.parse(readFileSync(process.argv[2]!, 'utf8')) as Config;
@@ -153,6 +154,7 @@ const daemon = createDaemonWithAdapters(
     workspaceRoot: config.workspaceRoot,
     storeDir: config.storeDir,
     hostedJournal: { mode: 'sqlite' },
+    ...(config.agentHome === true ? { agentHome: { hostStorageRoot: path.join(config.storeDir, 'agent-home') } } : {}),
   },
   [new ControlledAdapter()],
   overrides,

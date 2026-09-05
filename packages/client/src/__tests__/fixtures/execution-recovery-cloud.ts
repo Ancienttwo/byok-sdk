@@ -309,7 +309,15 @@ lines.on('line', (line) => {
       case 'enqueueOffer':
         return cloud.enqueueOffer(tenant, String(params.deviceId), {
           ...(params.taskId === undefined ? {} : { taskId: String(params.taskId) }),
-          payload: { instruction: String(params.instruction), policy: { mode: 'auto' } },
+          payload: { instruction: String(params.instruction), policy: { mode: 'auto' }, ...(params.agentRef === undefined ? {} : { agentRef: params.agentRef }) },
+        });
+      case 'enqueueAgentOffer':
+        return cloud.enqueueAgentOffer(tenant, String(params.deviceId), {
+          payload: {
+            instruction: String(params.instruction),
+            policy: { mode: 'auto' },
+            agentRef: params.agentRef as { agentId: string; profileRevision: string },
+          },
         });
       case 'cancelTask':
         return cloud.cancelTask(tenant, String(params.taskId), params.reason === undefined ? undefined : String(params.reason));
