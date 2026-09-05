@@ -37,10 +37,10 @@ Owns the root capability boundary declared in .ai/context/capabilities.json.
 - Architecture domain: `sdk`
 - Architecture capability: `sdk-root`
 - Architecture module: `docs/architecture/sdk-architecture.md`
-- Last architecture event: 2026-09-05T01:25:51+0800
-- Last changed path: `tasks/workstreams/root/20260905-sdk-root.md`
-- Severity: medium
-- Change type: workstream-sync
+- Last architecture event: 2026-09-05T02:08:11+0800
+- Last changed path: `packages/client/src/__tests__/daemon-auth.test.ts`
+- Severity: low
+- Change type: source-change
 - Module responsibility: Keep this block aligned with the local boundary described by surrounding human-owned context.
 - Entrypoints: `packages`
 - Allowed dependencies: Follow root `AGENTS.md` / `CLAUDE.md` and this local contract.
@@ -50,7 +50,7 @@ Owns the root capability boundary declared in .ai/context/capabilities.json.
 - Verification: Use root required checks plus local commands recorded in this capability contract.
 - Latest snapshot: `(none yet)`
 - Semantic diagram source: `docs/architecture/sdk-architecture.md`
-- Pending architecture request: `(none)`
+- Pending architecture request: `docs/architecture/requests/root.md`
 
 ## Active Workstreams
 

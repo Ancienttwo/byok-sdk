@@ -15,5 +15,5 @@
 ## Pending Requests
 
 <!-- BEGIN ARCHITECTURE PENDING REQUESTS -->
-- (none)
+- [ ] 2026-09-05T02:08:11+0800 [high] `packages/client/src/__tests__/daemon-auth.test.ts` -> [root](requests/root.md)
 <!-- END ARCHITECTURE PENDING REQUESTS -->
