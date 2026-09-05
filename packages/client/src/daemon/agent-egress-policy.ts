@@ -68,6 +68,14 @@ export function resolveAgentEgressPolicy(policy: AgentEgressPolicy | undefined):
  * Default activity projection. Every retained string is SDK-authored; no
  * runtime trajectory, tool, prompt, environment, argv, path, or credential
  * value survives this transformation.
+ *
+ * Each case CONSTRUCTS a fresh event from SDK-authored literals rather than
+ * editing the incoming one, which is what makes the guarantee total rather
+ * than a list of fields someone remembered to strip. `spill` on
+ * `tool_use`/`tool_result` is covered by exactly that: a `BlobRef` is a
+ * readable locator for the omitted tool payload — content, not metadata — so
+ * it never survives a metadata-status projection, and neither do the byte
+ * counts that would leak the payload's size.
  */
 export function metadataStatusEvent(event: AgentEvent): AgentEvent {
   switch (event.type) {

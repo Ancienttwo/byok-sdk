@@ -257,3 +257,139 @@ describe('usage AgentEvent variant', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// `spill` — additive omission descriptor on tool_use / tool_result.
+// ---------------------------------------------------------------------------
+
+describe('AgentEvent spill descriptor', () => {
+  const blob = {
+    blobId: 'blob_01HZ',
+    contentHash: `sha256:${'a'.repeat(64)}`,
+    size: 3_145_728,
+    contentType: 'application/json',
+  } as const;
+
+  it('accepts a tool_result whose output was spilled to the blob plane', () => {
+    const result = AgentEventSchema.safeParse({
+      type: 'tool_result',
+      tool: 'bash',
+      toolCallId: 'call-1',
+      output: { preview: { head: 'first bytes', tail: 'last bytes' } },
+      spill: {
+        field: 'output',
+        totalBytes: 3_145_728,
+        omittedBytes: 3_145_706,
+        contentType: 'application/json',
+        blob,
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts a tool_use whose input could not be stored, carrying unstoredReason instead', () => {
+    const result = AgentEventSchema.safeParse({
+      type: 'tool_use',
+      tool: 'write_file',
+      input: { preview: { head: '{"path"', tail: '"}' } },
+      spill: {
+        field: 'input',
+        totalBytes: 900_000,
+        omittedBytes: 899_991,
+        contentType: 'application/json',
+        unstoredReason: 'blob upload failed: HTTP 503',
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a spill carrying BOTH blob and unstoredReason', () => {
+    const result = AgentEventSchema.safeParse({
+      type: 'tool_result',
+      tool: 'bash',
+      output: { preview: { head: '', tail: '' } },
+      spill: {
+        field: 'output',
+        totalBytes: 10,
+        omittedBytes: 10,
+        contentType: 'application/json',
+        blob,
+        unstoredReason: 'also failed',
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a spill carrying NEITHER blob nor unstoredReason', () => {
+    const result = AgentEventSchema.safeParse({
+      type: 'tool_result',
+      tool: 'bash',
+      output: { preview: { head: '', tail: '' } },
+      spill: { field: 'output', totalBytes: 10, omittedBytes: 10, contentType: 'application/json' },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an unstoredReason longer than 512 characters, and an empty one', () => {
+    const base = {
+      type: 'tool_result' as const,
+      tool: 'bash',
+      output: { preview: { head: '', tail: '' } },
+    };
+    const spill = { field: 'output' as const, totalBytes: 10, omittedBytes: 10, contentType: 'application/json' as const };
+    expect(AgentEventSchema.safeParse({ ...base, spill: { ...spill, unstoredReason: 'x'.repeat(513) } }).success).toBe(false);
+    expect(AgentEventSchema.safeParse({ ...base, spill: { ...spill, unstoredReason: 'x'.repeat(512) } }).success).toBe(true);
+    expect(AgentEventSchema.safeParse({ ...base, spill: { ...spill, unstoredReason: '' } }).success).toBe(false);
+  });
+
+  it('rejects an unrecognized key inside the descriptor (.strict) and a non-JSON contentType', () => {
+    const base = {
+      type: 'tool_result' as const,
+      tool: 'bash',
+      output: { preview: { head: '', tail: '' } },
+    };
+    expect(AgentEventSchema.safeParse({
+      ...base,
+      spill: { field: 'output', totalBytes: 10, omittedBytes: 10, contentType: 'application/json', blob, path: '/tmp/spill' },
+    }).success).toBe(false);
+    expect(AgentEventSchema.safeParse({
+      ...base,
+      spill: { field: 'output', totalBytes: 10, omittedBytes: 10, contentType: 'text/plain', blob },
+    }).success).toBe(false);
+  });
+
+  it('rejects spill on a variant that has no spillable field (progress)', () => {
+    const result = AgentEventSchema.safeParse({
+      type: 'progress',
+      text: 'hello',
+      spill: { field: 'output', totalBytes: 10, omittedBytes: 10, contentType: 'application/json', blob },
+    });
+    // `progress` has no `spill` in its variant, so the key is stripped rather
+    // than retained — the point is that it never becomes part of the parsed
+    // event, so no consumer can be told a `progress.text` was spilled.
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ type: 'progress', text: 'hello' });
+      expect('spill' in result.data).toBe(false);
+    }
+  });
+
+  it('survives an encode/decode round trip inside a task.progress envelope', () => {
+    const event = {
+      type: 'tool_result' as const,
+      tool: 'bash',
+      toolCallId: 'call-9',
+      output: { preview: { head: 'head…', tail: '…tail' } },
+      spill: {
+        field: 'output' as const,
+        totalBytes: 3_145_728,
+        omittedBytes: 3_145_700,
+        contentType: 'application/json' as const,
+        blob,
+      },
+    };
+    const envelope = createEnvelope('task.progress', { seq: 1, events: [event] }, { taskId: 'task-1', seq: 1 });
+    expect(decodeEnvelope(encodeEnvelope(envelope))).toEqual(envelope);
+    expect(parseMessage(JSON.parse(encodeEnvelope(envelope)))).toEqual(envelope);
+  });
+});

@@ -120,6 +120,7 @@ import {
   type LocalStoragePolicy,
   type LocalStoragePolicyInput,
 } from './journal/storage-policy';
+import { DEFAULT_MAX_INLINE_EVENT_BYTES, MIN_MAX_INLINE_EVENT_BYTES } from './event-spill';
 import {
   DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME,
   DEFAULT_MAX_TASK_OUTPUT_BYTES,
@@ -461,6 +462,36 @@ export interface DaemonConfig {
    * explicitly instead to opt out of enforcement altogether.
    */
   maxTaskOutputBytes?: number;
+  /**
+   * Per-EVENT inline ceiling (default {@link DEFAULT_MAX_INLINE_EVENT_BYTES},
+   * 64 KiB) for the two `AgentEvent` fields a runtime authors freely:
+   * `tool_use.input` and `tool_result.output`. An event whose serialization
+   * exceeds this leaves `TaskRunner.pump` with that field replaced by a
+   * UTF-8-safe head/tail preview (`{ preview: { head, tail } }`) and an
+   * additive `spill` descriptor; the full JSON serialization is uploaded to
+   * the blob plane under an idempotent, content-addressed key, and
+   * `spill.blob` is where a consumer reads it back. If the upload fails the
+   * preview still ships, carrying `spill.unstoredReason` instead — omission
+   * is always described, never silent.
+   *
+   * This is a per-event bound, orthogonal to `maxTaskOutputBytes` (a
+   * whole-task total, counted AFTER spilling) and to
+   * `progressBatch.maxBatchBytes` (a per-batch wire budget).
+   *
+   * **Consumer contract:** `spill`'s presence is the only signal that the
+   * inline field is a preview. A consumer that renders `tool_result.output`
+   * without checking `spill` renders a truncation as the whole result.
+   *
+   * Must be a positive safe integer of at least
+   * {@link MIN_MAX_INLINE_EVENT_BYTES} (4096) — below that a legitimate
+   * `spill` descriptor no longer fits inside the cap it exists to enforce.
+   * Anything else (0, negative, non-integer, `NaN`,
+   * `Number.POSITIVE_INFINITY`) is a config validation error thrown
+   * synchronously from `createDaemonWithAdapters`/`createDaemon`; there is
+   * no opt-out, because "unbounded event" is exactly the state this exists
+   * to prevent.
+   */
+  maxInlineEventBytes?: number;
   /**
    * Host-owned batching policy for normalized `task.progress` events.
    * `maxBatchBytes`, when set, measures exactly the UTF-8 bytes of
@@ -1167,6 +1198,20 @@ export function buildDaemonWithAdapters(
   if (config.maxTaskOutputBytes !== undefined && !(config.maxTaskOutputBytes > 0)) {
     throw new Error(
       `DaemonConfig.maxTaskOutputBytes must be a positive number (or omitted to use the ${DEFAULT_MAX_TASK_OUTPUT_BYTES}-byte default) — got ${config.maxTaskOutputBytes}. Pass Number.POSITIVE_INFINITY to explicitly disable the cap; 0 or a negative number is rejected rather than silently treated as "disabled".`,
+    );
+  }
+  // Same up-front discipline as `maxTaskOutputBytes` above, with one
+  // deliberate difference: there is no `Number.POSITIVE_INFINITY` opt-out.
+  // An unbounded per-event payload is the exact failure this cap exists to
+  // prevent, and a cap below `MIN_MAX_INLINE_EVENT_BYTES` cannot even hold
+  // the descriptor that documents the omission — see
+  // `DaemonConfig.maxInlineEventBytes`'s own doc comment.
+  if (
+    config.maxInlineEventBytes !== undefined
+    && !(Number.isSafeInteger(config.maxInlineEventBytes) && config.maxInlineEventBytes >= MIN_MAX_INLINE_EVENT_BYTES)
+  ) {
+    throw new Error(
+      `DaemonConfig.maxInlineEventBytes must be a safe integer of at least ${MIN_MAX_INLINE_EVENT_BYTES} (or omitted to use the ${DEFAULT_MAX_INLINE_EVENT_BYTES}-byte default) — got ${config.maxInlineEventBytes}. A smaller cap cannot hold the spill descriptor that documents the omission, and there is no "disabled" value: an unbounded tool_use.input/tool_result.output is what this cap exists to prevent.`,
     );
   }
   validateProgressBatcherOptions(config.progressBatch);
@@ -1929,6 +1974,8 @@ export function buildDaemonWithAdapters(
       shutdownInterruptTimeoutMs: overrides.shutdown?.taskInterruptTimeoutMs,
       // M5 batch-3 (workstream 2): see DaemonConfig.maxTaskOutputBytes's own doc comment — already validated above.
       maxTaskOutputBytes: config.maxTaskOutputBytes,
+      // See DaemonConfig.maxInlineEventBytes's own doc comment — already validated above.
+      maxInlineEventBytes: config.maxInlineEventBytes,
       // additive-minor (`task.complete.document`): passed through verbatim,
       // absent when unconfigured — see `DaemonConfig.resultDocument`'s own
       // doc comment. Spread rather than assigned so an unconfigured daemon
