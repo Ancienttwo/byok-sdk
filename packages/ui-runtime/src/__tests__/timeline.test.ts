@@ -2,6 +2,7 @@ import type { ActivityTail, TimelineEvent } from '@byok-sdk/cloud';
 import { describe, expect, it } from 'vitest';
 import {
   TimelineFoldError,
+  type ToolTimelineItem,
   createTimelineState,
   foldTimelineEvent,
   projectTimeline,
@@ -163,5 +164,68 @@ describe('Live Activity Timeline fold', () => {
       timelineEvent(1, 0, { type: 'tool_use', tool: 'shell', toolCallId: 'reused' }))), 'tool_collision');
     expectCode(() => projectTimeline(foldTimelineEvent(useState,
       timelineEvent(1, 0, { type: 'tool_result', tool: 'other', toolCallId: 'reused' }))), 'tool_collision');
+  });
+
+  it('passes both spill descriptors through a paired tool item', () => {
+    const inputSpill = {
+      field: 'input' as const,
+      totalBytes: 4096,
+      omittedBytes: 3800,
+      contentType: 'application/json' as const,
+      blob: {
+        blobId: 'blob-1',
+        contentHash: `sha256:${'a'.repeat(64)}`,
+        size: 4096,
+        contentType: 'application/json',
+      },
+    };
+    const outputSpill = {
+      field: 'output' as const,
+      totalBytes: 8192,
+      omittedBytes: 7900,
+      contentType: 'application/json' as const,
+      unstoredReason: 'blob upload failed',
+    };
+    const snapshot = replayTimeline(tail([
+      timelineEvent(0, 0, {
+        type: 'tool_use', tool: 'shell', toolCallId: 'spilled', input: { preview: { head: 'a', tail: 'z' } }, spill: inputSpill,
+      }),
+      timelineEvent(0, 1, {
+        type: 'tool_result', tool: 'shell', toolCallId: 'spilled', output: { preview: { head: 'o', tail: 'k' } }, isError: false, spill: outputSpill,
+      }),
+    ]));
+    const item = snapshot.items[0]!;
+    expect(item.kind).toBe('tool');
+    expect(item).toMatchObject({ state: 'output-available', inputSpill, outputSpill });
+    expect((item as ToolTimelineItem).inputSpill).toEqual(inputSpill);
+    expect((item as ToolTimelineItem).outputSpill).toEqual(outputSpill);
+  });
+
+  it('passes a spill through an unpaired tool result without inventing the other side', () => {
+    const outputSpill = {
+      field: 'output' as const,
+      totalBytes: 2048,
+      omittedBytes: 1900,
+      contentType: 'application/json' as const,
+      unstoredReason: 'locator exceeded the inline cap',
+    };
+    const snapshot = replayTimeline(tail([
+      timelineEvent(0, 0, { type: 'tool_result', tool: 'custom', output: { preview: { head: 'h', tail: 't' } }, spill: outputSpill }),
+    ]));
+    const item = snapshot.items[0]!;
+    expect(item).toMatchObject({ kind: 'tool', state: 'unpaired-result' });
+    expect((item as ToolTimelineItem).outputSpill).toEqual(outputSpill);
+    expect(Object.hasOwn(item, 'inputSpill')).toBe(false);
+  });
+
+  it('omits both spill keys when neither source event was spilled', () => {
+    const snapshot = replayTimeline(tail([
+      timelineEvent(0, 0, { type: 'tool_use', tool: 'shell', toolCallId: 'plain', input: 'pwd' }),
+      timelineEvent(0, 1, { type: 'tool_result', tool: 'shell', toolCallId: 'plain', output: 'ok', isError: false }),
+    ]));
+    const item = snapshot.items[0]!;
+    expect(item).toMatchObject({ kind: 'tool', state: 'output-available' });
+    expect(Object.hasOwn(item, 'inputSpill')).toBe(false);
+    expect(Object.hasOwn(item, 'outputSpill')).toBe(false);
   });
 });

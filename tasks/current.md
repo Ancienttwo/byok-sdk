@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-09-06T04:04:37+0800 -->
+<!-- updated_at: 2026-09-06T04:21:32+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-09-06T04:04:37+0800
-> **Source Branch**: codex/runtime-event-spill
-> **Source Commit**: 4342a23
+> **Updated At**: 2026-09-06T04:21:32+0800
+> **Source Branch**: codex/timeline-spill-passthrough
+> **Source Commit**: b2cb42f
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -31,12 +31,12 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- linked-worktree-ce21c0c05deb: stale active-plan marker -> plans/plan-20260906-0253-runtime-event-spill.md
+- linked-worktree-ce21c0c05deb: plans/plan-20260906-0412-timeline-spill-passthrough.md
 - linked-worktree-ce21c0c05deb: active-worktree owner -> self
 - linked-worktree-058512fbcacc: plans/plan-20260906-0350-issue-147-task-offer-journal.md
 - linked-worktree-058512fbcacc: active-worktree owner -> self
-- linked-worktree-1a8b7d9d60aa: plans/plan-20260906-0311-team-pi-relay.md
-- linked-worktree-1a8b7d9d60aa: active-worktree owner -> self
+- linked-worktree-e00cabb04ed5: plans/plan-20260906-0420-issue-147-integration.md
+- linked-worktree-e00cabb04ed5: active-worktree owner -> self
 ## Active Sprint
 
 - Sprint: (none)
@@ -57,16 +57,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260906-0253-runtime-event-spill.md
- D tasks/contracts/20260906-0253-runtime-event-spill.contract.md
- D tasks/notes/20260906-0253-runtime-event-spill.notes.md
- D tasks/reviews/20260906-0253-runtime-event-spill.review.md
+ D plans/plan-20260906-0412-timeline-spill-passthrough.md
+ D tasks/contracts/20260906-0412-timeline-spill-passthrough.contract.md
+ D tasks/notes/20260906-0412-timeline-spill-passthrough.notes.md
+ D tasks/reviews/20260906-0412-timeline-spill-passthrough.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260906-0253-runtime-event-spill.md
-?? tasks/archive/contract-20260906-0404-runtime-event-spill.md
-?? tasks/archive/notes-20260906-0404-runtime-event-spill.md
-?? tasks/archive/review-20260906-0404-runtime-event-spill.md
-?? tasks/archive/todo-20260906-0404-runtime-event-spill.md
+?? plans/archive/plan-20260906-0412-timeline-spill-passthrough.md
+?? tasks/archive/contract-20260906-0421-timeline-spill-passthrough.md
+?? tasks/archive/notes-20260906-0421-timeline-spill-passthrough.md
+?? tasks/archive/review-20260906-0421-timeline-spill-passthrough.md
+?? tasks/archive/todo-20260906-0421-timeline-spill-passthrough.md
 ```
 
 ## Source Artifacts
