@@ -1,0 +1,19 @@
+{
+  "old_main": "e542d210719a43fe1111b793bba1a76d37076cbf",
+  "landed_commit": "6656b858d757622fc9d3935a35a047a2565efad2",
+  "receipt_subject": "sha256:9bc1da921931406ac4d4f26fb5c98d9d03432876533209e0d71779e42031bf5c",
+  "primary_before": {
+    "head": "02792b3f156a0be8402a839c25dd904f58d20ff0",
+    "branch": "claude/audit-spill-size",
+    "status": "M packages/AGENTS.md\n M packages/CLAUDE.md",
+    "diff_sha256": "5132aa70baff86fb55e277fa986f5eb8f2601ff1ef54fcbd9df922658a926095"
+  },
+  "primary_after": {
+    "head": "02792b3f156a0be8402a839c25dd904f58d20ff0",
+    "branch": "claude/audit-spill-size",
+    "status": "M packages/AGENTS.md\n M packages/CLAUDE.md",
+    "diff_sha256": "5132aa70baff86fb55e277fa986f5eb8f2601ff1ef54fcbd9df922658a926095"
+  },
+  "primary_unchanged": true,
+  "method": "git update-ref compare-and-swap; main unoccupied; ancestor verified"
+}

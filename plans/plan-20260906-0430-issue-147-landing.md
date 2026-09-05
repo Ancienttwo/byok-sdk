@@ -1,6 +1,6 @@
 # Plan: issue147 local main landing
 
-> **Status**: Executing
+> **Status**: Completed
 > **Artifact Level**: work-package
 > **Promotion Reason**: Exact-subject local landing across an accepted main successor
 > **Verification Boundary**: Required source checks and typed Claude receipt for the main target
