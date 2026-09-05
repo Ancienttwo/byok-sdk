@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.14.0 / @byok-sdk/keys 0.4.0 — prepared, not published
+
+- **`@byok-sdk/protocol` / client hosted journal (#147):** A single protocol task-offer family authority now includes both agent-egress offers. The daemon creates durable task rows before acknowledgement, journals terminal events and marks acknowledged interrupted tasks recovered on restart.
 
 - **`@byok-sdk/client` Pi GUI team relay:** Pin Pi to `0.85.1`; add bounded
   `team pi-relay` for one Codex thread and an owned Pi RPC child. Native UI spans
