@@ -56,7 +56,7 @@ If both egress offers already create real SQLite task rows through the daemon on
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[]}
+{"protocol":1,"oracles":[{"id":"protocol-family-and-required-source-checks","kind":"deterministic_test","paths":["*"]},{"id":"real-daemon-sqlite-row-terminal-recovery-readback","kind":"runtime_readback","paths":["*"]}]}
 ```
 
 ## Acceptance Policy
