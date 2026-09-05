@@ -1,9 +1,19 @@
+> **Archived**: 2026-09-06 04:21
+> **Related Plan**: plans/archive/plan-20260906-0412-timeline-spill-passthrough.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260906-0421
+> **Archive Projection V1**: `plans/plan-20260906-0412-timeline-spill-passthrough.md` => `plans/archive/plan-20260906-0412-timeline-spill-passthrough.md`
+> **Archive Projection V1**: `tasks/notes/20260906-0412-timeline-spill-passthrough.notes.md` => `tasks/archive/notes-20260906-0421-timeline-spill-passthrough.md`
+> **Archive Projection V1**: `tasks/contracts/20260906-0412-timeline-spill-passthrough.contract.md` => `tasks/archive/contract-20260906-0421-timeline-spill-passthrough.md`
+> **Archive Projection V1**: `tasks/reviews/20260906-0412-timeline-spill-passthrough.review.md` => `tasks/archive/review-20260906-0421-timeline-spill-passthrough.md`
+
 # Implementation Notes: timeline-spill-passthrough
 
 > **Status**: Active
-> **Plan**: plans/plan-20260906-0412-timeline-spill-passthrough.md
-> **Contract**: tasks/contracts/20260906-0412-timeline-spill-passthrough.contract.md
-> **Review**: tasks/reviews/20260906-0412-timeline-spill-passthrough.review.md
+> **Plan**: plans/archive/plan-20260906-0412-timeline-spill-passthrough.md
+> **Contract**: tasks/archive/contract-20260906-0421-timeline-spill-passthrough.md
+> **Review**: tasks/archive/review-20260906-0421-timeline-spill-passthrough.md
 > **Last Updated**: 2026-09-06 04:18
 > **Lifecycle**: notes
 
