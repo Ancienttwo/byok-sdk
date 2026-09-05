@@ -121,8 +121,6 @@ jobs:
         with:
           node-version-file: .node-version
       - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.0
       - name: Install frozen dependencies and build
         run: bun ci && bun run build
       - name: Exercise actual native SIGKILL and original terminal recovery
