@@ -138,6 +138,8 @@ export type { TaskState } from './task-state';
 
 export {
   MESSAGE_TYPES,
+  TASK_OFFER_TYPES,
+  isTaskOfferType,
   MESSAGE_PAYLOAD_SCHEMAS,
   SERVER_TO_DAEMON_TYPES,
   DAEMON_TO_SERVER_TYPES,
@@ -319,3 +321,5 @@ export type {
   AgentMemoryProjectionCommitRequest,
   AgentMemoryProjectionCommitResponse,
 } from './http-api';
+
+export type { TaskOfferType } from './messages';

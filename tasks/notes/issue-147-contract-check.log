@@ -1,0 +1,22 @@
+[PASS] task_profile: bugfix
+[PASS] Evidence Requirements: benchmark declared as not_applicable
+[PASS] Root Cause Evidence: root_cause is concrete
+[PASS] Root Cause Evidence: repro is concrete
+[PASS] Root Cause Evidence: regression_guard is concrete
+[PASS] Root Cause Evidence: pre_fix_failure_artifact is concrete
+[PASS] Root Cause Evidence: regression_guard packages/client/src/__tests__/journal-offer-family.test.ts is listed under exit_criteria.tests_pass
+[PASS] Root Cause Evidence: pre_fix_failure_artifact exists: tasks/notes/issue-147-pre-fix.log
+[PASS] Root Cause Evidence: pre_fix_failure_artifact shows PRE_FIX_EXIT=1
+[PASS] Root Cause Evidence: pre_fix_failure_artifact references the regression_guard path
+[PASS] files_exist: docs/spec.md
+[PASS] artifacts_exist: .ai/harness/checks/latest.json
+[PASS] artifacts_exist: tasks/notes/20260906-0350-issue-147-task-offer-journal.notes.md
+[PASS] commands_succeed: repo-harness run check-task-workflow --strict (1306ms)
+[PASS] tests_pass: packages/client/src/__tests__/journal-offer-family.test.ts via bun run --cwd packages/client test -- src/__tests__/journal-offer-family.test.ts (18001ms)
+[PASS] commands_succeed: bun run build (3019ms)
+[PASS] commands_succeed: bun run typecheck (2690ms)
+[PASS] commands_succeed: bun run test (35712ms)
+[PASS] commands_succeed: bun run check:api-surface (99ms)
+[PASS] commands_succeed: bun run check:version-authority (38ms)
+[PASS] commands_succeed: git diff --check (28ms)
+[ContractVerify] total=21 failed=0 status=Fulfilled
