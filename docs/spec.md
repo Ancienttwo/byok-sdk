@@ -463,6 +463,38 @@ must not carry message bodies, inject prompts with `send-keys`, or infer
 delivery from `capture-pane`. This contract adds no cloud protocol, cross-device
 room, or task-manifest fallback.
 
+The foreground `byok-agent team relay` binds exactly two explicitly registered,
+existing operator-owned Codex sessions in one workspace. Each private binding
+names its member context, native thread UUID, explicit loopback WebSocket or
+Unix endpoint, and starting notification sequence. The operator must configure
+each native session with that same member's Team MCP grant; the relay does not
+infer or establish that mapping. The absolute Codex executable must pass the
+qualified `codex-cli 0.153.4` version preflight. This is a client CLI binding,
+not a TaskRunner, native-session lifecycle owner, or new package boundary.
+
+Authenticated `team_notifications.snapshot` accepts the existing member-context
+and optional `afterSeq` read contract. It validates the grant and returns only
+workspace/member/revision/expiry, acknowledged sequence and latest peer sequence
+after max(ack, afterSeq). It neither returns message bodies nor changes delivery,
+acknowledgements, revision or persistent state. Self posts do not notify self.
+A fixed notification invokes native `codex queue --remote ... --thread ...`;
+models retain the existing read/post/ack authority and approval rules.
+
+A room lock allows one foreground relay per store. Both grants are checked before
+queueing; lease/control errors halt. Notification watermarks advance only on an
+exact-thread queue receipt. Attempts, including failures, consume a required
+1–100 budget. Timeout, nonzero exit or unknown receipt halts without retry.
+Queue acceptance is not model completion. Watermarks and budget are process-local;
+a restart is an explicit operator epoch and may duplicate notifications depending
+on its chosen `afterSeq`. No guaranteed at-least-once service, exactly-once delivery,
+automatic recovery or lease renewal is provided. Stdin pause/resume/status/stop
+and SIGINT/SIGTERM control the relay; pause cannot recall already queued work.
+Credentials remain in owner-only binding files and authenticated control requests,
+never argv or status. A stop during enqueue may retain `queue_delivery_unknown`
+because native acceptance cannot be recalled or ruled out by aborting the CLI.
+Loopback Codex endpoints retain the native local-process trust boundary; the
+relay adds no authentication to them. Pi and Claude bindings remain deferred.
+
 ## Task-scoped host MCP toolsets
 
 A SaaS task may require one or more host-integrated tools without making the

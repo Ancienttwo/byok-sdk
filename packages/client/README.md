@@ -354,4 +354,43 @@ plain watcher. Native Windows returns `unsupported_platform` for the tmux view.
 The launcher never uses `send-keys` or `capture-pane`; tmux displays the
 daemon-owned stream but is never message transport or protocol authority.
 
+### Automatic notification for two existing Codex sessions
+
+Configure two operator-owned Codex app-server sessions with their respective
+`team join` MCP grants. Record each exact native thread UUID and local endpoint.
+The relay does not create sessions or verify your member-to-session mapping.
+Write an absolute-path JSON file with mode `0600` (its contexts are bearer secrets):
+
+```json
+{"version":1,"bindings":[
+  {"context":"<member-a-context>","threadId":"<native-thread-a-uuid>","endpoint":"ws://127.0.0.1:9101","afterSeq":0},
+  {"context":"<member-b-context>","threadId":"<native-thread-b-uuid>","endpoint":"ws://127.0.0.1:9102","afterSeq":0}
+]}
+```
+
+```bash
+byok-agent team relay dev --bindings /absolute/private-bindings.json --codex-bin /absolute/codex --max-notifications 2 --config /absolute/agent.json
+```
+
+POSIX only; the executable must report `codex-cli 0.153.4`, the qualified native
+queue version. Endpoints must be explicit loopback `ws://127.0.0.1:<port>` /
+`ws://[::1]:<port>` or `unix:///absolute/socket`. No remote server discovery. Loopback app-server queue endpoints trust local
+processes; the relay does not add authentication to the native Codex endpoint.
+Keep the foreground command open and enter `pause`, `resume`, `status`, or `stop`;
+SIGINT/SIGTERM also stop. Output includes queue attempts/receipts and redacted
+state. A successful queue receipt means accepted notification, not completed work.
+The model reads, replies and acknowledges with the existing Team MCP tools.
+
+The required budget counts every attempt, capped at 100. Unknown delivery,
+revoked/expired grant or control failure stops without retry. An operator stop
+during enqueue can report `stopped` with `queue_delivery_unknown`: aborting the
+local queue process cannot prove the native server rejected the notification. Pause does not undo
+queued work. A room lock rejects concurrent relays; inspect the recorded owner
+before manually removing a stale `<storeDir>/team-relay-locks/<room>.lock`.
+Watermarks are process-local. On restart choose `afterSeq` explicitly from prior
+status and actual room receipts; do not assume automatic crash replay, exactly-once
+or guaranteed at-least-once delivery. Renewing grants requires explicitly updating
+both the session MCP grant and binding file. This slice supplies only the Codex
+notification binding; tmux remains an optional view.
+
 MIT licensed. Node.js 22.22.0 or newer.

@@ -1,0 +1,46 @@
+{
+  "scope": "two existing operator-owned Codex sessions; actual SDK fixture control/store/helper and production team relay CLI",
+  "scratchRemoved": true,
+  "sessions": [
+    {
+      "member": "alice",
+      "threadId": "01a0729d-3459-7b23-a909-b73b7ac1e5d6",
+      "endpoint": "ws://127.0.0.1:62294",
+      "model": "gpt-6-astra",
+      "modelProvider": "openai"
+    },
+    {
+      "member": "bob",
+      "threadId": "01a0729d-39e6-7432-9914-33519a22da03",
+      "endpoint": "ws://127.0.0.1:62304",
+      "model": "gpt-6-astra",
+      "modelProvider": "openai"
+    }
+  ],
+  "status": "FAIL",
+  "codexVersion": "codex-cli 0.153.4",
+  "errorType": "TimeoutError",
+  "error": "smoke deadline",
+  "ledger": [],
+  "controlEvents": [],
+  "ownedProcessesStopped": true,
+  "cleanupReceipts": [
+    {
+      "threadId": "01a0729d-3459-7b23-a909-b73b7ac1e5d6",
+      "deleted": false,
+      "error": {
+        "code": -32600,
+        "message": "no rollout found for thread id 01a0729d-3459-7b23-a909-b73b7ac1e5d6"
+      }
+    },
+    {
+      "threadId": "01a0729d-39e6-7432-9914-33519a22da03",
+      "deleted": false,
+      "error": {
+        "code": -32600,
+        "message": "no rollout found for thread id 01a0729d-39e6-7432-9914-33519a22da03"
+      }
+    }
+  ],
+  "cleanupNote": "No model turn started. Native thread/delete confirmed no persisted rollout for both IDs; disposable app-server processes and private scratch removed."
+}

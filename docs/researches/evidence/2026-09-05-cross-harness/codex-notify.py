@@ -3,6 +3,7 @@ import json,os,pathlib,queue,signal,socket,subprocess,sys,threading,time,tomllib
 HERE=pathlib.Path(__file__).resolve().parent
 scratch=pathlib.Path(sys.argv[1]);assert scratch.name.startswith('byok-notify-probe-')
 root=scratch/'codex';root.mkdir(mode=0o700,exist_ok=True)
+if any((root/name).exists() for name in ['tools.jsonl','release']):raise SystemExit('Use a fresh scratch root: stale tool events or gate state detected')
 records=[];processes=[];received=[];q=queue.Queue();counter=0
 draft_mode=len(sys.argv)>2 and sys.argv[2]=='draft'
 out=HERE/('codex-draft-results.json' if draft_mode else 'codex-notify-results.json');result={'harness':'codex','version':'0.153.4','scope':'dedicated app-server; native queue CLI','cases':{}}

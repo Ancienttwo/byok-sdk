@@ -120,3 +120,20 @@ The user approved completing the remaining Claude cells. One fresh-session reche
 P1 remains native Claude input/permission handling versus BYOK message authority. P2 ends at the provider refusal before the busy gate, while the independent TUI path reaches trusted startup → MCP child → native socket/auth metadata. P3 is to preserve the existing communication design and stop dependent model probes until the provider refusal is resolved; tmux or a new message layer would not resolve this observed blocker.
 
 Evidence: `claude-notify-recheck-results.json` and `claude-tui-startup-results.json`. Offline validation requires refusal flags/category, absence of a busy tool entry, startup capability presence and absence of any UDS send/model tool event. No prior blocked evidence was overwritten. Native `claude project purge --dry-run` identified only the owned temporary project's trust entry; the exact-path purge removed that entry, without touching other projects. Probe processes and private scratch are cleaned after export. No production source or global model/auth settings changed.
+
+
+## Codex foreground relay implementation (2026-09-06)
+
+The isolated `codex/team-codex-relay` slice implements the missing local queue
+binding. Built-CLI two-session smoke passed: two peer-only automatic notifications,
+two durable messages, three MCP reads, both members acknowledged through seq2;
+pause suppressed notifications and budget2 stopped the foreground relay. Evidence:
+`evidence/2026-09-05-cross-harness/relay-smoke-results.json`; offline verifier
+`verify-relay.py` also binds the result to production source SHA-256 fingerprints.
+No manual notifications occurred after Alice's initial seed turn. Native final
+text is not the receipt oracle. Owned native sessions and scratch were removed.
+The fixture composes actual SDK store/control/helper with the production CLI;
+it is not a full enrolled-device/cloud acceptance or a three-harness relay.
+First smoke startup failed before any model turn because source CLI lacked a
+build-time version define; the driver now uses built dist, with failure evidence
+retained. Claude/Pi notification integrations remain deferred on prior boundaries.

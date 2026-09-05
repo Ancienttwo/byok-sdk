@@ -2173,3 +2173,20 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 - Completed workstream evidence: `tasks/workstreams/root/20260904-sdk-root.md`
 
 - `tasks/workstreams/root/20260905-sdk-root.md`
+
+
+## Local Codex team notification binding
+
+`client/src/bin/commands/team-relay.ts` is the foreground operator entrypoint;
+`bin/team-codex-relay.ts` owns binding validation, process-local notification
+watermarks and bounded native queue attempts. It uses the existing authenticated
+control client, not TaskRunner or cloud dispatch. `create-daemon.ts` exposes
+`team_notifications.snapshot`; `LocalTeamWorkspace.notificationSnapshot` validates
+the same member grant and returns metadata without writing delivered/ack state.
+The durable path remains Team MCP → control socket → TeamWorkspace → fsync.
+The notification path is snapshot → exact Codex endpoint/thread queue → native
+Team MCP read/post/ack. The operator configures the same member grant in each
+session; tmux has no delivery role. Existing public workspace exports gain the
+additive snapshot method; native process/home lifecycle and other harness bindings
+are outside this slice. Queue errors stop with unknown delivery and no retry;
+restart watermarks are explicit operator input, not a second receipt authority.

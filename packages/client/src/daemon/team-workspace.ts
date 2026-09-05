@@ -763,6 +763,27 @@ export class LocalTeamWorkspace {
     });
   }
 
+  /** Metadata-only operator notification view. Never advances delivery or acknowledgement. */
+  async notificationSnapshot(input: TeamReadMessagesInput): Promise<{
+    workspaceId: string; memberId: string; registryRevision: TeamWorkspaceRevision;
+    expiresAt: string; acknowledgedThroughSeq: number; latestPeerSeq: number | null;
+  }> {
+    assertLeaseShape(input?.lease);
+    if (input.afterSeq !== undefined) assertAfterSeq(input.afterSeq);
+    return this.enqueue(async () => {
+      const state = await this.resolveLease(await this.load(), input.lease);
+      const acknowledgedThroughSeq = state.receipts[input.lease.memberId]!.acknowledgedThroughSeq;
+      const after = Math.max(input.afterSeq ?? 0, acknowledgedThroughSeq);
+      let latestPeerSeq: number | null = null;
+      for (const message of state.messages) {
+        if (message.seq > after && message.senderMemberId !== input.lease.memberId) latestPeerSeq = message.seq;
+      }
+      return Object.freeze({ workspaceId: state.definition.workspaceId, memberId: input.lease.memberId,
+        registryRevision: state.definition.revision, expiresAt: input.lease.expiresAt,
+        acknowledgedThroughSeq, latestPeerSeq });
+    });
+  }
+
   async readMessages(input: TeamReadMessagesInput): Promise<TeamReadMessagesResult> {
     assertLeaseShape(input?.lease);
     if (input?.afterSeq !== undefined) assertAfterSeq(input.afterSeq);

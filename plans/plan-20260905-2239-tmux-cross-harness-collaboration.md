@@ -44,6 +44,8 @@ tmux 复用终端能力有价值，但不能由此推导能安全控制正在审
 
 ## Verified Capability Boundary
 
+This table records the initial MCP probe only. The later **Native Notify Probe Ruling** and **Claude Continuation Result** below supersede its notify/startup cells; restart resume remains unverified.
+
 | Harness | 本次实测版本 | native protocol launch | 同 session idle 两轮 | MCP attach/read/post/ack | TUI notify / restart resume |
 |---|---|---|---|---|---|
 | Claude | 2.1.261 | PASS stream-json | PASS | PASS | unverified |

@@ -1,0 +1,247 @@
+{
+  "scope": "two existing operator-owned Codex sessions; actual SDK fixture control/store/helper and production team relay CLI",
+  "scratchRemoved": true,
+  "sessions": [
+    {
+      "member": "alice",
+      "threadId": "01a0729e-2791-7492-bbcd-6c189d2fb590",
+      "endpoint": "ws://127.0.0.1:62430",
+      "model": "gpt-6-astra",
+      "modelProvider": "openai"
+    },
+    {
+      "member": "bob",
+      "threadId": "01a0729e-2ccd-7d53-8e71-f8416f7ac276",
+      "endpoint": "ws://127.0.0.1:62435",
+      "model": "gpt-6-astra",
+      "modelProvider": "openai"
+    }
+  ],
+  "status": "PASS",
+  "codexVersion": "codex-cli 0.153.4",
+  "pauseBeforeResume": "PASS",
+  "messages": [
+    {
+      "seq": 1,
+      "senderMemberId": "alice",
+      "messageId": "ccc71f50-2bfb-4a70-8650-119e9887aa27"
+    },
+    {
+      "seq": 2,
+      "senderMemberId": "bob",
+      "messageId": "2385a668-2d25-468e-9050-d410740caaff"
+    }
+  ],
+  "receipts": {
+    "alice": {
+      "deliveredThroughSeq": 2,
+      "acknowledgedThroughSeq": 2
+    },
+    "bob": {
+      "deliveredThroughSeq": 2,
+      "acknowledgedThroughSeq": 2
+    }
+  },
+  "ledger": [
+    {
+      "event": "preflight",
+      "codexBin": "/Users/kito/.codex/packages/standalone/releases/0.153.4-aarch64-apple-darwin/bin/codex",
+      "codexVersion": "0.153.4"
+    },
+    {
+      "state": "running",
+      "attempts": 0,
+      "maxNotifications": 2,
+      "bindings": [
+        {
+          "workspaceId": "probe-room",
+          "memberId": "alice",
+          "threadId": "01a0729e-2791-7492-bbcd-6c189d2fb590",
+          "notifiedThroughSeq": 0
+        },
+        {
+          "workspaceId": "probe-room",
+          "memberId": "bob",
+          "threadId": "01a0729e-2ccd-7d53-8e71-f8416f7ac276",
+          "notifiedThroughSeq": 0
+        }
+      ]
+    },
+    {
+      "state": "paused",
+      "attempts": 0,
+      "maxNotifications": 2,
+      "bindings": [
+        {
+          "workspaceId": "probe-room",
+          "memberId": "alice",
+          "threadId": "01a0729e-2791-7492-bbcd-6c189d2fb590",
+          "notifiedThroughSeq": 0
+        },
+        {
+          "workspaceId": "probe-room",
+          "memberId": "bob",
+          "threadId": "01a0729e-2ccd-7d53-8e71-f8416f7ac276",
+          "notifiedThroughSeq": 0
+        }
+      ]
+    },
+    {
+      "state": "running",
+      "attempts": 0,
+      "maxNotifications": 2,
+      "bindings": [
+        {
+          "workspaceId": "probe-room",
+          "memberId": "alice",
+          "threadId": "01a0729e-2791-7492-bbcd-6c189d2fb590",
+          "notifiedThroughSeq": 0
+        },
+        {
+          "workspaceId": "probe-room",
+          "memberId": "bob",
+          "threadId": "01a0729e-2ccd-7d53-8e71-f8416f7ac276",
+          "notifiedThroughSeq": 0
+        }
+      ]
+    },
+    {
+      "event": "queue_attempt",
+      "memberId": "bob",
+      "threadId": "01a0729e-2ccd-7d53-8e71-f8416f7ac276",
+      "attempt": 1,
+      "watermark": 0,
+      "latestPeerSeq": 1
+    },
+    {
+      "event": "queue_accepted",
+      "memberId": "bob",
+      "threadId": "01a0729e-2ccd-7d53-8e71-f8416f7ac276",
+      "attempt": 1,
+      "watermark": 0,
+      "latestPeerSeq": 1,
+      "queueId": "01a0729e-711c-7a21-8840-e5ff2ff90e15"
+    },
+    {
+      "state": "running",
+      "attempts": 1,
+      "maxNotifications": 2,
+      "bindings": [
+        {
+          "workspaceId": "probe-room",
+          "memberId": "alice",
+          "threadId": "01a0729e-2791-7492-bbcd-6c189d2fb590",
+          "notifiedThroughSeq": 0
+        },
+        {
+          "workspaceId": "probe-room",
+          "memberId": "bob",
+          "threadId": "01a0729e-2ccd-7d53-8e71-f8416f7ac276",
+          "notifiedThroughSeq": 1
+        }
+      ]
+    },
+    {
+      "event": "queue_attempt",
+      "memberId": "alice",
+      "threadId": "01a0729e-2791-7492-bbcd-6c189d2fb590",
+      "attempt": 2,
+      "watermark": 0,
+      "latestPeerSeq": 2
+    },
+    {
+      "event": "queue_accepted",
+      "memberId": "alice",
+      "threadId": "01a0729e-2791-7492-bbcd-6c189d2fb590",
+      "attempt": 2,
+      "watermark": 0,
+      "latestPeerSeq": 2,
+      "queueId": "01a0729e-ab99-7491-97e6-567d0e0ad392"
+    },
+    {
+      "state": "budget_exhausted",
+      "attempts": 2,
+      "maxNotifications": 2,
+      "bindings": [
+        {
+          "workspaceId": "probe-room",
+          "memberId": "alice",
+          "threadId": "01a0729e-2791-7492-bbcd-6c189d2fb590",
+          "notifiedThroughSeq": 2
+        },
+        {
+          "workspaceId": "probe-room",
+          "memberId": "bob",
+          "threadId": "01a0729e-2ccd-7d53-8e71-f8416f7ac276",
+          "notifiedThroughSeq": 1
+        }
+      ]
+    }
+  ],
+  "controlEvents": [
+    {
+      "ts": "2026-09-05T17:29:39.238Z",
+      "method": "post",
+      "member": "alice",
+      "seq": 1,
+      "messageId": "ccc71f50-2bfb-4a70-8650-119e9887aa27"
+    },
+    {
+      "ts": "2026-09-05T17:29:51.235Z",
+      "method": "read",
+      "member": "bob",
+      "deliveredThroughSeq": 1,
+      "count": 1
+    },
+    {
+      "ts": "2026-09-05T17:29:56.088Z",
+      "method": "post",
+      "member": "bob",
+      "seq": 2,
+      "messageId": "2385a668-2d25-468e-9050-d410740caaff"
+    },
+    {
+      "ts": "2026-09-05T17:29:56.099Z",
+      "method": "read",
+      "member": "bob",
+      "deliveredThroughSeq": 2,
+      "count": 2
+    },
+    {
+      "ts": "2026-09-05T17:30:02.520Z",
+      "method": "ack",
+      "member": "bob",
+      "throughSeq": 2
+    },
+    {
+      "ts": "2026-09-05T17:30:03.355Z",
+      "method": "read",
+      "member": "alice",
+      "deliveredThroughSeq": 2,
+      "count": 2
+    },
+    {
+      "ts": "2026-09-05T17:30:10.222Z",
+      "method": "ack",
+      "member": "alice",
+      "throughSeq": 2
+    }
+  ],
+  "nativeCompletedTurns": {
+    "alice": 1,
+    "bob": 1
+  },
+  "nativeThreadsDeleted": true,
+  "ownedProcessesStopped": true,
+  "sourceSha256": {
+    "packages/client/src/daemon/team-workspace.ts": "1ea4f4809dfc8a34842ede1503304e797706c2d16f4798d0d168f799b0bde624",
+    "packages/client/src/daemon/control-protocol.ts": "e7b2fe4a26043dacbaf5c3842d40edb718c44556eeb3387fa95a3356d13cd6c5",
+    "packages/client/src/daemon/create-daemon.ts": "ef07b68215f46fb65ba80be21e1d1ac7b430bbd80e3a2c5f801935826bf2c2e2",
+    "packages/client/src/bin/team-codex-relay.ts": "d3bd64433643ec853930a4cf7c1ca3fcf349c550421e6a181f9c8b2ecf762ea7",
+    "packages/client/src/bin/commands/team-relay.ts": "cd0c7de1e073c01b75bc4c81515972e4b5bc91b2a3f80dffdb64b8cd5afd4dfa",
+    "packages/client/src/bin/byok-agent.ts": "425e7ec38280740407155d992547a7e125f8fd85786d6e84e3d5941d4ab2fa19"
+  },
+  "sourceFingerprintNote": "Recorded after smoke; these production files were unchanged between build, smoke and fingerprint capture. Native model final-text completion is not the oracle: durable read/ack receipts are.",
+  "builtCliSha256": "4451b9f02fa556448f0819b7a31947f51619df3bcdbcdc018e0e5228435a3337",
+  "nativeCompletedTurnsNote": "Non-oracle snapshot taken after durable acknowledgements, before native cleanup. Alice count includes only the completed initial turn; cleanup can interrupt remaining final-text generation. No claim of final-text completion."
+}

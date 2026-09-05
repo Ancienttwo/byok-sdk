@@ -14,7 +14,7 @@ assert d['status']=='PASS TUI draft'
 assert any(x.get('text')==d['draftText'] for m in d['nativeUserMessages'] for x in m['content'])
 assert p['status']=='COMPLETED with idle-dialog boundary';pe=p['events']
 assert all(e['sessionId']==p['sessionId'] for e in pe)
-assert all(e.get('editor','HUMAN_DRAFT_SENTINEL')=='HUMAN_DRAFT_SENTINEL' for e in pe if e['event']!='ready')
+assert all(e['editor']=='HUMAN_DRAFT_SENTINEL' for e in pe if e['event']!='ready')
 def pi_event(kind,label):return next(e for e in pe if e['event']==kind and e.get('label')==label)
 assert pi_event('tool_exit','busy')['ts']<pi_event('tool_enter','busy-notify')['ts']
 assert pi_event('confirm_resolved','approval')['answer'] is False

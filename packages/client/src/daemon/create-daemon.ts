@@ -86,6 +86,7 @@ import {
   parseTeamMessageInspectParams,
   parseTeamMessagePostParams,
   parseTeamMessageReadParams,
+  parseTeamNotificationSnapshotParams,
   parseTeamWorkspaceCreateParams,
   parseTeamWorkspaceJoinParams,
   parseToolsetsReloadParams,
@@ -2955,6 +2956,11 @@ export function buildDaemonWithAdapters(
         const parsed = parseTeamMessageAckParams(params);
         if (!parsed) throw new ControlError('bad_request', 'team_messages.ack requires exactly {context,throughSeq}');
         return teamWorkspaces.ackMessages({ lease: decodeTeamMemberContext(parsed.context), throughSeq: parsed.throughSeq });
+      },
+      'team_notifications.snapshot': (params) => {
+        const parsed = parseTeamNotificationSnapshotParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'team_notifications.snapshot requires exactly {context,afterSeq?}');
+        return teamWorkspaces.notificationSnapshot({ lease: decodeTeamMemberContext(parsed.context), ...(parsed.afterSeq === undefined ? {} : { afterSeq: parsed.afterSeq }) });
       },
       'team_messages.inspect': (params) => {
         const parsed = parseTeamMessageInspectParams(params);

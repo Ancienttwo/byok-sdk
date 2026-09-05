@@ -737,6 +737,11 @@ export function parseTeamMessageReadParams(value: unknown): TeamMessageReadParam
   if (!isRecord(value) || !exactKeys(value, ['context', 'afterSeq']) || !contextString(value.context) || (value.afterSeq !== undefined && !safeInteger(value.afterSeq))) return undefined;
   return { context: value.context, ...(value.afterSeq === undefined ? {} : { afterSeq: value.afterSeq }) };
 }
+/** Exact local operator RPC; the shared read-parameter shape has no model identity fields. */
+export function parseTeamNotificationSnapshotParams(value: unknown): TeamMessageReadParams | undefined {
+  return parseTeamMessageReadParams(value);
+}
+
 export function parseTeamMessageAckParams(value: unknown): TeamMessageAckParams | undefined {
   if (!isRecord(value) || !exactKeys(value, ['context', 'throughSeq']) || !contextString(value.context) || !safeInteger(value.throughSeq)) return undefined;
   return { context: value.context, throughSeq: value.throughSeq };

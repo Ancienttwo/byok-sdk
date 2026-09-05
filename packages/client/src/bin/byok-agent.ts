@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { runTeamRelayCommand } from './commands/team-relay';
 import { createDaemon, createServiceLifecycle, type ServiceLifecycle } from '../index';
 import { DeviceRevokedError } from '../daemon/auth-manager';
 import { argValue, hasFlag, loadConfig, positionalArgs, resolveStoreDir } from './config';
@@ -130,6 +131,7 @@ function usage(): never {
       '  byok-agent team list --config <path>',
       '  byok-agent team create <workspace> --members <id,id> --config <path>',
       '  byok-agent team join <workspace> --member <id> --config <path>   (prints MCP config)',
+      '  byok-agent team relay <workspace> --bindings <private-absolute.json> --codex-bin <absolute> --max-notifications <1..100> --config <path>',
       '  byok-agent team watch <workspace> --config <path>',
       '  byok-agent team open <workspace> --tmux-bin <absolute> [--session <name>] --config <path>',
       '  byok-agent workspaces [--show-paths] [--config <path>]',
@@ -236,7 +238,7 @@ async function main(): Promise<void> {
   }
 
   if (command === 'team') {
-    const [action, workspaceId, ...extra] = positionalArgs(rest, ['--members', '--member', '--tmux-bin', '--session', '--config']);
+    const [action, workspaceId, ...extra] = positionalArgs(rest, ['--members', '--member', '--tmux-bin', '--session', '--config', '--bindings', '--codex-bin', '--max-notifications']);
     if (extra.length > 0) usage();
     const configPath = configPathFrom(rest);
     if (!configPath) { console.error('team commands require --config <path> or a BYOK_CONFIG env var'); process.exit(1); }
@@ -251,6 +253,14 @@ async function main(): Promise<void> {
     if (action === 'join') {
       const memberId = argValue(rest, '--member'); if (!memberId) usage();
       return runTeamJoinCommand(config, workspaceId, memberId);
+    }
+    if (action === 'relay') {
+      const bindingsFile = argValue(rest, '--bindings');
+      const codexBin = argValue(rest, '--codex-bin');
+      const budget = argValue(rest, '--max-notifications');
+      if (!bindingsFile || !codexBin || !budget || !/^[1-9][0-9]*$/u.test(budget)) usage();
+      const controller = abortOnSignal();
+      return runTeamRelayCommand({ config, workspaceId, bindingsFile, codexBin, maxNotifications: Number(budget), signal: controller.signal });
     }
     if (action === 'watch') { const controller = abortOnSignal(); return runTeamWatchCommand(config, workspaceId, controller.signal); }
     if (action === 'open') {

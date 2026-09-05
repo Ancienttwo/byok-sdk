@@ -1,0 +1,85 @@
+{
+  "sourceBase": "f993f8e",
+  "productionSourceSha256": {
+    "packages/client/src/daemon/team-workspace.ts": "1ea4f4809dfc8a34842ede1503304e797706c2d16f4798d0d168f799b0bde624",
+    "packages/client/src/daemon/control-protocol.ts": "e7b2fe4a26043dacbaf5c3842d40edb718c44556eeb3387fa95a3356d13cd6c5",
+    "packages/client/src/daemon/create-daemon.ts": "ef07b68215f46fb65ba80be21e1d1ac7b430bbd80e3a2c5f801935826bf2c2e2",
+    "packages/client/src/bin/team-codex-relay.ts": "d3bd64433643ec853930a4cf7c1ca3fcf349c550421e6a181f9c8b2ecf762ea7",
+    "packages/client/src/bin/commands/team-relay.ts": "cd0c7de1e073c01b75bc4c81515972e4b5bc91b2a3f80dffdb64b8cd5afd4dfa",
+    "packages/client/src/bin/byok-agent.ts": "425e7ec38280740407155d992547a7e125f8fd85786d6e84e3d5941d4ab2fa19"
+  },
+  "commands": [
+    {
+      "command": "bun run build",
+      "exitCode": 0
+    },
+    {
+      "command": "bun run typecheck",
+      "exitCode": 0
+    },
+    {
+      "command": "bun run test",
+      "exitCode": 1,
+      "failure": "cloud-dataplane worker-packaging.test.ts:47 Wrangler dry-run exceeded existing 5000ms (6895ms observed); no related changes"
+    },
+    {
+      "command": "bun run check:api-surface",
+      "exitCode": 0,
+      "packages": 9
+    },
+    {
+      "command": "bun run check:version-authority",
+      "exitCode": 0
+    },
+    {
+      "command": "repo-harness run check-task-workflow --strict",
+      "exitCode": 0
+    },
+    {
+      "command": "client targeted team-codex-relay and team-workspace tests",
+      "exitCode": 0,
+      "passed": 20
+    },
+    {
+      "command": "remaining package tests after root fail-fast",
+      "exitCode": 0,
+      "packages": [
+        "core",
+        "keys",
+        "protocol",
+        "server",
+        "testkit",
+        "ui-runtime",
+        "sdk"
+      ]
+    },
+    {
+      "command": "remaining example workspace tests after root fail-fast",
+      "exitCode": 0,
+      "packages": [
+        "example-live-activity-host",
+        "example-salesko-connector-broker"
+      ],
+      "passed": 46
+    },
+    {
+      "command": "bun run test (one unchanged recheck after concurrent build/model smoke ended)",
+      "exitCode": 0,
+      "passed": 3642,
+      "skipped": 133
+    }
+  ],
+  "scope": "Source verification passed. Prior unrelated Wrangler timeout retained as stability risk; no fix, timeout relaxation, merge or release.",
+  "finalRootTest": {
+    "exitCode": 0,
+    "passed": 3642,
+    "skipped": 133,
+    "failed": 0
+  },
+  "initialPartialRuns": {
+    "passed": 3481,
+    "skipped": 133,
+    "failed": 1,
+    "note": "Initial fail-fast run plus separately selected SDK/example packages; conformance was first executed by the final full root rerun."
+  }
+}

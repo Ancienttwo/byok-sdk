@@ -3245,6 +3245,8 @@ export declare function parseTeamWorkspaceJoinParams(value: unknown): TeamWorksp
 export declare function parseTeamContextParams(value: unknown): TeamContextParams | undefined;
 export declare function parseTeamMessagePostParams(value: unknown): TeamMessagePostParams | undefined;
 export declare function parseTeamMessageReadParams(value: unknown): TeamMessageReadParams | undefined;
+/** Exact local operator RPC; the shared read-parameter shape has no model identity fields. */
+export declare function parseTeamNotificationSnapshotParams(value: unknown): TeamMessageReadParams | undefined;
 export declare function parseTeamMessageAckParams(value: unknown): TeamMessageAckParams | undefined;
 export declare function parseTeamMessageInspectParams(value: unknown): TeamMessageInspectParams | undefined;
 // ==== @byok-sdk/client dist/daemon/create-daemon.d.ts ====
@@ -7668,6 +7670,15 @@ export declare class LocalTeamWorkspace {
         expiresAt: string;
     }>>;
     postMessage(input: TeamPostMessageInput): Promise<TeamMessageAcceptedReceipt>;
+    /** Metadata-only operator notification view. Never advances delivery or acknowledgement. */
+    notificationSnapshot(input: TeamReadMessagesInput): Promise<{
+        workspaceId: string;
+        memberId: string;
+        registryRevision: TeamWorkspaceRevision;
+        expiresAt: string;
+        acknowledgedThroughSeq: number;
+        latestPeerSeq: number | null;
+    }>;
     readMessages(input: TeamReadMessagesInput): Promise<TeamReadMessagesResult>;
     ackMessages(input: TeamAckMessagesInput): Promise<TeamAckReceipt>;
     private resolveLease;
