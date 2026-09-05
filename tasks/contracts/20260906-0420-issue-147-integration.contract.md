@@ -69,6 +69,7 @@ If both egress offers already create real SQLite task rows through the daemon on
 
 ```yaml
 allowed_paths:
+  - .ai/harness/policy.json
   - plans/
   - tasks/contracts/20260906-0350-issue-147-task-offer-journal.contract.md
   - tasks/reviews/20260906-0350-issue-147-task-offer-journal.review.md
