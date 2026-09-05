@@ -63,6 +63,9 @@
     "audit:credentials": "node scripts/linux-credential-audit.mjs",
     "clean": "rm -rf dist"
   },
+  "optionalDependencies": {
+    "koffi": "3.2.0"
+  },
   "dependencies": {
     "@byok-sdk/core": "workspace:*",
     "@byok-sdk/protocol": "workspace:*",
