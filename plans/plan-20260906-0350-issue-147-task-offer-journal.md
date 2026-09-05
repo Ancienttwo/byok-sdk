@@ -118,7 +118,7 @@ Protocol registry/export and tests; client journal projection and lifecycle regr
 - [x] T1 Freeze independent base and activate plan/bugfix contract.
 - [x] T2 Capture failing regression on unchanged production source.
 - [x] T3 Implement protocol single authority and verify lifecycle, recovery, ordering and dedup.
-- [ ] T4 Run source gates and record integration-ready handoff; release train coordination remains a pre-release gate.
+- [x] T4 Run source gates and record integration-ready handoff; release train coordination remains a pre-release gate.
 
 ## Subject and Isolation
 Base origin/main 440907ee2c44051b427d9ed4fe1431d93ffff72d, refreshed 2026-09-06. Branch codex/issue-147-task-offer-journal, worktree /Users/kito/Projects/byok-sdk-wt-issue-147. Main checkout currently claude/event-spill at 152206c, local main ahead origin/main; neither is our base. Provider catalog and event spill WIP remain untouched. Integration may overlap create-daemon.ts, protocol/index.ts and generated API snapshots: integrate only frozen successor evidence.
@@ -128,3 +128,7 @@ Regression-first real SQLite journal integration; protocol complete-family cover
 
 ## Annotations
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
+
+## Source Delivery
+
+All authorized source work complete at fc404d7ce0599d6ab0e396af39e89a3c8b11ae0c. Single handoff: tasks/notes/issue-147-handoff.md. Plan remains Review because typed acceptance and release integration have not occurred; source checks do not stand in for those gates.

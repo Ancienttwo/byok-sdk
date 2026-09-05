@@ -1,6 +1,6 @@
 # Issue #147 implementation notes
 
-> Status: source gates and architecture/security reviews passed; integration handoff in preparation
+> Status: source gates and architecture/security reviews passed; integration-ready handoff delivered
 > Plan: plans/plan-20260906-0350-issue-147-task-offer-journal.md
 > Contract: tasks/contracts/20260906-0350-issue-147-task-offer-journal.contract.md
 
@@ -32,3 +32,5 @@ Independent branch codex/issue-147-task-offer-journal at /Users/kito/Projects/by
 Latest observed release v0.13.0; no version mutation or publication here. PR149 runtime-event-spill is an active integration neighbor (observed head4342a237f5b97bcb2d7c70900a342bdd8ab55793). Resolve create-daemon.ts/protocol index/API snapshot overlaps against its eventual frozen subject, then run integration acceptance. Review Markdown/source checks do not substitute for the harness-required typed Claude AcceptanceReceipt. No receipt or user waiver is manufactured. Downstream exact-pin and the Salesko acknowledged-interrupted recovery_marker rerun follow a separately coordinated real release. WP3 remains deferred.
 
 Captured text logs retain command output with trailing whitespace normalized for git diff --check. This changes no reported assertions or exit codes.
+
+Source commit: fc404d7ce0599d6ab0e396af39e89a3c8b11ae0c. Single handoff: issue-147-handoff.md.
