@@ -75,6 +75,9 @@ boundary and final implementation; no main-worktree or event-spill edits.
 - [x] Implement and verify confirmation admission and Codex↔Pi round trip.
 - [x] Run required checks and independent acceptance; record remaining scope.
 
+- [x] Integrate main d138ce5; resolve the CHANGELOG-only textual conflict.
+- [ ] Verify the combined candidate and fast-forward main with WIP intact.
+
 Selected native guard/GUI design and tested transport details: see the research.
 
 
@@ -104,7 +107,5 @@ then fast-forward main while preserving the two unrelated dirty context files.
 Reuse the existing native round-trip evidence for unchanged relay code; do not
 claim its older whole-artifact hash proves the merged daemon build.
 
-- [x] Integrate main d138ce5; resolve the CHANGELOG-only textual conflict.
-- [ ] Verify the combined candidate and fast-forward main with WIP intact.
 
 No push, remote cleanup or release is authorized by this slice.
