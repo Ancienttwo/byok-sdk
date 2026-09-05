@@ -1,6 +1,6 @@
 # Task Contract: audit-log-spill-size
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260906-0433-audit-log-spill-size.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
