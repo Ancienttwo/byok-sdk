@@ -155,7 +155,7 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
     client.stop();
   });
 
-  it('a batch with ONLY unknown-type (forward-compat) entries never backs off at retryDelayMs — the existing idle/no-op cadence is unaffected', async () => {
+  it('unknown executable messages back off without acknowledging their sequence', async () => {
     const unknownType = {
       v: 1,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff32',
@@ -186,14 +186,14 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
       return jsonResponse(call <= 2 ? { events: [unknownType], cursor: 1 } : { events: [], cursor: 1 });
     });
 
-    const onSkippedSeq = vi.fn();
+    const onValidationFailedSeq = vi.fn();
     const retryDelayMs = 2000; // deliberately large — if the (wrong) old behavior applied it here too, the assertion below would time out
     const client = new LongPollClient({
       serverUrl: 'http://example.invalid',
       auth,
       getCursor: () => undefined,
       onEnvelope: vi.fn(),
-      onSkippedSeq,
+      onValidationFailedSeq,
       isStalled: () => false, // never stalled — a pure forward-compat skip never engages the stall
       retryDelayMs,
       idleDelayMs: 20,
@@ -207,8 +207,8 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
     // count on purpose — the precise number depends on how many idle-cycle
     // empty polls fit in the window, which isn't this test's concern.)
     await delay(200);
-    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
-    expect(onSkippedSeq).toHaveBeenCalledWith(1);
+    expect(fetchMock.mock.calls.length).toBe(1);
+    expect(onValidationFailedSeq).toHaveBeenCalledWith(1);
 
     client.stop();
   });

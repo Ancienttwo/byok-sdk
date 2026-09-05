@@ -110,8 +110,11 @@ describe('POST /byok/messages', () => {
   it('accepts a full-sized batch', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
+    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+      payload: offerPayload('full batch'),
+    });
     const batch: Envelope[] = Array.from({ length: MAX_MESSAGES_PER_BATCH }, () =>
-      createEnvelope('task.progress', { seq: 1, events: [] }, { taskId: 'task-1' }),
+      createEnvelope('task.progress', { seq: 1, events: [] }, { taskId }),
     );
 
     const response = await send(harness, device.authorization, batch);

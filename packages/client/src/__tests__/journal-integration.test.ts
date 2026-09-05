@@ -18,7 +18,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { createEnvelope, encodeEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
@@ -28,7 +28,7 @@ import { TaskRunner, type AdmissionGuardDecision, type TaskRunnerDeps } from '..
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { JOURNAL_DB_FILENAME } from '../daemon/journal/sqlite-journal';
 import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
-import type { JournalReceipt, LocalTaskJournal, ReceivedEnvelopeRecord } from '../daemon/journal/journal';
+import type { JournalIdentity, JournalReceipt, LocalTaskJournal, LocalTerminalRecord, ReceivedEnvelopeRecord, RecoverableTask } from '../daemon/journal/journal';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
@@ -70,7 +70,8 @@ async function exists(target: string): Promise<boolean> {
  */
 class RecordingJournal implements LocalTaskJournal {
   readonly appended: ReceivedEnvelopeRecord[] = [];
-  readonly terminals: string[] = [];
+  readonly terminals: LocalTerminalRecord[] = [];
+  readonly tasks = new Map<string, RecoverableTask>();
   #gate: Promise<void> | undefined;
   #release: (() => void) | undefined;
 
@@ -86,6 +87,13 @@ class RecordingJournal implements LocalTaskJournal {
 
   async appendEnvelope(record: ReceivedEnvelopeRecord): Promise<JournalReceipt> {
     this.appended.push(record);
+    if (record.opensTask && record.taskId !== undefined) {
+      this.tasks.set(record.taskId, {
+        taskId: record.taskId, envelopeId: record.envelopeId, seq: record.seq,
+        identity: record.identity, localState: 'received', updatedAt: record.receivedAt,
+        envelopeBytes: record.bytes,
+      });
+    }
     if (this.#gate) await this.#gate;
     return {
       envelopeId: record.envelopeId,
@@ -97,8 +105,25 @@ class RecordingJournal implements LocalTaskJournal {
   }
   async recordAdmission(): Promise<void> {}
   async recordTransition(): Promise<void> {}
-  async recordTerminal(record: { taskId: string; payloadHash: string }): Promise<void> {
-    this.terminals.push(`${record.taskId}:${record.payloadHash}`);
+  async recordTerminal(record: LocalTerminalRecord): Promise<void> {
+    if (!this.terminals.some((terminal) => terminal.taskId === record.taskId)) this.terminals.push(record);
+  }
+  async listPendingTerminals(): Promise<LocalTerminalRecord[]> { return this.terminals.filter((terminal) => terminal.truthState !== 'confirmed'); }
+  async confirmTerminal(taskId: string, payloadHash: string): Promise<void> {
+    const terminal = this.terminals.find((candidate) => candidate.taskId === taskId && candidate.payloadHash === payloadHash);
+    if (!terminal) throw new Error('terminal acknowledgement does not match durable terminal');
+    this.terminals[this.terminals.indexOf(terminal)] = { ...terminal, truthState: 'confirmed' };
+  }
+  async rejectTerminal(taskId: string, payloadHash: string, reason: string): Promise<void> {
+    const terminal = this.terminals.find((candidate) => candidate.taskId === taskId && candidate.payloadHash === payloadHash);
+    if (!terminal) throw new Error('terminal acknowledgement does not match durable terminal');
+    this.terminals[this.terminals.indexOf(terminal)] = { ...terminal, truthState: 'failed', lastError: reason };
+  }
+  async listRecoveryTasks(): Promise<[]> { return []; }
+  async readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | undefined> {
+    const task = this.tasks.get(taskId);
+    if (task && (task.identity.tenantId !== identity.tenantId || task.identity.productId !== identity.productId || task.identity.deviceId !== identity.deviceId)) throw new Error('journal enrollment identity mismatch');
+    return task;
   }
   async listRecoverable(): Promise<[]> {
     return [];
@@ -262,7 +287,7 @@ describe('hosted journal integration (L-002)', () => {
       // write, its presence by the time the cloud has the envelope is the
       // ordering.
       expect(journal.terminals).toHaveLength(1);
-      expect(journal.terminals[0]).toMatch(/^task-terminal-1:sha256:/);
+      expect(journal.terminals[0]).toMatchObject({ taskId: 'task-terminal-1', payloadHash: expect.stringMatching(/^sha256:/) });
     });
   });
 
@@ -280,9 +305,9 @@ describe('hosted journal integration (L-002)', () => {
         // recovery exists for.
         const storeDir = await tmpDir('byok-journal-recover-store-');
         const seeded = new SqliteLocalTaskJournal({ storeDir });
-        const bytes = JSON.stringify({ v: 1, id: 'env-crashed', type: 'task.offer', task_id: 'task-recover-1' });
+        const bytes = encodeEnvelope(createEnvelope('task.offer', { instruction: 'recover', policy: { mode: 'auto' } }, { taskId: 'task-recover-1', seq: 7 }));
         await seeded.appendEnvelope({
-          identity: { tenantId: 'tenant-a', productId: 'test-product-journal', deviceId: 'device-1' },
+          identity: { tenantId: 'tenant-test', productId: 'test-product-journal', deviceId: 'device-1' },
           envelopeId: 'env-crashed',
           taskId: 'task-recover-1',
           seq: 7,
@@ -309,12 +334,22 @@ describe('hosted journal integration (L-002)', () => {
         await daemon.pair('pairing-code');
         await daemon.start();
 
-        expect(warn.mock.calls.some((call) => String(call[0]).includes('task-recover-1'))).toBe(true);
+        await server.waitFor((envelope) => envelope.type === 'task.fail' && envelope.task_id === 'task-recover-1');
         // Marked, not resumed: no adapter session was started for it.
         expect(adapter.startCalls).toHaveLength(0);
 
         const after = new SqliteLocalTaskJournal({ storeDir });
         expect(await after.listRecoverable()).toEqual([]);
+        const pending = await after.listPendingTerminals({ tenantId: 'tenant-test', productId: 'test-product-journal', deviceId: 'device-1' });
+        if (pending.length > 0) {
+          expect(pending).toMatchObject([{ taskId: 'task-recover-1', terminalType: 'failed', truthState: 'pending' }]);
+        } else {
+          // A fast accepted POST may already confirm the terminal; the task
+          // row must still retain its terminal state and original bytes.
+          expect(await after.readTask('task-recover-1', { tenantId: 'tenant-test', productId: 'test-product-journal', deviceId: 'device-1' })).toMatchObject({
+            taskId: 'task-recover-1', localState: 'terminal:failed',
+          });
+        }
         await after.close();
         // Marked, not deleted: the row and its bytes are still there.
         const reread = new SqliteLocalTaskJournal({ storeDir });

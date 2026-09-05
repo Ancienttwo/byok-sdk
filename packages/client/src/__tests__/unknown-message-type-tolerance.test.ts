@@ -85,7 +85,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     return { record, cursorStore, received };
   }
 
-  it('long-poll (a): a batch [known, unknown-type, known] processes both known entries in order, never fails the whole batch, and advances the cursor past all three — including a trailing skip with nothing known after it', async () => {
+  it('long-poll (a): a batch [known, unknown-type, known] processes both known entries in order, never fails the whole batch, and keeps the cursor before unknown executable work', async () => {
     const { record, cursorStore, received } = await startLongPollOnly('byok-unknown-type-lp-mixed-store-');
 
     const before = createEnvelope('task.offer', { instruction: 'before', policy: { mode: 'auto' } }, { taskId: 'known-before', seq: 1 });
@@ -111,7 +111,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     expect(received).toHaveLength(2);
 
     await vi.waitFor(async () => {
-      expect(await cursorStore.load(server.url, record.deviceId)).toBe(3);
+      expect(await cursorStore.load(server.url, record.deviceId)).toBe(1);
     });
 
     // Isolate the fix itself: a batch containing ONLY a trailing
@@ -130,7 +130,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     server.pushRawLongPollEvent(trailingUnknown);
 
     await vi.waitFor(async () => {
-      expect(await cursorStore.load(server.url, record.deviceId)).toBe(4);
+      expect(await cursorStore.load(server.url, record.deviceId)).toBe(1);
     });
     // Still exactly the same 2 known envelopes — the trailing skip never
     // produced a THIRD onEnvelope call either.
@@ -371,66 +371,20 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     }
   });
 
-  it('long-poll (c, was: documents the stall — now: asserts the fix): a persistently-redelivered unrecognized-type envelope never blocks forward progress — the cursor keeps advancing through it, and a concurrent known envelope is delivered immediately, no grace period needed', async () => {
-    // Mirrors the REAL @byok-sdk/server's outbox semantics (hub.ts's
-    // collectRelevant): an un-ack'd envelope is RETAINED and redelivered on
-    // every subsequent poll until the client's cursor advances past it — it
-    // is NOT drained after one delivery attempt regardless of whether the
-    // client actually parsed it. TestServer's own long-poll queue is a
-    // simple splice-and-drain per poll (unlike the real retain-until-acked
-    // outbox ring), so this test re-pushes the SAME poison payload on every
-    // cycle itself, to reproduce that persistent-redelivery shape rather
-    // than relying on (and being misled by) the stub's simpler drain model.
+  it('persistent unknown executable work blocks acknowledgement across a later known message', async () => {
     const { record, cursorStore, received } = await startLongPollOnly('byok-unknown-type-lp-recover-store-');
-
-    const poison = {
-      v: 1,
-      id: 'ffffffff-ffff-4fff-8fff-fffffffffffe',
-      ts: new Date().toISOString(),
-      type: 'task.brand_new_future_type',
-      task_id: 'task-future-1',
-      seq: 1,
-      payload: {},
-    };
-
-    let keepPoisoning = true;
-    const poisonTimer = setInterval(() => {
-      if (keepPoisoning) server.pushRawLongPollEvent(poison);
-    }, 10);
-
-    try {
-      // Several retry cycles' worth of real time — proves this is a
-      // genuine, sustained observation window, not a single shot.
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      expect(received).toEqual([]); // still nothing real to process — the poison itself never becomes an envelope
-      // FIX (was the gap): the cursor is NOT stuck — it already advanced
-      // past the poison's own seq, even mid-poisoning, because each
-      // redelivered copy is idempotently skip-advanced (`advanceCursor`'s
-      // own `seq <= this.cursor` no-op guard makes repeat pushes of the
-      // identical seq harmless).
-      await vi.waitFor(async () => {
-        expect(await cursorStore.load(server.url, record.deviceId)).toBe(1);
-      });
-    } finally {
-      keepPoisoning = false;
-      clearInterval(poisonTimer);
-    }
-
-    // A genuinely valid envelope pushed immediately (no grace period for a
-    // "clean cycle" needed anymore — a straggler poison item landing in the
-    // SAME batch as this one no longer corrupts it; only the poison entry
-    // itself is skipped) gets through right away.
-    const taskId = 'task-known-recover';
-    server.pushLongPollEvent(
-      createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId, seq: 2 }),
-    );
-
-    await vi.waitFor(() => {
-      expect(received.some((e) => e.type === 'task.offer' && e.task_id === taskId)).toBe(true);
-    });
-    await vi.waitFor(async () => {
-      expect(await cursorStore.load(server.url, record.deviceId)).toBe(2);
-    });
+    const poison = { v: 1, id: 'ffffffff-ffff-4fff-8fff-fffffffffffe', ts: new Date().toISOString(),
+      type: 'agent.future_executable', task_id: 'task-future-1', seq: 1, payload: {} };
+    server.pushRawLongPollEvent(poison);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(received).toEqual([]);
+    expect(await cursorStore.load(server.url, record.deviceId)).toBeUndefined();
+    server.pushLongPollEvent(createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'known', seq: 2 }));
+    await vi.waitFor(() => expect(received.some((e) => e.task_id === 'known')).toBe(true));
+    expect(await cursorStore.load(server.url, record.deviceId)).toBe(0);
+    server.pushRawLongPollEvent(poison);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(await cursorStore.load(server.url, record.deviceId)).toBe(0);
   });
 
   /**
@@ -522,12 +476,10 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       expect(await cursorStore.load(server.url, record.deviceId)).toBeGreaterThanOrEqual(1);
     });
 
-    // Redeliver the still-un-acked skip too — nothing is stalled anymore,
-    // so it now cleanly advances the cursor the rest of the way to 2.
+    // Redelivery of unknown work is still undisposed and must remain unacked.
     server.pushRawLongPollEvent(unknownSeq2);
-    await vi.waitFor(async () => {
-      expect(await cursorStore.load(server.url, record.deviceId)).toBe(2);
-    });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(await cursorStore.load(server.url, record.deviceId)).toBe(1);
   });
 
   /**
@@ -565,9 +517,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       payload: {},
     };
     server.pushRawLongPollEvent(taskLike);
-
-    await vi.waitFor(async () => {
-      expect(await cursorStore.load(server.url, record.deviceId)).toBe(1);
-    });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(await cursorStore.load(server.url, record.deviceId)).toBeUndefined();
   });
 });

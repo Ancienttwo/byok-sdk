@@ -186,6 +186,7 @@ describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', 
     await journal.recordTerminal({
       taskId: 'task-pending-truth',
       terminalType: 'complete',
+      bytes: 'payload-pending',
       payloadHash: journalHash('payload-pending'),
       truthState: 'pending',
       attempt: 1,
@@ -197,6 +198,7 @@ describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', 
     await journal.recordTerminal({
       taskId: 'task-confirmed',
       terminalType: 'complete',
+      bytes: 'payload-confirmed',
       payloadHash: journalHash('payload-confirmed'),
       truthState: 'confirmed',
       attempt: 1,
@@ -359,20 +361,23 @@ describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', 
       // §12.7.2.1's other half of the hard-pressure row: everything that
       // FINISHES work keeps running while the device is at the hard watermark.
       // Terminal flush:
+      await journal.appendEnvelope(offerRecord('task-hard-finished', 999));
       await journal.recordTerminal({
-        taskId: 'task-hard-idle',
+        taskId: 'task-hard-finished',
         terminalType: 'complete',
+        bytes: 'hard-pressure-terminal',
         payloadHash: journalHash('hard-pressure-terminal'),
-        truthState: 'confirmed',
+        truthState: 'pending',
         attempt: 1,
         recordedAt: '2026-08-07T00:01:00.000Z',
       });
-      expect(readRows(storeDir, "SELECT truth_state FROM journal_terminal WHERE task_id = 'task-hard-idle'")[0]?.truth_state).toBe('confirmed');
+      await journal.confirmTerminal('task-hard-finished', journalHash('hard-pressure-terminal'));
+      expect(readRows(storeDir, "SELECT truth_state FROM journal_terminal WHERE task_id = 'task-hard-finished'")[0]?.truth_state).toBe('confirmed');
       // Export/read:
       expect(await journal.listRecoverable()).toEqual([]);
       // Delete:
-      expect(await journal.pruneConfirmedJournalTask('task-hard-idle')).toBe(true);
-      expect(countRows(storeDir, 'journal_task')).toBe(0);
+      expect(await journal.pruneConfirmedJournalTask('task-hard-finished')).toBe(true);
+      expect(readRows(storeDir, "SELECT task_id FROM journal_task WHERE task_id = 'task-hard-finished'")).toEqual([]);
       // Still hard pressure throughout — none of the above needed the state to
       // relax first.
       expect(engine.state).toBe('hard-pressure');
@@ -760,6 +765,7 @@ describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', 
       await journal.recordTerminal({
         taskId: 'task-unconfirmed',
         terminalType: 'complete',
+        bytes: 'p1',
         payloadHash: journalHash('p1'),
         truthState: 'pending',
         attempt: 1,
@@ -770,6 +776,7 @@ describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', 
       await journal.recordTerminal({
         taskId: 'task-marked',
         terminalType: 'complete',
+        bytes: 'p2',
         payloadHash: journalHash('p2'),
         truthState: 'confirmed',
         attempt: 1,
@@ -782,6 +789,7 @@ describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', 
       await journal.recordTerminal({
         taskId: 'task-eligible',
         terminalType: 'complete',
+        bytes: 'p3',
         payloadHash: journalHash('p3'),
         truthState: 'confirmed',
         attempt: 1,

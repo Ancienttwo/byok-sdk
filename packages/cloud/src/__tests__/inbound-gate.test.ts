@@ -123,6 +123,41 @@ describe('the inbound gate', () => {
     expect(accepted).toEqual([...DAEMON_TO_SERVER_TYPES].filter((type) => type !== 'agent.message.publish'));
   });
 
+  it('step 2: rejects an envelope from a device other than the immutable offer target before claim', async () => {
+    const other = await harness.pairDevice(TENANT_A);
+    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
+
+    const intruderStores = tenantStoresFor(devicePrincipal(TENANT_A, other.deviceId), {
+      core: harness.core,
+      cloud: harness.stores,
+    });
+    expect(await handleInboundEnvelope(intruderStores, other.deviceId, claim(taskId, other.deviceId))).toBe('rejected');
+    expect(await handleInboundEnvelope(intruderStores, other.deviceId, complete(taskId, 'stolen'))).toBe('rejected');
+    await expect(harness.stores.tasks.claim(TENANT_A, {
+      taskId,
+      deviceId: other.deviceId,
+    })).resolves.toMatchObject({
+      deviceId,
+      status: 'offered',
+    });
+
+    const attempt = await harness.cloud.readTaskAttempt(TENANT_A, taskId);
+    expect(attempt?.ownerDeviceId).toBeUndefined();
+    expect(attempt?.status).toBe('offered');
+    expect(await harness.cloud.readTerminalReceipt(TENANT_A, taskId)).toBeUndefined();
+  });
+
+  it('step 2: rejects a claim whose device echo differs from its authenticated principal', async () => {
+    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
+    const spoofed = createEnvelope('task.claim', { deviceId: 'device-spoofed' }, { taskId });
+
+    expect(await handleInboundEnvelope(stores, deviceId, spoofed)).toBe('rejected');
+    await expect(harness.cloud.readTaskAttempt(TENANT_A, taskId)).resolves.toMatchObject({
+      deviceId,
+      status: 'offered',
+    });
+  });
+
   it('step 2: rejects an envelope for a task another device already owns, and does not disturb it', async () => {
     const other = await harness.pairDevice(TENANT_A);
     const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
@@ -141,10 +176,8 @@ describe('the inbound gate', () => {
     expect(await harness.cloud.readTerminalReceipt(TENANT_A, taskId)).toBeUndefined();
   });
 
-  it('step 2: lets an unowned task through — a guessed id must not be force-failable', async () => {
-    // The reference server drops on an ownership MISMATCH only; a task with no
-    // owner (or none at all) is handled by the store's no-op-on-missing.
-    expect(await handleInboundEnvelope(stores, deviceId, progress('task-nobody-offered'))).toBe('accepted');
+  it('step 2: rejects an unknown task before task-scoped projections or dedup', async () => {
+    expect(await handleInboundEnvelope(stores, deviceId, progress('task-nobody-offered'))).toBe('rejected');
     expect(await harness.cloud.readTaskAttempt(TENANT_A, 'task-nobody-offered')).toBeUndefined();
   });
 
@@ -246,10 +279,20 @@ describe('the inbound gate', () => {
       core: harness.core,
       cloud: harness.stores,
     });
-    const envelope = progress('task-shared');
+    await harness.stores.tasks.open(TENANT_A, { taskId: 'task-first-device', deviceId });
+    await harness.stores.tasks.open(TENANT_A, { taskId: 'task-other-device', deviceId: other.deviceId });
+    const envelopeId = '10000000-0000-4000-8000-000000000123';
+    const first = createEnvelope('task.progress', { seq: 1, events: [] }, {
+      id: envelopeId,
+      taskId: 'task-first-device',
+    });
+    const second = createEnvelope('task.progress', { seq: 1, events: [] }, {
+      id: envelopeId,
+      taskId: 'task-other-device',
+    });
 
-    expect(await handleInboundEnvelope(stores, deviceId, envelope)).toBe('accepted');
-    expect(await handleInboundEnvelope(otherStores, other.deviceId, envelope)).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, deviceId, first)).toBe('accepted');
+    expect(await handleInboundEnvelope(otherStores, other.deviceId, second)).toBe('accepted');
   });
 
   it('step 3: dedup is per tenant — the same device id in another tenant has its own ring', async () => {
@@ -257,6 +300,8 @@ describe('the inbound gate', () => {
       core: harness.core,
       cloud: harness.stores,
     });
+    await harness.stores.tasks.open(TENANT_A, { taskId: 'task-shared', deviceId });
+    await harness.stores.tasks.open(TENANT_B, { taskId: 'task-shared', deviceId });
     const envelope = progress('task-shared');
 
     expect(await handleInboundEnvelope(stores, deviceId, envelope)).toBe('accepted');
@@ -299,7 +344,7 @@ describe('the inbound gate', () => {
       cloud: harness.stores,
     });
 
-    expect(await handleInboundEnvelope(foreign, deviceId, claim(taskId, deviceId))).toBe('accepted');
+    expect(await handleInboundEnvelope(foreign, deviceId, claim(taskId, deviceId))).toBe('rejected');
 
     // Tenant A's attempt is untouched, and tenant B gained no row for the id
     // it guessed.

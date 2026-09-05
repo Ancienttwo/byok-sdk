@@ -1,4 +1,4 @@
-import {
+import { isTaskOfferType,
   partitionAgentEvents,
   TASK_TRANSITIONS,
   type AgentEvent,
@@ -239,8 +239,9 @@ export class DaemonObserver {
    * where those are actually reported from.
    */
   handleInboundEnvelope(envelope: Envelope): void {
-    if (envelope.type !== 'task.offer' && envelope.type !== 'task.offer_with_toolsets' && envelope.type !== 'task.offer_for_agent') return;
-    const taskId = envelope.task_id;
+    if (!isTaskOfferType(envelope.type)) return;
+    const offer = envelope as Extract<Envelope, { type: import('@byok-sdk/protocol').TaskOfferType }>;
+    const taskId = offer.task_id;
 
     // Redelivery guard (protocol §9, at-least-once delivery): this observer
     // has no visibility into TaskRunner's own private `finishedTaskIds`/
@@ -256,8 +257,8 @@ export class DaemonObserver {
     // regress a finished task back to `Offered`.
     if (this.taskInfo.has(taskId)) return;
 
-    this.upsertTask(taskId, { state: 'Offered', runtime: envelope.payload.runtime });
-    this.emit({ kind: 'offered', ts: nowIso(), taskId, runtime: envelope.payload.runtime });
+    this.upsertTask(taskId, { state: 'Offered', runtime: offer.payload.runtime });
+    this.emit({ kind: 'offered', ts: nowIso(), taskId, runtime: offer.payload.runtime });
   }
 
   /**

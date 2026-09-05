@@ -83,6 +83,29 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
     ).toThrow('Unsupported BYOK SQLite schema version');
   });
 
+  it('keeps the immutable target device fence across restart', async () => {
+    const path = databasePath();
+    const clock = createMutableClock();
+    const crypto = createWebCrypto();
+    const first = createSqliteEmbeddedStores({ path }, { clock, crypto });
+    await first.cloud.tasks.open(TENANT, { taskId: 'task-target-fence', deviceId: 'device-target' });
+    await first.close();
+
+    const reopened = createSqliteEmbeddedStores({ path }, { clock, crypto });
+    await expect(reopened.cloud.tasks.claim(TENANT, {
+      taskId: 'task-target-fence',
+      deviceId: 'device-intruder',
+    })).resolves.toMatchObject({
+      deviceId: 'device-target',
+      status: 'offered',
+    });
+    await expect(reopened.cloud.tasks.get(TENANT, 'task-target-fence')).resolves.toMatchObject({
+      deviceId: 'device-target',
+      status: 'offered',
+    });
+    await reopened.close();
+  });
+
   it('reopens task, cancellation delivery, object manifest, blob metadata, and bytes', async () => {
     const path = databasePath();
     const clock = createMutableClock();

@@ -55,7 +55,7 @@ describe('drainOutbox chunks outbound sends to the server batch cap (finding P1,
     real = await startRealServer({
       productId: 'test-product',
       longPollHoldMs: 200,
-      rateLimit: { messagesPerSecond: 1000, burst: 500 },
+      rateLimit: { messagesPerSecond: 10000, burst: 10000 },
     });
 
     const storeDir = await tmpDir('byok-outbox-chunk-store-');

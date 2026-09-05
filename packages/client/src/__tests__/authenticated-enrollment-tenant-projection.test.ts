@@ -48,6 +48,11 @@ class CapturingJournal implements LocalTaskJournal {
   async recordAdmission(): Promise<void> {}
   async recordTransition(): Promise<void> {}
   async recordTerminal(): Promise<void> {}
+  async listPendingTerminals(): Promise<[]> { return []; }
+  async confirmTerminal(): Promise<void> {}
+  async rejectTerminal(): Promise<void> {}
+  async listRecoveryTasks(): Promise<[]> { return []; }
+  async readTask(): Promise<undefined> { return undefined; }
   async listRecoverable(): Promise<[]> { return []; }
   async markRecovered(): Promise<void> {}
   async measureUsage(): Promise<never> { throw new Error('not used'); }
