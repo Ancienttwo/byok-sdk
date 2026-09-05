@@ -182,6 +182,67 @@ describe('TaskRunner: maxInlineEventBytes spill to the blob plane', () => {
     diagnostic.mockRestore();
   });
 
+  /**
+   * `BlobRefSchema.blobId` has no length bound, so a blob store can answer a
+   * successful upload with a locator that does not fit `maxInlineEventBytes`.
+   * The spill policy used to throw on that, and the throw escaped
+   * `TaskRunner.pump` into the runtime-boundary catch — failing a task that
+   * actually succeeded, and blaming the adapter. It must degrade to
+   * `unstoredReason` instead.
+   */
+  it('completes the task when the blob store returns a locator too large to inline', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    const uploads: RecordedUpload[] = [];
+    const hugeBlobId = `blob_${'L'.repeat(3995)}`;
+    const client: BlobResolver = {
+      resolveInstruction: async () => {
+        throw new Error('not used in this test');
+      },
+      uploadArtifact: async (content, contentType) => {
+        const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : content;
+        uploads.push({ content: new TextDecoder().decode(bytes), contentType });
+        const ref: BlobRef = {
+          blobId: hugeBlobId,
+          contentHash: `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
+          size: bytes.length,
+          contentType,
+        };
+        return ref;
+      },
+    };
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    // A 4 KiB cap: the 4000-character locator alone overruns it.
+    const runner = await makeRunner(adapter, sent, client, {
+      maxInlineEventBytes: 4096,
+      maxTaskOutputBytes: 128 * 1024,
+    });
+
+    await runner.handleEnvelope(
+      createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'task-locator', seq: 1 }),
+    );
+    const session = adapter.sessions[0];
+    session!.emit({ type: 'tool_result', tool: 'bash', toolCallId: 'call-locator', output: OUTPUT_300_KIB });
+    session!.emit({ type: 'turn_end' });
+
+    await vi.waitFor(() => {
+      expect(sent.some((e) => e.type === 'task.complete' && e.task_id === 'task-locator')).toBe(true);
+    });
+    // The regression: this used to be a task.fail carrying "event spill failed to bound".
+    expect(sent.some((e) => e.type === 'task.fail')).toBe(false);
+
+    const toolResult = progressEvents(sent, 'task-locator').find((event) => event.type === 'tool_result');
+    const spill = (toolResult as { spill?: Record<string, unknown> }).spill;
+    expect(spill?.['blob']).toBeUndefined();
+    expect(spill?.['unstoredReason']).toBe('spill locator too large for maxInlineBytes: blobId 4000 chars');
+    expect(JSON.stringify(toolResult)).not.toContain(hugeBlobId);
+    expect(Buffer.byteLength(JSON.stringify(toolResult), 'utf8')).toBeLessThanOrEqual(4096);
+    // The bytes are still in the blob plane; only the inline locator was dropped.
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0]?.content).toBe(JSON.stringify(OUTPUT_300_KIB));
+    diagnostic.mockRestore();
+  });
+
   it('leaves an under-cap tool_result byte-identical on the wire', async () => {
     const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];

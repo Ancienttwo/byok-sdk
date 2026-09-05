@@ -75,10 +75,17 @@ BYOK_PROTOCOL_UPDATE_GOLDEN=1 bun run --filter @byok-sdk/protocol test -- freeze
     code-point boundary, calls `log` once, and continues — the preview still
     ships and the task is not failed.
   - A final assertion throws a plain `Error` naming the numbers if the
-    replacement still exceeds the cap. Made unreachable in practice by a
-    pre-check: if the event minus the spilled field already meets or exceeds the
-    cap (a pathological `tool` name, say), the field is not what makes the event
-    oversized — the event is forwarded unchanged and logged, with no upload.
+    replacement still exceeds the cap. Made unreachable by construction via a
+    skeleton gate: if `byteLength(skeleton) + MAX_SPILL_DESCRIPTOR_BYTES (768) >
+    cap` — the event minus the spilled field plus the descriptor's proven
+    worst-case encoded width — the field is not what can bring the event under
+    the cap, so the event is forwarded unchanged and logged, with no upload.
+    The trade: events whose non-spillable parts land in the band
+    `(cap − 768, cap)` are now forwarded unchanged and logged, where the older
+    `>= cap` gate would have spilled them with a tiny preview or driven them
+    into the throw path. Reaching that band takes a ~3.3 KB `tool` name at the
+    4096-byte minimum cap, or ~64 KB at the default — and it buys a provable
+    bound instead of a reachable throw.
 - `packages/client/src/daemon/task-runner.ts`
   - New optional `TaskRunnerDeps.maxInlineEventBytes` + private
     `get maxInlineEventBytes()` defaulting to `DEFAULT_MAX_INLINE_EVENT_BYTES`.
@@ -299,6 +306,244 @@ DIFF_CHECK_EXIT=0
 
 `repo-harness run check-task-workflow --strict` was **not** run — the dispatch
 explicitly withheld it. Nothing was committed.
+
+## Gate Round 1
+
+Two acceptance findings against `packages/client/src/daemon/event-spill.ts`,
+both fixed in the linked contract worktree
+`/Users/kito/Projects/byok-sdk-wt-runtime-event-spill` (branch
+`codex/runtime-event-spill`, base `152206c`). Nothing committed.
+
+### Finding 1 — the "Unreachable" bound-failure throw was reachable
+
+The comment at the old `:235-243` claimed the final cap check was "Unreachable
+for any `maxInlineBytes >= MIN_MAX_INLINE_EVENT_BYTES`". False.
+`BlobRefSchema.blobId` is an unbounded server-chosen string, so a SUCCESSFUL
+upload can hand back a locator whose descriptor alone exceeds the cap.
+Reproduced at cap 4096 with a 3800-character `blobId`: the module threw
+`event spill failed to bound a tool_result event: replacement is 4137 bytes
+against a 4096-byte cap`. Because `spillOversizedEvent` runs inside
+`TaskRunner.pump`, that throw escaped into the runtime-boundary catch and
+failed the task — misattributing a telemetry-plane problem to the adapter.
+
+Fix, in three coupled parts:
+
+1. **`MAX_UNSTORED_REASON_BYTES` is now charged on the ENCODED width**
+   (`JSON.stringify(reason)` minus its two quotes), not the raw UTF-8 width.
+   A raw bound was not enough to make anything provable: a runtime error
+   message made of control characters escapes to six bytes per character, so
+   a "512-byte" reason could cost 3072 bytes on the wire. `boundReasonText`
+   rescales the prefix budget by the OBSERVED escape ratio rather than
+   subtracting the overshoot — subtracting would zero out a maximally
+   escaping reason entirely. All-ASCII reasons still truncate at exactly 512
+   bytes, so the pre-existing max-length assertion is unchanged.
+2. **`MAX_SPILL_DESCRIPTOR_BYTES = 768`** (exported), itemized in its own
+   doc comment: `,"spill":` 9 + `{` 1 + `"field":"output",` 17 +
+   `"totalBytes":<=16d>,` 30 + `"omittedBytes":<=16d>,` 32 +
+   `"contentType":"application/json",` 33 + `"unstoredReason":` 17 + encoded
+   reason <= 514 + `}` 1 = **654**, rounded up so digit growth cannot
+   invalidate it. The skeleton gate is strengthened from
+   `byteLength(skeleton) >= cap` to
+   `byteLength(skeleton) + MAX_SPILL_DESCRIPTOR_BYTES > cap`.
+3. **The measure-and-shrink loop is extracted into `bound(half)` and run
+   twice.** When the first run (with the real `BlobRef`) still exceeds the
+   cap — whether because the empty-preview overhead already exceeds it, or
+   because the loop bottomed out at an empty preview — the descriptor falls
+   back to `unstoredReason: "spill locator too large for maxInlineBytes:
+   blobId <N> chars"`, `deps.log` fires once, and the same loop re-runs. The
+   blob stays uploaded; only the inline locator is dropped, and the reason
+   reports the SIZE rather than repeating the oversized id.
+
+The false "Unreachable" claim is deleted. The final check is kept as a
+fail-closed assertion and is now dead code by construction, with the argument
+in the comment: reaching it requires an `unstoredReason` descriptor (the
+`blob` branch already fell back), that descriptor costs at most 768 encoded
+bytes, the skeleton gate refused to spill unless `skeleton + 768 <= cap`, and
+because `spill` serializes last an empty-preview event is EXACTLY
+`skeleton + ,"spill":{...}`. The arithmetic is asserted by a test
+("fits the cap when the skeleton is at the gate AND the reason escapes
+maximally"), not left to the prose.
+
+### Finding 2 — unguarded `JSON.stringify`
+
+`AgentEvent.input` / `.output` are `z.unknown()`, so an in-process custom
+`AgentSession` can supply a BigInt, a cycle, or a throwing `toJSON`. Every
+`JSON.stringify` in the module was unguarded — the one at the old `:139` threw
+a `TypeError` before any size check, on the same `TaskRunner.pump` path whose
+sibling `estimateEventBytes` documents "never throws".
+
+Fix: one module-level `safeStringify` returning `string | undefined`, applied
+at all four call sites (whole event, spilled value, skeleton, and both
+measurements inside `bound`). Every failure logs once via `deps.log` and
+returns the event unchanged — the same treatment given to values
+`JSON.stringify` legitimately declines to encode, since in both cases the
+module cannot measure and therefore cannot bound the event.
+
+### Tests added
+
+`packages/client/src/__tests__/event-spill.test.ts`
+
+- `falls back to unstoredReason, keeps the upload, and never throws` — cap
+  4096, upload succeeds with a 4000-character `blobId`; result <= cap,
+  `unstoredReason` is exactly `spill locator too large for maxInlineBytes:
+  blobId 4000 chars`, no `spill.blob`, the reason does not contain the id,
+  upload called once, `log` called once, and a real preview still ships.
+- `forwards a BigInt payload unchanged, logs once, and never uploads`
+- `forwards a circular payload unchanged, logs once, and never uploads`
+- `forwards a payload whose toJSON throws, without failing the caller`
+- `fits the cap when the skeleton is at the gate AND the reason escapes
+  maximally` — a 3240-character tool name puts the skeleton just inside the
+  gate, the upload fails with 9000 `U+0001` characters (six bytes each once
+  escaped), and the test asserts both the encoded-reason bound and that the
+  whole `,"spill":{...}` fragment stays within `MAX_SPILL_DESCRIPTOR_BYTES`.
+
+`packages/client/src/__tests__/task-runner-event-spill.test.ts`
+
+- `completes the task when the blob store returns a locator too large to
+  inline` — end to end through `TaskRunner.pump` at a 4 KiB cap with a
+  4000-character `blobId`: `task.complete` is sent, no `task.fail`, the wire
+  event is <= 4096 bytes and carries `unstoredReason` without the id, and the
+  300 KiB payload is still in the blob plane.
+
+### Evidence (verbatim exit lines, this run)
+
+```
+$ bun run --filter @byok-sdk/client typecheck
+@byok-sdk/client typecheck: Exited with code 0
+TYPECHECK_EXIT=0
+```
+
+```
+$ bun run --filter @byok-sdk/client test -- event-spill task-runner-event-spill
+@byok-sdk/client test:  Test Files  2 passed (2)
+@byok-sdk/client test:       Tests  26 passed (26)
+@byok-sdk/client test: Exited with code 0
+TARGETED_TEST_EXIT=0
+```
+
+```
+$ bun run --filter @byok-sdk/client test
+@byok-sdk/client test:  Test Files  170 passed | 2 skipped (172)
+@byok-sdk/client test:       Tests  1684 passed | 11 skipped (1695)
+@byok-sdk/client test: Exited with code 0
+CLIENT_TEST_EXIT=0
+```
+
+```
+$ bun run check:api-surface
+$ node scripts/api-surface/check-api-surface.mjs
+api-surface: 9 package golden(s) match the built declarations
+API_SURFACE_EXIT=0
+```
+
+```
+$ git diff --check
+DIFF_CHECK_EXIT=0
+```
+
+`bun run build` was run first: the workspace `typecheck` resolves
+`@byok-sdk/core` / `@byok-sdk/protocol` through their `dist` declarations, so
+a cold worktree fails with `TS2307` until it is built.
+`repo-harness run check-task-workflow --strict` was not run — outside this
+dispatch. Nothing was committed.
+
+### Ledger and contract updates in this round
+
+- `tasks/todos.md` — two Deferred Goals rows appended. The first names
+  `ToolTimelineItem` (`packages/ui-runtime/src/types.ts:60-67`), not
+  `TimelineToolCall`: there is no such symbol in
+  `packages/ui-runtime/src/timeline.ts`. The second records that
+  `redactAgentEvent` (`packages/client/src/bin/audit-log.ts:209-211`) measures
+  the post-spill preview and should record `spill.totalBytes` instead.
+- `tasks/contracts/20260906-0253-runtime-event-spill.contract.md` — Rollback
+  Point commit `440907e` -> `5af5c5c`.
+
+## Gate Round 2
+
+Two documentation-accuracy findings against the round-1 fix. Both are text
+only — no behavior changed. Fixed in this worktree
+(`/Users/kito/Projects/byok-sdk-wt-runtime-event-spill`, branch
+`codex/runtime-event-spill`). Nothing committed.
+
+### Finding 1 — `unstoredReason` was documented as upload failure only
+
+`packages/protocol/src/agent-event.ts:33-35` and `docs/protocol.md` §11.6
+("Storage failure is described, never silent") both said `unstoredReason`
+means the upload did not succeed and the content is gone from the wire. Round
+1 added a second producer: a SUCCESSFUL upload whose returned `blobId` makes
+the descriptor exceed the inline cap also falls back to `unstoredReason`
+(`spill locator too large for maxInlineBytes: blobId <N> chars`), with the
+blob still stored. A consumer reading the old wording would conclude the
+content was lost when it is in fact in the blob plane, just not addressable
+from this event.
+
+Fix: both texts now state that `unstoredReason` means the omitted bytes are
+not readable *from this event* — either the upload failed, or it succeeded
+but the returned locator did not fit the daemon's inline cap — and that
+`spill.blob` is absent either way. The 512-character bound statement in
+§11.6 is unchanged.
+
+### Finding 2 — the notes described the superseded skeleton gate
+
+`tasks/notes/20260906-0253-runtime-event-spill.notes.md:78-81` still
+described the pre-round-1 gate ("if the event minus the spilled field already
+meets or exceeds the cap … forwarded unchanged"). The shipped gate is
+`byteLength(skeleton) + MAX_SPILL_DESCRIPTOR_BYTES (768) > cap`.
+
+Fix: the bullet now states the current gate and records the trade it makes —
+events whose non-spillable parts land in `(cap − 768, cap)` are forwarded
+unchanged and logged, where the old gate would have spilled them with a tiny
+preview or driven them into the throw path. Reaching that band needs a
+~3.3 KB `tool` name at the 4096-byte minimum cap or ~64 KB at the default,
+and it buys a provable bound instead of a reachable throw.
+
+### Evidence (verbatim exit lines, this run)
+
+```
+$ bun run build
+byok-sdk build: ESM ⚡️ Build success in 18ms
+byok-sdk build: Exited with code 0
+BUILD_EXIT=0
+```
+
+```
+$ node scripts/api-surface/check-api-surface.mjs --update --package protocol
+api-surface: updated 1 golden(s): protocol
+UPDATE_PROTOCOL_EXIT=0
+
+$ node scripts/api-surface/check-api-surface.mjs --update --package cloud
+api-surface: 1 golden(s) already up to date
+UPDATE_CLOUD_EXIT=0
+```
+
+`api-surface/cloud.d.ts` did not move: the cloud golden re-exports the
+protocol schema declarations without carrying this jsdoc block, so only
+`api-surface/protocol.d.ts` changed (6 insertions, 3 deletions, all comment
+text).
+
+```
+$ bun run check:api-surface
+api-surface: 9 package golden(s) match the built declarations
+API_SURFACE_EXIT=0
+```
+
+```
+$ bun run --filter @byok-sdk/protocol test
+@byok-sdk/protocol test:  Test Files  21 passed (21)
+@byok-sdk/protocol test:       Tests  356 passed (356)
+@byok-sdk/protocol test: Exited with code 0
+PROTOCOL_TEST_EXIT=0
+```
+
+```
+$ git diff --check
+DIFF_CHECK_EXIT=0
+```
+
+```
+$ git diff api-surface/ | grep '^[-+]' | grep -v '^\(---\|+++\)' | grep -v '\*'
+(no output — the api-surface diff is jsdoc text only)
+```
 
 ## Evidence Links
 

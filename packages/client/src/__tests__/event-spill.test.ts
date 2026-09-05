@@ -4,6 +4,7 @@ import type { AgentEvent, BlobRef } from '@byok-sdk/protocol';
 import { AgentEventSchema } from '@byok-sdk/protocol';
 import {
   DEFAULT_MAX_INLINE_EVENT_BYTES,
+  MAX_SPILL_DESCRIPTOR_BYTES,
   MIN_MAX_INLINE_EVENT_BYTES,
   spillOversizedEvent,
   type EventSpillDeps,
@@ -323,5 +324,142 @@ describe('spillOversizedEvent: cap invariant at the configured minimum', () => {
     expect(AgentEventSchema.safeParse(spilled).success).toBe(true);
     const spill = (spilled as { spill: Record<string, unknown> }).spill;
     expect(utf8(spill['unstoredReason'] as string)).toBe(512);
+  });
+
+  /**
+   * The arithmetic behind `MAX_SPILL_DESCRIPTOR_BYTES`, asserted instead of
+   * argued: an event whose skeleton sits just under the gate, spilling with a
+   * reason built entirely from characters that JSON escapes to six bytes
+   * each — the widest an `unstoredReason` descriptor can ever be.
+   */
+  it('fits the cap when the skeleton is at the gate AND the reason escapes maximally', async () => {
+    const tool = 'T'.repeat(3240);
+    const input = 'q'.repeat(20_000);
+    const skeleton = JSON.stringify({
+      type: 'tool_use',
+      tool,
+      input: { preview: { head: '', tail: '' } },
+    });
+    // Just inside the gate the module enforces before it will spill at all.
+    expect(utf8(skeleton) + MAX_SPILL_DESCRIPTOR_BYTES).toBeLessThanOrEqual(MIN_MAX_INLINE_EVENT_BYTES);
+    expect(utf8(skeleton) + MAX_SPILL_DESCRIPTOR_BYTES).toBeGreaterThan(MIN_MAX_INLINE_EVENT_BYTES - 64);
+
+    const log = vi.fn();
+    const { blobClient } = recordingBlobClient({ fail: new Error('\u0001'.repeat(9000)) });
+    const spilled = await spillOversizedEvent(
+      { type: 'tool_use', tool, input },
+      { maxInlineBytes: MIN_MAX_INLINE_EVENT_BYTES, blobClient, taskId: 'task-max-escape', log },
+    );
+
+    expectFits(spilled, MIN_MAX_INLINE_EVENT_BYTES);
+    expect(AgentEventSchema.safeParse(spilled).success).toBe(true);
+    const spill = (spilled as { spill: Record<string, unknown> }).spill;
+    const reason = spill['unstoredReason'] as string;
+    expect(reason.length).toBeGreaterThan(0);
+    expect(reason).toContain('\u0001');
+    // The bound that MAX_SPILL_DESCRIPTOR_BYTES is derived from: encoded
+    // width, not raw width. Raw would be ~85 bytes here and prove nothing.
+    expect(utf8(JSON.stringify(reason)) - 2).toBeLessThanOrEqual(512);
+    // And the whole descriptor really does stay inside its declared bound.
+    expect(utf8(`,"spill":${JSON.stringify(spill)}`)).toBeLessThanOrEqual(MAX_SPILL_DESCRIPTOR_BYTES);
+  });
+});
+
+/**
+ * `BlobRefSchema.blobId` is a server-chosen string with NO length bound, so a
+ * successful upload can hand back a locator that does not fit the very cap
+ * this module exists to hold. That must never throw: `spillOversizedEvent`
+ * runs inside `TaskRunner.pump`, where an escaping error is caught at the
+ * runtime boundary and fails the task, blaming the adapter for what is a
+ * telemetry-plane problem.
+ */
+describe('spillOversizedEvent: the blob locator itself does not fit', () => {
+  it('falls back to unstoredReason, keeps the upload, and never throws', async () => {
+    const log = vi.fn();
+    const blobId = `blob_${'L'.repeat(3995)}`;
+    expect(blobId.length).toBe(4000);
+    const { blobClient, calls } = recordingBlobClient({ blobId });
+    const output = 'z'.repeat(20_000);
+    const serialized = JSON.stringify(output);
+
+    const spilled = await spillOversizedEvent(
+      { type: 'tool_result', tool: 'bash', toolCallId: 'call-huge-locator', output },
+      { maxInlineBytes: MIN_MAX_INLINE_EVENT_BYTES, blobClient, taskId: 'task-huge-locator', log },
+    );
+
+    expectFits(spilled, MIN_MAX_INLINE_EVENT_BYTES);
+    expect(AgentEventSchema.safeParse(spilled).success).toBe(true);
+
+    const spill = (spilled as { spill: Record<string, unknown> }).spill;
+    expect(spill['blob']).toBeUndefined();
+    const reason = spill['unstoredReason'] as string;
+    expect(reason).toBe('spill locator too large for maxInlineBytes: blobId 4000 chars');
+    // The reason explains the SIZE; repeating the id would reintroduce the
+    // very bytes that did not fit.
+    expect(reason).not.toContain(blobId);
+    expect(utf8(reason)).toBeLessThanOrEqual(512);
+
+    // The blob is still stored — only the inline locator was dropped.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.content).toBe(serialized);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0]?.[0]).toContain('spill locator too large');
+
+    // A real preview still ships.
+    const { head, tail } = previewOf(spilled, 'output');
+    expect(utf8(head) + utf8(tail)).toBeGreaterThan(0);
+    expect(serialized.startsWith(head)).toBe(true);
+    expect(serialized.endsWith(tail)).toBe(true);
+  });
+});
+
+/**
+ * `AgentEvent.input` / `.output` are `z.unknown()`, so an in-process custom
+ * `AgentSession` can hand this module a value `JSON.stringify` refuses to
+ * encode. `estimateEventBytes` documents that it never throws; this module
+ * sits on the same path and must not either.
+ */
+describe('spillOversizedEvent: payloads JSON.stringify cannot encode', () => {
+  it('forwards a BigInt payload unchanged, logs once, and never uploads', async () => {
+    const log = vi.fn();
+    const event = { type: 'tool_result', tool: 'bash', toolCallId: 'c-bigint', output: { n: 10n } } as unknown as AgentEvent;
+    const d = deps({ maxInlineBytes: MIN_MAX_INLINE_EVENT_BYTES, log });
+
+    const spilled = await spillOversizedEvent(event, d);
+
+    expect(spilled).toBe(event);
+    expect(d.calls).toHaveLength(0);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0]?.[0]).toContain('cannot be JSON-serialized');
+  });
+
+  it('forwards a circular payload unchanged, logs once, and never uploads', async () => {
+    const log = vi.fn();
+    const cycle: Record<string, unknown> = { big: 'x'.repeat(20_000) };
+    cycle['self'] = cycle;
+    const event = { type: 'tool_use', tool: 'write_file', input: cycle } as unknown as AgentEvent;
+    const d = deps({ maxInlineBytes: MIN_MAX_INLINE_EVENT_BYTES, log });
+
+    const spilled = await spillOversizedEvent(event, d);
+
+    expect(spilled).toBe(event);
+    expect(d.calls).toHaveLength(0);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0]?.[0]).toContain('cannot be JSON-serialized');
+  });
+
+  it('forwards a payload whose toJSON throws, without failing the caller', async () => {
+    const log = vi.fn();
+    const hostile = {
+      toJSON() {
+        throw new Error('toJSON exploded');
+      },
+    };
+    const event = { type: 'tool_result', tool: 'bash', output: hostile } as unknown as AgentEvent;
+    const d = deps({ maxInlineBytes: MIN_MAX_INLINE_EVENT_BYTES, log });
+
+    await expect(spillOversizedEvent(event, d)).resolves.toBe(event);
+    expect(d.calls).toHaveLength(0);
+    expect(log).toHaveBeenCalledTimes(1);
   });
 });

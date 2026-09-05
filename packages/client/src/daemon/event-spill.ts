@@ -24,8 +24,46 @@ export const DEFAULT_MAX_INLINE_EVENT_BYTES = 64 * 1024;
  */
 export const MIN_MAX_INLINE_EVENT_BYTES = 4096;
 
-/** Hard ceiling on `AgentEventSpill.unstoredReason`, mirroring the protocol schema's own bound. */
+/**
+ * Hard ceiling on `AgentEventSpill.unstoredReason`, mirroring the protocol
+ * schema's own bound. Charged against the reason's JSON-ENCODED width (minus
+ * its two quotes), not its raw UTF-8 width: a runtime error message can carry
+ * control characters that `JSON.stringify` expands to six bytes each, so a
+ * raw-byte bound would let a 512-byte reason cost 3072 bytes on the wire and
+ * invalidate the descriptor arithmetic below.
+ */
 const MAX_UNSTORED_REASON_BYTES = 512;
+
+/**
+ * Worst-case JSON cost of the `,"spill":{…}` fragment when the descriptor
+ * carries an `unstoredReason` rather than a server-chosen `BlobRef`.
+ *
+ * Every part is bounded by construction, which a `BlobRef` is not — its
+ * `blobId` is an arbitrary-length server-chosen string:
+ *
+ * ```
+ *   ,"spill":                                  9
+ *   {                                          1
+ *   "field":"output",                         17   ("output" is the longer of the two)
+ *   "totalBytes":<=16 digits>,                30
+ *   "omittedBytes":<=16 digits>,              32   (never exceeds totalBytes)
+ *   "contentType":"application/json",         33   (a module constant)
+ *   "unstoredReason":                         17
+ *   "<=512 bytes of escaped reason>"         514   (MAX_UNSTORED_REASON_BYTES + 2 quotes)
+ *   }                                          1
+ *                                           ----
+ *                                            654
+ * ```
+ *
+ * Rounded up to 768 so digit-count growth cannot invalidate it. Because the
+ * event is spread first and `spill` written last, a bounded event is EXACTLY
+ * the empty-preview skeleton plus this fragment — so refusing to spill unless
+ * `skeleton + MAX_SPILL_DESCRIPTOR_BYTES <= maxInlineBytes` is what makes the
+ * final cap check unreachable rather than merely unlikely. `event-spill.test.ts`
+ * asserts this against a maximally escaping reason instead of trusting the
+ * comment.
+ */
+export const MAX_SPILL_DESCRIPTOR_BYTES = 768;
 
 export interface EventSpillDeps {
   /** Effective inline ceiling for this daemon; already validated at the `DaemonConfig` layer. */
@@ -42,8 +80,32 @@ export interface EventSpillDeps {
 
 type SpillableEvent = Extract<AgentEvent, { type: 'tool_use' | 'tool_result' }>;
 
+/** The exactly-one-of half of an `AgentEventSpill`: where the omitted bytes are, or why they are nowhere. */
+type StoredHalf = Pick<AgentEventSpill, 'blob'> | Pick<AgentEventSpill, 'unstoredReason'>;
+
 function byteLength(value: string): number {
   return Buffer.byteLength(value, 'utf8');
+}
+
+/**
+ * `JSON.stringify` that reports failure instead of throwing.
+ *
+ * `AgentEvent.input` / `.output` are `z.unknown()` — an in-process
+ * `AgentSession` can put a BigInt, a cycle, or a throwing `toJSON` in there,
+ * and `JSON.stringify` answers each of those with a `TypeError`. This module
+ * runs inside `TaskRunner.pump`, where an escaping throw is caught at the
+ * runtime boundary and fails the whole task, misattributing a telemetry
+ * problem to the adapter. `undefined` covers both the throw and the values
+ * `JSON.stringify` legitimately declines to encode (`undefined`, a function,
+ * a symbol); every caller treats them the same way, because in both cases
+ * this module cannot measure — and therefore cannot bound — the event.
+ */
+function safeStringify(value: unknown): string | undefined {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
 }
 
 /** UTF-8 width of one code point — matches what `Buffer.byteLength` charges, including 3 bytes for a lone surrogate. */
@@ -98,14 +160,44 @@ function utf8Suffix(value: string, maxBytes: number): string {
   return value.slice(index);
 }
 
-/** Bounded, non-empty diagnostic string for a failed upload — truncated on a code-point boundary so the reason itself can never push the event back over the cap. */
+/**
+ * Bounded, non-empty diagnostic string — truncated on a code-point boundary so
+ * the reason itself can never push the event back over the cap.
+ *
+ * The bound is on the ENCODED width (`JSON.stringify(reason)` minus its two
+ * quotes), so `MAX_SPILL_DESCRIPTOR_BYTES` holds even for a reason built
+ * entirely from characters that escape to six bytes each. For an all-ASCII
+ * reason the encoded width equals the raw width, so the common case still
+ * truncates at exactly 512 bytes.
+ */
+function boundReasonText(raw: string): string {
+  const collapsed = raw.replace(/\s+/g, ' ').trim();
+  const fallback = 'blob upload failed with a non-descriptive error';
+  if (collapsed.length === 0) return fallback;
+  let budget = MAX_UNSTORED_REASON_BYTES;
+  for (;;) {
+    const reason = utf8Prefix(collapsed, budget);
+    // A single code point encodes to at most 12 bytes, so the ratio below can
+    // never drive the budget to zero on a non-empty reason; the guard keeps
+    // the protocol's `min(1)` true by construction rather than by argument.
+    if (reason.length === 0) return fallback;
+    const encoded = byteLength(JSON.stringify(reason)) - 2;
+    if (encoded <= MAX_UNSTORED_REASON_BYTES) return reason;
+    // Rescale by the OBSERVED escape ratio rather than subtracting the
+    // overshoot: at 6 bytes per source character the overshoot exceeds the
+    // whole budget, and subtracting it would throw the reason away entirely.
+    // `budget - 1` keeps every iteration strictly decreasing, so this
+    // terminates (in practice after one rescale).
+    budget = Math.min(Math.floor((budget * MAX_UNSTORED_REASON_BYTES) / encoded), budget - 1);
+  }
+}
+
+/** {@link boundReasonText} over whatever the blob upload rejected with. */
 function boundedUnstoredReason(error: unknown): string {
   const raw = error instanceof Error && error.message.length > 0
     ? `${error.name}: ${error.message}`
     : String(error);
-  const collapsed = raw.replace(/\s+/g, ' ').trim();
-  if (collapsed.length === 0) return 'blob upload failed with a non-descriptive error';
-  return utf8Prefix(collapsed, MAX_UNSTORED_REASON_BYTES);
+  return boundReasonText(raw);
 }
 
 /**
@@ -136,7 +228,13 @@ function boundedUnstoredReason(error: unknown): string {
 export async function spillOversizedEvent(event: AgentEvent, deps: EventSpillDeps): Promise<AgentEvent> {
   if (event.type !== 'tool_use' && event.type !== 'tool_result') return event;
 
-  const serializedEvent = JSON.stringify(event);
+  const serializedEvent = safeStringify(event);
+  if (serializedEvent === undefined) {
+    deps.log?.(
+      `task ${deps.taskId}: ${event.type} event cannot be JSON-serialized (a BigInt, a cycle, or a throwing toJSON in its payload); forwarding it unchanged and unbounded`,
+    );
+    return event;
+  }
   if (byteLength(serializedEvent) <= deps.maxInlineBytes) return event;
 
   const spillable: SpillableEvent = event;
@@ -149,7 +247,7 @@ export async function spillOversizedEvent(event: AgentEvent, deps: EventSpillDep
     return event;
   }
 
-  const serialized: string | undefined = JSON.stringify(value);
+  const serialized = safeStringify(value);
   if (serialized === undefined) {
     deps.log?.(
       `task ${deps.taskId}: ${spillable.type}.${field} is not JSON-serializable; forwarding the event unchanged`,
@@ -159,25 +257,40 @@ export async function spillOversizedEvent(event: AgentEvent, deps: EventSpillDep
   const totalBytes = byteLength(serialized);
 
   // Everything about this event EXCEPT the spilled field and the descriptor.
-  // If that alone already exceeds the cap, the field is not what makes this
-  // event oversized (a pathological `tool` name, say) and spilling it would
-  // upload bytes without bounding anything.
-  const skeleton = JSON.stringify({ ...spillable, [field]: { preview: { head: '', tail: '' } } });
-  if (byteLength(skeleton) >= deps.maxInlineBytes) {
+  // If that plus a worst-case bounded descriptor already exceeds the cap, the
+  // field is not what makes this event oversized (a pathological `tool` name,
+  // say) and spilling it would upload bytes without bounding anything.
+  //
+  // Charging MAX_SPILL_DESCRIPTOR_BYTES here rather than measuring the
+  // skeleton alone is what turns the final cap check below into dead code:
+  // past this point an empty-preview event carrying an `unstoredReason`
+  // descriptor provably fits.
+  const skeleton = safeStringify({ ...spillable, [field]: { preview: { head: '', tail: '' } } });
+  if (skeleton === undefined) {
     deps.log?.(
-      `task ${deps.taskId}: ${spillable.type} event exceeds the ${deps.maxInlineBytes}-byte inline cap independently of its ${field} (${byteLength(skeleton)} bytes without it); forwarding unchanged`,
+      `task ${deps.taskId}: ${spillable.type} event cannot be JSON-serialized once its ${field} is replaced by a preview; forwarding it unchanged and unbounded`,
+    );
+    return event;
+  }
+  if (byteLength(skeleton) + MAX_SPILL_DESCRIPTOR_BYTES > deps.maxInlineBytes) {
+    deps.log?.(
+      `task ${deps.taskId}: ${spillable.type} event exceeds the ${deps.maxInlineBytes}-byte inline cap independently of its ${field} (${byteLength(skeleton)} bytes without it, plus up to ${MAX_SPILL_DESCRIPTOR_BYTES} bytes of spill descriptor); forwarding unchanged`,
     );
     return event;
   }
 
   const digest = createHash('sha256').update(serialized, 'utf8').digest('hex');
-  let stored: Pick<AgentEventSpill, 'blob'> | Pick<AgentEventSpill, 'unstoredReason'>;
+  let stored: StoredHalf;
+  // Tracked separately from `stored` because narrowing a `Pick<…, 'blob'>`
+  // union on an OPTIONAL property is not something `in` can do.
+  let storedBlobId: string | undefined;
   try {
     const blob = await deps.blobClient.uploadArtifact(serialized, 'application/json', {
       idempotencyKey: `spill_${deps.taskId}_${digest}`,
       ...(deps.signal === undefined ? {} : { signal: deps.signal }),
     });
     stored = { blob };
+    storedBlobId = blob.blobId;
   } catch (error) {
     const unstoredReason = boundedUnstoredReason(error);
     stored = { unstoredReason };
@@ -189,57 +302,110 @@ export async function spillOversizedEvent(event: AgentEvent, deps: EventSpillDep
   // Worst-case descriptor: the real `blob`/`unstoredReason`, and byte counts
   // at their widest (`omittedBytes` can never exceed `totalBytes`, so
   // `totalBytes`'s digit count bounds both).
-  const descriptorFor = (omittedBytes: number): AgentEventSpill => ({
+  const descriptorFor = (omittedBytes: number, half: StoredHalf): AgentEventSpill => ({
     field,
     totalBytes,
     omittedBytes,
     contentType: 'application/json',
-    ...stored,
+    ...half,
   });
-  const overhead = byteLength(
-    JSON.stringify({ ...spillable, [field]: { preview: { head: '', tail: '' } }, spill: descriptorFor(totalBytes) }),
-  );
 
-  let headBudget = Math.max(0, Math.ceil((deps.maxInlineBytes - overhead) / 2));
-  let tailBudget = Math.max(0, Math.floor((deps.maxInlineBytes - overhead) / 2));
-  let result: AgentEvent;
-  let resultBytes: number;
-  for (;;) {
-    const head = utf8Prefix(serialized, headBudget);
-    // Sliced past the head so a short value can never have its middle
-    // counted twice (head and tail overlapping into one duplicated run).
-    const tail = utf8Suffix(serialized.slice(head.length), tailBudget);
-    const retained = byteLength(head) + byteLength(tail);
-    result = {
+  /**
+   * Measure the empty-preview overhead for one descriptor half, then shrink
+   * the preview until the event actually fits. Returns the best it reached —
+   * `resultBytes` may still exceed the cap when the descriptor itself is too
+   * wide, which is the caller's signal to retry with a bounded half.
+   * `undefined` means the replacement stopped being serializable, which the
+   * caller reports rather than guesses around.
+   */
+  const bound = (half: StoredHalf): { result: AgentEvent; resultBytes: number; overhead: number } | undefined => {
+    const overheadJson = safeStringify({
       ...spillable,
-      [field]: { preview: { head, tail } },
-      spill: descriptorFor(totalBytes - retained),
-    } as AgentEvent;
-    resultBytes = byteLength(JSON.stringify(result));
-    if (resultBytes <= deps.maxInlineBytes) break;
+      [field]: { preview: { head: '', tail: '' } },
+      spill: descriptorFor(totalBytes, half),
+    });
+    if (overheadJson === undefined) return undefined;
+    const overhead = byteLength(overheadJson);
 
-    // JSON escaping made the measured event larger than the byte budget
-    // predicted. Shrink by ACTUAL retained bytes (not by the budget, which
-    // may already be slack) so every iteration makes strict progress.
-    const headBytes = byteLength(head);
-    const tailBytes = byteLength(tail);
-    if (headBytes === 0 && tailBytes === 0) break;
-    const excess = resultBytes - deps.maxInlineBytes;
-    const dropHead = headBytes === 0 ? 0 : Math.min(headBytes, Math.max(1, Math.ceil(excess / 2)));
-    const dropTail = tailBytes === 0 ? 0 : Math.min(tailBytes, Math.max(dropHead === 0 ? 1 : 0, excess - dropHead));
-    if (dropHead === 0 && dropTail === 0) break;
-    headBudget = headBytes - dropHead;
-    tailBudget = tailBytes - dropTail;
+    let headBudget = Math.max(0, Math.ceil((deps.maxInlineBytes - overhead) / 2));
+    let tailBudget = Math.max(0, Math.floor((deps.maxInlineBytes - overhead) / 2));
+    for (;;) {
+      const head = utf8Prefix(serialized, headBudget);
+      // Sliced past the head so a short value can never have its middle
+      // counted twice (head and tail overlapping into one duplicated run).
+      const tail = utf8Suffix(serialized.slice(head.length), tailBudget);
+      const retained = byteLength(head) + byteLength(tail);
+      const result = {
+        ...spillable,
+        [field]: { preview: { head, tail } },
+        spill: descriptorFor(totalBytes - retained, half),
+      } as AgentEvent;
+      const resultJson = safeStringify(result);
+      if (resultJson === undefined) return undefined;
+      const resultBytes = byteLength(resultJson);
+      if (resultBytes <= deps.maxInlineBytes) return { result, resultBytes, overhead };
+
+      // JSON escaping made the measured event larger than the byte budget
+      // predicted. Shrink by ACTUAL retained bytes (not by the budget, which
+      // may already be slack) so every iteration makes strict progress.
+      const headBytes = byteLength(head);
+      const tailBytes = byteLength(tail);
+      if (headBytes === 0 && tailBytes === 0) return { result, resultBytes, overhead };
+      const excess = resultBytes - deps.maxInlineBytes;
+      const dropHead = headBytes === 0 ? 0 : Math.min(headBytes, Math.max(1, Math.ceil(excess / 2)));
+      const dropTail = tailBytes === 0 ? 0 : Math.min(tailBytes, Math.max(dropHead === 0 ? 1 : 0, excess - dropHead));
+      if (dropHead === 0 && dropTail === 0) return { result, resultBytes, overhead };
+      headBudget = headBytes - dropHead;
+      tailBudget = tailBytes - dropTail;
+    }
+  };
+
+  let bounded = bound(stored);
+  if (bounded === undefined) {
+    deps.log?.(
+      `task ${deps.taskId}: ${spillable.type} event cannot be JSON-serialized once its ${field} is replaced by a preview and a spill descriptor; forwarding it unchanged and unbounded`,
+    );
+    return event;
   }
 
-  if (resultBytes > deps.maxInlineBytes) {
-    // Unreachable for any `maxInlineBytes >= MIN_MAX_INLINE_EVENT_BYTES`: the
-    // skeleton check above already proved the event minus its spilled field
-    // fits, and the descriptor is bounded. Loud rather than silently shipping
-    // an event this policy promised to bound.
+  // `BlobRefSchema.blobId` is a server-chosen string with no length bound, so
+  // a SUCCESSFUL upload can still hand back a locator that does not fit the
+  // cap this function exists to hold — and throwing here would escape
+  // `TaskRunner.pump` into the runtime-boundary catch and fail the task over
+  // a telemetry detail. The blob stays uploaded; only the inline locator is
+  // dropped, and the reason says why without repeating the oversized id.
+  if (bounded.resultBytes > deps.maxInlineBytes && storedBlobId !== undefined) {
+    const unstoredReason = boundReasonText(
+      `spill locator too large for maxInlineBytes: blobId ${storedBlobId.length} chars`,
+    );
+    deps.log?.(
+      `task ${deps.taskId}: ${totalBytes}-byte ${spillable.type}.${field} was stored, but its spill locator does not fit the ${deps.maxInlineBytes}-byte inline cap (descriptor overhead ${bounded.overhead} bytes); shipping the preview with unstoredReason instead — ${unstoredReason}`,
+    );
+    stored = { unstoredReason };
+    storedBlobId = undefined;
+    bounded = bound(stored);
+    if (bounded === undefined) {
+      deps.log?.(
+        `task ${deps.taskId}: ${spillable.type} event cannot be JSON-serialized once its ${field} is replaced by a preview and a spill descriptor; forwarding it unchanged and unbounded`,
+      );
+      return event;
+    }
+  }
+
+  if (bounded.resultBytes > deps.maxInlineBytes) {
+    // Dead code, and provably so. Reaching here needs `stored` to hold an
+    // `unstoredReason` (the `blob` branch above already fell back), whose
+    // descriptor costs at most MAX_SPILL_DESCRIPTOR_BYTES = 768 encoded bytes
+    // — 654 worst case, itemized at that constant. The skeleton gate above
+    // refused to spill unless `skeleton + 768 <= maxInlineBytes`, and because
+    // `spill` serializes last, an empty-preview event is EXACTLY
+    // `skeleton + ,"spill":{…}`. So the loop's empty-preview terminal state
+    // always measures at or under the cap and returns before this line.
+    // Kept as a fail-closed assertion: shipping an event this policy promised
+    // to bound would be worse than a loud failure.
     throw new Error(
-      `event spill failed to bound a ${spillable.type} event: replacement is ${resultBytes} bytes against a ${deps.maxInlineBytes}-byte cap (${field} was ${totalBytes} bytes, descriptor overhead ${overhead} bytes)`,
+      `event spill failed to bound a ${spillable.type} event: replacement is ${bounded.resultBytes} bytes against a ${deps.maxInlineBytes}-byte cap (${field} was ${totalBytes} bytes, descriptor overhead ${bounded.overhead} bytes)`,
     );
   }
-  return result;
+  return bounded.result;
 }

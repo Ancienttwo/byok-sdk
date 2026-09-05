@@ -2021,11 +2021,15 @@ truncation as the whole result. Under-cap events are unchanged and carry no
 `spill` at all, so today's readers stay correct for every event that was
 already small enough to send whole.
 
-**Storage failure is described, never silent.** If the blob upload does not
-succeed, the preview still ships and `unstoredReason` (a bounded diagnostic,
-at most 512 characters) says why the omitted bytes are unreadable. The task is
-not failed over it: the runtime's own transcript still holds the content, and
-losing a real result to a telemetry upload failure would be the worse trade.
+**Storage failure is described, never silent.** When the omitted bytes are not
+readable from the event, the preview still ships and `unstoredReason` (a
+bounded diagnostic, at most 512 characters) says why. Two cases produce it:
+the blob upload did not succeed, or it succeeded but the returned locator did
+not fit the daemon's inline cap, so it could not be carried inline. Either
+way the content is not reachable through this event and `spill.blob` is
+absent. The task is not failed over it: the runtime's own transcript still
+holds the content, and losing a real result to a telemetry problem would be
+the worse trade.
 
 **Egress.** A `BlobRef` is a readable locator for tool content, so a
 metadata-status Agent egress projection (§2.1) carries no `spill` at all —

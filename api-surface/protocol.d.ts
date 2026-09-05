@@ -202,9 +202,12 @@ export declare const AGENT_EVENT_SPILL_UNSTORED_REASON_MAX_LENGTH = 512;
  *    blob plane (protocol §7) under that `BlobRef`; `contentHash` is the
  *    sha256 of exactly those bytes, so a consumer can verify what it read
  *    back is what was omitted.
- *  - `unstoredReason` — the upload did not succeed. The content is GONE from
- *    this wire; the reason says why. This exists so storage failure is
- *    observable rather than silently indistinguishable from a small output.
+ *  - `unstoredReason` — the omitted bytes are not readable from this event:
+ *    either the upload failed, or it succeeded but the returned locator did
+ *    not fit the daemon's inline cap. Either way the content is not reachable
+ *    through this event; the reason says which. This exists so an unreadable
+ *    omission is observable rather than silently indistinguishable from a
+ *    small output.
  *
  * `.strict()` because this is an SDK-authored descriptor with a closed
  * shape, not free-form runtime data: an unrecognized key here means a
