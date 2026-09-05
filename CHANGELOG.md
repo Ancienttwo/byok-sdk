@@ -21,6 +21,12 @@
   there is no opt-out value. A failed upload is reported through
   `spill.unstoredReason` and logged, never silently dropped, and the task
   still completes. Metadata-status Agent egress carries no `spill`.
+- **`@byok-sdk/client` audit log spill sizes:** a spilled `tool_use` /
+  `tool_result` is recorded with the pre-spill content size
+  (`spill.totalBytes`) plus a boolean `inputSpilled` / `outputSpilled` instead
+  of the preview object's size — never the blob locator (`blobId` /
+  `contentHash`) or the `unstoredReason` text; read-back placeholders render
+  `[redacted: N bytes, spilled]`. Unspilled events are unchanged.
 - **`@byok-sdk/ui-runtime` timeline spill passthrough (additive):**
   `ToolTimelineItem` now carries `inputSpill` / `outputSpill`
   (`AgentEventSpill`) when the source `tool_use` / `tool_result` event was

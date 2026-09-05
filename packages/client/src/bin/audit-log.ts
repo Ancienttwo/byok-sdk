@@ -157,9 +157,10 @@ function valueByteSize(value: unknown): number | undefined {
   }
 }
 
-/** Unambiguous, never-confusable-with-real-content marker substituted for a redacted text/bytes field on READ (see `reconstructDaemonEvent`/`reconstructAgentEvent`) — never written to disk itself (only the size is). */
-function placeholderFor(size: number | undefined): string {
-  return size === undefined ? '[redacted]' : `[redacted: ${size} bytes]`;
+/** Unambiguous, never-confusable-with-real-content marker substituted for a redacted text/bytes field on READ (see `reconstructDaemonEvent`/`reconstructAgentEvent`) — never written to disk itself (only the size is). `spilled` marks a size that came from a spill descriptor's pre-spill `totalBytes` rather than from the inline value. */
+function placeholderFor(size: number | undefined, spilled?: boolean): string {
+  const suffix = spilled ? ', spilled' : '';
+  return size === undefined ? `[redacted${suffix}]` : `[redacted: ${size} bytes${suffix}]`;
 }
 
 /**
@@ -199,16 +200,23 @@ function gitDirty(value: unknown): { staged: number; unstaged: number; untracked
  * `AgentEvent` that's actually written to disk — every free-form field
  * (`text`/`input`/`output`/`summary`/`message`) becomes a `*Size` byte count;
  * `tool`/`name`/`contentType` (identifiers, not content) and `usage`'s token
- * COUNTS survive verbatim.
+ * COUNTS survive verbatim. A spilled `tool_use`/`tool_result` records the
+ * pre-spill content size (`spill.totalBytes`) plus a boolean
+ * `inputSpilled`/`outputSpilled`, never the spill locator (`blob`/`blobId`/
+ * `contentHash`) or its `unstoredReason` text.
  */
 function redactAgentEvent(event: AgentEvent): Record<string, unknown> {
   switch (event.type) {
     case 'progress':
       return { type: 'progress', textSize: byteSize(event.text) };
     case 'tool_use':
-      return { type: 'tool_use', tool: event.tool, inputSize: valueByteSize(event.input) };
+      return event.spill !== undefined
+        ? { type: 'tool_use', tool: event.tool, inputSize: event.spill.totalBytes, inputSpilled: true }
+        : { type: 'tool_use', tool: event.tool, inputSize: valueByteSize(event.input) };
     case 'tool_result':
-      return { type: 'tool_result', tool: event.tool, outputSize: valueByteSize(event.output) };
+      return event.spill !== undefined
+        ? { type: 'tool_result', tool: event.tool, outputSize: event.spill.totalBytes, outputSpilled: true }
+        : { type: 'tool_result', tool: event.tool, outputSize: valueByteSize(event.output) };
     case 'artifact':
       return { type: 'artifact', name: event.name, contentType: event.contentType };
     case 'needs_approval':
@@ -372,9 +380,9 @@ function reconstructAgentEvent(raw: unknown): AgentEvent {
     case 'progress':
       return { type: 'progress', text: placeholderFor(num(r.textSize)) };
     case 'tool_use':
-      return { type: 'tool_use', tool: str(r.tool), input: placeholderFor(num(r.inputSize)) };
+      return { type: 'tool_use', tool: str(r.tool), input: placeholderFor(num(r.inputSize), bool(r.inputSpilled, false)) };
     case 'tool_result':
-      return { type: 'tool_result', tool: str(r.tool), output: placeholderFor(num(r.outputSize)) };
+      return { type: 'tool_result', tool: str(r.tool), output: placeholderFor(num(r.outputSize), bool(r.outputSpilled, false)) };
     case 'artifact':
       return { type: 'artifact', name: str(r.name), contentType: str(r.contentType) };
     case 'needs_approval':

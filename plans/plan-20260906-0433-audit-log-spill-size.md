@@ -107,6 +107,6 @@ Unchanged JSONL format with two optional boolean keys.
 - [RESOLVED]: `totalBytes` is a count and the flags are booleans; `blob` and `unstoredReason` are never written. A test asserts the raw JSONL line contains neither `blobId` nor the reason text.
 
 ## Task Breakdown
-- [ ] Write and read side changes; tests.
-- [ ] CHANGELOG; remove the todos row; notes.
+- [x] Write and read side changes; tests.
+- [x] CHANGELOG; remove the todos row; notes.
 - [ ] Verify; PR.
