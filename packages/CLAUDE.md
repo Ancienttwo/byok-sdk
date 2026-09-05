@@ -7,8 +7,8 @@
 - Architecture domain: `sdk`
 - Architecture capability: `sdk-root`
 - Architecture module: `docs/architecture/sdk-architecture.md`
-- Last architecture event: 2026-09-06T02:37:10+0800
-- Last changed path: `packages/client/src/__tests__/device-assertion-broker.test.ts`
+- Last architecture event: 2026-09-05T23:06:44+0800
+- Last changed path: `packages/client/src/__tests__/deterministic-jitter.test.ts`
 - Severity: low
 - Change type: source-change
 - Module responsibility: Keep this block aligned with the local boundary described by surrounding human-owned context.
