@@ -78,7 +78,7 @@ boundary and final implementation; no main-worktree or event-spill edits.
 Selected native guard/GUI design and tested transport details: see the research.
 
 
-## Completion
+## Initial source completion
 
 Reviewed source: 17f9db31b1b57f2b6ef2f11740d2872d5b54455f. Existing tmux Claude
 accepted the frozen source and same-run evidence. Root checks passed; 312 test
@@ -87,3 +87,24 @@ Codex↔Pi receipts passed, with the initial smoke oracle correction preserved.
 See the review for the unobserved original relay exit code. This branch remains
 isolated; main integration, GUI application construction and release are not part
 of this completed source slice.
+
+
+## Approved main integration
+
+The user approved main integration on 2026-09-06 after source acceptance.
+P1: main's event-spill changes belong to TaskRunner/daemon progress and protocol;
+Pi team notification uses its own RPC host and the unchanged authenticated
+TeamWorkspace control methods. Shared declaration and changelog projections overlap.
+P2: native Pi RPC frames still feed the adapter; TaskRunner applies the newly
+merged spill limit on its separate progress path. The team CLI calls snapshots
+and native queue/session APIs directly. No team handler or admission hook changed.
+P3: preserve both accepted authorities. Merge main into this isolated branch,
+retain both changelog entries, verify combined declarations and required gates,
+then fast-forward main while preserving the two unrelated dirty context files.
+Reuse the existing native round-trip evidence for unchanged relay code; do not
+claim its older whole-artifact hash proves the merged daemon build.
+
+- [x] Integrate main d138ce5; resolve the CHANGELOG-only textual conflict.
+- [ ] Verify the combined candidate and fast-forward main with WIP intact.
+
+No push, remote cleanup or release is authorized by this slice.
