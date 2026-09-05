@@ -2,6 +2,7 @@
 
 > **Status**: Executing
 > **Artifact Level**: program
+> **Task Contract**: tasks/contracts/20260906-0500-prelaunch-integration.contract.md
 > **Owner**: Astra, tmux %7
 > **Authorization**: User requested autonomous overnight implementation, acceptance, commits, push and PRs. Registry publication, production deployment and destructive live data operations are excluded.
 
@@ -72,3 +73,20 @@ Preserve active workers and dirty files. Do not expand into publisher signing, l
 - A cancellation tombstone remains cloud outcome authority. An authenticated original terminal can confirm execution termination and converge effective status to `cancelled`, without replacing receipt bytes or creating a fake cancellation envelope. Cover cancellation between the initial read and status CAS; accepted transport disposition requires convergence.
 - Device startup/reconnect discovers its exact cloud Placement collection through a distinct authenticated assertion audience, then reconciles each explicit Agent with a fresh single-use assertion. Local home enumeration cannot discover a lost home; no default Agent is inferred.
 - Candidate CI lives in the private Salesko repository, checks out the public SDK by committed SHA, and validates both immutable subjects. It uses no added cross-repository secret or registry publication.
+
+## Evidence Contract
+
+- **State/progress path**: This plan's Task Breakdown and linked integration contract.
+- **Verification evidence**: Exact worker handoffs, combined source checks, schema-2 package manifest, native compiled consumer CI artifacts and final review.
+- **Evaluator rubric**: Original terminal durability and authenticated settlement; explicit Multi-Agent placement with no replaced singleton authority; exact source/package/runtime identity.
+- **Stop condition**: Reviewable pushed PRs with required checks and cross-repo artifact acceptance, or a genuinely external blocker reported separately.
+- **Rollback surface**: Isolated source branches and recoverable commits; no registry or production mutation.
+
+## Promotion Gate
+
+- **Merge/PR unit**: SDK integration PR paired with the independently reviewable Salesko clean cutover PR.
+- **Rollback surface**: Revert source commits before operator release; no production effects in this task.
+- **Verification boundary**: Freeze source before final packed consumer evidence.
+- **Review/acceptance boundary**: One independent combined acceptance per changed boundary.
+- **High-risk surface**: Durable execution truth and immutable device/Agent identity.
+- **Why not checklist row**: Cross-package SDK and downstream contracts require a file-backed integration boundary.
