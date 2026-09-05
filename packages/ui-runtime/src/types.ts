@@ -1,4 +1,5 @@
 import type { ActivityCursor, TimelineEvent } from '@byok-sdk/cloud';
+import type { AgentEventSpill } from '@byok-sdk/protocol';
 
 export interface TimelineEventKey {
   readonly sourceEnvelopeId: string;
@@ -64,6 +65,10 @@ export interface ToolTimelineItem extends TimelineItemBase {
   readonly state: ToolTimelineState;
   readonly input?: unknown;
   readonly output?: unknown;
+  /** Present exactly when the source `tool_use` event carried `spill` (see `docs/protocol.md` §11.6); render the truncation from this, never infer it from the `{ preview }` shape. */
+  readonly inputSpill?: AgentEventSpill;
+  /** Present exactly when the source `tool_result` event carried `spill` (see `docs/protocol.md` §11.6); render the truncation from this, never infer it from the `{ preview }` shape. */
+  readonly outputSpill?: AgentEventSpill;
 }
 
 export interface ArtifactTimelineItem extends TimelineItemBase {

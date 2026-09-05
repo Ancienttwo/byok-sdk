@@ -4,12 +4,43 @@
 > **Plan**: plans/plan-20260906-0412-timeline-spill-passthrough.md
 > **Contract**: tasks/contracts/20260906-0412-timeline-spill-passthrough.contract.md
 > **Review**: tasks/reviews/20260906-0412-timeline-spill-passthrough.review.md
-> **Last Updated**: 2026-09-06 04:13
+> **Last Updated**: 2026-09-06 04:18
 > **Lifecycle**: notes
 
 ## Design Decisions
 
-- ...
+- Two descriptors, not one: a tool item merges one `tool_use` and one
+  `tool_result`, so `inputSpill` and `outputSpill` stay separate; a single
+  `spill` field would be ambiguous when both sides spilled.
+- Presence is copied, never inferred: the spreads are guarded by
+  `Object.hasOwn(<event>, 'spill')`, mirroring the existing `input` / `output`
+  guards, so a key is absent rather than `undefined` when the source event
+  carried no spill. No consumer may derive truncation from the
+  `{ preview: { head, tail } }` shape.
+
+## Per-File Changes
+
+| File | Change |
+|------|--------|
+| `packages/ui-runtime/src/types.ts` | `import type { AgentEventSpill } from '@byok-sdk/protocol'`; `ToolTimelineItem` gains `readonly inputSpill?: AgentEventSpill` and `readonly outputSpill?: AgentEventSpill`, each with a one-line doc comment pointing at `docs/protocol.md` §11.6. |
+| `packages/ui-runtime/src/timeline.ts` | `toolItem` (paired fold) spreads `inputSpill` / `outputSpill` from the `tool_use` / `tool_result` observations behind `Object.hasOwn(..., 'spill')`; `unpairedTool` spreads the same two behind its existing `observation.type` guards. Both items stay `Object.freeze`d. |
+| `packages/ui-runtime/src/__tests__/timeline.test.ts` | Three cases: paired use+result where both events spilled (blob form on the input, `unstoredReason` form on the output) asserts both fields deep-equal the sources; unpaired `tool_result` with `spill` asserts `outputSpill` only and `Object.hasOwn(item, 'inputSpill') === false`; a paired item without spill asserts neither key is own. |
+| `api-surface/ui-runtime.d.ts` | Regenerated with `node scripts/api-surface/check-api-surface.mjs --update --package ui-runtime`; 5 added lines, 0 removed. |
+| `CHANGELOG.md` | Unreleased bullet for `@byok-sdk/ui-runtime`. |
+| `tasks/todos.md` | Deleted the delivered "Timeline 消费者透出 spill" row; the `bin/audit-log.ts` row stays. |
+
+## Verification
+
+```
+bun run --filter @byok-sdk/ui-runtime typecheck -> exit 0
+bun run --filter @byok-sdk/ui-runtime build     -> exit 0
+bun run --filter @byok-sdk/ui-runtime test      -> exit 0   (3 files, 20 tests passed)
+bun run typecheck                               -> exit 0
+bun run check:api-surface                       -> exit 0   (9 package golden(s) match)
+git diff --check                                -> exit 0
+```
+
+Golden diff: `git diff api-surface/ui-runtime.d.ts | grep -c '^-[^-]'` = 0, `'^+[^+]'` = 5.
 
 ## Deviations From Plan Or Spec
 

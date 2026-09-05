@@ -208,6 +208,8 @@ function toolItem(accumulator: ToolAccumulator, toolCallId: string): ToolTimelin
     state,
     ...(use && Object.hasOwn(use, 'input') ? { input: use.input } : {}),
     ...(result && Object.hasOwn(result, 'output') ? { output: result.output } : {}),
+    ...(use && Object.hasOwn(use, 'spill') ? { inputSpill: use.spill } : {}),
+    ...(result && Object.hasOwn(result, 'spill') ? { outputSpill: result.spill } : {}),
   });
 }
 
@@ -220,6 +222,8 @@ function unpairedTool(event: TimelineEvent, observation: ToolUseEvent | ToolResu
     state: observation.type === 'tool_use' ? 'unpaired-use' : 'unpaired-result',
     ...(observation.type === 'tool_use' && Object.hasOwn(observation, 'input') ? { input: observation.input } : {}),
     ...(observation.type === 'tool_result' && Object.hasOwn(observation, 'output') ? { output: observation.output } : {}),
+    ...(observation.type === 'tool_use' && Object.hasOwn(observation, 'spill') ? { inputSpill: observation.spill } : {}),
+    ...(observation.type === 'tool_result' && Object.hasOwn(observation, 'spill') ? { outputSpill: observation.spill } : {}),
   });
 }
 

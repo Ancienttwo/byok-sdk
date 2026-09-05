@@ -107,6 +107,6 @@ Unchanged except the two new fields ride along the existing fold.
 - [RESOLVED]: `AgentEventSpill` is exported from `packages/protocol/src/index.ts` (PR #149) and `@byok-sdk/ui-runtime` already depends on `@byok-sdk/protocol` (`package.json:48`).
 
 ## Task Breakdown
-- [ ] Add the two fields and passthrough; tests.
-- [ ] Regenerate the golden; CHANGELOG; remove the todos row; notes.
+- [x] Add the two fields and passthrough; tests.
+- [x] Regenerate the golden; CHANGELOG; remove the todos row; notes.
 - [ ] Verify; PR.

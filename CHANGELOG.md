@@ -21,6 +21,11 @@
   there is no opt-out value. A failed upload is reported through
   `spill.unstoredReason` and logged, never silently dropped, and the task
   still completes. Metadata-status Agent egress carries no `spill`.
+- **`@byok-sdk/ui-runtime` timeline spill passthrough (additive):**
+  `ToolTimelineItem` now carries `inputSpill` / `outputSpill`
+  (`AgentEventSpill`) when the source `tool_use` / `tool_result` event was
+  spilled, so a consumer can render the truncation instead of showing the
+  preview as the whole value.
 - **`@byok-sdk/keys` provider vendor catalog:** `MODEL_PROVIDER_VENDORS` declares
   27 vendors (id, display name, base URL in the SDK's suffix convention, adapter,
   auth mode, credential env name) ported from deepseek-harness / pi-ai 0.84.2;
