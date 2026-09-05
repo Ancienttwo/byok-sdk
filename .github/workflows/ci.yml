@@ -126,6 +126,8 @@ jobs:
       - name: Install frozen dependencies and build
         run: bun ci && bun run build
       - name: Exercise actual native SIGKILL and original terminal recovery
+        env:
+          BYOK_REQUIRE_SQLITE: '1'
         shell: bash
         run: |
           set -euo pipefail

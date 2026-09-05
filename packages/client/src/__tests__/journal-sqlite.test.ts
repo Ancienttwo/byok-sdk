@@ -102,6 +102,10 @@ const OPEN_STEPS: readonly JournalOpenStep[] = [
   'after-header-read',
 ];
 
+if (process.env.BYOK_REQUIRE_SQLITE === '1' && !isSqliteAvailable()) {
+  throw new Error('Required native journal acceptance cannot skip unavailable node:sqlite');
+}
+
 describe.skipIf(!isSqliteAvailable())('SqliteLocalTaskJournal', () => {
   const dirs: string[] = [];
   const open: SqliteLocalTaskJournal[] = [];

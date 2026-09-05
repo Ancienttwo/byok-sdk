@@ -75,6 +75,8 @@ exit_criteria:
 
 Exact SDK schema-2 manifest, consumer receipt, both native compiled matrix reports and PR/CI readback are additionally required. Prepared artifacts never imply registry publication.
 
+Hosted terminal size is an explicit admission constraint for every terminal kind: an oversized complete, fail or cancellation report becomes the bounded canonical `terminal_result_too_large` non-retryable failure. Oversized original reason/retryability is not retained as successful settlement; the original task and Agent identity remains exact. Cloud cancellation tombstones still govern effective cancellation independently.
+
 ## Stop Conditions
 
 No publish, tag, deployment, live SQL migration, provider execution or real enrollment changes. No compatibility shim or automatic rerun of uncertain side effects. Preserve concurrent worktrees and report genuinely external blockers without waiving acceptance.
