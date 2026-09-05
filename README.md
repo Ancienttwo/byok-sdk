@@ -7,8 +7,8 @@ composition over Postgres and R2.
 
 ## Current release
 
-The current release is `byok-sdk@0.12.0`, with the independently versioned
-`@byok-sdk/keys@0.3.9`. `CHANGELOG.md` carries the per-train release notes for
+The current release is `byok-sdk@0.13.0`, with the independently versioned
+`@byok-sdk/keys@0.3.10`. `CHANGELOG.md` carries the per-train release notes for
 the daemon, the hosted data plane, and the key management surface. Read it
 there rather than from a summary duplicated in this file.
 
@@ -34,7 +34,7 @@ adapter that supports both shapes or allocates process/temp/workspace/session
 resources during `prepare()`; reject unsupported input before claim instead.
 
 ```sh
-npm install byok-sdk@0.12.0
+npm install byok-sdk@0.13.0
 ```
 
 ```ts
@@ -102,7 +102,7 @@ It is intentionally outside `byok-sdk` and the entire dispatch dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.3.9
+npm install @byok-sdk/keys@0.3.10
 ```
 
 ## Host connector composition
@@ -118,5 +118,5 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.3.9`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.3.10`
 require Node.js 22.22.0 or newer. MIT licensed.
