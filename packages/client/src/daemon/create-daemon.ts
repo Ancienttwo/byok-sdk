@@ -7,6 +7,7 @@ import path from 'node:path';
 import {
   createEnvelope,
   encodeEnvelope,
+  isTaskOfferType,
   PROTOCOL_VERSION,
   STRICT_AGENT_ONLY_CAPABILITY,
   TASK_TRANSITIONS,
@@ -858,10 +859,8 @@ function terminalKindOf(type: string): 'complete' | 'failed' | 'cancelled' | und
  * guarantee is what makes that a faithful record, and it is the same choice
  * the cloud's own terminal receipt makes.
  *
- * `opensTask` is decided here, from the envelope's own type, rather than
- * inside the journal: the two offer variants are the inbound types that bring
- * a task into existence on this device, and that is protocol knowledge this
- * file already has and the journal should not acquire a second copy of.
+ * The protocol owns the task-opening family. Project that classification
+ * here so neither the daemon nor the storage journal maintains a second list.
  */
 function toJournalEnvelopeRecord(envelope: Envelope, identity: JournalIdentity): ReceivedEnvelopeRecord {
   const bytes = encodeEnvelope(envelope);
@@ -873,7 +872,7 @@ function toJournalEnvelopeRecord(envelope: Envelope, identity: JournalIdentity):
     bytes,
     bytesHash: journalHash(bytes),
     receivedAt: new Date().toISOString(),
-    opensTask: envelope.type === 'task.offer' || envelope.type === 'task.offer_with_toolsets' || envelope.type === 'task.offer_for_agent',
+    opensTask: isTaskOfferType(envelope.type),
   };
 }
 

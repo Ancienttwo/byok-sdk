@@ -1,0 +1,98 @@
+Subject: 440907ee2c44051b427d9ed4fe1431d93ffff72d (production source unchanged)
+Regression guard: packages/client/src/__tests__/journal-offer-family.test.ts
+Runtime: Node v22.22.0, Bun 1.4.0 package script launcher
+$ vitest run src/__tests__/journal-offer-family.test.ts
+
+ RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-147/packages/client
+
+(node:28213) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/__tests__/journal-offer-family.test.ts > issue #147 protocol offer family through real hosted SQLite journal > task.offer_for_agent_with_egress opens one journal_task before the acknowledged cursor and absorbs redelivery
+[byok/client] capability discovery failed; presence publishing stays off until the next reconnect: failed to read the capability declaration from http://127.0.0.1:64906/byok/capabilities: HTTP 404
+
+stderr | src/__tests__/journal-offer-family.test.ts > issue #147 protocol offer family through real hosted SQLite journal > task.offer_for_agent_with_egress opens one journal_task before the acknowledged cursor and absorbs redelivery
+[byok/client] could not record task task-147's terminal in the local journal (sending it anyway): recordTerminal references task "task-147", which has no journal_task row — its offer envelope was never appended. Refusing rather than synthesising the missing row: a fabricated task record is fabricated recovery evidence.
+
+stderr | src/__tests__/journal-offer-family.test.ts > issue #147 protocol offer family through real hosted SQLite journal > task.offer_for_agent_with_egress_fresh opens one journal_task before the acknowledged cursor and absorbs redelivery
+[byok/client] capability discovery failed; presence publishing stays off until the next reconnect: failed to read the capability declaration from http://127.0.0.1:64912/byok/capabilities: HTTP 404
+
+stderr | src/__tests__/journal-offer-family.test.ts > issue #147 protocol offer family through real hosted SQLite journal > task.offer_for_agent_with_egress_fresh opens one journal_task before the acknowledged cursor and absorbs redelivery
+[byok/client] could not record task task-147's terminal in the local journal (sending it anyway): recordTerminal references task "task-147", which has no journal_task row — its offer envelope was never appended. Refusing rather than synthesising the missing row: a fabricated task record is fabricated recovery evidence.
+
+stderr | src/__tests__/journal-offer-family.test.ts > issue #147 protocol offer family through real hosted SQLite journal > task.offer_for_agent_with_egress journals the actual terminal before send and marks an acknowledged interrupted snapshot on restart
+[byok/client] capability discovery failed; presence publishing stays off until the next reconnect: failed to read the capability declaration from http://127.0.0.1:64935/byok/capabilities: HTTP 404
+
+stderr | src/__tests__/journal-offer-family.test.ts > issue #147 protocol offer family through real hosted SQLite journal > task.offer_for_agent_with_egress journals the actual terminal before send and marks an acknowledged interrupted snapshot on restart
+[byok/client] could not record task task-147's terminal in the local journal (sending it anyway): recordTerminal references task "task-147", which has no journal_task row — its offer envelope was never appended. Refusing rather than synthesising the missing row: a fabricated task record is fabricated recovery evidence.
+
+stderr | src/__tests__/journal-offer-family.test.ts > issue #147 protocol offer family through real hosted SQLite journal > task.offer_for_agent_with_egress_fresh journals the actual terminal before send and marks an acknowledged interrupted snapshot on restart
+[byok/client] capability discovery failed; presence publishing stays off until the next reconnect: failed to read the capability declaration from http://127.0.0.1:64941/byok/capabilities: HTTP 404
+
+stderr | src/__tests__/journal-offer-family.test.ts > issue #147 protocol offer family through real hosted SQLite journal > task.offer_for_agent_with_egress_fresh journals the actual terminal before send and marks an acknowledged interrupted snapshot on restart
+[byok/client] could not record task task-147's terminal in the local journal (sending it anyway): recordTerminal references task "task-147", which has no journal_task row — its offer envelope was never appended. Refusing rather than synthesising the missing row: a fabricated task record is fabricated recovery evidence.
+
+ ❯ src/__tests__/journal-offer-family.test.ts (9 tests | 4 failed) 10292ms
+     × task.offer_for_agent_with_egress opens one journal_task before the acknowledged cursor and absorbs redelivery 417ms
+     × task.offer_for_agent_with_egress_fresh opens one journal_task before the acknowledged cursor and absorbs redelivery 399ms
+     × task.offer_for_agent_with_egress journals the actual terminal before send and marks an acknowledged interrupted snapshot on restart 391ms
+     × task.offer_for_agent_with_egress_fresh journals the actual terminal before send and marks an acknowledged interrupted snapshot on restart 384ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/journal-offer-family.test.ts > issue #147 protocol offer family through real hosted SQLite journal > task.offer_for_agent_with_egress opens one journal_task before the acknowledged cursor and absorbs redelivery
+ FAIL  src/__tests__/journal-offer-family.test.ts > issue #147 protocol offer family through real hosted SQLite journal > task.offer_for_agent_with_egress_fresh opens one journal_task before the acknowledged cursor and absorbs redelivery
+AssertionError: expected [] to deeply equal [ { task_id: 'task-147' } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "task_id": "task-147",
+-   },
+- ]
++ []
+
+ ❯ src/__tests__/journal-offer-family.test.ts:77:64
+     75|   it.each(offerTypes)('%s opens one journal_task before the acknowledg…
+     76|     const { storeDir, envelope, adapter } = await setup(type);
+     77|     expect(rows(storeDir, 'SELECT task_id FROM journal_task')).toEqual…
+       |                                                                ^
+     78|     server.send(envelope);
+     79|     // A later acknowledged frame proves the duplicate has passed the …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/__tests__/journal-offer-family.test.ts > issue #147 protocol offer family through real hosted SQLite journal > task.offer_for_agent_with_egress journals the actual terminal before send and marks an acknowledged interrupted snapshot on restart
+ FAIL  src/__tests__/journal-offer-family.test.ts > issue #147 protocol offer family through real hosted SQLite journal > task.offer_for_agent_with_egress_fresh journals the actual terminal before send and marks an acknowledged interrupted snapshot on restart
+AssertionError: expected [] to deeply equal [ { task_id: 'task-147', …(1) } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "recovery_marker": null,
+-     "task_id": "task-147",
+-   },
+- ]
++ []
+
+ ❯ src/__tests__/journal-offer-family.test.ts:89:81
+     87|     const { config, adapter, storeDir } = await setup(type);
+     88|     await server.waitFor((e) => e.type === 'task.started' && e.task_id…
+     89|     expect(rows(storeDir, 'SELECT task_id, recovery_marker FROM journa…
+       |                                                                                 ^
+     90|     // Capture a real SQLite-consistent crash boundary after ack and b…
+     91|     // Graceful stop would create a terminal; restore this snapshot to…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 5 passed (9)
+   Start at  03:54:30
+   Duration  11.05s (transform 510ms, setup 0ms, import 666ms, tests 10.29s, environment 0ms)
+
+error: script "test" exited with code 1
+PRE_FIX_EXIT=1

@@ -1123,14 +1123,29 @@ export type TaskApprovalResolvedPayload = z.infer<typeof TaskApprovalResolvedPay
 // registry — single source of truth mapping message type -> payload schema
 // ---------------------------------------------------------------------------
 
-export const MESSAGE_PAYLOAD_SCHEMAS = {
-  'conn.hello': ConnHelloPayloadSchema,
-  'conn.ack': ConnAckPayloadSchema,
+/** Protocol-owned task-opening family; the wire registry consumes these same entries. */
+const TASK_OFFER_PAYLOAD_SCHEMAS = {
   'task.offer': TaskOfferPayloadSchema,
   'task.offer_with_toolsets': TaskOfferWithToolsetsPayloadSchema,
   'task.offer_for_agent': TaskOfferForAgentPayloadSchema,
   'task.offer_for_agent_with_egress': TaskOfferForAgentWithEgressPayloadSchema,
   'task.offer_for_agent_with_egress_fresh': TaskOfferForAgentWithEgressFreshPayloadSchema,
+} as const;
+
+export type TaskOfferType = keyof typeof TASK_OFFER_PAYLOAD_SCHEMAS;
+export const TASK_OFFER_TYPES: readonly TaskOfferType[] = Object.freeze(
+  Object.keys(TASK_OFFER_PAYLOAD_SCHEMAS) as TaskOfferType[],
+);
+
+/** Classify task-opening offers without duplicating the protocol registry in consumers. */
+export function isTaskOfferType(type: string): type is TaskOfferType {
+  return Object.hasOwn(TASK_OFFER_PAYLOAD_SCHEMAS, type);
+}
+
+export const MESSAGE_PAYLOAD_SCHEMAS = {
+  'conn.hello': ConnHelloPayloadSchema,
+  'conn.ack': ConnAckPayloadSchema,
+  ...TASK_OFFER_PAYLOAD_SCHEMAS,
   'agent.egress.reliable': AgentEgressReliablePayloadSchema,
   'agent.egress.ack': AgentEgressAckPayloadSchema,
   'agent.message.publish': AgentMessagePublishPayloadSchema,
