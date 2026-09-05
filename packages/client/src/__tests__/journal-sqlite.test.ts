@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   JournalCorruptError,
   JournalRecordTooLargeError,
+  JournalUnavailableError,
   JournalUnknownTaskError,
   journalHash,
   type JournalIdentity,
@@ -284,6 +285,21 @@ describe.skipIf(!isSqliteAvailable())('SqliteLocalTaskJournal', () => {
   });
 
   describe('restart', () => {
+    it('refuses a hash-only predecessor terminal schema without altering its bytes', async () => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir);
+      await journal.appendEnvelope(envelopeRecord());
+      const terminalBytes = JSON.stringify({ v: 1, id: 'terminal-1', type: 'task.fail', task_id: 'task-1', payload: { reason: 'legacy' } });
+      await journal.recordTerminal({ taskId: 'task-1', terminalType: 'failed', bytes: terminalBytes, payloadHash: journalHash(terminalBytes), truthState: 'pending', attempt: 1, recordedAt: '2026-08-07T00:00:00.000Z' });
+      await journal.close();
+      const db = openJournalDatabase(path.join(storeDir, JOURNAL_DB_FILENAME), DEFAULT_JOURNAL_BUSY_TIMEOUT_MS);
+      db.prepare('ALTER TABLE journal_terminal DROP COLUMN bytes').run();
+      db.close();
+      const before = readRows(storeDir, "SELECT task_id, payload_hash, truth_state FROM journal_terminal");
+      expect(() => build(storeDir)).toThrow(JournalUnavailableError);
+      expect(readRows(storeDir, "SELECT task_id, payload_hash, truth_state FROM journal_terminal")).toEqual(before);
+    });
+
     it('recovers everything it committed after a clean close and reopen', async () => {
       const storeDir = await tmpStore();
       const first = build(storeDir);

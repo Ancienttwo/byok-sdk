@@ -350,6 +350,24 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
     expect(starts()).toHaveLength(1);
   }, 30_000);
 
+  it('settles an oversized result as a bounded durable failure without rerunning after restart', async () => {
+    const cloud = await startCloud();
+    const { daemon, deviceId } = await pair(cloud);
+    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'produce an oversized result' }) as { taskId: string };
+    await waitForFile(path.join(current!.daemonBase.controlDir, 'runtime-starts.jsonl'));
+    await finish(offer.taskId, 'x'.repeat(300 * 1024));
+    const attempt = await waitForAttempt(cloud, offer.taskId, 'failed');
+    expect(attempt.terminalCause).toBe('terminal_result_too_large');
+    const terminal = decodeEnvelope(String(await cloud.rpc('readTerminalBody', { taskId: offer.taskId })));
+    expect(terminal.type).toBe('task.fail');
+    if (terminal.type === 'task.fail') expect(terminal.payload).toMatchObject({ reason: 'terminal_result_too_large', retryable: false });
+    expect(starts()).toHaveLength(1);
+    daemon.kill();
+    expect((await daemon.exited()).signal).toBe('SIGKILL');
+    await startDaemon();
+    expect(starts()).toHaveLength(1);
+  }, 30_000);
+
   it.each([
     ['recovery:before-commit', false, false],
     ['recovery:after-commit', true, false],

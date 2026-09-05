@@ -112,7 +112,7 @@ import { AgentSessionHandoffStore } from './agent-session-handoff-store';
 import { GitWorkspaceManager, stableGitWorkspaceOwnerId } from './git-workspace';
 import { GitWorkspaceStore } from './git-workspace-store';
 import { DeviceRecordRePairRequiredError, DeviceStore, type DeviceEnrollment, type DeviceRecord } from './store';
-import { JournalUnavailableError, journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord, type StorageCategory } from './journal/journal';
+import { JournalRecordTooLargeError, JournalUnavailableError, journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord, type StorageCategory } from './journal/journal';
 import { JournalHandleCleanupError, SqliteLocalTaskJournal } from './journal/sqlite-journal';
 import { isSqliteAvailable, type JournalOpenFaultSeam } from './journal/sqlite-support';
 import {
@@ -1855,8 +1855,39 @@ export function buildDaemonWithAdapters(
         observer.handleOutboundEnvelope(durable);
         connection?.send(durable);
       });
-      void journalTerminalTail.catch((error: unknown) => {
-        console.error('[byok/client] terminal durability failed; execution remains unsettled', error);
+      void journalTerminalTail.catch(async (error: unknown) => {
+        if (!(error instanceof JournalRecordTooLargeError) || !activeJournal || !journalIdentity) {
+          console.error('[byok/client] terminal durability failed; execution remains unsettled', error);
+          return;
+        }
+        // A completed result can exceed the journal's bounded record size. Do
+        // not truncate or invent a success: settle the exact task identity
+        // with one small, canonical, non-retryable failure. The offer is the
+        // sole source of AgentRef, so a foreign or missing ref is never guessed.
+        try {
+          const task = await activeJournal.readTask(taskId, journalIdentity);
+          if (!task) throw new Error(`missing durable task ${taskId}`);
+          const offer = decodeEnvelope(task.envelopeBytes);
+          if (!isTaskOfferType(offer.type) || offer.task_id !== taskId) throw new Error(`invalid durable offer binding for ${taskId}`);
+          const offerPayload = offer.payload as { agentRef?: AgentRef };
+          const failure = createEnvelope('task.fail', {
+            reason: 'terminal_result_too_large', retryable: false,
+            ...(offerPayload.agentRef === undefined ? {} : { agentRef: offerPayload.agentRef }),
+          }, { taskId });
+          const failureBytes = encodeEnvelope(failure);
+          await activeJournal.recordTerminal({ taskId, terminalType: 'failed', bytes: failureBytes,
+            payloadHash: journalHash(failureBytes), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
+          const durableFailure = (await activeJournal.listPendingTerminals(journalIdentity)).find((row) => row.taskId === taskId);
+          if (!durableFailure || durableFailure.truthState !== 'pending') return;
+          const decoded = decodeEnvelope(durableFailure.bytes);
+          observer.handleOutboundEnvelope(decoded);
+          connection?.send(decoded);
+        } catch (settlementError) {
+          // Never recurse through arbitrary fallback terminals. A storage or
+          // canonicalization failure remains visible and requires operator
+          // recovery; the oversized result itself is never silently dropped.
+          console.error('[byok/client] bounded terminal overflow settlement failed; execution remains unsettled', settlementError);
+        }
       });
     };
     const sendEnvelope: TaskRunnerDeps['send'] = (candidate) => {
