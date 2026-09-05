@@ -1,16 +1,16 @@
 # Task Review: win32-job-object-ownership
 
-> **Status**: Pending
+> **Status**: Accepted
 > **Plan**: plans/plan-20260906-0130-win32-job-object-ownership.md
 > **Contract**: tasks/contracts/20260906-0130-win32-job-object-ownership.contract.md
 > **Notes File**: tasks/notes/20260906-0130-win32-job-object-ownership.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
 > **Last Updated**: 2026-09-06 01:39
-> **Recommendation**: fail
+> **Recommendation**: pass
 > **Review Rubric Version**: 2
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:8d0d86c73385bd3f6e52ef11f8bd4a5923d484d5a5ae116379c2aa5ef3a80305
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
+> **Reviewed Target Revision**: b052d8ad76d6b59a4e2150e7870d3b641934c238
 
 ## Human Review Card
 
@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Claude
+> **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:8d0d86c73385bd3f6e52ef11f8bd4a5923d484d5a5ae116379c2aa5ef3a80305
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: b052d8ad76d6b59a4e2150e7870d3b641934c238
+> **Verification Evidence SHA256**: sha256:3a307e08b3e3263b390fd7d6af6ea189e61b48b9d6ad53d9b6b8ed8edb8b7644
+> **Issued At**: 2026-09-05T18:33:32.852Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: Gatekeeper PASS round 2 (2026-09-06): win32 Job Object bindings match harness abi-probe table; fail-closed at all three adapters proven with real processes; host-exit backstop proven by real process.exit readback; POSIX never resolves koffi; release-graph optional-dependency audit mutation-tested; client 1635 passed; real Win32 proof deferred to adapter-lifecycle-smoke windows-latest CI leg
 - Findings: none
 
 ## Behavior Diff Notes
