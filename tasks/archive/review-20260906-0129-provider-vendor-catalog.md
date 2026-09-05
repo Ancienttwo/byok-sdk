@@ -1,16 +1,26 @@
+> **Archived**: 2026-09-06 01:29
+> **Related Plan**: plans/archive/plan-20260906-0018-provider-vendor-catalog.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260906-0129
+> **Archive Projection V1**: `plans/plan-20260906-0018-provider-vendor-catalog.md` => `plans/archive/plan-20260906-0018-provider-vendor-catalog.md`
+> **Archive Projection V1**: `tasks/notes/20260906-0018-provider-vendor-catalog.notes.md` => `tasks/archive/notes-20260906-0129-provider-vendor-catalog.md`
+> **Archive Projection V1**: `tasks/contracts/20260906-0018-provider-vendor-catalog.contract.md` => `tasks/archive/contract-20260906-0129-provider-vendor-catalog.md`
+> **Archive Projection V1**: `tasks/reviews/20260906-0018-provider-vendor-catalog.review.md` => `tasks/archive/review-20260906-0129-provider-vendor-catalog.md`
+
 # Task Review: provider-vendor-catalog
 
 > **Status**: Accepted
-> **Plan**: plans/plan-20260906-0018-provider-vendor-catalog.md
-> **Contract**: tasks/contracts/20260906-0018-provider-vendor-catalog.contract.md
-> **Notes File**: tasks/notes/20260906-0018-provider-vendor-catalog.notes.md
+> **Plan**: plans/archive/plan-20260906-0018-provider-vendor-catalog.md
+> **Contract**: tasks/archive/contract-20260906-0129-provider-vendor-catalog.md
+> **Notes File**: tasks/archive/notes-20260906-0129-provider-vendor-catalog.md
 > **Checks File**: .ai/harness/checks/latest.json
 > **Last Updated**: 2026-09-06 00:26
 > **Recommendation**: pass
 > **Review Rubric Version**: 2
-> **Reviewed Subject SHA256**: sha256:1f87b969bb1d79424f140e6f51b0df4c3db9298fd12b0c4deffc8e18fa33edff
+> **Reviewed Subject SHA256**: sha256:8a48a87d4183098e73ae4f89c74fed8f1767410bd1f5272e245d4ec977b74183
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: 12278dc429bd15660190e237e0f6c97d654d5643
+> **Reviewed Target Revision**: f993f8e7b1652fa9dc26d81278c5a50a6408a61c
 
 ## Human Review Card
 
@@ -53,13 +63,13 @@ screenshot/artifact path, or reviewer observation.
 > **Reviewer**: Claude
 > **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: sha256:1f87b969bb1d79424f140e6f51b0df4c3db9298fd12b0c4deffc8e18fa33edff
+> **Reviewed Subject SHA256**: sha256:8a48a87d4183098e73ae4f89c74fed8f1767410bd1f5272e245d4ec977b74183
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: 12278dc429bd15660190e237e0f6c97d654d5643
-> **Verification Evidence SHA256**: sha256:02f70347b27921aa6e1b418a3f134fdd6b2088127c7b0d7bab71f06917e0b7af
-> **Issued At**: 2026-09-05T17:01:33.705Z
+> **Reviewed Target Revision**: f993f8e7b1652fa9dc26d81278c5a50a6408a61c
+> **Verification Evidence SHA256**: sha256:87743890f70dd738a153199dee68c64fe7d1fe9a27bc7ffc0b102ee34a3e18f0
+> **Issued At**: 2026-09-05T17:29:42.264Z
 
-- Summary: Gatekeeper PASS 2026-09-06: 27-vendor catalog traced to pi-ai 0.84.2 and harness llm-deepseek; kinds and SQLite CHECK derived from one authority; stale DDL fails closed; deny list covers every api_key_env; build, keys 427/427, client 1614 passed, api-surface 9/9, version-authority, strict workflow, diff --check all exit 0
+- Summary: Post-merge re-seal on main f993f8e: gatekeeper PASS evidence unchanged
 - Findings: none
 
 ## Behavior Diff Notes

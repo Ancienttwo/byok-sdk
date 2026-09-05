@@ -26,6 +26,33 @@ const errors = [];
 // `.node` addon or runs an install script turns an end user's install into a compile/download step
 // and breaks the SEA/bun single-file packagability invariant. Direct dependencies only — the
 // transitive closure is deliberately out of scope, since scoping it would require an allowlist.
+//
+// `optionalDependencies` is the one narrow exception, and it is narrow on purpose. It may carry a
+// native addon ONLY when a single platform genuinely requires it, that platform fails CLOSED on its
+// absence (no degraded path, no silent skip), and no other platform ever loads the module. `koffi`
+// is the only such entry today: the win32 kill-on-close Job Object that owns runtime process trees
+// (packages/client/src/adapters/win32-job-object.ts) has no pure-JS equivalent, a Windows daemon
+// refuses to start a runtime without it, and POSIX reaches the module through a win32-only dynamic
+// import that never runs. npm has no per-platform install field other than this one, so the manifest
+// field is a distribution mechanism; the runtime rule is what carries the hardness.
+//
+// The checks below keep that exception from widening. Every optional dependency stays exactly
+// pinned, none may also be a hard dependency or be inlined into the bundle by tsup (`noExternal`)
+// -- either of which would make a POSIX install load it after all -- and every optional dependency
+// is run through the SAME purity audit as the direct ones (install scripts plus shipped `.node`
+// addons). A purity violation is an error unless the package is named in
+// `OPTIONAL_NATIVE_ALLOWLIST` below, and an allowlist entry that is not actually present in
+// `optionalDependencies` is an error too, so a carve-out cannot outlive the dependency it was
+// written for. koffi is the only entry today, and it does violate the audit: koffi 3.2.0 declares
+// an `install` script (`node ./cnoke.cjs -P . -D src/koffi --prebuild --release`) and ships no
+// `.node` file of its own, resolving its addon from the os/cpu-scoped `@koromix/koffi-<os>-<arch>`
+// siblings instead. That is acceptable precisely because of those prebuilt siblings: the install
+// script is a prebuild check that finds the addon already present and does nothing, bun never runs
+// it, and POSIX never loads the module. A second native optional entry gets none of this silently
+// -- it fails the gate until someone writes it into the allowlist with its own justification.
+const OPTIONAL_NATIVE_ALLOWLIST = {
+  koffi: 'win32 kill-on-close job object; per-platform prebuilt from @koromix/koffi-* makes the install script a no-op, bun never runs it, and POSIX never loads the module',
+};
 const installScriptFields = ['preinstall', 'install', 'postinstall'];
 
 /** Walks the node_modules chain upward, mirroring Node's own resolution; Bun's workspace links resolve to their real package location. */
@@ -295,6 +322,45 @@ if (
 }
 
 const clientDirectory = path.join(repoRoot, 'packages/client');
+const clientOptionalDependencies = Object.entries(clientManifest?.optionalDependencies ?? {});
+const clientTsupConfig = readFileSync(path.join(repoRoot, 'packages/client/tsup.config.ts'), 'utf8');
+const clientNoExternal = /noExternal\s*:\s*\[([^\]]*)\]/.exec(clientTsupConfig)?.[1] ?? '';
+for (const [dependency, range] of clientOptionalDependencies) {
+  if (typeof range !== 'string' || !exactStableVersion.test(range)) {
+    errors.push(`packages/client/package.json: optional dependency ${dependency} must be pinned to an exact x.y.z version`);
+  }
+  if (clientManifest?.dependencies?.[dependency] !== undefined) {
+    errors.push(`packages/client/package.json: ${dependency} is both a dependency and an optionalDependency; the platform-required native exception applies to optionalDependencies only`);
+  }
+  if (clientNoExternal.includes(`'${dependency}'`) || clientNoExternal.includes(`"${dependency}"`)) {
+    errors.push(`packages/client/tsup.config.ts: optional dependency ${dependency} must not be inlined by noExternal; it has to stay a runtime resolution`);
+  }
+  const optionalLabel = `packages/client/package.json: optional dependency ${dependency}`;
+  const optionalDirectory = resolvePackageDir(clientDirectory, dependency);
+  if (!optionalDirectory) {
+    errors.push(`${optionalLabel} could not be resolved under node_modules`);
+    continue;
+  }
+  const violations = auditPackagePurity(optionalLabel, optionalDirectory);
+  if (violations.length === 0) continue;
+  const justification = OPTIONAL_NATIVE_ALLOWLIST[dependency];
+  if (justification === undefined) {
+    errors.push(
+      ...violations.map(
+        (violation) =>
+          `${violation} — optionalDependencies is not a free pass for native packages; add ${dependency} to OPTIONAL_NATIVE_ALLOWLIST in this script with a written justification, or drop the dependency`,
+      ),
+    );
+  }
+}
+for (const dependency of Object.keys(OPTIONAL_NATIVE_ALLOWLIST)) {
+  if (clientManifest?.optionalDependencies?.[dependency] === undefined) {
+    errors.push(
+      `scripts/release/check-package-graph.mjs: OPTIONAL_NATIVE_ALLOWLIST carves out ${dependency}, which is no longer an optionalDependency of packages/client — remove the dead carve-out`,
+    );
+  }
+}
+
 for (const dependency of Object.keys(clientManifest?.dependencies ?? {})) {
   const label = `packages/client/package.json: direct dependency ${dependency}`;
   const dependencyDirectory = resolvePackageDir(clientDirectory, dependency);

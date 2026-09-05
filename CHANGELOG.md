@@ -14,6 +14,17 @@
 - **`@byok-sdk/client` credential deny list:** `HF_TOKEN` and `MOONSHOT_API_KEY`
   join `PROVIDER_CREDENTIAL_ENV_DENY_NAMES`, so the catalog's credential names
   are never inherited by subscription or BYOK custody children.
+- **`@byok-sdk/client` owned process trees survive-nothing guarantee:** on Windows
+  every runtime process tree is assigned to a daemon-wide
+  `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` Job Object immediately after spawn, so the
+  kernel terminates the whole tree if the daemon itself dies. `koffi` 3.2.0 is a
+  new **optional dependency**, hard-required on Windows — a runtime cannot start
+  without it and the typed failure carries the Win32 error code; it is never
+  loaded on any other platform (POSIX reaches the module through a win32-only
+  dynamic import). Install footprint is ~3 MB (koffi plus the one prebuilt addon
+  package for the host platform; koffi 3 ships per-platform addons, so no other
+  platform's binary is downloaded). On every platform a synchronous host-exit
+  backstop now kills still-live owned trees when the daemon exits normally.
 
 ## 0.13.0 / @byok-sdk/keys 0.3.10 — 2026-09-05
 

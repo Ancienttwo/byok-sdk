@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
-import { disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../process-tree';
+import { adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../process-tree';
 
 export type SpawnFn = typeof spawn;
 
@@ -27,6 +27,15 @@ export interface CodexProcessOptions {
   spawnFn?: SpawnFn;
   /** Called once per parsed JSONL line, in arrival order. */
   onEvent: (evt: CodexRawEvent) => void;
+  /**
+   * DI seam scoped to ADOPTION only (`../process-tree.ts`'s
+   * `adoptOwnedProcessTree`), so the win32 job-object branch is exercisable
+   * from POSIX. Disposal keeps `process.platform` as its own authority — this
+   * must never silently reroute the taskkill sweep on a real host.
+   */
+  platform?: NodeJS.Platform;
+  /** DI seam for the win32 job-object backstop; see `../win32-job-object.ts`. */
+  jobObject?: { assign(pid: number): Promise<void> };
 }
 
 /** Bound on retained stderr lines (see `onStderr`/`buildExitError`) — mirrors `STDERR_RING_CAPACITY` in `../pi/rpc-client.ts`. */
@@ -72,6 +81,19 @@ export class CodexProcessRunner {
   private readonly closedPromise: Promise<void>;
   private resolveClosed!: () => void;
   private disposalAttempt: Promise<void> | undefined;
+  /** Resolves once this tree is backstopped (see `adoptOwnedProcessTree`); rejects with the adoption failure, having already terminated the tree. */
+  private readonly adopted: Promise<void>;
+  /** Set before the fail-closed termination starts; `buildExitError` reports it instead of the exit status of the kill we ourselves requested. */
+  private adoptionFailure: Error | undefined;
+  private adoption: 'pending' | 'adopted' | 'failed' = 'pending';
+  /**
+   * Lines parsed before adoption settled. Unlike pi and claude, this runner has
+   * no first awaited operation of its own to gate on — its caller reads the
+   * FIRST event as the authoritative thread id. Holding events until the tree
+   * is backstopped is what keeps that caller from publishing a session for a
+   * tree the job object never took.
+   */
+  private readonly deferredEvents: CodexRawEvent[] = [];
 
   constructor(options: CodexProcessOptions) {
     this.onEvent = options.onEvent;
@@ -85,6 +107,10 @@ export class CodexProcessRunner {
     this.closedPromise = new Promise((resolve) => {
       this.resolveClosed = resolve;
     });
+    this.adopted = this.adoptOwnedTree(options);
+    // The rejection is surfaced through `buildExitError` on the close the
+    // teardown itself causes; this keeps it from raising an unhandled rejection.
+    this.adopted.catch(() => {});
 
     this.child.stdout.setEncoding('utf8');
     this.child.stdout.on('data', (chunk: string) => this.onData(chunk));
@@ -166,8 +192,58 @@ export class CodexProcessRunner {
     };
   }
 
-  /** Builds a descriptive error folding in the exit code/signal and the stderr tail — mirrors `PiRpcClient.buildExitError`'s reasoning: a post-mortem on a failed start/resume should never need separately re-running codex by hand with a raw JSONL logger to learn why. */
+  /**
+   * Backstop this tree, or tear it down. Adoption failure is a start-time
+   * precondition, not a degraded mode: the child is terminated through the one
+   * disposal authority, every parsed line is dropped instead of delivered, and
+   * the resulting close makes the caller's own `waitClosed()` race reject with
+   * the adoption failure (`buildExitError`) before a thread id is published.
+   * Both cleanup attempts are best-effort because the adoption failure, not a
+   * terminator's own complaint, is the reason to report.
+   */
+  private async adoptOwnedTree(options: CodexProcessOptions): Promise<void> {
+    try {
+      await adoptOwnedProcessTree({
+        child: this.child,
+        label: 'codex',
+        platform: options.platform,
+        jobObject: options.jobObject,
+      });
+    } catch (cause) {
+      const failure = cause instanceof Error ? cause : new Error(String(cause));
+      this.adoptionFailure = failure;
+      this.adoption = 'failed';
+      this.deferredEvents.length = 0;
+      await requestOwnedProcessTreeTermination(this.processTreeOptions()).catch(() => {});
+      await disposeOwnedProcessTree(this.processTreeOptions()).catch(() => {});
+      throw failure;
+    }
+    this.adoption = 'adopted';
+    for (const evt of this.deferredEvents.splice(0)) this.onEvent(evt);
+  }
+
+  /** Arrival-order delivery, held back until the tree is backstopped (see `deferredEvents`). */
+  private deliver(evt: CodexRawEvent): void {
+    if (this.adoption === 'failed') return;
+    if (this.adoption === 'pending') {
+      this.deferredEvents.push(evt);
+      return;
+    }
+    this.onEvent(evt);
+  }
+
+  /**
+   * Builds a descriptive error folding in the exit code/signal and the stderr
+   * tail — mirrors `PiRpcClient.buildExitError`'s reasoning: a post-mortem on a
+   * failed start/resume should never need separately re-running codex by hand
+   * with a raw JSONL logger to learn why.
+   *
+   * A tree this runner could not backstop is the one exception: that process
+   * exited because THIS runner killed it, so `exit code=null, signal=SIGKILL`
+   * plus an empty stderr tail would bury the only reason anyone can act on.
+   */
   buildExitError(context: string): Error {
+    if (this.adoptionFailure !== undefined) return this.adoptionFailure;
     const parts = [`${context} (exit code=${this.exitCode}, signal=${this.exitSignal})`];
     if (this.stderrRing.length > 0) {
       parts.push(`stderr: ${this.stderrRing.join(' | ')}`);
@@ -197,7 +273,7 @@ export class CodexProcessRunner {
     if (!parsed || typeof parsed !== 'object' || typeof (parsed as { type?: unknown }).type !== 'string') {
       return;
     }
-    this.onEvent(parsed as CodexRawEvent);
+    this.deliver(parsed as CodexRawEvent);
   }
 
   private onStderr(chunk: string): void {

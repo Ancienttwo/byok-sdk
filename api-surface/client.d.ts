@@ -247,6 +247,17 @@ export interface ClaudeProcessClientOptions {
     cwd: string;
     env: NodeJS.ProcessEnv;
     spawnFn?: SpawnFn;
+    /**
+     * DI seam scoped to ADOPTION only (`../process-tree.ts`'s
+     * `adoptOwnedProcessTree`), so the win32 job-object branch is exercisable
+     * from POSIX. Disposal keeps `process.platform` as its own authority — this
+     * must never silently reroute the taskkill sweep on a real host.
+     */
+    platform?: NodeJS.Platform;
+    /** DI seam for the win32 job-object backstop; see `../win32-job-object.ts`. */
+    jobObject?: {
+        assign(pid: number): Promise<void>;
+    };
 }
 /**
  * NDJSON process transport for `claude -p --input-format stream-json
@@ -295,6 +306,10 @@ export declare class ClaudeProcessClient {
     private readonly closedPromise;
     private resolveClosed;
     private disposalAttempt;
+    /** Resolves once this tree is backstopped (see `adoptOwnedProcessTree`); rejects with the adoption failure, having already terminated the tree. */
+    private readonly adopted;
+    /** Set before the fail-closed termination starts, so it — not the exit code of the kill we ourselves requested — becomes this client's exit error. */
+    private adoptionFailure;
     private readonly stderrRing;
     private readonly unmappedFrameCounts;
     private sessionId;
@@ -348,6 +363,15 @@ export declare class ClaudeProcessClient {
     waitClosed(): Promise<void>;
     dispose(): Promise<void>;
     private processTreeOptions;
+    /**
+     * Backstop this tree, or tear it down. Adoption failure is a start-time
+     * precondition, not a degraded mode: the child is terminated through the one
+     * disposal authority and the failure is re-thrown, which is what makes
+     * `waitForInit()` — and therefore `ClaudeAdapter.start()` — fail before any
+     * session is published. Both cleanup attempts are best-effort because the
+     * adoption failure, not a terminator's own complaint, is the reason to report.
+     */
+    private adoptOwnedTree;
     private onData;
     private onLine;
     private onStderr;
@@ -540,6 +564,17 @@ export interface CodexProcessOptions {
     spawnFn?: SpawnFn;
     /** Called once per parsed JSONL line, in arrival order. */
     onEvent: (evt: CodexRawEvent) => void;
+    /**
+     * DI seam scoped to ADOPTION only (`../process-tree.ts`'s
+     * `adoptOwnedProcessTree`), so the win32 job-object branch is exercisable
+     * from POSIX. Disposal keeps `process.platform` as its own authority — this
+     * must never silently reroute the taskkill sweep on a real host.
+     */
+    platform?: NodeJS.Platform;
+    /** DI seam for the win32 job-object backstop; see `../win32-job-object.ts`. */
+    jobObject?: {
+        assign(pid: number): Promise<void>;
+    };
 }
 /**
  * Spawns and streams ONE `codex exec` / `codex exec resume` invocation — i.e.
@@ -581,6 +616,19 @@ export declare class CodexProcessRunner {
     private readonly closedPromise;
     private resolveClosed;
     private disposalAttempt;
+    /** Resolves once this tree is backstopped (see `adoptOwnedProcessTree`); rejects with the adoption failure, having already terminated the tree. */
+    private readonly adopted;
+    /** Set before the fail-closed termination starts; `buildExitError` reports it instead of the exit status of the kill we ourselves requested. */
+    private adoptionFailure;
+    private adoption;
+    /**
+     * Lines parsed before adoption settled. Unlike pi and claude, this runner has
+     * no first awaited operation of its own to gate on — its caller reads the
+     * FIRST event as the authoritative thread id. Holding events until the tree
+     * is backstopped is what keeps that caller from publishing a session for a
+     * tree the job object never took.
+     */
+    private readonly deferredEvents;
     constructor(options: CodexProcessOptions);
     private finishClosing;
     /** Resolves once the child process has fully exited (both exit and stdio-flush guaranteed — see the `close` listener above). Never rejects. */
@@ -607,7 +655,28 @@ export declare class CodexProcessRunner {
     kill(): void;
     dispose(): Promise<void>;
     private processTreeOptions;
-    /** Builds a descriptive error folding in the exit code/signal and the stderr tail — mirrors `PiRpcClient.buildExitError`'s reasoning: a post-mortem on a failed start/resume should never need separately re-running codex by hand with a raw JSONL logger to learn why. */
+    /**
+     * Backstop this tree, or tear it down. Adoption failure is a start-time
+     * precondition, not a degraded mode: the child is terminated through the one
+     * disposal authority, every parsed line is dropped instead of delivered, and
+     * the resulting close makes the caller's own `waitClosed()` race reject with
+     * the adoption failure (`buildExitError`) before a thread id is published.
+     * Both cleanup attempts are best-effort because the adoption failure, not a
+     * terminator's own complaint, is the reason to report.
+     */
+    private adoptOwnedTree;
+    /** Arrival-order delivery, held back until the tree is backstopped (see `deferredEvents`). */
+    private deliver;
+    /**
+     * Builds a descriptive error folding in the exit code/signal and the stderr
+     * tail — mirrors `PiRpcClient.buildExitError`'s reasoning: a post-mortem on a
+     * failed start/resume should never need separately re-running codex by hand
+     * with a raw JSONL logger to learn why.
+     *
+     * A tree this runner could not backstop is the one exception: that process
+     * exited because THIS runner killed it, so `exit code=null, signal=SIGKILL`
+     * plus an empty stderr tail would bury the only reason anyone can act on.
+     */
     buildExitError(context: string): Error;
     private onData;
     private parseLine;
@@ -772,6 +841,17 @@ export interface PiRpcClientOptions {
     cwd: string;
     env: NodeJS.ProcessEnv;
     spawnFn?: SpawnFn;
+    /**
+     * DI seam scoped to ADOPTION only (`../process-tree.ts`'s
+     * `adoptOwnedProcessTree`), so the win32 job-object branch is exercisable
+     * from POSIX. Disposal keeps `process.platform` as its own authority — this
+     * must never silently reroute the taskkill sweep on a real host.
+     */
+    platform?: NodeJS.Platform;
+    /** DI seam for the win32 job-object backstop; see `../win32-job-object.ts`. */
+    jobObject?: {
+        assign(pid: number): Promise<void>;
+    };
 }
 /**
  * JSONL request/response + event-stream client for `pi --mode rpc`.
@@ -796,12 +876,23 @@ export declare class PiRpcClient {
     private readonly closedPromise;
     private resolveClosed;
     private disposalAttempt;
+    /** Resolves once this tree is backstopped (see `adoptOwnedProcessTree`); rejects with the adoption failure, having already terminated the tree. */
+    private readonly adopted;
+    /** Set before the fail-closed termination starts, so it — not the exit code of the kill we ourselves requested — becomes this client's exit error. */
+    private adoptionFailure;
     /** Bounded tail of recent stderr lines — pi discarded this entirely before (nothing ever read `child.stderr`), which is exactly why finding #1 (`Error: Unknown option: --session-id`, exit 1) had to be root-caused by hand instead of reading it off a thrown error. See `buildExitError`. */
     private readonly stderrRing;
     /** Count of pi RPC message types `PiSession` (pi-adapter.ts) has told us have no `AgentEvent` mapping and aren't routine bookkeeping — see `recordUnmappedFrame`. */
     private readonly unmappedFrameCounts;
     constructor(options: PiRpcClientOptions);
-    /** Send a command, resolved with its correlated `response` message. */
+    /**
+     * Send a command, resolved with its correlated `response` message.
+     *
+     * Adoption is awaited FIRST — this is `PiAdapter.start()`'s first awaited
+     * operation, so an unbackstopped tree never receives the initial prompt and
+     * never yields a session. The wait costs one settled-promise turn once the
+     * tree is adopted; every later command sees it already resolved.
+     */
     send(command: Record<string, unknown> & {
         type: string;
         id?: string;
@@ -831,6 +922,15 @@ export declare class PiRpcClient {
     waitClosed(): Promise<void>;
     dispose(): Promise<void>;
     private processTreeOptions;
+    /**
+     * Backstop this tree, or tear it down. Adoption failure is a start-time
+     * precondition, not a degraded mode: the child is terminated through the one
+     * disposal authority and the failure is re-thrown, which is what makes the
+     * first `send()` — and therefore `PiAdapter.start()` — fail before any
+     * session is published. Both cleanup attempts are best-effort because the
+     * adoption failure, not a terminator's own complaint, is the reason to report.
+     */
+    private adoptOwnedTree;
     private onData;
     private onLine;
     /**

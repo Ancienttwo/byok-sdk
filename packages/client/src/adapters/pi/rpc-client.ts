@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { AsyncQueue } from '../../util/async-queue';
-import { disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../process-tree';
+import { adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../process-tree';
 
 export type SpawnFn = typeof spawn;
 
@@ -23,6 +23,15 @@ export interface PiRpcClientOptions {
   cwd: string;
   env: NodeJS.ProcessEnv;
   spawnFn?: SpawnFn;
+  /**
+   * DI seam scoped to ADOPTION only (`../process-tree.ts`'s
+   * `adoptOwnedProcessTree`), so the win32 job-object branch is exercisable
+   * from POSIX. Disposal keeps `process.platform` as its own authority — this
+   * must never silently reroute the taskkill sweep on a real host.
+   */
+  platform?: NodeJS.Platform;
+  /** DI seam for the win32 job-object backstop; see `../win32-job-object.ts`. */
+  jobObject?: { assign(pid: number): Promise<void> };
 }
 
 /** Bound on retained stderr lines (see `onStderr`/`buildExitError`) — enough to show a real crash reason without an unbounded footprint for a long-lived process that's merely chatty on stderr. */
@@ -65,6 +74,10 @@ export class PiRpcClient {
   private readonly closedPromise: Promise<void>;
   private resolveClosed!: () => void;
   private disposalAttempt: Promise<void> | undefined;
+  /** Resolves once this tree is backstopped (see `adoptOwnedProcessTree`); rejects with the adoption failure, having already terminated the tree. */
+  private readonly adopted: Promise<void>;
+  /** Set before the fail-closed termination starts, so it — not the exit code of the kill we ourselves requested — becomes this client's exit error. */
+  private adoptionFailure: Error | undefined;
   /** Bounded tail of recent stderr lines — pi discarded this entirely before (nothing ever read `child.stderr`), which is exactly why finding #1 (`Error: Unknown option: --session-id`, exit 1) had to be root-caused by hand instead of reading it off a thrown error. See `buildExitError`. */
   private readonly stderrRing: string[] = [];
   /** Count of pi RPC message types `PiSession` (pi-adapter.ts) has told us have no `AgentEvent` mapping and aren't routine bookkeeping — see `recordUnmappedFrame`. */
@@ -80,6 +93,10 @@ export class PiRpcClient {
     this.closedPromise = new Promise((resolve) => {
       this.resolveClosed = resolve;
     });
+    this.adopted = this.adoptOwnedTree(options);
+    // The rejection is consumed by `send()`; this keeps a client that is
+    // constructed and then abandoned from raising an unhandled rejection.
+    this.adopted.catch(() => {});
 
     this.child.stdout.setEncoding('utf8');
     this.child.stdout.on('data', (chunk: string) => this.onData(chunk));
@@ -100,10 +117,18 @@ export class PiRpcClient {
     });
   }
 
-  /** Send a command, resolved with its correlated `response` message. */
-  send(command: Record<string, unknown> & { type: string; id?: string }): Promise<PiRpcMessage> {
+  /**
+   * Send a command, resolved with its correlated `response` message.
+   *
+   * Adoption is awaited FIRST — this is `PiAdapter.start()`'s first awaited
+   * operation, so an unbackstopped tree never receives the initial prompt and
+   * never yields a session. The wait costs one settled-promise turn once the
+   * tree is adopted; every later command sees it already resolved.
+   */
+  async send(command: Record<string, unknown> & { type: string; id?: string }): Promise<PiRpcMessage> {
+    await this.adopted;
     if (this.closed) {
-      return Promise.reject(this.exitError ?? new Error('pi process is closed'));
+      throw this.exitError ?? new Error('pi process is closed');
     }
     const id = command.id ?? `req-${this.nextId++}`;
     const full = { ...command, id };
@@ -180,6 +205,31 @@ export class PiRpcClient {
       isClosed: () => this.closed,
       label: 'pi',
     };
+  }
+
+  /**
+   * Backstop this tree, or tear it down. Adoption failure is a start-time
+   * precondition, not a degraded mode: the child is terminated through the one
+   * disposal authority and the failure is re-thrown, which is what makes the
+   * first `send()` — and therefore `PiAdapter.start()` — fail before any
+   * session is published. Both cleanup attempts are best-effort because the
+   * adoption failure, not a terminator's own complaint, is the reason to report.
+   */
+  private async adoptOwnedTree(options: PiRpcClientOptions): Promise<void> {
+    try {
+      await adoptOwnedProcessTree({
+        child: this.child,
+        label: 'pi',
+        platform: options.platform,
+        jobObject: options.jobObject,
+      });
+    } catch (cause) {
+      const failure = cause instanceof Error ? cause : new Error(String(cause));
+      this.adoptionFailure = failure;
+      await requestOwnedProcessTreeTermination(this.processTreeOptions()).catch(() => {});
+      await disposeOwnedProcessTree(this.processTreeOptions()).catch(() => {});
+      throw failure;
+    }
   }
 
   private onData(chunk: string): void {
@@ -272,9 +322,13 @@ export class PiRpcClient {
   private onClosed(err: Error): void {
     if (this.closed) return;
     this.closed = true;
-    this.exitError = err;
+    // An adoption failure outranks the exit status of the termination it
+    // itself requested: reporting `exit code=null, signal=SIGKILL` would bury
+    // the only reason anyone can act on.
+    const terminal = this.adoptionFailure ?? err;
+    this.exitError = terminal;
     this.resolveClosed();
-    for (const [, waiter] of this.pending) waiter.reject(err);
+    for (const [, waiter] of this.pending) waiter.reject(terminal);
     this.pending.clear();
     this.eventQueue.end();
   }

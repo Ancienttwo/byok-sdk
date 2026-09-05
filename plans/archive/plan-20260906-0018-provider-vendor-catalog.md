@@ -1,6 +1,16 @@
+> **Archived**: 2026-09-06 01:29
+> **Related Plan**: plans/archive/plan-20260906-0018-provider-vendor-catalog.md
+> **Outcome**: Completed
+> **Lifecycle**: plan
+> **Parent Run ID**: run-20260906-0129
+> **Archive Projection V1**: `plans/plan-20260906-0018-provider-vendor-catalog.md` => `plans/archive/plan-20260906-0018-provider-vendor-catalog.md`
+> **Archive Projection V1**: `tasks/notes/20260906-0018-provider-vendor-catalog.notes.md` => `tasks/archive/notes-20260906-0129-provider-vendor-catalog.md`
+> **Archive Projection V1**: `tasks/contracts/20260906-0018-provider-vendor-catalog.contract.md` => `tasks/archive/contract-20260906-0129-provider-vendor-catalog.md`
+> **Archive Projection V1**: `tasks/reviews/20260906-0018-provider-vendor-catalog.review.md` => `tasks/archive/review-20260906-0129-provider-vendor-catalog.md`
+
 # Plan: Port deepseek-harness provider vendor catalog into @byok-sdk/keys
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260906-0018
 > **Slug**: provider-vendor-catalog
 > **Artifact Level**: work-package
@@ -9,9 +19,9 @@
 > **Rollback Surface**: the new catalog module, the widened provider-kind enum, the adapter-legality refinement, the derived SQLite CHECK plus its stale-schema guard, two client deny-list names, the api-surface golden, docs.
 > **Spec**: `docs/spec.md`
 > **Research**: `docs/researches/2026-09-06_deepseek-harness-provider-catalog-port.md`
-> **Task Contract**: `tasks/contracts/20260906-0018-provider-vendor-catalog.contract.md`
-> **Task Review**: `tasks/reviews/20260906-0018-provider-vendor-catalog.review.md`
-> **Implementation Notes**: `tasks/notes/20260906-0018-provider-vendor-catalog.notes.md`
+> **Task Contract**: `tasks/archive/contract-20260906-0129-provider-vendor-catalog.md`
+> **Task Review**: `tasks/archive/review-20260906-0129-provider-vendor-catalog.md`
+> **Implementation Notes**: `tasks/archive/notes-20260906-0129-provider-vendor-catalog.md`
 
 ## Agentic Routing
 - Selected route: main-loop planning with direct execution.
@@ -24,16 +34,16 @@
 ## Workflow Inventory
 Complete this inventory before implementation. If any line is unknown, keep the plan in Draft and fill it before projection.
 
-- Active plan: `plans/plan-20260906-0018-provider-vendor-catalog.md`
-- Sprint contract: `tasks/contracts/20260906-0018-provider-vendor-catalog.contract.md`
-- Sprint review: `tasks/reviews/20260906-0018-provider-vendor-catalog.review.md`
-- Implementation notes: `tasks/notes/20260906-0018-provider-vendor-catalog.notes.md`
+- Active plan: `plans/archive/plan-20260906-0018-provider-vendor-catalog.md`
+- Sprint contract: `tasks/archive/contract-20260906-0129-provider-vendor-catalog.md`
+- Sprint review: `tasks/archive/review-20260906-0129-provider-vendor-catalog.md`
+- Implementation notes: `tasks/archive/notes-20260906-0129-provider-vendor-catalog.md`
 - Deferred-goal ledger: `tasks/todos.md`
 - Current checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
-- Scope authority: `tasks/contracts/20260906-0018-provider-vendor-catalog.contract.md` `allowed_paths`
+- Scope authority: `tasks/archive/contract-20260906-0129-provider-vendor-catalog.md` `allowed_paths`
 - Concurrency rule: `.ai/harness/active-plan` selects the active plan for this worktree when present; `.ai/harness/active-worktree` records the owning worktree. If another worktree already owns active work, open or switch to the matching worktree instead of serializing unrelated plans.
-- Execution isolation: approved contract-level work projects through `repo-harness run plan-to-todo --plan plans/plan-20260906-0018-provider-vendor-catalog.md` and may start `repo-harness run contract-worktree start --plan plans/plan-20260906-0018-provider-vendor-catalog.md`.
+- Execution isolation: approved contract-level work projects through `repo-harness run plan-to-todo --plan plans/archive/plan-20260906-0018-provider-vendor-catalog.md` and may start `repo-harness run contract-worktree start --plan plans/archive/plan-20260906-0018-provider-vendor-catalog.md`.
 
 ## Approach
 ### Strategy
@@ -89,11 +99,11 @@ Catalog entry -> consumer prefills a profile -> `parseModelProviderProfile` enfo
 | pi-ai catalog drift | Certain over time | Stale URLs | Note pins the source version; re-port is a data edit |
 
 ## Task Contracts
-- Contract file: `tasks/contracts/20260906-0018-provider-vendor-catalog.contract.md`
-- Review file: `tasks/reviews/20260906-0018-provider-vendor-catalog.review.md`
-- Implementation notes file: `tasks/notes/20260906-0018-provider-vendor-catalog.notes.md`
+- Contract file: `tasks/archive/contract-20260906-0129-provider-vendor-catalog.md`
+- Review file: `tasks/archive/review-20260906-0129-provider-vendor-catalog.md`
+- Implementation notes file: `tasks/archive/notes-20260906-0129-provider-vendor-catalog.md`
 - Template: `.claude/templates/contract.template.md`
-- Verification command: `repo-harness run verify-contract --contract tasks/contracts/20260906-0018-provider-vendor-catalog.contract.md --strict`
+- Verification command: `repo-harness run verify-contract --contract tasks/archive/contract-20260906-0129-provider-vendor-catalog.md --strict`
 - Active plan rule: `.ai/harness/active-plan` is authoritative for this worktree when present; `.ai/harness/active-worktree` records the owning worktree. Do not infer active execution from the latest non-archived plan.
 
 ## Handoff
