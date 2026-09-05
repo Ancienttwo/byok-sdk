@@ -255,7 +255,7 @@ describe('host task cancellation', () => {
     await expect(terminal).resolves.toBe('accepted');
 
     await expect(harness.cloud.readTaskAttempt(TENANT_A, offer.taskId)).resolves.toMatchObject({
-      status: 'cancel_requested',
+      status: 'cancelled',
       cancellation: { reason: 'cancel wins the CAS' },
     });
     await expect(harness.cloud.readTaskResult(TENANT_A, offer.taskId)).resolves.toMatchObject({

@@ -33,6 +33,8 @@ import { existsSync, mkdirSync, readdirSync, renameSync, statSync, writeFileSync
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import {
+  journalHash,
+  type JournalIdentity,
   JournalClosedError,
   JournalCorruptError,
   JournalRecordTooLargeError,
@@ -101,9 +103,14 @@ export type JournalFaultStep =
   | 'append:after-task'
   | 'append:after-receipt'
   | 'append:before-commit'
+  | 'append:after-commit'
   | 'admission:before-commit'
   | 'transition:before-commit'
   | 'terminal:before-commit'
+  | 'terminal:after-commit'
+  | 'recovery:after-commit'
+  | 'confirm:before-commit'
+  | 'confirm:after-commit'
   | 'recovery:before-commit'
   | 'cleanup:before-commit'
   | 'prune:before-commit';
@@ -204,6 +211,7 @@ CREATE INDEX IF NOT EXISTS journal_transition_task ON journal_transition (task_i
 CREATE TABLE IF NOT EXISTS journal_terminal (
   task_id       TEXT PRIMARY KEY REFERENCES journal_task (task_id),
   terminal_type TEXT NOT NULL,
+  bytes         TEXT NOT NULL,
   payload_hash  TEXT NOT NULL,
   truth_state   TEXT NOT NULL,
   attempt       INTEGER NOT NULL,
@@ -400,6 +408,14 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
       const quarantinePath = quarantineDatabase(options.storeDir, this.#dbPath, reason, this.#clock());
       throw new JournalCorruptError(this.#dbPath, quarantinePath, reason, { cause: err });
     }
+    // A hash-only predecessor cannot be silently upgraded into replay evidence.
+    // Preserve its files and require an explicit operator resolution; never quarantine
+    // a structurally valid old format or synthesize missing terminal bytes.
+    const terminalColumns = db.prepare('PRAGMA table_info(journal_terminal)').all() as Array<{ name: string }>;
+    if (!terminalColumns.some((column) => column.name === 'bytes')) {
+      db.close();
+      throw new JournalUnavailableError('hash-only journal format cannot replay terminals; preserve/export this journal and resolve it before starting the new execution-recovery format');
+    }
     this.#db = db;
     try {
       secureJournalFilePermissions(this.#dbPath);
@@ -504,12 +520,15 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
 
     return this.#enqueue('appendEnvelope', () => {
       this.#fault('append:before-begin');
-      return this.#transaction((): JournalReceipt => {
+      const committed = this.#transaction((): JournalReceipt => {
         const existing = this.#db
           .prepare('SELECT receipt FROM journal_idempotency WHERE scope = ? AND key = ?')
           .get('envelope', record.envelopeId) as { receipt: string } | undefined;
         if (existing) {
           const prior = JSON.parse(existing.receipt) as Omit<JournalReceipt, 'created'>;
+          if (prior.bytesHash !== record.bytesHash) throw new Error('journal envelope identity collision');
+          const priorIdentity = this.#db.prepare('SELECT tenant_id, product_id, device_id FROM journal_envelope WHERE envelope_id = ?').get(record.envelopeId) as Record<string, unknown>;
+          this.#assertIdentity(priorIdentity, record.identity);
           return { ...prior, created: false };
         }
 
@@ -535,6 +554,18 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
         this.#fault('append:after-envelope');
 
         if (record.opensTask && record.taskId !== undefined) {
+          const task = this.#db.prepare('SELECT * FROM journal_task WHERE task_id = ?').get(record.taskId) as Record<string, unknown> | undefined;
+          if (task) {
+            this.#assertIdentity(task, record.identity);
+            const original = this.#db.prepare('SELECT bytes FROM journal_envelope WHERE envelope_id = ?').get(task.envelope_id as string) as { bytes: string };
+            // Transport IDs/seq can change on duplicate delivery, but the execution
+            // contract (including exact AgentRef) must never change under task_id.
+            const oldOffer = JSON.parse(original.bytes) as { type?: unknown; payload?: unknown };
+            const newOffer = JSON.parse(record.bytes) as { type?: unknown; payload?: unknown };
+            if (oldOffer.type !== newOffer.type || JSON.stringify(oldOffer.payload) !== JSON.stringify(newOffer.payload)) {
+              throw new Error('journal task identity reused with a different execution contract');
+            }
+          }
           // `OR IGNORE`: a second, different envelope re-opening the same task
           // id (a re-offer after the cloud lost track) must not clobber the
           // admission/claim state the first one already accumulated. The
@@ -573,6 +604,8 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
 
         return { ...receipt, created: true };
       });
+      this.#fault('append:after-commit');
+      return committed;
     });
   }
 
@@ -652,39 +685,114 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
    */
   recordTerminal(record: LocalTerminalRecord): Promise<void> {
     return this.#enqueue('recordTerminal', () => {
+      if (typeof record.bytes !== 'string' || journalHash(record.bytes) !== record.payloadHash) {
+        throw new Error('terminal bytes do not match their canonical hash');
+      }
+      if (byteLength(record.bytes) > this.#maxRecordBytes) {
+        throw new JournalRecordTooLargeError('terminal bytes', byteLength(record.bytes), this.#maxRecordBytes);
+      }
       this.#transaction(() => {
         this.#requireTask(record.taskId, 'recordTerminal');
-        const existing = this.#db
-          .prepare('SELECT payload_hash FROM journal_terminal WHERE task_id = ?')
-          .get(record.taskId) as { payload_hash: string } | undefined;
-
-        if (existing === undefined) {
-          this.#db
-            .prepare(
-              `INSERT INTO journal_terminal
-                 (task_id, terminal_type, payload_hash, truth_state, attempt, last_error, recorded_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            )
-            .run(
-              record.taskId,
-              record.terminalType,
-              record.payloadHash,
-              record.truthState,
-              record.attempt,
-              record.lastError ?? null,
-              record.recordedAt,
-              record.recordedAt,
-            );
-          this.#db
-            .prepare('UPDATE journal_task SET local_state = ?, updated_at = ? WHERE task_id = ?')
+        const existing = this.#db.prepare('SELECT * FROM journal_terminal WHERE task_id = ?')
+          .get(record.taskId) as { payload_hash: string; bytes: string; truth_state: string } | undefined;
+        if (!existing) {
+          this.#db.prepare(`INSERT INTO journal_terminal
+            (task_id, terminal_type, bytes, payload_hash, truth_state, attempt, last_error, recorded_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+            .run(record.taskId, record.terminalType, record.bytes, record.payloadHash, record.truthState,
+              record.attempt, record.lastError ?? null, record.recordedAt, record.recordedAt);
+          this.#db.prepare('UPDATE journal_task SET local_state = ?, updated_at = ? WHERE task_id = ?')
             .run(`terminal:${record.terminalType}`, record.recordedAt, record.taskId);
-        } else if (existing.payload_hash === record.payloadHash) {
-          this.#db
-            .prepare('UPDATE journal_terminal SET truth_state = ?, attempt = ?, last_error = ?, updated_at = ? WHERE task_id = ?')
+        } else if (existing.payload_hash === record.payloadHash && existing.bytes === record.bytes && existing.truth_state !== 'confirmed') {
+          this.#db.prepare('UPDATE journal_terminal SET truth_state = ?, attempt = ?, last_error = ?, updated_at = ? WHERE task_id = ?')
             .run(record.truthState, record.attempt, record.lastError ?? null, record.recordedAt, record.taskId);
+        }
+        if (record.recovery !== undefined && !existing) {
+          this.#db.prepare('UPDATE journal_task SET recovery_marker = ?, updated_at = ? WHERE task_id = ?')
+            .run(JSON.stringify({ ...record.recovery, occurredAt: record.recovery.occurredAt ?? record.recordedAt }), record.recordedAt, record.taskId);
+          this.#fault('recovery:before-commit');
         }
         this.#fault('terminal:before-commit');
       });
+      if (record.recovery !== undefined) this.#fault('recovery:after-commit');
+      this.#fault('terminal:after-commit');
+    });
+  }
+
+  #assertIdentity(row: Record<string, unknown>, identity: JournalIdentity): void {
+    if (row.tenant_id !== identity.tenantId || row.product_id !== identity.productId || row.device_id !== identity.deviceId) {
+      throw new Error('journal enrollment identity mismatch; refusing cross-enrollment execution or terminal replay');
+    }
+  }
+
+  #taskRow(row: Record<string, unknown>): RecoverableTask {
+    if (typeof row.envelope_bytes !== 'string' || journalHash(row.envelope_bytes) !== row.envelope_hash) {
+      throw new Error('durable offer bytes/hash mismatch');
+    }
+    return {
+      taskId: row.task_id as string, envelopeId: row.envelope_id as string, seq: Number(row.seq),
+      identity: { tenantId: row.tenant_id as string, productId: row.product_id as string, deviceId: row.device_id as string },
+      localState: row.recovery_marker !== null && !String(row.local_state).startsWith('terminal:') ? 'interrupted' : row.local_state as string,
+      ...(row.claimed_runtime == null ? {} : { claimedRuntime: row.claimed_runtime as string }),
+      ...(row.workspace_ref == null ? {} : { workspaceRef: row.workspace_ref as string }),
+      updatedAt: row.updated_at as string, envelopeBytes: row.envelope_bytes as string,
+    };
+  }
+
+  readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | undefined> {
+    return this.#enqueue('readTask', () => {
+      const row = this.#db.prepare(`SELECT t.*, e.bytes AS envelope_bytes, e.bytes_hash AS envelope_hash FROM journal_task t
+        JOIN journal_envelope e ON e.envelope_id = t.envelope_id WHERE t.task_id = ?`).get(taskId) as Record<string, unknown> | undefined;
+      if (!row) return undefined;
+      this.#assertIdentity(row, identity);
+      return this.#taskRow(row);
+    });
+  }
+
+  listRecoveryTasks(identity: JournalIdentity): Promise<RecoverableTask[]> {
+    return this.#enqueue('listRecoveryTasks', () => {
+      const rows = this.#db.prepare(`SELECT t.*, e.bytes AS envelope_bytes, e.bytes_hash AS envelope_hash FROM journal_task t
+        JOIN journal_envelope e ON e.envelope_id = t.envelope_id
+        LEFT JOIN journal_terminal term ON term.task_id = t.task_id
+        WHERE term.task_id IS NULL ORDER BY t.seq, t.task_id`).all() as Record<string, unknown>[];
+      return rows.map((row) => { this.#assertIdentity(row, identity); return this.#taskRow(row); });
+    });
+  }
+
+  listPendingTerminals(identity: JournalIdentity): Promise<LocalTerminalRecord[]> {
+    return this.#enqueue('listPendingTerminals', () => {
+      const rows = this.#db.prepare(`SELECT term.*, t.tenant_id, t.product_id, t.device_id FROM journal_terminal term
+        JOIN journal_task t ON t.task_id = term.task_id WHERE term.truth_state <> 'confirmed'
+        ORDER BY term.recorded_at, term.task_id`).all() as Record<string, unknown>[];
+      return rows.map((row) => {
+        this.#assertIdentity(row, identity);
+        if (typeof row.bytes !== 'string' || journalHash(row.bytes) !== row.payload_hash) throw new Error('durable terminal bytes/hash mismatch');
+        return { taskId: row.task_id as string, terminalType: row.terminal_type as LocalTerminalRecord['terminalType'],
+          bytes: row.bytes, payloadHash: row.payload_hash as string, truthState: row.truth_state as LocalTerminalRecord['truthState'],
+          attempt: Number(row.attempt), recordedAt: row.recorded_at as string,
+          ...(row.last_error === null ? {} : { lastError: row.last_error as string }) };
+      });
+    });
+  }
+
+  confirmTerminal(taskId: string, payloadHash: string): Promise<void> {
+    return this.#terminalDisposition(taskId, payloadHash, 'confirmed');
+  }
+
+  rejectTerminal(taskId: string, payloadHash: string, reason: string): Promise<void> {
+    return this.#terminalDisposition(taskId, payloadHash, 'failed', reason);
+  }
+
+  #terminalDisposition(taskId: string, payloadHash: string, state: 'confirmed' | 'failed', reason?: string): Promise<void> {
+    return this.#enqueue('terminalDisposition', () => {
+      this.#transaction(() => {
+        const row = this.#db.prepare('SELECT payload_hash FROM journal_terminal WHERE task_id = ?').get(taskId) as { payload_hash: string } | undefined;
+        if (!row || row.payload_hash !== payloadHash) throw new Error('terminal acknowledgement does not match durable terminal');
+        this.#db.prepare(`UPDATE journal_terminal SET truth_state = ?, last_error = ?, updated_at = ?
+          WHERE task_id = ? AND truth_state <> 'confirmed'`).run(state, reason ?? null, this.#clock().toISOString(), taskId);
+        this.#fault('confirm:before-commit');
+      });
+      this.#fault('confirm:after-commit');
     });
   }
 
@@ -703,8 +811,9 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
       const rows = this.#db
         .prepare(
           `SELECT t.task_id, t.envelope_id, t.seq, t.tenant_id, t.product_id, t.device_id,
-                  t.local_state, t.claimed_runtime, t.workspace_ref, t.updated_at
+                  t.local_state, t.claimed_runtime, t.workspace_ref, t.updated_at, e.bytes AS envelope_bytes, e.bytes_hash AS envelope_hash
              FROM journal_task t
+             JOIN journal_envelope e ON e.envelope_id = t.envelope_id
              LEFT JOIN journal_terminal term ON term.task_id = t.task_id
             WHERE t.recovery_marker IS NULL
               AND term.task_id IS NULL
@@ -728,6 +837,7 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
           ...(claimedRuntime === null ? {} : { claimedRuntime }),
           ...(workspaceRef === null ? {} : { workspaceRef }),
           updatedAt: row.updated_at as string,
+          envelopeBytes: row.envelope_bytes as string,
         };
       });
     });

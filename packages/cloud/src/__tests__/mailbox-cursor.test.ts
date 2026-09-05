@@ -226,6 +226,45 @@ describe('GET /byok/events cursor semantics', () => {
 });
 
 describe('enqueueOffer', () => {
+  it('never re-enqueues a delivered task id after its mailbox row is retired', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const taskId = 'task-immutable-execution';
+    const input = { taskId, payload: offerPayload('execute once') };
+    const first = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, input);
+    await harness.stores.tasks.recordStatus(TENANT_A, { taskId, status: 'complete' });
+
+    await harness.core.mailbox.recordDelivery(TENANT_A, {
+      deviceId: device.deviceId,
+      deliveredSeq: first.seq,
+    });
+    await harness.core.mailbox.advanceCursor(TENANT_A, {
+      deviceId: device.deviceId,
+      ackedSeq: first.seq,
+    });
+    await harness.core.mailbox.collectRetired(TENANT_A, {
+      deviceId: device.deviceId,
+      ackedBefore: '2999-01-01T00:00:00.000Z',
+      expireUnackedBefore: '2999-01-01T00:00:00.000Z',
+    });
+    expect((await harness.core.mailbox.readAfter(TENANT_A, {
+      deviceId: device.deviceId,
+      afterSeq: first.seq,
+    })).messages).toEqual([]);
+
+    await expect(harness.cloud.enqueueOffer(TENANT_A, device.deviceId, input))
+      .rejects.toSatisfy((error: unknown) => isCloudError(error, 'coordination_input_invalid'));
+    expect((await harness.core.mailbox.readAfter(TENANT_A, {
+      deviceId: device.deviceId,
+      afterSeq: first.seq,
+    })).messages).toEqual([]);
+    await expect(harness.cloud.readTaskAttempt(TENANT_A, taskId)).resolves.toMatchObject({
+      taskId,
+      deviceId: device.deviceId,
+      status: 'complete',
+    });
+  });
+
   it('numbers the envelope with the same seq the mailbox row gets', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);

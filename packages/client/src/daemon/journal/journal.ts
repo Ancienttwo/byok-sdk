@@ -136,18 +136,21 @@ export interface LocalTransitionRecord {
 export type TerminalTruthState = 'pending' | 'confirmed' | 'failed';
 
 /**
- * A task's terminal, as it exists locally. The PAYLOAD is not stored — only
- * its hash, plus enough retry state to know whether the cloud has taken it.
+ * One immutable canonical terminal and its delivery projection. Bytes are the
+ * replay authority; the hash is checked against them, never used as a substitute.
  */
 export interface LocalTerminalRecord {
   readonly taskId: string;
-  readonly terminalType: 'complete' | 'failed' | 'cancelled';
+  readonly terminalType: 'complete' | 'failed' | 'cancelled' | 'declined';
+  readonly bytes: string;
   readonly payloadHash: string;
   readonly truthState: TerminalTruthState;
   /** How many times delivery to the cloud has been attempted. */
   readonly attempt: number;
   readonly lastError?: string;
   readonly recordedAt: string;
+  /** Committed atomically with the original interruption report. */
+  readonly recovery?: RecoveryOutcome;
 }
 
 /** A task the journal knows about that has no terminal and no recovery marker — i.e. one this daemon was in the middle of when it stopped. */
@@ -160,6 +163,7 @@ export interface RecoverableTask {
   readonly claimedRuntime?: string;
   readonly workspaceRef?: string;
   readonly updatedAt: string;
+  readonly envelopeBytes: string;
 }
 
 /**
@@ -286,6 +290,14 @@ export interface LocalTaskJournal {
   recordTransition(record: LocalTransitionRecord): Promise<void>;
   /** Record (or update the retry state of) a task's terminal. Idempotent by task id: a replay with the same payload hash is a no-op beyond retry bookkeeping. */
   recordTerminal(record: LocalTerminalRecord): Promise<void>;
+  /** Exact original terminal bytes, including rejected records, until acknowledged. */
+  listPendingTerminals(identity: JournalIdentity): Promise<LocalTerminalRecord[]>;
+  /** A successful authenticated transport disposition, bound to the original bytes. */
+  confirmTerminal(taskId: string, payloadHash: string): Promise<void>;
+  rejectTerminal(taskId: string, payloadHash: string, reason: string): Promise<void>;
+  /** Includes old interruption markers without reports; they must not hide pending work. */
+  listRecoveryTasks(identity: JournalIdentity): Promise<RecoverableTask[]>;
+  readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | undefined>;
   /** Tasks with no terminal and no recovery marker — what this daemon was in the middle of when it last stopped. */
   listRecoverable(): Promise<RecoverableTask[]>;
   /** Close out one recoverable task by writing its recovery marker. Never deletes; a marked row is on §12.7.2.1's never-auto-delete list. */

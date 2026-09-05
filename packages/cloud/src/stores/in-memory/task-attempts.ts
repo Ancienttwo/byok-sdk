@@ -199,6 +199,7 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
       const existing = this.#state.attempts.get(key);
       if (existing === undefined) return undefined;
       if (
+        existing.deviceId !== input.deviceId ||
         existing.ownerDeviceId !== undefined ||
         existing.cancellation !== undefined ||
         existing.status !== 'offered'

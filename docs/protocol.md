@@ -42,10 +42,10 @@ state/transition. There is no in-place "tighten it a little" allowance
 post-freeze the way pre-freeze M0→M1 had (§10) — a change of this shape is a
 new major version, full stop.
 
-**Both sides ignore unknown.** A daemon or server on an older minor version
-must not crash or hard-fail on a field, message type, or event variant it
-doesn't recognize yet — see the asymmetry below for the one deliberate
-exception. **Server supports N and N-1.** A server negotiates the highest
+**Unknown observability remains ignorable; unknown executable work is not acknowledged.**
+An unrecognized executable message has no durable disposition, so the daemon
+freezes the mailbox cursor rather than silently losing the work. Unknown nested
+observability fields and events retain the tolerance described below. **Server supports N and N-1.** A server negotiates the highest
 protocol version common to its own supported set and the daemon's
 `conn.hello.protocolVersions[]` list, and must continue accepting the
 immediately-prior major version so a fleet of daemons can roll forward
@@ -169,8 +169,8 @@ Every wire message is a single-line NDJSON envelope:
 Unknown top-level fields are stripped, not rejected (forward-compat). An
 unrecognized `type` is a distinct error (`UnknownMessageTypeError`, not
 `EnvelopeValidationError`) precisely so a daemon/server on an older minor
-version can skip an unfamiliar additive message type instead of treating it as
-corrupt input.
+version can report an unfamiliar message type distinctly from malformed input.
+An unknown executable type freezes its sequence; it is not an acknowledgement.
 
 ### 1.1 `task_id` is the sole routing key (M1 gap #1, #7)
 
@@ -2112,22 +2112,13 @@ real evidence:
    (parsed, field stripped, no throw) —
    `packages/protocol/src/__tests__/version-negotiation-drill.test.ts` and
    the adjacent AgentEvent-variant case already in `freeze-guard.test.ts`.
-2. **Unknown NEW message type — long-poll entries are skipped independently:**
-   the outer poll response (`events` plus `cursor`) is validated for shape,
-   then each event is parsed independently. An unrecognized `type` is skipped
-   for this batch without affecting later events or the session. When the
-   skipped envelope carries a numeric `seq`, the daemon advances its
-   skip-watermark past that entry so a persistently redelivered future message
-   cannot stall progress.
-
-   A recognized type whose payload fails validation is different: it engages
-   `stalledAtSeq` and does not advance the cursor. Later events may still run
-   their handlers, but the durable cursor remains frozen until the malformed
-   entry is redelivered in corrected form. Once corrected, the cursor advances
-   to that sequence; a higher sequence already handled while stalled is not
-   retroactively acknowledged until a genuinely new event closes the gap.
-   This is fail-closed control-message handling, not a compatibility
-   reinterpretation.
+2. **Unknown executable message types remain unacknowledged:** the outer poll
+   page is validated before each entry is parsed. Unknown types and known types
+   with invalid payloads engage the same ordered `stalledAtSeq`. Later valid
+   handlers may run, but cannot advance the durable cursor across undisposed
+   work. A corrected redelivery can clear that exact gap. Connection-level
+   messages never advance the execution cursor. An unidentifiable page entry
+   fails page validation, rather than disappearing before a later ack.
 
    The regression suites in
    `packages/client/src/__tests__/unknown-message-type-tolerance.test.ts` and
@@ -2164,3 +2155,23 @@ queued an outbound envelope. Daemon→server delivery has no redelivery cursor;
 the server's `accepted` response and the envelope's idempotency key are the
 only delivery facts. This was already true before the long-poll-only fold and
 does not add a second transport semantics.
+
+### Durable terminal delivery and execution restart
+
+With hostedJournal enabled, canonical terminal bytes and their hash projection
+are committed before entering ConnectionManager's existing authenticated
+`POST /byok/messages` queue. The accepted batch disposition is awaited through
+local `confirmed` persistence. A lost HTTP response or failed confirmation
+replays the identical envelope; a rejected singleton becomes locally `failed`,
+never `confirmed`. Terminal bytes remain immutable, including when the cloud
+already holds a winning final fact. `confirmed` means accepted delivery, while
+cloud receipt/cancellation authority determines the effective product outcome.
+
+The durable pre-claim admission boundary precedes runtime execution. Startup
+leaves unacknowledged/uncommitted offers for cloud mailbox redelivery, so host
+cancellation can suppress them. An acknowledged or committed unfinished task
+produces `task.fail` with `reason: daemon_interrupted`, `retryable: false`, and
+its original exact AgentRef. The interruption marker and report bytes commit
+atomically. Startup never automatically repeats runtime side effects. The
+existing tenant/task_id remains an immutable execution identity; dispatch with
+an already delivered identity is refused even after mailbox retention.

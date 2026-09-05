@@ -4,7 +4,6 @@ import {
   MESSAGE_TYPES,
   MessagesSendResponseSchema,
   parseMessage,
-  UnknownMessageTypeError,
   type Envelope,
   type MessagesSendResponse,
 } from '@byok-sdk/protocol';
@@ -71,56 +70,8 @@ export interface LongPollClientOptions {
   onRevoked?: () => void;
   /** Called when the server cannot replay the durable cursor supplied to this poll. */
   onReplayCursorTooOld?: (error: ReplayCursorTooOldError) => void;
-  /**
-   * M4 Phase 4 (version-negotiation drill fix), scope narrowed by finding F1:
-   * called ONLY for a batch entry that failed to parse because its `type`
-   * is entirely unrecognized (`parseMessage` throwing
-   * {@link UnknownMessageTypeError}) and which still carries a
-   * numeric envelope-level `seq` AND a recognizably task-class `type` (a
-   * `task.` prefix — see `extractSkippableSeq`'s own doc comment for why a
-   * `conn.*`-shaped or type-less entry is deliberately excluded, mirroring
-   * F2's "conn.* is never cursor-tracked" rule), so the caller can advance
-   * its cursor/watermark past it even though there is no real `Envelope` to
-   * hand to `onEnvelope`. Without this, a persistently-redelivered
-   * unrecognized-type entry (the real server retains and redelivers an
-   * un-acked envelope, protocol §9) would keep reappearing at the same
-   * cursor position forever.
-   *
-   * Finding F1: a RECOGNIZED type that fails schema validation
-   * ({@link EnvelopeValidationError} — e.g. a `task.offer` whose
-   * `PermissionPolicy` rejects an unknown constraint) is deliberately NOT
-   * reported here. That failure is a genuinely malformed control message,
-   * not forward-compat tolerance — forwarding its `seq` here would
-   * permanently ack a message the daemon never actually understood (the
-   * server would stop redelivering it, silently stranding whatever it was
-   * offering). This callback being scoped to `UnknownMessageTypeError` only
-   * preserves the no-silent-permanent-ack property. Optional
-   * only for constructor/test convenience — `ConnectionManager` always
-   * supplies it.
-   */
-  onSkippedSeq?: (seq: number) => void;
-  /**
-   * Finding R1 (cross-model re-review — the F1 fix alone was NOT-CLOSED):
-   * called for a batch entry whose `type` WAS recognized but whose payload
-   * failed schema validation ({@link EnvelopeValidationError}) — a genuine
-   * delivery failure at that specific seq, not forward-compat tolerance
-   * (contrast {@link onSkippedSeq}, which is scoped to the opposite case,
-   * an entirely unrecognized type). F1's own fix — simply not forwarding
-   * this seq to `onSkippedSeq` — turned out to be insufficient on its own:
-   * a LATER valid envelope in the same or a later batch would still
-   * silently advance the durable cursor PAST this seq once its own handler
-   * succeeded, since nothing had told `ConnectionManager` this seq needed
-   * the same stall treatment a thrown handler failure already gets — an
-   * INDIRECT permanent ack, one hop removed from the exact bug F1 set out
-   * to fix. `ConnectionManager` (`noteValidationFailure`) engages
-   * `stalledAtSeq` for this seq the same way `process()`'s own catch block
-   * does for a real thrown handler — freezing `dedupWatermark()` at the
-   * durable cursor (so the server's retain-and-redeliver semantics,
-   * protocol §9, keep this seq alive) and, via that SAME existing
-   * machinery, holding back the cursor for anything else delivered after it
-   * in the same batch too, exactly as a real handler failure already would.
-   * Optional only for constructor/test convenience — `ConnectionManager`
-   * always supplies it.
+  /** Unknown or malformed executable messages have no durable disposition.
+   * Freeze their sequence; a later valid message must not acknowledge them.
    */
   onValidationFailedSeq?: (seq: number) => void;
   /**
@@ -217,9 +168,10 @@ function isSafeNonnegativeInteger(value: unknown): value is number {
 function validateTrustedEventsPage(events: readonly unknown[], requestedCursor: number, pageCursor: number): void {
   let previousTaskSeq: number | undefined;
   for (const raw of events) {
-    if (typeof raw !== 'object' || raw === null) continue;
+    if (typeof raw !== 'object' || raw === null) throw new Error('events page contains an unidentifiable message');
     const { type, seq } = raw as { type?: unknown; seq?: unknown };
-    if (typeof type !== 'string' || !type.startsWith('task.')) continue;
+    if (typeof type !== 'string') throw new Error('events page message has no authoritative type');
+    if (type.startsWith('conn.')) continue;
     if (!isSafeNonnegativeInteger(seq)) {
       throw new Error('events poll task seq is not a safe nonnegative integer');
     }
@@ -238,24 +190,11 @@ function validateTrustedEventsPage(events: readonly unknown[], requestedCursor: 
   }
 }
 
-/**
- * M4 Phase 4 (gatekeeper MEDIUM advisory): a numeric envelope-level `seq`
- * opportunistically read off a batch entry that failed `parseMessage` — but
- * ONLY when the entry's own `type` string also looks task-shaped (a
- * `task.` prefix), mirroring `ConnectionManager`'s own (unexported)
- * `isTaskEnvelopeType` distinction. Finding F2 documents that `conn.*` types
- * are NEVER cursor-tracked, even when perfectly well-formed — there is no
- * way to tell a hypothetical future `conn.something` type apart from that
- * rule from raw shape alone, so a skipped entry that isn't recognizably
- * task-class (wrong prefix, or no `type`/`seq` at all) must not be allowed
- * to touch the cursor either. `undefined` whenever the entry doesn't
- * qualify — used only to feed `onSkippedSeq`, never to treat the entry as
- * processable.
- */
-function extractSkippableSeq(raw: unknown): number | undefined {
+/** Only validated non-connection sequences can hold the durable cursor. */
+function extractExecutableSeq(raw: unknown): number | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
   const { type, seq } = raw as { type?: unknown; seq?: unknown };
-  if (typeof type !== 'string' || !type.startsWith('task.')) return undefined;
+  if (typeof type !== 'string' || type.startsWith('conn.')) return undefined;
   return isSafeNonnegativeInteger(seq) ? seq : undefined;
 }
 
@@ -480,46 +419,9 @@ export class LongPollClient {
           continue;
         }
 
-        // Finding F3-on-long-poll: each polled envelope flows through
-        // `ConnectionManager.deliver()`/`process()` — no eager batch-level
-        // cursor advance here. The durable
-        // cursor now only ever advances AFTER a `task.*` handler's side
-        // effects resolve successfully (see `ConnectionManager.process`).
-        // `parsed.cursor` (the server's own batch high-water) is intentionally
-        // not consulted for that — the
-        // wire acknowledgement uses the processed cursor while the eager
-        // delivery watermark remains local to duplicate suppression.
-        //
-        // M4 Phase 4 (version-negotiation drill fix): the outer shape
-        // (`events` array + `cursor`) is validated loosely; each entry is
-        // then validated INDIVIDUALLY via `parseMessage`. An entry that fails
-        // for ANY reason is silently
-        // skipped for THIS batch — it never fails the rest of the batch —
-        // but (finding F1, revised by finding R1) the two failure classes
-        // are NOT treated identically:
-        //   - `UnknownMessageTypeError` (an entirely unrecognized `type` —
-        //     genuine forward-compat tolerance, e.g. a future minor
-        //     server's new message type): recognizably task-class entries
-        //     (see `extractSkippableSeq`'s own doc comment for why
-        //     `conn.*`-shaped or type-less entries are excluded) still
-        //     advance the cursor/watermark past it (`onSkippedSeq`), so a
-        //     persistently-redelivered unparseable entry can never stall
-        //     this device's progress.
-        //   - Any OTHER failure (in practice `EnvelopeValidationError`: a
-        //     RECOGNIZED type whose payload fails schema validation) is a
-        //     genuine delivery failure at that seq, not a forward-compat
-        //     case. Finding R1: this now engages the SAME stall machinery a
-        //     thrown handler failure does (`onValidationFailedSeq` ->
-        //     `ConnectionManager.noteValidationFailure`) rather than merely
-        //     withholding the skip-forward — the F1 fix alone still let a
-        //     LATER valid envelope in the same/a later batch silently drag
-        //     the cursor past this seq once ITS OWN handler succeeded (see
-        //     `onValidationFailedSeq`'s own doc comment for the full
-        //     before/after). Freezing the cursor via the stall (rather than
-        //     just not advancing it here) is what lets the server's
-        //     ordinary retain-and-redeliver semantics (protocol §9) keep
-        //     this seq alive, and holds back anything delivered after it
-        //     too, until a corrected version is actually processed.
+        // Validate each executable envelope independently. Both unknown types
+        // and invalid payloads freeze their sequence; neither has a durable
+        // disposition that would authorize acknowledging it.
         let parsed: LooseEventsPollResponse;
         try {
           parsed = parseLooseEventsPollResponse(await res.json(), cursor ?? 0);
@@ -553,32 +455,14 @@ export class LongPollClient {
           try {
             envelope = parseMessage(raw);
           } catch (err) {
-            if (err instanceof UnknownMessageTypeError) {
-              const skippableSeq = extractSkippableSeq(raw);
-              if (skippableSeq !== undefined) {
-                this.opts.onSkippedSeq?.(skippableSeq);
-                acceptedAnyEntry = true;
-              }
-            } else {
-              const failedSeq = extractSkippableSeq(raw);
-              if (failedSeq !== undefined) {
-                hadValidationFailureThisBatch = true;
-                this.opts.onValidationFailedSeq?.(failedSeq);
-                // Finding R1: once per seq, not once per poll — this exact
-                // entry gets redelivered on every cycle for as long as it
-                // stalls the cursor (protocol §9's retain-and-redeliver),
-                // so without the `warnedValidationFailureSeqs` guard this
-                // would spam identically forever.
-                if (!this.warnedValidationFailureSeqs.has(failedSeq)) {
-                  if (this.warnedValidationFailureSeqs.size > MAX_TRACKED_VALIDATION_FAILURE_WARNINGS) {
-                    this.warnedValidationFailureSeqs.clear(); // see this Set's own doc comment — a rare-path reset, not a hot one
-                  }
-                  this.warnedValidationFailureSeqs.add(failedSeq);
-                  console.warn(
-                    `[byok/client] long-poll: a recognized message type at seq=${failedSeq} failed payload validation — skipped for this batch, cursor frozen so the server keeps redelivering it until a corrected version arrives:`,
-                    err,
-                  );
-                }
+            const failedSeq = extractExecutableSeq(raw);
+            if (failedSeq !== undefined) {
+              hadValidationFailureThisBatch = true;
+              this.opts.onValidationFailedSeq?.(failedSeq);
+              if (!this.warnedValidationFailureSeqs.has(failedSeq)) {
+                if (this.warnedValidationFailureSeqs.size > MAX_TRACKED_VALIDATION_FAILURE_WARNINGS) this.warnedValidationFailureSeqs.clear();
+                this.warnedValidationFailureSeqs.add(failedSeq);
+                console.warn(`[byok/client] long-poll: unknown or invalid executable message at seq=${failedSeq}; cursor frozen without durable disposition`, err);
               }
             }
             continue;

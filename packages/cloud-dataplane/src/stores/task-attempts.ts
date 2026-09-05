@@ -336,7 +336,7 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
               claimed_runtime = $5,
               claimed_runtime_capabilities = $6::jsonb,
               updated_at = $4
-        WHERE tenant_id = $1 AND task_id = $2 AND owner_device_id IS NULL
+        WHERE tenant_id = $1 AND task_id = $2 AND device_id = $3 AND owner_device_id IS NULL
           AND cancel_requested_at IS NULL AND status = 'offered'
       RETURNING ${TASK_SELECT_COLUMNS}`,
       [

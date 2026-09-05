@@ -46,6 +46,29 @@ function materializeCancellation(
 }
 
 describe.skipIf(SKIP_DATAPLANE)(`Postgres task cancellation — ${SKIP_REASON}`, () => {
+  it('keeps the immutable target device fence in the claim CAS', async () => {
+    const scope = await createDataplaneScope();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const tasks = new PostgresTaskAttemptStore(scope.pool, createMutableClock());
+      await tasks.open(TENANT, { taskId: 'task-target-fence', deviceId: 'device-target' });
+
+      await expect(tasks.claim(TENANT, {
+        taskId: 'task-target-fence',
+        deviceId: 'device-intruder',
+      })).resolves.toMatchObject({
+        deviceId: 'device-target',
+        status: 'offered',
+      });
+      await expect(tasks.get(TENANT, 'task-target-fence')).resolves.toMatchObject({
+        deviceId: 'device-target',
+        status: 'offered',
+      });
+    } finally {
+      await scope.dispose();
+    }
+  });
+
   it('rolls back both tombstone and mailbox delivery when materialization fails', async () => {
     const scope = await createDataplaneScope();
     try {
