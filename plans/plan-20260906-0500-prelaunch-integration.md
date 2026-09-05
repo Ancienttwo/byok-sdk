@@ -2,6 +2,9 @@
 
 > **Status**: Executing
 > **Artifact Level**: work-package
+> **Promotion Reason**: Cross-package execution truth and downstream compiled acceptance require a complete SDK integration PR.
+> **Verification Boundary**: Frozen source checks, canonical packed graph and exact native Salesko consumer evidence.
+> **Rollback Surface**: Isolated source commits before operator publication; no registry or production mutation.
 > **Task Contract**: tasks/contracts/20260906-0500-prelaunch-integration.contract.md
 > **Owner**: Astra, tmux %7
 > **Authorization**: User requested autonomous overnight implementation, acceptance, commits, push and PRs. Registry publication, production deployment and destructive live data operations are excluded.
