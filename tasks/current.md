@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-09-06T02:44:15+0800 -->
+<!-- updated_at: 2026-09-06T04:04:37+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-09-06T02:44:15+0800
-> **Source Branch**: claude/win32-job-object-ownership
-> **Source Commit**: f0f52ed
+> **Updated At**: 2026-09-06T04:04:37+0800
+> **Source Branch**: codex/runtime-event-spill
+> **Source Commit**: 4342a23
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -31,8 +31,12 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- linked-worktree-0c1914c608a1: plans/plan-20260906-0107-team-codex-relay.md
-- linked-worktree-0c1914c608a1: active-worktree owner -> self
+- linked-worktree-ce21c0c05deb: stale active-plan marker -> plans/plan-20260906-0253-runtime-event-spill.md
+- linked-worktree-ce21c0c05deb: active-worktree owner -> self
+- linked-worktree-058512fbcacc: plans/plan-20260906-0350-issue-147-task-offer-journal.md
+- linked-worktree-058512fbcacc: active-worktree owner -> self
+- linked-worktree-1a8b7d9d60aa: plans/plan-20260906-0311-team-pi-relay.md
+- linked-worktree-1a8b7d9d60aa: active-worktree owner -> self
 ## Active Sprint
 
 - Sprint: (none)
@@ -42,7 +46,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - `tasks/workstreams/root/20260905-sdk-root.md`: status=acceptance, current_slice=T7 exact AgentRef reliability identities, then replacement acceptance, source_plan=plans/plan-20260905-0124-issues-135-144-reliability.md
 ## Handoff
 
-- Exact Next Step: Stage the completed module diff first; then run /check and let canonical workflow gates determine whether review, external acceptance, verification, or worktree finish is next. Command: /check
+- Exact Next Step: (none)
 
 ## Checks
 
@@ -53,16 +57,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260906-0130-win32-job-object-ownership.md
- D tasks/contracts/20260906-0130-win32-job-object-ownership.contract.md
- D tasks/notes/20260906-0130-win32-job-object-ownership.notes.md
- D tasks/reviews/20260906-0130-win32-job-object-ownership.review.md
+ D plans/plan-20260906-0253-runtime-event-spill.md
+ D tasks/contracts/20260906-0253-runtime-event-spill.contract.md
+ D tasks/notes/20260906-0253-runtime-event-spill.notes.md
+ D tasks/reviews/20260906-0253-runtime-event-spill.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260906-0130-win32-job-object-ownership.md
-?? tasks/archive/contract-20260906-0244-win32-job-object-ownership.md
-?? tasks/archive/notes-20260906-0244-win32-job-object-ownership.md
-?? tasks/archive/review-20260906-0244-win32-job-object-ownership.md
-?? tasks/archive/todo-20260906-0244-win32-job-object-ownership.md
+?? plans/archive/plan-20260906-0253-runtime-event-spill.md
+?? tasks/archive/contract-20260906-0404-runtime-event-spill.md
+?? tasks/archive/notes-20260906-0404-runtime-event-spill.md
+?? tasks/archive/review-20260906-0404-runtime-event-spill.md
+?? tasks/archive/todo-20260906-0404-runtime-event-spill.md
 ```
 
 ## Source Artifacts

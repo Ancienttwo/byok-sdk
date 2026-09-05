@@ -1,14 +1,24 @@
+> **Archived**: 2026-09-06 04:04
+> **Related Plan**: plans/archive/plan-20260906-0253-runtime-event-spill.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260906-0404
+> **Archive Projection V1**: `plans/plan-20260906-0253-runtime-event-spill.md` => `plans/archive/plan-20260906-0253-runtime-event-spill.md`
+> **Archive Projection V1**: `tasks/notes/20260906-0253-runtime-event-spill.notes.md` => `tasks/archive/notes-20260906-0404-runtime-event-spill.md`
+> **Archive Projection V1**: `tasks/contracts/20260906-0253-runtime-event-spill.contract.md` => `tasks/archive/contract-20260906-0404-runtime-event-spill.md`
+> **Archive Projection V1**: `tasks/reviews/20260906-0253-runtime-event-spill.review.md` => `tasks/archive/review-20260906-0404-runtime-event-spill.md`
+
 # Task Contract: runtime-event-spill
 
-> **Status**: Active
-> **Plan**: plans/plan-20260906-0253-runtime-event-spill.md
+> **Status**: Fulfilled
+> **Plan**: plans/archive/plan-20260906-0253-runtime-event-spill.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
 > **Last Updated**: 2026-09-06 03:00
-> **Review File**: `tasks/reviews/20260906-0253-runtime-event-spill.review.md`
-> **Notes File**: `tasks/notes/20260906-0253-runtime-event-spill.notes.md`
+> **Review File**: `tasks/archive/review-20260906-0404-runtime-event-spill.md`
+> **Notes File**: `tasks/archive/notes-20260906-0404-runtime-event-spill.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
 
 ## Why
@@ -47,10 +57,10 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 
 ## Workflow Inventory
 
-- Source plan: `plans/plan-20260906-0253-runtime-event-spill.md`
+- Source plan: `plans/archive/plan-20260906-0253-runtime-event-spill.md`
 - Deferred-goal ledger: `tasks/todos.md`
-- Review file: `tasks/reviews/20260906-0253-runtime-event-spill.review.md`
-- Notes file: `tasks/notes/20260906-0253-runtime-event-spill.notes.md`
+- Review file: `tasks/archive/review-20260906-0404-runtime-event-spill.md`
+- Notes file: `tasks/archive/notes-20260906-0404-runtime-event-spill.md`
 - Checks file: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
 - Scope gate: edit only paths listed under `allowed_paths`; update this contract before widening scope.
@@ -72,12 +82,12 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 
 ```yaml
 allowed_paths:
-  - plans/plan-20260906-0253-runtime-event-spill.md
+  - plans/archive/plan-20260906-0253-runtime-event-spill.md
   - tasks/todos.md
   - tasks/current.md
-  - tasks/contracts/20260906-0253-runtime-event-spill.contract.md
-  - tasks/reviews/20260906-0253-runtime-event-spill.review.md
-  - tasks/notes/20260906-0253-runtime-event-spill.notes.md
+  - tasks/archive/contract-20260906-0404-runtime-event-spill.md
+  - tasks/archive/review-20260906-0404-runtime-event-spill.md
+  - tasks/archive/notes-20260906-0404-runtime-event-spill.md
   - packages/protocol/src/agent-event.ts
   - packages/protocol/src/index.ts
   - packages/protocol/src/__tests__/agent-event.test.ts
@@ -157,7 +167,7 @@ exit_criteria:
     - packages/client/src/__tests__/event-spill.test.ts
   artifacts_exist:
     - .ai/harness/checks/latest.json
-    - tasks/notes/20260906-0253-runtime-event-spill.notes.md
+    - tasks/archive/notes-20260906-0404-runtime-event-spill.md
   tests_pass:
     - path: packages/client/src/__tests__/event-spill.test.ts
     - path: packages/client/src/__tests__/task-runner-event-spill.test.ts

@@ -1,9 +1,19 @@
+> **Archived**: 2026-09-06 04:04
+> **Related Plan**: plans/archive/plan-20260906-0253-runtime-event-spill.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260906-0404
+> **Archive Projection V1**: `plans/plan-20260906-0253-runtime-event-spill.md` => `plans/archive/plan-20260906-0253-runtime-event-spill.md`
+> **Archive Projection V1**: `tasks/notes/20260906-0253-runtime-event-spill.notes.md` => `tasks/archive/notes-20260906-0404-runtime-event-spill.md`
+> **Archive Projection V1**: `tasks/contracts/20260906-0253-runtime-event-spill.contract.md` => `tasks/archive/contract-20260906-0404-runtime-event-spill.md`
+> **Archive Projection V1**: `tasks/reviews/20260906-0253-runtime-event-spill.review.md` => `tasks/archive/review-20260906-0404-runtime-event-spill.md`
+
 # Implementation Notes: runtime-event-spill
 
 > **Status**: Active
-> **Plan**: plans/plan-20260906-0253-runtime-event-spill.md
-> **Contract**: tasks/contracts/20260906-0253-runtime-event-spill.contract.md
-> **Review**: tasks/reviews/20260906-0253-runtime-event-spill.review.md
+> **Plan**: plans/archive/plan-20260906-0253-runtime-event-spill.md
+> **Contract**: tasks/archive/contract-20260906-0404-runtime-event-spill.md
+> **Review**: tasks/archive/review-20260906-0404-runtime-event-spill.md
 > **Last Updated**: 2026-09-06 03:20
 > **Lifecycle**: notes
 
@@ -455,7 +465,7 @@ dispatch. Nothing was committed.
   `packages/ui-runtime/src/timeline.ts`. The second records that
   `redactAgentEvent` (`packages/client/src/bin/audit-log.ts:209-211`) measures
   the post-spill preview and should record `spill.totalBytes` instead.
-- `tasks/contracts/20260906-0253-runtime-event-spill.contract.md` — Rollback
+- `tasks/archive/contract-20260906-0404-runtime-event-spill.md` — Rollback
   Point commit `440907e` -> `5af5c5c`.
 
 ## Gate Round 2
@@ -485,7 +495,7 @@ but the returned locator did not fit the daemon's inline cap — and that
 
 ### Finding 2 — the notes described the superseded skeleton gate
 
-`tasks/notes/20260906-0253-runtime-event-spill.notes.md:78-81` still
+`tasks/archive/notes-20260906-0404-runtime-event-spill.md:78-81` still
 described the pre-round-1 gate ("if the event minus the spilled field already
 meets or exceeds the cap … forwarded unchanged"). The shipped gate is
 `byteLength(skeleton) + MAX_SPILL_DESCRIPTOR_BYTES (768) > cap`.

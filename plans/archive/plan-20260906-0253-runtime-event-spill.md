@@ -1,6 +1,16 @@
+> **Archived**: 2026-09-06 04:04
+> **Related Plan**: plans/archive/plan-20260906-0253-runtime-event-spill.md
+> **Outcome**: Completed
+> **Lifecycle**: plan
+> **Parent Run ID**: run-20260906-0404
+> **Archive Projection V1**: `plans/plan-20260906-0253-runtime-event-spill.md` => `plans/archive/plan-20260906-0253-runtime-event-spill.md`
+> **Archive Projection V1**: `tasks/notes/20260906-0253-runtime-event-spill.notes.md` => `tasks/archive/notes-20260906-0404-runtime-event-spill.md`
+> **Archive Projection V1**: `tasks/contracts/20260906-0253-runtime-event-spill.contract.md` => `tasks/archive/contract-20260906-0404-runtime-event-spill.md`
+> **Archive Projection V1**: `tasks/reviews/20260906-0253-runtime-event-spill.review.md` => `tasks/archive/review-20260906-0404-runtime-event-spill.md`
+
 # Plan: Bounded tool_use/tool_result payloads: spill oversized event content to the blob plane with a head/tail preview
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260906-0253
 > **Slug**: runtime-event-spill
 > **Artifact Level**: work-package
@@ -9,9 +19,9 @@
 > **Rollback Surface**: the optional `spill` field on two `AgentEvent` variants and its golden, the new `event-spill.ts` module, the `TaskRunner.pump` hook and `DaemonConfig.maxInlineEventBytes`, the egress-policy strip, docs, CHANGELOG.
 > **Spec**: `docs/spec.md`
 > **Research**: `docs/researches/2026-08-15_deepseek-harness-peripheral-extraction.md` §五 (items 1, 4)
-> **Task Contract**: `tasks/contracts/20260906-0253-runtime-event-spill.contract.md`
-> **Task Review**: `tasks/reviews/20260906-0253-runtime-event-spill.review.md`
-> **Implementation Notes**: `tasks/notes/20260906-0253-runtime-event-spill.notes.md`
+> **Task Contract**: `tasks/archive/contract-20260906-0404-runtime-event-spill.md`
+> **Task Review**: `tasks/archive/review-20260906-0404-runtime-event-spill.md`
+> **Implementation Notes**: `tasks/archive/notes-20260906-0404-runtime-event-spill.md`
 
 ## Agentic Routing
 - Selected route: main-loop planning; execution dispatched to `deep-worker` (protocol golden, daemon pump, and blob upload must land coherently).
@@ -24,16 +34,16 @@
 ## Workflow Inventory
 Complete this inventory before implementation. If any line is unknown, keep the plan in Draft and fill it before projection.
 
-- Active plan: `plans/plan-20260906-0253-runtime-event-spill.md`
-- Sprint contract: `tasks/contracts/20260906-0253-runtime-event-spill.contract.md`
-- Sprint review: `tasks/reviews/20260906-0253-runtime-event-spill.review.md`
-- Implementation notes: `tasks/notes/20260906-0253-runtime-event-spill.notes.md`
+- Active plan: `plans/archive/plan-20260906-0253-runtime-event-spill.md`
+- Sprint contract: `tasks/archive/contract-20260906-0404-runtime-event-spill.md`
+- Sprint review: `tasks/archive/review-20260906-0404-runtime-event-spill.md`
+- Implementation notes: `tasks/archive/notes-20260906-0404-runtime-event-spill.md`
 - Deferred-goal ledger: `tasks/todos.md`
 - Current checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
-- Scope authority: `tasks/contracts/20260906-0253-runtime-event-spill.contract.md` `allowed_paths`
+- Scope authority: `tasks/archive/contract-20260906-0404-runtime-event-spill.md` `allowed_paths`
 - Concurrency rule: `.ai/harness/active-plan` selects the active plan for this worktree when present; `.ai/harness/active-worktree` records the owning worktree. If another worktree already owns active work, open or switch to the matching worktree instead of serializing unrelated plans.
-- Execution isolation: approved contract-level work projects through `repo-harness run plan-to-todo --plan plans/plan-20260906-0253-runtime-event-spill.md` and may start `repo-harness run contract-worktree start --plan plans/plan-20260906-0253-runtime-event-spill.md`.
+- Execution isolation: approved contract-level work projects through `repo-harness run plan-to-todo --plan plans/archive/plan-20260906-0253-runtime-event-spill.md` and may start `repo-harness run contract-worktree start --plan plans/archive/plan-20260906-0253-runtime-event-spill.md`.
 
 ## Approach
 ### Strategy
@@ -85,11 +95,11 @@ adapter event → `spillOversizedEvent` (measure → upload → preview → asse
 | Upload latency on the pump path | Medium | Slower event delivery for huge outputs | Bounded by the blob client deadline; upload is per oversized event only |
 
 ## Task Contracts
-- Contract file: `tasks/contracts/20260906-0253-runtime-event-spill.contract.md`
-- Review file: `tasks/reviews/20260906-0253-runtime-event-spill.review.md`
-- Implementation notes file: `tasks/notes/20260906-0253-runtime-event-spill.notes.md`
+- Contract file: `tasks/archive/contract-20260906-0404-runtime-event-spill.md`
+- Review file: `tasks/archive/review-20260906-0404-runtime-event-spill.md`
+- Implementation notes file: `tasks/archive/notes-20260906-0404-runtime-event-spill.md`
 - Template: `.claude/templates/contract.template.md`
-- Verification command: `repo-harness run verify-contract --contract tasks/contracts/20260906-0253-runtime-event-spill.contract.md --strict`
+- Verification command: `repo-harness run verify-contract --contract tasks/archive/contract-20260906-0404-runtime-event-spill.md --strict`
 - Active plan rule: `.ai/harness/active-plan` is authoritative for this worktree when present; `.ai/harness/active-worktree` records the owning worktree. Do not infer active execution from the latest non-archived plan.
 
 ## Handoff
