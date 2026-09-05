@@ -1,0 +1,31 @@
+{
+  "base": "440907ee2c44051b427d9ed4fe1431d93ffff72d",
+  "node": "22.22.0",
+  "bun": "1.4.0",
+  "files_sha256": {
+    "packages/protocol/src/messages.ts": "5d1472a32d192e39238afd304ca4a42671e587bf2f49e5ac3976b6a590be09a3",
+    "packages/protocol/src/index.ts": "c2426ced62d5fb2c6b0ccb15222e70c0293b79f48c5aa8c82a4e9e42ac8e3bc1",
+    "packages/protocol/src/__tests__/task-offer-family.test.ts": "1479eeedd4f1142d2fe65fd49ec2bc420eb00748ab94ce3367f49183e884ccb9",
+    "packages/client/src/daemon/create-daemon.ts": "a27947be6f87196229d01c3dcc81ac04be76cf68c2bcf69119f5ee4f8af5d32c",
+    "packages/client/src/__tests__/journal-offer-family.test.ts": "62e12720db58ba853cb7e74dfc418690163d900a188c6e41b56418c50f9a0fe0",
+    "api-surface/protocol.d.ts": "a1a89736786691f7b73e03a20cda1d5327f64e4fc226759ac788b41ffb258624"
+  },
+  "source_subject_sha256": "d74ab4420d6b970e4c3844c8ce266cf68b154fd72d2772445103875b304dcec2",
+  "checks": {
+    "build": 0,
+    "typecheck": 0,
+    "test": {
+      "exit": 0,
+      "passed": 3660,
+      "skipped": 133
+    },
+    "api_surface": 0,
+    "version_authority": 0,
+    "strict_workflow": 0,
+    "strict_contract": {
+      "total": 21,
+      "failed": 0
+    }
+  },
+  "release_status": "not released; no version change, merge, push, tag, registry or downstream pin"
+}

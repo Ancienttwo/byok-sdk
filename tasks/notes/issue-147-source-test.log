@@ -1,0 +1,169 @@
+$ bun run --sequential --filter '*' --if-present test
+@byok-sdk/client:test                           |
+@byok-sdk/client:test                           |  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-147/packages/client
+@byok-sdk/client:test                           |
+@byok-sdk/client:test                           | (node:66607) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+@byok-sdk/client:test                           | (Use `node --trace-warnings ...` to show where the warning was created)
+@byok-sdk/client:test                           | (node:66605) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+@byok-sdk/client:test                           | (Use `node --trace-warnings ...` to show where the warning was created)
+@byok-sdk/client:test                           | (node:67020) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+@byok-sdk/client:test                           | (Use `node --trace-warnings ...` to show where the warning was created)
+@byok-sdk/client:test                           | (node:69722) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+@byok-sdk/client:test                           | (Use `node --trace-warnings ...` to show where the warning was created)
+@byok-sdk/client:test                           | (node:71706) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+@byok-sdk/client:test                           | (Use `node --trace-warnings ...` to show where the warning was created)
+@byok-sdk/client:test                           | (node:72440) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+@byok-sdk/client:test                           | (Use `node --trace-warnings ...` to show where the warning was created)
+@byok-sdk/client:test                           | (node:72861) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+@byok-sdk/client:test                           | (Use `node --trace-warnings ...` to show where the warning was created)
+@byok-sdk/client:test                           | (node:70222) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+@byok-sdk/client:test                           | (Use `node --trace-warnings ...` to show where the warning was created)
+@byok-sdk/client:test                           | (node:77792) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+@byok-sdk/client:test                           | (Use `node --trace-warnings ...` to show where the warning was created)
+@byok-sdk/client:test                           | (node:78247) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+@byok-sdk/client:test                           | (Use `node --trace-warnings ...` to show where the warning was created)
+@byok-sdk/client:test                           | (node:80828) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+@byok-sdk/client:test                           | (Use `node --trace-warnings ...` to show where the warning was created)
+@byok-sdk/client:test                           |
+@byok-sdk/client:test                           |  Test Files  168 passed | 2 skipped (170)
+@byok-sdk/client:test                           |       Tests  1644 passed | 11 skipped (1655)
+@byok-sdk/client:test                           |    Start at  03:57:08
+@byok-sdk/client:test                           |    Duration  34.99s (transform 6.08s, setup 0ms, import 23.06s, tests 217.16s, environment 7ms)
+@byok-sdk/client:test                           |
+@byok-sdk/client:test                           | Done in 35.39s
+@byok-sdk/cloud:test                            |
+@byok-sdk/cloud:test                            |  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-147/packages/cloud
+@byok-sdk/cloud:test                            |
+@byok-sdk/cloud:test                            |
+@byok-sdk/cloud:test                            |  Test Files  37 passed (37)
+@byok-sdk/cloud:test                            |       Tests  338 passed (338)
+@byok-sdk/cloud:test                            |    Start at  03:57:44
+@byok-sdk/cloud:test                            |    Duration  2.83s (transform 5.42s, setup 0ms, import 16.84s, tests 5.88s, environment 2ms)
+@byok-sdk/cloud:test                            |
+@byok-sdk/cloud:test                            | Done in 3.11s
+@byok-sdk/cloud-dataplane:test                  |
+@byok-sdk/cloud-dataplane:test                  |  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-147/packages/cloud-dataplane
+@byok-sdk/cloud-dataplane:test                  |
+@byok-sdk/cloud-dataplane:test                  |
+@byok-sdk/cloud-dataplane:test                  |  Test Files  8 passed | 26 skipped (34)
+@byok-sdk/cloud-dataplane:test                  |       Tests  74 passed | 103 skipped (177)
+@byok-sdk/cloud-dataplane:test                  |    Start at  03:57:47
+@byok-sdk/cloud-dataplane:test                  |    Duration  3.85s (transform 4.21s, setup 7.09s, import 14.58s, tests 2.80s, environment 2ms)
+@byok-sdk/cloud-dataplane:test                  |
+@byok-sdk/cloud-dataplane:test                  | Done in 4.09s
+@byok-sdk/conformance:test                      |
+@byok-sdk/conformance:test                      |  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-147/packages/conformance
+@byok-sdk/conformance:test                      |
+@byok-sdk/conformance:test                      |
+@byok-sdk/conformance:test                      |  Test Files  4 passed (4)
+@byok-sdk/conformance:test                      |       Tests  160 passed (160)
+@byok-sdk/conformance:test                      |    Start at  03:57:51
+@byok-sdk/conformance:test                      |    Duration  360ms (transform 638ms, setup 0ms, import 895ms, tests 95ms, environment 0ms)
+@byok-sdk/conformance:test                      |
+@byok-sdk/conformance:test                      | Done in 537ms
+@byok-sdk/core:test                             |
+@byok-sdk/core:test                             |  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-147/packages/core
+@byok-sdk/core:test                             |
+@byok-sdk/core:test                             |
+@byok-sdk/core:test                             |  Test Files  9 passed (9)
+@byok-sdk/core:test                             |       Tests  252 passed (252)
+@byok-sdk/core:test                             |    Start at  03:57:51
+@byok-sdk/core:test                             |    Duration  282ms (transform 505ms, setup 0ms, import 900ms, tests 59ms, environment 0ms)
+@byok-sdk/core:test                             |
+@byok-sdk/core:test                             | Done in 473ms
+@byok-sdk/example-live-activity-host:test       |
+@byok-sdk/example-live-activity-host:test       |  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-147/examples/live-activity-host
+@byok-sdk/example-live-activity-host:test       |
+@byok-sdk/example-live-activity-host:test       |
+@byok-sdk/example-live-activity-host:test       |  Test Files  1 passed (1)
+@byok-sdk/example-live-activity-host:test       |       Tests  21 passed (21)
+@byok-sdk/example-live-activity-host:test       |    Start at  03:57:52
+@byok-sdk/example-live-activity-host:test       |    Duration  317ms (transform 148ms, setup 0ms, import 218ms, tests 27ms, environment 0ms)
+@byok-sdk/example-live-activity-host:test       |
+@byok-sdk/example-live-activity-host:test       | Done in 497ms
+@byok-sdk/example-salesko-connector-broker:test |
+@byok-sdk/example-salesko-connector-broker:test |  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-147/examples/salesko-connector-broker
+@byok-sdk/example-salesko-connector-broker:test |
+@byok-sdk/example-salesko-connector-broker:test |
+@byok-sdk/example-salesko-connector-broker:test |  Test Files  5 passed (5)
+@byok-sdk/example-salesko-connector-broker:test |       Tests  25 passed (25)
+@byok-sdk/example-salesko-connector-broker:test |    Start at  03:57:52
+@byok-sdk/example-salesko-connector-broker:test |    Duration  474ms (transform 390ms, setup 0ms, import 680ms, tests 317ms, environment 0ms)
+@byok-sdk/example-salesko-connector-broker:test |
+@byok-sdk/example-salesko-connector-broker:test | Done in 639ms
+@byok-sdk/keys:test                             |
+@byok-sdk/keys:test                             |  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-147/packages/keys
+@byok-sdk/keys:test                             |
+@byok-sdk/keys:test                             | (node:96330) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+@byok-sdk/keys:test                             | (Use `node --trace-warnings ...` to show where the warning was created)
+@byok-sdk/keys:test                             | (node:96334) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+@byok-sdk/keys:test                             | (Use `node --trace-warnings ...` to show where the warning was created)
+@byok-sdk/keys:test                             | (node:96344) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+@byok-sdk/keys:test                             | (Use `node --trace-warnings ...` to show where the warning was created)
+@byok-sdk/keys:test                             | (node:96347) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+@byok-sdk/keys:test                             | (Use `node --trace-warnings ...` to show where the warning was created)
+@byok-sdk/keys:test                             |
+@byok-sdk/keys:test                             |  Test Files  21 passed (21)
+@byok-sdk/keys:test                             |       Tests  427 passed (427)
+@byok-sdk/keys:test                             |    Start at  03:57:53
+@byok-sdk/keys:test                             |    Duration  589ms (transform 1.15s, setup 0ms, import 2.34s, tests 473ms, environment 1ms)
+@byok-sdk/keys:test                             |
+@byok-sdk/keys:test                             | Done in 753ms
+@byok-sdk/protocol:test                         |
+@byok-sdk/protocol:test                         |  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-147/packages/protocol
+@byok-sdk/protocol:test                         |
+@byok-sdk/protocol:test                         |
+@byok-sdk/protocol:test                         |  Test Files  22 passed (22)
+@byok-sdk/protocol:test                         |       Tests  350 passed (350)
+@byok-sdk/protocol:test                         |    Start at  03:57:54
+@byok-sdk/protocol:test                         |    Duration  653ms (transform 1.23s, setup 0ms, import 3.69s, tests 386ms, environment 1ms)
+@byok-sdk/protocol:test                         |
+@byok-sdk/protocol:test                         | Done in 812ms
+@byok-sdk/server:test                           |
+@byok-sdk/server:test                           |  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-147/packages/server
+@byok-sdk/server:test                           |
+@byok-sdk/server:test                           | (node:96782) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+@byok-sdk/server:test                           | (Use `node --trace-warnings ...` to show where the warning was created)
+@byok-sdk/server:test                           | (node:96803) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+@byok-sdk/server:test                           | (Use `node --trace-warnings ...` to show where the warning was created)
+@byok-sdk/server:test                           | (node:96868) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+@byok-sdk/server:test                           | (Use `node --trace-warnings ...` to show where the warning was created)
+@byok-sdk/server:test                           | (node:96809) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+@byok-sdk/server:test                           | (Use `node --trace-warnings ...` to show where the warning was created)
+@byok-sdk/server:test                           |
+@byok-sdk/server:test                           |  Test Files  32 passed (32)
+@byok-sdk/server:test                           |       Tests  347 passed | 19 skipped (366)
+@byok-sdk/server:test                           |    Start at  03:57:54
+@byok-sdk/server:test                           |    Duration  3.38s (transform 1.96s, setup 0ms, import 8.87s, tests 11.72s, environment 2ms)
+@byok-sdk/server:test                           |
+@byok-sdk/server:test                           | Done in 3.56s
+@byok-sdk/testkit:test                          |
+@byok-sdk/testkit:test                          |  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-147/packages/testkit
+@byok-sdk/testkit:test                          |
+@byok-sdk/testkit:test                          |
+@byok-sdk/testkit:test                          |  Test Files  1 passed (1)
+@byok-sdk/testkit:test                          |       Tests  4 passed (4)
+@byok-sdk/testkit:test                          |    Start at  03:57:58
+@byok-sdk/testkit:test                          |    Duration  291ms (transform 98ms, setup 0ms, import 150ms, tests 7ms, environment 0ms)
+@byok-sdk/testkit:test                          |
+@byok-sdk/testkit:test                          | Done in 686ms
+@byok-sdk/ui-runtime:test                       |
+@byok-sdk/ui-runtime:test                       |  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-147/packages/ui-runtime
+@byok-sdk/ui-runtime:test                       |
+@byok-sdk/ui-runtime:test                       |
+@byok-sdk/ui-runtime:test                       |  Test Files  3 passed (3)
+@byok-sdk/ui-runtime:test                       |       Tests  17 passed (17)
+@byok-sdk/ui-runtime:test                       |    Start at  03:57:59
+@byok-sdk/ui-runtime:test                       |    Duration  441ms (transform 429ms, setup 0ms, import 732ms, tests 24ms, environment 0ms)
+@byok-sdk/ui-runtime:test                       |
+@byok-sdk/ui-runtime:test                       | Done in 635ms
+byok-sdk:test                                   |
+byok-sdk:test                                   |  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-147/packages/sdk
+byok-sdk:test                                   |
+byok-sdk:test                                   |
+byok-sdk:test                                   |  Test Files  1 passed (1)
+byok-sdk:test                                   |       Tests  1 passed (1)
+byok-sdk:test                                   |    Start at  03:57:59
+byok-sdk:test                                   |    Duration  1.66s (transform 1.17s, setup 0ms, import 1.49s, tests 4ms, environment 0ms)
+byok-sdk:test                                   |
+byok-sdk:test                                   | Done in 1.91s

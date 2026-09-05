@@ -1,0 +1,586 @@
+{
+  "acceptance_receipt": {
+    "disposition": "external_pass",
+    "message": "AcceptanceReceipt external_pass is valid.",
+    "reviewer": "Claude",
+    "source": "claude-review",
+    "status": "pass"
+  },
+  "active_plan": "plans/plan-20260906-0420-issue-147-integration.md",
+  "allowed_paths_check": {
+    "allowed_paths": [
+      ".ai/harness/policy.json",
+      "plans/",
+      "tasks/contracts/20260906-0350-issue-147-task-offer-journal.contract.md",
+      "tasks/reviews/20260906-0350-issue-147-task-offer-journal.review.md",
+      "tasks/contracts/20260906-0420-issue-147-integration.contract.md",
+      "tasks/reviews/20260906-0420-issue-147-integration.review.md",
+      "tasks/notes/",
+      "packages/protocol/src/messages.ts",
+      "packages/protocol/src/index.ts",
+      "packages/protocol/src/__tests__/task-offer-family.test.ts",
+      "packages/client/src/daemon/create-daemon.ts",
+      "packages/client/src/__tests__/journal-offer-family.test.ts",
+      "api-surface/protocol.d.ts"
+    ],
+    "checked": true,
+    "outside": [],
+    "status": "pass"
+  },
+  "benchmark_evidence": {
+    "benchmark_subject_sha256": "",
+    "report_sha256": "",
+    "status": "not_applicable"
+  },
+  "branch": "codex/issue-147-integration",
+  "change_assessment": {
+    "assessment": {
+      "assessment_sha256": "sha256:70cf65705a990fcd334f6562226be440c43658e3efc4bf184387e71253f50735",
+      "kind": "repo-harness-change-assessment",
+      "protocol": 1,
+      "reasons": [
+        {
+          "code": "authority_change",
+          "evidence": "strict workflow categories: public-api",
+          "paths": [
+            ".ai/harness/policy.json",
+            "api-surface/protocol.d.ts",
+            "packages/client/src/__tests__/journal-offer-family.test.ts",
+            "packages/client/src/daemon/create-daemon.ts",
+            "packages/protocol/src/__tests__/task-offer-family.test.ts",
+            "packages/protocol/src/index.ts",
+            "packages/protocol/src/messages.ts"
+          ],
+          "required_oracle_kinds": [
+            "deterministic_test"
+          ]
+        }
+      ],
+      "required_oracles": [
+        {
+          "id": "protocol-family-and-required-source-checks",
+          "kind": "deterministic_test",
+          "paths": [
+            "*"
+          ]
+        }
+      ],
+      "review_subject_sha256": "sha256:803ca23de016e64dcbce29851d0b7bb8ab3f7ef78848004dc2ea12baa7d73be4",
+      "selected_paths": [
+        ".ai/harness/policy.json",
+        "api-surface/protocol.d.ts",
+        "packages/client/src/__tests__/journal-offer-family.test.ts",
+        "packages/client/src/daemon/create-daemon.ts",
+        "packages/protocol/src/__tests__/task-offer-family.test.ts",
+        "packages/protocol/src/index.ts",
+        "packages/protocol/src/messages.ts"
+      ],
+      "status": "ready",
+      "strict_categories": [
+        "public-api"
+      ],
+      "subject_paths": [
+        ".ai/harness/policy.json",
+        "api-surface/protocol.d.ts",
+        "packages/client/src/__tests__/journal-offer-family.test.ts",
+        "packages/client/src/daemon/create-daemon.ts",
+        "packages/protocol/src/__tests__/task-offer-family.test.ts",
+        "packages/protocol/src/index.ts",
+        "packages/protocol/src/messages.ts"
+      ],
+      "target_ref": "612ec44073f0481341036107483aaf8fdc190a87",
+      "target_revision": "612ec44073f0481341036107483aaf8fdc190a87",
+      "workflow_profile": "strict"
+    },
+    "evidence_sha256": "sha256:891ea5c583a54ea45836b3bbd138905a121495c9cef763955c8a032c72ae7c31",
+    "schema": "repo-harness-change-assessment-evidence.v1",
+    "selection_packet": {
+      "assessment_sha256": "sha256:70cf65705a990fcd334f6562226be440c43658e3efc4bf184387e71253f50735",
+      "kind": "repo-harness-review-selection-packet",
+      "packet_sha256": "sha256:7a9bb10917fc987498e3b9b9ece8b54ffe336ff5d44473c8cda47c2f78ea1007",
+      "protocol": 1,
+      "reasons": [
+        {
+          "code": "authority_change",
+          "evidence": "strict workflow categories: public-api",
+          "paths": [
+            ".ai/harness/policy.json",
+            "api-surface/protocol.d.ts",
+            "packages/client/src/__tests__/journal-offer-family.test.ts",
+            "packages/client/src/daemon/create-daemon.ts",
+            "packages/protocol/src/__tests__/task-offer-family.test.ts",
+            "packages/protocol/src/index.ts",
+            "packages/protocol/src/messages.ts"
+          ],
+          "required_oracle_kinds": [
+            "deterministic_test"
+          ]
+        }
+      ],
+      "required_oracles": [
+        {
+          "id": "protocol-family-and-required-source-checks",
+          "kind": "deterministic_test",
+          "paths": [
+            "*"
+          ]
+        }
+      ],
+      "review_subject_sha256": "sha256:803ca23de016e64dcbce29851d0b7bb8ab3f7ef78848004dc2ea12baa7d73be4",
+      "selected_paths": [
+        ".ai/harness/policy.json",
+        "api-surface/protocol.d.ts",
+        "packages/client/src/__tests__/journal-offer-family.test.ts",
+        "packages/client/src/daemon/create-daemon.ts",
+        "packages/protocol/src/__tests__/task-offer-family.test.ts",
+        "packages/protocol/src/index.ts",
+        "packages/protocol/src/messages.ts"
+      ],
+      "status": "ready",
+      "subject_paths": [
+        ".ai/harness/policy.json",
+        "api-surface/protocol.d.ts",
+        "packages/client/src/__tests__/journal-offer-family.test.ts",
+        "packages/client/src/daemon/create-daemon.ts",
+        "packages/protocol/src/__tests__/task-offer-family.test.ts",
+        "packages/protocol/src/index.ts",
+        "packages/protocol/src/messages.ts"
+      ],
+      "target_ref": "612ec44073f0481341036107483aaf8fdc190a87",
+      "target_revision": "612ec44073f0481341036107483aaf8fdc190a87"
+    },
+    "status": "pass"
+  },
+  "command": "repo-harness run verify-sprint",
+  "commands": [
+    {
+      "command": "repo-harness run verify-sprint",
+      "exit_code": 0,
+      "name": "verify-sprint",
+      "status": "pass"
+    },
+    {
+      "command": "repo-harness run verify-contract --contract tasks/contracts/20260906-0420-issue-147-integration.contract.md --strict --read-only --report-file <temp>",
+      "exit_code": 0,
+      "name": "verify-contract",
+      "status": "pass"
+    },
+    {
+      "cache_key": "",
+      "command": "repo-harness run check-task-workflow --strict",
+      "duration_ms": 1440,
+      "execution": "executed",
+      "exit_code": 0,
+      "force_reason": "",
+      "name": "criterion:commands_succeed:repo-harness run check-task-workflow --strict",
+      "status": "pass"
+    },
+    {
+      "cache_key": "",
+      "command": "bun run --cwd packages/client test -- src/__tests__/journal-offer-family.test.ts",
+      "duration_ms": 17640,
+      "execution": "executed",
+      "exit_code": 0,
+      "force_reason": "",
+      "name": "criterion:tests_pass:packages/client/src/__tests__/journal-offer-family.test.ts",
+      "status": "pass"
+    },
+    {
+      "cache_key": "",
+      "command": "bun run build",
+      "duration_ms": 3143,
+      "execution": "executed",
+      "exit_code": 0,
+      "force_reason": "",
+      "name": "criterion:commands_succeed:bun run build",
+      "status": "pass"
+    },
+    {
+      "cache_key": "",
+      "command": "bun run typecheck",
+      "duration_ms": 2807,
+      "execution": "executed",
+      "exit_code": 0,
+      "force_reason": "",
+      "name": "criterion:commands_succeed:bun run typecheck",
+      "status": "pass"
+    },
+    {
+      "cache_key": "",
+      "command": "bun run test",
+      "duration_ms": 33862,
+      "execution": "executed",
+      "exit_code": 0,
+      "force_reason": "",
+      "name": "criterion:commands_succeed:bun run test",
+      "status": "pass"
+    },
+    {
+      "cache_key": "",
+      "command": "bun run check:api-surface",
+      "duration_ms": 100,
+      "execution": "executed",
+      "exit_code": 0,
+      "force_reason": "",
+      "name": "criterion:commands_succeed:bun run check:api-surface",
+      "status": "pass"
+    },
+    {
+      "cache_key": "",
+      "command": "bun run check:version-authority",
+      "duration_ms": 39,
+      "execution": "executed",
+      "exit_code": 0,
+      "force_reason": "",
+      "name": "criterion:commands_succeed:bun run check:version-authority",
+      "status": "pass"
+    },
+    {
+      "cache_key": "",
+      "command": "git diff --check",
+      "duration_ms": 25,
+      "execution": "executed",
+      "exit_code": 0,
+      "force_reason": "",
+      "name": "criterion:commands_succeed:git diff --check",
+      "status": "pass"
+    }
+  ],
+  "contract": {
+    "allowed_paths": [
+      ".ai/harness/policy.json",
+      "plans/",
+      "tasks/contracts/20260906-0350-issue-147-task-offer-journal.contract.md",
+      "tasks/reviews/20260906-0350-issue-147-task-offer-journal.review.md",
+      "tasks/contracts/20260906-0420-issue-147-integration.contract.md",
+      "tasks/reviews/20260906-0420-issue-147-integration.review.md",
+      "tasks/notes/",
+      "packages/protocol/src/messages.ts",
+      "packages/protocol/src/index.ts",
+      "packages/protocol/src/__tests__/task-offer-family.test.ts",
+      "packages/client/src/daemon/create-daemon.ts",
+      "packages/client/src/__tests__/journal-offer-family.test.ts",
+      "api-surface/protocol.d.ts"
+    ],
+    "command": "repo-harness run verify-contract --contract tasks/contracts/20260906-0420-issue-147-integration.contract.md --strict --read-only --report-file <temp>",
+    "exit_code": 0,
+    "file": "tasks/contracts/20260906-0420-issue-147-integration.contract.md",
+    "report": {
+      "budget_ms": 3600000,
+      "contract": "tasks/contracts/20260906-0420-issue-147-integration.contract.md",
+      "executes_contract_commands": true,
+      "failed": 0,
+      "failure_class": "",
+      "next_status": "Fulfilled",
+      "previous_status": "Active",
+      "quiet": false,
+      "read_only": true,
+      "results": [
+        {
+          "cache_key": "",
+          "command": "",
+          "duration_ms": null,
+          "execution": "evaluated",
+          "exit_code": null,
+          "force_reason": "",
+          "kind": "task_profile",
+          "message": "task_profile: code-change",
+          "passed": true,
+          "signal": null,
+          "target": "code-change",
+          "timed_out": false
+        },
+        {
+          "cache_key": "",
+          "command": "",
+          "duration_ms": null,
+          "execution": "evaluated",
+          "exit_code": null,
+          "force_reason": "",
+          "kind": "evidence_requirements",
+          "message": "Evidence Requirements: benchmark declared as not_applicable",
+          "passed": true,
+          "signal": null,
+          "target": "benchmark",
+          "timed_out": false
+        },
+        {
+          "cache_key": "",
+          "command": "",
+          "duration_ms": null,
+          "execution": "evaluated",
+          "exit_code": null,
+          "force_reason": "",
+          "kind": "files_exist",
+          "message": "files_exist: docs/spec.md",
+          "passed": true,
+          "signal": null,
+          "target": "docs/spec.md",
+          "timed_out": false
+        },
+        {
+          "cache_key": "",
+          "command": "",
+          "duration_ms": null,
+          "execution": "evaluated",
+          "exit_code": null,
+          "force_reason": "",
+          "kind": "artifacts_exist",
+          "message": "artifacts_exist: .ai/harness/checks/latest.json",
+          "passed": true,
+          "signal": null,
+          "target": ".ai/harness/checks/latest.json",
+          "timed_out": false
+        },
+        {
+          "cache_key": "",
+          "command": "",
+          "duration_ms": null,
+          "execution": "evaluated",
+          "exit_code": null,
+          "force_reason": "",
+          "kind": "artifacts_exist",
+          "message": "artifacts_exist: tasks/notes/20260906-0420-issue-147-integration.notes.md",
+          "passed": true,
+          "signal": null,
+          "target": "tasks/notes/20260906-0420-issue-147-integration.notes.md",
+          "timed_out": false
+        },
+        {
+          "cache_key": "",
+          "command": "repo-harness run check-task-workflow --strict",
+          "duration_ms": 1440,
+          "execution": "executed",
+          "exit_code": 0,
+          "force_reason": "",
+          "kind": "commands_succeed",
+          "message": "commands_succeed: repo-harness run check-task-workflow --strict (1440ms)",
+          "passed": true,
+          "signal": null,
+          "target": "repo-harness run check-task-workflow --strict",
+          "timed_out": false
+        },
+        {
+          "cache_key": "",
+          "command": "bun run --cwd packages/client test -- src/__tests__/journal-offer-family.test.ts",
+          "duration_ms": 17640,
+          "execution": "executed",
+          "exit_code": 0,
+          "force_reason": "",
+          "kind": "tests_pass",
+          "message": "tests_pass: packages/client/src/__tests__/journal-offer-family.test.ts via bun run --cwd packages/client test -- src/__tests__/journal-offer-family.test.ts (17640ms)",
+          "passed": true,
+          "signal": null,
+          "target": "packages/client/src/__tests__/journal-offer-family.test.ts",
+          "timed_out": false
+        },
+        {
+          "cache_key": "",
+          "command": "bun run build",
+          "duration_ms": 3143,
+          "execution": "executed",
+          "exit_code": 0,
+          "force_reason": "",
+          "kind": "commands_succeed",
+          "message": "commands_succeed: bun run build (3143ms)",
+          "passed": true,
+          "signal": null,
+          "target": "bun run build",
+          "timed_out": false
+        },
+        {
+          "cache_key": "",
+          "command": "bun run typecheck",
+          "duration_ms": 2807,
+          "execution": "executed",
+          "exit_code": 0,
+          "force_reason": "",
+          "kind": "commands_succeed",
+          "message": "commands_succeed: bun run typecheck (2807ms)",
+          "passed": true,
+          "signal": null,
+          "target": "bun run typecheck",
+          "timed_out": false
+        },
+        {
+          "cache_key": "",
+          "command": "bun run test",
+          "duration_ms": 33862,
+          "execution": "executed",
+          "exit_code": 0,
+          "force_reason": "",
+          "kind": "commands_succeed",
+          "message": "commands_succeed: bun run test (33862ms)",
+          "passed": true,
+          "signal": null,
+          "target": "bun run test",
+          "timed_out": false
+        },
+        {
+          "cache_key": "",
+          "command": "bun run check:api-surface",
+          "duration_ms": 100,
+          "execution": "executed",
+          "exit_code": 0,
+          "force_reason": "",
+          "kind": "commands_succeed",
+          "message": "commands_succeed: bun run check:api-surface (100ms)",
+          "passed": true,
+          "signal": null,
+          "target": "bun run check:api-surface",
+          "timed_out": false
+        },
+        {
+          "cache_key": "",
+          "command": "bun run check:version-authority",
+          "duration_ms": 39,
+          "execution": "executed",
+          "exit_code": 0,
+          "force_reason": "",
+          "kind": "commands_succeed",
+          "message": "commands_succeed: bun run check:version-authority (39ms)",
+          "passed": true,
+          "signal": null,
+          "target": "bun run check:version-authority",
+          "timed_out": false
+        },
+        {
+          "cache_key": "",
+          "command": "git diff --check",
+          "duration_ms": 25,
+          "execution": "executed",
+          "exit_code": 0,
+          "force_reason": "",
+          "kind": "commands_succeed",
+          "message": "commands_succeed: git diff --check (25ms)",
+          "passed": true,
+          "signal": null,
+          "target": "git diff --check",
+          "timed_out": false
+        }
+      ],
+      "run_id": "run-20260906T041958-21869",
+      "strict": true,
+      "timed_out": false,
+      "total": 13,
+      "total_duration_ms": 59815
+    },
+    "retry_context": {
+      "contract_sha256": "sha256:56d3f3489878c9fc7f0f3a1c18445072b86a6a750a3cad0f5f0e25215b04e653",
+      "goal_sha256": "sha256:1f62742eeb2fc9fea82824726ef6dae385f553d27f2d9b45b02dbe1339abf5a6",
+      "repository_root": "sha256:15c5fc46912b4f2a18be76fdf073e6380760ee194da625b341866cf02c80a766",
+      "schema": "repo-harness-criterion-context.v1",
+      "subject_sha256": "sha256:803ca23de016e64dcbce29851d0b7bb8ab3f7ef78848004dc2ea12baa7d73be4",
+      "target_revision": "612ec44073f0481341036107483aaf8fdc190a87",
+      "toolchain_fingerprint": "sha256:823873b805f2e78724e7a43c6f2105c6c954857f291e34ed4df8958db389a4d7"
+    },
+    "retry_context_guard": {
+      "message": "Frozen criterion retry identity remained unchanged through contract execution.",
+      "status": "pass"
+    },
+    "status": "pass",
+    "task_profile": "code-change"
+  },
+  "diff_base": {
+    "merge_base": "612ec44073f0481341036107483aaf8fdc190a87",
+    "ref": "origin/main"
+  },
+  "exit_code": 0,
+  "failure_class": "",
+  "files_changed": [
+    ".ai/harness/policy.json",
+    "api-surface/protocol.d.ts",
+    "packages/client/src/__tests__/journal-offer-family.test.ts",
+    "packages/client/src/daemon/create-daemon.ts",
+    "packages/protocol/src/__tests__/task-offer-family.test.ts",
+    "packages/protocol/src/index.ts",
+    "packages/protocol/src/messages.ts",
+    "plans/plan-20260906-0350-issue-147-task-offer-journal.md",
+    "plans/plan-20260906-0420-issue-147-integration.md",
+    "tasks/contracts/20260906-0350-issue-147-task-offer-journal.contract.md",
+    "tasks/contracts/20260906-0420-issue-147-integration.contract.md",
+    "tasks/notes/20260906-0350-issue-147-task-offer-journal.notes.md",
+    "tasks/notes/20260906-0420-issue-147-integration.notes.md",
+    "tasks/notes/issue-147-contract-check.json",
+    "tasks/notes/issue-147-contract-check.log",
+    "tasks/notes/issue-147-handoff.md",
+    "tasks/notes/issue-147-post-fix.log",
+    "tasks/notes/issue-147-pre-fix.log",
+    "tasks/notes/issue-147-source-evidence.json",
+    "tasks/notes/issue-147-source-test.log",
+    "tasks/reviews/20260906-0350-issue-147-task-offer-journal.review.md",
+    "tasks/reviews/20260906-0420-issue-147-integration.review.md"
+  ],
+  "generated_at": "2026-09-06T04:19:57+0800",
+  "guards": [
+    {
+      "name": "contract",
+      "status": "pass"
+    },
+    {
+      "message": "Frozen criterion retry identity remained unchanged through contract execution.",
+      "name": "criterion_context",
+      "status": "pass"
+    },
+    {
+      "name": "review",
+      "status": "pass"
+    },
+    {
+      "name": "change_assessment",
+      "status": "pass"
+    },
+    {
+      "name": "acceptance_receipt",
+      "status": "pass"
+    },
+    {
+      "name": "allowed_paths",
+      "status": "pass"
+    }
+  ],
+  "handoffs": [
+    {
+      "exists": false,
+      "file": ".ai/harness/handoff/current.md"
+    },
+    {
+      "exists": false,
+      "file": ".ai/harness/handoff/resume.md"
+    }
+  ],
+  "lifecycle": {
+    "evidence_tier": "harness-trace-v1",
+    "latest": ".ai/harness/checks/latest.json",
+    "snapshot": ".ai/harness/runs/run-20260906T041957-21402-20260906-0420-issue-147-integration.json"
+  },
+  "next_step": "finish contract worktree or archive completed task",
+  "review": {
+    "file": "tasks/reviews/20260906-0420-issue-147-integration.review.md",
+    "message": "Review artifact is available for deterministic AcceptanceReceipt projection.",
+    "status": "pass"
+  },
+  "review_subject_sha256": "sha256:803ca23de016e64dcbce29851d0b7bb8ab3f7ef78848004dc2ea12baa7d73be4",
+  "run_file": ".ai/harness/runs/run-20260906T041957-21402-20260906-0420-issue-147-integration.json",
+  "run_id": "run-20260906T041957-21402",
+  "schema": "repo-harness-run-trace.v1",
+  "source": "verify-sprint",
+  "status": "pass",
+  "task_profile": "code-change",
+  "worktree": "sha256:15c5fc46912b4f2a18be76fdf073e6380760ee194da625b341866cf02c80a766",
+  "provenance": {
+    "schema_version": 1,
+    "generated_at": "2026-09-05T20:23:49.956Z",
+    "materializer_version": "1",
+    "source_event_ids": [
+      "evt-01M1SKKEAT7ANSYQFY85N1ERS7",
+      "evt-01M1SKPJ299GSRQG2E1R9VRS13",
+      "evt-01M1SKVQY2E8PVECJ6BD5HK7G0"
+    ],
+    "source_checkpoint_id": null,
+    "subject_hash": "sha256:803ca23de016e64dcbce29851d0b7bb8ab3f7ef78848004dc2ea12baa7d73be4",
+    "content_hash": "sha256:898f7e1e6d6aba13991abc7779591ae60abc4f3fb2809ad54233461d5546280c",
+    "worktree_id": "20260906-0420-issue-147-integration",
+    "contract_id": "tasks/contracts/20260906-0420-issue-147-integration.contract.md"
+  }
+}
