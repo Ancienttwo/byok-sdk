@@ -1,0 +1,46 @@
+{
+  "protocol": 2,
+  "kind": "repo-harness-acceptance-receipt",
+  "repository_root": "/Users/kito/Projects/byok-sdk-wt-issue-147-landing",
+  "contract_file": "tasks/contracts/20260906-0430-issue-147-landing.contract.md",
+  "contract_sha256": "sha256:836b0cf510f197e53b9760825e0929e78343ecfcf701295d3d6d4b4f1e0195cb",
+  "goal_file": "plans/plan-20260906-0430-issue-147-landing.md",
+  "goal_sha256": "sha256:06731ffbdd3db60f00c93affb8640057dee7b0806b47c232417cd5dfb38e2183",
+  "verification_file": ".ai/harness/checks/latest.json",
+  "verification_evidence_sha256": "sha256:b2f7c550e33e9f5b7c19729762f836d90b35c6353825b837861af929e6f4d540",
+  "benchmark_evidence_sha256": "not-applicable",
+  "subject_sha256": "sha256:9bc1da921931406ac4d4f26fb5c98d9d03432876533209e0d71779e42031bf5c",
+  "subject_scope": "normalized-final-content",
+  "target_ref": "main",
+  "target_revision": "e542d210719a43fe1111b793bba1a76d37076cbf",
+  "reviewed_paths": [
+    "api-surface/protocol.d.ts",
+    "packages/client/src/__tests__/journal-offer-family.test.ts",
+    "packages/client/src/daemon/create-daemon.ts",
+    "packages/protocol/src/__tests__/task-offer-family.test.ts",
+    "packages/protocol/src/index.ts",
+    "packages/protocol/src/messages.ts"
+  ],
+  "disposition": "external_pass",
+  "expected_reviewer": "Claude",
+  "reviewer": "Claude",
+  "source": "claude-review",
+  "actor": null,
+  "summary": "Claude fable PASS/noP1 for actual main targete542d210; two inherited and one minor P2 retained. Product files unchanged since reviewed candidate0941041; parent verified final source gates12/12. Raw review: tasks/notes/issue-147-landing-claude.md.",
+  "findings": [
+    {
+      "severity": "P2",
+      "message": "Inherited: observer.ts retains pre-existing three-offer list; offered observation for egress omitted. Outside journal scope, report-only."
+    },
+    {
+      "severity": "P2",
+      "message": "Inherited: exact-seq duplicate is filtered before journal; new test proves task-level dedup, existing journal-sqlite suites prove receipt idempotency."
+    },
+    {
+      "severity": "P2",
+      "message": "Minor reviewer advisory: default vi.waitFor timeout may have limited margin under CI load; no correctness failure observed and no change required for landing."
+    }
+  ],
+  "waiver_grant_sha256": null,
+  "issued_at": "2026-09-05T20:38:47.621Z"
+}
