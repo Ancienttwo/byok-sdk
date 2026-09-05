@@ -39,7 +39,7 @@ No writer edits another worktree. Shared files move between owners sequentially 
 
 - [x] Refresh live branches, worker identities, PRs and #147 landing evidence.
 - [x] Dispatch recovery and Multi-Agent workers with disjoint responsibility.
-- [ ] Review workers' concrete designs and resolve shared contract choices.
+- [x] Review workers' concrete designs and resolve shared contract choices.
 - [ ] Accept BYOK recovery source and incorporate independently accepted audit/version changes.
 - [ ] Accept Salesko Multi-Agent source and integrate existing journal/producer-fence work.
 - [ ] Build frozen SDK packages and prove clean consumer installation without alternate semantic authorities.
@@ -65,3 +65,10 @@ No writer edits another worktree. Shared files move between owners sequentially 
 ## Stop and Recovery
 
 Preserve active workers and dirty files. Do not expand into publisher signing, live credentials, automatic provider execution or production migrations. Resolve routine implementation and integration choices under the user's authority. Record genuine external blockers without manufacturing success or reducing the objective. Use the persistent goal to continue until the complete deliverable is proved.
+
+## Integration Decisions
+
+- Reuse the existing tenant-scoped `taskId` as an immutable execution identity; close legacy reuse and exact-device claim gaps instead of adding a redundant identifier. Explicit retry gets a new task identity.
+- A cancellation tombstone remains cloud outcome authority. An authenticated original terminal can confirm execution termination and converge effective status to `cancelled`, without replacing receipt bytes or creating a fake cancellation envelope. Cover cancellation between the initial read and status CAS; accepted transport disposition requires convergence.
+- Device startup/reconnect discovers its exact cloud Placement collection through a distinct authenticated assertion audience, then reconciles each explicit Agent with a fresh single-use assertion. Local home enumeration cannot discover a lost home; no default Agent is inferred.
+- Candidate CI lives in the private Salesko repository, checks out the public SDK by committed SHA, and validates both immutable subjects. It uses no added cross-repository secret or registry publication.
