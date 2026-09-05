@@ -22,6 +22,7 @@ const DEVICE = 'agent-home-projection-device';
 const OTHER_DEVICE = 'agent-home-projection-other-device';
 const REQUEST_ID = '10000000-0000-4000-8000-000000000210';
 const HASH = 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const OTHER_AGENT_REF = { agentId: 'durable-projection-agent-other', profileRevision: '7' } as const;
 
 const desired = {
   requestId: REQUEST_ID,
@@ -46,7 +47,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres Agent-home projection receipts — ${S
       const clock = createMutableClock();
       const receipts = new PostgresRequestReceiptStore(scope.pool, clock);
       const first = await receipts.record(TENANT, {
-        key: agentHomeProjectionRequestKey(DEVICE, REQUEST_ID),
+        key: agentHomeProjectionRequestKey(DEVICE, desired.agentRef, REQUEST_ID),
         body: JSON.stringify(desired),
       });
       expect(first.created).toBe(true);
@@ -106,6 +107,41 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres Agent-home projection receipts — ${S
       ).resolves.toBeUndefined();
     } finally {
       await restarted?.end();
+      await scope.dispose();
+    }
+  });
+
+  it('keeps same-device same-request Agent-home facts isolated by AgentRef', async () => {
+    const scope = await createDataplaneScope();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const receipts = new PostgresRequestReceiptStore(scope.pool, createMutableClock());
+      const otherDesired = {
+        ...desired,
+        agentRef: OTHER_AGENT_REF,
+        projection: { opaque: 'other durable projection' },
+      } as const;
+
+      await expect(receipts.record(TENANT, {
+        key: agentHomeProjectionRequestKey(DEVICE, desired.agentRef, REQUEST_ID),
+        body: JSON.stringify(desired),
+      })).resolves.toMatchObject({ created: true });
+      await expect(receipts.record(TENANT, {
+        key: agentHomeProjectionRequestKey(DEVICE, otherDesired.agentRef, REQUEST_ID),
+        body: JSON.stringify(otherDesired),
+      })).resolves.toMatchObject({ created: true });
+
+      await expect(readAgentHomeProjectionStatus(tenantReceipts(receipts, TENANT), TENANT, DEVICE, {
+        requestId: REQUEST_ID,
+        agentRef: desired.agentRef,
+        projectionHash: HASH,
+      })).resolves.toMatchObject({ agentRef: desired.agentRef, status: 'pending' });
+      await expect(readAgentHomeProjectionStatus(tenantReceipts(receipts, TENANT), TENANT, DEVICE, {
+        requestId: REQUEST_ID,
+        agentRef: otherDesired.agentRef,
+        projectionHash: HASH,
+      })).resolves.toMatchObject({ agentRef: otherDesired.agentRef, status: 'pending' });
+    } finally {
       await scope.dispose();
     }
   });

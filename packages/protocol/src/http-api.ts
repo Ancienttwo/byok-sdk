@@ -236,12 +236,10 @@ export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
 
 /**
  * `accepted` counts every envelope `ConnectionHub.handleInbound` returned
- * `'accepted'` *or* `'duplicate'` for (finding P2) — a dedup'd replay is a
- * wire-level success (§9's idempotency window), even though no handler ran
- * for it a second time. `rejected` (a type outside `DAEMON_TO_SERVER_TYPES`,
- * or an ownership mismatch — N2) is a separate, additive count: omitted
- * entirely when zero, so a batch with nothing rejected keeps the pre-P2
- * `{ accepted }` shape callers already depend on.
+ * `'accepted'` *or* `'duplicate'` for — a deduped replay is a wire-level
+ * success even though the business mutation did not run a second time.
+ * `rejected` is additive and omitted when zero, preserving frozen v1's
+ * `{ accepted }` response shape.
  */
 export const MessagesSendResponseSchema = z.object({
   accepted: z.number().int().nonnegative(),

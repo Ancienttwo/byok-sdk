@@ -191,6 +191,15 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
       });
     });
 
+    it('keeps Agent-bound dedup rings separate per tenant', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        const agentRef = { agentId: 'agent-1', profileRevision: 'profile-1' } as const;
+        expect(await stores.dedup.checkAndRecordAgent(TENANT_A, 'device-1', agentRef, 'env-1')).toBe(false);
+        expect(await stores.dedup.checkAndRecordAgent(TENANT_B, 'device-1', agentRef, 'env-1')).toBe(false);
+        expect(await stores.dedup.checkAndRecordAgent(TENANT_A, 'device-1', agentRef, 'env-1')).toBe(true);
+      });
+    });
+
     it('does not leak task attempts or let a guess touch another tenant row', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         await stores.tasks.open(TENANT_A, { taskId: 'task-1', deviceId: 'device-1' });

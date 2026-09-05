@@ -24,6 +24,12 @@ export const TimelineEventSchema = z.object({
   sourceEnvelopeId: SourceEnvelopeIdSchema,
   batchSeq: z.number().int().nonnegative(),
   eventIndex: z.number().int().nonnegative(),
+  /**
+   * The producer-declared loss attached to this source batch. It travels with
+   * every retained event so a replay includes it in the canonical batch
+   * binding rather than treating the aggregate as an incidental counter.
+   */
+  sourceDropped: z.number().int().nonnegative().optional(),
   receivedAt: z.iso.datetime(),
   event: AgentEventOrUnknownSchema,
 });
@@ -56,6 +62,12 @@ export interface ActivityAppendInput {
 }
 
 export interface ActivityStore {
+  /**
+   * `sourceEnvelopeId` is the per-envelope idempotency authority. Repeating
+   * its exact canonical batch returns the existing tail; changing any batch
+   * fact under that identity is rejected rather than appended as a second
+   * observation.
+   */
   append(tenant: TenantId, input: ActivityAppendInput): Promise<ActivityTail>;
   read(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined>;
 }
@@ -94,10 +106,41 @@ export function projectTimelineEvents(
       sourceEnvelopeId: input.sourceEnvelopeId,
       batchSeq: input.batchSeq,
       eventIndex,
+      sourceDropped: input.dropped,
       receivedAt,
       event,
     }),
   );
+}
+
+/**
+ * Whether one live tail already contains this source envelope's canonical
+ * batch. `conflict` includes a partially retained source: its missing events
+ * are not evidence that a different batch may reuse the same source identity.
+ */
+export function activitySourceBatchState(
+  entries: readonly TimelineEvent[],
+  input: ActivityAppendInput,
+): 'absent' | 'same' | 'conflict' {
+  const existing = entries
+    .filter((entry) => entry.sourceEnvelopeId === input.sourceEnvelopeId)
+    .sort((left, right) => left.eventIndex - right.eventIndex);
+  if (existing.length === 0) return 'absent';
+  if (existing.length !== input.events.length) return 'conflict';
+  for (const [eventIndex, event] of input.events.entries()) {
+    const stored = existing[eventIndex];
+    if (
+      stored === undefined ||
+      stored.taskId !== input.taskId ||
+      stored.batchSeq !== input.batchSeq ||
+      stored.eventIndex !== eventIndex ||
+      stored.sourceDropped !== input.dropped ||
+      JSON.stringify(stored.event) !== JSON.stringify(event)
+    ) {
+      return 'conflict';
+    }
+  }
+  return 'same';
 }
 
 export function parseTimelineEvents(value: unknown): readonly TimelineEvent[] {

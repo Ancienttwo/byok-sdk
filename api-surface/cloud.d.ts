@@ -50,6 +50,7 @@ export declare const TimelineEventSchema: z.ZodObject<{
     sourceEnvelopeId: z.ZodString;
     batchSeq: z.ZodNumber;
     eventIndex: z.ZodNumber;
+    sourceDropped: z.ZodOptional<z.ZodNumber>;
     receivedAt: z.ZodISODateTime;
     event: z.ZodUnion<readonly [z.ZodDiscriminatedUnion<[z.ZodObject<{
         type: z.ZodLiteral<"progress">;
@@ -112,11 +113,23 @@ export interface ActivityAppendInput {
     readonly capacity?: number;
 }
 export interface ActivityStore {
+    /**
+     * `sourceEnvelopeId` is the per-envelope idempotency authority. Repeating
+     * its exact canonical batch returns the existing tail; changing any batch
+     * fact under that identity is rejected rather than appended as a second
+     * observation.
+     */
     append(tenant: TenantId, input: ActivityAppendInput): Promise<ActivityTail>;
     read(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined>;
 }
 export declare function validateActivityAppend(input: ActivityAppendInput): number;
 export declare function projectTimelineEvents(input: ActivityAppendInput, receivedAt: string): readonly TimelineEvent[];
+/**
+ * Whether one live tail already contains this source envelope's canonical
+ * batch. `conflict` includes a partially retained source: its missing events
+ * are not evidence that a different batch may reuse the same source identity.
+ */
+export declare function activitySourceBatchState(entries: readonly TimelineEvent[], input: ActivityAppendInput): 'absent' | 'same' | 'conflict';
 export declare function parseTimelineEvents(value: unknown): readonly TimelineEvent[];
 export declare function compareTimelineEvents(left: TimelineEvent, right: TimelineEvent): number;
 export declare function activityCursor(entries: readonly TimelineEvent[]): ActivityCursor | undefined;
@@ -138,8 +151,8 @@ export interface AgentHomeProjectionReceiptInput {
     readonly agentRef: AgentHomeProjectionPayload['agentRef'];
     readonly projectionHash: AgentHomeProjectionPayload['projectionHash'];
 }
-export declare function agentHomeProjectionRequestKey(deviceId: string, requestId: string): string;
-export declare function agentHomeProjectionCompletionKey(deviceId: string, requestId: string): string;
+export declare function agentHomeProjectionRequestKey(deviceId: string, agentRef: AgentHomeProjectionPayload['agentRef'], requestId: string): string;
+export declare function agentHomeProjectionCompletionKey(deviceId: string, agentRef: AgentHomeProjectionPayload['agentRef'], requestId: string): string;
 export declare function sameAgentHomeProjectionRequest(expected: AgentHomeProjectionPayload, actual: AgentHomeProjectionPayload): boolean;
 export declare function receiptMatchesAgentHomeProjection(request: AgentHomeProjectionPayload, receipt: AgentHomeProjectionCompletionRequest): boolean;
 export declare function statusInputMatchesAgentHomeProjection(request: AgentHomeProjectionPayload, input: AgentHomeProjectionReceiptInput): boolean;
@@ -284,6 +297,10 @@ export interface PendingApproval {
      * `approvalId` proceeds untargeted exactly as it does on the server.
      */
     readonly approvalId?: string;
+    /** Immutable daemon envelope identity for this exact request observation. */
+    readonly sourceEnvelopeId: string;
+    /** Monotonic timeline revision for this exact request observation. */
+    readonly revision: number;
 }
 /**
  * The task's current pending approval, or `undefined` when it has none — see
@@ -296,46 +313,66 @@ import { z } from 'zod';
 export declare const DEFAULT_APPROVAL_TIMELINE_CAPACITY = 50;
 export declare const DEFAULT_APPROVAL_TIMELINE_TTL_MS: number;
 export declare const APPROVAL_SUMMARY_MAX_BYTES: number;
-export declare const ApprovalTimelineEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+export declare const ApprovalTimelineEventSchema: z.ZodUnion<readonly [z.ZodObject<{
     type: z.ZodLiteral<"approval_requested">;
     summary: z.ZodString;
     approvalId: z.ZodOptional<z.ZodString>;
-}, z.core.$strip>, z.ZodObject<{
+}, z.core.$strict>, z.ZodObject<{
     type: z.ZodLiteral<"approval_resolved">;
     approvalId: z.ZodOptional<z.ZodString>;
     decision: z.ZodEnum<{
         approve: "approve";
         reject: "reject";
     }>;
-    resolvedBy: z.ZodEnum<{
-        host: "host";
-        local: "local";
-    }>;
+    resolvedBy: z.ZodLiteral<"local">;
     at: z.ZodISODateTime;
-}, z.core.$strip>], "type">;
+}, z.core.$strict>, z.ZodObject<{
+    type: z.ZodLiteral<"approval_resolved">;
+    approvalId: z.ZodOptional<z.ZodString>;
+    decision: z.ZodLiteral<"approve">;
+    resolvedBy: z.ZodLiteral<"host">;
+    at: z.ZodISODateTime;
+}, z.core.$strict>, z.ZodObject<{
+    type: z.ZodLiteral<"approval_resolved">;
+    approvalId: z.ZodOptional<z.ZodString>;
+    decision: z.ZodLiteral<"reject">;
+    resolvedBy: z.ZodLiteral<"host">;
+    reason: z.ZodNullable<z.ZodString>;
+    at: z.ZodISODateTime;
+}, z.core.$strict>]>;
 export type ApprovalTimelineEvent = Readonly<z.infer<typeof ApprovalTimelineEventSchema>>;
 export declare const ApprovalObservationSchema: z.ZodObject<{
     taskId: z.ZodString;
     sourceEnvelopeId: z.ZodString;
     revision: z.ZodNumber;
     receivedAt: z.ZodISODateTime;
-    event: z.ZodDiscriminatedUnion<[z.ZodObject<{
+    event: z.ZodUnion<readonly [z.ZodObject<{
         type: z.ZodLiteral<"approval_requested">;
         summary: z.ZodString;
         approvalId: z.ZodOptional<z.ZodString>;
-    }, z.core.$strip>, z.ZodObject<{
+    }, z.core.$strict>, z.ZodObject<{
         type: z.ZodLiteral<"approval_resolved">;
         approvalId: z.ZodOptional<z.ZodString>;
         decision: z.ZodEnum<{
             approve: "approve";
             reject: "reject";
         }>;
-        resolvedBy: z.ZodEnum<{
-            host: "host";
-            local: "local";
-        }>;
+        resolvedBy: z.ZodLiteral<"local">;
         at: z.ZodISODateTime;
-    }, z.core.$strip>], "type">;
+    }, z.core.$strict>, z.ZodObject<{
+        type: z.ZodLiteral<"approval_resolved">;
+        approvalId: z.ZodOptional<z.ZodString>;
+        decision: z.ZodLiteral<"approve">;
+        resolvedBy: z.ZodLiteral<"host">;
+        at: z.ZodISODateTime;
+    }, z.core.$strict>, z.ZodObject<{
+        type: z.ZodLiteral<"approval_resolved">;
+        approvalId: z.ZodOptional<z.ZodString>;
+        decision: z.ZodLiteral<"reject">;
+        resolvedBy: z.ZodLiteral<"host">;
+        reason: z.ZodNullable<z.ZodString>;
+        at: z.ZodISODateTime;
+    }, z.core.$strict>]>;
 }, z.core.$strip>;
 export type ApprovalObservation = Readonly<z.infer<typeof ApprovalObservationSchema>>;
 export interface ApprovalTimelineTail {
@@ -354,8 +391,31 @@ export interface ApprovalTimelineAppendInput {
     readonly ttlMs?: number;
     readonly capacity?: number;
 }
+/**
+ * One host decision against the exact unresolved request it observed.
+ *
+ * The expected source/revision pair is the durable request identity.  A
+ * resolver must not turn a stale read into a decision for a request which has
+ * since been superseded, and it must not split one logical decision into
+ * several mailbox controls.  Implementations serialize this comparison and
+ * append under the timeline's per-task authority.
+ */
+export interface ApprovalTimelineResolvePendingInput extends ApprovalTimelineAppendInput {
+    readonly expectedSourceEnvelopeId: string;
+    readonly expectedRevision: number;
+}
+/** Result of a conditional host-decision append. Logical conflicts are data, not transport failures. */
+export type ApprovalTimelineResolvePendingResult = {
+    readonly status: 'applied' | 'replayed';
+    readonly tail: ApprovalTimelineTail;
+} | {
+    readonly status: 'conflict' | 'superseded' | 'absent';
+    readonly tail?: ApprovalTimelineTail;
+};
 export interface ApprovalTimelineStore {
     append(tenant: TenantId, input: ApprovalTimelineAppendInput): Promise<ApprovalTimelineTail>;
+    /** Atomically append one host resolution only if its request remains current. */
+    resolvePending(tenant: TenantId, input: ApprovalTimelineResolvePendingInput): Promise<ApprovalTimelineResolvePendingResult>;
     read(tenant: TenantId, taskId: string): Promise<ApprovalTimelineTail | undefined>;
 }
 export interface ValidatedApprovalTimelineAppend {
@@ -364,6 +424,7 @@ export interface ValidatedApprovalTimelineAppend {
     readonly event: ApprovalTimelineEvent;
 }
 export declare function validateApprovalTimelineAppend(input: ApprovalTimelineAppendInput): ValidatedApprovalTimelineAppend;
+export declare function validateApprovalTimelineResolve(input: ApprovalTimelineResolvePendingInput): ValidatedApprovalTimelineAppend;
 export declare function approvalTimelineKey(tenant: TenantId, taskId: string): string;
 export declare function parseApprovalObservations(value: unknown): readonly ApprovalObservation[];
 export declare function approvalTimelineCursor(entries: readonly ApprovalObservation[]): number | undefined;
@@ -697,7 +758,7 @@ export declare function declares(declaration: CapabilityDeclaration, capability:
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { type Envelope, type AgentContentReadPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
+import { type Envelope, type AgentRef, type AgentContentReadPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -756,7 +817,16 @@ export interface ByokCloudOptions {
      * authorities: see `BearerAuthDeps.instanceProductId` (`auth/bearer.ts`).
      */
     readonly instanceProductId?: string;
-    /** Product-owned consumer; destination lookup is keyed by authenticated task context, never model input. */
+    /**
+     * Product-owned consumer; destination lookup uses authenticated task context.
+     * Delivery is at least once, including concurrent calls and retries after a
+     * process restart or an uncertain commit. The product must durably deduplicate
+     * the exact tenant/device/task/AgentRef/message identity and payload, producing
+     * one logical effect and the same outcome/reasonCode on every exact replay.
+     * A thrown error leaves admission pending for transport retry; only a returned
+     * outcome is a terminal product decision. Do not use callback invocation count
+     * as execution authority.
+     */
     readonly agentMessage?: {
         consume(input: {
             readonly tenant: TenantId;
@@ -1008,8 +1078,8 @@ export interface ByokCloud {
     listTaskAttempts(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
     /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
     readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
-    /** Exact durable egress fact and receipt selected by (tenant, device, event id). */
-    readAgentEgress(tenant: TenantId, deviceId: string, eventId: string): Promise<AgentEgressRecord | undefined>;
+    /** Exact durable egress fact and receipt selected by (tenant, device, AgentRef, event id). */
+    readAgentEgress(tenant: TenantId, deviceId: string, agentRef: AgentRef, eventId: string): Promise<AgentEgressRecord | undefined>;
     /**
      * Host control plane: the same first terminal, decoded into the typed read
      * model ({@link TerminalResult}) so a host reads result fields, not envelope
@@ -1548,9 +1618,11 @@ export declare function truthPutHandler(deps: TruthRouteDeps): (c: Context) => P
  *    is not rejected here — the store's own no-op-on-missing behavior covers
  *    the latter, and it covers it per tenant, so a guessed id from another
  *    tenant writes nothing anywhere.
- * 3. **dedup** — an envelope id already seen from this device is a no-op. The
- *    wire is at-least-once (§9); this makes processing at-most-once.
- * 4. **apply** — the lifecycle write.
+ * 3. **apply/recover** — every lifecycle side effect is idempotent under the
+ *    envelope's own durable identity. A retry after a partial failure resumes
+ *    this step rather than being hidden by transport admission.
+ * 4. **dedup** — only after every authoritative side effect converged do we
+ *    mark the envelope complete. The next retry is then a no-op.
  *
  * A duplicate is still a wire-level success (§8.2): it just did not re-run
  * anything. Only `rejected`/`rate_limited` are excluded from `accepted`.
@@ -1666,15 +1738,15 @@ export { projectTerminalResult } from './terminal-result';
 export type { TerminalResult } from './terminal-result';
 export { tenantStoresFor } from './tenant-stores';
 export type { TenantBoundActivity, TenantBoundApprovalTimeline, TenantBoundBoard, CloudRootStores, TenantBoundBlobs, TenantBoundDedup, TenantBoundDevices, TenantBoundMailbox, TenantBoundPresence, TenantBoundQuota, TenantBoundRateLimiter, TenantBoundReceipts, TenantBoundTaskAttempts, TenantStores, } from './tenant-stores';
-export { ApprovalObservationSchema, ApprovalTimelineEventSchema, APPROVAL_SUMMARY_MAX_BYTES, DEFAULT_APPROVAL_TIMELINE_CAPACITY, DEFAULT_APPROVAL_TIMELINE_TTL_MS, approvalTimelineCursor, parseApprovalObservations, validateApprovalTimelineAppend, } from './approval-timeline';
-export type { ApprovalObservation, ApprovalTimelineAppendInput, ApprovalTimelineEvent, ApprovalTimelineStore, ApprovalTimelineTail, } from './approval-timeline';
+export { ApprovalObservationSchema, ApprovalTimelineEventSchema, APPROVAL_SUMMARY_MAX_BYTES, DEFAULT_APPROVAL_TIMELINE_CAPACITY, DEFAULT_APPROVAL_TIMELINE_TTL_MS, approvalTimelineCursor, parseApprovalObservations, validateApprovalTimelineAppend, validateApprovalTimelineResolve, } from './approval-timeline';
+export type { ApprovalObservation, ApprovalTimelineAppendInput, ApprovalTimelineEvent, ApprovalTimelineResolvePendingInput, ApprovalTimelineResolvePendingResult, ApprovalTimelineStore, ApprovalTimelineTail, } from './approval-timeline';
 export { StaleApprovalError, pendingApproval } from './approval-control';
 export type { PendingApproval } from './approval-control';
 export { SteerRejectedError } from './steer-control';
 export type { SteerRejectionCode } from './steer-control';
 export { assertTaskAttemptListLimit, DEFAULT_ACTIVITY_BOUNDS, DEFAULT_ACTIVITY_CAPACITY, DEFAULT_ACTIVITY_MAX_BYTES, DEFAULT_ACTIVITY_MAX_EVENTS, DEFAULT_ACTIVITY_TTL_MS, DEFAULT_BOARD_CHANNEL_MAX_BYTES, DEFAULT_BOARD_TITLE_MAX_BYTES, DEFAULT_PRESENCE_DETAIL_MAX_BYTES, DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS, DEFAULT_PRESENCE_TTL_MS, } from './coordination';
 export type { ActivityBounds } from './coordination';
-export { TimelineEventSchema, ActivityAppendRequestSchema, activityCursor, parseTimelineEvents, projectTimelineEvents, validateActivityAppend, } from './activity';
+export { TimelineEventSchema, ActivityAppendRequestSchema, activityCursor, activitySourceBatchState, parseTimelineEvents, projectTimelineEvents, validateActivityAppend, } from './activity';
 export type { ActivityAppendInput, ActivityCursor, ActivityStore, ActivityTail, TimelineEvent, } from './activity';
 export { BoardFeedClient, BoardFeedRetryableError, BoardFeedStoppedError } from './coordination-client';
 export type { BoardFeedClientOptions, BoardFeedItem, BoardFeedMode, BoardFeedPage, BoardFeedRead, } from './coordination-client';
@@ -1848,7 +1920,7 @@ export declare class InMemoryAgentEgressStore implements AgentEgressStore {
         readonly record: AgentEgressRecord;
         readonly created: boolean;
     }>;
-    get(tenant: TenantId, deviceId: string, eventId: string): Promise<AgentEgressRecord | undefined>;
+    get(tenant: TenantId, deviceId: string, agentRef: AgentEgressRecord['payload']['agentRef'], eventId: string): Promise<AgentEgressRecord | undefined>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/agent-memory-projection.d.ts ====
 /** In-memory conformance implementation for the one-way hosted memory projection ports. */
@@ -1882,12 +1954,13 @@ export declare class InMemoryAgentMemoryProjectionAuthorizer implements AgentMem
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/approval-timeline.d.ts ====
 import type { Clock, TenantId } from '@byok-sdk/core';
-import { type ApprovalTimelineAppendInput, type ApprovalTimelineStore, type ApprovalTimelineTail } from '../../approval-timeline';
+import { type ApprovalTimelineAppendInput, type ApprovalTimelineResolvePendingInput, type ApprovalTimelineResolvePendingResult, type ApprovalTimelineStore, type ApprovalTimelineTail } from '../../approval-timeline';
 export declare class InMemoryApprovalTimelineStore implements ApprovalTimelineStore {
     #private;
     private readonly clock;
     constructor(clock: Clock);
     append(tenant: TenantId, input: ApprovalTimelineAppendInput): Promise<ApprovalTimelineTail>;
+    resolvePending(tenant: TenantId, input: ApprovalTimelineResolvePendingInput): Promise<ApprovalTimelineResolvePendingResult>;
     read(tenant: TenantId, taskId: string): Promise<ApprovalTimelineTail | undefined>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/blobs.d.ts ====
@@ -1991,19 +2064,22 @@ export {};
 /**
  * In-memory {@link InboundDedupStore} (N3).
  *
- * A bounded ring per (tenant, device), not an unbounded set: the wire is
- * at-least-once (§9), so this makes processing at-most-once without letting a
- * chatty device grow memory without limit. Check-and-record is one call, so a
- * composition cannot accidentally split it into a racy read-then-write.
+ * A bounded ring per physical (tenant, device) or strict (tenant, device,
+ * AgentRef) fact, not an unbounded set: the wire is at-least-once (§9), so
+ * this makes processing at-most-once without letting a chatty device or Agent
+ * grow memory without limit. Check-and-record is one call, so a composition
+ * cannot accidentally split it into a racy read-then-write.
  */
 import { type TenantId } from '@byok-sdk/core';
+import type { AgentRef } from '@byok-sdk/protocol';
 import type { InboundDedupStore } from '../ports';
-/** Ids retained per device. Same order of magnitude as the reference server's ring. */
+/** Ids retained per physical or Agent-bound key. Same depth as the reference server's ring. */
 export declare const DEDUP_RING_CAPACITY = 1024;
 export declare class InMemoryInboundDedupStore implements InboundDedupStore {
     #private;
     constructor(capacity?: number);
     checkAndRecord(tenant: TenantId, deviceId: string, envelopeId: string): Promise<boolean>;
+    checkAndRecordAgent(tenant: TenantId, deviceId: string, agentRef: AgentRef, envelopeId: string): Promise<boolean>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/device-directory.d.ts ====
 /**
@@ -2194,6 +2270,9 @@ export declare class InMemoryRequestReceiptStore implements RequestReceiptStore 
 import { type Clock, type TenantId } from '@byok-sdk/core';
 import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptListQuery, type TaskAttemptPage, type TaskAttemptStatus, type TaskAttemptStore } from '../ports';
+interface StoredAgentMessageAdmission extends AgentMessageAdmission {
+    readonly deviceId: string;
+}
 export declare class InMemoryTaskAttemptStore implements TaskAttemptStore {
     #private;
     constructor(clock: Clock, state?: InMemoryTaskAttemptState);
@@ -2249,12 +2328,13 @@ export declare class InMemoryTaskAttemptStore implements TaskAttemptStore {
 export declare class InMemoryTaskAttemptState {
     #private;
     readonly attempts: Map<string, TaskAttempt>;
-    readonly messageAdmissions: Map<string, AgentMessageAdmission>;
+    readonly messageAdmissions: Map<string, StoredAgentMessageAdmission>;
     constructor(clock: Clock);
     now(): string;
     /** Serialize every state-changing operation for one tenant/task key. */
     mutate<T>(key: string, operation: () => T | Promise<T>): Promise<T>;
 }
+export {};
 // ==== @byok-sdk/cloud dist/stores/in-memory/task-cancellations.d.ts ====
 import { type MailboxStore, type TenantId } from '@byok-sdk/core';
 import type { TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore } from '../ports';
@@ -2473,12 +2553,17 @@ export interface NonceStore {
 }
 export interface InboundDedupStore {
     /**
-     * `true` when `envelopeId` was already seen for this (tenant, device);
-     * otherwise records it and returns `false`. Bounded per device — the wire is
-     * at-least-once (§9); this makes processing at-most-once without an
-     * unbounded set.
+     * Device-physical envelope ledger (`conn.hello` and facts with no Agent
+     * binding). `true` when `envelopeId` was already seen for this (tenant,
+     * device); otherwise records it and returns `false`.
      */
     checkAndRecord(tenant: TenantId, deviceId: string, envelopeId: string): Promise<boolean>;
+    /**
+     * Agent-bound envelope ledger. The AgentRef is required: a same-device
+     * second Agent must never resolve or suppress this Agent's completed fact.
+     * Retention remains bounded per exact (tenant, device, AgentRef).
+     */
+    checkAndRecordAgent(tenant: TenantId, deviceId: string, agentRef: AgentRef, envelopeId: string): Promise<boolean>;
 }
 export declare const TASK_ATTEMPT_STATUSES: readonly ['offered', 'claimed', 'running', 'cancel_requested', 'complete', 'failed', 'cancelled'];
 export type TaskAttemptStatus = (typeof TASK_ATTEMPT_STATUSES)[number];
@@ -2600,8 +2685,10 @@ export interface TaskAttemptStore {
     /**
      * Atomically binds one message payload to a live task before an external
      * consumer can run. `pending` is an existing exact reservation whose terminal
-     * receipt has not been recorded yet; callers must fail closed rather than
-     * invoke the consumer again.
+     * receipt has not been recorded yet; callers retry the same product consumer
+     * contract so its own durable idempotency can reconcile a commit whose local
+     * finalization failed. Exact pending lookup precedes the live-task gate, while
+     * every new reservation remains lifecycle-gated.
      */
     reserveAgentMessage(tenant: TenantId, input: {
         readonly taskId: string;
@@ -2713,7 +2800,8 @@ export interface AgentEgressStore {
         readonly record: AgentEgressRecord;
         readonly created: boolean;
     }>;
-    get(tenant: TenantId, deviceId: string, eventId: string): Promise<AgentEgressRecord | undefined>;
+    /** Exact reliable fact lookup; device plus event id alone is ambiguous. */
+    get(tenant: TenantId, deviceId: string, agentRef: AgentRef, eventId: string): Promise<AgentEgressRecord | undefined>;
 }
 export interface ProofRequestReceipt {
     readonly tenantId: TenantId;
@@ -2903,7 +2991,7 @@ export type CloudStoreName = (typeof CLOUD_STORE_NAMES)[number];
  * device-facing handler must not be able to reach them.
  */
 import { type BoardClaimInput, type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type BoardStatusUpdateInput, type BoardUnclaimInput, type CoreStores, type MailboxAdvanceCursorInput, type MailboxAppendInput, type MailboxCursorState, type MailboxMessage, type MailboxPage, type MailboxReadQuery, type MailboxRecordDeliveryInput, type Principal, type PresenceHint, type PresenceHintInput, type TenantReadiness, type StorageFinalizeInput, type StorageFinalizeResult, type StorageReservation, type StorageReservationInput, type TenantId } from '@byok-sdk/core';
-import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
+import type { AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import type { ActivityAppendInput, ActivityTail } from './activity';
 import type { ApprovalTimelineAppendInput, ApprovalTimelineTail } from './approval-timeline';
 import type { BlobObservation, CloudStores, DeviceRecord, AgentEgressRecord, RequestReceipt, TaskCancellationMutation, TaskCancellationRequest, TaskAttempt, TaskAttemptStatus } from './stores/ports';
@@ -2999,7 +3087,10 @@ export interface TenantBoundTaskCancellations {
     request(input: TaskCancellationRequest): Promise<TaskCancellationMutation | undefined>;
 }
 export interface TenantBoundDedup {
+    /** Device-physical envelope ledger. */
     checkAndRecord(deviceId: string, envelopeId: string): Promise<boolean>;
+    /** Strict Agent-bound envelope ledger. */
+    checkAndRecordAgent(deviceId: string, agentRef: AgentRef, envelopeId: string): Promise<boolean>;
 }
 export interface TenantBoundReceipts {
     record(input: {
@@ -3016,7 +3107,7 @@ export interface TenantBoundAgentEgress {
         readonly record: AgentEgressRecord;
         readonly created: boolean;
     }>;
-    get(deviceId: string, eventId: string): Promise<AgentEgressRecord | undefined>;
+    get(deviceId: string, agentRef: AgentRef, eventId: string): Promise<AgentEgressRecord | undefined>;
 }
 export interface TenantBoundBlobs {
     createUpload(reservation: StorageReservation): Promise<{

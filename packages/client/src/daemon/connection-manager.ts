@@ -78,6 +78,13 @@ export interface ConnectionManagerOptions {
   onTerminalError?: (error: ReplayCursorTooOldError) => void;
 }
 
+export interface RejectedOutboundEnvelope {
+  readonly envelope: Envelope;
+  readonly reason: 'inbound_rejected';
+}
+
+const MAX_REJECTED_OUTBOX_ENTRIES = 1_000;
+
 /**
  * Owns the daemon's one authenticated long-poll connection to the server.
  * Every received envelope passes through the same cursor-dedupe/persistence
@@ -136,6 +143,8 @@ export class ConnectionManager {
    * application (protocol §9).
    */
   private readonly outbox: Envelope[] = [];
+  /** Terminally rejected outbound envelopes, retained as a bounded observable quarantine. */
+  private readonly rejectedOutboundEnvelopes: RejectedOutboundEnvelope[] = [];
   /**
    * Finding F5(b): how many envelopes `drainOutbox` has
    * currently spliced OUT of `this.outbox` for an in-flight (not yet
@@ -291,6 +300,31 @@ export class ConnectionManager {
   private async drainOutbox(): Promise<void> {
     if (!this.started || this.draining) return;
     this.draining = true;
+    // Frozen v1 has no rejected ids. A finite FIFO therefore replays an
+    // immutable rejected segment by halves; accepted replays are server-dedup
+    // success and a rejected singleton reaches bounded quarantine. A missing
+    // response returns the same current segment plus untouched siblings for
+    // the ordinary backoff path below. At most 2n - 1 POSTs occur per batch.
+    const isolateRejectedBatch = async (batch: readonly Envelope[]): Promise<Envelope[] | undefined> => {
+      const pending: Envelope[][] = [[...batch]];
+      while (pending.length > 0) {
+        if (this.stopped || this.revoked) return pending.flat();
+
+        const segment = pending.shift()!;
+        const result = await this.longPoll.postBatch(segment);
+        if (result === undefined) return [...segment, ...pending.flat()];
+
+        if ((result.rejected ?? 0) === 0) continue;
+        if (segment.length === 1) {
+          this.quarantineRejectedOutbound(segment[0]!, 'inbound_rejected');
+          continue;
+        }
+
+        const midpoint = Math.floor(segment.length / 2);
+        pending.unshift(segment.slice(0, midpoint), segment.slice(midpoint));
+      }
+      return undefined;
+    };
     try {
       while (this.outbox.length > 0) {
         if (this.stopped || this.revoked) return;
@@ -303,13 +337,13 @@ export class ConnectionManager {
         // a stalled/hung `postBatch` call means: neither queued nor
         // delivered, just stuck). See `outboxLength`'s own doc comment.
         this.inFlightBatchSize = batch.length;
-        let ok: boolean;
+        let retrySegments: Envelope[] | undefined;
         try {
-          ok = await this.longPoll.postBatch(batch);
+          retrySegments = await isolateRejectedBatch(batch);
         } finally {
           this.inFlightBatchSize = 0;
         }
-        if (ok) {
+        if (retrySegments === undefined) {
           this.uploadRetryAttempt = 0;
           this.opts.onOperationalOutcome?.('success', 'upload');
           continue;
@@ -317,7 +351,7 @@ export class ConnectionManager {
 
         this.opts.onOperationalOutcome?.('failure', 'upload');
 
-        this.outbox.unshift(...batch); // retry, preserving order — same objects, same ids (finding F1)
+        this.outbox.unshift(...retrySegments); // retry, preserving order — same objects, same ids (finding F1)
         // Finding P3: a revoked device can never recover without a fresh
         // pair() — retrying (and thus scheduling another backoff timer)
         // would spin forever and keep the process alive for no reason.
@@ -472,6 +506,11 @@ export class ConnectionManager {
     return this.outbox.length + this.inFlightBatchSize;
   }
 
+  /** A bounded terminal quarantine for operator inspection; these entries are never retried. */
+  rejectedOutbox(): readonly RejectedOutboundEnvelope[] {
+    return this.rejectedOutboundEnvelopes;
+  }
+
   /**
    * Finding F5(b): polls {@link outboxLength} (not `this.outbox.length`
    * alone — see that method's own doc comment for why a spliced-out,
@@ -599,15 +638,17 @@ export class ConnectionManager {
       }
       await this.opts.onEnvelope(envelope);
       if (!tracked) return;
-      this.processedSeqs.add(seq!); // finding P2 (Fix 2b) — see its own doc comment
       // Still behind an earlier, not-yet-resolved failure: this envelope
       // (even though it just succeeded) is not the one unblocking the
       // cursor. Advancing here would create a gap a future redelivery could
       // never fill (the skipped-over failed seq would look already-seen).
-      if (this.stalledAtSeq !== undefined && envelope.seq !== this.stalledAtSeq) return;
+      if (this.stalledAtSeq !== undefined && envelope.seq !== this.stalledAtSeq) {
+        this.processedSeqs.add(seq!); // successful but held behind the earlier stalled seq
+        return;
+      }
       this.stalledAtSeq = undefined;
+      await this.advanceCursor(envelope.seq!);
       this.processedSeqs.clear(); // no longer needed once unstalled — deliveredSeq/watermark already covers everything delivered so far
-      this.advanceCursor(envelope.seq!);
     } catch (err) {
       if (tracked && this.stalledAtSeq === undefined) this.stalledAtSeq = envelope.seq;
       console.error(
@@ -685,9 +726,18 @@ export class ConnectionManager {
    */
   private noteSkippedSeq(seq: number): void {
     this.noteDelivered(seq);
-    this.processingChain = this.processingChain.then(() => {
+    this.processingChain = this.processingChain.then(async () => {
       if (this.stalledAtSeq === undefined || seq === this.stalledAtSeq) {
-        this.advanceCursor(seq);
+        try {
+          await this.advanceCursor(seq);
+          if (this.stalledAtSeq === seq) this.stalledAtSeq = undefined;
+        } catch (err) {
+          if (this.stalledAtSeq === undefined) this.stalledAtSeq = seq;
+          console.error(
+            `[byok/client] unknown task seq=${seq} could not durably persist its cursor; cursor left unadvanced for redelivery:`,
+            err,
+          );
+        }
       }
     });
   }
@@ -735,25 +785,25 @@ export class ConnectionManager {
     });
   }
 
-  private advanceCursor(seq: number): void {
+  private async advanceCursor(seq: number): Promise<void> {
     if (this.cursor !== undefined && seq <= this.cursor) return;
+    // A later redelivery may retry a failed save, but the failed save remains
+    // observable to its current caller and this cursor is never exposed until
+    // its own write resolves successfully.
+    const save = this.pendingCursorSave
+      .catch(() => undefined)
+      .then(() => this.opts.cursorStore.save(this.opts.serverUrl, this.opts.deviceId, seq));
+    this.pendingCursorSave = save;
+    await save;
     this.cursor = seq;
-    // Chain onto the previous save rather than firing independently: two
-    // overlapping writes to the same file have no guaranteed completion
-    // order, so an earlier (lower-seq) save finishing *after* a later one
-    // could silently clobber it back to a stale value. Chaining forces
-    // strict write order, matching call order (which matches seq order,
-    // since advanceCursor is only ever called with an increasing value).
-    this.pendingCursorSave = this.pendingCursorSave
-      .catch(() => {
-        // don't let an earlier failure abort the chain for later saves
-      })
-      .then(() => this.opts.cursorStore.save(this.opts.serverUrl, this.opts.deviceId, seq))
-      .catch(() => {
-        // Best-effort persistence: a failed write just means a future
-        // reconnect might redeliver slightly more than strictly necessary,
-        // which is safe under at-least-once delivery (protocol §9).
-      });
+  }
+
+  private quarantineRejectedOutbound(envelope: Envelope, reason: 'inbound_rejected'): void {
+    if (this.rejectedOutboundEnvelopes.length === MAX_REJECTED_OUTBOX_ENTRIES) this.rejectedOutboundEnvelopes.shift();
+    this.rejectedOutboundEnvelopes.push({ envelope, reason });
+    console.error(
+      `[byok/client] outbound envelope ${envelope.id} was permanently rejected (${reason}) and moved to the terminal quarantine.`,
+    );
   }
 
   private notifySettled(err?: unknown): void {

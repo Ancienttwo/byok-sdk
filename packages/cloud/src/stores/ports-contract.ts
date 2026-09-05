@@ -18,12 +18,12 @@ import type { CloudStoreName } from './ports';
 
 export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string[]>> = {
   activity: ['append', 'read'],
-  approvals: ['append', 'read'],
+  approvals: ['append', 'read', 'resolvePending'],
   devices: ['register', 'get', 'revoke', 'list', 'readiness', 'recordCapabilities', 'resolveByDeviceId'],
   pairingCodes: ['issue'],
   pairing: ['redeemAndRegister'],
   nonces: ['issue', 'consumeIfValid'],
-  dedup: ['checkAndRecord'],
+  dedup: ['checkAndRecord', 'checkAndRecordAgent'],
   tasks: [
     'open',
     'reserveAgentOffer',

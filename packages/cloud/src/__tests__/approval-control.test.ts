@@ -16,7 +16,7 @@
  */
 import type { TenantId } from '@byok-sdk/core';
 import { createEnvelope, type EventsPollResponse } from '@byok-sdk/protocol';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { StaleApprovalError } from '../approval-control';
 import { isCloudError } from '../errors';
 import { handleInboundEnvelope } from '../inbound';
@@ -184,18 +184,21 @@ describe('approveTask (GAP-1)', () => {
     expect((await poll(harness, device, task.seq)).events).toHaveLength(0);
   });
 
-  it('proceeds untargeted when the daemon never reported an approvalId', async () => {
+  it('does not manufacture an approvalId when the daemon never reported one', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     // A pre-M5 daemon: pending, resolvable, but not targetable. There is no id
-    // to disagree with, so the caller's own id is not stale.
+    // to disagree with, so the caller's own id is not stale, but it is not a
+    // protocol identity and must not enter the durable event or wire payload.
     const task = await paused(harness, device, undefined);
 
     await harness.cloud.approveTask(TENANT_A, task.taskId, { approvalId: 'approval-a' });
 
     const page = await poll(harness, device, task.seq);
     expect(page.events.map((event) => event.type)).toEqual(['task.approve']);
-    expect(page.events[0]?.payload).toMatchObject({ approvalId: 'approval-a' });
+    expect(page.events[0]?.payload).toEqual({});
+    const tail = await harness.stores.approvals.read(TENANT_A, task.taskId);
+    expect(tail?.entries.at(-1)).not.toHaveProperty('event.approvalId');
   });
 
   it('omits approvalId entirely when neither side has one', async () => {
@@ -362,6 +365,47 @@ describe('rejectTask (GAP-1)', () => {
 
     const page = await poll(harness, device, task.seq);
     expect(page.events[0]?.payload).toEqual({ approvalId: 'approval-a' });
+  });
+
+  it('persists the first host rejection payload before a failed mailbox append, then replays only that payload', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const task = await paused(harness, device, 'approval-reason');
+    const append = vi
+      .spyOn(harness.core.mailbox, 'append')
+      .mockRejectedValueOnce(new Error('injected mailbox append failure'));
+
+    await expect(
+      harness.cloud.rejectTask(TENANT_A, task.taskId, {
+        approvalId: 'approval-reason',
+        reason: 'first reason',
+      }),
+    ).rejects.toThrow('injected mailbox append failure');
+
+    await expect(
+      harness.cloud.rejectTask(TENANT_A, task.taskId, {
+        approvalId: 'approval-reason',
+        reason: 'second reason',
+      }),
+    ).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+    expect((await poll(harness, device, task.seq)).events).toHaveLength(0);
+
+    await expect(
+      harness.cloud.rejectTask(TENANT_A, task.taskId, {
+        approvalId: 'approval-reason',
+        reason: 'first reason',
+      }),
+    ).resolves.toMatchObject({ envelope: { type: 'task.reject' } });
+
+    const page = await poll(harness, device, task.seq);
+    expect(page.events).toHaveLength(1);
+    expect(page.events[0]).toMatchObject({
+      type: 'task.reject',
+      task_id: task.taskId,
+      payload: { approvalId: 'approval-reason', reason: 'first reason' },
+    });
+    expect(append).toHaveBeenCalledTimes(2);
+    append.mockRestore();
   });
 
   it('refuses a superseded approvalId on the same gate order as approveTask', async () => {

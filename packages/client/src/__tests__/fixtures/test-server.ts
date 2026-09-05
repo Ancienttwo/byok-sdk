@@ -206,6 +206,10 @@ export class TestServer {
    */
   pushRawLongPollEvent(raw: unknown): void {
     this.pendingLongPollEntries.push(raw);
+    const seq = typeof raw === 'object' && raw !== null ? (raw as { seq?: unknown }).seq : undefined;
+    if (typeof seq === 'number' && Number.isSafeInteger(seq) && seq > this.longPollCursor) {
+      this.longPollCursor = seq;
+    }
   }
 
   /** The content currently stored for a blob (undefined until the presigned PUT lands). */
@@ -473,14 +477,18 @@ export class TestServer {
     res.writeHead(200, { 'content-type': blob.contentType }).end(blob.bytes);
   }
 
-  /** `cursor` is accepted per the schema but not used to filter — this stub always drains its whole queue (in push order — see `pendingLongPollEntries`'s own doc comment) rather than tracking per-request replay. */
+  /** Drains the queued test page in order while honoring the caller's durable cursor. */
   private async handleEventsPoll(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!this.requireBearer(req, res)) return;
     if (this.failEventsPolls) {
       respondJson(res, 500, { error: 'simulated events poll failure' });
       return;
     }
-    const entries = this.pendingLongPollEntries.splice(0);
+    const requestedCursor = Number(new URL(req.url ?? '/', 'http://internal').searchParams.get('cursor') ?? 0);
+    const entries = this.pendingLongPollEntries.splice(0).filter((entry) => {
+      const seq = typeof entry === 'object' && entry !== null ? (entry as { seq?: unknown }).seq : undefined;
+      return typeof seq !== 'number' || !Number.isSafeInteger(seq) || seq > requestedCursor;
+    });
     // Not re-validated here — this response is hand-serialized exactly like
     // the real server's `EventsPollResponse`, so a raw entry queued via
     // `pushRawLongPollEvent` rides along unchanged, the same way a genuinely

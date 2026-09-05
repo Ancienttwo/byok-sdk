@@ -37,10 +37,10 @@ Owns the root capability boundary declared in .ai/context/capabilities.json.
 - Architecture domain: `sdk`
 - Architecture capability: `sdk-root`
 - Architecture module: `docs/architecture/sdk-architecture.md`
-- Last architecture event: 2026-09-05T01:22:18+0800
-- Last changed path: `packages/client/src/__tests__/control-server.test.ts`
-- Severity: low
-- Change type: source-change
+- Last architecture event: 2026-09-05T01:25:51+0800
+- Last changed path: `tasks/workstreams/root/20260905-sdk-root.md`
+- Severity: medium
+- Change type: workstream-sync
 - Module responsibility: Keep this block aligned with the local boundary described by surrounding human-owned context.
 - Entrypoints: `packages`
 - Allowed dependencies: Follow root `AGENTS.md` / `CLAUDE.md` and this local contract.
@@ -58,6 +58,10 @@ Owns the root capability boundary declared in .ai/context/capabilities.json.
   - status: completed
   - current_slice: complete
   - source_plan: (none)
+- `tasks/workstreams/root/20260905-sdk-root.md`
+  - status: active
+  - current_slice: T1-T6
+  - source_plan: plans/plan-20260905-0124-issues-135-144-reliability.md
 
 ## Current Session Projection
 

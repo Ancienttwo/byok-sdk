@@ -32,6 +32,10 @@ function sameAgentRef(left: AgentRef | undefined, right: AgentRef | undefined): 
   return left?.agentId === right?.agentId && left?.profileRevision === right?.profileRevision;
 }
 
+interface StoredAgentMessageAdmission extends AgentMessageAdmission {
+  readonly deviceId: string;
+}
+
 export class InMemoryTaskAttemptStore implements TaskAttemptStore {
   readonly #state: InMemoryTaskAttemptState;
 
@@ -87,6 +91,14 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
   ): Promise<'reserved' | 'pending' | 'rejected'> {
     const key = tenantKey(tenant, input.taskId);
     return this.#state.mutate(key, () => {
+      const existing = this.#state.messageAdmissions.get(key);
+      if (existing !== undefined) {
+        return existing.deviceId === input.deviceId &&
+          existing.messageId === input.messageId &&
+          existing.payloadBody === input.payloadBody
+          ? 'pending'
+          : 'rejected';
+      }
       const attempt = this.#state.attempts.get(key);
       if (
         attempt === undefined ||
@@ -94,17 +106,12 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
         attempt.cancellation !== undefined ||
         !['offered', 'claimed', 'running'].includes(attempt.status)
       ) return 'rejected';
-      const existing = this.#state.messageAdmissions.get(key);
-      if (existing === undefined) {
-        this.#state.messageAdmissions.set(key, {
-          messageId: input.messageId,
-          payloadBody: input.payloadBody,
-        });
-        return 'reserved';
-      }
-      return existing.messageId === input.messageId && existing.payloadBody === input.payloadBody
-        ? 'pending'
-        : 'rejected';
+      this.#state.messageAdmissions.set(key, {
+        deviceId: input.deviceId,
+        messageId: input.messageId,
+        payloadBody: input.payloadBody,
+      });
+      return 'reserved';
     });
   }
 
@@ -113,7 +120,7 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
     input: { readonly taskId: string; readonly deviceId: string; readonly messageId: string; readonly payloadBody: string },
   ): Promise<AgentMessageAdmission | undefined> {
     const admission = this.#state.messageAdmissions.get(tenantKey(tenant, input.taskId));
-    return admission !== undefined && admission.messageId === input.messageId && admission.payloadBody === input.payloadBody
+    return admission !== undefined && admission.deviceId === input.deviceId && admission.messageId === input.messageId && admission.payloadBody === input.payloadBody
       ? admission
       : undefined;
   }
@@ -134,10 +141,10 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
 
   #terminalize(
     key: string,
-    input: { readonly messageId: string; readonly payloadBody: string; readonly terminalBody: string },
+    input: { readonly deviceId: string; readonly messageId: string; readonly payloadBody: string; readonly terminalBody: string },
   ): AgentMessageAdmission | undefined {
     const admission = this.#state.messageAdmissions.get(key);
-    if (admission === undefined || admission.messageId !== input.messageId || admission.payloadBody !== input.payloadBody) {
+    if (admission === undefined || admission.deviceId !== input.deviceId || admission.messageId !== input.messageId || admission.payloadBody !== input.payloadBody) {
       return undefined;
     }
     if (admission.terminalBody !== undefined) return admission;
@@ -259,7 +266,7 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
 /** Shared mutable state for the task and cancellation reference ports. */
 export class InMemoryTaskAttemptState {
   readonly attempts = new Map<string, TaskAttempt>();
-  readonly messageAdmissions = new Map<string, AgentMessageAdmission>();
+  readonly messageAdmissions = new Map<string, StoredAgentMessageAdmission>();
   readonly #clock: Clock;
   readonly #mutationTails = new Map<string, Promise<void>>();
 

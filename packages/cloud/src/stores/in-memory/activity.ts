@@ -2,6 +2,7 @@ import type { Clock, TenantId } from '@byok-sdk/core';
 import { ByokCloudError } from '../../errors';
 import {
   activityCursor,
+  activitySourceBatchState,
   activityTailKey,
   compareTimelineEvents,
   projectTimelineEvents,
@@ -23,6 +24,14 @@ export class InMemoryActivityStore implements ActivityStore {
     const key = activityTailKey(tenant, input.taskId);
     const existing = this.#tails.get(key);
     const live = existing !== undefined && receivedAt < existing.expiresAt ? existing : undefined;
+    const sourceState = activitySourceBatchState(live?.entries ?? [], input);
+    if (sourceState === 'same') return live!;
+    if (sourceState === 'conflict') {
+      throw new ByokCloudError(
+        'coordination_input_invalid',
+        `Activity source envelope ${input.sourceEnvelopeId} already belongs to another canonical batch.`,
+      );
+    }
     const incoming = projectTimelineEvents(input, receivedAt);
     for (const next of incoming) {
       const collision = live?.entries.find(

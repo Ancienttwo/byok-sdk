@@ -8,6 +8,7 @@ import {
 import { TENANT_A, createHarness, type CloudHarness } from './support/harness';
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'profile-r1' } as const;
+const OTHER_AGENT_REF = { agentId: 'agent-2', profileRevision: 'profile-r9' } as const;
 
 function deviceStores(harness: CloudHarness, deviceId: string) {
   return tenantStoresFor(
@@ -121,6 +122,68 @@ describe('hosted Agent-home contract', () => {
     ).toHaveLength(1);
   });
 
+  it('isolates same-device offers, retry receipts, and approval decisions by exact AgentRef', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await harness.stores.devices.recordCapabilities(TENANT_A, {
+      deviceId: device.deviceId,
+      capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
+    });
+
+    const [first, second] = await Promise.all([
+      harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
+        taskId: 'same-device-agent-one',
+        payload: agentPayload(),
+      }),
+      harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
+        taskId: 'same-device-agent-two',
+        payload: { ...agentPayload(), instruction: 'second Agent task', agentRef: OTHER_AGENT_REF },
+      }),
+    ]);
+    expect(first.attempt.agentRef).toEqual(AGENT_REF);
+    expect(second.attempt.agentRef).toEqual(OTHER_AGENT_REF);
+
+    const stores = deviceStores(harness, device.deviceId);
+    for (const [taskId, agentRef, approvalId] of [
+      [first.taskId, AGENT_REF, 'approval-agent-one'],
+      [second.taskId, OTHER_AGENT_REF, 'approval-agent-two'],
+    ] as const) {
+      await expect(
+        handleInboundEnvelope(
+          stores,
+          device.deviceId,
+          createEnvelope('task.claim', { deviceId: device.deviceId, agentRef }, { taskId }),
+        ),
+      ).resolves.toBe('accepted');
+      await expect(
+        handleInboundEnvelope(
+          stores,
+          device.deviceId,
+          createEnvelope('task.await_approval', { summary: 'needs confirmation', approvalId }, { taskId }),
+        ),
+      ).resolves.toBe('accepted');
+    }
+
+    await Promise.all([
+      harness.cloud.approveTask(TENANT_A, first.taskId, { approvalId: 'approval-agent-one' }),
+      harness.cloud.approveTask(TENANT_A, second.taskId, { approvalId: 'approval-agent-two' }),
+    ]);
+    await expect(harness.cloud.approveTask(TENANT_A, first.taskId, { approvalId: 'approval-agent-one' }))
+      .resolves.toMatchObject({ envelope: { type: 'task.approve' } });
+
+    const page = await harness.core.mailbox.readAfter(TENANT_A, {
+      deviceId: device.deviceId,
+      afterSeq: 0,
+      limit: 10,
+    });
+    const offers = page.messages.map((message) => decodeEnvelope(message.body)).filter((item) => item.type === 'task.offer_for_agent');
+    const decisions = page.messages.map((message) => decodeEnvelope(message.body)).filter((item) => item.type === 'task.approve');
+    expect(offers).toHaveLength(2);
+    expect(decisions).toHaveLength(2);
+    expect(new Set(offers.map((item) => item.id)).size).toBe(2);
+    expect(new Set(decisions.map((item) => item.id)).size).toBe(2);
+  });
+
   it('records capability from the authenticated long-poll HTTP handshake, never from presence', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
@@ -223,7 +286,7 @@ describe('hosted Agent-home contract', () => {
     expect(await harness.cloud.readTaskAttempt(TENANT_A, 'agent-oversized')).toBeUndefined();
   });
 
-  it('durably closes a reserved Agent attempt when mailbox append fails', async () => {
+  it('keeps a reserved Agent attempt retryable when mailbox append fails', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
@@ -239,20 +302,19 @@ describe('hosted Agent-home contract', () => {
       }),
     ).rejects.toThrow('mailbox unavailable');
     await expect(harness.cloud.readTaskAttempt(TENANT_A, 'agent-mailbox-failure')).resolves.toMatchObject({
-      status: 'failed',
+      status: 'offered',
       agentRef: AGENT_REF,
-      terminalCause: 'mailbox append failed before Agent offer delivery',
     });
     await expect(
       harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
         taskId: 'agent-mailbox-failure',
         payload: agentPayload(),
       }),
-    ).rejects.toMatchObject({ code: 'agent_task_already_exists' });
+    ).resolves.toMatchObject({ taskId: 'agent-mailbox-failure' });
     expect(
       (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0, limit: 10 }))
         .messages,
-    ).toHaveLength(0);
+    ).toHaveLength(1);
   });
 
   it('does not let lifecycle callers attach Agent identity to a legacy attempt', async () => {

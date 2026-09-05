@@ -1,4 +1,13 @@
-import { BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, MessagesSendResponseSchema, parseMessage, UnknownMessageTypeError, type Envelope } from '@byok-sdk/protocol';
+import {
+  BYOK_EVENTS_PATH,
+  BYOK_MESSAGES_PATH,
+  MESSAGE_TYPES,
+  MessagesSendResponseSchema,
+  parseMessage,
+  UnknownMessageTypeError,
+  type Envelope,
+  type MessagesSendResponse,
+} from '@byok-sdk/protocol';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
 import { authedFetch } from './http-client';
 import { ReplayCursorTooOldError } from './replay-cursor';
@@ -150,6 +159,12 @@ interface LooseEventsPollResponse {
   capabilities: string[];
 }
 
+/** A fully-read frozen-v1 count acknowledgement for the batch that was posted. */
+export interface MessageBatchPostResult {
+  readonly accepted: number;
+  readonly rejected?: number;
+}
+
 /** Finding R1: soft cap on `LongPollClient`'s own `warnedValidationFailureSeqs` bookkeeping — see that field's own doc comment for why this is a simple "clear outright" reset rather than an eviction policy: a rare/pathological path, not a hot one. */
 const MAX_TRACKED_VALIDATION_FAILURE_WARNINGS = 1000;
 
@@ -168,7 +183,7 @@ const MAX_TRACKED_ROUTE_FAILURE_WARNINGS = 1000;
  * entry is now validated individually, right where it's consumed
  * (`LongPollClient.loop`, below), via `parseMessage`.
  */
-function parseLooseEventsPollResponse(raw: unknown): LooseEventsPollResponse {
+function parseLooseEventsPollResponse(raw: unknown, requestedCursor: number): LooseEventsPollResponse {
   if (typeof raw !== 'object' || raw === null) {
     throw new Error('events poll response is not an object');
   }
@@ -180,8 +195,11 @@ function parseLooseEventsPollResponse(raw: unknown): LooseEventsPollResponse {
   if (!Array.isArray(events)) {
     throw new Error('events poll response.events is not an array');
   }
-  if (typeof cursor !== 'number' || !Number.isInteger(cursor)) {
-    throw new Error('events poll response.cursor is not an integer');
+  if (!isSafeNonnegativeInteger(cursor)) {
+    throw new Error('events poll response.cursor is not a safe nonnegative integer');
+  }
+  if (cursor < requestedCursor) {
+    throw new Error('events poll response.cursor regressed below the requested cursor');
   }
   if (
     capabilities !== undefined &&
@@ -190,6 +208,34 @@ function parseLooseEventsPollResponse(raw: unknown): LooseEventsPollResponse {
     throw new Error('events poll response.capabilities is not an array of strings');
   }
   return { events, cursor, capabilities: capabilities ?? [] };
+}
+
+function isSafeNonnegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function validateTrustedEventsPage(events: readonly unknown[], requestedCursor: number, pageCursor: number): void {
+  let previousTaskSeq: number | undefined;
+  for (const raw of events) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const { type, seq } = raw as { type?: unknown; seq?: unknown };
+    if (typeof type !== 'string' || !type.startsWith('task.')) continue;
+    if (!isSafeNonnegativeInteger(seq)) {
+      throw new Error('events poll task seq is not a safe nonnegative integer');
+    }
+    if (seq <= requestedCursor || seq > pageCursor) {
+      throw new Error('events poll task seq lies outside the trusted page cursor range');
+    }
+    if (previousTaskSeq !== undefined && seq <= previousTaskSeq) {
+      throw new Error('events poll task seq is not strictly page ordered');
+    }
+    const knownTaskType = (MESSAGE_TYPES as readonly string[]).includes(type);
+    const predecessor = previousTaskSeq ?? requestedCursor;
+    if (!knownTaskType && seq !== predecessor + 1) {
+      throw new Error('events poll unknown task seq would cross an untrusted gap');
+    }
+    previousTaskSeq = seq;
+  }
 }
 
 /**
@@ -210,7 +256,7 @@ function extractSkippableSeq(raw: unknown): number | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
   const { type, seq } = raw as { type?: unknown; seq?: unknown };
   if (typeof type !== 'string' || !type.startsWith('task.')) return undefined;
-  return typeof seq === 'number' && Number.isInteger(seq) ? seq : undefined;
+  return isSafeNonnegativeInteger(seq) ? seq : undefined;
 }
 
 /**
@@ -221,9 +267,10 @@ function extractSkippableSeq(raw: unknown): number | undefined {
  *
  * Design B (finding N4): this is a stateless drainer; it holds no outbound
  * queue of its own. `ConnectionManager` owns the single shared outbox;
- * `postBatch` is a single POST attempt, reporting back whether the server
- * accepted it. All retry/backoff policy (and re-checking which transport is
- * currently active) lives in the caller (`ConnectionManager.drainOutbox`).
+ * `postBatch` is a single POST attempt, reporting only frozen-v1 accepted and
+ * rejected counts after its response body has been read and validated. All
+ * retry/backoff and rejection isolation policy lives in the caller
+ * (`ConnectionManager.drainOutbox`).
  */
 export class LongPollClient {
   private running = false;
@@ -323,9 +370,9 @@ export class LongPollClient {
    * (`ConnectionHub.handleInbound`), so a resend of the SAME batch (same
    * envelope `id`s — the caller must never rebuild them) is deduped
    * server-side into a safe no-op rather than reprocessed (§9). Returns
-   * `true` once the server has accepted the batch.
+   * validated frozen-v1 counts only after a readable response body.
    */
-  async postBatch(envelopes: Envelope[]): Promise<boolean> {
+  async postBatch(envelopes: Envelope[]): Promise<MessageBatchPostResult | undefined> {
     // Phase 1 — credentials. This happens BEFORE the route request exists, so
     // its failure can never be attributed to `/byok/messages`. Pre-flighting
     // the token here (rather than letting `authedFetch`'s own identical call
@@ -336,7 +383,7 @@ export class LongPollClient {
       await this.opts.auth.getValidAccessToken();
     } catch (err) {
       this.noteRevoked(err);
-      return false;
+      return undefined;
     }
 
     // Phase 2 — the route request/response cycle. Only failures from here on
@@ -357,22 +404,25 @@ export class LongPollClient {
       // No response was ever produced (the `fetch` itself rejected) — the one
       // case where `status: undefined` is structurally true.
       if (!this.noteRevoked(err)) this.warnRouteFailure(this.messagesEndpoint, undefined, err);
-      return false;
+      return undefined;
     }
     if (!res.ok) {
       this.warnRouteFailure(this.messagesEndpoint, res.status, undefined);
-      return false;
+      return undefined;
     }
     try {
-      MessagesSendResponseSchema.parse(await res.json());
+      const response = MessagesSendResponseSchema.parse(await res.json());
+      if (response.accepted + (response.rejected ?? 0) !== envelopes.length) {
+        throw new Error('messages response counts do not match the posted batch length');
+      }
+      return response;
     } catch (err) {
       // The response DID exist and the server DID accept the request line —
       // it is its body that is unusable, so this carries that response's own
       // status with the read/parse error in `cause`.
       this.warnRouteFailure(this.messagesEndpoint, res.status, err);
-      return false;
+      return undefined;
     }
-    return true;
   }
 
   private async loop(signal: AbortSignal): Promise<void> {
@@ -472,7 +522,8 @@ export class LongPollClient {
         //     too, until a corrected version is actually processed.
         let parsed: LooseEventsPollResponse;
         try {
-          parsed = parseLooseEventsPollResponse(await res.json());
+          parsed = parseLooseEventsPollResponse(await res.json(), cursor ?? 0);
+          validateTrustedEventsPage(parsed.events, cursor ?? 0, parsed.cursor);
         } catch (err) {
           // The response DID exist (and was a success status) — it is its body
           // that is unusable. Carrying `res.status` here rather than

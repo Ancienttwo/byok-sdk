@@ -20,6 +20,8 @@
 --   deploy/sql/0016_mailbox_delivery_watermark.sql (server-owned delivery bound for mailbox acknowledgements)
 --   deploy/sql/0017_agent_message_admission.sql (live-task first-message reservation)
 --   deploy/sql/0018_task_attempt_claimed_runtime.sql (nullable write-once claim-time runtime snapshot columns)
+--   deploy/sql/0019_agent_ref_replay_keys.sql (AgentRef-scoped inbound dedup and reliable egress keys)
+--   deploy/sql/0020_agent_ref_request_keys.sql (remove device-wide Agent message-id uniqueness)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
@@ -182,10 +184,35 @@ BEGIN
      AND t.relname = 'agent_message_admission'
      AND c.contype = 'u';
 
-  IF message_unique_columns IS DISTINCT FROM ARRAY['tenant_id', 'device_id', 'message_id']::text[] THEN
+  IF message_unique_columns IS NOT NULL THEN
     RAISE EXCEPTION
-      'agent_message_admission message uniqueness must be (tenant_id, device_id, message_id), found %',
+      'agent_message_admission must not impose device-wide message uniqueness, found %',
       message_unique_columns;
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 0.9 Inbound replay identity is exact to AgentRef when an Agent owns the fact
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE
+  primary_key_columns text[];
+BEGIN
+  SELECT array_agg(a.attname ORDER BY key_columns.ordinality)
+    INTO primary_key_columns
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS key_columns(attnum, ordinality)
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key_columns.attnum
+   WHERE n.nspname = current_schema()
+     AND t.relname = 'inbound_dedup'
+     AND c.contype = 'p';
+
+  IF primary_key_columns IS DISTINCT FROM ARRAY['tenant_id', 'device_id', 'agent_id', 'agent_profile_revision', 'envelope_id']::text[] THEN
+    RAISE EXCEPTION
+      'inbound_dedup primary key must include exact AgentRef, found %',
+      primary_key_columns;
   END IF;
 END $$;
 
@@ -250,9 +277,9 @@ BEGIN
      AND t.relname = 'agent_egress_event'
      AND constraint_row.contype = 'p';
 
-  IF primary_key_columns IS DISTINCT FROM ARRAY['tenant_id', 'device_id', 'event_id']::text[] THEN
+  IF primary_key_columns IS DISTINCT FROM ARRAY['tenant_id', 'device_id', 'agent_id', 'agent_profile_revision', 'event_id']::text[] THEN
     RAISE EXCEPTION
-      'agent_egress_event primary key must be (tenant_id, device_id, event_id), found %',
+      'agent_egress_event primary key must include exact AgentRef, found %',
       primary_key_columns;
   END IF;
 END $$;

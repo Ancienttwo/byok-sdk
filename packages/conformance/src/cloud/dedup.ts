@@ -36,6 +36,16 @@ export function runDedupConformance(factory: CloudCompositionFactory): void {
       });
     });
 
+    it('keeps the same envelope id independent for two Agents on one device', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        const firstAgent = { agentId: 'agent-one', profileRevision: 'profile-one' } as const;
+        const secondAgent = { agentId: 'agent-two', profileRevision: 'profile-two' } as const;
+        expect(await stores.dedup.checkAndRecordAgent(TENANT_A, 'device-1', firstAgent, 'env-shared')).toBe(false);
+        expect(await stores.dedup.checkAndRecordAgent(TENANT_A, 'device-1', secondAgent, 'env-shared')).toBe(false);
+        expect(await stores.dedup.checkAndRecordAgent(TENANT_A, 'device-1', firstAgent, 'env-shared')).toBe(true);
+      });
+    });
+
     it(
       'retains at most the contracted capacity, evicting oldest first',
       async () => {

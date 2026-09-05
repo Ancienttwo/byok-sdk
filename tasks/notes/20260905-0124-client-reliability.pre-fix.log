@@ -1,0 +1,344 @@
+$ vitest run src/__tests__/long-poll-reliability-regression.test.ts
+
+ RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client
+
+stderr | src/__tests__/long-poll-reliability-regression.test.ts > long-poll reliability regressions (#135, #136, #137) > #136 returns exact outcomes, retries unreadable 200 bodies, and quarantines a permanent rejection without blocking later sends
+[byok/client] long-poll example.invalid/byok/messages failed with HTTP 200 LongPollRouteError: long-poll example.invalid/byok/messages failed with HTTP 200
+    at LongPollClient.warnRouteFailure (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:285:19)
+    at LongPollClient.postBatch (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:372:12)
+    at /Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/__tests__/long-poll-reliability-regression.test.ts:188:5
+    at file:///Users/kito/Projects/byok-sdk-wt-issues-135-137-client/node_modules/.bun/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20 {
+  endpoint: {
+    transport: 'long-poll',
+    host: 'example.invalid',
+    path: '/byok/messages'
+  },
+  status: 200,
+  [cause]: ZodError: [
+    {
+      "expected": "number",
+      "code": "invalid_type",
+      "path": [
+        "accepted"
+      ],
+      "message": "Invalid input: expected number, received undefined"
+    }
+  ]
+      at LongPollClient.postBatch (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:367:34)
+      at /Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/__tests__/long-poll-reliability-regression.test.ts:188:5
+      at file:///Users/kito/Projects/byok-sdk-wt-issues-135-137-client/node_modules/.bun/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+}
+
+stderr | src/__tests__/long-poll-reliability-regression.test.ts > long-poll reliability regressions (#135, #136, #137) > #137 rejects an invalid trusted page: negative unknown task seq
+[byok/client] long-poll example.invalid/byok/events failed with HTTP 200 LongPollRouteError: long-poll example.invalid/byok/events failed with HTTP 200
+    at LongPollClient.warnRouteFailure (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:285:19)
+    at LongPollClient.loop (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:481:16) {
+  endpoint: {
+    transport: 'long-poll',
+    host: 'example.invalid',
+    path: '/byok/events'
+  },
+  status: 200,
+  [cause]: TypeError: Body is unusable: Body has already been read
+      at consumeBody (node:internal/deps/undici/undici:6943:31)
+      at Response.json (node:internal/deps/undici/undici:6871:18)
+      at LongPollClient.loop (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:475:59)
+}
+
+stderr | src/__tests__/long-poll-reliability-regression.test.ts > long-poll reliability regressions (#135, #136, #137) > #137 rejects an invalid trusted page: future unknown task seq
+[byok/client] long-poll example.invalid/byok/events failed with HTTP 200 LongPollRouteError: long-poll example.invalid/byok/events failed with HTTP 200
+    at LongPollClient.warnRouteFailure (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:285:19)
+    at LongPollClient.loop (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:481:16) {
+  endpoint: {
+    transport: 'long-poll',
+    host: 'example.invalid',
+    path: '/byok/events'
+  },
+  status: 200,
+  [cause]: TypeError: Body is unusable: Body has already been read
+      at consumeBody (node:internal/deps/undici/undici:6943:31)
+      at Response.json (node:internal/deps/undici/undici:6871:18)
+      at LongPollClient.loop (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:475:59)
+}
+
+stderr | src/__tests__/long-poll-reliability-regression.test.ts > long-poll reliability regressions (#135, #136, #137) > #137 rejects an invalid trusted page: gap-crossing unknown task seq
+[byok/client] long-poll example.invalid/byok/events failed with HTTP 200 LongPollRouteError: long-poll example.invalid/byok/events failed with HTTP 200
+    at LongPollClient.warnRouteFailure (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:285:19)
+    at LongPollClient.loop (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:481:16) {
+  endpoint: {
+    transport: 'long-poll',
+    host: 'example.invalid',
+    path: '/byok/events'
+  },
+  status: 200,
+  [cause]: TypeError: Body is unusable: Body has already been read
+      at consumeBody (node:internal/deps/undici/undici:6943:31)
+      at Response.json (node:internal/deps/undici/undici:6871:18)
+      at LongPollClient.loop (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:475:59)
+}
+
+stderr | src/__tests__/long-poll-reliability-regression.test.ts > long-poll reliability regressions (#135, #136, #137) > #137 rejects an invalid trusted page: decreasing task page order
+[byok/client] long-poll example.invalid/byok/events failed with HTTP 200 LongPollRouteError: long-poll example.invalid/byok/events failed with HTTP 200
+    at LongPollClient.warnRouteFailure (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:285:19)
+    at LongPollClient.loop (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:481:16) {
+  endpoint: {
+    transport: 'long-poll',
+    host: 'example.invalid',
+    path: '/byok/events'
+  },
+  status: 200,
+  [cause]: TypeError: Body is unusable: Body has already been read
+      at consumeBody (node:internal/deps/undici/undici:6943:31)
+      at Response.json (node:internal/deps/undici/undici:6871:18)
+      at LongPollClient.loop (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:475:59)
+}
+
+stderr | src/__tests__/long-poll-reliability-regression.test.ts > long-poll reliability regressions (#135, #136, #137) > #137 rejects an invalid trusted page: decreasing task page order
+[byok/client] long-poll example.invalid/byok/events failed LongPollRouteError: long-poll example.invalid/byok/events failed
+    at LongPollClient.warnRouteFailure (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:285:19)
+    at LongPollClient.loop (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:409:18)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  endpoint: {
+    transport: 'long-poll',
+    host: 'example.invalid',
+    path: '/byok/events'
+  },
+  status: undefined,
+  [cause]: [TypeError: fetch failed] {
+    [cause]: Error: getaddrinfo ENOTFOUND example.invalid
+        at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:121:26) {
+      errno: -3008,
+      code: 'ENOTFOUND',
+      syscall: 'getaddrinfo',
+      hostname: 'example.invalid'
+    }
+  }
+}
+
+stderr | src/__tests__/long-poll-reliability-regression.test.ts > long-poll reliability regressions (#135, #136, #137) > #137 rejects an invalid trusted page: decreasing task page order
+[byok/client] long-poll example.invalid/byok/events failed LongPollRouteError: long-poll example.invalid/byok/events failed
+    at LongPollClient.warnRouteFailure (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:285:19)
+    at LongPollClient.loop (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:409:18)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  endpoint: {
+    transport: 'long-poll',
+    host: 'example.invalid',
+    path: '/byok/events'
+  },
+  status: undefined,
+  [cause]: [TypeError: fetch failed] {
+    [cause]: Error: getaddrinfo ENOTFOUND example.invalid
+        at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:121:26) {
+      errno: -3008,
+      code: 'ENOTFOUND',
+      syscall: 'getaddrinfo',
+      hostname: 'example.invalid'
+    }
+  }
+}
+
+stderr | src/__tests__/long-poll-reliability-regression.test.ts > long-poll reliability regressions (#135, #136, #137) > #137 rejects an invalid trusted page: decreasing task page order
+[byok/client] long-poll example.invalid/byok/events failed LongPollRouteError: long-poll example.invalid/byok/events failed
+    at LongPollClient.warnRouteFailure (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:285:19)
+    at LongPollClient.loop (/Users/kito/Projects/byok-sdk-wt-issues-135-137-client/packages/client/src/daemon/long-poll-transport.ts:409:18)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  endpoint: {
+    transport: 'long-poll',
+    host: 'example.invalid',
+    path: '/byok/events'
+  },
+  status: undefined,
+  [cause]: [TypeError: fetch failed] {
+    [cause]: Error: getaddrinfo ENOTFOUND example.invalid
+        at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:121:26) {
+      errno: -3008,
+      code: 'ENOTFOUND',
+      syscall: 'getaddrinfo',
+      hostname: 'example.invalid'
+    }
+  }
+}
+
+ ❯ src/__tests__/long-poll-reliability-regression.test.ts (11 tests | 8 failed) 1866ms
+     × #135 never acknowledges a rejected cursor save and surfaces the persistence error 690ms
+     × #135 holds the wire cursor and stop behind a never-resolving cursor save 157ms
+     × #135 serializes rapid cursor saves and exposes neither cursor before its own durable save 186ms
+     × #136 returns exact outcomes, retries unreadable 200 bodies, and quarantines a permanent rejection without blocking later sends 18ms
+     × #137 rejects an invalid trusted page: negative unknown task seq 60ms
+     × #137 rejects an invalid trusted page: future unknown task seq 56ms
+     × #137 rejects an invalid trusted page: gap-crossing unknown task seq 56ms
+     × #137 rejects an invalid trusted page: decreasing task page order 62ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/long-poll-reliability-regression.test.ts > long-poll reliability regressions (#135, #136, #137) > #135 never acknowledges a rejected cursor save and surfaces the persistence error
+AssertionError: expected "error" to be called at least once
+ ❯ vi.waitFor.timeout src/__tests__/long-poll-reliability-regression.test.ts:107:43
+    105|     server!.pushLongPollEvent(offer('cursor-save-rejected', 1));
+    106|     await vi.waitFor(() => expect(saves).toEqual([0, 1]));
+    107|     await vi.waitFor(() => expect(errors).toHaveBeenCalled(), { timeou…
+       |                                           ^
+    108|     await vi.waitFor(() => expect(pollCursors.length).toBeGreaterThanO…
+    109|     expect(pollCursors).not.toContain('1');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/8]⎯
+
+ FAIL  src/__tests__/long-poll-reliability-regression.test.ts > long-poll reliability regressions (#135, #136, #137) > #135 holds the wire cursor and stop behind a never-resolving cursor save
+AssertionError: expected [ Array(7) ] to not include '1'
+ ❯ src/__tests__/long-poll-reliability-regression.test.ts:138:42
+    136|     heldSave.resolve();
+    137|     await stopping;
+    138|     expect(cursorsBeforeDurableSave).not.toContain('1');
+       |                                          ^
+    139|     expect(stopWasHeldBehindSave).toBe(true);
+    140|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/8]⎯
+
+ FAIL  src/__tests__/long-poll-reliability-regression.test.ts > long-poll reliability regressions (#135, #136, #137) > #135 serializes rapid cursor saves and exposes neither cursor before its own durable save
+AssertionError: expected [ null, null, null, '2', '2', '2' ] to not include '2'
+ ❯ src/__tests__/long-poll-reliability-regression.test.ts:169:47
+    167|     await connection!.stop();
+    168|     expect(cursorsBeforeFirstDurableSave).not.toContain('1');
+    169|     expect(cursorsBeforeFirstDurableSave).not.toContain('2');
+       |                                               ^
+    170|     expect(cursorsBeforeSecondDurableSave).not.toContain('2');
+    171|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/8]⎯
+
+ FAIL  src/__tests__/long-poll-reliability-regression.test.ts > long-poll reliability regressions (#135, #136, #137) > #136 returns exact outcomes, retries unreadable 200 bodies, and quarantines a permanent rejection without blocking later sends
+AssertionError: expected false to deeply equal { outcomes: [ { …(2) }, { …(3) } ] }
+
+- Expected:
+{
+  "outcomes": [
+    {
+      "id": "e1cc4fba-bfaa-4798-9b51-acb02aa3263d",
+      "outcome": "accepted",
+    },
+    {
+      "id": "2badf4ac-7ff7-4c95-8675-fead30e754b2",
+      "outcome": "rejected",
+      "reason": "inbound_rejected",
+    },
+  ],
+}
+
++ Received:
+false
+
+ ❯ src/__tests__/long-poll-reliability-regression.test.ts:188:57
+    186|     );
+    187|     const client = new LongPollClient({ serverUrl: 'http://example.inv…
+    188|     await expect(client.postBatch([accepted, rejected])).resolves.toEq…
+       |                                                         ^
+    189|       outcomes: [
+    190|         { id: accepted.id, outcome: 'accepted' },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/8]⎯
+
+ FAIL  src/__tests__/long-poll-reliability-regression.test.ts > long-poll reliability regressions (#135, #136, #137) > #137 rejects an invalid trusted page: negative unknown task seq
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      -1,
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/__tests__/long-poll-reliability-regression.test.ts:251:25
+    249|     client.start();
+    250|     await vi.waitFor(() => expect(fetchMock.mock.calls.length).toBeGre…
+    251|     expect(skipped).not.toHaveBeenCalled();
+       |                         ^
+    252|     expect(cursor).toBe(0);
+    253|     for (const [input] of fetchMock.mock.calls) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/8]⎯
+
+ FAIL  src/__tests__/long-poll-reliability-regression.test.ts > long-poll reliability regressions (#135, #136, #137) > #137 rejects an invalid trusted page: future unknown task seq
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      2,
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/__tests__/long-poll-reliability-regression.test.ts:251:25
+    249|     client.start();
+    250|     await vi.waitFor(() => expect(fetchMock.mock.calls.length).toBeGre…
+    251|     expect(skipped).not.toHaveBeenCalled();
+       |                         ^
+    252|     expect(cursor).toBe(0);
+    253|     for (const [input] of fetchMock.mock.calls) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/8]⎯
+
+ FAIL  src/__tests__/long-poll-reliability-regression.test.ts > long-poll reliability regressions (#135, #136, #137) > #137 rejects an invalid trusted page: gap-crossing unknown task seq
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      2,
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/__tests__/long-poll-reliability-regression.test.ts:251:25
+    249|     client.start();
+    250|     await vi.waitFor(() => expect(fetchMock.mock.calls.length).toBeGre…
+    251|     expect(skipped).not.toHaveBeenCalled();
+       |                         ^
+    252|     expect(cursor).toBe(0);
+    253|     for (const [input] of fetchMock.mock.calls) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/8]⎯
+
+ FAIL  src/__tests__/long-poll-reliability-regression.test.ts > long-poll reliability regressions (#135, #136, #137) > #137 rejects an invalid trusted page: decreasing task page order
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      1,
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/__tests__/long-poll-reliability-regression.test.ts:251:25
+    249|     client.start();
+    250|     await vi.waitFor(() => expect(fetchMock.mock.calls.length).toBeGre…
+    251|     expect(skipped).not.toHaveBeenCalled();
+       |                         ^
+    252|     expect(cursor).toBe(0);
+    253|     for (const [input] of fetchMock.mock.calls) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/8]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  8 failed | 3 passed (11)
+   Start at  01:36:55
+   Duration  2.19s (transform 116ms, setup 0ms, import 203ms, tests 1.87s, environment 0ms)
+
+error: script "test" exited with code 1
+PRE_FIX_EXIT=1

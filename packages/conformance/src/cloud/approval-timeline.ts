@@ -1,5 +1,6 @@
 import {
   APPROVAL_SUMMARY_MAX_BYTES,
+  ApprovalTimelineEventSchema,
   type ApprovalTimelineStore,
 } from '@byok-sdk/cloud';
 import { describe, expect, it } from 'vitest';
@@ -83,6 +84,95 @@ export function runApprovalTimelineConformance(
         const duplicate = await store.append(TENANT_A, input);
         expect(duplicate.entries).toHaveLength(1);
         expect(duplicate.cursor).toBe(1);
+      });
+    });
+
+    it('atomically persists a host rejection payload, replays it exactly, and rejects conflicts', async () => {
+      await withComposition(factory, async ({ store }) => {
+        const request = await store.append(TENANT_A, {
+          taskId: 'task-conditional-resolution',
+          sourceEnvelopeId: 'request-conditional',
+          event: requested('approval-conditional'),
+        });
+        const resolution = {
+          taskId: 'task-conditional-resolution',
+          expectedSourceEnvelopeId: 'request-conditional',
+          expectedRevision: request.cursor!,
+          sourceEnvelopeId: '10000000-0000-8000-8000-000000000001',
+          event: {
+            type: 'approval_resolved' as const,
+            approvalId: 'approval-conditional',
+            decision: 'reject' as const,
+            resolvedBy: 'host' as const,
+            reason: 'first reason' as const,
+            at: '2026-09-05T00:00:00.000Z',
+          },
+        };
+        await expect(store.resolvePending(TENANT_A, resolution)).resolves.toMatchObject({ status: 'applied' });
+        await expect(store.resolvePending(TENANT_A, resolution)).resolves.toMatchObject({ status: 'replayed' });
+        await expect(
+          store.resolvePending(TENANT_A, {
+            ...resolution,
+            event: { ...resolution.event, reason: 'second reason' },
+          }),
+        ).resolves.toMatchObject({ status: 'conflict' });
+        expect((await store.read(TENANT_A, 'task-conditional-resolution'))?.entries.at(-1)?.event).toMatchObject({
+          resolvedBy: 'host',
+          decision: 'reject',
+          reason: 'first reason',
+        });
+      });
+    });
+
+    it('does not allow a local wire resolution to claim a host rejection payload', () => {
+      expect(
+        ApprovalTimelineEventSchema.safeParse({
+          type: 'approval_resolved',
+          approvalId: 'approval-local',
+          decision: 'reject',
+          resolvedBy: 'local',
+          reason: 'not a host command',
+          at: '2026-09-05T00:00:00.000Z',
+        }).success,
+      ).toBe(false);
+      expect(
+        ApprovalTimelineEventSchema.safeParse({
+          type: 'approval_resolved',
+          approvalId: 'approval-host',
+          decision: 'reject',
+          resolvedBy: 'host',
+          at: '2026-09-05T00:00:00.000Z',
+        }).success,
+      ).toBe(false);
+    });
+
+    it('refuses a stale expected request after the daemon superseded it', async () => {
+      await withComposition(factory, async ({ store }) => {
+        const first = await store.append(TENANT_A, {
+          taskId: 'task-superseded-resolution',
+          sourceEnvelopeId: 'request-first',
+          event: requested('approval-first'),
+        });
+        await store.append(TENANT_A, {
+          taskId: 'task-superseded-resolution',
+          sourceEnvelopeId: 'request-second',
+          event: requested('approval-second'),
+        });
+        await expect(
+          store.resolvePending(TENANT_A, {
+            taskId: 'task-superseded-resolution',
+            expectedSourceEnvelopeId: 'request-first',
+            expectedRevision: first.cursor!,
+            sourceEnvelopeId: '10000000-0000-8000-8000-000000000003',
+            event: {
+              type: 'approval_resolved',
+              approvalId: 'approval-first',
+              decision: 'approve',
+              resolvedBy: 'host',
+              at: '2026-09-05T00:00:00.000Z',
+            },
+          }),
+        ).resolves.toMatchObject({ status: 'superseded' });
       });
     });
 

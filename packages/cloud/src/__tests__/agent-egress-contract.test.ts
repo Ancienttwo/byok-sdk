@@ -1,9 +1,18 @@
-import { createEnvelope, decodeEnvelope, type AgentEgressPolicy, type EventsPollResponse } from '@byok-sdk/protocol';
+import {
+  createEnvelope,
+  decodeEnvelope,
+  type AgentEgressPolicy,
+  type AgentRef,
+  type EventsPollResponse,
+} from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
+import { agentReliabilityKey } from '../agent-reliability';
+import { handleInboundEnvelope } from '../inbound';
 import { tenantStoresFor } from '../tenant-stores';
 import { TENANT_A, createHarness, type CloudHarness } from './support/harness';
 
 const AGENT_REF = { agentId: 'agent-egress', profileRevision: 'profile-egress' } as const;
+const OTHER_AGENT_REF = { agentId: 'agent-egress-other', profileRevision: 'profile-egress' } as const;
 const POLICY: AgentEgressPolicy = {
   policyRevision: 'policy-r1',
   activity: { mode: 'metadata-status' as const, delivery: 'latest-value' as const },
@@ -39,17 +48,38 @@ function freshEgressOfferPayload() {
   };
 }
 
-function reliableEnvelope() {
+function reliableEnvelope(
+  agentRef: AgentRef = AGENT_REF,
+  eventId = '10000000-0000-4000-8000-000000000010',
+  envelopeId?: string,
+) {
   return createEnvelope('agent.egress.reliable', {
-    agentRef: AGENT_REF,
+    agentRef,
     sessionRef: 'session-egress',
     policyRevision: POLICY.policyRevision,
-    eventId: '10000000-0000-4000-8000-000000000010',
+    eventId,
     cursor: 7,
     payload: { status: 'ready' },
     contentHash: CONTENT_HASH,
     byteCount: 18,
-  });
+  }, envelopeId === undefined ? undefined : { id: envelopeId });
+}
+
+function contentReadPayload(agentRef: AgentRef = AGENT_REF) {
+  return {
+    requestId: '10000000-0000-4000-8000-000000000022',
+    surface: 'workspace' as const,
+    actor: { kind: 'user' as const, id: 'actor-cloud-1' },
+    agentRef,
+    sessionRef: 'session-egress',
+    runtime: 'codex' as const,
+    cwd: '/workspace',
+    policyRevision: POLICY.policyRevision,
+    target: 'README.md',
+    mimeType: 'text/plain' as const,
+    decodeAs: 'utf8' as const,
+    policy: { maxBytes: 512, allowedMimeTypes: ['text/plain'] },
+  };
 }
 
 function deviceStores(harness: CloudHarness, deviceId: string) {
@@ -256,7 +286,12 @@ describe('hosted Agent egress contract', () => {
       body: JSON.stringify({ messages: [event] }),
     });
     expect(await first.json()).toEqual({ accepted: 1 });
-    const stored = await harness.cloud.readAgentEgress(TENANT_A, device.deviceId, event.payload.eventId);
+    const stored = await harness.cloud.readAgentEgress(
+      TENANT_A,
+      device.deviceId,
+      AGENT_REF,
+      event.payload.eventId,
+    );
     expect(stored?.payload).toEqual(event.payload);
     expect(stored?.receiptId).toMatch(/^[0-9a-f-]{36}$/u);
 
@@ -293,6 +328,28 @@ describe('hosted Agent egress contract', () => {
       ]),
     );
     expect(pollBody.events).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'agent.egress.ack' })]));
+  });
+
+  it('keeps same-device Agent reliable ids and completed envelope ids independent', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await admitFullEgress(harness, device.deviceId);
+    const secondAgent = { agentId: 'agent-egress-second', profileRevision: 'profile-egress-second' } as const;
+    const eventId = '10000000-0000-4000-8000-000000000011';
+    const envelopeId = '10000000-0000-4000-8000-000000000012';
+    const first = reliableEnvelope(AGENT_REF, eventId, envelopeId);
+    const second = reliableEnvelope(secondAgent, eventId, envelopeId);
+    const stores = deviceStores(harness, device.deviceId);
+
+    await expect(handleInboundEnvelope(stores, device.deviceId, first)).resolves.toBe('accepted');
+    await expect(handleInboundEnvelope(stores, device.deviceId, second)).resolves.toBe('accepted');
+    await expect(handleInboundEnvelope(stores, device.deviceId, first)).resolves.toBe('duplicate');
+
+    const firstRecord = await stores.egress.get(device.deviceId, AGENT_REF, eventId);
+    const secondRecord = await stores.egress.get(device.deviceId, secondAgent, eventId);
+    expect(firstRecord?.payload.agentRef).toEqual(AGENT_REF);
+    expect(secondRecord?.payload.agentRef).toEqual(secondAgent);
+    expect(firstRecord?.receiptId).not.toEqual(secondRecord?.receiptId);
   });
 
   it('filters a pre-lease cancelled egress Agent offer and delivers only task.cancel', async () => {
@@ -384,7 +441,7 @@ describe('hosted Agent egress contract', () => {
     });
     expect(await response.json()).toEqual({ accepted: 1 });
     const durableReceipt = await deviceStores(harness, device.deviceId).receipts.get(
-      `agent-content:${device.deviceId}:${receipt.payload.requestId}`,
+      agentReliabilityKey('agent-content-receipt', device.deviceId, AGENT_REF, receipt.payload.requestId),
     );
     expect(durableReceipt === undefined ? undefined : JSON.parse(durableReceipt.body)).toEqual(receipt.payload);
     const acknowledgements = (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 })).messages
@@ -422,5 +479,30 @@ describe('hosted Agent egress contract', () => {
       body: JSON.stringify({ messages: [mismatch] }),
     });
     expect(await rejected.json()).toEqual({ accepted: 0, rejected: 1 });
+  });
+
+  it('isolates same-device content reads with one logical request id by exact AgentRef', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await admitFullEgress(harness, device.deviceId);
+    const firstInput = contentReadPayload(AGENT_REF);
+    const secondInput = contentReadPayload(OTHER_AGENT_REF);
+
+    const first = await harness.cloud.enqueueAgentContentRead(TENANT_A, device.deviceId, { payload: firstInput });
+    const replay = await harness.cloud.enqueueAgentContentRead(TENANT_A, device.deviceId, { payload: firstInput });
+    const second = await harness.cloud.enqueueAgentContentRead(TENANT_A, device.deviceId, { payload: secondInput });
+
+    expect(replay).toEqual(first);
+    expect(first.envelope.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
+    expect(first.envelope.id).not.toBe(firstInput.requestId);
+    expect(second.envelope.id).not.toBe(secondInput.requestId);
+    expect(second.envelope.id).not.toBe(first.envelope.id);
+    const controls = (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 })).messages
+      .map((row) => decodeEnvelope(row.body))
+      .filter((envelope) => envelope.type === 'agent.content.read');
+    expect(controls).toEqual([
+      expect.objectContaining({ id: first.envelope.id, payload: firstInput }),
+      expect.objectContaining({ id: second.envelope.id, payload: secondInput }),
+    ]);
   });
 });

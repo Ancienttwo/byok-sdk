@@ -162,7 +162,7 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
       ts: new Date().toISOString(),
       type: 'task.some_future_type',
       task_id: 'future-task',
-      seq: 2,
+      seq: 1,
       payload: {},
     };
     // Only the first TWO polls return the (non-empty, unknown-type-only)
@@ -183,7 +183,7 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
     let call = 0;
     fetchMock.mockImplementation(async () => {
       call += 1;
-      return jsonResponse(call <= 2 ? { events: [unknownType], cursor: 2 } : { events: [], cursor: 2 });
+      return jsonResponse(call <= 2 ? { events: [unknownType], cursor: 1 } : { events: [], cursor: 1 });
     });
 
     const onSkippedSeq = vi.fn();
@@ -208,7 +208,7 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
     // empty polls fit in the window, which isn't this test's concern.)
     await delay(200);
     expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
-    expect(onSkippedSeq).toHaveBeenCalledWith(2);
+    expect(onSkippedSeq).toHaveBeenCalledWith(1);
 
     client.stop();
   });

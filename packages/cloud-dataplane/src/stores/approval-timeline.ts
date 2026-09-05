@@ -4,7 +4,11 @@ import {
   approvalTimelineCursor,
   parseApprovalObservations,
   validateApprovalTimelineAppend,
+  validateApprovalTimelineResolve,
   type ApprovalTimelineAppendInput,
+  type ApprovalObservation,
+  type ApprovalTimelineResolvePendingInput,
+  type ApprovalTimelineResolvePendingResult,
   type ApprovalTimelineStore,
   type ApprovalTimelineTail,
 } from '@byok-sdk/cloud';
@@ -141,6 +145,91 @@ export class PostgresApprovalTimelineStore implements ApprovalTimelineStore {
     }
   }
 
+  async resolvePending(
+    tenant: TenantId,
+    input: ApprovalTimelineResolvePendingInput,
+  ): Promise<ApprovalTimelineResolvePendingResult> {
+    const { capacity, ttlMs, event } = validateApprovalTimelineResolve(input);
+    const now = this.clock.now();
+    const receivedAt = now.toISOString();
+    const expiresAt = new Date(now.getTime() + ttlMs).toISOString();
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1 || E'\\x1f' || $2, 0))`,
+        [tenant, input.taskId],
+      );
+      const stored = await readLocked(client, tenant, input.taskId);
+      const live = stored !== undefined && receivedAt < stored.expires_at ? toTail(stored) : undefined;
+      if (live === undefined) {
+        await client.query('COMMIT');
+        return { status: 'absent' };
+      }
+
+      const duplicate = live.entries.find((entry) => entry.sourceEnvelopeId === input.sourceEnvelopeId);
+      if (duplicate !== undefined) {
+        await client.query('COMMIT');
+        return JSON.stringify(duplicate.event) === JSON.stringify(event)
+          ? { status: 'replayed', tail: live }
+          : { status: 'conflict', tail: live };
+      }
+
+      const pending = pendingObservation(live.entries);
+      if (pending === undefined) {
+        await client.query('COMMIT');
+        return { status: 'absent', tail: live };
+      }
+      if (
+        pending.sourceEnvelopeId !== input.expectedSourceEnvelopeId ||
+        pending.revision !== input.expectedRevision
+      ) {
+        await client.query('COMMIT');
+        return { status: 'superseded', tail: live };
+      }
+
+      const revision = Number(stored!.next_revision);
+      const expectedRevision = (live.cursor ?? 0) + 1;
+      if (!Number.isSafeInteger(revision) || revision <= 0 || revision !== expectedRevision) {
+        throw new ByokCloudError(
+          'coordination_input_invalid',
+          'Approval timeline revision authority is malformed.',
+        );
+      }
+      const observation = ApprovalObservationSchema.parse({
+        taskId: input.taskId,
+        sourceEnvelopeId: input.sourceEnvelopeId,
+        revision,
+        receivedAt,
+        event,
+      });
+      const allEntries = [...live.entries, observation];
+      const evicted = Math.max(allEntries.length - capacity, 0);
+      const entries = allEntries.slice(evicted);
+      const dropped = live.dropped + evicted;
+      const result = await client.query<TailRow>(
+        `INSERT INTO approval_timeline_tail
+           (tenant_id, task_id, entries, next_revision, dropped, capacity, expires_at)
+         VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7)
+         ON CONFLICT (tenant_id, task_id) DO UPDATE
+           SET entries = EXCLUDED.entries,
+               next_revision = EXCLUDED.next_revision,
+               dropped = EXCLUDED.dropped,
+               capacity = EXCLUDED.capacity,
+               expires_at = EXCLUDED.expires_at
+         RETURNING tenant_id, task_id, entries, next_revision, dropped, capacity, expires_at`,
+        [tenant, input.taskId, JSON.stringify(entries), revision + 1, dropped, capacity, expiresAt],
+      );
+      await client.query('COMMIT');
+      return { status: 'applied', tail: toTail(result.rows[0]!) };
+    } catch (caught) {
+      await client.query('ROLLBACK');
+      throw caught;
+    } finally {
+      client.release();
+    }
+  }
+
   async read(tenant: TenantId, taskId: string): Promise<ApprovalTimelineTail | undefined> {
     const result = await this.pool.query<TailRow>(
       `SELECT tenant_id, task_id, entries, next_revision, dropped, capacity, expires_at
@@ -151,4 +240,21 @@ export class PostgresApprovalTimelineStore implements ApprovalTimelineStore {
     const row = result.rows[0];
     return row === undefined ? undefined : toTail(row);
   }
+}
+
+function pendingObservation(entries: readonly ApprovalObservation[]): ApprovalObservation | undefined {
+  let pending: ApprovalObservation | undefined;
+  for (const entry of entries) {
+    if (entry.event.type === 'approval_requested') {
+      pending = entry;
+      continue;
+    }
+    if (
+      pending !== undefined &&
+      (pending.event.approvalId === undefined || pending.event.approvalId === entry.event.approvalId)
+    ) {
+      pending = undefined;
+    }
+  }
+  return pending;
 }

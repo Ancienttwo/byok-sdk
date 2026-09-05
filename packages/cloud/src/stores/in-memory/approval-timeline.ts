@@ -5,7 +5,11 @@ import {
   approvalTimelineCursor,
   approvalTimelineKey,
   validateApprovalTimelineAppend,
+  validateApprovalTimelineResolve,
   type ApprovalTimelineAppendInput,
+  type ApprovalTimelineResolvePendingInput,
+  type ApprovalTimelineResolvePendingResult,
+  type ApprovalObservation,
   type ApprovalTimelineStore,
   type ApprovalTimelineTail,
 } from '../../approval-timeline';
@@ -64,6 +68,56 @@ export class InMemoryApprovalTimelineStore implements ApprovalTimelineStore {
     return tail;
   }
 
+  async resolvePending(
+    tenant: TenantId,
+    input: ApprovalTimelineResolvePendingInput,
+  ): Promise<ApprovalTimelineResolvePendingResult> {
+    const { capacity, ttlMs, event } = validateApprovalTimelineResolve(input);
+    const now = this.clock.now();
+    const receivedAt = now.toISOString();
+    const key = approvalTimelineKey(tenant, input.taskId);
+    const existing = this.#tails.get(key);
+    const live = existing !== undefined && receivedAt < existing.expiresAt ? existing : undefined;
+    if (live === undefined) return { status: 'absent' };
+
+    const duplicate = live.entries.find((entry) => entry.sourceEnvelopeId === input.sourceEnvelopeId);
+    if (duplicate !== undefined) {
+      if (JSON.stringify(duplicate.event) !== JSON.stringify(event)) return { status: 'conflict', tail: live };
+      return { status: 'replayed', tail: live };
+    }
+
+    const pending = pendingObservation(live.entries);
+    if (pending === undefined) return { status: 'absent', tail: live };
+    if (
+      pending.sourceEnvelopeId !== input.expectedSourceEnvelopeId ||
+      pending.revision !== input.expectedRevision
+    ) {
+      return { status: 'superseded', tail: live };
+    }
+
+    const revision = (live.cursor ?? 0) + 1;
+    const observation = ApprovalObservationSchema.parse({
+      taskId: input.taskId,
+      sourceEnvelopeId: input.sourceEnvelopeId,
+      revision,
+      receivedAt,
+      event,
+    });
+    const allEntries = [...live.entries, observation];
+    const evicted = Math.max(allEntries.length - capacity, 0);
+    const tail: ApprovalTimelineTail = {
+      tenantId: tenant,
+      taskId: input.taskId,
+      entries: allEntries.slice(evicted),
+      cursor: revision,
+      dropped: live.dropped + evicted,
+      capacity,
+      expiresAt: new Date(now.getTime() + ttlMs).toISOString(),
+    };
+    this.#tails.set(key, tail);
+    return { status: 'applied', tail };
+  }
+
   async read(tenant: TenantId, taskId: string): Promise<ApprovalTimelineTail | undefined> {
     const key = approvalTimelineKey(tenant, taskId);
     const tail = this.#tails.get(key);
@@ -74,4 +128,21 @@ export class InMemoryApprovalTimelineStore implements ApprovalTimelineStore {
     }
     return tail;
   }
+}
+
+function pendingObservation(entries: readonly ApprovalObservation[]): ApprovalObservation | undefined {
+  let pending: ApprovalObservation | undefined;
+  for (const entry of entries) {
+    if (entry.event.type === 'approval_requested') {
+      pending = entry;
+      continue;
+    }
+    if (
+      pending !== undefined &&
+      (pending.event.approvalId === undefined || pending.event.approvalId === entry.event.approvalId)
+    ) {
+      pending = undefined;
+    }
+  }
+  return pending;
 }

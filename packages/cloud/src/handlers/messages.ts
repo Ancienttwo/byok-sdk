@@ -102,7 +102,7 @@ export function messagesHandler(deps: MessagesRouteDeps) {
         }
       }
       if (envelope.type === 'agent.egress.reliable' && (outcome === 'accepted' || outcome === 'duplicate')) {
-        const record = await stores.egress.get(device.deviceId, envelope.payload.eventId);
+        const record = await stores.egress.get(device.deviceId, envelope.payload.agentRef, envelope.payload.eventId);
         if (record === undefined) {
           throw new Error(`Accepted reliable egress ${envelope.payload.eventId} has no durable receipt record.`);
         }
@@ -111,15 +111,12 @@ export function messagesHandler(deps: MessagesRouteDeps) {
       if (envelope.type === 'agent.content.receipt' && (outcome === 'accepted' || outcome === 'duplicate')) {
         await deps.appendContentReceiptAck(stores, device.deviceId, envelope.payload);
       }
-      // A duplicate is still a wire-level success (§8.2/§9's idempotency
-      // window) — it just did not re-run a handler. Only a gate rejection
-      // (wrong-direction type, or an ownership mismatch) is excluded.
+      // A duplicate is a wire-level success (§8.2/§9's idempotency window),
+      // even though its business mutation did not execute a second time.
       if (outcome === 'rejected') rejected += 1;
       else accepted += 1;
     }
 
-    // `rejected` is additive and omitted entirely when zero, so a batch with
-    // nothing rejected keeps the `{ accepted }` shape callers depend on.
     const response: MessagesSendResponse = rejected > 0 ? { accepted, rejected } : { accepted };
     return c.json(response, 200);
   };

@@ -9,34 +9,57 @@ export const APPROVAL_SUMMARY_MAX_BYTES = 16 * 1_024;
 const NonBlankIdSchema = z.string().max(200).regex(/\S/, 'value must not be blank');
 const TaskIdSchema = z.string().min(1).max(200);
 
-export const ApprovalTimelineEventSchema = z.discriminatedUnion('type', [
-  z.object({
+const ApprovalRequestedEventSchema = z
+  .object({
     type: z.literal('approval_requested'),
     summary: z.string(),
     approvalId: NonBlankIdSchema.optional(),
-  }),
-  z.object({
+  })
+  .strict();
+
+const LocalApprovalResolutionEventSchema = z
+  .object({
     type: z.literal('approval_resolved'),
-    // Absent only when a host resolves the single outstanding request from a
-    // pre-M5 daemon, which never supplied native approval identity. This is
-    // explicit unpaired source data; no id is synthesized.
+    // Absent only when a daemon resolved the single outstanding request without
+    // native approval identity. No id is synthesized.
     approvalId: NonBlankIdSchema.optional(),
     decision: z.enum(['approve', 'reject']),
-    /**
-     * WHO resolved it. `'local'` is the daemon's own `task.approval_resolved`
-     * (the wire value, `TaskApprovalResolvedPayloadSchema`); no device can
-     * produce anything else. `'host'` is the control plane resolving it
-     * through `ByokCloud.approveTask`/`rejectTask` — an embedded composition
-     * (`@byok-sdk/server`) treats a host decision as authoritative the moment
-     * it is enqueued, and the pending-approval slot is DERIVED from this tail
-     * (`approval-control.ts`), so a host resolution left unrecorded would make
-     * the one authority keep claiming an approval is outstanding that the
-     * operator has already answered. Additive: `pendingApproval`'s fold reads
-     * both values identically and no gate branches on this field.
-     */
-    resolvedBy: z.enum(['local', 'host']),
+    // A daemon's `task.approval_resolved` is pure wire observation; it cannot
+    // declare a host command payload.
+    resolvedBy: z.literal('local'),
     at: z.iso.datetime({ offset: true }),
-  }),
+  })
+  .strict();
+
+const HostApprovalResolutionEventSchema = z
+  .object({
+    type: z.literal('approval_resolved'),
+    approvalId: NonBlankIdSchema.optional(),
+    decision: z.literal('approve'),
+    resolvedBy: z.literal('host'),
+    at: z.iso.datetime({ offset: true }),
+  })
+  .strict();
+
+const HostRejectResolutionEventSchema = z
+  .object({
+    type: z.literal('approval_resolved'),
+    approvalId: NonBlankIdSchema.optional(),
+    decision: z.literal('reject'),
+    resolvedBy: z.literal('host'),
+    // Required even when the host deliberately omitted a wire reason. `null`
+    // records that complete payload, so a historical host reject with no field
+    // cannot be mistaken for a recoverable executable command.
+    reason: z.string().nullable(),
+    at: z.iso.datetime({ offset: true }),
+  })
+  .strict();
+
+export const ApprovalTimelineEventSchema = z.union([
+  ApprovalRequestedEventSchema,
+  LocalApprovalResolutionEventSchema,
+  HostApprovalResolutionEventSchema,
+  HostRejectResolutionEventSchema,
 ]);
 
 export type ApprovalTimelineEvent = Readonly<z.infer<typeof ApprovalTimelineEventSchema>>;
@@ -69,8 +92,32 @@ export interface ApprovalTimelineAppendInput {
   readonly capacity?: number;
 }
 
+/**
+ * One host decision against the exact unresolved request it observed.
+ *
+ * The expected source/revision pair is the durable request identity.  A
+ * resolver must not turn a stale read into a decision for a request which has
+ * since been superseded, and it must not split one logical decision into
+ * several mailbox controls.  Implementations serialize this comparison and
+ * append under the timeline's per-task authority.
+ */
+export interface ApprovalTimelineResolvePendingInput extends ApprovalTimelineAppendInput {
+  readonly expectedSourceEnvelopeId: string;
+  readonly expectedRevision: number;
+}
+
+/** Result of a conditional host-decision append. Logical conflicts are data, not transport failures. */
+export type ApprovalTimelineResolvePendingResult =
+  | { readonly status: 'applied' | 'replayed'; readonly tail: ApprovalTimelineTail }
+  | { readonly status: 'conflict' | 'superseded' | 'absent'; readonly tail?: ApprovalTimelineTail };
+
 export interface ApprovalTimelineStore {
   append(tenant: TenantId, input: ApprovalTimelineAppendInput): Promise<ApprovalTimelineTail>;
+  /** Atomically append one host resolution only if its request remains current. */
+  resolvePending(
+    tenant: TenantId,
+    input: ApprovalTimelineResolvePendingInput,
+  ): Promise<ApprovalTimelineResolvePendingResult>;
   read(tenant: TenantId, taskId: string): Promise<ApprovalTimelineTail | undefined>;
 }
 
@@ -120,6 +167,25 @@ export function validateApprovalTimelineAppend(
     );
   }
   return { capacity, ttlMs, event: parsed.data.event };
+}
+
+export function validateApprovalTimelineResolve(
+  input: ApprovalTimelineResolvePendingInput,
+): ValidatedApprovalTimelineAppend {
+  const validated = validateApprovalTimelineAppend(input);
+  const expected = z
+    .object({
+      expectedSourceEnvelopeId: NonBlankIdSchema,
+      expectedRevision: z.number().int().positive(),
+    })
+    .safeParse(input);
+  if (!expected.success || validated.event.type !== 'approval_resolved' || validated.event.resolvedBy !== 'host') {
+    throw new ByokCloudError(
+      'coordination_input_invalid',
+      'Host approval resolution requires an exact pending source/revision and a host resolution event.',
+    );
+  }
+  return validated;
 }
 
 export function approvalTimelineKey(tenant: TenantId, taskId: string): string {

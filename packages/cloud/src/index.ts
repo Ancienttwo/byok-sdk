@@ -168,11 +168,14 @@ export {
   approvalTimelineCursor,
   parseApprovalObservations,
   validateApprovalTimelineAppend,
+  validateApprovalTimelineResolve,
 } from './approval-timeline';
 export type {
   ApprovalObservation,
   ApprovalTimelineAppendInput,
   ApprovalTimelineEvent,
+  ApprovalTimelineResolvePendingInput,
+  ApprovalTimelineResolvePendingResult,
   ApprovalTimelineStore,
   ApprovalTimelineTail,
 } from './approval-timeline';
@@ -208,6 +211,7 @@ export {
   TimelineEventSchema,
   ActivityAppendRequestSchema,
   activityCursor,
+  activitySourceBatchState,
   parseTimelineEvents,
   projectTimelineEvents,
   validateActivityAppend,

@@ -291,15 +291,22 @@ describe('reference-server Agent egress contract', () => {
       },
     });
     if (first.type !== 'agent.egress.ack') throw new Error('unreachable');
-    expect(await instance.egress.get(daemon.deviceId, event.payload.eventId)).toMatchObject({
+    expect(await instance.egress.get(daemon.deviceId, AGENT_REF, event.payload.eventId)).toMatchObject({
       payload: event.payload,
       receiptId: first.payload.receiptId,
     });
+    await expect(
+      instance.egress.get(
+        daemon.deviceId,
+        { agentId: 'another-agent', profileRevision: AGENT_REF.profileRevision },
+        event.payload.eventId,
+      ),
+    ).resolves.toBeUndefined();
 
     // An exact replay returns the SAME durable receipt — the first-write-wins
     // record is unchanged, and no second one is minted.
     await daemon.send(event);
-    expect(await instance.egress.get(daemon.deviceId, event.payload.eventId)).toMatchObject({
+    expect(await instance.egress.get(daemon.deviceId, AGENT_REF, event.payload.eventId)).toMatchObject({
       payload: event.payload,
       receiptId: first.payload.receiptId,
     });

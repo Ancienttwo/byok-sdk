@@ -70,7 +70,7 @@ describe('reference task-free Agent-home projection', () => {
 
     await expect(started.byok.enqueueAgentHomeProjection({ deviceId: daemon.deviceId, payload: desired() }))
       .rejects.toThrow(AGENT_HOME_PROJECTION_CAPABILITY);
-    expect(await started.byok.readAgentHomeProjection(daemon.deviceId, REQUEST_ID)).toBeUndefined();
+    expect(await started.byok.readAgentHomeProjection(daemon.deviceId, desired().agentRef, REQUEST_ID)).toBeUndefined();
     expect((await started.byok.tasks.list()).tasks).toHaveLength(0);
   });
 
@@ -123,7 +123,14 @@ describe('reference task-free Agent-home projection', () => {
       status: 'applied',
       completedAt: expect.any(String),
     });
-    expect(await started.byok.readAgentHomeProjection(daemon.deviceId, REQUEST_ID)).toEqual(readback);
+    expect(await started.byok.readAgentHomeProjection(daemon.deviceId, desired().agentRef, REQUEST_ID)).toEqual(readback);
+    await expect(
+      started.byok.readAgentHomeProjection(
+        daemon.deviceId,
+        { agentId: 'agent-two', profileRevision: desired().agentRef.profileRevision },
+        REQUEST_ID,
+      ),
+    ).resolves.toBeUndefined();
     expect((await started.byok.tasks.list()).tasks).toHaveLength(0);
 
     const changed = await fetch(`${started.baseUrl}${byokAgentHomeProjectionCompletionPath(REQUEST_ID)}`, {
@@ -135,7 +142,7 @@ describe('reference task-free Agent-home projection', () => {
       body: JSON.stringify({ ...completion, outcome: 'conflict' }),
     });
     expect(changed.status).toBe(409);
-    expect(await started.byok.readAgentHomeProjection(daemon.deviceId, REQUEST_ID)).toEqual(readback);
+    expect(await started.byok.readAgentHomeProjection(daemon.deviceId, desired().agentRef, REQUEST_ID)).toEqual(readback);
   });
 
   it('does not allow another authenticated device to complete the exact target request', async () => {
@@ -167,6 +174,6 @@ describe('reference task-free Agent-home projection', () => {
       }),
     });
     expect(response.status).toBe(404);
-    expect((await started.byok.readAgentHomeProjection(target.deviceId, REQUEST_ID))?.status).toBe('pending');
+    expect((await started.byok.readAgentHomeProjection(target.deviceId, desired().agentRef, REQUEST_ID))?.status).toBe('pending');
   });
 });

@@ -56,11 +56,25 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres Agent egress contract — ${SKIP_REASO
         receiptId: '10000000-0000-4000-8000-000000000032',
       });
       expect(replay).toEqual({ record: first.record, created: false });
-      expect(await store.get(OTHER_TENANT, 'device-postgres', input.eventId)).toBeUndefined();
+      expect(await store.get(OTHER_TENANT, 'device-postgres', input.agentRef, input.eventId)).toBeUndefined();
+
+      const sameIdSecondAgent = {
+        ...payload(input.eventId),
+        agentRef: { agentId: 'agent-postgres-second', profileRevision: 'profile-postgres-second' },
+      };
+      const independent = await store.record(TENANT, {
+        deviceId: 'device-postgres',
+        payload: sameIdSecondAgent,
+        receiptId: '10000000-0000-4000-8000-000000000033',
+      });
+      expect(independent.created).toBe(true);
+      expect(await store.get(TENANT, 'device-postgres', input.agentRef, input.eventId)).toEqual(first.record);
+      expect(await store.get(TENANT, 'device-postgres', sameIdSecondAgent.agentRef, input.eventId)).toEqual(independent.record);
 
       restarted = scope.openRestartPool();
       const afterRestart = new PostgresAgentEgressStore(restarted, clock);
-      expect(await afterRestart.get(TENANT, 'device-postgres', input.eventId)).toEqual(first.record);
+      expect(await afterRestart.get(TENANT, 'device-postgres', input.agentRef, input.eventId)).toEqual(first.record);
+      expect(await afterRestart.get(TENANT, 'device-postgres', sameIdSecondAgent.agentRef, input.eventId)).toEqual(independent.record);
     } finally {
       await restarted?.end();
       await scope.dispose();

@@ -176,6 +176,11 @@ function countingDedup(inner: InboundDedupStore): CountingDedupStore {
       if (seen) drops += 1;
       return seen;
     },
+    async checkAndRecordAgent(tenant, deviceId, agentRef, envelopeId): Promise<boolean> {
+      const seen = await inner.checkAndRecordAgent(tenant, deviceId, agentRef, envelopeId);
+      if (seen) drops += 1;
+      return seen;
+    },
     drops: () => drops,
   };
 }

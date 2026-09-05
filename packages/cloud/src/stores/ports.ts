@@ -223,12 +223,22 @@ export interface NonceStore {
 
 export interface InboundDedupStore {
   /**
-   * `true` when `envelopeId` was already seen for this (tenant, device);
-   * otherwise records it and returns `false`. Bounded per device — the wire is
-   * at-least-once (§9); this makes processing at-most-once without an
-   * unbounded set.
+   * Device-physical envelope ledger (`conn.hello` and facts with no Agent
+   * binding). `true` when `envelopeId` was already seen for this (tenant,
+   * device); otherwise records it and returns `false`.
    */
   checkAndRecord(tenant: TenantId, deviceId: string, envelopeId: string): Promise<boolean>;
+  /**
+   * Agent-bound envelope ledger. The AgentRef is required: a same-device
+   * second Agent must never resolve or suppress this Agent's completed fact.
+   * Retention remains bounded per exact (tenant, device, AgentRef).
+   */
+  checkAndRecordAgent(
+    tenant: TenantId,
+    deviceId: string,
+    agentRef: AgentRef,
+    envelopeId: string,
+  ): Promise<boolean>;
 }
 
 // ---------------------------------------------------------------------------
@@ -371,8 +381,10 @@ export interface TaskAttemptStore {
   /**
    * Atomically binds one message payload to a live task before an external
    * consumer can run. `pending` is an existing exact reservation whose terminal
-   * receipt has not been recorded yet; callers must fail closed rather than
-   * invoke the consumer again.
+   * receipt has not been recorded yet; callers retry the same product consumer
+   * contract so its own durable idempotency can reconcile a commit whose local
+   * finalization failed. Exact pending lookup precedes the live-task gate, while
+   * every new reservation remains lifecycle-gated.
    */
   reserveAgentMessage(
     tenant: TenantId,
@@ -511,7 +523,13 @@ export interface AgentEgressStore {
     tenant: TenantId,
     input: Omit<AgentEgressRecord, 'tenantId' | 'recordedAt'>,
   ): Promise<{ readonly record: AgentEgressRecord; readonly created: boolean }>;
-  get(tenant: TenantId, deviceId: string, eventId: string): Promise<AgentEgressRecord | undefined>;
+  /** Exact reliable fact lookup; device plus event id alone is ambiguous. */
+  get(
+    tenant: TenantId,
+    deviceId: string,
+    agentRef: AgentRef,
+    eventId: string,
+  ): Promise<AgentEgressRecord | undefined>;
 }
 
 // ---------------------------------------------------------------------------

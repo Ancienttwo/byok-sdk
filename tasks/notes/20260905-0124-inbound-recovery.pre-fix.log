@@ -1,0 +1,106 @@
+$ vitest run src/__tests__/inbound-recovery-regression.test.ts
+
+ RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issues-138-140-inbound/packages/cloud
+
+ ❯ src/__tests__/inbound-recovery-regression.test.ts (7 tests | 7 failed) 91ms
+     × completes a claim after its authoritative write succeeds but the delivery faults, then observes only the completed commit 75ms
+     × replays a status write, activity batch, and approval observation after their post-write faults 4ms
+     × replays an already-terminalized agent message without invoking its consumer again 3ms
+     × resumes the winning terminal receipt through the receipt projection fault 2ms
+     × resumes the winning terminal receipt through the status projection fault 1ms
+     × resumes the winning terminal receipt through the board projection fault 2ms
+     × projects the exact first terminal binding and rejects unknown terminals before receipts or dedup 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/inbound-recovery-regression.test.ts > inbound lifecycle recovery > completes a claim after its authoritative write succeeds but the delivery faults, then observes only the completed commit
+AssertionError: expected 'duplicate' to be 'accepted' // Object.is equality
+
+Expected: "accepted"
+Received: "duplicate"
+
+ ❯ src/__tests__/inbound-recovery-regression.test.ts:72:6
+     70|     await expect(
+     71|       handleInboundEnvelope(recoveryStores, device.deviceId, envelope,…
+     72|     ).resolves.toBe('accepted');
+       |      ^
+     73|     expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.st…
+     74|     expect(observed).toEqual([envelope.id]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  src/__tests__/inbound-recovery-regression.test.ts > inbound lifecycle recovery > replays a status write, activity batch, and approval observation after their post-write faults
+AssertionError: expected 'duplicate' to be 'accepted' // Object.is equality
+
+Expected: "accepted"
+Received: "duplicate"
+
+ ❯ src/__tests__/inbound-recovery-regression.test.ts:136:85
+    134|     ] as const) {
+    135|       await expect(handleInboundEnvelope(recoveryStores, device.device…
+    136|       await expect(handleInboundEnvelope(recoveryStores, device.device…
+       |                                                                                     ^
+    137|       await expect(handleInboundEnvelope(recoveryStores, device.device…
+    138|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  src/__tests__/inbound-recovery-regression.test.ts > inbound lifecycle recovery > replays an already-terminalized agent message without invoking its consumer again
+AssertionError: expected 'duplicate' to be 'accepted' // Object.is equality
+
+Expected: "accepted"
+Received: "duplicate"
+
+ ❯ src/__tests__/inbound-recovery-regression.test.ts:211:103
+    209|       'fault after agent message terminal',
+    210|     );
+    211|     await expect(handleInboundEnvelope(recoveryStores, device.deviceId…
+       |                                                                                                       ^
+    212|     expect(consumed).toBe(1);
+    213|     await expect(handleInboundEnvelope(recoveryStores, device.deviceId…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  src/__tests__/inbound-recovery-regression.test.ts > inbound lifecycle recovery > resumes the winning terminal receipt through the receipt projection fault
+ FAIL  src/__tests__/inbound-recovery-regression.test.ts > inbound lifecycle recovery > resumes the winning terminal receipt through the status projection fault
+ FAIL  src/__tests__/inbound-recovery-regression.test.ts > inbound lifecycle recovery > resumes the winning terminal receipt through the board projection fault
+AssertionError: expected 'duplicate' to be 'accepted' // Object.is equality
+
+Expected: "accepted"
+Received: "duplicate"
+
+ ❯ src/__tests__/inbound-recovery-regression.test.ts:267:85
+    265|
+    266|       await expect(handleInboundEnvelope(recoveryStores, device.device…
+    267|       await expect(handleInboundEnvelope(recoveryStores, device.device…
+       |                                                                                     ^
+    268|       expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.…
+    269|       await expect(harness.cloud.listBoardItems(TENANT_A, {})).resolve…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  src/__tests__/inbound-recovery-regression.test.ts > inbound lifecycle recovery > projects the exact first terminal binding and rejects unknown terminals before receipts or dedup
+AssertionError: expected 'claimed' to be 'complete' // Object.is equality
+
+Expected: "complete"
+Received: "claimed"
+
+ ❯ src/__tests__/inbound-recovery-regression.test.ts:284:77
+    282|
+    283|     await expect(handleInboundEnvelope(stores, device.deviceId, losing…
+    284|     expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.st…
+       |                                                                             ^
+    285|     expect((await harness.cloud.readTaskResult(TENANT_A, taskId))?.sta…
+    286|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  7 failed (7)
+   Start at  01:34:06
+   Duration  583ms (transform 228ms, setup 0ms, import 346ms, tests 91ms, environment 0ms)
+
+error: script "test" exited with code 1
+
+PRE_FIX_EXIT=1

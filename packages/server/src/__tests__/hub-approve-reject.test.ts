@@ -148,7 +148,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
    * "whichever one is currently pending".
    */
   describe('M5 (approval targeting): approve/reject opts.approvalId', () => {
-    it('approve({approvalId}) after that EXACT approval is already consumed (task now Running) fails closed with task_not_awaiting_approval — the pending-approval check runs before the approvalId check', async () => {
+    it('replays the same targeted host decision after response loss without enqueuing a second control', async () => {
       const { byok: instance, daemon } = await start();
 
       const handle = await instance.dispatch({ instruction: 'needs a human ok' });
@@ -159,8 +159,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
       await handle.approve({ approvalId: 'appr-1' }); // targeted — consumes it, AwaitApproval -> Running.
       expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
 
-      const refused = await handle.approve({ approvalId: 'appr-1' }).catch((error: unknown) => error);
-      expect(isCloudError(refused, 'task_not_awaiting_approval')).toBe(true);
+      await expect(handle.approve({ approvalId: 'appr-1' })).resolves.toBeUndefined();
     });
 
     it('approve({approvalId: A}) while a DIFFERENT approval (B) is now the recorded pending one throws StaleApprovalError, changes no state, and sends no wire message', async () => {

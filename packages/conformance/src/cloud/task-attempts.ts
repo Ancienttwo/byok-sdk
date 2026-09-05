@@ -110,6 +110,42 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
       });
     });
 
+    it.each(['complete', 'cancel_requested'] as const)(
+      'keeps an exact pending message recoverable after %s while lifecycle-gating every new binding',
+      async (status) => {
+        await withCloudComposition(factory, async ({ stores }) => {
+          const taskId = `task-message-${status}`;
+          const exact = {
+            taskId,
+            deviceId: 'device-1',
+            messageId: '10000000-0000-4000-8000-000000001138',
+            payloadBody: '{"message":"exact"}',
+          };
+          await stores.tasks.open(TENANT_A, { taskId, deviceId: exact.deviceId });
+          await expect(stores.tasks.reserveAgentMessage(TENANT_A, exact)).resolves.toBe('reserved');
+          await stores.tasks.recordStatus(TENANT_A, { taskId, status });
+
+          await expect(stores.tasks.reserveAgentMessage(TENANT_A, exact)).resolves.toBe('pending');
+          await expect(stores.tasks.reserveAgentMessage(TENANT_A, {
+            ...exact,
+            messageId: '10000000-0000-4000-8000-000000001139',
+          })).resolves.toBe('rejected');
+          await expect(stores.tasks.reserveAgentMessage(TENANT_A, {
+            ...exact,
+            payloadBody: '{"message":"conflict"}',
+          })).resolves.toBe('rejected');
+          await expect(stores.tasks.reserveAgentMessage(TENANT_A, {
+            ...exact,
+            deviceId: 'device-2',
+          })).resolves.toBe('rejected');
+          await expect(stores.tasks.readAgentMessage(TENANT_A, {
+            ...exact,
+            deviceId: 'device-2',
+          })).resolves.toBeUndefined();
+        });
+      },
+    );
+
     it('writes nothing for a task that was never offered', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         expect(

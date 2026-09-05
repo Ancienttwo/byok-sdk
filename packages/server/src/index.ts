@@ -6,6 +6,7 @@ import {
   fullCapabilityDeclaration,
   pendingApproval,
   type ByokCloud,
+  type EnqueuedOffer,
   type PairingCodeInfo,
   type PendingApproval,
   type TaskAttempt,
@@ -25,6 +26,7 @@ import {
   TASK_STATES,
   TerminalProjectionSelectionSchema,
   type AgentHomeProjectionPayload,
+  type AgentRef,
   type PermissionPolicy,
   type TaskState,
 } from '@byok-sdk/protocol';
@@ -168,8 +170,12 @@ export interface ByokServer {
   requestAgentContentRead(input: AgentContentReadRequest): Promise<void>;
   /** Enqueue one task-free, exact-device Agent-home projection. */
   enqueueAgentHomeProjection(input: AgentHomeProjectionRequest): Promise<AgentHomeProjectionStatusReadback>;
-  /** Durable desired-state and terminal-outcome readback for one projection request. */
-  readAgentHomeProjection(deviceId: string, requestId: string): Promise<AgentHomeProjectionStatusReadback | undefined>;
+  /** Durable desired-state and terminal-outcome readback for one exact device-and-Agent request. */
+  readAgentHomeProjection(
+    deviceId: string,
+    agentRef: AgentRef,
+    requestId: string,
+  ): Promise<AgentHomeProjectionStatusReadback | undefined>;
   tasks: {
     get(taskId: string): Promise<TaskSnapshot | undefined>;
     /**
@@ -186,7 +192,7 @@ export interface ByokServer {
   };
   /** Reliable Agent egress receipt readback. */
   egress: {
-    get(deviceId: string, eventId: string): Promise<AgentEgressReceipt | undefined>;
+    get(deviceId: string, agentRef: AgentRef, eventId: string): Promise<AgentEgressReceipt | undefined>;
   };
   machines: {
     list(): Promise<MachineInfo[]>;
@@ -370,42 +376,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   }
 
   /**
-   * Write a host-side approval decision onto the task's durable approval
-   * timeline.
-   *
-   * The pending-approval slot is DERIVED from that timeline — by this package's
-   * snapshot projection and by the kernel's own staleness gate, from the same
-   * fold. So a host decision that stayed unrecorded would leave both of them
-   * insisting an approval is still outstanding that the operator already
-   * answered, and `approve()` would silently enqueue a second `task.approve`
-   * every time it was called. Recording it in the one authority is what keeps
-   * those two readers agreeing; a private "already resolved" set beside the
-   * timeline would be a second authority for exactly one datum.
-   *
-   * A pre-M5 daemon reported `task.await_approval` with no `approvalId`. Its
-   * untargeted host decision is retained as an explicit id-less resolution;
-   * no local identity is synthesized, and the one pending slot still clears.
-   */
-  async function recordHostApproval(
-    taskId: string,
-    decision: 'approve' | 'reject',
-    approvalId: string | undefined,
-    sourceEnvelopeId: string,
-  ): Promise<void> {
-    await composition.cloud.approvals.append(tenant, {
-      taskId,
-      sourceEnvelopeId,
-      event: {
-        type: 'approval_resolved',
-        ...(approvalId === undefined ? {} : { approvalId }),
-        decision,
-        resolvedBy: 'host',
-        at: new Date().toISOString(),
-      },
-    });
-  }
-
-  /**
    * M4 Phase 3 hardening: the daemon resolved a pending approval entirely
    * locally and never sent `task.approval_resolved`, but its next
    * progress/artifact message proves, after the fact, that it did. Recorded on
@@ -417,17 +387,58 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
    * the kernel's observer contract is synchronous and inline. A failure here
    * changes nothing durable — the next message re-runs the same check.
    */
-  relay.onTaskActivity = (taskId: string): void => {
+  relay.onTaskActivity = (
+    taskId: string,
+    pendingRequestSourceEnvelopeId: string | undefined,
+    activitySourceEnvelopeId: string,
+    activityAt: string,
+  ): void => {
     void (async () => {
+      // The relay captured this request identity when it observed the native
+      // `task.await_approval`. An activity that committed before that request
+      // is therefore never retroactively allowed to resolve it after an async
+      // timeline read observes the newer pending slot.
+      if (pendingRequestSourceEnvelopeId === undefined) return;
       const pending = await readPending(taskId);
-      if (pending?.approvalId === undefined) return;
-      const at = new Date().toISOString();
-      await composition.cloud.approvals.append(tenant, {
+      if (
+        pending === undefined ||
+        pending.sourceEnvelopeId !== pendingRequestSourceEnvelopeId
+      ) {
+        return;
+      }
+      const attempt = await cloud.readTaskAttempt(tenant, taskId);
+      if (attempt === undefined) return;
+      const sourceEnvelopeId = await composition.crypto.sha256(
+        new TextEncoder().encode(
+          JSON.stringify({
+            domain: 'byok:implicit-approval',
+            tenant,
+            taskId,
+            deviceId: attempt.deviceId,
+            ownerDeviceId: attempt.ownerDeviceId,
+            agentRef: attempt.agentRef,
+            requestSourceEnvelopeId: pending.sourceEnvelopeId,
+            requestRevision: pending.revision,
+            activitySourceEnvelopeId,
+          }),
+        ),
+      );
+      const resolved = await composition.cloud.approvals.resolvePending(tenant, {
         taskId,
-        sourceEnvelopeId: `implicit-approval:${taskId}:${pending.approvalId}`,
-        event: { type: 'approval_resolved', approvalId: pending.approvalId, decision: 'approve', resolvedBy: 'host', at },
+        sourceEnvelopeId,
+        expectedSourceEnvelopeId: pending.sourceEnvelopeId,
+        expectedRevision: pending.revision,
+        event: {
+          type: 'approval_resolved',
+          ...(pending.approvalId === undefined ? {} : { approvalId: pending.approvalId }),
+          decision: 'approve',
+          resolvedBy: 'host',
+          at: activityAt,
+        },
       });
-      relay.emitImplicitApprovalResolved(taskId, at);
+      if (resolved.status === 'applied' || resolved.status === 'replayed') {
+        relay.emitImplicitApprovalResolved(taskId, activityAt);
+      }
     })().catch(() => undefined);
   };
 
@@ -553,59 +564,75 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       ...(dispatchSelection === undefined ? {} : { dispatchSelection }),
     };
 
-    const enqueued = await (async () => {
-      if (agentRef !== undefined && egressPolicy !== undefined && freshAgentEgress) {
-        return cloud.enqueueFreshAgentEgressOffer(tenant, deviceId, {
-          payload: {
-            ...common,
-            agentRef,
-            egressPolicy,
-            ...(terminalProjection === undefined ? {} : { terminalProjection }),
-            ...(messageEgress === undefined ? {} : { messageEgress }),
-            ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
-          },
-          ...(agentMessageContext === undefined ? {} : { agentMessageContext }),
-        });
-      }
-      if (agentRef !== undefined && egressPolicy !== undefined) {
-        if (sessionRef === undefined) {
-          throw new Error(
-            'Agent egress resume dispatch requires an exact sessionRef; use dispatchFreshAgentEgress for fresh execution',
-          );
+    // A known id lets the relay exist before enqueue can make the offer
+    // observable. Inbound claim/terminal traffic racing append is buffered by
+    // that provisional relay state and reconciled once the offer succeeds.
+    const taskId = globalThis.crypto.randomUUID();
+    relay.provision(taskId);
+    let enqueued: EnqueuedOffer;
+    try {
+      enqueued = await (async () => {
+        if (agentRef !== undefined && egressPolicy !== undefined && freshAgentEgress) {
+          return cloud.enqueueFreshAgentEgressOffer(tenant, deviceId, {
+            taskId,
+            payload: {
+              ...common,
+              agentRef,
+              egressPolicy,
+              ...(terminalProjection === undefined ? {} : { terminalProjection }),
+              ...(messageEgress === undefined ? {} : { messageEgress }),
+              ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
+            },
+            ...(agentMessageContext === undefined ? {} : { agentMessageContext }),
+          });
         }
-        return cloud.enqueueAgentEgressOffer(tenant, deviceId, {
-          payload: {
-            ...common,
-            sessionRef,
-            agentRef,
-            egressPolicy,
-            ...(terminalProjection === undefined ? {} : { terminalProjection }),
-            ...(messageEgress === undefined ? {} : { messageEgress }),
-            ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
-          },
-          ...(agentMessageContext === undefined ? {} : { agentMessageContext }),
+        if (agentRef !== undefined && egressPolicy !== undefined) {
+          if (sessionRef === undefined) {
+            throw new Error(
+              'Agent egress resume dispatch requires an exact sessionRef; use dispatchFreshAgentEgress for fresh execution',
+            );
+          }
+          return cloud.enqueueAgentEgressOffer(tenant, deviceId, {
+            taskId,
+            payload: {
+              ...common,
+              sessionRef,
+              agentRef,
+              egressPolicy,
+              ...(terminalProjection === undefined ? {} : { terminalProjection }),
+              ...(messageEgress === undefined ? {} : { messageEgress }),
+              ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
+            },
+            ...(agentMessageContext === undefined ? {} : { agentMessageContext }),
+          });
+        }
+        if (agentRef !== undefined) {
+          return cloud.enqueueAgentOffer(tenant, deviceId, {
+            taskId,
+            payload: {
+              ...common,
+              agentRef,
+              ...(sessionRef === undefined ? {} : { sessionRef }),
+              ...(terminalProjection === undefined ? {} : { terminalProjection }),
+              ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
+            },
+          });
+        }
+        if (requiredToolsets !== undefined) {
+          return cloud.enqueueToolsetOffer(tenant, deviceId, {
+            taskId,
+            payload: { ...common, ...(sessionRef === undefined ? {} : { sessionRef }), requiredToolsets },
+          });
+        }
+        return cloud.enqueueOffer(tenant, deviceId, {
+          taskId,
+          payload: { ...common, ...(sessionRef === undefined ? {} : { sessionRef }) },
         });
-      }
-      if (agentRef !== undefined) {
-        return cloud.enqueueAgentOffer(tenant, deviceId, {
-          payload: {
-            ...common,
-            agentRef,
-            ...(sessionRef === undefined ? {} : { sessionRef }),
-            ...(terminalProjection === undefined ? {} : { terminalProjection }),
-            ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
-          },
-        });
-      }
-      if (requiredToolsets !== undefined) {
-        return cloud.enqueueToolsetOffer(tenant, deviceId, {
-          payload: { ...common, ...(sessionRef === undefined ? {} : { sessionRef }), requiredToolsets },
-        });
-      }
-      return cloud.enqueueOffer(tenant, deviceId, {
-        payload: { ...common, ...(sessionRef === undefined ? {} : { sessionRef }) },
-      });
-    })();
+      })();
+    } catch (error) {
+      relay.abort(taskId);
+      throw error;
+    }
 
     // The offer envelope's own timestamp, so the feed and the snapshot agree on
     // when the task began rather than each stamping its own "now".
@@ -623,7 +650,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       tenant,
       cloud,
       relay,
-      recordHostApproval,
       readState: readTaskState,
       readResult: async (id) => toTaskResult(await readTerminal(id)),
     });
@@ -684,16 +710,14 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
 
     async readAgentHomeProjection(
       deviceId: string,
+      agentRef: AgentRef,
       requestId: string,
     ): Promise<AgentHomeProjectionStatusReadback | undefined> {
-      // The kernel's readback is keyed by the WHOLE immutable request identity
-      // (`requestId` + `agentRef` + `projectionHash`) so a status read can never
-      // be answered for a different desired state that happens to share an id.
-      // A host holding only the id gets the rest from the durable request the
-      // enqueue recorded — one authority, read twice, not a second index.
+      // The durable request lookup is exact to the device and AgentRef. The
+      // stored request remains the authority for the projection hash.
       const stored = await composition.cloud.receipts.get(
         tenant,
-        agentHomeProjectionRequestKey(deviceId, requestId),
+        agentHomeProjectionRequestKey(deviceId, agentRef, requestId),
       );
       if (stored === undefined) return undefined;
       let desired: AgentHomeProjectionPayload;
@@ -733,8 +757,8 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     },
 
     egress: {
-      async get(deviceId: string, eventId: string): Promise<AgentEgressReceipt | undefined> {
-        const record = await cloud.readAgentEgress(tenant, deviceId, eventId);
+      async get(deviceId: string, agentRef: AgentRef, eventId: string): Promise<AgentEgressReceipt | undefined> {
+        const record = await cloud.readAgentEgress(tenant, deviceId, agentRef, eventId);
         return record === undefined
           ? undefined
           : {
