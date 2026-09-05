@@ -15,12 +15,46 @@ export declare const ActivityAppendRequestSchema: z.ZodObject<{
         tool: z.ZodString;
         input: z.ZodOptional<z.ZodUnknown>;
         toolCallId: z.ZodOptional<z.ZodString>;
+        spill: z.ZodOptional<z.ZodObject<{
+            field: z.ZodEnum<{
+                input: "input";
+                output: "output";
+            }>;
+            totalBytes: z.ZodNumber;
+            omittedBytes: z.ZodNumber;
+            contentType: z.ZodLiteral<"application/json">;
+            blob: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>>;
+            unstoredReason: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"tool_result">;
         tool: z.ZodString;
         output: z.ZodOptional<z.ZodUnknown>;
         toolCallId: z.ZodOptional<z.ZodString>;
         isError: z.ZodOptional<z.ZodBoolean>;
+        spill: z.ZodOptional<z.ZodObject<{
+            field: z.ZodEnum<{
+                input: "input";
+                output: "output";
+            }>;
+            totalBytes: z.ZodNumber;
+            omittedBytes: z.ZodNumber;
+            contentType: z.ZodLiteral<"application/json">;
+            blob: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>>;
+            unstoredReason: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"artifact">;
         name: z.ZodString;
@@ -60,12 +94,46 @@ export declare const TimelineEventSchema: z.ZodObject<{
         tool: z.ZodString;
         input: z.ZodOptional<z.ZodUnknown>;
         toolCallId: z.ZodOptional<z.ZodString>;
+        spill: z.ZodOptional<z.ZodObject<{
+            field: z.ZodEnum<{
+                input: "input";
+                output: "output";
+            }>;
+            totalBytes: z.ZodNumber;
+            omittedBytes: z.ZodNumber;
+            contentType: z.ZodLiteral<"application/json">;
+            blob: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>>;
+            unstoredReason: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"tool_result">;
         tool: z.ZodString;
         output: z.ZodOptional<z.ZodUnknown>;
         toolCallId: z.ZodOptional<z.ZodString>;
         isError: z.ZodOptional<z.ZodBoolean>;
+        spill: z.ZodOptional<z.ZodObject<{
+            field: z.ZodEnum<{
+                input: "input";
+                output: "output";
+            }>;
+            totalBytes: z.ZodNumber;
+            omittedBytes: z.ZodNumber;
+            contentType: z.ZodLiteral<"application/json">;
+            blob: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>>;
+            unstoredReason: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"artifact">;
         name: z.ZodString;

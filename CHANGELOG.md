@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **`@byok-sdk/protocol` bounded tool payloads (additive):** `tool_use` and
+  `tool_result` optionally carry `spill` (`AgentEventSpillSchema`) — `field`,
+  `totalBytes`, `omittedBytes`, `contentType: 'application/json'`, and exactly
+  one of `blob` (a `BlobRef` to the full serialization) or `unstoredReason`.
+  No `PROTOCOL_VERSION` bump; the v1 freeze golden is regenerated as an
+  additive change. **Consumers must check `spill` before treating
+  `tool_use.input` / `tool_result.output` as the complete value** — when it is
+  present the inline field is `{ preview: { head, tail } }`, not the payload.
+- **`@byok-sdk/client` `DaemonConfig.maxInlineEventBytes` (default 64 KiB):**
+  a `tool_use` / `tool_result` event whose serialization exceeds the cap
+  leaves `TaskRunner.pump` with its `input` / `output` replaced by a
+  UTF-8-safe head/tail preview and a `spill` descriptor; the full
+  `JSON.stringify` of the field is uploaded to the blob plane under an
+  idempotent, content-addressed key. The replacement is measured against the
+  cap, not assumed to fit, and the whole-task `maxTaskOutputBytes` accounting
+  now counts the post-spill size. Must be a safe integer of at least 4096 —
+  there is no opt-out value. A failed upload is reported through
+  `spill.unstoredReason` and logged, never silently dropped, and the task
+  still completes. Metadata-status Agent egress carries no `spill`.
 - **`@byok-sdk/keys` provider vendor catalog:** `MODEL_PROVIDER_VENDORS` declares
   27 vendors (id, display name, base URL in the SDK's suffix convention, adapter,
   auth mode, credential env name) ported from deepseek-harness / pi-ai 0.84.2;

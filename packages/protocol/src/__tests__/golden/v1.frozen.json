@@ -3585,6 +3585,74 @@
                       "toolCallId": {
                         "type": "string",
                         "pattern": "\\S"
+                      },
+                      "spill": {
+                        "type": "object",
+                        "properties": {
+                          "field": {
+                            "type": "string",
+                            "enum": [
+                              "input",
+                              "output"
+                            ]
+                          },
+                          "totalBytes": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "omittedBytes": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "contentType": {
+                            "type": "string",
+                            "const": "application/json"
+                          },
+                          "blob": {
+                            "type": "object",
+                            "properties": {
+                              "blobId": {
+                                "type": "string"
+                              },
+                              "contentHash": {
+                                "type": "string",
+                                "pattern": "^sha256:[0-9a-f]{64}$"
+                              },
+                              "size": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "contentType": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "blobId",
+                              "contentHash",
+                              "size",
+                              "contentType"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "unstoredReason": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512
+                          }
+                        },
+                        "required": [
+                          "field",
+                          "totalBytes",
+                          "omittedBytes",
+                          "contentType"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -3610,6 +3678,74 @@
                       },
                       "isError": {
                         "type": "boolean"
+                      },
+                      "spill": {
+                        "type": "object",
+                        "properties": {
+                          "field": {
+                            "type": "string",
+                            "enum": [
+                              "input",
+                              "output"
+                            ]
+                          },
+                          "totalBytes": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "omittedBytes": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "contentType": {
+                            "type": "string",
+                            "const": "application/json"
+                          },
+                          "blob": {
+                            "type": "object",
+                            "properties": {
+                              "blobId": {
+                                "type": "string"
+                              },
+                              "contentHash": {
+                                "type": "string",
+                                "pattern": "^sha256:[0-9a-f]{64}$"
+                              },
+                              "size": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "contentType": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "blobId",
+                              "contentHash",
+                              "size",
+                              "contentType"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "unstoredReason": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512
+                          }
+                        },
+                        "required": [
+                          "field",
+                          "totalBytes",
+                          "omittedBytes",
+                          "contentType"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -7729,6 +7865,74 @@
                             "toolCallId": {
                               "type": "string",
                               "pattern": "\\S"
+                            },
+                            "spill": {
+                              "type": "object",
+                              "properties": {
+                                "field": {
+                                  "type": "string",
+                                  "enum": [
+                                    "input",
+                                    "output"
+                                  ]
+                                },
+                                "totalBytes": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "omittedBytes": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "contentType": {
+                                  "type": "string",
+                                  "const": "application/json"
+                                },
+                                "blob": {
+                                  "type": "object",
+                                  "properties": {
+                                    "blobId": {
+                                      "type": "string"
+                                    },
+                                    "contentHash": {
+                                      "type": "string",
+                                      "pattern": "^sha256:[0-9a-f]{64}$"
+                                    },
+                                    "size": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "contentType": {
+                                      "type": "string"
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "blobId",
+                                    "contentHash",
+                                    "size",
+                                    "contentType"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "unstoredReason": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512
+                                }
+                              },
+                              "required": [
+                                "field",
+                                "totalBytes",
+                                "omittedBytes",
+                                "contentType"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "required": [
@@ -7754,6 +7958,74 @@
                             },
                             "isError": {
                               "type": "boolean"
+                            },
+                            "spill": {
+                              "type": "object",
+                              "properties": {
+                                "field": {
+                                  "type": "string",
+                                  "enum": [
+                                    "input",
+                                    "output"
+                                  ]
+                                },
+                                "totalBytes": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "omittedBytes": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "contentType": {
+                                  "type": "string",
+                                  "const": "application/json"
+                                },
+                                "blob": {
+                                  "type": "object",
+                                  "properties": {
+                                    "blobId": {
+                                      "type": "string"
+                                    },
+                                    "contentHash": {
+                                      "type": "string",
+                                      "pattern": "^sha256:[0-9a-f]{64}$"
+                                    },
+                                    "size": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "contentType": {
+                                      "type": "string"
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "blobId",
+                                    "contentHash",
+                                    "size",
+                                    "contentType"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "unstoredReason": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512
+                                }
+                              },
+                              "required": [
+                                "field",
+                                "totalBytes",
+                                "omittedBytes",
+                                "contentType"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "required": [
@@ -9373,6 +9645,74 @@
           "toolCallId": {
             "type": "string",
             "pattern": "\\S"
+          },
+          "spill": {
+            "type": "object",
+            "properties": {
+              "field": {
+                "type": "string",
+                "enum": [
+                  "input",
+                  "output"
+                ]
+              },
+              "totalBytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "omittedBytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "contentType": {
+                "type": "string",
+                "const": "application/json"
+              },
+              "blob": {
+                "type": "object",
+                "properties": {
+                  "blobId": {
+                    "type": "string"
+                  },
+                  "contentHash": {
+                    "type": "string",
+                    "pattern": "^sha256:[0-9a-f]{64}$"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "contentType": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "blobId",
+                  "contentHash",
+                  "size",
+                  "contentType"
+                ],
+                "additionalProperties": false
+              },
+              "unstoredReason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              }
+            },
+            "required": [
+              "field",
+              "totalBytes",
+              "omittedBytes",
+              "contentType"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -9398,6 +9738,74 @@
           },
           "isError": {
             "type": "boolean"
+          },
+          "spill": {
+            "type": "object",
+            "properties": {
+              "field": {
+                "type": "string",
+                "enum": [
+                  "input",
+                  "output"
+                ]
+              },
+              "totalBytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "omittedBytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "contentType": {
+                "type": "string",
+                "const": "application/json"
+              },
+              "blob": {
+                "type": "object",
+                "properties": {
+                  "blobId": {
+                    "type": "string"
+                  },
+                  "contentHash": {
+                    "type": "string",
+                    "pattern": "^sha256:[0-9a-f]{64}$"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "contentType": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "blobId",
+                  "contentHash",
+                  "size",
+                  "contentType"
+                ],
+                "additionalProperties": false
+              },
+              "unstoredReason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              }
+            },
+            "required": [
+              "field",
+              "totalBytes",
+              "omittedBytes",
+              "contentType"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -9550,6 +9958,74 @@
               "toolCallId": {
                 "type": "string",
                 "pattern": "\\S"
+              },
+              "spill": {
+                "type": "object",
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "enum": [
+                      "input",
+                      "output"
+                    ]
+                  },
+                  "totalBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "omittedBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "contentType": {
+                    "type": "string",
+                    "const": "application/json"
+                  },
+                  "blob": {
+                    "type": "object",
+                    "properties": {
+                      "blobId": {
+                        "type": "string"
+                      },
+                      "contentHash": {
+                        "type": "string",
+                        "pattern": "^sha256:[0-9a-f]{64}$"
+                      },
+                      "size": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "contentType": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "blobId",
+                      "contentHash",
+                      "size",
+                      "contentType"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "unstoredReason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  }
+                },
+                "required": [
+                  "field",
+                  "totalBytes",
+                  "omittedBytes",
+                  "contentType"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -9575,6 +10051,74 @@
               },
               "isError": {
                 "type": "boolean"
+              },
+              "spill": {
+                "type": "object",
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "enum": [
+                      "input",
+                      "output"
+                    ]
+                  },
+                  "totalBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "omittedBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "contentType": {
+                    "type": "string",
+                    "const": "application/json"
+                  },
+                  "blob": {
+                    "type": "object",
+                    "properties": {
+                      "blobId": {
+                        "type": "string"
+                      },
+                      "contentHash": {
+                        "type": "string",
+                        "pattern": "^sha256:[0-9a-f]{64}$"
+                      },
+                      "size": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "contentType": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "blobId",
+                      "contentHash",
+                      "size",
+                      "contentType"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "unstoredReason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  }
+                },
+                "required": [
+                  "field",
+                  "totalBytes",
+                  "omittedBytes",
+                  "contentType"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -13593,6 +14137,74 @@
                                     "toolCallId": {
                                       "type": "string",
                                       "pattern": "\\S"
+                                    },
+                                    "spill": {
+                                      "type": "object",
+                                      "properties": {
+                                        "field": {
+                                          "type": "string",
+                                          "enum": [
+                                            "input",
+                                            "output"
+                                          ]
+                                        },
+                                        "totalBytes": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "omittedBytes": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "contentType": {
+                                          "type": "string",
+                                          "const": "application/json"
+                                        },
+                                        "blob": {
+                                          "type": "object",
+                                          "properties": {
+                                            "blobId": {
+                                              "type": "string"
+                                            },
+                                            "contentHash": {
+                                              "type": "string",
+                                              "pattern": "^sha256:[0-9a-f]{64}$"
+                                            },
+                                            "size": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "contentType": {
+                                              "type": "string"
+                                            },
+                                            "url": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "blobId",
+                                            "contentHash",
+                                            "size",
+                                            "contentType"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        "unstoredReason": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 512
+                                        }
+                                      },
+                                      "required": [
+                                        "field",
+                                        "totalBytes",
+                                        "omittedBytes",
+                                        "contentType"
+                                      ],
+                                      "additionalProperties": false
                                     }
                                   },
                                   "required": [
@@ -13618,6 +14230,74 @@
                                     },
                                     "isError": {
                                       "type": "boolean"
+                                    },
+                                    "spill": {
+                                      "type": "object",
+                                      "properties": {
+                                        "field": {
+                                          "type": "string",
+                                          "enum": [
+                                            "input",
+                                            "output"
+                                          ]
+                                        },
+                                        "totalBytes": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "omittedBytes": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "contentType": {
+                                          "type": "string",
+                                          "const": "application/json"
+                                        },
+                                        "blob": {
+                                          "type": "object",
+                                          "properties": {
+                                            "blobId": {
+                                              "type": "string"
+                                            },
+                                            "contentHash": {
+                                              "type": "string",
+                                              "pattern": "^sha256:[0-9a-f]{64}$"
+                                            },
+                                            "size": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "contentType": {
+                                              "type": "string"
+                                            },
+                                            "url": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "blobId",
+                                            "contentHash",
+                                            "size",
+                                            "contentType"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        "unstoredReason": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 512
+                                        }
+                                      },
+                                      "required": [
+                                        "field",
+                                        "totalBytes",
+                                        "omittedBytes",
+                                        "contentType"
+                                      ],
+                                      "additionalProperties": false
                                     }
                                   },
                                   "required": [
@@ -18782,6 +19462,74 @@
                                     "toolCallId": {
                                       "type": "string",
                                       "pattern": "\\S"
+                                    },
+                                    "spill": {
+                                      "type": "object",
+                                      "properties": {
+                                        "field": {
+                                          "type": "string",
+                                          "enum": [
+                                            "input",
+                                            "output"
+                                          ]
+                                        },
+                                        "totalBytes": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "omittedBytes": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "contentType": {
+                                          "type": "string",
+                                          "const": "application/json"
+                                        },
+                                        "blob": {
+                                          "type": "object",
+                                          "properties": {
+                                            "blobId": {
+                                              "type": "string"
+                                            },
+                                            "contentHash": {
+                                              "type": "string",
+                                              "pattern": "^sha256:[0-9a-f]{64}$"
+                                            },
+                                            "size": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "contentType": {
+                                              "type": "string"
+                                            },
+                                            "url": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "blobId",
+                                            "contentHash",
+                                            "size",
+                                            "contentType"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        "unstoredReason": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 512
+                                        }
+                                      },
+                                      "required": [
+                                        "field",
+                                        "totalBytes",
+                                        "omittedBytes",
+                                        "contentType"
+                                      ],
+                                      "additionalProperties": false
                                     }
                                   },
                                   "required": [
@@ -18807,6 +19555,74 @@
                                     },
                                     "isError": {
                                       "type": "boolean"
+                                    },
+                                    "spill": {
+                                      "type": "object",
+                                      "properties": {
+                                        "field": {
+                                          "type": "string",
+                                          "enum": [
+                                            "input",
+                                            "output"
+                                          ]
+                                        },
+                                        "totalBytes": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "omittedBytes": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "contentType": {
+                                          "type": "string",
+                                          "const": "application/json"
+                                        },
+                                        "blob": {
+                                          "type": "object",
+                                          "properties": {
+                                            "blobId": {
+                                              "type": "string"
+                                            },
+                                            "contentHash": {
+                                              "type": "string",
+                                              "pattern": "^sha256:[0-9a-f]{64}$"
+                                            },
+                                            "size": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "contentType": {
+                                              "type": "string"
+                                            },
+                                            "url": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "blobId",
+                                            "contentHash",
+                                            "size",
+                                            "contentType"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        "unstoredReason": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 512
+                                        }
+                                      },
+                                      "required": [
+                                        "field",
+                                        "totalBytes",
+                                        "omittedBytes",
+                                        "contentType"
+                                      ],
+                                      "additionalProperties": false
                                     }
                                   },
                                   "required": [

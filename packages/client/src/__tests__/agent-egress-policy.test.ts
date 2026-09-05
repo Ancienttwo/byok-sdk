@@ -81,6 +81,55 @@ describe('Agent egress policy and sanitizer', () => {
     })).toEqual(events);
   });
 
+  it('never lets a spill descriptor (a readable blob locator) survive metadata-status projection', () => {
+    const blobId = 'blob_spilled_tool_output';
+    const spill = {
+      field: 'output' as const,
+      totalBytes: 3_145_728,
+      omittedBytes: 3_145_700,
+      contentType: 'application/json' as const,
+      blob: {
+        blobId,
+        contentHash: `sha256:${'c'.repeat(64)}`,
+        size: 3_145_728,
+        contentType: 'application/json',
+      },
+    };
+    const envelope = createEnvelope('task.progress', {
+      seq: 1,
+      events: [
+        { type: 'tool_result', tool: 'bash', isError: false, output: { preview: { head: 'HEAD-BYTES', tail: 'TAIL-BYTES' } }, spill },
+        { type: 'tool_use', tool: 'write_file', input: { preview: { head: 'IN-HEAD', tail: 'IN-TAIL' } }, spill: { ...spill, field: 'input' as const } },
+      ],
+    }, { taskId: 'task-egress-omission', seq: 1 });
+
+    const sanitized = sanitizeEgressEnvelope(envelope, DEFAULT_AGENT_EGRESS_POLICY, undefined);
+    expect(sanitized.ok).toBe(true);
+    if (!sanitized.ok) return;
+    const events = (sanitized.envelope.payload as { events: unknown[] }).events;
+    expect(events).toEqual([
+      { type: 'tool_result', tool: '[tool omitted]', isError: false },
+      { type: 'tool_use', tool: '[tool omitted]' },
+    ]);
+    for (const wire of [encodeEnvelope(sanitized.envelope), JSON.stringify({ messages: [sanitized.envelope] })]) {
+      expect(wire).not.toContain(blobId);
+      expect(wire).not.toContain('spill');
+      expect(wire).not.toContain('HEAD-BYTES');
+      expect(wire).not.toContain('3145728');
+    }
+
+    // Same guarantee through the controller's own latest-value projection.
+    const controller = new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY });
+    const projected = controller.projectLatestValue({
+      taskId: 'task-egress-omission',
+      agentRef,
+      events: [{ type: 'tool_result', tool: 'bash', output: { preview: { head: 'x', tail: 'y' } }, spill }],
+      serverCapabilities: ['agent-egress'],
+    });
+    expect(JSON.stringify(projected)).not.toContain('spill');
+    expect(JSON.stringify(projected)).not.toContain(blobId);
+  });
+
   it('rejects malformed policy instead of silently selecting contentful semantics', () => {
     expect(() => resolveAgentEgressPolicy({
       ...DEFAULT_AGENT_EGRESS_POLICY,

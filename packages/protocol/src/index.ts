@@ -26,13 +26,15 @@ export type {
 
 export {
   AgentEventSchema,
+  AgentEventSpillSchema,
+  AGENT_EVENT_SPILL_UNSTORED_REASON_MAX_LENGTH,
   UnknownAgentEventSchema,
   AgentEventOrUnknownSchema,
   KNOWN_AGENT_EVENT_TYPES,
   isKnownAgentEvent,
   partitionAgentEvents,
 } from './agent-event';
-export type { AgentEvent, UnknownAgentEvent, AgentEventOrUnknown } from './agent-event';
+export type { AgentEvent, AgentEventSpill, UnknownAgentEvent, AgentEventOrUnknown } from './agent-event';
 
 export {
   AgentEgressPolicySchema,
