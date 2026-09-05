@@ -72,7 +72,18 @@ boundary and final implementation; no main-worktree or event-spill edits.
 - [x] Consult existing tmux Claude and record independent findings.
 - [x] Resolve native TUI versus owned RPC host product boundary.
 - [x] Write the exact approved implementation contract and selected plan.
-- [ ] Implement and verify confirmation admission and Codex↔Pi round trip.
-- [ ] Run required checks and independent acceptance; record remaining scope.
+- [x] Implement and verify confirmation admission and Codex↔Pi round trip.
+- [x] Run required checks and independent acceptance; record remaining scope.
 
 Selected native guard/GUI design and tested transport details: see the research.
+
+
+## Completion
+
+Reviewed source: 17f9db31b1b57f2b6ef2f11740d2872d5b54455f. Existing tmux Claude
+accepted the frozen source and same-run evidence. Root checks passed; 312 test
+files / 3668 tests. Pi readback is exactly 0.85.1. Actual confirmation hold and
+Codex↔Pi receipts passed, with the initial smoke oracle correction preserved.
+See the review for the unobserved original relay exit code. This branch remains
+isolated; main integration, GUI application construction and release are not part
+of this completed source slice.
