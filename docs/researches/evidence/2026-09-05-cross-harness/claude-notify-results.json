@@ -1,0 +1,71 @@
+{
+  "harness": "claude",
+  "version": "2.1.261",
+  "scope": "print stream-json persistent process; not interactive TUI",
+  "cases": {
+    "idle": "PASS: persistent stream-json accepts idle input",
+    "busy": "BLOCKED before gate: provider refusal, not a measured queue failure",
+    "approval": "UNVERIFIED: busy setup provider refusal stopped this lane",
+    "draft": "UNVERIFIED: hidden TUI route probe stopped before workspace trust/model execution"
+  },
+  "sessionId": "1155d2d7-11ac-4b4e-985e-dc9e476e7b2c",
+  "status": "BLOCKED",
+  "error": "Provider refusal on busy setup: reasoning_extraction; terminal_reason=api_error, is_error=true, stop_reason=refusal despite subtype=success. No busy/approval conclusion.",
+  "events": [
+    {
+      "ts": 1788623887.839919,
+      "event": "native_input_sent",
+      "label": "idle"
+    },
+    {
+      "ts": 1788623892.481195,
+      "event": "result",
+      "sessionId": "1155d2d7-11ac-4b4e-985e-dc9e476e7b2c",
+      "subtype": "success"
+    },
+    {
+      "ts": 1788623892.481237,
+      "event": "native_input_sent",
+      "label": "busy"
+    },
+    {
+      "ts": 1788623977.57535,
+      "event": "blocked",
+      "reason": "Claude tool event deadline busy"
+    }
+  ],
+  "tools": [
+    {
+      "ts": 1788623891.479769,
+      "event": "tool_enter",
+      "tool": "probe_record",
+      "label": "idle"
+    },
+    {
+      "ts": 1788623891.481066,
+      "event": "tool_exit",
+      "tool": "probe_record",
+      "label": "idle"
+    }
+  ],
+  "resultSessionIds": [
+    "1155d2d7-11ac-4b4e-985e-dc9e476e7b2c",
+    "1155d2d7-11ac-4b4e-985e-dc9e476e7b2c"
+  ],
+  "providerResult": [
+    {
+      "subtype": "success",
+      "is_error": false,
+      "stop_reason": "end_turn",
+      "terminal_reason": "completed",
+      "session_id": "1155d2d7-11ac-4b4e-985e-dc9e476e7b2c"
+    },
+    {
+      "subtype": "success",
+      "is_error": true,
+      "stop_reason": "refusal",
+      "terminal_reason": "api_error",
+      "session_id": "1155d2d7-11ac-4b4e-985e-dc9e476e7b2c"
+    }
+  ]
+}

@@ -71,8 +71,33 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 
 ## Allowed Paths
 
+Draft-only scope addition (2026-09-05): the user explicitly requested a tmux
+cross-harness refactor proposal after discussion with the existing Claude pane.
+Permit only the following standalone Draft plan file. This does not activate
+that plan, change this topology goal, or authorize any implementation paths.
+
+Probe-only scope addition (2026-09-05): the user approved the bounded
+Claude/Codex/Pi Team MCP and native continuation probes. Permit the report and
+disposable-probe source/sanitized evidence below. Production source, live Agent
+homes, existing panes, release state and this topology goal remain outside that
+new slice. These probes do not approve the broad refactor Draft.
+
+Continuation approval (2026-09-05): the user approved native notify probes for
+idle, busy, approval and human-draft states in disposable owned sessions. Use
+the same report/evidence paths. No production binding, existing pane adoption,
+or global harness configuration mutation is authorized by this slice.
+
+Claude acceptance continuation (2026-09-06): user approved completion of the
+remaining Claude busy/approval/TUI matrix. Allow one unchanged-provider probe
+recheck, disposable TUI setup and evidence updates in the same existing paths.
+Provider refusal must remain observable; no model substitution or hidden
+permission bypass is authorized or required.
+
 ```yaml
 allowed_paths:
+  - docs/researches/2026-09-05_cross-harness-probe.md
+  - docs/researches/evidence/2026-09-05-cross-harness/
+  - plans/plan-20260905-2239-tmux-cross-harness-collaboration.md
   - plans/plan-20260905-0114-public-package-topology.md
   - tasks/todos.md
   - tasks/current.md

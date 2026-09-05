@@ -12,7 +12,10 @@ describe('Agent-scoped provider profile binding', () => {
     expect(api.ProviderProfileRefSchema).toBeDefined();
     expect(api.ProviderProfileRefSchema?.parse('openrouter-primary')).toBe('openrouter-primary');
     expect(api.ProviderProfileRefSchema?.parse('openrouter-backup')).toBe('openrouter-backup');
-    expect(api.MODEL_PROVIDER_KINDS).toEqual(['openai', 'deepseek', 'anthropic', 'custom']);
+    expect(api.MODEL_PROVIDER_KINDS).toEqual([...keys.MODEL_PROVIDER_VENDOR_IDS, 'custom']);
+    expect(api.MODEL_PROVIDER_KINDS).toEqual(
+      expect.arrayContaining(['openai', 'deepseek', 'anthropic', 'custom']),
+    );
   });
 
   it('projects explicit image-input capability without exposing a credential', () => {

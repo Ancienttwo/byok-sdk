@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **`@byok-sdk/keys` provider vendor catalog:** `MODEL_PROVIDER_VENDORS` declares
+  27 vendors (id, display name, base URL in the SDK's suffix convention, adapter,
+  auth mode, credential env name) ported from deepseek-harness / pi-ai 0.84.2;
+  `MODEL_PROVIDER_KINDS` is now that catalog plus `custom`, and the SQLite
+  `provider_profile` CHECK constraints are generated from it. **Breaking:** a
+  catalog vendor kind must use its catalog adapter (`custom` keeps both), and a
+  provider profile store created by an earlier version fails closed at open with
+  `PROVIDER_STORE_SCHEMA_STALE` — recreate the store file; there is no in-place
+  migration.
+- **`@byok-sdk/client` credential deny list:** `HF_TOKEN` and `MOONSHOT_API_KEY`
+  join `PROVIDER_CREDENTIAL_ENV_DENY_NAMES`, so the catalog's credential names
+  are never inherited by subscription or BYOK custody children.
+
 ## 0.13.0 / @byok-sdk/keys 0.3.10 — 2026-09-05
 
 - **Breaking (WP3B coordination transport):** `@byok-sdk/server` is now the

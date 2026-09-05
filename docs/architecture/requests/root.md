@@ -2,10 +2,10 @@
 
 > **Status**: Pending
 > **Detected**: 2026-09-05T01:25:02+0800
-> **Updated**: 2026-09-05T02:08:11+0800
+> **Updated**: 2026-09-05T23:06:44+0800
 > **Severity**: high
 > **Change Type**: source-change
-> **File**: `packages/client/src/__tests__/daemon-auth.test.ts`
+> **File**: `packages/client/src/__tests__/deterministic-jitter.test.ts`
 > **Functional Block**: `packages`
 > **Capability ID**: `root`
 > **Matched Prefix**: `packages`
@@ -16,7 +16,7 @@
 > **Contract Files**: `packages/AGENTS.md`, `packages/CLAUDE.md`
 > **Contract Sync Required**: false
 > **Spawn Recommended**: true
-> **Open Edits**: 63
+> **Open Edits**: 74
 
 ## Required Follow-up
 
@@ -33,6 +33,17 @@
 
 | Last Event | Severity | Change Type | File | Event Key |
 | --- | --- | --- | --- | --- |
+| 2026-09-05T23:06:44+0800 | low | source-change | `packages/client/src/__tests__/deterministic-jitter.test.ts` | `sha256:3be306497aa01955777d35c9435801147fb69b407fd9664108dd6c9f0a643e6e` |
+| 2026-09-05T23:06:42+0800 | low | source-change | `packages/client/src/__tests__/daemon-task-loop.test.ts` | `sha256:daa4e5c122eac244d10838edadd63634860c0d4f2b6edefcb26f08415b23b772` |
+| 2026-09-05T23:06:41+0800 | low | source-change | `packages/client/src/__tests__/daemon-stop-shutdown-parity.test.ts` | `sha256:f22cb5d6af16ac40047da1078211996243c1702bb869a60fad13310177554f90` |
+| 2026-09-05T23:06:40+0800 | low | source-change | `packages/client/src/__tests__/daemon-session-resume.test.ts` | `sha256:2941eb187c76726ca739b9e5ffc735ee26643055f7200e78d25a8663707967db` |
+| 2026-09-05T23:06:38+0800 | low | source-change | `packages/client/src/__tests__/daemon-reconnect.test.ts` | `sha256:ee25d323ec5b467efa9d0e76aa0e821c5827b5206f1f24e9b3606a52eae5ac7f` |
+| 2026-09-05T23:06:37+0800 | low | source-change | `packages/client/src/__tests__/daemon-owner-mutex-collision.test.ts` | `sha256:12446b812e97b065999ea014ec12fc87223ebc01e8a8d195b92ab494e57cce97` |
+| 2026-09-05T23:06:36+0800 | low | source-change | `packages/client/src/__tests__/daemon-observer.test.ts` | `sha256:bdbda1a4c4542084106d16baa917000375cc2a9f6c7ce62d2270791cb429e78b` |
+| 2026-09-05T23:06:34+0800 | low | source-change | `packages/client/src/__tests__/daemon-longpoll.test.ts` | `sha256:c83335d6c035ee4f74cc91f629aeb18c40025efb9c626d74f094e439c01ef374` |
+| 2026-09-05T23:06:33+0800 | low | source-change | `packages/client/src/__tests__/daemon-control-socket.test.ts` | `sha256:b0e2a5b74ce8d01e63525e7df929be143d6db0a2e2b6cb713d41fbaaa21771d2` |
+| 2026-09-05T23:03:58+0800 | low | source-change | `packages/client/src/__tests__/daemon-conn-hello-capabilities.test.ts` | `sha256:6933df6689dbbb57307de67e81208d9007419625149866fc526612651f94f76f` |
+| 2026-09-05T22:58:43+0800 | low | source-change | `packages/client/src/__tests__/daemon-blob.test.ts` | `sha256:f42f4950b6d4c4afd60bbedb3562a2c9db22fe39b05be19563d62022dadff6f4` |
 | 2026-09-05T02:08:11+0800 | low | source-change | `packages/client/src/__tests__/daemon-auth.test.ts` | `sha256:2ade49d228cdb687f57378293456abdfc1adec8051b43ddc6f68b33484119bf7` |
 | 2026-09-05T02:08:10+0800 | low | source-change | `packages/client/src/__tests__/create-daemon-white-label.test.ts` | `sha256:323931123abd4f6a2cf811c14f6eff4c410abab1247c9e8c2350d80148be7dfe` |
 | 2026-09-05T02:08:08+0800 | low | source-change | `packages/client/src/__tests__/create-daemon-url-gate.test.ts` | `sha256:98009357c87e551e995a0e1094dfbffd2d49312f0cd4f56762e1d2bda913d5c3` |
@@ -101,8 +112,8 @@
 
 ```json
 {
-  "ts": "2026-09-05T02:08:11+0800",
-  "file_path": "packages/client/src/__tests__/daemon-auth.test.ts",
+  "ts": "2026-09-05T23:06:44+0800",
+  "file_path": "packages/client/src/__tests__/deterministic-jitter.test.ts",
   "severity": "low",
   "functional_block": "packages",
   "capability_id": "root",
@@ -117,7 +128,7 @@
   "request_file": "docs/architecture/requests/root.md",
   "spawn_recommended": false,
   "contract_sync_required": false,
-  "event_key": "sha256:2ade49d228cdb687f57378293456abdfc1adec8051b43ddc6f68b33484119bf7"
+  "event_key": "sha256:3be306497aa01955777d35c9435801147fb69b407fd9664108dd6c9f0a643e6e"
 }
 ```
 
@@ -125,6 +136,215 @@
 
 ```json
 [
+  {
+    "ts": "2026-09-05T23:06:44+0800",
+    "file_path": "packages/client/src/__tests__/deterministic-jitter.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:3be306497aa01955777d35c9435801147fb69b407fd9664108dd6c9f0a643e6e"
+  },
+  {
+    "ts": "2026-09-05T23:06:42+0800",
+    "file_path": "packages/client/src/__tests__/daemon-task-loop.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:daa4e5c122eac244d10838edadd63634860c0d4f2b6edefcb26f08415b23b772"
+  },
+  {
+    "ts": "2026-09-05T23:06:41+0800",
+    "file_path": "packages/client/src/__tests__/daemon-stop-shutdown-parity.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:f22cb5d6af16ac40047da1078211996243c1702bb869a60fad13310177554f90"
+  },
+  {
+    "ts": "2026-09-05T23:06:40+0800",
+    "file_path": "packages/client/src/__tests__/daemon-session-resume.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:2941eb187c76726ca739b9e5ffc735ee26643055f7200e78d25a8663707967db"
+  },
+  {
+    "ts": "2026-09-05T23:06:38+0800",
+    "file_path": "packages/client/src/__tests__/daemon-reconnect.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:ee25d323ec5b467efa9d0e76aa0e821c5827b5206f1f24e9b3606a52eae5ac7f"
+  },
+  {
+    "ts": "2026-09-05T23:06:37+0800",
+    "file_path": "packages/client/src/__tests__/daemon-owner-mutex-collision.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:12446b812e97b065999ea014ec12fc87223ebc01e8a8d195b92ab494e57cce97"
+  },
+  {
+    "ts": "2026-09-05T23:06:36+0800",
+    "file_path": "packages/client/src/__tests__/daemon-observer.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:bdbda1a4c4542084106d16baa917000375cc2a9f6c7ce62d2270791cb429e78b"
+  },
+  {
+    "ts": "2026-09-05T23:06:34+0800",
+    "file_path": "packages/client/src/__tests__/daemon-longpoll.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:c83335d6c035ee4f74cc91f629aeb18c40025efb9c626d74f094e439c01ef374"
+  },
+  {
+    "ts": "2026-09-05T23:06:33+0800",
+    "file_path": "packages/client/src/__tests__/daemon-control-socket.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:b0e2a5b74ce8d01e63525e7df929be143d6db0a2e2b6cb713d41fbaaa21771d2"
+  },
+  {
+    "ts": "2026-09-05T23:03:58+0800",
+    "file_path": "packages/client/src/__tests__/daemon-conn-hello-capabilities.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:6933df6689dbbb57307de67e81208d9007419625149866fc526612651f94f76f"
+  },
+  {
+    "ts": "2026-09-05T22:58:43+0800",
+    "file_path": "packages/client/src/__tests__/daemon-blob.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:f42f4950b6d4c4afd60bbedb3562a2c9db22fe39b05be19563d62022dadff6f4"
+  },
   {
     "ts": "2026-09-05T02:08:11+0800",
     "file_path": "packages/client/src/__tests__/daemon-auth.test.ts",

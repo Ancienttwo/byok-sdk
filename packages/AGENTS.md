@@ -1,33 +1,3 @@
-# Functional Block Agent Context
-
-Keep this file focused on the local contract for this primary functional block.
-
-<!-- BEGIN CAPABILITY CONTEXT -->
-## Capability Context
-
-- Capability ID: `root`
-- Domain: `sdk`
-- Name: `sdk-root`
-- Primary prefix: `packages`
-- Architecture module: `docs/architecture/sdk-architecture.md`
-- Workstream: `tasks/workstreams/root`
-
-## Positioning
-
-Owns the root capability boundary declared in .ai/context/capabilities.json.
-
-## Source Map
-
-- Primary prefix: `packages` (entrypoint)
-- Architecture module: `docs/architecture/sdk-architecture.md` (design-source)
-- Workstream: `tasks/workstreams/root` (durable-progress)
-
-## Refresh Hints
-
-- `bun run build`
-- `bun run typecheck`
-<!-- END CAPABILITY CONTEXT -->
-
 <!-- BEGIN ARCHITECTURE CONTRACT -->
 ## Architecture Contract
 
@@ -37,8 +7,8 @@ Owns the root capability boundary declared in .ai/context/capabilities.json.
 - Architecture domain: `sdk`
 - Architecture capability: `sdk-root`
 - Architecture module: `docs/architecture/sdk-architecture.md`
-- Last architecture event: 2026-09-05T02:08:11+0800
-- Last changed path: `packages/client/src/__tests__/daemon-auth.test.ts`
+- Last architecture event: 2026-09-05T23:06:44+0800
+- Last changed path: `packages/client/src/__tests__/deterministic-jitter.test.ts`
 - Severity: low
 - Change type: source-change
 - Module responsibility: Keep this block aligned with the local boundary described by surrounding human-owned context.
@@ -59,8 +29,8 @@ Owns the root capability boundary declared in .ai/context/capabilities.json.
   - current_slice: complete
   - source_plan: (none)
 - `tasks/workstreams/root/20260905-sdk-root.md`
-  - status: active
-  - current_slice: T1-T6
+  - status: acceptance
+  - current_slice: T7 exact AgentRef reliability identities, then replacement acceptance
   - source_plan: plans/plan-20260905-0124-issues-135-144-reliability.md
 
 ## Current Session Projection

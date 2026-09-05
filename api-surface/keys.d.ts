@@ -89,8 +89,9 @@ export declare class ByokKeysError extends Error {
  * stored value as-is), `SECRET_ENVELOPE_INVALID` (it reported a malformed
  * envelope as an absent secret), and `SECRET_NAME_INVALID` /
  * `SECRET_VALUE_INVALID` (the runtime replacements for the closed
- * `KeychainSecretName` union). Everything else matches the source string for
- * string.
+ * `KeychainSecretName` union). `PROVIDER_STORE_SCHEMA_STALE` joins them: it
+ * guards a persisted `provider_profile` DDL that differs from the one this
+ * package generates. Everything else matches the source string for string.
  *
  * `SECRET_NAMESPACE_INVALID` is a separate case. The source does record it:
  * `normalizeSecretNamespace` (`index.ts:748-757`) throws the verbatim string
@@ -132,6 +133,7 @@ export declare const BYOK_KEYS_ERROR_CODES: {
     readonly PROVIDER_SECRET_MISSING: 'PROVIDER_SECRET_MISSING';
     readonly PROVIDER_SECRET_NOT_ALLOWED: 'PROVIDER_SECRET_NOT_ALLOWED';
     readonly PROVIDER_SECRET_ROLLBACK_FAILED: 'PROVIDER_SECRET_ROLLBACK_FAILED';
+    readonly PROVIDER_STORE_SCHEMA_STALE: 'PROVIDER_STORE_SCHEMA_STALE';
     readonly PROVIDER_STORE_UNAVAILABLE: 'PROVIDER_STORE_UNAVAILABLE';
     readonly PROVIDER_TRUTH_INVALID: 'PROVIDER_TRUTH_INVALID';
     readonly PROVIDER_URL_INVALID: 'PROVIDER_URL_INVALID';
@@ -213,6 +215,8 @@ export { ByokKeysError, BYOK_KEYS_ERROR_CODES } from './errors';
 export type { ByokKeysErrorCode } from './errors';
 export { MODEL_PROVIDER_ADAPTERS, MODEL_PROVIDER_KINDS, PROVIDER_AUTH_MODES, PROVIDER_MODEL_CAPABILITIES, ModelProviderProfileSchema, ProviderModelCapabilitySchema, ProviderProfileRefSchema, parseModelProviderProfile, exactProviderProfileBinding, assertExactProviderProfileBinding, } from './provider-profile';
 export type { ModelProviderAdapter, ModelProviderKind, ModelProviderProfile, ModelProviderProfileInput, ExactProviderProfileBinding, ProviderAuthMode, ProviderModelCapability, ProviderProfileRef, } from './provider-profile';
+export { MODEL_PROVIDER_VENDORS, MODEL_PROVIDER_VENDOR_IDS, modelProviderVendor, } from './provider-catalog';
+export type { ModelProviderVendor, ModelProviderVendorId, } from './provider-catalog';
 export { providerHeaders, requiredProviderSecret } from './headers';
 export type { ProviderAuthProfile } from './headers';
 export { normalizeProviderUrl, isLoopbackHost, isLoopbackProviderUrl, isPrivateNetworkLiteral, } from './url';
@@ -432,8 +436,83 @@ export declare class InMemoryProviderProfileStore implements ProviderProfileStor
     save(profile: ModelProviderProfile): Promise<ModelProviderProfile>;
     setEnabled(profileRef: ProviderProfileRef): Promise<ModelProviderProfile>;
 }
+// ==== @byok-sdk/keys dist/provider-catalog.d.ts ====
+import type { ModelProviderAdapter, ProviderAuthMode } from './provider-profile';
+/**
+ * One vendor the SDK can address without the consumer typing its endpoint.
+ *
+ * Ported from the provider catalog deepseek-harness resolves its routes from:
+ * pi-ai 0.84.2 `dist/providers/*.js` (the version the SDK's pinned
+ * `@earendil-works/pi-coding-agent` 0.84.2 resolves) plus the harness's own
+ * `packages/llm/llm-deepseek/src/index.ts` `PUBLIC_BASE_URL`, which agrees
+ * with pi-ai's `deepseek` entry. Selection and the URL mapping rule are
+ * recorded in `docs/researches/2026-09-06_deepseek-harness-provider-catalog-port.md`.
+ *
+ * Every field is declared configuration a consumer may copy into a
+ * `ModelProviderProfile`; nothing here is read at request time, and a
+ * profile still carries its own `base_url` so a self-hosted gateway for a
+ * vendor stays expressible. `api_key_env` is the credential name the vendor's
+ * own tooling reads; this package never reads it, and `@byok-sdk/client`'s
+ * credential deny list must contain every value listed here.
+ */
+export interface ModelProviderVendor {
+    readonly display_name: string;
+    /**
+     * Endpoint base in this package's suffix convention: an
+     * `openai_compatible` client appends `chat/completions`, an `anthropic`
+     * client appends `messages`. pi-ai's anthropic-dialect entries therefore
+     * gain a `/v1` segment here; its OpenAI-dialect entries are verbatim.
+     */
+    readonly base_url: string;
+    readonly adapter: ModelProviderAdapter;
+    readonly auth_mode: Exclude<ProviderAuthMode, 'none'>;
+    readonly api_key_env: string;
+}
+/**
+ * Vendor id → declared endpoint facts. Ids are pi-ai's provider ids so a
+ * profile's `provider_kind` names the same route deepseek-harness would.
+ * Ordered by dialect, then alphabetically; order carries no meaning.
+ */
+export declare const MODEL_PROVIDER_VENDORS: {
+    readonly 'ant-ling': ModelProviderVendor;
+    readonly baseten: ModelProviderVendor;
+    readonly cerebras: ModelProviderVendor;
+    readonly deepseek: ModelProviderVendor;
+    readonly groq: ModelProviderVendor;
+    readonly huggingface: ModelProviderVendor;
+    readonly moonshotai: ModelProviderVendor;
+    readonly 'moonshotai-cn': ModelProviderVendor;
+    readonly nvidia: ModelProviderVendor;
+    readonly openai: ModelProviderVendor;
+    readonly openrouter: ModelProviderVendor;
+    readonly 'qwen-token-plan': ModelProviderVendor;
+    readonly 'qwen-token-plan-cn': ModelProviderVendor;
+    readonly together: ModelProviderVendor;
+    readonly xai: ModelProviderVendor;
+    readonly xiaomi: ModelProviderVendor;
+    readonly 'xiaomi-token-plan-ams': ModelProviderVendor;
+    readonly 'xiaomi-token-plan-cn': ModelProviderVendor;
+    readonly 'xiaomi-token-plan-sgp': ModelProviderVendor;
+    readonly zai: ModelProviderVendor;
+    readonly 'zai-coding-cn': ModelProviderVendor;
+    readonly anthropic: ModelProviderVendor;
+    readonly fireworks: ModelProviderVendor;
+    readonly 'kimi-coding': ModelProviderVendor;
+    readonly minimax: ModelProviderVendor;
+    readonly 'minimax-cn': ModelProviderVendor;
+    readonly 'vercel-ai-gateway': ModelProviderVendor;
+};
+export type ModelProviderVendorId = keyof typeof MODEL_PROVIDER_VENDORS;
+/** Catalog vendor ids; `MODEL_PROVIDER_KINDS` is this list plus `custom`. */
+export declare const MODEL_PROVIDER_VENDOR_IDS: readonly ModelProviderVendorId[];
+/**
+ * The catalog entry for a provider kind, or `undefined` for `custom`, which
+ * by definition declares everything itself.
+ */
+export declare function modelProviderVendor(kind: string): ModelProviderVendor | undefined;
 // ==== @byok-sdk/keys dist/provider-profile.d.ts ====
 import { z } from 'zod';
+import { type ModelProviderVendorId } from './provider-catalog';
 /**
  * Opaque, portable identity of one locally configured provider profile.
  *
@@ -458,11 +537,14 @@ export type ProviderProfileRef = z.infer<typeof ProviderProfileRefSchema>;
  * Provider kinds this package knows how to address — the surviving half of the
  * former `MODEL_PROVIDER_IDS`. A kind says *what dialect family and vendor
  * shape* a profile is; {@link ProviderProfileRefSchema} says *which* profile.
- * Ported from `aip-main-open@c6a5385` `providers.ts:30-36`
- * (`LOCAL_MODEL_PROVIDER_IDS`).
+ * Originally ported from `aip-main-open@c6a5385` `providers.ts:30-36`
+ * (`LOCAL_MODEL_PROVIDER_IDS`); the list is now derived: every id in
+ * {@link MODEL_PROVIDER_VENDORS}, plus `custom` for an endpoint the catalog
+ * does not name. `provider-catalog.ts` is the single authority, and
+ * `sqlite-profile-store.ts` generates its CHECK constraint from this list.
  */
-export declare const MODEL_PROVIDER_KINDS: readonly ['openai', 'deepseek', 'anthropic', 'custom'];
-export type ModelProviderKind = (typeof MODEL_PROVIDER_KINDS)[number];
+export type ModelProviderKind = ModelProviderVendorId | 'custom';
+export declare const MODEL_PROVIDER_KINDS: readonly [ModelProviderKind, ...ModelProviderKind[]];
 /**
  * Bounded model capabilities a profile may declare. A capability is explicit
  * local configuration, never inferred from the model name or the base URL.
@@ -511,10 +593,34 @@ export declare const ModelProviderProfileSchema: z.ZodObject<{
     model: z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>;
     profile_ref: z.ZodString;
     provider_kind: z.ZodEnum<{
+        "ant-ling": "ant-ling";
         anthropic: "anthropic";
+        baseten: "baseten";
+        cerebras: "cerebras";
         custom: "custom";
         deepseek: "deepseek";
+        fireworks: "fireworks";
+        groq: "groq";
+        huggingface: "huggingface";
+        "kimi-coding": "kimi-coding";
+        minimax: "minimax";
+        "minimax-cn": "minimax-cn";
+        moonshotai: "moonshotai";
+        "moonshotai-cn": "moonshotai-cn";
+        nvidia: "nvidia";
         openai: "openai";
+        openrouter: "openrouter";
+        "qwen-token-plan": "qwen-token-plan";
+        "qwen-token-plan-cn": "qwen-token-plan-cn";
+        together: "together";
+        "vercel-ai-gateway": "vercel-ai-gateway";
+        xai: "xai";
+        xiaomi: "xiaomi";
+        "xiaomi-token-plan-ams": "xiaomi-token-plan-ams";
+        "xiaomi-token-plan-cn": "xiaomi-token-plan-cn";
+        "xiaomi-token-plan-sgp": "xiaomi-token-plan-sgp";
+        zai: "zai";
+        "zai-coding-cn": "zai-coding-cn";
     }>;
     updated_at: z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>;
 }, z.core.$strip>;
@@ -897,7 +1003,7 @@ export declare class SqliteProviderProfileStore implements ProviderProfileStore 
     setEnabled(profileRef: ProviderProfileRef): Promise<ModelProviderProfile>;
 }
 /** Exported for the store's own tests to enumerate the CHECK-constrained kinds. */
-export declare const SQLITE_PROFILE_PROVIDER_KINDS: readonly ["openai", "deepseek", "anthropic", "custom"];
+export declare const SQLITE_PROFILE_PROVIDER_KINDS: readonly [import("./provider-profile").ModelProviderKind, ...import("./provider-profile").ModelProviderKind[]];
 // ==== @byok-sdk/keys dist/sqlite-support.d.ts ====
 import type { DatabaseSync, DatabaseSyncOptions } from 'node:sqlite';
 export type SqliteOpenStep = 'after-open' | 'after-wal' | 'after-synchronous';

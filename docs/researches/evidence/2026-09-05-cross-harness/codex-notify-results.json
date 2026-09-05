@@ -1,0 +1,230 @@
+{
+  "harness": "codex",
+  "version": "0.153.4",
+  "scope": "dedicated app-server; native queue CLI",
+  "cases": {
+    "idle": "PASS: CLI queue starts an idle loaded thread without explicit turn/start",
+    "busy": "PASS: queued behind controlled in-flight MCP call, then processed",
+    "approval": "PASS: notification neither grants approval nor executes queued work while approval is pending; explicit decline releases queue",
+    "draft": "not tested by headless RPC; separate TUI case required"
+  },
+  "sessionId": "01a07243-5cd8-7e90-815b-f75dbf950226",
+  "status": "PASS protocol cases",
+  "events": [
+    {
+      "ts": 1788623412.7553852,
+      "event": "thread_created",
+      "sessionId": "01a07243-5cd8-7e90-815b-f75dbf950226"
+    },
+    {
+      "ts": 1788623412.810048,
+      "event": "queue_accepted",
+      "label": "idle",
+      "receipt": "Queued message 01a07243-5e3d-75e0-8356-49f468350967 for thread 01a07243-5cd8-7e90-815b-f75dbf950226."
+    },
+    {
+      "ts": 1788623444.230398,
+      "event": "queue_accepted",
+      "label": "busy-notify",
+      "receipt": "Queued message 01a07243-d904-70a0-bc45-07c42c93c28d for thread 01a07243-5cd8-7e90-815b-f75dbf950226."
+    },
+    {
+      "ts": 1788623446.3291452,
+      "event": "busy_notification_pending",
+      "queueCount": 1
+    },
+    {
+      "ts": 1788623466.3886652,
+      "event": "approval_requested",
+      "requestId": 0,
+      "method": "mcpServer/elicitation/request"
+    },
+    {
+      "ts": 1788623466.431299,
+      "event": "queue_accepted",
+      "label": "approval-notify",
+      "receipt": "Queued message 01a07244-2fbc-7411-8623-78b57bfa58c7 for thread 01a07243-5cd8-7e90-815b-f75dbf950226."
+    },
+    {
+      "ts": 1788623468.445151,
+      "event": "approval_unchanged_notification_pending",
+      "queueCount": 1
+    },
+    {
+      "ts": 1788623468.4451652,
+      "event": "approval_explicitly_declined"
+    }
+  ],
+  "tools": [
+    {
+      "ts": 1788623424.1255429,
+      "event": "tool_enter",
+      "tool": "probe_record",
+      "label": "idle"
+    },
+    {
+      "ts": 1788623424.125786,
+      "event": "tool_exit",
+      "tool": "probe_record",
+      "label": "idle"
+    },
+    {
+      "ts": 1788623444.086761,
+      "event": "tool_enter",
+      "tool": "probe_gate",
+      "label": "busy"
+    },
+    {
+      "ts": 1788623446.382006,
+      "event": "tool_exit",
+      "tool": "probe_gate",
+      "label": "busy"
+    },
+    {
+      "ts": 1788623455.323589,
+      "event": "tool_enter",
+      "tool": "probe_record",
+      "label": "busy-notify"
+    },
+    {
+      "ts": 1788623455.323785,
+      "event": "tool_exit",
+      "tool": "probe_record",
+      "label": "busy-notify"
+    },
+    {
+      "ts": 1788623481.059347,
+      "event": "tool_enter",
+      "tool": "probe_record",
+      "label": "approval-notify"
+    },
+    {
+      "ts": 1788623481.059564,
+      "event": "tool_exit",
+      "tool": "probe_record",
+      "label": "approval-notify"
+    }
+  ],
+  "nativeEvents": [
+    {
+      "method": "turn/started",
+      "itemType": null,
+      "tool": null
+    },
+    {
+      "method": "item/completed",
+      "itemType": "userMessage",
+      "tool": null
+    },
+    {
+      "method": "item/completed",
+      "itemType": "mcpToolCall",
+      "tool": "probe_record"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "agentMessage",
+      "tool": null
+    },
+    {
+      "method": "turn/completed",
+      "itemType": null,
+      "tool": null
+    },
+    {
+      "method": "turn/started",
+      "itemType": null,
+      "tool": null
+    },
+    {
+      "method": "item/completed",
+      "itemType": "userMessage",
+      "tool": null
+    },
+    {
+      "method": "item/completed",
+      "itemType": "mcpToolCall",
+      "tool": "probe_gate"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "agentMessage",
+      "tool": null
+    },
+    {
+      "method": "turn/completed",
+      "itemType": null,
+      "tool": null
+    },
+    {
+      "method": "turn/started",
+      "itemType": null,
+      "tool": null
+    },
+    {
+      "method": "item/completed",
+      "itemType": "userMessage",
+      "tool": null
+    },
+    {
+      "method": "item/completed",
+      "itemType": "mcpToolCall",
+      "tool": "probe_record"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "agentMessage",
+      "tool": null
+    },
+    {
+      "method": "turn/completed",
+      "itemType": null,
+      "tool": null
+    },
+    {
+      "method": "turn/started",
+      "itemType": null,
+      "tool": null
+    },
+    {
+      "method": "item/completed",
+      "itemType": "userMessage",
+      "tool": null
+    },
+    {
+      "method": "mcpServer/elicitation/request",
+      "itemType": null,
+      "tool": null
+    },
+    {
+      "method": "item/completed",
+      "itemType": "mcpToolCall",
+      "tool": "probe_approval"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "agentMessage",
+      "tool": null
+    },
+    {
+      "method": "turn/completed",
+      "itemType": null,
+      "tool": null
+    },
+    {
+      "method": "turn/started",
+      "itemType": null,
+      "tool": null
+    },
+    {
+      "method": "item/completed",
+      "itemType": "userMessage",
+      "tool": null
+    },
+    {
+      "method": "item/completed",
+      "itemType": "mcpToolCall",
+      "tool": "probe_record"
+    }
+  ]
+}

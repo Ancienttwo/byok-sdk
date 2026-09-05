@@ -1,0 +1,25 @@
+{
+  "harness": "claude",
+  "version": "2.1.261",
+  "sessionId": "5dfdf951-54e8-440a-a65a-5a0753c3ed8d",
+  "scope": "owned interactive TUI; hidden messaging-socket-path; actual MCP child auth",
+  "cases": {
+    "startup": "Native MCP child received socket metadata after explicit trust of owned scratch directory"
+  },
+  "ownedDirectoryTrustSelected": true,
+  "nativeChildCapability": {
+    "ts": 1788624844.767401,
+    "event": "uds_child_ready",
+    "socketAvailable": true,
+    "tokenAvailable": true
+  },
+  "status": "PASS startup only; no model input or notification",
+  "events": [
+    {
+      "ts": 1788624844.767401,
+      "event": "uds_child_ready",
+      "socketAvailable": true,
+      "tokenAvailable": true
+    }
+  ]
+}

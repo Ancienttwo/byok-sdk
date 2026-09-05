@@ -36,8 +36,9 @@ export class ByokKeysError extends Error {
  * stored value as-is), `SECRET_ENVELOPE_INVALID` (it reported a malformed
  * envelope as an absent secret), and `SECRET_NAME_INVALID` /
  * `SECRET_VALUE_INVALID` (the runtime replacements for the closed
- * `KeychainSecretName` union). Everything else matches the source string for
- * string.
+ * `KeychainSecretName` union). `PROVIDER_STORE_SCHEMA_STALE` joins them: it
+ * guards a persisted `provider_profile` DDL that differs from the one this
+ * package generates. Everything else matches the source string for string.
  *
  * `SECRET_NAMESPACE_INVALID` is a separate case. The source does record it:
  * `normalizeSecretNamespace` (`index.ts:748-757`) throws the verbatim string
@@ -79,6 +80,7 @@ export const BYOK_KEYS_ERROR_CODES = {
   PROVIDER_SECRET_MISSING: 'PROVIDER_SECRET_MISSING',
   PROVIDER_SECRET_NOT_ALLOWED: 'PROVIDER_SECRET_NOT_ALLOWED',
   PROVIDER_SECRET_ROLLBACK_FAILED: 'PROVIDER_SECRET_ROLLBACK_FAILED',
+  PROVIDER_STORE_SCHEMA_STALE: 'PROVIDER_STORE_SCHEMA_STALE',
   PROVIDER_STORE_UNAVAILABLE: 'PROVIDER_STORE_UNAVAILABLE',
   PROVIDER_TRUTH_INVALID: 'PROVIDER_TRUTH_INVALID',
   PROVIDER_URL_INVALID: 'PROVIDER_URL_INVALID',

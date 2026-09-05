@@ -117,6 +117,61 @@ describe('ModelProviderProfileSchema', () => {
     expectRejected(openAiProfile({ provider_kind: 'mistral' as never }));
   });
 
+  it('accepts a catalog vendor kind paired with its own adapter', () => {
+    const parsed = parseModelProviderProfile(
+      openAiProfile({
+        base_url: 'https://api.groq.com/openai/v1',
+        display_name: 'Groq',
+        profile_ref: 'groq',
+        provider_kind: 'groq',
+      }),
+    );
+    expect(parsed.provider_kind).toBe('groq');
+    expect(parsed.adapter).toBe('openai_compatible');
+  });
+
+  it('rejects a catalog vendor kind paired with the other adapter', () => {
+    const error = expectRejected(
+      openAiProfile({
+        base_url: 'https://api.anthropic.com/v1',
+        profile_ref: 'anthropic',
+        provider_kind: 'anthropic',
+      }),
+    );
+    expect(error.message).toContain('anthropic adapter');
+
+    expectRejected(
+      anthropicProfile({
+        base_url: 'https://api.deepseek.com',
+        profile_ref: 'deepseek',
+        provider_kind: 'deepseek',
+      }),
+    );
+  });
+
+  it('leaves the custom kind free to pick either adapter', () => {
+    expect(
+      parseModelProviderProfile(openAiProfile({ provider_kind: 'custom' }))
+        .adapter,
+    ).toBe('openai_compatible');
+    expect(
+      parseModelProviderProfile(anthropicProfile({ provider_kind: 'custom' }))
+        .adapter,
+    ).toBe('anthropic');
+  });
+
+  it('lets a vendor kind point at a self-hosted gateway, so the catalog is not a URL constraint', () => {
+    expect(
+      parseModelProviderProfile(
+        openAiProfile({
+          base_url: 'https://gateway.example.com/v1',
+          profile_ref: 'deepseek',
+          provider_kind: 'deepseek',
+        }),
+      ).base_url,
+    ).toBe('https://gateway.example.com/v1');
+  });
+
   it('accepts two independent custom profiles under one provider kind', () => {
     const primary = parseModelProviderProfile(
       openAiProfile({
