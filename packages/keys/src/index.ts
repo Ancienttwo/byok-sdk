@@ -24,6 +24,16 @@ export type {
   ProviderProfileRef,
 } from './provider-profile';
 
+export {
+  MODEL_PROVIDER_VENDORS,
+  MODEL_PROVIDER_VENDOR_IDS,
+  modelProviderVendor,
+} from './provider-catalog';
+export type {
+  ModelProviderVendor,
+  ModelProviderVendorId,
+} from './provider-catalog';
+
 export { providerHeaders, requiredProviderSecret } from './headers';
 export type { ProviderAuthProfile } from './headers';
 

@@ -4,9 +4,10 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { ByokKeysError } from './errors';
 import type { ModelProviderProfile } from './provider-profile';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
-import { isSqliteAvailable } from './sqlite-support';
+import { isSqliteAvailable, openSqliteDatabase } from './sqlite-support';
 
 // node:sqlite requires Node 22.5+, and shipped behind --experimental-sqlite
 // until later in the 22.x line — so "Node >= 22.5" alone doesn't mean the
@@ -24,16 +25,27 @@ const sqliteReady = isSqliteAvailable();
  * nothing is left on the machine.
  */
 const profile = (
-  profile_ref: 'anthropic' | 'custom' | 'deepseek' | 'openai',
+  profile_ref: 'anthropic' | 'custom' | 'deepseek' | 'groq' | 'openai',
   overrides: Partial<ModelProviderProfile> = {},
 ): ModelProviderProfile =>
   ({
-    adapter: 'openai_compatible',
-    auth_mode: 'bearer',
-    base_url: 'https://api.openai.com/v1',
+    // A vendor kind must speak its catalog adapter, so the anthropic row is
+    // built in its own dialect rather than as an OpenAI-compatible one.
+    ...(profile_ref === 'anthropic'
+      ? {
+          adapter: 'anthropic',
+          auth_mode: 'x_api_key',
+          base_url: 'https://api.anthropic.com/v1',
+          display_name: 'Anthropic',
+        }
+      : {
+          adapter: 'openai_compatible',
+          auth_mode: 'bearer',
+          base_url: 'https://api.openai.com/v1',
+          display_name: 'OpenAI',
+        }),
     capabilities: [],
     created_at: '2026-08-05T00:00:00.000Z',
-    display_name: 'OpenAI',
     enabled: true,
     kind: 'model',
     model: 'gpt-5.2',
@@ -42,6 +54,39 @@ const profile = (
     updated_at: '2026-08-05T00:00:00.000Z',
     ...overrides,
   }) as ModelProviderProfile;
+
+/**
+ * The `provider_profile` DDL this package emitted before the vendor catalog
+ * derived the CHECK lists, copied verbatim so the stale-schema guard is proven
+ * against a real earlier statement rather than an invented one.
+ */
+const PRE_CATALOG_SCHEMA = `
+CREATE TABLE IF NOT EXISTS provider_profile (
+  profile_ref   TEXT PRIMARY KEY,
+  provider_kind TEXT NOT NULL CHECK (provider_kind IN ('openai', 'deepseek', 'anthropic', 'custom')),
+  kind          TEXT NOT NULL CHECK (kind = 'model'),
+  adapter       TEXT NOT NULL CHECK (adapter IN ('openai_compatible', 'anthropic')),
+  display_name  TEXT NOT NULL,
+  base_url      TEXT NOT NULL,
+  auth_mode     TEXT NOT NULL CHECK (auth_mode IN ('bearer', 'x_api_key', 'none')),
+  model         TEXT NOT NULL,
+  capabilities  TEXT NOT NULL,
+  enabled       INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+`;
+
+const expectSchemaStale = (open: () => SqliteProviderProfileStore): void => {
+  let thrown: unknown;
+  try {
+    open();
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).toBeInstanceOf(ByokKeysError);
+  expect((thrown as ByokKeysError).code).toBe('PROVIDER_STORE_SCHEMA_STALE');
+};
 
 let directory: string;
 let databasePath: string;
@@ -151,6 +196,56 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
     await expect(store.get('deepseek')).resolves.toBeUndefined();
     expect((await store.get('openai'))?.enabled).toBe(true);
     await store.close();
+  });
+
+  it('round-trips a catalog vendor kind the pre-catalog CHECK did not allow', async () => {
+    const store = new SqliteProviderProfileStore({ path: databasePath });
+    await store.save(
+      profile('groq', { base_url: 'https://api.groq.com/openai/v1' }),
+    );
+    await store.close();
+
+    const reopened = new SqliteProviderProfileStore({ path: databasePath });
+    await expect(reopened.get('groq')).resolves.toMatchObject({
+      base_url: 'https://api.groq.com/openai/v1',
+      provider_kind: 'groq',
+    });
+    await reopened.close();
+  });
+
+  it('fails closed on a store created by an earlier schema instead of migrating it', async () => {
+    const legacy = openSqliteDatabase(databasePath);
+    legacy.exec(PRE_CATALOG_SCHEMA);
+    legacy.close();
+
+    expectSchemaStale(
+      () => new SqliteProviderProfileStore({ path: databasePath }),
+    );
+    expectSchemaStale(
+      () => new SqliteProviderProfileStore({ path: databasePath, readOnly: true }),
+    );
+
+    // The failed opens released their native handles, so the file is still an
+    // ordinary file the fixture can delete.
+    rmSync(databasePath, { force: true });
+    expect(existsSync(databasePath)).toBe(false);
+  });
+
+  it('reopens a store this version created without a false stale-schema alarm', async () => {
+    const store = new SqliteProviderProfileStore({ path: databasePath });
+    await store.save(profile('openai'));
+    await store.close();
+
+    const writable = new SqliteProviderProfileStore({ path: databasePath });
+    expect((await writable.get('openai'))?.provider_kind).toBe('openai');
+    await writable.close();
+
+    const reader = new SqliteProviderProfileStore({
+      path: databasePath,
+      readOnly: true,
+    });
+    expect((await reader.get('openai'))?.provider_kind).toBe('openai');
+    await reader.close();
   });
 
   it('declares no column that could hold a secret', async () => {

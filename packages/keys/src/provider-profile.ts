@@ -2,6 +2,11 @@ import { z } from 'zod';
 import { createHash } from 'node:crypto';
 
 import { ByokKeysError } from './errors';
+import {
+  MODEL_PROVIDER_VENDOR_IDS,
+  modelProviderVendor,
+  type ModelProviderVendorId,
+} from './provider-catalog';
 import { normalizeProviderUrl } from './url';
 
 /**
@@ -39,17 +44,21 @@ export type ProviderProfileRef = z.infer<typeof ProviderProfileRefSchema>;
  * Provider kinds this package knows how to address — the surviving half of the
  * former `MODEL_PROVIDER_IDS`. A kind says *what dialect family and vendor
  * shape* a profile is; {@link ProviderProfileRefSchema} says *which* profile.
- * Ported from `aip-main-open@c6a5385` `providers.ts:30-36`
- * (`LOCAL_MODEL_PROVIDER_IDS`).
+ * Originally ported from `aip-main-open@c6a5385` `providers.ts:30-36`
+ * (`LOCAL_MODEL_PROVIDER_IDS`); the list is now derived: every id in
+ * {@link MODEL_PROVIDER_VENDORS}, plus `custom` for an endpoint the catalog
+ * does not name. `provider-catalog.ts` is the single authority, and
+ * `sqlite-profile-store.ts` generates its CHECK constraint from this list.
  */
-export const MODEL_PROVIDER_KINDS = [
-  'openai',
-  'deepseek',
-  'anthropic',
-  'custom',
-] as const;
+export type ModelProviderKind = ModelProviderVendorId | 'custom';
 
-export type ModelProviderKind = (typeof MODEL_PROVIDER_KINDS)[number];
+export const MODEL_PROVIDER_KINDS = [
+  ...MODEL_PROVIDER_VENDOR_IDS,
+  'custom',
+] as readonly ModelProviderKind[] as readonly [
+  ModelProviderKind,
+  ...ModelProviderKind[],
+];
 
 /**
  * Bounded model capabilities a profile may declare. A capability is explicit
@@ -181,6 +190,14 @@ export const ModelProviderProfileSchema = z
         message:
           'OpenAI-compatible providers support bearer or no authentication',
         path: ['auth_mode'],
+      });
+    }
+    const vendor = modelProviderVendor(profile.provider_kind);
+    if (vendor !== undefined && vendor.adapter !== profile.adapter) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `Provider kind ${profile.provider_kind} speaks the ${vendor.adapter} adapter`,
+        path: ['adapter'],
       });
     }
     if (Date.parse(profile.updated_at) < Date.parse(profile.created_at)) {
