@@ -1,0 +1,394 @@
+{
+  "harness": "pi",
+  "version": "0.84.2",
+  "scope": "actual package-local interactive TUI; explicit disposable extension",
+  "cases": {
+    "idle": "PASS: sendUserMessage starts idle TUI turn",
+    "draft": "PASS: getEditorText preserves exact synthetic draft across notify and completed turn",
+    "busy": "PASS: followUp waits behind controlled tool call",
+    "toolApproval": "PASS: followUp does not resolve in-flight extension approval; explicit Escape declines, then queued turn runs",
+    "idleDialog": "OBSERVED: a UI confirm while agent idle does not gate sendUserMessage; notified model turn runs while dialog remains unresolved"
+  },
+  "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+  "status": "COMPLETED with idle-dialog boundary",
+  "events": [
+    {
+      "ts": 1788623757800,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "ready",
+      "editor": "",
+      "idle": true,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623757852,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "request_handled",
+      "id": "1",
+      "op": "draft",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": true,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623757952,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "notify_before",
+      "label": "idle",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": true,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623757953,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "request_handled",
+      "id": "2",
+      "op": "notify",
+      "label": "idle",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": true,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623770202,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "tool_enter",
+      "tool": "probe_record",
+      "label": "idle",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": false,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623770203,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "tool_exit",
+      "tool": "probe_record",
+      "label": "idle",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": false,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623775241,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "agent_settled",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": true,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623775348,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "request_handled",
+      "id": "3",
+      "op": "snapshot",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": true,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623775449,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "notify_before",
+      "label": "busy",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": true,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623775451,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "request_handled",
+      "id": "4",
+      "op": "notify",
+      "label": "busy",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": true,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623780180,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "tool_enter",
+      "tool": "probe_gate",
+      "label": "busy",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": false,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623780232,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "notify_before",
+      "label": "busy-notify",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": false,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623780233,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "request_handled",
+      "id": "5",
+      "op": "notify",
+      "label": "busy-notify",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": false,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623782369,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "request_handled",
+      "id": "6",
+      "op": "snapshot",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": false,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623782470,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "request_handled",
+      "id": "7",
+      "op": "release",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": false,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623782471,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "tool_exit",
+      "tool": "probe_gate",
+      "label": "busy",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": false,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623793258,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "tool_enter",
+      "tool": "probe_record",
+      "label": "busy-notify",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": false,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623793258,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "tool_exit",
+      "tool": "probe_record",
+      "label": "busy-notify",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": false,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623799125,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "agent_settled",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": true,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623799181,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "notify_before",
+      "label": "approval",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": true,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623799181,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "request_handled",
+      "id": "8",
+      "op": "notify",
+      "label": "approval",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": true,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623803808,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "tool_enter",
+      "tool": "probe_approval",
+      "label": "approval",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": false,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623803809,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "confirm_open",
+      "label": "approval",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": false,
+      "pendingConfirm": true
+    },
+    {
+      "ts": 1788623803862,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "notify_before",
+      "label": "approval-notify",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": false,
+      "pendingConfirm": true
+    },
+    {
+      "ts": 1788623803862,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "request_handled",
+      "id": "9",
+      "op": "notify",
+      "label": "approval-notify",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": false,
+      "pendingConfirm": true
+    },
+    {
+      "ts": 1788623805949,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "request_handled",
+      "id": "10",
+      "op": "snapshot",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": false,
+      "pendingConfirm": true
+    },
+    {
+      "ts": 1788623806058,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "confirm_resolved",
+      "label": "approval",
+      "answer": false,
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": false,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623818949,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "tool_enter",
+      "tool": "probe_record",
+      "label": "approval-notify",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": false,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623818949,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "tool_exit",
+      "tool": "probe_record",
+      "label": "approval-notify",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": false,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623825248,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "agent_settled",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": true,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623825310,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "confirm_open",
+      "label": "idle-dialog",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": true,
+      "pendingConfirm": true
+    },
+    {
+      "ts": 1788623825312,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "request_handled",
+      "id": "11",
+      "op": "confirm",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": true,
+      "pendingConfirm": true
+    },
+    {
+      "ts": 1788623825413,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "notify_before",
+      "label": "idle-dialog-notify",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": true,
+      "pendingConfirm": true
+    },
+    {
+      "ts": 1788623825414,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "request_handled",
+      "id": "12",
+      "op": "notify",
+      "label": "idle-dialog-notify",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": true,
+      "pendingConfirm": true
+    },
+    {
+      "ts": 1788623832597,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "tool_enter",
+      "tool": "probe_record",
+      "label": "idle-dialog-notify",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": false,
+      "pendingConfirm": true
+    },
+    {
+      "ts": 1788623832597,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "tool_exit",
+      "tool": "probe_record",
+      "label": "idle-dialog-notify",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": false,
+      "pendingConfirm": true
+    },
+    {
+      "ts": 1788623837307,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "agent_settled",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": true,
+      "pendingConfirm": true
+    },
+    {
+      "ts": 1788623837337,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "confirm_resolved",
+      "label": "idle-dialog",
+      "answer": false,
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": true,
+      "pendingConfirm": false
+    },
+    {
+      "ts": 1788623837466,
+      "sessionId": "01a07248-a199-7f72-80e7-7c5def0cb206",
+      "event": "request_handled",
+      "id": "13",
+      "op": "snapshot",
+      "editor": "HUMAN_DRAFT_SENTINEL",
+      "idle": true,
+      "pendingConfirm": false
+    }
+  ]
+}

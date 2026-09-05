@@ -1,0 +1,417 @@
+{
+  "scope": "macOS native protocol idle continuation; actual SDK store/control/helper; no TUI or automatic wakeup acceptance",
+  "results": [
+    {
+      "lane": "claude",
+      "startedAt": "2026-09-05T15:35:49Z",
+      "rounds": [
+        {
+          "round": 1,
+          "sessionId": "fee08a52-30a1-47a6-8def-e49aaed9243f",
+          "completion": "success"
+        },
+        {
+          "round": 2,
+          "sessionId": "fee08a52-30a1-47a6-8def-e49aaed9243f",
+          "completion": "success"
+        }
+      ],
+      "sessionId": "fee08a52-30a1-47a6-8def-e49aaed9243f",
+      "status": "protocol-completed",
+      "exitCode": 143,
+      "assertions": "same-session; 2 exact durable replies; 4 reads; 2 covering acknowledgements"
+    },
+    {
+      "lane": "codex",
+      "startedAt": "2026-09-05T15:36:12Z",
+      "rounds": [
+        {
+          "round": 1,
+          "sessionId": "01a07236-98f6-79b0-8c14-dce6c4815115",
+          "completion": "turn/completed"
+        },
+        {
+          "round": 2,
+          "sessionId": "01a07236-98f6-79b0-8c14-dce6c4815115",
+          "completion": "turn/completed"
+        }
+      ],
+      "sessionId": "01a07236-98f6-79b0-8c14-dce6c4815115",
+      "status": "protocol-completed",
+      "exitCode": -15,
+      "assertions": "same-session; 2 exact durable replies; 4 reads; 2 covering acknowledgements"
+    },
+    {
+      "lane": "pi",
+      "startedAt": "2026-09-05T15:36:00Z",
+      "rounds": [
+        {
+          "round": 1,
+          "sessionId": "01a07236-6091-7262-add6-db7fa33fe4f1",
+          "completion": "agent_settled"
+        },
+        {
+          "round": 2,
+          "sessionId": "01a07236-6091-7262-add6-db7fa33fe4f1",
+          "completion": "agent_settled"
+        }
+      ],
+      "sessionId": "01a07236-6091-7262-add6-db7fa33fe4f1",
+      "status": "protocol-completed",
+      "exitCode": 143,
+      "assertions": "same-session; 2 exact durable replies; 4 reads; 2 covering acknowledgements"
+    }
+  ],
+  "messages": [
+    {
+      "version": 1,
+      "workspaceId": "probe-room",
+      "seq": 1,
+      "messageId": "c0a6172a-663d-4774-8a05-ae0b6b87916c",
+      "senderMemberId": "operator",
+      "body": "challenge-claude-1",
+      "contentType": "text/plain",
+      "byteCount": 18,
+      "contentHash": "sha256:9f6d25270df0f70e1f5da4d666995735752f28a0dccf59e5ba5f19d50dd2bf40",
+      "createdAt": "2026-09-05T15:35:49.726Z"
+    },
+    {
+      "version": 1,
+      "workspaceId": "probe-room",
+      "seq": 2,
+      "messageId": "39f750c2-c407-4cc3-a1f3-2f8071b8864f",
+      "senderMemberId": "claude",
+      "body": "reply-claude-1",
+      "contentType": "text/plain",
+      "byteCount": 14,
+      "contentHash": "sha256:5894ec4ccaf5986456930b741edec17bf76ac9456ecb2ede75c0cadb77494499",
+      "createdAt": "2026-09-05T15:35:55.996Z"
+    },
+    {
+      "version": 1,
+      "workspaceId": "probe-room",
+      "seq": 3,
+      "messageId": "2689e531-3552-4f60-becc-bc6c76183519",
+      "senderMemberId": "operator",
+      "body": "challenge-claude-2",
+      "contentType": "text/plain",
+      "byteCount": 18,
+      "contentHash": "sha256:9246035a11631bd17d88117e85e736662c869f9c401ef80dc4b95b3fca469af7",
+      "createdAt": "2026-09-05T15:36:00.330Z"
+    },
+    {
+      "version": 1,
+      "workspaceId": "probe-room",
+      "seq": 4,
+      "messageId": "00f40cee-fb72-4ac3-a482-ab576396f31b",
+      "senderMemberId": "operator",
+      "body": "challenge-pi-1",
+      "contentType": "text/plain",
+      "byteCount": 14,
+      "contentHash": "sha256:bd91ef169d80a3716ca8b20f4d1913507c5385fd5603f69bb84534c6a6c23fb0",
+      "createdAt": "2026-09-05T15:36:02.303Z"
+    },
+    {
+      "version": 1,
+      "workspaceId": "probe-room",
+      "seq": 5,
+      "messageId": "5e0b49fc-7393-4ad5-ae2c-17776e6a2566",
+      "senderMemberId": "claude",
+      "body": "reply-claude-2",
+      "contentType": "text/plain",
+      "byteCount": 14,
+      "contentHash": "sha256:d9e59659bb6a1700ca24771553854a0bd2fb08491058a824cef568508f55873b",
+      "createdAt": "2026-09-05T15:36:04.333Z"
+    },
+    {
+      "version": 1,
+      "workspaceId": "probe-room",
+      "seq": 6,
+      "messageId": "fff3a4f0-a848-4e22-9c1b-59cf91016cc2",
+      "senderMemberId": "pi",
+      "body": "reply-pi-1",
+      "contentType": "text/plain",
+      "byteCount": 10,
+      "contentHash": "sha256:0c8ba0312d6ca5fa2e5d5f14088b913a26735a07ab0ded706603473ed9f6ffc6",
+      "createdAt": "2026-09-05T15:36:15.106Z"
+    },
+    {
+      "version": 1,
+      "workspaceId": "probe-room",
+      "seq": 7,
+      "messageId": "98fa3d6d-3209-4e85-bbe3-bee149fe79f8",
+      "senderMemberId": "operator",
+      "body": "challenge-codex-1",
+      "contentType": "text/plain",
+      "byteCount": 17,
+      "contentHash": "sha256:f02060bcf7d482fe85ba42efad344c165c4553ceba494fe59097a945f0c274ef",
+      "createdAt": "2026-09-05T15:36:16.463Z"
+    },
+    {
+      "version": 1,
+      "workspaceId": "probe-room",
+      "seq": 8,
+      "messageId": "9aab0bf4-ad6f-4c5a-8d97-8c47dbee43da",
+      "senderMemberId": "operator",
+      "body": "challenge-pi-2",
+      "contentType": "text/plain",
+      "byteCount": 14,
+      "contentHash": "sha256:263e4257bef79692bdc4243b84d2e84eff39e06c154770beeea1f40226ef28e7",
+      "createdAt": "2026-09-05T15:36:28.252Z"
+    },
+    {
+      "version": 1,
+      "workspaceId": "probe-room",
+      "seq": 9,
+      "messageId": "5791d244-05c2-4941-8553-c8cbe2c08215",
+      "senderMemberId": "pi",
+      "body": "reply-pi-2",
+      "contentType": "text/plain",
+      "byteCount": 10,
+      "contentHash": "sha256:cdb098cbf0e475e03f775baf508aa314067ec5e64adc4b51abf93583494116d9",
+      "createdAt": "2026-09-05T15:36:36.781Z"
+    },
+    {
+      "version": 1,
+      "workspaceId": "probe-room",
+      "seq": 10,
+      "messageId": "73a07bcf-0e21-4302-8f5a-d0f91b201d26",
+      "senderMemberId": "codex",
+      "body": "reply-codex-1",
+      "contentType": "text/plain",
+      "byteCount": 13,
+      "contentHash": "sha256:d1d6ab90dfdfc6cf0aff70be1c7691c49e357a0211741de5104aa11711708034",
+      "createdAt": "2026-09-05T15:36:42.043Z"
+    },
+    {
+      "version": 1,
+      "workspaceId": "probe-room",
+      "seq": 11,
+      "messageId": "392ae988-a2ae-4b0a-95ef-4dfc920c46fc",
+      "senderMemberId": "operator",
+      "body": "challenge-codex-2",
+      "contentType": "text/plain",
+      "byteCount": 17,
+      "contentHash": "sha256:2b45b8610ff796244a14fd9f2a4aba5943c1161f6dad21e08e02c33c472af63a",
+      "createdAt": "2026-09-05T15:36:54.177Z"
+    },
+    {
+      "version": 1,
+      "workspaceId": "probe-room",
+      "seq": 12,
+      "messageId": "a9ff6d09-ad7e-42f7-a207-f4b118151d9d",
+      "senderMemberId": "codex",
+      "body": "reply-codex-2",
+      "contentType": "text/plain",
+      "byteCount": 13,
+      "contentHash": "sha256:ab92abbe0fcf9c69eecb78a6558e9b7195c1ad23b7a722aa1950517fb6259cc8",
+      "createdAt": "2026-09-05T15:37:18.215Z"
+    }
+  ],
+  "controlEvents": [
+    {
+      "ts": "2026-09-05T15:35:49.727Z",
+      "method": "post",
+      "member": "operator",
+      "seq": 1,
+      "messageId": "c0a6172a-663d-4774-8a05-ae0b6b87916c"
+    },
+    {
+      "ts": "2026-09-05T15:35:53.961Z",
+      "method": "read",
+      "member": "claude",
+      "deliveredThroughSeq": 1,
+      "count": 1
+    },
+    {
+      "ts": "2026-09-05T15:35:55.998Z",
+      "method": "post",
+      "member": "claude",
+      "seq": 2,
+      "messageId": "39f750c2-c407-4cc3-a1f3-2f8071b8864f"
+    },
+    {
+      "ts": "2026-09-05T15:35:57.472Z",
+      "method": "read",
+      "member": "claude",
+      "deliveredThroughSeq": 2,
+      "count": 2
+    },
+    {
+      "ts": "2026-09-05T15:35:59.105Z",
+      "method": "ack",
+      "member": "claude",
+      "throughSeq": 2
+    },
+    {
+      "ts": "2026-09-05T15:36:00.331Z",
+      "method": "post",
+      "member": "operator",
+      "seq": 3,
+      "messageId": "2689e531-3552-4f60-becc-bc6c76183519"
+    },
+    {
+      "ts": "2026-09-05T15:36:02.181Z",
+      "method": "read",
+      "member": "claude",
+      "deliveredThroughSeq": 3,
+      "count": 1
+    },
+    {
+      "ts": "2026-09-05T15:36:02.304Z",
+      "method": "post",
+      "member": "operator",
+      "seq": 4,
+      "messageId": "00f40cee-fb72-4ac3-a482-ab576396f31b"
+    },
+    {
+      "ts": "2026-09-05T15:36:04.335Z",
+      "method": "post",
+      "member": "claude",
+      "seq": 5,
+      "messageId": "5e0b49fc-7393-4ad5-ae2c-17776e6a2566"
+    },
+    {
+      "ts": "2026-09-05T15:36:05.705Z",
+      "method": "read",
+      "member": "claude",
+      "deliveredThroughSeq": 5,
+      "count": 3
+    },
+    {
+      "ts": "2026-09-05T15:36:07.212Z",
+      "method": "ack",
+      "member": "claude",
+      "throughSeq": 5
+    },
+    {
+      "ts": "2026-09-05T15:36:10.190Z",
+      "method": "read",
+      "member": "pi",
+      "deliveredThroughSeq": 5,
+      "count": 5
+    },
+    {
+      "ts": "2026-09-05T15:36:15.108Z",
+      "method": "post",
+      "member": "pi",
+      "seq": 6,
+      "messageId": "fff3a4f0-a848-4e22-9c1b-59cf91016cc2"
+    },
+    {
+      "ts": "2026-09-05T15:36:16.464Z",
+      "method": "post",
+      "member": "operator",
+      "seq": 7,
+      "messageId": "98fa3d6d-3209-4e85-bbe3-bee149fe79f8"
+    },
+    {
+      "ts": "2026-09-05T15:36:19.326Z",
+      "method": "read",
+      "member": "pi",
+      "deliveredThroughSeq": 7,
+      "count": 7
+    },
+    {
+      "ts": "2026-09-05T15:36:24.245Z",
+      "method": "ack",
+      "member": "pi",
+      "throughSeq": 7
+    },
+    {
+      "ts": "2026-09-05T15:36:28.253Z",
+      "method": "post",
+      "member": "operator",
+      "seq": 8,
+      "messageId": "9aab0bf4-ad6f-4c5a-8d97-8c47dbee43da"
+    },
+    {
+      "ts": "2026-09-05T15:36:32.382Z",
+      "method": "read",
+      "member": "pi",
+      "deliveredThroughSeq": 8,
+      "count": 1
+    },
+    {
+      "ts": "2026-09-05T15:36:36.569Z",
+      "method": "read",
+      "member": "codex",
+      "deliveredThroughSeq": 8,
+      "count": 8
+    },
+    {
+      "ts": "2026-09-05T15:36:36.782Z",
+      "method": "post",
+      "member": "pi",
+      "seq": 9,
+      "messageId": "5791d244-05c2-4941-8553-c8cbe2c08215"
+    },
+    {
+      "ts": "2026-09-05T15:36:41.237Z",
+      "method": "read",
+      "member": "pi",
+      "deliveredThroughSeq": 9,
+      "count": 2
+    },
+    {
+      "ts": "2026-09-05T15:36:42.046Z",
+      "method": "post",
+      "member": "codex",
+      "seq": 10,
+      "messageId": "73a07bcf-0e21-4302-8f5a-d0f91b201d26"
+    },
+    {
+      "ts": "2026-09-05T15:36:42.080Z",
+      "method": "read",
+      "member": "codex",
+      "deliveredThroughSeq": 10,
+      "count": 10
+    },
+    {
+      "ts": "2026-09-05T15:36:48.332Z",
+      "method": "ack",
+      "member": "pi",
+      "throughSeq": 9
+    },
+    {
+      "ts": "2026-09-05T15:36:48.857Z",
+      "method": "ack",
+      "member": "codex",
+      "throughSeq": 10
+    },
+    {
+      "ts": "2026-09-05T15:36:54.177Z",
+      "method": "post",
+      "member": "operator",
+      "seq": 11,
+      "messageId": "392ae988-a2ae-4b0a-95ef-4dfc920c46fc"
+    },
+    {
+      "ts": "2026-09-05T15:37:05.637Z",
+      "method": "read",
+      "member": "codex",
+      "deliveredThroughSeq": 11,
+      "count": 1
+    },
+    {
+      "ts": "2026-09-05T15:37:18.218Z",
+      "method": "post",
+      "member": "codex",
+      "seq": 12,
+      "messageId": "a9ff6d09-ad7e-42f7-a207-f4b118151d9d"
+    },
+    {
+      "ts": "2026-09-05T15:37:18.250Z",
+      "method": "read",
+      "member": "codex",
+      "deliveredThroughSeq": 12,
+      "count": 2
+    },
+    {
+      "ts": "2026-09-05T15:37:23.192Z",
+      "method": "ack",
+      "member": "codex",
+      "throughSeq": 12
+    }
+  ]
+}

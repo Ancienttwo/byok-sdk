@@ -1,0 +1,218 @@
+{
+  "harness": "codex",
+  "version": "0.153.4",
+  "scope": "dedicated app-server; native queue CLI",
+  "cases": {
+    "draft": "PASS: owned TUI draft remained unsubmitted through native queue notification; explicit Enter submitted its exact original text"
+  },
+  "sessionId": "01a07246-94d0-7f40-bd43-2589ad79677d",
+  "draftText": "Call only probe_record with label \"human-draft\" once, then finish with DONE. This is a synthetic probe, do not call other tools.",
+  "status": "PASS TUI draft",
+  "events": [
+    {
+      "ts": 1788623623.6057322,
+      "event": "thread_created",
+      "sessionId": "01a07246-94d0-7f40-bd43-2589ad79677d"
+    },
+    {
+      "ts": 1788623648.45589,
+      "event": "synthetic_draft_typed_without_enter",
+      "text": "Call only probe_record with label \"human-draft\" once, then finish with DONE. This is a synthetic probe, do not call other tools."
+    },
+    {
+      "ts": 1788623650.621324,
+      "event": "queue_accepted",
+      "label": "draft-notify",
+      "receipt": "Queued message 01a07246-ff38-75f3-a862-b2c661559052 for thread 01a07246-94d0-7f40-bd43-2589ad79677d."
+    },
+    {
+      "ts": 1788623664.3163798,
+      "event": "synthetic_draft_explicitly_submitted"
+    }
+  ],
+  "tools": [
+    {
+      "ts": 1788623424.1255429,
+      "event": "tool_enter",
+      "tool": "probe_record",
+      "label": "idle"
+    },
+    {
+      "ts": 1788623424.125786,
+      "event": "tool_exit",
+      "tool": "probe_record",
+      "label": "idle"
+    },
+    {
+      "ts": 1788623444.086761,
+      "event": "tool_enter",
+      "tool": "probe_gate",
+      "label": "busy"
+    },
+    {
+      "ts": 1788623446.382006,
+      "event": "tool_exit",
+      "tool": "probe_gate",
+      "label": "busy"
+    },
+    {
+      "ts": 1788623455.323589,
+      "event": "tool_enter",
+      "tool": "probe_record",
+      "label": "busy-notify"
+    },
+    {
+      "ts": 1788623455.323785,
+      "event": "tool_exit",
+      "tool": "probe_record",
+      "label": "busy-notify"
+    },
+    {
+      "ts": 1788623481.059347,
+      "event": "tool_enter",
+      "tool": "probe_record",
+      "label": "approval-notify"
+    },
+    {
+      "ts": 1788623481.059564,
+      "event": "tool_exit",
+      "tool": "probe_record",
+      "label": "approval-notify"
+    },
+    {
+      "ts": 1788623634.2357361,
+      "event": "tool_enter",
+      "tool": "probe_record",
+      "label": "idle"
+    },
+    {
+      "ts": 1788623634.2358541,
+      "event": "tool_exit",
+      "tool": "probe_record",
+      "label": "idle"
+    },
+    {
+      "ts": 1788623656.732718,
+      "event": "tool_enter",
+      "tool": "probe_record",
+      "label": "draft-notify"
+    },
+    {
+      "ts": 1788623656.733118,
+      "event": "tool_exit",
+      "tool": "probe_record",
+      "label": "draft-notify"
+    },
+    {
+      "ts": 1788623672.3449118,
+      "event": "tool_enter",
+      "tool": "probe_record",
+      "label": "human-draft"
+    },
+    {
+      "ts": 1788623672.3456728,
+      "event": "tool_exit",
+      "tool": "probe_record",
+      "label": "human-draft"
+    }
+  ],
+  "nativeEvents": [
+    {
+      "method": "turn/started",
+      "itemType": null,
+      "tool": null
+    },
+    {
+      "method": "item/completed",
+      "itemType": "userMessage",
+      "tool": null
+    },
+    {
+      "method": "item/completed",
+      "itemType": "mcpToolCall",
+      "tool": "probe_record"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "agentMessage",
+      "tool": null
+    },
+    {
+      "method": "turn/completed",
+      "itemType": null,
+      "tool": null
+    },
+    {
+      "method": "turn/started",
+      "itemType": null,
+      "tool": null
+    },
+    {
+      "method": "item/completed",
+      "itemType": "userMessage",
+      "tool": null
+    },
+    {
+      "method": "item/completed",
+      "itemType": "mcpToolCall",
+      "tool": "probe_record"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "agentMessage",
+      "tool": null
+    },
+    {
+      "method": "turn/completed",
+      "itemType": null,
+      "tool": null
+    },
+    {
+      "method": "turn/started",
+      "itemType": null,
+      "tool": null
+    },
+    {
+      "method": "item/completed",
+      "itemType": "userMessage",
+      "tool": null
+    },
+    {
+      "method": "item/completed",
+      "itemType": "mcpToolCall",
+      "tool": "probe_record"
+    }
+  ],
+  "nativeUserMessages": [
+    {
+      "id": "01a07246-a71e-7d93-b0fc-0fb6f4fffab4",
+      "content": [
+        {
+          "type": "text",
+          "text": "Call only probe_record with label \"idle\" once, then finish with DONE. This is a synthetic probe, do not call other tools.",
+          "text_elements": []
+        }
+      ]
+    },
+    {
+      "id": "01a07246-ffaf-7f70-9a46-c78370c65c94",
+      "content": [
+        {
+          "type": "text",
+          "text": "Call only probe_record with label \"draft-notify\" once, then finish with DONE. This is a synthetic probe, do not call other tools.",
+          "text_elements": []
+        }
+      ]
+    },
+    {
+      "id": "01a07247-3549-7622-8021-ace5ed9df67c",
+      "content": [
+        {
+          "type": "text",
+          "text": "Call only probe_record with label \"human-draft\" once, then finish with DONE. This is a synthetic probe, do not call other tools.",
+          "text_elements": []
+        }
+      ]
+    }
+  ]
+}

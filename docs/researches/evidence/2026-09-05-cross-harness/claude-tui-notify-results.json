@@ -1,0 +1,10 @@
+{
+  "harness": "claude",
+  "version": "2.1.261",
+  "sessionId": "9aec6f34-3e8a-4049-a2bf-7442ce452654",
+  "scope": "owned interactive TUI; hidden messaging-socket-path; actual MCP child auth",
+  "cases": {},
+  "status": "BLOCKED",
+  "error": "Owned TUI remained at workspace trust prompt and timed out before MCP child/socket evidence; no synthetic notification sent. Not retried after separate provider refusal.",
+  "events": []
+}

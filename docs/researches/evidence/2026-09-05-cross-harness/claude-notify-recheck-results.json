@@ -1,0 +1,77 @@
+{
+  "harness": "claude",
+  "version": "2.1.261",
+  "scope": "print stream-json persistent process; not interactive TUI",
+  "cases": {
+    "idle": "PASS: persistent stream-json accepts idle input",
+    "busy": "BLOCKED: provider refused before gate tool entered",
+    "approval": "UNVERIFIED: lane stopped on provider refusal",
+    "draft": "UNVERIFIED: startup-only TUI check does not exercise notifications"
+  },
+  "sessionId": "a29f21d0-3b40-4e7e-9d69-6a21b9561e18",
+  "status": "BLOCKED",
+  "error": "Claude provider returned an error/refusal; stop this lane without retry",
+  "events": [
+    {
+      "ts": 1788624727.8608708,
+      "event": "native_input_sent",
+      "label": "idle"
+    },
+    {
+      "ts": 1788624733.71223,
+      "event": "result",
+      "sessionId": "a29f21d0-3b40-4e7e-9d69-6a21b9561e18",
+      "subtype": "success"
+    },
+    {
+      "ts": 1788624733.712285,
+      "event": "native_input_sent",
+      "label": "busy"
+    },
+    {
+      "ts": 1788624734.916638,
+      "event": "blocked",
+      "reason": "Claude provider returned an error/refusal; stop this lane without retry"
+    }
+  ],
+  "tools": [
+    {
+      "ts": 1788624732.3714938,
+      "event": "tool_enter",
+      "tool": "probe_record",
+      "label": "idle"
+    },
+    {
+      "ts": 1788624732.372156,
+      "event": "tool_exit",
+      "tool": "probe_record",
+      "label": "idle"
+    }
+  ],
+  "resultSessionIds": [
+    "a29f21d0-3b40-4e7e-9d69-6a21b9561e18",
+    "a29f21d0-3b40-4e7e-9d69-6a21b9561e18"
+  ],
+  "providerResult": [
+    {
+      "subtype": "success",
+      "is_error": false,
+      "stop_reason": "end_turn",
+      "terminal_reason": "completed",
+      "session_id": "a29f21d0-3b40-4e7e-9d69-6a21b9561e18"
+    },
+    {
+      "subtype": "success",
+      "is_error": true,
+      "stop_reason": "refusal",
+      "terminal_reason": "api_error",
+      "session_id": "a29f21d0-3b40-4e7e-9d69-6a21b9561e18"
+    }
+  ],
+  "providerRefusals": [
+    {
+      "category": "reasoning_extraction",
+      "requestId": "req_011CekazPpwHBRFuwz4bBuVA"
+    }
+  ]
+}

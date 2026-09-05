@@ -1,0 +1,26 @@
+{
+  "codexSessions": [
+    {
+      "sessionId": "01a07243-5cd8-7e90-815b-f75dbf950226",
+      "exitCode": 0,
+      "output": "Deleted session 01a07243-5cd8-7e90-815b-f75dbf950226."
+    },
+    {
+      "sessionId": "01a07245-b0e8-7a73-bb94-bad5efe1bb61",
+      "exitCode": 1,
+      "output": "Error: failed to delete session"
+    },
+    {
+      "sessionId": "01a07246-94d0-7f40-bd43-2589ad79677d",
+      "exitCode": 0,
+      "output": "Deleted session 01a07246-94d0-7f40-bd43-2589ad79677d."
+    }
+  ],
+  "ownedProbeProcessesRemaining": 0,
+  "rawScratchRemoved": true,
+  "claudeContinuation": {
+    "ownedProcessesRemaining": 0,
+    "scratchRemoved": true,
+    "nativeOwnedProjectTrustPurge": "1 project config entry purged"
+  }
+}
