@@ -1,0 +1,39 @@
+{
+  "recordedAt": "2026-09-05T19:57:44.546809+00:00",
+  "sourceAggregateSha256": "c1188e87293e61adeab3e14e32e6ad94863d088059ab0baf07103d2a8407aa41",
+  "commands": [
+    {
+      "command": "bun run build",
+      "status": "PASS"
+    },
+    {
+      "command": "bun run typecheck",
+      "status": "PASS"
+    },
+    {
+      "command": "bun run test",
+      "status": "PASS",
+      "testFilesPassed": 312,
+      "testsPassed": 3668,
+      "note": "One unchanged rerun after existing Wrangler worker-packaging 5000ms cold timeout; no cloud edits."
+    },
+    {
+      "command": "bun run check:api-surface",
+      "status": "PASS",
+      "goldens": 9
+    },
+    {
+      "command": "bun run check:version-authority",
+      "status": "PASS"
+    },
+    {
+      "command": "repo-harness run check-task-workflow --strict",
+      "status": "PASS"
+    },
+    {
+      "command": "git diff --check",
+      "status": "PASS"
+    }
+  ],
+  "focusedTestsPassed": 52
+}

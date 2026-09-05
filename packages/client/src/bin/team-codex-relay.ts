@@ -34,20 +34,22 @@ export function validateCodexRelayEndpoint(value: unknown): asserts value is str
   throw new Error('relay requires an explicit loopback WebSocket or absolute Unix socket endpoint');
 }
 
+export function parseCodexTeamBinding(binding: unknown, workspaceId: string): CodexTeamBinding {
+  if (!record(binding) || !exact(binding, ['context', 'threadId', 'endpoint', 'afterSeq']) || typeof binding.context !== 'string' || typeof binding.threadId !== 'string' || !UUID.test(binding.threadId) || !seq(binding.afterSeq)) throw new Error('invalid relay binding');
+  validateCodexRelayEndpoint(binding.endpoint);
+  const lease = decodeTeamMemberContext(binding.context);
+  if (lease.workspaceId !== workspaceId) throw new Error('relay binding belongs to another workspace');
+  return Object.freeze({ context: binding.context, lease, threadId: binding.threadId, endpoint: binding.endpoint, afterSeq: binding.afterSeq });
+}
+
 export function parseCodexTeamBindings(value: unknown, workspaceId: string): readonly CodexTeamBinding[] {
   if (!record(value) || !exact(value, ['version', 'bindings']) || value.version !== 1 || !Array.isArray(value.bindings) || value.bindings.length !== 2) throw new Error('relay requires version 1 and exactly two bindings');
-  const bindings = value.bindings.map((binding): CodexTeamBinding => {
-    if (!record(binding) || !exact(binding, ['context', 'threadId', 'endpoint', 'afterSeq']) || typeof binding.context !== 'string' || typeof binding.threadId !== 'string' || !UUID.test(binding.threadId) || !seq(binding.afterSeq)) throw new Error('invalid relay binding');
-    validateCodexRelayEndpoint(binding.endpoint);
-    const lease = decodeTeamMemberContext(binding.context);
-    if (lease.workspaceId !== workspaceId) throw new Error('relay binding belongs to another workspace');
-    return Object.freeze({ context: binding.context, lease, threadId: binding.threadId, endpoint: binding.endpoint, afterSeq: binding.afterSeq });
-  });
+  const bindings = value.bindings.map(binding => parseCodexTeamBinding(binding, workspaceId));
   if (bindings[0]!.lease.memberId === bindings[1]!.lease.memberId || bindings[0]!.threadId === bindings[1]!.threadId) throw new Error('relay bindings require distinct members and threads');
   return Object.freeze(bindings);
 }
 
-export async function loadCodexTeamBindings(file: string, workspaceId: string): Promise<readonly CodexTeamBinding[]> {
+export async function loadPrivateTeamDocument(file: string): Promise<unknown> {
   if (process.platform === 'win32') throw new Error('team relay currently requires a POSIX private binding file');
   if (!path.isAbsolute(file)) throw new Error('bindings path must be absolute');
   const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -58,8 +60,12 @@ export async function loadCodexTeamBindings(file: string, workspaceId: string): 
     if (Buffer.byteLength(contents) > 16_384) throw new Error('bindings file exceeds size limit');
     let parsed: unknown;
     try { parsed = JSON.parse(contents); } catch { throw new Error('bindings file is not valid JSON'); }
-    return parseCodexTeamBindings(parsed, workspaceId);
+    return parsed;
   } finally { await handle.close(); }
+}
+
+export async function loadCodexTeamBindings(file: string, workspaceId: string): Promise<readonly CodexTeamBinding[]> {
+  return parseCodexTeamBindings(await loadPrivateTeamDocument(file), workspaceId);
 }
 
 export function codexTeamNotification(workspaceId: string, throughSeq: number): string {
@@ -94,67 +100,4 @@ export async function queueCodexTeamNotification(input: {
       resolve(match[1]!);
     });
   });
-}
-
-export type TeamRelayState = 'running' | 'paused' | 'stopped' | 'budget_exhausted' | 'failed';
-export class CodexTeamRelay {
-  private state: TeamRelayState = 'running';
-  private attempts = 0;
-  private error: 'snapshot_failed' | 'queue_delivery_unknown' | undefined;
-  private readonly watermarks: number[];
-  private pending: Promise<void> | undefined;
-  private readonly abort = new AbortController();
-  constructor(private readonly options: {
-    bindings: readonly CodexTeamBinding[]; maxNotifications: number;
-    snapshot: (binding: CodexTeamBinding, afterSeq: number) => Promise<unknown>;
-    enqueue: (binding: CodexTeamBinding, throughSeq: number, signal: AbortSignal) => Promise<string>;
-  }) {
-    if (!Number.isInteger(options.maxNotifications) || options.maxNotifications < 1 || options.maxNotifications > 100) throw new Error('max-notifications must be an integer from 1 to 100');
-    if (options.bindings.length !== 2) throw new Error('relay requires exactly two bindings');
-    this.watermarks = options.bindings.map(binding => binding.afterSeq);
-  }
-  status() {
-    return { state: this.state, attempts: this.attempts, maxNotifications: this.options.maxNotifications,
-      ...(this.error ? { error: this.error } : {}), bindings: this.options.bindings.map((binding, i) => ({
-        workspaceId: binding.lease.workspaceId, memberId: binding.lease.memberId,
-        threadId: binding.threadId, notifiedThroughSeq: this.watermarks[i],
-      })) };
-  }
-  pause(): void { if (this.state === 'running') this.state = 'paused'; }
-  resume(): void { if (this.state === 'paused') this.state = 'running'; }
-  stop(): void { this.state = 'stopped'; this.abort.abort(); }
-  tick(): Promise<void> {
-    if (this.pending) return this.pending;
-    this.pending = this.performTick().finally(() => { this.pending = undefined; });
-    return this.pending;
-  }
-  private async performTick(): Promise<void> {
-    if (this.state !== 'running') return;
-    let phase: 'snapshot_failed' | 'queue_delivery_unknown' = 'snapshot_failed';
-    try {
-      // Validate both grants before queuing anything, including at startup.
-      const snapshots = await Promise.all(this.options.bindings.map(async (binding, i) => {
-        const v = await this.options.snapshot(binding, this.watermarks[i]!);
-        if (!record(v) || !exact(v, ['workspaceId', 'memberId', 'registryRevision', 'expiresAt', 'acknowledgedThroughSeq', 'latestPeerSeq']) ||
-          v.workspaceId !== binding.lease.workspaceId || v.memberId !== binding.lease.memberId || v.registryRevision !== binding.lease.registryRevision ||
-          v.expiresAt !== binding.lease.expiresAt || Date.parse(binding.lease.expiresAt) <= Date.now() ||
-          !seq(v.acknowledgedThroughSeq) || (v.latestPeerSeq !== null && (!seq(v.latestPeerSeq) || v.latestPeerSeq <= Math.max(this.watermarks[i]!, v.acknowledgedThroughSeq)))) throw new Error('invalid or expired notification snapshot');
-        return v as unknown as TeamNotificationSnapshot;
-      }));
-      for (const [i, snapshot] of snapshots.entries()) {
-        if (this.state !== 'running') break;
-        if (snapshot.latestPeerSeq === null) continue;
-        if (this.attempts >= this.options.maxNotifications) { this.state = 'budget_exhausted'; break; }
-        phase = 'queue_delivery_unknown';
-        this.attempts += 1;
-        const receipt = await this.options.enqueue(this.options.bindings[i]!, snapshot.latestPeerSeq, this.abort.signal);
-        if (!UUID.test(receipt)) throw new Error('invalid queue receipt');
-        this.watermarks[i] = snapshot.latestPeerSeq;
-        if (this.attempts === this.options.maxNotifications && !this.abort.signal.aborted) this.state = 'budget_exhausted';
-      }
-    } catch {
-      this.error = phase;
-      if (!this.abort.signal.aborted) this.state = 'failed';
-    }
-  }
 }

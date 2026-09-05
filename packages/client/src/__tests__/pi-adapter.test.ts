@@ -597,10 +597,10 @@ describe('PiAdapter against the fake-pi fixture', () => {
   });
 });
 
-describe('PiAdapter against the user-installed runtime (no network/API key required)', () => {
-  it('detect() returns a well-formed result whether or not pi is actually installed here', async () => {
+describe('PiAdapter against the pinned package runtime (no network/API key required)', () => {
+  it('detect() reads back the pinned executable version', async () => {
     const adapter = new PiAdapter();
     const result = await adapter.detect();
-    expect(result).toMatchObject({ present: true, version: '0.84.2' });
+    expect(result).toMatchObject({ present: true, version: '0.85.1' });
   });
 });

@@ -1,3 +1,4 @@
+import { TeamNotificationRelay } from '../team-notification-relay';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -5,7 +6,7 @@ import type { DaemonConfig } from '../../daemon/create-daemon';
 import { ensureSecureDir } from '../../util/secure-dir';
 import { connectControlClient } from '../control-client';
 import { resolveStoreDir } from '../config';
-import { CodexTeamRelay, loadCodexTeamBindings, preflightCodexRelay, queueCodexTeamNotification } from '../team-codex-relay';
+import { loadCodexTeamBindings, preflightCodexRelay, queueCodexTeamNotification } from '../team-codex-relay';
 
 /** One foreground owner per room. Stale locks are never guessed away or stolen. */
 export async function acquireTeamRelayLock(storeDir: string, workspaceId: string): Promise<() => Promise<void>> {
@@ -33,7 +34,7 @@ export async function runTeamRelayCommand(input: {
   const client = connection.client;
   let release: (() => Promise<void>) | undefined;
   let commands: ReturnType<typeof createInterface> | undefined;
-  const relay = new CodexTeamRelay({ bindings, maxNotifications: input.maxNotifications,
+  const relay = new TeamNotificationRelay({ bindings, describe: binding => ({ threadId: binding.threadId }), maxNotifications: input.maxNotifications,
     snapshot: (binding, afterSeq) => client.request('team_notifications.snapshot', { context: binding.context, afterSeq }),
     enqueue: async (binding, throughSeq, signal) => {
       const status = relay.status();

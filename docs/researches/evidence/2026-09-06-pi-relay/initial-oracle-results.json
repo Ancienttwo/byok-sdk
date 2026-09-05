@@ -1,0 +1,190 @@
+{
+  "startedAt": "2026-09-05T19:50:48Z",
+  "scope": "one existing Codex session and one owned Pi 0.85.1 RPC member; actual SDK control/store/helper and production pi-relay CLI",
+  "scratchRemoved": false,
+  "sessions": [
+    {
+      "member": "alice",
+      "threadId": "01a0731f-b327-7fe2-9cf9-d2c821838148",
+      "endpoint": "ws://127.0.0.1:59554",
+      "model": "gpt-6-astra",
+      "modelProvider": "openai"
+    },
+    {
+      "member": "bob",
+      "sessionId": "01a0731f-b6be-75e2-a8da-bb1bbf769aca",
+      "provider": "zai",
+      "model": "glm-5.3"
+    }
+  ],
+  "status": "FAIL",
+  "codexVersion": "codex-cli 0.153.4",
+  "piVersion": "0.85.1",
+  "confirmationBeforeResponse": "PASS",
+  "errorType": "TimeoutError",
+  "error": "smoke deadline",
+  "controlEvents": [
+    {
+      "ts": "2026-09-05T19:51:05.269Z",
+      "method": "post",
+      "member": "alice",
+      "seq": 1,
+      "messageId": "105cf084-1e51-4195-a0f4-11997b2af51c"
+    },
+    {
+      "ts": "2026-09-05T19:51:13.656Z",
+      "method": "read",
+      "member": "bob",
+      "deliveredThroughSeq": 1,
+      "count": 1
+    },
+    {
+      "ts": "2026-09-05T19:51:18.454Z",
+      "method": "post",
+      "member": "bob",
+      "seq": 2,
+      "messageId": "902c02d2-a5c0-41f4-b39a-2c2d2b973cc8"
+    },
+    {
+      "ts": "2026-09-05T19:51:21.631Z",
+      "method": "read",
+      "member": "alice",
+      "deliveredThroughSeq": 2,
+      "count": 2
+    },
+    {
+      "ts": "2026-09-05T19:51:22.891Z",
+      "method": "read",
+      "member": "bob",
+      "deliveredThroughSeq": 1,
+      "count": 0
+    },
+    {
+      "ts": "2026-09-05T19:51:27.118Z",
+      "method": "ack",
+      "member": "bob",
+      "throughSeq": 1
+    },
+    {
+      "ts": "2026-09-05T19:51:28.341Z",
+      "method": "ack",
+      "member": "alice",
+      "throughSeq": 2
+    }
+  ],
+  "ledger": [
+    {
+      "event": "pi_gate",
+      "sessionId": "01a0731f-b6be-75e2-a8da-bb1bbf769aca",
+      "phase": "open",
+      "revision": 1
+    },
+    {
+      "event": "pi_ready",
+      "sessionId": "01a0731f-b6be-75e2-a8da-bb1bbf769aca",
+      "version": "0.85.1",
+      "provider": "zai",
+      "model": "glm-5.3"
+    },
+    {
+      "event": "status",
+      "state": "running",
+      "attempts": 0,
+      "maxNotifications": 2
+    },
+    {
+      "event": "ui_request",
+      "sessionId": "01a0731f-b6be-75e2-a8da-bb1bbf769aca"
+    },
+    {
+      "event": "pi_gate",
+      "sessionId": "01a0731f-b6be-75e2-a8da-bb1bbf769aca",
+      "phase": "waiting",
+      "revision": 2
+    },
+    {
+      "event": "input_accepted",
+      "sessionId": "01a0731f-b6be-75e2-a8da-bb1bbf769aca",
+      "queueId": "9391c9d3-be8d-4382-a2af-531f18d1aa95"
+    },
+    {
+      "event": "ui_response_sent",
+      "sessionId": "01a0731f-b6be-75e2-a8da-bb1bbf769aca",
+      "requestId": "19500a6a-fcc1-4374-9d64-5665dc0833fb"
+    },
+    {
+      "event": "pi_gate",
+      "sessionId": "01a0731f-b6be-75e2-a8da-bb1bbf769aca",
+      "phase": "open",
+      "revision": 3
+    },
+    {
+      "event": "queue_attempt",
+      "harness": "pi",
+      "memberId": "bob",
+      "throughSeq": 1,
+      "attempt": 1
+    },
+    {
+      "event": "queue_accepted",
+      "harness": "pi",
+      "memberId": "bob",
+      "throughSeq": 1,
+      "attempt": 1,
+      "queueId": "f525cdb4-191d-43d8-a730-c3574a040a1e"
+    },
+    {
+      "event": "status",
+      "state": "running",
+      "attempts": 1,
+      "maxNotifications": 2
+    },
+    {
+      "event": "queue_attempt",
+      "harness": "codex",
+      "memberId": "alice",
+      "throughSeq": 2,
+      "attempt": 2
+    },
+    {
+      "event": "queue_accepted",
+      "harness": "codex",
+      "memberId": "alice",
+      "throughSeq": 2,
+      "attempt": 2,
+      "queueId": "01a07320-19ed-7a92-90a1-7b945bb7c097"
+    },
+    {
+      "event": "status",
+      "state": "budget_exhausted",
+      "attempts": 2,
+      "maxNotifications": 2
+    },
+    {
+      "event": "pi_settled",
+      "sessionId": "01a0731f-b6be-75e2-a8da-bb1bbf769aca"
+    }
+  ],
+  "sourceSha256": {
+    "packages/client/src/daemon/team-workspace.ts": "1ea4f4809dfc8a34842ede1503304e797706c2d16f4798d0d168f799b0bde624",
+    "packages/client/src/daemon/control-protocol.ts": "e7b2fe4a26043dacbaf5c3842d40edb718c44556eeb3387fa95a3356d13cd6c5",
+    "packages/client/src/daemon/create-daemon.ts": "ef07b68215f46fb65ba80be21e1d1ac7b430bbd80e3a2c5f801935826bf2c2e2",
+    "packages/client/src/bin/team-codex-relay.ts": "9478326ad936beb20755a67bccd77f7d6b43493d0f6e79a7f79317dde69c60aa",
+    "packages/client/src/bin/commands/team-relay.ts": "14f1dfca3f00a82f3e6d07c3a9649033c6bbcb423f0f8f02fdff6c4c3cbd08a7",
+    "packages/client/src/bin/byok-agent.ts": "c5432a67ad39d5b69de37866e02cd5f99633e4a45045b865082da4376fe3c47b",
+    "packages/client/src/bin/commands/team-pi-relay.ts": "36145d9a89a7302bff36180b202afe5f9c34a927b1ab19f818e733062af167a1",
+    "packages/client/src/bin/team-pi-session.ts": "6dcf0a70726d0a645b25fc4d130b6376457abc0ba60e3ffbd8ed613584b27dc3",
+    "packages/client/src/bin/team-notification-relay.ts": "d0b5719778318eaa8253889f0c1bb7e3c69faacd8426acb30bbd4adf0378b4c7",
+    "packages/client/src/adapters/pi/rpc-client.ts": "33dcab3160f16ebb8cc6268171652bca02c6f3fb5f205db2b3ad07dddbc54e0a",
+    "packages/client/src/adapters/pi/team-interaction-extension.ts": "4d91e49f79ca7467ffd93edd6c803eb620f36a5355da5f9ffccf9773a2dd17a1",
+    "packages/client/package.json": "c3f3537155ec2d6c6c33ce4234f6d00b96838b3b987deacf0988c1468383a917",
+    "bun.lock": "c01bcd2728ff8dc4f2abaf6fe64df34004423d002290c008f35eafd9317668be"
+  },
+  "builtCliSha256": "b46670971b7f2b3a3bc95c60d51070c5c46d4f700cd19d93a119835d7509ade3",
+  "builtArtifactsSha256": {
+    "packages/client/dist/adapters/pi/team-interaction-extension.js": "f532ae6a0efeb153b06ef8ed8efdaf3367f0b2ed09c2719f80f10f25763837c3",
+    "packages/client/dist/adapters/pi/mcp-extension.js": "52f53d36a1dd48b9aa8654827dfb8b552c9009937dfb571fccac3751398bed9f"
+  },
+  "ownedProcessesStopped": true,
+  "privateScratch": "/tmp/byok-harness-probe-relay-71di9e9b"
+}

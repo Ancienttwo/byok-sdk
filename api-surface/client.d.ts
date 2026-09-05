@@ -841,6 +841,13 @@ export interface PiRpcClientOptions {
     cwd: string;
     env: NodeJS.ProcessEnv;
     spawnFn?: SpawnFn;
+    /** Explicit GUI-owned interaction lane; omission retains unattended cancellation. */
+    extensionUi?: {
+        mode: 'hold';
+        onRequest: (request: PiRpcMessage) => void;
+    };
+    /** Synchronous observation before command receipts resolve, for an owned relay. */
+    onFrame?: (frame: PiRpcMessage) => void;
     /**
      * DI seam scoped to ADOPTION only (`../process-tree.ts`'s
      * `adoptOwnedProcessTree`), so the win32 job-object branch is exercisable
@@ -866,6 +873,7 @@ export interface PiRpcClientOptions {
  * response can overtake a slower in-flight command's response).
  */
 export declare class PiRpcClient {
+    private readonly options;
     private readonly child;
     private buffer;
     private nextId;
@@ -933,6 +941,13 @@ export declare class PiRpcClient {
     private adoptOwnedTree;
     private onData;
     private onLine;
+    /** Write an explicit host-owned response; completion is a transport receipt only. */
+    respondExtensionUi(response: {
+        id: string;
+        cancelled?: true;
+        confirmed?: boolean;
+        value?: string;
+    }): Promise<void>;
     /**
      * Answer pi's extension-UI blocking protocol headlessly (rpc.md's
      * "Extension UI Protocol"). Fail-closed policy, stated explicitly because

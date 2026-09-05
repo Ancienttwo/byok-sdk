@@ -69,7 +69,7 @@
   "dependencies": {
     "@byok-sdk/core": "workspace:*",
     "@byok-sdk/protocol": "workspace:*",
-    "@earendil-works/pi-coding-agent": "0.84.2",
+    "@earendil-works/pi-coding-agent": "0.85.1",
     "@juicesharp/rpiv-todo": "2.8.0",
     "pi-mcp-adapter": "2.27.0",
     "pi-subagents": "0.60.0",

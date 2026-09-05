@@ -229,7 +229,7 @@ remain the only device protocol.
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. `@byok-sdk/client` depends on the exact npm
-artifact `@earendil-works/pi-coding-agent@0.84.2`; the SDK does not accept an
+artifact `@earendil-works/pi-coding-agent@0.85.1`; the SDK does not accept an
 unversioned global `pi` on `PATH` as an implicit substitute. All workspace
 dispatch packages and private conformance tests require Node.js `>=22.22.0`,
 matching pi's published engine floor. The independent
@@ -493,7 +493,7 @@ Credentials remain in owner-only binding files and authenticated control request
 never argv or status. A stop during enqueue may retain `queue_delivery_unknown`
 because native acceptance cannot be recalled or ruled out by aborting the CLI.
 Loopback Codex endpoints retain the native local-process trust boundary; the
-relay adds no authentication to them. Pi and Claude bindings remain deferred.
+relay adds no authentication to them. The Pi RPC binding is specified below; Claude notification remains deferred.
 
 ## Task-scoped host MCP toolsets
 
@@ -840,3 +840,34 @@ normal. Server/cloud explicit dispatch rejects legacy work to a strict device
 before task/mailbox mutation, and implicit legacy selection skips strict
 devices. Those producer gates are scheduling defenses only; stale connections
 remain covered by the local gate.
+
+
+### Owned Pi RPC team member and GUI interaction
+
+`byok-agent team pi-relay` binds one exact existing Codex thread and one newly
+owned Pi 0.85.1 RPC session. The private version-1 binding document has `codex`
+(context, threadId, endpoint, afterSeq) and `pi` (context, afterSeq, absolute cwd,
+fresh absolute sessionDir, provider, model, systemPrompt, extensionPaths) fields.
+Both grants belong to distinct members of the same workspace. The CLI creates
+Pi's three-tool Team MCP config from its member grant, disables ambient resource
+loading and installs the SDK interaction guard first. Native TUI adoption and GUI
+application construction are outside this contract.
+
+GUI stdin uses JSONL `pause`, `resume`, `status`, `stop`, `input` and `respond`
+commands. Input identifies the exact sessionId and message. Respond identifies
+sessionId, requestId and exactly one method-matching value, confirmation or cancel.
+Output includes native dialog requests, gate/session metadata, delivery receipts
+and agent_settled. No automatic approval or dismissal occurs in this host.
+
+Native ui_prompt_start/end spans govern input/provider admission in the Pi
+process. Public setStatus RPC frames project the guard's session and monotonic
+revision. The host additionally defers notifications while busy, compacting or
+holding GUI IDs. Timeout does not infer a per-ID dismissal: GUI response is
+explicit, and its receipt means sent, not native acceptance. Native rejection,
+unknown delivery, malformed authority or session replacement stops the epoch.
+
+The existing finite attempt/watermark/room-lock contract applies. Budget exhaustion
+allows accepted Pi work up to 120 seconds to settle; stop, signals and stdin EOF
+terminate the owned child. Pending prompt RPC has a 30-second deadline. Already
+admitted work is not recalled by a later dialog. GUI requests/concurrent commands
+are capped at 32. The TaskRunner unattended cancellation policy is unchanged.

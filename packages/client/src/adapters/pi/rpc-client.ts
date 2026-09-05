@@ -23,6 +23,10 @@ export interface PiRpcClientOptions {
   cwd: string;
   env: NodeJS.ProcessEnv;
   spawnFn?: SpawnFn;
+  /** Explicit GUI-owned interaction lane; omission retains unattended cancellation. */
+  extensionUi?: { mode: 'hold'; onRequest: (request: PiRpcMessage) => void };
+  /** Synchronous observation before command receipts resolve, for an owned relay. */
+  onFrame?: (frame: PiRpcMessage) => void;
   /**
    * DI seam scoped to ADOPTION only (`../process-tree.ts`'s
    * `adoptOwnedProcessTree`), so the win32 job-object branch is exercisable
@@ -83,7 +87,7 @@ export class PiRpcClient {
   /** Count of pi RPC message types `PiSession` (pi-adapter.ts) has told us have no `AgentEvent` mapping and aren't routine bookkeeping — see `recordUnmappedFrame`. */
   private readonly unmappedFrameCounts = new Map<string, number>();
 
-  constructor(options: PiRpcClientOptions) {
+  constructor(private readonly options: PiRpcClientOptions) {
     const spawnFn = options.spawnFn ?? spawn;
     this.child = spawnFn(options.command, options.args, withOwnedProcessTree({
       cwd: options.cwd,
@@ -251,6 +255,7 @@ export class PiRpcClient {
     } catch {
       return; // a stray non-JSON line is not this client's concern
     }
+    this.options.onFrame?.(msg);
     if (msg.type === 'response' && typeof msg.id === 'string' && this.pending.has(msg.id)) {
       const waiter = this.pending.get(msg.id);
       this.pending.delete(msg.id);
@@ -261,10 +266,19 @@ export class PiRpcClient {
       // Answered here, not enqueued — see `respondToExtensionUiRequest`. If
       // left unanswered this blocks pi's entire run (process alive, waiting
       // on stdin forever), so every blocking dialog is handled here.
-      this.respondToExtensionUiRequest(msg.id, msg.method);
+      if (this.options.extensionUi?.mode === 'hold') this.options.extensionUi.onRequest(msg);
+      else this.respondToExtensionUiRequest(msg.id, msg.method);
       return;
     }
     this.eventQueue.push(msg);
+  }
+
+  /** Write an explicit host-owned response; completion is a transport receipt only. */
+  async respondExtensionUi(response: { id: string; cancelled?: true; confirmed?: boolean; value?: string }): Promise<void> {
+    if (this.options.extensionUi?.mode !== 'hold') throw new Error('Pi interactions are not host-owned');
+    await this.adopted;
+    if (this.closed) throw new Error('Pi process is closed');
+    await new Promise<void>((resolve, reject) => this.child.stdin.write(`${JSON.stringify({ type: 'extension_ui_response', ...response })}\n`, error => error ? reject(error) : resolve()));
   }
 
   /**

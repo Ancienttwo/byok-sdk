@@ -1,0 +1,35 @@
+{
+  "messages": [
+    {
+      "seq": 1,
+      "senderMemberId": "alice",
+      "messageId": "105cf084-1e51-4195-a0f4-11997b2af51c"
+    },
+    {
+      "seq": 2,
+      "senderMemberId": "bob",
+      "messageId": "902c02d2-a5c0-41f4-b39a-2c2d2b973cc8"
+    }
+  ],
+  "receipts": {
+    "alice": {
+      "deliveredThroughSeq": 2,
+      "acknowledgedThroughSeq": 2
+    },
+    "bob": {
+      "deliveredThroughSeq": 1,
+      "acknowledgedThroughSeq": 1
+    }
+  },
+  "nativeCleanup": {
+    "threadId": "01a0731f-b327-7fe2-9cf9-d2c821838148",
+    "turnStatuses": [
+      "completed",
+      "completed"
+    ],
+    "nativeThreadsDeleted": true,
+    "sameRun": true
+  },
+  "relayStderrEmpty": true,
+  "scratchRemoved": true
+}

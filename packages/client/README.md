@@ -390,7 +390,48 @@ before manually removing a stale `<storeDir>/team-relay-locks/<room>.lock`.
 Watermarks are process-local. On restart choose `afterSeq` explicitly from prior
 status and actual room receipts; do not assume automatic crash replay, exactly-once
 or guaranteed at-least-once delivery. Renewing grants requires explicitly updating
-both the session MCP grant and binding file. This slice supplies only the Codex
-notification binding; tmux remains an optional view.
+both the session MCP grant and binding file. tmux remains an optional view.
+
+### Codex + Pi through a GUI host
+
+`team pi-relay` owns a fresh Pi **0.85.1** RPC child alongside your existing Codex
+session. Prepare a private `0600` absolute-path binding document:
+
+```json
+{"version":1,"codex":{"context":"<codex-grant>","threadId":"<uuid>","endpoint":"ws://127.0.0.1:9101","afterSeq":0},"pi":{"context":"<pi-grant>","afterSeq":0,"cwd":"/absolute/workspace","sessionDir":"/absolute/new-session-dir","provider":"<provider>","model":"<model>","systemPrompt":"<explicit instructions>","extensionPaths":[]}}
+```
+
+The session directory must not exist; its parent must exist. The SDK supplies the
+Pi Team MCP tools and guard extension. Additional absolute extension paths are
+operator-trusted code, loaded after the guard. Ambient extension loading is off.
+
+```bash
+byok-agent team pi-relay dev --bindings /absolute/private.json --codex-bin /absolute/codex --max-notifications 2 --config /absolute/agent.json
+```
+
+Connect a GUI backend to stdin/stdout JSONL. This command provides the interface;
+it does not include a GUI app. Keep stdin open while the session runs.
+
+```json
+{"command":"status"}
+{"command":"pause"}
+{"command":"resume"}
+{"command":"input","sessionId":"<pi_ready sessionId>","message":"<operator input>"}
+{"command":"respond","sessionId":"<ui_request sessionId>","requestId":"<request.id>","response":{"cancelled":true}}
+{"command":"stop"}
+```
+
+For confirm, use `{"confirmed":true}` or `false`; for select/input/editor, use
+`{"value":"..."}`. Exactly one response field is accepted. Wrong session, stale ID,
+duplicate answer or mismatched shape is rejected. `ui_response_sent` confirms pipe
+write only: Pi may have expired that ID. Expiry leaves the GUI item pending until
+you explicitly dismiss it. Render `ui_request.request` as untrusted display data.
+
+The first-loaded native guard holds input/provider admission during Pi UI spans.
+`pi_gate` reports that state; `pi_settled` reports completed native work. Busy Pi
+waits for readiness. A 30-second unresolved RPC stops the owned process, without
+retry. Budget exhaustion drains accepted Pi work for up to 120 seconds; explicit
+stop or stdin EOF terminates it. Neither pause nor a new dialog recalls already
+admitted work. Runtime/grants remain separate from the native Codex session.
 
 MIT licensed. Node.js 22.22.0 or newer.

@@ -1,3 +1,4 @@
+import { TeamNotificationRelay } from '../bin/team-notification-relay';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -5,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LocalTeamWorkspace, encodeTeamMemberContext, TEAM_WORKSPACE_DIRECTORY } from '../daemon/team-workspace';
 import { parseTeamNotificationSnapshotParams } from '../daemon/control-protocol';
 import { acquireTeamRelayLock } from '../bin/commands/team-relay';
-import { CodexTeamRelay, parseCodexTeamBindings, loadCodexTeamBindings, queueCodexTeamNotification, preflightCodexRelay, validateCodexRelayEndpoint } from '../bin/team-codex-relay';
+import { parseCodexTeamBindings, loadCodexTeamBindings, queueCodexTeamNotification, preflightCodexRelay, validateCodexRelayEndpoint } from '../bin/team-codex-relay';
 
 const dirs: string[] = [];
 const receipt = '11111111-1111-4111-8111-111111111111';
@@ -47,8 +48,19 @@ describe('notification authority', () => {
 });
 
 describe('Codex relay state machine', () => {
+  it('defers an unready member without spending attempts or moving its watermark', async () => {
+    const s = await setup(); let open = false;
+    const relay = new TeamNotificationRelay({ ...s, maxNotifications: 1, describe: binding => ({ threadId: binding.threadId }), ready: async () => open });
+    await s.workspace.postMessage({ lease: s.leases[0]!, body: 'peer message' });
+    await relay.tick(); await relay.tick();
+    expect(s.enqueue).not.toHaveBeenCalled(); expect(relay.status().attempts).toBe(0);
+    expect(relay.status().bindings[1]!.notifiedThroughSeq).toBe(0);
+    open = true; await relay.tick();
+    expect(relay.status()).toMatchObject({ state: 'budget_exhausted', attempts: 1 });
+    expect(s.enqueue).toHaveBeenCalledTimes(1);
+  });
   it('serializes ticks and advances notification watermark without advancing receipt', async () => {
-    const s = await setup(); const relay = new CodexTeamRelay({ ...s, maxNotifications: 2 });
+    const s = await setup(); const relay = new TeamNotificationRelay({ describe: binding => ({ threadId: binding.threadId }), ...s, maxNotifications: 2 });
     await s.workspace.postMessage({ lease: s.leases[0]!, body: 'request' });
     await Promise.all([relay.tick(), relay.tick(), relay.tick()]); await relay.tick();
     expect(s.enqueue).toHaveBeenCalledTimes(1);
@@ -63,20 +75,20 @@ describe('Codex relay state machine', () => {
   it('preflights both leases before any delivery and stops on revoke', async () => {
     const s = await setup(); await s.workspace.postMessage({ lease: s.leases[0]!, body: 'request' });
     await s.workspace.revokeMemberLease({ lease: s.leases[0]! });
-    const relay = new CodexTeamRelay({ ...s, maxNotifications: 2 }); await relay.tick();
+    const relay = new TeamNotificationRelay({ describe: binding => ({ threadId: binding.threadId }), ...s, maxNotifications: 2 }); await relay.tick();
     expect(relay.status()).toMatchObject({ state: 'failed', attempts: 0, error: 'snapshot_failed' }); expect(s.enqueue).not.toHaveBeenCalled();
   });
   it('pause during snapshot prevents delivery, resume preserves budget', async () => {
     const s = await setup(); await s.workspace.postMessage({ lease: s.leases[0]!, body: 'request' });
     let release!: () => void; const gate = new Promise<void>(r => { release = r; });
-    const relay = new CodexTeamRelay({ ...s, maxNotifications: 1, snapshot: async (b, seq) => { await gate; return s.snapshot(b, seq); } });
+    const relay = new TeamNotificationRelay({ describe: binding => ({ threadId: binding.threadId }), ...s, maxNotifications: 1, snapshot: async (b, seq) => { await gate; return s.snapshot(b, seq); } });
     const tick = relay.tick(); relay.pause(); release(); await tick; expect(s.enqueue).not.toHaveBeenCalled();
     relay.resume(); await relay.tick(); expect(relay.status()).toMatchObject({ state: 'budget_exhausted', attempts: 1 });
   });
   it.each(['reject', 'malformed'])('counts failed attempts and never retries (%s)', async kind => {
     const s = await setup(); await s.workspace.postMessage({ lease: s.leases[0]!, body: 'request' });
     const enqueue = vi.fn(async () => { if (kind === 'reject') throw new Error('private upstream detail'); return 'not-a-receipt'; });
-    const relay = new CodexTeamRelay({ ...s, enqueue, maxNotifications: 2 }); await relay.tick(); relay.resume(); await relay.tick();
+    const relay = new TeamNotificationRelay({ describe: binding => ({ threadId: binding.threadId }), ...s, enqueue, maxNotifications: 2 }); await relay.tick(); relay.resume(); await relay.tick();
     expect(relay.status()).toMatchObject({ state: 'failed', attempts: 1, error: 'queue_delivery_unknown' }); expect(enqueue).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(relay.status())).not.toContain('private upstream');
   });
@@ -84,13 +96,13 @@ describe('Codex relay state machine', () => {
     const s = await setup(); await s.workspace.postMessage({ lease: s.leases[0]!, body: 'a' }); await s.workspace.postMessage({ lease: s.leases[1]!, body: 'b' });
     let entered!: () => void; const ready = new Promise<void>(r => { entered = r; });
     const enqueue = vi.fn(async (_b, _seq, signal: AbortSignal) => { entered(); return new Promise<string>((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true })); });
-    const relay = new CodexTeamRelay({ ...s, enqueue, maxNotifications: 2 }); const tick = relay.tick(); await ready; relay.stop(); await tick;
+    const relay = new TeamNotificationRelay({ describe: binding => ({ threadId: binding.threadId }), ...s, enqueue, maxNotifications: 2 }); const tick = relay.tick(); await ready; relay.stop(); await tick;
     expect(relay.status()).toMatchObject({ state: 'stopped', attempts: 1 }); expect(enqueue).toHaveBeenCalledTimes(1);
   });
   it.each(['identity', 'expired', 'extra'])('rejects malformed snapshot before notifying (%s)', async kind => {
     const s = await setup(); const bindings = kind === 'expired' ? s.bindings.map(b => ({ ...b, lease: { ...b.lease, expiresAt: '2000-01-01T00:00:00.000Z' } })) : s.bindings;
     const snapshot = async (b: typeof bindings[number], seq: number) => ({ ...await s.snapshot(s.bindings.find(x => x.threadId === b.threadId)!, seq), ...(kind === 'identity' ? { memberId: 'wrong' } : kind === 'expired' ? { expiresAt: b.lease.expiresAt } : { body: 'forbidden' }) });
-    const relay = new CodexTeamRelay({ ...s, bindings, snapshot, maxNotifications: 2 }); await relay.tick();
+    const relay = new TeamNotificationRelay({ describe: binding => ({ threadId: binding.threadId }), ...s, bindings, snapshot, maxNotifications: 2 }); await relay.tick();
     expect(relay.status().state).toBe('failed'); expect(s.enqueue).not.toHaveBeenCalled();
   });
 });

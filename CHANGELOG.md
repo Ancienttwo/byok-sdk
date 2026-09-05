@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`@byok-sdk/client` Pi GUI team relay:** Pin Pi to `0.85.1`; add bounded
+  `team pi-relay` for one Codex thread and an owned Pi RPC child. Native UI spans
+  gate input/provider requests; GUI answers exact IDs without automatic approval.
+  Shared notification watermarks preserve durable TeamWorkspace receipt authority.
+
 - **`@byok-sdk/keys` provider vendor catalog:** `MODEL_PROVIDER_VENDORS` declares
   27 vendors (id, display name, base URL in the SDK's suffix convention, adapter,
   auth mode, credential env name) ported from deepseek-harness / pi-ai 0.84.2;
