@@ -1,0 +1,27 @@
+{
+  "status": "PASS",
+  "testedRevision": "99976fd80173582ecbc82a8657368c9820c37c99",
+  "integratedMain": "d138ce5",
+  "piSourceAcceptance": "17f9db31b1b57f2b6ef2f11740d2872d5b54455f",
+  "recordedAt": "2026-09-05T20:16:48.534699+00:00",
+  "testFilesPassed": 314,
+  "testsPassed": 3711,
+  "commandsPassed": [
+    "bun run build",
+    "bun run typecheck",
+    "bun run test",
+    "bun run check:api-surface",
+    "bun run check:version-authority",
+    "repo-harness run check-task-workflow --strict",
+    "git diff --check"
+  ],
+  "textConflict": "CHANGELOG.md; both entries retained",
+  "nativeEvidenceReuse": "Pi relay/admission code unchanged. Older smoke remains bound to its original source and built hashes; combined build and tests provide integration evidence.",
+  "changedNativeSmokeSourcePaths": [
+    "packages/client/src/daemon/create-daemon.ts"
+  ],
+  "mainLanding": "fast-forwarded in isolated worktree; original root retained concurrent claude/timeline-spill branch",
+  "rootContextFilesByteIdentical": true,
+  "recoveryBranch": "recovery/pi-relay-main-context-20260906",
+  "remotePush": false
+}

@@ -76,7 +76,7 @@ boundary and final implementation; no main-worktree or event-spill edits.
 - [x] Run required checks and independent acceptance; record remaining scope.
 
 - [x] Integrate main d138ce5; resolve the CHANGELOG-only textual conflict.
-- [ ] Verify the combined candidate and fast-forward main with WIP intact.
+- [x] Verify the combined candidate and fast-forward main with WIP intact.
 
 Selected native guard/GUI design and tested transport details: see the research.
 
@@ -109,3 +109,7 @@ claim its older whole-artifact hash proves the merged daemon build.
 
 
 No push, remote cleanup or release is authorized by this slice.
+
+Main was fast-forwarded to tested source 99976fd in the isolated worktree.
+The root retained Claude's concurrent timeline-spill checkout and dirty context
+files. Integration gates passed; see evidence/2026-09-06-pi-relay/integration.json.
