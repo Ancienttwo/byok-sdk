@@ -24,3 +24,10 @@ Confirmed installed parser requires `plan-YYYYMMDD-HHMM-...md`; missing time fie
 ## Pending acceptance
 
 Worker source freeze and handoffs, combined source/API/version/workflow checks, independent final review, canonical SDK pack, exact downstream installed graph and native compiled results, coherent pushed PRs with CI readback. Do not conflate worker progress, prepared metadata or test syntax with completed runtime acceptance.
+
+## Recovery integration readback
+
+- Merged worker `adfc85a0956aae1ac2518bec22acb096fcf7be91` as `f838a0f54624f5d2b9cc46e6ff4e766b3abaa1c3` without source conflict. Worker self-review is not the final independent integration acceptance.
+- Node 22.22 source build, typecheck, all 9 API goldens and version authority passed on the integrated source.
+- Re-ran the reported Wrangler packaging timeout under the Node 22.22 host after building the required dist: 6/6 tests passed in 2.23 seconds (2.07 seconds test body). No test timeout or source change was needed. A prior root invocation before dist existed refused at the documented build prerequisite and ran zero tests; it is not counted as a code failure or pass.
+- Strict workflow identified the integration plan's `program` level as incompatible with an active implementation contract. This bounded SDK PR is an integration work-package; corrected that classification, leaving the product child separate and all acceptance requirements intact.

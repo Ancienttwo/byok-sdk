@@ -1,7 +1,7 @@
 # Prelaunch execution recovery and Multi-Agent integration
 
 > **Status**: Executing
-> **Artifact Level**: program
+> **Artifact Level**: work-package
 > **Task Contract**: tasks/contracts/20260906-0500-prelaunch-integration.contract.md
 > **Owner**: Astra, tmux %7
 > **Authorization**: User requested autonomous overnight implementation, acceptance, commits, push and PRs. Registry publication, production deployment and destructive live data operations are excluded.
@@ -41,7 +41,7 @@ No writer edits another worktree. Shared files move between owners sequentially 
 - [x] Refresh live branches, worker identities, PRs and #147 landing evidence.
 - [x] Dispatch recovery and Multi-Agent workers with disjoint responsibility.
 - [x] Review workers' concrete designs and resolve shared contract choices.
-- [ ] Accept BYOK recovery source and incorporate independently accepted audit/version changes.
+- [x] Integrate BYOK recovery source and independently accepted audit/version checkpoints (final acceptance remains below).
 - [ ] Accept Salesko Multi-Agent source and integrate existing journal/producer-fence work.
 - [ ] Build frozen SDK packages and prove clean consumer installation without alternate semantic authorities.
 - [ ] Run real compiled daemon crash/restart and two-Agent acceptance against the frozen consumer subject.
