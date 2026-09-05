@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-09-06T01:29:46+0800 -->
+<!-- updated_at: 2026-09-06T02:44:15+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-09-06T01:29:46+0800
-> **Source Branch**: main
-> **Source Commit**: f993f8e
+> **Updated At**: 2026-09-06T02:44:15+0800
+> **Source Branch**: claude/win32-job-object-ownership
+> **Source Commit**: f0f52ed
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -53,16 +53,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260906-0018-provider-vendor-catalog.md
- D tasks/contracts/20260906-0018-provider-vendor-catalog.contract.md
- D tasks/notes/20260906-0018-provider-vendor-catalog.notes.md
- D tasks/reviews/20260906-0018-provider-vendor-catalog.review.md
+ D plans/plan-20260906-0130-win32-job-object-ownership.md
+ D tasks/contracts/20260906-0130-win32-job-object-ownership.contract.md
+ D tasks/notes/20260906-0130-win32-job-object-ownership.notes.md
+ D tasks/reviews/20260906-0130-win32-job-object-ownership.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260906-0018-provider-vendor-catalog.md
-?? tasks/archive/contract-20260906-0129-provider-vendor-catalog.md
-?? tasks/archive/notes-20260906-0129-provider-vendor-catalog.md
-?? tasks/archive/review-20260906-0129-provider-vendor-catalog.md
-?? tasks/archive/todo-20260906-0129-provider-vendor-catalog.md
+?? plans/archive/plan-20260906-0130-win32-job-object-ownership.md
+?? tasks/archive/contract-20260906-0244-win32-job-object-ownership.md
+?? tasks/archive/notes-20260906-0244-win32-job-object-ownership.md
+?? tasks/archive/review-20260906-0244-win32-job-object-ownership.md
+?? tasks/archive/todo-20260906-0244-win32-job-object-ownership.md
 ```
 
 ## Source Artifacts

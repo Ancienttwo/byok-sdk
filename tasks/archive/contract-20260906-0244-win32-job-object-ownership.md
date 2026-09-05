@@ -1,14 +1,24 @@
+> **Archived**: 2026-09-06 02:44
+> **Related Plan**: plans/archive/plan-20260906-0130-win32-job-object-ownership.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260906-0244
+> **Archive Projection V1**: `plans/plan-20260906-0130-win32-job-object-ownership.md` => `plans/archive/plan-20260906-0130-win32-job-object-ownership.md`
+> **Archive Projection V1**: `tasks/notes/20260906-0130-win32-job-object-ownership.notes.md` => `tasks/archive/notes-20260906-0244-win32-job-object-ownership.md`
+> **Archive Projection V1**: `tasks/contracts/20260906-0130-win32-job-object-ownership.contract.md` => `tasks/archive/contract-20260906-0244-win32-job-object-ownership.md`
+> **Archive Projection V1**: `tasks/reviews/20260906-0130-win32-job-object-ownership.review.md` => `tasks/archive/review-20260906-0244-win32-job-object-ownership.md`
+
 # Task Contract: win32-job-object-ownership
 
-> **Status**: Active
-> **Plan**: plans/plan-20260906-0130-win32-job-object-ownership.md
+> **Status**: Fulfilled
+> **Plan**: plans/archive/plan-20260906-0130-win32-job-object-ownership.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
 > **Last Updated**: 2026-09-06 01:40
-> **Review File**: `tasks/reviews/20260906-0130-win32-job-object-ownership.review.md`
-> **Notes File**: `tasks/notes/20260906-0130-win32-job-object-ownership.notes.md`
+> **Review File**: `tasks/archive/review-20260906-0244-win32-job-object-ownership.md`
+> **Notes File**: `tasks/archive/notes-20260906-0244-win32-job-object-ownership.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
 
 ## Why
@@ -47,10 +57,10 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 
 ## Workflow Inventory
 
-- Source plan: `plans/plan-20260906-0130-win32-job-object-ownership.md`
+- Source plan: `plans/archive/plan-20260906-0130-win32-job-object-ownership.md`
 - Deferred-goal ledger: `tasks/todos.md`
-- Review file: `tasks/reviews/20260906-0130-win32-job-object-ownership.review.md`
-- Notes file: `tasks/notes/20260906-0130-win32-job-object-ownership.notes.md`
+- Review file: `tasks/archive/review-20260906-0244-win32-job-object-ownership.md`
+- Notes file: `tasks/archive/notes-20260906-0244-win32-job-object-ownership.md`
 - Checks file: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
 - Scope gate: edit only paths listed under `allowed_paths`; update this contract before widening scope.
@@ -72,12 +82,12 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 
 ```yaml
 allowed_paths:
-  - plans/plan-20260906-0130-win32-job-object-ownership.md
+  - plans/archive/plan-20260906-0130-win32-job-object-ownership.md
   - tasks/todos.md
   - tasks/current.md
-  - tasks/contracts/20260906-0130-win32-job-object-ownership.contract.md
-  - tasks/reviews/20260906-0130-win32-job-object-ownership.review.md
-  - tasks/notes/20260906-0130-win32-job-object-ownership.notes.md
+  - tasks/archive/contract-20260906-0244-win32-job-object-ownership.md
+  - tasks/archive/review-20260906-0244-win32-job-object-ownership.md
+  - tasks/archive/notes-20260906-0244-win32-job-object-ownership.md
   - packages/client/src/adapters/win32-job-object.ts
   - packages/client/src/adapters/process-tree.ts
   - packages/client/src/adapters/claude/process-client.ts
@@ -147,7 +157,7 @@ exit_criteria:
     - packages/client/src/__tests__/host-exit-backstop.test.ts
   artifacts_exist:
     - .ai/harness/checks/latest.json
-    - tasks/notes/20260906-0130-win32-job-object-ownership.notes.md
+    - tasks/archive/notes-20260906-0244-win32-job-object-ownership.md
   tests_pass:
     - path: packages/client/src/__tests__/win32-job-object.test.ts
     - path: packages/client/src/__tests__/host-exit-backstop.test.ts

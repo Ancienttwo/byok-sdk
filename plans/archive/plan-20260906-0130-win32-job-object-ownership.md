@@ -1,6 +1,16 @@
+> **Archived**: 2026-09-06 02:44
+> **Related Plan**: plans/archive/plan-20260906-0130-win32-job-object-ownership.md
+> **Outcome**: Completed
+> **Lifecycle**: plan
+> **Parent Run ID**: run-20260906-0244
+> **Archive Projection V1**: `plans/plan-20260906-0130-win32-job-object-ownership.md` => `plans/archive/plan-20260906-0130-win32-job-object-ownership.md`
+> **Archive Projection V1**: `tasks/notes/20260906-0130-win32-job-object-ownership.notes.md` => `tasks/archive/notes-20260906-0244-win32-job-object-ownership.md`
+> **Archive Projection V1**: `tasks/contracts/20260906-0130-win32-job-object-ownership.contract.md` => `tasks/archive/contract-20260906-0244-win32-job-object-ownership.md`
+> **Archive Projection V1**: `tasks/reviews/20260906-0130-win32-job-object-ownership.review.md` => `tasks/archive/review-20260906-0244-win32-job-object-ownership.md`
+
 # Plan: Windows Job Object kill-on-close and host-exit termination backstop for owned runtime process trees
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260906-0130
 > **Slug**: win32-job-object-ownership
 > **Artifact Level**: work-package
@@ -9,9 +19,9 @@
 > **Rollback Surface**: the new win32 job-object module, the host-exit registry in `process-tree.ts`, the three adapter spawn sites, the `koffi` optional dependency and tsup external, the release-graph invariant text, tests, CHANGELOG.
 > **Spec**: `docs/spec.md`
 > **Research**: `docs/researches/2026-08-15_deepseek-harness-peripheral-extraction.md` §一 (items 6-8)
-> **Task Contract**: `tasks/contracts/20260906-0130-win32-job-object-ownership.contract.md`
-> **Task Review**: `tasks/reviews/20260906-0130-win32-job-object-ownership.review.md`
-> **Implementation Notes**: `tasks/notes/20260906-0130-win32-job-object-ownership.notes.md`
+> **Task Contract**: `tasks/archive/contract-20260906-0244-win32-job-object-ownership.md`
+> **Task Review**: `tasks/archive/review-20260906-0244-win32-job-object-ownership.md`
+> **Implementation Notes**: `tasks/archive/notes-20260906-0244-win32-job-object-ownership.md`
 
 ## Agentic Routing
 - Selected route: main-loop planning; execution dispatched to `deep-worker` (process lifecycle and FFI must land right in one pass).
@@ -24,16 +34,16 @@
 ## Workflow Inventory
 Complete this inventory before implementation. If any line is unknown, keep the plan in Draft and fill it before projection.
 
-- Active plan: `plans/plan-20260906-0130-win32-job-object-ownership.md`
-- Sprint contract: `tasks/contracts/20260906-0130-win32-job-object-ownership.contract.md`
-- Sprint review: `tasks/reviews/20260906-0130-win32-job-object-ownership.review.md`
-- Implementation notes: `tasks/notes/20260906-0130-win32-job-object-ownership.notes.md`
+- Active plan: `plans/archive/plan-20260906-0130-win32-job-object-ownership.md`
+- Sprint contract: `tasks/archive/contract-20260906-0244-win32-job-object-ownership.md`
+- Sprint review: `tasks/archive/review-20260906-0244-win32-job-object-ownership.md`
+- Implementation notes: `tasks/archive/notes-20260906-0244-win32-job-object-ownership.md`
 - Deferred-goal ledger: `tasks/todos.md`
 - Current checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
-- Scope authority: `tasks/contracts/20260906-0130-win32-job-object-ownership.contract.md` `allowed_paths`
+- Scope authority: `tasks/archive/contract-20260906-0244-win32-job-object-ownership.md` `allowed_paths`
 - Concurrency rule: `.ai/harness/active-plan` selects the active plan for this worktree when present; `.ai/harness/active-worktree` records the owning worktree. If another worktree already owns active work, open or switch to the matching worktree instead of serializing unrelated plans.
-- Execution isolation: approved contract-level work projects through `repo-harness run plan-to-todo --plan plans/plan-20260906-0130-win32-job-object-ownership.md` and may start `repo-harness run contract-worktree start --plan plans/plan-20260906-0130-win32-job-object-ownership.md`.
+- Execution isolation: approved contract-level work projects through `repo-harness run plan-to-todo --plan plans/archive/plan-20260906-0130-win32-job-object-ownership.md` and may start `repo-harness run contract-worktree start --plan plans/archive/plan-20260906-0130-win32-job-object-ownership.md`.
 
 ## Approach
 ### Strategy
@@ -89,11 +99,11 @@ spawn → adopt (win32: OpenProcess + AssignProcessToJobObject; all: register) �
 | Assignment race after spawn | Certain but tiny window | A grandchild forked before assignment escapes the job | Stated residual; host-exit sweep still covers ordinary exits |
 
 ## Task Contracts
-- Contract file: `tasks/contracts/20260906-0130-win32-job-object-ownership.contract.md`
-- Review file: `tasks/reviews/20260906-0130-win32-job-object-ownership.review.md`
-- Implementation notes file: `tasks/notes/20260906-0130-win32-job-object-ownership.notes.md`
+- Contract file: `tasks/archive/contract-20260906-0244-win32-job-object-ownership.md`
+- Review file: `tasks/archive/review-20260906-0244-win32-job-object-ownership.md`
+- Implementation notes file: `tasks/archive/notes-20260906-0244-win32-job-object-ownership.md`
 - Template: `.claude/templates/contract.template.md`
-- Verification command: `repo-harness run verify-contract --contract tasks/contracts/20260906-0130-win32-job-object-ownership.contract.md --strict`
+- Verification command: `repo-harness run verify-contract --contract tasks/archive/contract-20260906-0244-win32-job-object-ownership.md --strict`
 - Active plan rule: `.ai/harness/active-plan` is authoritative for this worktree when present; `.ai/harness/active-worktree` records the owning worktree. Do not infer active execution from the latest non-archived plan.
 
 ## Handoff

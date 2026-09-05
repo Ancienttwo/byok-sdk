@@ -1,9 +1,19 @@
+> **Archived**: 2026-09-06 02:44
+> **Related Plan**: plans/archive/plan-20260906-0130-win32-job-object-ownership.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260906-0244
+> **Archive Projection V1**: `plans/plan-20260906-0130-win32-job-object-ownership.md` => `plans/archive/plan-20260906-0130-win32-job-object-ownership.md`
+> **Archive Projection V1**: `tasks/notes/20260906-0130-win32-job-object-ownership.notes.md` => `tasks/archive/notes-20260906-0244-win32-job-object-ownership.md`
+> **Archive Projection V1**: `tasks/contracts/20260906-0130-win32-job-object-ownership.contract.md` => `tasks/archive/contract-20260906-0244-win32-job-object-ownership.md`
+> **Archive Projection V1**: `tasks/reviews/20260906-0130-win32-job-object-ownership.review.md` => `tasks/archive/review-20260906-0244-win32-job-object-ownership.md`
+
 # Implementation Notes: win32-job-object-ownership
 
 > **Status**: Active
-> **Plan**: plans/plan-20260906-0130-win32-job-object-ownership.md
-> **Contract**: tasks/contracts/20260906-0130-win32-job-object-ownership.contract.md
-> **Review**: tasks/reviews/20260906-0130-win32-job-object-ownership.review.md
+> **Plan**: plans/archive/plan-20260906-0130-win32-job-object-ownership.md
+> **Contract**: tasks/archive/contract-20260906-0244-win32-job-object-ownership.md
+> **Review**: tasks/archive/review-20260906-0244-win32-job-object-ownership.md
 > **Last Updated**: 2026-09-06 (gate round 1)
 > **Lifecycle**: notes
 
@@ -150,7 +160,7 @@ Three findings from the acceptance gate, and what each one changed.
 
 1. **The `optionalDependencies` carve-out was asserted in prose but never audited.** The comment claimed the two new checks kept the exception from widening, but neither of them looked at install scripts or shipped `.node` addons for optional entries — only direct dependencies got `auditPackagePurity`. A second native optional entry would have passed silently, and koffi itself was never held to the rule it was the stated exception to (koffi 3.2.0 declares `install: node ./cnoke.cjs -P . -D src/koffi --prebuild --release`). Fix in `scripts/release/check-package-graph.mjs`: every `optionalDependencies` entry is resolved with the existing `resolvePackageDir` and run through `auditPackagePurity`; violations are accepted only for names in the new `OPTIONAL_NATIVE_ALLOWLIST` constant, whose one entry is koffi with its written justification (per-platform prebuilt from `@koromix/koffi-*` makes the install script a no-op, bun never runs it, POSIX never loads the module); an allowlisted name that is not actually in `optionalDependencies` is itself an error, so the carve-out cannot outlive the dependency. The invariant comment now states all of this, including that koffi carries an install script and why that is acceptable.
 2. **Notes recorded a failing `check:api-surface` and an open owner question that were both already resolved.** `api-surface/client.d.ts` is in this contract's `allowed_paths` and the golden was regenerated; the run block, the "NOT fixed here" deviation bullet, and the Open Question have been updated to the passing state.
-3. **The contract's regression-risk line still carried the plan's `+28 MB` estimate.** Replaced with the measured `~3 MB` (koffi 1.8 MB + one `@koromix/koffi-<os>-<arch>` prebuilt 1.2 MB) in `tasks/contracts/20260906-0130-win32-job-object-ownership.contract.md`.
+3. **The contract's regression-risk line still carried the plan's `+28 MB` estimate.** Replaced with the measured `~3 MB` (koffi 1.8 MB + one `@koromix/koffi-<os>-<arch>` prebuilt 1.2 MB) in `tasks/archive/contract-20260906-0244-win32-job-object-ownership.md`.
 
 Residual the gate named (codex only, accepted): if the fail-closed teardown itself cannot kill a freshly spawned child, `CodexProcessRunner.waitClosed()` never resolves while parsed events stay dropped, so the adapter race hangs instead of erroring. Likelihood is very low — it needs the kill to fail on a process that has just spawned — and claude and pi are unaffected because they reject from `adopted` directly rather than through an event gate.
 
