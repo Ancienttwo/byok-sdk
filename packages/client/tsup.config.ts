@@ -26,6 +26,11 @@ export default defineConfig({
   splitting: false,
   treeshake: true,
   noExternal: ['pi-subagents'],
+  // koffi is the win32 job-object backstop's native binding layer and an
+  // `optionalDependencies` entry: it must stay a runtime resolution so a
+  // non-win32 install (where the addon may be absent) never has it inlined,
+  // and so the win32 branch loads the host's own prebuilt addon.
+  external: ['koffi'],
   define: {
     __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(manifest.version),
   },

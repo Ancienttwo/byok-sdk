@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { AsyncQueue } from '../../util/async-queue';
 import type { ClaudeStreamMessage } from './events';
-import { disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../process-tree';
+import { adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../process-tree';
 
 export type SpawnFn = typeof spawn;
 
@@ -11,6 +11,15 @@ export interface ClaudeProcessClientOptions {
   cwd: string;
   env: NodeJS.ProcessEnv;
   spawnFn?: SpawnFn;
+  /**
+   * DI seam scoped to ADOPTION only (`../process-tree.ts`'s
+   * `adoptOwnedProcessTree`), so the win32 job-object branch is exercisable
+   * from POSIX. Disposal keeps `process.platform` as its own authority — this
+   * must never silently reroute the taskkill sweep on a real host.
+   */
+  platform?: NodeJS.Platform;
+  /** DI seam for the win32 job-object backstop; see `../win32-job-object.ts`. */
+  jobObject?: { assign(pid: number): Promise<void> };
 }
 
 /** Bound on retained stderr lines, mirroring pi's identical constant/rationale in `../pi/rpc-client.ts`. */
@@ -63,6 +72,10 @@ export class ClaudeProcessClient {
   private readonly closedPromise: Promise<void>;
   private resolveClosed!: () => void;
   private disposalAttempt: Promise<void> | undefined;
+  /** Resolves once this tree is backstopped (see `adoptOwnedProcessTree`); rejects with the adoption failure, having already terminated the tree. */
+  private readonly adopted: Promise<void>;
+  /** Set before the fail-closed termination starts, so it — not the exit code of the kill we ourselves requested — becomes this client's exit error. */
+  private adoptionFailure: Error | undefined;
   private readonly stderrRing: string[] = [];
   private readonly unmappedFrameCounts = new Map<string, number>();
 
@@ -79,6 +92,10 @@ export class ClaudeProcessClient {
     this.closedPromise = new Promise((resolve) => {
       this.resolveClosed = resolve;
     });
+    this.adopted = this.adoptOwnedTree(options);
+    // The rejection is consumed by `waitForInit()`; this keeps a client that is
+    // constructed and then abandoned from raising an unhandled rejection.
+    this.adopted.catch(() => {});
 
     this.child.stdout.setEncoding('utf8');
     this.child.stdout.on('data', (chunk: string) => this.onData(chunk));
@@ -130,9 +147,14 @@ export class ClaudeProcessClient {
    * same id; if the process already closed before init ever arrived,
    * every call rejects with that same exit error.
    */
-  waitForInit(): Promise<string> {
-    if (this.sessionId !== undefined) return Promise.resolve(this.sessionId);
-    if (this.closed) return Promise.reject(this.exitError ?? new Error('claude process is closed'));
+  async waitForInit(): Promise<string> {
+    // Adoption is awaited FIRST, ahead of any `session_id` this process may
+    // already have produced: a run handle must never be published for a tree
+    // no backstop owns, and claude can emit `system/init` inside the window
+    // the assignment is still in flight.
+    await this.adopted;
+    if (this.sessionId !== undefined) return this.sessionId;
+    if (this.closed) throw this.exitError ?? new Error('claude process is closed');
     return new Promise((resolve, reject) => {
       this.initWaiter = { resolve, reject };
     });
@@ -203,6 +225,31 @@ export class ClaudeProcessClient {
     };
   }
 
+  /**
+   * Backstop this tree, or tear it down. Adoption failure is a start-time
+   * precondition, not a degraded mode: the child is terminated through the one
+   * disposal authority and the failure is re-thrown, which is what makes
+   * `waitForInit()` — and therefore `ClaudeAdapter.start()` — fail before any
+   * session is published. Both cleanup attempts are best-effort because the
+   * adoption failure, not a terminator's own complaint, is the reason to report.
+   */
+  private async adoptOwnedTree(options: ClaudeProcessClientOptions): Promise<void> {
+    try {
+      await adoptOwnedProcessTree({
+        child: this.child,
+        label: 'claude',
+        platform: options.platform,
+        jobObject: options.jobObject,
+      });
+    } catch (cause) {
+      const failure = cause instanceof Error ? cause : new Error(String(cause));
+      this.adoptionFailure = failure;
+      await requestOwnedProcessTreeTermination(this.processTreeOptions()).catch(() => {});
+      await disposeOwnedProcessTree(this.processTreeOptions()).catch(() => {});
+      throw failure;
+    }
+  }
+
   private onData(chunk: string): void {
     this.buffer += chunk;
     let newlineIndex = this.buffer.indexOf('\n');
@@ -263,9 +310,13 @@ export class ClaudeProcessClient {
   private onClosed(err: Error): void {
     if (this.closed) return;
     this.closed = true;
-    this.exitError = err;
+    // An adoption failure outranks the exit status of the termination it
+    // itself requested: reporting `exit code=null, signal=SIGKILL` would bury
+    // the only reason anyone can act on.
+    const terminal = this.adoptionFailure ?? err;
+    this.exitError = terminal;
     this.resolveClosed();
-    this.initWaiter?.reject(err);
+    this.initWaiter?.reject(terminal);
     this.initWaiter = undefined;
     this.eventQueue.end();
   }
