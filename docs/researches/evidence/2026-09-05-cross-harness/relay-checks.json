@@ -81,5 +81,105 @@
     "skipped": 133,
     "failed": 1,
     "note": "Initial fail-fast run plus separately selected SDK/example packages; conformance was first executed by the final full root rerun."
+  },
+  "landingVerification": {
+    "testedCommit": "578ae10cf735b9bc5d468756b134b34d901abb80",
+    "targetMain": "440907ee2c44051b427d9ed4fe1431d93ffff72d",
+    "commands": [
+      {
+        "command": [
+          "bun",
+          "install",
+          "--frozen-lockfile"
+        ],
+        "exitCode": 0,
+        "log": "/tmp/byok-relay-landing-0.log"
+      },
+      {
+        "command": [
+          "bun",
+          "run",
+          "build"
+        ],
+        "exitCode": 0,
+        "log": "/tmp/byok-relay-landing-1.log"
+      },
+      {
+        "command": [
+          "bun",
+          "run",
+          "typecheck"
+        ],
+        "exitCode": 0,
+        "log": "/tmp/byok-relay-landing-2.log"
+      },
+      {
+        "command": [
+          "bun",
+          "run",
+          "test"
+        ],
+        "exitCode": 1,
+        "log": "/tmp/byok-relay-landing-3.log"
+      },
+      {
+        "command": [
+          "bun",
+          "run",
+          "test"
+        ],
+        "exitCode": 0,
+        "log": "/tmp/byok-relay-landing-4.log"
+      },
+      {
+        "command": [
+          "bun",
+          "run",
+          "check:api-surface"
+        ],
+        "exitCode": 0,
+        "log": "/tmp/byok-relay-landing-5.log"
+      },
+      {
+        "command": [
+          "bun",
+          "run",
+          "check:version-authority"
+        ],
+        "exitCode": 0,
+        "log": "/tmp/byok-relay-landing-6.log"
+      },
+      {
+        "command": [
+          "repo-harness",
+          "run",
+          "check-task-workflow",
+          "--strict"
+        ],
+        "exitCode": 0,
+        "log": "/tmp/byok-relay-landing-7.log"
+      },
+      {
+        "command": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "exitCode": 0,
+        "log": "/tmp/byok-relay-landing-8.log"
+      },
+      {
+        "command": [
+          "/Users/kito/.local/bin/python3.11",
+          "docs/researches/evidence/2026-09-05-cross-harness/verify-relay.py"
+        ],
+        "exitCode": 0,
+        "log": "/tmp/byok-relay-landing-9.log"
+      }
+    ],
+    "passed": 3663,
+    "skipped": 133,
+    "failed": 0,
+    "note": "User authorized local main merge and cleanup. Main updates were merged into the reviewed branch without conflicts. The prior native smoke source hashes still match; no new model probe. Initial unchanged Wrangler timeout retained; one unchanged root recheck passed."
   }
 }
