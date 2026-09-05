@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
+import { DEFAULT_MAX_INLINE_EVENT_BYTES, MIN_MAX_INLINE_EVENT_BYTES } from '../daemon/event-spill';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -98,6 +99,49 @@ describe('createDaemonWithAdapters: DaemonConfig.progressBatch validation', () =
     });
     expect(() => createDaemonWithAdapters(configured, [new StubRuntimeAdapter()])).not.toThrow();
 
+    const unset = await buildConfig(undefined);
+    expect(() => createDaemonWithAdapters(unset, [new StubRuntimeAdapter()])).not.toThrow();
+  });
+});
+
+/**
+ * `DaemonConfig.maxInlineEventBytes` config validation. Unlike
+ * `maxTaskOutputBytes` there is deliberately NO opt-out value: an unbounded
+ * per-event `tool_use.input`/`tool_result.output` is the exact state this cap
+ * exists to prevent, and a cap under `MIN_MAX_INLINE_EVENT_BYTES` cannot hold
+ * the spill descriptor that documents the omission.
+ */
+describe('createDaemonWithAdapters: DaemonConfig.maxInlineEventBytes validation', () => {
+  async function buildConfig(maxInlineEventBytes?: number): Promise<DaemonConfig> {
+    return {
+      localAgentRelease: { version: '0.0.0-test' },
+      productName: 'Test Product',
+      productId: 'test-product-inline-event-bytes',
+      serverUrl: 'http://localhost:1',
+      workspaceRoot: await tmpDir('byok-inline-event-workspace-'),
+      storeDir: await tmpDir('byok-inline-event-store-'),
+      maxInlineEventBytes,
+    };
+  }
+
+  it.each([0, -1, 4095, 4096.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects %s synchronously with a clear message',
+    async (maxInlineEventBytes) => {
+      const config = await buildConfig(maxInlineEventBytes);
+      expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()])).toThrow(/maxInlineEventBytes/);
+    },
+  );
+
+  it('accepts exactly the documented minimum (4096)', async () => {
+    const config = await buildConfig(MIN_MAX_INLINE_EVENT_BYTES);
+    expect(MIN_MAX_INLINE_EVENT_BYTES).toBe(4096);
+    expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()])).not.toThrow();
+  });
+
+  it('accepts the default value and an unset value', async () => {
+    expect(DEFAULT_MAX_INLINE_EVENT_BYTES).toBe(64 * 1024);
+    const explicit = await buildConfig(DEFAULT_MAX_INLINE_EVENT_BYTES);
+    expect(() => createDaemonWithAdapters(explicit, [new StubRuntimeAdapter()])).not.toThrow();
     const unset = await buildConfig(undefined);
     expect(() => createDaemonWithAdapters(unset, [new StubRuntimeAdapter()])).not.toThrow();
   });
