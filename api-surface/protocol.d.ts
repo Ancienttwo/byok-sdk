@@ -175,6 +175,61 @@ export declare const AgentEgressPolicyRevisionSchema: z.ZodString;
 // ==== @byok-sdk/protocol dist/agent-event.d.ts ====
 import { z } from 'zod';
 /**
+ * Maximum UTF-16 length of {@link AgentEventSpillSchema}'s `unstoredReason`.
+ * The reason is a bounded diagnostic string, not a place to inline the
+ * content that failed to store: the whole point of a spill descriptor is
+ * that the event stays under the daemon's inline-event cap even when the
+ * blob upload failed.
+ */
+export declare const AGENT_EVENT_SPILL_UNSTORED_REASON_MAX_LENGTH = 512;
+/**
+ * Additive descriptor attached to a `tool_use` / `tool_result` event whose
+ * `input` / `output` was too large to travel inline and was therefore
+ * REPLACED, at the daemon's ingestion boundary, by a bounded head/tail
+ * preview (`{ preview: { head, tail } }`). See
+ * `packages/client/src/daemon/event-spill.ts` for the producer and
+ * `DaemonConfig.maxInlineEventBytes` for the cap.
+ *
+ * Presence of this field is the ONLY signal that the inline field is a
+ * projection rather than the whole value — a consumer that reads
+ * `tool_result.output` (or `tool_use.input`) without checking `spill` is
+ * reading a preview and calling it the result.
+ *
+ * Exactly one of `blob` / `unstoredReason` is present, and the union is
+ * closed on purpose:
+ *
+ *  - `blob` — the full `JSON.stringify(<field>)` bytes are readable from the
+ *    blob plane (protocol §7) under that `BlobRef`; `contentHash` is the
+ *    sha256 of exactly those bytes, so a consumer can verify what it read
+ *    back is what was omitted.
+ *  - `unstoredReason` — the upload did not succeed. The content is GONE from
+ *    this wire; the reason says why. This exists so storage failure is
+ *    observable rather than silently indistinguishable from a small output.
+ *
+ * `.strict()` because this is an SDK-authored descriptor with a closed
+ * shape, not free-form runtime data: an unrecognized key here means a
+ * producer and a consumer disagree about what the omission means, which is
+ * exactly the case that must fail loudly.
+ */
+export declare const AgentEventSpillSchema: z.ZodObject<{
+    field: z.ZodEnum<{
+        input: "input";
+        output: "output";
+    }>;
+    totalBytes: z.ZodNumber;
+    omittedBytes: z.ZodNumber;
+    contentType: z.ZodLiteral<"application/json">;
+    blob: z.ZodOptional<z.ZodObject<{
+        blobId: z.ZodString;
+        contentHash: z.ZodString;
+        size: z.ZodNumber;
+        contentType: z.ZodString;
+        url: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+    unstoredReason: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
+export type AgentEventSpill = z.infer<typeof AgentEventSpillSchema>;
+/**
  * Normalized event shape that every runtime adapter (pi / claude / codex)
  * translates its native JSONL output into. This is the interior of a
  * `task.progress` payload's `events` array.
@@ -187,12 +242,46 @@ export declare const AgentEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     tool: z.ZodString;
     input: z.ZodOptional<z.ZodUnknown>;
     toolCallId: z.ZodOptional<z.ZodString>;
+    spill: z.ZodOptional<z.ZodObject<{
+        field: z.ZodEnum<{
+            input: "input";
+            output: "output";
+        }>;
+        totalBytes: z.ZodNumber;
+        omittedBytes: z.ZodNumber;
+        contentType: z.ZodLiteral<"application/json">;
+        blob: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+            url: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+        unstoredReason: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"tool_result">;
     tool: z.ZodString;
     output: z.ZodOptional<z.ZodUnknown>;
     toolCallId: z.ZodOptional<z.ZodString>;
     isError: z.ZodOptional<z.ZodBoolean>;
+    spill: z.ZodOptional<z.ZodObject<{
+        field: z.ZodEnum<{
+            input: "input";
+            output: "output";
+        }>;
+        totalBytes: z.ZodNumber;
+        omittedBytes: z.ZodNumber;
+        contentType: z.ZodLiteral<"application/json">;
+        blob: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+            url: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+        unstoredReason: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"artifact">;
     name: z.ZodString;
@@ -281,12 +370,46 @@ export declare const AgentEventOrUnknownSchema: z.ZodUnion<readonly [z.ZodDiscri
     tool: z.ZodString;
     input: z.ZodOptional<z.ZodUnknown>;
     toolCallId: z.ZodOptional<z.ZodString>;
+    spill: z.ZodOptional<z.ZodObject<{
+        field: z.ZodEnum<{
+            input: "input";
+            output: "output";
+        }>;
+        totalBytes: z.ZodNumber;
+        omittedBytes: z.ZodNumber;
+        contentType: z.ZodLiteral<"application/json">;
+        blob: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+            url: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+        unstoredReason: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"tool_result">;
     tool: z.ZodString;
     output: z.ZodOptional<z.ZodUnknown>;
     toolCallId: z.ZodOptional<z.ZodString>;
     isError: z.ZodOptional<z.ZodBoolean>;
+    spill: z.ZodOptional<z.ZodObject<{
+        field: z.ZodEnum<{
+            input: "input";
+            output: "output";
+        }>;
+        totalBytes: z.ZodNumber;
+        omittedBytes: z.ZodNumber;
+        contentType: z.ZodLiteral<"application/json">;
+        blob: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+            url: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+        unstoredReason: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"artifact">;
     name: z.ZodString;
@@ -1400,12 +1523,46 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             tool: z.ZodString;
             input: z.ZodOptional<z.ZodUnknown>;
             toolCallId: z.ZodOptional<z.ZodString>;
+            spill: z.ZodOptional<z.ZodObject<{
+                field: z.ZodEnum<{
+                    input: "input";
+                    output: "output";
+                }>;
+                totalBytes: z.ZodNumber;
+                omittedBytes: z.ZodNumber;
+                contentType: z.ZodLiteral<"application/json">;
+                blob: z.ZodOptional<z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                    url: z.ZodOptional<z.ZodString>;
+                }, z.core.$strip>>;
+                unstoredReason: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
         }, z.core.$strip>, z.ZodObject<{
             type: z.ZodLiteral<"tool_result">;
             tool: z.ZodString;
             output: z.ZodOptional<z.ZodUnknown>;
             toolCallId: z.ZodOptional<z.ZodString>;
             isError: z.ZodOptional<z.ZodBoolean>;
+            spill: z.ZodOptional<z.ZodObject<{
+                field: z.ZodEnum<{
+                    input: "input";
+                    output: "output";
+                }>;
+                totalBytes: z.ZodNumber;
+                omittedBytes: z.ZodNumber;
+                contentType: z.ZodLiteral<"application/json">;
+                blob: z.ZodOptional<z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                    url: z.ZodOptional<z.ZodString>;
+                }, z.core.$strip>>;
+                unstoredReason: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
         }, z.core.$strip>, z.ZodObject<{
             type: z.ZodLiteral<"artifact">;
             name: z.ZodString;
@@ -2597,12 +2754,46 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 tool: z.ZodString;
                 input: z.ZodOptional<z.ZodUnknown>;
                 toolCallId: z.ZodOptional<z.ZodString>;
+                spill: z.ZodOptional<z.ZodObject<{
+                    field: z.ZodEnum<{
+                        input: "input";
+                        output: "output";
+                    }>;
+                    totalBytes: z.ZodNumber;
+                    omittedBytes: z.ZodNumber;
+                    contentType: z.ZodLiteral<"application/json">;
+                    blob: z.ZodOptional<z.ZodObject<{
+                        blobId: z.ZodString;
+                        contentHash: z.ZodString;
+                        size: z.ZodNumber;
+                        contentType: z.ZodString;
+                        url: z.ZodOptional<z.ZodString>;
+                    }, z.core.$strip>>;
+                    unstoredReason: z.ZodOptional<z.ZodString>;
+                }, z.core.$strict>>;
             }, z.core.$strip>, z.ZodObject<{
                 type: z.ZodLiteral<"tool_result">;
                 tool: z.ZodString;
                 output: z.ZodOptional<z.ZodUnknown>;
                 toolCallId: z.ZodOptional<z.ZodString>;
                 isError: z.ZodOptional<z.ZodBoolean>;
+                spill: z.ZodOptional<z.ZodObject<{
+                    field: z.ZodEnum<{
+                        input: "input";
+                        output: "output";
+                    }>;
+                    totalBytes: z.ZodNumber;
+                    omittedBytes: z.ZodNumber;
+                    contentType: z.ZodLiteral<"application/json">;
+                    blob: z.ZodOptional<z.ZodObject<{
+                        blobId: z.ZodString;
+                        contentHash: z.ZodString;
+                        size: z.ZodNumber;
+                        contentType: z.ZodString;
+                        url: z.ZodOptional<z.ZodString>;
+                    }, z.core.$strip>>;
+                    unstoredReason: z.ZodOptional<z.ZodString>;
+                }, z.core.$strict>>;
             }, z.core.$strip>, z.ZodObject<{
                 type: z.ZodLiteral<"artifact">;
                 name: z.ZodString;
@@ -3667,12 +3858,46 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 tool: z.ZodString;
                 input: z.ZodOptional<z.ZodUnknown>;
                 toolCallId: z.ZodOptional<z.ZodString>;
+                spill: z.ZodOptional<z.ZodObject<{
+                    field: z.ZodEnum<{
+                        input: "input";
+                        output: "output";
+                    }>;
+                    totalBytes: z.ZodNumber;
+                    omittedBytes: z.ZodNumber;
+                    contentType: z.ZodLiteral<"application/json">;
+                    blob: z.ZodOptional<z.ZodObject<{
+                        blobId: z.ZodString;
+                        contentHash: z.ZodString;
+                        size: z.ZodNumber;
+                        contentType: z.ZodString;
+                        url: z.ZodOptional<z.ZodString>;
+                    }, z.core.$strip>>;
+                    unstoredReason: z.ZodOptional<z.ZodString>;
+                }, z.core.$strict>>;
             }, z.core.$strip>, z.ZodObject<{
                 type: z.ZodLiteral<"tool_result">;
                 tool: z.ZodString;
                 output: z.ZodOptional<z.ZodUnknown>;
                 toolCallId: z.ZodOptional<z.ZodString>;
                 isError: z.ZodOptional<z.ZodBoolean>;
+                spill: z.ZodOptional<z.ZodObject<{
+                    field: z.ZodEnum<{
+                        input: "input";
+                        output: "output";
+                    }>;
+                    totalBytes: z.ZodNumber;
+                    omittedBytes: z.ZodNumber;
+                    contentType: z.ZodLiteral<"application/json">;
+                    blob: z.ZodOptional<z.ZodObject<{
+                        blobId: z.ZodString;
+                        contentHash: z.ZodString;
+                        size: z.ZodNumber;
+                        contentType: z.ZodString;
+                        url: z.ZodOptional<z.ZodString>;
+                    }, z.core.$strip>>;
+                    unstoredReason: z.ZodOptional<z.ZodString>;
+                }, z.core.$strict>>;
             }, z.core.$strip>, z.ZodObject<{
                 type: z.ZodLiteral<"artifact">;
                 name: z.ZodString;
@@ -4186,8 +4411,8 @@ export { PermissionPolicySchema, PERMISSION_MODES } from './permission';
 export type { PermissionPolicy, PermissionMode } from './permission';
 export { PROVIDER_PROFILE_BINDING_CAPABILITY, PROVIDER_MODEL_CAPABILITIES, ProviderProfileRefSchema, ProviderProfileRevisionSchema, ProviderProfileHashSchema, ProviderModelCapabilitySchema, ProviderProfileBindingSchema, } from './provider-profile-binding';
 export type { ProviderProfileRef, ProviderProfileRevision, ProviderProfileHash, ProviderModelCapability, ProviderProfileBinding, } from './provider-profile-binding';
-export { AgentEventSchema, UnknownAgentEventSchema, AgentEventOrUnknownSchema, KNOWN_AGENT_EVENT_TYPES, isKnownAgentEvent, partitionAgentEvents, } from './agent-event';
-export type { AgentEvent, UnknownAgentEvent, AgentEventOrUnknown } from './agent-event';
+export { AgentEventSchema, AgentEventSpillSchema, AGENT_EVENT_SPILL_UNSTORED_REASON_MAX_LENGTH, UnknownAgentEventSchema, AgentEventOrUnknownSchema, KNOWN_AGENT_EVENT_TYPES, isKnownAgentEvent, partitionAgentEvents, } from './agent-event';
+export type { AgentEvent, AgentEventSpill, UnknownAgentEvent, AgentEventOrUnknown } from './agent-event';
 export { AgentEgressPolicySchema, AgentEgressActivityPolicySchema, AgentReliableQuotaPolicySchema, ContentReadPolicySchema, AgentEgressLaneSchema, AgentEgressDropReasonSchema, AgentContentReadSurfaceSchema, AgentContentActorKindSchema, AgentContentActorSchema, AgentContentDecodeAsSchema, AgentContentMimeTypeSchema, AgentContentReadDecisionSchema, AgentContentReadDenialReasonSchema, AgentEgressContentHashSchema, AgentEgressPolicyRevisionSchema, AgentMessageContractSchema, AgentMessageContentTypeSchema, AgentMessageDestinationBindingSchema, AgentMessageFreshnessCursorSchema, AgentMessageServerContextSchema, AgentMessageEgressRequirementSchema, AGENT_MESSAGE_MAX_BYTES, AGENT_MESSAGE_EGRESS_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_CONTENT_WORKSPACE_READ_CAPABILITY, AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY, AGENT_CONTENT_ARTIFACT_READ_CAPABILITY, } from './agent-egress';
 export type { AgentEgressPolicy, AgentEgressActivityPolicy, AgentReliableQuotaPolicy, ContentReadPolicy, AgentEgressLane, AgentEgressDropReason, AgentMessageContentType, AgentMessageEgressRequirement, AgentMessageServerContext, AgentContentReadSurface, AgentContentActorKind, AgentContentActor, AgentContentDecodeAs, AgentContentReadDecision, AgentContentReadDenialReason, } from './agent-egress';
 export { AGENT_HOME_PROJECTION_CAPABILITY, AGENT_HOME_PROJECTION_MAX_BYTES, AGENT_HOME_PROJECTION_PROFILE_REVISION_MAXIMUM, AgentHomeProjectionProfileRevisionSchema, AgentHomeProjectionHashSchema, AgentHomeProjectionOutcomeSchema, AgentHomeProjectionValueSchema, } from './agent-home-projection';
@@ -5220,12 +5445,46 @@ export declare const TaskProgressPayloadSchema: z.ZodObject<{
         tool: z.ZodString;
         input: z.ZodOptional<z.ZodUnknown>;
         toolCallId: z.ZodOptional<z.ZodString>;
+        spill: z.ZodOptional<z.ZodObject<{
+            field: z.ZodEnum<{
+                input: "input";
+                output: "output";
+            }>;
+            totalBytes: z.ZodNumber;
+            omittedBytes: z.ZodNumber;
+            contentType: z.ZodLiteral<"application/json">;
+            blob: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>>;
+            unstoredReason: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"tool_result">;
         tool: z.ZodString;
         output: z.ZodOptional<z.ZodUnknown>;
         toolCallId: z.ZodOptional<z.ZodString>;
         isError: z.ZodOptional<z.ZodBoolean>;
+        spill: z.ZodOptional<z.ZodObject<{
+            field: z.ZodEnum<{
+                input: "input";
+                output: "output";
+            }>;
+            totalBytes: z.ZodNumber;
+            omittedBytes: z.ZodNumber;
+            contentType: z.ZodLiteral<"application/json">;
+            blob: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>>;
+            unstoredReason: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"artifact">;
         name: z.ZodString;
@@ -6280,12 +6539,46 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             tool: z.ZodString;
             input: z.ZodOptional<z.ZodUnknown>;
             toolCallId: z.ZodOptional<z.ZodString>;
+            spill: z.ZodOptional<z.ZodObject<{
+                field: z.ZodEnum<{
+                    input: "input";
+                    output: "output";
+                }>;
+                totalBytes: z.ZodNumber;
+                omittedBytes: z.ZodNumber;
+                contentType: z.ZodLiteral<"application/json">;
+                blob: z.ZodOptional<z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                    url: z.ZodOptional<z.ZodString>;
+                }, z.core.$strip>>;
+                unstoredReason: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
         }, z.core.$strip>, z.ZodObject<{
             type: z.ZodLiteral<"tool_result">;
             tool: z.ZodString;
             output: z.ZodOptional<z.ZodUnknown>;
             toolCallId: z.ZodOptional<z.ZodString>;
             isError: z.ZodOptional<z.ZodBoolean>;
+            spill: z.ZodOptional<z.ZodObject<{
+                field: z.ZodEnum<{
+                    input: "input";
+                    output: "output";
+                }>;
+                totalBytes: z.ZodNumber;
+                omittedBytes: z.ZodNumber;
+                contentType: z.ZodLiteral<"application/json">;
+                blob: z.ZodOptional<z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                    url: z.ZodOptional<z.ZodString>;
+                }, z.core.$strip>>;
+                unstoredReason: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
         }, z.core.$strip>, z.ZodObject<{
             type: z.ZodLiteral<"artifact">;
             name: z.ZodString;

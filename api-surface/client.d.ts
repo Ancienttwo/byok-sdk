@@ -1702,6 +1702,14 @@ export declare function resolveAgentEgressPolicy(policy: AgentEgressPolicy | und
  * Default activity projection. Every retained string is SDK-authored; no
  * runtime trajectory, tool, prompt, environment, argv, path, or credential
  * value survives this transformation.
+ *
+ * Each case CONSTRUCTS a fresh event from SDK-authored literals rather than
+ * editing the incoming one, which is what makes the guarantee total rather
+ * than a list of fields someone remembered to strip. `spill` on
+ * `tool_use`/`tool_result` is covered by exactly that: a `BlobRef` is a
+ * readable locator for the omitted tool payload — content, not metadata — so
+ * it never survives a metadata-status projection, and neither do the byte
+ * counts that would leak the payload's size.
  */
 export declare function metadataStatusEvent(event: AgentEvent): AgentEvent;
 export declare function eventBytes(event: AgentEvent): number;
@@ -3657,6 +3665,36 @@ export interface DaemonConfig {
      * explicitly instead to opt out of enforcement altogether.
      */
     maxTaskOutputBytes?: number;
+    /**
+     * Per-EVENT inline ceiling (default {@link DEFAULT_MAX_INLINE_EVENT_BYTES},
+     * 64 KiB) for the two `AgentEvent` fields a runtime authors freely:
+     * `tool_use.input` and `tool_result.output`. An event whose serialization
+     * exceeds this leaves `TaskRunner.pump` with that field replaced by a
+     * UTF-8-safe head/tail preview (`{ preview: { head, tail } }`) and an
+     * additive `spill` descriptor; the full JSON serialization is uploaded to
+     * the blob plane under an idempotent, content-addressed key, and
+     * `spill.blob` is where a consumer reads it back. If the upload fails the
+     * preview still ships, carrying `spill.unstoredReason` instead — omission
+     * is always described, never silent.
+     *
+     * This is a per-event bound, orthogonal to `maxTaskOutputBytes` (a
+     * whole-task total, counted AFTER spilling) and to
+     * `progressBatch.maxBatchBytes` (a per-batch wire budget).
+     *
+     * **Consumer contract:** `spill`'s presence is the only signal that the
+     * inline field is a preview. A consumer that renders `tool_result.output`
+     * without checking `spill` renders a truncation as the whole result.
+     *
+     * Must be a positive safe integer of at least
+     * {@link MIN_MAX_INLINE_EVENT_BYTES} (4096) — below that a legitimate
+     * `spill` descriptor no longer fits inside the cap it exists to enforce.
+     * Anything else (0, negative, non-integer, `NaN`,
+     * `Number.POSITIVE_INFINITY`) is a config validation error thrown
+     * synchronously from `createDaemonWithAdapters`/`createDaemon`; there is
+     * no opt-out, because "unbounded event" is exactly the state this exists
+     * to prevent.
+     */
+    maxInlineEventBytes?: number;
     /**
      * Host-owned batching policy for normalized `task.progress` events.
      * `maxBatchBytes`, when set, measures exactly the UTF-8 bytes of
@@ -6730,6 +6768,15 @@ export interface TaskRunnerDeps {
      */
     maxTaskOutputBytes?: number;
     /**
+     * Per-event inline ceiling for `tool_use.input` / `tool_result.output` —
+     * see `DaemonConfig.maxInlineEventBytes` (`create-daemon.ts`) for the full
+     * contract and {@link DEFAULT_MAX_INLINE_EVENT_BYTES} for the default.
+     * Validated (positive safe integer, at least
+     * `MIN_MAX_INLINE_EVENT_BYTES`) at the `DaemonConfig` layer, not here —
+     * this seam trusts its caller, same as `maxTaskOutputBytes` above.
+     */
+    maxInlineEventBytes?: number;
+    /**
      * M4 (additive-minor, `task.approval_resolved`): the capabilities advertised
      * by the CURRENT transport's server (`conn.ack` on WS, the latest successful
      * events response on long-poll) — read fresh at call time (mirrors
@@ -6968,6 +7015,8 @@ export declare class TaskRunner {
     usesAgentEgress(taskId: string): boolean;
     /** M5 batch-3 (workstream 2): effective `maxTaskOutputBytes` cap for this daemon — see {@link DEFAULT_MAX_TASK_OUTPUT_BYTES}'s own doc comment. */
     private get maxTaskOutputBytes();
+    /** Effective per-event inline ceiling for this daemon — see `DaemonConfig.maxInlineEventBytes`. */
+    private get maxInlineEventBytes();
     /** WP0: effective per-canonical-Agent-home Attempt cap — see {@link DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME}. */
     private get maxConcurrentMutableSessionsPerAgentHome();
     /**

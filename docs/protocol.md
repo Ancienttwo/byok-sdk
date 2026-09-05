@@ -1980,6 +1980,63 @@ no member of, but capabilities are a self-report any adapter can make
 honestly, and gating them would leave a custom steer-capable adapter
 permanently un-steerable.
 
+### 11.6 `spill` on `tool_use` / `tool_result` — bounded inline event content (additive)
+
+`tool_use.input` and `tool_result.output` are `z.unknown()` (§11.1): a tool's
+payload can be anything, and a single shell command or file write can produce
+megabytes of it. Both variants now optionally carry a `spill` descriptor
+(`AgentEventSpillSchema`, `agent-event.ts`):
+
+```
+{ field: 'input' | 'output', totalBytes, omittedBytes,
+  contentType: 'application/json',
+  blob?: BlobRef, unstoredReason?: string }   // exactly one of the last two
+```
+
+The descriptor is `.strict()` and exactly one of `blob` / `unstoredReason` is
+present; neither, or both, is a validation error.
+
+**What it means.** The daemon bounds each of those two fields at ingestion
+(`DaemonConfig.maxInlineEventBytes`, default 64 KiB). When the serialized
+event exceeds that cap, the field is REPLACED inline by a UTF-8-safe head/tail
+preview:
+
+```
+{ preview: { head: '<first bytes of JSON.stringify(field)>',
+             tail: '<last bytes of the same>' } }
+```
+
+and the full `JSON.stringify(field)` is uploaded to the blob plane (§7) under
+an idempotent, content-addressed key. `spill.blob.contentHash` is the sha256
+of exactly those bytes, so a consumer can verify what it reads back is what
+was omitted. `totalBytes` is the full serialization's UTF-8 length;
+`omittedBytes` is that minus the retained preview. The cut is made on a
+code-point boundary — a preview never contains a lone surrogate — and the
+replacement event is *measured* against the cap, not assumed to fit.
+
+**Consumers must check `spill` before treating `input` / `output` as
+complete.** Its presence is the only signal that the inline value is a
+projection. A consumer that renders `tool_result.output` without it renders a
+truncation as the whole result. Under-cap events are unchanged and carry no
+`spill` at all, so today's readers stay correct for every event that was
+already small enough to send whole.
+
+**Storage failure is described, never silent.** If the blob upload does not
+succeed, the preview still ships and `unstoredReason` (a bounded diagnostic,
+at most 512 characters) says why the omitted bytes are unreadable. The task is
+not failed over it: the runtime's own transcript still holds the content, and
+losing a real result to a telemetry upload failure would be the worse trade.
+
+**Egress.** A `BlobRef` is a readable locator for tool content, so a
+metadata-status Agent egress projection (§2.1) carries no `spill` at all —
+`metadataStatusEvent` rebuilds each event from SDK-authored literals, and the
+descriptor's byte counts would leak the payload's size even without the
+locator.
+
+Additive-minor: an optional field on two existing variants, no
+`PROTOCOL_VERSION` bump — the freeze golden (`golden/v1.frozen.json`) is
+regenerated, which is exactly the additive case the freeze rule describes.
+
 ## 12. Historical task lease (M2; superseded by WP3B Step 2)
 
 > Historical (pre-WP3B Step 2; non-normative): the lease/reaper contract in

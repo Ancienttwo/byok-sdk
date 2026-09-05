@@ -1,4 +1,66 @@
 import { z } from 'zod';
+import { BlobRefSchema } from './blob';
+
+/**
+ * Maximum UTF-16 length of {@link AgentEventSpillSchema}'s `unstoredReason`.
+ * The reason is a bounded diagnostic string, not a place to inline the
+ * content that failed to store: the whole point of a spill descriptor is
+ * that the event stays under the daemon's inline-event cap even when the
+ * blob upload failed.
+ */
+export const AGENT_EVENT_SPILL_UNSTORED_REASON_MAX_LENGTH = 512;
+
+/**
+ * Additive descriptor attached to a `tool_use` / `tool_result` event whose
+ * `input` / `output` was too large to travel inline and was therefore
+ * REPLACED, at the daemon's ingestion boundary, by a bounded head/tail
+ * preview (`{ preview: { head, tail } }`). See
+ * `packages/client/src/daemon/event-spill.ts` for the producer and
+ * `DaemonConfig.maxInlineEventBytes` for the cap.
+ *
+ * Presence of this field is the ONLY signal that the inline field is a
+ * projection rather than the whole value — a consumer that reads
+ * `tool_result.output` (or `tool_use.input`) without checking `spill` is
+ * reading a preview and calling it the result.
+ *
+ * Exactly one of `blob` / `unstoredReason` is present, and the union is
+ * closed on purpose:
+ *
+ *  - `blob` — the full `JSON.stringify(<field>)` bytes are readable from the
+ *    blob plane (protocol §7) under that `BlobRef`; `contentHash` is the
+ *    sha256 of exactly those bytes, so a consumer can verify what it read
+ *    back is what was omitted.
+ *  - `unstoredReason` — the upload did not succeed. The content is GONE from
+ *    this wire; the reason says why. This exists so storage failure is
+ *    observable rather than silently indistinguishable from a small output.
+ *
+ * `.strict()` because this is an SDK-authored descriptor with a closed
+ * shape, not free-form runtime data: an unrecognized key here means a
+ * producer and a consumer disagree about what the omission means, which is
+ * exactly the case that must fail loudly.
+ */
+export const AgentEventSpillSchema = z
+  .object({
+    /** Which field of the event was replaced by a preview. */
+    field: z.enum(['input', 'output']),
+    /** UTF-8 byte length of the full `JSON.stringify(<field>)` that was spilled. */
+    totalBytes: z.number().int().nonnegative(),
+    /** `totalBytes` minus the UTF-8 bytes of the retained preview head + tail. */
+    omittedBytes: z.number().int().nonnegative(),
+    /** Always the JSON serialization of the field — never the tool's own notion of a content type. */
+    contentType: z.literal('application/json'),
+    /** Where the omitted bytes are readable. Mutually exclusive with `unstoredReason`. */
+    blob: BlobRefSchema.optional(),
+    /** Why the omitted bytes are NOT readable. Mutually exclusive with `blob`. */
+    unstoredReason: z.string().min(1).max(AGENT_EVENT_SPILL_UNSTORED_REASON_MAX_LENGTH).optional(),
+  })
+  .strict()
+  .refine(
+    (spill) => (spill.blob === undefined) !== (spill.unstoredReason === undefined),
+    'spill must carry exactly one of blob (the omitted bytes are readable) or unstoredReason (they are not)',
+  );
+
+export type AgentEventSpill = z.infer<typeof AgentEventSpillSchema>;
 
 /**
  * Normalized event shape that every runtime adapter (pi / claude / codex)
@@ -12,6 +74,8 @@ export const AgentEventSchema = z.discriminatedUnion('type', [
     tool: z.string(),
     input: z.unknown().optional(),
     toolCallId: z.string().regex(/\S/, 'toolCallId must contain a non-whitespace character').optional(),
+    /** Present only when `input` is a preview of a spilled value — see {@link AgentEventSpillSchema}. */
+    spill: AgentEventSpillSchema.optional(),
   }),
   z.object({
     type: z.literal('tool_result'),
@@ -19,6 +83,8 @@ export const AgentEventSchema = z.discriminatedUnion('type', [
     output: z.unknown().optional(),
     toolCallId: z.string().regex(/\S/, 'toolCallId must contain a non-whitespace character').optional(),
     isError: z.boolean().optional(),
+    /** Present only when `output` is a preview of a spilled value — see {@link AgentEventSpillSchema}. */
+    spill: AgentEventSpillSchema.optional(),
   }),
   z.object({ type: z.literal('artifact'), name: z.string(), contentType: z.string() }),
   z.object({ type: z.literal('needs_approval'), summary: z.string() }),

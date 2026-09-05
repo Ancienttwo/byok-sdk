@@ -60,6 +60,7 @@ import {
 import { ApprovalNotFoundError, type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { TaskQueueWatermark } from './control-protocol';
+import { DEFAULT_MAX_INLINE_EVENT_BYTES, spillOversizedEvent } from './event-spill';
 import { buildRuntimeEnv } from './environment';
 import { computeEffectivePolicy } from './policy';
 import { toRuntimeInfoCapabilities } from './runtime-capabilities';
@@ -454,6 +455,15 @@ export interface TaskRunnerDeps {
    * interface (`shutdownInterruptTimeoutMs`, `approvalTimeoutMs`).
    */
   maxTaskOutputBytes?: number;
+  /**
+   * Per-event inline ceiling for `tool_use.input` / `tool_result.output` —
+   * see `DaemonConfig.maxInlineEventBytes` (`create-daemon.ts`) for the full
+   * contract and {@link DEFAULT_MAX_INLINE_EVENT_BYTES} for the default.
+   * Validated (positive safe integer, at least
+   * `MIN_MAX_INLINE_EVENT_BYTES`) at the `DaemonConfig` layer, not here —
+   * this seam trusts its caller, same as `maxTaskOutputBytes` above.
+   */
+  maxInlineEventBytes?: number;
   /**
    * M4 (additive-minor, `task.approval_resolved`): the capabilities advertised
    * by the CURRENT transport's server (`conn.ack` on WS, the latest successful
@@ -1140,6 +1150,11 @@ export class TaskRunner {
   /** M5 batch-3 (workstream 2): effective `maxTaskOutputBytes` cap for this daemon — see {@link DEFAULT_MAX_TASK_OUTPUT_BYTES}'s own doc comment. */
   private get maxTaskOutputBytes(): number {
     return this.deps.maxTaskOutputBytes ?? DEFAULT_MAX_TASK_OUTPUT_BYTES;
+  }
+
+  /** Effective per-event inline ceiling for this daemon — see `DaemonConfig.maxInlineEventBytes`. */
+  private get maxInlineEventBytes(): number {
+    return this.deps.maxInlineEventBytes ?? DEFAULT_MAX_INLINE_EVENT_BYTES;
   }
 
   /** WP0: effective per-canonical-Agent-home Attempt cap — see {@link DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME}. */
@@ -2595,7 +2610,7 @@ export class TaskRunner {
 
   private async pump(active: ActiveTask): Promise<void> {
     try {
-      for await (const event of active.session.events) {
+      for await (let event of active.session.events) {
         if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
         // A concurrent task.cancel/task.reject may already have finished
         // (and deleted) this task while this loop was awaiting the next
@@ -2610,6 +2625,26 @@ export class TaskRunner {
         // guarantees for genuinely stale terminal messages. Mirrors the
         // same check already used below for the non-turn_end loop exits.
         if (this.tasks.get(active.taskId) !== active) return;
+
+        // DaemonConfig.maxInlineEventBytes: bound this ONE event before it is
+        // counted, batched, or sent. An oversized `tool_use.input` /
+        // `tool_result.output` is uploaded to the blob plane in full and
+        // replaced inline by a head/tail preview plus a `spill` descriptor
+        // (see `event-spill.ts`). Deliberately placed BEFORE the whole-task
+        // byte accounting below so `maxTaskOutputBytes` counts what actually
+        // goes on the wire, not the pre-spill size — a task that spills is
+        // not a task that flooded.
+        event = await spillOversizedEvent(event, {
+          maxInlineBytes: this.maxInlineEventBytes,
+          blobClient: this.deps.blobClient,
+          taskId: active.taskId,
+          signal: active.blobAbort.signal,
+          log: (message) => console.error(`[byok/client] ${message}`),
+        });
+        // The upload above is a real await: a concurrent cancel/reject may
+        // have finished this task while it was in flight. Same guard, same
+        // reason as the two above — see this loop's own top-of-body checks.
+        if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
 
         // M5 batch-3 (workstream 2): DaemonConfig.maxTaskOutputBytes
         // enforcement — see `estimateEventBytes`'s own doc comment for
