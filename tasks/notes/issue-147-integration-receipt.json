@@ -1,0 +1,43 @@
+{
+  "protocol": 2,
+  "kind": "repo-harness-acceptance-receipt",
+  "repository_root": "/Users/kito/Projects/byok-sdk-wt-issue-147-integration",
+  "contract_file": "tasks/contracts/20260906-0420-issue-147-integration.contract.md",
+  "contract_sha256": "sha256:a52c9b7beb3cfb54efc26cfa7cdc9d8913f7e5561a633f2041ea3960f1fe54b3",
+  "goal_file": "plans/plan-20260906-0420-issue-147-integration.md",
+  "goal_sha256": "sha256:524cacaa5eda102c587e81ea2d7fefa3c767ce24b2955b078b45035bd152a2b7",
+  "verification_file": ".ai/harness/checks/latest.json",
+  "verification_evidence_sha256": "sha256:6d09d70d6c0053ea2210e64d9c7d98b9560fe3483a680f150ff0a534bba39ce9",
+  "benchmark_evidence_sha256": "not-applicable",
+  "subject_sha256": "sha256:803ca23de016e64dcbce29851d0b7bb8ab3f7ef78848004dc2ea12baa7d73be4",
+  "subject_scope": "normalized-final-content",
+  "target_ref": "612ec44073f0481341036107483aaf8fdc190a87",
+  "target_revision": "612ec44073f0481341036107483aaf8fdc190a87",
+  "reviewed_paths": [
+    ".ai/harness/policy.json",
+    "api-surface/protocol.d.ts",
+    "packages/client/src/__tests__/journal-offer-family.test.ts",
+    "packages/client/src/daemon/create-daemon.ts",
+    "packages/protocol/src/__tests__/task-offer-family.test.ts",
+    "packages/protocol/src/index.ts",
+    "packages/protocol/src/messages.ts"
+  ],
+  "disposition": "external_pass",
+  "expected_reviewer": "Claude",
+  "reviewer": "Claude",
+  "source": "claude-review",
+  "actor": null,
+  "summary": "Claude fable read-only review completed exit0: no P1, two P2 advisories retained; combined source gates passed. Raw review: tasks/notes/issue-147-integration-claude.md.",
+  "findings": [
+    {
+      "severity": "P2",
+      "message": "observer.ts:242 retains pre-existing three-offer classification; egress offered observation missing. Out of scope, report-only; classification sweep limited to journal opensTask."
+    },
+    {
+      "severity": "P2",
+      "message": "journal-offer-family.test exact-seq duplicate is filtered before journal; proves transport/task dedup, not journal receipt dedup. Existing journal-sqlite tests provide receipt dedup coverage."
+    }
+  ],
+  "waiver_grant_sha256": null,
+  "issued_at": "2026-09-05T20:23:48.877Z"
+}

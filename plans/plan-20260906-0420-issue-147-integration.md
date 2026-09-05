@@ -1,6 +1,6 @@
 # Plan: Issue 147 task offer journal authority
 
-> **Status**: Executing
+> **Status**: Review
 > **Created**: 20260906-0350
 > **Slug**: issue-147-task-offer-journal
 > **Planning Source**: codex-plan
