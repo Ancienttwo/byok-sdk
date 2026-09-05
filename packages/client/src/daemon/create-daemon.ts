@@ -1845,26 +1845,23 @@ export function buildDaemonWithAdapters(
       const taskId = envelope.task_id;
       const bytes = encodeEnvelope(envelope);
       journalTerminalTail = journalTerminalTail.catch(() => undefined).then(async () => {
-        await activeJournal.recordTerminal({ taskId, terminalType: terminalKind, bytes,
-          payloadHash: journalHash(bytes), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
-        // Read the first immutable winner, not an attempted replacement candidate.
-        const terminal = (await activeJournal.listPendingTerminals(journalIdentity)).find((row) => row.taskId === taskId);
-        if (!terminal || terminal.truthState !== 'pending') return;
-        const durable = decodeEnvelope(terminal.bytes);
-        overrides.executionRecoveryFault?.('terminal:before-send');
-        observer.handleOutboundEnvelope(durable);
-        connection?.send(durable);
-      });
-      void journalTerminalTail.catch(async (error: unknown) => {
-        if (!(error instanceof JournalRecordTooLargeError) || !activeJournal || !journalIdentity) {
-          console.error('[byok/client] terminal durability failed; execution remains unsettled', error);
-          return;
-        }
-        // A completed result can exceed the journal's bounded record size. Do
-        // not truncate or invent a success: settle the exact task identity
-        // with one small, canonical, non-retryable failure. The offer is the
-        // sole source of AgentRef, so a foreign or missing ref is never guessed.
         try {
+          await activeJournal.recordTerminal({ taskId, terminalType: terminalKind, bytes,
+            payloadHash: journalHash(bytes), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
+          // Read the first immutable winner, not an attempted replacement candidate.
+          const terminal = (await activeJournal.listPendingTerminals(journalIdentity)).find((row) => row.taskId === taskId);
+          if (!terminal || terminal.truthState !== 'pending') return;
+          const durable = decodeEnvelope(terminal.bytes);
+          overrides.executionRecoveryFault?.('terminal:before-send');
+          observer.handleOutboundEnvelope(durable);
+          connection?.send(durable);
+        } catch (error: unknown) {
+          if (!(error instanceof JournalRecordTooLargeError)) throw error;
+          // A completed result can exceed the journal's bounded record size.
+          // Do not truncate or invent a success: settle the exact task identity
+          // with one small, canonical, non-retryable failure. The offer is the
+          // sole source of AgentRef, so a foreign or missing ref is never guessed.
+          if (!activeJournal || !journalIdentity) throw error;
           const task = await activeJournal.readTask(taskId, journalIdentity);
           if (!task) throw new Error(`missing durable task ${taskId}`);
           const offer = decodeEnvelope(task.envelopeBytes);
@@ -1882,12 +1879,12 @@ export function buildDaemonWithAdapters(
           const decoded = decodeEnvelope(durableFailure.bytes);
           observer.handleOutboundEnvelope(decoded);
           connection?.send(decoded);
-        } catch (settlementError) {
           // Never recurse through arbitrary fallback terminals. A storage or
           // canonicalization failure remains visible and requires operator
           // recovery; the oversized result itself is never silently dropped.
-          console.error('[byok/client] bounded terminal overflow settlement failed; execution remains unsettled', settlementError);
         }
+      }).catch((error: unknown) => {
+        console.error('[byok/client] terminal durability failed; execution remains unsettled', error);
       });
     };
     const sendEnvelope: TaskRunnerDeps['send'] = (candidate) => {

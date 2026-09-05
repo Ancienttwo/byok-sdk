@@ -18,6 +18,7 @@ interface ChildConfig {
   readonly action?: 'run' | 'unpair';
   readonly journalFault?: string;
   readonly recoveryFault?: string;
+  readonly agentHome?: boolean;
 }
 
 interface JsonLine {
@@ -352,20 +353,30 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
 
   it('settles an oversized result as a bounded durable failure without rerunning after restart', async () => {
     const cloud = await startCloud();
-    const { daemon, deviceId } = await pair(cloud);
-    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'produce an oversized result' }) as { taskId: string };
+    const { daemon, deviceId } = await pair(cloud, { agentHome: true });
+    const agentRef = { agentId: 'agent-overflow', profileRevision: 'profile-v1' };
+    const offer = await cloud.rpc('enqueueAgentOffer', { deviceId, instruction: 'produce an oversized result', agentRef }) as { taskId: string };
     await waitForFile(path.join(current!.daemonBase.controlDir, 'runtime-starts.jsonl'));
     await finish(offer.taskId, 'x'.repeat(300 * 1024));
     const attempt = await waitForAttempt(cloud, offer.taskId, 'failed');
     expect(attempt.terminalCause).toBe('terminal_result_too_large');
     const terminal = decodeEnvelope(String(await cloud.rpc('readTerminalBody', { taskId: offer.taskId })));
     expect(terminal.type).toBe('task.fail');
-    if (terminal.type === 'task.fail') expect(terminal.payload).toMatchObject({ reason: 'terminal_result_too_large', retryable: false });
+    if (terminal.type === 'task.fail') expect(terminal.payload).toMatchObject({ reason: 'terminal_result_too_large', retryable: false, agentRef });
+    expect(terminal.task_id).toBe(offer.taskId);
+    await waitForJournalTruth('confirmed');
+    const [localFailure] = journalRows('SELECT bytes, payload_hash, truth_state FROM journal_terminal');
+    expect(localFailure?.truth_state).toBe('confirmed');
+    expect(localFailure?.payload_hash).toBeTruthy();
+    expect(localFailure?.bytes).toBe(String(await cloud.rpc('readTerminalBody', { taskId: offer.taskId })));
+    const confirmedBytes = localFailure?.bytes;
     expect(starts()).toHaveLength(1);
     daemon.kill();
     expect((await daemon.exited()).signal).toBe('SIGKILL');
     await startDaemon();
     expect(starts()).toHaveLength(1);
+    const [afterRestart] = journalRows('SELECT bytes, payload_hash, truth_state FROM journal_terminal');
+    expect(afterRestart).toMatchObject({ bytes: confirmedBytes, payload_hash: localFailure?.payload_hash, truth_state: 'confirmed' });
   }, 30_000);
 
   it.each([

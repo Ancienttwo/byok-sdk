@@ -48,4 +48,6 @@ Old journal-crash-matrix cases 5/6 are receipt/idempotence tests, not actual cra
 
 ## Oversized terminal bounded settlement
 
+Sequencing correction: overflow settlement runs inside the assigned `journalTerminalTail` promise, so shutdown awaits failure persistence/send/confirmation. The oversized oracle uses a genuine `task.offer_for_agent` contract and checks exact AgentRef, local confirmed bytes/hash, and immutable bytes after restart. The hash-only oracle captures the DB before the first refusal; only SQLite header change counters are normalized, while schema/data/path/no-quarantine preservation is asserted.
+
 Claude review identified that a result over the 256 KiB journal cap was logged and left cloud `running`. The approved fix reads the durable offer's exact task/AgentRef, persists and sends one canonical `task.fail` with stable reason `terminal_result_too_large` and `retryable:false`, then uses ordinary cloud confirmation. It never truncates or synthesizes success; storage/identity/canonicalization failures do not recurse. The compiled darwin fixture now proves a 300 KiB result settles durably and restart does not rerun runtime (14 kill tests total); SQLite proves a hash-only predecessor schema is refused without rewriting the database.
