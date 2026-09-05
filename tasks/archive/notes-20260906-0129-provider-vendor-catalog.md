@@ -1,7 +1,17 @@
+> **Archived**: 2026-09-06 01:29
+> **Related Plan**: plans/archive/plan-20260906-0018-provider-vendor-catalog.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260906-0129
+> **Archive Projection V1**: `plans/plan-20260906-0018-provider-vendor-catalog.md` => `plans/archive/plan-20260906-0018-provider-vendor-catalog.md`
+> **Archive Projection V1**: `tasks/notes/20260906-0018-provider-vendor-catalog.notes.md` => `tasks/archive/notes-20260906-0129-provider-vendor-catalog.md`
+> **Archive Projection V1**: `tasks/contracts/20260906-0018-provider-vendor-catalog.contract.md` => `tasks/archive/contract-20260906-0129-provider-vendor-catalog.md`
+> **Archive Projection V1**: `tasks/reviews/20260906-0018-provider-vendor-catalog.review.md` => `tasks/archive/review-20260906-0129-provider-vendor-catalog.md`
+
 # Implementation Notes: provider-vendor-catalog
 
-> Contract: `tasks/contracts/20260906-0018-provider-vendor-catalog.contract.md`
-> Plan: `plans/plan-20260906-0018-provider-vendor-catalog.md`
+> Contract: `tasks/archive/contract-20260906-0129-provider-vendor-catalog.md`
+> Plan: `plans/archive/plan-20260906-0018-provider-vendor-catalog.md`
 > Date: 2026-09-06
 
 ## Status

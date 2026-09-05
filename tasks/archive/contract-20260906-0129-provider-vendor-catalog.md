@@ -1,14 +1,24 @@
+> **Archived**: 2026-09-06 01:29
+> **Related Plan**: plans/archive/plan-20260906-0018-provider-vendor-catalog.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260906-0129
+> **Archive Projection V1**: `plans/plan-20260906-0018-provider-vendor-catalog.md` => `plans/archive/plan-20260906-0018-provider-vendor-catalog.md`
+> **Archive Projection V1**: `tasks/notes/20260906-0018-provider-vendor-catalog.notes.md` => `tasks/archive/notes-20260906-0129-provider-vendor-catalog.md`
+> **Archive Projection V1**: `tasks/contracts/20260906-0018-provider-vendor-catalog.contract.md` => `tasks/archive/contract-20260906-0129-provider-vendor-catalog.md`
+> **Archive Projection V1**: `tasks/reviews/20260906-0018-provider-vendor-catalog.review.md` => `tasks/archive/review-20260906-0129-provider-vendor-catalog.md`
+
 # Task Contract: provider-vendor-catalog
 
-> **Status**: Active
-> **Plan**: plans/plan-20260906-0018-provider-vendor-catalog.md
+> **Status**: Fulfilled
+> **Plan**: plans/archive/plan-20260906-0018-provider-vendor-catalog.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
 > **Last Updated**: 2026-09-06 00:30
-> **Review File**: `tasks/reviews/20260906-0018-provider-vendor-catalog.review.md`
-> **Notes File**: `tasks/notes/20260906-0018-provider-vendor-catalog.notes.md`
+> **Review File**: `tasks/archive/review-20260906-0129-provider-vendor-catalog.md`
+> **Notes File**: `tasks/archive/notes-20260906-0129-provider-vendor-catalog.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
 
 ## Why
@@ -47,10 +57,10 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 
 ## Workflow Inventory
 
-- Source plan: `plans/plan-20260906-0018-provider-vendor-catalog.md`
+- Source plan: `plans/archive/plan-20260906-0018-provider-vendor-catalog.md`
 - Deferred-goal ledger: `tasks/todos.md`
-- Review file: `tasks/reviews/20260906-0018-provider-vendor-catalog.review.md`
-- Notes file: `tasks/notes/20260906-0018-provider-vendor-catalog.notes.md`
+- Review file: `tasks/archive/review-20260906-0129-provider-vendor-catalog.md`
+- Notes file: `tasks/archive/notes-20260906-0129-provider-vendor-catalog.md`
 - Checks file: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
 - Scope gate: edit only paths listed under `allowed_paths`; update this contract before widening scope.
@@ -89,12 +99,12 @@ allowed_paths:
   - docs/researches/2026-09-05_cross-harness-probe.md
   - docs/researches/evidence/2026-09-05-cross-harness/
   - plans/plan-20260905-2239-tmux-cross-harness-collaboration.md
-  - plans/plan-20260906-0018-provider-vendor-catalog.md
+  - plans/archive/plan-20260906-0018-provider-vendor-catalog.md
   - tasks/todos.md
   - tasks/current.md
-  - tasks/contracts/20260906-0018-provider-vendor-catalog.contract.md
-  - tasks/reviews/20260906-0018-provider-vendor-catalog.review.md
-  - tasks/notes/20260906-0018-provider-vendor-catalog.notes.md
+  - tasks/archive/contract-20260906-0129-provider-vendor-catalog.md
+  - tasks/archive/review-20260906-0129-provider-vendor-catalog.md
+  - tasks/archive/notes-20260906-0129-provider-vendor-catalog.md
   - packages/keys/src/provider-catalog.ts
   - packages/keys/src/provider-catalog.test.ts
   - packages/keys/src/provider-profile.ts
@@ -159,7 +169,7 @@ exit_criteria:
     - docs/researches/2026-09-06_deepseek-harness-provider-catalog-port.md
   artifacts_exist:
     - .ai/harness/checks/latest.json
-    - tasks/notes/20260906-0018-provider-vendor-catalog.notes.md
+    - tasks/archive/notes-20260906-0129-provider-vendor-catalog.md
   tests_pass:
     - path: packages/keys/src/provider-catalog.test.ts
     - path: packages/keys/src/provider-profile.test.ts
