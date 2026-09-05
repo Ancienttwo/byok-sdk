@@ -1,9 +1,19 @@
+> **Archived**: 2026-09-06 04:43
+> **Related Plan**: plans/archive/plan-20260906-0433-audit-log-spill-size.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260906-0443
+> **Archive Projection V1**: `plans/plan-20260906-0433-audit-log-spill-size.md` => `plans/archive/plan-20260906-0433-audit-log-spill-size.md`
+> **Archive Projection V1**: `tasks/notes/20260906-0433-audit-log-spill-size.notes.md` => `tasks/archive/notes-20260906-0443-audit-log-spill-size.md`
+> **Archive Projection V1**: `tasks/contracts/20260906-0433-audit-log-spill-size.contract.md` => `tasks/archive/contract-20260906-0443-audit-log-spill-size.md`
+> **Archive Projection V1**: `tasks/reviews/20260906-0433-audit-log-spill-size.review.md` => `tasks/archive/review-20260906-0443-audit-log-spill-size.md`
+
 # Implementation Notes: audit-log-spill-size
 
 > **Status**: Active
-> **Plan**: plans/plan-20260906-0433-audit-log-spill-size.md
-> **Contract**: tasks/contracts/20260906-0433-audit-log-spill-size.contract.md
-> **Review**: tasks/reviews/20260906-0433-audit-log-spill-size.review.md
+> **Plan**: plans/archive/plan-20260906-0433-audit-log-spill-size.md
+> **Contract**: tasks/archive/contract-20260906-0443-audit-log-spill-size.md
+> **Review**: tasks/archive/review-20260906-0443-audit-log-spill-size.md
 > **Last Updated**: 2026-09-06 04:40
 > **Lifecycle**: notes
 

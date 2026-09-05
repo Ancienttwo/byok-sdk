@@ -1,14 +1,24 @@
+> **Archived**: 2026-09-06 04:43
+> **Related Plan**: plans/archive/plan-20260906-0433-audit-log-spill-size.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260906-0443
+> **Archive Projection V1**: `plans/plan-20260906-0433-audit-log-spill-size.md` => `plans/archive/plan-20260906-0433-audit-log-spill-size.md`
+> **Archive Projection V1**: `tasks/notes/20260906-0433-audit-log-spill-size.notes.md` => `tasks/archive/notes-20260906-0443-audit-log-spill-size.md`
+> **Archive Projection V1**: `tasks/contracts/20260906-0433-audit-log-spill-size.contract.md` => `tasks/archive/contract-20260906-0443-audit-log-spill-size.md`
+> **Archive Projection V1**: `tasks/reviews/20260906-0433-audit-log-spill-size.review.md` => `tasks/archive/review-20260906-0443-audit-log-spill-size.md`
+
 # Task Contract: audit-log-spill-size
 
 > **Status**: Fulfilled
-> **Plan**: plans/plan-20260906-0433-audit-log-spill-size.md
+> **Plan**: plans/archive/plan-20260906-0433-audit-log-spill-size.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
 > **Last Updated**: 2026-09-06 04:36
-> **Review File**: `tasks/reviews/20260906-0433-audit-log-spill-size.review.md`
-> **Notes File**: `tasks/notes/20260906-0433-audit-log-spill-size.notes.md`
+> **Review File**: `tasks/archive/review-20260906-0443-audit-log-spill-size.md`
+> **Notes File**: `tasks/archive/notes-20260906-0443-audit-log-spill-size.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
 
 ## Why
@@ -46,10 +56,10 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 
 ## Workflow Inventory
 
-- Source plan: `plans/plan-20260906-0433-audit-log-spill-size.md`
+- Source plan: `plans/archive/plan-20260906-0433-audit-log-spill-size.md`
 - Deferred-goal ledger: `tasks/todos.md`
-- Review file: `tasks/reviews/20260906-0433-audit-log-spill-size.review.md`
-- Notes file: `tasks/notes/20260906-0433-audit-log-spill-size.notes.md`
+- Review file: `tasks/archive/review-20260906-0443-audit-log-spill-size.md`
+- Notes file: `tasks/archive/notes-20260906-0443-audit-log-spill-size.md`
 - Checks file: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
 - Scope gate: edit only paths listed under `allowed_paths`; update this contract before widening scope.
@@ -71,12 +81,12 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 
 ```yaml
 allowed_paths:
-  - plans/plan-20260906-0433-audit-log-spill-size.md
+  - plans/archive/plan-20260906-0433-audit-log-spill-size.md
   - tasks/todos.md
   - tasks/current.md
-  - tasks/contracts/20260906-0433-audit-log-spill-size.contract.md
-  - tasks/reviews/20260906-0433-audit-log-spill-size.review.md
-  - tasks/notes/20260906-0433-audit-log-spill-size.notes.md
+  - tasks/archive/contract-20260906-0443-audit-log-spill-size.md
+  - tasks/archive/review-20260906-0443-audit-log-spill-size.md
+  - tasks/archive/notes-20260906-0443-audit-log-spill-size.md
   - packages/client/src/bin/audit-log.ts
   - packages/client/src/__tests__/bin-audit-log.test.ts
   - api-surface/client.d.ts
@@ -131,7 +141,7 @@ exit_criteria:
     - packages/client/src/bin/audit-log.ts
   artifacts_exist:
     - .ai/harness/checks/latest.json
-    - tasks/notes/20260906-0433-audit-log-spill-size.notes.md
+    - tasks/archive/notes-20260906-0443-audit-log-spill-size.md
   tests_pass:
     - path: packages/client/src/__tests__/bin-audit-log.test.ts
   commands_succeed:

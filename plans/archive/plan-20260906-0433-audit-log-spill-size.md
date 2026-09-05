@@ -1,6 +1,16 @@
+> **Archived**: 2026-09-06 04:43
+> **Related Plan**: plans/archive/plan-20260906-0433-audit-log-spill-size.md
+> **Outcome**: Completed
+> **Lifecycle**: plan
+> **Parent Run ID**: run-20260906-0443
+> **Archive Projection V1**: `plans/plan-20260906-0433-audit-log-spill-size.md` => `plans/archive/plan-20260906-0433-audit-log-spill-size.md`
+> **Archive Projection V1**: `tasks/notes/20260906-0433-audit-log-spill-size.notes.md` => `tasks/archive/notes-20260906-0443-audit-log-spill-size.md`
+> **Archive Projection V1**: `tasks/contracts/20260906-0433-audit-log-spill-size.contract.md` => `tasks/archive/contract-20260906-0443-audit-log-spill-size.md`
+> **Archive Projection V1**: `tasks/reviews/20260906-0433-audit-log-spill-size.review.md` => `tasks/archive/review-20260906-0443-audit-log-spill-size.md`
+
 # Plan: Audit log records pre-spill byte sizes for spilled tool events
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260906-0433
 > **Slug**: audit-log-spill-size
 > **Artifact Level**: work-package
@@ -9,9 +19,9 @@
 > **Rollback Surface**: two write-side branches, two read-side branches, tests, CHANGELOG, todos row.
 > **Spec**: `docs/spec.md`
 > **Research**: `docs/protocol.md` §11.6
-> **Task Contract**: `tasks/contracts/20260906-0433-audit-log-spill-size.contract.md`
-> **Task Review**: `tasks/reviews/20260906-0433-audit-log-spill-size.review.md`
-> **Implementation Notes**: `tasks/notes/20260906-0433-audit-log-spill-size.notes.md`
+> **Task Contract**: `tasks/archive/contract-20260906-0443-audit-log-spill-size.md`
+> **Task Review**: `tasks/archive/review-20260906-0443-audit-log-spill-size.md`
+> **Implementation Notes**: `tasks/archive/notes-20260906-0443-audit-log-spill-size.md`
 
 ## Agentic Routing
 - Selected route: main-loop planning; `fast-worker` execution in a contract worktree; orchestrator verifies directly (single-file mechanical change).
@@ -24,16 +34,16 @@
 ## Workflow Inventory
 Complete this inventory before implementation. If any line is unknown, keep the plan in Draft and fill it before projection.
 
-- Active plan: `plans/plan-20260906-0433-audit-log-spill-size.md`
-- Sprint contract: `tasks/contracts/20260906-0433-audit-log-spill-size.contract.md`
-- Sprint review: `tasks/reviews/20260906-0433-audit-log-spill-size.review.md`
-- Implementation notes: `tasks/notes/20260906-0433-audit-log-spill-size.notes.md`
+- Active plan: `plans/archive/plan-20260906-0433-audit-log-spill-size.md`
+- Sprint contract: `tasks/archive/contract-20260906-0443-audit-log-spill-size.md`
+- Sprint review: `tasks/archive/review-20260906-0443-audit-log-spill-size.md`
+- Implementation notes: `tasks/archive/notes-20260906-0443-audit-log-spill-size.md`
 - Deferred-goal ledger: `tasks/todos.md`
 - Current checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
-- Scope authority: `tasks/contracts/20260906-0433-audit-log-spill-size.contract.md` `allowed_paths`
+- Scope authority: `tasks/archive/contract-20260906-0443-audit-log-spill-size.md` `allowed_paths`
 - Concurrency rule: `.ai/harness/active-plan` selects the active plan for this worktree when present; `.ai/harness/active-worktree` records the owning worktree. If another worktree already owns active work, open or switch to the matching worktree instead of serializing unrelated plans.
-- Execution isolation: approved contract-level work projects through `repo-harness run plan-to-todo --plan plans/plan-20260906-0433-audit-log-spill-size.md` and may start `repo-harness run contract-worktree start --plan plans/plan-20260906-0433-audit-log-spill-size.md`.
+- Execution isolation: approved contract-level work projects through `repo-harness run plan-to-todo --plan plans/archive/plan-20260906-0433-audit-log-spill-size.md` and may start `repo-harness run contract-worktree start --plan plans/archive/plan-20260906-0433-audit-log-spill-size.md`.
 
 ## Approach
 ### Strategy
@@ -73,11 +83,11 @@ Unchanged JSONL format with two optional boolean keys.
 | Older readers see unknown keys | Certain | None; reader ignores unknown keys | Reader already tolerant |
 
 ## Task Contracts
-- Contract file: `tasks/contracts/20260906-0433-audit-log-spill-size.contract.md`
-- Review file: `tasks/reviews/20260906-0433-audit-log-spill-size.review.md`
-- Implementation notes file: `tasks/notes/20260906-0433-audit-log-spill-size.notes.md`
+- Contract file: `tasks/archive/contract-20260906-0443-audit-log-spill-size.md`
+- Review file: `tasks/archive/review-20260906-0443-audit-log-spill-size.md`
+- Implementation notes file: `tasks/archive/notes-20260906-0443-audit-log-spill-size.md`
 - Template: `.claude/templates/contract.template.md`
-- Verification command: `repo-harness run verify-contract --contract tasks/contracts/20260906-0433-audit-log-spill-size.contract.md --strict`
+- Verification command: `repo-harness run verify-contract --contract tasks/archive/contract-20260906-0443-audit-log-spill-size.md --strict`
 - Active plan rule: `.ai/harness/active-plan` is authoritative for this worktree when present; `.ai/harness/active-worktree` records the owning worktree. Do not infer active execution from the latest non-archived plan.
 
 ## Handoff
