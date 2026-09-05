@@ -204,6 +204,99 @@ describe('bin/audit-log: finding P1 #3 (SECURITY) — redaction, 0600 file, 0700
     expect(serializedReadBack).not.toContain(secretInlineBase64);
   });
 
+  it('records a spilled tool_result as the pre-spill totalBytes plus a boolean, never the blob locator or the preview', async () => {
+    const storeDir = await tmpDir('byok-audit-spill-result-');
+    await appendAuditEvent(storeDir, {
+      kind: 'progress',
+      ts: '2026-01-01T00:00:00.000Z',
+      taskId: 'task-big-output',
+      event: {
+        type: 'tool_result',
+        tool: 'bash',
+        output: { preview: { head: 'HEAD-BYTES', tail: 'TAIL' } },
+        spill: {
+          field: 'output',
+          totalBytes: 3_145_728,
+          omittedBytes: 3_145_000,
+          contentType: 'application/json',
+          blob: {
+            blobId: 'blob_SECRET_LOCATOR',
+            contentHash: `sha256:${'a'.repeat(64)}`,
+            size: 3_145_728,
+            contentType: 'application/json',
+          },
+        },
+      },
+    });
+
+    const raw = await fs.readFile(auditLogPath(storeDir), 'utf8');
+    expect(raw).toContain('"outputSize":3145728');
+    expect(raw).toContain('"outputSpilled":true');
+    expect(raw).not.toContain('blob_SECRET_LOCATOR');
+    expect(raw).not.toContain('contentHash');
+    expect(raw).not.toContain('spill');
+    expect(raw).not.toContain('HEAD-BYTES');
+
+    const events = await readAuditEvents(storeDir);
+    expect(events).toHaveLength(1);
+    const [event] = events;
+    if (event?.kind !== 'progress' || event.event.type !== 'tool_result') throw new Error('unreachable');
+    expect(event.event.output).toBe('[redacted: 3145728 bytes, spilled]');
+  });
+
+  it('records the unstoredReason form of a spilled tool_use as totalBytes plus a boolean, never the reason text', async () => {
+    const storeDir = await tmpDir('byok-audit-spill-use-');
+    await appendAuditEvent(storeDir, {
+      kind: 'progress',
+      ts: '2026-01-01T00:00:00.000Z',
+      taskId: 'task-unstored',
+      event: {
+        type: 'tool_use',
+        tool: 'bash',
+        input: { preview: { head: 'HEAD-BYTES', tail: 'TAIL' } },
+        spill: {
+          field: 'input',
+          totalBytes: 2_097_152,
+          omittedBytes: 2_096_000,
+          contentType: 'application/json',
+          unstoredReason: 'REASON-TEXT-MUST-NOT-LEAK',
+        },
+      },
+    });
+
+    const raw = await fs.readFile(auditLogPath(storeDir), 'utf8');
+    expect(raw).toContain('"inputSize":2097152');
+    expect(raw).toContain('"inputSpilled":true');
+    expect(raw).not.toContain('REASON-TEXT-MUST-NOT-LEAK');
+    expect(raw).not.toContain('unstoredReason');
+
+    const events = await readAuditEvents(storeDir);
+    const [event] = events;
+    if (event?.kind !== 'progress' || event.event.type !== 'tool_use') throw new Error('unreachable');
+    expect(event.event.input).toBe('[redacted: 2097152 bytes, spilled]');
+  });
+
+  it('leaves an unspilled tool_result unchanged: no outputSpilled key, outputSize is the inline value size', async () => {
+    const storeDir = await tmpDir('byok-audit-unspilled-');
+    const output = { stdout: 'ok' };
+    const size = Buffer.byteLength(JSON.stringify(output), 'utf8');
+    await appendAuditEvent(storeDir, {
+      kind: 'progress',
+      ts: '2026-01-01T00:00:00.000Z',
+      taskId: 't-unspilled',
+      event: { type: 'tool_result', tool: 'bash', output },
+    });
+
+    const raw = await fs.readFile(auditLogPath(storeDir), 'utf8');
+    expect(raw).not.toContain('outputSpilled');
+    expect(raw).toContain(`"outputSize":${size}`);
+
+    const events = await readAuditEvents(storeDir);
+    const [event] = events;
+    if (event?.kind !== 'progress' || event.event.type !== 'tool_result') throw new Error('unreachable');
+    expect(event.event.output).toBe(`[redacted: ${size} bytes]`);
+  });
+
   it('persists only coarse Git workspace metadata, rejects sensitive sentinels, and does not anchor task lifecycle rotation', async () => {
     const storeDir = await tmpDir('byok-audit-git-workspace-');
     const sentinels = {

@@ -1,7 +1,13 @@
+> **Archived**: 2026-09-06 04:43
+> **Related Plan**: plans/archive/plan-20260906-0433-audit-log-spill-size.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260906-0443
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: (archive-workflow)
+> **Updated**: 2026-09-06 04:34
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.
