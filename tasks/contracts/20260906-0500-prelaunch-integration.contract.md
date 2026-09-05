@@ -32,6 +32,7 @@ Sequential integration of the committed recovery worker and existing release/aud
 
 ```yaml
 allowed_paths:
+  - .github/workflows/ci.yml
   - packages/
   - api-surface/
   - deploy/sql/
