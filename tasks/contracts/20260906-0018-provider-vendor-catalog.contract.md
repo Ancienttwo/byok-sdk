@@ -70,8 +70,25 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 
 ## Allowed Paths
 
+Co-shipped scope addition (2026-09-06): the user directed that the
+public-package-topology task's committed WIP (`c8664b3`: architecture
+projection refresh, cross-harness probe report and evidence, the tmux
+collaboration Draft plan, and that contract's own scope additions) merge
+together with this branch. Those paths are owned by
+`tasks/contracts/20260905-0114-public-package-topology.contract.md`; they are
+listed here only so this contract's branch-diff preflight recognises them.
+This task made no edits to them.
+
 ```yaml
 allowed_paths:
+  - docs/architecture/index.md
+  - docs/architecture/requests/root.md
+  - packages/AGENTS.md
+  - packages/CLAUDE.md
+  - tasks/contracts/20260905-0114-public-package-topology.contract.md
+  - docs/researches/2026-09-05_cross-harness-probe.md
+  - docs/researches/evidence/2026-09-05-cross-harness/
+  - plans/plan-20260905-2239-tmux-cross-harness-collaboration.md
   - plans/plan-20260906-0018-provider-vendor-catalog.md
   - tasks/todos.md
   - tasks/current.md
