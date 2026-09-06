@@ -1,6 +1,6 @@
 # Prelaunch execution recovery and Multi-Agent integration
 
-> **Status**: Executing
+> **Status**: Completed
 > **Artifact Level**: work-package
 > **Promotion Reason**: Cross-package execution truth and downstream compiled acceptance require a complete SDK integration PR.
 > **Verification Boundary**: Frozen source checks, canonical packed graph and exact native Salesko consumer evidence.
@@ -93,3 +93,7 @@ Preserve active workers and dirty files. Do not expand into publisher signing, l
 - **Review/acceptance boundary**: One independent combined acceptance per changed boundary.
 - **High-risk surface**: Durable execution truth and immutable device/Agent identity.
 - **Why not checklist row**: Cross-package SDK and downstream contracts require a file-backed integration boundary.
+
+## Verified closeout — 2026-09-06
+
+Lifecycle reconciled from exact SDK/consumer CI and live PR/Issue readback in `tasks/notes/20260906-pr152-closeout.md`. Historical checkboxes and acceptance text remain frozen; this completion record supersedes earlier pending-state statements. This closes the source/candidate delivery boundary only; registry publication and production rollout remain separate.

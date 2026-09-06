@@ -1,6 +1,6 @@
 # Plan: Issue 147 task offer journal authority
 
-> **Status**: Review
+> **Status**: Completed
 > **Created**: 20260906-0350
 > **Slug**: issue-147-task-offer-journal
 > **Planning Source**: codex-plan
@@ -132,3 +132,7 @@ Regression-first real SQLite journal integration; protocol complete-family cover
 ## Source Delivery
 
 All authorized source work complete at fc404d7ce0599d6ab0e396af39e89a3c8b11ae0c. Single handoff: tasks/notes/issue-147-handoff.md. Plan remains Review because typed acceptance and release integration have not occurred; source checks do not stand in for those gates.
+
+## Verified closeout — 2026-09-06
+
+Lifecycle reconciled from exact SDK/consumer CI and live PR/Issue readback in `tasks/notes/20260906-pr152-closeout.md`. Historical checkboxes and acceptance text remain frozen; this completion record supersedes earlier pending-state statements. This closes the source/candidate delivery boundary only; registry publication and production rollout remain separate.

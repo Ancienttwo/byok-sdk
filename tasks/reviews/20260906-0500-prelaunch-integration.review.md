@@ -1,6 +1,6 @@
 # Prelaunch SDK integration review
 
-Status: source review PASS after targeted finding closure; packed runtime/PR gates pending, no publication acceptance.
+Status: source review PASS after targeted finding closure; packed runtime CI succeeded and PR 152 merged. No publication acceptance. See `tasks/notes/20260906-pr152-closeout.md` for exact delivery evidence. Earlier pending statements below are historical review-stage context.
 
 Independent reviewer: native Claude, read-only Read/Grep/Glob invocation against `c678548b05bf8e2d705f745b303c993d852a0339`. Review output retained at `/tmp/astra-sdk-integration-claude-review.md`; prompt and frozen diff retained beside it. No waiver or self-review substitution.
 

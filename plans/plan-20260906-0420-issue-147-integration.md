@@ -1,6 +1,6 @@
 # Plan: Issue 147 task offer journal authority
 
-> **Status**: Review
+> **Status**: Completed
 > **Created**: 20260906-0350
 > **Slug**: issue-147-task-offer-journal
 > **Planning Source**: codex-plan
@@ -115,3 +115,7 @@ Merge exact accepted main successor and exact #147 source rather than reconstruc
 
 ## Stop and scope
 No main merge/push/release/registry/tag/deploy/downstream pin. Do not include timeline-spill or provider catalog WIP. New reviewer findings outside this integration are report-only. No user waiver has been requested or granted.
+
+## Verified closeout — 2026-09-06
+
+Lifecycle reconciled from exact SDK/consumer CI and live PR/Issue readback in `tasks/notes/20260906-pr152-closeout.md`. Historical checkboxes and acceptance text remain frozen; this completion record supersedes earlier pending-state statements. This closes the source/candidate delivery boundary only; registry publication and production rollout remain separate.

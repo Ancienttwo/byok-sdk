@@ -1,6 +1,6 @@
 # Execution recovery and durable terminal settlement
 
-> **Status**: Executing
+> **Status**: Completed
 > **Artifact Level**: work-package
 > **Promotion Reason**: Cross-package durable execution recovery with real compiled crash evidence
 > **Verification Boundary**: Required source gates plus compiled Node 22.22.0 SIGKILL oracle; no registry/deployment claim
@@ -113,3 +113,7 @@ Promote only because all named crash windows and fencing invariants are covered 
 ## Why not checklist row
 
 This is a cross-package behavior change with durable storage, protocol disposition, cloud authority, and compiled crash evidence; it requires a dedicated contract and review boundary rather than a checklist-only task.
+
+## Verified closeout — 2026-09-06
+
+Lifecycle reconciled from exact SDK/consumer CI and live PR/Issue readback in `tasks/notes/20260906-pr152-closeout.md`. Historical checkboxes and acceptance text remain frozen; this completion record supersedes earlier pending-state statements. This closes the source/candidate delivery boundary only; registry publication and production rollout remain separate.

@@ -50,3 +50,7 @@ No unrelated fixes, no external release actions. Keep inherited P2 observer and 
 ## Target ownership readback
 
 Primary checkout moved to a separate audit-spill-size branch while main itself remains e542d210. If no worktree owns main at final readback, local landing uses git update-ref refs/heads/main <accepted-head> e542d210... (compare-and-swap) instead of checking out or editing primary. Otherwise require disjoint dirty-state equality and a normal fast-forward. Neither route force-overwrites an advanced main.
+
+## Verified closeout — 2026-09-06
+
+Lifecycle reconciled from exact SDK/consumer CI and live PR/Issue readback in `tasks/notes/20260906-pr152-closeout.md`. Historical checkboxes and acceptance text remain frozen; this completion record supersedes earlier pending-state statements. This closes the source/candidate delivery boundary only; registry publication and production rollout remain separate.
