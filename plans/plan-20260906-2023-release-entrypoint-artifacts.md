@@ -116,6 +116,6 @@ CI `npm-release-pack` (ubuntu) → `release-pack-<sha>` artifact → operator do
 - [RESOLVED]: `deploy/runbooks/release-responsibility.md:25` is the human-owned release authority; the script's header comment described its own behaviour and is corrected to match the runbook.
 
 ## Task Breakdown
-- [ ] `publish.mjs`: `--artifacts` mode, `verifyFrozenArtifacts`, account gate, reordered execute path.
-- [ ] `publish.test.mjs` + `test:scripts`; CI upload step; runbook; CHANGELOG; notes.
+- [x] `publish.mjs`: `--artifacts` mode, `verifyFrozenArtifacts`, account gate, reordered execute path.
+- [x] `publish.test.mjs` + `test:scripts`; CI upload step; runbook; CHANGELOG; notes.
 - [ ] Verification, gatekeeper, PR, CI artifact readback.
