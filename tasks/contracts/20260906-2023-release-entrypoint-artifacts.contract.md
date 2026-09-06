@@ -142,7 +142,7 @@ exit_criteria:
     - bun run test:scripts
     - bun run check:release-graph
     - bun run check:version-authority
-    - node -e "const fs=require('node:fs');const s=fs.readFileSync('scripts/release/publish.mjs','utf8');const e=s.indexOf('--- Step');const pub=s.indexOf(\"'publish',\");const rb=s.indexOf('registry-readback.mjs');const tag=s.indexOf(\"['tag', '-a'\");if(!(pub>0&&rb>pub&&tag>rb))throw new Error('execute order must be publish -> readback -> tag')"
+    - node -e "const fs=require('node:fs');const s=fs.readFileSync('scripts/release/publish.mjs','utf8');const e=s.indexOf('--- Step');const pub=s.indexOf(\"'publish',\");const rb=s.indexOf(\"'scripts/release/registry-readback.mjs'\");const tag=s.indexOf(\"['tag', '-a'\");if(!(pub>0&&rb>pub&&tag>rb))throw new Error('execute order must be publish -> readback -> tag')"
     - repo-harness run check-task-workflow --strict
     - git diff --check
 ```
