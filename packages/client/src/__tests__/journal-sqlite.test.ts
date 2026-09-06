@@ -12,12 +12,14 @@
  * `journal-unavailable.test.ts`, which does not skip.
  */
 import { promises as fs, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   JournalCorruptError,
   JournalRecordTooLargeError,
+  JournalUnavailableError,
   JournalUnknownTaskError,
   journalHash,
   type JournalIdentity,
@@ -68,6 +70,16 @@ function countRows(storeDir: string, table: string): number {
   return Number(readRows(storeDir, `SELECT count(*) AS n FROM ${table}`)[0]?.n ?? -1);
 }
 
+function stableDbBytes(bytes: Buffer): Buffer {
+  const copy = Buffer.from(bytes);
+  // SQLite updates these header change counters when opening a database. They
+  // are runtime bookkeeping, not a journal rewrite; normalize them so the
+  // refusal oracle compares the durable file content and its hash.
+  copy.fill(0, 24, 28);
+  copy.fill(0, 92, 96);
+  return copy;
+}
+
 /** Throws once, at exactly one named step. Later passes through the same step proceed — so a test can inject a failure and then prove the NEXT attempt succeeds. */
 function faultOnce(step: JournalFaultStep): { onStep(step: JournalFaultStep): void; fired: () => boolean } {
   let fired = false;
@@ -89,6 +101,10 @@ const OPEN_STEPS: readonly JournalOpenStep[] = [
   'after-synchronous',
   'after-header-read',
 ];
+
+if (process.env.BYOK_REQUIRE_SQLITE === '1' && !isSqliteAvailable()) {
+  throw new Error('Required native journal acceptance cannot skip unavailable node:sqlite');
+}
 
 describe.skipIf(!isSqliteAvailable())('SqliteLocalTaskJournal', () => {
   const dirs: string[] = [];
@@ -284,6 +300,31 @@ describe.skipIf(!isSqliteAvailable())('SqliteLocalTaskJournal', () => {
   });
 
   describe('restart', () => {
+    it('refuses a hash-only predecessor terminal schema without altering its bytes', async () => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir);
+      await journal.appendEnvelope(envelopeRecord());
+      const terminalBytes = JSON.stringify({ v: 1, id: 'terminal-1', type: 'task.fail', task_id: 'task-1', payload: { reason: 'legacy' } });
+      await journal.recordTerminal({ taskId: 'task-1', terminalType: 'failed', bytes: terminalBytes, payloadHash: journalHash(terminalBytes), truthState: 'pending', attempt: 1, recordedAt: '2026-08-07T00:00:00.000Z' });
+      await journal.close();
+      const db = openJournalDatabase(path.join(storeDir, JOURNAL_DB_FILENAME), DEFAULT_JOURNAL_BUSY_TIMEOUT_MS);
+      db.prepare('ALTER TABLE journal_terminal DROP COLUMN bytes').run();
+      db.close();
+      const dbPath = path.join(storeDir, JOURNAL_DB_FILENAME);
+      const before = readRows(storeDir, "SELECT task_id, payload_hash, truth_state FROM journal_terminal");
+      const beforeRefusalBytes = await fs.readFile(dbPath);
+      expect(() => build(storeDir)).toThrow(JournalUnavailableError);
+      expect(readRows(storeDir, "SELECT task_id, payload_hash, truth_state FROM journal_terminal")).toEqual(before);
+      const afterRefusalBytes = await fs.readFile(dbPath);
+      // The first open may advance SQLite's header change counters; the
+      // normalized bytes/hash prove no schema or durable row content changed.
+      expect(stableDbBytes(afterRefusalBytes)).toEqual(stableDbBytes(beforeRefusalBytes));
+      expect(createHash('sha256').update(stableDbBytes(afterRefusalBytes)).digest('hex'))
+        .toBe(createHash('sha256').update(stableDbBytes(beforeRefusalBytes)).digest('hex'));
+      expect(await fs.stat(dbPath)).toBeTruthy();
+      await expect(fs.stat(path.join(storeDir, JOURNAL_QUARANTINE_DIRNAME))).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
     it('recovers everything it committed after a clean close and reopen', async () => {
       const storeDir = await tmpStore();
       const first = build(storeDir);
@@ -353,6 +394,7 @@ describe.skipIf(!isSqliteAvailable())('SqliteLocalTaskJournal', () => {
       await journal.recordTerminal({
         taskId: 'task-1',
         terminalType: 'complete',
+        bytes: 'first',
         payloadHash: journalHash('first'),
         truthState: 'pending',
         attempt: 1,
@@ -361,6 +403,7 @@ describe.skipIf(!isSqliteAvailable())('SqliteLocalTaskJournal', () => {
       await journal.recordTerminal({
         taskId: 'task-1',
         terminalType: 'complete',
+        bytes: 'first',
         payloadHash: journalHash('first'),
         truthState: 'confirmed',
         attempt: 2,
@@ -371,6 +414,7 @@ describe.skipIf(!isSqliteAvailable())('SqliteLocalTaskJournal', () => {
       await journal.recordTerminal({
         taskId: 'task-1',
         terminalType: 'failed',
+        bytes: 'second',
         payloadHash: journalHash('second'),
         truthState: 'pending',
         attempt: 1,
@@ -395,12 +439,110 @@ describe.skipIf(!isSqliteAvailable())('SqliteLocalTaskJournal', () => {
         journal.recordTransition({ transitionId: 'tr-x', taskId: 'ghost', to: 'Running', occurredAt: '2026-08-07T00:00:00.000Z' }),
       ).rejects.toBeInstanceOf(JournalUnknownTaskError);
       await expect(
-        journal.recordTerminal({ taskId: 'ghost', terminalType: 'complete', payloadHash: journalHash('x'), truthState: 'pending', attempt: 1, recordedAt: '2026-08-07T00:00:00.000Z' }),
+        journal.recordTerminal({ taskId: 'ghost', terminalType: 'complete', bytes: 'x', payloadHash: journalHash('x'), truthState: 'pending', attempt: 1, recordedAt: '2026-08-07T00:00:00.000Z' }),
       ).rejects.toBeInstanceOf(JournalUnknownTaskError);
+    });
+
+    it('rejects terminal bytes whose hash does not bind the supplied payload', async () => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir);
+      await journal.appendEnvelope(envelopeRecord());
+
+      await expect(journal.recordTerminal({
+        taskId: 'task-1', terminalType: 'complete', bytes: 'canonical-terminal',
+        payloadHash: journalHash('different-terminal'), truthState: 'pending', attempt: 1,
+        recordedAt: '2026-08-07T00:00:00.000Z',
+      })).rejects.toThrow('terminal bytes do not match their canonical hash');
+      expect(countRows(storeDir, 'journal_terminal')).toBe(0);
+    });
+
+    it('refuses corrupted durable terminal bytes rather than replaying a different payload', async () => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir);
+      await journal.appendEnvelope(envelopeRecord());
+      await journal.recordTerminal({
+        taskId: 'task-1', terminalType: 'complete', bytes: 'canonical-terminal',
+        payloadHash: journalHash('canonical-terminal'), truthState: 'pending', attempt: 1,
+        recordedAt: '2026-08-07T00:00:00.000Z',
+      });
+      const db = openJournalDatabase(path.join(storeDir, JOURNAL_DB_FILENAME), DEFAULT_JOURNAL_BUSY_TIMEOUT_MS);
+      try {
+        db.prepare("UPDATE journal_terminal SET bytes = 'corrupted-terminal' WHERE task_id = 'task-1'").run();
+      } finally {
+        db.close();
+      }
+
+      await expect(journal.listPendingTerminals(IDENTITY)).rejects.toThrow('durable terminal bytes/hash mismatch');
+    });
+
+    it('requires the exact enrollment identity for reads and pending terminal replay', async () => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir);
+      await journal.appendEnvelope(envelopeRecord());
+      await journal.recordTerminal({
+        taskId: 'task-1', terminalType: 'complete', bytes: 'canonical-terminal',
+        payloadHash: journalHash('canonical-terminal'), truthState: 'pending', attempt: 1,
+        recordedAt: '2026-08-07T00:00:00.000Z',
+      });
+      const secondBytes = JSON.stringify({ v: 1, id: 'env-2', type: 'task.offer', task_id: 'task-2' });
+      await journal.appendEnvelope(envelopeRecord({ taskId: 'task-2', envelopeId: 'env-2', seq: 2, bytes: secondBytes, bytesHash: journalHash(secondBytes) }));
+      const wrongIdentity: JournalIdentity = { ...IDENTITY, deviceId: 'dev_other' };
+
+      await expect(journal.readTask('task-1', wrongIdentity)).rejects.toThrow('journal enrollment identity mismatch');
+      await expect(journal.listRecoveryTasks(wrongIdentity)).rejects.toThrow('journal enrollment identity mismatch');
+      await expect(journal.listPendingTerminals(wrongIdentity)).rejects.toThrow('journal enrollment identity mismatch');
+    });
+
+    it('confirms the exact terminal idempotently and rejects a mismatched acknowledgement', async () => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir);
+      const bytes = 'canonical-terminal';
+      const payloadHash = journalHash(bytes);
+      await journal.appendEnvelope(envelopeRecord());
+      await journal.recordTerminal({
+        taskId: 'task-1', terminalType: 'complete', bytes, payloadHash,
+        truthState: 'pending', attempt: 1, recordedAt: '2026-08-07T00:00:00.000Z',
+      });
+
+      await expect(journal.confirmTerminal('task-1', journalHash('wrong-terminal'))).rejects.toThrow('terminal acknowledgement does not match durable terminal');
+      await journal.confirmTerminal('task-1', payloadHash);
+      await journal.confirmTerminal('task-1', payloadHash);
+      expect(await journal.listPendingTerminals(IDENTITY)).toEqual([]);
+      expect(readRows(storeDir, "SELECT truth_state FROM journal_terminal WHERE task_id = 'task-1'")[0]?.truth_state).toBe('confirmed');
     });
   });
 
   describe('recovery markers', () => {
+    it('commits an interruption marker and its terminal together, on neither side of a failed transaction', async () => {
+      const storeDir = await tmpStore('byok-journal-recovery-before-commit-');
+      const journal = build(storeDir, { faults: faultOnce('recovery:before-commit') });
+      await journal.appendEnvelope(envelopeRecord());
+      const bytes = 'interrupted-terminal';
+
+      await expect(journal.recordTerminal({
+        taskId: 'task-1', terminalType: 'failed', bytes, payloadHash: journalHash(bytes),
+        truthState: 'pending', attempt: 1, recordedAt: '2026-08-07T00:01:00.000Z',
+        recovery: { disposition: 'interrupted', reason: 'daemon_interrupted' },
+      })).rejects.toThrow('injected fault at recovery:before-commit');
+      expect(countRows(storeDir, 'journal_terminal')).toBe(0);
+      expect(readRows(storeDir, "SELECT recovery_marker FROM journal_task WHERE task_id = 'task-1'")[0]?.recovery_marker).toBeNull();
+    });
+
+    it('keeps both the interruption marker and original terminal after a post-commit failure', async () => {
+      const storeDir = await tmpStore('byok-journal-recovery-after-commit-');
+      const journal = build(storeDir, { faults: faultOnce('recovery:after-commit') });
+      await journal.appendEnvelope(envelopeRecord());
+      const bytes = 'interrupted-terminal';
+
+      await expect(journal.recordTerminal({
+        taskId: 'task-1', terminalType: 'failed', bytes, payloadHash: journalHash(bytes),
+        truthState: 'pending', attempt: 1, recordedAt: '2026-08-07T00:01:00.000Z',
+        recovery: { disposition: 'interrupted', reason: 'daemon_interrupted' },
+      })).rejects.toThrow('injected fault at recovery:after-commit');
+      expect(countRows(storeDir, 'journal_terminal')).toBe(1);
+      expect(readRows(storeDir, "SELECT recovery_marker FROM journal_task WHERE task_id = 'task-1'")[0]?.recovery_marker).toContain('daemon_interrupted');
+    });
+
     it('takes a task out of the recoverable set without deleting it, and keeps the FIRST decision', async () => {
       const storeDir = await tmpStore();
       const journal = build(storeDir);

@@ -2482,6 +2482,11 @@ export interface ConnectionManagerOptions {
      */
     onEnvelope: (envelope: Envelope) => void | Promise<void>;
     onStateChange?: (state: ConnectionState) => void;
+    /** Await durable disposition before retiring the exact accepted/rejected bytes. */
+    onOutboundAccepted?: (envelopes: readonly Envelope[]) => Promise<void>;
+    onOutboundRejected?: (envelope: Envelope) => Promise<void>;
+    onOutboundQueued?: (envelope: Envelope) => void;
+    beforeOutboundPost?: (envelopes: readonly Envelope[]) => void;
     /** Backoff between failed long-poll HTTP attempts. Default 2s. */
     longPollRetryDelayMs?: number;
     /** Minimum delay before the next long-poll request after an empty (no-events) response. Default 250ms. */
@@ -2791,106 +2796,7 @@ export declare class ConnectionManager {
     /** Design A: eagerly advance the in-memory delivery watermark — called for every `task.*` envelope `deliver()` admits past dedup, regardless of transport or of whether its handler has even started yet. */
     private noteDelivered;
     private process;
-    /**
-     * M4 Phase 4 (version-negotiation drill fix): `LongPollClient` calls this
-     * for a batch entry it could not parse into a known `Envelope` at all (an
-     * unrecognized message type (see `long-poll-transport.ts`'s own doc
-     * comment on `parseLooseEventsPollResponse`) but which still carried a numeric,
-     * task-class envelope-level `seq` (the caller only invokes this for a
-     * `task.`-prefixed type — see `long-poll-transport.ts`'s own
-     * `extractSkippableSeq`; `conn.*`-shaped or type-less entries never reach
-     * here at all, mirroring F2's "conn.* is never cursor-tracked" rule).
-     * There is no real `Envelope` to hand to a handler — a genuinely
-     * unrecognized type has nothing this build could ever act on.
-     *
-     * GATEKEEPER-CAUGHT REGRESSION (fixed here): this used to call
-     * `advanceCursor(seq)` DIRECTLY, synchronously, the instant a skip was
-     * detected in `LongPollClient.loop()`'s per-entry for-loop. That is NOT
-     * "instantaneous and race-free" the way the previous version of this
-     * comment claimed — the hazard was never the skip racing against itself,
-     * it was the skip racing AHEAD of an EARLIER real envelope in the SAME
-     * batch that is still in flight on `processingChain` (`deliver()`, above,
-     * only ever CHAINS `process()` onto that promise chain — it never awaits
-     * it before returning). Concretely, batch `[real seq1, unknown seq2]`:
-     * `deliver(seq1)` chains `process(seq1)` but returns immediately without
-     * running it; the for-loop then reaches `seq2` and (pre-fix) called
-     * `advanceCursor(2)` synchronously, BEFORE `process(seq1)` had even
-     * started, let alone failed. If `seq1`'s handler then failed,
-     * `stalledAtSeq` became 1 — but the durable cursor was already 2, so
-     * `dedupWatermark()` returned 2, and every future redelivery of seq1 was
-     * dedup-dropped as "already past the cursor" forever: permanent envelope
-     * loss, exactly the F3 bug class the whole `stalledAtSeq`/frozen-watermark
-     * mechanism exists to prevent.
-     *
-     * Fix: the cursor-advancing half is now CHAINED onto `processingChain`
-     * too, exactly like `process()`'s own post-handler bookkeeping — so it
-     * only ever runs once every earlier envelope already queued ahead of it
-     * has fully settled (success or failure), and can observe `stalledAtSeq`'s
-     * REAL, up-to-date value rather than whatever it happened to be at the
-     * instant the skip was first noticed. The guard mirrors `process()`'s own
-     * success-path guard exactly: never advance past a still-unresolved
-     * earlier failure, unless (degenerate, cannot really happen for a skip)
-     * this exact seq IS the stalled one.
-     *
-     * `noteDelivered` (the eager, in-memory watermark) stays UNCHAINED —
-     * called immediately, unconditionally, regardless of `stalledAtSeq` —
-     * matching `deliver()`'s own eager, unconditional call for a real
-     * envelope: its only job is "don't re-dispatch something already handed off,"
-     * independent of outcome, and that property does not depend on FIFO
-     * ordering the way the DURABLE cursor does.
-     *
-     * Deliberately NO top-level `dedupWatermark() <= seq` early-return before
-     * queuing the chained callback (an earlier draft of this fix had one, and
-     * it was itself subtly wrong): `deliveredSeq` can already reflect a seq
-     * from the FIRST time it was ever seen, while the DURABLE cursor is still
-     * behind it because a stall intervened before that seq's chained
-     * advancement ran — a pre-check keyed on `deliveredSeq` would then
-     * wrongly treat a LATER redelivery of the same seq (arriving once the
-     * stall has since cleared) as "already accounted for" and never queue
-     * another attempt, permanently stranding the cursor one seq short. Always
-     * queuing is safe and cheap: `advanceCursor`'s own `seq <= this.cursor`
-     * guard already makes a genuinely-redundant call a no-op, so there is no
-     * correctness reason to short-circuit earlier, only a (here, unnecessary)
-     * micro-optimization one.
-     */
-    private noteSkippedSeq;
-    /**
-     * Finding R1 (cross-model re-review — was NOT-CLOSED against F1):
-     * `LongPollClient` calls this for a batch entry whose `type` it
-     * recognized but whose payload failed schema validation
-     * ({@link EnvelopeValidationError}) — a genuine delivery failure at that
-     * seq, unlike `noteSkippedSeq`'s forward-compat case. Deliberately mirrors
-     * `process()`'s own catch block (`if (tracked && this.stalledAtSeq ===
-     * undefined) this.stalledAtSeq = envelope.seq;`) as closely as possible:
-     * the SAME "only the lowest unresolved failure holds the stall" rule, the
-     * SAME resulting freeze of `dedupWatermark()` at the durable cursor
-     * (protocol §9 keeps this seq alive), and — because it's the SAME
-     * `stalledAtSeq` field `process()`'s own post-success guard already
-     * checks — anything ELSE delivered after this seq (same batch or a later
-     * one) is automatically held back from advancing the cursor too, with
-     * zero changes needed to `process()` itself.
-     *
-     * Chained onto `processingChain` for exactly the reason `noteSkippedSeq`
-     * documents for its own identical chaining (see that method's sibling
-     * doc comment on `LongPollClient`, "GATEKEEPER-CAUGHT REGRESSION"): an
-     * EARLIER real envelope in the SAME batch may still be in flight on that
-     * FIFO chain when this is called (`deliver()` only ever chains
-     * `process()` onto it, never awaits before returning) — mutating
-     * `stalledAtSeq` synchronously here could race ahead of that still-
-     * unresolved earlier envelope. Chaining instead guarantees this only
-     * takes effect once every earlier-queued envelope has already settled,
-     * and reads `stalledAtSeq`'s real, up-to-date value rather than whatever
-     * it happened to be the instant the failure was first noticed.
-     *
-     * No `noteDelivered` call here (contrast `noteSkippedSeq`, which does
-     * call it): a validation-failed entry never becomes a real `Envelope` and
-     * never reaches `deliver()`, so it was never "delivered" in the eager
-     * in-memory-watermark sense that field tracks — there is nothing for it
-     * to eagerly mark. Once a corrected redelivery of this exact seq DOES
-     * arrive as a real envelope, it flows through the ordinary `deliver()`
-     * path (which calls `noteDelivered` itself) and, on success, clears the
-     * stall via `process()`'s own existing logic — no special-casing needed.
-     */
+    /** Serialized with handler completion, so invalid work cannot be acked by later success. */
     private noteValidationFailure;
     private advanceCursor;
     private quarantineRejectedOutbound;
@@ -3964,6 +3870,8 @@ export interface Daemon {
 }
 /** Internal seam so tests can substitute stub adapters / faster batch and long-poll timing. `createDaemonWithAdapters` (which takes this) is also the real entry point for products supplying a hand-built adapter set `createDaemon` can't construct on its own — e.g. custom adapter options, or an adapter that REPLACES a bundled runtime's implementation under the same id. Honest limit: an adapter id outside `pi`/`claude`/`codex` cannot pass wire validation today — `RuntimeIdSchema` (`@byok-sdk/protocol`) is a closed `z.enum(['pi', 'claude', 'codex'])`, and `isRuntimeId` filtering below (see `detectRuntimes`) drops any detected adapter outside that set before it ever reaches a wire-visible field. A genuinely fourth/namespaced runtime id is a future protocol change, not something this seam enables today. */
 export interface DaemonOverrides {
+    /** Test-only synchronous kill points; never supplied by production configuration. */
+    executionRecoveryFault?: (step: 'terminal:before-send' | 'terminal:queued' | 'outbound:before-post' | 'outbound:after-ack') => void;
     /** M4 Phase 3: overrides `TaskRunner`'s default out-of-band approval wait (`DEFAULT_APPROVAL_TIMEOUT_MS`, 10 minutes) before an unanswered `requestApproval` force-resolves as a fail-closed rejection. */
     approvalTimeoutMs?: number;
     /** Finding F5: overrides for the control-socket shutdown path's own bounded waits — see `TaskRunner.shutdownTask`'s and `ConnectionManager.stop`'s own doc comments. Both default to 5s; neither affects an ordinary (non-shutdown-RPC) `daemon.stop()` call. */
@@ -4619,18 +4527,21 @@ export interface LocalTransitionRecord {
 /** Whether the cloud has confirmed the terminal this daemon produced (§12.7.3's "terminal 生成后、truth 写入前" window). */
 export type TerminalTruthState = 'pending' | 'confirmed' | 'failed';
 /**
- * A task's terminal, as it exists locally. The PAYLOAD is not stored — only
- * its hash, plus enough retry state to know whether the cloud has taken it.
+ * One immutable canonical terminal and its delivery projection. Bytes are the
+ * replay authority; the hash is checked against them, never used as a substitute.
  */
 export interface LocalTerminalRecord {
     readonly taskId: string;
-    readonly terminalType: 'complete' | 'failed' | 'cancelled';
+    readonly terminalType: 'complete' | 'failed' | 'cancelled' | 'declined';
+    readonly bytes: string;
     readonly payloadHash: string;
     readonly truthState: TerminalTruthState;
     /** How many times delivery to the cloud has been attempted. */
     readonly attempt: number;
     readonly lastError?: string;
     readonly recordedAt: string;
+    /** Committed atomically with the original interruption report. */
+    readonly recovery?: RecoveryOutcome;
 }
 /** A task the journal knows about that has no terminal and no recovery marker — i.e. one this daemon was in the middle of when it stopped. */
 export interface RecoverableTask {
@@ -4642,6 +4553,7 @@ export interface RecoverableTask {
     readonly claimedRuntime?: string;
     readonly workspaceRef?: string;
     readonly updatedAt: string;
+    readonly envelopeBytes: string;
 }
 /**
  * What recovery decided about a task. `interrupted` is the honest default for
@@ -4757,6 +4669,14 @@ export interface LocalTaskJournal {
     recordTransition(record: LocalTransitionRecord): Promise<void>;
     /** Record (or update the retry state of) a task's terminal. Idempotent by task id: a replay with the same payload hash is a no-op beyond retry bookkeeping. */
     recordTerminal(record: LocalTerminalRecord): Promise<void>;
+    /** Exact original terminal bytes, including rejected records, until acknowledged. */
+    listPendingTerminals(identity: JournalIdentity): Promise<LocalTerminalRecord[]>;
+    /** A successful authenticated transport disposition, bound to the original bytes. */
+    confirmTerminal(taskId: string, payloadHash: string): Promise<void>;
+    rejectTerminal(taskId: string, payloadHash: string, reason: string): Promise<void>;
+    /** Includes old interruption markers without reports; they must not hide pending work. */
+    listRecoveryTasks(identity: JournalIdentity): Promise<RecoverableTask[]>;
+    readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | undefined>;
     /** Tasks with no terminal and no recovery marker — what this daemon was in the middle of when it last stopped. */
     listRecoverable(): Promise<RecoverableTask[]>;
     /** Close out one recoverable task by writing its recovery marker. Never deletes; a marked row is on §12.7.2.1's never-auto-delete list. */
@@ -4836,7 +4756,7 @@ export declare class JournalClosedError extends Error {
     constructor(operation: string);
 }
 // ==== @byok-sdk/client dist/daemon/journal/sqlite-journal.d.ts ====
-import { type AdmissionRecord, type CategoryUsage, type CleanableCategory, type CleanupCandidate, type CleanupResult, type CompactOptions, type CompactResult, type JournalReceipt, type LocalStorageUsage, type LocalTaskJournal, type LocalTerminalRecord, type LocalTransitionRecord, type RecoverableTask, type RecoveryOutcome, type ReceivedEnvelopeRecord, type StorageCategory } from './journal';
+import { type JournalIdentity, type AdmissionRecord, type CategoryUsage, type CleanableCategory, type CleanupCandidate, type CleanupResult, type CompactOptions, type CompactResult, type JournalReceipt, type LocalStorageUsage, type LocalTaskJournal, type LocalTerminalRecord, type LocalTransitionRecord, type RecoverableTask, type RecoveryOutcome, type ReceivedEnvelopeRecord, type StorageCategory } from './journal';
 import { JournalHandleCleanupError, type JournalOpenFaultSeam } from './sqlite-support';
 export { JournalHandleCleanupError };
 /** The single database file, per §12.7.2's "建议单库 `<storeDir>/daemon.db`". */
@@ -4862,7 +4782,7 @@ export declare const DEFAULT_JOURNAL_BUSY_TIMEOUT_MS = 5000;
  * (`util/secure-dir.ts`): a seam the production path never supplies, exercised
  * from any host.
  */
-export type JournalFaultStep = 'append:before-begin' | 'append:after-envelope' | 'append:after-task' | 'append:after-receipt' | 'append:before-commit' | 'admission:before-commit' | 'transition:before-commit' | 'terminal:before-commit' | 'recovery:before-commit' | 'cleanup:before-commit' | 'prune:before-commit';
+export type JournalFaultStep = 'append:before-begin' | 'append:after-envelope' | 'append:after-task' | 'append:after-receipt' | 'append:before-commit' | 'append:after-commit' | 'admission:before-commit' | 'transition:before-commit' | 'terminal:before-commit' | 'terminal:after-commit' | 'recovery:after-commit' | 'confirm:before-commit' | 'confirm:after-commit' | 'recovery:before-commit' | 'cleanup:before-commit' | 'prune:before-commit';
 export interface JournalFaultSeam {
     /** Throw to simulate a crash or IO error at exactly this step. Return normally to proceed. */
     onStep?(step: JournalFaultStep): void;
@@ -4917,6 +4837,11 @@ export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
      * first fact stands.
      */
     recordTerminal(record: LocalTerminalRecord): Promise<void>;
+    readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | undefined>;
+    listRecoveryTasks(identity: JournalIdentity): Promise<RecoverableTask[]>;
+    listPendingTerminals(identity: JournalIdentity): Promise<LocalTerminalRecord[]>;
+    confirmTerminal(taskId: string, payloadHash: string): Promise<void>;
+    rejectTerminal(taskId: string, payloadHash: string, reason: string): Promise<void>;
     /**
      * What this daemon was in the middle of: a task whose offer envelope is
      * durable, that has no terminal, that was not declined, and that recovery
@@ -6682,6 +6607,8 @@ export interface TaskRunnerDeps {
     agentSessionHandoffs?: AgentSessionHandoffStore;
     deviceId: string;
     send: (envelope: Envelope) => void;
+    /** Fsync the execution commitment before claim/runtime side effects. */
+    beforeClaim?: (taskId: string, runtime: string) => Promise<void>;
     blobClient: BlobResolver;
     batcherOptions?: ProgressBatcherOptions;
     /**

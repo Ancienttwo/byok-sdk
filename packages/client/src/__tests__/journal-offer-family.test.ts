@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { EnvelopeSchema, MESSAGE_TYPES, type Envelope } from '@byok-sdk/protocol';
+import { encodeEnvelope, EnvelopeSchema, MESSAGE_TYPES, type Envelope } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentHomeManager } from '../agent-home';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
@@ -85,7 +85,7 @@ describe('issue #147 protocol offer family through real hosted SQLite journal', 
     expect(adapter.startCalls).toHaveLength(type === 'task.offer_with_toolsets' ? 0 : 1);
   });
 
-  it.each(offerTypes.filter((type) => type !== 'task.offer_with_toolsets'))('%s journals the actual terminal before send and marks an acknowledged interrupted snapshot on restart', async (type) => {
+  it.each(offerTypes.filter((type) => type !== 'task.offer_with_toolsets'))('%s records the exact interrupted terminal before transport confirmation on restart', async (type) => {
     const { config, adapter, storeDir } = await setup(type);
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-147');
     expect(rows(storeDir, 'SELECT task_id, recovery_marker FROM journal_task')).toEqual([{ task_id: 'task-147', recovery_marker: null }]);
@@ -103,10 +103,14 @@ describe('issue #147 protocol offer family through real hosted SQLite journal', 
     const restartedAdapter = new StubRuntimeAdapter('pi');
     daemon = createDaemonWithAdapters(config, [restartedAdapter]);
     await daemon.start();
+    const interrupted = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'task-147');
     const recovered = rows(storeDir, 'SELECT recovery_marker FROM journal_task');
     expect(recovered).toHaveLength(1);
     expect(JSON.parse(String(recovered[0]!.recovery_marker))).toMatchObject({ disposition: 'interrupted' });
-    expect(rows(storeDir, 'SELECT * FROM journal_terminal')).toEqual([]);
+    expect(rows(storeDir, 'SELECT task_id, terminal_type, bytes, payload_hash, truth_state FROM journal_terminal')).toEqual([{
+      task_id: 'task-147', terminal_type: 'failed', bytes: encodeEnvelope(interrupted),
+      payload_hash: expect.stringMatching(/^sha256:/), truth_state: 'pending',
+    }]);
     expect(restartedAdapter.startCalls).toHaveLength(0);
   });
 });

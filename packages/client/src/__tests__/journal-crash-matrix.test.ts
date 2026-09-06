@@ -359,7 +359,7 @@ describe.skipIf(!isSqliteAvailable())('S3.4 crash matrix, points 1-6', () => {
       expect(countRows(storeDir, 'journal_terminal')).toBe(1);
     }, 30_000);
 
-    it('6: crash after the cloud receipt and before the local completion mark — the mark replays idempotently', async () => {
+    it('6: receipt confirmation is idempotent after the cloud has accepted the immutable terminal', async () => {
       const { taskId, storeDir, terminal, cloudHandle, journalHandle } = await runOneTaskToTerminal();
       const payloadHash = journalHash(encodeEnvelope(terminal));
       const receiptBefore = await cloudHandle.readTerminalBody(taskId);
@@ -370,6 +370,7 @@ describe.skipIf(!isSqliteAvailable())('S3.4 crash matrix, points 1-6', () => {
       await journalHandle.recordTerminal({
         taskId,
         terminalType: 'complete',
+        bytes: encodeEnvelope(terminal),
         payloadHash,
         truthState: 'confirmed',
         attempt: 2,
@@ -378,6 +379,7 @@ describe.skipIf(!isSqliteAvailable())('S3.4 crash matrix, points 1-6', () => {
       await journalHandle.recordTerminal({
         taskId,
         terminalType: 'complete',
+        bytes: encodeEnvelope(terminal),
         payloadHash,
         truthState: 'confirmed',
         attempt: 2,

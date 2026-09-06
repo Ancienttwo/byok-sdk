@@ -424,7 +424,7 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
       db.prepare(
         `UPDATE task_attempt SET owner_device_id = ?, claimed_runtime = ?, claimed_runtime_capabilities_json = ?,
           status = 'claimed', updated_at = ?
-         WHERE tenant_id = ? AND task_id = ? AND owner_device_id IS NULL
+         WHERE tenant_id = ? AND task_id = ? AND device_id = ? AND owner_device_id IS NULL
            AND cancellation_requested_at IS NULL AND status = 'offered'`,
       ).run(
         input.deviceId,
@@ -433,6 +433,7 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
         this.#now(),
         tenant,
         input.taskId,
+        input.deviceId,
       );
       return readTask(db, tenant, input.taskId);
     });

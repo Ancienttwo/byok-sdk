@@ -1,0 +1,105 @@
+{
+  "observedAt": "2026-09-05T20:47:38.874847+00:00",
+  "packages": [
+    {
+      "package": "@byok-sdk/core",
+      "candidate": "0.14.0",
+      "available": true,
+      "distTags": {
+        "beta": "0.8.0-beta.0",
+        "rc": "0.9.0-rc.1",
+        "latest": "0.13.0"
+      }
+    },
+    {
+      "package": "@byok-sdk/server",
+      "candidate": "0.14.0",
+      "available": true,
+      "distTags": {
+        "beta": "0.8.0-beta.0",
+        "rc": "0.9.0-rc.1",
+        "latest": "0.13.0"
+      }
+    },
+    {
+      "package": "@byok-sdk/protocol",
+      "candidate": "0.14.0",
+      "available": true,
+      "distTags": {
+        "beta": "0.8.0-beta.0",
+        "rc": "0.9.0-rc.1",
+        "latest": "0.13.0"
+      }
+    },
+    {
+      "package": "@byok-sdk/testkit",
+      "candidate": "0.14.0",
+      "available": true,
+      "distTags": {
+        "beta": "0.8.0-beta.0",
+        "rc": "0.9.0-rc.1",
+        "latest": "0.13.0"
+      }
+    },
+    {
+      "package": "@byok-sdk/cloud-dataplane",
+      "candidate": "0.14.0",
+      "available": true,
+      "distTags": {
+        "beta": "0.8.0-beta.0",
+        "rc": "0.9.0-rc.1",
+        "latest": "0.13.0"
+      }
+    },
+    {
+      "package": "byok-sdk",
+      "candidate": "0.14.0",
+      "available": true,
+      "distTags": {
+        "beta": "0.8.0-beta.0",
+        "rc": "0.9.0-rc.1",
+        "latest": "0.13.0"
+      }
+    },
+    {
+      "package": "@byok-sdk/cloud",
+      "candidate": "0.14.0",
+      "available": true,
+      "distTags": {
+        "beta": "0.8.0-beta.0",
+        "rc": "0.9.0-rc.1",
+        "latest": "0.13.0"
+      }
+    },
+    {
+      "package": "@byok-sdk/ui-runtime",
+      "candidate": "0.14.0",
+      "available": true,
+      "distTags": {
+        "beta": "0.8.0-beta.0",
+        "rc": "0.9.0-rc.1",
+        "latest": "0.13.0"
+      }
+    },
+    {
+      "package": "@byok-sdk/keys",
+      "candidate": "0.4.0",
+      "available": true,
+      "distTags": {
+        "beta": "0.3.1-beta.0",
+        "rc": "0.3.3-rc.1",
+        "latest": "0.3.10"
+      }
+    },
+    {
+      "package": "@byok-sdk/client",
+      "candidate": "0.14.0",
+      "available": true,
+      "distTags": {
+        "beta": "0.8.0-beta.0",
+        "rc": "0.9.0-rc.1",
+        "latest": "0.13.0"
+      }
+    }
+  ]
+}

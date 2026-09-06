@@ -13,13 +13,12 @@
  *    authenticated long-poll `conn.hello` capability snapshot handled below.
  *    A server -> daemon type arriving inbound, or anything unrecognized, is
  *    rejected before it is dispatched or counted accepted.
- * 2. **ownership** — an envelope for a task already owned by a DIFFERENT
- *    device is dropped, never force-failed: force-failing on an authz mismatch
+ * 2. **ownership** — an envelope must name an existing task targeted at this
+ *    exact device, and a task already owned by a DIFFERENT device is dropped,
+ *    never force-failed: force-failing on an authz mismatch
  *    would let an attacker who merely guesses a `taskId` kill the real owner's
- *    task. A task with no owner yet, or that this tenant does not have at all,
- *    is not rejected here — the store's own no-op-on-missing behavior covers
- *    the latter, and it covers it per tenant, so a guessed id from another
- *    tenant writes nothing anywhere.
+ *    task. Unknown task ids are rejected before any task-scoped projection or
+ *    dedup fact can be written.
  * 3. **apply/recover** — every lifecycle side effect is idempotent under the
  *    envelope's own durable identity. A retry after a partial failure resumes
  *    this step rather than being hidden by transport admission.
@@ -464,11 +463,13 @@ async function applyInboundGate(
   if (taskId === undefined) return 'rejected';
 
   const attempt = await stores.tasks.get(taskId);
-  // Strict Agent offers are explicitly placed. Unlike legacy unowned task
-  // attempts, a different tenant device may not claim or report one merely by
-  // guessing its task id.
-  if (attempt?.agentRef !== undefined && attempt.deviceId !== deviceId) return 'rejected';
+  // The offered target is immutable for every execution kind. This check is
+  // repeated inside the claim store's ownership CAS so a stale pre-read cannot
+  // authorize a claim, while all other lifecycle writes remain fenced by this
+  // immutable attempt binding.
+  if (attempt === undefined || attempt.deviceId !== deviceId) return 'rejected';
   if (attempt?.ownerDeviceId !== undefined && attempt.ownerDeviceId !== deviceId) return 'rejected';
+  if (envelope.type === 'task.claim' && envelope.payload.deviceId !== deviceId) return 'rejected';
   // Agent identity is an exact-match boundary. A missing echo is a mismatch
   // just like a different id or profile revision; accepting it would let an
   // unrelated session write a terminal for the durable Agent attempt.
@@ -479,11 +480,6 @@ async function applyInboundGate(
   ) {
     return 'rejected';
   }
-  // Unlike the existing unknown-progress no-op, an unknown terminal must not
-  // create a receipt or consume an envelope id: either would make a guessed
-  // task terminal durable.
-  if (terminalStatus(envelope) !== undefined && attempt === undefined) return 'rejected';
-
   if (envelope.type === 'task.progress' && envelope.payload.events.length > 0) {
     try {
       validateActivityBatch(
@@ -682,13 +678,16 @@ async function recordTerminal(
   }
   const attempt = await stores.tasks.get(taskId);
   if (attempt?.cancellation !== undefined) {
-    if (winner.status === 'cancelled') {
-      await stores.tasks.recordStatus({
-        taskId,
-        status: 'cancelled',
-        ...(attempt.agentRef === undefined ? {} : { agentRef: attempt.agentRef }),
-      });
-    }
+    // A cancellation tombstone is the effective product authority even when
+    // the immutable terminal receipt contains the original completion/failure.
+    // Persist the cancelled status through the store CAS: if cancellation lands
+    // after this read, the same CAS observes it and converges; the original
+    // receipt bytes remain untouched and no review projection is emitted.
+    await stores.tasks.recordStatus({
+      taskId,
+      status: 'cancelled',
+      ...(attempt.agentRef === undefined ? {} : { agentRef: attempt.agentRef }),
+    });
     return;
   }
   const recordedAttempt = await stores.tasks.recordStatus({
@@ -700,7 +699,16 @@ async function recordTerminal(
   // The attempt mutation is the ordering CAS. Cancellation may have landed
   // after the read above but before this write; in that race the store returns
   // the cancellation-bearing attempt and no business projection is allowed.
-  if (recordedAttempt?.status !== winner.status || recordedAttempt.cancellation !== undefined) return;
+  if (recordedAttempt?.cancellation !== undefined || recordedAttempt?.status !== winner.status) {
+    if (recordedAttempt?.cancellation !== undefined) {
+      await stores.tasks.recordStatus({
+        taskId,
+        status: 'cancelled',
+        ...(recordedAttempt.agentRef === undefined ? {} : { agentRef: recordedAttempt.agentRef }),
+      });
+    }
+    return;
+  }
   await projectTerminalToReview(stores.board, taskId);
 }
 

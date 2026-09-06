@@ -1,0 +1,47 @@
+{
+  "sourceGitSha": "0e3dd3b424b2434dd4930d45b3c74d89288657f8",
+  "node": "22.22.0",
+  "bun": "1.4.0",
+  "frozenInstallExitCode": 0,
+  "buildExitCode": 0,
+  "checks": [
+    {
+      "name": "typecheck",
+      "command": "bun run typecheck",
+      "exitCode": 0,
+      "seconds": 3.28
+    },
+    {
+      "name": "test",
+      "command": "bun run test",
+      "exitCode": 0,
+      "seconds": 48.55
+    },
+    {
+      "name": "metadata",
+      "command": "bun run check:api-surface && bun run check:version-authority && bun run check:release-graph && repo-harness run check-task-workflow --strict && git diff --check",
+      "exitCode": 0,
+      "seconds": 2.7
+    }
+  ],
+  "logs": {
+    "test.log": {
+      "sha256": "f10a0e1280f272f0cd5fb723a97d9b732109a1e1a0875040d9794ad750a9a5cc",
+      "path": "_ops/releases/0.14.0/logs/test.log"
+    },
+    "typecheck.log": {
+      "sha256": "1c56d6ca54707142b66cb5f556969b52f4a4363b5aba52c3e32e3453c62623fd",
+      "path": "_ops/releases/0.14.0/logs/typecheck.log"
+    },
+    "metadata.log": {
+      "sha256": "5e61f3a246a3ca81063a530815679f393163686367e385c0d743e99cef225462",
+      "path": "_ops/releases/0.14.0/logs/metadata.log"
+    },
+    "build.log": {
+      "sha256": "938d3a8725b6efcf3eae3267613d8abde792e7998f9416d57aff79c184286b32",
+      "path": "_ops/releases/0.14.0/logs/build.log"
+    }
+  },
+  "packing": "NOT RUN: coordinated subject hold",
+  "publication": "NOT AUTHORIZED"
+}

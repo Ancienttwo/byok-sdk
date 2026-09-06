@@ -353,6 +353,8 @@ export interface TaskRunnerDeps {
   agentSessionHandoffs?: AgentSessionHandoffStore;
   deviceId: string;
   send: (envelope: Envelope) => void;
+  /** Fsync the execution commitment before claim/runtime side effects. */
+  beforeClaim?: (taskId: string, runtime: string) => Promise<void>;
   blobClient: BlobResolver;
   batcherOptions?: ProgressBatcherOptions;
   /**
@@ -2023,6 +2025,7 @@ export class TaskRunner {
       // All semantic admission is now in `prepare()` and the frozen manifest.
       // Claim is the first externally visible commitment; instruction bytes,
       // workspace preparation, and process creation remain after it.
+      await this.deps.beforeClaim?.(taskId, manifest.descriptor.id);
       this.deps.send(
         createEnvelope(
           'task.claim',

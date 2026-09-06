@@ -1679,13 +1679,12 @@ export declare function truthPutHandler(deps: TruthRouteDeps): (c: Context) => P
  *    authenticated long-poll `conn.hello` capability snapshot handled below.
  *    A server -> daemon type arriving inbound, or anything unrecognized, is
  *    rejected before it is dispatched or counted accepted.
- * 2. **ownership** — an envelope for a task already owned by a DIFFERENT
- *    device is dropped, never force-failed: force-failing on an authz mismatch
+ * 2. **ownership** — an envelope must name an existing task targeted at this
+ *    exact device, and a task already owned by a DIFFERENT device is dropped,
+ *    never force-failed: force-failing on an authz mismatch
  *    would let an attacker who merely guesses a `taskId` kill the real owner's
- *    task. A task with no owner yet, or that this tenant does not have at all,
- *    is not rejected here — the store's own no-op-on-missing behavior covers
- *    the latter, and it covers it per tenant, so a guessed id from another
- *    tenant writes nothing anywhere.
+ *    task. Unknown task ids are rejected before any task-scoped projection or
+ *    dedup fact can be written.
  * 3. **apply/recover** — every lifecycle side effect is idempotent under the
  *    envelope's own durable identity. A retry after a partial failure resumes
  *    this step rather than being hidden by transport admission.

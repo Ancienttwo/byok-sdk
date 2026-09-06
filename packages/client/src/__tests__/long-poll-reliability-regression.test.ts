@@ -290,7 +290,7 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
       auth,
       getCursor: () => cursor,
       onEnvelope: () => {},
-      onSkippedSeq: skipped,
+      onValidationFailedSeq: skipped,
       onServerCapabilities: capabilities,
       retryDelayMs: 15,
     });
@@ -305,28 +305,26 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
     client.stop();
   });
 
-  it('#137 preserves forward compatibility for a contiguous, in-page unknown task', async () => {
+  it('unknown executable work keeps the durable cursor unchanged', async () => {
     const auth = await seededAuth();
     const body = { events: [{ type: 'task.future', seq: 1 }], cursor: 1 };
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     let cursor = 0;
-    const skipped = vi.fn((seq: number) => {
-      cursor = seq;
-    });
+    const skipped = vi.fn();
     const client = new LongPollClient({
       serverUrl: 'http://example.invalid',
       auth,
       getCursor: () => cursor,
       onEnvelope: () => {},
-      onSkippedSeq: skipped,
+      onValidationFailedSeq: skipped,
       retryDelayMs: 15,
     });
     client.start();
     await vi.waitFor(() => expect(skipped).toHaveBeenCalledWith(1));
     await vi.waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2));
-    expect(cursor).toBe(1);
-    expect(new URL(String(fetchMock.mock.calls[1]?.[0])).searchParams.get('cursor')).toBe('1');
+    expect(cursor).toBe(0);
+    expect(new URL(String(fetchMock.mock.calls[1]?.[0])).searchParams.get('cursor')).toBe('0');
     client.stop();
   });
 });

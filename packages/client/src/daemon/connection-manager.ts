@@ -1,6 +1,7 @@
 import {
   MAX_MESSAGES_PER_BATCH,
   createEnvelope,
+  isServerToDaemonType,
   PROTOCOL_VERSION,
   type CapabilityFlag,
   type Envelope,
@@ -24,10 +25,7 @@ export type ConnectionState = 'connecting' | 'open' | 'closed' | 'revoked';
  * uniformity and never move this cursor.
  */
 function isCursorEnvelopeType(type: Envelope['type']): boolean {
-  return type.startsWith('task.') ||
-    type === 'agent.egress.ack' ||
-    type === 'agent.content.read' ||
-    type === 'agent.home.projection';
+  return isServerToDaemonType(type) && !type.startsWith('conn.');
 }
 
 function createConnectionHelloEnvelope(
@@ -69,6 +67,11 @@ export interface ConnectionManagerOptions {
    */
   onEnvelope: (envelope: Envelope) => void | Promise<void>;
   onStateChange?: (state: ConnectionState) => void;
+  /** Await durable disposition before retiring the exact accepted/rejected bytes. */
+  onOutboundAccepted?: (envelopes: readonly Envelope[]) => Promise<void>;
+  onOutboundRejected?: (envelope: Envelope) => Promise<void>;
+  onOutboundQueued?: (envelope: Envelope) => void;
+  beforeOutboundPost?: (envelopes: readonly Envelope[]) => void;
   /** Backoff between failed long-poll HTTP attempts. Default 2s. */
   longPollRetryDelayMs?: number;
   /** Minimum delay before the next long-poll request after an empty (no-events) response. Default 250ms. */
@@ -230,16 +233,7 @@ export class ConnectionManager {
       onPollFailure: () => this.noteDisconnected(),
       onRevoked: () => this.enterRevoked(),
       onReplayCursorTooOld: (error) => this.enterReplayCursorTooOld(error),
-      // M4 Phase 4 (version-negotiation drill fix): a batch entry
-      // LongPollClient couldn't parse into a known Envelope at all (an
-      // unrecognized message type) still needs its cursor/watermark
-      // advanced past it, exactly like a successfully-processed envelope
-      // would — see `noteSkippedSeq`'s own doc comment.
-      onSkippedSeq: (seq) => this.noteSkippedSeq(seq),
-      // Finding R1: a batch entry LongPollClient recognized the TYPE of but
-      // whose payload failed validation — a genuine delivery failure at
-      // that seq, engaged the same way a thrown handler failure is (see
-      // `noteValidationFailure`'s own doc comment).
+      // Unknown and malformed executable work use the same ordered stall.
       onValidationFailedSeq: (seq) => this.noteValidationFailure(seq),
       // Finding P2 (Fix 2a): lets the long-poll loop distinguish "this
       // non-empty batch was a stalled backlog re-pull, no cursor progress
@@ -271,6 +265,7 @@ export class ConnectionManager {
    */
   send(envelope: Envelope): void {
     this.outbox.push(envelope);
+    this.opts.onOutboundQueued?.(envelope);
     void this.drainOutbox();
   }
 
@@ -311,13 +306,24 @@ export class ConnectionManager {
         if (this.stopped || this.revoked) return pending.flat();
 
         const segment = pending.shift()!;
-        const result = await this.longPoll.postBatch(segment);
-        if (result === undefined) return [...segment, ...pending.flat()];
-
-        if ((result.rejected ?? 0) === 0) continue;
-        if (segment.length === 1) {
-          this.quarantineRejectedOutbound(segment[0]!, 'inbound_rejected');
-          continue;
+        try {
+          this.opts.beforeOutboundPost?.(segment);
+          const result = await this.longPoll.postBatch(segment);
+          if (result === undefined) return [...segment, ...pending.flat()];
+          if ((result.rejected ?? 0) === 0) {
+            await this.opts.onOutboundAccepted?.(segment);
+            continue;
+          }
+          if (segment.length === 1) {
+            await this.opts.onOutboundRejected?.(segment[0]!);
+            this.quarantineRejectedOutbound(segment[0]!, 'inbound_rejected');
+            continue;
+          }
+        } catch (error) {
+          // A committed cloud receipt with a lost local confirmation is still
+          // pending locally. Retry the SAME bytes; never drop them in finally.
+          console.error('[byok/client] outbound durable disposition failed; retaining exact batch', error);
+          return [...segment, ...pending.flat()];
         }
 
         const midpoint = Math.floor(segment.length / 2);
@@ -567,6 +573,10 @@ export class ConnectionManager {
    *   documented idempotent (protocol §9).
    */
   private deliver(envelope: Envelope): boolean {
+    if (!isServerToDaemonType(envelope.type)) {
+      if (typeof envelope.seq === 'number') this.noteValidationFailure(envelope.seq);
+      return false;
+    }
     const tracked = isCursorEnvelopeType(envelope.type) && typeof envelope.seq === 'number';
     const watermark = this.dedupWatermark();
     if (tracked && watermark !== undefined && envelope.seq! <= watermark) return false; // redelivered — idempotent skip (protocol §9)
@@ -662,123 +672,7 @@ export class ConnectionManager {
     }
   }
 
-  /**
-   * M4 Phase 4 (version-negotiation drill fix): `LongPollClient` calls this
-   * for a batch entry it could not parse into a known `Envelope` at all (an
-   * unrecognized message type (see `long-poll-transport.ts`'s own doc
-   * comment on `parseLooseEventsPollResponse`) but which still carried a numeric,
-   * task-class envelope-level `seq` (the caller only invokes this for a
-   * `task.`-prefixed type — see `long-poll-transport.ts`'s own
-   * `extractSkippableSeq`; `conn.*`-shaped or type-less entries never reach
-   * here at all, mirroring F2's "conn.* is never cursor-tracked" rule).
-   * There is no real `Envelope` to hand to a handler — a genuinely
-   * unrecognized type has nothing this build could ever act on.
-   *
-   * GATEKEEPER-CAUGHT REGRESSION (fixed here): this used to call
-   * `advanceCursor(seq)` DIRECTLY, synchronously, the instant a skip was
-   * detected in `LongPollClient.loop()`'s per-entry for-loop. That is NOT
-   * "instantaneous and race-free" the way the previous version of this
-   * comment claimed — the hazard was never the skip racing against itself,
-   * it was the skip racing AHEAD of an EARLIER real envelope in the SAME
-   * batch that is still in flight on `processingChain` (`deliver()`, above,
-   * only ever CHAINS `process()` onto that promise chain — it never awaits
-   * it before returning). Concretely, batch `[real seq1, unknown seq2]`:
-   * `deliver(seq1)` chains `process(seq1)` but returns immediately without
-   * running it; the for-loop then reaches `seq2` and (pre-fix) called
-   * `advanceCursor(2)` synchronously, BEFORE `process(seq1)` had even
-   * started, let alone failed. If `seq1`'s handler then failed,
-   * `stalledAtSeq` became 1 — but the durable cursor was already 2, so
-   * `dedupWatermark()` returned 2, and every future redelivery of seq1 was
-   * dedup-dropped as "already past the cursor" forever: permanent envelope
-   * loss, exactly the F3 bug class the whole `stalledAtSeq`/frozen-watermark
-   * mechanism exists to prevent.
-   *
-   * Fix: the cursor-advancing half is now CHAINED onto `processingChain`
-   * too, exactly like `process()`'s own post-handler bookkeeping — so it
-   * only ever runs once every earlier envelope already queued ahead of it
-   * has fully settled (success or failure), and can observe `stalledAtSeq`'s
-   * REAL, up-to-date value rather than whatever it happened to be at the
-   * instant the skip was first noticed. The guard mirrors `process()`'s own
-   * success-path guard exactly: never advance past a still-unresolved
-   * earlier failure, unless (degenerate, cannot really happen for a skip)
-   * this exact seq IS the stalled one.
-   *
-   * `noteDelivered` (the eager, in-memory watermark) stays UNCHAINED —
-   * called immediately, unconditionally, regardless of `stalledAtSeq` —
-   * matching `deliver()`'s own eager, unconditional call for a real
-   * envelope: its only job is "don't re-dispatch something already handed off,"
-   * independent of outcome, and that property does not depend on FIFO
-   * ordering the way the DURABLE cursor does.
-   *
-   * Deliberately NO top-level `dedupWatermark() <= seq` early-return before
-   * queuing the chained callback (an earlier draft of this fix had one, and
-   * it was itself subtly wrong): `deliveredSeq` can already reflect a seq
-   * from the FIRST time it was ever seen, while the DURABLE cursor is still
-   * behind it because a stall intervened before that seq's chained
-   * advancement ran — a pre-check keyed on `deliveredSeq` would then
-   * wrongly treat a LATER redelivery of the same seq (arriving once the
-   * stall has since cleared) as "already accounted for" and never queue
-   * another attempt, permanently stranding the cursor one seq short. Always
-   * queuing is safe and cheap: `advanceCursor`'s own `seq <= this.cursor`
-   * guard already makes a genuinely-redundant call a no-op, so there is no
-   * correctness reason to short-circuit earlier, only a (here, unnecessary)
-   * micro-optimization one.
-   */
-  private noteSkippedSeq(seq: number): void {
-    this.noteDelivered(seq);
-    this.processingChain = this.processingChain.then(async () => {
-      if (this.stalledAtSeq === undefined || seq === this.stalledAtSeq) {
-        try {
-          await this.advanceCursor(seq);
-          if (this.stalledAtSeq === seq) this.stalledAtSeq = undefined;
-        } catch (err) {
-          if (this.stalledAtSeq === undefined) this.stalledAtSeq = seq;
-          console.error(
-            `[byok/client] unknown task seq=${seq} could not durably persist its cursor; cursor left unadvanced for redelivery:`,
-            err,
-          );
-        }
-      }
-    });
-  }
-
-  /**
-   * Finding R1 (cross-model re-review — was NOT-CLOSED against F1):
-   * `LongPollClient` calls this for a batch entry whose `type` it
-   * recognized but whose payload failed schema validation
-   * ({@link EnvelopeValidationError}) — a genuine delivery failure at that
-   * seq, unlike `noteSkippedSeq`'s forward-compat case. Deliberately mirrors
-   * `process()`'s own catch block (`if (tracked && this.stalledAtSeq ===
-   * undefined) this.stalledAtSeq = envelope.seq;`) as closely as possible:
-   * the SAME "only the lowest unresolved failure holds the stall" rule, the
-   * SAME resulting freeze of `dedupWatermark()` at the durable cursor
-   * (protocol §9 keeps this seq alive), and — because it's the SAME
-   * `stalledAtSeq` field `process()`'s own post-success guard already
-   * checks — anything ELSE delivered after this seq (same batch or a later
-   * one) is automatically held back from advancing the cursor too, with
-   * zero changes needed to `process()` itself.
-   *
-   * Chained onto `processingChain` for exactly the reason `noteSkippedSeq`
-   * documents for its own identical chaining (see that method's sibling
-   * doc comment on `LongPollClient`, "GATEKEEPER-CAUGHT REGRESSION"): an
-   * EARLIER real envelope in the SAME batch may still be in flight on that
-   * FIFO chain when this is called (`deliver()` only ever chains
-   * `process()` onto it, never awaits before returning) — mutating
-   * `stalledAtSeq` synchronously here could race ahead of that still-
-   * unresolved earlier envelope. Chaining instead guarantees this only
-   * takes effect once every earlier-queued envelope has already settled,
-   * and reads `stalledAtSeq`'s real, up-to-date value rather than whatever
-   * it happened to be the instant the failure was first noticed.
-   *
-   * No `noteDelivered` call here (contrast `noteSkippedSeq`, which does
-   * call it): a validation-failed entry never becomes a real `Envelope` and
-   * never reaches `deliver()`, so it was never "delivered" in the eager
-   * in-memory-watermark sense that field tracks — there is nothing for it
-   * to eagerly mark. Once a corrected redelivery of this exact seq DOES
-   * arrive as a real envelope, it flows through the ordinary `deliver()`
-   * path (which calls `noteDelivered` itself) and, on success, clears the
-   * stall via `process()`'s own existing logic — no special-casing needed.
-   */
+  /** Serialized with handler completion, so invalid work cannot be acked by later success. */
   private noteValidationFailure(seq: number): void {
     this.processingChain = this.processingChain.then(() => {
       if (this.stalledAtSeq === undefined) this.stalledAtSeq = seq;

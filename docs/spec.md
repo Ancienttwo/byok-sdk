@@ -53,10 +53,10 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.13.0`; publication requires separate release
+aligned dispatch release is `0.14.0`; publication requires separate release
 authorization and registry readback. The current independent keys candidate is
-`0.3.10`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.13.0`, proven from an isolated standard npm install rather
+`0.4.0`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.14.0`, proven from an isolated standard npm install rather
 than the workspace graph.
 
 ## Local Agent application release authority
@@ -871,3 +871,13 @@ allows accepted Pi work up to 120 seconds to settle; stop, signals and stdin EOF
 terminate the owned child. Pending prompt RPC has a 30-second deadline. Already
 admitted work is not recalled by a later dialog. GUI requests/concurrent commands
 are capped at 32. The TaskRunner unattended cancellation policy is unchanged.
+
+## Durable execution recovery
+
+For a daemon configured with hostedJournal, the existing tenant-scoped taskId is an immutable execution identity reserved by cloud dispatch. Omitted IDs are minted by cloud; explicit host IDs are idempotency inputs, never permission to reopen or retarget an execution. Delivery retirement survives mailbox retention. Every lifecycle message is bound to the authenticated tenant, exact offered device and, for Agent executions, the exact AgentRef. Retry is an explicit new execution; daemon restart never reruns committed runtime side effects.
+
+A durable pre-claim admission write separates unexecuted offers from possibly executed work. An unacknowledged offer without that commitment awaits authoritative mailbox redelivery, including cancellation suppression. An acknowledged or committed unfinished execution produces task.fail with reason daemon_interrupted and retryable false. Its original AgentRef, complete canonical terminal bytes and interruption marker commit atomically. A marker alone cannot conceal unfinished work.
+
+The journal owns one immutable terminal byte record, including pre-claim declines. ConnectionManager uses its existing authenticated POST queue and retries the exact original envelope. Accepted transport disposition is durably recorded as confirmed before local delivery state is retired; an acknowledgement write failure retains the original batch. A rejected singleton is durably failed and remains inspectable. Confirmation records delivery acceptance; the cloud's immutable first terminal and cancellation authority remain product truth.
+
+Unknown or invalid executable messages cannot silently advance the mailbox cursor. The observer consumes the protocol offer classifier. The new journal format requires complete terminal bytes: a valid hash-only predecessor is preserved and rejected with an explicit format error, never silently upgraded, quarantined as corruption, or synthesized into replayable evidence.

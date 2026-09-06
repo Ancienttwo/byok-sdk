@@ -111,6 +111,39 @@ jobs:
           BYOK_TEST_AGENT_MEMORY_FS_BIN="$RUNNER_TEMP/byok-agent-memory-fs" \
             bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-fs-helper.test.ts
 
+  execution-recovery-native:
+    name: compiled execution recovery (macOS, Node 22.22, Bun 1.4)
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@v2
+      - name: Install frozen dependencies and build
+        run: bun ci && bun run build
+      - name: Exercise actual native SIGKILL and original terminal recovery
+        env:
+          BYOK_REQUIRE_SQLITE: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Darwin
+          git rev-parse HEAD > "$RUNNER_TEMP/recovery-source.txt"
+          node --version >> "$RUNNER_TEMP/recovery-source.txt"
+          bun --version >> "$RUNNER_TEMP/recovery-source.txt"
+          bun run --cwd packages/client test -- src/__tests__/execution-recovery-kill.test.ts src/__tests__/journal-sqlite.test.ts 2>&1 | tee "$RUNNER_TEMP/execution-recovery.log"
+      - name: Retain exact source and native recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: execution-recovery-native-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/recovery-source.txt
+            ${{ runner.temp }}/execution-recovery.log
+          if-no-files-found: error
+
   adapter-lifecycle-smoke:
     name: built adapter lifecycle smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

@@ -922,18 +922,16 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     const offerReceiptKey = `task-offer:${messageId}`;
     const deliveryReceiptKey = `task-offer-delivered:${messageId}`;
-    // Existing strict dispatch keeps its observable one-winner behavior once
-    // an offer is delivered. A missing delivery marker is the sole retryable
-    // state: it is how an append failure can be retried without treating a
-    // completed Agent placement as a second dispatch.
+    // The task id is the immutable execution identity for every offer kind.
+    // This receipt outlives mailbox retention, so a completed or retired task
+    // can never be made executable again by reusing the caller-supplied id. A
+    // missing marker is the sole retryable state after a pre-delivery failure.
     if (
-      agentRef !== undefined &&
-      reservation?.created === false &&
       (await stores.receipts.get(deliveryReceiptKey)) !== undefined
     ) {
       throw new ByokCloudError(
-        'agent_task_already_exists',
-        `Task ${taskId} already has a durable Agent attempt and cannot be enqueued again.`,
+        agentRef === undefined ? 'coordination_input_invalid' : 'agent_task_already_exists',
+        `Task ${taskId} already has a durable delivered attempt and cannot be enqueued again.`,
       );
     }
 
@@ -989,14 +987,12 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         `Task ${taskId} already has a different executable offer body.`,
       );
     }
-    if (agentRef !== undefined) {
-      const delivered = await stores.receipts.record({ key: deliveryReceiptKey, body: messageId });
-      if (reservation?.created === false && !delivered.created) {
-        throw new ByokCloudError(
-          'agent_task_already_exists',
-          `Task ${taskId} already has a durable Agent attempt and cannot be enqueued again.`,
-        );
-      }
+    const delivered = await stores.receipts.record({ key: deliveryReceiptKey, body: messageId });
+    if (agentRef !== undefined && reservation?.created === false && !delivered.created) {
+      throw new ByokCloudError(
+        'agent_task_already_exists',
+        `Task ${taskId} already has a durable Agent attempt and cannot be enqueued again.`,
+      );
     }
     return { taskId, seq: message.seq, envelope, attempt: openedBeforeAppend };
   }
