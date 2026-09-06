@@ -233,7 +233,7 @@ artifact `@earendil-works/pi-coding-agent@0.85.1`; the SDK does not accept an
 unversioned global `pi` on `PATH` as an implicit substitute. All workspace
 dispatch packages and private conformance tests require Node.js `>=22.22.0`,
 matching pi's published engine floor. The independent
-`@byok-sdk/keys@0.2.0` package remains outside the dispatch graph, depends only
+`@byok-sdk/keys` package remains outside the dispatch graph, depends only
 on protocol-free `@byok-sdk/core`, and shares the Node.js `>=22.22.0` floor. A
 host that enables the BYOK lane installs its
 `byok-pi-provider-launcher` binary separately and gives the client only the
