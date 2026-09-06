@@ -1,9 +1,19 @@
+> **Archived**: 2026-09-06 21:22
+> **Related Plan**: plans/archive/plan-20260906-2023-release-entrypoint-artifacts.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260906-2122
+> **Archive Projection V1**: `plans/plan-20260906-2023-release-entrypoint-artifacts.md` => `plans/archive/plan-20260906-2023-release-entrypoint-artifacts.md`
+> **Archive Projection V1**: `tasks/notes/20260906-2023-release-entrypoint-artifacts.notes.md` => `tasks/archive/notes-20260906-2122-release-entrypoint-artifacts.md`
+> **Archive Projection V1**: `tasks/contracts/20260906-2023-release-entrypoint-artifacts.contract.md` => `tasks/archive/contract-20260906-2122-release-entrypoint-artifacts.md`
+> **Archive Projection V1**: `tasks/reviews/20260906-2023-release-entrypoint-artifacts.review.md` => `tasks/archive/review-20260906-2122-release-entrypoint-artifacts.md`
+
 # Implementation Notes: release-entrypoint-artifacts
 
 > **Status**: Active
-> **Plan**: plans/plan-20260906-2023-release-entrypoint-artifacts.md
-> **Contract**: tasks/contracts/20260906-2023-release-entrypoint-artifacts.contract.md
-> **Review**: tasks/reviews/20260906-2023-release-entrypoint-artifacts.review.md
+> **Plan**: plans/archive/plan-20260906-2023-release-entrypoint-artifacts.md
+> **Contract**: tasks/archive/contract-20260906-2122-release-entrypoint-artifacts.md
+> **Review**: tasks/archive/review-20260906-2122-release-entrypoint-artifacts.md
 > **Last Updated**: 2026-09-06 21:40
 > **Lifecycle**: notes
 
@@ -26,7 +36,7 @@
 | `.github/workflows/ci.yml` | `npm-release-pack` gains one step after the pack step: `actions/upload-artifact@v4`, `if: matrix.os == 'ubuntu-latest'`, `name: release-pack-${{ github.sha }}`, `path: .ci-artifacts/release-pack`, `if-no-files-found: error`, `retention-days: 30`. |
 | `deploy/runbooks/release-responsibility.md` | Step 5 rewritten as the concrete five-step sequence (green CI for the exact commit → `gh run download` → `--artifacts` dry run → `--artifacts --execute --otp` → `git push origin v<version>`), retaining the original requirement that names/versions, contents, provenance/2FA and readback are all verified before tagging, plus the 30-day retention note. |
 | `CHANGELOG.md` | One "Release tooling" bullet under 0.14.0 covering `--artifacts`, the account gate, provenance-only-on-CI, and the publish → readback → tag order. |
-| `plans/plan-20260906-2023-release-entrypoint-artifacts.md` | Task Breakdown boxes 1-2 ticked. |
+| `plans/archive/plan-20260906-2023-release-entrypoint-artifacts.md` | Task Breakdown boxes 1-2 ticked. |
 
 ## Verification
 

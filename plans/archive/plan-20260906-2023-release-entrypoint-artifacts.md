@@ -1,6 +1,16 @@
+> **Archived**: 2026-09-06 21:22
+> **Related Plan**: plans/archive/plan-20260906-2023-release-entrypoint-artifacts.md
+> **Outcome**: Completed
+> **Lifecycle**: plan
+> **Parent Run ID**: run-20260906-2122
+> **Archive Projection V1**: `plans/plan-20260906-2023-release-entrypoint-artifacts.md` => `plans/archive/plan-20260906-2023-release-entrypoint-artifacts.md`
+> **Archive Projection V1**: `tasks/notes/20260906-2023-release-entrypoint-artifacts.notes.md` => `tasks/archive/notes-20260906-2122-release-entrypoint-artifacts.md`
+> **Archive Projection V1**: `tasks/contracts/20260906-2023-release-entrypoint-artifacts.contract.md` => `tasks/archive/contract-20260906-2122-release-entrypoint-artifacts.md`
+> **Archive Projection V1**: `tasks/reviews/20260906-2023-release-entrypoint-artifacts.review.md` => `tasks/archive/review-20260906-2122-release-entrypoint-artifacts.md`
+
 # Plan: Release entrypoint: reuse CI-frozen artifacts, account gate, publish before readback before tag
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260906-2023
 > **Slug**: release-entrypoint-artifacts
 > **Artifact Level**: work-package
@@ -9,9 +19,9 @@
 > **Rollback Surface**: `publish.mjs` (new `--artifacts` mode, account gate, reordered execute path), `publish.test.mjs`, `package.json` `test:scripts`, one `upload-artifact` step in `ci.yml`, the runbook step, CHANGELOG.
 > **Spec**: `docs/spec.md`
 > **Research**: `deploy/runbooks/release-responsibility.md` §Release checklist; PR #152 body (exact-source CI and consumer receipts)
-> **Task Contract**: `tasks/contracts/20260906-2023-release-entrypoint-artifacts.contract.md`
-> **Task Review**: `tasks/reviews/20260906-2023-release-entrypoint-artifacts.review.md`
-> **Implementation Notes**: `tasks/notes/20260906-2023-release-entrypoint-artifacts.notes.md`
+> **Task Contract**: `tasks/archive/contract-20260906-2122-release-entrypoint-artifacts.md`
+> **Task Review**: `tasks/archive/review-20260906-2122-release-entrypoint-artifacts.md`
+> **Implementation Notes**: `tasks/archive/notes-20260906-2122-release-entrypoint-artifacts.md`
 
 ## Agentic Routing
 - Selected route: main-loop planning; `deep-worker` execution in a contract worktree; `gatekeeper` acceptance (release path is high-risk).
@@ -24,16 +34,16 @@
 ## Workflow Inventory
 Complete this inventory before implementation. If any line is unknown, keep the plan in Draft and fill it before projection.
 
-- Active plan: `plans/plan-20260906-2023-release-entrypoint-artifacts.md`
-- Sprint contract: `tasks/contracts/20260906-2023-release-entrypoint-artifacts.contract.md`
-- Sprint review: `tasks/reviews/20260906-2023-release-entrypoint-artifacts.review.md`
-- Implementation notes: `tasks/notes/20260906-2023-release-entrypoint-artifacts.notes.md`
+- Active plan: `plans/archive/plan-20260906-2023-release-entrypoint-artifacts.md`
+- Sprint contract: `tasks/archive/contract-20260906-2122-release-entrypoint-artifacts.md`
+- Sprint review: `tasks/archive/review-20260906-2122-release-entrypoint-artifacts.md`
+- Implementation notes: `tasks/archive/notes-20260906-2122-release-entrypoint-artifacts.md`
 - Deferred-goal ledger: `tasks/todos.md`
 - Current checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
-- Scope authority: `tasks/contracts/20260906-2023-release-entrypoint-artifacts.contract.md` `allowed_paths`
+- Scope authority: `tasks/archive/contract-20260906-2122-release-entrypoint-artifacts.md` `allowed_paths`
 - Concurrency rule: `.ai/harness/active-plan` selects the active plan for this worktree when present; `.ai/harness/active-worktree` records the owning worktree. If another worktree already owns active work, open or switch to the matching worktree instead of serializing unrelated plans.
-- Execution isolation: approved contract-level work projects through `repo-harness run plan-to-todo --plan plans/plan-20260906-2023-release-entrypoint-artifacts.md` and may start `repo-harness run contract-worktree start --plan plans/plan-20260906-2023-release-entrypoint-artifacts.md`.
+- Execution isolation: approved contract-level work projects through `repo-harness run plan-to-todo --plan plans/archive/plan-20260906-2023-release-entrypoint-artifacts.md` and may start `repo-harness run contract-worktree start --plan plans/archive/plan-20260906-2023-release-entrypoint-artifacts.md`.
 
 ## Approach
 ### Strategy
@@ -82,11 +92,11 @@ CI `npm-release-pack` (ubuntu) → `release-pack-<sha>` artifact → operator do
 | Tarball determinism across CI legs | N/A | Only the ubuntu artifact is uploaded and consumed | Single source |
 
 ## Task Contracts
-- Contract file: `tasks/contracts/20260906-2023-release-entrypoint-artifacts.contract.md`
-- Review file: `tasks/reviews/20260906-2023-release-entrypoint-artifacts.review.md`
-- Implementation notes file: `tasks/notes/20260906-2023-release-entrypoint-artifacts.notes.md`
+- Contract file: `tasks/archive/contract-20260906-2122-release-entrypoint-artifacts.md`
+- Review file: `tasks/archive/review-20260906-2122-release-entrypoint-artifacts.md`
+- Implementation notes file: `tasks/archive/notes-20260906-2122-release-entrypoint-artifacts.md`
 - Template: `.claude/templates/contract.template.md`
-- Verification command: `repo-harness run verify-contract --contract tasks/contracts/20260906-2023-release-entrypoint-artifacts.contract.md --strict`
+- Verification command: `repo-harness run verify-contract --contract tasks/archive/contract-20260906-2122-release-entrypoint-artifacts.md --strict`
 - Active plan rule: `.ai/harness/active-plan` is authoritative for this worktree when present; `.ai/harness/active-worktree` records the owning worktree. Do not infer active execution from the latest non-archived plan.
 
 ## Handoff
