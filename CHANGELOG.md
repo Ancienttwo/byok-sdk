@@ -65,6 +65,19 @@
   package for the host platform; koffi 3 ships per-platform addons, so no other
   platform's binary is downloaded). On every platform a synchronous host-exit
   backstop now kills still-live owned trees when the daemon exits normally.
+- **Release tooling:** `scripts/release/publish.mjs --artifacts <dir>` publishes the
+  tarballs CI already accepted instead of repacking — it reads that directory's
+  `release-manifest.json`, refuses unless it was packed from the current `HEAD` for
+  this release version, and re-hashes every tarball the publish set needs against its
+  recorded sha256 (mutually exclusive with `--out-dir`; the ubuntu `npm-release-pack`
+  leg now uploads `release-pack-<sha>`). Under `--execute` the driver first gates on
+  the registry account — `npm whoami` must resolve and `npm profile get --json` must
+  report `tfa.mode` `auth-and-writes`, with no override flag — and on the tag not
+  already existing, before any side effect. `--provenance` is passed only when the run
+  is a GitHub Actions run, since attestations are signed from its OIDC token; a local
+  release logs that none is attached. The execute order is now publish → registry
+  readback → annotated tag, so a tag is never created for a train the registry has not
+  confirmed.
 
 ## 0.13.0 / @byok-sdk/keys 0.3.10 — 2026-09-05
 

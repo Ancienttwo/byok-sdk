@@ -1,27 +1,27 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-09-06T16:05:50+0800 -->
+<!-- updated_at: 2026-09-06T21:22:23+0800 -->
 <!-- stale_after: 24h -->
 
-> **Status**: Active
-> **Updated At**: 2026-09-06T16:05:50+0800
-> **Source Branch**: codex/pr152-closeout
-> **Source Commit**: 63dccb5
+> **Status**: ManualClearedWithActiveWork
+> **Updated At**: 2026-09-06T21:22:23+0800
+> **Source Branch**: codex/release-entrypoint-artifacts
+> **Source Commit**: ad3d351
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: manual
+> **Reason**: archive-workflow
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
 
 ## Current Focus
 
-- Status: Active
+- Status: ManualClearedWithActiveWork
 - Active Plan: (none)
 - Plan Status: (none)
 - Next Task: inspect active worktree marker(s)
-- Clear Note: (none)
+- Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
 
 ## Mainline Snapshot Reading
 
@@ -31,6 +31,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
+- linked-worktree-ce21c0c05deb: plans/plan-20260906-2023-release-entrypoint-artifacts.md
 - linked-worktree-ce21c0c05deb: active-worktree owner -> self
 - linked-worktree-f9103fe5572c: plans/plan-20260906-0500-execution-recovery.md
 - linked-worktree-f9103fe5572c: active-worktree owner -> self
@@ -57,23 +58,23 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Checks
 
-- status=(none), source=(none), file=.ai/harness/checks/latest.json
+- status=pass, source=verify-sprint, exit_code=0, file=.ai/harness/checks/latest.json
 
 ## Git Status
 
 - Summary: 10 changed/untracked path(s)
 
 ```
- M plans/plan-20260906-0350-issue-147-task-offer-journal.md
- M plans/plan-20260906-0420-issue-147-integration.md
- M plans/plan-20260906-0430-issue-147-landing.md
- M plans/plan-20260906-0450-release-014-prep.md
- M plans/plan-20260906-0500-execution-recovery.md
- M plans/plan-20260906-0500-prelaunch-integration.md
- M tasks/notes/20260906-0500-prelaunch-integration.notes.md
- M tasks/reviews/20260906-0500-prelaunch-integration.review.md
+ D plans/plan-20260906-2023-release-entrypoint-artifacts.md
+ D tasks/contracts/20260906-2023-release-entrypoint-artifacts.contract.md
+ D tasks/notes/20260906-2023-release-entrypoint-artifacts.notes.md
+ D tasks/reviews/20260906-2023-release-entrypoint-artifacts.review.md
  M tasks/todos.md
-?? tasks/notes/20260906-pr152-closeout.md
+?? plans/archive/plan-20260906-2023-release-entrypoint-artifacts.md
+?? tasks/archive/contract-20260906-2122-release-entrypoint-artifacts.md
+?? tasks/archive/notes-20260906-2122-release-entrypoint-artifacts.md
+?? tasks/archive/review-20260906-2122-release-entrypoint-artifacts.md
+?? tasks/archive/todo-20260906-2122-release-entrypoint-artifacts.md
 ```
 
 ## Source Artifacts

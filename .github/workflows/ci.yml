@@ -404,6 +404,18 @@ jobs:
       - name: Check graph, pack exact tarballs, and import from an isolated npm install
         run: bun run check:release-pack -- --out-dir .ci-artifacts/release-pack
 
+      # The release driver's --artifacts mode publishes exactly the bytes this job
+      # accepted, so one leg has to hand them out. Ubuntu only: three legs would be
+      # three name collisions, and one accepted set is the point.
+      - name: Retain the accepted release tarballs for the publish driver
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-pack-${{ github.sha }}
+          path: .ci-artifacts/release-pack
+          if-no-files-found: error
+          retention-days: 30
+
   # Tier 2 of the release-asset guarantee. `npm-release-pack` above is the hard
   # gate and is deliberately service-free: it proves the cloud-dataplane tarball
   # carries `deploy/sql` byte-for-byte under `dist/sql/` and that an isolated

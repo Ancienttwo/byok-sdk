@@ -29,7 +29,7 @@
     "check:task-sync": "repo-harness run check-task-sync",
     "check:task-workflow": "repo-harness run check-task-workflow --strict",
     "sync:brain-docs": "repo-harness run sync-brain-docs --all",
-    "test:scripts": "node --test scripts/api-surface/check-api-surface.test.mjs scripts/api-surface/check-version-authority.test.mjs"
+    "test:scripts": "node --test scripts/api-surface/check-api-surface.test.mjs scripts/api-surface/check-version-authority.test.mjs scripts/release/publish.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
