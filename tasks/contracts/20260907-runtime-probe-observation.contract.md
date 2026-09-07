@@ -23,6 +23,7 @@ allowed_paths:
   - packages/client/src/
   - packages/client/scripts/adapter-task-smoke.mjs
   - templates/packaging/bun/README.md
+  - templates/packaging/bun/smoke-test.sh
   - templates/packaging/sea/README.md
   - templates/packaging/sea/smoke-test.sh
   - examples/packaging/launcher.ts

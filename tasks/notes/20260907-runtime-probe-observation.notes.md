@@ -53,3 +53,11 @@ Read-only consumer mapping found no remaining legacy detection authoring outside
 Updated active Bun/SEA packaging docs, launcher comment and SEA smoke comment to the new success/failure vocabulary. Package resolution failure is probe-failed; explicit missing executable is not-found. This is documentation alignment, not a claim that the packaging matrix was rerun.
 
 A real TERM-ignoring child that exceeded stdout maxBuffer reproduced a remaining classification defect: cleanup reached the probe deadline and overwrote the already-known output-limit failure with timeout. The execFile callback now retains its explicit ERR_CHILD_PROCESS_STDIO_MAXBUFFER cause as probe-failed even if deadline SIGKILL was required for cleanup. A parameterized real-process regression covers both TERM behavior variants; 30 focused probe tests passed. No message parsing or fallback was introduced.
+
+## Approved independent acceptance and merge preparation
+
+User approved independent acceptance and preparation of a mainline merge candidate. No actual push, mainline merge or publication is implied. Initial frozen commit f7ff9d4 reviewed against freshly fetched origin/main=0f8fdb4; merge-tree had no conflicts and worktree was clean.
+
+Independent review correctly rejected the stale piDetect.present assertions in both packaging smokes. The parser and expectations now consume kind directly, closing the missed downstream authoring-contract cutover. Pre-fix Bun smoke reproduced the failure. SEA initially stopped earlier because the shell selected Node 26.3.1; the repo's .node-version is 22.22.3. A temporary exact Node 22.22.3 was installed in ignored _ops; global Node is unchanged. Final verification is rebound to the corrected commit and pinned runtime. The prior root results remain valid for their original environment but are not CI-Node evidence.
+
+Final independent review and merge candidate receipt are local artifacts under _ops/runtime-probe so recording acceptance does not change the reviewed commit. Task status remains Review until separately authorized integration; no external harness receipt is fabricated.
