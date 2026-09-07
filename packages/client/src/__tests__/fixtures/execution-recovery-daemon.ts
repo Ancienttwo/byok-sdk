@@ -28,6 +28,7 @@ interface Config {
   readonly journalFault?: JournalFaultStep | 'append:after-commit';
   readonly recoveryFault?: 'terminal:before-send' | 'terminal:queued' | 'outbound:before-post' | 'outbound:after-ack';
   readonly agentHome?: boolean;
+  readonly holdTerminalConfirmation?: boolean;
 }
 
 if (await runSdkReservedHelperCommand()) process.exit(0);
@@ -148,6 +149,17 @@ const journal = new SqliteLocalTaskJournal({
         },
       }),
 });
+// Test-only barrier: cloud acceptance can precede the daemon's durable confirmation.
+if (config.holdTerminalConfirmation === true) {
+  const confirmTerminal = journal.confirmTerminal.bind(journal);
+  journal.confirmTerminal = async (...args: Parameters<typeof confirmTerminal>) => {
+    checkpoint('terminal-confirmation');
+    while (!existsSync(path.join(config.controlDir, 'terminal-confirmation.release'))) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    return confirmTerminal(...args);
+  };
+}
 const overrides = {
   hostedJournal: { journal },
   longPoll: { retryDelayMs: 20, idleDelayMs: 10 },

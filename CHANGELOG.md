@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.15.0 / @byok-sdk/keys 0.4.1 — prepared, not published
+
+- Fix daemon restart ordering for durable Agent messages whose first cloud admission failed: persist the interruption immediately, but deliver its terminal only after the exact recovered message disposition is durable. Recovery does not rerun the task.
+- Preserve accepted, held and refused dispositions across another restart; unavailable or mismatched cloud responses keep pending evidence fail-closed.
+- Exercise compiled restart, repeated interruption, cloud reconstruction and cancellation paths. Stabilize Wrangler packaging setup and publish compiled-test completion fixtures atomically.
+- Add `TaskRunner.hasPendingRecoveredAgentMessage(taskId)` to query existing durable recovery state. The additive public method requires the SDK MINOR bump under the pre-1.0 version policy.
+- Align all nine SDK packages at 0.15.0. Independently bump keys to 0.4.1 so its packed core dependency resolves exactly to 0.15.0; no keys API or provider dependency changes.
 
 - **Breaking custom adapter contract (`@byok-sdk/client`):** `RuntimeDetectResult`
   now authors one `kind`: `available`, `not-found`, `not-executable`, `timeout`,
@@ -10,9 +16,10 @@
   `runtimes`, `status`, and `doctor` distinguish failures without copying error
   messages, executable paths or failed probe streams. Display `present` is
   derived from `available`; wire registration and admission/retry semantics
-  remain unchanged. Requires a future minor release; no version is published here.
+  remain unchanged. Included in this prepared minor release; publication remains separate.
 
-## 0.14.0 / @byok-sdk/keys 0.4.0 — prepared, not published
+
+## 0.14.0 / @byok-sdk/keys 0.4.0 — 2026-09-06
 
 - **`@byok-sdk/protocol` / client hosted journal (#147):** A single protocol task-offer family authority includes both agent-egress offers. An awaited pre-claim admission barrier separates never-executed offers from uncertain side effects. Interrupted executions durably report `task.fail` with `daemon_interrupted`, `retryable: false`, and the original AgentRef; runtime work is not automatically rerun.
 - **Durable terminal settlement:** The journal retains complete immutable canonical terminal bytes, not only hashes. Startup replays the original envelope; authenticated transport acceptance is persisted as `confirmed` before the queue forgets it. Interruption report and recovery marker commit atomically. Cloud enforces immutable task identity and exact target-device claims; an existing cancellation tombstone controls effective outcome without replacing the original terminal receipt.
