@@ -1318,6 +1318,9 @@ export class TaskRunner {
       if (outcome === 'accepted') this.recoveredMessageOutboxes.delete(taskId);
       return;
     }
+    // Disposition persistence may race cancellation and disposal. Never create
+    // a new terminal for an execution that finished while its receipt was written.
+    if (this.tasks.get(taskId) !== active) return;
     if (outcome === 'held') {
       if (active.messageRetryTimer !== undefined) clearTimeout(active.messageRetryTimer);
       active.messageRetryTimer = undefined;
@@ -1327,6 +1330,8 @@ export class TaskRunner {
       if (active.messageRetryTimer !== undefined) clearTimeout(active.messageRetryTimer);
       active.messageRetryTimer = undefined;
       this.revokeAgentMessageContext(taskId);
+      active.pendingMessageCompletion = undefined;
+      await this.fail(taskId, 'required Agent message was refused', false);
       return;
     }
     if (outcome !== 'accepted') return;

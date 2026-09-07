@@ -2,6 +2,8 @@
 
 ## 0.15.0 / @byok-sdk/keys 0.4.1 — prepared, not published
 
+- Fix active required Agent message refusal leaving tasks running: persist the exact disposition, settle through the existing failure/disposal path, and fence cancellation races.
+
 - Fix R7: terminate every compacted Agent message outbox and reliable egress
   spool JSONL record with a newline. Subsequent appends remain separate records
   and reopen preserves retained identities. Existing malformed logs are not

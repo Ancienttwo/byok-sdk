@@ -62,6 +62,95 @@ describe('required Agent message completion gate', () => {
     expect(sent).toHaveLength(1);
   });
 
+  it.each(['before-turn-end', 'after-turn-end', 'cancel-during-disposition', 'cancel-during-close'] as const)(
+    'settles refused required messages exactly once: %s', async (timing) => {
+      const sent: Envelope[] = [];
+      const storeDir = await temporary('byok-refusal-store-');
+      const hostStorageRoot = await temporary('byok-refusal-home-');
+      const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
+        steer: false, resume: true, approvalInteractive: false, mcpToolsets: true, permissionModes: ['auto'],
+      });
+      const runner = new TaskRunner({
+        adapters: [adapter], workspaceRoot: await temporary('byok-refusal-workspace-'),
+        agentHome: new AgentHomeManager({ hostStorageRoot }), agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-refusal',
+        send: (envelope) => sent.push(envelope),
+        blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
+        sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+        storeDir, productId: 'refusal-test', tenantId: 'tenant-refusal',
+        agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
+        agentMessageMcpPreflight: async () => {},
+      });
+      const taskId = 'refused-task';
+      const agentRef = { agentId: 'refused-agent', profileRevision: '1' };
+      await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+        instruction: 'reply', policy: { mode: 'auto' }, runtime: 'pi', agentRef,
+        egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
+      }, { taskId, seq: 1 }));
+      const session = adapter.sessions[0]!;
+      const close = vi.spyOn(session, 'close');
+      const ctx = adapter.startCalls[0]!.ctx;
+      const token = ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!;
+      await runner.publishAgentMessage({ contextToken: token, contentType: 'text/markdown', body: 'immutable reply' });
+      const message = sent.find((e) => e.type === 'agent.message.publish');
+      if (message?.type !== 'agent.message.publish') throw new Error('missing message');
+      const { sessionRef, contract, messageId, cursor, contentHash } = message.payload;
+      const disposition = createEnvelope('agent.message.disposition', {
+        agentRef, sessionRef, contract, messageId, cursor, contentHash,
+        outcome: 'refused', receiptId: '10000000-0000-4000-8000-000000000009', reasonCode: 'stale_product_context',
+      }, { taskId, seq: 2 });
+      if (timing === 'after-turn-end') {
+        session.emit({ type: 'turn_end' });
+        // The parked completion resends the existing immutable record.
+        await vi.waitFor(() => expect(sent.filter((e) => e.type === 'agent.message.publish').length).toBeGreaterThan(1));
+      }
+      let release!: () => void;
+      let entered!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const enteredGate = new Promise<void>((resolve) => { entered = resolve; });
+      const original = AgentMessageOutbox.prototype.applyDisposition;
+      const apply = vi.spyOn(AgentMessageOutbox.prototype, 'applyDisposition').mockImplementation(async function (this: AgentMessageOutbox, ...args) {
+        const result = await original.apply(this, args);
+        if (timing === 'cancel-during-disposition') { entered(); await gate; }
+        return result;
+      });
+      const releaseClose = timing === 'cancel-during-close' ? session.blockClose() : undefined;
+      try {
+        const refusal = runner.handleEnvelope(disposition);
+        if (timing === 'cancel-during-disposition') {
+          await enteredGate;
+          await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'cancel wins' }, { taskId, seq: 3 }));
+          release();
+        }
+        if (timing === 'cancel-during-close') {
+          await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+          const cancellation = runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'late cancel' }, { taskId, seq: 3 }));
+          session.emit({ type: 'turn_end' });
+          releaseClose!();
+          await cancellation;
+        }
+        await refusal;
+        session.emit({ type: 'turn_end' });
+        await runner.handleEnvelope(disposition);
+        expect(runner.activeTaskCount).toBe(0);
+        expect(close).toHaveBeenCalledOnce();
+        const terminals = sent.filter((e) => e.type === 'task.fail' || e.type === 'task.complete' || e.type === 'task.cancelled');
+        expect(terminals).toHaveLength(1);
+        expect(terminals[0]).toMatchObject(timing === 'cancel-during-disposition'
+          ? { type: 'task.cancelled', payload: { reason: 'cancel wins', agentRef } }
+          : { type: 'task.fail', payload: { reason: 'required Agent message was refused', retryable: false, agentRef } });
+        await expect(runner.publishAgentMessage({ contextToken: token, contentType: 'text/markdown', body: 'again' })).rejects.toThrow(/invalid or expired/);
+        const reopened = await AgentMessageOutbox.open(ctx.workspaceDir);
+        expect(reopened.get(taskId)?.body).toBe('immutable reply');
+        expect(reopened.retryableRecords()).toHaveLength(0);
+      } finally {
+        release(); releaseClose?.(); apply.mockRestore();
+        await runner.shutdownActiveTasks('test cleanup');
+      }
+    },
+  );
+
   it('declines before adapter preparation when the exact helper handshake fails', async () => {
     const sent: Envelope[] = [];
     const storeDir = await temporary('byok-message-preflight-store-');
