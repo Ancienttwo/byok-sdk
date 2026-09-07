@@ -95,8 +95,10 @@ Unrelated to bundling, but worth knowing if you test this on Windows: pi
 adapter's `detect()` (`packages/client/src/adapters/pi/pi-adapter.ts`) calls
 Node's `child_process.execFile(bin.command, ['--version'])` with no
 `shell: true`. Windows can't `CreateProcess` a `.cmd`/`.bat` file directly
-without a shell, so pointing `BYOK_PI_BIN` at one silently degrades to
-`present: false` — indistinguishable from pi being genuinely absent.
+without a shell, so pointing `BYOK_PI_BIN` at one produces a structured probe
+failure. Its `kind` reflects the OS
+error (`not-found` for ENOENT, `not-executable` for EACCES/EPERM/ENOEXEC,
+otherwise `probe-failed`); the SDK does not infer the cause from the extension.
 This recipe's `smoke-test.sh` stub is a copy of `node.exe` (a genuine
 `.exe`) for exactly this reason, not a `.cmd` script. This is a real,
 pre-existing characteristic of `execFile`-without-`shell` on Windows that
@@ -117,12 +119,13 @@ Empirically confirmed while building this recipe (see `smoke-test.sh`'s two
 assertions):
 
 - **pi sidecar absent** (no `BYOK_PI_BIN`): `PiAdapter.detect()` reports
-  `{ present: false }` cleanly. A product treats this as a missing core
-  deployment dependency, not as a supported steady state.
+  `{ kind: 'probe-failed' }` when package resolution fails. An explicit
+  override pointing to a missing executable reports `{ kind: 'not-found' }`. A product
+  treats this as a missing core deployment dependency, not as a supported steady state.
 - **pi picked up via override**: `BYOK_PI_BIN=/path/to/pi` short-circuits
   resolve-bin.ts straight past `import.meta.resolve` entirely, so a stub or
   version-matched Node 22.22+ pi binary at that path is detected correctly
-  (`present: true`) even inside the SEA binary.
+  (`kind: 'available'`) even inside the SEA binary.
 
 **claude and codex are never a hazard here.** Both adapters'
 `resolve-bin.ts` (`packages/client/src/adapters/{claude,codex}/`) only ever

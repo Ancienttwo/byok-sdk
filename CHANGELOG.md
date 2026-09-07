@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Breaking custom adapter contract (`@byok-sdk/client`):** `RuntimeDetectResult`
+  now authors one `kind`: `available`, `not-found`, `not-executable`, `timeout`,
+  or `probe-failed`. Only `available` carries optional version/auth observations;
+  legacy `present` results and mixed shapes are rejected. Bundled version probes
+  preserve OS failure categories and own their timeout termination. Local
+  `runtimes`, `status`, and `doctor` distinguish failures without copying error
+  messages, executable paths or failed probe streams. Display `present` is
+  derived from `available`; wire registration and admission/retry semantics
+  remain unchanged. Requires a future minor release; no version is published here.
+
 ## 0.14.0 / @byok-sdk/keys 0.4.0 — prepared, not published
 
 - **`@byok-sdk/protocol` / client hosted journal (#147):** A single protocol task-offer family authority includes both agent-egress offers. An awaited pre-claim admission barrier separates never-executed offers from uncertain side effects. Interrupted executions durably report `task.fail` with `daemon_interrupted`, `retryable: false`, and the original AgentRef; runtime work is not automatically rerun.

@@ -86,7 +86,7 @@ async function makeRunner(
 
 describe('TaskRunner logical MCP toolset resolution', () => {
   it('resolves local server definitions into TaskContext and strips logical ids before adapter.start', async () => {
-    const adapter = new StubRuntimeAdapter('claude', { present: true }, MCP_CAPABLE);
+    const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
     const sent: Envelope[] = [];
     const runner = await makeRunner(
       adapter,
@@ -134,7 +134,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
 
   it('declines pre-claim when the registry or a requested id is missing', async () => {
     for (const registry of [undefined, new Map<string, McpToolsetConfig>()]) {
-      const adapter = new StubRuntimeAdapter('claude', { present: true }, MCP_CAPABLE);
+      const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
       const sent: Envelope[] = [];
       const runner = await makeRunner(adapter, sent, registry);
       await runner.handleEnvelope(
@@ -156,7 +156,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
   });
 
   it('declines a named runtime that cannot project MCP toolsets', async () => {
-    const adapter = new StubRuntimeAdapter('pi', { present: true }, MCP_UNSUPPORTED);
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_UNSUPPORTED);
     const sent: Envelope[] = [];
     const runner = await makeRunner(
       adapter,
@@ -176,7 +176,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
   });
 
   it('declines colliding MCP server names instead of choosing one by order', async () => {
-    const adapter = new StubRuntimeAdapter('claude', { present: true }, MCP_CAPABLE);
+    const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
     const sent: Envelope[] = [];
     const runner = await makeRunner(
       adapter,
@@ -209,7 +209,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
       async () => { throw new Error('server exited before handshake'); },
       async () => [],
     ] satisfies Array<NonNullable<TaskRunnerDeps['mcpToolsetToolsProbe']>>) {
-      const adapter = new StubRuntimeAdapter('claude', { present: true }, MCP_CAPABLE);
+      const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
       const sent: Envelope[] = [];
       const runner = await makeRunner(
         adapter,
@@ -237,7 +237,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     const registry = new McpToolsetRegistry({
       salesko: { mcpServers: { salesko: { command: '/opt/salesko/mcp-v1' } } },
     });
-    const adapter = new StubRuntimeAdapter('claude', { present: true }, MCP_CAPABLE);
+    const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
     const sent: Envelope[] = [];
     const runner = await makeRunner(adapter, sent, undefined, () => registry.snapshot().toolsets);
 
@@ -275,7 +275,7 @@ describe('TaskRunner toolset tools/list probe — who pays for it, and for how l
     // The pi shape: `mcpToolsets: true`, but it projects servers through its
     // own extension and reads no observation, so an offer routed to it must
     // not wait on a `tools/list` handshake per projected server.
-    const adapter = new StubRuntimeAdapter('pi', { present: true }, {
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: true, resume: true, approvalInteractive: false, mcpToolsets: true,
       permissionModes: ['auto', 'readonly'],
     }, false);
@@ -309,7 +309,7 @@ describe('TaskRunner toolset tools/list probe — who pays for it, and for how l
   it('declines permanently when a server reports an ungrantable tool name', async () => {
     // A retry would start the same configured command and get the same answer,
     // so a retryable decline here is an infinite re-offer loop.
-    const adapter = new StubRuntimeAdapter('claude', { present: true }, MCP_CAPABLE);
+    const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
     const sent: Envelope[] = [];
     const runner = await makeRunner(
       adapter,
@@ -346,7 +346,7 @@ describe('TaskRunner toolset tools/list probe — who pays for it, and for how l
         args: [SILENT_PROBE_FIXTURE, JSON.stringify({ silent: true })],
       };
     }
-    const adapter = new StubRuntimeAdapter('claude', { present: true }, MCP_CAPABLE);
+    const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
     const sent: Envelope[] = [];
     const budgets: Array<number | undefined> = [];
     const runner = await makeRunner(
@@ -487,13 +487,13 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
             salesko: { mcpServers: { salesko: { command: '/opt/salesko/mcp', args: ['--stdio'] } } },
           },
         },
-        [new StubRuntimeAdapter('claude', { present: true }, MCP_CAPABLE)],
+        [new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE)],
       ),
     ).not.toThrow();
   });
 
   it('rejects malformed ids, reserved names, and env/header fields synchronously', () => {
-    const adapter = new StubRuntimeAdapter('claude', { present: true }, MCP_CAPABLE);
+    const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
     expect(() =>
       createDaemonWithAdapters(
         { ...baseConfig, mcpToolsets: { Salesko: { mcpServers: { salesko: { command: '/bin/true' } } } } },

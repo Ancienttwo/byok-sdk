@@ -57,12 +57,13 @@ Empirically confirmed while building this recipe (see
 `smoke-test.sh`'s two assertions):
 
 - **pi sidecar absent** (no `BYOK_PI_BIN`): `PiAdapter.detect()` reports
-  `{ present: false }` cleanly. A product treats this as a missing core
-  deployment dependency, not as a supported steady state.
+  `{ kind: 'probe-failed' }` when package resolution fails. An explicit
+  override pointing to a missing executable reports `{ kind: 'not-found' }`. A product
+  treats this as a missing core deployment dependency, not as a supported steady state.
 - **pi picked up via override**: `BYOK_PI_BIN=/path/to/pi` short-circuits
   resolve-bin.ts straight past `import.meta.resolve` entirely, so a stub or
   the version-matched Node 22.22+ pi binary at that path is detected correctly
-  (`present: true`) even inside the compiled executable.
+  (`kind: 'available'`) even inside the compiled executable.
 
 **claude and codex are never a hazard here.** Both adapters'
 `resolve-bin.ts` (`packages/client/src/adapters/{claude,codex}/`) only ever

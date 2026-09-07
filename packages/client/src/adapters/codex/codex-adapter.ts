@@ -1,3 +1,4 @@
+import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { promisify } from 'node:util';
@@ -109,14 +110,15 @@ export class CodexAdapter implements RuntimeAdapter {
   constructor(private readonly options: CodexAdapterOptions = {}) {}
 
   async detect(): Promise<RuntimeDetectResult> {
-    const bin = this.resolveBin();
     try {
-      const versionResult = await execFileAsync(bin.command, ['--version'], { timeout: DETECT_TIMEOUT_MS });
-      const version = versionResult.stdout.trim() || versionResult.stderr.trim();
+      const bin = this.resolveBin();
+      const probe = await probeRuntimeVersion(bin.command, DETECT_TIMEOUT_MS);
+      if (probe.kind !== 'available') return probe;
+      const version = probe.stdout.trim() || probe.stderr.trim();
       const authPresent = await this.probeAuthPresent(bin);
-      return { present: true, version, authPresent };
-    } catch {
-      return { present: false };
+      return { kind: 'available', version, authPresent };
+    } catch (error) {
+      return classifyDetectError(error);
     }
   }
 

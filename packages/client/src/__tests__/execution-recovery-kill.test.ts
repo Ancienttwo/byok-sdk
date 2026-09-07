@@ -239,7 +239,12 @@ async function arm(name: string): Promise<void> {
 
 async function finish(taskId: string, summary: string): Promise<void> {
   if (current === undefined) throw new Error('test context missing');
-  await fs.writeFile(path.join(current.daemonBase.controlDir, `${taskId}.finish.json`), JSON.stringify({ summary }));
+  // Existence is the child process's publication signal. Publish complete JSON
+  // atomically so it cannot observe the file between open/truncate and write.
+  const target = path.join(current.daemonBase.controlDir, `${taskId}.finish.json`);
+  const pending = `${target}.pending`;
+  await fs.writeFile(pending, JSON.stringify({ summary }));
+  await fs.rename(pending, target);
 }
 
 async function pair(cloud: JsonChild, daemonOptions: Partial<ChildConfig> = {}): Promise<{ daemon: JsonChild; deviceId: string }> {
@@ -328,6 +333,7 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
     if (terminal.type === 'task.fail') expect(terminal.payload).toMatchObject({ reason: 'daemon_interrupted', retryable: false });
     const [task] = journalRows('SELECT recovery_marker FROM journal_task');
     expect(JSON.parse(String(task?.recovery_marker))).toMatchObject({ disposition: 'interrupted' });
+    await waitForJournalTruth('confirmed');
     expect(journalRows('SELECT terminal_type, truth_state FROM journal_terminal')).toEqual([
       { terminal_type: 'failed', truth_state: 'confirmed' },
     ]);
@@ -347,6 +353,7 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
     await startDaemon();
     await waitForAttempt(cloud, offer.taskId, 'complete');
     expect(await cloud.rpc('readTerminalBody', { taskId: offer.taskId })).toBe(pending?.bytes);
+    await waitForJournalTruth('confirmed');
     expect(journalRows('SELECT truth_state FROM journal_terminal')).toEqual([{ truth_state: 'confirmed' }]);
     expect(starts()).toHaveLength(1);
   }, 30_000);
@@ -410,6 +417,7 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
       const attempt = await waitForAttempt(cloud, offer.taskId, 'failed');
       expect(attempt.terminalCause).toBe('daemon_interrupted');
       expect(starts()).toHaveLength(1);
+      await waitForJournalTruth('confirmed');
       const [settled] = journalRows('SELECT bytes, terminal_type, truth_state FROM journal_terminal');
       expect(settled).toMatchObject({ terminal_type: 'failed', truth_state: 'confirmed' });
       if (terminalCommittedAfterSecond) expect(settled?.bytes).toBe(afterSecond[0]?.bytes);
@@ -435,6 +443,7 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
     await startDaemon();
     await waitForAttempt(cloud, offer.taskId, 'complete');
     expect(starts()).toHaveLength(1);
+    await waitForJournalTruth('confirmed');
     expect(journalRows('SELECT truth_state FROM journal_terminal')).toEqual([{ truth_state: 'confirmed' }]);
   }, 30_000);
 
@@ -521,6 +530,7 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
     const terminal = decodeEnvelope(String(await cloud.rpc('readTerminalBody', { taskId: offer.taskId })));
     expect(terminal.type).toBe('task.complete');
     expect(await cloud.rpc('readTerminalBody', { taskId: offer.taskId })).toBe(original?.bytes);
+    await waitForJournalTruth('confirmed');
     expect(journalRows('SELECT terminal_type, truth_state FROM journal_terminal')).toEqual([
       { terminal_type: 'complete', truth_state: 'confirmed' },
     ]);

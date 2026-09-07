@@ -1,3 +1,5 @@
+import type { RuntimeDetectResult } from '../types';
+import { validateRuntimeDetectResult } from '../runtime-detection';
 import { PiAdapter, ClaudeAdapter, CodexAdapter, type RuntimeAdapter } from '../index';
 
 /**
@@ -20,13 +22,15 @@ function boundedSingleLine(value: string, maxChars: number): string {
   return value.replace(/[\r\n\t]/g, ' ').slice(0, maxChars);
 }
 
+class RuntimeProbeTimeout extends Error {}
+
 async function detectWithTimeout(adapter: RuntimeAdapter, timeoutMs: number): ReturnType<RuntimeAdapter['detect']> {
   let timer: NodeJS.Timeout | undefined;
   try {
     return await Promise.race([
       adapter.detect(),
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error('runtime detection timed out')), timeoutMs);
+        timer = setTimeout(() => reject(new RuntimeProbeTimeout()), timeoutMs);
         timer.unref?.();
       }),
     ]);
@@ -61,7 +65,9 @@ export function defaultRuntimeAdapters(runtimeAllowlist: string[] | undefined): 
  */
 export interface ProbedRuntime {
   id: string;
+  /** Deterministic projection of outcome, never adapter-authored. */
   present: boolean;
+  outcome: RuntimeDetectResult['kind'];
   version?: string;
   authPresent?: boolean;
   steer: boolean;
@@ -70,13 +76,9 @@ export interface ProbedRuntime {
 }
 
 /**
- * Runs `detect()` and reads each adapter's frozen descriptor, in parallel. Every
- * bundled adapter's own `detect()` already catches its own failures (e.g.
- * `pi-adapter.ts`'s `detect()` wraps its version probe in try/catch and
- * resolves `{present: false}` rather than rejecting) — the catch here is a
- * defensive backstop for a `RuntimeAdapter` that doesn't hold that
- * convention, not a workaround for an observed failure in the bundled
- * three.
+ * Fresh, parallel local observations. A custom adapter timeout is an observation
+ * deadline only: detect() has no cancellation contract. Never expose arbitrary
+ * adapter errors or interpret an old/malformed result as available.
  */
 export async function probeRuntimes(
   adapters: readonly RuntimeAdapter[],
@@ -98,20 +100,21 @@ export async function probeRuntimes(
         permissionModes = caps.permissionModes
           .slice(0, MAX_PERMISSION_MODES)
           .map((mode) => boundedSingleLine(mode, MAX_PERMISSION_MODE_CHARS));
-        const detected = await detectWithTimeout(adapter, timeoutMs);
+        const detected = validateRuntimeDetectResult(await detectWithTimeout(adapter, timeoutMs));
         return {
           id,
-          present: detected.present === true,
-          ...(detected.version === undefined
+          present: detected.kind === 'available',
+          outcome: detected.kind,
+          ...(detected.kind !== 'available' || detected.version === undefined
             ? {}
             : { version: boundedSingleLine(detected.version, MAX_RUNTIME_VERSION_CHARS) }),
-          ...(typeof detected.authPresent === 'boolean' ? { authPresent: detected.authPresent } : {}),
+          ...(detected.kind === 'available' && typeof detected.authPresent === 'boolean' ? { authPresent: detected.authPresent } : {}),
           steer,
           resume,
           permissionModes,
         };
-      } catch {
-        return { id, present: false, steer, resume, permissionModes };
+      } catch (error) {
+        return { id, present: false, outcome: error instanceof RuntimeProbeTimeout ? 'timeout' : 'probe-failed', steer, resume, permissionModes };
       }
     }),
   );

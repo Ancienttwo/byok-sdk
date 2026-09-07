@@ -210,7 +210,7 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
         environmentRequirements: { credentialNames: [] },
       }),
       async detect() {
-        return { present: true };
+        return { kind: 'available' };
       },
       async prepare() {
         return { kind: 'reject', reason: 'not used by capability handshake test', retryable: false };

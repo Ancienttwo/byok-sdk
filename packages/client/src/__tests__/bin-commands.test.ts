@@ -86,7 +86,7 @@ describe('bin/commands/status: runStatusCommand', () => {
     const { log, lines } = collectLog();
     const config = baseConfig(storeDir, { branding: { displayName: 'Acme Coder' } });
 
-    await runStatusCommand(config, { log, adapters: [new StubRuntimeAdapter('pi', { present: true, version: '1.0' })] });
+    await runStatusCommand(config, { log, adapters: [new StubRuntimeAdapter('pi', { kind: 'available', version: '1.0' })] });
 
     expect(lines[0]).toBe('product: Acme Coder (acme-product)');
     expect(lines.some((l) => l === 'paired: no')).toBe(true);
@@ -180,8 +180,8 @@ describe('bin/commands/runtimes: runRuntimesCommand', () => {
     await runRuntimesCommand(baseConfig('/unused'), {
       log,
       adapters: [
-        new StubRuntimeAdapter('pi', { present: true, version: '1.2.3', authPresent: true }),
-        new StubRuntimeAdapter('claude', { present: false }),
+        new StubRuntimeAdapter('pi', { kind: 'available', version: '1.2.3', authPresent: true }),
+        new StubRuntimeAdapter('claude', { kind: 'not-found' }),
       ],
     });
     expect(lines).toEqual([
@@ -190,7 +190,7 @@ describe('bin/commands/runtimes: runRuntimesCommand', () => {
       // fixtures/stub-adapter.ts's `DEFAULT_STUB_CAPABILITIES` doc comment —
       // not modeled on the real pi adapter's own narrower declared set.
       'pi: present version=1.2.3 authPresent=true capabilities=steer,resume modes=auto,readonly,plan,confirm',
-      'claude: absent',
+      'claude: not-found',
     ]);
   });
 });

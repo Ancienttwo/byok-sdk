@@ -111,7 +111,7 @@ describe('support bundle privacy and bounds', () => {
         },
         environmentRequirements: { credentialNames: [] },
       }),
-      detect: async () => ({ present: true, version: `SENTINEL_RUNTIME_VERSION\n${'x'.repeat(10_000)}`, authPresent: true }),
+      detect: async () => ({ kind: 'available', version: `SENTINEL_RUNTIME_VERSION\n${'x'.repeat(10_000)}`, authPresent: true }),
       prepare: async () => ({ kind: 'reject', reason: 'not used', retryable: false }),
     };
     const bundle = await createSupportBundle(config(dir), dir, { adapters: [runtime], connectControl: unreachable });

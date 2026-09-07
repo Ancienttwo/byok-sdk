@@ -65,14 +65,9 @@ if [ "$OS" = "Windows" ]; then
   # NOT a .cmd/.bat here on purpose: pi-adapter.ts's detect() calls Node's
   # `child_process.execFile(bin.command, ['--version'])` with no
   # `shell: true` -- Windows can't CreateProcess a .cmd/.bat directly
-  # without a shell, so execFile fails for one (silently degrading to
-  # `present: false`, same symptom as "truly absent" -- empirically
-  # confirmed while building this recipe: a .cmd stub here read as
-  # indistinguishable from no stub at all). This is a real, pre-existing
-  # execFile-without-shell limitation of pi-adapter.ts's own resolveBin
-  # usage on Windows, orthogonal to bundling -- it would affect an
-  # unbundled Windows run identically. A copy of `node.exe` is a genuine
-  # .exe that responds to `--version` on stdout with exit 0, so it is a
+  # without a shell. Detection reports the observed OS failure kind; it
+  # does not infer a cause from the file extension. A copy of node.exe is
+  # a genuine executable that answers --version successfully, so it is a
   # fair stand-in for "a real pi binary" for this smoke's purposes.
   STUB="$WORK_DIR/stub-pi.exe"
   node -e "require('fs').copyFileSync(process.execPath, process.argv[1])" "$STUB"

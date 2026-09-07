@@ -224,7 +224,7 @@ export function formatTaskListLines(tasks: readonly (DaemonTaskInfo | DerivedTas
 export function formatRuntimeLines(runtimes: readonly ProbedRuntime[]): string[] {
   if (runtimes.length === 0) return ['(no runtimes configured — check runtimeAllowlist)'];
   return runtimes.map((r) => {
-    if (!r.present) return `${r.id}: absent`;
+    if (!r.present) return `${r.id}: ${r.outcome}`;
     const caps: string[] = [];
     if (r.steer) caps.push('steer');
     if (r.resume) caps.push('resume');
@@ -267,7 +267,7 @@ export function formatStatusLines(view: StatusView): string[] {
       ? `connection: last-known=${view.connection.state} at=${view.connection.ts}`
       : 'connection: unknown (no audit log yet — run `byok-agent start` at least once to begin observing)',
   );
-  const runtimeSummary = view.runtimes.map((r) => `${r.id}=${r.present ? 'present' : 'absent'}`).join(' ');
+  const runtimeSummary = view.runtimes.map((r) => `${r.id}=${r.present ? 'present' : r.outcome}`).join(' ');
   lines.push(`runtimes: ${runtimeSummary || '(none configured)'}`);
   const c = view.taskCounts;
   lines.push(

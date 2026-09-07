@@ -60,17 +60,18 @@ describe('PiAdapter against the fake-pi fixture', () => {
   it('detect() reports present + version from the fake binary', async () => {
     const adapter = fakePiAdapter();
     const result = await adapter.detect();
-    expect(result.present).toBe(true);
+    expect(result.kind).toBe('available');
+    if (result.kind !== 'available') throw new Error('expected available runtime');
     expect(result.version).toBe('0.0.0-fake');
   });
 
-  it('detect() reports absent when a bundle cannot resolve its required external pi sidecar', async () => {
+  it('detect() reports probe-failed when a bundle cannot resolve its required external pi sidecar', async () => {
     const adapter = new PiAdapter({
       resolveBin: () => {
         throw new Error('required pi sidecar is not embedded');
       },
     });
-    await expect(adapter.detect()).resolves.toEqual({ present: false });
+    await expect(adapter.detect()).resolves.toEqual({ kind: 'probe-failed' });
   });
 
   it('start() fails closed when the required package or explicit sidecar cannot resolve', async () => {
@@ -601,6 +602,6 @@ describe('PiAdapter against the pinned package runtime (no network/API key requi
   it('detect() reads back the pinned executable version', async () => {
     const adapter = new PiAdapter();
     const result = await adapter.detect();
-    expect(result).toMatchObject({ present: true, version: '0.85.1' });
+    expect(result).toMatchObject({ kind: 'available', version: '0.85.1' });
   });
 });

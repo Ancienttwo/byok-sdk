@@ -51,7 +51,8 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
   it('detect() reports present + version + authPresent from the fake binary', async () => {
     const adapter = fakeClaudeAdapter();
     const result = await adapter.detect();
-    expect(result.present).toBe(true);
+    expect(result.kind).toBe('available');
+    if (result.kind !== 'available') throw new Error('expected available runtime');
     expect(result.version).toBe('2.0.0-fake');
     expect(result.authPresent).toBe(true);
   });
@@ -64,7 +65,8 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     process.env.FAKE_CLAUDE_AUTH_STATUS_FAIL = '1';
     try {
       const result = await adapter.detect();
-      expect(result.present).toBe(true);
+      expect(result.kind).toBe('available');
+      if (result.kind !== 'available') throw new Error('expected available runtime');
       expect(result.authPresent).toBe(false);
     } finally {
       if (original === undefined) delete process.env.FAKE_CLAUDE_AUTH_STATUS_FAIL;
@@ -72,13 +74,13 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     }
   });
 
-  it('cross-model review (Fix 4): detect() fails closed (present:false) within the timeout when the fake `--version` hangs', async () => {
+  it('cross-model review (Fix 4): detect() reports timeout within the deadline when the fake `--version` hangs', async () => {
     const adapter = fakeClaudeAdapter();
     const original = process.env.FAKE_CLAUDE_VERSION_HANG;
     process.env.FAKE_CLAUDE_VERSION_HANG = '1';
     try {
       const result = await adapter.detect();
-      expect(result.present).toBe(false);
+      expect(result.kind).toBe('timeout');
     } finally {
       if (original === undefined) delete process.env.FAKE_CLAUDE_VERSION_HANG;
       else process.env.FAKE_CLAUDE_VERSION_HANG = original;
@@ -91,7 +93,8 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     process.env.FAKE_CLAUDE_AUTH_HANG = '1';
     try {
       const result = await adapter.detect();
-      expect(result.present).toBe(true);
+      expect(result.kind).toBe('available');
+      if (result.kind !== 'available') throw new Error('expected available runtime');
       expect(result.authPresent).toBe(false);
     } finally {
       if (original === undefined) delete process.env.FAKE_CLAUDE_AUTH_HANG;
@@ -610,8 +613,8 @@ describe('ClaudeAdapter against the real installed claude binary (no network/tas
   it('detect() returns a well-formed result whether or not claude is actually installed on PATH here', async () => {
     const adapter = new ClaudeAdapter();
     const result = await adapter.detect();
-    expect(typeof result.present).toBe('boolean');
-    if (result.present) {
+    expect(typeof result.kind).toBe('string');
+    if (result.kind === 'available') {
       expect(typeof result.version).toBe('string');
       expect(result.version?.length).toBeGreaterThan(0);
       expect(typeof result.authPresent).toBe('boolean');

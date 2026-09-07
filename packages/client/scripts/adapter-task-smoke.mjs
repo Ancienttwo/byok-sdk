@@ -199,7 +199,7 @@ try {
     process.platform === 'win32'
       ? {
           descriptor: adapter.descriptor,
-          detect: async () => ({ present: true, version: 'fixture' }),
+          detect: async () => ({ kind: 'available', version: 'fixture' }),
           prepare: (input) => adapter.prepare(input),
         }
       : adapter;

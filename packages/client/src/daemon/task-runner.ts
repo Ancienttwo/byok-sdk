@@ -1,3 +1,4 @@
+import { validateRuntimeDetectResult } from '../runtime-detection';
 import { randomUUID } from 'node:crypto';
 import { promises as fs, constants as fsConstants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
@@ -4228,8 +4229,8 @@ export class TaskRunner {
           retryable: false,
         };
       }
-      const detected = await adapter.detect();
-      if (!detected.present) {
+      const detected = validateRuntimeDetectResult(await adapter.detect());
+      if (detected.kind !== 'available') {
         return {
           ok: false,
           reason: `runtime "${requestedRuntime}" is not installed/available on this device`,
@@ -4249,8 +4250,8 @@ export class TaskRunner {
       const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
       if (!adapterSupportsMode(descriptor, policyMode)) continue;
       if (requiresMcpToolsets && !adapterSupportsMcpToolsets(descriptor)) continue;
-      const detected = await adapter.detect();
-      if (detected.present) return { ok: true, adapter, descriptor };
+      const detected = validateRuntimeDetectResult(await adapter.detect());
+      if (detected.kind === 'available') return { ok: true, adapter, descriptor };
     }
     return {
       ok: false,
