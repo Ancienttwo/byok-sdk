@@ -15,9 +15,14 @@ describe.skipIf(SKIP_DATAPLANE)(`custom harness claim CAS — ${SKIP_REASON}`, (
       const tenant = tenantId('custom-harness');
       const store = new PostgresTaskAttemptStore(scope.pool, createMutableClock());
       await store.open(tenant, { taskId: 't', deviceId: 'device-a' });
-      await store.claim(tenant, { taskId: 't', deviceId: 'device-a', harnessId: 'acme-harness' });
-      await store.claim(tenant, { taskId: 't', deviceId: 'device-a', harnessId: 'other' });
-      expect(await new PostgresTaskAttemptStore(scope.pool, createMutableClock()).get(tenant, 't')).toMatchObject({ claimedHarnessId: 'acme-harness' });
+      const outcomes = await Promise.all(['acme-harness', 'other'].map((harnessId) =>
+        store.claim(tenant, { taskId: 't', deviceId: 'device-a', harnessId })));
+      const winner = await new PostgresTaskAttemptStore(scope.pool, createMutableClock()).get(tenant, 't');
+      expect(['acme-harness', 'other']).toContain(winner?.claimedHarnessId);
+      // Both CAS callers must observe the same immutable winner, so inbound
+      // can reject the losing identity without trusting its earlier read.
+      for (const outcome of outcomes) expect(outcome).toEqual(winner);
+      expect(winner?.ownerDeviceId).toBe('device-a');
       await store.open(tenant, { taskId: 'invalid', deviceId: 'device-a' });
       await expect(store.claim(tenant, { taskId: 'invalid', deviceId: 'device-a', harnessId: 'acme-harness', runtime: 'pi' })).rejects.toThrow('task_claimed_identity_exclusive');
     } finally { await scope.dispose(); }
