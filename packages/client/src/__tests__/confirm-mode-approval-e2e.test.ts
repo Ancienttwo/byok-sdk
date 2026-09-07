@@ -117,6 +117,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
   beforeEach(async () => {
     server = await TestServer.start();
+    server.setAckCapabilities(['custom-harness']);
   });
 
   afterEach(async () => {

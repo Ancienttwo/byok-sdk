@@ -1,3 +1,4 @@
+import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
  * Postgres {@link DeviceDirectory}.
  *
@@ -38,6 +39,7 @@ interface DeviceRow {
   readonly proof_key_epoch: number;
   readonly revoked: boolean;
   readonly machine_id: string | null;
+  readonly harnesses: readonly HarnessInfo[] | null;
   readonly capabilities: readonly string[] | null;
 }
 
@@ -58,12 +60,13 @@ function toRecord(row: DeviceRow): DeviceRecord {
     proofKeyEpoch: row.proof_key_epoch,
     revoked: row.revoked,
     ...(row.machine_id == null ? {} : { machineId: row.machine_id }),
+    ...(row.harnesses == null ? {} : { harnesses: row.harnesses }),
     ...(row.capabilities == null ? {} : { capabilities: Object.freeze([...row.capabilities]) }),
   };
 }
 
 const SELECT_COLUMNS =
-  'tenant_id, device_id, product_id, device_name, device_public_key, proof_key_id, proof_key_epoch, revoked, machine_id, capabilities';
+  'tenant_id, device_id, product_id, device_name, device_public_key, proof_key_id, proof_key_epoch, revoked, machine_id, capabilities, harnesses';
 
 /**
  * The device-scoped state a device row is the only reason to keep, deleted
@@ -180,7 +183,7 @@ export async function registerDeviceOnClient(
            proof_key_epoch = EXCLUDED.proof_key_epoch,
            revoked = false,
            machine_id = EXCLUDED.machine_id,
-           capabilities = NULL
+           capabilities = NULL, harnesses = NULL
      RETURNING ${SELECT_COLUMNS}`,
     [
       tenant,
@@ -276,14 +279,14 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
 
   async recordCapabilities(
     tenant: TenantId,
-    input: { readonly deviceId: string; readonly capabilities: readonly string[] },
+    input: { readonly deviceId: string; readonly harnesses?: readonly HarnessInfo[]; readonly capabilities: readonly string[] },
   ): Promise<DeviceRecord | undefined> {
     const result = await this.#pool.query<DeviceRow>(
       `UPDATE device
-          SET capabilities = $3::jsonb
+          SET capabilities = $3::jsonb, harnesses = $4::jsonb
         WHERE tenant_id = $1 AND device_id = $2 AND revoked = false
       RETURNING ${SELECT_COLUMNS}`,
-      [tenant, input.deviceId, JSON.stringify([...input.capabilities])],
+      [tenant, input.deviceId, JSON.stringify([...input.capabilities]), JSON.stringify(input.harnesses ?? [])],
     );
     const row = result.rows[0];
     return row === undefined ? undefined : toRecord(row);

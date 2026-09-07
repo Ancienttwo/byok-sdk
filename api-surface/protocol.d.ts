@@ -836,6 +836,17 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
             }, z.core.$strip>>;
         }, z.core.$strip>>>;
+        harnesses: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            version: z.ZodOptional<z.ZodString>;
+            capabilities: z.ZodObject<{
+                steer: z.ZodOptional<z.ZodBoolean>;
+                resume: z.ZodOptional<z.ZodBoolean>;
+                approvalInteractive: z.ZodOptional<z.ZodBoolean>;
+                mcpToolsets: z.ZodOptional<z.ZodBoolean>;
+                permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            }, z.core.$strip>;
+        }, z.core.$strip>>>;
         configuredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         cursor: z.ZodOptional<z.ZodNumber>;
     }, z.core.$strip>;
@@ -887,6 +898,7 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             codex: "codex";
             pi: "pi";
         }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
         dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
@@ -955,6 +967,7 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             codex: "codex";
             pi: "pi";
         }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
         dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
@@ -1029,6 +1042,7 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             codex: "codex";
             pi: "pi";
         }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
         dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
@@ -1107,6 +1121,7 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             codex: "codex";
             pi: "pi";
         }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
         dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
@@ -1225,6 +1240,7 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             codex: "codex";
             pi: "pi";
         }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
         dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
@@ -1475,6 +1491,7 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             codex: "codex";
             pi: "pi";
         }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
         capabilities: z.ZodOptional<z.ZodObject<{
             steer: z.ZodOptional<z.ZodBoolean>;
             resume: z.ZodOptional<z.ZodBoolean>;
@@ -1630,6 +1647,7 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     session_ref: z.ZodOptional<z.ZodString>;
     seq: z.ZodOptional<z.ZodNumber>;
     payload: z.ZodObject<{
+        harnessId: z.ZodOptional<z.ZodString>;
         summary: z.ZodString;
         sessionRef: z.ZodString;
         artifactRefs: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -1668,6 +1686,7 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     session_ref: z.ZodOptional<z.ZodString>;
     seq: z.ZodOptional<z.ZodNumber>;
     payload: z.ZodObject<{
+        harnessId: z.ZodOptional<z.ZodString>;
         reason: z.ZodString;
         retryable: z.ZodOptional<z.ZodBoolean>;
         usage: z.ZodOptional<z.ZodObject<{
@@ -1698,6 +1717,7 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     session_ref: z.ZodOptional<z.ZodString>;
     seq: z.ZodOptional<z.ZodNumber>;
     payload: z.ZodObject<{
+        harnessId: z.ZodOptional<z.ZodString>;
         reason: z.ZodOptional<z.ZodString>;
         usage: z.ZodOptional<z.ZodObject<{
             runtime: z.ZodEnum<{
@@ -2067,6 +2087,17 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                     permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
                 }, z.core.$strip>>;
             }, z.core.$strip>>>;
+            harnesses: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                version: z.ZodOptional<z.ZodString>;
+                capabilities: z.ZodObject<{
+                    steer: z.ZodOptional<z.ZodBoolean>;
+                    resume: z.ZodOptional<z.ZodBoolean>;
+                    approvalInteractive: z.ZodOptional<z.ZodBoolean>;
+                    mcpToolsets: z.ZodOptional<z.ZodBoolean>;
+                    permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                }, z.core.$strip>;
+            }, z.core.$strip>>>;
             configuredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
             cursor: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>;
@@ -2118,6 +2149,7 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 codex: "codex";
                 pi: "pi";
             }>>;
+            harnessId: z.ZodOptional<z.ZodString>;
             dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
                 lane: z.ZodLiteral<"subscription">;
                 runtimeId: z.ZodEnum<{
@@ -2186,6 +2218,7 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 codex: "codex";
                 pi: "pi";
             }>>;
+            harnessId: z.ZodOptional<z.ZodString>;
             dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
                 lane: z.ZodLiteral<"subscription">;
                 runtimeId: z.ZodEnum<{
@@ -2260,6 +2293,7 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 codex: "codex";
                 pi: "pi";
             }>>;
+            harnessId: z.ZodOptional<z.ZodString>;
             dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
                 lane: z.ZodLiteral<"subscription">;
                 runtimeId: z.ZodEnum<{
@@ -2338,6 +2372,7 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 codex: "codex";
                 pi: "pi";
             }>>;
+            harnessId: z.ZodOptional<z.ZodString>;
             dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
                 lane: z.ZodLiteral<"subscription">;
                 runtimeId: z.ZodEnum<{
@@ -2456,6 +2491,7 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 codex: "codex";
                 pi: "pi";
             }>>;
+            harnessId: z.ZodOptional<z.ZodString>;
             dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
                 lane: z.ZodLiteral<"subscription">;
                 runtimeId: z.ZodEnum<{
@@ -2706,6 +2742,7 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 codex: "codex";
                 pi: "pi";
             }>>;
+            harnessId: z.ZodOptional<z.ZodString>;
             capabilities: z.ZodOptional<z.ZodObject<{
                 steer: z.ZodOptional<z.ZodBoolean>;
                 resume: z.ZodOptional<z.ZodBoolean>;
@@ -2861,6 +2898,7 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
         session_ref: z.ZodOptional<z.ZodString>;
         seq: z.ZodOptional<z.ZodNumber>;
         payload: z.ZodObject<{
+            harnessId: z.ZodOptional<z.ZodString>;
             summary: z.ZodString;
             sessionRef: z.ZodString;
             artifactRefs: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -2899,6 +2937,7 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
         session_ref: z.ZodOptional<z.ZodString>;
         seq: z.ZodOptional<z.ZodNumber>;
         payload: z.ZodObject<{
+            harnessId: z.ZodOptional<z.ZodString>;
             reason: z.ZodString;
             retryable: z.ZodOptional<z.ZodBoolean>;
             usage: z.ZodOptional<z.ZodObject<{
@@ -2929,6 +2968,7 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
         session_ref: z.ZodOptional<z.ZodString>;
         seq: z.ZodOptional<z.ZodNumber>;
         payload: z.ZodObject<{
+            harnessId: z.ZodOptional<z.ZodString>;
             reason: z.ZodOptional<z.ZodString>;
             usage: z.ZodOptional<z.ZodObject<{
                 runtime: z.ZodEnum<{
@@ -3171,6 +3211,17 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                     permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
                 }, z.core.$strip>>;
             }, z.core.$strip>>>;
+            harnesses: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                version: z.ZodOptional<z.ZodString>;
+                capabilities: z.ZodObject<{
+                    steer: z.ZodOptional<z.ZodBoolean>;
+                    resume: z.ZodOptional<z.ZodBoolean>;
+                    approvalInteractive: z.ZodOptional<z.ZodBoolean>;
+                    mcpToolsets: z.ZodOptional<z.ZodBoolean>;
+                    permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                }, z.core.$strip>;
+            }, z.core.$strip>>>;
             configuredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
             cursor: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>;
@@ -3222,6 +3273,7 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 codex: "codex";
                 pi: "pi";
             }>>;
+            harnessId: z.ZodOptional<z.ZodString>;
             dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
                 lane: z.ZodLiteral<"subscription">;
                 runtimeId: z.ZodEnum<{
@@ -3290,6 +3342,7 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 codex: "codex";
                 pi: "pi";
             }>>;
+            harnessId: z.ZodOptional<z.ZodString>;
             dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
                 lane: z.ZodLiteral<"subscription">;
                 runtimeId: z.ZodEnum<{
@@ -3364,6 +3417,7 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 codex: "codex";
                 pi: "pi";
             }>>;
+            harnessId: z.ZodOptional<z.ZodString>;
             dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
                 lane: z.ZodLiteral<"subscription">;
                 runtimeId: z.ZodEnum<{
@@ -3442,6 +3496,7 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 codex: "codex";
                 pi: "pi";
             }>>;
+            harnessId: z.ZodOptional<z.ZodString>;
             dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
                 lane: z.ZodLiteral<"subscription">;
                 runtimeId: z.ZodEnum<{
@@ -3560,6 +3615,7 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 codex: "codex";
                 pi: "pi";
             }>>;
+            harnessId: z.ZodOptional<z.ZodString>;
             dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
                 lane: z.ZodLiteral<"subscription">;
                 runtimeId: z.ZodEnum<{
@@ -3810,6 +3866,7 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 codex: "codex";
                 pi: "pi";
             }>>;
+            harnessId: z.ZodOptional<z.ZodString>;
             capabilities: z.ZodOptional<z.ZodObject<{
                 steer: z.ZodOptional<z.ZodBoolean>;
                 resume: z.ZodOptional<z.ZodBoolean>;
@@ -3965,6 +4022,7 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
         session_ref: z.ZodOptional<z.ZodString>;
         seq: z.ZodOptional<z.ZodNumber>;
         payload: z.ZodObject<{
+            harnessId: z.ZodOptional<z.ZodString>;
             summary: z.ZodString;
             sessionRef: z.ZodString;
             artifactRefs: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -4003,6 +4061,7 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
         session_ref: z.ZodOptional<z.ZodString>;
         seq: z.ZodOptional<z.ZodNumber>;
         payload: z.ZodObject<{
+            harnessId: z.ZodOptional<z.ZodString>;
             reason: z.ZodString;
             retryable: z.ZodOptional<z.ZodBoolean>;
             usage: z.ZodOptional<z.ZodObject<{
@@ -4033,6 +4092,7 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
         session_ref: z.ZodOptional<z.ZodString>;
         seq: z.ZodOptional<z.ZodNumber>;
         payload: z.ZodObject<{
+            harnessId: z.ZodOptional<z.ZodString>;
             reason: z.ZodOptional<z.ZodString>;
             usage: z.ZodOptional<z.ZodObject<{
                 runtime: z.ZodEnum<{
@@ -4426,7 +4486,7 @@ export { TERMINAL_PROJECTION_SELECTION_CAPABILITY, TerminalProjectionContractSch
 export type { TerminalProjectionSelection } from './terminal-projection';
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
-export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
+export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
 export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, ConnAckPayload, TaskOfferPayload, TaskOfferWithToolsetsPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, } from './messages';
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';
 export type { Envelope } from './envelope';
@@ -4436,6 +4496,8 @@ export type { CreateEnvelopeOptions } from './codec';
 export { PairRequestSchema, PairResponseTenantIdSchema, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH, PairResponseSchema, ChallengeRequestSchema, ChallengeResponseSchema, TokenRequestSchema, TokenResponseSchema, PresencePublishRequestSchema, CreateBlobRequestSchema, CreateBlobResponseSchema, BlobDownloadUrlResponseSchema, EventsPollQuerySchema, EventsPollResponseSchema, MessagesSendRequestSchema, MessagesSendResponseSchema, AgentHomeProjectionCompletionRequestSchema, AgentHomeProjectionStatusSchema, AgentHomeProjectionReadbackSchema, AgentMemoryProjectionCommitRequestSchema, AgentMemoryProjectionCommitResponseSchema, MAX_MESSAGES_PER_BATCH, BYOK_PAIR_PATH, BYOK_CHALLENGE_PATH, BYOK_TOKEN_PATH, BYOK_CAPABILITIES_PATH, BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, BYOK_AGENT_HOME_PROJECTIONS_PATH, BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE, byokAgentHomeProjectionCompletionPath, BYOK_AGENT_MEMORY_PROJECTIONS_PATH, BYOK_PRESENCE_PATH, BYOK_ACTIVITY_PATH, BYOK_BOARD_PATH, BYOK_BOARD_STREAM_PATH, BYOK_BOARD_CLAIM_ROUTE, BYOK_BOARD_UNCLAIM_ROUTE, BYOK_BOARD_STATUS_ROUTE, BYOK_RECORDS_PATH, BYOK_RECORD_ROUTE, byokRecordPath, BYOK_SKILL_PACKS_PATH, BYOK_SKILL_PACK_FILE_ROUTE, byokSkillPackFilePath, BYOK_BLOBS_PATH, BYOK_BLOB_FINALIZE_ROUTE, BYOK_BLOB_URL_ROUTE, BYOK_BLOB_CONTENT_ROUTE, byokBlobFinalizePath, byokBlobUrlPath, byokBlobContentPath, } from './http-api';
 export type { PairRequest, PairResponse, ChallengeRequest, ChallengeResponse, TokenRequest, TokenResponse, PresencePublishRequest, CreateBlobRequest, CreateBlobResponse, BlobDownloadUrlResponse, EventsPollQuery, EventsPollResponse, MessagesSendRequest, MessagesSendResponse, AgentHomeProjectionCompletionRequest, AgentHomeProjectionStatus, AgentHomeProjectionReadback, AgentMemoryProjectionCommitRequest, AgentMemoryProjectionCommitResponse, } from './http-api';
 export type { TaskOfferType } from './messages';
+export type { HarnessId, HarnessInfo } from './messages';
+export { CUSTOM_HARNESS_CAPABILITY } from './version';
 // ==== @byok-sdk/protocol dist/messages.d.ts ====
 import { z } from 'zod';
 export declare const RuntimeIdSchema: z.ZodEnum<{
@@ -4501,6 +4563,32 @@ export declare const RuntimeInfoSchema: z.ZodObject<{
     }, z.core.$strip>>;
 }, z.core.$strip>;
 export type RuntimeInfo = z.infer<typeof RuntimeInfoSchema>;
+/** Custom identities are disjoint from the frozen built-in runtime enum. */
+export declare const HarnessIdSchema: z.ZodString;
+export type HarnessId = z.infer<typeof HarnessIdSchema>;
+export declare const HarnessInfoSchema: z.ZodObject<{
+    id: z.ZodString;
+    version: z.ZodOptional<z.ZodString>;
+    capabilities: z.ZodObject<{
+        steer: z.ZodOptional<z.ZodBoolean>;
+        resume: z.ZodOptional<z.ZodBoolean>;
+        approvalInteractive: z.ZodOptional<z.ZodBoolean>;
+        mcpToolsets: z.ZodOptional<z.ZodBoolean>;
+        permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    }, z.core.$strip>;
+}, z.core.$strip>;
+export type HarnessInfo = z.infer<typeof HarnessInfoSchema>;
+export declare const HarnessInventorySchema: z.ZodArray<z.ZodObject<{
+    id: z.ZodString;
+    version: z.ZodOptional<z.ZodString>;
+    capabilities: z.ZodObject<{
+        steer: z.ZodOptional<z.ZodBoolean>;
+        resume: z.ZodOptional<z.ZodBoolean>;
+        approvalInteractive: z.ZodOptional<z.ZodBoolean>;
+        mcpToolsets: z.ZodOptional<z.ZodBoolean>;
+        permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    }, z.core.$strip>;
+}, z.core.$strip>>;
 /** Maximum logical toolsets one daemon may advertise as locally configured. */
 export declare const CONFIGURED_TOOLSETS_MAX_ITEMS = 64;
 /**
@@ -4555,6 +4643,17 @@ export declare const ConnHelloPayloadSchema: z.ZodObject<{
             mcpToolsets: z.ZodOptional<z.ZodBoolean>;
             permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
         }, z.core.$strip>>;
+    }, z.core.$strip>>>;
+    harnesses: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        version: z.ZodOptional<z.ZodString>;
+        capabilities: z.ZodObject<{
+            steer: z.ZodOptional<z.ZodBoolean>;
+            resume: z.ZodOptional<z.ZodBoolean>;
+            approvalInteractive: z.ZodOptional<z.ZodBoolean>;
+            mcpToolsets: z.ZodOptional<z.ZodBoolean>;
+            permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        }, z.core.$strip>;
     }, z.core.$strip>>>;
     configuredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     cursor: z.ZodOptional<z.ZodNumber>;
@@ -4634,6 +4733,7 @@ export declare const TaskOfferPayloadSchema: z.ZodObject<{
         codex: "codex";
         pi: "pi";
     }>>;
+    harnessId: z.ZodOptional<z.ZodString>;
     dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
         lane: z.ZodLiteral<"subscription">;
         runtimeId: z.ZodEnum<{
@@ -4705,6 +4805,7 @@ export declare const TaskOfferWithToolsetsPayloadSchema: z.ZodObject<{
         codex: "codex";
         pi: "pi";
     }>>;
+    harnessId: z.ZodOptional<z.ZodString>;
     dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
         lane: z.ZodLiteral<"subscription">;
         runtimeId: z.ZodEnum<{
@@ -4777,6 +4878,7 @@ export declare const TaskOfferForAgentPayloadSchema: z.ZodObject<{
         codex: "codex";
         pi: "pi";
     }>>;
+    harnessId: z.ZodOptional<z.ZodString>;
     dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
         lane: z.ZodLiteral<"subscription">;
         runtimeId: z.ZodEnum<{
@@ -4853,6 +4955,7 @@ export declare const TaskOfferForAgentWithEgressPayloadSchema: z.ZodObject<{
         codex: "codex";
         pi: "pi";
     }>>;
+    harnessId: z.ZodOptional<z.ZodString>;
     dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
         lane: z.ZodLiteral<"subscription">;
         runtimeId: z.ZodEnum<{
@@ -4970,6 +5073,7 @@ export declare const TaskOfferForAgentWithEgressFreshPayloadSchema: z.ZodObject<
         codex: "codex";
         pi: "pi";
     }>>;
+    harnessId: z.ZodOptional<z.ZodString>;
     dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
         lane: z.ZodLiteral<"subscription">;
         runtimeId: z.ZodEnum<{
@@ -5387,6 +5491,7 @@ export declare const TaskClaimPayloadSchema: z.ZodObject<{
         codex: "codex";
         pi: "pi";
     }>>;
+    harnessId: z.ZodOptional<z.ZodString>;
     capabilities: z.ZodOptional<z.ZodObject<{
         steer: z.ZodOptional<z.ZodBoolean>;
         resume: z.ZodOptional<z.ZodBoolean>;
@@ -5697,6 +5802,7 @@ export type TerminalInferenceUsage = z.infer<typeof TerminalInferenceUsageSchema
  * see `packages/client`'s `task-runner.ts`.
  */
 export declare const TaskCompletePayloadSchema: z.ZodObject<{
+    harnessId: z.ZodOptional<z.ZodString>;
     summary: z.ZodString;
     sessionRef: z.ZodString;
     artifactRefs: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -5729,6 +5835,7 @@ export declare const TaskCompletePayloadSchema: z.ZodObject<{
 export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
 /** daemon -> server: task failed. */
 export declare const TaskFailPayloadSchema: z.ZodObject<{
+    harnessId: z.ZodOptional<z.ZodString>;
     reason: z.ZodString;
     retryable: z.ZodOptional<z.ZodBoolean>;
     usage: z.ZodOptional<z.ZodObject<{
@@ -5771,6 +5878,7 @@ export type TaskFailPayload = z.infer<typeof TaskFailPayloadSchema>;
  * trigger that moves `Claimed`/`Running`/`AwaitApproval -> Cancelled`.
  */
 export declare const TaskCancelledPayloadSchema: z.ZodObject<{
+    harnessId: z.ZodOptional<z.ZodString>;
     reason: z.ZodOptional<z.ZodString>;
     usage: z.ZodOptional<z.ZodObject<{
         runtime: z.ZodEnum<{
@@ -5869,6 +5977,7 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
             codex: "codex";
             pi: "pi";
         }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
         dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
@@ -5929,6 +6038,7 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
             codex: "codex";
             pi: "pi";
         }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
         dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
@@ -5995,6 +6105,7 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
             codex: "codex";
             pi: "pi";
         }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
         dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
@@ -6065,6 +6176,7 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
             codex: "codex";
             pi: "pi";
         }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
         dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
@@ -6175,6 +6287,7 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
             codex: "codex";
             pi: "pi";
         }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
         dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
@@ -6285,6 +6398,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             codex: "codex";
             pi: "pi";
         }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
         dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
@@ -6345,6 +6459,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             codex: "codex";
             pi: "pi";
         }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
         dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
@@ -6411,6 +6526,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             codex: "codex";
             pi: "pi";
         }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
         dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
@@ -6481,6 +6597,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             codex: "codex";
             pi: "pi";
         }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
         dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
@@ -6591,6 +6708,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             codex: "codex";
             pi: "pi";
         }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
         dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
@@ -6689,6 +6807,17 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
                 mcpToolsets: z.ZodOptional<z.ZodBoolean>;
                 permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
             }, z.core.$strip>>;
+        }, z.core.$strip>>>;
+        harnesses: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            version: z.ZodOptional<z.ZodString>;
+            capabilities: z.ZodObject<{
+                steer: z.ZodOptional<z.ZodBoolean>;
+                resume: z.ZodOptional<z.ZodBoolean>;
+                approvalInteractive: z.ZodOptional<z.ZodBoolean>;
+                mcpToolsets: z.ZodOptional<z.ZodBoolean>;
+                permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            }, z.core.$strip>;
         }, z.core.$strip>>>;
         configuredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         cursor: z.ZodOptional<z.ZodNumber>;
@@ -6933,6 +7062,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             codex: "codex";
             pi: "pi";
         }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
         capabilities: z.ZodOptional<z.ZodObject<{
             steer: z.ZodOptional<z.ZodBoolean>;
             resume: z.ZodOptional<z.ZodBoolean>;
@@ -7040,6 +7170,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         approvalId: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>;
     readonly 'task.complete': z.ZodObject<{
+        harnessId: z.ZodOptional<z.ZodString>;
         summary: z.ZodString;
         sessionRef: z.ZodString;
         artifactRefs: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -7070,6 +7201,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         }, z.core.$strict>>;
     }, z.core.$strip>;
     readonly 'task.fail': z.ZodObject<{
+        harnessId: z.ZodOptional<z.ZodString>;
         reason: z.ZodString;
         retryable: z.ZodOptional<z.ZodBoolean>;
         usage: z.ZodOptional<z.ZodObject<{
@@ -7092,6 +7224,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         }, z.core.$strict>>;
     }, z.core.$strip>;
     readonly 'task.cancelled': z.ZodObject<{
+        harnessId: z.ZodOptional<z.ZodString>;
         reason: z.ZodOptional<z.ZodString>;
         usage: z.ZodOptional<z.ZodObject<{
             runtime: z.ZodEnum<{
@@ -7356,5 +7489,6 @@ export declare const STRICT_AGENT_ONLY_CAPABILITY: 'strict-agent-only';
  * boundary for long-poll: an older daemon skips it as unknown and therefore
  * cannot accidentally execute the instruction without the required tools.
  */
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "terminal-projection-selection"];
+export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "terminal-projection-selection", "custom-harness"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];

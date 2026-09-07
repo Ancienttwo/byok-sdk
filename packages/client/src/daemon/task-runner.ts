@@ -1389,6 +1389,8 @@ export class TaskRunner {
   /** Startup resources have an owner even before a Session can become active. */
   private startupRetryTimer: ReturnType<typeof setTimeout> | undefined;
 
+  private readonly claimedHarnesses = new Map<string, string>();
+
   private readonly homeReservations = new Map<string, number>();
 
   private readonly startupOwners = new Map<string, {
@@ -1821,6 +1823,14 @@ export class TaskRunner {
         return;
       }
 
+      if (payload.harnessId !== undefined && (payload.runtime !== undefined || payload.dispatchSelection !== undefined)) {
+        decline('harnessId cannot be combined with a built-in runtime selection', false);
+        return;
+      }
+      if (payload.harnessId !== undefined && !(this.deps.getServerCapabilities?.() ?? []).includes('custom-harness')) {
+        decline('server does not support custom-harness identity', false);
+        return;
+      }
       const requiredToolsets = 'requiredToolsets' in payload ? payload.requiredToolsets : undefined;
       const resolvedMcp = requiredToolsets ? this.resolveMcpServers(requiredToolsets) : undefined;
       if (resolvedMcp && !resolvedMcp.ok) {
@@ -1835,7 +1845,7 @@ export class TaskRunner {
       }
 
       const offered = withoutRequiredToolsets(payload);
-      const requestedRuntime = payload.dispatchSelection?.runtimeId ?? payload.runtime;
+      const requestedRuntime = payload.harnessId ?? payload.dispatchSelection?.runtimeId ?? payload.runtime;
       const requiresAgentMemoryMcp = agentRef !== undefined
         && this.deps.agentMemoryMcpBin !== undefined
         && isAgentMemorySecureFilesystemAvailable(this.deps.agentMemoryFilesystemHelperBin !== undefined);
@@ -1846,6 +1856,10 @@ export class TaskRunner {
       );
       if (!pick.ok) {
         decline(pick.reason, pick.retryable);
+        return;
+      }
+      if (!isKnownRuntimeId(pick.descriptor.id) && !(this.deps.getServerCapabilities?.() ?? []).includes('custom-harness')) {
+        decline('server does not support the selected custom harness identity', false);
         return;
       }
       // The environment EVERY child process of this task receives. Computed
@@ -2116,6 +2130,7 @@ export class TaskRunner {
       // Claim is the first externally visible commitment; instruction bytes,
       // workspace preparation, and process creation remain after it.
       await this.deps.beforeClaim?.(taskId, manifest.descriptor.id);
+      if (!isKnownRuntimeId(manifest.descriptor.id)) this.claimedHarnesses.set(taskId, manifest.descriptor.id);
       this.deps.send(
         createEnvelope(
           'task.claim',
@@ -2133,6 +2148,7 @@ export class TaskRunner {
             // where an auto-selected task left the server never learning
             // which runtime actually ran.
             runtime: isKnownRuntimeId(manifest.descriptor.id) ? manifest.descriptor.id : undefined,
+            ...(!isKnownRuntimeId(manifest.descriptor.id) ? { harnessId: manifest.descriptor.id } : {}),
             // S0/D-4 (`task.claim.capabilities`, docs/protocol.md §2.4): the
             // selected adapter's own capability self-report, carried on the
             // same message that establishes the task↔runtime binding. The
@@ -2282,7 +2298,7 @@ export class TaskRunner {
             this.pendingCancelled.delete(taskId);
             this.addFinishedTaskId(taskId);
             this.deps.send(createEnvelope('task.cancelled', {
-              reason,
+              reason, ...(this.claimedHarnesses.has(taskId) ? { harnessId: this.claimedHarnesses.get(taskId)! } : {}),
               ...(agentBinding === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
             }, { taskId }));
           } else if (agentBinding === undefined) await this.fail(taskId, err.message, false);
@@ -2298,6 +2314,7 @@ export class TaskRunner {
           gitLease?.release();
           this.deps.send(createEnvelope('task.cancelled', {
             reason,
+            ...(this.claimedHarnesses.has(taskId) ? { harnessId: this.claimedHarnesses.get(taskId)! } : {}),
             ...(agentBinding === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
           }, { taskId }));
           return;
@@ -2530,6 +2547,7 @@ export class TaskRunner {
       }
       this.inFlightBlobAborts.delete(taskId);
       this.inFlightOffers.delete(taskId);
+      this.claimedHarnesses.delete(taskId);
     }
   }
 
@@ -3795,7 +3813,7 @@ export class TaskRunner {
       createEnvelope(
         'task.fail',
         active === undefined
-          ? { reason, retryable }
+          ? { reason, retryable, ...(this.claimedHarnesses.has(taskId) ? { harnessId: this.claimedHarnesses.get(taskId)! } : {}) }
           : { reason, retryable, ...this.terminalInferenceUsagePayload(active), ...this.agentTerminalPayload(active) },
         { taskId },
       ),
@@ -3842,7 +3860,7 @@ export class TaskRunner {
     }
     this.deps.send(createEnvelope(
       'task.fail',
-      { reason, retryable, agentRef },
+      { reason, retryable, agentRef, ...(!isKnownRuntimeId(context.runtimeId) ? { harnessId: context.runtimeId } : {}) },
       { taskId },
     ));
     return result.ok;
@@ -3858,10 +3876,11 @@ export class TaskRunner {
    * omits this optional block rather than fabricating a usage observation from
    * independently known runtime, elapsed duration, or Local Agent version.
    */
-  private terminalInferenceUsagePayload(active: ActiveTask): { usage?: TerminalInferenceUsage } {
+  private terminalInferenceUsagePayload(active: ActiveTask): { usage?: TerminalInferenceUsage; harnessId?: string } {
     const release = this.deps.localAgentRelease;
     const runtimeId = active.adapter.descriptor.id;
-    if (release === undefined || active.lastUsage === undefined || !isKnownRuntimeId(runtimeId)) return {};
+    if (!isKnownRuntimeId(runtimeId)) return { harnessId: runtimeId };
+    if (release === undefined || active.lastUsage === undefined) return {};
 
     const nowMs = Date.now();
     const durationMs = terminalUsageNumber(nowMs - active.startedAtMs, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS);

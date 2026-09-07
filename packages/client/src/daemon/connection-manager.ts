@@ -1,3 +1,4 @@
+import type { HarnessInfo } from '@byok-sdk/protocol';
 import {
   MAX_MESSAGES_PER_BATCH,
   createEnvelope,
@@ -31,7 +32,7 @@ function isCursorEnvelopeType(type: Envelope['type']): boolean {
 function createConnectionHelloEnvelope(
   opts: Pick<
     ConnectionManagerOptions,
-    'deviceId' | 'productId' | 'capabilities' | 'clientVersion' | 'runtimes' | 'getConfiguredToolsets'
+    'deviceId' | 'productId' | 'capabilities' | 'clientVersion' | 'runtimes' | 'harnesses' | 'getConfiguredToolsets'
   >,
   getCursor: () => number | undefined,
 ): Envelope {
@@ -43,6 +44,7 @@ function createConnectionHelloEnvelope(
     productId: opts.productId,
     clientVersion: opts.clientVersion,
     runtimes: opts.runtimes,
+    harnesses: opts.harnesses,
     configuredToolsets: configuredToolsets === undefined ? undefined : [...configuredToolsets],
     cursor: getCursor(),
   });
@@ -56,6 +58,7 @@ export interface ConnectionManagerOptions {
   /** U4a Local Agent release version, sent unchanged in `conn.hello`. */
   clientVersion?: string;
   runtimes: RuntimeInfo[];
+  harnesses?: HarnessInfo[];
   /** Reads current sorted logical IDs from the validated local registry for every `conn.hello`. */
   getConfiguredToolsets?: () => readonly ToolsetId[];
   auth: AuthManager;

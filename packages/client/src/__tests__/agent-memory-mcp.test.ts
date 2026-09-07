@@ -204,6 +204,7 @@ describe('Agent memory MCP local authority', () => {
     });
     const runner = new TaskRunner({
       adapters: [unsupported, supported],
+      getServerCapabilities: () => ['custom-harness'],
       workspaceRoot,
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: new AgentSessionHandoffStore(),

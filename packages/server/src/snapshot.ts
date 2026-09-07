@@ -107,6 +107,7 @@ export function toTaskSnapshot(
     updatedAt: attempt.updatedAt,
     ...(result === undefined ? {} : { result }),
     ...(pending?.approvalId === undefined ? {} : { pendingApprovalId: pending.approvalId }),
+    ...(attempt.claimedHarnessId === undefined ? {} : { claimedHarnessId: attempt.claimedHarnessId }),
     ...(attempt.claimedRuntime === undefined ? {} : { claimedRuntime: attempt.claimedRuntime }),
     ...(attempt.claimedRuntimeCapabilities === undefined
       ? {}
@@ -128,6 +129,7 @@ export function toMachineInfo(device: DeviceRecord, connection: DeviceConnection
     connected: connection?.connected ?? false,
     lastSeen: connection?.lastSeen,
     ...(connection?.clientVersion === undefined ? {} : { clientVersion: connection.clientVersion }),
+    harnesses: device.harnesses,
     runtimes: connection?.runtimes === undefined ? undefined : [...connection.runtimes],
     configuredToolsets:
       connection?.configuredToolsets === undefined ? undefined : [...connection.configuredToolsets],

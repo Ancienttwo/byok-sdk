@@ -191,6 +191,7 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
       taskId: string;
       deviceId: string;
       runtime?: RuntimeId;
+      harnessId?: string;
       capabilities?: RuntimeCapabilities;
     },
   ): Promise<TaskAttempt | undefined> {
@@ -211,6 +212,7 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
         ...existing,
         ownerDeviceId: input.deviceId,
         ...(input.runtime === undefined ? {} : { claimedRuntime: input.runtime }),
+        ...(input.harnessId === undefined ? {} : { claimedHarnessId: input.harnessId }),
         ...(input.capabilities === undefined
           ? {}
           : { claimedRuntimeCapabilities: { ...input.capabilities } }),

@@ -26,6 +26,7 @@ interface TaskRelayState {
   readonly early: Array<{ readonly envelope: InboundCommitted['envelope']; readonly at: string }>;
   latestApprovalRequestSourceEnvelopeId?: string;
   claimedRuntime?: RuntimeId;
+  claimedHarnessId?: string;
   reclaimTimer?: ReturnType<typeof setTimeout>;
 }
 
@@ -206,6 +207,7 @@ export class TaskEventRelay implements ByokCloudObserver {
     switch (envelope.type) {
       case 'task.claim':
         if (envelope.payload.runtime !== undefined) state.claimedRuntime = envelope.payload.runtime;
+        if (envelope.payload.harnessId !== undefined) state.claimedHarnessId = envelope.payload.harnessId;
         this.#transition(state, taskId, 'Claimed', at);
         return;
       case 'task.started':
@@ -299,6 +301,7 @@ export class TaskEventRelay implements ByokCloudObserver {
       taskId,
       state: next,
       at,
+      ...(state.claimedHarnessId === undefined ? {} : { claimedHarnessId: state.claimedHarnessId }),
       ...(state.claimedRuntime === undefined ? {} : { claimedRuntime: state.claimedRuntime }),
     });
     if (next !== 'Complete' && next !== 'Failed' && next !== 'Cancelled') return;

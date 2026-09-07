@@ -95,6 +95,19 @@ export const RuntimeInfoSchema = z.object({
 });
 export type RuntimeInfo = z.infer<typeof RuntimeInfoSchema>;
 
+/** Custom identities are disjoint from the frozen built-in runtime enum. */
+export const HarnessIdSchema = z.string().min(1).max(128).regex(/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/)
+  .refine(value => !['pi', 'claude', 'codex'].includes(value), 'built-in runtime must use runtime');
+export type HarnessId = z.infer<typeof HarnessIdSchema>;
+export const HarnessInfoSchema = z.object({
+  id: HarnessIdSchema,
+  version: z.string().min(1).max(128).optional(),
+  capabilities: RuntimeCapabilitiesSchema,
+});
+export type HarnessInfo = z.infer<typeof HarnessInfoSchema>;
+export const HarnessInventorySchema = z.array(HarnessInfoSchema).max(64)
+  .refine(values => new Set(values.map(value => value.id)).size === values.length, 'duplicate harness identity');
+
 /** Maximum logical toolsets one daemon may advertise as locally configured. */
 export const CONFIGURED_TOOLSETS_MAX_ITEMS = 64;
 
@@ -181,6 +194,7 @@ export const ConnHelloPayloadSchema = z.object({
   clientVersion: z.string().min(1).max(128).optional(),
   /** Runtimes detected on this device (M1 gap #4; replaces `agents`). */
   runtimes: z.array(RuntimeInfoSchema).optional(),
+  harnesses: HarnessInventorySchema.optional(),
   /** Validated logical IDs configured on this device; definitions and secrets stay local. */
   configuredToolsets: ConfiguredToolsetsSchema.optional(),
   /**
@@ -279,6 +293,7 @@ export const TaskOfferPayloadSchema = z.object({
   instruction: z.union([z.string(), InstructionBlobRefSchema]),
   policy: PermissionPolicySchema,
   runtime: RuntimeIdSchema.optional(),
+  harnessId: HarnessIdSchema.optional(),
   dispatchSelection: DispatchSelectionSchema.optional(),
   sessionRef: z.string().optional(),
   workspaceHint: z.string().optional(),
@@ -323,6 +338,7 @@ export const TaskOfferForAgentPayloadSchema = z
     agentRef: AgentRefSchema,
     requiredToolsets: RequiredToolsetsSchema.optional(),
     runtime: RuntimeIdSchema.optional(),
+    harnessId: HarnessIdSchema.optional(),
     dispatchSelection: DispatchSelectionSchema.optional(),
     terminalProjection: TerminalProjectionSelectionSchema.optional(),
     sessionRef: z.string().optional(),
@@ -673,6 +689,7 @@ export const TaskClaimPayloadSchema = z.object({
   agentId: z.string().optional(),
   agentRef: AgentRefSchema.optional(),
   runtime: RuntimeIdSchema.optional(),
+  harnessId: HarnessIdSchema.optional(),
   capabilities: RuntimeCapabilitiesSchema.optional(),
 });
 export type TaskClaimPayload = z.infer<typeof TaskClaimPayloadSchema>;
@@ -1026,6 +1043,7 @@ export type TerminalInferenceUsage = z.infer<typeof TerminalInferenceUsageSchema
  * see `packages/client`'s `task-runner.ts`.
  */
 export const TaskCompletePayloadSchema = z.object({
+  harnessId: HarnessIdSchema.optional(),
   summary: z.string(),
   sessionRef: z.string(),
   artifactRefs: z.array(BlobRefSchema).optional(),
@@ -1042,6 +1060,7 @@ export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
 
 /** daemon -> server: task failed. */
 export const TaskFailPayloadSchema = z.object({
+  harnessId: HarnessIdSchema.optional(),
   reason: z.string(),
   retryable: z.boolean().optional(),
   usage: TerminalInferenceUsageSchema.optional(),
@@ -1069,6 +1088,7 @@ export type TaskFailPayload = z.infer<typeof TaskFailPayloadSchema>;
  * trigger that moves `Claimed`/`Running`/`AwaitApproval -> Cancelled`.
  */
 export const TaskCancelledPayloadSchema = z.object({
+  harnessId: HarnessIdSchema.optional(),
   reason: z.string().optional(),
   usage: TerminalInferenceUsageSchema.optional(),
   agentRef: AgentRefSchema.optional(),

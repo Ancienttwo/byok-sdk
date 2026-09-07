@@ -27,6 +27,7 @@ import { TENANT_A, createHarness, offerPayload } from './support/harness';
  * from the source under test would assert nothing.
  */
 const EXPECTED_CAPABILITIES = [
+  'custom-harness',
   'result-document',
   'approval_resolved',
   'agent-home-contract',

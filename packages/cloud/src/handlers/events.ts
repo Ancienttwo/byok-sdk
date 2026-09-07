@@ -63,6 +63,7 @@ import { authenticateDevice, type DeviceRouteDeps } from './shared';
  * Exact-list drift guard: `packages/cloud/src/__tests__/protocol-capabilities.test.ts`.
  */
 const CLOUD_PROTOCOL_CAPABILITIES = [
+  'custom-harness',
   'result-document',
   // The kernel's inbound handles `task.approval_resolved` on both the plain
   // and the approval-timeline paths (`packages/cloud/src/inbound.ts:576,610`).

@@ -1,3 +1,4 @@
+import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
  * In-memory {@link DeviceDirectory}.
  *
@@ -94,7 +95,7 @@ export class InMemoryDeviceDirectory implements DeviceDirectory {
 
   async recordCapabilities(
     tenant: TenantId,
-    input: { readonly deviceId: string; readonly capabilities: readonly string[] },
+    input: { readonly deviceId: string; readonly harnesses?: readonly HarnessInfo[]; readonly capabilities: readonly string[] },
   ): Promise<DeviceRecord | undefined> {
     const key = tenantKey(tenant, input.deviceId);
     const record = this.#byTenant.get(key);
@@ -102,6 +103,7 @@ export class InMemoryDeviceDirectory implements DeviceDirectory {
     const updated: DeviceRecord = {
       ...record,
       capabilities: Object.freeze([...input.capabilities]),
+      harnesses: Object.freeze((input.harnesses ?? []).map(value => Object.freeze({ ...value }))),
     };
     this.#byTenant.set(key, updated);
     return updated;

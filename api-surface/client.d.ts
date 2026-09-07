@@ -2456,6 +2456,7 @@ export declare class BlobClient implements BlobResolver {
     }): Promise<BlobRef>;
 }
 // ==== @byok-sdk/client dist/daemon/connection-manager.d.ts ====
+import type { HarnessInfo } from '@byok-sdk/protocol';
 import { type CapabilityFlag, type Envelope, type RuntimeInfo, type ToolsetId } from '@byok-sdk/protocol';
 import { AuthManager } from './auth-manager';
 import type { CursorStore } from './cursor-store';
@@ -2472,6 +2473,7 @@ export interface ConnectionManagerOptions {
     /** U4a Local Agent release version, sent unchanged in `conn.hello`. */
     clientVersion?: string;
     runtimes: RuntimeInfo[];
+    harnesses?: HarnessInfo[];
     /** Reads current sorted logical IDs from the validated local registry for every `conn.hello`. */
     getConfiguredToolsets?: () => readonly ToolsetId[];
     auth: AuthManager;
@@ -3813,7 +3815,8 @@ export interface Daemon {
     /** M3-2a: same as {@link approve} but rejects — see that method's doc comment. */
     reject(taskId: string, reason?: string): Promise<void>;
 }
-/** Internal seam so tests can substitute stub adapters / faster batch and long-poll timing. `createDaemonWithAdapters` (which takes this) is also the real entry point for products supplying a hand-built adapter set `createDaemon` can't construct on its own — e.g. custom adapter options, or an adapter that REPLACES a bundled runtime's implementation under the same id. Honest limit: an adapter id outside `pi`/`claude`/`codex` cannot pass wire validation today — `RuntimeIdSchema` (`@byok-sdk/protocol`) is a closed `z.enum(['pi', 'claude', 'codex'])`, and `isRuntimeId` filtering below (see `detectRuntimes`) drops any detected adapter outside that set before it ever reaches a wire-visible field. A genuinely fourth/namespaced runtime id is a future protocol change, not something this seam enables today. */
+/** Custom adapter composition. Available custom descriptors are published through
+ * the capability-gated harness inventory; built-in RuntimeId remains closed. */
 export interface DaemonOverrides {
     /** Test-only synchronous kill points; never supplied by production configuration. */
     executionRecoveryFault?: (step: 'terminal:before-send' | 'terminal:queued' | 'outbound:before-post' | 'outbound:after-ack') => void;
@@ -7004,6 +7007,7 @@ export declare class TaskRunner {
      */
     /** Startup resources have an owner even before a Session can become active. */
     private startupRetryTimer;
+    private readonly claimedHarnesses;
     private readonly homeReservations;
     private readonly startupOwners;
     private readonly startupDisposals;

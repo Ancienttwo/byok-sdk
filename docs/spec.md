@@ -919,7 +919,7 @@ The journal owns one immutable terminal byte record, including pre-claim decline
 
 Unknown or invalid executable messages cannot silently advance the mailbox cursor. The observer consumes the protocol offer classifier. The new journal format requires complete terminal bytes: a valid hash-only predecessor is preserved and rejected with an explicit format error, never silently upgraded, quarantined as corruption, or synthesized into replayable evidence.
 
-### Execution receipts and bounded startup (#158–#166)
+### Execution receipts, bounded startup and custom harness identity (#158–#167)
 
 Independent offers may progress concurrently. Admission reserves the canonical
 Agent home synchronously before asynchronous preparation and converts that
@@ -953,3 +953,17 @@ validated fd, cancellation and actual-byte accounting: `artifactLimits` defaults
 to 16 MiB per file and 64 MiB cumulatively per task. Reads use 64 KiB chunks and
 check both initial stat and actual growth; no upload/event is emitted after
 cancellation. Strict Agent egress remains its own authority.
+
+The additive `custom-harness` capability carries custom identities separately
+from the unchanged `RuntimeId` enum. Available adapters publish bounded
+`conn.hello.harnesses` (id, optional version, capabilities). The authenticated
+hello replaces the device's durable inventory. Hosts discover it through
+`MachineInfo.harnesses`, select one device and optionally require `harnessId` on
+an offer/dispatch. That field cannot coexist with `runtime` or
+`dispatchSelection`; capability/inventory rejection occurs before reservation.
+The actual custom adapter echoes `task.claim.harnessId`; the same claim CAS stores
+`claimedHarnessId`, and every complete/fail/cancelled terminal must echo it.
+An explicitly selected harness must match the immutable offer receipt. Old peers
+without the capability are refused; no identity is inferred from display names
+or provider/model fields. Business scheduling and device choice stay with the
+host. Deploy migration `0021_custom_harness_identity.sql` before this server code.
