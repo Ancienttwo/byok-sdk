@@ -3229,7 +3229,7 @@ export interface CloudRootStores {
 }
 export declare function tenantStoresFor(principal: Principal, root: CloudRootStores): TenantStores;
 // ==== @byok-sdk/cloud dist/terminal-result.d.ts ====
-import { type AgentRef, type BlobRef, type TerminalInferenceUsage } from '@byok-sdk/protocol';
+import { type AgentRef, type BlobRef, type TerminalInferenceUsage, type TaskFailPayload } from '@byok-sdk/protocol';
 import type { RequestReceipt } from './stores/ports';
 /**
  * The typed terminal read model — the hosted counterpart of the embedded
@@ -3241,6 +3241,8 @@ import type { RequestReceipt } from './stores/ports';
 export interface TerminalResult {
     readonly taskId: string;
     readonly harnessId?: string;
+    /** Local interruption observation; claimed ownership remains on TaskAttempt. */
+    readonly recovery?: TaskFailPayload['recovery'];
     readonly state: 'complete' | 'failed' | 'cancelled';
     /** Exact Agent identity echoed by the winning terminal, when Agent-bound. */
     readonly agentRef?: AgentRef;

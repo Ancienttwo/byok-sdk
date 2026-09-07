@@ -16,6 +16,8 @@ export class TerminalCommitQueue {
 
   get pendingCount(): number { return this.pending.size; }
 
+  hasPending(taskId: string): boolean { return this.pending.has(taskId); }
+
   enqueue(taskId: string, commit: () => Promise<void>): void {
     if (!this.pending.has(taskId)) this.pending.set(taskId, { commit, receipt: Promise.resolve(), running: false });
     void this.attempt(taskId).catch(() => undefined);

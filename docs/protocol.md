@@ -2202,3 +2202,29 @@ Independent inbound handlers retain per-task control order. Acknowledgement only
 advances after all received sequences in the prefix have succeeded and the cursor
 is durable. Successfully handled tails survive gaps and cursor-write retries in
 memory; delivery alone is never acknowledgement.
+
+### Offer-bound daemon interruption (#163 / #167 acceptance follow-up)
+
+`task.fail.recovery` is optional and, when present, is the strict object
+`{ kind: 'daemon_interrupted', offerId: <original offer envelope UUID> }`.
+Only `reason: 'daemon_interrupted'` with `retryable: false` is accepted for this
+contract. The target device must echo the immutable offer's exact AgentRef and
+respect any explicit harness/runtime selection. The cloud requires its sealed
+offer receipt and exact offer UUID; a missing receipt is a rejection.
+
+A local admission may commit before the cloud accepts claim. If cloud ownership
+is absent, this bound recovery report can settle the task without asserting or
+creating a claim. Its custom harness is the device's local admission fact;
+automatic selection is permitted when the offer imposes no runtime selection.
+If cloud ownership exists, all terminals, including recovery, must match
+`claimedHarnessId` exactly. Ordinary failures gain no exception. The terminal
+read model copies `recovery` verbatim; `TaskAttempt` remains cloud claim authority.
+Deploy the supporting server before using these recovery reports. Migration
+0021 remains required for custom claims; the recovery object lives in existing
+immutable terminal receipts and requires no additional database migration.
+
+For hosted journal replay, a selected but uncommitted terminal blocks admission
+even when SQLite rolled the task row back to `received`. SDK-generated oversize
+failures project the admitted execution identity, including automatically
+selected custom adapters, through the same identity projection as other SDK
+terminals. They do not copy the requested identity from the offer.

@@ -967,3 +967,26 @@ An explicitly selected harness must match the immutable offer receipt. Old peers
 without the capability are refused; no identity is inferred from display names
 or provider/model fields. Business scheduling and device choice stay with the
 host. Deploy migration `0021_custom_harness_identity.sql` before this server code.
+
+### Terminal boundary acceptance follow-up (#163 / #167)
+
+A selected pending terminal fences admission before reading the journal task.
+The journal may still say `received` after a rolled-back decline transaction;
+that does not revoke the first decision. Redelivery retries that decision's
+exact bytes and cannot start a runtime. Only a successful commit permits ack.
+
+SDK terminals project the actual admitted adapter identity and the original
+AgentRef, including the bounded `terminal_result_too_large` replacement. An
+offer's requested harness is not evidence of automatic adapter selection.
+
+Restart reports carry `task.fail.recovery = { kind: 'daemon_interrupted',
+offerId }`, `reason: 'daemon_interrupted'`, and `retryable: false`. The cloud
+verifies the exact immutable offer receipt, tenant, target device and AgentRef,
+plus any explicit runtime/harness selection. Before cloud ownership exists,
+this is a local interruption observation: it may report the locally admitted
+custom harness but never writes `ownerDeviceId` or `claimedHarnessId`. After
+claim, the exact claimed harness comparison still applies. Mutable inventory
+cannot reconstruct historical admission. The terminal read model preserves
+`recovery`, so the host can distinguish this observation from a cloud claim.
+This closes the local-admission/cloud-claim gap without assuming that runtime
+side effects did or did not occur before a crash. No automatic re-execution.

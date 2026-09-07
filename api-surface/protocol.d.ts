@@ -1686,6 +1686,10 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     session_ref: z.ZodOptional<z.ZodString>;
     seq: z.ZodOptional<z.ZodNumber>;
     payload: z.ZodObject<{
+        recovery: z.ZodOptional<z.ZodObject<{
+            kind: z.ZodLiteral<"daemon_interrupted">;
+            offerId: z.ZodUUID;
+        }, z.core.$strict>>;
         harnessId: z.ZodOptional<z.ZodString>;
         reason: z.ZodString;
         retryable: z.ZodOptional<z.ZodBoolean>;
@@ -2937,6 +2941,10 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
         session_ref: z.ZodOptional<z.ZodString>;
         seq: z.ZodOptional<z.ZodNumber>;
         payload: z.ZodObject<{
+            recovery: z.ZodOptional<z.ZodObject<{
+                kind: z.ZodLiteral<"daemon_interrupted">;
+                offerId: z.ZodUUID;
+            }, z.core.$strict>>;
             harnessId: z.ZodOptional<z.ZodString>;
             reason: z.ZodString;
             retryable: z.ZodOptional<z.ZodBoolean>;
@@ -4061,6 +4069,10 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
         session_ref: z.ZodOptional<z.ZodString>;
         seq: z.ZodOptional<z.ZodNumber>;
         payload: z.ZodObject<{
+            recovery: z.ZodOptional<z.ZodObject<{
+                kind: z.ZodLiteral<"daemon_interrupted">;
+                offerId: z.ZodUUID;
+            }, z.core.$strict>>;
             harnessId: z.ZodOptional<z.ZodString>;
             reason: z.ZodString;
             retryable: z.ZodOptional<z.ZodBoolean>;
@@ -5835,6 +5847,10 @@ export declare const TaskCompletePayloadSchema: z.ZodObject<{
 export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
 /** daemon -> server: task failed. */
 export declare const TaskFailPayloadSchema: z.ZodObject<{
+    recovery: z.ZodOptional<z.ZodObject<{
+        kind: z.ZodLiteral<"daemon_interrupted">;
+        offerId: z.ZodUUID;
+    }, z.core.$strict>>;
     harnessId: z.ZodOptional<z.ZodString>;
     reason: z.ZodString;
     retryable: z.ZodOptional<z.ZodBoolean>;
@@ -7201,6 +7217,10 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         }, z.core.$strict>>;
     }, z.core.$strip>;
     readonly 'task.fail': z.ZodObject<{
+        recovery: z.ZodOptional<z.ZodObject<{
+            kind: z.ZodLiteral<"daemon_interrupted">;
+            offerId: z.ZodUUID;
+        }, z.core.$strict>>;
         harnessId: z.ZodOptional<z.ZodString>;
         reason: z.ZodString;
         retryable: z.ZodOptional<z.ZodBoolean>;

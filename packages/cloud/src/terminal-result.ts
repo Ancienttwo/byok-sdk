@@ -4,6 +4,7 @@ import {
   type BlobRef,
   type Envelope,
   type TerminalInferenceUsage,
+  type TaskFailPayload,
 } from '@byok-sdk/protocol';
 import { ByokCloudError } from './errors';
 import type { RequestReceipt } from './stores/ports';
@@ -18,6 +19,8 @@ import type { RequestReceipt } from './stores/ports';
 export interface TerminalResult {
   readonly taskId: string;
   readonly harnessId?: string;
+  /** Local interruption observation; claimed ownership remains on TaskAttempt. */
+  readonly recovery?: TaskFailPayload['recovery'];
   readonly state: 'complete' | 'failed' | 'cancelled';
   /** Exact Agent identity echoed by the winning terminal, when Agent-bound. */
   readonly agentRef?: AgentRef;
@@ -87,6 +90,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         taskId,
         state: 'failed',
         ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
+        ...(envelope.payload.recovery === undefined ? {} : { recovery: envelope.payload.recovery }),
         reason: envelope.payload.reason,
         terminalCause: envelope.payload.reason,
         ...(envelope.payload.retryable !== undefined

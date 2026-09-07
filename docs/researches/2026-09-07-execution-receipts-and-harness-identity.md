@@ -86,3 +86,41 @@ will run under the repository's real CI substrate gate. Native Windows process
 ownership and production rollout are not established by these macOS checks.
 
 No npm publication, deployment or issue closure is part of this task.
+
+## Acceptance follow-up: R1–R3 (#163 / #167)
+
+The earlier main-path acceptance is insufficient for complete closure. Issues
+#163 and #167 were reopened. This bounded follow-up starts from merged main
+`0c70396dbec8cc70a354ac7d7222b25cc92b9469`; it does not authorize release/deploy.
+
+### Root Cause Evidence
+
+| Finding | Trigger / trace | Pre-fix observation | Repair / regression |
+| --- | --- | --- | --- |
+| R1 | Real SQLite `terminal:before-commit` fault rolls decline back to `received`; adapter detection changes unavailable → available before replay. | Runtime started once despite the first decline still pending. | Pending terminal fence precedes journal task read/admission. Test proves zero starts, byte-identical original decline and cursor advances only after durable commit. |
+| R2 | Persist real SQLite offer + admission; reconstruct daemon before/after accepting the cloud claim, explicit/automatic custom selection. | Both pre-claim cases remained offered; recovery terminal was permanently rejected. Both post-claim controls passed. | Explicit offer-bound interruption contract settles unclaimed recovery without writing cloud claim ownership. Strict claimed identity and immutable offer/device/Agent binding remain. |
+| R3 | Explicit/automatic custom execution emits an 8192-byte summary against a 2048-byte journal record budget. | Both canonical small failures were rejected; cloud task remained running. | Shared terminal identity projection uses sealed adapter/admission facts, including oversize replacement. Both cases now reach cloud failed state with acme-harness. |
+
+The 7-case client regression failed 5 / passed 2 before production edits and now
+passes all 7. Its R2 crash images use committed SQLite transitions and reopen;
+they do not claim new custom-harness SIGKILL injection. Cloud rejection tests
+also cover wrong offer UUID, device, explicit selection, reason, retryability,
+built-in selection and conflicting existing claims. The read model preserves
+recovery metadata, and no unclaimed interruption creates `ownerDeviceId` or
+`claimedHarnessId`, including when a delayed claim arrives afterward.
+
+Frozen-source local verification: build, typecheck, API-surface (9 package
+goldens), version-authority and strict task-workflow passed. Root test: **3825
+passed / 135 skipped**, including the existing compiled SIGKILL recovery suite.
+Node was 22.22.3. The installed global Bun 1.3.14 could not load `node:sqlite`
+and was refused by repo-harness; rerunning with isolated npm Bun 1.4.0 under
+`/tmp/byok-terminal-tools` passed. No global tool installation was changed.
+The 135 skips include unconfigured live datastores and platform-specific cases;
+they are not claimed as validated. No production migration or deployment ran.
+
+The repair is for review on `codex/issues-163-167-terminal-boundaries`. Keep both
+issues open until follow-up acceptance. New push CI evidence is separate from
+the previous PR #168 CI. Migration 0021 remains a server deployment prerequisite;
+this optional recovery field uses existing immutable receipt storage and adds
+no migration. Install the supporting server before sending the new recovery
+contract from clients.

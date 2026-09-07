@@ -1060,6 +1060,8 @@ export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
 
 /** daemon -> server: task failed. */
 export const TaskFailPayloadSchema = z.object({
+  /** Local interruption observation bound to the immutable offer; does not assert a cloud claim. */
+  recovery: z.object({ kind: z.literal('daemon_interrupted'), offerId: z.uuid() }).strict().optional(),
   harnessId: HarnessIdSchema.optional(),
   reason: z.string(),
   retryable: z.boolean().optional(),

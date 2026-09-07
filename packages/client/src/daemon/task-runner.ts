@@ -1,3 +1,4 @@
+import { terminalIdentity } from './terminal-identity';
 import { startOwnedRuntime } from './runtime-start';
 import { DEFAULT_ARTIFACT_LIMITS, readArtifactBytes } from './artifact-read';
 import { validateRuntimeDetectResult } from '../runtime-detection';
@@ -2298,7 +2299,7 @@ export class TaskRunner {
             this.pendingCancelled.delete(taskId);
             this.addFinishedTaskId(taskId);
             this.deps.send(createEnvelope('task.cancelled', {
-              reason, ...(this.claimedHarnesses.has(taskId) ? { harnessId: this.claimedHarnesses.get(taskId)! } : {}),
+              reason, ...terminalIdentity(this.claimedHarnesses.get(taskId)),
               ...(agentBinding === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
             }, { taskId }));
           } else if (agentBinding === undefined) await this.fail(taskId, err.message, false);
@@ -2314,7 +2315,7 @@ export class TaskRunner {
           gitLease?.release();
           this.deps.send(createEnvelope('task.cancelled', {
             reason,
-            ...(this.claimedHarnesses.has(taskId) ? { harnessId: this.claimedHarnesses.get(taskId)! } : {}),
+            ...terminalIdentity(this.claimedHarnesses.get(taskId)),
             ...(agentBinding === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
           }, { taskId }));
           return;
@@ -3813,7 +3814,7 @@ export class TaskRunner {
       createEnvelope(
         'task.fail',
         active === undefined
-          ? { reason, retryable, ...(this.claimedHarnesses.has(taskId) ? { harnessId: this.claimedHarnesses.get(taskId)! } : {}) }
+          ? { reason, retryable, ...terminalIdentity(this.claimedHarnesses.get(taskId)) }
           : { reason, retryable, ...this.terminalInferenceUsagePayload(active), ...this.agentTerminalPayload(active) },
         { taskId },
       ),
@@ -3860,7 +3861,7 @@ export class TaskRunner {
     }
     this.deps.send(createEnvelope(
       'task.fail',
-      { reason, retryable, agentRef, ...(!isKnownRuntimeId(context.runtimeId) ? { harnessId: context.runtimeId } : {}) },
+      { reason, retryable, ...terminalIdentity(context.runtimeId, agentRef) },
       { taskId },
     ));
     return result.ok;
@@ -3876,10 +3877,10 @@ export class TaskRunner {
    * omits this optional block rather than fabricating a usage observation from
    * independently known runtime, elapsed duration, or Local Agent version.
    */
-  private terminalInferenceUsagePayload(active: ActiveTask): { usage?: TerminalInferenceUsage; harnessId?: string } {
+  private terminalInferenceUsagePayload(active: ActiveTask): { usage?: TerminalInferenceUsage } {
     const release = this.deps.localAgentRelease;
     const runtimeId = active.adapter.descriptor.id;
-    if (!isKnownRuntimeId(runtimeId)) return { harnessId: runtimeId };
+    if (!isKnownRuntimeId(runtimeId)) return {};
     if (release === undefined || active.lastUsage === undefined) return {};
 
     const nowMs = Date.now();
@@ -3900,8 +3901,8 @@ export class TaskRunner {
   }
 
   /** Exact Agent identity projection for claim/terminal wire payloads. */
-  private agentTerminalPayload(active: ActiveTask): { agentRef?: AgentRef } {
-    return active.agentRef === undefined ? {} : { agentRef: active.agentRef };
+  private agentTerminalPayload(active: ActiveTask): { agentRef?: AgentRef; harnessId?: string } {
+    return terminalIdentity(active.adapter.descriptor.id, active.agentRef);
   }
 
   /**
