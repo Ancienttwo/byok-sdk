@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../../daemon/agent-egress-policy';
 import { createInterface } from 'node:readline';
 import { DatabaseSync } from 'node:sqlite';
 import { serve } from '@hono/node-server';
@@ -45,6 +46,8 @@ const embedded = createSqliteEmbeddedStores({ path: config.dbPath }, { clock, cr
 const db = new DatabaseSync(config.dbPath);
 db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;');
 db.exec(`
+  CREATE TABLE IF NOT EXISTS fixture_message (task_id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS fixture_wire (body TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS fixture_device (
     tenant_id TEXT NOT NULL,
     product_id TEXT NOT NULL,
@@ -256,6 +259,10 @@ const cloud = createByokCloud({
   clock,
   capabilities: fullCapabilityDeclaration(),
   instanceProductId: config.productId,
+  agentMessage: { consume: async ({ taskId, payload }) => {
+    db.prepare('INSERT OR IGNORE INTO fixture_message (task_id, payload) VALUES (?, ?)').run(taskId, JSON.stringify(payload));
+    return { outcome: 'accepted' };
+  } },
   longPollHoldMs: 100,
   longPollIntervalMs: 10,
 });
@@ -284,6 +291,14 @@ const httpServer = serve({
     const faultCandidate = request.method === 'POST' && new URL(request.url).pathname === '/byok/messages'
       ? await request.clone().json().catch(() => undefined)
       : undefined;
+    if (faultCandidate !== undefined) {
+      const messages = (faultCandidate as { messages?: Array<{ type: string; payload: unknown }> }).messages ?? [];
+      if (messages.some((message) => message.type === 'agent.message.publish') && existsSync(`${config.dbPath}.message-outage`)) {
+        writeFileSync(`${config.dbPath}.message-blocked`, JSON.stringify(messages.find((message) => message.type === 'agent.message.publish')!.payload));
+        return new Response('message admission unavailable', { status: 503 });
+      }
+      db.prepare('INSERT INTO fixture_wire (body) VALUES (?)').run(JSON.stringify(messages));
+    }
     const response = await cloud.fetch(request);
     if (response.ok && hasTerminal(faultCandidate) && existsSync(config.faultFile)) {
       unlinkSync(config.faultFile);
@@ -319,6 +334,21 @@ lines.on('line', (line) => {
             agentRef: params.agentRef as { agentId: string; profileRevision: string },
           },
         });
+      case 'enqueueMessageOffer':
+        return cloud.enqueueFreshAgentEgressOffer(tenant, String(params.deviceId), {
+          agentMessageContext: { destinationBinding: 'fixture-conversation', freshnessCursor: 'fixture-turn' },
+          payload: {
+            instruction: 'publish durable reply', policy: { mode: 'auto' }, runtime: 'pi',
+            agentRef: { agentId: 'agent-message', profileRevision: 'profile-v1' },
+            egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+            messageEgress: { mode: 'required', contract: 'fixture.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
+            terminalProjection: { mode: 'none' },
+          },
+        });
+      case 'readMessages':
+        return db.prepare('SELECT * FROM fixture_message').all();
+      case 'readWire':
+        return db.prepare('SELECT body FROM fixture_wire').all().flatMap((row) => JSON.parse(String(row.body)));
       case 'cancelTask':
         return cloud.cancelTask(tenant, String(params.taskId), params.reason === undefined ? undefined : String(params.reason));
       case 'readTaskAttempt':

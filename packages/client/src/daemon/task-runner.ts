@@ -1248,11 +1248,17 @@ export class TaskRunner {
     return opened;
   }
 
+  /** A recovery terminal must not close first-message admission before this durable draft has a disposition. */
+  hasPendingRecoveredAgentMessage(taskId: string): boolean {
+    return this.recoveredMessageOutboxes.get(taskId)?.retryableRecords()
+      .some((record) => record.taskId === taskId && record.sessionRef !== undefined) === true;
+  }
+
   /** Retry stable recovered records after a transport handshake/re-handshake. */
   retryRecoveredAgentMessages(): void {
     for (const [taskId, outbox] of this.recoveredMessageOutboxes) {
       const record = outbox.get(taskId);
-      if (record?.sessionRef !== undefined) this.sendAgentMessageRecord(outbox, record);
+      if (record?.sessionRef !== undefined && this.hasPendingRecoveredAgentMessage(taskId)) this.sendAgentMessageRecord(outbox, record);
     }
   }
 

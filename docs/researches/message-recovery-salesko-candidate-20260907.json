@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "status": "prepared-not-published",
+  "saleskoSource": "5cfb4f5f4e8bce699ccfa9596eac751bb8de86b5",
+  "sdkSource": "7941c5e56b1b5e5afa58a0d4e82438b547f5d3fe",
+  "releaseVersion": "0.14.0",
+  "packages": [
+    {
+      "package": "@byok-sdk/core",
+      "version": "0.14.0",
+      "file": "byok-sdk-core-0.14.0.tgz",
+      "sha256": "1261d820b172513340469f9026bf605c14ea523654bee2633b08e2f7fc2855c3",
+      "sha512Integrity": "sha512-pIi8hnGsm5wmDpmfjxEqTceHg4WJZEL/wG3A9qQg1UG2zmFLGO0pm3qnVHkkso8/ou4di94D/felOTxGQHZ8wQ=="
+    },
+    {
+      "package": "@byok-sdk/protocol",
+      "version": "0.14.0",
+      "file": "byok-sdk-protocol-0.14.0.tgz",
+      "sha256": "9e3b5f177a4b86506ad18077f1128a02c24d3a059dc66ecbe352e38c1439e6ca",
+      "sha512Integrity": "sha512-qZ6Y/i1/mGIQCLTBVjMMFJOOaumPFKP48eLkKAqskAXEjIBC6PxkW3c/Egu4KK28rkrFseVGHHp2A170cFXyjw=="
+    },
+    {
+      "package": "@byok-sdk/server",
+      "version": "0.14.0",
+      "file": "byok-sdk-server-0.14.0.tgz",
+      "sha256": "3dfc66e3538348cffd4eebeca6b926835636a3bac61d4efa4df7eea9235e2434",
+      "sha512Integrity": "sha512-hTJxvNJBpleT6Jyiq1P2FY8XwvOfXXJS8iuWKPyXyqr6YL0XNxue7jmMKlruKGtnOZa8xAsWeNdnBtdmYU39Gw=="
+    },
+    {
+      "package": "@byok-sdk/cloud",
+      "version": "0.14.0",
+      "file": "byok-sdk-cloud-0.14.0.tgz",
+      "sha256": "ae37f9848776b75f6fc2907544e97e4d0675fc12e234eb9cbe26d5f439d16252",
+      "sha512Integrity": "sha512-V26CGsYJqS7q74mmRaCwI99rSWkXhDEOpD5e52mRjOBcVG3byDmPxHFqQqqW0rVE7SrUaCV/XIuj147uGLgfDA=="
+    },
+    {
+      "package": "@byok-sdk/client",
+      "version": "0.14.0",
+      "file": "byok-sdk-client-0.14.0.tgz",
+      "sha256": "0bfce8bc16a996c682ac1f1a8763e1b8c9d930648cbad9e5aaa62ef617db3dcb",
+      "sha512Integrity": "sha512-vyxkY9NGXukVSE44s5rtd4ysgEkoZz9uY7vSB+NDE9Ijetr98nM7eyRtjEbZuuHmXKBCxOln+nYeS5bGKEzEiA=="
+    },
+    {
+      "package": "@byok-sdk/cloud-dataplane",
+      "version": "0.14.0",
+      "file": "byok-sdk-cloud-dataplane-0.14.0.tgz",
+      "sha256": "e19178306ffa22a978fef3c5e05a5eb6e2ae45965313613eea5bb92673f67095",
+      "sha512Integrity": "sha512-VIHw0GG1Y2ytvZ6p8Uzq+TiIRupln01N/2j1HYrkG1Zwd1AvyPD6SUDO0PE0zoqmGxG1nHThnoAZHDvVb7kImw=="
+    },
+    {
+      "package": "@byok-sdk/ui-runtime",
+      "version": "0.14.0",
+      "file": "byok-sdk-ui-runtime-0.14.0.tgz",
+      "sha256": "350883e84632bcc1933aab1b7b9f0e5284b8e3a218605b813d41dd9754172f79",
+      "sha512Integrity": "sha512-EvgIotrerw/31P8OevEMIFgCSaDqujrXQriIoZhOIX0h4doWoRxx4iXWsdaOPNKSEge1FKV8M9l6K1njwqR80w=="
+    },
+    {
+      "package": "@byok-sdk/testkit",
+      "version": "0.14.0",
+      "file": "byok-sdk-testkit-0.14.0.tgz",
+      "sha256": "a15d11c377f843d77a1367f6a8f39d9cc9a115557cccc98adb818dd09192a167",
+      "sha512Integrity": "sha512-aE+tMVQbAZVJ4fX8VN2Gm4LSxL2+8UBNbgqKgeKNK/4gMcX4M3MXvedejQJVyih4WHAUAlVcP8razr+X2w5mxw=="
+    },
+    {
+      "package": "byok-sdk",
+      "version": "0.14.0",
+      "file": "byok-sdk-0.14.0.tgz",
+      "sha256": "005af3b7136e7de73f1efff4cfc9f7a11271677a1b953f5da71f4dcb71a84d51",
+      "sha512Integrity": "sha512-wQ+El1n+rsLCRcRI/0iPZ69nKUvtUi62okf/iAs9hEvwgBgSF2lG0iiwQCcMjXeqA+NZbzFQOMUuLU8YdE8ciA=="
+    },
+    {
+      "package": "@byok-sdk/keys",
+      "version": "0.4.0",
+      "file": "byok-sdk-keys-0.4.0.tgz",
+      "sha256": "14f6ccc2ec4e0d1040b4005ed70b1b17d93c501c97c271aa45eca67079e20d1d",
+      "sha512Integrity": "sha512-yt6rOKLv7sJ4boEl60pyFbk2S3Z73MJSiSsWXBGMkS3/IPJRo1EqWtiruyjyMeDhK2e8tv4dIgjamBJAFLpe5g=="
+    }
+  ],
+  "installed": [
+    {
+      "package": "@byok-sdk/core",
+      "version": "0.14.0"
+    },
+    {
+      "package": "@byok-sdk/protocol",
+      "version": "0.14.0"
+    },
+    {
+      "package": "@byok-sdk/cloud-dataplane",
+      "version": "0.14.0"
+    },
+    {
+      "package": "@byok-sdk/cloud",
+      "version": "0.14.0"
+    },
+    {
+      "package": "@byok-sdk/keys",
+      "version": "0.4.0"
+    },
+    {
+      "package": "@byok-sdk/client",
+      "version": "0.14.0"
+    }
+  ],
+  "manifestSha256": "e4eae88f1df42697770761b0fa7a6ca596434cc6e181b666e09116778a9e1918",
+  "consumer": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/salesko-sdk-candidate-AgYt94/consumer",
+  "node": "v26.3.0",
+  "bun": "1.4.0"
+}
