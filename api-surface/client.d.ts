@@ -7006,6 +7006,8 @@ export declare class TaskRunner {
     /** Restore activated, unaccepted message drafts before transport admission on daemon restart. */
     recoverAgentMessageOutboxes(agentsRoot: string): Promise<void>;
     private agentMessageOutbox;
+    /** A recovery terminal must not close first-message admission before this durable draft has a disposition. */
+    hasPendingRecoveredAgentMessage(taskId: string): boolean;
     /** Retry stable recovered records after a transport handshake/re-handshake. */
     retryRecoveredAgentMessages(): void;
     private sendAgentMessageRecord;

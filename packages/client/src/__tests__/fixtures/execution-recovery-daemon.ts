@@ -1,6 +1,9 @@
 import { appendFileSync, existsSync, promises as fs, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../../daemon/agent-egress-policy';
+import { connectControlClient } from '../../bin/control-client';
+import { runSdkReservedHelperCommand } from '../../sdk-reserved-helper-host';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type DaemonOverrides } from '../../daemon/create-daemon';
 import { SqliteLocalTaskJournal, type JournalFaultStep } from '../../daemon/journal/sqlite-journal';
@@ -27,6 +30,8 @@ interface Config {
   readonly agentHome?: boolean;
 }
 
+if (await runSdkReservedHelperCommand()) process.exit(0);
+
 const config = JSON.parse(readFileSync(process.argv[2]!, 'utf8')) as Config;
 await fs.mkdir(config.controlDir, { recursive: true });
 
@@ -47,7 +52,7 @@ class ControlledSession implements Session {
   readonly sessionRef: string;
   private closed = false;
 
-  constructor(private readonly taskId: string) {
+  constructor(private readonly taskId: string, private readonly input: RuntimeOperationStartInput) {
     this.sessionRef = `fixture-${taskId}`;
   }
 
@@ -55,6 +60,15 @@ class ControlledSession implements Session {
     const self = this;
     return {
       async *[Symbol.asyncIterator]() {
+        const server = self.input.mcpServers?.byokagentmessage;
+        if (server !== undefined) {
+          const connected = await connectControlClient({ storeDir: config.storeDir, productId: config.productId });
+          if (!connected.ok) throw new Error(connected.reason);
+          try {
+            await connected.client.request('agent_messages.publish', { contextToken: server.env!.BYOK_AGENT_MESSAGE_CONTEXT, contentType: 'text/markdown', body: '**exact durable reply**' });
+            checkpoint('message-staged');
+          } finally { connected.client.close(); }
+        }
         const finishFile = path.join(config.controlDir, `${self.taskId}.finish.json`);
         while (!self.closed) {
           if (existsSync(finishFile)) {
@@ -115,7 +129,7 @@ class ControlledAdapter implements RuntimeAdapter {
             path.join(config.controlDir, 'runtime-starts.jsonl'),
             `${JSON.stringify({ taskId, pid: process.pid, instruction: startInput.instruction })}\n`,
           );
-          return new ControlledSession(taskId);
+          return new ControlledSession(taskId, startInput);
         },
       },
     };
@@ -154,7 +168,8 @@ const daemon = createDaemonWithAdapters(
     workspaceRoot: config.workspaceRoot,
     storeDir: config.storeDir,
     hostedJournal: { mode: 'sqlite' },
-    ...(config.agentHome === true ? { agentHome: { hostStorageRoot: path.join(config.storeDir, 'agent-home') } } : {}),
+    sdkHelperHost: { mode: 'self-executable' },
+    ...(config.agentHome === true ? { agentHome: { hostStorageRoot: path.join(config.storeDir, 'agent-home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } } : {}),
   },
   [new ControlledAdapter()],
   overrides,

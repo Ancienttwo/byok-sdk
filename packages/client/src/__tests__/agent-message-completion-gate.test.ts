@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { AgentHomeManager } from '../agent-home';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { AgentMessageOutbox } from '../daemon/agent-message-outbox';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
@@ -21,6 +22,46 @@ async function temporary(prefix: string): Promise<string> {
 }
 
 describe('required Agent message completion gate', () => {
+  it.each(['accepted', 'held', 'refused'] as const)('releases only the exact durable %s recovered disposition and never replays it on reconnect', async (outcome) => {
+    const root = await temporary('byok-recovery-disposition-');
+    const agentRef = { agentId: 'agent-one', profileRevision: '7' };
+    const home = path.join(root, 'agents', agentRef.agentId);
+    await fs.mkdir(home, { recursive: true });
+    const outbox = await AgentMessageOutbox.open(home);
+    await outbox.appendDraft({ taskId: 'pending', tenantId: 'tenant-one', agentRef,
+      requirement: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
+      contentType: 'text/markdown', body: 'exact reply', maxPendingEvents: 4, maxPendingBytes: 2000 });
+    const record = await outbox.activate('pending', 'session-one');
+    const payload = outbox.publishPayload(record!);
+    const sent: Envelope[] = [];
+    const createRunner = () => new TaskRunner({
+      adapters: [], workspaceRoot: root, storeDir: root, productId: 'recovery-test', deviceId: 'device-one', tenantId: 'tenant-one',
+      send: (envelope) => sent.push(envelope),
+      blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
+      sessionWorkspaces: new SessionWorkspaceStore(root), approvalRegistry: new ApprovalRegistry(),
+    });
+    const runner = createRunner();
+    await runner.recoverAgentMessageOutboxes(path.join(root, 'agents'));
+    expect(runner.hasPendingRecoveredAgentMessage('pending')).toBe(true);
+    expect(runner.hasPendingRecoveredAgentMessage('unrelated')).toBe(false);
+    const disposition = { agentRef, sessionRef: payload.sessionRef, contract: payload.contract,
+      messageId: payload.messageId, cursor: payload.cursor, contentHash: payload.contentHash,
+      outcome, receiptId: '10000000-0000-4000-8000-000000000001' };
+    await runner.handleEnvelope(createEnvelope('agent.message.disposition', { ...disposition, sessionRef: 'wrong-session' }, { taskId: 'pending', seq: 1 }));
+    expect(runner.hasPendingRecoveredAgentMessage('pending')).toBe(true);
+    runner.retryRecoveredAgentMessages();
+    expect(sent).toHaveLength(1);
+    await runner.handleEnvelope(createEnvelope('agent.message.disposition', disposition, { taskId: 'pending', seq: 2 }));
+    expect(runner.hasPendingRecoveredAgentMessage('pending')).toBe(false);
+    runner.retryRecoveredAgentMessages();
+    expect(sent).toHaveLength(1);
+    const restarted = createRunner();
+    await restarted.recoverAgentMessageOutboxes(path.join(root, 'agents'));
+    expect(restarted.hasPendingRecoveredAgentMessage('pending')).toBe(false);
+    restarted.retryRecoveredAgentMessages();
+    expect(sent).toHaveLength(1);
+  });
+
   it('declines before adapter preparation when the exact helper handshake fails', async () => {
     const sent: Envelope[] = [];
     const storeDir = await temporary('byok-message-preflight-store-');

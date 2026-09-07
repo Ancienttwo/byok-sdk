@@ -2023,6 +2023,25 @@ export function buildDaemonWithAdapters(
     if (config.agentHome !== undefined && config.agentEgress !== undefined) {
       await runner.recoverAgentMessageOutboxes(path.join(config.agentHome.hostStorageRoot, 'agents'));
     }
+    // Both prerequisites survive process death in their existing authorities:
+    // immutable terminal bytes in the journal and exact disposition in the outbox.
+    // Queueing the message first is insufficient: a failed POST must not let the
+    // terminal close cloud admission while its message is still pending.
+    const replayRecoveryTerminals = async (taskId?: string): Promise<void> => {
+      if (!activeJournal || !journalIdentity) return;
+      for (const terminal of await activeJournal.listPendingTerminals(journalIdentity)) {
+        if (terminal.truthState !== 'pending' || (taskId !== undefined && terminal.taskId !== taskId)) continue;
+        if (runner?.hasPendingRecoveredAgentMessage(terminal.taskId)) continue;
+        const envelope = decodeEnvelope(terminal.bytes);
+        if (envelope.task_id !== terminal.taskId || terminalKindOf(envelope.type) !== terminal.terminalType) {
+          throw new Error('durable terminal execution binding mismatch');
+        }
+        overrides.executionRecoveryFault?.('terminal:before-send');
+        observer.handleOutboundEnvelope(envelope);
+        connection?.send(envelope);
+      }
+    };
+
     const handleAgentHomeProjectionEnvelope = async (envelope: Envelope): Promise<boolean> => {
       if (envelope.type !== 'agent.home.projection') return false;
       if (agentHomeManager === undefined || agentHomeProjectionCompletion === undefined) {
@@ -2235,6 +2254,11 @@ export function buildDaemonWithAdapters(
                 if (task.localState !== 'received') return;
               }
               await runner?.handleEnvelope(envelope);
+              if (envelope.type === 'agent.message.disposition') {
+                // handleEnvelope fsyncs only an exact disposition before this
+                // gate opens. A crash before sending leaves the journal pending.
+                await replayRecoveryTerminals(envelope.task_id);
+              }
               // In particular, a pre-claim decline must be durable before ack.
               await journalTerminalTail;
             }
@@ -2294,18 +2318,7 @@ export function buildDaemonWithAdapters(
         });
       },
     });
-    if (activeJournal && journalIdentity) {
-      for (const terminal of await activeJournal.listPendingTerminals(journalIdentity)) {
-        if (terminal.truthState !== 'pending') continue;
-        const envelope = decodeEnvelope(terminal.bytes);
-        if (envelope.task_id !== terminal.taskId || terminalKindOf(envelope.type) !== terminal.terminalType) {
-          throw new Error('durable terminal execution binding mismatch');
-        }
-        overrides.executionRecoveryFault?.('terminal:before-send');
-        observer.handleOutboundEnvelope(envelope);
-        connection.send(envelope);
-      }
-    }
+    await replayRecoveryTerminals();
     await connection.start();
     await connection.waitForConnection();
     runner.retryRecoveredAgentMessages();

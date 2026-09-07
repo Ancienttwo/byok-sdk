@@ -29,9 +29,10 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PACKAGE_DIR, WORKER_SMOKE_DIR, wranglerEntry, wranglerEnv } from './support/wrangler';
 
+const WRANGLER_TIMEOUT_MS = 120_000;
 const DIST_RUNTIME = path.join(PACKAGE_DIR, 'dist', 'runtime.js');
 
 if (!existsSync(DIST_RUNTIME)) {
@@ -44,14 +45,16 @@ describe('the worker-smoke fixture bundles on wrangler', () => {
   const outDir = mkdtempSync(path.join(os.tmpdir(), 'byok-worker-smoke-'));
   let bundle = '';
 
-  it('dry-runs wrangler deploy over worker-smoke', () => {
+  // Build is shared setup, not a 5s unit test. Keep the child timeout
+  // authoritative and allow the hook 5s for assertions and emitted-file reads.
+  beforeAll(() => {
     const result = spawnSync(
       process.execPath,
       [wranglerEntry(), 'deploy', '--dry-run', '--outdir', outDir],
       {
         cwd: WORKER_SMOKE_DIR,
         encoding: 'utf8',
-        timeout: 120_000,
+        timeout: WRANGLER_TIMEOUT_MS,
         env: wranglerEnv(),
       },
     );
@@ -60,6 +63,10 @@ describe('the worker-smoke fixture bundles on wrangler', () => {
     const emitted = readdirSync(outDir).filter((name) => name.endsWith('.js'));
     expect(emitted.length).toBeGreaterThan(0);
     bundle = emitted.map((name) => readFileSync(path.join(outDir, name), 'utf8')).join('\n');
+  }, WRANGLER_TIMEOUT_MS + 5_000);
+
+  afterAll(() => {
+    rmSync(outDir, { recursive: true, force: true });
   });
 
   it('reaches no node builtin that workerd does not implement', () => {
@@ -87,9 +94,5 @@ describe('the worker-smoke fixture bundles on wrangler', () => {
     expect(bundle).toContain('createPostgresCoreStores');
     expect(bundle).toContain('PostgresPairingCodeStore');
     expect(bundle).toContain('PostgresTruthCommitter');
-  });
-
-  it('cleans up its scratch directory', () => {
-    rmSync(outDir, { recursive: true, force: true });
   });
 });
