@@ -50,7 +50,7 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
     const storeDir = await tmpDir('byok-e2e-store-');
     // Default stub capabilities include `steer: true` — an honest self-report
     // from an adapter that really does implement `Session.steer`.
-    const adapter = new StubRuntimeAdapter();
+    const adapter = new StubRuntimeAdapter('acme-harness');
     expect(adapter.descriptor.capabilities.steer).toBe(true);
 
     daemon = createDaemonWithAdapters(
@@ -69,7 +69,9 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
       expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });
 
-    const handle = await real.byok.dispatch({ instruction: 'run over long-poll', policy: { mode: 'auto' } });
+    const machines = await real.byok.machines.list();
+    expect(machines.find(m => m.deviceId === record.deviceId)?.harnesses).toEqual([expect.objectContaining({ id: 'acme-harness', version: '0.0.0' })]);
+    const handle = await real.byok.dispatch({ harnessId: 'acme-harness', instruction: 'run over long-poll', policy: { mode: 'auto' } });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const session = adapter.sessions[0]!;
@@ -80,6 +82,7 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
     // name it), so there was nothing for the server to infer a default from.
     const snapshot = await real.byok.tasks.get(handle.taskId);
     expect(snapshot?.claimedRuntime).toBeUndefined();
+    expect(snapshot?.claimedHarnessId).toBe('acme-harness');
     expect(snapshot?.claimedRuntimeCapabilities).toEqual({
       steer: true,
       resume: true,
@@ -113,7 +116,7 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
 
     const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
-    const adapter = new StubRuntimeAdapter('stub', { kind: 'available', version: '0.0.0' }, {
+    const adapter = new StubRuntimeAdapter('acme-harness', { kind: 'available', version: '0.0.0' }, {
       steer: false,
       resume: true,
       approvalInteractive: false,
@@ -136,7 +139,9 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
       expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });
 
-    const handle = await real.byok.dispatch({ instruction: 'run over long-poll', policy: { mode: 'auto' } });
+    const machines = await real.byok.machines.list();
+    expect(machines.find(m => m.deviceId === record.deviceId)?.harnesses).toEqual([expect.objectContaining({ id: 'acme-harness', version: '0.0.0' })]);
+    const handle = await real.byok.dispatch({ harnessId: 'acme-harness', instruction: 'run over long-poll', policy: { mode: 'auto' } });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const session = adapter.sessions[0]!;

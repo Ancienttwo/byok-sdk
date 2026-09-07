@@ -1,3 +1,4 @@
+import type { HarnessInfo } from '@byok-sdk/protocol';
 import type {
   AgentContentReadPayload,
   AgentHomeProjectionPayload,
@@ -142,6 +143,7 @@ export interface DispatchInput {
    */
   dispatchSelection?: DispatchSelection;
   runtime?: RuntimeId;
+  harnessId?: string;
   policy?: PermissionPolicy;
   deviceId?: string;
   sessionRef?: string;
@@ -285,6 +287,7 @@ export interface MachineInfo {
   clientVersion?: string;
   /** Runtimes detected on this device, as reported in its last `conn.hello` (M1: typed, replaces the old untyped `agents`). */
   runtimes?: RuntimeInfo[];
+  harnesses?: readonly HarnessInfo[];
   /** Logical toolset IDs reported by the current daemon; omission means legacy/unknown. */
   configuredToolsets?: ToolsetId[];
 }
@@ -350,6 +353,7 @@ export interface TaskSnapshot {
    * straight off `TaskAttempt.claimedRuntime` (`@byok-sdk/cloud`).
    */
   claimedRuntime?: RuntimeId;
+  claimedHarnessId?: string;
   /**
    * S0/D-4 (runtime-honest control surface): the capability block the
    * CLAIMING adapter reported for itself on its own `task.claim`
@@ -415,6 +419,7 @@ export type ByokServerEvent =
        * (docs/protocol.md §3.1).
        */
       claimedRuntime?: RuntimeId;
+  claimedHarnessId?: string;
     }
   /**
    * M4 Phase 3 hardening (orchestrator-directed): the daemon resolved a

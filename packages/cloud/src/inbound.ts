@@ -1,3 +1,4 @@
+import { taskOfferMessageId, hashOfferBytes } from './offer-identity';
 /**
  * The single inbound choke point for every daemon -> cloud envelope.
  *
@@ -388,12 +389,13 @@ async function applyInboundGate(
   // cloud path that admits the target capability; presence is not consulted.
   if (envelope.type === 'conn.hello') {
     if (envelope.payload.deviceId !== deviceId) return 'rejected';
+    if (envelope.payload.harnesses !== undefined && !envelope.payload.capabilities.includes('custom-harness')) return 'rejected';
     if (!envelope.payload.protocolVersions.includes(PROTOCOL_VERSION)) return 'rejected';
     const device = await stores.devices.get(deviceId);
     if (device === undefined || device.revoked || device.productId !== envelope.payload.productId) {
       return 'rejected';
     }
-    if ((await stores.devices.recordCapabilities({ capabilities: envelope.payload.capabilities })) === undefined) {
+    if ((await stores.devices.recordCapabilities({ capabilities: envelope.payload.capabilities, ...(envelope.payload.harnesses === undefined ? {} : { harnesses: envelope.payload.harnesses }) })) === undefined) {
       return 'rejected';
     }
     return completeInboundEnvelope(stores, deviceId, envelope.id, undefined);
@@ -470,6 +472,25 @@ async function applyInboundGate(
   if (attempt === undefined || attempt.deviceId !== deviceId) return 'rejected';
   if (attempt?.ownerDeviceId !== undefined && attempt.ownerDeviceId !== deviceId) return 'rejected';
   if (envelope.type === 'task.claim' && envelope.payload.deviceId !== deviceId) return 'rejected';
+  if (envelope.type === 'task.claim') {
+    const harnessId = envelope.payload.harnessId;
+    if (harnessId !== undefined && envelope.payload.runtime !== undefined) return 'rejected';
+    if (attempt.ownerDeviceId !== undefined && (harnessId !== undefined || attempt.claimedHarnessId !== undefined)
+      && harnessId !== attempt.claimedHarnessId) return 'rejected';
+    const device = await stores.devices.get(deviceId);
+    if (harnessId !== undefined && (!device?.capabilities?.includes('custom-harness')
+      || !device.harnesses?.some(harness => harness.id === harnessId))) return 'rejected';
+    const messageId = await taskOfferMessageId(stores.tenant, taskId, deviceId, attempt.agentRef, hashOfferBytes);
+    const offer = await stores.receipts.get(`task-offer:${messageId}`);
+    if (offer !== undefined) {
+      const sealed = JSON.parse(offer.body) as { payload: { harnessId?: string; runtime?: string; dispatchSelection?: unknown } };
+      if (harnessId !== undefined && (sealed.payload.runtime !== undefined || sealed.payload.dispatchSelection !== undefined)) return 'rejected';
+      if (sealed.payload.harnessId !== undefined && sealed.payload.harnessId !== harnessId) return 'rejected';
+    } else if (harnessId !== undefined) return 'rejected';
+  }
+  if ((envelope.type === 'task.complete' || envelope.type === 'task.fail' || envelope.type === 'task.cancelled')
+    && envelope.payload.harnessId !== attempt.claimedHarnessId) return 'rejected';
+
   // Agent identity is an exact-match boundary. A missing echo is a mismatch
   // just like a different id or profile revision; accepting it would let an
   // unrelated session write a terminal for the durable Agent attempt.
@@ -557,6 +578,7 @@ async function applyLifecycle(
         taskId,
         deviceId,
         ...(envelope.payload.runtime === undefined ? {} : { runtime: envelope.payload.runtime }),
+        ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
         ...(envelope.payload.capabilities === undefined
           ? {}
           : { capabilities: envelope.payload.capabilities }),

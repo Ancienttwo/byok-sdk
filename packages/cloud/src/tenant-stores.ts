@@ -1,3 +1,4 @@
+import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
  * Layer 2 of the six-layer isolation model (§12.6.2) — the tenant-closed
  * facade a handler actually receives.
@@ -105,7 +106,7 @@ export interface TenantBoundDevices {
   list(): Promise<readonly DeviceRecord[]>;
   revoke(deviceId: string): Promise<void>;
   /** Persist the authenticated device's own capability snapshot. */
-  recordCapabilities(input: { readonly capabilities: readonly string[] }): Promise<DeviceRecord | undefined>;
+  recordCapabilities(input: { readonly harnesses?: readonly HarnessInfo[]; readonly capabilities: readonly string[] }): Promise<DeviceRecord | undefined>;
   readiness(): Promise<TenantReadiness>;
 }
 
@@ -148,6 +149,7 @@ export interface TenantBoundTaskAttempts {
     readonly taskId: string;
     readonly deviceId: string;
     readonly runtime?: RuntimeId;
+      readonly harnessId?: string;
     readonly capabilities?: RuntimeCapabilities;
   }): Promise<TaskAttempt | undefined>;
   recordStatus(input: {
@@ -271,6 +273,7 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
           ? cloud.devices.recordCapabilities(tenant, {
               deviceId: principal.deviceId,
               capabilities: input.capabilities,
+              ...(input.harnesses === undefined ? {} : { harnesses: input.harnesses }),
             })
           : Promise.resolve(undefined),
       readiness: () => cloud.devices.readiness(tenant, core.presence),

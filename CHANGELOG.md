@@ -2,6 +2,10 @@
 
 ## 0.15.0 / @byok-sdk/keys 0.4.1 — prepared, not published
 
+- Fix #158–#163: receipt-gated startup ownership and cleanup, independent Agent startup with atomic home admission, bounded cancel/reject interrupt, gap-safe durable cursor acknowledgement, and observable exact terminal commit retry.
+- Fix #164–#166: Codex prompt stdin/EOF and per-MCP environment channels remove sensitive values from Codex argv; raw stdout/deferred/stderr and cancellable same-fd legacy artifact reads have local byte budgets.
+- Add #167 as a separate additive `custom-harness` protocol contract: durable device inventory, explicit selection, immutable claim identity and terminal echo. Builtin `RuntimeId` is unchanged; unsupported peers fail closed. Apply `0021_custom_harness_identity.sql` before deploying the new server. No publication or deployment is performed here.
+
 - Fix daemon restart ordering for durable Agent messages whose first cloud admission failed: persist the interruption immediately, but deliver its terminal only after the exact recovered message disposition is durable. Recovery does not rerun the task.
 - Preserve accepted, held and refused dispositions across another restart; unavailable or mismatched cloud responses keep pending evidence fail-closed.
 - Exercise compiled restart, repeated interruption, cloud reconstruction and cancellation paths. Stabilize Wrangler packaging setup and publish compiled-test completion fixtures atomically.

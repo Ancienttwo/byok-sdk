@@ -181,6 +181,57 @@ describe('hosted journal integration (L-002)', () => {
     return { adapter, storeDir, deviceId: record.deviceId };
   }
 
+  it('keeps exact successful terminal bytes and active ownership through a journal write outage', async () => {
+    const journal = new RecordingJournal();
+    let unavailable = true;
+    const candidates: LocalTerminalRecord[] = [];
+    const recordTerminal = journal.recordTerminal.bind(journal);
+    vi.spyOn(journal, 'recordTerminal').mockImplementation(async record => {
+      candidates.push(record);
+      if (unavailable) throw new Error('EIO');
+      await recordTerminal(record);
+    });
+    const { adapter } = await startDaemon({ hostedJournal: { mode: 'sqlite' } }, journal);
+    server.send(createEnvelope('task.offer', { instruction: 'unique result', policy: { mode: 'auto' } },
+      { taskId: 'terminal-retry', seq: server.nextSeq() }));
+    await server.waitFor(e => e.type === 'task.started');
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(candidates).toHaveLength(1));
+    expect(daemon!.status().pendingTerminalCommits).toBe(1);
+    expect(server.received.some(e => e.type === 'task.complete')).toBe(false);
+    await vi.waitFor(() => expect(adapter.sessions[0]!.closeCalled).toBe(true));
+    expect(daemon!.status().activeTaskCount).toBe(1);
+    unavailable = false;
+    await server.waitFor(e => e.type === 'task.complete', 3_000);
+    await vi.waitFor(() => expect(daemon!.status().pendingTerminalCommits).toBe(0));
+    await vi.waitFor(() => expect(daemon!.status().activeTaskCount).toBe(0));
+    expect(candidates.every(record => record.bytes === candidates[0]!.bytes && record.payloadHash === candidates[0]!.payloadHash)).toBe(true);
+    expect(adapter.startCalls).toHaveLength(1);
+  });
+
+  it('decline journal failure leaves its offer cursor unacknowledged until recovery', async () => {
+    const journal = new RecordingJournal();
+    let unavailable = true;
+    const recordTerminal = journal.recordTerminal.bind(journal);
+    vi.spyOn(journal, 'recordTerminal').mockImplementation(async record => {
+      if (unavailable) throw new Error('ENOSPC');
+      await recordTerminal(record);
+    });
+    const { adapter, storeDir, deviceId } = await startDaemon({ hostedJournal: { mode: 'sqlite' } }, journal);
+    const seq = server.nextSeq();
+    const offer = createEnvelope('task.offer', { instruction: 'invalid limit', policy: { mode: 'auto' }, limits: { maxTokens: 1 } },
+      { taskId: 'decline-retry', seq });
+    server.send(offer);
+    await vi.waitFor(() => expect(daemon!.status().pendingTerminalCommits).toBe(1));
+    expect(await new CursorStore(storeDir).load(server.url, deviceId)).toBe(0);
+    expect(server.received.some(e => e.type === 'task.decline')).toBe(false);
+    unavailable = false;
+    server.send(offer);
+    await server.waitFor(e => e.type === 'task.decline');
+    await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server.url, deviceId)).toBe(seq));
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+
   describe('the default path', () => {
     it('constructs no journal object and creates no database, through a full task lifecycle', async () => {
       const { adapter, storeDir } = await startDaemon({});

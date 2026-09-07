@@ -151,6 +151,7 @@ describe('tenant isolation across every device-class resource', () => {
       events: [],
       cursor: 0,
       capabilities: [
+        'custom-harness',
         'result-document',
         'approval_resolved',
         'agent-home-contract',

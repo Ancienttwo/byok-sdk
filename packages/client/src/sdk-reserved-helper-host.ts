@@ -4,7 +4,7 @@ import { runSdkReservedHelper } from './bin/sdk-reserved-helper-runners';
 
 export const BYOK_SDK_HELPER_SUBCOMMAND = '__byok_sdk_helper';
 
-export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'approval-mcp' | 'agent-team-mcp';
+export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'approval-mcp' | 'agent-team-mcp' | 'mcp-env';
 
 export interface SdkHelperHostConfig {
   /**
@@ -28,6 +28,7 @@ const DIST_SCRIPT_BY_KIND: Readonly<Record<SdkReservedHelperKind, string>> = Obj
   'agent-memory-mcp': 'byok-agent-memory-mcp.js',
   'approval-mcp': 'byok-approval-mcp.js',
   'agent-team-mcp': 'byok-agent-team-mcp.js',
+  'mcp-env': 'byok-mcp-env.js',
 });
 
 function assertExecutable(executable: string): void {
@@ -51,8 +52,12 @@ export function resolveSdkReservedHelperBin(
       source: 'self-executable' as const,
     });
   }
+  const entryDir = path.dirname(fileURLToPath(import.meta.url));
+  // Both public bundles project helpers from dist/bin; adapters/index.js is
+  // the one nested package entry, not an alternate filesystem authority.
+  const distDir = path.basename(entryDir) === 'adapters' ? path.dirname(entryDir) : entryDir;
   const script = path.join(
-    path.dirname(fileURLToPath(import.meta.url)),
+    distDir,
     'bin',
     DIST_SCRIPT_BY_KIND[kind],
   );
@@ -64,7 +69,7 @@ export function resolveSdkReservedHelperBin(
 }
 
 function isHelperKind(value: string | undefined): value is SdkReservedHelperKind {
-  return value === 'agent-message-mcp' || value === 'agent-memory-mcp' || value === 'approval-mcp' || value === 'agent-team-mcp';
+  return value === 'agent-message-mcp' || value === 'agent-memory-mcp' || value === 'approval-mcp' || value === 'agent-team-mcp' || value === 'mcp-env';
 }
 
 /**

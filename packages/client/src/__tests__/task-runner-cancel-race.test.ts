@@ -124,8 +124,8 @@ describe('TaskRunner: cancel arriving during the offer-processing window (findin
     expect(sent.some((e) => e.type === 'task.claim' && e.task_id === taskId)).toBe(true);
 
     expect(adapter.sessions).toHaveLength(1);
+    await vi.waitFor(() => expect(adapter.sessions[0]?.closeCalled).toBe(true), { timeout: 3_000 });
     expect(adapter.sessions[0]?.interruptCalled).toBe(true);
-    expect(adapter.sessions[0]?.closeCalled).toBe(true);
     expect(runner.activeTaskCount).toBe(0);
   });
 

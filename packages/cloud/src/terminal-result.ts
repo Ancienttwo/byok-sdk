@@ -17,6 +17,7 @@ import type { RequestReceipt } from './stores/ports';
  */
 export interface TerminalResult {
   readonly taskId: string;
+  readonly harnessId?: string;
   readonly state: 'complete' | 'failed' | 'cancelled';
   /** Exact Agent identity echoed by the winning terminal, when Agent-bound. */
   readonly agentRef?: AgentRef;
@@ -77,6 +78,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
           ? { artifactRefs: envelope.payload.artifactRefs }
           : {}),
         ...(envelope.payload.document !== undefined ? { document: envelope.payload.document } : {}),
+        ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
         ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
         recordedAt: receipt.recordedAt,
       };
@@ -90,6 +92,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         ...(envelope.payload.retryable !== undefined
           ? { retryable: envelope.payload.retryable }
           : {}),
+        ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
         ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
         recordedAt: receipt.recordedAt,
       };
@@ -117,6 +120,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
         ...(envelope.payload.reason !== undefined ? { reason: envelope.payload.reason } : {}),
         ...(envelope.payload.reason === undefined ? {} : { terminalCause: envelope.payload.reason }),
+        ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
         ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
         recordedAt: receipt.recordedAt,
       };

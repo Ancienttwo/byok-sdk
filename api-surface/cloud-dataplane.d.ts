@@ -772,6 +772,7 @@ export declare class PostgresDeviceAssertionReplayAuthority implements DeviceAss
     deleteExpired(before: Date, limit: number): Promise<number>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/devices.d.ts ====
+import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
  * Postgres {@link DeviceDirectory}.
  *
@@ -820,6 +821,7 @@ export declare class PostgresDeviceDirectory implements DeviceDirectory {
     revoke(tenant: TenantId, deviceId: string): Promise<void>;
     recordCapabilities(tenant: TenantId, input: {
         readonly deviceId: string;
+        readonly harnesses?: readonly HarnessInfo[];
         readonly capabilities: readonly string[];
     }): Promise<DeviceRecord | undefined>;
     list(tenant: TenantId): Promise<readonly DeviceRecord[]>;
@@ -1273,11 +1275,12 @@ export interface TaskRow {
     readonly cancel_requested_at: Date | null;
     readonly cancel_reason: string | null;
     readonly cancel_message_id: string | null;
+    readonly claimed_harness_id: string | null;
     readonly claimed_runtime: string | null;
     readonly claimed_runtime_capabilities: RuntimeCapabilities | null;
     readonly updated_at: Date;
 }
-export declare const TASK_SELECT_COLUMNS = "tenant_id, task_id, device_id, agent_id, agent_profile_revision, owner_device_id, status, terminal_cause, cancel_requested_at, cancel_reason, cancel_message_id, claimed_runtime, claimed_runtime_capabilities, updated_at";
+export declare const TASK_SELECT_COLUMNS = "tenant_id, task_id, device_id, agent_id, agent_profile_revision, owner_device_id, status, terminal_cause, cancel_requested_at, cancel_reason, cancel_message_id, claimed_runtime, claimed_harness_id, claimed_runtime_capabilities, updated_at";
 export declare function taskRowToAttempt(row: TaskRow): TaskAttempt;
 export declare class PostgresTaskAttemptStore implements TaskAttemptStore {
     #private;
@@ -1321,6 +1324,7 @@ export declare class PostgresTaskAttemptStore implements TaskAttemptStore {
         readonly taskId: string;
         readonly deviceId: string;
         readonly runtime?: RuntimeId;
+        readonly harnessId?: string;
         readonly capabilities?: RuntimeCapabilities;
     }): Promise<TaskAttempt | undefined>;
     recordStatus(tenant: TenantId, input: {

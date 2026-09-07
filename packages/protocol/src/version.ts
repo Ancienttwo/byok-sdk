@@ -105,6 +105,8 @@ export const STRICT_AGENT_ONLY_CAPABILITY = 'strict-agent-only' as const;
  * boundary for long-poll: an older daemon skips it as unknown and therefore
  * cannot accidentally execute the instruction without the required tools.
  */
+export const CUSTOM_HARNESS_CAPABILITY = 'custom-harness' as const;
+
 export const CAPABILITY_FLAGS = [
   'steer',
   'blob-upload',
@@ -126,6 +128,7 @@ export const CAPABILITY_FLAGS = [
   AGENT_CONTENT_ARTIFACT_READ_CAPABILITY,
   AGENT_HOME_PROJECTION_CAPABILITY,
   TERMINAL_PROJECTION_SELECTION_CAPABILITY,
+  CUSTOM_HARNESS_CAPABILITY,
 ] as const;
 
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];

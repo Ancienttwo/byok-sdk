@@ -1,3 +1,5 @@
+import { uuidFromSha256, taskOfferMessageId } from './offer-identity';
+import { HarnessIdSchema } from '@byok-sdk/protocol';
 /**
  * `createByokCloud` — the hosted device surface, assembled.
  *
@@ -216,16 +218,6 @@ function sameAgentRef(expected: AgentRef, actual: AgentRef | undefined): boolean
  * identity.  Reserve UUIDv8 for this opaque sha256-derived namespace rather
  * than pretending a fresh random UUID can identify the same logical action.
  */
-function uuidFromSha256(value: string): string {
-  const match = /^sha256:([0-9a-f]{64})$/.exec(value);
-  if (match === null) throw new Error('CloudCrypto.sha256 must return canonical sha256 hex');
-  const digest = match[1];
-  if (digest === undefined) throw new Error('CloudCrypto.sha256 must return canonical sha256 hex');
-  const hex = digest.slice(0, 32).split('');
-  hex[12] = '8';
-  hex[16] = ['8', '9', 'a', 'b'][Number.parseInt(hex[16]!, 16) & 0x03]!;
-  return `${hex.slice(0, 8).join('')}-${hex.slice(8, 12).join('')}-${hex.slice(12, 16).join('')}-${hex.slice(16, 20).join('')}-${hex.slice(20).join('')}`;
-}
 
 function sameOfferEnvelope(expected: Envelope, actual: Envelope): boolean {
   // `ts` is deliberately excluded: it records when this particular producer
@@ -889,13 +881,16 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   ): Promise<EnqueuedOffer> {
     const stores = tenantStoresFor(controlPlane(tenant), root);
     const taskId = requestedTaskId ?? `task_${options.crypto.randomUuid()}`;
-    const messageId = uuidFromSha256(
-      await options.crypto.sha256(
-        new TextEncoder().encode(
-          JSON.stringify({ domain: 'byok:task-offer', tenant, taskId, deviceId, agentRef }),
-        ),
-      ),
-    );
+    const messageId = await taskOfferMessageId(tenant, taskId, deviceId, agentRef, bytes => options.crypto.sha256(bytes));
+    const proposed = buildEnvelope(taskId, 0, messageId);
+    const selection = proposed.payload as { harnessId?: string; runtime?: string; dispatchSelection?: unknown };
+    if (selection.harnessId !== undefined) {
+      HarnessIdSchema.parse(selection.harnessId);
+      if (selection.runtime !== undefined || selection.dispatchSelection !== undefined) throw new ByokCloudError('coordination_input_invalid', 'harnessId conflicts with built-in runtime selection');
+      await assertAgentCapabilities(tenant, deviceId, ['custom-harness']);
+      const device = await options.cloud.devices.get(tenant, deviceId);
+      if (!device?.harnesses?.some(harness => harness.id === selection.harnessId)) throw new ByokCloudError('coordination_input_invalid', 'requested custom harness is not advertised by this device');
+    }
     // An attempt is the task authority, so reserve/open it BEFORE the offer is
     // observable in a mailbox.  The stable message identity then makes an
     // append failure retry converge on the one offer rather than allocating a
@@ -939,7 +934,6 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     // append. The attempt intentionally contains no payload; this existing
     // idempotent receipt authority supplies the missing comparison so a retry
     // after append failure cannot silently replace an undelivered body.
-    const proposed = buildEnvelope(taskId, 0, messageId);
     const proposedBody = JSON.stringify({
       deviceId,
       type: proposed.type,

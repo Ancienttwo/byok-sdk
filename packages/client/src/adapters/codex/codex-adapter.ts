@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -16,6 +18,7 @@ import {
 } from '../../types';
 import {
   RuntimeExecutionFailure,
+  RuntimeStartupDisposalFailure,
   isRuntimeExecutionFailure,
   type RuntimeFailurePhase,
 } from '../../runtime-failure';
@@ -40,6 +43,7 @@ const RESERVED_MCP_POLICY_PROBE_TIMEOUT_MS = 5000;
 const MIN_CODEX_RESERVED_MCP_APPROVAL_VERSION = [0, 149, 0] as const;
 
 export interface CodexAdapterOptions {
+  sdkHelperHost?: SdkHelperHostConfig;
   /** Override bin resolution — tests substitute the fake-codex fixture script. */
   resolveBin?: () => ResolvedBin;
   /** Override process spawning — tests substitute a fake spawn. */
@@ -292,7 +296,7 @@ export class CodexAdapter implements RuntimeAdapter {
     // recomputed later: `preparedMcpGrants` was probed at admission and
     // `startInput.mcpServers` is the sealed authority for this operation, so
     // a second computation could only widen or drift.
-    const mcpConfigArgs = codexMcpConfigArgs(startInput.mcpServers, preparedMcpGrants);
+    const mcpConfigArgs = codexMcpConfigArgs(startInput.mcpServers, runtimeEnv, this.options.sdkHelperHost, preparedMcpGrants);
     const { sessionRef, runner } = await runCodexTurn({
       command,
       resumeRef: startInput.manifest.sessionRef,
@@ -308,6 +312,7 @@ export class CodexAdapter implements RuntimeAdapter {
       expectedSessionRef: startInput.manifest.sessionRef,
       preparedGit: startInput.manifest.workspace.workspaceId !== undefined,
       failurePhase: 'start',
+      signal: startInput.signal,
       terminal,
     });
 
@@ -316,6 +321,7 @@ export class CodexAdapter implements RuntimeAdapter {
       command,
       workspaceDir,
       env: startInput.env,
+      mcpEnvironment: Object.fromEntries(Object.entries(runtimeEnv).filter(([key]) => key.startsWith('BYOK_MCP_PAYLOAD_'))) as Record<string, string>,
       spawnFn: this.options.spawnFn,
       queue,
       recordUnmapped,
@@ -412,17 +418,21 @@ function codexMcpToolApprovalArgs(name: string, tools: readonly string[]): strin
 
 function codexMcpConfigArgs(
   servers: RuntimeOperationStartInput['mcpServers'],
+  env: NodeJS.ProcessEnv,
+  helperHost: SdkHelperHostConfig | undefined,
   grants: readonly McpToolsetGrant[] = [],
 ): string[] {
   if (servers === undefined || Object.keys(servers).length === 0) return [];
   const grantedTools = new Map(grants.map((grant) => [grant.server, grant.tools] as const));
   const args = ['--ignore-user-config'];
   for (const [name, server] of Object.entries(servers).sort(([left], [right]) => left.localeCompare(right))) {
-    args.push('-c', `mcp_servers.${name}.command=${JSON.stringify(server.command)}`);
-    if (server.args !== undefined) args.push('-c', `mcp_servers.${name}.args=${JSON.stringify([...server.args])}`);
-    for (const [key, value] of Object.entries(server.env ?? {}).sort(([left], [right]) => left.localeCompare(right))) {
-      args.push('-c', `mcp_servers.${name}.env.${key}=${JSON.stringify(value)}`);
-    }
+    const key = `BYOK_MCP_PAYLOAD_${randomBytes(16).toString('hex').toUpperCase()}`;
+    env[key] = JSON.stringify(server);
+    const helper = resolveSdkReservedHelperBin('mcp-env', helperHost);
+    args.push('-c', `mcp_servers.${name}.command=${JSON.stringify(helper.command)}`);
+    args.push('-c', `mcp_servers.${name}.args=${JSON.stringify([...helper.args])}`);
+    args.push('-c', `mcp_servers.${name}.env.BYOK_MCP_ENV_KEY=${JSON.stringify(key)}`);
+    args.push('-c', `mcp_servers.${name}.env_vars=${JSON.stringify([key])}`);
     const granted = grantedTools.get(name);
     if (granted !== undefined) args.push(...codexMcpToolApprovalArgs(name, granted));
   }
@@ -468,6 +478,7 @@ function makeUnmappedFrameRecorder(counts: Map<string, number>): (key: string) =
 }
 
 interface RunTurnParams {
+  signal?: AbortSignal;
   command: string;
   resumeRef: string | undefined;
   instruction: string;
@@ -533,7 +544,7 @@ function buildArgv(
     ...(modelId ? ['--model', modelId] : []),
     ...(preparedGit ? [] : ['--skip-git-repo-check']),
     ...policyArgs,
-    instruction,
+    '-',
   ];
 }
 
@@ -576,9 +587,18 @@ async function runCodexTurn(params: RunTurnParams): Promise<RunTurnResult> {
     runner = new CodexProcessRunner({
       command: params.command,
       args: argv,
+      instruction: params.instruction,
       cwd: params.cwd,
       env: params.env,
       spawnFn: params.spawnFn,
+      onFailure: (failure) => {
+        if (!firstLineSettled) {
+          firstLineSettled = true;
+          rejectFirstLine(failure);
+        }
+        params.terminal.failure = failure;
+        params.queue.end();
+      },
       onEvent: (evt: CodexRawEvent) => {
         if (!firstLineSettled) {
           firstLineSettled = true;
@@ -679,6 +699,14 @@ async function runCodexTurn(params: RunTurnParams): Promise<RunTurnResult> {
   // resolves (see process-runner.ts), and `firstLine` always has its
   // resolve/reject consumed below regardless of which settles first.
   let sessionRef: string;
+  const abortStartup = (): void => rejectFirstLine(new RuntimeExecutionFailure({
+    phase: params.failurePhase, category: 'infrastructure', retry: 'non-retryable',
+    reason: 'codex startup cancelled or exceeded its deadline',
+  }));
+  const startupTimer = setTimeout(abortStartup, 30_000);
+  startupTimer.unref?.();
+  params.signal?.addEventListener('abort', abortStartup, { once: true });
+  if (params.signal?.aborted) abortStartup();
   try {
     sessionRef = await new Promise<string>((resolve, reject) => {
       let settled = false;
@@ -710,8 +738,11 @@ async function runCodexTurn(params: RunTurnParams): Promise<RunTurnResult> {
       });
     });
   } catch (err) {
-    runner.kill();
+    await disposeFailedStartup(runner, err);
     throw err;
+  } finally {
+    clearTimeout(startupTimer);
+    params.signal?.removeEventListener('abort', abortStartup);
   }
 
   // Cross-model review finding: this used to only `console.warn` and
@@ -725,19 +756,27 @@ async function runCodexTurn(params: RunTurnParams): Promise<RunTurnResult> {
   // longer trust that codex resumed the workspace/history the caller
   // actually meant — fail closed rather than quietly proceeding.
   if (params.expectedSessionRef !== undefined && sessionRef !== params.expectedSessionRef) {
-    runner.kill();
-    throw new RuntimeExecutionFailure({
-      phase: params.failurePhase,
-      category: 'authority',
-      retry: 'non-retryable',
+    const failure = new RuntimeExecutionFailure({
+      phase: params.failurePhase, category: 'authority', retry: 'non-retryable',
       reason: `codex exec resume echoed a different thread id than requested (requested ${params.expectedSessionRef}, got ${sessionRef})`,
     });
+    await disposeFailedStartup(runner, failure);
+    throw failure;
   }
 
   return { sessionRef, runner };
 }
 
+async function disposeFailedStartup(runner: CodexProcessRunner, cause: unknown): Promise<void> {
+  try {
+    await runner.dispose();
+  } catch (disposalFailure) {
+    throw new RuntimeStartupDisposalFailure(() => runner.dispose(), { cause: new AggregateError([cause, disposalFailure]) });
+  }
+}
+
 interface CodexSessionOptions {
+  mcpEnvironment: Record<string, string>;
   sessionRef: string;
   command: string;
   workspaceDir: string;
@@ -792,6 +831,7 @@ class CodexSession implements Session {
    * recomputed from anything a later turn supplies, so a follow-up can never
    * widen this session's MCP authority.
    */
+  private readonly mcpEnvironment: Readonly<Record<string, string>>;
   private readonly mcpConfigArgs: readonly string[];
   private terminal: RuntimeTurnTerminal;
   private currentRunner: CodexProcessRunner | undefined;
@@ -812,6 +852,7 @@ class CodexSession implements Session {
     this.modelId = options.modelId;
     this.terminal = options.terminal;
     this.mcpConfigArgs = options.mcpConfigArgs;
+    this.mcpEnvironment = Object.freeze({ ...options.mcpEnvironment });
     this.currentRunner = options.initialRunner;
     this.ownedRunners.add(options.initialRunner);
     void this.forgetRunnerOnceClosed(options.initialRunner);
@@ -933,7 +974,7 @@ class CodexSession implements Session {
         // frozen MCP config replayed verbatim — see `mcpConfigArgs`.
         policyArgs: [...mapping.args, ...this.mcpConfigArgs],
         cwd: this.workspaceDir,
-        env: withoutProviderCredentials(this.env),
+        env: { ...withoutProviderCredentials(this.env), ...this.mcpEnvironment },
         spawnFn: this.spawnFn,
         workspaceDir: this.workspaceDir,
         queue: this.queue,

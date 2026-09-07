@@ -90,6 +90,8 @@ export type {
 } from './sdk-reserved-helper-host';
 export {
   RuntimeExecutionFailure,
+  RuntimeStartupDisposalFailure,
+  isRuntimeStartupDisposalFailure,
   RuntimeDisposalFailure,
   RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON,
   isRuntimeDisposalFailure,

@@ -22,6 +22,7 @@
 --   deploy/sql/0018_task_attempt_claimed_runtime.sql (nullable write-once claim-time runtime snapshot columns)
 --   deploy/sql/0019_agent_ref_replay_keys.sql (AgentRef-scoped inbound dedup and reliable egress keys)
 --   deploy/sql/0020_agent_ref_request_keys.sql (remove device-wide Agent message-id uniqueness)
+--   deploy/sql/0021_custom_harness_identity.sql (custom discovery and disjoint claim identity)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
@@ -824,5 +825,18 @@ BEGIN
     RAISE EXCEPTION
       'control-plane invariant violated (§12.6.2 layer 3): unique index/constraint not leading with tenant_id: %. Two exceptions are whitelisted in tests/sql/control_plane_invariants.sql; a third needs an argument, not an edit.',
       offenders;
+  END IF;
+END $$;
+
+-- Custom execution identity stays disjoint from the built-in runtime identity.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+      AND table_name = 'device' AND column_name = 'harnesses' AND data_type = 'jsonb')
+    OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+      AND table_name = 'task' AND column_name = 'claimed_harness_id' AND data_type = 'text')
+    OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'task'::regclass
+      AND conname = 'task_claimed_identity_exclusive' AND contype = 'c') THEN
+    RAISE EXCEPTION 'custom harness discovery/claim identity migration is incomplete';
   END IF;
 END $$;

@@ -20,6 +20,34 @@ describe('long-poll lifecycle (protocol §8)', () => {
     await server.close();
   });
 
+  it('a stalled startup does not block another runtime or remote cancellation', async () => {
+    server = await TestServer.start();
+    const slow = new StubRuntimeAdapter('codex');
+    const other = new StubRuntimeAdapter('pi');
+    const release = slow.blockStart();
+    daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-test' },
+      productName: 'Test', productId: 'test-product', serverUrl: server.url,
+      workspaceRoot: await tmpDir('byok-independent-work-'), storeDir: await tmpDir('byok-independent-store-'),
+    }, [slow, other], { longPoll: { retryDelayMs: 20 } });
+    await daemon.pair('code');
+    await daemon.start();
+    try {
+      server.pushLongPollEvent(createEnvelope('task.offer', { instruction: 'blocked', runtime: 'codex', policy: { mode: 'auto' } },
+        { taskId: 'slow-start', seq: server.nextSeq() }));
+      await server.waitFor(e => e.type === 'task.claim');
+      server.pushLongPollEvent(createEnvelope('task.offer', { instruction: 'independent', runtime: 'pi', policy: { mode: 'auto' } },
+        { taskId: 'other-start', seq: server.nextSeq() }));
+      await vi.waitFor(() => expect(other.sessions).toHaveLength(1));
+      server.pushLongPollEvent(createEnvelope('task.cancel', { reason: 'remote' },
+        { taskId: 'slow-start', seq: server.nextSeq() }));
+      await server.waitFor(e => e.type === 'task.cancelled');
+      expect(slow.sessions).toHaveLength(0);
+    } finally {
+      release();
+    }
+    await vi.waitFor(() => expect(slow.sessions[0]?.closeCalled).toBe(true), { timeout: 3_000 });
+  });
+
   it('runs a full task lifecycle over GET /byok/events and POST /byok/messages', async () => {
     server = await TestServer.start();
 

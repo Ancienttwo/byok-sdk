@@ -918,3 +918,52 @@ Recovery terminal delivery waits when the same execution has an activated durabl
 The journal owns one immutable terminal byte record, including pre-claim declines. ConnectionManager uses its existing authenticated POST queue and retries the exact original envelope. Accepted transport disposition is durably recorded as confirmed before local delivery state is retired; an acknowledgement write failure retains the original batch. A rejected singleton is durably failed and remains inspectable. Confirmation records delivery acceptance; the cloud's immutable first terminal and cancellation authority remain product truth.
 
 Unknown or invalid executable messages cannot silently advance the mailbox cursor. The observer consumes the protocol offer classifier. The new journal format requires complete terminal bytes: a valid hash-only predecessor is preserved and rejected with an explicit format error, never silently upgraded, quarantined as corruption, or synthesized into replayable evidence.
+
+### Execution receipts, bounded startup and custom harness identity (#158–#167)
+
+Independent offers may progress concurrently. Admission reserves the canonical
+Agent home synchronously before asynchronous preparation and converts that
+reservation into the existing execution lease. Controls remain ordered per task;
+startup does not block another Agent or that task's cancel. `startupTimeoutMs`
+(default 30 seconds) aborts startup admission. A deadline is not a disposal
+receipt: a late Session, failed binding/handoff/outbox activation, or failed
+Codex handshake retains an owner and the home lease until `close()` succeeds.
+An adapter unable to dispose after failed startup throws
+`RuntimeStartupDisposalFailure` with an owned `retryDisposal()` receipt. Expected
+ordinary start failures must already have disposed any process they spawned.
+Cancel/reject share the bounded soft-interrupt path before mandatory close.
+
+Cursor advancement covers the successful prefix below every received unresolved
+sequence, including malformed messages. Successful tails remain remembered until
+the cursor write succeeds; replay never depends on a fourth/new message. Hosted
+terminal commits preserve the first exact envelope through write failures, reject
+current waiters and retry independently of other tasks. Until success, ownership
+and `Daemon.status().pendingTerminalCommits` remain observable. Volatile pending
+bytes are not durable evidence: a crash during a failed journal write cannot
+promise exact-result recovery.
+
+Codex prompts use documented stdin `-` with EOF, including resumed turns. Each
+MCP server receives a separate environment payload through `env_vars` and the
+SDK reserved `mcp-env` helper; original command/args/env values are absent from
+Codex argv. This preserves per-server values for colliding environment names
+without changing Codex auth or user configuration. Raw stdout frames are bounded
+at 1 MiB before decoding/parsing; deferred frames total at most 4 MiB and stderr
+retention is at most 64 KiB / 20 lines. Legacy artifact reads use the already
+validated fd, cancellation and actual-byte accounting: `artifactLimits` defaults
+to 16 MiB per file and 64 MiB cumulatively per task. Reads use 64 KiB chunks and
+check both initial stat and actual growth; no upload/event is emitted after
+cancellation. Strict Agent egress remains its own authority.
+
+The additive `custom-harness` capability carries custom identities separately
+from the unchanged `RuntimeId` enum. Available adapters publish bounded
+`conn.hello.harnesses` (id, optional version, capabilities). The authenticated
+hello replaces the device's durable inventory. Hosts discover it through
+`MachineInfo.harnesses`, select one device and optionally require `harnessId` on
+an offer/dispatch. That field cannot coexist with `runtime` or
+`dispatchSelection`; capability/inventory rejection occurs before reservation.
+The actual custom adapter echoes `task.claim.harnessId`; the same claim CAS stores
+`claimedHarnessId`, and every complete/fail/cancelled terminal must echo it.
+An explicitly selected harness must match the immutable offer receipt. Old peers
+without the capability are refused; no identity is inferred from display names
+or provider/model fields. Business scheduling and device choice stay with the
+host. Deploy migration `0021_custom_harness_identity.sql` before this server code.

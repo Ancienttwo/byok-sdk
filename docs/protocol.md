@@ -2175,3 +2175,30 @@ its original exact AgentRef. The interruption marker and report bytes commit
 atomically. Startup never automatically repeats runtime side effects. The
 existing tenant/task_id remains an immutable execution identity; dispatch with
 an already delivered identity is refused even after mailbox retention.
+
+## Additive custom-harness contract (#167)
+
+`PROTOCOL_VERSION` remains 1. The new optional fields and `custom-harness`
+capability preserve every existing builtin runtime meaning and golden envelope.
+
+- `conn.hello.harnesses`: at most 64 unique custom descriptors with `id`, optional
+  `version` (1–128 characters), and `capabilities`. IDs are lower-case ASCII
+  segments separated by `.`, `_` or `-`, begin with a letter, are at most 128
+  characters, and exclude `pi`, `claude`, `codex`. This is a capability-gated,
+  authenticated, replace-all durable device snapshot, without secret/env/path data.
+- All offer-family payloads may require `harnessId`, mutually exclusive with
+  builtin `runtime` and `dispatchSelection`. The host checks the target device's
+  capability and exact inventory before task reservation. An unavailable or old
+  peer is rejected; unknown fields must not silently change execution identity.
+- `task.claim.harnessId` identifies the actual custom adapter and cannot coexist
+  with `runtime`. It must be advertised and match any explicit sealed selection.
+  The ownership CAS records it once as `claimedHarnessId`; retries cannot rewrite
+  execution identity. Claim-carried capabilities remain the steer authority.
+- `task.complete`, `task.fail`, `task.cancelled` echo that exact custom identity.
+  A missing, different, or unexpected custom identity is rejected. Builtin usage
+  metrics keep their existing schema; the SDK does not invent custom usage.
+
+Independent inbound handlers retain per-task control order. Acknowledgement only
+advances after all received sequences in the prefix have succeeded and the cursor
+is durable. Successfully handled tails survive gaps and cursor-write retries in
+memory; delivery alone is never acknowledgement.

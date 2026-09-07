@@ -2,6 +2,8 @@
 
 Durable research reports live in this directory as topic-scoped Markdown files. Keep task-local implementation decisions in `tasks/notes/` and correction-derived rules in `tasks/lessons.md`.
 
+- [Execution receipts and custom harness identity (#158–#167)](./2026-09-07-execution-receipts-and-harness-identity.md)
+
 Architecture decisions:
 
 - [ADR-024: R2 Hash Authority](./r2-hash-authority-decision.md)

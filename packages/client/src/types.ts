@@ -293,6 +293,8 @@ export interface RuntimeOperationManifest {
 
 /** Runtime resources only available after TaskRunner has sealed the manifest and claimed the task. */
 export interface RuntimeOperationStartInput {
+  /** Startup cancellation only; rejection must preserve unresolved process ownership. */
+  readonly signal?: AbortSignal;
   readonly manifest: RuntimeOperationManifest;
   readonly instruction: string;
   readonly env: NodeJS.ProcessEnv;

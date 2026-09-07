@@ -1,3 +1,5 @@
+import { HarnessIdSchema, type HarnessInfo } from '@byok-sdk/protocol';
+import { TerminalCommitQueue } from './terminal-commit-queue';
 import { validateRuntimeDetectResult } from '../runtime-detection';
 import {
   DEVICE_ASSERTION_AUDIENCE_MAX_BYTES,
@@ -466,6 +468,10 @@ export interface DaemonConfig {
    * explicitly instead to opt out of enforcement altogether.
    */
   maxTaskOutputBytes?: number;
+  /** Legacy artifact bytes only: default 16 MiB/file and 64 MiB/task, independent of event output limits. */
+  artifactLimits?: { maxFileBytes: number; maxTaskBytes: number };
+  /** Startup observation deadline; unresolved process owners remain quarantined. Default 30 seconds. */
+  startupTimeoutMs?: number;
   /**
    * Per-EVENT inline ceiling (default {@link DEFAULT_MAX_INLINE_EVENT_BYTES},
    * 64 KiB) for the two `AgentEvent` fields a runtime authors freely:
@@ -692,6 +698,8 @@ export interface DaemonStatus {
   revoked: boolean;
   deviceId?: string;
   activeTaskCount: number;
+  /** Exact terminal results retained for journal retry; nonzero requires recovery. */
+  pendingTerminalCommits: number;
   /** Passthrough of `DaemonConfig.branding` — `undefined` when the product configured none. See `DaemonBranding`. */
   branding?: DaemonBranding;
   /** Local lifecycle/retry budget, separate from transport fallback state. */
@@ -760,7 +768,8 @@ export interface Daemon {
   reject(taskId: string, reason?: string): Promise<void>;
 }
 
-/** Internal seam so tests can substitute stub adapters / faster batch and long-poll timing. `createDaemonWithAdapters` (which takes this) is also the real entry point for products supplying a hand-built adapter set `createDaemon` can't construct on its own — e.g. custom adapter options, or an adapter that REPLACES a bundled runtime's implementation under the same id. Honest limit: an adapter id outside `pi`/`claude`/`codex` cannot pass wire validation today — `RuntimeIdSchema` (`@byok-sdk/protocol`) is a closed `z.enum(['pi', 'claude', 'codex'])`, and `isRuntimeId` filtering below (see `detectRuntimes`) drops any detected adapter outside that set before it ever reaches a wire-visible field. A genuinely fourth/namespaced runtime id is a future protocol change, not something this seam enables today. */
+/** Custom adapter composition. Available custom descriptors are published through
+ * the capability-gated harness inventory; built-in RuntimeId remains closed. */
 export interface DaemonOverrides {
   /** Test-only synchronous kill points; never supplied by production configuration. */
   executionRecoveryFault?: (step: 'terminal:before-send' | 'terminal:queued' | 'outbound:before-post' | 'outbound:after-ack') => void;
@@ -887,11 +896,18 @@ function isRuntimeId(id: string): id is RuntimeId {
 }
 
 /** Runtimes actually detected as present on this device, typed per protocol §10 gap #4 (`ConnHelloPayload.runtimes`). Computed once at `start()` — re-probing on every reconnect would mean re-spawning each runtime's `--version` check for no real benefit within one daemon lifetime. */
-async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<RuntimeInfo[]> {
+async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{ runtimes: RuntimeInfo[]; harnesses: HarnessInfo[] }> {
   const detections = await Promise.all(adapters.map(async (adapter) => ({ adapter, detected: validateRuntimeDetectResult(await adapter.detect()) })));
   const runtimes: RuntimeInfo[] = [];
+  const harnesses: HarnessInfo[] = [];
   for (const { adapter, detected } of detections) {
-    if (detected.kind !== 'available' || !isRuntimeId(adapter.descriptor.id)) continue;
+    if (detected.kind !== 'available') continue;
+    if (!isRuntimeId(adapter.descriptor.id)) {
+      harnesses.push({ id: HarnessIdSchema.parse(adapter.descriptor.id),
+        ...(detected.version === undefined ? {} : { version: detected.version }),
+        capabilities: toRuntimeInfoCapabilities(adapter.descriptor.capabilities) });
+      continue;
+    }
     const info: RuntimeInfo = { id: adapter.descriptor.id };
     if (detected.version !== undefined) info.version = detected.version;
     if (detected.authPresent !== undefined) info.authPresent = detected.authPresent;
@@ -903,7 +919,7 @@ async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<RuntimeInfo[]
     info.capabilities = toRuntimeInfoCapabilities(adapter.descriptor.capabilities);
     runtimes.push(info);
   }
-  return runtimes;
+  return { runtimes, harnesses };
 }
 
 /**
@@ -1069,7 +1085,7 @@ function buildAdapter(id: RuntimeId, config: DaemonConfig): RuntimeAdapter {
         resolveApprovalMcpBin: () => resolveApprovalMcpBin(config.sdkHelperHost),
       });
     case 'codex':
-      return new CodexAdapter();
+      return new CodexAdapter({ sdkHelperHost: config.sdkHelperHost });
   }
 }
 
@@ -1200,6 +1216,12 @@ export function buildDaemonWithAdapters(
   // opt-out pin. `configured > 0` is `false` for `NaN`, `0`, and any
   // negative number, and `true` for `Number.POSITIVE_INFINITY` — exactly the
   // three-way split this config wants.
+  if (config.startupTimeoutMs !== undefined && (!Number.isSafeInteger(config.startupTimeoutMs) || config.startupTimeoutMs <= 0)) throw new Error('startupTimeoutMs must be a positive safe integer');
+  if (config.artifactLimits !== undefined) {
+    for (const value of [config.artifactLimits.maxFileBytes, config.artifactLimits.maxTaskBytes]) {
+      if (!Number.isSafeInteger(value) || value <= 0) throw new Error('artifactLimits must contain positive safe integer byte budgets');
+    }
+  }
   if (config.maxTaskOutputBytes !== undefined && !(config.maxTaskOutputBytes > 0)) {
     throw new Error(
       `DaemonConfig.maxTaskOutputBytes must be a positive number (or omitted to use the ${DEFAULT_MAX_TASK_OUTPUT_BYTES}-byte default) — got ${config.maxTaskOutputBytes}. Pass Number.POSITIVE_INFINITY to explicitly disable the cap; 0 or a negative number is rejected rather than silently treated as "disabled".`,
@@ -1430,7 +1452,11 @@ export function buildDaemonWithAdapters(
    * outbox drain, so a `task.fail` produced during teardown can never be left
    * mid-chain while the connection closes out from under it.
    */
-  let journalTerminalTail: Promise<void> = Promise.resolve();
+  const terminalCommits = new TerminalCommitQueue(taskId => {
+    void runner?.retryTerminalFinalization(taskId).catch(error => {
+      console.error('[byok/client] terminal finalization still requires recovery', error);
+    });
+  });
   // M3-2a: local observability — constructed once per daemon instance (not
   // per `start()`) so `subscribe()`/`tasks()` work immediately after
   // `createDaemonWithAdapters()` returns and keep accumulating across an
@@ -1673,6 +1699,7 @@ export function buildDaemonWithAdapters(
   }
 
   async function startUnderLease(): Promise<void> {
+    terminalCommits.resume();
     if (!daemonOwnerLease) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
     try {
     // Only the explicitly enabled service-enrollment path resolves credential
@@ -1755,6 +1782,7 @@ export function buildDaemonWithAdapters(
         const payload = offer.payload as { agentRef?: AgentRef };
         const terminal = createEnvelope('task.fail', {
           reason: 'daemon_interrupted', retryable: false,
+          ...(task.claimedRuntime !== undefined && !isRuntimeId(task.claimedRuntime) ? { harnessId: task.claimedRuntime } : {}),
           ...(payload.agentRef === undefined ? {} : { agentRef: payload.agentRef }),
         }, { taskId: task.taskId });
         const bytes = encodeEnvelope(terminal);
@@ -1807,7 +1835,7 @@ export function buildDaemonWithAdapters(
     }
 
     blobLifecycleAbort = new AbortController();
-    const [runtimes, blobClient] = await Promise.all([
+    const [{ runtimes, harnesses }, blobClient] = await Promise.all([
       detectRuntimes(adapters),
       Promise.resolve(new BlobClient(config.serverUrl, auth, { signal: blobLifecycleAbort.signal })),
     ]);
@@ -1834,6 +1862,8 @@ export function buildDaemonWithAdapters(
         })
       : undefined;
 
+    capabilities.push('custom-harness');
+
     // The journal owns terminal bytes; the transport owns one delivery queue.
     // A local write failure must never bypass durability and send different truth.
     const sendSanitizedEnvelope: TaskRunnerDeps['send'] = (envelope) => {
@@ -1845,7 +1875,7 @@ export function buildDaemonWithAdapters(
       }
       const taskId = envelope.task_id;
       const bytes = encodeEnvelope(envelope);
-      journalTerminalTail = journalTerminalTail.catch(() => undefined).then(async () => {
+      terminalCommits.enqueue(taskId, async () => {
         try {
           await activeJournal.recordTerminal({ taskId, terminalType: terminalKind, bytes,
             payloadHash: journalHash(bytes), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
@@ -1884,8 +1914,6 @@ export function buildDaemonWithAdapters(
           // canonicalization failure remains visible and requires operator
           // recovery; the oversized result itself is never silently dropped.
         }
-      }).catch((error: unknown) => {
-        console.error('[byok/client] terminal durability failed; execution remains unsettled', error);
       });
     };
     const sendEnvelope: TaskRunnerDeps['send'] = (candidate) => {
@@ -1975,7 +2003,10 @@ export function buildDaemonWithAdapters(
       // Finding F5(a): see TaskRunnerDeps.shutdownInterruptTimeoutMs's own doc comment.
       shutdownInterruptTimeoutMs: overrides.shutdown?.taskInterruptTimeoutMs,
       // M5 batch-3 (workstream 2): see DaemonConfig.maxTaskOutputBytes's own doc comment — already validated above.
+      awaitTerminalCommit: taskId => terminalCommits.receipt(taskId),
       maxTaskOutputBytes: config.maxTaskOutputBytes,
+      artifactLimits: config.artifactLimits,
+      startupTimeoutMs: config.startupTimeoutMs,
       // See DaemonConfig.maxInlineEventBytes's own doc comment — already validated above.
       maxInlineEventBytes: config.maxInlineEventBytes,
       // additive-minor (`task.complete.document`): passed through verbatim,
@@ -2199,6 +2230,7 @@ export function buildDaemonWithAdapters(
       capabilities,
       clientVersion: localAgentRelease.version,
       runtimes,
+      harnesses,
       getConfiguredToolsets: () => toolsetRegistry.snapshot().configuredToolsets,
       auth,
       cursorStore,
@@ -2251,7 +2283,10 @@ export function buildDaemonWithAdapters(
               if (isTaskOfferType(envelope.type) && envelope.task_id !== undefined) {
                 const task = await activeJournal.readTask(envelope.task_id, journalIdentity);
                 if (!task) throw new Error('durable offer has no execution record');
-                if (task.localState !== 'received') return;
+                if (task.localState !== 'received') {
+                  await terminalCommits.retry(envelope.task_id);
+                  return;
+                }
               }
               await runner?.handleEnvelope(envelope);
               if (envelope.type === 'agent.message.disposition') {
@@ -2260,7 +2295,7 @@ export function buildDaemonWithAdapters(
                 await replayRecoveryTerminals(envelope.task_id);
               }
               // In particular, a pre-claim decline must be durable before ack.
-              await journalTerminalTail;
+              if (envelope.task_id !== undefined) await terminalCommits.receipt(envelope.task_id);
             }
           : (envelope) => {
               if (tenantRebinding) {
@@ -2566,7 +2601,7 @@ export function buildDaemonWithAdapters(
     // — before the drain wait below, which is what decides the connection is
     // idle — is what keeps that fail from being written into an outbox nobody
     // is draining any more. Exactly a no-op when no journal is configured.
-    const journalTailSettled = journal ? await attempt(() => journalTerminalTail, true) : true;
+    const journalTailSettled = journal ? await attempt(() => terminalCommits.stop(), true) : true;
     // stop() cleared the maintenance timer synchronously above. Await the pass
     // that may already have been inside SQLite only here, immediately before
     // closing the owned journal, so task interruption is not held behind a
@@ -3374,6 +3409,7 @@ export function buildDaemonWithAdapters(
       revoked: connection?.isRevoked() ?? auth.isRevoked(),
       deviceId: auth.deviceId,
       activeTaskCount: runner?.activeTaskCount ?? 0,
+      pendingTerminalCommits: terminalCommits.pendingCount,
       branding: config.branding,
       operationalHealth: operationalHealth.snapshot(),
       toolsets: toolsetRegistry.status(),

@@ -1,3 +1,4 @@
+import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
  * The cloud-local store ports.
  *
@@ -85,6 +86,7 @@ export interface DeviceRecord {
    * lossy/TTL-bounded and cannot authorize Agent dispatch.
    */
   readonly capabilities?: readonly string[];
+  readonly harnesses?: readonly HarnessInfo[];
 }
 
 /** Everything `POST /byok/pair` knows at registration time. `tenantId` is the store's first parameter; `revoked` is the store's own to set (always `false`). */
@@ -141,7 +143,7 @@ export interface DeviceDirectory {
    */
   recordCapabilities(
     tenant: TenantId,
-    input: { readonly deviceId: string; readonly capabilities: readonly string[] },
+    input: { readonly deviceId: string; readonly harnesses?: readonly HarnessInfo[]; readonly capabilities: readonly string[] },
   ): Promise<DeviceRecord | undefined>;
   /** Pre-tenant. Two callers only: `POST /byok/challenge` and `POST /byok/token`. Never exposed through the tenant facade. */
   resolveByDeviceId(deviceId: string): Promise<DeviceRecord | undefined>;
@@ -289,6 +291,7 @@ export interface TaskAttempt {
    * Absent for a daemon whose `task.claim` carried no `runtime` at all.
    */
   readonly claimedRuntime?: RuntimeId;
+  readonly claimedHarnessId?: string;
   /**
    * The capability block the CLAIMING adapter reported for ITSELF on that same
    * `task.claim` (`TaskClaimPayload.capabilities`), snapshotted under exactly
@@ -442,6 +445,7 @@ export interface TaskAttemptStore {
       readonly taskId: string;
       readonly deviceId: string;
       readonly runtime?: RuntimeId;
+      readonly harnessId?: string;
       readonly capabilities?: RuntimeCapabilities;
     },
   ): Promise<TaskAttempt | undefined>;

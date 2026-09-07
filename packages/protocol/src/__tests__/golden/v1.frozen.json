@@ -20,7 +20,8 @@
     "agent-content-transcript-read",
     "agent-content-artifact-read",
     "agent-home-projection",
-    "terminal-projection-selection"
+    "terminal-projection-selection",
+    "custom-harness"
   ],
   "permissionModes": [
     "auto",
@@ -331,6 +332,55 @@
             "additionalProperties": false
           }
         },
+        "harnesses": {
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "capabilities": {
+                "type": "object",
+                "properties": {
+                  "steer": {
+                    "type": "boolean"
+                  },
+                  "resume": {
+                    "type": "boolean"
+                  },
+                  "approvalInteractive": {
+                    "type": "boolean"
+                  },
+                  "mcpToolsets": {
+                    "type": "boolean"
+                  },
+                  "permissionModes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "capabilities"
+            ],
+            "additionalProperties": false
+          }
+        },
         "configuredToolsets": {
           "maxItems": 64,
           "type": "array",
@@ -476,6 +526,12 @@
             "claude",
             "codex"
           ]
+        },
+        "harnessId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
         },
         "dispatchSelection": {
           "oneOf": [
@@ -729,6 +785,12 @@
             "claude",
             "codex"
           ]
+        },
+        "harnessId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
         },
         "dispatchSelection": {
           "oneOf": [
@@ -1034,6 +1096,12 @@
             "claude",
             "codex"
           ]
+        },
+        "harnessId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
         },
         "dispatchSelection": {
           "oneOf": [
@@ -1362,6 +1430,12 @@
             "claude",
             "codex"
           ]
+        },
+        "harnessId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
         },
         "dispatchSelection": {
           "oneOf": [
@@ -1937,6 +2011,12 @@
             "claude",
             "codex"
           ]
+        },
+        "harnessId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
         },
         "dispatchSelection": {
           "oneOf": [
@@ -3458,6 +3538,12 @@
             "codex"
           ]
         },
+        "harnessId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+        },
         "capabilities": {
           "type": "object",
           "properties": {
@@ -3954,6 +4040,12 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "harnessId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+        },
         "summary": {
           "type": "string"
         },
@@ -4088,6 +4180,12 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "harnessId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+        },
         "reason": {
           "type": "string"
         },
@@ -4187,6 +4285,12 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "harnessId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+        },
         "reason": {
           "type": "string"
         },
@@ -4427,6 +4531,55 @@
                   "additionalProperties": false
                 }
               },
+              "harnesses": {
+                "maxItems": 64,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+                    },
+                    "version": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "capabilities": {
+                      "type": "object",
+                      "properties": {
+                        "steer": {
+                          "type": "boolean"
+                        },
+                        "resume": {
+                          "type": "boolean"
+                        },
+                        "approvalInteractive": {
+                          "type": "boolean"
+                        },
+                        "mcpToolsets": {
+                          "type": "boolean"
+                        },
+                        "permissionModes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "capabilities"
+                  ],
+                  "additionalProperties": false
+                }
+              },
               "configuredToolsets": {
                 "maxItems": 64,
                 "type": "array",
@@ -4659,6 +4812,12 @@
                   "claude",
                   "codex"
                 ]
+              },
+              "harnessId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
               },
               "dispatchSelection": {
                 "oneOf": [
@@ -4957,6 +5116,12 @@
                   "claude",
                   "codex"
                 ]
+              },
+              "harnessId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
               },
               "dispatchSelection": {
                 "oneOf": [
@@ -5307,6 +5472,12 @@
                   "claude",
                   "codex"
                 ]
+              },
+              "harnessId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
               },
               "dispatchSelection": {
                 "oneOf": [
@@ -5680,6 +5851,12 @@
                   "claude",
                   "codex"
                 ]
+              },
+              "harnessId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
               },
               "dispatchSelection": {
                 "oneOf": [
@@ -6300,6 +6477,12 @@
                   "claude",
                   "codex"
                 ]
+              },
+              "harnessId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
               },
               "dispatchSelection": {
                 "oneOf": [
@@ -7606,6 +7789,12 @@
                   "codex"
                 ]
               },
+              "harnessId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+              },
               "capabilities": {
                 "type": "object",
                 "properties": {
@@ -8366,6 +8555,12 @@
           "payload": {
             "type": "object",
             "properties": {
+              "harnessId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+              },
               "summary": {
                 "type": "string"
               },
@@ -8544,6 +8739,12 @@
           "payload": {
             "type": "object",
             "properties": {
+              "harnessId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+              },
               "reason": {
                 "type": "string"
               },
@@ -8687,6 +8888,12 @@
           "payload": {
             "type": "object",
             "properties": {
+              "harnessId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+              },
               "reason": {
                 "type": "string"
               },
@@ -10699,6 +10906,55 @@
                           "additionalProperties": false
                         }
                       },
+                      "harnesses": {
+                        "maxItems": 64,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+                            },
+                            "version": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128
+                            },
+                            "capabilities": {
+                              "type": "object",
+                              "properties": {
+                                "steer": {
+                                  "type": "boolean"
+                                },
+                                "resume": {
+                                  "type": "boolean"
+                                },
+                                "approvalInteractive": {
+                                  "type": "boolean"
+                                },
+                                "mcpToolsets": {
+                                  "type": "boolean"
+                                },
+                                "permissionModes": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "capabilities"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
                       "configuredToolsets": {
                         "maxItems": 64,
                         "type": "array",
@@ -10931,6 +11187,12 @@
                           "claude",
                           "codex"
                         ]
+                      },
+                      "harnessId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
                       },
                       "dispatchSelection": {
                         "oneOf": [
@@ -11229,6 +11491,12 @@
                           "claude",
                           "codex"
                         ]
+                      },
+                      "harnessId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
                       },
                       "dispatchSelection": {
                         "oneOf": [
@@ -11579,6 +11847,12 @@
                           "claude",
                           "codex"
                         ]
+                      },
+                      "harnessId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
                       },
                       "dispatchSelection": {
                         "oneOf": [
@@ -11952,6 +12226,12 @@
                           "claude",
                           "codex"
                         ]
+                      },
+                      "harnessId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
                       },
                       "dispatchSelection": {
                         "oneOf": [
@@ -12572,6 +12852,12 @@
                           "claude",
                           "codex"
                         ]
+                      },
+                      "harnessId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
                       },
                       "dispatchSelection": {
                         "oneOf": [
@@ -13878,6 +14164,12 @@
                           "codex"
                         ]
                       },
+                      "harnessId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+                      },
                       "capabilities": {
                         "type": "object",
                         "properties": {
@@ -14638,6 +14930,12 @@
                   "payload": {
                     "type": "object",
                     "properties": {
+                      "harnessId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+                      },
                       "summary": {
                         "type": "string"
                       },
@@ -14816,6 +15114,12 @@
                   "payload": {
                     "type": "object",
                     "properties": {
+                      "harnessId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+                      },
                       "reason": {
                         "type": "string"
                       },
@@ -14959,6 +15263,12 @@
                   "payload": {
                     "type": "object",
                     "properties": {
+                      "harnessId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+                      },
                       "reason": {
                         "type": "string"
                       },
@@ -16024,6 +16334,55 @@
                           "additionalProperties": false
                         }
                       },
+                      "harnesses": {
+                        "maxItems": 64,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+                            },
+                            "version": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128
+                            },
+                            "capabilities": {
+                              "type": "object",
+                              "properties": {
+                                "steer": {
+                                  "type": "boolean"
+                                },
+                                "resume": {
+                                  "type": "boolean"
+                                },
+                                "approvalInteractive": {
+                                  "type": "boolean"
+                                },
+                                "mcpToolsets": {
+                                  "type": "boolean"
+                                },
+                                "permissionModes": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "capabilities"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
                       "configuredToolsets": {
                         "maxItems": 64,
                         "type": "array",
@@ -16256,6 +16615,12 @@
                           "claude",
                           "codex"
                         ]
+                      },
+                      "harnessId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
                       },
                       "dispatchSelection": {
                         "oneOf": [
@@ -16554,6 +16919,12 @@
                           "claude",
                           "codex"
                         ]
+                      },
+                      "harnessId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
                       },
                       "dispatchSelection": {
                         "oneOf": [
@@ -16904,6 +17275,12 @@
                           "claude",
                           "codex"
                         ]
+                      },
+                      "harnessId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
                       },
                       "dispatchSelection": {
                         "oneOf": [
@@ -17277,6 +17654,12 @@
                           "claude",
                           "codex"
                         ]
+                      },
+                      "harnessId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
                       },
                       "dispatchSelection": {
                         "oneOf": [
@@ -17897,6 +18280,12 @@
                           "claude",
                           "codex"
                         ]
+                      },
+                      "harnessId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
                       },
                       "dispatchSelection": {
                         "oneOf": [
@@ -19203,6 +19592,12 @@
                           "codex"
                         ]
                       },
+                      "harnessId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+                      },
                       "capabilities": {
                         "type": "object",
                         "properties": {
@@ -19963,6 +20358,12 @@
                   "payload": {
                     "type": "object",
                     "properties": {
+                      "harnessId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+                      },
                       "summary": {
                         "type": "string"
                       },
@@ -20141,6 +20542,12 @@
                   "payload": {
                     "type": "object",
                     "properties": {
+                      "harnessId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+                      },
                       "reason": {
                         "type": "string"
                       },
@@ -20284,6 +20691,12 @@
                   "payload": {
                     "type": "object",
                     "properties": {
+                      "harnessId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+                      },
                       "reason": {
                         "type": "string"
                       },

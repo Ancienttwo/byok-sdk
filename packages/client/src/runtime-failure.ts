@@ -174,3 +174,21 @@ export function projectRuntimeBoundaryFailure(
     contractViolation: true,
   };
 }
+
+/** A failed startup whose process tree has not yielded a disposal receipt. */
+export class RuntimeStartupDisposalFailure extends Error {
+  readonly retryDisposal: () => Promise<void>;
+  constructor(retryDisposal: () => Promise<void>, options?: ErrorOptions) {
+    super('runtime startup failed and process ownership remains quarantined', options);
+    this.name = 'RuntimeStartupDisposalFailure';
+    this.retryDisposal = retryDisposal;
+    Object.defineProperty(this, Symbol.for('@byok-sdk/client/RuntimeStartupDisposalFailure/v1'), { value: true });
+    Object.freeze(this);
+  }
+}
+
+export function isRuntimeStartupDisposalFailure(value: unknown): value is RuntimeStartupDisposalFailure {
+  return typeof value === 'object' && value !== null
+    && (value as Record<symbol, unknown>)[Symbol.for('@byok-sdk/client/RuntimeStartupDisposalFailure/v1')] === true
+    && typeof (value as RuntimeStartupDisposalFailure).retryDisposal === 'function';
+}

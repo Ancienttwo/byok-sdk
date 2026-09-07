@@ -930,3 +930,20 @@ auto-merges, retries, or dual-writes SQLite. Secrets stay in the local
 `SecretStore`; if a configure call changed a secret before its profile CAS
 failed, the registry restores the previous local value and reports a distinct
 failure if restoration itself fails.
+
+### Codex MCP input transport and local I/O bounds (#164–#166)
+
+Codex argv contains the prompt marker `-` and nonsecret MCP channel names; the
+prompt is delivered via stdin and EOF. Original per-server MCP command/args/env
+are carried by independent environment payloads into the SDK `mcp-env` helper,
+which removes all sealed channel variables before starting the selected server.
+This removes secret values from Codex argv and SDK launcher diagnostics. It does
+not claim process environment secrecy against the same OS principal, or conceal
+arguments authored by an MCP server configuration from that server's own process.
+Codex auth state and CODEX_HOME are unchanged.
+
+Raw Codex JSONL is limited before parsing (1 MiB/frame, 4 MiB deferred frames),
+with bounded stderr retention (64 KiB and 20 lines). Legacy artifact uploads read
+an existing validated fd in cancellable 64 KiB chunks under separate per-file and
+per-task byte budgets; file growth is counted rather than trusting stat alone.
+These limits do not change strict Agent egress permissions.

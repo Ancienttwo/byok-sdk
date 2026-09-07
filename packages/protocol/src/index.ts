@@ -148,6 +148,9 @@ export {
   RuntimeIdSchema,
   ProtocolVersionNumberSchema,
   RuntimeInfoSchema,
+  HarnessIdSchema,
+  HarnessInfoSchema,
+  HarnessInventorySchema,
   RuntimeCapabilitiesSchema,
   AgentRefSchema,
   AgentHomeProjectionAgentRefSchema,
@@ -325,3 +328,7 @@ export type {
 } from './http-api';
 
 export type { TaskOfferType } from './messages';
+
+export type { HarnessId, HarnessInfo } from './messages';
+
+export { CUSTOM_HARNESS_CAPABILITY } from './version';

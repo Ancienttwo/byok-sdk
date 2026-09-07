@@ -558,6 +558,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     const policy: PermissionPolicy = input.policy ?? { mode: 'confirm' };
     const runtime = dispatchSelection?.runtimeId ?? input.runtime;
     const common = {
+      ...(input.harnessId === undefined ? {} : { harnessId: input.harnessId }),
       instruction: input.instruction,
       policy,
       ...(runtime === undefined ? {} : { runtime }),

@@ -1,3 +1,4 @@
+import { runMcpEnvLauncher } from './mcp-env-launcher';
 import type { Readable } from 'node:stream';
 import { connectControlClient, type ControlClient } from './control-client';
 import { serveAgentMessageMcpOverStdio, type AgentMessageMcpDeps } from './agent-message-mcp-server';
@@ -123,6 +124,9 @@ async function runAgentTeamMcp(): Promise<void> {
 
 export async function runSdkReservedHelper(kind: SdkReservedHelperKind): Promise<void> {
   switch (kind) {
+    case 'mcp-env':
+      await runMcpEnvLauncher();
+      return;
     case 'agent-message-mcp':
       await runAgentMessageMcp();
       return;
