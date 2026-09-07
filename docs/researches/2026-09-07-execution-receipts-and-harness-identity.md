@@ -166,3 +166,10 @@ Validation for the expanded source is recorded in the follow-up plan after its
 required checks and clean-subject packed smoke finish. Earlier counts above are
 R1–R3 historical evidence only, not evidence for R4–R6. No release/deployment or
 production migration is part of this work.
+
+Expanded-source local verification passed: 3835 tests / 135 skips across all
+workspaces, build/typecheck/API/version/strict workflow checks. Canonical clean
+release pack at f09030902ffe329eb0c66e005695477a97ca52e0 passed on macOS arm64,
+including real MCP calls through all three installed entries, ten-package exact
+dependency closure and the 21 migration files. These are local package evidence;
+remote CI and production deployment remain separate. R4 is tracked as #170.

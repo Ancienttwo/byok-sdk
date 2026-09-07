@@ -47,5 +47,8 @@ the user-provided concrete traces, without claiming to have run those attachment
   SQLite decline settles its receipt even after cancellation filters the offer.
 - R4 baseline installed tarballs: root/adapters actual MCP pass, official CLI
   fails MODULE_NOT_FOUND at dist/bin/bin/byok-mcp-env.js. Fixed clean-subject
-  tarball smoke and new-SHA CI remain to be observed.
+  tarball smoke passed at f09030902ffe329eb0c66e005695477a97ca52e0 on macOS
+  arm64: actual MCP tools/call through root, adapters and official CLI start;
+  all 10 packages install with exact internal edges and migration files.
+  New-SHA remote CI remains to be observed.
 - Tracking: #160 (R5/R6), #163, #167 and #170 (R4) remain open; PR #169 draft.
