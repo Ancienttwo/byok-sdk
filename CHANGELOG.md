@@ -2,6 +2,11 @@
 
 ## 0.15.0 / @byok-sdk/keys 0.4.1 — prepared, not published
 
+- Fix R7: terminate every compacted Agent message outbox and reliable egress
+  spool JSONL record with a newline. Subsequent appends remain separate records
+  and reopen preserves retained identities. Existing malformed logs are not
+  rewritten or salvaged by this writer correction.
+
 - Fix #158–#163: receipt-gated startup ownership and cleanup, independent Agent startup with atomic home admission, bounded cancel/reject interrupt, gap-safe durable cursor acknowledgement, and observable exact terminal commit retry.
 - Fix #164–#166: Codex prompt stdin/EOF and per-MCP environment channels remove sensitive values from Codex argv; raw stdout/deferred/stderr and cancellable same-fd legacy artifact reads have local byte budgets.
 - Add #167 as a separate additive `custom-harness` protocol contract: durable device inventory, explicit selection, immutable claim identity and terminal echo. Builtin `RuntimeId` is unchanged; unsupported peers fail closed. Apply `0021_custom_harness_identity.sql` before deploying the new server. No publication or deployment is performed here.

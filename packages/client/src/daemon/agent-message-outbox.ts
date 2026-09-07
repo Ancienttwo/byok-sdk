@@ -280,7 +280,7 @@ export class AgentMessageOutbox {
       const disposition = this.dispositionByTask.get(record.taskId);
       return disposition === undefined ? [append] : [append, { schema: 1, kind: 'disposition', taskId: record.taskId, disposition }];
     });
-    await atomicWriteFile(this.outboxPath, entries.map(stableJson).join(entries.length === 0 ? '' : '\n'), { mode: 0o600 });
+    await atomicWriteFile(this.outboxPath, entries.map((entry) => `${stableJson(entry)}\n`).join(''), { mode: 0o600 });
     this.logEntries = entries.length;
   }
 
