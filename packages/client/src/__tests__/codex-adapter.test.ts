@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { SteerUnsupportedError, type Session } from '../types';
-import { RuntimeExecutionFailure } from '../runtime-failure';
+import { CodexProcessRunner } from '../adapters/codex/process-runner';
+import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-codex.mjs', import.meta.url));
@@ -131,6 +132,26 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     expect(adapter.descriptor.environmentRequirements).toEqual({ credentialNames: [] });
   });
 
+  it('a failed handshake waits for disposal and retains a retryable owner when disposal fails', async () => {
+    const actualDispose = CodexProcessRunner.prototype.dispose;
+    let runner: CodexProcessRunner | undefined;
+    const disposal = vi.spyOn(CodexProcessRunner.prototype, 'dispose').mockImplementationOnce(function (this: CodexProcessRunner) {
+      runner = this;
+      return Promise.reject(new Error('injected disposal failure'));
+    });
+    try {
+      const ctx = await makeCtx({ ...process.env, FAKE_CODEX_NO_THREAD_STARTED: '1' });
+      const error = await startAdapter(fakeCodexAdapter(), baseTask, ctx).catch(error => error);
+      expect(disposal).toHaveBeenCalledTimes(1);
+      expect(error).toBeInstanceOf(RuntimeStartupDisposalFailure);
+      disposal.mockRestore();
+      await expect(error.retryDisposal()).resolves.toBeUndefined();
+    } finally {
+      disposal.mockRestore();
+      if (runner) await actualDispose.call(runner);
+    }
+  });
+
   it('start() resolves sessionRef from thread.started and drives the canned sequence into normalized AgentEvents', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx();
@@ -178,15 +199,16 @@ describe('CodexAdapter against the fake-codex fixture', () => {
       'sandbox_mode=workspace-write',
       '-c',
       'approval_policy=never',
-      'say hi',
+      '-',
     ]);
   });
 
   it('projects task-scoped MCP command, args, and sealed env through Codex config overrides', async () => {
     const captured: string[][] = [];
+    const envs: NodeJS.ProcessEnv[] = [];
     const adapter = new CodexAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
-      spawnFn: capturingSpawn(captured),
+      spawnFn: capturingSpawn(captured, envs),
     });
     const ctx = await makeCtx();
     ctx.mcpServers = {
@@ -199,18 +221,12 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
     await takeEvents(session, 7);
-    expect(captured[0]).toEqual([
-      'exec', '--json', '--skip-git-repo-check',
-      '-c', 'sandbox_mode=workspace-write',
-      '-c', 'approval_policy=never',
-      '--ignore-user-config',
-      '-c', 'mcp_servers.byokagentmessage.command="/opt/byok-agent-message-mcp"',
-      '-c', 'mcp_servers.byokagentmessage.args=["--stdio"]',
-      '-c', 'mcp_servers.byokagentmessage.env.BYOK_AGENT_MESSAGE_CONTEXT="sealed-context"',
-      '-c', 'mcp_servers.byokagentmessage.enabled_tools=["send_agent_message"]',
-      '-c', 'mcp_servers.byokagentmessage.tools.send_agent_message.approval_mode="approve"',
-      'say hi',
-    ]);
+    expect(captured[0]!.join(' ')).not.toContain('sealed-context');
+    expect(captured[0]!.at(-1)).toBe('-');
+    const key = Object.keys(envs[0]!).find(name => name.startsWith('BYOK_MCP_PAYLOAD_'))!;
+    expect(JSON.parse(envs[0]![key]!)).toEqual(ctx.mcpServers.byokagentmessage);
+    expect(captured[0]).toContain(`mcp_servers.byokagentmessage.env_vars=${JSON.stringify([key])}`);
+
   });
 
   it('replays the first turn\'s exact MCP config argv on a resumed turn, so the MCP tool still resolves', async () => {
@@ -243,18 +259,9 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     // `turn.completed`) would have ended this turn without a `turn_end`.
     expect(secondTurn.at(-1)).toEqual({ type: 'turn_end' });
 
-    expect(captured[1]).toEqual([
-      'exec', 'resume', 'fake-thread-1', '--json', '--skip-git-repo-check',
-      '-c', 'sandbox_mode=workspace-write',
-      '-c', 'approval_policy=never',
-      '--ignore-user-config',
-      '-c', 'mcp_servers.byokagentmessage.command="/opt/byok-agent-message-mcp"',
-      '-c', 'mcp_servers.byokagentmessage.args=["--stdio"]',
-      '-c', 'mcp_servers.byokagentmessage.env.BYOK_AGENT_MESSAGE_CONTEXT="sealed-context"',
-      '-c', 'mcp_servers.byokagentmessage.enabled_tools=["send_agent_message"]',
-      '-c', 'mcp_servers.byokagentmessage.tools.send_agent_message.approval_mode="approve"',
-      'follow up',
-    ]);
+    expect(captured[1]!.join(' ')).not.toContain('sealed-context');
+    expect(captured[1]!.at(-1)).toBe('-');
+
     // Byte-identical, not merely equivalent: the resume replays the exact
     // argv the first turn was launched with.
     expect(mcpConfigSlice(captured[1]!)).toEqual(mcpConfigSlice(captured[0]!));
@@ -277,7 +284,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
       'exec', 'resume', 'fake-thread-1', '--json', '--skip-git-repo-check',
       '-c', 'sandbox_mode=workspace-write',
       '-c', 'approval_policy=never',
-      'follow up',
+      '-',
     ]);
     expect(mcpConfigSlice(captured[1]!)).toEqual([]);
   });
@@ -363,7 +370,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
         'sandbox_mode=workspace-write',
         '-c',
         'approval_policy=never',
-        'say hi',
+        '-',
       ],
       [
         'exec',
@@ -374,7 +381,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
         'sandbox_mode=workspace-write',
         '-c',
         'approval_policy=never',
-        'say hi',
+        '-',
       ],
     ]);
   });

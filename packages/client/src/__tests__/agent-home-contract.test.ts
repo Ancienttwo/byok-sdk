@@ -546,6 +546,64 @@ describe('SDK-owned Agent home contract', () => {
       });
   });
 
+  it('retains the startup owner after handoff and close failures until explicit cleanup retry', async () => {
+    const hostStorageRoot = await makeRoot();
+    const storeDir = await makeRoot();
+    const adapter = new StubRuntimeAdapter('pi');
+    const sent: Envelope[] = [];
+    const handoffs = new AgentSessionHandoffStore();
+    let closeFails = true;
+    vi.spyOn(handoffs, 'record').mockImplementationOnce(async () => {
+      adapter.sessions[0]!.close = async () => {
+        if (closeFails) throw new Error('injected disposal failure');
+      };
+      throw new Error('disk unavailable');
+    });
+    const realRecordTaskTerminal = handoffs.recordTaskTerminal.bind(handoffs);
+    const terminalEvidence = vi.spyOn(handoffs, 'recordTaskTerminal').mockImplementation(async (...args) => {
+      expect(sent.some((entry) => entry.type === 'task.fail')).toBe(false);
+      return realRecordTaskTerminal(...args);
+    });
+    const agentHome = new AgentHomeManager({ hostStorageRoot });
+    const runner = new TaskRunner({
+      adapters: [adapter],
+      workspaceRoot: await makeRoot(),
+      agentHome,
+      agentSessionHandoffs: handoffs,
+      deviceId: 'device-1',
+      send: (envelope) => sent.push(envelope),
+      blobClient: {
+        resolveInstruction: async () => { throw new Error('not used'); },
+        uploadArtifact: async () => { throw new Error('not used'); },
+      },
+      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
+      approvalRegistry: new ApprovalRegistry(),
+      storeDir,
+      productId: 'product-1',
+    });
+    const agentRef = ref('agent-handoff-failure', 'profile-5');
+    const taskId = 'task-agent-handoff-failure';
+
+    await runner.handleEnvelope(createEnvelope(
+      'task.offer_for_agent',
+      { instruction: 'fail while writing handoff', policy: { mode: 'auto' }, runtime: 'pi', agentRef },
+      { taskId, seq: 1 },
+    ));
+
+    const cwd = await agentHome.layout.canonicalHomePath(agentRef);
+    expect(agentHome.executionLeaseManager.activeAttemptCount(cwd)).toBe(1);
+    await runner.handleEnvelope(createEnvelope('task.offer_for_agent', {
+      instruction: 'competing writer', policy: { mode: 'auto' }, runtime: 'pi', agentRef,
+    }, { taskId: 'competing-writer', seq: 2 }));
+    expect(adapter.sessions).toHaveLength(1);
+    expect(sent.at(-1)?.type).toBe('task.decline');
+    closeFails = false;
+    await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'retry cleanup' }, { taskId, seq: 3 }));
+    expect(agentHome.executionLeaseManager.activeAttemptCount(cwd)).toBe(0);
+    expect(sent.filter(e => e.type === 'task.fail')).toHaveLength(1);
+    expect(sent.filter(e => e.type === 'task.started')).toHaveLength(0);
+  });
+
   it('publishes a claimed failure after bounded permanent evidence failure and releases the Agent lease', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const hostStorageRoot = await makeRoot();

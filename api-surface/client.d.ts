@@ -455,10 +455,12 @@ export interface ResolvedBin {
  */
 export declare function resolveClaudeBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/codex/codex-adapter.d.ts ====
+import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type ResolvedBin } from './resolve-bin';
 import { type SpawnFn } from './process-runner';
 export interface CodexAdapterOptions {
+    sdkHelperHost?: SdkHelperHostConfig;
     /** Override bin resolution — tests substitute the fake-codex fixture script. */
     resolveBin?: () => ResolvedBin;
     /** Override process spawning — tests substitute a fake spawn. */
@@ -543,6 +545,7 @@ export declare class CodexAdapter implements RuntimeAdapter {
     private resolveBin;
 }
 // ==== @byok-sdk/client dist/adapters/codex/process-runner.d.ts ====
+import { RuntimeExecutionFailure } from '../../runtime-failure';
 import { spawn } from 'node:child_process';
 export type SpawnFn = typeof spawn;
 /**
@@ -559,11 +562,13 @@ export interface CodexRawEvent {
 export interface CodexProcessOptions {
     command: string;
     args: string[];
+    instruction?: string;
     cwd: string;
     env: NodeJS.ProcessEnv;
     spawnFn?: SpawnFn;
     /** Called once per parsed JSONL line, in arrival order. */
     onEvent: (evt: CodexRawEvent) => void;
+    onFailure?: (error: RuntimeExecutionFailure) => void;
     /**
      * DI seam scoped to ADOPTION only (`../process-tree.ts`'s
      * `adoptOwnedProcessTree`), so the win32 job-object branch is exercisable
@@ -576,6 +581,9 @@ export interface CodexProcessOptions {
         assign(pid: number): Promise<void>;
     };
 }
+export declare const CODEX_MAX_FRAME_BYTES: number;
+export declare const CODEX_MAX_DEFERRED_BYTES: number;
+export declare const CODEX_MAX_STDERR_BYTES: number;
 /**
  * Spawns and streams ONE `codex exec` / `codex exec resume` invocation — i.e.
  * exactly one turn.
@@ -583,32 +591,24 @@ export interface CodexProcessOptions {
  * Unlike pi (a single long-lived RPC server process for a whole session's
  * lifetime — see `../pi/rpc-client.ts`), `codex exec` is a one-shot batch
  * process per turn with no persistent request/response channel: it takes its
- * prompt as an argv positional, streams JSONL to stdout for the one turn
+ * prompt from stdin with the documented `-` positional, streams JSONL to stdout for the one turn
  * it's running, and exits. `../codex-adapter.ts`'s `CodexSession` constructs
  * a fresh `CodexProcessRunner` for every turn (the initial `start()` and
  * every later `followUp()`), forwarding each one's lines into the same
  * long-lived event queue.
  *
- * stdin is deliberately never piped to the child (`stdio: ['ignore', 'pipe',
- * 'pipe']`): `codex exec --help` documents that a piped, non-TTY stdin is
- * read and appended to the prompt as a `<stdin>` block even when a prompt was
- * ALSO given as an argv positional, and empirically every single real
- * invocation made while building this adapter logged "Reading additional
- * input from stdin..." on stderr regardless of whether a prompt argument was
- * given. Leaving `stdio: ['pipe', ...]` open for stdin and never closing it
- * risks codex blocking on that read forever — exactly the hang class this
- * task was built to avoid (the pi adapter's own `agent_end`/`agent_settled`
- * mismatch left a task stuck `Running` forever in the M0/M1 GLM run).
- * `'ignore'` presents immediate EOF instead, which was verified live with a
- * dedicated Node `child_process` probe before this was written: no hang,
- * clean completion at normal model latency. This adapter never needs to
- * SEND codex anything over stdin — there is no in-band steer/approval
- * protocol (see `../codex-adapter.ts`'s `steer`/`resolveApproval`).
+ * Prompt stdin is closed with EOF immediately after writing. This is a one-shot
+ * input channel; steer and approvals are not multiplexed over it.
  */
 export declare class CodexProcessRunner {
     private readonly child;
     private readonly onEvent;
-    private buffer;
+    private readonly frameChunks;
+    private frameBytes;
+    private deferredBytes;
+    private stderrBytes;
+    private transportFailure;
+    private readonly onFailure;
     private readonly stderrRing;
     private closed;
     private exitCode;
@@ -678,6 +678,7 @@ export declare class CodexProcessRunner {
      * plus an empty stderr tail would bury the only reason anyone can act on.
      */
     buildExitError(context: string): Error;
+    private failTransport;
     private onData;
     private parseLine;
     private onStderr;
@@ -710,7 +711,7 @@ export declare function resolveCodexBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/index.d.ts ====
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, } from '../types';
 export type { RuntimeEnvironmentRequirements } from '../daemon/environment';
-export { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
+export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
 export type { RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeExecutionFailureInput, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeRetryDisposition, } from '../runtime-failure';
 export { PiAdapter } from './pi/pi-adapter';
 export type { PiAdapterOptions, PiByokLauncherConfig } from './pi/pi-adapter';
@@ -2530,25 +2531,11 @@ export declare class ConnectionManager {
      * guarantees in docs/protocol.md §9.
      */
     private stalledAtSeq;
-    /**
-     * Design A (Wave 2, F3-on-long-poll): the second, in-memory watermark
-     * alongside the durable `cursor`. `cursor` only ever advances AFTER a
-     * `task.*` handler's side effects resolve successfully, and is persisted
-     * (see `advanceCursor`) — that semantics is unchanged. `deliveredSeq`
-     * advances eagerly, the instant a `task.*` envelope is admitted past
-     * dedup (see `deliver`/`noteDelivered`), independent of whether its
-     * handler has even started, let alone succeeded. It exists so a repeated
-     * read at the durable cursor does not re-dispatch an envelope already in
-     * flight — `handleOffer` must not start a second adapter session while a
-     * first attempt is still running. On WS this same field is written the
-     * same way, but since a live WS connection only ever pushes a given `seq`
-     * once, it never has an observable effect there beyond mirroring
-     * `cursor` (see `dedupWatermark`'s doc comment for why redelivery
-     * correctness doesn't depend on resetting it anywhere).
-     */
-    private deliveredSeq;
-    /** Finding F3: serializes `onEnvelope` calls into a per-connection FIFO — one envelope's handler always fully settles before the next one starts. */
+    /** Drain barrier for independently running handlers; not an admission lock. */
     private processingChain;
+    private cursorInitialization;
+    private completionTail;
+    private readonly controlTails;
     /**
      * Design B (finding N4): the ONE outbound queue holds `Envelope` OBJECTS,
      * never re-encoded/rebuilt strings, so a
@@ -2574,38 +2561,12 @@ export declare class ConnectionManager {
     private terminalError;
     private settledWaiters;
     private pendingCursorSave;
-    /**
-     * Finding P2 (Fix 2b): seqs currently admitted into `processingChain` but
-     * not yet settled — added in `deliver()` the moment a `task.*` envelope is
-     * accepted past the ordinary watermark check, removed in `process()`'s
-     * `finally` once that specific attempt resolves (success OR failure).
-     * While stalled, `dedupWatermark()` deliberately stays frozen below
-     * already-delivered seqs (see its own doc comment) so the failed seq's own
-     * redelivery can get through — but that same frozen watermark also means
-     * every OTHER seq above it rides along on every re-poll too. Without this,
-     * a seq already mid-flight (e.g. a `task.offer` whose prepared operation start()
-     * hasn't resolved yet) would be re-enqueued into `processingChain` on
-     * every such re-poll, piling up duplicate copies that — once the first
-     * finally resolves and the chain unwinds through them — run its handler
-     * again; for `task.offer` specifically, a second adapter session
-     * orphaning the first (`TaskRunner`'s own `this.tasks.has` guard, finding
-     * P2c, is the second, independent layer against exactly that).
-     */
+    /** Admission dedup while an individual handler is running. */
     private readonly inFlightSeqs;
-    /**
-     * Finding P2 (Fix 2b): seqs whose handler has already resolved
-     * successfully at least once this session, tracked only while a stall is
-     * in effect — cleared the moment `stalledAtSeq` itself clears (see
-     * `process()`), since once unstalled the ordinary watermark check via
-     * `deliveredSeq` already covers everything delivered so far, making this
-     * redundant. Needed because the stall-gap-prevention rule in `process()`
-     * deliberately does NOT advance `cursor` past a seq above the
-     * still-unresolved `stalledAtSeq`, even once that seq's own handler
-     * succeeds — so `dedupWatermark()` alone can't distinguish "already
-     * succeeded, don't re-run" from "never yet attempted" for anything in
-     * that gap.
-     */
+    /** Successful side effects retained until their durable acknowledgement. */
     private readonly processedSeqs;
+    /** Received work lacking a successful handler receipt, including malformed frames. */
+    private readonly unresolvedSeqs;
     /**
      * Finding P3: the pending `drainOutbox` long-poll retry backoff, if any —
      * cancellable so `enterRevoked()` can unblock it immediately instead of
@@ -2760,43 +2721,18 @@ export declare class ConnectionManager {
      * - F3 (at-most-once): the old code persisted the cursor advance BEFORE
      *   `onEnvelope` even ran (fire-and-forget) — a handler that then failed
      *   left a redelivery-proof envelope permanently marked processed. Inbound
-     *   envelopes are now serialized through `processingChain` (one handler
-     *   fully settles before the next starts) and the cursor only advances
+     *   handlers may run independently; their receipt commits are serialized.
+     *   The cursor only advances
      *   AFTER the handler resolves successfully; a rejection leaves the
      *   cursor where it was (see `stalledAtSeq`), so a future reconnect's
      *   redelivery re-attempts it — safe because every server->daemon type is
      *   documented idempotent (protocol §9).
      */
     private deliver;
-    /**
-     * The local watermark `deliver()` dedupes inbound `task.*` envelopes
-     * against. It is deliberately NOT the long-poll query cursor: that query
-     * is the kernel acknowledgement and uses only the successfully processed
-     * `cursor` (see the constructor). Normally this local watermark is
-     * `deliveredSeq` — which is always >= `cursor` (every envelope that
-     * reaches `advanceCursor` already passed through `noteDelivered` first,
-     * see `deliver`) — so this is the literal `max(cursor, deliveredSeq)` the
-     * design calls for, just expressed via that invariant rather than an
-     * explicit `Math.max`.
-     *
-     * While `stalledAtSeq` is set, this collapses to the durable `cursor`
-     * alone, deliberately ignoring however far `deliveredSeq` had already run
-     * ahead before the failure was known: that's what lets the stalled
-     * envelope's own redelivery (and everything after it, right up to a
-     * fresh success) get past this same dedup check instead of being
-     * self-deduped by the client's own earlier eager tracking of envelopes
-     * whose outcome wasn't known yet. No separate "reset deliveredSeq on
-     * reconnect" step is needed for this to be correct — collapsing to
-     * `cursor` exactly while stalled already produces the right answer on
-     * every long-poll retry path. NOT resetting it unconditionally on every
-     * retry lets `deliveredSeq` keep doing its job of not re-dispatching
-     * something already in flight while a handler is still running.
-     */
+    /** Only a durable acknowledgement can deduplicate a whole prefix. */
     private dedupWatermark;
-    /** Design A: eagerly advance the in-memory delivery watermark — called for every `task.*` envelope `deliver()` admits past dedup, regardless of transport or of whether its handler has even started yet. */
-    private noteDelivered;
     private process;
-    /** Serialized with handler completion, so invalid work cannot be acked by later success. */
+    /** Recorded synchronously at receive, before a later successful receipt can commit. */
     private noteValidationFailure;
     private advanceCursor;
     private quarantineRejectedOutbound;
@@ -3588,6 +3524,13 @@ export interface DaemonConfig {
      * explicitly instead to opt out of enforcement altogether.
      */
     maxTaskOutputBytes?: number;
+    /** Legacy artifact bytes only: default 16 MiB/file and 64 MiB/task, independent of event output limits. */
+    artifactLimits?: {
+        maxFileBytes: number;
+        maxTaskBytes: number;
+    };
+    /** Startup observation deadline; unresolved process owners remain quarantined. Default 30 seconds. */
+    startupTimeoutMs?: number;
     /**
      * Per-EVENT inline ceiling (default {@link DEFAULT_MAX_INLINE_EVENT_BYTES},
      * 64 KiB) for the two `AgentEvent` fields a runtime authors freely:
@@ -3809,6 +3752,8 @@ export interface DaemonStatus {
     revoked: boolean;
     deviceId?: string;
     activeTaskCount: number;
+    /** Exact terminal results retained for journal retry; nonzero requires recovery. */
+    pendingTerminalCommits: number;
     /** Passthrough of `DaemonConfig.branding` — `undefined` when the product configured none. See `DaemonBranding`. */
     branding?: DaemonBranding;
     /** Local lifecycle/retry budget, separate from transport fallback state. */
@@ -6607,6 +6552,7 @@ export interface TaskRunnerDeps {
     agentSessionHandoffs?: AgentSessionHandoffStore;
     deviceId: string;
     send: (envelope: Envelope) => void;
+    awaitTerminalCommit?: (taskId: string) => Promise<void>;
     /** Fsync the execution commitment before claim/runtime side effects. */
     beforeClaim?: (taskId: string, runtime: string) => Promise<void>;
     blobClient: BlobResolver;
@@ -6702,6 +6648,7 @@ export interface TaskRunnerDeps {
     onApprovalDispatched?: (taskId: string, approvalId: string) => void;
     /** Overrides the bounded soft-interrupt window before authoritative `Session.close()` disposal begins. */
     shutdownInterruptTimeoutMs?: number;
+    startupTimeoutMs?: number;
     /**
      * M5 batch-3 (workstream 2): overrides {@link DEFAULT_MAX_TASK_OUTPUT_BYTES}
      * — see that constant's own doc comment and `DaemonConfig.maxTaskOutputBytes`
@@ -6711,6 +6658,10 @@ export interface TaskRunnerDeps {
      * interface (`shutdownInterruptTimeoutMs`, `approvalTimeoutMs`).
      */
     maxTaskOutputBytes?: number;
+    artifactLimits?: {
+        maxFileBytes: number;
+        maxTaskBytes: number;
+    };
     /**
      * Per-event inline ceiling for `tool_use.input` / `tool_result.output` —
      * see `DaemonConfig.maxInlineEventBytes` (`create-daemon.ts`) for the full
@@ -7051,6 +7002,13 @@ export declare class TaskRunner {
      * ahead of this method — see `daemon-control-socket.test.ts`'s dedicated
      * regression test for the exact scenario.
      */
+    /** Startup resources have an owner even before a Session can become active. */
+    private startupRetryTimer;
+    private readonly homeReservations;
+    private readonly startupOwners;
+    private readonly startupDisposals;
+    private disposeStartupOwner;
+    private disposeStartupOwnerOnce;
     shutdownActiveTasks(reason: string): Promise<void>;
     /**
      * M5 batch-3 (workstream 2): the ONE shared per-task teardown sequence —
@@ -7082,6 +7040,7 @@ export declare class TaskRunner {
      * a genuine protocol bug, not a benign race — mirrors `pump()`'s own
      * identity-check guard for the same class of race.
      */
+    private interruptBounded;
     private teardownActiveTask;
     /** Graceful-shutdown caller of {@link teardownActiveTask} — see `shutdownActiveTasks`'s own doc comment. `retryable: true`: nothing about the task/policy itself was ever at fault, only this device's own availability right now. */
     private shutdownTask;
@@ -7532,7 +7491,10 @@ export declare class TaskRunner {
     private persistAgentTerminalEvidence;
     private retryAgentTerminalEvidence;
     private reportAgentTerminalEvidenceFailure;
+    retryTerminalFinalization(taskId: string): Promise<void>;
+    private readonly finalizationAttempts;
     private finish;
+    private finishOnce;
     private reserveSemanticTerminal;
     /** M3-B: bounded insert for `finishedTaskIds` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest (first-inserted) entry once over cap, same idiom as `ConnectionHub.checkAndRecordDuplicate` (packages/server/src/hub.ts). */
     private addFinishedTaskId;
@@ -7922,7 +7884,7 @@ export { resolveLocalAgentReleaseIdentity } from './release-identity';
 export type { LocalAgentReleaseIdentity } from './release-identity';
 export { BYOK_SDK_HELPER_SUBCOMMAND, resolveSdkReservedHelperBin, runSdkReservedHelperCommand, } from './sdk-reserved-helper-host';
 export type { SdkHelperHostConfig, SdkReservedHelperKind, ResolvedSdkReservedHelperBin, } from './sdk-reserved-helper-host';
-export { RuntimeExecutionFailure, RuntimeDisposalFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON, isRuntimeDisposalFailure, isRuntimeExecutionFailure, projectRuntimeBoundaryFailure, projectRuntimeExecutionFailure, } from './runtime-failure';
+export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartupDisposalFailure, RuntimeDisposalFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON, isRuntimeDisposalFailure, isRuntimeExecutionFailure, projectRuntimeBoundaryFailure, projectRuntimeExecutionFailure, } from './runtime-failure';
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure';
 export { GitWorkspaceManager, GitWorkspaceError, isGitWorkspaceConfig, prependGitWorkspaceGuidance } from './daemon/git-workspace';
 export type { GitWorkspaceObservation, GitWorkspaceLease, GitWorkspaceOptions, GitErrorCategory } from './daemon/git-workspace';
@@ -8646,9 +8608,15 @@ export declare const RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON: Readonly<{
 export declare function projectRuntimeBoundaryFailure(value: unknown, expectedPhase: RuntimeFailurePhase): RuntimeFailureProjection & {
     contractViolation: boolean;
 };
+/** A failed startup whose process tree has not yielded a disposal receipt. */
+export declare class RuntimeStartupDisposalFailure extends Error {
+    readonly retryDisposal: () => Promise<void>;
+    constructor(retryDisposal: () => Promise<void>, options?: ErrorOptions);
+}
+export declare function isRuntimeStartupDisposalFailure(value: unknown): value is RuntimeStartupDisposalFailure;
 // ==== @byok-sdk/client dist/sdk-reserved-helper-host.d.ts ====
 export declare const BYOK_SDK_HELPER_SUBCOMMAND = "__byok_sdk_helper";
-export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'approval-mcp' | 'agent-team-mcp';
+export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'approval-mcp' | 'agent-team-mcp' | 'mcp-env';
 export interface SdkHelperHostConfig {
     /**
      * Run SDK-reserved helpers by re-entering the product's single-file/SEA
@@ -8966,6 +8934,8 @@ export interface RuntimeOperationManifest {
 }
 /** Runtime resources only available after TaskRunner has sealed the manifest and claimed the task. */
 export interface RuntimeOperationStartInput {
+    /** Startup cancellation only; rejection must preserve unresolved process ownership. */
+    readonly signal?: AbortSignal;
     readonly manifest: RuntimeOperationManifest;
     readonly instruction: string;
     readonly env: NodeJS.ProcessEnv;

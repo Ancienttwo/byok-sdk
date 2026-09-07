@@ -50,7 +50,7 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
     const storeDir = await tmpDir('byok-e2e-store-');
     // Default stub capabilities include `steer: true` — an honest self-report
     // from an adapter that really does implement `Session.steer`.
-    const adapter = new StubRuntimeAdapter();
+    const adapter = new StubRuntimeAdapter('stub');
     expect(adapter.descriptor.capabilities.steer).toBe(true);
 
     daemon = createDaemonWithAdapters(

@@ -117,6 +117,64 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     });
   });
 
+  it.each([[[1]], [[1, 2]]])('acks a finite successful tail without reexecuting it after failures at %j', async (failures) => {
+    server = await TestServer.start();
+    const storeDir = await tmpDir('byok-finite-tail-');
+    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const record = await auth.pair('pairing-code');
+    const cursorStore = new CursorStore(storeDir);
+    const attempts = new Map<number, number>();
+    connection = new ConnectionManager({ serverUrl: server.url, deviceId: record.deviceId,
+      productId: 'test-product', capabilities: [], runtimes: [], auth, cursorStore,
+      onEnvelope: async (envelope) => {
+        if (envelope.type !== 'task.offer') return;
+        const n = Number(envelope.task_id);
+        const count = (attempts.get(n) ?? 0) + 1;
+        attempts.set(n, count);
+        if (failures.includes(n) && count === 1) throw new Error('injected first failure');
+      },
+    });
+    await connection.start();
+    await connection.waitForConnection();
+    const offers = [1, 2, 3].map(n => createEnvelope('task.offer', {
+      instruction: 'finite backlog', policy: { mode: 'auto' },
+    }, { taskId: String(n), seq: server.nextSeq() }));
+    offers.forEach(offer => server.send(offer));
+    await vi.waitFor(() => expect(attempts.size).toBe(3));
+    offers.forEach(offer => server.send(offer));
+    await vi.waitFor(async () => expect(await cursorStore.load(server.url, record.deviceId)).toBe(offers[2]!.seq));
+    expect(attempts.get(3)).toBe(1);
+    expect(attempts.get(2)).toBe(failures.includes(2) ? 2 : 1);
+  });
+
+  it('retries cursor persistence without repeating successful side effects', async () => {
+    server = await TestServer.start();
+    const storeDir = await tmpDir('byok-cursor-save-');
+    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const record = await auth.pair('pairing-code');
+    const cursorStore = new CursorStore(storeDir);
+    const save = cursorStore.save.bind(cursorStore);
+    let unavailable = true;
+    vi.spyOn(cursorStore, 'save').mockImplementation(async (url, id, seq) => {
+      if (seq > 0 && unavailable) throw new Error('EIO cursor');
+      await save(url, id, seq);
+    });
+    const effect = vi.fn();
+    connection = new ConnectionManager({ serverUrl: server.url, deviceId: record.deviceId,
+      productId: 'test-product', capabilities: [], runtimes: [], auth, cursorStore,
+      onEnvelope: async e => { if (e.type === 'task.offer') effect(); },
+    });
+    await connection.start(); await connection.waitForConnection();
+    const offer = createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'a', seq: server.nextSeq() });
+    server.send(offer);
+    await vi.waitFor(() => expect(effect).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(cursorStore.save).toHaveBeenCalledWith(server.url, record.deviceId, offer.seq));
+    expect(await cursorStore.load(server.url, record.deviceId)).toBe(0);
+    unavailable = false; server.send(offer);
+    await vi.waitFor(async () => expect(await cursorStore.load(server.url, record.deviceId)).toBe(offer.seq));
+    expect(effect).toHaveBeenCalledTimes(1);
+  });
+
   it('tracks agent.egress.ack and agent.content.read while excluding conn.ack, then retries a failed content read', async () => {
     server = await TestServer.start();
     const storeDir = await tmpDir('byok-cm-content-cursor-store-');

@@ -154,8 +154,8 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
     const { pollCursors } = await startConnection(cursorStore);
 
     server!.pushLongPollEvent(offer('cursor-save-first', 1));
-    server!.pushLongPollEvent(offer('cursor-save-second', 2));
     await vi.waitFor(() => expect(saves).toEqual([0, 1]));
+    server!.pushLongPollEvent(offer('cursor-save-second', 2));
     await delay(40);
     const cursorsBeforeFirstDurableSave = [...pollCursors];
 

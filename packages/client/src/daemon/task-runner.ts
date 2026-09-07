@@ -1,3 +1,5 @@
+import { startOwnedRuntime } from './runtime-start';
+import { DEFAULT_ARTIFACT_LIMITS, readArtifactBytes } from './artifact-read';
 import { validateRuntimeDetectResult } from '../runtime-detection';
 import { randomUUID } from 'node:crypto';
 import { promises as fs, constants as fsConstants } from 'node:fs';
@@ -55,6 +57,7 @@ import {
 import {
   RuntimeDisposalFailure,
   isRuntimeDisposalFailure,
+  isRuntimeStartupDisposalFailure,
   projectRuntimeBoundaryFailure,
   type RuntimeDisposalStage,
 } from '../runtime-failure';
@@ -354,6 +357,7 @@ export interface TaskRunnerDeps {
   agentSessionHandoffs?: AgentSessionHandoffStore;
   deviceId: string;
   send: (envelope: Envelope) => void;
+  awaitTerminalCommit?: (taskId: string) => Promise<void>;
   /** Fsync the execution commitment before claim/runtime side effects. */
   beforeClaim?: (taskId: string, runtime: string) => Promise<void>;
   blobClient: BlobResolver;
@@ -449,6 +453,7 @@ export interface TaskRunnerDeps {
   onApprovalDispatched?: (taskId: string, approvalId: string) => void;
   /** Overrides the bounded soft-interrupt window before authoritative `Session.close()` disposal begins. */
   shutdownInterruptTimeoutMs?: number;
+  startupTimeoutMs?: number;
   /**
    * M5 batch-3 (workstream 2): overrides {@link DEFAULT_MAX_TASK_OUTPUT_BYTES}
    * — see that constant's own doc comment and `DaemonConfig.maxTaskOutputBytes`
@@ -458,6 +463,7 @@ export interface TaskRunnerDeps {
    * interface (`shutdownInterruptTimeoutMs`, `approvalTimeoutMs`).
    */
   maxTaskOutputBytes?: number;
+  artifactLimits?: { maxFileBytes: number; maxTaskBytes: number };
   /**
    * Per-event inline ceiling for `tool_use.input` / `tool_result.output` —
    * see `DaemonConfig.maxInlineEventBytes` (`create-daemon.ts`) for the full
@@ -633,6 +639,7 @@ interface ActiveTask {
    * wire-byte accountant).
    */
   outputBytesSoFar: number;
+  artifactBytesSoFar?: number;
   /** Device monotonic-ish wall-clock anchor taken only after a Session started. */
   startedAtMs: number;
   /**
@@ -1138,7 +1145,7 @@ export class TaskRunner {
   constructor(private readonly deps: TaskRunnerDeps) {}
 
   get activeTaskCount(): number {
-    return this.tasks.size;
+    return this.tasks.size + this.startupOwners.size;
   }
 
   /**
@@ -1337,6 +1344,9 @@ export class TaskRunner {
   /** M4 Phase 2: stop claiming any FUTURE `task.offer` — see `stoppingOffers`'s own doc comment. Idempotent. */
   stopAcceptingOffers(): void {
     this.stoppingOffers = true;
+    if (this.startupRetryTimer) clearTimeout(this.startupRetryTimer);
+    this.startupRetryTimer = undefined;
+    for (const abort of this.inFlightBlobAborts.values()) abort.abort();
   }
 
   /**
@@ -1376,9 +1386,67 @@ export class TaskRunner {
    * ahead of this method — see `daemon-control-socket.test.ts`'s dedicated
    * regression test for the exact scenario.
    */
+  /** Startup resources have an owner even before a Session can become active. */
+  private startupRetryTimer: ReturnType<typeof setTimeout> | undefined;
+
+  private readonly homeReservations = new Map<string, number>();
+
+  private readonly startupOwners = new Map<string, {
+    runtimeId: string;
+    dispose: () => Promise<void>;
+    release: () => Promise<void>;
+  }>();
+
+  private readonly startupDisposals = new Map<string, Promise<boolean>>();
+
+  private disposeStartupOwner(taskId: string): Promise<boolean> {
+    const existing = this.startupDisposals.get(taskId);
+    if (existing) return existing;
+    const attempt = this.disposeStartupOwnerOnce(taskId).finally(() => this.startupDisposals.delete(taskId));
+    this.startupDisposals.set(taskId, attempt);
+    return attempt;
+  }
+
+  private async disposeStartupOwnerOnce(taskId: string): Promise<boolean> {
+    const owner = this.startupOwners.get(taskId);
+    if (!owner) return true;
+    try {
+      await owner.dispose();
+      await this.deps.awaitTerminalCommit?.(taskId);
+      await owner.release();
+    } catch (caught) {
+      const failure = isRuntimeDisposalFailure(caught) ? caught : new RuntimeDisposalFailure({
+        stage: 'quiescence', reason: 'startup runtime disposal has not been confirmed',
+      }, { cause: caught });
+      this.deps.onRuntimeDisposalFailure?.({ taskId, runtimeId: owner.runtimeId,
+        stage: failure.stage, reason: failure.message });
+      console.error(`[byok/client] startup ownership retained for ${taskId}: ${failure.message}`);
+      if (!this.startupRetryTimer && !this.stoppingOffers) {
+        this.startupRetryTimer = setTimeout(() => {
+          this.startupRetryTimer = undefined;
+          for (const id of this.startupOwners.keys()) {
+            if (!this.inFlightOffers.has(id)) void this.disposeStartupOwner(id);
+          }
+        }, 1_000);
+        this.startupRetryTimer.unref?.();
+      }
+      return false;
+    }
+    if (this.startupOwners.get(taskId) === owner) this.startupOwners.delete(taskId);
+    this.pendingMessageTasks.delete(taskId);
+    this.revokeAgentMessageContext(taskId);
+    this.revokeAgentMemoryContext(taskId);
+    return true;
+  }
+
   async shutdownActiveTasks(reason: string): Promise<void> {
     const active = [...this.tasks.values()];
     await Promise.all(active.map((task) => this.shutdownTask(task, reason)));
+    for (const taskId of this.startupOwners.keys()) {
+      if (!await this.disposeStartupOwner(taskId)) throw new RuntimeDisposalFailure({
+        stage: 'quiescence', reason: 'startup runtime ownership remains quarantined',
+      });
+    }
   }
 
   /**
@@ -1411,6 +1479,11 @@ export class TaskRunner {
    * a genuine protocol bug, not a benign race — mirrors `pump()`'s own
    * identity-check guard for the same class of race.
    */
+  private async interruptBounded(session: Session): Promise<void> {
+    await raceSettleFirst(() => session.interrupt(),
+      this.deps.shutdownInterruptTimeoutMs ?? DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS);
+  }
+
   private async teardownActiveTask(active: ActiveTask, reason: string, retryable: boolean): Promise<boolean> {
     if (active.finalizationStarted) return this.finish(active.taskId);
     if (!this.reserveSemanticTerminal(active)) return active.semanticTerminalSettled ?? false;
@@ -1419,8 +1492,7 @@ export class TaskRunner {
     active.beingTornDown = true;
     active.blobAbort.abort();
     await this.observeGit(active, 'salvage');
-    const timeoutMs = this.deps.shutdownInterruptTimeoutMs ?? DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS;
-    await raceSettleFirst(() => active.session.interrupt(), timeoutMs);
+    await this.interruptBounded(active.session);
     if (this.tasks.get(active.taskId) !== active) return true;
     await this.persistAgentTerminalEvidence(active, 'failed', reason);
     this.deps.send(
@@ -1540,7 +1612,7 @@ export class TaskRunner {
     // same offer while its first prepared operation is still in flight (or
     // well after it already succeeded) would start a SECOND adapter session
     // for the same task, orphaning the first.
-    if (this.tasks.has(taskId) || this.finishedTaskIds.has(taskId) || this.strictDeclinedTaskIds.has(taskId)) {
+    if (this.tasks.has(taskId) || this.startupOwners.has(taskId) || this.inFlightOffers.has(taskId) || this.finishedTaskIds.has(taskId) || this.strictDeclinedTaskIds.has(taskId)) {
       return;
     }
 
@@ -1595,6 +1667,14 @@ export class TaskRunner {
     this.inFlightBlobAborts.set(taskId, blobAbort);
     let agentBinding: AgentHomeExecutionBinding | undefined;
     let agentLeaseTransferred = false;
+    let reservedHome: string | undefined;
+    const releaseReservation = (): void => {
+      if (reservedHome === undefined) return;
+      const remaining = this.homeReservations.get(reservedHome)! - 1;
+      if (remaining === 0) this.homeReservations.delete(reservedHome);
+      else this.homeReservations.set(reservedHome, remaining);
+      reservedHome = undefined;
+    };
     try {
       // Finding F4, checkpoint 1 ("before claim where possible -> decline
       // path"): a task.cancel already arrived for this exact taskId before
@@ -1633,10 +1713,8 @@ export class TaskRunner {
       // The decline reason carries counts only — never a path, never prompt
       // text — because `task.decline` leaves this device.
       //
-      // The count read here is still the count when `acquireExecution` runs
-      // below: `ConnectionManager` chains every envelope through one serial
-      // promise chain (`processingChain`), so two `handleOffer` calls for the
-      // same daemon never interleave between this check and that acquire.
+      // Canonical-home reservations bridge this check and lease acquisition.
+      // Different homes may start concurrently; check-and-reserve has no await.
       //
       // The count key is derived with `canonicalHomePath()`, NOT `resolve()`:
       // this gate runs before the host's own admission veto, so it must not
@@ -1655,11 +1733,15 @@ export class TaskRunner {
           );
           return;
         }
-        const active = this.deps.agentHome!.executionLeaseManager.activeAttemptCount(canonicalHome);
+        const active = this.deps.agentHome!.executionLeaseManager.activeAttemptCount(canonicalHome)
+          + (this.homeReservations.get(canonicalHome) ?? 0);
         if (active >= limit) {
           decline(`agent home busy: ${active} active attempt(s)`, true);
           return;
         }
+        // Check and reserve are synchronous at the canonical-home authority.
+        this.homeReservations.set(canonicalHome, (this.homeReservations.get(canonicalHome) ?? 0) + 1);
+        reservedHome = canonicalHome;
       }
 
       // S3b (L-002): the pre-claim admission veto stays after the strict
@@ -1831,7 +1913,7 @@ export class TaskRunner {
       //
       // All servers are probed CONCURRENTLY under one shared deadline
       // (`MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS`, see its own doc comment):
-      // `handleOffer` holds this connection's FIFO, so a serial loop would
+      // Downloads belong to this offer; a serial loop would
       // multiply the timeout by the server count and let one unresponsive
       // command delay `task.cancel`/`task.approve` for minutes. Every probe
       // kills its own child when the deadline expires, so a decline never
@@ -1897,6 +1979,7 @@ export class TaskRunner {
       if (agentRef !== undefined) {
         try {
           agentBinding = await this.deps.agentHome!.acquireExecution(agentRef, { taskId, sessionRef });
+          releaseReservation();
         } catch (error) {
           decline(
             `Agent home admission failed: ${errorMessage(error)}`,
@@ -2181,8 +2264,44 @@ export class TaskRunner {
       };
       let session: Session;
       try {
-        session = await prepared.operation.start(startInput);
+        session = await startOwnedRuntime(input => prepared.operation.start(input), startInput, blobAbort.signal,
+          this.deps.startupTimeoutMs ?? 30_000);
       } catch (err) {
+        if (isRuntimeStartupDisposalFailure(err)) {
+          const ownedBinding = agentBinding;
+          this.startupOwners.set(taskId, {
+            runtimeId: pick.descriptor.id,
+            dispose: err.retryDisposal,
+            release: async () => { await ownedBinding?.lease.release(); gitLease?.release(); },
+          });
+          agentLeaseTransferred = true;
+          this.deps.onRuntimeDisposalFailure?.({ taskId, runtimeId: pick.descriptor.id,
+            stage: 'quiescence', reason: err.message });
+          if (this.pendingCancelled.has(taskId)) {
+            const reason = this.pendingCancelled.get(taskId);
+            this.pendingCancelled.delete(taskId);
+            this.addFinishedTaskId(taskId);
+            this.deps.send(createEnvelope('task.cancelled', {
+              reason,
+              ...(agentBinding === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
+            }, { taskId }));
+          } else if (agentBinding === undefined) await this.fail(taskId, err.message, false);
+          else await this.failClaimedAgent(taskId, err.message, false, {
+            binding: agentBinding, runtimeId: pick.descriptor.id,
+          });
+          return;
+        }
+        if (this.pendingCancelled.has(taskId)) {
+          const reason = this.pendingCancelled.get(taskId);
+          this.pendingCancelled.delete(taskId);
+          this.addFinishedTaskId(taskId);
+          gitLease?.release();
+          this.deps.send(createEnvelope('task.cancelled', {
+            reason,
+            ...(agentBinding === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
+          }, { taskId }));
+          return;
+        }
         const failure = projectRuntimeBoundaryFailure(err, 'start');
         if (failure.contractViolation) {
           console.error('[byok/client] runtime adapter start() returned an untyped failure', err);
@@ -2200,11 +2319,20 @@ export class TaskRunner {
         return;
       }
 
+      const ownedBinding = agentBinding;
+      this.startupOwners.set(taskId, {
+        runtimeId: pick.descriptor.id,
+        dispose: () => session.close(),
+        release: async () => {
+          await ownedBinding?.lease.release();
+          gitLease?.release();
+        },
+      });
+      try {
       if (agentBinding !== undefined) {
         try {
           await agentBinding.lease.bindSession(session.sessionRef);
         } catch (error) {
-          await session.close().catch(() => {});
           await this.failClaimedAgent(
             taskId,
             `Agent session execution lease could not bind the runtime session: ${errorMessage(error)}`,
@@ -2282,7 +2410,6 @@ export class TaskRunner {
               leaseId: binding.lease.leaseId,
             }));
         } catch (error) {
-          await session.close().catch(() => {});
           await this.failClaimedAgent(
             taskId,
             `Agent session handoff could not be durably written before start: ${errorMessage(error)}`,
@@ -2312,13 +2439,10 @@ export class TaskRunner {
         const reason = this.pendingCancelled.get(taskId);
         this.pendingCancelled.delete(taskId);
         agentLeaseTransferred = agentBinding !== undefined;
+        this.startupOwners.delete(taskId);
         this.tasks.set(taskId, active);
         this.reserveSemanticTerminal(active);
-        try {
-          await session.interrupt();
-        } catch {
-          // best-effort — still report cancellation below
-        }
+        await this.interruptBounded(session);
         await this.updateGitPhaseBestEffort(gitWorkspaceId, 'cancelled');
         await this.persistAgentTerminalEvidence(active, 'cancelled', reason);
         this.deps.send(
@@ -2348,6 +2472,7 @@ export class TaskRunner {
       // `task.cancelled` entirely.
       agentLeaseTransferred = agentBinding !== undefined;
       this.inFlightBlobAborts.delete(taskId);
+      this.startupOwners.delete(taskId);
       this.tasks.set(taskId, active);
       this.pendingMessageTasks.delete(taskId);
       if (active.messageOutbox !== undefined && activatedMessageRecord !== undefined) {
@@ -2380,7 +2505,21 @@ export class TaskRunner {
       if (gitWorkspaceId && this.deps.gitWorkspaceStore) {
         void this.deps.gitWorkspaceStore.attachSession(gitWorkspaceId, session.sessionRef).catch(() => {});
       }
+      } catch (error) {
+        if (this.tasks.has(taskId)) throw error;
+        const reason = `runtime activation failed: ${errorMessage(error)}`;
+        if (agentBinding === undefined) await this.fail(taskId, reason, false);
+        else await this.failClaimedAgent(taskId, reason, false, {
+          binding: agentBinding, runtimeId: pick.descriptor.id, sessionRef: session.sessionRef,
+        });
+      }
     } finally {
+      releaseReservation();
+      if (this.startupOwners.has(taskId)) {
+        // This owner also releases the lease, but only after the disposal receipt.
+        agentLeaseTransferred = true;
+        await this.disposeStartupOwner(taskId);
+      }
       if (!agentLeaseTransferred) {
         this.pendingMessageTasks.delete(taskId);
         this.revokeAgentMessageContext(taskId);
@@ -2986,7 +3125,10 @@ export class TaskRunner {
 
     let bytes: Buffer;
     try {
-      bytes = await opened.handle.readFile();
+      const limits = this.deps.artifactLimits ?? DEFAULT_ARTIFACT_LIMITS;
+      const remaining = limits.maxTaskBytes - (active.artifactBytesSoFar ?? 0);
+      bytes = await readArtifactBytes(opened.handle, Math.min(limits.maxFileBytes, remaining),
+        active.blobAbort.signal, count => { active.artifactBytesSoFar = (active.artifactBytesSoFar ?? 0) + count; });
     } catch (err) {
       this.reportArtifactError(active, name, `failed to read artifact "${name}": ${errorMessage(err)}`);
       return;
@@ -2994,6 +3136,7 @@ export class TaskRunner {
       await opened.handle.close().catch(() => {});
     }
 
+    if (this.tasks.get(active.taskId) !== active || active.blobAbort.signal.aborted || active.beingTornDown) return;
     if (bytes.length <= MAX_INLINE_ARTIFACT_BYTES) {
       const inline = bytes.toString('base64');
       if (new TextEncoder().encode(inline).length <= MAX_INLINE_ARTIFACT_BYTES) {
@@ -3006,6 +3149,7 @@ export class TaskRunner {
       const blobRef: BlobRef = await this.deps.blobClient.uploadArtifact(bytes, contentType, {
         signal: active.blobAbort.signal,
       });
+      if (this.tasks.get(active.taskId) !== active || active.blobAbort.signal.aborted || active.beingTornDown) return;
       this.deps.send(createEnvelope('task.artifact', { name, contentType, blobRef }, { taskId: active.taskId }));
     } catch (err) {
       this.reportArtifactError(active, name, `failed to upload artifact "${name}": ${errorMessage(err)}`);
@@ -3014,6 +3158,7 @@ export class TaskRunner {
 
   /** Loud, non-silent artifact failure (finding F7): logged, and folded into this task's own progress stream as an `error` AgentEvent rather than swallowed — the task itself can still complete normally, but the omission is now visible. */
   private reportArtifactError(active: ActiveTask, name: string, reason: string): void {
+    if (active.blobAbort.signal.aborted || active.beingTornDown) return;
     console.error(`[byok/client] artifact "${name}" for task ${active.taskId} dropped: ${reason}`);
     active.batcher.push({ type: 'error', message: reason });
   }
@@ -3021,6 +3166,10 @@ export class TaskRunner {
   private async handleCancel(taskId: string, reason: string | undefined): Promise<void> {
     const active = this.tasks.get(taskId);
     if (!active) {
+      if (this.startupOwners.has(taskId) && !this.inFlightOffers.has(taskId)) {
+        await this.disposeStartupOwner(taskId);
+        return;
+      }
       // Finding F4: not registered yet — record it in case handleOffer is
       // still in flight for this exact taskId (claimed but not yet started;
       // see the class-level doc on `pendingCancelled` and the two
@@ -3041,11 +3190,7 @@ export class TaskRunner {
       return;
     }
     active.blobAbort.abort();
-    try {
-      await active.session.interrupt();
-    } catch {
-      // best-effort — still report cancellation below
-    }
+    await this.interruptBounded(active.session);
     await this.observeGit(active, 'salvage');
     // Deliberately NOT active.batcher.flush()-ed here (M1-4 e2e finding):
     // §4's "server state is authoritative on its own action" rule means the
@@ -3608,11 +3753,7 @@ export class TaskRunner {
       await active.semanticTerminalSettled;
       return;
     }
-    try {
-      await active.session.interrupt();
-    } catch {
-      // best-effort
-    }
+    await this.interruptBounded(active.session);
     await this.observeGit(active, 'salvage');
     // Same reasoning as handleCancel() above: the server already moved this
     // task to `Failed` and closed its event queue before this notification
@@ -4004,7 +4145,22 @@ export class TaskRunner {
     });
   }
 
-  private async finish(taskId: string): Promise<boolean> {
+  async retryTerminalFinalization(taskId: string): Promise<void> {
+    const active = this.tasks.get(taskId);
+    if (active?.finalizationStarted) await this.finish(taskId);
+  }
+
+  private readonly finalizationAttempts = new Map<string, Promise<boolean>>();
+
+  private finish(taskId: string): Promise<boolean> {
+    const existing = this.finalizationAttempts.get(taskId);
+    if (existing) return existing;
+    const attempt = this.finishOnce(taskId).finally(() => this.finalizationAttempts.delete(taskId));
+    this.finalizationAttempts.set(taskId, attempt);
+    return attempt;
+  }
+
+  private async finishOnce(taskId: string): Promise<boolean> {
     const active = this.tasks.get(taskId);
     if (!active) return true;
     // M5 batch-3 (workstream 2): see `armMaxDurationTimer`'s own doc
@@ -4078,6 +4234,13 @@ export class TaskRunner {
         stage: failure.stage,
         reason: failure.message,
       });
+      active.resolveSemanticTerminalSettled?.(false);
+      return false;
+    }
+    if (this.tasks.get(taskId) !== active) return true;
+    try {
+      await this.deps.awaitTerminalCommit?.(taskId);
+    } catch {
       active.resolveSemanticTerminalSettled?.(false);
       return false;
     }

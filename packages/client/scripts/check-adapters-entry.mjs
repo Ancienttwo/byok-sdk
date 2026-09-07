@@ -32,7 +32,7 @@ const adapters = await import(new URL('../dist/adapters/index.js', import.meta.u
 const root = await import(new URL('../dist/index.js', import.meta.url));
 assert.deepEqual(
   Object.keys(adapters).sort(),
-  ['ClaudeAdapter', 'CodexAdapter', 'PI_PACKAGE_NAME', 'PiAdapter', 'RuntimeDisposalFailure', 'RuntimeExecutionFailure'],
+  ['ClaudeAdapter', 'CodexAdapter', 'PI_PACKAGE_NAME', 'PiAdapter', 'RuntimeDisposalFailure', 'RuntimeExecutionFailure', 'RuntimeStartupDisposalFailure'],
 );
 const crossEntryFailure = new adapters.RuntimeExecutionFailure({
   phase: 'start',
@@ -47,6 +47,7 @@ const crossEntryDisposalFailure = new adapters.RuntimeDisposalFailure({
   reason: 'adapter-entry-disposal-smoke',
 });
 assert.equal(root.isRuntimeDisposalFailure(crossEntryDisposalFailure), true);
+assert.equal(root.isRuntimeStartupDisposalFailure(new adapters.RuntimeStartupDisposalFailure(async () => {})), true);
 assert.equal(new adapters.PiAdapter().descriptor.id, 'pi');
 assert.equal(new adapters.ClaudeAdapter().descriptor.id, 'claude');
 assert.equal(new adapters.CodexAdapter().descriptor.id, 'codex');

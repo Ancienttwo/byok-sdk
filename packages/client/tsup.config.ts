@@ -13,6 +13,7 @@ export default defineConfig({
     'src/adapters/pi/team-interaction-extension.ts',
     'src/adapters/pi/subagents-policy-extension.ts',
     'src/bin/byok-agent.ts',
+    'src/bin/byok-mcp-env.ts',
     'src/bin/byok-approval-mcp.ts',
     'src/bin/byok-agent-message-mcp.ts',
     'src/bin/byok-agent-memory-mcp.ts',

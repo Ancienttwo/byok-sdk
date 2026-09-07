@@ -122,7 +122,7 @@ class ChannelRoutingSession implements Session {
 
 class ChannelRoutingAdapter implements RuntimeAdapter {
   readonly descriptor = freezeRuntimeAdapterDescriptor({
-    id: 'channel-routing-stub',
+    id: 'claude',
     supportsDispatchSelection: false,
     capabilities: { steer: false, resume: true, approvalInteractive: true, permissionModes: ['confirm'] },
     environmentRequirements: { credentialNames: [] },

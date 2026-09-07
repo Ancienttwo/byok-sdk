@@ -1,11 +1,12 @@
+import { RuntimeExecutionFailure } from '../../runtime-failure';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
-import type { Readable } from 'node:stream';
+import type { Readable, Writable } from 'node:stream';
 import { adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../process-tree';
 
 export type SpawnFn = typeof spawn;
 
-/** stdin is `null` (never a Writable) — this process never pipes stdin to the child; see the module doc comment below for why. */
-type CodexChildProcess = ChildProcessByStdio<null, Readable, Readable>;
+/** Prompt-bearing invocations pipe stdin and close it after the exact prompt. */
+type CodexChildProcess = ChildProcessByStdio<Writable | null, Readable, Readable>;
 
 /**
  * One parsed line of `codex exec --json` / `codex exec resume --json`
@@ -22,11 +23,13 @@ export interface CodexRawEvent {
 export interface CodexProcessOptions {
   command: string;
   args: string[];
+  instruction?: string;
   cwd: string;
   env: NodeJS.ProcessEnv;
   spawnFn?: SpawnFn;
   /** Called once per parsed JSONL line, in arrival order. */
   onEvent: (evt: CodexRawEvent) => void;
+  onFailure?: (error: RuntimeExecutionFailure) => void;
   /**
    * DI seam scoped to ADOPTION only (`../process-tree.ts`'s
    * `adoptOwnedProcessTree`), so the win32 job-object branch is exercisable
@@ -40,6 +43,9 @@ export interface CodexProcessOptions {
 
 /** Bound on retained stderr lines (see `onStderr`/`buildExitError`) — mirrors `STDERR_RING_CAPACITY` in `../pi/rpc-client.ts`. */
 const STDERR_RING_CAPACITY = 20;
+export const CODEX_MAX_FRAME_BYTES = 1024 * 1024;
+export const CODEX_MAX_DEFERRED_BYTES = 4 * 1024 * 1024;
+export const CODEX_MAX_STDERR_BYTES = 64 * 1024;
 
 /**
  * Spawns and streams ONE `codex exec` / `codex exec resume` invocation — i.e.
@@ -48,32 +54,24 @@ const STDERR_RING_CAPACITY = 20;
  * Unlike pi (a single long-lived RPC server process for a whole session's
  * lifetime — see `../pi/rpc-client.ts`), `codex exec` is a one-shot batch
  * process per turn with no persistent request/response channel: it takes its
- * prompt as an argv positional, streams JSONL to stdout for the one turn
+ * prompt from stdin with the documented `-` positional, streams JSONL to stdout for the one turn
  * it's running, and exits. `../codex-adapter.ts`'s `CodexSession` constructs
  * a fresh `CodexProcessRunner` for every turn (the initial `start()` and
  * every later `followUp()`), forwarding each one's lines into the same
  * long-lived event queue.
  *
- * stdin is deliberately never piped to the child (`stdio: ['ignore', 'pipe',
- * 'pipe']`): `codex exec --help` documents that a piped, non-TTY stdin is
- * read and appended to the prompt as a `<stdin>` block even when a prompt was
- * ALSO given as an argv positional, and empirically every single real
- * invocation made while building this adapter logged "Reading additional
- * input from stdin..." on stderr regardless of whether a prompt argument was
- * given. Leaving `stdio: ['pipe', ...]` open for stdin and never closing it
- * risks codex blocking on that read forever — exactly the hang class this
- * task was built to avoid (the pi adapter's own `agent_end`/`agent_settled`
- * mismatch left a task stuck `Running` forever in the M0/M1 GLM run).
- * `'ignore'` presents immediate EOF instead, which was verified live with a
- * dedicated Node `child_process` probe before this was written: no hang,
- * clean completion at normal model latency. This adapter never needs to
- * SEND codex anything over stdin — there is no in-band steer/approval
- * protocol (see `../codex-adapter.ts`'s `steer`/`resolveApproval`).
+ * Prompt stdin is closed with EOF immediately after writing. This is a one-shot
+ * input channel; steer and approvals are not multiplexed over it.
  */
 export class CodexProcessRunner {
   private readonly child: CodexChildProcess;
   private readonly onEvent: (evt: CodexRawEvent) => void;
-  private buffer = '';
+  private readonly frameChunks: Buffer[] = [];
+  private frameBytes = 0;
+  private deferredBytes = 0;
+  private stderrBytes = 0;
+  private transportFailure: RuntimeExecutionFailure | undefined;
+  private readonly onFailure: CodexProcessOptions['onFailure'];
   private readonly stderrRing: string[] = [];
   private closed = false;
   private exitCode: number | null = null;
@@ -97,11 +95,12 @@ export class CodexProcessRunner {
 
   constructor(options: CodexProcessOptions) {
     this.onEvent = options.onEvent;
+    this.onFailure = options.onFailure;
     const spawnFn = options.spawnFn ?? spawn;
     this.child = spawnFn(options.command, options.args, withOwnedProcessTree({
       cwd: options.cwd,
       env: options.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [options.instruction === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     })) as CodexChildProcess;
 
     this.closedPromise = new Promise((resolve) => {
@@ -112,8 +111,7 @@ export class CodexProcessRunner {
     // teardown itself causes; this keeps it from raising an unhandled rejection.
     this.adopted.catch(() => {});
 
-    this.child.stdout.setEncoding('utf8');
-    this.child.stdout.on('data', (chunk: string) => this.onData(chunk));
+    this.child.stdout.on('data', (chunk: Buffer) => this.onData(chunk));
 
     this.child.stderr.setEncoding('utf8');
     this.child.stderr.on('data', (chunk: string) => this.onStderr(chunk));
@@ -127,6 +125,13 @@ export class CodexProcessRunner {
       this.exitSignal = signal;
       this.finishClosing();
     });
+    if (options.instruction !== undefined) {
+      this.child.stdin!.on('error', () => {
+        this.failTransport('codex prompt stdin failed before delivery');
+      });
+      // One bounded-by-task input, followed by EOF even for empty/Unicode prompts.
+      this.child.stdin!.end(options.instruction, 'utf8');
+    }
     this.child.on('error', () => {
       // e.g. ENOENT for a missing binary — buildExitError's stderr tail will
       // be empty in this case, but exitCode/exitSignal staying null is
@@ -219,13 +224,20 @@ export class CodexProcessRunner {
       throw failure;
     }
     this.adoption = 'adopted';
+    this.deferredBytes = 0;
     for (const evt of this.deferredEvents.splice(0)) this.onEvent(evt);
   }
 
   /** Arrival-order delivery, held back until the tree is backstopped (see `deferredEvents`). */
-  private deliver(evt: CodexRawEvent): void {
+  private deliver(evt: CodexRawEvent, bytes: number): void {
+    if (this.transportFailure) return;
     if (this.adoption === 'failed') return;
     if (this.adoption === 'pending') {
+      if (this.deferredBytes + bytes > CODEX_MAX_DEFERRED_BYTES) {
+        this.failTransport('codex pre-adoption event buffer exceeded its byte budget');
+        return;
+      }
+      this.deferredBytes += bytes;
       this.deferredEvents.push(evt);
       return;
     }
@@ -243,6 +255,7 @@ export class CodexProcessRunner {
    * plus an empty stderr tail would bury the only reason anyone can act on.
    */
   buildExitError(context: string): Error {
+    if (this.transportFailure) return this.transportFailure;
     if (this.adoptionFailure !== undefined) return this.adoptionFailure;
     const parts = [`${context} (exit code=${this.exitCode}, signal=${this.exitSignal})`];
     if (this.stderrRing.length > 0) {
@@ -251,19 +264,43 @@ export class CodexProcessRunner {
     return new Error(parts.join('; '));
   }
 
-  private onData(chunk: string): void {
-    this.buffer += chunk;
-    let newlineIndex = this.buffer.indexOf('\n');
-    while (newlineIndex !== -1) {
-      let line = this.buffer.slice(0, newlineIndex);
-      this.buffer = this.buffer.slice(newlineIndex + 1);
-      if (line.endsWith('\r')) line = line.slice(0, -1);
-      if (line.length > 0) this.parseLine(line);
-      newlineIndex = this.buffer.indexOf('\n');
+  private failTransport(reason: string): void {
+    if (this.transportFailure) return;
+    this.transportFailure = new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure',
+      retry: 'non-retryable', reason });
+    this.frameChunks.length = 0;
+    this.frameBytes = 0;
+    this.deferredEvents.length = 0;
+    this.deferredBytes = 0;
+    this.onFailure?.(this.transportFailure);
+    this.kill();
+  }
+
+  private onData(chunk: Buffer): void {
+    if (this.transportFailure) return;
+    let offset = 0;
+    while (offset < chunk.length) {
+      const newline = chunk.indexOf(10, offset);
+      const end = newline === -1 ? chunk.length : newline;
+      const bytes = end - offset;
+      if (this.frameBytes + bytes > CODEX_MAX_FRAME_BYTES) {
+        this.failTransport('codex raw JSONL frame exceeded its byte budget');
+        return;
+      }
+      if (bytes > 0) this.frameChunks.push(Buffer.from(chunk.subarray(offset, end)));
+      this.frameBytes += bytes;
+      if (newline === -1) return;
+      const frame = Buffer.concat(this.frameChunks, this.frameBytes);
+      this.frameChunks.length = 0;
+      this.frameBytes = 0;
+      const line = frame.toString('utf8').replace(/\r$/, '');
+      if (line.length > 0) this.parseLine(line, frame.length);
+      if (this.transportFailure) return;
+      offset = newline + 1;
     }
   }
 
-  private parseLine(line: string): void {
+  private parseLine(line: string, bytes: number): void {
     let parsed: unknown;
     try {
       parsed = JSON.parse(line);
@@ -273,15 +310,19 @@ export class CodexProcessRunner {
     if (!parsed || typeof parsed !== 'object' || typeof (parsed as { type?: unknown }).type !== 'string') {
       return;
     }
-    this.deliver(parsed as CodexRawEvent);
+    this.deliver(parsed as CodexRawEvent, bytes);
   }
 
   private onStderr(chunk: string): void {
-    for (const rawLine of chunk.split('\n')) {
+    const bounded = Buffer.from(chunk).subarray(-CODEX_MAX_STDERR_BYTES).toString('utf8');
+    for (const rawLine of bounded.split('\n')) {
       const line = rawLine.trim();
       if (line.length === 0) continue;
       this.stderrRing.push(line);
-      if (this.stderrRing.length > STDERR_RING_CAPACITY) this.stderrRing.shift();
+      this.stderrBytes += Buffer.byteLength(line);
+      while (this.stderrRing.length > STDERR_RING_CAPACITY || this.stderrBytes > CODEX_MAX_STDERR_BYTES) {
+        this.stderrBytes -= Buffer.byteLength(this.stderrRing.shift()!);
+      }
     }
   }
 }

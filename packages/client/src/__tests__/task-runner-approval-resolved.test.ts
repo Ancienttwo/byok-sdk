@@ -126,7 +126,7 @@ class RelayingSession implements Session {
 
 class RelayingAdapter implements RuntimeAdapter {
   readonly descriptor = freezeRuntimeAdapterDescriptor({
-    id: 'relay-stub',
+    id: 'claude',
     supportsDispatchSelection: false,
     capabilities: { steer: false, resume: true, approvalInteractive: true, permissionModes: ['confirm'] },
     environmentRequirements: { credentialNames: [] },

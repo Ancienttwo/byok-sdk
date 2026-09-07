@@ -62,13 +62,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     const claim = await server.waitFor((e) => e.type === 'task.claim');
     expect(claim.payload).toMatchObject({ deviceId: 'device-1' });
     expect('taskId' in claim.payload).toBe(false);
-    // M5 (claimed runtime): the default StubRuntimeAdapter's id ('stub') is
-    // not one of the frozen RuntimeIdSchema values, so it must be omitted
-    // from task.claim.runtime entirely rather than sent as an invalid enum
-    // value — mirrors create-daemon.ts's own isRuntimeId gate for
-    // conn.hello.runtimes reporting. See the dedicated describe block below
-    // for the recognized-runtime-id cases.
-    expect('runtime' in claim.payload).toBe(false);
+    expect(claim.payload).toMatchObject({ runtime: 'pi' });
 
     // M1 gap #2: `task.claim` no longer implies `Running` — `task.started`
     // is the explicit, separate signal the adapter session actually started.

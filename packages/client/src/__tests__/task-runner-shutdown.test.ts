@@ -170,6 +170,22 @@ describe('TaskRunner.shutdownActiveTasks', () => {
     expect(fail?.payload).toMatchObject({ retryable: true });
   });
 
+  it('remote cancel reaches close after a hung soft interrupt', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(adapter, sent, { shutdownInterruptTimeoutMs: 10 });
+    await runner.handleEnvelope(createEnvelope('task.offer', {
+      instruction: 'cancel me', policy: { mode: 'auto' },
+    }, { taskId: 'bounded-cancel', seq: 1 }));
+    const session = adapter.sessions[0]!;
+    session.interrupt = () => new Promise<void>(() => {});
+    const cancel = runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'user' }, { taskId: 'bounded-cancel', seq: 2 }));
+    await Promise.race([cancel, new Promise((_, reject) => setTimeout(() => reject(new Error('cancel did not reach close')), 500))]);
+    expect(runner.activeTaskCount).toBe(0);
+    expect(sent.filter(e => e.type === 'task.cancelled')).toHaveLength(1);
+    expect(session.closeCalled).toBe(true);
+  });
+
   it('handles multiple concurrently-active tasks', async () => {
     const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];
@@ -215,7 +231,7 @@ describe('TaskRunner.shutdownActiveTasks', () => {
     await expect(runner.shutdownActiveTasks('operator')).rejects.toBeInstanceOf(RuntimeDisposalFailure);
     expect(runner.activeTaskCount).toBe(1);
     expect(sent.filter((event) => event.type === 'task.fail' && event.task_id === 'task-disposal')).toHaveLength(1);
-    expect(disposalEvidence).toEqual([{ taskId: 'task-disposal', runtimeId: 'stub', stage: 'quiescence', reason: 'fixture process tree remains live' }]);
+    expect(disposalEvidence).toEqual([{ taskId: 'task-disposal', runtimeId: 'pi', stage: 'quiescence', reason: 'fixture process tree remains live' }]);
 
     await expect(runner.shutdownActiveTasks('operator retry')).resolves.toBeUndefined();
     expect(closeAttempts).toBe(2);

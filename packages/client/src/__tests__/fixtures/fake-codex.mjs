@@ -242,6 +242,7 @@ for (let i = 0; i < rest.length; i++) {
     configOverrides.push(value);
     continue;
   }
+  if (arg === '-') { prompt = '-'; continue; }
   if (arg.startsWith('-')) {
     process.stderr.write(`error: unexpected argument '${arg}' found\n`);
     process.exit(2);
@@ -249,6 +250,11 @@ for (let i = 0; i < rest.length; i++) {
   prompt = arg; // the final bare positional is the prompt
 }
 
+if (prompt === '-') {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  prompt = Buffer.concat(chunks).toString('utf8');
+}
 if (typeof prompt !== 'string') {
   process.stderr.write('error: no prompt provided\n');
   process.exit(2);

@@ -253,7 +253,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     expect(received).toHaveLength(2); // before + the valid seq3 — the malformed entry never became a THIRD onEnvelope call
   });
 
-  it('long-poll (e, finding R1): once a corrected redelivery of seq2 succeeds, the stall clears and the cursor advances to exactly 2 — reaching any HIGHER already-processed seq (here, 3) requires a later, genuinely-new envelope, mirroring the pre-existing stalledAtSeq/deliveredSeq contract for a real thrown-handler stall', async () => {
+  it('long-poll (e): corrected seq2 flushes an already-successful finite tail without a new message', async () => {
     // IMPORTANT SEMANTIC, stated explicitly rather than left implied (per
     // this finding's own review note): entries AFTER the bad seq in the
     // same (or a later) batch ARE delivered to onEnvelope and their
@@ -304,7 +304,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     expect(await cursorStore.load(server.url, record.deviceId)).toBe(1); // still frozen, as the previous test also proves
 
     // Corrected redelivery of seq2 ALONE — the stall clears, the cursor
-    // advances to exactly 2 (not automatically to 3).
+    // advances through the already-successful tail at 3.
     const corrected = createEnvelope(
       'task.offer',
       { instruction: 'corrected', policy: { mode: 'auto' } },
@@ -312,20 +312,14 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     );
     server.pushLongPollEvent(corrected);
     await vi.waitFor(() => expect(received.some((e) => e.task_id === 'r1b-bad')).toBe(true));
-    await vi.waitFor(async () => expect(await cursorStore.load(server.url, record.deviceId)).toBe(2));
+    await vi.waitFor(async () => expect(await cursorStore.load(server.url, record.deviceId)).toBe(3));
 
-    // Re-delivering the already-processed seq3 again does NOT move the
-    // cursor further, and does NOT reprocess it (the redelivery dedup —
-    // deliveredSeq already covers seq3 — discards it before onEnvelope is
-    // ever called a second time): stays exactly 2, received count unchanged.
+    // The successful tail is acknowledged immediately without repeating its side effect.
     server.pushLongPollEvent(validAfter);
     await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(await cursorStore.load(server.url, record.deviceId)).toBe(2);
-    expect(received).toHaveLength(3); // before, valid-3 (first delivery), corrected — the redelivery of valid-3 never landed a 4th time
+    expect(await cursorStore.load(server.url, record.deviceId)).toBe(3);
+    expect(received).toHaveLength(3);
 
-    // A genuinely NEW, later envelope succeeding normally is what actually
-    // flushes the cursor past the gap — ordinary continued operation, not
-    // a special recovery step.
     const fresh = createEnvelope('task.offer', { instruction: 'fresh', policy: { mode: 'auto' } }, { taskId: 'r1b-fresh-4', seq: 4 });
     server.pushLongPollEvent(fresh);
     await vi.waitFor(() => expect(received.some((e) => e.task_id === 'r1b-fresh-4')).toBe(true));

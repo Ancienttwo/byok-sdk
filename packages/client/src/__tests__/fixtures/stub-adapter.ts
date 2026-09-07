@@ -215,7 +215,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
    * offer wait on a `tools/list` probe.
    */
   constructor(
-    id = 'stub',
+    id = 'pi',
     detectResult: RuntimeDetectResult = { kind: 'available', version: '0.0.0' },
     capabilities: RuntimeCapabilities = DEFAULT_STUB_CAPABILITIES,
     requiresMcpToolsetToolObservation = true,

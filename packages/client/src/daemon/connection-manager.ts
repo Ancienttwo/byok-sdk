@@ -118,25 +118,11 @@ export class ConnectionManager {
    * guarantees in docs/protocol.md §9.
    */
   private stalledAtSeq: number | undefined;
-  /**
-   * Design A (Wave 2, F3-on-long-poll): the second, in-memory watermark
-   * alongside the durable `cursor`. `cursor` only ever advances AFTER a
-   * `task.*` handler's side effects resolve successfully, and is persisted
-   * (see `advanceCursor`) — that semantics is unchanged. `deliveredSeq`
-   * advances eagerly, the instant a `task.*` envelope is admitted past
-   * dedup (see `deliver`/`noteDelivered`), independent of whether its
-   * handler has even started, let alone succeeded. It exists so a repeated
-   * read at the durable cursor does not re-dispatch an envelope already in
-   * flight — `handleOffer` must not start a second adapter session while a
-   * first attempt is still running. On WS this same field is written the
-   * same way, but since a live WS connection only ever pushes a given `seq`
-   * once, it never has an observable effect there beyond mirroring
-   * `cursor` (see `dedupWatermark`'s doc comment for why redelivery
-   * correctness doesn't depend on resetting it anywhere).
-   */
-  private deliveredSeq: number | undefined;
-  /** Finding F3: serializes `onEnvelope` calls into a per-connection FIFO — one envelope's handler always fully settles before the next one starts. */
+  /** Drain barrier for independently running handlers; not an admission lock. */
   private processingChain: Promise<void> = Promise.resolve();
+  private cursorInitialization: Promise<void> | undefined;
+  private completionTail: Promise<void> = Promise.resolve();
+  private readonly controlTails = new Map<string, Promise<void>>();
   /**
    * Design B (finding N4): the ONE outbound queue holds `Envelope` OBJECTS,
    * never re-encoded/rebuilt strings, so a
@@ -162,38 +148,12 @@ export class ConnectionManager {
   private terminalError: ReplayCursorTooOldError | undefined;
   private settledWaiters: Array<(err?: unknown) => void> = [];
   private pendingCursorSave: Promise<void> = Promise.resolve();
-  /**
-   * Finding P2 (Fix 2b): seqs currently admitted into `processingChain` but
-   * not yet settled — added in `deliver()` the moment a `task.*` envelope is
-   * accepted past the ordinary watermark check, removed in `process()`'s
-   * `finally` once that specific attempt resolves (success OR failure).
-   * While stalled, `dedupWatermark()` deliberately stays frozen below
-   * already-delivered seqs (see its own doc comment) so the failed seq's own
-   * redelivery can get through — but that same frozen watermark also means
-   * every OTHER seq above it rides along on every re-poll too. Without this,
-   * a seq already mid-flight (e.g. a `task.offer` whose prepared operation start()
-   * hasn't resolved yet) would be re-enqueued into `processingChain` on
-   * every such re-poll, piling up duplicate copies that — once the first
-   * finally resolves and the chain unwinds through them — run its handler
-   * again; for `task.offer` specifically, a second adapter session
-   * orphaning the first (`TaskRunner`'s own `this.tasks.has` guard, finding
-   * P2c, is the second, independent layer against exactly that).
-   */
+  /** Admission dedup while an individual handler is running. */
   private readonly inFlightSeqs = new Set<number>();
-  /**
-   * Finding P2 (Fix 2b): seqs whose handler has already resolved
-   * successfully at least once this session, tracked only while a stall is
-   * in effect — cleared the moment `stalledAtSeq` itself clears (see
-   * `process()`), since once unstalled the ordinary watermark check via
-   * `deliveredSeq` already covers everything delivered so far, making this
-   * redundant. Needed because the stall-gap-prevention rule in `process()`
-   * deliberately does NOT advance `cursor` past a seq above the
-   * still-unresolved `stalledAtSeq`, even once that seq's own handler
-   * succeeds — so `dedupWatermark()` alone can't distinguish "already
-   * succeeded, don't re-run" from "never yet attempted" for anything in
-   * that gap.
-   */
+  /** Successful side effects retained until their durable acknowledgement. */
   private readonly processedSeqs = new Set<number>();
+  /** Received work lacking a successful handler receipt, including malformed frames. */
+  private readonly unresolvedSeqs = new Set<number>();
   /**
    * Finding P3: the pending `drainOutbox` long-poll retry backoff, if any —
    * cancellable so `enterRevoked()` can unblock it immediately instead of
@@ -217,8 +177,8 @@ export class ConnectionManager {
       serverUrl: opts.serverUrl,
       auth: opts.auth,
       // The long-poll query cursor is also the kernel's irreversible ack.
-      // Only report the successfully processed cursor here. `deliveredSeq`
-      // remains a local dedup watermark; using it on the wire would ack an
+      // Only report the successfully persisted cursor; using received work
+      // on the wire would ack an
       // in-flight envelope before its handler settles and make a later
       // failure impossible to redeliver.
       getCursor: () => this.cursor,
@@ -565,8 +525,8 @@ export class ConnectionManager {
    * - F3 (at-most-once): the old code persisted the cursor advance BEFORE
    *   `onEnvelope` even ran (fire-and-forget) — a handler that then failed
    *   left a redelivery-proof envelope permanently marked processed. Inbound
-   *   envelopes are now serialized through `processingChain` (one handler
-   *   fully settles before the next starts) and the cursor only advances
+   *   handlers may run independently; their receipt commits are serialized.
+   *   The cursor only advances
    *   AFTER the handler resolves successfully; a rejection leaves the
    *   cursor where it was (see `stalledAtSeq`), so a future reconnect's
    *   redelivery re-attempts it — safe because every server->daemon type is
@@ -583,84 +543,66 @@ export class ConnectionManager {
 
     if (tracked) {
       const seq = envelope.seq!;
-      // Finding P2 (Fix 2b): a redelivery of a seq already in flight (its
-      // prior attempt hasn't settled yet) or already succeeded this session
-      // — both possible even though `seq > watermark` while stalled (see
-      // `dedupWatermark`'s doc comment) — must not be re-appended to
-      // `processingChain`. The stalled seq itself is deliberately NOT
-      // excluded by this check once its prior attempt has settled (removed
-      // from `inFlightSeqs` in `process()`'s `finally`, never added to
-      // `processedSeqs` since it failed) — that's exactly the redelivery
-      // this whole mechanism exists to let through for a fresh retry.
-      if (this.inFlightSeqs.has(seq) || this.processedSeqs.has(seq)) return false;
+      if (this.inFlightSeqs.has(seq)) return false;
+      if (!this.processedSeqs.has(seq)) this.unresolvedSeqs.add(seq);
       this.inFlightSeqs.add(seq);
-      this.noteDelivered(seq);
     }
 
-    this.processingChain = this.processingChain.then(() => this.process(envelope, tracked));
+    // Startup owns its own lifetime. Controls for that task can reach it;
+    // controls among themselves retain arrival order.
+    const controlKey = envelope.task_id !== undefined && !envelope.type.startsWith('task.offer')
+      ? envelope.task_id : undefined;
+    const prior = controlKey === undefined ? Promise.resolve() : (this.controlTails.get(controlKey) ?? Promise.resolve());
+    const operation = prior.then(() => this.process(envelope, tracked));
+    if (controlKey !== undefined) {
+      this.controlTails.set(controlKey, operation);
+      void operation.finally(() => {
+        if (this.controlTails.get(controlKey) === operation) this.controlTails.delete(controlKey);
+      });
+    }
+    this.processingChain = Promise.all([this.processingChain, operation]).then(() => undefined);
     return true;
   }
 
-  /**
-   * The local watermark `deliver()` dedupes inbound `task.*` envelopes
-   * against. It is deliberately NOT the long-poll query cursor: that query
-   * is the kernel acknowledgement and uses only the successfully processed
-   * `cursor` (see the constructor). Normally this local watermark is
-   * `deliveredSeq` — which is always >= `cursor` (every envelope that
-   * reaches `advanceCursor` already passed through `noteDelivered` first,
-   * see `deliver`) — so this is the literal `max(cursor, deliveredSeq)` the
-   * design calls for, just expressed via that invariant rather than an
-   * explicit `Math.max`.
-   *
-   * While `stalledAtSeq` is set, this collapses to the durable `cursor`
-   * alone, deliberately ignoring however far `deliveredSeq` had already run
-   * ahead before the failure was known: that's what lets the stalled
-   * envelope's own redelivery (and everything after it, right up to a
-   * fresh success) get past this same dedup check instead of being
-   * self-deduped by the client's own earlier eager tracking of envelopes
-   * whose outcome wasn't known yet. No separate "reset deliveredSeq on
-   * reconnect" step is needed for this to be correct — collapsing to
-   * `cursor` exactly while stalled already produces the right answer on
-   * every long-poll retry path. NOT resetting it unconditionally on every
-   * retry lets `deliveredSeq` keep doing its job of not re-dispatching
-   * something already in flight while a handler is still running.
-   */
+  /** Only a durable acknowledgement can deduplicate a whole prefix. */
   private dedupWatermark(): number | undefined {
-    return this.stalledAtSeq !== undefined ? this.cursor : (this.deliveredSeq ?? this.cursor);
-  }
-
-  /** Design A: eagerly advance the in-memory delivery watermark — called for every `task.*` envelope `deliver()` admits past dedup, regardless of transport or of whether its handler has even started yet. */
-  private noteDelivered(seq: number): void {
-    if (this.deliveredSeq === undefined || seq > this.deliveredSeq) this.deliveredSeq = seq;
+    return this.cursor;
   }
 
   private async process(envelope: Envelope, tracked: boolean): Promise<void> {
     const seq = tracked ? envelope.seq! : undefined;
     try {
+      if (tracked && seq! <= (this.cursor ?? 0)) return;
       // An absent cursor means "this device has never accepted tracked
       // delivery", so reconnect handshakes omit it and a server correctly
       // sends no backlog. Persist zero before the very first handler side
       // effect so a crash/failure during that handler is distinguishable
       // from a genuinely first-ever connection and can request seq > 0.
       if (tracked && this.cursor === undefined) {
-        await this.opts.cursorStore.save(this.opts.serverUrl, this.opts.deviceId, 0);
-        this.cursor = 0;
+        this.cursorInitialization ??= this.opts.cursorStore.save(this.opts.serverUrl, this.opts.deviceId, 0)
+          .then(() => { this.cursor = 0; })
+          .catch(error => { this.cursorInitialization = undefined; throw error; });
+        await this.cursorInitialization;
       }
-      await this.opts.onEnvelope(envelope);
+      if (!tracked || !this.processedSeqs.has(seq!)) await this.opts.onEnvelope(envelope);
       if (!tracked) return;
-      // Still behind an earlier, not-yet-resolved failure: this envelope
-      // (even though it just succeeded) is not the one unblocking the
-      // cursor. Advancing here would create a gap a future redelivery could
-      // never fill (the skipped-over failed seq would look already-seen).
-      if (this.stalledAtSeq !== undefined && envelope.seq !== this.stalledAtSeq) {
-        this.processedSeqs.add(seq!); // successful but held behind the earlier stalled seq
-        return;
-      }
-      this.stalledAtSeq = undefined;
-      await this.advanceCursor(envelope.seq!);
-      this.processedSeqs.clear(); // no longer needed once unstalled — deliveredSeq/watermark already covers everything delivered so far
+      this.processedSeqs.add(seq!);
+      this.unresolvedSeqs.delete(seq!);
+      const completion = this.completionTail.catch(() => undefined).then(async () => {
+        let firstUnresolved = Infinity;
+        for (const value of this.unresolvedSeqs) firstUnresolved = Math.min(firstUnresolved, value);
+        let prefix = this.cursor ?? 0;
+        for (const value of this.processedSeqs) if (value < firstUnresolved) prefix = Math.max(prefix, value);
+        if (prefix > (this.cursor ?? 0)) await this.advanceCursor(prefix);
+        for (const value of this.processedSeqs) {
+          if (value <= (this.cursor ?? 0)) this.processedSeqs.delete(value);
+        }
+        this.stalledAtSeq = this.unresolvedSeqs.size > 0 ? firstUnresolved : undefined;
+      });
+      this.completionTail = completion;
+      await completion;
     } catch (err) {
-      if (tracked && this.stalledAtSeq === undefined) this.stalledAtSeq = envelope.seq;
+      if (tracked) this.stalledAtSeq = Math.min(envelope.seq!, this.stalledAtSeq ?? Infinity);
       console.error(
         `[byok/client] envelope handler failed for ${envelope.type}${
           typeof envelope.seq === 'number' ? ` (seq=${envelope.seq})` : ''
@@ -672,11 +614,10 @@ export class ConnectionManager {
     }
   }
 
-  /** Serialized with handler completion, so invalid work cannot be acked by later success. */
+  /** Recorded synchronously at receive, before a later successful receipt can commit. */
   private noteValidationFailure(seq: number): void {
-    this.processingChain = this.processingChain.then(() => {
-      if (this.stalledAtSeq === undefined) this.stalledAtSeq = seq;
-    });
+    this.unresolvedSeqs.add(seq);
+    this.stalledAtSeq = Math.min(seq, this.stalledAtSeq ?? seq);
   }
 
   private async advanceCursor(seq: number): Promise<void> {
