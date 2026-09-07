@@ -1,0 +1,46 @@
+{
+  "base": "0f8fdb4a43774b9d21ccfec0ba7d49fa06fec009",
+  "pre_fix_exit": 1,
+  "pre_fix_assertion": "expected confirmed to be pending during message admission HTTP503",
+  "regression_guard": "packages/client/src/__tests__/execution-recovery-kill.test.ts",
+  "node": "22.22.0",
+  "bun": "1.4.0",
+  "logs": [
+    {
+      "path": "/tmp/byok-message-prefix.log",
+      "sha256": "5ce17fb3a1b4120139868e4538e2f12e1f8563478fbc04bd7565d5f0f90beb0d"
+    },
+    {
+      "path": "/tmp/byok-message-postfix.log",
+      "sha256": "d2466f5b5c2ef8aa370063352707865fe723dde480fe889261f97cff78537b61"
+    },
+    {
+      "path": "/tmp/byok-message-focused.log",
+      "sha256": "9ab34497a0158eaa214d3e82c13237558aa5592428b9238474ac76b588e3a3eb"
+    },
+    {
+      "path": "/tmp/byok-message-final-build.log",
+      "sha256": "3ea96aeae8fae3390ffd78513362409f545155378b19f926891417abc32d7bc9"
+    },
+    {
+      "path": "/tmp/byok-message-final-types.log",
+      "sha256": "50776ee131c7afb18a3764d8bc621aee9830922769bf0202f46b13dcf19b1b25"
+    },
+    {
+      "path": "/tmp/byok-message-final-tests.log",
+      "sha256": "f285be29fdeccd7378e5e9127e4446edcc5de54a440909d1ed065f070a4fd12c"
+    },
+    {
+      "path": "/tmp/byok-message-api-update.log",
+      "sha256": "749a8ab855ff939d16d0f1b57c4ba1cf85be7031b5f81120366ddb4897a3b71a"
+    },
+    {
+      "path": "/tmp/byok-message-version.log",
+      "sha256": "5158d72ca52ef7ffab18ea5891b9c5818e09f5b3183c60b04f8c26299a85c317"
+    },
+    {
+      "path": "/tmp/byok-message-workflow.log",
+      "sha256": "92916e09c848dbd6a5f6faa9c800ed158aadbfb1901b8653845a813dd79ce51a"
+    }
+  ]
+}

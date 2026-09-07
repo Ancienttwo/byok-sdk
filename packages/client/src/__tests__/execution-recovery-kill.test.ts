@@ -310,6 +310,76 @@ afterAll(async () => {
 });
 
 describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL execution recovery against reconstructed durable cloud stores', () => {
+  it('recovers a never-admitted message through repeated SIGKILL before delivering its interrupted terminal', async () => {
+    const cloud = await startCloud();
+    const { daemon, deviceId } = await pair(cloud, { agentHome: true });
+    await fs.writeFile(`${current!.cloudDb}.message-outage`, '503');
+    const offer = await cloud.rpc('enqueueMessageOffer', { deviceId }) as { taskId: string };
+    await waitForFile(`${current!.cloudDb}.message-blocked`);
+    const originalPayload = JSON.parse(await fs.readFile(`${current!.cloudDb}.message-blocked`, 'utf8'));
+    expect(await cloud.rpc('readMessages')).toEqual([]);
+    daemon.kill();
+    await daemon.exited();
+
+    const second = await startDaemon({ agentHome: true });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const [pending] = journalRows('SELECT bytes, truth_state FROM journal_terminal');
+    expect(pending?.truth_state).toBe('pending');
+    expect((await cloud.rpc('readTaskAttempt', { taskId: offer.taskId }) as { status: string }).status).toBe('running');
+    second.kill();
+    await second.exited();
+    cloud.kill();
+    await cloud.exited();
+    await fs.unlink(`${current!.cloudDb}.message-outage`);
+    const restoredCloud = await startCloud();
+    await arm('terminal:before-send');
+    const afterDisposition = await spawnDaemon({ agentHome: true, recoveryFault: 'terminal:before-send' });
+    expect((await afterDisposition.exited()).signal).toBe('SIGKILL');
+    expect((await restoredCloud.rpc('readTaskAttempt', { taskId: offer.taskId }) as { status: string }).status).toBe('running');
+    expect(journalRows('SELECT bytes, truth_state FROM journal_terminal')).toEqual([pending]);
+    const third = await startDaemon({ agentHome: true });
+    await waitForAttempt(restoredCloud, offer.taskId, 'failed');
+    await waitForJournalTruth('confirmed');
+    const messages = await restoredCloud.rpc('readMessages') as Array<{ task_id: string; payload: string }>;
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.task_id).toBe(offer.taskId);
+    expect(JSON.parse(messages[0]!.payload)).toEqual(originalPayload);
+    expect(await restoredCloud.rpc('readTerminalBody', { taskId: offer.taskId })).toBe(pending?.bytes);
+    const wire = await restoredCloud.rpc('readWire') as Array<{ type: string; task_id?: string }>;
+    const publishes = wire.findIndex((row) => row.type === 'agent.message.publish' && row.task_id === offer.taskId);
+    const terminal = wire.findIndex((row) => row.type === 'task.fail' && row.task_id === offer.taskId);
+    expect(publishes).toBeGreaterThanOrEqual(0);
+    expect(terminal).toBeGreaterThan(publishes);
+    expect(starts()).toHaveLength(1);
+    third.kill();
+    await third.exited();
+    await startDaemon({ agentHome: true });
+    expect(await restoredCloud.rpc('readMessages')).toEqual(messages);
+    expect(starts()).toHaveLength(1);
+  }, 30_000);
+
+  it('does not bypass cloud cancellation for a never-admitted recovered message', async () => {
+    const cloud = await startCloud();
+    const { daemon, deviceId } = await pair(cloud, { agentHome: true });
+    await fs.writeFile(`${current!.cloudDb}.message-outage`, '503');
+    const offer = await cloud.rpc('enqueueMessageOffer', { deviceId }) as { taskId: string };
+    await waitForFile(`${current!.cloudDb}.message-blocked`);
+    daemon.kill();
+    await daemon.exited();
+    await cloud.rpc('cancelTask', { taskId: offer.taskId, reason: 'cancel before message admission' });
+    await fs.unlink(`${current!.cloudDb}.message-outage`);
+    const restarted = await startDaemon({ agentHome: true });
+    const deadline = Date.now() + 5000;
+    while (!restarted.stderr.includes('inbound_rejected')) {
+      if (Date.now() >= deadline) throw new Error(`no message rejection: ${restarted.stderr}`);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(await cloud.rpc('readMessages')).toEqual([]);
+    expect(await cloud.rpc('readTaskAttempt', { taskId: offer.taskId })).toMatchObject({ cancellation: { reason: 'cancel before message admission' } });
+    expect(journalRows('SELECT truth_state FROM journal_terminal')).toEqual([{ truth_state: 'pending' }]);
+    expect(starts()).toHaveLength(1);
+  }, 30_000);
+
   it('terminal:before-commit restarts as one non-retryable daemon_interrupted failure without runtime re-execution', async () => {
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud, { journalFault: 'terminal:before-commit' });
