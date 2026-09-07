@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { decodeEnvelope } from '@byok-sdk/protocol';
 
 interface ChildConfig {
@@ -239,7 +239,11 @@ async function arm(name: string): Promise<void> {
 
 async function finish(taskId: string, summary: string): Promise<void> {
   if (current === undefined) throw new Error('test context missing');
-  await fs.writeFile(path.join(current.daemonBase.controlDir, `${taskId}.finish.json`), JSON.stringify({ summary }));
+  const target = path.join(current.daemonBase.controlDir, `${taskId}.finish.json`);
+  const staging = `${target}.tmp`;
+  // The compiled reader polls target: never expose a truncated/partial command.
+  await fs.writeFile(staging, JSON.stringify({ summary }));
+  await fs.rename(staging, target);
 }
 
 async function pair(cloud: JsonChild, daemonOptions: Partial<ChildConfig> = {}): Promise<{ daemon: JsonChild; deviceId: string }> {
@@ -310,6 +314,28 @@ afterAll(async () => {
 });
 
 describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL execution recovery against reconstructed durable cloud stores', () => {
+  it('publishes completion input atomically while the compiled runtime polls during a paused write', async () => {
+    const cloud = await startCloud();
+    const { deviceId } = await pair(cloud);
+    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'read a complete fixture command' }) as { taskId: string };
+    await waitForFile(path.join(current!.daemonBase.controlDir, 'runtime-starts.jsonl'));
+    const writeFile = fs.writeFile.bind(fs);
+    const pausedWrite = vi.spyOn(fs, 'writeFile').mockImplementationOnce(async (file, data, options) => {
+      await writeFile(file, '', options);
+      // Expose the real truncate/write window long enough for the separate
+      // compiled reader to poll it. The final pathname must stay invisible.
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await writeFile(file, data, options);
+    });
+    try {
+      await finish(offer.taskId, 'complete JSON only');
+    } finally {
+      pausedWrite.mockRestore();
+    }
+    await waitForAttempt(cloud, offer.taskId, 'complete');
+    expect(starts()).toHaveLength(1);
+  }, 30_000);
+
   it('recovers a never-admitted message through repeated SIGKILL before delivering its interrupted terminal', async () => {
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud, { agentHome: true });

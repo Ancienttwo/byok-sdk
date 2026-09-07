@@ -1,6 +1,6 @@
 # Task Contract: message-recovery-ordering
 
-> **Status**: Blocked
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260907-1236-message-recovery-ordering.md
 > **Task Profile**: code-change
 > **Owner**: Codex
@@ -16,6 +16,7 @@ Recover pending local Agent messages before immutable interrupted terminal deliv
 ```yaml
 allowed_paths:
   - packages/client/src/
+  - packages/cloud-dataplane/src/__tests__/worker-packaging.test.ts
   - api-surface/client.d.ts
   - docs/spec.md
   - docs/researches/
@@ -52,3 +53,11 @@ exit_criteria:
 ## Stop Conditions
 
 Three fix/reverify rounds per issue. Preserve WIP. No npm publish, production mutation or dependency pin claim.
+
+## Approved packaging follow-up
+
+User approved the existing failing worker-packaging gate. Extend the same recovery acceptance boundary by correcting only the test fixture timeout/lifecycle; retain build assertions and child120s bound. No runtime change, new dependency, publication or deployment.
+
+## Source acceptance closeout
+
+All machine-verifiable commands pass after the approved packaging gate and the one directly blocking test-fixture atomic-write repair. Root full test:3757pass134skip0fail. No new dependencies. Exact release CI/artifact and publication are not claimed.

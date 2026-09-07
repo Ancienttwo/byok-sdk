@@ -57,6 +57,58 @@
     {
       "path": "/tmp/salesko-message-candidate-egress.log",
       "sha256": "9b6f4572e256f37e9ed24f80a0b637718269bfeeeedc2774d805002204954995"
+    },
+    {
+      "path": "/tmp/byok-packaging-timeout-control.log",
+      "sha256": "0c406726cd8764bf7ebf96692df2bd5f11ce4413ac9384c009d15fa3d5674b2e"
+    },
+    {
+      "path": "/tmp/byok-packaging-slow-prefix.log",
+      "sha256": "75051400469887184896862147f4430afaa1057751256374aed9db68becddf70"
+    },
+    {
+      "path": "/tmp/byok-packaging-slow-postfix.log",
+      "sha256": "1723ed21c6eb396686e3089b2bfb2cdbcfa4b5c9fb511654c6d603211683d271"
+    },
+    {
+      "path": "/tmp/byok-packaging-rejected-build.log",
+      "sha256": "0fd02789e3eba62fea674a86bbfd5be2599647ecacd7bcaa9c5a352341d12de1"
+    },
+    {
+      "path": "/tmp/byok-packaging-final-tests.log",
+      "sha256": "2d9498876a4042be9db982f038381cac9ffa051835205e210f843e13b18f1ce2"
+    },
+    {
+      "path": "/tmp/byok-packaging-fixture-prefix.log",
+      "sha256": "de98129aa6c99e89a2b1a6686c8a102f514e791a88e8860373010b498841e4e7"
+    },
+    {
+      "path": "/tmp/byok-packaging-fixture-postfix.log",
+      "sha256": "71044dc958b9a08bdc7399ccb731c46c5c9b6eb5f9c9d068423aee3c96526ff9"
+    },
+    {
+      "path": "/tmp/byok-packaging-atomic-final-tests.log",
+      "sha256": "f6bab8de9ac9be75e230d3e1268428437521b685af30c043c63c804e9180c46c"
+    },
+    {
+      "path": "/tmp/byok-packaging-final-build.log",
+      "sha256": "b7b4ff1938d3b05d757b0080fdba657403592fbb7aedfeb33ac595e887eaab21"
+    },
+    {
+      "path": "/tmp/byok-packaging-atomic-final-types.log",
+      "sha256": "b6ed843860889f12d695667561e45b44e7ba130586941cdfe2de3dbb7aed1e58"
+    },
+    {
+      "path": "/tmp/byok-packaging-final-api.log",
+      "sha256": "9b8f2b5181f563105bd2efe1218023535d4126196fe554c12f332dc5b77ecbe5"
+    },
+    {
+      "path": "/tmp/byok-packaging-final-version.log",
+      "sha256": "5158d72ca52ef7ffab18ea5891b9c5818e09f5b3183c60b04f8c26299a85c317"
+    },
+    {
+      "path": "/tmp/byok-packaging-final-workflow.log",
+      "sha256": "92916e09c848dbd6a5f6faa9c800ed158aadbfb1901b8653845a813dd79ce51a"
     }
   ],
   "sdk_source": "7941c5e56b1b5e5afa58a0d4e82438b547f5d3fe",
@@ -69,8 +121,7 @@
   "sdk_tests": {
     "passed": 3757,
     "skipped": 134,
-    "failed": 1,
-    "failure": "unchanged cloud-dataplane worker-packaging 5000ms timeout"
+    "failed": 0
   },
   "compiled_kill_tests": {
     "passed": 16
@@ -81,5 +132,35 @@
     "assertions": 48
   },
   "candidate": "prepared-not-published",
-  "native_arch": "darwin-arm64"
+  "native_arch": "darwin-arm64",
+  "initial_sdk_tests": {
+    "passed": 3757,
+    "skipped": 134,
+    "failed": 1,
+    "failure": "unchanged cloud-dataplane worker-packaging 5000ms timeout"
+  },
+  "compiled_recovery_tests": {
+    "passed": 17
+  },
+  "packaging_followup": {
+    "status": "local-source-gates-pass",
+    "dependency_changes": false,
+    "runtime_changes_since_candidate": false,
+    "packaging_slow_start": {
+      "delay_ms": 6000,
+      "pre_fix_exit": 1,
+      "post_fix_exit": 0
+    },
+    "packaging_failure_cleanup": {
+      "injected_child_exit": 23,
+      "suite_exit": 1,
+      "dependent_tests_skipped": 4,
+      "scratch_removed": true
+    },
+    "fixture_atomic_publication": {
+      "pre_fix_exit": 1,
+      "post_fix_exit": 0,
+      "scope_exception": "one directly blocking fixture issue"
+    }
+  }
 }

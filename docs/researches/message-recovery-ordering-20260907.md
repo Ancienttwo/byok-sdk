@@ -1,5 +1,7 @@
 # Pending Agent message recovery ordering
 
+Current local source status: all required gates pass after the approved packaging follow-up; prior failures below are historical reproduction evidence. Publication/deployment remain pending.
+
 ## Root Cause Evidence
 
 - root_cause: Startup durably records interruption then sends its terminal before retrying a never-admitted local Agent message, closing the cloud lifecycle reservation first.
@@ -22,3 +24,7 @@ Build, typecheck, API surface, version authority and strict workflow pass. Clien
 ## Downstream readback
 
 Exact SDK candidate7941c5e plus Salesko5cfb4f5 passed the unchanged egress test file:3tests/48assertions, including pending-message restart exactly once. All16 compiled crash tests passed. Ten-package pack/install smoke passed. Root packaging timeout remains the sole failed source gate; candidate success is not registry or deployment acceptance. See the neighboring candidate receipt and evidence JSON.
+
+## Packaging gate closed
+
+The5s Vitest/120s Wrangler mismatch was reproduced with a6s slow-start preload and corrected by bounded beforeAll setup plus afterAll cleanup. All bundle assertions remain unchanged. A child exit23 negative control confirms failure propagation and scratch cleanup. The first full run exposed one separate fixture-family race: completion JSON was visible before fs.writeFile finished. A paused-write regression reproduced the exact runtime contract violation, and same-directory temporary write plus rename corrected that test writer. No product code or dependencies changed. Final full root suite3757pass134skip0fail; build/typecheck/API/version/workflow pass. Details and four-field evidence are in matching task notes.
