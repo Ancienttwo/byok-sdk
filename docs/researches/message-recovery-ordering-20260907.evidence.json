@@ -41,6 +41,45 @@
     {
       "path": "/tmp/byok-message-workflow.log",
       "sha256": "92916e09c848dbd6a5f6faa9c800ed158aadbfb1901b8653845a813dd79ce51a"
+    },
+    {
+      "path": "/tmp/byok-message-remaining-tests.log",
+      "sha256": "fd63205effa8771161c3a99a943efee4a7d70277573469e0cd1421aa699b4e86"
+    },
+    {
+      "path": "/tmp/byok-message-pack.log",
+      "sha256": "27e76c2c4f47c97f5fd0da65038187e41439166bb2d889d1d779333e5761a4f2"
+    },
+    {
+      "path": "/tmp/salesko-message-candidate-build.log",
+      "sha256": "59e690740684201f2b50b89016428c357d872abd965c15d8148c34a5a312022b"
+    },
+    {
+      "path": "/tmp/salesko-message-candidate-egress.log",
+      "sha256": "9b6f4572e256f37e9ed24f80a0b637718269bfeeeedc2774d805002204954995"
     }
-  ]
+  ],
+  "sdk_source": "7941c5e56b1b5e5afa58a0d4e82438b547f5d3fe",
+  "salesko_source": "5cfb4f5f4e8bce699ccfa9596eac751bb8de86b5",
+  "sdk_build": "pass",
+  "sdk_typecheck": "pass",
+  "sdk_api_surface": "pass",
+  "sdk_version_authority": "pass",
+  "sdk_workflow": "pass",
+  "sdk_tests": {
+    "passed": 3757,
+    "skipped": 134,
+    "failed": 1,
+    "failure": "unchanged cloud-dataplane worker-packaging 5000ms timeout"
+  },
+  "compiled_kill_tests": {
+    "passed": 16
+  },
+  "salesko_unchanged_egress_tests": {
+    "passed": 3,
+    "failed": 0,
+    "assertions": 48
+  },
+  "candidate": "prepared-not-published",
+  "native_arch": "darwin-arm64"
 }

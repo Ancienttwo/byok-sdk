@@ -1,6 +1,6 @@
 # Pending Agent message recovery before interrupted settlement
 
-> **Status**: Active
+> **Status**: Blocked
 > **Task Contract**: tasks/contracts/20260907-1236-message-recovery-ordering.contract.md
 
 ## Authorization
@@ -24,8 +24,8 @@ Keep terminal recording before transport, but defer recovery terminal delivery w
 - [x] Verify source identity, isolate worktree and trace failure.
 - [x] Add compiled SIGKILL regression and prove pre-fix failure.
 - [x] Implement durable disposition gate and focused semantic tests.
-- [ ] Run required SDK checks and unchanged Salesko candidate regression.
-- [ ] Record exact evidence and handoff; registry/rebuild remain separate.
+- [x] Run required SDK checks and unchanged Salesko candidate regression.
+- [x] Record exact evidence and handoff; registry/rebuild remain separate.
 
 ## Verification Boundary
 
@@ -34,3 +34,7 @@ Compiled daemon and cloud with real SQLite, 503 before admission, repeated resta
 ## Rollback Surface
 
 Revert this isolated source diff. No new dependency or durable schema. Existing fixture extensions avoid a second test harness.
+
+## Closeout boundary
+
+Source fix, compiled SIGKILL and unchanged downstream candidate regression are complete. Root required test remains blocked only by the pre-existing cloud-dataplane worker-packaging 5s timeout. This plan does not claim all exit criteria passed or authorize its unrelated repair. Publication, native release matrix and beta rebuild follow the corrected stable artifact.

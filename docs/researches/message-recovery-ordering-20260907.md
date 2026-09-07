@@ -18,3 +18,7 @@ A transport rejection or unavailable/revoked device does not invent an applicati
 ## Validation boundary
 
 Build, typecheck, API surface, version authority and strict workflow pass. Client suite: 1727 passed /11 skipped. Cloud:341 passed. Root test stops on the existing unrelated cloud-dataplane worker-packaging 5000ms timeout (73 passed/104 skipped/1 failed); no timeout or assertion was changed. Remaining workspace tests and downstream candidate validation are tracked in task notes. Source validation does not claim release or deployment.
+
+## Downstream readback
+
+Exact SDK candidate7941c5e plus Salesko5cfb4f5 passed the unchanged egress test file:3tests/48assertions, including pending-message restart exactly once. All16 compiled crash tests passed. Ten-package pack/install smoke passed. Root packaging timeout remains the sole failed source gate; candidate success is not registry or deployment acceptance. See the neighboring candidate receipt and evidence JSON.

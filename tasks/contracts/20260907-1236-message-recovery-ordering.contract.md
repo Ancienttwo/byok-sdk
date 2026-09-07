@@ -1,6 +1,6 @@
 # Task Contract: message-recovery-ordering
 
-> **Status**: Active
+> **Status**: Blocked
 > **Plan**: plans/plan-20260907-1236-message-recovery-ordering.md
 > **Task Profile**: code-change
 > **Owner**: Codex
