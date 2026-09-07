@@ -484,7 +484,8 @@ export class TestServer {
       respondJson(res, 500, { error: 'simulated events poll failure' });
       return;
     }
-    const requestedCursor = Number(new URL(req.url ?? '/', 'http://internal').searchParams.get('cursor') ?? 0);
+    const query = new URL(req.url ?? '/', 'http://internal').searchParams;
+    const requestedCursor = Number(query.get('afterSeq') ?? query.get('cursor') ?? 0);
     const entries = this.pendingLongPollEntries.splice(0).filter((entry) => {
       const seq = typeof entry === 'object' && entry !== null ? (entry as { seq?: unknown }).seq : undefined;
       return typeof seq !== 'number' || !Number.isSafeInteger(seq) || seq > requestedCursor;
@@ -496,7 +497,7 @@ export class TestServer {
     respondJson(res, 200, {
       events: entries,
       cursor: this.longPollCursor,
-      ...(this.advertiseLongPollCapabilities ? { capabilities: this.ackCapabilities } : {}),
+      ...(this.advertiseLongPollCapabilities ? { capabilities: [...new Set([...this.ackCapabilities, 'mailbox-read-ahead'])] } : {}),
     });
   }
 

@@ -1317,14 +1317,24 @@ path.
 
 ```
 GET /byok/events?cursor=N
-  Query    (EventsPollQuerySchema):    { cursor? }
+  Query    (EventsPollQuerySchema):    { cursor?, afterSeq? }
   Response (EventsPollResponseSchema): { events: Envelope[], cursor, capabilities?: string[] }
 ```
 
 Authed (bearer access token); holds the request open for ~50 seconds waiting
 for new events before returning an empty `events` array. `cursor` in the query
-is "last seq I've seen," and `cursor` in the response is "resume from here
-next time." The daemon establishes its per-device session through the HTTP
+is the last reliably processed sequence and is the sole durable ACK.
+`afterSeq` selects the next read position without acknowledging it; omission
+reads from the ACK. The response `cursor` is a navigation position only.
+Servers advertise `mailbox-read-ahead`; a client must observe it before sending
+`afterSeq > cursor`, and fail observably if support disappears. Navigation must
+be a safe integer between ACK and the previously delivered watermark, at most
+4096 sequences ahead of ACK. The client sweeps that window (plus one returned
+page), then backs off and replays from ACK if the gap persists. At mailbox head
+and after reconnect/failure it also resets navigation to ACK. Controls inside
+this window can reach unfinished offers; a full window remains an observable
+capacity limit, not a promise of unbounded control bypass. Retention validation
+always uses ACK, so navigating ahead cannot conceal an expired replay gap. The daemon establishes its per-device session through the HTTP
 layer's bearer auth and sends the bounded `conn.hello` capability snapshot as
 the first `POST /byok/messages` envelope. The route accepts that one non-task
 envelope only when its device, product, and protocol version exactly match the

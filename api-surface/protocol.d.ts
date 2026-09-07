@@ -2057,6 +2057,7 @@ export declare const BlobDownloadUrlResponseSchema: z.ZodObject<{
 }, z.core.$strip>;
 export type BlobDownloadUrlResponse = z.infer<typeof BlobDownloadUrlResponseSchema>;
 export declare const EventsPollQuerySchema: z.ZodObject<{
+    afterSeq: z.ZodOptional<z.ZodNumber>;
     cursor: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
 export type EventsPollQuery = z.infer<typeof EventsPollQuerySchema>;
@@ -4478,6 +4479,7 @@ export declare function byokBlobUrlPath(blobId: string): string;
  */
 export declare function byokBlobContentPath(blobId: string): string;
 // ==== @byok-sdk/protocol dist/index.d.ts ====
+export { MAILBOX_READ_AHEAD_MAX_SEQS, MAILBOX_READ_AHEAD_CAPABILITY } from './version';
 export { PROTOCOL_VERSION, CAPABILITY_FLAGS, STRICT_AGENT_ONLY_CAPABILITY } from './version';
 export type { CapabilityFlag } from './version';
 export { BlobRefSchema, CONTENT_HASH_RE } from './blob';
@@ -7404,6 +7406,9 @@ export declare const TerminalProjectionSelectionSchema: z.ZodDiscriminatedUnion<
 }, z.core.$strict>], "mode">;
 export type TerminalProjectionSelection = z.infer<typeof TerminalProjectionSelectionSchema>;
 // ==== @byok-sdk/protocol dist/version.d.ts ====
+/** Bounded volatile navigation; only cursor is a durable acknowledgement. */
+export declare const MAILBOX_READ_AHEAD_MAX_SEQS = 4096;
+export declare const MAILBOX_READ_AHEAD_CAPABILITY = "mailbox-read-ahead";
 /**
  * Wire protocol version. Bump on breaking (non-additive) changes to the envelope
  * or message shapes. Additive changes (new optional fields, new message types)
@@ -7510,5 +7515,5 @@ export declare const STRICT_AGENT_ONLY_CAPABILITY: 'strict-agent-only';
  * cannot accidentally execute the instruction without the required tools.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "terminal-projection-selection", "custom-harness"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "terminal-projection-selection", "custom-harness", "mailbox-read-ahead"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];

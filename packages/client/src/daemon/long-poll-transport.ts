@@ -1,5 +1,7 @@
 import {
   BYOK_EVENTS_PATH,
+  MAILBOX_READ_AHEAD_CAPABILITY,
+  MAILBOX_READ_AHEAD_MAX_SEQS,
   BYOK_MESSAGES_PATH,
   MESSAGE_TYPES,
   MessagesSendResponseSchema,
@@ -366,6 +368,9 @@ export class LongPollClient {
 
   private async loop(signal: AbortSignal): Promise<void> {
     let retryAttempt = 0;
+    let readCursor: number | undefined;
+    let readAheadSupported = false;
+    let warnedWindowAt: number | undefined;
     while (this.running && !signal.aborted) {
       try {
         // Phase 1 — credentials. A failure here happens BEFORE any request to
@@ -381,7 +386,28 @@ export class LongPollClient {
         const base = toHttpBase(this.opts.serverUrl);
         const url = new URL(BYOK_EVENTS_PATH, base);
         const cursor = this.opts.getCursor();
+        const ack = cursor ?? 0;
+        // One bounded forward sweep, then replay the durable gap. Retained
+        // processing state is bounded by this seq window plus one server page.
+        if (readCursor !== undefined && readCursor - ack >= MAILBOX_READ_AHEAD_MAX_SEQS) {
+          if (warnedWindowAt !== ack) {
+            warnedWindowAt = ack;
+            console.warn('[byok/client] mailbox read-ahead window full; acknowledgement is stalled');
+          }
+          readCursor = ack;
+          await sleep(this.opts.retryDelayMs ?? 2000, signal);
+          continue;
+        }
+        const afterSeq = Math.max(ack, readCursor ?? ack);
         if (cursor !== undefined) url.searchParams.set('cursor', String(cursor));
+        if (afterSeq > ack) {
+          if (!readAheadSupported) {
+            const error = new Error('server does not advertise mailbox-read-ahead; cannot read past unacknowledged work');
+            this.warnRouteFailure(this.eventsEndpoint, undefined, error);
+            throw error;
+          }
+          url.searchParams.set('afterSeq', String(afterSeq));
+        }
 
         // Phase 2 — the route request/response cycle. Only failures from here
         // on are {@link LongPollRouteError}s.
@@ -411,6 +437,8 @@ export class LongPollClient {
           // longer proves that the responder behind the NEXT request supports
           // what the last successful one advertised. Match WS disconnect
           // discipline and withdraw the advertisement immediately.
+          readCursor = undefined;
+          readAheadSupported = false;
           this.opts.onServerCapabilitiesInvalidated?.();
           this.opts.onPollFailure?.();
           this.opts.onOperationalOutcome?.('failure');
@@ -424,8 +452,9 @@ export class LongPollClient {
         // disposition that would authorize acknowledging it.
         let parsed: LooseEventsPollResponse;
         try {
-          parsed = parseLooseEventsPollResponse(await res.json(), cursor ?? 0);
-          validateTrustedEventsPage(parsed.events, cursor ?? 0, parsed.cursor);
+          parsed = parseLooseEventsPollResponse(await res.json(), afterSeq);
+          validateTrustedEventsPage(parsed.events, afterSeq, parsed.cursor);
+          if (afterSeq > ack && !parsed.capabilities.includes(MAILBOX_READ_AHEAD_CAPABILITY)) throw new Error('mailbox read-ahead capability was withdrawn');
         } catch (err) {
           // The response DID exist (and was a success status) — it is its body
           // that is unusable. Carrying `res.status` here rather than
@@ -434,6 +463,9 @@ export class LongPollClient {
           this.warnRouteFailure(this.eventsEndpoint, res.status, err);
           throw err;
         }
+        readAheadSupported = parsed.capabilities.includes(MAILBOX_READ_AHEAD_CAPABILITY);
+        const madeReadProgress = parsed.cursor > afterSeq;
+        readCursor = parsed.cursor;
         this.opts.onServerCapabilities?.(parsed.capabilities);
         // Finding R1 (Codex's new P2): true the moment THIS batch contains
         // at least one validation-failed entry — used below to apply the
@@ -471,14 +503,17 @@ export class LongPollClient {
         }
 
         if (parsed.events.length === 0) {
+          // At the retained head, retry from the ACK so failed handlers can
+          // recover. Reconnect likewise discards navigation, never the ACK.
+          readCursor = this.opts.getCursor() ?? 0;
           retryAttempt = 0;
           this.opts.onOperationalOutcome?.('success');
           await sleep(this.opts.idleDelayMs ?? 250, signal);
-        } else if (
+        } else if (!madeReadProgress && (
           this.opts.isStalled?.() ||
           hadValidationFailureThisBatch ||
           (!acceptedAnyEntry && this.opts.getCursor() === cursor)
-        ) {
+        )) {
           // Finding P2 (Fix 2a) / R1: a non-empty batch while stalled (or
           // one that just NOW triggered the stall — see
           // `hadValidationFailureThisBatch`'s own doc comment for why that
@@ -499,6 +534,8 @@ export class LongPollClient {
         // warns itself: it cannot tell a route failure apart from a credential
         // failure or a throwing `onEnvelope` handler, and guessing is exactly
         // the mis-attribution this split removed.
+        readCursor = undefined;
+        readAheadSupported = false;
         this.opts.onServerCapabilitiesInvalidated?.();
         if (this.noteRevoked(err)) return;
         if (!this.running || signal.aborted) return;

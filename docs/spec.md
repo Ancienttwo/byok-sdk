@@ -925,7 +925,9 @@ Independent offers may progress concurrently. Admission reserves the canonical
 Agent home synchronously before asynchronous preparation and converts that
 reservation into the existing execution lease. Controls remain ordered per task;
 startup does not block another Agent or that task's cancel. `startupTimeoutMs`
-(default 30 seconds) aborts startup admission. A deadline is not a disposal
+(default 30 seconds) starts before admission and bounds pure adapter detect/prepare
+waits as well as runtime start. AbortSignal is supplied to these pure adapter
+operations; late returns cannot claim/start or retain the home reservation. A deadline is not a disposal
 receipt: a late Session, failed binding/handoff/outbox activation, or failed
 Codex handshake retains an owner and the home lease until `close()` succeeds.
 An adapter unable to dispose after failed startup throws
@@ -935,7 +937,12 @@ Cancel/reject share the bounded soft-interrupt path before mandatory close.
 
 Cursor advancement covers the successful prefix below every received unresolved
 sequence, including malformed messages. Successful tails remain remembered until
-the cursor write succeeds; replay never depends on a fourth/new message. Hosted
+the cursor write succeeds; replay never depends on a fourth/new message.
+Capability-gated `afterSeq` separates volatile reading from durable ACK within
+a 4096-sequence window plus one returned page. Head/reconnect resets navigation
+to ACK; a full window backs off visibly. Later-page controls can reach slow
+offers within this bound. A successful terminal commit retries retained failed
+local receipts, including an offer now filtered by cloud cancellation. Hosted
 terminal commits preserve the first exact envelope through write failures, reject
 current waiters and retry independently of other tasks. Until success, ownership
 and `Daemon.status().pendingTerminalCommits` remain observable. Volatile pending
@@ -945,7 +952,9 @@ promise exact-result recovery.
 Codex prompts use documented stdin `-` with EOF, including resumed turns. Each
 MCP server receives a separate environment payload through `env_vars` and the
 SDK reserved `mcp-env` helper; original command/args/env values are absent from
-Codex argv. This preserves per-server values for colliding environment names
+Codex argv. Helpers resolve from the same `dist/bin` for package root, adapters
+and official CLI bundles; release pack smoke runs actual MCP calls through all
+three installed entries. This preserves per-server values for colliding environment names
 without changing Codex auth or user configuration. Raw stdout frames are bounded
 at 1 MiB before decoding/parsing; deferred frames total at most 4 MiB and stderr
 retention is at most 64 KiB / 20 lines. Legacy artifact reads use the already

@@ -471,7 +471,7 @@ export interface DaemonConfig {
   maxTaskOutputBytes?: number;
   /** Legacy artifact bytes only: default 16 MiB/file and 64 MiB/task, independent of event output limits. */
   artifactLimits?: { maxFileBytes: number; maxTaskBytes: number };
-  /** Startup observation deadline; unresolved process owners remain quarantined. Default 30 seconds. */
+  /** Admission and startup deadline, including pure detect/prepare waits; unresolved process owners remain quarantined. Default 30 seconds. */
   startupTimeoutMs?: number;
   /**
    * Per-EVENT inline ceiling (default {@link DEFAULT_MAX_INLINE_EVENT_BYTES},
@@ -1454,6 +1454,7 @@ export function buildDaemonWithAdapters(
    * mid-chain while the connection closes out from under it.
    */
   const terminalCommits = new TerminalCommitQueue(taskId => {
+    connection?.retryTaskReceipts(taskId);
     void runner?.retryTerminalFinalization(taskId).catch(error => {
       console.error('[byok/client] terminal finalization still requires recovery', error);
     });

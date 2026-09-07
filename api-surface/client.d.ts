@@ -2567,6 +2567,7 @@ export declare class ConnectionManager {
     private readonly inFlightSeqs;
     /** Successful side effects retained until their durable acknowledgement. */
     private readonly processedSeqs;
+    private readonly failedEnvelopes;
     /** Received work lacking a successful handler receipt, including malformed frames. */
     private readonly unresolvedSeqs;
     /**
@@ -2731,6 +2732,9 @@ export declare class ConnectionManager {
      *   documented idempotent (protocol §9).
      */
     private deliver;
+    /** A committed terminal can settle a failed offer receipt even if cloud
+     * cancellation has since filtered that offer from mailbox replay. */
+    retryTaskReceipts(taskId: string): void;
     /** Only a durable acknowledgement can deduplicate a whole prefix. */
     private dedupWatermark;
     private process;
@@ -3531,7 +3535,7 @@ export interface DaemonConfig {
         maxFileBytes: number;
         maxTaskBytes: number;
     };
-    /** Startup observation deadline; unresolved process owners remain quarantined. Default 30 seconds. */
+    /** Admission and startup deadline, including pure detect/prepare waits; unresolved process owners remain quarantined. Default 30 seconds. */
     startupTimeoutMs?: number;
     /**
      * Per-EVENT inline ceiling (default {@link DEFAULT_MAX_INLINE_EVENT_BYTES},
@@ -8871,6 +8875,8 @@ export interface RuntimeAdapterDescriptor {
 }
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
 export interface RuntimeAdapterPrepareInput {
+    /** Admission cancellation; late pure results are discarded and never started. */
+    signal?: AbortSignal;
     offer: TaskOfferPayload;
     policy: PermissionPolicy;
     descriptor: RuntimeAdapterDescriptor;
@@ -8961,7 +8967,8 @@ export interface PreparedRuntimeOperation {
  */
 export interface RuntimeAdapter {
     readonly descriptor: RuntimeAdapterDescriptor;
-    detect(): Promise<RuntimeDetectResult>;
+    /** Readiness probing must not mutate an Agent home or allocate execution ownership. */
+    detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
 }
 /** Copy then deeply freeze descriptor authority so callers cannot retain a mutable source reference. */

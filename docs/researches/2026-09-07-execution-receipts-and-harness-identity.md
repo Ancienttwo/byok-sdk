@@ -124,3 +124,45 @@ the previous PR #168 CI. Migration 0021 remains a server deployment prerequisite
 this optional recovery field uses existing immutable receipt storage and adds
 no migration. Install the supporting server before sending the new recovery
 contract from clients.
+
+## R4–R6 follow-up: packaging, admission and pagination
+
+P1: all three bundled client entries own the same reserved helper projection.
+TaskRunner owns per-home reservation and runtime disposal; ConnectionManager
+owns successful handler receipts, while cloud mailbox ACK remains separate
+from delivery. The cloud events handler is also used by the embedded server.
+
+P2: installed official CLI start → daemon → Codex environment launcher produced
+`dist/bin/bin/byok-mcp-env.js` and MODULE_NOT_FOUND. The same installed tarballs
+passed actual MCP tools/call through root and adapters entries. The probe uses a
+compiled deterministic Codex driver that spawns the actual SDK launcher and a
+real stdio MCP server; no live model account or synthetic tool-use event stands
+in for the call. Baseline material was the existing e134055 CI release pack.
+
+P2: offer → synchronous home reservation → detect/prepare could never reach the
+old start-only timer. Six pre-fix cases failed: each pure phase under deadline,
+cancel and shutdown. The repair starts one deadline before admission, races only
+pure plugin waits against its AbortSignal, prevents late claim/start, and keeps
+owned resource cleanup on actual receipts. Tests cover late completion and
+same-home replacement; no timeout is promoted to process quiescence.
+
+P2: with real cloud pageLimit=2, pending A / successful B on page one hid later
+approve/cancel. The pre-fix test received neither control. `afterSeq` is now
+bounded volatile navigation, never an ACK. Server validates previously delivered
+watermark and 4096-sequence distance, preserving ACK-based retention checks.
+Client resets at head/reconnect and backs off at capacity; retained state is
+bounded by the window plus a returned page. This bound is an explicit liveness
+limit under a permanently unresolved prefix, not unlimited control bypass.
+
+P3: retain the existing ownership and journal authorities. Add one protocol
+navigation input and capability rather than advancing durable ACK or increasing
+pageLimit. Combined tests exercise paginated cancellation of never-returning
+prepare, and failed SQLite decline followed by cloud cancellation filtering.
+The latter required retrying retained failed local receipts on real terminal
+commit: without that callback the original decline committed but ACK stayed 0;
+with it the byte-identical first terminal settles the receipt without re-admission.
+
+Validation for the expanded source is recorded in the follow-up plan after its
+required checks and clean-subject packed smoke finish. Earlier counts above are
+R1–R3 historical evidence only, not evidence for R4–R6. No release/deployment or
+production migration is part of this work.

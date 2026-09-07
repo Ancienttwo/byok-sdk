@@ -128,3 +128,35 @@ describe('terminal durability and actual harness boundaries', () => {
     });
   }
 });
+
+it('R1/R6: committed decline settles its failed receipt after cancellation filters the offer', async () => {
+  const cloud = await startRealCloud({ productId: 'terminal-boundaries', eventsPageLimit: 2, longPollHoldMs: 20, longPollIntervalMs: 5 });
+  cleanup.push(() => cloud.close());
+  const cfg = await config(cloud.url);
+  const adapter = new StubRuntimeAdapter();
+  let available = false, fail = true;
+  vi.spyOn(adapter, 'detect').mockImplementation(async () => available ? { kind: 'available', version: '0.0.0' } : { kind: 'not-found' });
+  const journal = new SqliteLocalTaskJournal({ storeDir: cfg.storeDir!, faults: { onStep(step) {
+    if (step === 'terminal:before-commit' && fail) throw new Error('injected EIO');
+  } } });
+  const candidates: LocalTerminalRecord[] = [];
+  const recordTerminal = journal.recordTerminal.bind(journal);
+  vi.spyOn(journal, 'recordTerminal').mockImplementation(async record => { candidates.push(record); return recordTerminal(record); });
+  const daemon = createDaemonWithAdapters(cfg, [adapter], { hostedJournal: { journal }, longPoll: { retryDelayMs: 5, idleDelayMs: 5 } });
+  cleanup.push(async () => { fail = false; await daemon.stop(); await journal.close(); });
+  const device = await daemon.pair((await cloud.createPairingCode()).code);
+  const a = await cloud.enqueueOffer(device.deviceId, 'declined while temporarily unavailable');
+  const b = await cloud.enqueueOffer(device.deviceId, 'second offer');
+  await daemon.start();
+  await vi.waitFor(() => expect(candidates.some(record => record.taskId === a.taskId)).toBe(true));
+  const first = candidates.find(record => record.taskId === a.taskId)!.bytes;
+  await cloud.cancelTask(a.taskId, 'filter failed offer');
+  available = true;
+  expect(await new CursorStore(cfg.storeDir!).load(cloud.url, device.deviceId)).toBe(0);
+  fail = false;
+  await vi.waitFor(async () => expect(await new CursorStore(cfg.storeDir!).load(cloud.url, device.deviceId)).toBe(3), { timeout: 3500 });
+  expect(await cloud.readTerminalBody(a.taskId)).toBe(first);
+  expect(candidates.filter(record => record.taskId === a.taskId).every(record => record.bytes === first)).toBe(true);
+  expect(adapter.startCalls).toHaveLength(0);
+  expect((await cloud.readTaskAttempt(b.taskId))?.status).toBe('failed');
+});

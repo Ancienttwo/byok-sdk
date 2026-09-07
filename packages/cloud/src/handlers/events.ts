@@ -1,3 +1,4 @@
+import { MAILBOX_READ_AHEAD_CAPABILITY, MAILBOX_READ_AHEAD_MAX_SEQS } from '@byok-sdk/protocol';
 /**
  * `GET /byok/events?cursor=N` — the long-poll receive half (§8).
  *
@@ -64,6 +65,7 @@ import { authenticateDevice, type DeviceRouteDeps } from './shared';
  */
 const CLOUD_PROTOCOL_CAPABILITIES = [
   'custom-harness',
+  MAILBOX_READ_AHEAD_CAPABILITY,
   'result-document',
   // The kernel's inbound handles `task.approval_resolved` on both the plain
   // and the approval-timeline paths (`packages/cloud/src/inbound.ts:576,610`).
@@ -113,7 +115,13 @@ export function eventsHandler(deps: EventsRouteDeps) {
       cursor = parsedCursor;
     }
 
+    const afterRaw = c.req.query('afterSeq');
+    const afterSeq = afterRaw === undefined ? cursor : Number(afterRaw);
+    if (!Number.isSafeInteger(afterSeq) || afterSeq < cursor || afterSeq - cursor > MAILBOX_READ_AHEAD_MAX_SEQS) {
+      return c.json({ error: 'invalid read-ahead offset' }, 400);
+    }
     const acked = await stores.mailbox.readCursor(device.deviceId);
+    if (afterRaw !== undefined && afterSeq > acked.deliveredSeq) return c.json({ error: 'read offset exceeds delivered watermark' }, 409);
     if (cursor > acked.ackedSeq) {
       try {
         await stores.mailbox.advanceCursor({ deviceId: device.deviceId, ackedSeq: cursor });
@@ -127,7 +135,7 @@ export function eventsHandler(deps: EventsRouteDeps) {
 
     const attempts = Math.max(1, Math.ceil(deps.longPollHoldMs / deps.longPollIntervalMs));
     for (let attempt = 0; attempt < attempts; attempt += 1) {
-      let scanCursor = cursor;
+      let scanCursor = afterSeq;
       while (true) {
         const page = await stores.mailbox.readAfter({
           deviceId: device.deviceId,
@@ -198,7 +206,7 @@ export function eventsHandler(deps: EventsRouteDeps) {
 
     const response: EventsPollResponse = {
       events: [],
-      cursor,
+      cursor: afterSeq,
       capabilities: CLOUD_PROTOCOL_CAPABILITIES,
     };
     return c.json(response, 200);

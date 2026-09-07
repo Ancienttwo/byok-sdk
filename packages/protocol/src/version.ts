@@ -1,3 +1,7 @@
+/** Bounded volatile navigation; only cursor is a durable acknowledgement. */
+export const MAILBOX_READ_AHEAD_MAX_SEQS = 4096;
+export const MAILBOX_READ_AHEAD_CAPABILITY = 'mailbox-read-ahead';
+
 /**
  * Wire protocol version. Bump on breaking (non-additive) changes to the envelope
  * or message shapes. Additive changes (new optional fields, new message types)
@@ -129,6 +133,7 @@ export const CAPABILITY_FLAGS = [
   AGENT_HOME_PROJECTION_CAPABILITY,
   TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   CUSTOM_HARNESS_CAPABILITY,
+  MAILBOX_READ_AHEAD_CAPABILITY,
 ] as const;
 
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];

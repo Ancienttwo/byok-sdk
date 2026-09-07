@@ -70,6 +70,7 @@ export interface RealCloudHandle {
 }
 
 export interface StartRealCloudOptions {
+  readonly eventsPageLimit?: number;
   readonly productId: string;
   /** Keep this short in tests: the production default holds each empty poll ~50s. */
   readonly longPollHoldMs?: number;
@@ -103,6 +104,7 @@ export async function startRealCloud(opts: StartRealCloudOptions): Promise<RealC
   const tenant = tenantId(CLOUD_TEST_TENANT);
   const declaration = fullCapabilityDeclaration();
   const { cloud, core } = createInMemoryByokCloud({
+    ...(opts.eventsPageLimit === undefined ? {} : { eventsPageLimit: opts.eventsPageLimit }),
     longPollHoldMs: opts.longPollHoldMs ?? 200,
     longPollIntervalMs: opts.longPollIntervalMs ?? 20,
     ...(opts.omitCapabilities === undefined

@@ -191,7 +191,9 @@ export type BlobDownloadUrlResponse = z.infer<typeof BlobDownloadUrlResponseSche
 // ---------------------------------------------------------------------------
 
 export const EventsPollQuerySchema = z.object({
-  /** Last `seq` this client has seen; omitted on a client's first-ever poll. Never negative — `seq` is a monotonically increasing counter starting at 1. */
+  /** Volatile navigation within the advertised read-ahead window; never acknowledges work. */
+  afterSeq: z.number().int().nonnegative().optional(),
+  /** Last reliably processed seq; the only acknowledgement. Omitted on the first poll. */
   cursor: z.number().int().nonnegative().optional(),
 });
 export type EventsPollQuery = z.infer<typeof EventsPollQuerySchema>;

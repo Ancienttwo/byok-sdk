@@ -155,6 +155,7 @@ export class ConnectionManager {
   private readonly inFlightSeqs = new Set<number>();
   /** Successful side effects retained until their durable acknowledgement. */
   private readonly processedSeqs = new Set<number>();
+  private readonly failedEnvelopes = new Map<number, Envelope>();
   /** Received work lacking a successful handler receipt, including malformed frames. */
   private readonly unresolvedSeqs = new Set<number>();
   /**
@@ -567,6 +568,14 @@ export class ConnectionManager {
     return true;
   }
 
+  /** A committed terminal can settle a failed offer receipt even if cloud
+   * cancellation has since filtered that offer from mailbox replay. */
+  retryTaskReceipts(taskId: string): void {
+    for (const envelope of this.failedEnvelopes.values()) {
+      if (envelope.task_id === taskId) this.deliver(envelope);
+    }
+  }
+
   /** Only a durable acknowledgement can deduplicate a whole prefix. */
   private dedupWatermark(): number | undefined {
     return this.cursor;
@@ -589,6 +598,7 @@ export class ConnectionManager {
       }
       if (!tracked || !this.processedSeqs.has(seq!)) await this.opts.onEnvelope(envelope);
       if (!tracked) return;
+      this.failedEnvelopes.delete(seq!);
       this.processedSeqs.add(seq!);
       this.unresolvedSeqs.delete(seq!);
       const completion = this.completionTail.catch(() => undefined).then(async () => {
@@ -598,14 +608,20 @@ export class ConnectionManager {
         for (const value of this.processedSeqs) if (value < firstUnresolved) prefix = Math.max(prefix, value);
         if (prefix > (this.cursor ?? 0)) await this.advanceCursor(prefix);
         for (const value of this.processedSeqs) {
-          if (value <= (this.cursor ?? 0)) this.processedSeqs.delete(value);
+          if (value <= (this.cursor ?? 0)) {
+            this.processedSeqs.delete(value);
+            this.failedEnvelopes.delete(value);
+          }
         }
         this.stalledAtSeq = this.unresolvedSeqs.size > 0 ? firstUnresolved : undefined;
       });
       this.completionTail = completion;
       await completion;
     } catch (err) {
-      if (tracked) this.stalledAtSeq = Math.min(envelope.seq!, this.stalledAtSeq ?? Infinity);
+      if (tracked) {
+        this.failedEnvelopes.set(seq!, envelope);
+        this.stalledAtSeq = Math.min(envelope.seq!, this.stalledAtSeq ?? Infinity);
+      }
       console.error(
         `[byok/client] envelope handler failed for ${envelope.type}${
           typeof envelope.seq === 'number' ? ` (seq=${envelope.seq})` : ''

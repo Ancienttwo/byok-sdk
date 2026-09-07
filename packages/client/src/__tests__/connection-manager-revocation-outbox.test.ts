@@ -42,7 +42,7 @@ describe('a revoked device stops draining its outbox instead of retrying forever
 
   it('drainOutbox stops calling postBatch once revocation is discovered, even with envelopes still queued', async () => {
     server = await TestServer.start();
-    server.setAckCapabilities(['approval_resolved']);
+    server.setAckCapabilities(['approval_resolved', 'mailbox-read-ahead']);
 
     const storeDir = await tmpDir('byok-revoke-outbox-store-');
     const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
@@ -66,7 +66,7 @@ describe('a revoked device stops draining its outbox instead of retrying forever
 
     await connection.start();
     await connection.waitForConnection();
-    expect(connection.getServerCapabilities()).toEqual(['approval_resolved']);
+    expect(connection.getServerCapabilities()).toEqual(['approval_resolved', 'mailbox-read-ahead']);
 
     // Revoke server-side, THEN queue outbound envelopes — the drain's very
     // first attempt discovers revocation (401 on the send, then on the

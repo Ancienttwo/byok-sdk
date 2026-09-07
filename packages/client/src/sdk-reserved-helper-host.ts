@@ -53,9 +53,9 @@ export function resolveSdkReservedHelperBin(
     });
   }
   const entryDir = path.dirname(fileURLToPath(import.meta.url));
-  // Both public bundles project helpers from dist/bin; adapters/index.js is
-  // the one nested package entry, not an alternate filesystem authority.
-  const distDir = path.basename(entryDir) === 'adapters' ? path.dirname(entryDir) : entryDir;
+  // Root, adapters and official CLI bundles all project helpers from dist/bin.
+  const entryKind = path.basename(entryDir);
+  const distDir = entryKind === 'adapters' || entryKind === 'bin' ? path.dirname(entryDir) : entryDir;
   const script = path.join(
     distDir,
     'bin',

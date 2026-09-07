@@ -43,7 +43,7 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
 
   async function connectAndAck(): Promise<void> {
     server = await TestServer.start();
-    server.setAckCapabilities(['approval_resolved']);
+    server.setAckCapabilities(['approval_resolved', 'mailbox-read-ahead']);
     const storeDir = await tmpDir('byok-server-caps-store-');
     const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
@@ -65,12 +65,12 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
 
   it('capabilities are present immediately after a real poll response advertises them', async () => {
     await connectAndAck();
-    expect(connection!.getServerCapabilities()).toEqual(['approval_resolved']);
+    expect(connection!.getServerCapabilities()).toEqual(['approval_resolved', 'mailbox-read-ahead']);
   });
 
   it('a response that omits capabilities clears the prior advertisement and keeps it empty', async () => {
     await connectAndAck();
-    expect(connection!.getServerCapabilities()).toEqual(['approval_resolved']);
+    expect(connection!.getServerCapabilities()).toEqual(['approval_resolved', 'mailbox-read-ahead']);
 
     // Model an N-1 HTTP responder. The old advertisement must not leak into
     // its responses; a later response's explicit advertisement is covered
@@ -88,13 +88,13 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
     server.setAdvertiseLongPollCapabilities(false);
     await vi.waitFor(() => expect(connection!.getServerCapabilities()).toEqual([]));
     server.setAdvertiseLongPollCapabilities(true);
-    await vi.waitFor(() => expect(connection!.getServerCapabilities()).toEqual(['approval_resolved']), { timeout: 5000 });
+    await vi.waitFor(() => expect(connection!.getServerCapabilities()).toEqual(['approval_resolved', 'mailbox-read-ahead']), { timeout: 5000 });
     expect(connection!.isConnected()).toBe(true);
   });
 
   it('an events response publishes capabilities before its envelopes reach the handler', async () => {
     server = await TestServer.start();
-    server.setAckCapabilities(['approval_resolved']);
+    server.setAckCapabilities(['approval_resolved', 'mailbox-read-ahead']);
     const storeDir = await tmpDir('byok-server-caps-degraded-store-');
     const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
@@ -124,8 +124,8 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
     });
     await connection.start();
     await connection.waitForConnection();
-    await vi.waitFor(() => expect(capabilitiesSeenByHandler).toEqual(['approval_resolved']));
-    expect(connection.getServerCapabilities()).toEqual(['approval_resolved']);
+    await vi.waitFor(() => expect(capabilitiesSeenByHandler).toEqual(['approval_resolved', 'mailbox-read-ahead']));
+    expect(connection.getServerCapabilities()).toEqual(['approval_resolved', 'mailbox-read-ahead']);
 
     server.setFailEventsPolls(true);
     await vi.waitFor(() => expect(connection!.getServerCapabilities()).toEqual([]));
@@ -174,7 +174,7 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
 
   it('an N-1 long-poll responder that omits capabilities remains fail-closed', async () => {
     server = await TestServer.start();
-    server.setAckCapabilities(['approval_resolved']);
+    server.setAckCapabilities(['approval_resolved', 'mailbox-read-ahead']);
     server.setAdvertiseLongPollCapabilities(false);
     const storeDir = await tmpDir('byok-server-caps-old-long-poll-');
     const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
@@ -202,7 +202,7 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
 
   it('stop() also clears capabilities (defensive — nothing left to gate a send against)', async () => {
     await connectAndAck();
-    expect(connection!.getServerCapabilities()).toEqual(['approval_resolved']);
+    expect(connection!.getServerCapabilities()).toEqual(['approval_resolved', 'mailbox-read-ahead']);
     await connection!.stop();
     expect(connection!.getServerCapabilities()).toEqual([]);
   });

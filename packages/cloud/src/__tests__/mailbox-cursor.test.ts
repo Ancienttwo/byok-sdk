@@ -317,3 +317,25 @@ describe('enqueueOffer', () => {
     expect(attempt?.status).toBe('offered');
   });
 });
+
+describe('bounded read-ahead navigation', () => {
+  it('reads later pages without ACK and replays from the durable cursor after reconnect', async () => {
+    const harness = createHarness({ eventsPageLimit: 2, longPollHoldMs: 1, longPollIntervalMs: 1 });
+    const device = await harness.pairDevice(TENANT_A);
+    for (let i = 0; i < 4; i++) await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload(String(i)) });
+    const first = await poll(harness, device.authorization, 0);
+    expect(first.events.map(event => event.seq)).toEqual([1, 2]);
+    const second = await harness.request('/byok/events?cursor=0&afterSeq=2', { headers: device.authorization });
+    expect(second.status).toBe(200);
+    expect((await second.json() as EventsPollResponse).events.map(event => event.seq)).toEqual([3, 4]);
+    expect((await harness.core.mailbox.readCursor(TENANT_A, device.deviceId)).ackedSeq).toBe(0);
+    expect((await poll(harness, device.authorization, 0)).events).toEqual(first.events);
+    const empty = await harness.request('/byok/events?cursor=0&afterSeq=4', { headers: device.authorization });
+    expect(await empty.json()).toMatchObject({ cursor: 4, events: [] });
+    expect((await harness.core.mailbox.readCursor(TENANT_A, device.deviceId)).ackedSeq).toBe(0);
+    for (const [query, status] of [['cursor=0&afterSeq=5', 409], ['cursor=0&afterSeq=4097', 400], ['cursor=2&afterSeq=1', 400], ['afterSeq=-1', 400]] as const) {
+      expect((await harness.request(`/byok/events?${query}`, { headers: device.authorization })).status).toBe(status);
+    }
+    expect((await harness.core.mailbox.readCursor(TENANT_A, device.deviceId)).ackedSeq).toBe(0);
+  });
+});
