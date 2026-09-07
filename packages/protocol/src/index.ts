@@ -1,3 +1,4 @@
+export { MAILBOX_READ_AHEAD_MAX_SEQS, MAILBOX_READ_AHEAD_CAPABILITY } from './version';
 export { PROTOCOL_VERSION, CAPABILITY_FLAGS, STRICT_AGENT_ONLY_CAPABILITY } from './version';
 export type { CapabilityFlag } from './version';
 

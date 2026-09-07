@@ -488,8 +488,25 @@ async function applyInboundGate(
       if (sealed.payload.harnessId !== undefined && sealed.payload.harnessId !== harnessId) return 'rejected';
     } else if (harnessId !== undefined) return 'rejected';
   }
+  let unclaimedInterruption = false;
+  if (envelope.type === 'task.fail' && envelope.payload.recovery !== undefined) {
+    // Recovery reports a local decision interrupted across the claim boundary.
+    // It cannot manufacture cloud execution ownership, nor loosen claimed identity.
+    if (envelope.payload.reason !== 'daemon_interrupted' || envelope.payload.retryable !== false) return 'rejected';
+    const messageId = await taskOfferMessageId(stores.tenant, taskId, deviceId, attempt.agentRef, hashOfferBytes);
+    if (envelope.payload.recovery.offerId !== messageId) return 'rejected';
+    const offer = await stores.receipts.get(`task-offer:${messageId}`);
+    if (offer === undefined) return 'rejected';
+    const sealed = JSON.parse(offer.body) as { payload: { harnessId?: string; runtime?: string; dispatchSelection?: unknown } };
+    const harnessId = envelope.payload.harnessId;
+    if (sealed.payload.harnessId !== undefined && sealed.payload.harnessId !== harnessId) return 'rejected';
+    if (harnessId !== undefined && (sealed.payload.runtime !== undefined || sealed.payload.dispatchSelection !== undefined)) return 'rejected';
+    // For automatic selection the target device reports its sealed local
+    // admission. Inventory is mutable and is not historical claim authority.
+    unclaimedInterruption = attempt.ownerDeviceId === undefined && attempt.claimedHarnessId === undefined;
+  }
   if ((envelope.type === 'task.complete' || envelope.type === 'task.fail' || envelope.type === 'task.cancelled')
-    && envelope.payload.harnessId !== attempt.claimedHarnessId) return 'rejected';
+    && !unclaimedInterruption && envelope.payload.harnessId !== attempt.claimedHarnessId) return 'rejected';
 
   // Agent identity is an exact-match boundary. A missing echo is a mismatch
   // just like a different id or profile revision; accepting it would let an

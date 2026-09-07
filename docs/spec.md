@@ -925,7 +925,9 @@ Independent offers may progress concurrently. Admission reserves the canonical
 Agent home synchronously before asynchronous preparation and converts that
 reservation into the existing execution lease. Controls remain ordered per task;
 startup does not block another Agent or that task's cancel. `startupTimeoutMs`
-(default 30 seconds) aborts startup admission. A deadline is not a disposal
+(default 30 seconds) starts before admission and bounds pure adapter detect/prepare
+waits as well as runtime start. AbortSignal is supplied to these pure adapter
+operations; late returns cannot claim/start or retain the home reservation. A deadline is not a disposal
 receipt: a late Session, failed binding/handoff/outbox activation, or failed
 Codex handshake retains an owner and the home lease until `close()` succeeds.
 An adapter unable to dispose after failed startup throws
@@ -935,7 +937,12 @@ Cancel/reject share the bounded soft-interrupt path before mandatory close.
 
 Cursor advancement covers the successful prefix below every received unresolved
 sequence, including malformed messages. Successful tails remain remembered until
-the cursor write succeeds; replay never depends on a fourth/new message. Hosted
+the cursor write succeeds; replay never depends on a fourth/new message.
+Capability-gated `afterSeq` separates volatile reading from durable ACK within
+a 4096-sequence window plus one returned page. Head/reconnect resets navigation
+to ACK; a full window backs off visibly. Later-page controls can reach slow
+offers within this bound. A successful terminal commit retries retained failed
+local receipts, including an offer now filtered by cloud cancellation. Hosted
 terminal commits preserve the first exact envelope through write failures, reject
 current waiters and retry independently of other tasks. Until success, ownership
 and `Daemon.status().pendingTerminalCommits` remain observable. Volatile pending
@@ -945,7 +952,9 @@ promise exact-result recovery.
 Codex prompts use documented stdin `-` with EOF, including resumed turns. Each
 MCP server receives a separate environment payload through `env_vars` and the
 SDK reserved `mcp-env` helper; original command/args/env values are absent from
-Codex argv. This preserves per-server values for colliding environment names
+Codex argv. Helpers resolve from the same `dist/bin` for package root, adapters
+and official CLI bundles; release pack smoke runs actual MCP calls through all
+three installed entries. This preserves per-server values for colliding environment names
 without changing Codex auth or user configuration. Raw stdout frames are bounded
 at 1 MiB before decoding/parsing; deferred frames total at most 4 MiB and stderr
 retention is at most 64 KiB / 20 lines. Legacy artifact reads use the already
@@ -967,3 +976,26 @@ An explicitly selected harness must match the immutable offer receipt. Old peers
 without the capability are refused; no identity is inferred from display names
 or provider/model fields. Business scheduling and device choice stay with the
 host. Deploy migration `0021_custom_harness_identity.sql` before this server code.
+
+### Terminal boundary acceptance follow-up (#163 / #167)
+
+A selected pending terminal fences admission before reading the journal task.
+The journal may still say `received` after a rolled-back decline transaction;
+that does not revoke the first decision. Redelivery retries that decision's
+exact bytes and cannot start a runtime. Only a successful commit permits ack.
+
+SDK terminals project the actual admitted adapter identity and the original
+AgentRef, including the bounded `terminal_result_too_large` replacement. An
+offer's requested harness is not evidence of automatic adapter selection.
+
+Restart reports carry `task.fail.recovery = { kind: 'daemon_interrupted',
+offerId }`, `reason: 'daemon_interrupted'`, and `retryable: false`. The cloud
+verifies the exact immutable offer receipt, tenant, target device and AgentRef,
+plus any explicit runtime/harness selection. Before cloud ownership exists,
+this is a local interruption observation: it may report the locally admitted
+custom harness but never writes `ownerDeviceId` or `claimedHarnessId`. After
+claim, the exact claimed harness comparison still applies. Mutable inventory
+cannot reconstruct historical admission. The terminal read model preserves
+`recovery`, so the host can distinguish this observation from a cloud claim.
+This closes the local-admission/cloud-claim gap without assuming that runtime
+side effects did or did not occur before a crash. No automatic re-execution.

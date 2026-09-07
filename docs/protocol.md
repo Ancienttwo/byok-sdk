@@ -1317,14 +1317,24 @@ path.
 
 ```
 GET /byok/events?cursor=N
-  Query    (EventsPollQuerySchema):    { cursor? }
+  Query    (EventsPollQuerySchema):    { cursor?, afterSeq? }
   Response (EventsPollResponseSchema): { events: Envelope[], cursor, capabilities?: string[] }
 ```
 
 Authed (bearer access token); holds the request open for ~50 seconds waiting
 for new events before returning an empty `events` array. `cursor` in the query
-is "last seq I've seen," and `cursor` in the response is "resume from here
-next time." The daemon establishes its per-device session through the HTTP
+is the last reliably processed sequence and is the sole durable ACK.
+`afterSeq` selects the next read position without acknowledging it; omission
+reads from the ACK. The response `cursor` is a navigation position only.
+Servers advertise `mailbox-read-ahead`; a client must observe it before sending
+`afterSeq > cursor`, and fail observably if support disappears. Navigation must
+be a safe integer between ACK and the previously delivered watermark, at most
+4096 sequences ahead of ACK. The client sweeps that window (plus one returned
+page), then backs off and replays from ACK if the gap persists. At mailbox head
+and after reconnect/failure it also resets navigation to ACK. Controls inside
+this window can reach unfinished offers; a full window remains an observable
+capacity limit, not a promise of unbounded control bypass. Retention validation
+always uses ACK, so navigating ahead cannot conceal an expired replay gap. The daemon establishes its per-device session through the HTTP
 layer's bearer auth and sends the bounded `conn.hello` capability snapshot as
 the first `POST /byok/messages` envelope. The route accepts that one non-task
 envelope only when its device, product, and protocol version exactly match the
@@ -2202,3 +2212,29 @@ Independent inbound handlers retain per-task control order. Acknowledgement only
 advances after all received sequences in the prefix have succeeded and the cursor
 is durable. Successfully handled tails survive gaps and cursor-write retries in
 memory; delivery alone is never acknowledgement.
+
+### Offer-bound daemon interruption (#163 / #167 acceptance follow-up)
+
+`task.fail.recovery` is optional and, when present, is the strict object
+`{ kind: 'daemon_interrupted', offerId: <original offer envelope UUID> }`.
+Only `reason: 'daemon_interrupted'` with `retryable: false` is accepted for this
+contract. The target device must echo the immutable offer's exact AgentRef and
+respect any explicit harness/runtime selection. The cloud requires its sealed
+offer receipt and exact offer UUID; a missing receipt is a rejection.
+
+A local admission may commit before the cloud accepts claim. If cloud ownership
+is absent, this bound recovery report can settle the task without asserting or
+creating a claim. Its custom harness is the device's local admission fact;
+automatic selection is permitted when the offer imposes no runtime selection.
+If cloud ownership exists, all terminals, including recovery, must match
+`claimedHarnessId` exactly. Ordinary failures gain no exception. The terminal
+read model copies `recovery` verbatim; `TaskAttempt` remains cloud claim authority.
+Deploy the supporting server before using these recovery reports. Migration
+0021 remains required for custom claims; the recovery object lives in existing
+immutable terminal receipts and requires no additional database migration.
+
+For hosted journal replay, a selected but uncommitted terminal blocks admission
+even when SQLite rolled the task row back to `received`. SDK-generated oversize
+failures project the admitted execution identity, including automatically
+selected custom adapters, through the same identity projection as other SDK
+terminals. They do not copy the requested identity from the offer.

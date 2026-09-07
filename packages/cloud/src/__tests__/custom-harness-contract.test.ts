@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createEnvelope, HarnessIdSchema, HarnessInventorySchema } from '@byok-sdk/protocol';
+import { projectTerminalResult } from '../terminal-result';
 import { handleInboundEnvelope } from '../inbound';
 import { tenantStoresFor } from '../tenant-stores';
 import { createHarness, TENANT_A, offerPayload } from './support/harness';
@@ -67,4 +68,47 @@ describe('custom harness protocol authority', () => {
     expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, runtime: 'pi' }, { taskId }))).toBe('accepted');
     expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.fail', { reason: 'x', retryable: false, harnessId: 'acme-harness' }, { taskId }))).toBe('rejected');
   });
+  it('accepts only offer-bound interruption observations without inventing a claim', async () => {
+    const { h, stores, deviceId } = await setup();
+    await stores.devices.recordCapabilities({ capabilities: ['custom-harness'], harnesses: inventory });
+    const offer = await h.cloud.enqueueOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), harnessId: 'acme-harness' } });
+    const valid = { reason: 'daemon_interrupted', retryable: false, harnessId: 'acme-harness',
+      recovery: { kind: 'daemon_interrupted' as const, offerId: offer.envelope.id } };
+    for (const payload of [
+      { ...valid, recovery: undefined },
+      { ...valid, recovery: { ...valid.recovery, offerId: crypto.randomUUID() } },
+      { ...valid, harnessId: 'other' },
+      { ...valid, harnessId: undefined },
+      { ...valid, reason: 'ordinary_failure' },
+      { ...valid, retryable: true },
+      { ...valid, retryable: undefined },
+    ]) {
+      expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.fail', payload, { taskId: offer.taskId }))).toBe('rejected');
+    }
+    const other = await h.pairDevice(TENANT_A);
+    expect(await handleInboundEnvelope(stores, other.deviceId, createEnvelope('task.fail', valid, { taskId: offer.taskId }))).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.fail', valid, { taskId: offer.taskId }))).toBe('accepted');
+    expect(await stores.tasks.get(offer.taskId)).toMatchObject({ status: 'failed' });
+    expect((await stores.tasks.get(offer.taskId))?.ownerDeviceId).toBeUndefined();
+    expect((await stores.tasks.get(offer.taskId))?.claimedHarnessId).toBeUndefined();
+    const receipt = (await h.cloud.readTerminalReceipt(TENANT_A, offer.taskId))!;
+    expect(projectTerminalResult(offer.taskId, receipt)).toMatchObject({ recovery: valid.recovery, harnessId: 'acme-harness', state: 'failed' });
+    // Recovery never fabricates an execution claim, including on replay.
+    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, harnessId: 'acme-harness' }, { taskId: offer.taskId }))).toBe('accepted');
+    expect((await stores.tasks.get(offer.taskId))?.ownerDeviceId).toBeUndefined();
+  });
+
+  it('does not use recovery to bypass a built-in selection or an existing claim', async () => {
+    const { h, stores, deviceId } = await setup();
+    await stores.devices.recordCapabilities({ capabilities: ['custom-harness'], harnesses: [...inventory, { ...inventory[0]!, id: 'other' }] });
+    for (const builtin of [false, true]) {
+      const offer = await h.cloud.enqueueOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), ...(builtin ? { runtime: 'pi' as const } : {}) } });
+      const payload = { reason: 'daemon_interrupted', retryable: false, harnessId: 'acme-harness',
+        recovery: { kind: 'daemon_interrupted' as const, offerId: offer.envelope.id } };
+      if (!builtin) expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, harnessId: 'other' }, { taskId: offer.taskId }))).toBe('accepted');
+      expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.fail', payload, { taskId: offer.taskId }))).toBe('rejected');
+      expect(await h.cloud.readTerminalReceipt(TENANT_A, offer.taskId)).toBeUndefined();
+    }
+  });
+
 });

@@ -1,3 +1,4 @@
+import { terminalIdentity } from './terminal-identity';
 import { HarnessIdSchema, type HarnessInfo } from '@byok-sdk/protocol';
 import { TerminalCommitQueue } from './terminal-commit-queue';
 import { validateRuntimeDetectResult } from '../runtime-detection';
@@ -470,7 +471,7 @@ export interface DaemonConfig {
   maxTaskOutputBytes?: number;
   /** Legacy artifact bytes only: default 16 MiB/file and 64 MiB/task, independent of event output limits. */
   artifactLimits?: { maxFileBytes: number; maxTaskBytes: number };
-  /** Startup observation deadline; unresolved process owners remain quarantined. Default 30 seconds. */
+  /** Admission and startup deadline, including pure detect/prepare waits; unresolved process owners remain quarantined. Default 30 seconds. */
   startupTimeoutMs?: number;
   /**
    * Per-EVENT inline ceiling (default {@link DEFAULT_MAX_INLINE_EVENT_BYTES},
@@ -1453,6 +1454,7 @@ export function buildDaemonWithAdapters(
    * mid-chain while the connection closes out from under it.
    */
   const terminalCommits = new TerminalCommitQueue(taskId => {
+    connection?.retryTaskReceipts(taskId);
     void runner?.retryTerminalFinalization(taskId).catch(error => {
       console.error('[byok/client] terminal finalization still requires recovery', error);
     });
@@ -1782,8 +1784,8 @@ export function buildDaemonWithAdapters(
         const payload = offer.payload as { agentRef?: AgentRef };
         const terminal = createEnvelope('task.fail', {
           reason: 'daemon_interrupted', retryable: false,
-          ...(task.claimedRuntime !== undefined && !isRuntimeId(task.claimedRuntime) ? { harnessId: task.claimedRuntime } : {}),
-          ...(payload.agentRef === undefined ? {} : { agentRef: payload.agentRef }),
+          ...terminalIdentity(task.claimedRuntime, payload.agentRef),
+          recovery: { kind: 'daemon_interrupted', offerId: offer.id },
         }, { taskId: task.taskId });
         const bytes = encodeEnvelope(terminal);
         await activeJournal.recordTerminal({
@@ -1900,7 +1902,7 @@ export function buildDaemonWithAdapters(
           const offerPayload = offer.payload as { agentRef?: AgentRef };
           const failure = createEnvelope('task.fail', {
             reason: 'terminal_result_too_large', retryable: false,
-            ...(offerPayload.agentRef === undefined ? {} : { agentRef: offerPayload.agentRef }),
+            ...terminalIdentity(task.claimedRuntime, offerPayload.agentRef),
           }, { taskId });
           const failureBytes = encodeEnvelope(failure);
           await activeJournal.recordTerminal({ taskId, terminalType: 'failed', bytes: failureBytes,
@@ -2281,6 +2283,12 @@ export function buildDaemonWithAdapters(
               activePressureEngine?.assertAckCriticalAllowed();
               await activeJournal.appendEnvelope(toJournalEnvelopeRecord(envelope, journalIdentity));
               if (isTaskOfferType(envelope.type) && envelope.task_id !== undefined) {
+                // A selected terminal fences admission even if its transaction rolled
+                // back to received. Check before reading a possibly stale task row.
+                if (terminalCommits.hasPending(envelope.task_id)) {
+                  await terminalCommits.retry(envelope.task_id);
+                  return;
+                }
                 const task = await activeJournal.readTask(envelope.task_id, journalIdentity);
                 if (!task) throw new Error('durable offer has no execution record');
                 if (task.localState !== 'received') {

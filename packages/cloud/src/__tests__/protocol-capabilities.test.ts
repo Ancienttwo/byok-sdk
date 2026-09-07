@@ -28,6 +28,7 @@ import { TENANT_A, createHarness, offerPayload } from './support/harness';
  */
 const EXPECTED_CAPABILITIES = [
   'custom-harness',
+  'mailbox-read-ahead',
   'result-document',
   'approval_resolved',
   'agent-home-contract',

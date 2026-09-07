@@ -86,3 +86,90 @@ will run under the repository's real CI substrate gate. Native Windows process
 ownership and production rollout are not established by these macOS checks.
 
 No npm publication, deployment or issue closure is part of this task.
+
+## Acceptance follow-up: R1–R3 (#163 / #167)
+
+The earlier main-path acceptance is insufficient for complete closure. Issues
+#163 and #167 were reopened. This bounded follow-up starts from merged main
+`0c70396dbec8cc70a354ac7d7222b25cc92b9469`; it does not authorize release/deploy.
+
+### Root Cause Evidence
+
+| Finding | Trigger / trace | Pre-fix observation | Repair / regression |
+| --- | --- | --- | --- |
+| R1 | Real SQLite `terminal:before-commit` fault rolls decline back to `received`; adapter detection changes unavailable → available before replay. | Runtime started once despite the first decline still pending. | Pending terminal fence precedes journal task read/admission. Test proves zero starts, byte-identical original decline and cursor advances only after durable commit. |
+| R2 | Persist real SQLite offer + admission; reconstruct daemon before/after accepting the cloud claim, explicit/automatic custom selection. | Both pre-claim cases remained offered; recovery terminal was permanently rejected. Both post-claim controls passed. | Explicit offer-bound interruption contract settles unclaimed recovery without writing cloud claim ownership. Strict claimed identity and immutable offer/device/Agent binding remain. |
+| R3 | Explicit/automatic custom execution emits an 8192-byte summary against a 2048-byte journal record budget. | Both canonical small failures were rejected; cloud task remained running. | Shared terminal identity projection uses sealed adapter/admission facts, including oversize replacement. Both cases now reach cloud failed state with acme-harness. |
+
+The 7-case client regression failed 5 / passed 2 before production edits and now
+passes all 7. Its R2 crash images use committed SQLite transitions and reopen;
+they do not claim new custom-harness SIGKILL injection. Cloud rejection tests
+also cover wrong offer UUID, device, explicit selection, reason, retryability,
+built-in selection and conflicting existing claims. The read model preserves
+recovery metadata, and no unclaimed interruption creates `ownerDeviceId` or
+`claimedHarnessId`, including when a delayed claim arrives afterward.
+
+Frozen-source local verification: build, typecheck, API-surface (9 package
+goldens), version-authority and strict task-workflow passed. Root test: **3825
+passed / 135 skipped**, including the existing compiled SIGKILL recovery suite.
+Node was 22.22.3. The installed global Bun 1.3.14 could not load `node:sqlite`
+and was refused by repo-harness; rerunning with isolated npm Bun 1.4.0 under
+`/tmp/byok-terminal-tools` passed. No global tool installation was changed.
+The 135 skips include unconfigured live datastores and platform-specific cases;
+they are not claimed as validated. No production migration or deployment ran.
+
+The repair is for review on `codex/issues-163-167-terminal-boundaries`. Keep both
+issues open until follow-up acceptance. New push CI evidence is separate from
+the previous PR #168 CI. Migration 0021 remains a server deployment prerequisite;
+this optional recovery field uses existing immutable receipt storage and adds
+no migration. Install the supporting server before sending the new recovery
+contract from clients.
+
+## R4–R6 follow-up: packaging, admission and pagination
+
+P1: all three bundled client entries own the same reserved helper projection.
+TaskRunner owns per-home reservation and runtime disposal; ConnectionManager
+owns successful handler receipts, while cloud mailbox ACK remains separate
+from delivery. The cloud events handler is also used by the embedded server.
+
+P2: installed official CLI start → daemon → Codex environment launcher produced
+`dist/bin/bin/byok-mcp-env.js` and MODULE_NOT_FOUND. The same installed tarballs
+passed actual MCP tools/call through root and adapters entries. The probe uses a
+compiled deterministic Codex driver that spawns the actual SDK launcher and a
+real stdio MCP server; no live model account or synthetic tool-use event stands
+in for the call. Baseline material was the existing e134055 CI release pack.
+
+P2: offer → synchronous home reservation → detect/prepare could never reach the
+old start-only timer. Six pre-fix cases failed: each pure phase under deadline,
+cancel and shutdown. The repair starts one deadline before admission, races only
+pure plugin waits against its AbortSignal, prevents late claim/start, and keeps
+owned resource cleanup on actual receipts. Tests cover late completion and
+same-home replacement; no timeout is promoted to process quiescence.
+
+P2: with real cloud pageLimit=2, pending A / successful B on page one hid later
+approve/cancel. The pre-fix test received neither control. `afterSeq` is now
+bounded volatile navigation, never an ACK. Server validates previously delivered
+watermark and 4096-sequence distance, preserving ACK-based retention checks.
+Client resets at head/reconnect and backs off at capacity; retained state is
+bounded by the window plus a returned page. This bound is an explicit liveness
+limit under a permanently unresolved prefix, not unlimited control bypass.
+
+P3: retain the existing ownership and journal authorities. Add one protocol
+navigation input and capability rather than advancing durable ACK or increasing
+pageLimit. Combined tests exercise paginated cancellation of never-returning
+prepare, and failed SQLite decline followed by cloud cancellation filtering.
+The latter required retrying retained failed local receipts on real terminal
+commit: without that callback the original decline committed but ACK stayed 0;
+with it the byte-identical first terminal settles the receipt without re-admission.
+
+Validation for the expanded source is recorded in the follow-up plan after its
+required checks and clean-subject packed smoke finish. Earlier counts above are
+R1–R3 historical evidence only, not evidence for R4–R6. No release/deployment or
+production migration is part of this work.
+
+Expanded-source local verification passed: 3835 tests / 135 skips across all
+workspaces, build/typecheck/API/version/strict workflow checks. Canonical clean
+release pack at f09030902ffe329eb0c66e005695477a97ca52e0 passed on macOS arm64,
+including real MCP calls through all three installed entries, ten-package exact
+dependency closure and the 21 migration files. These are local package evidence;
+remote CI and production deployment remain separate. R4 is tracked as #170.

@@ -220,6 +220,8 @@ export interface RuntimeAdapterDescriptor {
 
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
 export interface RuntimeAdapterPrepareInput {
+  /** Admission cancellation; late pure results are discarded and never started. */
+  signal?: AbortSignal;
   offer: TaskOfferPayload;
   policy: PermissionPolicy;
   descriptor: RuntimeAdapterDescriptor;
@@ -318,7 +320,8 @@ export interface PreparedRuntimeOperation {
  */
 export interface RuntimeAdapter {
   readonly descriptor: RuntimeAdapterDescriptor;
-  detect(): Promise<RuntimeDetectResult>;
+  /** Readiness probing must not mutate an Agent home or allocate execution ownership. */
+  detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
   prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
 }
 

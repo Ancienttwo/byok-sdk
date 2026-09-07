@@ -1,3 +1,5 @@
+import { awaitAdmission } from './admission-wait';
+import { terminalIdentity } from './terminal-identity';
 import { startOwnedRuntime } from './runtime-start';
 import { DEFAULT_ARTIFACT_LIMITS, readArtifactBytes } from './artifact-read';
 import { validateRuntimeDetectResult } from '../runtime-detection';
@@ -1666,6 +1668,16 @@ export class TaskRunner {
     // successful registration) — never leaked past this one call.
     this.inFlightOffers.add(taskId);
     const blobAbort = new AbortController();
+    const startupDeadline = Date.now() + (this.deps.startupTimeoutMs ?? 30_000);
+    const startupTimer = setTimeout(() => blobAbort.abort(new Error('runtime startup deadline exceeded during admission/start')),
+      this.deps.startupTimeoutMs ?? 30_000);
+    startupTimer.unref?.();
+    const admissionWithdrawn = (): boolean => {
+      if (!blobAbort.signal.aborted) return false;
+      const cancelled = this.pendingCancelled.has(taskId);
+      decline(cancelled ? 'cancelled before claim' : this.stoppingOffers ? 'daemon is shutting down' : 'runtime startup deadline exceeded', !cancelled);
+      return true;
+    };
     this.inFlightBlobAborts.set(taskId, blobAbort);
     let agentBinding: AgentHomeExecutionBinding | undefined;
     let agentLeaseTransferred = false;
@@ -1735,6 +1747,7 @@ export class TaskRunner {
           );
           return;
         }
+        if (admissionWithdrawn()) return;
         const active = this.deps.agentHome!.executionLeaseManager.activeAttemptCount(canonicalHome)
           + (this.homeReservations.get(canonicalHome) ?? 0);
         if (active >= limit) {
@@ -1849,11 +1862,19 @@ export class TaskRunner {
       const requiresAgentMemoryMcp = agentRef !== undefined
         && this.deps.agentMemoryMcpBin !== undefined
         && isAgentMemorySecureFilesystemAvailable(this.deps.agentMemoryFilesystemHelperBin !== undefined);
-      const pick = await this.pickAdapter(
-        requestedRuntime,
-        payload.policy.mode,
-        requiredToolsets !== undefined || messageRequirement !== undefined || requiresAgentMemoryMcp,
-      );
+      let pick: PickResult;
+      try {
+        pick = await this.pickAdapter(
+          requestedRuntime,
+          payload.policy.mode,
+          requiredToolsets !== undefined || messageRequirement !== undefined || requiresAgentMemoryMcp,
+          blobAbort.signal,
+        );
+      } catch (error) {
+        if (!admissionWithdrawn()) decline(`runtime detection failed: ${errorMessage(error)}`, true);
+        return;
+      }
+      if (admissionWithdrawn()) return;
       if (!pick.ok) {
         decline(pick.reason, pick.retryable);
         return;
@@ -1973,18 +1994,20 @@ export class TaskRunner {
       }
       let prepared: Awaited<ReturnType<RuntimeAdapter['prepare']>>;
       try {
-        prepared = await pick.adapter.prepare({
+        prepared = await awaitAdmission(() => pick.adapter.prepare({
+          signal: blobAbort.signal,
           offer: offered,
           policy: decision.policy,
           descriptor: pick.descriptor,
           requiredToolsetIds: requiredToolsets ?? [],
           ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
           ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
-        });
+        }), blobAbort.signal);
       } catch (error) {
-        decline(`runtime preparation failed: ${errorMessage(error)}`, true);
+        if (!admissionWithdrawn()) decline(`runtime preparation failed: ${errorMessage(error)}`, true);
         return;
       }
+      if (admissionWithdrawn()) return;
       if (prepared.kind === 'reject') {
         decline(prepared.reason, prepared.retryable);
         return;
@@ -2129,7 +2152,9 @@ export class TaskRunner {
       // All semantic admission is now in `prepare()` and the frozen manifest.
       // Claim is the first externally visible commitment; instruction bytes,
       // workspace preparation, and process creation remain after it.
+      if (admissionWithdrawn()) { gitLease?.release(); return; }
       await this.deps.beforeClaim?.(taskId, manifest.descriptor.id);
+      if (admissionWithdrawn()) { gitLease?.release(); return; }
       if (!isKnownRuntimeId(manifest.descriptor.id)) this.claimedHarnesses.set(taskId, manifest.descriptor.id);
       this.deps.send(
         createEnvelope(
@@ -2281,7 +2306,7 @@ export class TaskRunner {
       let session: Session;
       try {
         session = await startOwnedRuntime(input => prepared.operation.start(input), startInput, blobAbort.signal,
-          this.deps.startupTimeoutMs ?? 30_000);
+          Math.max(0, startupDeadline - Date.now()));
       } catch (err) {
         if (isRuntimeStartupDisposalFailure(err)) {
           const ownedBinding = agentBinding;
@@ -2298,7 +2323,7 @@ export class TaskRunner {
             this.pendingCancelled.delete(taskId);
             this.addFinishedTaskId(taskId);
             this.deps.send(createEnvelope('task.cancelled', {
-              reason, ...(this.claimedHarnesses.has(taskId) ? { harnessId: this.claimedHarnesses.get(taskId)! } : {}),
+              reason, ...terminalIdentity(this.claimedHarnesses.get(taskId)),
               ...(agentBinding === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
             }, { taskId }));
           } else if (agentBinding === undefined) await this.fail(taskId, err.message, false);
@@ -2314,7 +2339,7 @@ export class TaskRunner {
           gitLease?.release();
           this.deps.send(createEnvelope('task.cancelled', {
             reason,
-            ...(this.claimedHarnesses.has(taskId) ? { harnessId: this.claimedHarnesses.get(taskId)! } : {}),
+            ...terminalIdentity(this.claimedHarnesses.get(taskId)),
             ...(agentBinding === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
           }, { taskId }));
           return;
@@ -2531,6 +2556,7 @@ export class TaskRunner {
         });
       }
     } finally {
+      clearTimeout(startupTimer);
       releaseReservation();
       if (this.startupOwners.has(taskId)) {
         // This owner also releases the lease, but only after the disposal receipt.
@@ -3813,7 +3839,7 @@ export class TaskRunner {
       createEnvelope(
         'task.fail',
         active === undefined
-          ? { reason, retryable, ...(this.claimedHarnesses.has(taskId) ? { harnessId: this.claimedHarnesses.get(taskId)! } : {}) }
+          ? { reason, retryable, ...terminalIdentity(this.claimedHarnesses.get(taskId)) }
           : { reason, retryable, ...this.terminalInferenceUsagePayload(active), ...this.agentTerminalPayload(active) },
         { taskId },
       ),
@@ -3860,7 +3886,7 @@ export class TaskRunner {
     }
     this.deps.send(createEnvelope(
       'task.fail',
-      { reason, retryable, agentRef, ...(!isKnownRuntimeId(context.runtimeId) ? { harnessId: context.runtimeId } : {}) },
+      { reason, retryable, ...terminalIdentity(context.runtimeId, agentRef) },
       { taskId },
     ));
     return result.ok;
@@ -3876,10 +3902,10 @@ export class TaskRunner {
    * omits this optional block rather than fabricating a usage observation from
    * independently known runtime, elapsed duration, or Local Agent version.
    */
-  private terminalInferenceUsagePayload(active: ActiveTask): { usage?: TerminalInferenceUsage; harnessId?: string } {
+  private terminalInferenceUsagePayload(active: ActiveTask): { usage?: TerminalInferenceUsage } {
     const release = this.deps.localAgentRelease;
     const runtimeId = active.adapter.descriptor.id;
-    if (!isKnownRuntimeId(runtimeId)) return { harnessId: runtimeId };
+    if (!isKnownRuntimeId(runtimeId)) return {};
     if (release === undefined || active.lastUsage === undefined) return {};
 
     const nowMs = Date.now();
@@ -3900,8 +3926,8 @@ export class TaskRunner {
   }
 
   /** Exact Agent identity projection for claim/terminal wire payloads. */
-  private agentTerminalPayload(active: ActiveTask): { agentRef?: AgentRef } {
-    return active.agentRef === undefined ? {} : { agentRef: active.agentRef };
+  private agentTerminalPayload(active: ActiveTask): { agentRef?: AgentRef; harnessId?: string } {
+    return terminalIdentity(active.adapter.descriptor.id, active.agentRef);
   }
 
   /**
@@ -4387,6 +4413,7 @@ export class TaskRunner {
     requestedRuntime: string | undefined,
     policyMode: PermissionMode,
     requiresMcpToolsets: boolean,
+    signal: AbortSignal,
   ): Promise<PickResult> {
     const allowlist = this.deps.runtimeAllowlist;
 
@@ -4417,7 +4444,7 @@ export class TaskRunner {
           retryable: false,
         };
       }
-      const detected = validateRuntimeDetectResult(await adapter.detect());
+      const detected = validateRuntimeDetectResult(await awaitAdmission(() => adapter.detect(signal), signal));
       if (detected.kind !== 'available') {
         return {
           ok: false,
@@ -4438,7 +4465,7 @@ export class TaskRunner {
       const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
       if (!adapterSupportsMode(descriptor, policyMode)) continue;
       if (requiresMcpToolsets && !adapterSupportsMcpToolsets(descriptor)) continue;
-      const detected = validateRuntimeDetectResult(await adapter.detect());
+      const detected = validateRuntimeDetectResult(await awaitAdmission(() => adapter.detect(signal), signal));
       if (detected.kind === 'available') return { ok: true, adapter, descriptor };
     }
     return {

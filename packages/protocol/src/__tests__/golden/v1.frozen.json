@@ -21,7 +21,8 @@
     "agent-content-artifact-read",
     "agent-home-projection",
     "terminal-projection-selection",
-    "custom-harness"
+    "custom-harness",
+    "mailbox-read-ahead"
   ],
   "permissionModes": [
     "auto",
@@ -4180,6 +4181,25 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "recovery": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "daemon_interrupted"
+            },
+            "offerId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "required": [
+            "kind",
+            "offerId"
+          ],
+          "additionalProperties": false
+        },
         "harnessId": {
           "type": "string",
           "minLength": 1,
@@ -8739,6 +8759,25 @@
           "payload": {
             "type": "object",
             "properties": {
+              "recovery": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "daemon_interrupted"
+                  },
+                  "offerId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "offerId"
+                ],
+                "additionalProperties": false
+              },
               "harnessId": {
                 "type": "string",
                 "minLength": 1,
@@ -10777,6 +10816,11 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "afterSeq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "cursor": {
           "type": "integer",
           "minimum": 0,
@@ -15114,6 +15158,25 @@
                   "payload": {
                     "type": "object",
                     "properties": {
+                      "recovery": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "daemon_interrupted"
+                          },
+                          "offerId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "offerId"
+                        ],
+                        "additionalProperties": false
+                      },
                       "harnessId": {
                         "type": "string",
                         "minLength": 1,
@@ -20542,6 +20605,25 @@
                   "payload": {
                     "type": "object",
                     "properties": {
+                      "recovery": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "daemon_interrupted"
+                          },
+                          "offerId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "offerId"
+                        ],
+                        "additionalProperties": false
+                      },
                       "harnessId": {
                         "type": "string",
                         "minLength": 1,
