@@ -113,7 +113,7 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
 
     const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
-    const adapter = new StubRuntimeAdapter('stub', { present: true, version: '0.0.0' }, {
+    const adapter = new StubRuntimeAdapter('stub', { kind: 'available', version: '0.0.0' }, {
       steer: false,
       resume: true,
       approvalInteractive: false,

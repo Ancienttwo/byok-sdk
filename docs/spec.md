@@ -116,6 +116,41 @@ when a real local probe supplied them, and missing facts stay omitted.
 
 ## Runtime operation authority
 
+### Local runtime probe observation
+
+`RuntimeDetectResult` has one required `kind`: `available`, `not-found`,
+`not-executable`, `timeout`, or `probe-failed`. Only `available` may carry the
+existing optional `version` and `authPresent` facts. Custom adapters must author
+this shape; old `present` shapes, mixed authorities, unknown kinds, and malformed
+metadata are rejected. There is no compatibility translation.
+
+Bundled version probes map OS `ENOENT` to `not-found` and
+`EACCES`/`EPERM`/`ENOEXEC` to `not-executable`. Platform errno differences remain
+visible as observed; file-name heuristics do not invent a more specific cause.
+Their own deadline is the authority for `timeout`; a killed process alone is
+not evidence of timeout. The probe terminates its version child with SIGKILL
+and closes its read pipes at that deadline, resolving at execFile completion.
+Other resolver/process failures are `probe-failed`. Failure results contain no
+paths, raw error messages, stdout or stderr. Existing authentication observation
+semantics and credential custody remain unchanged.
+
+Fresh local `runtimes` and `status` show failure kinds; `doctor` carries the same
+closed outcome in JSON and counts failures by kind in text. Its existing
+any-present pass/warn rule remains unchanged. Display `present` is a deterministic
+projection of `kind === 'available'`, never independent adapter authority.
+Custom-adapter throw/malformed results are observed as `probe-failed`; the local
+probe wrapper's deadline is observed as `timeout`. This outer deadline does not
+claim to cancel arbitrary custom work because `detect()` has no cancellation
+contract.
+
+Daemon runtime registration and task selection validate the same shape and use
+only `available` where they previously consumed presence. No failure-kind field
+is added to wire presence or task envelopes, and no decline/retry/permission
+policy is derived from these diagnostic categories. This contract does not add
+caching, periodic probing, minimum versions, repair commands or self-update.
+
+### Prepared operations
+
 `@byok-sdk/client` 0.4.0 has one breaking custom-adapter contract. A
 `RuntimeAdapter` exposes a required frozen `descriptor` and a required,
 side-effect-free `prepare()` method; preparation returns either a fail-closed

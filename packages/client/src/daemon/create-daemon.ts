@@ -1,3 +1,4 @@
+import { validateRuntimeDetectResult } from '../runtime-detection';
 import {
   DEVICE_ASSERTION_AUDIENCE_MAX_BYTES,
   DEVICE_ASSERTION_DEFAULT_TTL_MS,
@@ -887,10 +888,10 @@ function isRuntimeId(id: string): id is RuntimeId {
 
 /** Runtimes actually detected as present on this device, typed per protocol §10 gap #4 (`ConnHelloPayload.runtimes`). Computed once at `start()` — re-probing on every reconnect would mean re-spawning each runtime's `--version` check for no real benefit within one daemon lifetime. */
 async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<RuntimeInfo[]> {
-  const detections = await Promise.all(adapters.map(async (adapter) => ({ adapter, detected: await adapter.detect() })));
+  const detections = await Promise.all(adapters.map(async (adapter) => ({ adapter, detected: validateRuntimeDetectResult(await adapter.detect()) })));
   const runtimes: RuntimeInfo[] = [];
   for (const { adapter, detected } of detections) {
-    if (!detected.present || !isRuntimeId(adapter.descriptor.id)) continue;
+    if (detected.kind !== 'available' || !isRuntimeId(adapter.descriptor.id)) continue;
     const info: RuntimeInfo = { id: adapter.descriptor.id };
     if (detected.version !== undefined) info.version = detected.version;
     if (detected.authPresent !== undefined) info.authPresent = detected.authPresent;

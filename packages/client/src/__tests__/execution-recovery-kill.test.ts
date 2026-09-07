@@ -425,6 +425,7 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
     if (terminal.type === 'task.fail') expect(terminal.payload).toMatchObject({ reason: 'daemon_interrupted', retryable: false });
     const [task] = journalRows('SELECT recovery_marker FROM journal_task');
     expect(JSON.parse(String(task?.recovery_marker))).toMatchObject({ disposition: 'interrupted' });
+    await waitForJournalTruth('confirmed');
     expect(journalRows('SELECT terminal_type, truth_state FROM journal_terminal')).toEqual([
       { terminal_type: 'failed', truth_state: 'confirmed' },
     ]);
@@ -444,6 +445,7 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
     await startDaemon();
     await waitForAttempt(cloud, offer.taskId, 'complete');
     expect(await cloud.rpc('readTerminalBody', { taskId: offer.taskId })).toBe(pending?.bytes);
+    await waitForJournalTruth('confirmed');
     expect(journalRows('SELECT truth_state FROM journal_terminal')).toEqual([{ truth_state: 'confirmed' }]);
     expect(starts()).toHaveLength(1);
   }, 30_000);
@@ -507,6 +509,7 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
       const attempt = await waitForAttempt(cloud, offer.taskId, 'failed');
       expect(attempt.terminalCause).toBe('daemon_interrupted');
       expect(starts()).toHaveLength(1);
+      await waitForJournalTruth('confirmed');
       const [settled] = journalRows('SELECT bytes, terminal_type, truth_state FROM journal_terminal');
       expect(settled).toMatchObject({ terminal_type: 'failed', truth_state: 'confirmed' });
       if (terminalCommittedAfterSecond) expect(settled?.bytes).toBe(afterSecond[0]?.bytes);
@@ -532,6 +535,7 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
     await startDaemon();
     await waitForAttempt(cloud, offer.taskId, 'complete');
     expect(starts()).toHaveLength(1);
+    await waitForJournalTruth('confirmed');
     expect(journalRows('SELECT truth_state FROM journal_terminal')).toEqual([{ truth_state: 'confirmed' }]);
   }, 30_000);
 

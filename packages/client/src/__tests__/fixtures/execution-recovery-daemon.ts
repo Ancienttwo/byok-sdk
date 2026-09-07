@@ -116,7 +116,7 @@ class ControlledAdapter implements RuntimeAdapter {
   });
 
   async detect() {
-    return { present: true, version: 'fixture', authPresent: true };
+    return { kind: 'available' as const, version: 'fixture', authPresent: true };
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {

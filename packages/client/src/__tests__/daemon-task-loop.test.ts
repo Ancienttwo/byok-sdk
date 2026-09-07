@@ -229,7 +229,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     // `runtime` is constrained by the frozen protocol to 'pi'|'claude'|'codex'
     // (RuntimeIdSchema), so the stub must claim one of those ids to exercise
     // "runtime known but not detected as present" through a real TaskOfferPayload.
-    const adapter = new StubRuntimeAdapter('pi', { present: false });
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'not-found' });
     await setupDaemon(adapter);
 
     server.send(

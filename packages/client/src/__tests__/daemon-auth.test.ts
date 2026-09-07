@@ -568,7 +568,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
           capabilities: Object.freeze({ steer: true, resume: true, approvalInteractive: false, permissionModes: Object.freeze(['auto', 'confirm', 'deny']) }),
           environmentRequirements: Object.freeze({ credentialNames: Object.freeze([]) }),
         }),
-        detect: async () => ({ present: true, version: 'test', authPresent: true }),
+        detect: async () => ({ kind: 'available', version: 'test', authPresent: true }),
         prepare: async () => ({ kind: 'prepared', operation: { start: async () => { throw new Error('not used'); } } }),
       };
       const daemon = createDaemonWithAdapters(config, [adapter]);
@@ -649,7 +649,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
           capabilities: Object.freeze({ steer: true, resume: true, approvalInteractive: false, permissionModes: Object.freeze(['auto', 'confirm', 'deny']) }),
           environmentRequirements: Object.freeze({ credentialNames: Object.freeze([]) }),
         }),
-        detect: async () => ({ present: true, version: 'test', authPresent: true }),
+        detect: async () => ({ kind: 'available', version: 'test', authPresent: true }),
         prepare: async () => ({ kind: 'prepared', operation: { start: async () => { throw new Error('not used'); } } }),
       };
       const daemon = createDaemonWithAdapters(config, [adapter], {

@@ -8,6 +8,17 @@
 - Add `TaskRunner.hasPendingRecoveredAgentMessage(taskId)` to query existing durable recovery state. The additive public method requires the SDK MINOR bump under the pre-1.0 version policy.
 - Align all nine SDK packages at 0.15.0. Independently bump keys to 0.4.1 so its packed core dependency resolves exactly to 0.15.0; no keys API or provider dependency changes.
 
+- **Breaking custom adapter contract (`@byok-sdk/client`):** `RuntimeDetectResult`
+  now authors one `kind`: `available`, `not-found`, `not-executable`, `timeout`,
+  or `probe-failed`. Only `available` carries optional version/auth observations;
+  legacy `present` results and mixed shapes are rejected. Bundled version probes
+  preserve OS failure categories and own their timeout termination. Local
+  `runtimes`, `status`, and `doctor` distinguish failures without copying error
+  messages, executable paths or failed probe streams. Display `present` is
+  derived from `available`; wire registration and admission/retry semantics
+  remain unchanged. Included in this prepared minor release; publication remains separate.
+
+
 ## 0.14.0 / @byok-sdk/keys 0.4.0 — 2026-09-06
 
 - **`@byok-sdk/protocol` / client hosted journal (#147):** A single protocol task-offer family authority includes both agent-egress offers. An awaited pre-claim admission barrier separates never-executed offers from uncertain side effects. Interrupted executions durably report `task.fail` with `daemon_interrupted`, `retryable: false`, and the original AgentRef; runtime work is not automatically rerun.

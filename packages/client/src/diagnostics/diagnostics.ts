@@ -1,3 +1,4 @@
+import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeDetectResult } from '../types';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   closeSync,
@@ -67,6 +68,7 @@ export interface DiagnosticsSnapshot {
   runtimes: Array<{
     idHash: string;
     present: boolean;
+    outcome: RuntimeDetectResult['kind'];
     versionPresent: boolean;
     authPresent?: boolean;
     steer: boolean;
@@ -657,7 +659,9 @@ function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>): DiagnosticChe
     {
       id: 'runtimes',
       status: snapshot.runtimes.some((runtime) => runtime.present) ? 'pass' : 'warn',
-      summary: `${snapshot.runtimes.filter((runtime) => runtime.present).length}/${snapshot.runtimes.length} present`,
+      summary: `${snapshot.runtimes.filter((runtime) => runtime.present).length}/${snapshot.runtimes.length} present; `
+        + RUNTIME_DETECTION_FAILURE_KINDS
+          .map((kind) => `${kind}=${snapshot.runtimes.filter((runtime) => runtime.outcome === kind).length}`).join(' '),
     },
     {
       id: 'control',
@@ -722,6 +726,7 @@ export async function collectDiagnostics(
   const runtimes: DiagnosticsSnapshot['runtimes'] = probedRuntimes.map((runtime) => ({
     idHash: stableIdentifierHash(runtime.id),
     present: runtime.present,
+    outcome: runtime.outcome,
     versionPresent: runtime.version !== undefined,
     ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
     steer: runtime.steer,

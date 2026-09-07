@@ -216,7 +216,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
    */
   constructor(
     id = 'stub',
-    detectResult: RuntimeDetectResult = { present: true, version: '0.0.0' },
+    detectResult: RuntimeDetectResult = { kind: 'available', version: '0.0.0' },
     capabilities: RuntimeCapabilities = DEFAULT_STUB_CAPABILITIES,
     requiresMcpToolsetToolObservation = true,
   ) {

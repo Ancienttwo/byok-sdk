@@ -25,11 +25,12 @@ describe('bin/runtime-probe: defaultRuntimeAdapters', () => {
 
 describe('bin/runtime-probe: probeRuntimes', () => {
   it('maps a present adapter\'s detect()+capabilities() into a flattened ProbedRuntime', async () => {
-    const adapter = new StubRuntimeAdapter('pi', { present: true, version: '1.2.3', authPresent: true });
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available', version: '1.2.3', authPresent: true });
     const [probed] = await probeRuntimes([adapter]);
     expect(probed).toEqual({
       id: 'pi',
       present: true,
+      outcome: 'available',
       version: '1.2.3',
       authPresent: true,
       steer: true,
@@ -44,11 +45,12 @@ describe('bin/runtime-probe: probeRuntimes', () => {
   });
 
   it('maps an absent adapter without version/authPresent', async () => {
-    const adapter = new StubRuntimeAdapter('claude', { present: false });
+    const adapter = new StubRuntimeAdapter('claude', { kind: 'not-found' });
     const [probed] = await probeRuntimes([adapter]);
     expect(probed).toEqual({
       id: 'claude',
       present: false,
+      outcome: 'not-found',
       version: undefined,
       authPresent: undefined,
       steer: true,
@@ -58,19 +60,20 @@ describe('bin/runtime-probe: probeRuntimes', () => {
   });
 
   it('probes multiple adapters in parallel, preserving input order', async () => {
-    const pi = new StubRuntimeAdapter('pi', { present: true });
-    const claude = new StubRuntimeAdapter('claude', { present: false });
-    const codex = new StubRuntimeAdapter('codex', { present: true, version: '9.9.9' });
+    const pi = new StubRuntimeAdapter('pi', { kind: 'available' });
+    const claude = new StubRuntimeAdapter('claude', { kind: 'not-found' });
+    const codex = new StubRuntimeAdapter('codex', { kind: 'available', version: '9.9.9' });
     const probed = await probeRuntimes([pi, claude, codex]);
     expect(probed.map((r) => r.id)).toEqual(['pi', 'claude', 'codex']);
     expect(probed.map((r) => r.present)).toEqual([true, false, true]);
   });
 
-  it('treats a throwing detect() as present:false rather than rejecting the whole probe', async () => {
+  it('reports a throwing detect() as probe-failed without rejecting other probes', async () => {
     const broken: StubRuntimeAdapter = new StubRuntimeAdapter('broken');
     broken.detect = () => Promise.reject(new Error('boom'));
     const [probed] = await probeRuntimes([broken]);
     expect(probed?.present).toBe(false);
+    expect(probed?.outcome).toBe('probe-failed');
     expect(probed?.id).toBe('broken');
   });
 });

@@ -223,13 +223,13 @@ describe('bin/format: formatRuntimeLines', () => {
   });
 
   it('renders an absent runtime minimally', () => {
-    const runtimes: ProbedRuntime[] = [{ id: 'claude', present: false, steer: true, resume: true, permissionModes: ['auto'] }];
-    expect(formatRuntimeLines(runtimes)).toEqual(['claude: absent']);
+    const runtimes: ProbedRuntime[] = [{ id: 'claude', present: false, outcome: 'not-found', steer: true, resume: true, permissionModes: ['auto'] }];
+    expect(formatRuntimeLines(runtimes)).toEqual(['claude: not-found']);
   });
 
   it('renders a present runtime with full detail', () => {
     const runtimes: ProbedRuntime[] = [
-      { id: 'pi', present: true, version: '1.2.3', authPresent: true, steer: true, resume: true, permissionModes: ['auto', 'readonly'] },
+      { id: 'pi', present: true, outcome: 'available', version: '1.2.3', authPresent: true, steer: true, resume: true, permissionModes: ['auto', 'readonly'] },
     ];
     expect(formatRuntimeLines(runtimes)).toEqual([
       'pi: present version=1.2.3 authPresent=true capabilities=steer,resume modes=auto,readonly',
@@ -237,7 +237,7 @@ describe('bin/format: formatRuntimeLines', () => {
   });
 
   it('renders (none) for capabilities/modes when both are empty', () => {
-    const runtimes: ProbedRuntime[] = [{ id: 'codex', present: true, steer: false, resume: false, permissionModes: [] }];
+    const runtimes: ProbedRuntime[] = [{ id: 'codex', present: true, outcome: 'available', steer: false, resume: false, permissionModes: [] }];
     expect(formatRuntimeLines(runtimes)).toEqual(['codex: present capabilities=(none) modes=(none)']);
   });
 });
@@ -290,16 +290,16 @@ describe('bin/format: formatStatusLines', () => {
     expect(lines).toContain('connection: last-known=open at=2026-01-01T00:00:00.000Z');
   });
 
-  it('summarizes runtimes as id=present/absent pairs', () => {
+  it('summarizes runtimes as presence and failure outcomes', () => {
     const lines = formatStatusLines(
       baseView({
         runtimes: [
-          { id: 'pi', present: true, steer: true, resume: true, permissionModes: [] },
-          { id: 'claude', present: false, steer: true, resume: true, permissionModes: [] },
+          { id: 'pi', present: true, outcome: 'available', steer: true, resume: true, permissionModes: [] },
+          { id: 'claude', present: false, outcome: 'not-found', steer: true, resume: true, permissionModes: [] },
         ],
       }),
     );
-    expect(lines).toContain('runtimes: pi=present claude=absent');
+    expect(lines).toContain('runtimes: pi=present claude=not-found');
   });
 
   it('renders full task counts', () => {
@@ -325,7 +325,7 @@ describe('bin/format: formatStatusLines', () => {
         paired: true,
         deviceId: 'dev-1',
         connection: { state: 'open', ts: 'T' },
-        runtimes: [{ id: 'pi', present: true, version: '1.0', authPresent: true, steer: true, resume: true, permissionModes: ['auto'] }],
+        runtimes: [{ id: 'pi', present: true, outcome: 'available', version: '1.0', authPresent: true, steer: true, resume: true, permissionModes: ['auto'] }],
       }),
     );
     for (const line of lines) expect(line).not.toMatch(ANSI_ESCAPE_RE);

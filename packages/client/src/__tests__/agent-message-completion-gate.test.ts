@@ -66,7 +66,7 @@ describe('required Agent message completion gate', () => {
     const sent: Envelope[] = [];
     const storeDir = await temporary('byok-message-preflight-store-');
     const hostStorageRoot = await temporary('byok-message-preflight-home-');
-    const adapter = new StubRuntimeAdapter('codex', { present: true }, {
+    const adapter = new StubRuntimeAdapter('codex', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
       permissionModes: ['auto'],
     });
@@ -99,7 +99,7 @@ describe('required Agent message completion gate', () => {
     const sent: Envelope[] = [];
     const storeDir = await temporary('byok-message-store-');
     const hostStorageRoot = await temporary('byok-message-home-');
-    const adapter = new StubRuntimeAdapter('pi', { present: true }, {
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
       permissionModes: ['auto'],
     });
@@ -225,7 +225,7 @@ describe('required Agent message completion gate', () => {
     const sent: Envelope[] = [];
     const storeDir = await temporary('byok-message-auto-store-');
     const hostStorageRoot = await temporary('byok-message-auto-home-');
-    const adapter = new StubRuntimeAdapter('pi', { present: true }, {
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
       permissionModes: ['auto'],
     });
@@ -269,7 +269,7 @@ describe('required Agent message completion gate', () => {
     const sent: Envelope[] = [];
     const storeDir = await temporary('byok-message-empty-store-');
     const hostStorageRoot = await temporary('byok-message-empty-home-');
-    const adapter = new StubRuntimeAdapter('pi', { present: true }, {
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
       permissionModes: ['auto'],
     });
@@ -305,7 +305,7 @@ describe('required Agent message completion gate', () => {
     const sent: Envelope[] = [];
     const storeDir = await temporary('byok-message-cap-store-');
     const hostStorageRoot = await temporary('byok-message-cap-home-');
-    const adapter = new StubRuntimeAdapter('pi', { present: true }, {
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
       permissionModes: ['auto'],
     });
@@ -351,7 +351,7 @@ describe('required Agent message completion gate', () => {
     const sent: Envelope[] = [];
     const storeDir = await temporary(`byok-${prefix}-store-`);
     const hostStorageRoot = await temporary(`byok-${prefix}-home-`);
-    const adapter = new StubRuntimeAdapter('pi', { present: true }, {
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
       permissionModes: ['auto'],
     });

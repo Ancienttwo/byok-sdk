@@ -1,3 +1,4 @@
+import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -176,14 +177,13 @@ export class PiAdapter implements RuntimeAdapter {
   async detect(): Promise<RuntimeDetectResult> {
     try {
       const bin = this.resolveBin();
-      // Empirically, pi 0.84.2 prints `--version` to stdout. Check stderr too
-      // so detection remains accurate if a future pinned release moves it.
-      const { stdout, stderr } = await execFileAsync(bin.command, ['--version'], { timeout: DETECT_TIMEOUT_MS });
-      const version = stdout.trim() || stderr.trim();
+      const probe = await probeRuntimeVersion(bin.command, DETECT_TIMEOUT_MS);
+      if (probe.kind !== 'available') return probe;
+      const version = probe.stdout.trim() || probe.stderr.trim();
       const authPresent = PROVIDER_CREDENTIAL_ENV_NAMES.some((name) => process.env[name] !== undefined);
-      return { present: true, version, authPresent };
-    } catch {
-      return { present: false };
+      return { kind: 'available', version, authPresent };
+    } catch (error) {
+      return classifyDetectError(error);
     }
   }
 

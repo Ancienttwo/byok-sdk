@@ -90,7 +90,8 @@ describe('CodexAdapter against the fake-codex fixture', () => {
   it('detect() reports present + version + authPresent from the fake binary', async () => {
     const adapter = fakeCodexAdapter();
     const result = await adapter.detect();
-    expect(result.present).toBe(true);
+    expect(result.kind).toBe('available');
+    if (result.kind !== 'available') throw new Error('expected available runtime');
     expect(result.version).toBe('codex-cli 0.149.0-fake');
     expect(result.authPresent).toBe(true);
   });
@@ -103,7 +104,8 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     process.env.FAKE_CODEX_LOGGED_IN = '0';
     try {
       const result = await adapter.detect();
-      expect(result.present).toBe(true);
+      expect(result.kind).toBe('available');
+      if (result.kind !== 'available') throw new Error('expected available runtime');
       expect(result.authPresent).toBe(false);
     } finally {
       if (original === undefined) delete process.env.FAKE_CODEX_LOGGED_IN;
@@ -768,8 +770,8 @@ describe('CodexAdapter against the real installed codex binary (no auth.json rea
   it('detect() returns a well-formed result whether or not codex is actually installed here', async () => {
     const adapter = new CodexAdapter();
     const result = await adapter.detect();
-    expect(typeof result.present).toBe('boolean');
-    if (result.present) {
+    expect(typeof result.kind).toBe('string');
+    if (result.kind === 'available') {
       expect(typeof result.version).toBe('string');
       expect(result.version?.length).toBeGreaterThan(0);
       expect(typeof result.authPresent).toBe('boolean');

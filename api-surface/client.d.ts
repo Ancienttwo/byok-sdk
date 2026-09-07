@@ -8707,16 +8707,21 @@ export interface GitWorkspaceConfig {
     mode: 'local-checkpoints';
 }
 /**
- * Result of probing whether a runtime is usable on this machine. `authPresent`
- * is computed without ever reading the runtime's own credential storage (see
- * the credential-isolation rule on {@link RuntimeAdapter}) — it only reflects
- * whether a recognized environment variable name is set.
+ * Failure vocabulary shared by the detection contract and local diagnostics.
  */
-export interface RuntimeDetectResult {
-    present: boolean;
-    version?: string;
-    authPresent?: boolean;
-}
+export declare const RUNTIME_DETECTION_FAILURE_KINDS: readonly ['not-found', 'not-executable', 'timeout', 'probe-failed'];
+/**
+ * One probe outcome, never a separately authored presence boolean. Authentication
+ * observation retains each adapter's native status/env-name probe and never
+ * reads credential storage. Failure variants contain no arbitrary diagnostics.
+ */
+export type RuntimeDetectResult = {
+    readonly kind: 'available';
+    readonly version?: string;
+    readonly authPresent?: boolean;
+} | {
+    readonly kind: typeof RUNTIME_DETECTION_FAILURE_KINDS[number];
+};
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
     readonly steer: boolean;

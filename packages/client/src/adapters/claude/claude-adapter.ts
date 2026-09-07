@@ -1,3 +1,4 @@
+import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -186,18 +187,15 @@ export class ClaudeAdapter implements RuntimeAdapter {
   constructor(private readonly options: ClaudeAdapterOptions = {}) {}
 
   async detect(): Promise<RuntimeDetectResult> {
-    const bin = this.resolveBin();
     try {
-      // Empirically confirmed: claude 2.1.212 prints `--version` output to
-      // STDOUT. Only stdout is read here because that is what was probed;
-      // pi reads both streams instead because its own `--version` channel
-      // has moved between pi releases (see ../pi/pi-adapter.ts).
-      const { stdout } = await execFileAsync(bin.command, ['--version'], { timeout: DETECT_TIMEOUT_MS });
-      const version = stdout.trim();
+      const bin = this.resolveBin();
+      const probe = await probeRuntimeVersion(bin.command, DETECT_TIMEOUT_MS);
+      if (probe.kind !== 'available') return probe;
+      const version = probe.stdout.trim();
       const authPresent = await this.probeAuthPresent(bin.command);
-      return { present: true, version, authPresent };
-    } catch {
-      return { present: false };
+      return { kind: 'available', version, authPresent };
+    } catch (error) {
+      return classifyDetectError(error);
     }
   }
 

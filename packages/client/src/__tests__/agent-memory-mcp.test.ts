@@ -139,7 +139,7 @@ describe('Agent memory MCP local authority', () => {
     const workspaceRoot = await root();
     const storeDir = await root();
     const sent: Envelope[] = [];
-    const adapter = new StubRuntimeAdapter('codex', { present: true }, {
+    const adapter = new StubRuntimeAdapter('codex', { kind: 'available' }, {
       steer: true,
       resume: true,
       approvalInteractive: true,
@@ -188,14 +188,14 @@ describe('Agent memory MCP local authority', () => {
     const hostStorageRoot = await root();
     const workspaceRoot = await root();
     const storeDir = await root();
-    const unsupported = new StubRuntimeAdapter('unsupported-memory-runtime', { present: true }, {
+    const unsupported = new StubRuntimeAdapter('unsupported-memory-runtime', { kind: 'available' }, {
       steer: true,
       resume: true,
       approvalInteractive: true,
       mcpToolsets: false,
       permissionModes: ['auto'],
     });
-    const supported = new StubRuntimeAdapter('supported-memory-runtime', { present: true }, {
+    const supported = new StubRuntimeAdapter('supported-memory-runtime', { kind: 'available' }, {
       steer: true,
       resume: true,
       approvalInteractive: true,

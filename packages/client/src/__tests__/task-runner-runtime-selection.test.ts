@@ -132,8 +132,8 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
 
   describe('capability matching at admission (pre-claim)', () => {
     it('confirm-mode offer: claude is picked over pi, since pi cannot express confirm', async () => {
-      const pi = new StubRuntimeAdapter('pi', { present: true, version: '0.0.0' }, NO_CONFIRM);
-      const claude = new StubRuntimeAdapter('claude', { present: true, version: '0.0.0' }, CONFIRM_CAPABLE);
+      const pi = new StubRuntimeAdapter('pi', { kind: 'available', version: '0.0.0' }, NO_CONFIRM);
+      const claude = new StubRuntimeAdapter('claude', { kind: 'available', version: '0.0.0' }, CONFIRM_CAPABLE);
       await setup([pi, claude]);
 
       server.send(
@@ -148,7 +148,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     });
 
     it('confirm-mode offer declines pre-claim (no claim, no fail) when only a non-confirm-capable runtime is present', async () => {
-      const pi = new StubRuntimeAdapter('pi', { present: true, version: '0.0.0' }, NO_CONFIRM);
+      const pi = new StubRuntimeAdapter('pi', { kind: 'available', version: '0.0.0' }, NO_CONFIRM);
       await setup([pi]);
 
       server.send(
@@ -164,7 +164,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     });
 
     it('explicit runtime=pi + confirm-mode offer declines pre-claim, even though pi is present (no claim, no fail)', async () => {
-      const pi = new StubRuntimeAdapter('pi', { present: true, version: '0.0.0' }, NO_CONFIRM);
+      const pi = new StubRuntimeAdapter('pi', { kind: 'available', version: '0.0.0' }, NO_CONFIRM);
       await setup([pi]);
 
       server.send(
@@ -185,14 +185,16 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
   });
 
   describe('explicit-runtime regression pin (unchanged by this batch)', () => {
-    it('an explicit runtime request that is not detected present still declines pre-claim, never claims', async () => {
+    it.each(['not-found', 'not-executable', 'timeout', 'probe-failed'] as const)('an explicit runtime with %s still declines pre-claim, never claims', async (kind) => {
       // Regression pin for the pre-existing (M1 gap #5) behavior — unchanged
       // by this batch's capability-matching/preference-order additions. Also
       // covered end-to-end by daemon-task-loop.test.ts's own identical
       // scenario; asserted again here so this workstream's own test file is
       // self-contained proof the explicit path wasn't disturbed.
-      const pi = new StubRuntimeAdapter('pi', { present: false });
+      const pi = new StubRuntimeAdapter('pi', { kind });
       await setup([pi]);
+      const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello');
+      expect(hello.payload).toMatchObject({ runtimes: [] });
 
       server.send(
         createEnvelope(
@@ -227,7 +229,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       const adapter: RuntimeAdapter = {
         descriptor: sourceDescriptor,
         async detect() {
-          return { present: true, version: '0.0.0' };
+          return { kind: 'available', version: '0.0.0' };
         },
         async prepare(input) {
           expect(input.descriptor).not.toBe(sourceDescriptor);

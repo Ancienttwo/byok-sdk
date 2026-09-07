@@ -134,7 +134,7 @@ class RelayingAdapter implements RuntimeAdapter {
   readonly sessions: RelayingSession[] = [];
 
   async detect(): Promise<RuntimeDetectResult> {
-    return { present: true, version: '0.0.0' };
+    return { kind: 'available', version: '0.0.0' };
   }
   async prepare(_input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     return {
