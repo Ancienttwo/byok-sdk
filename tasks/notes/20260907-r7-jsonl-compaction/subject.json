@@ -1,0 +1,6 @@
+{
+  "packages/client/src/daemon/agent-message-outbox.ts": "09dafa8fabb302ee89306d0dc921287bf40238f91e8e9fb2be41a49c0348381a",
+  "packages/client/src/daemon/agent-egress-spool.ts": "f8ee7725472a6f4b707a24309862f5892b2a7f87bf8156c77b9fa9cf09d09e75",
+  "packages/client/src/__tests__/agent-message-outbox.test.ts": "99cf374e71fe0efc41938004799edcb57242cd606e96b2fb178665f161306891",
+  "packages/client/src/__tests__/agent-egress-spool.test.ts": "513e3b144c6fb28479cc8bd14df3523e2ea2baa5fcfba3802d8855021a772474"
+}

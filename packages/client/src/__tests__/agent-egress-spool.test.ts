@@ -22,6 +22,30 @@ afterEach(async () => {
 });
 
 describe('Agent reliable egress spool', () => {
+  it.each([0, 1, 3])('reopens after natural compaction retaining %i records and another append', async (retainedCount) => {
+    const agentHome = await home('reliable-compaction');
+    const spool = await AgentReliableSpool.open(agentHome);
+    const append = () => spool.append({
+      agentRef, tenantId: 'tenant-spool', policyRevision: DEFAULT_AGENT_EGRESS_POLICY.policyRevision,
+      payload: { status: 'completed' }, sessionRef: 'session-spool',
+    }, DEFAULT_AGENT_EGRESS_POLICY, 0);
+    const retained = [];
+    for (let i = 0; i < retainedCount; i++) retained.push(await append());
+    // Each append/ack pair adds two entries; no private compaction invocation or mocked I/O.
+    for (let i = 0; i < Math.ceil((512 - retainedCount) / 2); i++) {
+      const record = await append();
+      expect(await spool.acknowledge({
+        agentRef, tenantId: record.tenantId, sessionRef: 'session-spool',
+        policyRevision: record.policyRevision, eventId: record.eventId, cursor: record.cursor,
+      })).toBe(true);
+    }
+    const snapshot = await readFile(spool.spoolPath, 'utf8');
+    expect(snapshot.split('\n').filter(Boolean)).toHaveLength(retainedCount);
+    const appended = await append();
+    expect((await AgentReliableSpool.open(agentHome)).records()).toEqual([...retained, appended]);
+    expect(snapshot.endsWith('\n')).toBe(retainedCount > 0);
+  });
+
   it('appends before send, keeps stable id/cursor across restart, and retires only after exact ack', async () => {
     const agentHome = await home('reliable-restart');
     const spool = await AgentReliableSpool.open(agentHome);

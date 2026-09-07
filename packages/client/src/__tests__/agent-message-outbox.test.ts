@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
@@ -16,6 +16,31 @@ async function open() {
 }
 
 describe('AgentMessageOutbox', () => {
+  test.each([0, 1, 3])('reopens after natural compaction retaining %i drafts and another append', async (retainedCount) => {
+    const { root, outbox } = await open();
+    const append = (taskId: string) => outbox.appendDraft({
+      taskId, tenantId: 'tenant-one', agentRef, requirement,
+      contentType: 'text/markdown', body: `body-${taskId}`, sessionRef: 'session-1',
+      maxPendingEvents: 8, maxPendingBytes: 200_000,
+    });
+    const retained = [];
+    for (let i = 0; i < retainedCount; i++) retained.push(await append(`keep-${i}`));
+    // Each completed draft adds two log entries; the last disposition naturally compacts.
+    for (let i = 0; i < Math.ceil((512 - retainedCount) / 2); i++) {
+      const record = await append(`cycle-${i}`);
+      expect(await outbox.applyDisposition(record.taskId, {
+        agentRef, sessionRef: record.sessionRef, contract: record.contract,
+        messageId: record.messageId, cursor: record.cursor, contentHash: record.contentHash,
+        outcome: 'accepted', receiptId: '11111111-1111-4111-8111-111111111111',
+      })).toBe('accepted');
+    }
+    const snapshot = await readFile(outbox.outboxPath, 'utf8');
+    expect(snapshot.split('\n').filter(Boolean)).toHaveLength(retainedCount);
+    const appended = await append('after-compact');
+    expect((await AgentMessageOutbox.open(root)).records()).toEqual([...retained, appended]);
+    expect(snapshot.endsWith('\n')).toBe(retainedCount > 0);
+  });
+
   test('stages before session, activates exactly, and only accepted retires', async () => {
     const { root, outbox } = await open();
     const record = await outbox.appendDraft({ taskId: 'task-1', tenantId: 'tenant-one', agentRef, requirement, contentType: 'text/markdown', body: '**hello**', maxPendingEvents: 4, maxPendingBytes: 200_000 });

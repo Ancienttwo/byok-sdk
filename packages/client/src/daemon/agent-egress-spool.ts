@@ -409,7 +409,7 @@ export class AgentReliableSpool {
 
   private async compact(): Promise<void> {
     const entries = this.records().map((record): SpoolEntry => ({ schema: 1, kind: 'append', record }));
-    await atomicWriteFile(this.spoolPath, entries.map((entry) => stableRecordJson(entry)).join(entries.length > 0 ? '\n' : ''), { mode: 0o600 });
+    await atomicWriteFile(this.spoolPath, entries.map((entry) => `${stableRecordJson(entry)}\n`).join(''), { mode: 0o600 });
     this.logEntries = entries.length;
   }
 
