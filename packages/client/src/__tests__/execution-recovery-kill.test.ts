@@ -19,6 +19,7 @@ interface ChildConfig {
   readonly journalFault?: string;
   readonly recoveryFault?: string;
   readonly agentHome?: boolean;
+  readonly holdTerminalConfirmation?: boolean;
 }
 
 interface JsonLine {
@@ -611,12 +612,19 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
     expect((await second.exited()).signal).toBe('SIGKILL');
 
     await fs.rm(path.join(current!.daemonBase.controlDir, 'terminal-queued.arm'));
-    await startDaemon();
+    await startDaemon({ holdTerminalConfirmation: true });
+    await waitForFile(path.join(current!.daemonBase.controlDir, 'terminal-confirmation.reached'));
     await waitForAttempt(cloud, offer.taskId, 'cancelled');
     expect(starts()).toHaveLength(1);
     const terminal = decodeEnvelope(String(await cloud.rpc('readTerminalBody', { taskId: offer.taskId })));
     expect(terminal.type).toBe('task.complete');
     expect(await cloud.rpc('readTerminalBody', { taskId: offer.taskId })).toBe(original?.bytes);
+    // Cloud acceptance does not imply the daemon has persisted its acknowledgement.
+    expect(journalRows('SELECT terminal_type, truth_state FROM journal_terminal')).toEqual([
+      { terminal_type: 'complete', truth_state: 'pending' },
+    ]);
+    await fs.writeFile(path.join(current!.daemonBase.controlDir, 'terminal-confirmation.release'), 'release\n');
+    await waitForJournalTruth('confirmed');
     expect(journalRows('SELECT terminal_type, truth_state FROM journal_terminal')).toEqual([
       { terminal_type: 'complete', truth_state: 'confirmed' },
     ]);
