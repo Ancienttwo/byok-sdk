@@ -73,7 +73,7 @@
   },
   "development_campaign": {
     "version": 1,
-    "mode": "shadow",
+    "mode": "active",
     "limits": {
       "maximum_group_count": 1,
       "maximum_issues_per_group": 2,
