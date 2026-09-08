@@ -39,7 +39,7 @@ describe('AgentMessageOutbox', () => {
     const appended = await append('after-compact');
     expect((await AgentMessageOutbox.open(root)).records()).toEqual([...retained, appended]);
     expect(snapshot.endsWith('\n')).toBe(retainedCount > 0);
-  });
+  }, 60_000); // Real threshold requires 1,000+ file/directory syncs; keep a local bounded I/O budget.
 
   test('stages before session, activates exactly, and only accepted retires', async () => {
     const { root, outbox } = await open();

@@ -1,6 +1,6 @@
 # Task Contract: Explicit device metadata repair and embedded diagnostics
 
-> **Status**: Blocked
+> **Status**: In Progress
 > **Plan**: plans/plan-20260908-doctor-repair.md
 > **Task Profile**: code-change
 > **Owner**: Codex
@@ -50,3 +50,9 @@ allowed_paths:
 ## Approved diagnostic continuation
 
 User approved the bounded baseline/candidate classification of seven test failures. No product/test repair, new whole-suite rerun, merge or publication is authorized by this continuation. Classification is complete; evidence lives in `docs/researches/2026-09-08-doctor-failure-classification.md`. Acceptance remains blocked on the original full-suite failure and separate review boundary.
+
+## Approved test acceptance continuation
+
+User approved test-only corrections to agent-egress-spool, agent-message-outbox, durable-egress-faults and agent-home-projection tests. Natural compaction receives a local 60s budget with real threshold and sync assertions intact. A fetch barrier delivers the first projection page, parks the next poll until daemon stop, and preserves exact completion/cursor/restart assertions. No product behavior or package-wide timeout changes.
+
+Outcome: approved test correction and local full-suite acceptance complete; prior classification-only restrictions were superseded only for these four tests and validation. No independent acceptance, merge, push, publication or live repair claim.

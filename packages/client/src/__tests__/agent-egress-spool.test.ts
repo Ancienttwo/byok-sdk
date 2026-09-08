@@ -44,7 +44,7 @@ describe('Agent reliable egress spool', () => {
     const appended = await append();
     expect((await AgentReliableSpool.open(agentHome)).records()).toEqual([...retained, appended]);
     expect(snapshot.endsWith('\n')).toBe(retainedCount > 0);
-  });
+  }, 60_000); // Real threshold requires 1,000+ file/directory syncs; keep a local bounded I/O budget.
 
   it('appends before send, keeps stable id/cursor across restart, and retires only after exact ack', async () => {
     const agentHome = await home('reliable-restart');

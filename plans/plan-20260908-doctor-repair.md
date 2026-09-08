@@ -1,6 +1,6 @@
 # Plan: Explicit device metadata repair and embedded diagnostics
 
-> **Status**: Blocked
+> **Status**: In Progress
 > **Artifact Level**: work-package
 > **Promotion Reason**: New public diagnostics and operator repair API.
 > **Verification Boundary**: Frozen local source and required checks; no release or deployment.
@@ -29,7 +29,9 @@ User authorized plan and implementation on 2026-09-08 after the SDK-owned downst
 - [x] Update spec, integration guide, runbook, changelog and API golden.
 - [x] Freeze code, run required checks once, record results and residuals.
 - [x] Classify the seven failures against pinned base and candidate under the user-approved diagnostic continuation.
-- [ ] Close whole-repo test acceptance; confirmed baseline test budget/scheduling issues remain, and test repairs need a separately authorized slice.
+- [x] Under subsequent user approval, correct local natural-compaction budgets and projection delivery/stop event ordering in the four named test files.
+- [x] Verify slow-sync controls and close whole-repo test acceptance on the frozen test-only correction.
+- [ ] Obtain independent semantic acceptance of the public repair contract; implementation and local checks are complete, no dispatch or release is implied.
 
 ## Verification
 
@@ -54,8 +56,12 @@ Targeted new repair/API tests plus existing auth/store/diagnostics tests during 
 
 ## Result
 
-Implementation complete; acceptance blocked by seven failures in four unchanged client test files; subsequent paired probes classify them as baseline budget/scheduling weaknesses, not doctor-specific functional regressions. All 23 new tests passed within the final client run; required non-test checks passed. See implementation notes for exact counts and evidence. No release or independent acceptance is claimed.
+Implementation and local required-check acceptance complete. The separately approved four-file test correction closes all seven failures: full `bun run test` exits 0 across 13 packages (3905 passed, 135 skipped), including client 1860 passed / 11 skipped. Root typecheck/API/version checks pass; prior passing build applies to unchanged production source. Independent semantic acceptance and live credential-provider qualification remain separate; no release is claimed.
 
 ## Failure classification continuation
 
 Raw targeted seven: base 7/7 and candidate 7/7 passed. Controlled slow-file-sync: both sides completed six original assertions beyond the original 10s budget. Controlled projection redelivery: both sides reproduced expected 2 / observed 3 with completion and cursor assertions satisfied. Report: `docs/researches/2026-09-08-doctor-failure-classification.md`. No original test or production source edits; no full-suite success claim.
+
+## Test correction closeout
+
+The user subsequently approved the four-file correction. All 12 natural-compaction slow-sync controls pass under local 60s budgets with package default 10s; the projection barrier test preserves exact completion/cursor/hook assertions and verifies stop abortion. Full-suite success supersedes the earlier local test blocker. Details: implementation notes and `test-repair-checks.json` in the classification evidence directory.

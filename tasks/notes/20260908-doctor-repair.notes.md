@@ -4,7 +4,7 @@
 
 Implemented in isolated worktree `/Users/kito/Projects/byok-sdk-wt-doctor-repair`, branch `codex/doctor-repair`, base `62e83ae` (fresh origin/main). Plan commit: `6cd908d`. Original root WIP was preserved; the preceding guide and its navigation edits were imported deliberately.
 
-Implementation is complete; whole-repo test acceptance is NOT passed. No push, merge, publication, live credential access, daemon operation, or deployment was performed. New public API requires a MINOR release boundary; package versions were not modified.
+Implementation and whole-repo local test acceptance are complete after the approved test correction below; independent semantic acceptance remains pending. No push, merge, publication, live credential access, daemon operation, or deployment was performed. New public API requires a MINOR release boundary; package versions were not modified.
 
 ## P1 / P2 / P3
 
@@ -54,3 +54,19 @@ The user approved only pinned-base comparison and attribution. Base `62e83ae` an
 Classification: shared baseline I/O-budget weakness for six cases; baseline scheduling assumption for projection. No doctor-specific functional regression was observed in these seven comparisons. Original failing-run disk load was not instrumented, so this is not an exact load measurement of that historical run or a performance benchmark. Product code and original tests were not changed, and whole-suite acceptance is still NOT passed.
 
 Durable report and exact commands/results/source hashes: `docs/researches/2026-09-08-doctor-failure-classification.md`, `docs/researches/evidence/doctor-failure-classification-20260908/results.json`. Next bounded slice is test-only budget/event-barrier correction; not executed under the classification approval.
+
+## Approved test correction
+
+P1: Only the four named test files changed; production code/API remain identical to `06991fb`. Natural compaction crosses the public 512-entry threshold and performs over 1,000 actual file/directory syncs. Projection completion and mailbox ACK are separate asynchronous boundaries.
+
+P2: A first events page is delivered to daemon A -> host hook -> injected completion 503 -> cursor stays 0. A test fetch barrier installed before start parks the next events request, with an abort listener as its stop receipt. The test waits for both the rejected completion and parked poll, asserts exactly one hook, stops A and verifies poll abortion. Daemon B then receives the retained row, completes idempotently and advances the same cursor to 1; exactly two total hooks and zero runtime sessions/tasks remain required.
+
+P3: Local 60s budgets cover only natural-compaction parameterized families, preserving the real threshold, append/reopen and quarantine checks. No global timeout, no sync mock removal, no relaxed count assertion, no product retry policy change. The barrier replaces a timing assumption with controlled delivery; at higher disk load the same bounded I/O budget can still expire honestly.
+
+Validation before full-suite freeze: projection file 5/5 PASS; all 12 natural-compaction cases PASS under the existing 21ms slow-sync overlay (97.41s total), retaining the package 10s default and relying only on the new local budgets. Root typecheck PASS. Source hashes and sync profile are in `docs/researches/evidence/doctor-failure-classification-20260908/test-repair-*`. Local logs: `_ops/doctor-repair/barrier-test.log`, `repair-budget-test.log`, `test-repair-typecheck.log`. No production files changed since the previous passing build; that build evidence is reused rather than reproduced.
+
+Frozen full-suite result: `bun run test` PASS (exit 0), 13 packages, 3905 passed / 135 skipped; client 1860 passed / 11 skipped. No new failures. Full log `_ops/doctor-repair/test-repair-full.log`, SHA-256 `36f562d235bd289099fd8ab782dbf1eff01f6fbecf48388c6d0de4d4c18e51b9`. Root typecheck, API surface and version authority PASS. This supersedes the earlier full-suite blocker; historical failure records remain above. Independent semantic acceptance and real OS-provider qualification are not claimed.
+
+Workflow closeout keeps the active plan nonterminal for its pending independent acceptance boundary. An attempted terminal status triggered active-plan/terminal-plan-count validation; corrected only this plan status rather than archiving unrelated plans.
+
+Final `repo-harness run check-task-workflow --strict` and `git diff --check`: PASS. No test rerun after document-only closeout.

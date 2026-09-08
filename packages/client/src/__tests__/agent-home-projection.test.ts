@@ -163,51 +163,71 @@ describe('task-free Agent-home projection', () => {
       storeDir,
       agentHome: { hostStorageRoot, projection },
     }, [adapterA], {
-      // WP3B Step 2: the real server has no WS upgrade handler at all, so fail
-      // over to long-poll after a single failed attempt instead of waiting
-      // through a full default backoff sequence — same configuration as
-      // `real-server-longpoll-only.test.ts`.
-      // Keep the first daemon from completing an automatic retry before the
-      // test can stop it; the second daemon must be the successful redelivery.
-      longPoll: { retryDelayMs: 1_000, idleDelayMs: 20 },
+      longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
     });
     daemons.push(daemonA);
     const pairing = await real.createPairingCode();
     const record = await daemonA.pair(pairing.code);
-    await daemonA.start();
-    // `daemon.start()` settles when the daemon commits to long-poll mode, which
-    // can be a tick before its first `GET /byok/events` lands — and the server
-    // only counts a device connected once that poll arrives. Enqueueing before
-    // then throws `device ... is not connected`. Same wait as
-    // `real-server-longpoll-only.test.ts`.
-    await vi.waitFor(async () => {
-      expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
-    });
-
     const nativeFetch = globalThis.fetch;
     let rejectedCompletions = 0;
-    const interceptedFetch: typeof fetch = (input, init) => {
+    let deliveredProjection = false;
+    let pollBlocked = false;
+    let blockedPollAborted = false;
+    const interceptedFetch: typeof fetch = async (input, init) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.includes(`/byok/agent-home-projections/${desired('1').requestId}/completion`)) {
         rejectedCompletions += 1;
-        return Promise.resolve(new Response(JSON.stringify({ error: 'injected completion failure' }), {
+        return new Response(JSON.stringify({ error: 'injected completion failure' }), {
           status: 503,
           headers: { 'content-type': 'application/json' },
-        }));
+        });
+      }
+      if (new URL(url).pathname === '/byok/events') {
+        // Install before start so even the first held poll crosses this barrier.
+        // After the only mailbox row is delivered, park the next poll until stop;
+        // retry/idle timing can no longer create a second attempt on daemon A.
+        if (deliveredProjection) {
+          const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+          if (!signal) throw new Error('Expected abortable events poll');
+          return new Promise<Response>((_resolve, reject) => {
+            const onAbort = () => {
+              signal.removeEventListener('abort', onAbort);
+              blockedPollAborted = true;
+              reject(new DOMException('Test poll stopped', 'AbortError'));
+            };
+            signal.addEventListener('abort', onAbort, { once: true });
+            pollBlocked = true;
+            if (signal.aborted) onAbort();
+          });
+        }
+        const response = await nativeFetch(input, init);
+        const page = await response.clone().json() as { events: unknown[] };
+        if (page.events.length > 0) deliveredProjection = true;
+        return response;
       }
       return nativeFetch(input, init);
     };
     vi.stubGlobal('fetch', interceptedFetch);
+    await daemonA.start();
+    // Enqueue only after the first real poll establishes device connectivity.
+    await vi.waitFor(async () => {
+      expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
+    });
 
     const pending = await real.byok.enqueueAgentHomeProjection({ deviceId: record.deviceId, payload: desired('1') });
     expect(pending.status).toBe('pending');
-    await vi.waitFor(() => expect(rejectedCompletions).toBeGreaterThan(0));
+    await vi.waitFor(() => {
+      expect(rejectedCompletions).toBe(1);
+      expect(pollBlocked).toBe(true);
+    });
+    expect(hookCwds).toHaveLength(1);
     expect((await real.byok.readAgentHomeProjection(record.deviceId, desired('1').agentRef, desired('1').requestId))?.status).toBe('pending');
     await expect(new CursorStore(storeDir).load(real.url, record.deviceId)).resolves.toBe(0);
     expect(adapterA.sessions).toHaveLength(0);
     expect((await real.byok.tasks.list()).tasks).toHaveLength(0);
 
     await daemonA.stop();
+    expect(blockedPollAborted).toBe(true);
     daemons.splice(daemons.indexOf(daemonA), 1);
     vi.unstubAllGlobals();
     const adapterB = new StubRuntimeAdapter();

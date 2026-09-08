@@ -1,0 +1,12 @@
+{
+  "parent": "4242fc6",
+  "node": "22.22.3",
+  "bun": "1.4.2",
+  "files": {
+    "packages/client/src/__tests__/agent-egress-spool.test.ts": "54661bd4c18df958567f2b6dcf2e30889ac616630a7aa6f88b9f81d7490312db",
+    "packages/client/src/__tests__/agent-message-outbox.test.ts": "315deee04a659742feca5292b8bc88f574546a596feb06d5bfe120d6f7c4e03f",
+    "packages/client/src/__tests__/durable-egress-faults.test.ts": "3936f32f1829ccd090baaeb3012663fe648f9b7b6303d2c5ba5615a0fdc71a8c",
+    "packages/client/src/__tests__/agent-home-projection.test.ts": "10d9593f5a7a05e950e632cae619131d25917ac386e38928ab6efde32f925739"
+  },
+  "control": "Same sync-delay.setup.ts, 21ms added to each real JSONL sync; package testTimeout stays 10000; only test-local 60000 applies."
+}

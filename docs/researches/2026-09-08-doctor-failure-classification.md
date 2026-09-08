@@ -62,3 +62,7 @@
 ## 下一步
 
 限定修复上述四个测试文件的证据边界：自然 compaction 场景设独立、有界且覆盖真实同步成本的预算；projection 用明确事件屏障控制首个失败与重启，不依赖等待时间或盲目放宽 hook 次数。保留完整 append/reopen、真实 fsync 故障、completion/cursor 与无 runtime 执行断言。此修复尚未获本次范围授权，未执行。
+
+## Approved correction result
+
+Subsequent user approval covered only the four named tests. Natural-compaction families now use local 60s budgets; a pre-start fetch barrier delivers one projection page and blocks the next poll until stop, preserving exact cursor/completion assertions. Production source is unchanged. All 12 slow-sync cases pass with the package default still 10s; projection file 5/5 passes. Frozen full root test run exits 0: 3905 passed / 135 skipped across 13 packages, including client 1860 passed / 11 skipped. Durable hashes and per-package summaries: `evidence/doctor-failure-classification-20260908/test-repair-checks.json`; test hashes and sync observations are adjacent. Historical baseline/candidate classification above remains unchanged.

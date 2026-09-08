@@ -1,0 +1,35 @@
+{
+  "fullTest": {
+    "exitCode": 0,
+    "passed": 3905,
+    "skipped": 135,
+    "packages": 13,
+    "sha256": "36f562d235bd289099fd8ab782dbf1eff01f6fbecf48388c6d0de4d4c18e51b9",
+    "log": "_ops/doctor-repair/test-repair-full.log",
+    "packageSummaries": [
+      "@byok-sdk/client:test                           |       Tests  1860 passed | 11 skipped (1871)",
+      "@byok-sdk/cloud:test                            |       Tests  357 passed (357)",
+      "@byok-sdk/cloud-dataplane:test                  |       Tests  72 passed | 105 skipped (177)",
+      "@byok-sdk/conformance:test                      |       Tests  160 passed (160)",
+      "@byok-sdk/core:test                             |       Tests  252 passed (252)",
+      "@byok-sdk/example-live-activity-host:test       |       Tests  21 passed (21)",
+      "@byok-sdk/example-salesko-connector-broker:test |       Tests  25 passed (25)",
+      "@byok-sdk/keys:test                             |       Tests  427 passed (427)",
+      "@byok-sdk/protocol:test                         |       Tests  358 passed (358)",
+      "@byok-sdk/server:test                           |       Tests  348 passed | 19 skipped (367)",
+      "@byok-sdk/testkit:test                          |       Tests  4 passed (4)",
+      "@byok-sdk/ui-runtime:test                       |       Tests  20 passed (20)",
+      "byok-sdk:test                                   |       Tests  1 passed (1)"
+    ]
+  },
+  "typecheck": "PASS",
+  "apiSurface": "PASS",
+  "versionAuthority": "PASS",
+  "build": "Reused passing build at unchanged production source 06991fb",
+  "targeted": {
+    "projection": 5,
+    "slowSyncNaturalCompaction": 12
+  },
+  "workflow": "PASS",
+  "diffCheck": "PASS"
+}

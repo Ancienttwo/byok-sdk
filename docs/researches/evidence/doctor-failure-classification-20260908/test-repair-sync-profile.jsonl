@@ -1,0 +1,12 @@
+{"test":"Agent reliable egress spool > reopens after natural compaction retaining 0 records and another append","syncCalls":515,"addedDelayMs":11392.542055000005,"realSyncMs":3271.3828239999807}
+{"test":"AgentMessageOutbox > reopens after natural compaction retaining 0 drafts and another append","syncCalls":515,"addedDelayMs":11395.638703000008,"realSyncMs":3374.074737999991}
+{"test":"outbox: natural compaction propagates temp sync failure and quarantines the replacement","syncCalls":514,"addedDelayMs":11364.104210999998,"realSyncMs":3278.1136140000053}
+{"test":"Agent reliable egress spool > reopens after natural compaction retaining 1 records and another append","syncCalls":516,"addedDelayMs":11562.198947999957,"realSyncMs":3649.657218000004}
+{"test":"outbox: natural compaction propagates target sync failure and quarantines the replacement","syncCalls":514,"addedDelayMs":11526.80151199999,"realSyncMs":3625.541878999982}
+{"test":"AgentMessageOutbox > reopens after natural compaction retaining 1 drafts and another append","syncCalls":516,"addedDelayMs":11553.36103500006,"realSyncMs":3604.2590010000204}
+{"test":"Agent reliable egress spool > reopens after natural compaction retaining 3 records and another append","syncCalls":516,"addedDelayMs":11571.715921999974,"realSyncMs":3710.648007000069}
+{"test":"outbox: natural compaction propagates directory sync failure and quarantines the replacement","syncCalls":515,"addedDelayMs":11563.518915000008,"realSyncMs":3902.877332999895}
+{"test":"AgentMessageOutbox > reopens after natural compaction retaining 3 drafts and another append","syncCalls":516,"addedDelayMs":11579.917071999946,"realSyncMs":3666.602000999992}
+{"test":"spool: natural compaction propagates temp sync failure and quarantines the replacement","syncCalls":514,"addedDelayMs":11660.917565000047,"realSyncMs":2145.3511560000043}
+{"test":"spool: natural compaction propagates target sync failure and quarantines the replacement","syncCalls":514,"addedDelayMs":11882.283589000232,"realSyncMs":2091.419114000033}
+{"test":"spool: natural compaction propagates directory sync failure and quarantines the replacement","syncCalls":515,"addedDelayMs":11981.35041099992,"realSyncMs":2197.593289000026}

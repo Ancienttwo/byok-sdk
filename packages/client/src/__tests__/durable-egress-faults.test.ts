@@ -159,7 +159,7 @@ for (const kind of ['outbox', 'spool'] as const) {
     vi.restoreAllMocks();
     await expect(append('blocked')).rejects.toThrow(/quarantined/);
     expect((kind === 'outbox' ? await AgentMessageOutbox.open(root) : await AgentReliableSpool.open(root)).records()).toEqual([retained]);
-  });
+  }, 60_000); // Natural threshold preparation retains real file/directory syncs.
 }
 
 test('reopen does not expose recovered records until their sync succeeds', async () => {
