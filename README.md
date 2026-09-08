@@ -5,21 +5,22 @@ authenticated on an end user's machine. It includes a local daemon, a
 self-hosted server façade over the cloud kernel, and a hosted multi-tenant
 composition over Postgres and R2.
 
-## Current release
+## Release status
 
-The prepared release candidate is `byok-sdk@0.15.0`, with the independently versioned
-`@byok-sdk/keys@0.4.1`. `CHANGELOG.md` carries the per-train release notes for
-the daemon, the hosted data plane, and the key management surface. Read it
-there rather than from a summary duplicated in this file.
+The latest published npm SDK train is **0.14.0**, with independent keys **0.4.0**.
+The source on `main` targets the unpublished candidate `byok-sdk@0.15.0`, with
+`@byok-sdk/keys@0.4.1`. A candidate version in this repository is not a published
+npm release. `CHANGELOG.md` separates candidate changes from released trains.
 
-The bundled Pi runtime authority remains the exact
-`@earendil-works/pi-coding-agent@0.84.2` dependency. Release SemVer is
-observability only; protocol intersection and advertised capabilities remain
-the execution gates.
+The Git tag `v0.14.0` exists; its GitHub Release page has not been created.
+GitHub's latest Release page therefore still shows `v0.13.0`. Registry packages,
+Git tags and GitHub Release pages are separate publication records.
 
-All ten npm artifacts were frozen from one source commit and passed registry
-integrity, dependency-edge, fresh-import, and single-version closure readback.
-The release does not perform a production migration or deployment for a host.
+The bundled Pi runtime is pinned to
+`@earendil-works/pi-coding-agent@0.85.1`. Release SemVer is observability only;
+protocol intersection and advertised capabilities remain the execution gates.
+Publishing an SDK release does not perform a host's production migration or
+deployment.
 
 ## 0.4.0 custom RuntimeAdapter migration
 
@@ -33,8 +34,10 @@ sealed its credential-free manifest and claimed the offer. Do not ship an
 adapter that supports both shapes or allocates process/temp/workspace/session
 resources during `prepare()`; reject unsupported input before claim instead.
 
+Install the latest published stable train (the candidate above is not on npm):
+
 ```sh
-npm install byok-sdk@0.15.0
+npm install byok-sdk
 ```
 
 ```ts
