@@ -15,3 +15,8 @@ The complete provider collection contains 178 Issue/PR records across two pages,
 Budget accounting includes five prior reservations, four active reservations and three diagnostic reads: twelve calls consumed against the original forty-call envelope, leaving at most twenty-eight with the original expiry 2026-09-08T16:34:27.212Z. Any new grant must bound runner invocations and agent turns consistently with provider calls, rather than the former four-invocation limit. The exhausted run and its stop receipt remain immutable. No replacement grant has been issued.
 
 Issues #177 and #178 exist but lack the configured brc1415-canary eligibility label. A complete collection remains mandatory; selecting only those numbers cannot prove absence of duplicate campaign slots. The current product cannot transplant authoring into a new campaign or revive an exhausted run. Preserve the two Issues pending the Owner decision on formal continuation versus a fresh campaign.
+
+
+## Owner-directed bounded read cutover
+
+Owner prohibited repository-wide reads. The selected GitHub adapter now sends the configured label filter on every collection page; completeness is limited to that selected scope. Only #177 and #178 receive brc1415-canary. Restore the original finite limits (two pages, twenty records, 256 KiB); do not increase them to scan unrelated records. Existing stopped campaign evidence is historical and cannot admit this new policy revision.

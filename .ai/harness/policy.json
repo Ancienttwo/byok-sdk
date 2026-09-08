@@ -157,10 +157,10 @@
         "assignees_any": []
       },
       "limits": {
-        "max_pages": 4,
-        "max_issues": 400,
+        "max_pages": 2,
+        "max_issues": 20,
         "max_body_bytes": 16384,
-        "max_total_bytes": 8388608,
+        "max_total_bytes": 262144,
         "deadline_ms": 30000
       }
     }
