@@ -2,10 +2,10 @@
 
 > **Status**: Pending
 > **Detected**: 2026-09-05T01:25:02+0800
-> **Updated**: 2026-09-05T23:06:44+0800
+> **Updated**: 2026-09-08T18:43:13+0800
 > **Severity**: high
 > **Change Type**: source-change
-> **File**: `packages/client/src/__tests__/deterministic-jitter.test.ts`
+> **File**: `packages/client/src/__tests__/artifact-read.test.ts`
 > **Functional Block**: `packages`
 > **Capability ID**: `root`
 > **Matched Prefix**: `packages`
@@ -16,7 +16,7 @@
 > **Contract Files**: `packages/AGENTS.md`, `packages/CLAUDE.md`
 > **Contract Sync Required**: false
 > **Spawn Recommended**: true
-> **Open Edits**: 74
+> **Open Edits**: 76
 
 ## Required Follow-up
 
@@ -33,6 +33,8 @@
 
 | Last Event | Severity | Change Type | File | Event Key |
 | --- | --- | --- | --- | --- |
+| 2026-09-08T18:43:13+0800 | low | source-change | `packages/client/src/__tests__/artifact-read.test.ts` | `sha256:b6a550458ecd5fa7096e8787eb990144d1384b484d94c53abbd638bbdb548404` |
+| 2026-09-08T18:42:37+0800 | low | source-change | `packages/client/src/__tests__/admission-deadline.test.ts` | `sha256:96ad05174499053d6156b78f62cec4eb44a47605c48ba0c098bfbb07865174a2` |
 | 2026-09-05T23:06:44+0800 | low | source-change | `packages/client/src/__tests__/deterministic-jitter.test.ts` | `sha256:3be306497aa01955777d35c9435801147fb69b407fd9664108dd6c9f0a643e6e` |
 | 2026-09-05T23:06:42+0800 | low | source-change | `packages/client/src/__tests__/daemon-task-loop.test.ts` | `sha256:daa4e5c122eac244d10838edadd63634860c0d4f2b6edefcb26f08415b23b772` |
 | 2026-09-05T23:06:41+0800 | low | source-change | `packages/client/src/__tests__/daemon-stop-shutdown-parity.test.ts` | `sha256:f22cb5d6af16ac40047da1078211996243c1702bb869a60fad13310177554f90` |
@@ -112,8 +114,8 @@
 
 ```json
 {
-  "ts": "2026-09-05T23:06:44+0800",
-  "file_path": "packages/client/src/__tests__/deterministic-jitter.test.ts",
+  "ts": "2026-09-08T18:43:13+0800",
+  "file_path": "packages/client/src/__tests__/artifact-read.test.ts",
   "severity": "low",
   "functional_block": "packages",
   "capability_id": "root",
@@ -128,7 +130,7 @@
   "request_file": "docs/architecture/requests/root.md",
   "spawn_recommended": false,
   "contract_sync_required": false,
-  "event_key": "sha256:3be306497aa01955777d35c9435801147fb69b407fd9664108dd6c9f0a643e6e"
+  "event_key": "sha256:b6a550458ecd5fa7096e8787eb990144d1384b484d94c53abbd638bbdb548404"
 }
 ```
 
@@ -136,6 +138,44 @@
 
 ```json
 [
+  {
+    "ts": "2026-09-08T18:43:13+0800",
+    "file_path": "packages/client/src/__tests__/artifact-read.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:b6a550458ecd5fa7096e8787eb990144d1384b484d94c53abbd638bbdb548404"
+  },
+  {
+    "ts": "2026-09-08T18:42:37+0800",
+    "file_path": "packages/client/src/__tests__/admission-deadline.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:96ad05174499053d6156b78f62cec4eb44a47605c48ba0c098bfbb07865174a2"
+  },
   {
     "ts": "2026-09-05T23:06:44+0800",
     "file_path": "packages/client/src/__tests__/deterministic-jitter.test.ts",

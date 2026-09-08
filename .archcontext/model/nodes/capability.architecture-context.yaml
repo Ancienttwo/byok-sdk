@@ -1,0 +1,6 @@
+id: "capability.architecture-context"
+kind: "capability"
+name: "Architecture Context"
+schemaVersion: "archcontext.node/v2"
+status: "active"
+summary: "Keeps product and architecture intent available to coding agents."

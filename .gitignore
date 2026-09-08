@@ -85,6 +85,7 @@ tasks/.current.md.tmp.*
 !.ai/harness/planning/.gitkeep
 .ai/harness/delegation/*
 .ai/harness/architecture/events.jsonl
+.ai/harness/architecture/.architecture-queue.lock
 .ai/harness/active-plan
 .ai/harness/active-worktree
 .ai/harness/sprint/

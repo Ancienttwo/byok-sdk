@@ -1,0 +1,13 @@
+capabilities:
+  - "architecture-context"
+id: "product.archcontext-project"
+name: "ArchContext Project"
+nonGoals: []
+purpose: "Capture product intent for architecture-aware agent work."
+riskDomains: []
+schemaVersion: "archcontext.product/v1"
+successCriteria:
+  - "Agent tasks bind to architecture context before completion."
+users:
+  - description: "Developer using an agentic coding runtime."
+    id: "developer"

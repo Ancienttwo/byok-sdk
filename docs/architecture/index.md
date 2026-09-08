@@ -15,5 +15,5 @@
 ## Pending Requests
 
 <!-- BEGIN ARCHITECTURE PENDING REQUESTS -->
-- [ ] 2026-09-05T23:06:44+0800 [high] `packages/client/src/__tests__/deterministic-jitter.test.ts` -> [root](requests/root.md)
+- [ ] 2026-09-08T18:43:13+0800 [high] `packages/client/src/__tests__/artifact-read.test.ts` -> [root](requests/root.md)
 <!-- END ARCHITECTURE PENDING REQUESTS -->
