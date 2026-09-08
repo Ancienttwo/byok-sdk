@@ -1,16 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.15.0 / @byok-sdk/keys 0.4.1 — prepared, not published
 
 - Add public `diagnoseDevice` for embedded hosts and confirmed, exact-target
   `repairDeviceEnrollmentMetadata` / `doctor --repair restore-enrollment-metadata`.
   Restore only missing/valid-stale non-secret metadata from OS enrollment under
   the existing store lease; no renewal, credential replacement or task replay.
   Existing health-only `--fix` is unchanged. Include downstream integration and
-  acceptance guidance. Public API addition requires a MINOR release boundary;
-  this source change does not publish or change package versions.
+  acceptance guidance. This additive API is included in the unpublished 0.15.0
+  MINOR train; keys 0.4.1 keeps its independent version.
 
-## 0.15.0 / @byok-sdk/keys 0.4.1 — prepared, not published
+- Reject unsupported wire majors before envelope admission, including direct
+  cloud inbound calls. Client long-poll leaves unsupported executable envelopes
+  unacknowledged. Wire major 1 remains the supported protocol; this does not add
+  v2 or infer compatibility from package versions.
 
 - Fix the R12/R13 pre-active cancellation gap: revoke staged messages before
   cancellation terminal delivery and retain startup ownership on settlement

@@ -12,6 +12,9 @@ The source on `main` targets the unpublished candidate `byok-sdk@0.15.0`, with
 `@byok-sdk/keys@0.4.1`. A candidate version in this repository is not a published
 npm release. `CHANGELOG.md` separates candidate changes from released trains.
 
+The [0.15.0 release notes draft](docs/releases/v0.15.0.md) covers the changes
+since 0.14.0 and required upgrade steps.
+
 The Git tag `v0.14.0` exists; its GitHub Release page has not been created.
 GitHub's latest Release page therefore still shows `v0.13.0`. Registry packages,
 Git tags and GitHub Release pages are separate publication records.

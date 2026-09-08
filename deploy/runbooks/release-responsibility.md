@@ -2,6 +2,10 @@
 
 Status: CURRENT boundary contract.
 
+For the prepared 0.15.0 / keys 0.4.1 train, use the
+[GitHub Release preparation checklist](../../docs/releases/v0.15.0-publication.md)
+and its linked release body.
+
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
 
 - release channel and rollback channel;
