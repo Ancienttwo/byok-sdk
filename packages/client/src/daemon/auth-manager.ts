@@ -390,23 +390,7 @@ export class AuthManager {
       throw new DeviceRecordRePairRequiredError();
     }
 
-    const projection: DeviceMetadata = {
-      deviceId: authority.deviceId,
-      tenantId: authority.tenantId,
-      devicePublicKey: authority.devicePublicKey,
-    };
-    // Missing or valid-but-stale non-secret projection is repairable. A
-    // legacy secret-bearing, malformed or tampered projection throws and may
-    // only be replaced by explicit authenticated pair(), never steady state.
-    const current = await this.opts.store.load();
-    if (
-      current === undefined ||
-      current.deviceId !== projection.deviceId ||
-      current.tenantId !== projection.tenantId ||
-      current.devicePublicKey !== projection.devicePublicKey
-    ) {
-      await this.opts.store.save(projection);
-    }
+    await this.opts.store.reconcileMetadata(authority);
     return Object.freeze({ ...authority });
   }
 }

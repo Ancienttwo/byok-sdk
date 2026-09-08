@@ -213,6 +213,24 @@ export class DeviceStore {
     }
   }
 
+  /** Rebuild only the non-secret projection, while the caller owns the store lease. */
+  async reconcileMetadata(authority: DeviceMetadata): Promise<boolean> {
+    const projection: DeviceMetadata = {
+      deviceId: authority.deviceId,
+      tenantId: authority.tenantId,
+      devicePublicKey: authority.devicePublicKey,
+    };
+    // Invalid/legacy files still throw: only explicit authenticated pairing
+    // may replace them. Never copy extra fields from the OS record.
+    const current = await this.load();
+    if (current !== undefined && current.deviceId === projection.deviceId &&
+        current.tenantId === projection.tenantId && current.devicePublicKey === projection.devicePublicKey) {
+      return false;
+    }
+    await this.save(projection);
+    return true;
+  }
+
   async save(record: DeviceMetadata): Promise<void> {
     assertDeviceMetadata(record);
     const storeDir = path.dirname(this.filePath);

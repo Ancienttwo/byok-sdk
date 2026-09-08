@@ -149,6 +149,36 @@ is added to wire presence or task envelopes, and no decline/retry/permission
 policy is derived from these diagnostic categories. This contract does not add
 caching, periodic probing, minimum versions, repair commands or self-update.
 
+### Explicit local device diagnostics and metadata repair
+
+`diagnoseDevice(config, { adapters?, runtimeProbeTimeoutMs? })` is the public,
+read-only projection of the existing local collector. Embedded hosts supply
+actual adapters; the result is device observation, not Agent readiness. The
+API does not read OS enrollment credentials and does not expose private
+collector clock/control injection seams.
+
+`repairDeviceEnrollmentMetadata(config, { confirmed: true, expectedDeviceId,
+expectedTenantId })` is an explicit operator action. It requires a matching
+existing OS enrollment authority and the same exclusive store lease used by
+daemon startup/pairing. Reachable authenticated control refuses; unreachable
+control is not quiescence proof. It restores only missing or valid-stale
+non-secret `device.json` through the same reconciliation method as startup,
+then reads back the metadata. Invalid/legacy/special-file projections,
+missing/unavailable authority and mismatched identity fail closed. It never
+renews/replaces credentials, creates a daemon, starts a task, or rebuilds a
+journal. Closed error codes and the result omit OS error details and secret
+bytes. `repaired` / `not-needed` describe projection readback only, not live
+service, credential validity or Agent readiness; a crash can require another
+projection rebuild from the OS authority.
+
+CLI: `doctor --repair restore-enrollment-metadata --expected-device-id <id>
+--expected-tenant-id <id> --yes [--json] --config <path>` emits `{ repair }` in
+JSON mode. Typed action failures emit `{ repair: { action, scope, status: "failed", code } }` and exit nonzero. Both expected identities come from the authorized host enrollment,
+not the potentially stale file. Unsupported/missing actions and conflicting
+`--fix` are rejected. Existing `doctor --fix --yes` remains health-quarantine
+only; ordinary doctor retains its existing `{ diagnostics, fix? }` shape.
+See [downstream integration](agent-diagnostics-integration.md).
+
 ### Prepared operations
 
 `@byok-sdk/client` 0.4.0 has one breaking custom-adapter contract. A

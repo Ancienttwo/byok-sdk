@@ -1,5 +1,20 @@
 # @byok-sdk/client
 
+## Diagnostics and recovery integration
+
+Use the SDK-maintained [downstream guide](https://github.com/Ancienttwo/byok-sdk/blob/main/docs/agent-diagnostics-integration.md)
+to build diagnostic UI and local repair flows. `byok-agent doctor --json` is
+the current read-only CLI entrypoint; `--fix --yes` only quarantines confirmed-corrupt
+operational health state with the daemon stopped. It does not repair an Agent
+or rebuild its journal. The guide includes integration limits and acceptance
+scenarios; qualify them against the exact SDK artifact shipped by your product.
+
+The public `diagnoseDevice` API accepts the host's actual adapters.
+`repairDeviceEnrollmentMetadata` (or the named CLI `--repair restore-enrollment-metadata`
+action) restores missing/valid-stale non-secret enrollment metadata from its
+existing OS authority, with confirmation, exact expected tenant/device and
+exclusive store ownership. It does not renew credentials or prove Agent readiness.
+
 ## Exact provider-profile admission
 
 When `DaemonConfig.piByokLauncher` is configured, the daemon advertises the

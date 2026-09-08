@@ -2,6 +2,10 @@
 
 Status: CURRENT for `byok-agent` foreground and OS-service deployments.
 
+For product UI, local command integration, responsibility boundaries and
+acceptance scenarios, use the SDK-maintained
+[downstream Agent diagnostics guide](../../docs/agent-diagnostics-integration.md).
+
 ## Daily operator path
 
 1. `byok-agent status --config <path>` shows persisted history plus a clearly marked live section when the authenticated control socket is reachable.
@@ -13,7 +17,7 @@ The support bundle includes system version, bounded runtime presence/capability 
 ## Corrupt state
 
 - A malformed/invalid-shape `operational-health.json` is reported as confirmed corrupt and left byte-identical by ordinary status/doctor runs. Open、permission、special-file or concurrent-change failures are reported as unavailable and are not eligible for fix.
-- Stop the daemon, retain a copy if local policy requires it, then run `byok-agent doctor --fix --yes --config <path>`. This is the only shipped fix: it must acquire the same cross-process store mutation lease (including its kernel-exclusive transition mutex) held until auth renewal and every other daemon writer stop, re-confirm corruption through a pathname-bound bounded handle (POSIX no-follow/non-blocking；Windows pre/post-open identity binding), refuse unavailable/symlink/non-regular evidence, synchronously copy the exact bounded bytes into a separate evidence inode inside a pinned `quarantine/` directory, hash that copy, publish a manifest containing reason, source path, size and SHA-256, revalidate the unchanged source, and only then remove its source name. POSIX fsyncs the quarantine directory before source removal and the source parent afterward；Windows uses file flush plus ordered link/unlink because Node exposes no directory flush there. A pre-unlink failure rolls back the publications；a crash after durable publication leaves the source plus valid duplicate evidence, never evidence loss. It does not create a healthy replacement.
+- Stop the daemon, retain a copy if local policy requires it, then run `byok-agent doctor --fix --yes --config <path>`. This health-only action: it must acquire the same cross-process store mutation lease (including its kernel-exclusive transition mutex) held until auth renewal and every other daemon writer stop, re-confirm corruption through a pathname-bound bounded handle (POSIX no-follow/non-blocking；Windows pre/post-open identity binding), refuse unavailable/symlink/non-regular evidence, synchronously copy the exact bounded bytes into a separate evidence inode inside a pinned `quarantine/` directory, hash that copy, publish a manifest containing reason, source path, size and SHA-256, revalidate the unchanged source, and only then remove its source name. POSIX fsyncs the quarantine directory before source removal and the source parent afterward；Windows uses file flush plus ordered link/unlink because Node exposes no directory flush there. A pre-unlink failure rolls back the publications；a crash after durable publication leaves the source plus valid duplicate evidence, never evidence loss. It does not create a healthy replacement.
 - `daemon.db` corruption follows the existing `JournalCorruptError` quarantine path, but only after daemon startup has acquired the same store lease；SQLite open/PRAGMA/schema/quarantine never runs in a rejected contender before ownership. There is no doctor rebuild or SQLite fallback. Inspect/recover the quarantined database outside the SDK before re-pairing or accepting new work.
 - Quarantine is never automatically deleted. Retention is an explicit operator policy and must preserve incident/legal requirements.
 
@@ -23,3 +27,7 @@ The support bundle includes system version, bounded runtime presence/capability 
 - `emergency` refuses to acknowledge data it cannot durably append.
 - Never delete unacked envelopes, live/approval tasks, unconfirmed terminals, recovery-marked records, user workspaces, credentials or quarantine evidence.
 - Restart through launchd/systemd/WinSW. The SDK daemon does not implement a second supervisor.
+
+## Explicit enrollment metadata repair
+
+With the service stopped, `byok-agent doctor --repair restore-enrollment-metadata --expected-device-id <id> --expected-tenant-id <id> --yes --json --config <path>` restores missing or valid-stale non-secret device metadata from the existing OS enrollment. Expected identity must come from the authorized host enrollment. It shares the startup reconciliation and store lease, refuses malformed/legacy records, missing authority and identity mismatches, and never renews credentials or reruns tasks. The `{ repair }` receipt proves metadata readback only; run doctor and separately verify service/Agent recovery. `--fix` remains health-only. See the integration guide for error codes and acceptance scenarios.

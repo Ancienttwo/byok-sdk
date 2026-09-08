@@ -1,6 +1,6 @@
 # Task Contract: Explicit device metadata repair and embedded diagnostics
 
-> **Status**: Active
+> **Status**: Blocked
 > **Plan**: plans/plan-20260908-doctor-repair.md
 > **Task Profile**: code-change
 > **Owner**: Codex

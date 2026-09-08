@@ -95,6 +95,13 @@ authorization and pairing authority, stable Agent/Profile identity, policy and r
 not compose Agent paths, implement SDK journals, or mirror the full local
 transcript as shared history.
 
+## Agent diagnostics and recovery integration
+
+The SDK maintains the [downstream integration guide](docs/agent-diagnostics-integration.md)
+for diagnostic UI, local CLI wiring, bounded health repair, support bundles,
+and acceptance scenarios. It distinguishes device diagnostics from Agent
+readiness and identifies SDK capabilities still needed by embedded hosts.
+
 ## Key management is separate
 
 `@byok-sdk/keys` stores provider credentials and makes direct provider calls.

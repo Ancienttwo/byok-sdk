@@ -6319,6 +6319,8 @@ export declare class DeviceStore {
      * identifiable until the synchronous pathname check and unlink complete.
      */
     remove(): Promise<DeviceMetadata | undefined>;
+    /** Rebuild only the non-secret projection, while the caller owns the store lease. */
+    reconcileMetadata(authority: DeviceMetadata): Promise<boolean>;
     save(record: DeviceMetadata): Promise<void>;
     private openBounded;
 }
@@ -7881,6 +7883,136 @@ export declare class TruthMemoryClient {
     writeSnapshot(input: TruthSnapshotWriteInput): Promise<TruthWriteResult>;
     writeTerminal(input: TruthTerminalWriteInput): Promise<TruthWriteResult>;
 }
+// ==== @byok-sdk/client dist/diagnostics/device-doctor.d.ts ====
+import type { DaemonConfig } from '../daemon/create-daemon';
+import type { RuntimeAdapter } from '../types';
+import type { DiagnosticsSnapshot } from './types';
+export type { DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus } from './types';
+export interface DiagnoseDeviceOptions {
+    /** The same adapters used by an embedded host; omitted uses bundled adapters. */
+    adapters?: RuntimeAdapter[];
+    runtimeProbeTimeoutMs?: number;
+}
+/** Read-only device observation; does not read OS credentials or prove Agent readiness. */
+export declare function diagnoseDevice(config: DaemonConfig, options?: DiagnoseDeviceOptions): Promise<DiagnosticsSnapshot>;
+export interface RepairDeviceEnrollmentMetadataInput {
+    confirmed: true;
+    /** Obtain both from the host's authorized enrollment target, never from a guessed default. */
+    expectedDeviceId: string;
+    expectedTenantId: string;
+}
+export interface DeviceMetadataRepairResult {
+    action: 'restore-enrollment-metadata';
+    scope: 'device';
+    /** Metadata readback only; does not imply renewed credentials or a running daemon. */
+    status: 'repaired' | 'not-needed';
+}
+declare const MESSAGES: {
+    readonly 'confirmation-required': 'Explicit confirmation is required for enrollment metadata repair.';
+    readonly 'invalid-target': 'An explicit expected tenant and device are required.';
+    readonly 'daemon-running': 'Stop the daemon before enrollment metadata repair.';
+    readonly 'store-busy': 'The store is owned by another operation; enrollment metadata repair refused.';
+    readonly 'authority-unavailable': 'The OS enrollment authority could not be read.';
+    readonly 'authority-missing': 'No complete OS enrollment exists; use explicit authenticated pairing.';
+    readonly 'target-mismatch': 'The OS enrollment does not match the expected tenant and device.';
+    readonly 'projection-unavailable': 'The enrollment metadata could not be read safely; repair refused.';
+    readonly 'repair-failed': 'Enrollment metadata repair did not complete; inspect the state before retrying.';
+};
+export type DeviceMetadataRepairErrorCode = keyof typeof MESSAGES;
+/** Closed diagnostics only: no OS stderr, local paths, authority bytes or nested cause. */
+export declare class DeviceMetadataRepairError extends Error {
+    readonly code: DeviceMetadataRepairErrorCode;
+    constructor(code: DeviceMetadataRepairErrorCode);
+}
+/**
+ * Explicitly restore missing/valid-stale device.json from its existing OS authority.
+ * Does not instantiate AuthManager, renew credentials, pair, or start a runtime.
+ * Ordinary doctor remains credential-blind; only this confirmed action opens the OS store.
+ */
+export declare function repairDeviceEnrollmentMetadata(config: DaemonConfig, input: RepairDeviceEnrollmentMetadataInput): Promise<DeviceMetadataRepairResult>;
+// ==== @byok-sdk/client dist/diagnostics/types.d.ts ====
+import type { RuntimeDetectResult } from '../types';
+import type { ControlStatusResult } from '../daemon/control-protocol';
+import type { OperationalHealthFileInspection } from '../daemon/operational-health';
+export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
+export interface DiagnosticCheck {
+    id: 'config' | 'device' | 'runtimes' | 'control' | 'health' | 'journal' | 'workspace' | 'quarantine';
+    status: DiagnosticStatus;
+    summary: string;
+}
+export interface DiagnosticsSnapshot {
+    version: 1;
+    generatedAt: string;
+    product: {
+        nameHash: string;
+        idHash: string;
+    };
+    system: {
+        node: string;
+        platform: NodeJS.Platform;
+        arch: string;
+        sqliteAvailable: boolean;
+    };
+    config: {
+        serverProtocol: 'http' | 'https' | 'ws' | 'wss' | 'invalid' | 'unsupported';
+        customStoreDir: boolean;
+        hostedJournal: boolean;
+        runtimeAllowlistCount?: number;
+    };
+    device: {
+        status: 'paired' | 'unpaired' | 'unavailable';
+        deviceIdHash?: string;
+    };
+    runtimes: Array<{
+        idHash: string;
+        present: boolean;
+        outcome: RuntimeDetectResult['kind'];
+        versionPresent: boolean;
+        authPresent?: boolean;
+        steer: boolean;
+        resume: boolean;
+        permissionModeCount: number;
+    }>;
+    control: {
+        status: 'offline';
+        reason: string;
+    } | {
+        status: 'online';
+        pid: number;
+        uptimeMs: number;
+        transport: string;
+        activeTaskCount: number;
+        pendingApprovalCount: number;
+        operationalHealth: ControlStatusResult['operationalHealth'];
+        storage?: ControlStatusResult['storage'];
+    };
+    health: OperationalHealthFileInspection;
+    journal: {
+        status: 'missing' | 'present' | 'corrupt' | 'unavailable';
+        sizeBytes?: number;
+        walBytes?: number;
+        integrity?: 'ok' | 'not-checked';
+        reason?: string;
+    };
+    workspace: {
+        status: 'available' | 'missing' | 'unavailable';
+        writable?: boolean;
+        reason?: string;
+    };
+    quarantine: {
+        status: 'available' | 'missing' | 'unavailable';
+        count: number;
+        scannedCount: number;
+        truncated: boolean;
+        entries: Array<{
+            nameHash: string;
+            sizeBytes: number;
+            modifiedAt: string;
+        }>;
+        reason?: string;
+    };
+    checks: DiagnosticCheck[];
+}
 // ==== @byok-sdk/client dist/index.d.ts ====
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, Session, GitWorkspaceConfig, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
 export type { AgentRef } from './agent-home';
@@ -7966,6 +8098,8 @@ export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin';
 export { ClaudeAdapter } from './adapters/claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
 export { CodexAdapter, type CodexAdapterOptions } from './adapters/codex/codex-adapter';
+export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError } from './diagnostics/device-doctor';
+export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, } from './diagnostics/device-doctor';
 // ==== @byok-sdk/client dist/lifecycle/create-service-lifecycle.d.ts ====
 import { type LaunchdDeps } from './launchd';
 import { type SystemdDeps } from './systemd';

@@ -1,6 +1,10 @@
 # Plan: Explicit device metadata repair and embedded diagnostics
 
-> **Status**: Approved
+> **Status**: Blocked
+> **Artifact Level**: work-package
+> **Promotion Reason**: New public diagnostics and operator repair API.
+> **Verification Boundary**: Frozen local source and required checks; no release or deployment.
+> **Rollback Surface**: This isolated candidate diff.
 > **Spec**: docs/spec.md
 > **Task Contract**: tasks/contracts/20260908-doctor-repair.contract.md
 > **Implementation Notes**: tasks/notes/20260908-doctor-repair.notes.md
@@ -19,11 +23,12 @@ User authorized plan and implementation on 2026-09-08 after the SDK-owned downst
 ## Task Breakdown
 
 - [x] Complete read-only trace and record Claude planning timeout; finalize the bounded main-agent contract.
-- [ ] Implement shared metadata reconciliation and public diagnosis/explicit repair APIs.
-- [ ] Wire named CLI action with confirmation and expected tenant/device, preserving --fix semantics.
-- [ ] Cover success, unchanged, missing authority, invalid projection, identity mismatch, concurrent owner, redaction, and public custom-adapter diagnostic paths.
-- [ ] Update spec, integration guide, runbook, changelog and API golden.
-- [ ] Freeze code, run required checks once, record results and residuals.
+- [x] Implement shared metadata reconciliation and public diagnosis/explicit repair APIs.
+- [x] Wire named CLI action with confirmation and expected tenant/device, preserving --fix semantics.
+- [x] Cover success, unchanged, missing authority, invalid projection, identity mismatch, concurrent owner, redaction, and public custom-adapter diagnostic paths.
+- [x] Update spec, integration guide, runbook, changelog and API golden.
+- [x] Freeze code, run required checks once, record results and residuals.
+- [ ] Close whole-repo test acceptance after classifying the seven failures; no out-of-scope repairs authorized by this slice.
 
 ## Verification
 
@@ -45,3 +50,7 @@ Targeted new repair/API tests plus existing auth/store/diagnostics tests during 
 - **Review/acceptance boundary**: main-agent source review; independent semantic acceptance remains separate.
 - **High-risk surface**: OS enrollment read and non-secret projection write under store lease.
 - **Why not checklist row**: new public API and operator mutation require a dedicated plan/contract.
+
+## Result
+
+Implementation complete; acceptance blocked by seven failures in four unchanged client test files. All 23 new tests passed within the final client run; required non-test checks passed. See implementation notes for exact counts and evidence. No release or independent acceptance is claimed.

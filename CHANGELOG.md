@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Add public `diagnoseDevice` for embedded hosts and confirmed, exact-target
+  `repairDeviceEnrollmentMetadata` / `doctor --repair restore-enrollment-metadata`.
+  Restore only missing/valid-stale non-secret metadata from OS enrollment under
+  the existing store lease; no renewal, credential replacement or task replay.
+  Existing health-only `--fix` is unchanged. Include downstream integration and
+  acceptance guidance. Public API addition requires a MINOR release boundary;
+  this source change does not publish or change package versions.
+
 ## 0.15.0 / @byok-sdk/keys 0.4.1 — prepared, not published
 
 - Fix R10–R11: quarantine uncertain JSONL writes, preserve exact identities on

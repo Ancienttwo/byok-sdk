@@ -1984,6 +1984,9 @@ S7-a 已将 automatic retry 的 random/fixed fleet cadence 收敛到一个可复
 
 #### 14.3.3 Health、doctor 与 quarantine
 
+公开 `diagnoseDevice` 复用现有 collector 并支持宿主 adapters；内部 DI 不外露。新增 `repairDeviceEnrollmentMetadata` / CLI `--repair restore-enrollment-metadata` 在明确确认、准确 expected tenant/device、offline 检查及同一 store lease 下，从现有 OS authority 修复缺失或有效但过期的 device metadata，复用 startup reconciliation。拒绝 malformed/legacy/mismatch/missing authority；不续期、不写凭证、不重跑任务。`--fix` 仍只隔离 health，两个动作不可混用。契约及下游流程见 `docs/spec.md` 与 `docs/agent-diagnostics-integration.md`。
+
+
 S7-a 落 operational health/crash authority；S7-b 已把它与 runtime/control/journal/workspace/quarantine 汇成 operator diagnostics：
 
 - daemon health 是独立于 transport/presence 的 `healthy/degraded/recovering` read model；默认 60s sliding window、3 failures degraded；

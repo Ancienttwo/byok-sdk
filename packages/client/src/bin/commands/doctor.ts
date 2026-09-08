@@ -7,10 +7,14 @@ import {
   type OperationalHealthFixResult,
 } from '../../diagnostics/diagnostics';
 import { resolveStoreDir } from '../config';
+import { repairDeviceEnrollmentMetadata, DeviceMetadataRepairError } from '../../diagnostics/device-doctor';
 
 export interface DoctorOptions extends CollectDiagnosticsOptions {
   json?: boolean;
   fix?: boolean;
+  repair?: string;
+  expectedDeviceId?: string;
+  expectedTenantId?: string;
   confirmed?: boolean;
   log?: (line: string) => void;
 }
@@ -52,6 +56,29 @@ function formatDoctorLines(snapshot: DiagnosticsSnapshot, fixResult?: Operationa
 }
 
 export async function runDoctorCommand(config: DaemonConfig, options: DoctorOptions = {}): Promise<void> {
+  if (options.repair !== undefined) {
+    if (options.fix || options.repair !== 'restore-enrollment-metadata') {
+      throw new Error('doctor requires one supported repair action; --fix cannot be combined with --repair');
+    }
+    const log = options.log ?? ((line: string) => console.log(line));
+    try {
+      const repair = await repairDeviceEnrollmentMetadata(config, {
+        confirmed: options.confirmed as true,
+        expectedDeviceId: options.expectedDeviceId as string,
+        expectedTenantId: options.expectedTenantId as string,
+      });
+      log(options.json ? JSON.stringify({ repair }, null, 2) : `repair ${repair.action}: ${repair.status} (${repair.scope})`);
+      return;
+    } catch (error) {
+      if (options.json && error instanceof DeviceMetadataRepairError) {
+        log(JSON.stringify({ repair: { action: 'restore-enrollment-metadata', scope: 'device', status: 'failed', code: error.code } }, null, 2));
+      }
+      throw error;
+    }
+  }
+  if (options.expectedDeviceId !== undefined || options.expectedTenantId !== undefined) {
+    throw new Error('expected identity flags require --repair restore-enrollment-metadata');
+  }
   if (options.fix && !options.confirmed) throw new DoctorConfirmationRequiredError();
   const storeDir = resolveStoreDir(config);
   let snapshot = await collectDiagnostics(config, storeDir, options);

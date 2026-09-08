@@ -125,6 +125,7 @@ function usage(): never {
       '  byok-agent start [--config <path>]                        (or BYOK_CONFIG env var)',
       '  byok-agent status [--config <path>]',
       '  byok-agent doctor [--json] [--fix --yes] [--config <path>]',
+      '  byok-agent doctor --repair restore-enrollment-metadata --expected-device-id <id> --expected-tenant-id <id> --yes [--json] [--config <path>]',
       '  byok-agent support-bundle --output <path> [--config <path>]',
       '  byok-agent runtimes [--config <path>]',
       '  byok-agent tasks [--follow] [--config <path>]',
@@ -203,6 +204,9 @@ async function main(): Promise<void> {
     return runDoctorCommand(config, {
       json: hasFlag(rest, '--json'),
       fix: hasFlag(rest, '--fix'),
+      repair: hasFlag(rest, '--repair') ? (argValue(rest, '--repair') ?? '') : undefined,
+      expectedDeviceId: hasFlag(rest, '--expected-device-id') ? (argValue(rest, '--expected-device-id') ?? '') : undefined,
+      expectedTenantId: hasFlag(rest, '--expected-tenant-id') ? (argValue(rest, '--expected-tenant-id') ?? '') : undefined,
       confirmed: hasFlag(rest, '--yes'),
     });
   }
