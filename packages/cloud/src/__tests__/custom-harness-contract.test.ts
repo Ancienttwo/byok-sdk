@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { createEnvelope, HarnessIdSchema, HarnessInventorySchema } from '@byok-sdk/protocol';
+import { describe, expect, it, vi } from 'vitest';
+import { createEnvelope, HarnessIdSchema, HarnessInventorySchema, type TaskClaimPayload } from '@byok-sdk/protocol';
 import { projectTerminalResult } from '../terminal-result';
 import { handleInboundEnvelope } from '../inbound';
 import { tenantStoresFor } from '../tenant-stores';
@@ -16,6 +16,52 @@ async function setup() {
 }
 
 describe('custom harness protocol authority', () => {
+  it.each([
+    [{ harnessId: 'acme-harness' }, { harnessId: 'other' }],
+    [{ harnessId: 'acme-harness' }, { runtime: 'pi' }],
+    [{ runtime: 'pi' }, { harnessId: 'acme-harness' }],
+    [{ runtime: 'pi' }, { runtime: 'codex' }],
+    [{ runtime: 'pi' }, {}],
+    [{ harnessId: 'acme-harness' }, { harnessId: 'acme-harness' }],
+    [{ runtime: 'pi' }, { runtime: 'pi' }],
+    [{}, {}],
+  ] satisfies Array<[Omit<TaskClaimPayload, 'deviceId'>, Omit<TaskClaimPayload, 'deviceId'>]>) (
+    'admits concurrent claims only for the atomic winner: %j / %j', async (first: Omit<TaskClaimPayload, 'deviceId'>, second: Omit<TaskClaimPayload, 'deviceId'>) => {
+      const { h, stores, deviceId } = await setup();
+      await stores.devices.recordCapabilities({ capabilities: ['custom-harness'], harnesses: [...inventory, { ...inventory[0]!, id: 'other' }] });
+      const { taskId } = await h.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
+      const claim = stores.tasks.claim.bind(stores.tasks);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      let arrivals = 0;
+      // Both handlers finish their stale pre-read before either performs the CAS.
+      const spy = vi.spyOn(stores.tasks, 'claim').mockImplementation(async (input) => {
+        if (++arrivals === 2) release();
+        await gate;
+        return claim(input);
+      });
+      const complete = vi.spyOn(stores.dedup, 'checkAndRecord');
+      const envelopes = [first, second].map((identity) => createEnvelope('task.claim', { deviceId, ...identity }, { taskId }));
+      const results = await Promise.all(envelopes.map((envelope) => handleInboundEnvelope(stores, deviceId, envelope)));
+      spy.mockRestore();
+      const winner = (await stores.tasks.get(taskId))!;
+      const expected = [first, second].map((identity) =>
+        identity.harnessId === winner.claimedHarnessId && identity.runtime === winner.claimedRuntime ? 'accepted' : 'rejected');
+      expect(results).toEqual(expected);
+      expect(complete).toHaveBeenCalledTimes(expected.filter((result) => result === 'accepted').length);
+      expect(winner.ownerDeviceId).toBe(deviceId);
+      const winnerIndex = expected.indexOf('accepted');
+      expect(await handleInboundEnvelope(stores, deviceId, envelopes[winnerIndex]!)).toBe('duplicate');
+      // New-envelope, same-identity replay is also idempotent and cannot restamp ownership.
+      expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', {
+        deviceId, ...[first, second][winnerIndex],
+      }, { taskId }))).toBe('accepted');
+      const loserIndex = expected.indexOf('rejected');
+      if (loserIndex !== -1) expect(await handleInboundEnvelope(stores, deviceId, envelopes[loserIndex]!)).toBe('rejected');
+      expect(await stores.tasks.get(taskId)).toEqual(winner);
+    },
+  );
+
   it('rejects reserved, malformed and duplicate inventory identities', () => {
     for (const id of ['pi', 'claude', 'codex', '', '../secret', 'x'.repeat(129)]) expect(HarnessIdSchema.safeParse(id).success).toBe(false);
     expect(HarnessInventorySchema.safeParse([...inventory, ...inventory]).success).toBe(false);
@@ -94,7 +140,7 @@ describe('custom harness protocol authority', () => {
     const receipt = (await h.cloud.readTerminalReceipt(TENANT_A, offer.taskId))!;
     expect(projectTerminalResult(offer.taskId, receipt)).toMatchObject({ recovery: valid.recovery, harnessId: 'acme-harness', state: 'failed' });
     // Recovery never fabricates an execution claim, including on replay.
-    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, harnessId: 'acme-harness' }, { taskId: offer.taskId }))).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, harnessId: 'acme-harness' }, { taskId: offer.taskId }))).toBe('rejected');
     expect((await stores.tasks.get(offer.taskId))?.ownerDeviceId).toBeUndefined();
   });
 

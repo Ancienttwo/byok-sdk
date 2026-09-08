@@ -2,6 +2,8 @@
 
 ## 0.15.0 / @byok-sdk/keys 0.4.1 — prepared, not published
 
+- Reject competing task claims whose runtime/harness identity differs from the atomic store winner; only confirmed ownership reaches inbound envelope acknowledgement.
+
 - Fix active required Agent message refusal leaving tasks running: persist the exact disposition, settle through the existing failure/disposal path, and fence cancellation races.
 
 - Fix R7: terminate every compacted Agent message outbox and reliable egress
