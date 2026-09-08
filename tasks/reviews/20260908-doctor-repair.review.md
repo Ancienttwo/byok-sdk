@@ -30,11 +30,12 @@ This is an independent reviewer report plus an explicitly authorized mechanical 
 > **Reviewer**: Codex
 > **Source**: codex-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: sha256:72dc1c390032dde19c292cd8bbab1c2bd9a8f00fe48f5097381c4339c6e704b0
+> **Reviewed Subject SHA256**: sha256:c24db8e5a77ccd286a7aa46b371e18a1e7d9eb2a985dc92dd2946709134c8551
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: 1dcbff572d6dc201c8c9afb757fda743ef6f8319
-> **Verification Evidence SHA256**: sha256:08142030565df339e8bd42598ff606a6ff28fdaf817c1142ec1b1d0a9154bc48
-> **Issued At**: 2026-09-08T10:16:32.212Z
+> **Reviewed Target Revision**: 62e83ae9ac76e38b5448307fec02850f780d7347
+> **Verification Evidence SHA256**: sha256:bb5de6626065bfbc2606645de704aced23f9ff3b1a1dacff0c25be2abbdbc807
+> **Issued At**: 2026-09-08T10:18:50.608Z
 
-- Summary: Independent gatekeeper /root/doctor_acceptance reviewed 30743c8: no semantic findings; the sole EOF whitespace finding was mechanically resolved at beb0b71 and cumulatively verified. Candidate 4a3d31c changes only formal plan/contract evidence declarations since that reviewed product source. Current exact source/config equality and doctor readback delta pass; baseline build/typecheck/full tests are ledger-bound.
+- Summary: Supersedes the receipt for stale local main. Independent gatekeeper /root/doctor_acceptance found no semantic findings on 30743c8; sole EOF finding resolved at beb0b71. Current candidate adds formal verification declarations and only changes review_base from main to origin/main, verified by exact policy-delta assertion. Source/config equality, doctor filesystem readback and ledger baseline checks pass against target 62e83ae.
 - Findings: none
+
