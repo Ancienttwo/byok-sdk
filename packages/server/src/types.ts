@@ -138,6 +138,8 @@ export interface CreateByokServerOptions {
 
 /** Input to {@link ByokServer.dispatch}. */
 export interface DispatchInput {
+  /** Pre-persisted execution identity. Requires explicit deviceId; retries may report a kernel conflict. */
+  taskId?: string;
   instruction: string;
   /**
    * Authoritative web-selected target. When present, `runtime` is derived

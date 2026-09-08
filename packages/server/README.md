@@ -39,8 +39,7 @@ disk usage; exhaustion is an error, not permission to delete identity fences.
 
 Unredeemed pairing codes, presence and other unmodified ports remain ephemeral.
 Keep daemon OS credentials, server URL and token signer stable across restart.
-This does not restore TaskHandle promises, subscriptions or provider processes,
-or add caller taskId/read/cancel methods to the server façade.
+This does not restore TaskHandle promises, subscriptions or provider processes.
 
 This candidate writes schema v3. Stop **all** writers and take a consistent
 SQLite backup (including WAL state or using SQLite's backup facility) before
@@ -73,3 +72,34 @@ candidate writers refuse v3. The previous unpublished `v1-to-v2` selector is
 replaced, without a compatibility alias. Restore of a backup requires a separate
 recovery procedure because it can lose new state or restore old grants. This
 belongs to the next MINOR release; these local changes are not a published upgrade.
+
+
+## Persistent host request identity
+
+Before enqueue, durably bind the authenticated scope and external execution key
+(including cycle/pass where applicable) to one taskId, explicit deviceId and
+immutable dispatch input. Pass that taskId to `dispatch` or
+`dispatchFreshAgentEgress`. Omitting taskId retains fresh-task semantics.
+A caller taskId requires an explicit device; the façade never reselects an
+ambient device for that identity. Initial dispatch still requires a connected
+device. Concurrent calls for one caller identity in one façade are rejected
+while the first is in flight.
+
+After restart use `tasks.offer(taskId)` to read the kernel's immutable executable
+offer and delivered marker, and `tasks.get(taskId)` for its state and result.
+These reads work offline. Duplicate dispatch can still throw a kernel conflict:
+only treat it as recovery after matching the original scope/target/type/payload
+and durable delivery. Missing or mismatched readback is not success. A false
+delivered marker does not prove mailbox append never happened. `tasks.offer`
+returns no invented transport sequence or reconstructed TaskHandle. Host-only
+agentMessageContext is not part of this executable-offer projection; callers
+must preserve its original binding and its separate consumer authority.
+
+`await server.tasks.cancel(taskId, reason)` uses the same kernel cancellation
+and relay notification as a live handle; it does not require a connected device.
+Missing tasks reject. A host must separately persist cancellation intent if it
+can crash before this call, and prevent dispatch of a cancelled prepared request.
+
+The runnable public-package fixture is
+`docs/researches/2026-09-09-g1c-facade/public-consumer-probe.mjs`. It demonstrates
+pre-enqueue binding and recovery, not product authentication or consumer ACK.

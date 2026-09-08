@@ -1,0 +1,22 @@
+{
+  "passed": true,
+  "failureDomain": "host and server close/reopen at selected commit boundaries",
+  "publicImportsOnly": true,
+  "fixedServerUrl": true,
+  "preEnqueueBindingSurvived": true,
+  "postEnqueueResponseLossRecovered": true,
+  "completedIdentitySurvivesRetention": true,
+  "hostAndSdkPayloadConflictsRejected": true,
+  "cycleIdentityDistinct": true,
+  "scopeBindingDistinct": true,
+  "cancellationReadAfterRestart": true,
+  "simulatedDeviceStarts": [
+    {
+      "taskId": "af2c8bf3-a968-4985-8c9b-99e840b0cfac",
+      "offerId": "cb09b370-28de-82d0-94fa-2f629c7ce9e2",
+      "seq": 1,
+      "sessionRef": "b372a0fb-eb6a-47fa-a2f0-7a81ea113341"
+    }
+  ],
+  "limitations": "Manual task.started from a fake device; no RuntimeAdapter.start, SIGKILL, real provider, product wiring or consumer ACK."
+}

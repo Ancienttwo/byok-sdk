@@ -38,6 +38,7 @@ export type {
   EnqueuedAgentControl,
   EnqueuedAgentHomeProjection,
   EnqueuedOffer,
+  TaskOfferReadback,
 } from './cloud';
 export {
   agentHomeProjectionCompletionKey,

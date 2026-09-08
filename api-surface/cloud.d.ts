@@ -826,7 +826,7 @@ export declare function declares(declaration: CapabilityDeclaration, capability:
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { type Envelope, type AgentRef, type AgentContentReadPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
+import { type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -1008,6 +1008,22 @@ export interface EnqueuedAgentControl {
 export interface EnqueuedAgentHomeProjection extends EnqueuedAgentControl {
     readonly status: AgentHomeProjectionReadback;
 }
+/** Immutable executable offer authority, independent of mailbox retention. */
+export type TaskOfferReadback = {
+    [T in TaskOfferType]: {
+        readonly taskId: string;
+        readonly deviceId: string;
+        readonly messageId: string;
+        readonly type: T;
+        readonly payload: Extract<Envelope, {
+            type: T;
+        }>['payload'];
+        /** Receipt time, not a transport delivery timestamp. */
+        readonly recordedAt: string;
+        /** The delivered marker is durable; false is not proof append never happened. */
+        readonly delivered: boolean;
+    };
+}[TaskOfferType];
 export interface EnqueuedOffer {
     readonly taskId: string;
     /** The per-(tenant, device) delivery seq — the daemon's redelivery cursor position for this envelope. */
@@ -1134,6 +1150,8 @@ export interface ByokCloud {
      */
     steerTask(tenant: TenantId, taskId: string, payload: TaskSteerPayload): Promise<EnqueuedAgentControl>;
     readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
+    /** Read the original executable offer; missing/corrupt authority never becomes a guessed payload. */
+    readTaskOffer(tenant: TenantId, taskId: string): Promise<TaskOfferReadback | undefined>;
     /**
      * Host control plane: one bounded page of this tenant's task attempts,
      * keyset-paged by `taskId` — see {@link TaskAttemptListQuery} for why the key
@@ -1770,7 +1788,7 @@ export declare function handleInboundEnvelope(stores: TenantStores, deviceId: st
 export { isTenantId, tenantId } from '@byok-sdk/core';
 export type { TenantId } from '@byok-sdk/core';
 export { createByokCloud } from './cloud';
-export type { ByokCloud, ByokCloudOptions, AgentDispatchInput, AgentEgressDispatchInput, AgentEgressFreshSessionDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, AgentHomeProjectionStatusInput, ApproveTaskOptions, EnqueueOfferInput, EnqueueToolsetOfferInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedOffer, } from './cloud';
+export type { ByokCloud, ByokCloudOptions, AgentDispatchInput, AgentEgressDispatchInput, AgentEgressFreshSessionDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, AgentHomeProjectionStatusInput, ApproveTaskOptions, EnqueueOfferInput, EnqueueToolsetOfferInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedOffer, TaskOfferReadback, } from './cloud';
 export { agentHomeProjectionCompletionKey, agentHomeProjectionRequestKey, readAgentHomeProjectionStatus, recordAgentHomeProjectionCompletion, } from './agent-home-projections';
 export type { AgentHomeProjectionReceiptInput } from './agent-home-projections';
 export { AGENT_HOME_CONTRACT_CAPABILITY, DEFAULT_EVENTS_PAGE_LIMIT, DEFAULT_LONG_POLL_HOLD_MS, DEFAULT_LONG_POLL_INTERVAL_MS, DEFAULT_MAX_BLOB_SIZE_BYTES, } from './cloud';

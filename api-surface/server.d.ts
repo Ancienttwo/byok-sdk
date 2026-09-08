@@ -77,6 +77,7 @@ import { type AgentRef } from '@byok-sdk/protocol';
 import type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
 import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, TaskHandle, TaskSnapshot } from './types';
 export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, ServerTaskEvent, TaskHandle, TaskResult, TaskSnapshot, } from './types';
+export type { TaskOfferReadback } from '@byok-sdk/cloud';
 /**
  * M5 (approval targeting, docs/protocol.md §5.3): `TaskHandle.approve`/`reject`'s
  * `opts.approvalId` targeting throws this when the id names an approval the
@@ -165,6 +166,10 @@ export interface ByokServer {
     readAgentHomeProjection(deviceId: string, agentRef: AgentRef, requestId: string): Promise<AgentHomeProjectionStatusReadback | undefined>;
     tasks: {
         get(taskId: string): Promise<TaskSnapshot | undefined>;
+        /** Immutable kernel offer readback for verifying a persisted host binding. No transport seq is inferred. */
+        offer(taskId: string): Promise<import('@byok-sdk/cloud').TaskOfferReadback | undefined>;
+        /** Request cancellation through the kernel without a process-owned TaskHandle. */
+        cancel(taskId: string, reason?: string): Promise<void>;
         /**
          * One bounded page, keyset-paged by task id. Paged rather than "all of
          * them" because the underlying store is: an unbounded `list()` would have
@@ -788,6 +793,8 @@ export interface CreateByokServerOptions {
 }
 /** Input to {@link ByokServer.dispatch}. */
 export interface DispatchInput {
+    /** Pre-persisted execution identity. Requires explicit deviceId; retries may report a kernel conflict. */
+    taskId?: string;
     instruction: string;
     /**
      * Authoritative web-selected target. When present, `runtime` is derived

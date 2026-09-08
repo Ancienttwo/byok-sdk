@@ -1,0 +1,47 @@
+{
+  "baseline": "0d5f99b35ccdbd2d8d829934691694efec7290eb",
+  "tests": {
+    "passed": 3942,
+    "skipped": 135
+  },
+  "checks": {
+    "build": {
+      "status": "pass",
+      "logSha256": "244714a72306ea99a31e1a321a2e7730e926e85521de1505c023645f26f903a0"
+    },
+    "typecheck": {
+      "status": "pass",
+      "logSha256": "359eb6016b2b2f4b2b8c0e9fdf2719ed83e61c7812082036828a01a74fd14ad7"
+    },
+    "api": {
+      "status": "pass",
+      "logSha256": "9b8f2b5181f563105bd2efe1218023535d4126196fe554c12f332dc5b77ecbe5"
+    },
+    "version": {
+      "status": "pass",
+      "logSha256": "e160d69f32e9d300a2d062993e537091d14280699b33f8bbcc4453a84150178d"
+    },
+    "workflow": {
+      "status": "pass",
+      "logSha256": "92916e09c848dbd6a5f6faa9c800ed158aadbfb1901b8653845a813dd79ce51a"
+    },
+    "tests": {
+      "status": "pass",
+      "logSha256": "4e1c70eb2aba28fa326ee610b4be2982716e560b483c289b8c19924d5a1b3c2e"
+    }
+  },
+  "files": {
+    "packages/cloud/src/cloud.ts": "242662888cc6dd7e448160d02d5220e8bf5ce7c14d3d432b8d57ea7dc23b051a",
+    "packages/cloud/src/index.ts": "33c4e93beb5c1d4a0e82d0327c9b4edf004dd3baaf77f073b233c3e5061377c5",
+    "packages/server/src/index.ts": "7ba0c60a1934b1edca3d7027d8367efa086d28b87d741d239fe321aca42e7db5",
+    "packages/server/src/types.ts": "e9f8bea43937cd371cbec8f4cc16d9e300f9a5e5ba45fbf30f7e0e0e776494b6",
+    "packages/server/src/__tests__/request-recovery.test.ts": "a33b88523b20d2168f47179e9712992cf5464a305dd92ae5f90ebadd1e3677ad",
+    "packages/server/src/__tests__/sqlite-receipts.test.ts": "6e4328e1c5c4d8d49fbd91a9bb6fb159bfb150cc6cc46269e5fa0afccc98a9f3",
+    "docs/researches/2026-09-09-g1c-facade/public-consumer-probe.mjs": "c25c971690a1f5d4e0fdb125b303ed3d368402dafc82689764fd151f002f0fb8"
+  },
+  "candidateTarballs": {
+    "byok-sdk-server-0.16.0.tgz": "3abdbf03af13644b4da1af835ed004034c95a60bb7add29d72fcb3ca0966adea",
+    "byok-sdk-cloud-0.16.0.tgz": "b954d802010826922f34e5a6b7915532e93a3c2d2fd55c681d7e380d2f48dd1f"
+  },
+  "publicConsumerResultSha256": "218099257e9232ffafff236250f78afa13ea1659318f340b48a58fbef61661fa"
+}

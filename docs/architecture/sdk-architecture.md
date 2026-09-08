@@ -367,8 +367,13 @@ agent-admission or advanced cursor history because prior receipt authority was
 in-memory and cannot be reconstructed. Eligible v1 adoption adds an empty device
 directory; v2 preserves enrollment. See `packages/server/README.md`.
 SQLite restores durable records, not process-owned promises, subscriptions or
-provider processes. No façade recovery methods or consumer ACK authority are
-added by this slice. Postgres generic receipt retention remains a separate gap.
+provider processes. The façade accepts a pre-persisted caller taskId with an
+explicit deviceId. `tasks.offer` projects `cloud.readTaskOffer` from immutable
+receipt authority; existing `tasks.get` includes the canonical terminal result;
+`tasks.cancel` calls kernel cancellation and projects the host notification.
+No recovered process handle, management HTTP route or consumer ACK authority is
+introduced. Host binding precedes enqueue; a dispatch conflict is accepted only
+after exact readback, never by error-code inference alone. Postgres generic receipt retention remains a separate gap.
 
 ### 3.2 HTTP and kernel responsibilities
 

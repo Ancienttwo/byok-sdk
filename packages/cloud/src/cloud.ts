@@ -73,6 +73,9 @@ import {
   decodeEnvelope,
   encodeEnvelope,
   type Envelope,
+  type TaskOfferType,
+  isTaskOfferType,
+  MESSAGE_PAYLOAD_SCHEMAS,
   AgentContentReadPayloadSchema,
   AgentContentReceiptPayloadSchema,
   AgentHomeProjectionCompletionRequestSchema,
@@ -402,6 +405,21 @@ export interface EnqueuedAgentHomeProjection extends EnqueuedAgentControl {
   readonly status: AgentHomeProjectionReadback;
 }
 
+/** Immutable executable offer authority, independent of mailbox retention. */
+export type TaskOfferReadback = {
+  [T in TaskOfferType]: {
+    readonly taskId: string;
+    readonly deviceId: string;
+    readonly messageId: string;
+    readonly type: T;
+    readonly payload: Extract<Envelope, { type: T }>['payload'];
+    /** Receipt time, not a transport delivery timestamp. */
+    readonly recordedAt: string;
+    /** The delivered marker is durable; false is not proof append never happened. */
+    readonly delivered: boolean;
+  }
+}[TaskOfferType];
+
 export interface EnqueuedOffer {
   readonly taskId: string;
   /** The per-(tenant, device) delivery seq — the daemon's redelivery cursor position for this envelope. */
@@ -559,6 +577,8 @@ export interface ByokCloud {
     payload: TaskSteerPayload,
   ): Promise<EnqueuedAgentControl>;
   readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
+  /** Read the original executable offer; missing/corrupt authority never becomes a guessed payload. */
+  readTaskOffer(tenant: TenantId, taskId: string): Promise<TaskOfferReadback | undefined>;
   /**
    * Host control plane: one bounded page of this tenant's task attempts,
    * keyset-paged by `taskId` — see {@link TaskAttemptListQuery} for why the key
@@ -1836,6 +1856,29 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         }
       }
       return mutation.attempt;
+    },
+
+    async readTaskOffer(tenant, taskId) {
+      const stores = tenantStoresFor(controlPlane(tenant), root);
+      const attempt = await stores.tasks.get(taskId);
+      if (attempt === undefined) return undefined;
+      const messageId = await taskOfferMessageId(tenant, taskId, attempt.deviceId, attempt.agentRef, bytes => options.crypto.sha256(bytes));
+      const receipt = await stores.receipts.get(`task-offer:${messageId}`);
+      if (receipt === undefined) return undefined;
+      const invalid = () => new ByokCloudError('coordination_input_invalid', `Task ${taskId} has an unreadable or mismatched immutable offer receipt.`);
+      let stored: { deviceId?: unknown; type?: unknown; payload?: unknown };
+      try { stored = JSON.parse(receipt.body); } catch { throw invalid(); }
+      if (stored === null || typeof stored !== 'object' || stored.deviceId !== attempt.deviceId ||
+          typeof stored.type !== 'string' || !isTaskOfferType(stored.type)) throw invalid();
+      const parsed = MESSAGE_PAYLOAD_SCHEMAS[stored.type].safeParse(stored.payload);
+      if (!parsed.success || JSON.stringify(parsed.data) !== JSON.stringify(stored.payload)) throw invalid();
+      const agentRef = 'agentRef' in parsed.data ? parsed.data.agentRef : undefined;
+      if (agentRef === undefined ? attempt.agentRef !== undefined :
+          attempt.agentRef === undefined || !sameAgentRef(agentRef, attempt.agentRef)) throw invalid();
+      const delivered = await stores.receipts.get(`task-offer-delivered:${messageId}`);
+      if (delivered !== undefined && delivered.body !== messageId) throw invalid();
+      return { taskId, deviceId: attempt.deviceId, messageId, type: stored.type, payload: parsed.data,
+        recordedAt: receipt.recordedAt, delivered: delivered !== undefined } as TaskOfferReadback;
     },
 
     readTaskAttempt(tenant, taskId) {

@@ -71,6 +71,7 @@ export type {
   TaskResult,
   TaskSnapshot,
 } from './types';
+export type { TaskOfferReadback } from '@byok-sdk/cloud';
 /**
  * M5 (approval targeting, docs/protocol.md §5.3): `TaskHandle.approve`/`reject`'s
  * `opts.approvalId` targeting throws this when the id names an approval the
@@ -178,6 +179,10 @@ export interface ByokServer {
   ): Promise<AgentHomeProjectionStatusReadback | undefined>;
   tasks: {
     get(taskId: string): Promise<TaskSnapshot | undefined>;
+    /** Immutable kernel offer readback for verifying a persisted host binding. No transport seq is inferred. */
+    offer(taskId: string): Promise<import('@byok-sdk/cloud').TaskOfferReadback | undefined>;
+    /** Request cancellation through the kernel without a process-owned TaskHandle. */
+    cancel(taskId: string, reason?: string): Promise<void>;
     /**
      * One bounded page, keyset-paged by task id. Paged rather than "all of
      * them" because the underlying store is: an unbounded `list()` would have
@@ -465,6 +470,20 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     if (!connections.isConnected(deviceId)) throw new Error(`device ${deviceId} is not connected`);
   }
 
+  // An in-flight exclusion only; persisted task and receipt stores own identity.
+  const dispatching = new Set<string>();
+  async function dispatchWithIdentity(input: DispatchInput | FreshAgentEgressDispatchInput, fresh: boolean): Promise<TaskHandle> {
+    const submission = { ...input };
+    const taskId = submission.taskId;
+    if (taskId === undefined) return dispatchInternal(submission, fresh);
+    if (typeof taskId !== 'string' || taskId.length === 0) throw new Error('taskId must be a non-empty string');
+    if (input.deviceId === undefined) throw new Error('caller taskId requires an explicit deviceId');
+    if (dispatching.has(taskId)) throw new Error('dispatch for this taskId is already in progress; retain the original binding');
+    dispatching.add(taskId);
+    try { return await dispatchInternal(submission, fresh); }
+    finally { dispatching.delete(taskId); }
+  }
+
   async function dispatchInternal(
     input: DispatchInput | FreshAgentEgressDispatchInput,
     freshAgentEgress: boolean,
@@ -568,7 +587,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     // A known id lets the relay exist before enqueue can make the offer
     // observable. Inbound claim/terminal traffic racing append is buffered by
     // that provisional relay state and reconciled once the offer succeeds.
-    const taskId = globalThis.crypto.randomUUID();
+    const taskId = input.taskId ?? globalThis.crypto.randomUUID();
     relay.provision(taskId);
     let enqueued: EnqueuedOffer;
     try {
@@ -679,7 +698,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     },
 
     dispatch(input: DispatchInput): Promise<TaskHandle> {
-      return dispatchInternal(input, false);
+      return dispatchWithIdentity(input, false);
     },
 
     dispatchFreshAgentEgress(input: FreshAgentEgressDispatchInput): Promise<TaskHandle> {
@@ -692,7 +711,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       if (input.agentRef === undefined || input.egressPolicy === undefined) {
         throw new Error('fresh Agent egress dispatch requires exact AgentRef and egress policy');
       }
-      return dispatchInternal(input, true);
+      return dispatchWithIdentity(input, true);
     },
 
     async requestAgentContentRead(input: AgentContentReadRequest): Promise<void> {
@@ -735,6 +754,13 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     },
 
     tasks: {
+      offer(taskId) { return cloud.readTaskOffer(tenant, taskId); },
+      async cancel(taskId, reason) {
+        const attempt = await cloud.cancelTask(tenant, taskId, reason);
+        if (attempt.cancellation !== undefined) {
+          relay.noteHostTransition(taskId, 'Cancelled', attempt.cancellation.requestedAt);
+        }
+      },
       async get(taskId: string): Promise<TaskSnapshot | undefined> {
         const attempt = await cloud.readTaskAttempt(tenant, taskId);
         return attempt === undefined ? undefined : projectTask(attempt);

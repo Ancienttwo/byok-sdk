@@ -69,3 +69,16 @@ stored body is not a terminal envelope throws `ByokCloudError` rather than
 returning a best-effort shape.
 
 MIT licensed. Node.js 22.22.0 or newer.
+
+
+## Immutable offer readback
+
+`readTaskOffer(tenant, taskId)` reads the immutable offer receipt using the
+TaskAttempt target and stable message identity. It validates the protocol
+payload, target/Agent binding and delivered marker. Corrupt receipts throw;
+missing attempt or missing offer receipt returns undefined. The returned
+recordedAt is receipt time, not transport time; no mailbox sequence is invented.
+A delivered=false read is not evidence that append never happened. Host-only
+message context is a separate authority, not part of this offer projection.
+The API's persistence is that of the injected receipts store: in-memory restart
+and Postgres generic receipt retention are not upgraded by this read method.

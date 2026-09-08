@@ -119,6 +119,7 @@ describe('SQLite receipt recovery', () => {
     const input = { taskId: 'pre-append', payload };
     try {
       await expect(runtime.cloud.enqueueOffer(tenant, deviceId, input)).rejects.toThrow('injected append failure');
+      expect(await runtime.cloud.readTaskOffer(tenant, input.taskId)).toMatchObject({ delivered: false, payload });
       await runtime.stores.close();
       const reset = new DatabaseSync(path); reset.exec('DROP TRIGGER fail_append'); reset.close();
       runtime = open();
@@ -168,6 +169,35 @@ describe('SQLite receipt recovery', () => {
       expect(result?.state).toBe('cancelled');
       await runtime.stores.close(); runtime = open();
       expect(await runtime.cloud.readTaskResult(tenant, 'cancelled-task')).toEqual(result);
+    } finally { await runtime.stores.close(); }
+  });
+
+
+  it('reads only validated immutable offer authority and rejects corrupt receipts', async () => {
+    const { open, path } = fixture(); const runtime = open();
+    const taskId = 'offer-readback';
+    try {
+      await runtime.stores.cloud.tasks.open(tenant, { taskId: 'unsubmitted', deviceId });
+      expect(await runtime.cloud.readTaskOffer(tenant, 'unsubmitted')).toBeUndefined();
+      const enqueued = await runtime.cloud.enqueueOffer(tenant, deviceId, { taskId, payload });
+      const original = await runtime.cloud.readTaskOffer(tenant, taskId);
+      expect(original).toMatchObject({ taskId, deviceId, messageId: enqueued.envelope.id, delivered: true,
+        type: 'task.offer', payload });
+      expect(await runtime.cloud.readTaskOffer(other, taskId)).toBeUndefined();
+      const db = new DatabaseSync(path);
+      const key = `task-offer:${enqueued.envelope.id}`;
+      const body = db.prepare('SELECT body FROM request_receipt WHERE tenant_id = ? AND key = ?').get(tenant, key)?.body as string;
+      try {
+        for (const corrupted of ['{', 'null', JSON.stringify({ ...JSON.parse(body), deviceId: 'foreign' }),
+          JSON.stringify({ ...JSON.parse(body), type: 'task.complete' }),
+          JSON.stringify({ ...JSON.parse(body), payload: { ...payload, instruction: 17 } })]) {
+          db.prepare('UPDATE request_receipt SET body = ? WHERE tenant_id = ? AND key = ?').run(corrupted, tenant, key);
+          await expect(runtime.cloud.readTaskOffer(tenant, taskId)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+        }
+        db.prepare('UPDATE request_receipt SET body = ? WHERE tenant_id = ? AND key = ?').run(body, tenant, key);
+        db.prepare('UPDATE request_receipt SET body = ? WHERE tenant_id = ? AND key = ?').run('wrong-id', tenant, `task-offer-delivered:${enqueued.envelope.id}`);
+        await expect(runtime.cloud.readTaskOffer(tenant, taskId)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+      } finally { db.close(); }
     } finally { await runtime.stores.close(); }
   });
 
