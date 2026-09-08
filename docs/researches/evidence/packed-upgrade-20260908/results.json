@@ -1,0 +1,483 @@
+{
+  "node": "v22.22.3",
+  "oldSource": "2752ffe86c4b222e2a23e75176dd2dd3a75901bb",
+  "newSource": "6bcf659874be14ed27378d6dcb635a8a9a23a258",
+  "cloudSource": "2752ffe86c4b222e2a23e75176dd2dd3a75901bb",
+  "results": [
+    {
+      "cut": "append:after-commit",
+      "status": "PASS",
+      "deviceIdentityPreserved": true,
+      "oldExit": {
+        "code": null,
+        "signal": "SIGKILL"
+      },
+      "newExit": {
+        "code": 0,
+        "signal": null
+      },
+      "runtimeStarts": 1,
+      "cloudBefore": {
+        "tenantId": "tenant-packed",
+        "taskId": "task_2693f6fe-2d79-4953-b4ca-6a889b9fd234",
+        "deviceId": "dev_a7058975-9120-4267-9e8d-e755169e49f4",
+        "agentRef": {
+          "agentId": "agent-packed",
+          "profileRevision": "profile-v1"
+        },
+        "status": "offered",
+        "updatedAt": "2026-09-08T08:59:02.710Z"
+      },
+      "hadCloudReceiptBefore": false,
+      "journalBefore": {
+        "tasks": [
+          {
+            "task_id": "task_2693f6fe-2d79-4953-b4ca-6a889b9fd234",
+            "device_id": "dev_a7058975-9120-4267-9e8d-e755169e49f4",
+            "admitted": null,
+            "local_state": "received",
+            "recovery_marker": null
+          }
+        ],
+        "terminals": []
+      },
+      "journalAfter": {
+        "tasks": [
+          {
+            "task_id": "task_2693f6fe-2d79-4953-b4ca-6a889b9fd234",
+            "device_id": "dev_a7058975-9120-4267-9e8d-e755169e49f4",
+            "admitted": 1,
+            "local_state": "terminal:complete",
+            "recovery_marker": null
+          }
+        ],
+        "terminals": [
+          {
+            "task_id": "task_2693f6fe-2d79-4953-b4ca-6a889b9fd234",
+            "terminal_type": "complete",
+            "payload_hash": "sha256:28aa29d6396ab1c23fa221b52cfa50215da393d8e00be07a2ff6b3753ac3742e",
+            "truth_state": "confirmed",
+            "attempt": 1,
+            "last_error": null,
+            "recorded_at": "2026-09-08T08:59:02.994Z",
+            "updated_at": "2026-09-08T08:59:03.001Z",
+            "bytesSha256": "28aa29d6396ab1c23fa221b52cfa50215da393d8e00be07a2ff6b3753ac3742e"
+          }
+        ]
+      },
+      "terminalPostsBefore": 0,
+      "terminalPostsAfter": 1,
+      "messageConsumes": 0,
+      "credentialCleanup": true
+    },
+    {
+      "cut": "before-runtime",
+      "status": "PASS",
+      "deviceIdentityPreserved": true,
+      "oldExit": {
+        "code": null,
+        "signal": "SIGKILL"
+      },
+      "newExit": {
+        "code": 0,
+        "signal": null
+      },
+      "runtimeStarts": 0,
+      "cloudBefore": {
+        "tenantId": "tenant-packed",
+        "taskId": "task_b476e6b9-845c-453b-9604-429b7a2252f2",
+        "deviceId": "dev_7003d4b3-eda0-4039-b0f3-cb4f09103e6a",
+        "agentRef": {
+          "agentId": "agent-packed",
+          "profileRevision": "profile-v1"
+        },
+        "status": "claimed",
+        "updatedAt": "2026-09-08T08:59:03.677Z",
+        "ownerDeviceId": "dev_7003d4b3-eda0-4039-b0f3-cb4f09103e6a",
+        "claimedRuntime": "pi",
+        "claimedRuntimeCapabilities": {
+          "steer": true,
+          "resume": true,
+          "approvalInteractive": false,
+          "mcpToolsets": true,
+          "permissionModes": [
+            "auto"
+          ]
+        }
+      },
+      "hadCloudReceiptBefore": false,
+      "journalBefore": {
+        "tasks": [
+          {
+            "task_id": "task_b476e6b9-845c-453b-9604-429b7a2252f2",
+            "device_id": "dev_7003d4b3-eda0-4039-b0f3-cb4f09103e6a",
+            "admitted": 1,
+            "local_state": "admitted",
+            "recovery_marker": null
+          }
+        ],
+        "terminals": []
+      },
+      "journalAfter": {
+        "tasks": [
+          {
+            "task_id": "task_b476e6b9-845c-453b-9604-429b7a2252f2",
+            "device_id": "dev_7003d4b3-eda0-4039-b0f3-cb4f09103e6a",
+            "admitted": 1,
+            "local_state": "terminal:failed",
+            "recovery_marker": "{\"disposition\":\"interrupted\",\"reason\":\"daemon_interrupted\",\"occurredAt\":\"2026-09-08T08:59:03.852Z\"}"
+          }
+        ],
+        "terminals": [
+          {
+            "task_id": "task_b476e6b9-845c-453b-9604-429b7a2252f2",
+            "terminal_type": "failed",
+            "payload_hash": "sha256:0a775f1fd8c2b19db8eec3a187f79884ddd698f45001657691a3aad5504058cc",
+            "truth_state": "confirmed",
+            "attempt": 1,
+            "last_error": null,
+            "recorded_at": "2026-09-08T08:59:03.852Z",
+            "updated_at": "2026-09-08T08:59:03.880Z",
+            "bytesSha256": "0a775f1fd8c2b19db8eec3a187f79884ddd698f45001657691a3aad5504058cc"
+          }
+        ]
+      },
+      "terminalPostsBefore": 0,
+      "terminalPostsAfter": 1,
+      "messageConsumes": 0,
+      "credentialCleanup": true
+    },
+    {
+      "cut": "running",
+      "status": "PASS",
+      "deviceIdentityPreserved": true,
+      "oldExit": {
+        "code": null,
+        "signal": "SIGKILL"
+      },
+      "newExit": {
+        "code": 0,
+        "signal": null
+      },
+      "runtimeStarts": 1,
+      "cloudBefore": {
+        "tenantId": "tenant-packed",
+        "taskId": "task_96c11cad-daae-4e58-9f3d-17b69aa6a518",
+        "deviceId": "dev_4d464aba-6aba-412f-8ca3-5cf09857a075",
+        "agentRef": {
+          "agentId": "agent-packed",
+          "profileRevision": "profile-v1"
+        },
+        "status": "running",
+        "updatedAt": "2026-09-08T08:59:04.601Z",
+        "ownerDeviceId": "dev_4d464aba-6aba-412f-8ca3-5cf09857a075",
+        "claimedRuntime": "pi",
+        "claimedRuntimeCapabilities": {
+          "steer": true,
+          "resume": true,
+          "approvalInteractive": false,
+          "mcpToolsets": true,
+          "permissionModes": [
+            "auto"
+          ]
+        }
+      },
+      "hadCloudReceiptBefore": false,
+      "journalBefore": {
+        "tasks": [
+          {
+            "task_id": "task_96c11cad-daae-4e58-9f3d-17b69aa6a518",
+            "device_id": "dev_4d464aba-6aba-412f-8ca3-5cf09857a075",
+            "admitted": 1,
+            "local_state": "admitted",
+            "recovery_marker": null
+          }
+        ],
+        "terminals": []
+      },
+      "journalAfter": {
+        "tasks": [
+          {
+            "task_id": "task_96c11cad-daae-4e58-9f3d-17b69aa6a518",
+            "device_id": "dev_4d464aba-6aba-412f-8ca3-5cf09857a075",
+            "admitted": 1,
+            "local_state": "terminal:failed",
+            "recovery_marker": "{\"disposition\":\"interrupted\",\"reason\":\"daemon_interrupted\",\"occurredAt\":\"2026-09-08T08:59:04.765Z\"}"
+          }
+        ],
+        "terminals": [
+          {
+            "task_id": "task_96c11cad-daae-4e58-9f3d-17b69aa6a518",
+            "terminal_type": "failed",
+            "payload_hash": "sha256:7c6b319f44aaa1968469b29058a82bfea0f42c70560b793f962fc5b22852a644",
+            "truth_state": "confirmed",
+            "attempt": 1,
+            "last_error": null,
+            "recorded_at": "2026-09-08T08:59:04.765Z",
+            "updated_at": "2026-09-08T08:59:04.791Z",
+            "bytesSha256": "7c6b319f44aaa1968469b29058a82bfea0f42c70560b793f962fc5b22852a644"
+          }
+        ]
+      },
+      "terminalPostsBefore": 0,
+      "terminalPostsAfter": 1,
+      "messageConsumes": 0,
+      "credentialCleanup": true
+    },
+    {
+      "cut": "terminal:after-commit",
+      "status": "PASS",
+      "deviceIdentityPreserved": true,
+      "oldExit": {
+        "code": null,
+        "signal": "SIGKILL"
+      },
+      "newExit": {
+        "code": 0,
+        "signal": null
+      },
+      "runtimeStarts": 1,
+      "cloudBefore": {
+        "tenantId": "tenant-packed",
+        "taskId": "task_c7510ef9-de96-461b-b960-7413c4e601a3",
+        "deviceId": "dev_8320812b-7f6a-48d9-bb9c-9899ab08a414",
+        "agentRef": {
+          "agentId": "agent-packed",
+          "profileRevision": "profile-v1"
+        },
+        "status": "running",
+        "updatedAt": "2026-09-08T08:59:05.646Z",
+        "ownerDeviceId": "dev_8320812b-7f6a-48d9-bb9c-9899ab08a414",
+        "claimedRuntime": "pi",
+        "claimedRuntimeCapabilities": {
+          "steer": true,
+          "resume": true,
+          "approvalInteractive": false,
+          "mcpToolsets": true,
+          "permissionModes": [
+            "auto"
+          ]
+        }
+      },
+      "hadCloudReceiptBefore": false,
+      "journalBefore": {
+        "tasks": [
+          {
+            "task_id": "task_c7510ef9-de96-461b-b960-7413c4e601a3",
+            "device_id": "dev_8320812b-7f6a-48d9-bb9c-9899ab08a414",
+            "admitted": 1,
+            "local_state": "terminal:complete",
+            "recovery_marker": null
+          }
+        ],
+        "terminals": [
+          {
+            "task_id": "task_c7510ef9-de96-461b-b960-7413c4e601a3",
+            "terminal_type": "complete",
+            "payload_hash": "sha256:8d8cbae5ce6874ea09b3852ae8cc69c5188984bd3e9c1819d4c090a07bcd6c1c",
+            "truth_state": "pending",
+            "attempt": 1,
+            "last_error": null,
+            "recorded_at": "2026-09-08T08:59:05.666Z",
+            "updated_at": "2026-09-08T08:59:05.666Z",
+            "bytesSha256": "8d8cbae5ce6874ea09b3852ae8cc69c5188984bd3e9c1819d4c090a07bcd6c1c"
+          }
+        ]
+      },
+      "journalAfter": {
+        "tasks": [
+          {
+            "task_id": "task_c7510ef9-de96-461b-b960-7413c4e601a3",
+            "device_id": "dev_8320812b-7f6a-48d9-bb9c-9899ab08a414",
+            "admitted": 1,
+            "local_state": "terminal:complete",
+            "recovery_marker": null
+          }
+        ],
+        "terminals": [
+          {
+            "task_id": "task_c7510ef9-de96-461b-b960-7413c4e601a3",
+            "terminal_type": "complete",
+            "payload_hash": "sha256:8d8cbae5ce6874ea09b3852ae8cc69c5188984bd3e9c1819d4c090a07bcd6c1c",
+            "truth_state": "confirmed",
+            "attempt": 1,
+            "last_error": null,
+            "recorded_at": "2026-09-08T08:59:05.666Z",
+            "updated_at": "2026-09-08T08:59:05.862Z",
+            "bytesSha256": "8d8cbae5ce6874ea09b3852ae8cc69c5188984bd3e9c1819d4c090a07bcd6c1c"
+          }
+        ]
+      },
+      "terminalPostsBefore": 0,
+      "terminalPostsAfter": 1,
+      "messageConsumes": 0,
+      "credentialCleanup": true
+    },
+    {
+      "cut": "confirm:after-commit",
+      "status": "PASS",
+      "deviceIdentityPreserved": true,
+      "oldExit": {
+        "code": null,
+        "signal": "SIGKILL"
+      },
+      "newExit": {
+        "code": 0,
+        "signal": null
+      },
+      "runtimeStarts": 1,
+      "cloudBefore": {
+        "tenantId": "tenant-packed",
+        "taskId": "task_e6cbe4f5-7767-4a19-a8a9-10635437c608",
+        "deviceId": "dev_3fe6c808-f799-4d48-91b7-9ab292574c63",
+        "agentRef": {
+          "agentId": "agent-packed",
+          "profileRevision": "profile-v1"
+        },
+        "status": "complete",
+        "updatedAt": "2026-09-08T08:59:06.717Z",
+        "ownerDeviceId": "dev_3fe6c808-f799-4d48-91b7-9ab292574c63",
+        "claimedRuntime": "pi",
+        "claimedRuntimeCapabilities": {
+          "steer": true,
+          "resume": true,
+          "approvalInteractive": false,
+          "mcpToolsets": true,
+          "permissionModes": [
+            "auto"
+          ]
+        }
+      },
+      "hadCloudReceiptBefore": true,
+      "journalBefore": {
+        "tasks": [
+          {
+            "task_id": "task_e6cbe4f5-7767-4a19-a8a9-10635437c608",
+            "device_id": "dev_3fe6c808-f799-4d48-91b7-9ab292574c63",
+            "admitted": 1,
+            "local_state": "terminal:complete",
+            "recovery_marker": null
+          }
+        ],
+        "terminals": [
+          {
+            "task_id": "task_e6cbe4f5-7767-4a19-a8a9-10635437c608",
+            "terminal_type": "complete",
+            "payload_hash": "sha256:638c90cda5da64cc777d4878bbb9dce121f6e3027d013179b2a2b871e6d94a0a",
+            "truth_state": "confirmed",
+            "attempt": 1,
+            "last_error": null,
+            "recorded_at": "2026-09-08T08:59:06.713Z",
+            "updated_at": "2026-09-08T08:59:06.718Z",
+            "bytesSha256": "638c90cda5da64cc777d4878bbb9dce121f6e3027d013179b2a2b871e6d94a0a"
+          }
+        ]
+      },
+      "journalAfter": {
+        "tasks": [
+          {
+            "task_id": "task_e6cbe4f5-7767-4a19-a8a9-10635437c608",
+            "device_id": "dev_3fe6c808-f799-4d48-91b7-9ab292574c63",
+            "admitted": 1,
+            "local_state": "terminal:complete",
+            "recovery_marker": null
+          }
+        ],
+        "terminals": [
+          {
+            "task_id": "task_e6cbe4f5-7767-4a19-a8a9-10635437c608",
+            "terminal_type": "complete",
+            "payload_hash": "sha256:638c90cda5da64cc777d4878bbb9dce121f6e3027d013179b2a2b871e6d94a0a",
+            "truth_state": "confirmed",
+            "attempt": 1,
+            "last_error": null,
+            "recorded_at": "2026-09-08T08:59:06.713Z",
+            "updated_at": "2026-09-08T08:59:06.718Z",
+            "bytesSha256": "638c90cda5da64cc777d4878bbb9dce121f6e3027d013179b2a2b871e6d94a0a"
+          }
+        ]
+      },
+      "terminalPostsBefore": 1,
+      "terminalPostsAfter": 1,
+      "messageConsumes": 0,
+      "credentialCleanup": true
+    },
+    {
+      "cut": "message-draft",
+      "status": "PASS",
+      "deviceIdentityPreserved": true,
+      "oldExit": {
+        "code": null,
+        "signal": "SIGKILL"
+      },
+      "newExit": {
+        "code": 0,
+        "signal": null
+      },
+      "runtimeStarts": 1,
+      "cloudBefore": {
+        "tenantId": "tenant-packed",
+        "taskId": "task_0f9f2a22-d005-495d-89f0-316f2b564486",
+        "deviceId": "dev_fc52307d-560a-4e42-a933-44e854d7be66",
+        "agentRef": {
+          "agentId": "agent-packed",
+          "profileRevision": "profile-v1"
+        },
+        "status": "running",
+        "updatedAt": "2026-09-08T09:00:12.007Z",
+        "ownerDeviceId": "dev_fc52307d-560a-4e42-a933-44e854d7be66",
+        "claimedRuntime": "pi",
+        "claimedRuntimeCapabilities": {
+          "steer": true,
+          "resume": true,
+          "approvalInteractive": false,
+          "mcpToolsets": true,
+          "permissionModes": [
+            "auto"
+          ]
+        }
+      },
+      "hadCloudReceiptBefore": false,
+      "journalBefore": {
+        "tasks": [
+          {
+            "task_id": "task_0f9f2a22-d005-495d-89f0-316f2b564486",
+            "device_id": "dev_fc52307d-560a-4e42-a933-44e854d7be66",
+            "admitted": 1,
+            "local_state": "admitted",
+            "recovery_marker": null
+          }
+        ],
+        "terminals": []
+      },
+      "journalAfter": {
+        "tasks": [
+          {
+            "task_id": "task_0f9f2a22-d005-495d-89f0-316f2b564486",
+            "device_id": "dev_fc52307d-560a-4e42-a933-44e854d7be66",
+            "admitted": 1,
+            "local_state": "terminal:failed",
+            "recovery_marker": "{\"disposition\":\"interrupted\",\"reason\":\"daemon_interrupted\",\"occurredAt\":\"2026-09-08T09:00:12.384Z\"}"
+          }
+        ],
+        "terminals": [
+          {
+            "task_id": "task_0f9f2a22-d005-495d-89f0-316f2b564486",
+            "terminal_type": "failed",
+            "payload_hash": "sha256:5d064b536ad76b087117021bb46f6d393e77f10e9714923a2b7ad6fc3507888f",
+            "truth_state": "confirmed",
+            "attempt": 1,
+            "last_error": null,
+            "recorded_at": "2026-09-08T09:00:12.384Z",
+            "updated_at": "2026-09-08T09:00:12.522Z",
+            "bytesSha256": "5d064b536ad76b087117021bb46f6d393e77f10e9714923a2b7ad6fc3507888f"
+          }
+        ]
+      },
+      "terminalPostsBefore": 0,
+      "terminalPostsAfter": 1,
+      "messageConsumes": 1,
+      "credentialCleanup": true
+    }
+  ]
+}

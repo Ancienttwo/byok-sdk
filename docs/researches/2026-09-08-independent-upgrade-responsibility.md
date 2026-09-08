@@ -112,3 +112,8 @@ bun docs/researches/evidence/independent-upgrade-20260908/outbox-cross-source.ts
 3. Salesko产品层修复可以基于已明确责任开工；受SDK恢复缺陷影响的升级放行须消费验收过的candidate产物并补上述旧→新组合。候选artifact/source acceptance不等于已merge、已publish、已部署或Salesko release通过。
 
 本轮不修改Salesko文件、生产、registry、凭据或用户已有数据。已损坏的旧JSONL、hash-only predecessor和外部业务数据migration仍需各自明确operator contract，禁止自动删除重建。
+
+
+## 后续实际 artifact 演练
+
+用户批准的旧→新生命周期补证已完成：固定旧 cloud，实际 packed client 从 2752ffe → 6bcf659，五个 journal/执行切点及独立 message draft 场景 6/6 PASS。见 [完整组合、结果与限制](2026-09-08-packed-upgrade-rehearsal.md)。该结果补齐 exact 组合的跨进程运行证据，不扩展为任意旧版本、Salesko binary updater 或生产验收。
