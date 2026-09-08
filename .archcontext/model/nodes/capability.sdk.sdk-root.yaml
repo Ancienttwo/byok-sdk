@@ -1,0 +1,19 @@
+schemaVersion: archcontext.node/v2
+id: capability.sdk.sdk-root
+kind: capability
+name: SDK Root
+status: active
+summary: Owns the existing SDK packages and their public namespace documentation and tests.
+responsibilities:
+  - Maintain package behavior, namespace documentation and package entrypoint tests.
+source:
+  include:
+    - "packages/**"
+extensions:
+  contractFiles:
+    agents: "packages/AGENTS.md"
+    claude: "packages/CLAUDE.md"
+  lspProfile: "typescript-lsp"
+  verification:
+    - "bun run build"
+    - "bun run typecheck"

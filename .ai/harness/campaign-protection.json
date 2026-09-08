@@ -22,7 +22,9 @@
       "scripts",
       "plans",
       "tasks",
-      "deploy"
+      "deploy",
+      ".archcontext",
+      "agents"
     ],
     "exempt_paths": []
   }
