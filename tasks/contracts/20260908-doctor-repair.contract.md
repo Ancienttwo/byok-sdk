@@ -70,7 +70,7 @@ The user approved the bounded independent gatekeeper review. No semantic finding
 ## Change Assessment
 
 ```json
-{"protocol": 1, "oracles": [{"id": "doctor-contract-tests", "kind": "deterministic_test", "paths": ["*"]}]}
+{"protocol": 1, "oracles": [{"id": "doctor-contract-tests", "kind": "deterministic_test", "paths": ["*"]}, {"id": "doctor-metadata-readback", "kind": "runtime_readback", "paths": ["*"]}]}
 ```
 
 ## Verification Plan
@@ -86,13 +86,21 @@ The user approved the bounded independent gatekeeper review. No semantic finding
       "cwd": ".",
       "phase": "verification",
       "cost": "expensive",
-      "evidence_policy": "current_exact",
+      "evidence_policy": "baseline_with_delta",
       "necessity": "Bind built SDK artifacts to the formal candidate.",
       "inputs": {
         "env": [
           "PATH"
         ]
-      }
+      },
+      "baseline": {
+        "run_file": ".ai/harness/runs/verification-vx-9390b8e7cf214475b709.json",
+        "execution_id": "vx-9390b8e7cf214475b709"
+      },
+      "delta_checks": [
+        "source-identical",
+        "doctor-readback"
+      ]
     },
     {
       "id": "typecheck",
@@ -101,13 +109,21 @@ The user approved the bounded independent gatekeeper review. No semantic finding
       "cwd": ".",
       "phase": "verification",
       "cost": "expensive",
-      "evidence_policy": "current_exact",
+      "evidence_policy": "baseline_with_delta",
       "necessity": "Check public and internal TypeScript contracts.",
       "inputs": {
         "env": [
           "PATH"
         ]
-      }
+      },
+      "baseline": {
+        "run_file": ".ai/harness/runs/verification-vx-53209e889bbd43c1a795.json",
+        "execution_id": "vx-53209e889bbd43c1a795"
+      },
+      "delta_checks": [
+        "source-identical",
+        "doctor-readback"
+      ]
     },
     {
       "id": "tests",
@@ -116,13 +132,21 @@ The user approved the bounded independent gatekeeper review. No semantic finding
       "cwd": ".",
       "phase": "verification",
       "cost": "expensive",
-      "evidence_policy": "current_exact",
+      "evidence_policy": "baseline_with_delta",
       "necessity": "Record required whole-workspace tests in the harness execution ledger.",
       "inputs": {
         "env": [
           "PATH"
         ]
-      }
+      },
+      "baseline": {
+        "run_file": ".ai/harness/runs/verification-vx-fc10c856f2f145c4adb8.json",
+        "execution_id": "vx-fc10c856f2f145c4adb8"
+      },
+      "delta_checks": [
+        "source-identical",
+        "doctor-readback"
+      ]
     },
     {
       "id": "api",
@@ -168,6 +192,36 @@ The user approved the bounded independent gatekeeper review. No semantic finding
           "PATH"
         ]
       }
+    },
+    {
+      "id": "source-identical",
+      "kind": "command",
+      "command": "git diff --exit-code 8b3771f -- packages examples scripts bun.lock package.json api-surface .ai .github",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "normal",
+      "evidence_policy": "current_exact",
+      "necessity": "Prove executable source, tests, dependencies and verifier/config inputs are unchanged from the bound baseline; only contract/plan evidence declarations changed.",
+      "inputs": {
+        "env": [
+          "PATH"
+        ]
+      }
+    },
+    {
+      "id": "doctor-readback",
+      "kind": "command",
+      "command": "bun run --cwd packages/client test -- src/__tests__/device-doctor.test.ts",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "normal",
+      "evidence_policy": "current_exact",
+      "necessity": "Exercise metadata write/readback and failure gates with the actual temporary filesystem and test credential authority.",
+      "inputs": {
+        "env": [
+          "PATH"
+        ]
+      }
     }
   ]
 }
@@ -189,3 +243,5 @@ exit_criteria:
 evidence_requirements:
   benchmark: not_applicable
 ```
+
+Formal evidence uses the existing ledger executions for build/typecheck/full test, with current exact source/config equality and real temporary-filesystem doctor readback as delta checks. The runtime_readback oracle refers to these existing repair/readback tests, not a live deployment. No policy exemption or user waiver is used.
