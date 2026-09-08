@@ -60,6 +60,26 @@
     "helper_runtime_dir": "package:assets/templates/helpers",
     "helper_source": "package"
   },
+  "agent_runtime": {
+    "mode": "off",
+    "adapters": {
+      "codex-app-thread": {
+        "enabled": false
+      },
+      "tmux-cli-agent": {
+        "enabled": false
+      }
+    }
+  },
+  "development_campaign": {
+    "version": 1,
+    "mode": "shadow",
+    "limits": {
+      "maximum_group_count": 1,
+      "maximum_issues_per_group": 2,
+      "maximum_parallel_tasks": 2
+    }
+  },
   "operations": {
     "dir": "deploy",
     "private_dir": "_ops",
@@ -67,6 +87,7 @@
   },
   "documentation": {
     "profile": "minimal-agentic",
+    "language": "en",
     "reference_source": "user-level-runtime-docs",
     "reference_stub_marker": "<!-- repo-harness: reference-config-stub v1 -->",
     "reference_resolver": "repo-harness docs path <doc-id>"
@@ -121,5 +142,27 @@
     "strategy_version": 1,
     "remove_only_ownership": "known_generated",
     "unknown_files": "preserve-or-archive"
+  },
+  "external_sources": {
+    "version": 1,
+    "mode": "manual",
+    "github": {
+      "enabled": true,
+      "repository": "Ancienttwo/byok-sdk",
+      "selection": {
+        "kind": "labels",
+        "labels_all": [
+          "brc1415-canary"
+        ],
+        "assignees_any": []
+      },
+      "limits": {
+        "max_pages": 2,
+        "max_issues": 20,
+        "max_body_bytes": 16384,
+        "max_total_bytes": 262144,
+        "deadline_ms": 30000
+      }
+    }
   }
 }

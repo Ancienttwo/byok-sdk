@@ -1,0 +1,8 @@
+{
+  "protocol": 1,
+  "kind": "repo-harness-work-graph",
+  "repository_id": "repo_1838c79384cca2b8",
+  "sprint_path": "plans/sprints/brc1415-canary.sprint.md",
+  "lane": "generic-v1",
+  "work_packages": []
+}
