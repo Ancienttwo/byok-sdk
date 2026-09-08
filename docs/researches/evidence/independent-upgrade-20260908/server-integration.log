@@ -1,0 +1,10 @@
+$ vitest run src/__tests__/integration.test.ts
+
+ RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-independent-upgrade-audit/packages/server
+
+
+ Test Files  1 passed (1)
+      Tests  12 passed | 2 skipped (14)
+   Start at  16:20:31
+   Duration  502ms (transform 167ms, setup 0ms, import 261ms, tests 142ms, environment 0ms)
+

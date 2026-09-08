@@ -1,0 +1,10 @@
+$ vitest run src/__tests__/validation.test.ts src/__tests__/freeze-guard.test.ts
+
+ RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/packages/protocol
+
+
+ Test Files  2 passed (2)
+      Tests  67 passed (67)
+   Start at  16:32:23
+   Duration  309ms (transform 181ms, setup 0ms, import 332ms, tests 63ms, environment 0ms)
+
