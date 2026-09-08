@@ -1,0 +1,24 @@
+{
+  "status": "PASS",
+  "sourceGitSha": "e8ce4a36e513653036d7b3741c548e7e15472dbe",
+  "sourceCleanAfterPack": true,
+  "command": "npx --yes --package=node@22.22.3 --package=bun@1.4.0 -c \"bun run check:release-pack --out-dir _ops/releases/0.16.0-e8ce4a3\"",
+  "exitCode": 0,
+  "toolchain": {
+    "node": "22.22.3",
+    "bun": "1.4.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "manifest": "/Users/kito/Projects/byok-sdk-rc/20260909-operator-e8ce4a3/_ops/releases/0.16.0-e8ce4a3/release-manifest.json",
+  "manifestSha256": "693d8942028f25555983fcd871f352139c9b2ba498f1e55830c569bfee29d073",
+  "tarballs": 10,
+  "sha256AndSha512Readback": "all match",
+  "publicOperatorDeclarations": "all present in packed client",
+  "publication": false,
+  "limitations": [
+    "local artifact acceptance only",
+    "no registry publication/readback",
+    "no new hosted CI or live-device acceptance"
+  ]
+}

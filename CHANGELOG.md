@@ -1,10 +1,10 @@
 # Changelog
 
-## 0.16.0 / @byok-sdk/keys 0.4.2 — prepared, not published
+## 0.16.0 / @byok-sdk/keys 0.4.2 — 2026-09-09
 
 - Add public embedded-host `quarantineDeviceOperationalHealth`, `exportDeviceSupportBundle`, and `archiveAgentTerminalMessages`, with closed `DeviceOperatorError` codes and narrow receipt types. Hosts retain confirmation, authenticated target selection and supervisor lifecycle ownership. Reuse SDK quarantine, allowlisted support bundle and terminal archive implementations; no OS credential access, automatic task retry, journal repair or remote shell API.
 - Per-Agent archive requires exact device/tenant and explicit AgentRef, offline device ownership plus exclusive Agent-home lease, validates existing source paths and identities, creates a new private output directory, preserves historical profile revisions and pending/held messages, and syncs complete audit evidence before live-log compaction. Audit archives contain sensitive bodies and are not replay inputs.
-- The additive API requires a new minor dispatch train. Align SDK packages at 0.16.0 and keys at 0.4.2 to retain the exact core dependency edge; Pi remains 0.85.1. No publication or downstream deployment is implied.
+- The additive API requires a new minor dispatch train. Align SDK packages at 0.16.0 and keys at 0.4.2 to retain the exact core dependency edge; Pi remains 0.85.1. Publication is verified in `docs/releases/v0.16.0-publication.md`; downstream deployment remains separate.
 
 ## 0.15.0 / @byok-sdk/keys 0.4.1 — 2026-09-08
 
