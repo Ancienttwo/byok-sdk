@@ -1841,6 +1841,7 @@ export declare class AgentReliableSpool {
     readonly homeDir: string;
     readonly spoolPath: string;
     private readonly pending;
+    private readonly file;
     private nextCursor;
     private logEntries;
     private writeTail;
@@ -6968,6 +6969,9 @@ export declare class TaskRunner {
     hasPendingRecoveredAgentMessage(taskId: string): boolean;
     /** Retry stable recovered records after a transport handshake/re-handshake. */
     retryRecoveredAgentMessages(): void;
+    private canPublishAgentMessage;
+    /** All authors and startup use the same queue-time and post-I/O authority check. */
+    private activateAgentMessage;
     private sendAgentMessageRecord;
     private handleAgentMessageDisposition;
     /** M4 Phase 2: stop claiming any FUTURE `task.offer` — see `stoppingOffers`'s own doc comment. Idempotent. */

@@ -1,12 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { constants as fsConstants, promises as fs } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   AgentContentReceiptPayloadSchema,
   type AgentContentReceiptPayload,
 } from '@byok-sdk/protocol';
 import type { AgentRef } from '../agent-home';
-import { atomicWriteFile } from '../util/atomic-write';
+import { DurableJsonlFile } from '../util/durable-jsonl';
 import { ensureSecureDir } from '../util/secure-dir';
 import { type AgentEgressPolicy, type AgentEgressDropReason, eventBytes } from './agent-egress-policy';
 
@@ -199,6 +199,7 @@ function parseEntry(value: unknown): SpoolEntry {
  */
 export class AgentReliableSpool {
   private readonly pending = new Map<string, AgentReliableEgressRecord>();
+  private readonly file: DurableJsonlFile;
   private nextCursor = 1;
   private logEntries = 0;
   private writeTail: Promise<unknown> = Promise.resolve();
@@ -206,13 +207,14 @@ export class AgentReliableSpool {
   private constructor(
     readonly homeDir: string,
     readonly spoolPath: string,
-  ) {}
+  ) { this.file = new DurableJsonlFile(spoolPath); }
 
   static async open(homeDir: string): Promise<AgentReliableSpool> {
     const directory = path.join(homeDir, AGENT_EGRESS_DIRECTORY);
     await ensureSecureDir(directory);
     const spool = new AgentReliableSpool(homeDir, path.join(directory, AGENT_RELIABLE_SPOOL_FILENAME));
     await spool.load();
+    await spool.file.confirmRecovered();
     return spool;
   }
 
@@ -236,6 +238,18 @@ export class AgentReliableSpool {
       const payloadJson = stableRecordJson(input.payload);
       const byteCount = Buffer.byteLength(payloadJson, 'utf8');
       if (byteCount <= 0) throw new AgentReliableSpoolError('reliable payload must have positive serialized bytes');
+      const eventId = input.eventId ?? randomUUID();
+      const existing = this.pending.get(eventId);
+      if (existing !== undefined) {
+        if (!sameRecord(existing, { wireType: 'agent.egress.reliable', agentRef: input.agentRef,
+          tenantId: input.tenantId, policyRevision: input.policyRevision, eventId, cursor: existing.cursor,
+          payloadHash: contentHash(payloadJson), byteCount, sessionRef: input.sessionRef, taskId: input.taskId })
+          || stableRecordJson(existing.payload) !== payloadJson
+          || (input.createdAt !== undefined && input.createdAt !== existing.createdAt)) {
+          throw new AgentReliableSpoolError(`reliable eventId ${eventId} differs from its existing record`);
+        }
+        return existing;
+      }
       if (this.pending.size >= policy.reliable.maxPendingEventsPerAgent) {
         throw new AgentReliableQuotaError('quota_exceeded', 'reliable per-Agent event quota is exhausted');
       }
@@ -245,8 +259,6 @@ export class AgentReliableSpool {
       if (tenantPendingBytes + byteCount > policy.reliable.maxPendingBytesPerTenant) {
         throw new AgentReliableQuotaError('quota_exceeded', 'reliable tenant byte quota is exhausted');
       }
-      const eventId = input.eventId ?? randomUUID();
-      if (this.pending.has(eventId)) throw new AgentReliableSpoolError(`reliable eventId ${eventId} already exists`);
       const record: AgentReliableEgressRecord = Object.freeze({
         schema: 1,
         wireType: 'agent.egress.reliable',
@@ -368,6 +380,7 @@ export class AgentReliableSpool {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
       throw error;
     }
+    if (raw.length > 0 && !raw.endsWith('\n')) throw new AgentReliableSpoolError('durable JSONL log has an incomplete trailing frame; preserve the file for explicit repair');
     for (const line of raw.split('\n')) {
       if (line.length === 0) continue;
       let entry: SpoolEntry;
@@ -397,19 +410,13 @@ export class AgentReliableSpool {
   }
 
   private async appendEntry(entry: SpoolEntry): Promise<void> {
-    const handle = await fs.open(this.spoolPath, fsConstants.O_APPEND | fsConstants.O_CREAT | fsConstants.O_WRONLY, 0o600);
-    try {
-      await handle.write(`${stableRecordJson(entry)}\n`, undefined, 'utf8');
-      await handle.sync();
-      this.logEntries += 1;
-    } finally {
-      await handle.close();
-    }
+    await this.file.append(stableRecordJson(entry));
+    this.logEntries += 1;
   }
 
   private async compact(): Promise<void> {
     const entries = this.records().map((record): SpoolEntry => ({ schema: 1, kind: 'append', record }));
-    await atomicWriteFile(this.spoolPath, entries.map((entry) => `${stableRecordJson(entry)}\n`).join(''), { mode: 0o600 });
+    await this.file.replace(entries.map(entry => stableRecordJson(entry)));
     this.logEntries = entries.length;
   }
 
@@ -419,6 +426,7 @@ export class AgentReliableSpool {
     this.writeTail = new Promise<void>((resolve) => { release = resolve; });
     await prior;
     try {
+      this.file.assertWritable();
       return await fn();
     } finally {
       release();

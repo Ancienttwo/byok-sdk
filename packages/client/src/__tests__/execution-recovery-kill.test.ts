@@ -527,6 +527,9 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
     const { daemon, deviceId } = await pair(cloud, { recoveryFault: 'terminal:queued' });
     const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'kill after queue' }) as { taskId: string };
     await waitForFile(path.join(current!.daemonBase.controlDir, 'runtime-starts.jsonl'));
+    // Runtime start precedes the cloud's task.started receipt. Establish the
+    // running precondition before SIGKILL can discard that in-memory envelope.
+    await waitForAttempt(cloud, offer.taskId, 'running');
     await arm('terminal:queued');
     await finish(offer.taskId, 'queued terminal');
     expect((await daemon.exited()).signal).toBe('SIGKILL');
