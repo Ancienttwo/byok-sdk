@@ -7,17 +7,15 @@ composition over Postgres and R2.
 
 ## Release status
 
-The latest published npm SDK train is **0.14.0**, with independent keys **0.4.0**.
-The source on `main` targets the unpublished candidate `byok-sdk@0.15.0`, with
-`@byok-sdk/keys@0.4.1`. A candidate version in this repository is not a published
-npm release. `CHANGELOG.md` separates candidate changes from released trains.
+The latest published npm SDK train is **0.15.0**, with independent keys **0.4.1**.
+See the [release notes](docs/releases/v0.15.0.md) for changes since 0.14.0,
+breaking custom adapter changes and required upgrade steps. `CHANGELOG.md`
+retains the detailed package history.
 
-The [0.15.0 release notes draft](docs/releases/v0.15.0.md) covers the changes
-since 0.14.0 and required upgrade steps.
-
-The Git tag `v0.14.0` exists; its GitHub Release page has not been created.
-GitHub's latest Release page therefore still shows `v0.13.0`. Registry packages,
-Git tags and GitHub Release pages are separate publication records.
+The [v0.15.0 GitHub Release](https://github.com/Ancienttwo/byok-sdk/releases/tag/v0.15.0)
+includes the manifest for the exact CI tarballs published to npm. Registry
+integrity, exact dependency closure and fresh installation were verified before
+the release tag was created.
 
 The bundled Pi runtime is pinned to
 `@earendil-works/pi-coding-agent@0.85.1`. Release SemVer is observability only;
@@ -37,10 +35,10 @@ sealed its credential-free manifest and claimed the offer. Do not ship an
 adapter that supports both shapes or allocates process/temp/workspace/session
 resources during `prepare()`; reject unsupported input before claim instead.
 
-Install the latest published stable train (the candidate above is not on npm):
+Install the published stable train:
 
 ```sh
-npm install byok-sdk
+npm install byok-sdk@0.15.0
 ```
 
 ```ts

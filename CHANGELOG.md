@@ -1,13 +1,13 @@
 # Changelog
 
-## 0.15.0 / @byok-sdk/keys 0.4.1 — prepared, not published
+## 0.15.0 / @byok-sdk/keys 0.4.1 — 2026-09-08
 
 - Add public `diagnoseDevice` for embedded hosts and confirmed, exact-target
   `repairDeviceEnrollmentMetadata` / `doctor --repair restore-enrollment-metadata`.
   Restore only missing/valid-stale non-secret metadata from OS enrollment under
   the existing store lease; no renewal, credential replacement or task replay.
   Existing health-only `--fix` is unchanged. Include downstream integration and
-  acceptance guidance. This additive API is included in the unpublished 0.15.0
+  acceptance guidance. This additive API is included in the 0.15.0
   MINOR train; keys 0.4.1 keeps its independent version.
 
 - Reject unsupported wire majors before envelope admission, including direct
@@ -69,7 +69,7 @@
   `runtimes`, `status`, and `doctor` distinguish failures without copying error
   messages, executable paths or failed probe streams. Display `present` is
   derived from `available`; wire registration and admission/retry semantics
-  remain unchanged. Included in this prepared minor release; publication remains separate.
+  remain unchanged. Included in this minor release.
 
 
 ## 0.14.0 / @byok-sdk/keys 0.4.0 — 2026-09-06
