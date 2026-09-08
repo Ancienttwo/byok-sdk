@@ -10,6 +10,8 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { ApprovalRegistry } from '../daemon/approvals';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
+import * as runtimeStart from '../daemon/runtime-start';
+import { RuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 const roots: string[] = [];
@@ -86,6 +88,117 @@ describe('required Agent message completion gate', () => {
       expect(sent.filter(e => e.type === 'agent.message.publish')).toHaveLength(0);
       expect(runner.activeTaskCount).toBe(0);
     } finally { release(); spy.mockRestore(); await runner.shutdownActiveTasks('test cleanup'); }
+  });
+
+  it('pre-active cancellation retires more than 64 staged drafts and disposes late Sessions', async () => {
+    const { runner, adapter, sent } = await cancellationFixture();
+    let workspaceDir = '';
+    for (let index = 0; index < 65; index++) {
+      const releaseStart = adapter.blockStart();
+      const taskId = `pre-active-${index}`;
+      const offer = runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+        instruction: 'reply', policy: { mode: 'auto' }, runtime: 'pi',
+        agentRef: { agentId: 'pre-active-agent', profileRevision: '1' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
+      }, { taskId, seq: index * 2 + 1 }));
+      try {
+        await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(index + 1));
+        const ctx = adapter.startCalls[index]!.ctx;
+        workspaceDir = ctx.workspaceDir;
+        expect(await runner.publishAgentMessage({
+          contextToken: ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!,
+          contentType: 'text/markdown', body: 'staged before Session',
+        })).toMatchObject({ state: 'staged' });
+        await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'pre-active cancel' }, { taskId, seq: index * 2 + 2 }));
+        await offer;
+        expect(sent.filter(e => e.type === 'task.cancelled')).toHaveLength(index + 1);
+        await expect(runner.publishAgentMessage({
+          contextToken: ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!,
+          contentType: 'text/markdown', body: 'staged before Session',
+        })).rejects.toThrow('invalid or expired');
+        const reopened = await AgentMessageOutbox.open(workspaceDir);
+        expect(reopened.retryableRecords()).toHaveLength(0);
+      } finally {
+        releaseStart();
+        await vi.waitFor(() => expect(adapter.sessions).toHaveLength(index + 1));
+        await runner.shutdownActiveTasks('late Session cleanup');
+        await offer;
+      }
+      expect(adapter.sessions[index]!.closeCalled).toBe(true);
+      expect(runner.activeTaskCount).toBe(0);
+    }
+    expect(sent.filter(e => e.type === 'agent.message.publish' || e.type === 'task.started')).toHaveLength(0);
+    const reopened = await AgentMessageOutbox.open(workspaceDir);
+    await expect(reopened.appendDraft({ taskId: 'next-legitimate', tenantId: 'tenant-cancel',
+      agentRef: { agentId: 'pre-active-agent', profileRevision: '1' },
+      requirement: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
+      contentType: 'text/markdown', body: 'next', maxPendingEvents: 64, maxPendingBytes: 4 * 1024 * 1024,
+    })).resolves.toBeDefined();
+    const archive = await reopened.archiveTerminalRecords(await temporary('byok-pre-active-archive-'));
+    expect(archive).toBeDefined();
+    const archived = (await fs.readFile(archive!, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    expect(archived.filter(entry => entry.kind === 'revoke')).toHaveLength(65);
+    expect(archived.filter(entry => entry.kind === 'append' && entry.record.body === 'staged before Session')).toHaveLength(65);
+    expect((await AgentMessageOutbox.open(workspaceDir)).retryableRecords()).toHaveLength(1);
+  }, 30_000);
+
+  it.each(['late-session', 'quiescent-start-failure'] as const)('pre-active %s retains ownership when revoke fails and retries settlement once', async (mode) => {
+    const { runner, adapter, sent } = await cancellationFixture();
+    const releaseStart = adapter.blockStart();
+    const startOwnedRuntime = runtimeStart.startOwnedRuntime;
+    // Exercise the other catch branch with an explicit quiescent startup
+    // failure receipt, after the real aborted start's late Session is closed.
+    const startSpy = vi.spyOn(runtimeStart, 'startOwnedRuntime').mockImplementation(async (...args) => {
+      try { return await startOwnedRuntime(...args); } catch (error) {
+        if (mode === 'late-session' || !isRuntimeStartupDisposalFailure(error)) throw error;
+        releaseStart();
+        await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+        await error.retryDisposal();
+        throw new RuntimeExecutionFailure({ phase: 'start', category: 'infrastructure', retry: 'non-retryable', reason: 'cancelled startup is quiescent' });
+      }
+    });
+    const taskId = `revoke-failure-${mode}`;
+    const offer = runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+      instruction: 'reply', policy: { mode: 'auto' }, runtime: 'pi',
+      agentRef: { agentId: 'revoke-failure-agent', profileRevision: '1' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
+    }, { taskId, seq: 1 }));
+    await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));
+    const ctx = adapter.startCalls[0]!.ctx;
+    const token = ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!;
+    await runner.publishAgentMessage({ contextToken: token, contentType: 'text/markdown', body: 'retain exact draft' });
+    let releaseRevoke!: () => void;
+    const barrier = new Promise<void>(resolve => { releaseRevoke = resolve; });
+    const revoke = AgentMessageOutbox.prototype.revoke;
+    const revokeSpy = vi.spyOn(AgentMessageOutbox.prototype, 'revoke').mockImplementationOnce(async () => {
+      await barrier;
+      throw new Error('injected revoke write failure');
+    });
+    try {
+      await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'cancel' }, { taskId, seq: 2 }));
+      await vi.waitFor(() => expect(revokeSpy).toHaveBeenCalled());
+      expect(sent.filter(e => e.type === 'task.cancelled')).toHaveLength(0);
+      expect(runner.activeTaskCount).toBe(1);
+      releaseRevoke();
+      await offer;
+      expect(sent.filter(e => e.type === 'task.cancelled')).toHaveLength(0);
+      expect(runner.activeTaskCount).toBe(1);
+      expect((await AgentMessageOutbox.open(ctx.workspaceDir)).records()).toHaveLength(1);
+      await expect(runner.publishAgentMessage({ contextToken: token, contentType: 'text/markdown', body: 'stale' })).rejects.toThrow();
+      releaseStart();
+      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+      revokeSpy.mockImplementation(revoke);
+      await runner.shutdownActiveTasks('retry durable settlement');
+      await runner.shutdownActiveTasks('idempotent cleanup');
+      expect(runner.activeTaskCount).toBe(0);
+      expect(adapter.sessions[0]!.closeCalled).toBe(true);
+      expect(sent.filter(e => e.type === 'task.cancelled')).toHaveLength(1);
+      expect(sent.filter(e => e.type === 'agent.message.publish')).toHaveLength(0);
+      expect((await AgentMessageOutbox.open(ctx.workspaceDir)).retryableRecords()).toHaveLength(0);
+    } finally {
+      releaseRevoke(); releaseStart(); revokeSpy.mockRestore(); startSpy.mockRestore();
+      await offer; await runner.shutdownActiveTasks('cleanup'); runner.stopAcceptingOffers();
+    }
   });
 
   it('startup cancellation durably revokes a staged message activated while start was in flight', async () => {
