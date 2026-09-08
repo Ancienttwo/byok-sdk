@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   EnvelopeValidationError,
+  EnvelopeSchema,
+  MessagesSendRequestSchema,
   PermissionPolicySchema,
   ProtocolError,
   TaskArtifactPayloadSchema,
@@ -13,6 +15,18 @@ import {
 } from '../index';
 
 describe('malformed payload rejection', () => {
+  it.each([0, -1, 2, 99])('rejects unsupported wire major %i before either decode or HTTP batch admission', (v) => {
+    const supported = createEnvelope('task.offer', {
+      instruction: 'same task contract', policy: { mode: 'auto' },
+    }, { taskId: 'version-gate', seq: 1 });
+    const unsupported = { ...supported, v };
+    expect(() => parseMessage(unsupported)).toThrow(EnvelopeValidationError);
+    expect(() => decodeEnvelope(JSON.stringify(unsupported))).toThrow(EnvelopeValidationError);
+    expect(EnvelopeSchema.safeParse(unsupported).success).toBe(false);
+    expect(MessagesSendRequestSchema.safeParse({ messages: [unsupported] }).success).toBe(false);
+    expect(parseMessage(supported)).toEqual(supported);
+  });
+
   it('rejects task.offer missing required "policy"', () => {
     const raw = {
       v: 1,

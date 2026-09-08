@@ -1,0 +1,13 @@
+{
+  "runtime": "v26.3.0",
+  "bun": "1.4.2",
+  "oldRoot": "/Users/kito/Projects/byok-sdk-wt-independent-upgrade-audit",
+  "newRoot": "/Users/kito/Projects/byok-sdk-wt-r10-r13",
+  "validOldState": "PASS: immutable identity/body preserved; wrong ACK retained; exact ACK retired across reopen",
+  "oldCompaction": {
+    "defectReproduced": true,
+    "error": "SyntaxError: JSON Parse error: Unable to parse JSON string",
+    "newReaderPreservesCorruptBytes": true
+  },
+  "newCompaction": "PASS: retained draft + append survive reopen"
+}

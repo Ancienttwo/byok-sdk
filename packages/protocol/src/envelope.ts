@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, type MessageType } from './messages';
+import { PROTOCOL_VERSION } from './version';
 
 const REQUIRED_TASK_ID = z.string().min(1);
 const OPTIONAL_TASK_ID = REQUIRED_TASK_ID.optional();
@@ -24,7 +25,11 @@ function envelopeShape<
   Seq extends z.ZodTypeAny,
 >(type: T, taskId: TaskId, seq: Seq) {
   return z.object({
-    v: z.number().int(),
+    // A known payload shape does not authorize interpreting another wire major
+    // as v1. Keep the public number type and all supported v1 bytes unchanged.
+    v: z.number().int().refine((version): boolean => version === PROTOCOL_VERSION, {
+      message: 'unsupported protocol version',
+    }),
     id: z.uuid(),
     ts: z.iso.datetime({ offset: true }),
     type: z.literal(type),
