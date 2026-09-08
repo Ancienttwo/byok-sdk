@@ -12,6 +12,10 @@
 
 ## 0.15.0 / @byok-sdk/keys 0.4.1 — prepared, not published
 
+- Fix the R12/R13 pre-active cancellation gap: revoke staged messages before
+  cancellation terminal delivery and retain startup ownership on settlement
+  failure, releasing send quota without deleting audit evidence.
+
 - Fix R10–R11: quarantine uncertain JSONL writes, preserve exact identities on
   reopen/retry, and require durable barriers for cursor saves and compaction.
 - Fix R12–R13: separate terminal message evidence from sending quotas, provide
