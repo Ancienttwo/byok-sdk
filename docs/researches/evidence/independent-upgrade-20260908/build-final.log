@@ -1,0 +1,175 @@
+$ bun run --filter '*' --if-present build
+@byok-sdk/core build: CLI Building entry: src/index.ts
+@byok-sdk/protocol build: CLI Building entry: src/index.ts
+@byok-sdk/core build: CLI Using tsconfig: tsconfig.json
+@byok-sdk/core build: CLI tsup v8.5.1
+@byok-sdk/core build: CLI Using tsup config: /Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/packages/core/tsup.config.ts
+@byok-sdk/protocol build: CLI Using tsconfig: tsconfig.json
+@byok-sdk/protocol build: CLI tsup v8.5.1
+@byok-sdk/protocol build: CLI Using tsup config: /Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/packages/protocol/tsup.config.ts
+@byok-sdk/protocol build: CLI Target: es2022
+@byok-sdk/core build: CLI Target: es2022
+@byok-sdk/protocol build: CLI Cleaning output folder
+@byok-sdk/protocol build: ESM Build start
+@byok-sdk/core build: CLI Cleaning output folder
+@byok-sdk/core build: ESM Build start
+@byok-sdk/protocol build: ESM dist/index.js     55.32 KB
+@byok-sdk/protocol build: ESM dist/index.js.map 177.17 KB
+@byok-sdk/protocol build: ESM ⚡️ Build success in 88ms
+@byok-sdk/core build: ESM dist/index.js     75.00 KB
+@byok-sdk/core build: ESM dist/index.js.map 253.54 KB
+@byok-sdk/core build: ESM ⚡️ Build success in 104ms
+@byok-sdk/core build: Exited with code 0
+@byok-sdk/protocol build: Exited with code 0
+@byok-sdk/keys build: CLI Building entry: src/index.ts, src/bin/pi-provider-launcher.ts
+@byok-sdk/keys build: CLI Using tsconfig: tsconfig.json
+@byok-sdk/keys build: CLI tsup v8.5.1
+@byok-sdk/keys build: CLI Using tsup config: /Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/packages/keys/tsup.config.ts
+@byok-sdk/keys build: CLI Target: es2022
+@byok-sdk/keys build: CLI Cleaning output folder
+@byok-sdk/keys build: ESM Build start
+@byok-sdk/cloud build: CLI Building entry: src/index.ts
+@byok-sdk/cloud build: CLI Using tsconfig: tsconfig.json
+@byok-sdk/cloud build: CLI tsup v8.5.1
+@byok-sdk/cloud build: CLI Using tsup config: /Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/packages/cloud/tsup.config.ts
+@byok-sdk/cloud build: CLI Target: es2022
+@byok-sdk/testkit build: CLI Building entry: src/index.ts
+@byok-sdk/testkit build: CLI Using tsconfig: tsconfig.json
+@byok-sdk/testkit build: CLI tsup v8.5.1
+@byok-sdk/testkit build: CLI Using tsup config: /Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/packages/testkit/tsup.config.ts
+@byok-sdk/testkit build: CLI Target: es2022
+@byok-sdk/testkit build: CLI Cleaning output folder
+@byok-sdk/testkit build: ESM Build start
+@byok-sdk/cloud build: CLI Cleaning output folder
+@byok-sdk/cloud build: ESM Build start
+@byok-sdk/testkit build: ESM dist/index.js     9.41 KB
+@byok-sdk/testkit build: ESM dist/index.js.map 30.89 KB
+@byok-sdk/testkit build: ESM ⚡️ Build success in 77ms
+@byok-sdk/keys build: ESM dist/index.js                        69.78 KB
+@byok-sdk/keys build: ESM dist/bin/pi-provider-launcher.js     48.31 KB
+@byok-sdk/keys build: ESM dist/bin/pi-provider-launcher.js.map 133.84 KB
+@byok-sdk/keys build: ESM dist/index.js.map                    183.45 KB
+@byok-sdk/keys build: ESM ⚡️ Build success in 242ms
+@byok-sdk/testkit build: Exited with code 0
+@byok-sdk/keys build: Exited with code 0
+@byok-sdk/example-salesko-connector-broker build: CLI Building entry: src/index.ts, src/bin/salesko-connector-mcp.ts
+@byok-sdk/example-salesko-connector-broker build: CLI Using tsconfig: tsconfig.json
+@byok-sdk/example-salesko-connector-broker build: CLI tsup v8.5.1
+@byok-sdk/example-salesko-connector-broker build: CLI Using tsup config: /Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/examples/salesko-connector-broker/tsup.config.ts
+@byok-sdk/example-salesko-connector-broker build: CLI Target: es2022
+@byok-sdk/example-salesko-connector-broker build: CLI Cleaning output folder
+@byok-sdk/example-salesko-connector-broker build: ESM Build start
+@byok-sdk/cloud build: ESM dist/index.js     217.80 KB
+@byok-sdk/cloud build: ESM dist/index.js.map 616.37 KB
+@byok-sdk/cloud build: ESM ⚡️ Build success in 649ms
+@byok-sdk/example-salesko-connector-broker build: ESM dist/index.js                         48.67 KB
+@byok-sdk/example-salesko-connector-broker build: ESM dist/bin/salesko-connector-mcp.js     51.92 KB
+@byok-sdk/example-salesko-connector-broker build: ESM dist/index.js.map                     106.54 KB
+@byok-sdk/example-salesko-connector-broker build: ESM dist/bin/salesko-connector-mcp.js.map 116.67 KB
+@byok-sdk/example-salesko-connector-broker build: ESM ⚡️ Build success in 223ms
+@byok-sdk/example-salesko-connector-broker build: Exited with code 0
+@byok-sdk/cloud build: Exited with code 0
+@byok-sdk/cloud-dataplane build: CLI Building entry: {"runtime":"src/runtime.ts"}
+@byok-sdk/cloud-dataplane build: CLI Using tsconfig: tsconfig.json
+@byok-sdk/cloud-dataplane build: CLI tsup v8.5.1
+@byok-sdk/cloud-dataplane build: CLI Using tsup config: /Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/packages/cloud-dataplane/tsup.config.ts
+@byok-sdk/cloud-dataplane build: CLI Building entry: src/index.ts
+@byok-sdk/cloud-dataplane build: CLI Using tsconfig: tsconfig.json
+@byok-sdk/cloud-dataplane build: CLI tsup v8.5.1
+@byok-sdk/cloud-dataplane build: CLI Using tsup config: /Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/packages/cloud-dataplane/tsup.config.ts
+@byok-sdk/cloud-dataplane build: CLI Target: es2022
+@byok-sdk/cloud-dataplane build: ESM Build start
+@byok-sdk/server build: CLI Building entry: src/index.ts
+@byok-sdk/cloud-dataplane build: CLI Target: es2022
+@byok-sdk/server build: CLI Using tsconfig: tsconfig.json
+@byok-sdk/server build: CLI tsup v8.5.1
+@byok-sdk/server build: CLI Using tsup config: /Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/packages/server/tsup.config.ts
+@byok-sdk/server build: CLI Target: es2022
+@byok-sdk/ui-runtime build: CLI Building entry: src/index.ts
+@byok-sdk/ui-runtime build: CLI Using tsconfig: tsconfig.json
+@byok-sdk/ui-runtime build: CLI tsup v8.5.1
+@byok-sdk/ui-runtime build: CLI Using tsup config: /Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/packages/ui-runtime/tsup.config.ts
+@byok-sdk/ui-runtime build: CLI Target: es2022
+@byok-sdk/server build: CLI Cleaning output folder
+@byok-sdk/server build: ESM Build start
+@byok-sdk/ui-runtime build: CLI Cleaning output folder
+@byok-sdk/ui-runtime build: ESM Build start
+@byok-sdk/cloud-dataplane build: CLI Cleaning output folder
+@byok-sdk/cloud-dataplane build: ESM Build start
+@byok-sdk/ui-runtime build: ESM dist/index.js     27.58 KB
+@byok-sdk/ui-runtime build: ESM dist/index.js.map 63.89 KB
+@byok-sdk/ui-runtime build: ESM ⚡️ Build success in 95ms
+@byok-sdk/server build: ESM dist/index.js     84.98 KB
+@byok-sdk/server build: ESM dist/index.js.map 224.90 KB
+@byok-sdk/server build: ESM ⚡️ Build success in 184ms
+@byok-sdk/cloud-dataplane build: ESM dist/runtime.js     172.20 KB
+@byok-sdk/cloud-dataplane build: ESM dist/runtime.js.map 408.86 KB
+@byok-sdk/cloud-dataplane build: ESM ⚡️ Build success in 354ms
+@byok-sdk/ui-runtime build: Exited with code 0
+@byok-sdk/server build: Exited with code 0
+@byok-sdk/cloud-dataplane build: ESM dist/index.js     232.39 KB
+@byok-sdk/cloud-dataplane build: ESM dist/index.js.map 541.13 KB
+@byok-sdk/cloud-dataplane build: ESM ⚡️ Build success in 561ms
+@byok-sdk/example-live-activity-host build: CLI Building entry: src/index.ts
+@byok-sdk/example-live-activity-host build: CLI Using tsconfig: tsconfig.json
+@byok-sdk/example-live-activity-host build: CLI tsup v8.5.1
+@byok-sdk/example-live-activity-host build: CLI Using tsup config: /Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/examples/live-activity-host/tsup.config.ts
+@byok-sdk/example-live-activity-host build: CLI Target: es2022
+@byok-sdk/example-live-activity-host build: CLI Cleaning output folder
+@byok-sdk/example-live-activity-host build: ESM Build start
+@byok-sdk/client build: CLI Building entry: src/index.ts, src/adapters/index.ts, src/agent-memory/index.ts, src/bin/byok-agent-memory-mcp.ts, src/bin/byok-agent-message-mcp.ts, src/bin/byok-agent-team-mcp.ts, src/bin/byok-agent.ts, src/bin/byok-approval-mcp.ts, src/bin/byok-mcp-env.ts, src/adapters/pi/mcp-extension.ts, src/adapters/pi/subagents-policy-extension.ts, src/adapters/pi/team-interaction-extension.ts
+@byok-sdk/client build: CLI Using tsconfig: tsconfig.json
+@byok-sdk/client build: CLI tsup v8.5.1
+@byok-sdk/client build: CLI Using tsup config: /Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/packages/client/tsup.config.ts
+@byok-sdk/client build: CLI Target: es2022
+@byok-sdk/example-live-activity-host build: ESM dist/index.js     10.53 KB
+@byok-sdk/example-live-activity-host build: ESM dist/index.js.map 22.92 KB
+@byok-sdk/example-live-activity-host build: ESM ⚡️ Build success in 215ms
+@byok-sdk/client build: CLI Cleaning output folder
+@byok-sdk/client build: ESM Build start
+@byok-sdk/cloud-dataplane build: [cloud-dataplane] projected 21 migration(s) from deploy/sql into dist/sql
+@byok-sdk/cloud-dataplane build: Exited with code 0
+@byok-sdk/example-live-activity-host build: Exited with code 0
+@byok-sdk/client build: "createInterface" is imported from external module "readline" but never used in "dist/adapters/index.js".
+@byok-sdk/client build: "AGENT_MEMORY_PROJECTION_CAPABILITY", "AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE", "AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES", "AgentMemoryProjectionMutationSchema", "AgentHomeProjectionPayloadSchema" and "AgentRefSchema" are imported from external module "@byok-sdk/protocol" but never used in "dist/agent-memory/index.js".
+@byok-sdk/client build: "NONCE_SIGNING_DOMAIN" is imported from external module "@byok-sdk/core" but never used in "dist/index.js".
+@byok-sdk/client build: "NONCE_SIGNING_DOMAIN" is imported from external module "@byok-sdk/core" but never used in "dist/bin/byok-agent.js".
+@byok-sdk/client build: ESM dist/agent-memory/index.js                         38.17 KB
+@byok-sdk/client build: ESM dist/adapters/index.js                             152.73 KB
+@byok-sdk/client build: ESM dist/bin/byok-agent-team-mcp.js                    32.00 KB
+@byok-sdk/client build: ESM dist/bin/byok-agent-message-mcp.js                 32.02 KB
+@byok-sdk/client build: ESM dist/bin/byok-agent-memory-mcp.js                  32.01 KB
+@byok-sdk/client build: ESM dist/bin/byok-mcp-env.js                           1.65 KB
+@byok-sdk/client build: ESM dist/bin/byok-approval-mcp.js                      31.99 KB
+@byok-sdk/client build: ESM dist/adapters/pi/team-interaction-extension.js     2.33 KB
+@byok-sdk/client build: ESM dist/adapters/pi/mcp-extension.js                  1.07 KB
+@byok-sdk/client build: ESM dist/adapters/pi/subagents-policy-extension.js     5.50 KB
+@byok-sdk/client build: ESM dist/index.js                                      968.38 KB
+@byok-sdk/client build: ESM dist/bin/byok-agent.js                             1.02 MB
+@byok-sdk/client build: ESM dist/agent-memory/index.js.map                     143.35 KB
+@byok-sdk/client build: ESM dist/adapters/index.js.map                         481.27 KB
+@byok-sdk/client build: ESM dist/bin/byok-agent-team-mcp.js.map                117.30 KB
+@byok-sdk/client build: ESM dist/adapters/pi/mcp-extension.js.map              2.16 KB
+@byok-sdk/client build: ESM dist/bin/byok-approval-mcp.js.map                  117.29 KB
+@byok-sdk/client build: ESM dist/bin/byok-mcp-env.js.map                       3.95 KB
+@byok-sdk/client build: ESM dist/bin/byok-agent-message-mcp.js.map             117.31 KB
+@byok-sdk/client build: ESM dist/adapters/pi/team-interaction-extension.js.map 5.86 KB
+@byok-sdk/client build: ESM dist/bin/byok-agent-memory-mcp.js.map              117.31 KB
+@byok-sdk/client build: ESM dist/adapters/pi/subagents-policy-extension.js.map 18.28 KB
+@byok-sdk/client build: ESM dist/index.js.map                                  2.53 MB
+@byok-sdk/client build: ESM dist/bin/byok-agent.js.map                         2.79 MB
+@byok-sdk/client build: ESM ⚡️ Build success in 1634ms
+@byok-sdk/client build: {"adapterEntryBytes":156549,"packageRoot":"/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/packages/client/","status":"passed"}
+@byok-sdk/client build: {"agentMemoryEntryBytes":39086,"agentMemoryEntryCeiling":49152,"rootEntryBytes":992347,"status":"passed"}
+@byok-sdk/client build: Exited with code 0
+byok-sdk build: CLI Building entry: src/index.ts
+byok-sdk build: CLI Using tsconfig: tsconfig.json
+byok-sdk build: CLI tsup v8.5.1
+byok-sdk build: CLI Using tsup config: /Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/packages/sdk/tsup.config.ts
+byok-sdk build: CLI Target: es2022
+byok-sdk build: CLI Cleaning output folder
+byok-sdk build: ESM Build start
+byok-sdk build: ESM dist/index.js     540.00 B
+byok-sdk build: ESM dist/index.js.map 89.00 B
+byok-sdk build: ESM ⚡️ Build success in 16ms
+byok-sdk build: Exited with code 0

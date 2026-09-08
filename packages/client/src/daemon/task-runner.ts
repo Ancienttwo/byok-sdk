@@ -1442,6 +1442,7 @@ export class TaskRunner {
   private readonly startupOwners = new Map<string, {
     runtimeId: string;
     dispose: () => Promise<void>;
+    settle?: () => Promise<void>;
     release: () => Promise<void>;
   }>();
 
@@ -1459,6 +1460,7 @@ export class TaskRunner {
     const owner = this.startupOwners.get(taskId);
     if (!owner) return true;
     try {
+      await owner.settle?.();
       await owner.dispose();
       await this.deps.awaitTerminalCommit?.(taskId);
       await owner.release();
@@ -2352,40 +2354,41 @@ export class TaskRunner {
         session = await startOwnedRuntime(input => prepared.operation.start(input), startInput, blobAbort.signal,
           Math.max(0, startupDeadline - Date.now()));
       } catch (err) {
-        if (isRuntimeStartupDisposalFailure(err)) {
+        const disposalFailure = isRuntimeStartupDisposalFailure(err);
+        const cancelled = this.pendingCancelled.has(taskId);
+        if (disposalFailure || cancelled) {
+          if (cancelled) this.revokeAgentMessageContext(taskId);
           const ownedBinding = agentBinding;
+          const cancellation = createEnvelope('task.cancelled', {
+            reason: this.pendingCancelled.get(taskId),
+            ...terminalIdentity(this.claimedHarnesses.get(taskId)),
+            ...(agentBinding === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
+          }, { taskId });
+          let cancellationSettled = false;
           this.startupOwners.set(taskId, {
             runtimeId: pick.descriptor.id,
-            dispose: err.retryDisposal,
+            dispose: disposalFailure ? err.retryDisposal : async () => {},
+            ...(cancelled ? { settle: async () => {
+              if (cancellationSettled) return;
+              // Retain startup ownership on a failed durable barrier, just as
+              // active cancellation retains its owner until terminal evidence.
+              await this.pendingMessageTasks.get(taskId)?.outbox.revoke(taskId);
+              this.deps.send(cancellation);
+              cancellationSettled = true;
+              this.pendingCancelled.delete(taskId);
+              this.addFinishedTaskId(taskId);
+            } } : {}),
             release: async () => { await ownedBinding?.lease.release(); gitLease?.release(); },
           });
           agentLeaseTransferred = true;
-          this.deps.onRuntimeDisposalFailure?.({ taskId, runtimeId: pick.descriptor.id,
+          if (disposalFailure) this.deps.onRuntimeDisposalFailure?.({ taskId, runtimeId: pick.descriptor.id,
             stage: 'quiescence', reason: err.message });
-          if (this.pendingCancelled.has(taskId)) {
-            const reason = this.pendingCancelled.get(taskId);
-            this.pendingCancelled.delete(taskId);
-            this.addFinishedTaskId(taskId);
-            this.deps.send(createEnvelope('task.cancelled', {
-              reason, ...terminalIdentity(this.claimedHarnesses.get(taskId)),
-              ...(agentBinding === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
-            }, { taskId }));
-          } else if (agentBinding === undefined) await this.fail(taskId, err.message, false);
-          else await this.failClaimedAgent(taskId, err.message, false, {
-            binding: agentBinding, runtimeId: pick.descriptor.id,
-          });
-          return;
-        }
-        if (this.pendingCancelled.has(taskId)) {
-          const reason = this.pendingCancelled.get(taskId);
-          this.pendingCancelled.delete(taskId);
-          this.addFinishedTaskId(taskId);
-          gitLease?.release();
-          this.deps.send(createEnvelope('task.cancelled', {
-            reason,
-            ...terminalIdentity(this.claimedHarnesses.get(taskId)),
-            ...(agentBinding === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
-          }, { taskId }));
+          if (!cancelled) {
+            if (agentBinding === undefined) await this.fail(taskId, errorMessage(err), false);
+            else await this.failClaimedAgent(taskId, errorMessage(err), false, {
+              binding: agentBinding, runtimeId: pick.descriptor.id,
+            });
+          }
           return;
         }
         const failure = projectRuntimeBoundaryFailure(err, 'start');

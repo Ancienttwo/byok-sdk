@@ -351,6 +351,9 @@ export async function handleInboundEnvelope(
   agentMessageConsume?: Parameters<typeof handleAgentMessagePublish>[4],
   observer?: ByokCloudObserver,
 ): Promise<InboundOutcome> {
+  // This exported entrypoint can be called without the HTTP schema boundary.
+  // Refuse before reserving an envelope identity or mutating task lifecycle.
+  if (envelope.v !== PROTOCOL_VERSION) return 'rejected';
   const outcome = await applyInboundGate(
     stores,
     deviceId,

@@ -1,0 +1,16 @@
+$ bun run --sequential --filter '*' --if-present typecheck
+@byok-sdk/client:typecheck                           | Done in 1.25s
+@byok-sdk/cloud:typecheck                            | Done in 444ms
+@byok-sdk/cloud-dataplane:typecheck                  | Done in 199ms
+@byok-sdk/conformance:typecheck                      | Done in 93ms
+@byok-sdk/core:typecheck                             | Done in 98ms
+@byok-sdk/example-basic:typecheck                    | Done in 117ms
+@byok-sdk/example-live-activity-host:typecheck       | Done in 87ms
+@byok-sdk/example-packaging:typecheck                | Done in 68ms
+@byok-sdk/example-salesko-connector-broker:typecheck | Done in 150ms
+@byok-sdk/keys:typecheck                             | Done in 109ms
+@byok-sdk/protocol:typecheck                         | Done in 256ms
+@byok-sdk/server:typecheck                           | Done in 398ms
+@byok-sdk/testkit:typecheck                          | Done in 79ms
+@byok-sdk/ui-runtime:typecheck                       | Done in 91ms
+byok-sdk:typecheck                                   | Done in 81ms

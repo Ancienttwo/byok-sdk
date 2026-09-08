@@ -1,0 +1,14 @@
+$ vitest run src/__tests__/journal-sqlite.test.ts src/__tests__/agent-message-outbox.test.ts src/__tests__/agent-egress-spool.test.ts src/__tests__/release-identity.test.ts src/__tests__/daemon-stop-shutdown-parity.test.ts
+
+ RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-independent-upgrade-audit/packages/client
+
+(node:87923) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:87925) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ Test Files  5 passed (5)
+      Tests  79 passed (79)
+   Start at  16:17:51
+   Duration  3.25s (transform 1.44s, setup 0ms, import 2.12s, tests 3.12s, environment 0ms)
+

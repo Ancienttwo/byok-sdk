@@ -12,6 +12,10 @@
 
 ## 0.15.0 / @byok-sdk/keys 0.4.1 — prepared, not published
 
+- Fix the R12/R13 pre-active cancellation gap: revoke staged messages before
+  cancellation terminal delivery and retain startup ownership on settlement
+  failure, releasing send quota without deleting audit evidence.
+
 - Fix R10–R11: quarantine uncertain JSONL writes, preserve exact identities on
   reopen/retry, and require durable barriers for cursor saves and compaction.
 - Fix R12–R13: separate terminal message evidence from sending quotas, provide
@@ -27,6 +31,22 @@
   spool JSONL record with a newline. Subsequent appends remain separate records
   and reopen preserves retained identities. Existing malformed logs are not
   rewritten or salvaged by this writer correction.
+- Follow-up PR #169 (R1–R6): pending terminal decisions fence re-admission even
+  after SQLite rollback; a committed terminal retries its failed local receipt
+  when cloud cancellation has filtered the original offer.
+- Bind custom-harness interruption recovery to the immutable offer across the
+  pre-claim crash window without synthesizing ownership. Oversized failure
+  replacements preserve actual execution identity for explicit and automatic
+  harness selection.
+- Bound pure adapter detect/prepare waits with the admission/start deadline and
+  AbortSignal; late results cannot claim or start a retired admission. Owned
+  processes still require real disposal receipts.
+- Add capability-gated `afterSeq` mailbox navigation independent of durable ACK,
+  with a 4096-sequence read-ahead window plus one returned page. Paginated
+  approve/cancel can reach unfinished offers within that bound.
+- Fix reserved helper resolution for official CLI bundles. Installed-tarball
+  smoke runs root, adapters and CLI start through actual MCP tools/call on
+  Windows, macOS and Linux.
 
 - Fix #158–#163: receipt-gated startup ownership and cleanup, independent Agent startup with atomic home admission, bounded cancel/reject interrupt, gap-safe durable cursor acknowledgement, and observable exact terminal commit retry.
 - Fix #164–#166: Codex prompt stdin/EOF and per-MCP environment channels remove sensitive values from Codex argv; raw stdout/deferred/stderr and cancellable same-fd legacy artifact reads have local byte budgets.

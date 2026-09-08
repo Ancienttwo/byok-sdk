@@ -1,0 +1,24 @@
+{
+  "observedAt": "2026-09-08T08:23:50.803699+00:00",
+  "consumedSource": "2752ffe86c4b222e2a23e75176dd2dd3a75901bb",
+  "mainSource": "62e83ae9ac76e38b5448307fec02850f780d7347",
+  "repairSource": "60321aefcbdea5f51c2771b0ed4c74226b8e8a68",
+  "repairSourcePackagesEqualMain": true,
+  "baselineTests": {
+    "passed": 103,
+    "skipped": 2,
+    "node": "22.22.3",
+    "bun": "1.4.2"
+  },
+  "files": {
+    "artifact-readback.json": "cea36d8b2f0572bb95be290da763944255001d45f347d20bb5f29bf38dfd1696",
+    "outbox-cross-source.json": "f9b3b144f0b2aa02db44501b70c6d08fae5e1622f6cca8f5ed014f256a96cef9",
+    "main-ci.json": "b0c1627e7c368b652e19c328c973d4d275837884ef18009fa24cebbb26fc6315",
+    "main-ci-jobs.json": "897742e3292e9eedd76224eb8374617917d792250751a5419af16386d80749e7",
+    "pr169.json": "6b52cfbecb248bec5b933c529fdc01b30c2e109b0848c9be12190f90e2d5f8f4",
+    "pr175.json": "4df575e86859cfc10daeee805adab19e7afeeddafd9a8a6b6e9509e8754286a1",
+    "baseline-focused.log": "d5d153f89d4d50e758bbd1caafc952f2aafdaed12518338e6d6aeb62c9be857c",
+    "server-integration.log": "6c7a4a95fd2e884c3c66404dfa61961626c7340c8eab03f445eb001ad3a96e67",
+    "cloud-capability.log": "08297a15fb5a3cfdc14d1c7b65bdc217368546e47c4d6bb219ebd9581fa3b0d4"
+  }
+}

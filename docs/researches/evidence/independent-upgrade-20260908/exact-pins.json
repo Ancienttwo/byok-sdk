@@ -1,0 +1,28 @@
+{
+  "name": "byok-upgrade-candidate-consumer",
+  "private": true,
+  "dependencies": {
+    "@byok-sdk/core": "file:/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/_ops/upgrade-version/release-pack/byok-sdk-core-0.15.0.tgz",
+    "@byok-sdk/protocol": "file:/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/_ops/upgrade-version/release-pack/byok-sdk-protocol-0.15.0.tgz",
+    "@byok-sdk/server": "file:/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/_ops/upgrade-version/release-pack/byok-sdk-server-0.15.0.tgz",
+    "@byok-sdk/cloud": "file:/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/_ops/upgrade-version/release-pack/byok-sdk-cloud-0.15.0.tgz",
+    "@byok-sdk/client": "file:/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/_ops/upgrade-version/release-pack/byok-sdk-client-0.15.0.tgz",
+    "@byok-sdk/cloud-dataplane": "file:/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/_ops/upgrade-version/release-pack/byok-sdk-cloud-dataplane-0.15.0.tgz",
+    "@byok-sdk/ui-runtime": "file:/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/_ops/upgrade-version/release-pack/byok-sdk-ui-runtime-0.15.0.tgz",
+    "@byok-sdk/testkit": "file:/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/_ops/upgrade-version/release-pack/byok-sdk-testkit-0.15.0.tgz",
+    "byok-sdk": "file:/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/_ops/upgrade-version/release-pack/byok-sdk-0.15.0.tgz",
+    "@byok-sdk/keys": "file:/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/_ops/upgrade-version/release-pack/byok-sdk-keys-0.4.1.tgz"
+  },
+  "overrides": {
+    "@byok-sdk/core": "file:/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/_ops/upgrade-version/release-pack/byok-sdk-core-0.15.0.tgz",
+    "@byok-sdk/protocol": "file:/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/_ops/upgrade-version/release-pack/byok-sdk-protocol-0.15.0.tgz",
+    "@byok-sdk/server": "file:/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/_ops/upgrade-version/release-pack/byok-sdk-server-0.15.0.tgz",
+    "@byok-sdk/cloud": "file:/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/_ops/upgrade-version/release-pack/byok-sdk-cloud-0.15.0.tgz",
+    "@byok-sdk/client": "file:/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/_ops/upgrade-version/release-pack/byok-sdk-client-0.15.0.tgz",
+    "@byok-sdk/cloud-dataplane": "file:/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/_ops/upgrade-version/release-pack/byok-sdk-cloud-dataplane-0.15.0.tgz",
+    "@byok-sdk/ui-runtime": "file:/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/_ops/upgrade-version/release-pack/byok-sdk-ui-runtime-0.15.0.tgz",
+    "@byok-sdk/testkit": "file:/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/_ops/upgrade-version/release-pack/byok-sdk-testkit-0.15.0.tgz",
+    "byok-sdk": "file:/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/_ops/upgrade-version/release-pack/byok-sdk-0.15.0.tgz",
+    "@byok-sdk/keys": "file:/Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/_ops/upgrade-version/release-pack/byok-sdk-keys-0.4.1.tgz"
+  }
+}

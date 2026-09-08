@@ -1,0 +1,34 @@
+$ vitest run src/__tests__/validation.test.ts
+
+ RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/packages/protocol
+
+ ❯ src/__tests__/validation.test.ts (20 tests | 4 failed) 12ms
+     × rejects unsupported wire major 0 before either decode or HTTP batch admission 6ms
+     × rejects unsupported wire major -1 before either decode or HTTP batch admission 0ms
+     × rejects unsupported wire major 2 before either decode or HTTP batch admission 0ms
+     × rejects unsupported wire major 99 before either decode or HTTP batch admission 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/validation.test.ts > malformed payload rejection > rejects unsupported wire major 0 before either decode or HTTP batch admission
+ FAIL  src/__tests__/validation.test.ts > malformed payload rejection > rejects unsupported wire major -1 before either decode or HTTP batch admission
+ FAIL  src/__tests__/validation.test.ts > malformed payload rejection > rejects unsupported wire major 2 before either decode or HTTP batch admission
+ FAIL  src/__tests__/validation.test.ts > malformed payload rejection > rejects unsupported wire major 99 before either decode or HTTP batch admission
+AssertionError: expected function to throw an error, but it didn't
+ ❯ src/__tests__/validation.test.ts:23:45
+     21|     }, { taskId: 'version-gate', seq: 1 });
+     22|     const unsupported = { ...supported, v };
+     23|     expect(() => parseMessage(unsupported)).toThrow(EnvelopeValidation…
+       |                                             ^
+     24|     expect(() => decodeEnvelope(JSON.stringify(unsupported))).toThrow(…
+     25|     expect(EnvelopeSchema.safeParse(unsupported).success).toBe(false);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 16 passed (20)
+   Start at  16:28:35
+   Duration  281ms (transform 86ms, setup 0ms, import 159ms, tests 12ms, environment 0ms)
+
+error: script "test" exited with code 1

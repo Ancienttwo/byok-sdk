@@ -12,6 +12,15 @@ document and the schemas in `packages/protocol/src/` describe a closed
 contract — see "Freeze rule" immediately below for exactly what "frozen"
 does and doesn't allow.
 
+Only wire major `1` is currently supported. Every envelope must carry that
+major even when its message type and payload happen to match a v1 shape. Schema
+decode rejects another major with `EnvelopeValidationError`; the HTTP messages
+boundary rejects the invalid batch before admission, and the exported cloud
+inbound gate returns `rejected` before reserving the envelope identity. Client
+long-poll keeps an unsupported executable envelope's cursor unacknowledged.
+This enforces the existing supported set; it does not add v2 or reinterpret v2
+as v1. Package/application SemVer remains unrelated to wire admission.
+
 > Current transport (WP3B Step 4b): the daemon uses authenticated long-poll
 > HTTP only. `GET /byok/events` receives server envelopes and
 > `POST /byok/messages` sends daemon envelopes; no socket transport or

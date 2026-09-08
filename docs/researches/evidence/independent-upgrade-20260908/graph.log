@@ -1,0 +1,2 @@
+$ node scripts/release/check-package-graph.mjs
+[release-graph] OK: 9 aligned manifests at 0.15.0, keys at 0.4.1; umbrella has 7 dispatch namespaces and no keys edge

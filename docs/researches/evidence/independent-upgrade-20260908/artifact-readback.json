@@ -1,0 +1,57 @@
+[
+  {
+    "package": "@byok-sdk/core",
+    "url": "https://downloads.salesko.ai/byok-sdk/2752ffe86c4b222e2a23e75176dd2dd3a75901bb/byok-sdk-core-0.15.0.tgz",
+    "sha256": "2000a79badea5cdc89c413c9e75907b5a0ea9ce90bc46ff04673a8ae543734cf",
+    "matchesManifest": true,
+    "dependencies": {
+      "zod": "^4.4.3"
+    }
+  },
+  {
+    "package": "@byok-sdk/protocol",
+    "url": "https://downloads.salesko.ai/byok-sdk/2752ffe86c4b222e2a23e75176dd2dd3a75901bb/byok-sdk-protocol-0.15.0.tgz",
+    "sha256": "c568dc6538896fed0466fbd506e208a93721c40567a2f64d1efb48ab2c75c850",
+    "matchesManifest": true,
+    "dependencies": {
+      "zod": "^4.4.3"
+    }
+  },
+  {
+    "package": "@byok-sdk/cloud",
+    "url": "https://downloads.salesko.ai/byok-sdk/2752ffe86c4b222e2a23e75176dd2dd3a75901bb/byok-sdk-cloud-0.15.0.tgz",
+    "sha256": "776d9c03dab3e2338040dff3c20e6701c0a2018951f8bf90f134f0d2d764a4b3",
+    "matchesManifest": true,
+    "dependencies": {
+      "@byok-sdk/core": "0.15.0",
+      "@byok-sdk/protocol": "0.15.0",
+      "hono": "^4.12.30",
+      "zod": "^4.4.3"
+    }
+  },
+  {
+    "package": "@byok-sdk/client",
+    "url": "https://downloads.salesko.ai/byok-sdk/2752ffe86c4b222e2a23e75176dd2dd3a75901bb/byok-sdk-client-0.15.0.tgz",
+    "sha256": "0ff5898e293fd02c2a4033c90f7358b819af10e0196224dcd55fee9907e652df",
+    "matchesManifest": true,
+    "dependencies": {
+      "@byok-sdk/core": "0.15.0",
+      "@byok-sdk/protocol": "0.15.0",
+      "@earendil-works/pi-coding-agent": "0.85.1",
+      "@juicesharp/rpiv-todo": "2.8.0",
+      "pi-mcp-adapter": "2.27.0",
+      "pi-subagents": "0.60.0",
+      "pi-web-access": "0.24.1"
+    }
+  },
+  {
+    "package": "@byok-sdk/keys",
+    "url": "https://downloads.salesko.ai/byok-sdk/2752ffe86c4b222e2a23e75176dd2dd3a75901bb/byok-sdk-keys-0.4.1.tgz",
+    "sha256": "ced101782a152d2a023ce681b959f270135e2d0a7720b9b520ff0339b44ad0bb",
+    "matchesManifest": true,
+    "dependencies": {
+      "@byok-sdk/core": "0.15.0",
+      "zod": "^4.4.3"
+    }
+  }
+]

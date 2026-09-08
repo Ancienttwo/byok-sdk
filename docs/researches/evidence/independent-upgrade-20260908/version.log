@@ -1,0 +1,2 @@
+$ node scripts/api-surface/check-version-authority.mjs
+version-authority: README.md and docs/spec.md agree with byok-sdk@0.15.0 and @byok-sdk/keys@0.4.1
