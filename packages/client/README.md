@@ -1,5 +1,14 @@
 # @byok-sdk/client
 
+## Diagnostics and recovery integration
+
+Use the SDK-maintained [downstream guide](https://github.com/Ancienttwo/byok-sdk/blob/main/docs/agent-diagnostics-integration.md)
+to build diagnostic UI and local repair flows. `byok-agent doctor --json` is
+the current CLI entrypoint; `--fix --yes` only quarantines confirmed-corrupt
+operational health state with the daemon stopped. It does not repair an Agent
+or rebuild its journal. The guide includes integration limits and acceptance
+scenarios; qualify them against the exact SDK artifact shipped by your product.
+
 ## Exact provider-profile admission
 
 When `DaemonConfig.piByokLauncher` is configured, the daemon advertises the
