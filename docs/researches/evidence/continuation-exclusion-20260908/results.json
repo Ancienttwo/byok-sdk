@@ -1,0 +1,142 @@
+{
+  "node": "v22.22.3",
+  "fixedCloud": "2752ffe86c4b222e2a23e75176dd2dd3a75901bb",
+  "rows": [
+    {
+      "lane": "old",
+      "fault": "close-held",
+      "status": "PASS_SERIALIZED_RELEASE",
+      "before": {
+        "maxConcurrentMutableSessionsPerAgentHome": 1,
+        "activeHomes": 1,
+        "activeAttempts": 1
+      },
+      "firstTask": "task-44dd5791-72e5-4d13-890e-63bdba4085ce",
+      "firstClosed": false,
+      "heldObservation": "successor admitted to cloud, inbound may still be serialized behind predecessor disposition; not proof of busy refusal",
+      "duplicateEnqueue": "explicitly rejected",
+      "successorStarts": 1,
+      "cleanup": true
+    },
+    {
+      "lane": "old",
+      "fault": "close-rejected",
+      "status": "PASS_EXCLUSION_ONLY",
+      "before": {
+        "maxConcurrentMutableSessionsPerAgentHome": 1,
+        "activeHomes": 1,
+        "activeAttempts": 1
+      },
+      "firstTask": "task-219caa4b-a473-4b86-a3f5-e91ecb0e79b5",
+      "firstClosed": false,
+      "decline": {
+        "reason": "agent home busy: 1 active attempt(s)",
+        "retryable": true,
+        "agentRef": {
+          "agentId": "shared",
+          "profileRevision": "p2"
+        }
+      },
+      "excludedBeforeRelease": true,
+      "duplicateEnqueue": "explicitly rejected",
+      "reconnectDuplicateExcluded": true,
+      "onlineCleanupRetry": "not attempted: no public per-task cleanup retry demonstrated",
+      "cleanup": true
+    },
+    {
+      "lane": "old",
+      "fault": "lease-release-rejected",
+      "status": "PASS",
+      "before": {
+        "maxConcurrentMutableSessionsPerAgentHome": 1,
+        "activeHomes": 0,
+        "activeAttempts": 0
+      },
+      "firstTask": "task-f0907ab9-316c-4a83-87c0-8aba96831576",
+      "firstClosed": true,
+      "decline": {
+        "reason": "Agent home admission failed: could not acquire Agent home lease: fixture lease rm denied",
+        "retryable": true,
+        "agentRef": {
+          "agentId": "shared",
+          "profileRevision": "p2"
+        }
+      },
+      "excludedBeforeRelease": true,
+      "duplicateEnqueue": "explicitly rejected",
+      "reconnectDuplicateExcluded": true,
+      "successorStarts": 1,
+      "claimResponseLostRetries": 2,
+      "thirdTask": "task-49370f53-245c-45d4-ac5b-85a8cf42f549",
+      "cleanup": true
+    },
+    {
+      "lane": "new",
+      "fault": "close-held",
+      "status": "PASS_SERIALIZED_RELEASE",
+      "before": {
+        "maxConcurrentMutableSessionsPerAgentHome": 1,
+        "activeHomes": 1,
+        "activeAttempts": 1
+      },
+      "firstTask": "task-52523b4b-8368-4810-a9f2-ec532fb1f0d5",
+      "firstClosed": false,
+      "heldObservation": "successor admitted to cloud, inbound may still be serialized behind predecessor disposition; not proof of busy refusal",
+      "duplicateEnqueue": "explicitly rejected",
+      "successorStarts": 1,
+      "cleanup": true
+    },
+    {
+      "lane": "new",
+      "fault": "close-rejected",
+      "status": "PASS_EXCLUSION_ONLY",
+      "before": {
+        "maxConcurrentMutableSessionsPerAgentHome": 1,
+        "activeHomes": 1,
+        "activeAttempts": 1
+      },
+      "firstTask": "task-8681a3fa-78c3-45f7-adfd-1a78b77bb46c",
+      "firstClosed": false,
+      "decline": {
+        "reason": "agent home busy: 1 active attempt(s)",
+        "retryable": true,
+        "agentRef": {
+          "agentId": "shared",
+          "profileRevision": "p2"
+        }
+      },
+      "excludedBeforeRelease": true,
+      "duplicateEnqueue": "explicitly rejected",
+      "reconnectDuplicateExcluded": true,
+      "onlineCleanupRetry": "not attempted: no public per-task cleanup retry demonstrated",
+      "cleanup": true
+    },
+    {
+      "lane": "new",
+      "fault": "lease-release-rejected",
+      "status": "PASS",
+      "before": {
+        "maxConcurrentMutableSessionsPerAgentHome": 1,
+        "activeHomes": 0,
+        "activeAttempts": 0
+      },
+      "firstTask": "task-cba35c7d-37e4-4efd-853b-89d1d201bad7",
+      "firstClosed": true,
+      "decline": {
+        "reason": "Agent home admission failed: could not acquire Agent home lease: fixture lease rm denied",
+        "retryable": true,
+        "agentRef": {
+          "agentId": "shared",
+          "profileRevision": "p2"
+        }
+      },
+      "excludedBeforeRelease": true,
+      "duplicateEnqueue": "explicitly rejected",
+      "reconnectDuplicateExcluded": true,
+      "successorStarts": 1,
+      "claimResponseLostRetries": 2,
+      "thirdTask": "task-dfe59f5e-9e5e-495a-9d3b-350b73c8f0f4",
+      "cleanup": true
+    }
+  ]
+}

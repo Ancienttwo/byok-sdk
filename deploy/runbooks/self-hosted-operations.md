@@ -2,6 +2,10 @@
 
 Status: CURRENT for `byok-agent` foreground and OS-service deployments.
 
+For product UI, local command integration, responsibility boundaries and
+acceptance scenarios, use the SDK-maintained
+[downstream Agent diagnostics guide](../../docs/agent-diagnostics-integration.md).
+
 ## Daily operator path
 
 1. `byok-agent status --config <path>` shows persisted history plus a clearly marked live section when the authenticated control socket is reachable.
