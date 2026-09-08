@@ -1,0 +1,42 @@
+{
+  "at": "2026-09-08T17:20:50.019Z",
+  "sdk": "0.16.0",
+  "test": "real SIGKILL after SDK dispatch/execution before host mapping; restart and replay identical outer request",
+  "first": {
+    "type": "crash_window",
+    "taskId": "306787d8-923d-411b-ad98-c6e451bb9ffe",
+    "executions": 1
+  },
+  "killedBy": "SIGKILL",
+  "result": "test_failed",
+  "error": "device has been revoked by the server; re-pair required",
+  "restartEvidence": {
+    "devices": [],
+    "tasks": {
+      "tasks": [
+        {
+          "taskId": "306787d8-923d-411b-ad98-c6e451bb9ffe",
+          "state": "Complete",
+          "deviceId": "dev_1d20e521-44a5-4427-8937-7aa5ab520a1f",
+          "createdAt": "2026-09-08T17:20:50.865Z",
+          "updatedAt": "2026-09-08T17:20:50.865Z",
+          "claimedRuntime": "pi",
+          "claimedRuntimeCapabilities": {
+            "steer": false,
+            "resume": false,
+            "approvalInteractive": false,
+            "mcpToolsets": false,
+            "permissionModes": [
+              "auto"
+            ]
+          }
+        }
+      ]
+    },
+    "enrollmentState": "paired"
+  },
+  "cleanup": {
+    "type": "cleaned"
+  },
+  "testStateRemoved": true
+}

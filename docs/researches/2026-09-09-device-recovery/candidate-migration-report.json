@@ -1,0 +1,9 @@
+{
+  "source": "published server 0.16.0",
+  "target": "unpublished candidate",
+  "startedAt": "2026-09-08T18:09:46.741Z",
+  "result": "passed",
+  "oldBuildRefusedV2": true,
+  "explicitMigrationRequired": true,
+  "testStateRemoved": true
+}

@@ -1,0 +1,8 @@
+{
+  "crash-dispatch.mjs": "3119d4471ccd860c438e8df98edea3b053e4b60d65e8253197fd6000d198ab4a",
+  "crash-trace.mjs": "98430e6803a0f0438f9b7ec233d1db258e912f89ca05bf5b120e86157cf9776a",
+  "candidate-migration-report.json": "4db1de72f2645fe045d75089e0db93ea51bea26bb61be6149720ac74da2a36af",
+  "candidate-crash-trace-report.json": "9d24cc832b00b9757aea01af6439b2a82e7485ed53c8240f76046a44bac1afde",
+  "candidate-crash-report.json": "d4145c1a7a263ebe8dda97715368a76ad616ec3da7671723c3be3783624b5f72",
+  "published-016-crash-report.json": "2658eb8063b02dee0fd98cdb5742076f6e24cc0bb1cc58824bd1be0838f588d4"
+}

@@ -1,0 +1,31 @@
+{
+  "at": "2026-09-08T18:09:53.664Z",
+  "sdk": "unpublished device-persistence candidate based on 0.16.0",
+  "test": "real SIGKILL after SDK dispatch/execution before host mapping; restart and replay identical outer request",
+  "first": {
+    "type": "crash_window",
+    "taskId": "9d9651f3-0ff4-4454-8334-e562b5b98559",
+    "executions": 1
+  },
+  "killedBy": "SIGKILL",
+  "recovery": {
+    "type": "recovered",
+    "beforeIds": [
+      "9d9651f3-0ff4-4454-8334-e562b5b98559"
+    ],
+    "afterIds": [
+      "9d9651f3-0ff4-4454-8334-e562b5b98559",
+      "d4f02f19-3f20-4219-b4ec-6185897111e1"
+    ],
+    "replayTaskId": "d4f02f19-3f20-4219-b4ec-6185897111e1",
+    "executions": 3,
+    "sameInstruction": true,
+    "hostMappingExists": false
+  },
+  "result": "test_failed",
+  "error": "Expected values to be strictly equal:\n\n3 !== 2\n",
+  "cleanup": {
+    "type": "cleaned"
+  },
+  "testStateRemoved": true
+}

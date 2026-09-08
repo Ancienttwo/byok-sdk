@@ -1,0 +1,49 @@
+{
+  "at": "2026-09-08T18:06:19.671Z",
+  "sdk": "unpublished device-persistence candidate based on 0.16.0",
+  "test": "real SIGKILL after SDK dispatch/execution before host mapping; restart and replay identical outer request",
+  "first": {
+    "type": "crash_window",
+    "taskId": "87a5830f-bdf4-4ff8-9863-8d827a26d332",
+    "executions": 1
+  },
+  "killedBy": "SIGKILL",
+  "recovery": {
+    "type": "recovered",
+    "beforeIds": [
+      "87a5830f-bdf4-4ff8-9863-8d827a26d332"
+    ],
+    "afterIds": [
+      "3e2773b2-f0fe-4616-bd16-564af8bb5548",
+      "87a5830f-bdf4-4ff8-9863-8d827a26d332"
+    ],
+    "replayTaskId": "3e2773b2-f0fe-4616-bd16-564af8bb5548",
+    "executionsBeforeDispatch": 1,
+    "audit": [
+      {
+        "instruction": "outer-request-once: deterministic test side effect",
+        "mode": "first",
+        "executionPhase": "explicit-dispatch"
+      },
+      {
+        "instruction": "outer-request-once: deterministic test side effect",
+        "mode": "replay",
+        "executionPhase": "explicit-dispatch"
+      },
+      {
+        "instruction": "outer-request-once: deterministic test side effect",
+        "mode": "replay",
+        "executionPhase": "explicit-dispatch"
+      }
+    ],
+    "executions": 3,
+    "sameInstruction": true,
+    "hostMappingExists": false
+  },
+  "result": "test_failed",
+  "error": "Expected values to be strictly equal:\n\n3 !== 2\n",
+  "cleanup": {
+    "type": "cleaned"
+  },
+  "testStateRemoved": true
+}
