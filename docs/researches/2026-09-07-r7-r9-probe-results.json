@@ -1,0 +1,38 @@
+{
+  "sourceSha": "fd1f46b927dcfbe3f7d5b7dc1bef2eaccd6e1d36",
+  "mergeSha": "0c70396dbec8cc70a354ac7d7222b25cc92b9469",
+  "node": "v26.3.1",
+  "scope": "source-level isolation, real filesystem for compaction",
+  "probes": [
+    {
+      "name": "R7-outbox-compaction",
+      "retainedRecords": 2,
+      "trailingNewline": false,
+      "reopenError": "Unexpected non-whitespace character after JSON at position 452 (line 1 column 453)"
+    },
+    {
+      "name": "R7-reliable-spool-compaction",
+      "retainedRecords": 2,
+      "trailingNewline": false,
+      "reopenError": "reliable spool is corrupt: Unexpected non-whitespace character after JSON at position 450 (line 1 column 451)"
+    },
+    {
+      "name": "R8-conflicting-claim-CAS",
+      "outcomes": [
+        "accepted",
+        "accepted"
+      ],
+      "storedHarnessId": "acme-a"
+    },
+    {
+      "name": "R9-required-message-refusal",
+      "pendingTaskCount": 1,
+      "pendingCompletion": true,
+      "retryTimerPresent": false,
+      "closeCalls": 0,
+      "terminalMessageCount": 0,
+      "contextRevocations": 1,
+      "cloudDispositionAfterAttemptedReplacement": "refused"
+    }
+  ]
+}

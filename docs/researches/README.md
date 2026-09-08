@@ -11,6 +11,7 @@ Architecture decisions:
 
 Reference reports:
 
+- [Multica extraction assessment (2026-09-07)](./2026-09-07_multica-extraction-assessment.md)
 - [RAFT architecture static reference](./raft-architecture-reference.md)
 - [RAFT Computer CLI dynamic research (2026-08-10)](./2026-08-10_research-raft-cli-dynamic-report.md)
 - [RAFT evidence impact on BYOK architecture (2026-08-10)](./2026-08-10_raft-evidence-impact-on-byok-architecture.md)
