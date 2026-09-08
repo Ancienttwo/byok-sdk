@@ -1,0 +1,738 @@
+{
+  "scenario": {
+    "name": "changed-url-no-journal-acked",
+    "journal": false,
+    "changeUrl": true,
+    "barrier": "acked",
+    "dispatchB": false,
+    "expectedA": 1
+  },
+  "startedAt": "2026-09-08T19:12:14.696Z",
+  "failureDomain": "combined server + daemon child process",
+  "result": "failed",
+  "first": {
+    "kind": "crash-ready",
+    "taskA": "19c3ec95-10bb-4447-8bc0-72a5c032c51f",
+    "deviceId": "dev_a1a3a1ce-bce8-4d56-ba17-4973d7d71c03",
+    "preStart": {
+      "serverUrl": "http://127.0.0.1:49757",
+      "deviceId": "dev_a1a3a1ce-bce8-4d56-ba17-4973d7d71c03",
+      "cursorNamespace": "ccbeb9e594fe4b3c61e2e92ee2274d1c",
+      "localCursor": null,
+      "mailbox": [],
+      "serverCursors": [],
+      "serverTasks": [],
+      "journal": {
+        "enabled": false,
+        "exists": false
+      }
+    },
+    "state": {
+      "serverUrl": "http://127.0.0.1:49757",
+      "deviceId": "dev_a1a3a1ce-bce8-4d56-ba17-4973d7d71c03",
+      "cursorNamespace": "ccbeb9e594fe4b3c61e2e92ee2274d1c",
+      "localCursor": 1,
+      "mailbox": [
+        {
+          "seq": 1,
+          "offerId": "c631759a-a5ca-8af9-bc5f-75c71a57923f",
+          "state": "acked",
+          "type": "task.offer",
+          "taskId": "19c3ec95-10bb-4447-8bc0-72a5c032c51f",
+          "envelopeId": "c631759a-a5ca-8af9-bc5f-75c71a57923f"
+        }
+      ],
+      "serverCursors": [
+        {
+          "device_id": "dev_a1a3a1ce-bce8-4d56-ba17-4973d7d71c03",
+          "delivered_seq": 1,
+          "acked_seq": 1
+        }
+      ],
+      "serverTasks": [
+        {
+          "task_id": "19c3ec95-10bb-4447-8bc0-72a5c032c51f",
+          "status": "complete"
+        }
+      ],
+      "journal": {
+        "enabled": false,
+        "exists": false
+      }
+    }
+  },
+  "error": "barrier timeout: recovery: durable offer ACK, terminal disposition, two subsequent empty polls",
+  "events": [
+    {
+      "stage": "first",
+      "pid": 14570,
+      "order": 1,
+      "at": "2026-09-08T19:12:15.042Z",
+      "kind": "phase-start",
+      "serverUrl": "http://127.0.0.1:49757",
+      "deviceId": "dev_a1a3a1ce-bce8-4d56-ba17-4973d7d71c03",
+      "journal": false,
+      "hostRequestId": "dbeb7de2-2fde-4c6d-8174-7803715fa57e"
+    },
+    {
+      "stage": "first",
+      "pid": 14570,
+      "order": 2,
+      "at": "2026-09-08T19:12:15.186Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "first",
+      "pid": 14570,
+      "order": 3,
+      "at": "2026-09-08T19:12:15.196Z",
+      "kind": "dispatch",
+      "taskId": "19c3ec95-10bb-4447-8bc0-72a5c032c51f",
+      "hostRequestId": "dbeb7de2-2fde-4c6d-8174-7803715fa57e",
+      "submission": "A"
+    },
+    {
+      "stage": "first",
+      "pid": 14570,
+      "order": 4,
+      "at": "2026-09-08T19:12:15.448Z",
+      "kind": "offer",
+      "taskId": "19c3ec95-10bb-4447-8bc0-72a5c032c51f",
+      "offerId": "c631759a-a5ca-8af9-bc5f-75c71a57923f",
+      "seq": 1,
+      "type": "task.offer"
+    },
+    {
+      "stage": "first",
+      "pid": 14570,
+      "order": 5,
+      "at": "2026-09-08T19:12:15.454Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 1,
+      "count": 1
+    },
+    {
+      "stage": "first",
+      "pid": 14570,
+      "order": 6,
+      "at": "2026-09-08T19:12:15.480Z",
+      "kind": "start",
+      "taskId": "19c3ec95-10bb-4447-8bc0-72a5c032c51f",
+      "runtimeId": "pi",
+      "agentRef": null,
+      "sessionRef": "37032798-d1f6-4713-b53d-abe8702a78e8",
+      "offerId": "c631759a-a5ca-8af9-bc5f-75c71a57923f",
+      "seq": 1
+    },
+    {
+      "stage": "first",
+      "pid": 14570,
+      "order": 7,
+      "at": "2026-09-08T19:12:15.493Z",
+      "kind": "terminal-send",
+      "taskId": "19c3ec95-10bb-4447-8bc0-72a5c032c51f",
+      "envelopeId": "5cf09215-85ef-4d03-bfeb-6c499e50b858",
+      "type": "task.complete",
+      "payloadHash": "sha256:1cb6375afec494dacb4162490784d0f75949f9ddf9c7dff70cbd892703040da6"
+    },
+    {
+      "stage": "first",
+      "pid": 14570,
+      "order": 8,
+      "at": "2026-09-08T19:12:15.506Z",
+      "kind": "terminal-response",
+      "taskId": "19c3ec95-10bb-4447-8bc0-72a5c032c51f",
+      "envelopeId": "5cf09215-85ef-4d03-bfeb-6c499e50b858",
+      "status": 200,
+      "payloadHash": "sha256:1cb6375afec494dacb4162490784d0f75949f9ddf9c7dff70cbd892703040da6"
+    },
+    {
+      "stage": "first",
+      "pid": 14570,
+      "order": 9,
+      "at": "2026-09-08T19:12:15.566Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 1,
+      "count": 0
+    },
+    {
+      "stage": "first",
+      "pid": 14570,
+      "order": 10,
+      "at": "2026-09-08T19:12:15.835Z",
+      "kind": "crash-barrier",
+      "barrier": "acked",
+      "taskId": "19c3ec95-10bb-4447-8bc0-72a5c032c51f"
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 1,
+      "at": "2026-09-08T19:12:15.996Z",
+      "kind": "phase-start",
+      "serverUrl": "http://127.0.0.1:49758",
+      "deviceId": "dev_a1a3a1ce-bce8-4d56-ba17-4973d7d71c03",
+      "journal": false,
+      "hostRequestId": "dbeb7de2-2fde-4c6d-8174-7803715fa57e"
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 2,
+      "at": "2026-09-08T19:12:16.175Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 3,
+      "at": "2026-09-08T19:12:16.543Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 4,
+      "at": "2026-09-08T19:12:16.927Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 5,
+      "at": "2026-09-08T19:12:17.293Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 6,
+      "at": "2026-09-08T19:12:17.663Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 7,
+      "at": "2026-09-08T19:12:18.036Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 8,
+      "at": "2026-09-08T19:12:18.403Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 9,
+      "at": "2026-09-08T19:12:18.765Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 10,
+      "at": "2026-09-08T19:12:19.134Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 11,
+      "at": "2026-09-08T19:12:19.504Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 12,
+      "at": "2026-09-08T19:12:19.875Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 13,
+      "at": "2026-09-08T19:12:20.249Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 14,
+      "at": "2026-09-08T19:12:20.629Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 15,
+      "at": "2026-09-08T19:12:21.004Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 16,
+      "at": "2026-09-08T19:12:21.431Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 17,
+      "at": "2026-09-08T19:12:21.794Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 18,
+      "at": "2026-09-08T19:12:22.161Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 19,
+      "at": "2026-09-08T19:12:22.556Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 20,
+      "at": "2026-09-08T19:12:22.924Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 21,
+      "at": "2026-09-08T19:12:23.291Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 22,
+      "at": "2026-09-08T19:12:23.662Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 23,
+      "at": "2026-09-08T19:12:24.027Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 24,
+      "at": "2026-09-08T19:12:24.398Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 25,
+      "at": "2026-09-08T19:12:24.764Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 26,
+      "at": "2026-09-08T19:12:25.127Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 27,
+      "at": "2026-09-08T19:12:25.498Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 28,
+      "at": "2026-09-08T19:12:25.864Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 29,
+      "at": "2026-09-08T19:12:26.230Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 30,
+      "at": "2026-09-08T19:12:26.596Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 31,
+      "at": "2026-09-08T19:12:26.977Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 32,
+      "at": "2026-09-08T19:12:27.343Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 33,
+      "at": "2026-09-08T19:12:27.709Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 34,
+      "at": "2026-09-08T19:12:28.068Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 35,
+      "at": "2026-09-08T19:12:28.441Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 36,
+      "at": "2026-09-08T19:12:28.807Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 37,
+      "at": "2026-09-08T19:12:29.173Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 38,
+      "at": "2026-09-08T19:12:29.546Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 39,
+      "at": "2026-09-08T19:12:29.909Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 40,
+      "at": "2026-09-08T19:12:30.283Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 41,
+      "at": "2026-09-08T19:12:30.653Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 42,
+      "at": "2026-09-08T19:12:31.018Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 43,
+      "at": "2026-09-08T19:12:31.383Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 44,
+      "at": "2026-09-08T19:12:31.746Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 45,
+      "at": "2026-09-08T19:12:32.116Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 46,
+      "at": "2026-09-08T19:12:32.484Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 47,
+      "at": "2026-09-08T19:12:32.846Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 48,
+      "at": "2026-09-08T19:12:33.211Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 49,
+      "at": "2026-09-08T19:12:33.579Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 50,
+      "at": "2026-09-08T19:12:33.946Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 51,
+      "at": "2026-09-08T19:12:34.314Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 52,
+      "at": "2026-09-08T19:12:34.680Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 53,
+      "at": "2026-09-08T19:12:35.055Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 54,
+      "at": "2026-09-08T19:12:35.420Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 55,
+      "at": "2026-09-08T19:12:35.786Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 14764,
+      "order": 56,
+      "at": "2026-09-08T19:12:36.152Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    }
+  ],
+  "cleanup": {
+    "kind": "cleaned"
+  },
+  "testStateRemoved": true
+}

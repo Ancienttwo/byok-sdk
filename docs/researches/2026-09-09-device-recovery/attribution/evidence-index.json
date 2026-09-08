@@ -1,0 +1,41 @@
+{
+  "sourceBase": "9b18bfa1af9369873ee90241982c036316eab9a7",
+  "sdkProductionCommit": "c83345d292dbc0a4bea3f2de780ece946de4b572",
+  "serverTarSha256": "31b4256445916341bf921379aa35a0467f1f33ce0a93fb0355dfdbaafd37412b",
+  "packages": {
+    "@byok-sdk/client": {
+      "version": "0.16.0",
+      "manifestSha256": "128622add9e39d82183afe108902f3184026793ffe3a6259cee2bc521c798a68"
+    },
+    "@byok-sdk/server": {
+      "version": "0.16.0",
+      "manifestSha256": "08f6561336ba7f4599ef3875c8a39601dab15e63b8f9eb89ec46e2a302e7f65f"
+    },
+    "@byok-sdk/cloud": {
+      "version": "0.16.0",
+      "manifestSha256": "b4cc06cd55915b16cba1c4d54964f92f34c1fac91e3cfe1e3371c33aaad06805"
+    },
+    "@byok-sdk/core": {
+      "version": "0.16.0",
+      "manifestSha256": "187875cf0ae705d2b95e5f407baf6f3d24cce03cec0731daac44396fa0a37201"
+    },
+    "@byok-sdk/protocol": {
+      "version": "0.16.0",
+      "manifestSha256": "a3b4afed1c04233228f934f80f819ec60f13d0416e330fadac14ba8569de1c39"
+    }
+  },
+  "sha256": {
+    "reports/changed-url-no-journal-acked.json": "544b4e9b1ec543cd43572600bcdd1a8600a8cb9efa45b91548a690ee6c5b20e7",
+    "reports/changed-url-no-journal-pending-then-B.json": "263727d2453d57e7c4a4067d0dd3f71851600e476ead6375181320b89f5990c7",
+    "reports/changed-url-no-journal-pending.json": "33c73a56bb383d06e54a14289e326140fb5b69f47dd1a41e0404a3e483e89b1e",
+    "reports/fixed-journal-pending-terminal.json": "ef584dfec85751fcc11a4fdfc69c0e40dd57246ba16159d9c8fc9d473fce55c6",
+    "reports/fixed-journal-terminal-response-held.json": "d029cb3c2a6659c5a7fd58135781f5bcc18a94205a471327189fbd55e0c89f8e",
+    "reports/fixed-journal-then-dispatch-B.json": "4cefaac2295d603b44de4c7488fc140ef77be846045d88999cf632581cd6269c",
+    "reports/fixed-no-journal-acked.json": "aecd107a2d893a44990af4ad2d044513af41eea2302eb2ba7c822913ea5cdafe",
+    "reports/fixed-no-journal-pending.json": "f598bbb08bbafbebf57122721647ffab31cc66deaef74b759857402b54430240",
+    "packages/server/src/__tests__/recovery-probe/evidence.mjs": "9ac5a6567fb52590d76e76426dcb9c7250f54847a12c8649a447280e2baf4c9b",
+    "packages/server/src/__tests__/recovery-probe/evidence.node-test.mjs": "9fa726b833d072d007b7cb57004a50108757c87f3f6d145fc0b2eeea28237640",
+    "packages/server/src/__tests__/recovery-probe/probe.mjs": "3e55305e3970b6fb6bec094709f2a2040702001fd0be9f578a1097d31af97ac5"
+  },
+  "initialProbeBarrierFailureSha256": "1b1db51d452e2f57c2a2ba298b545bd0e14769aadad7efade88cefbb1ca8ad49"
+}

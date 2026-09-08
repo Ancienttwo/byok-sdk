@@ -1,5 +1,14 @@
 # GPT Pro handoff：BYOK 0.16 接入与恢复审查
 
+## 后续实测更新
+
+用户批准的可归因 probe 已完成，先读
+[八组对照与证据](attribution/README.md)。新实验明确证明 changed URL + 未 ACK +
+无 journal 可导致旧 A 同 offer 重投；随后显式 façade dispatch B 得到 A=2/B=1。
+固定 URL/journal 恢复对照均不增加 A 的 start，已 ACK 的变 URL 对照也不重投。
+这不补足历史运行未记录的 URL 身份，也不表示任意 provider 副作用 exactly-once。
+本 handoff 后文保留原审查时的事实与未决问题；以新报告区分已解答和仍待查项。
+
 ## 请先判断什么
 
 请独立审查设备持久化补丁及重复执行实验，先给根因证据和最小下一刀，暂不修改或发布。

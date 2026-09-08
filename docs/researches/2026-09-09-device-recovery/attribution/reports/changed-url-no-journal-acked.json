@@ -1,0 +1,336 @@
+{
+  "scenario": {
+    "name": "changed-url-no-journal-acked",
+    "journal": false,
+    "changeUrl": true,
+    "barrier": "acked",
+    "dispatchB": false,
+    "expectedA": 1
+  },
+  "startedAt": "2026-09-08T19:15:48.969Z",
+  "failureDomain": "combined server + daemon child process",
+  "result": "passed",
+  "first": {
+    "kind": "crash-ready",
+    "taskA": "ffed62e5-1ce4-4412-8957-92fc68026ab9",
+    "deviceId": "dev_533e7953-79df-4e35-a3db-c1a124b6180d",
+    "preStart": {
+      "serverUrl": "http://127.0.0.1:50752",
+      "deviceId": "dev_533e7953-79df-4e35-a3db-c1a124b6180d",
+      "cursorNamespace": "801cc873c376164c24fe18127bb3e0b1",
+      "localCursor": null,
+      "mailbox": [],
+      "serverCursors": [],
+      "serverTasks": [],
+      "journal": {
+        "enabled": false,
+        "exists": false
+      }
+    },
+    "state": {
+      "serverUrl": "http://127.0.0.1:50752",
+      "deviceId": "dev_533e7953-79df-4e35-a3db-c1a124b6180d",
+      "cursorNamespace": "801cc873c376164c24fe18127bb3e0b1",
+      "localCursor": 1,
+      "mailbox": [
+        {
+          "seq": 1,
+          "offerId": "835c82a5-a3e4-8401-9cc5-f69dda654e17",
+          "state": "acked",
+          "type": "task.offer",
+          "taskId": "ffed62e5-1ce4-4412-8957-92fc68026ab9",
+          "envelopeId": "835c82a5-a3e4-8401-9cc5-f69dda654e17"
+        }
+      ],
+      "serverCursors": [
+        {
+          "device_id": "dev_533e7953-79df-4e35-a3db-c1a124b6180d",
+          "delivered_seq": 1,
+          "acked_seq": 1
+        }
+      ],
+      "serverTasks": [
+        {
+          "task_id": "ffed62e5-1ce4-4412-8957-92fc68026ab9",
+          "status": "complete"
+        }
+      ],
+      "journal": {
+        "enabled": false,
+        "exists": false
+      }
+    }
+  },
+  "recovery": {
+    "kind": "recovered",
+    "taskA": "ffed62e5-1ce4-4412-8957-92fc68026ab9",
+    "taskB": null,
+    "preStart": {
+      "serverUrl": "http://127.0.0.1:50753",
+      "deviceId": "dev_533e7953-79df-4e35-a3db-c1a124b6180d",
+      "cursorNamespace": "6540c14ca46341a06747722d4ab49150",
+      "localCursor": null,
+      "mailbox": [
+        {
+          "seq": 1,
+          "offerId": "835c82a5-a3e4-8401-9cc5-f69dda654e17",
+          "state": "acked",
+          "type": "task.offer",
+          "taskId": "ffed62e5-1ce4-4412-8957-92fc68026ab9",
+          "envelopeId": "835c82a5-a3e4-8401-9cc5-f69dda654e17"
+        }
+      ],
+      "serverCursors": [
+        {
+          "device_id": "dev_533e7953-79df-4e35-a3db-c1a124b6180d",
+          "delivered_seq": 1,
+          "acked_seq": 1
+        }
+      ],
+      "serverTasks": [
+        {
+          "task_id": "ffed62e5-1ce4-4412-8957-92fc68026ab9",
+          "status": "complete"
+        }
+      ],
+      "journal": {
+        "enabled": false,
+        "exists": false
+      }
+    },
+    "recoveryBarrier": {
+      "serverUrl": "http://127.0.0.1:50753",
+      "deviceId": "dev_533e7953-79df-4e35-a3db-c1a124b6180d",
+      "cursorNamespace": "6540c14ca46341a06747722d4ab49150",
+      "localCursor": null,
+      "mailbox": [
+        {
+          "seq": 1,
+          "offerId": "835c82a5-a3e4-8401-9cc5-f69dda654e17",
+          "state": "acked",
+          "type": "task.offer",
+          "taskId": "ffed62e5-1ce4-4412-8957-92fc68026ab9",
+          "envelopeId": "835c82a5-a3e4-8401-9cc5-f69dda654e17"
+        }
+      ],
+      "serverCursors": [
+        {
+          "device_id": "dev_533e7953-79df-4e35-a3db-c1a124b6180d",
+          "delivered_seq": 1,
+          "acked_seq": 1
+        }
+      ],
+      "serverTasks": [
+        {
+          "task_id": "ffed62e5-1ce4-4412-8957-92fc68026ab9",
+          "status": "complete"
+        }
+      ],
+      "journal": {
+        "enabled": false,
+        "exists": false
+      }
+    },
+    "finalState": {
+      "serverUrl": "http://127.0.0.1:50753",
+      "deviceId": "dev_533e7953-79df-4e35-a3db-c1a124b6180d",
+      "cursorNamespace": "6540c14ca46341a06747722d4ab49150",
+      "localCursor": null,
+      "mailbox": [
+        {
+          "seq": 1,
+          "offerId": "835c82a5-a3e4-8401-9cc5-f69dda654e17",
+          "state": "acked",
+          "type": "task.offer",
+          "taskId": "ffed62e5-1ce4-4412-8957-92fc68026ab9",
+          "envelopeId": "835c82a5-a3e4-8401-9cc5-f69dda654e17"
+        }
+      ],
+      "serverCursors": [
+        {
+          "device_id": "dev_533e7953-79df-4e35-a3db-c1a124b6180d",
+          "delivered_seq": 1,
+          "acked_seq": 1
+        }
+      ],
+      "serverTasks": [
+        {
+          "task_id": "ffed62e5-1ce4-4412-8957-92fc68026ab9",
+          "status": "complete"
+        }
+      ],
+      "journal": {
+        "enabled": false,
+        "exists": false
+      }
+    }
+  },
+  "events": [
+    {
+      "stage": "first",
+      "pid": 92986,
+      "order": 1,
+      "at": "2026-09-08T19:15:49.660Z",
+      "kind": "phase-start",
+      "serverUrl": "http://127.0.0.1:50752",
+      "deviceId": "dev_533e7953-79df-4e35-a3db-c1a124b6180d",
+      "journal": false,
+      "hostRequestId": "31222257-6a23-42c2-a27c-f4e65644e560"
+    },
+    {
+      "stage": "first",
+      "pid": 92986,
+      "order": 2,
+      "at": "2026-09-08T19:15:49.839Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "first",
+      "pid": 92986,
+      "order": 3,
+      "at": "2026-09-08T19:15:49.852Z",
+      "kind": "dispatch",
+      "taskId": "ffed62e5-1ce4-4412-8957-92fc68026ab9",
+      "hostRequestId": "31222257-6a23-42c2-a27c-f4e65644e560",
+      "submission": "A"
+    },
+    {
+      "stage": "first",
+      "pid": 92986,
+      "order": 4,
+      "at": "2026-09-08T19:15:50.113Z",
+      "kind": "offer",
+      "taskId": "ffed62e5-1ce4-4412-8957-92fc68026ab9",
+      "offerId": "835c82a5-a3e4-8401-9cc5-f69dda654e17",
+      "seq": 1,
+      "type": "task.offer"
+    },
+    {
+      "stage": "first",
+      "pid": 92986,
+      "order": 5,
+      "at": "2026-09-08T19:15:50.121Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 1,
+      "count": 1
+    },
+    {
+      "stage": "first",
+      "pid": 92986,
+      "order": 6,
+      "at": "2026-09-08T19:15:50.152Z",
+      "kind": "start",
+      "taskId": "ffed62e5-1ce4-4412-8957-92fc68026ab9",
+      "runtimeId": "pi",
+      "agentRef": null,
+      "sessionRef": "8fe6ea63-195b-4780-bad5-16d0a02d6d74",
+      "offerId": "835c82a5-a3e4-8401-9cc5-f69dda654e17",
+      "seq": 1
+    },
+    {
+      "stage": "first",
+      "pid": 92986,
+      "order": 7,
+      "at": "2026-09-08T19:15:50.173Z",
+      "kind": "terminal-send",
+      "taskId": "ffed62e5-1ce4-4412-8957-92fc68026ab9",
+      "envelopeId": "335094d5-6ef6-4f87-835d-9666e5b7c06d",
+      "type": "task.complete",
+      "payloadHash": "sha256:e77b62d948b2559aba4939b1827d1f7b4eb6d0e8d28d4cdb91ba4cad63fa2254"
+    },
+    {
+      "stage": "first",
+      "pid": 92986,
+      "order": 8,
+      "at": "2026-09-08T19:15:50.185Z",
+      "kind": "terminal-response",
+      "taskId": "ffed62e5-1ce4-4412-8957-92fc68026ab9",
+      "envelopeId": "335094d5-6ef6-4f87-835d-9666e5b7c06d",
+      "status": 200,
+      "batchAccepted": 2,
+      "batchRejected": 0,
+      "payloadHash": "sha256:e77b62d948b2559aba4939b1827d1f7b4eb6d0e8d28d4cdb91ba4cad63fa2254"
+    },
+    {
+      "stage": "first",
+      "pid": 92986,
+      "order": 9,
+      "at": "2026-09-08T19:15:50.246Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 1,
+      "count": 0
+    },
+    {
+      "stage": "first",
+      "pid": 92986,
+      "order": 10,
+      "at": "2026-09-08T19:15:50.520Z",
+      "kind": "crash-barrier",
+      "barrier": "acked",
+      "taskId": "ffed62e5-1ce4-4412-8957-92fc68026ab9"
+    },
+    {
+      "stage": "recover",
+      "pid": 93557,
+      "order": 1,
+      "at": "2026-09-08T19:15:50.686Z",
+      "kind": "phase-start",
+      "serverUrl": "http://127.0.0.1:50753",
+      "deviceId": "dev_533e7953-79df-4e35-a3db-c1a124b6180d",
+      "journal": false,
+      "hostRequestId": "31222257-6a23-42c2-a27c-f4e65644e560"
+    },
+    {
+      "stage": "recover",
+      "pid": 93557,
+      "order": 2,
+      "at": "2026-09-08T19:15:50.872Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 93557,
+      "order": 3,
+      "at": "2026-09-08T19:15:51.238Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 93557,
+      "order": 4,
+      "at": "2026-09-08T19:15:51.600Z",
+      "kind": "poll-response",
+      "requestedCursor": 0,
+      "responseCursor": 0,
+      "count": 0
+    },
+    {
+      "stage": "recover",
+      "pid": 93557,
+      "order": 5,
+      "at": "2026-09-08T19:15:51.604Z",
+      "kind": "recovery-barrier",
+      "taskId": "ffed62e5-1ce4-4412-8957-92fc68026ab9",
+      "completedPolls": 3,
+      "emptyPolls": 3
+    }
+  ],
+  "counts": {
+    "ffed62e5-1ce4-4412-8957-92fc68026ab9": 1
+  },
+  "cleanup": {
+    "kind": "cleaned"
+  },
+  "testStateRemoved": true
+}
