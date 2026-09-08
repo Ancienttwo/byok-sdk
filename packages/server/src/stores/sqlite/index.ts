@@ -40,6 +40,8 @@ import {
   type BlobWriteResult,
   type CloudCrypto,
   type CloudStores,
+  type RequestReceipt,
+  type RequestReceiptStore,
   type TaskAttempt,
   type TaskAttemptListQuery,
   type TaskAttemptPage,
@@ -61,9 +63,19 @@ const DEFAULT_MAILBOX_READ_LIMIT = 50;
 const DEFAULT_OBJECT_LIST_LIMIT = 100;
 const DEFAULT_BLOB_URL_TTL_MS = 15 * 60_000;
 const SIGNING_SECRET_BYTES = 32;
-const SQLITE_SCHEMA_VERSION = '2';
+const SQLITE_SCHEMA_VERSION = '3';
 
 import { SqliteDeviceDirectory, DEVICE_SCHEMA } from './device-directory';
+
+const RECEIPT_SCHEMA = `
+CREATE TABLE request_receipt (
+  tenant_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  body TEXT NOT NULL,
+  recorded_at TEXT NOT NULL,
+  PRIMARY KEY (tenant_id, key)
+);
+`;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS byok_sqlite_meta (
@@ -152,7 +164,7 @@ CREATE TABLE IF NOT EXISTS blob (
 export interface SqliteEmbeddedStoreOptions {
   readonly path: string;
   readonly urlTtlMs?: number;
-  readonly migration?: 'v1-to-v2';
+  readonly migration?: 'v1-to-v3' | 'v2-to-v3';
 }
 
 export interface SqliteEmbeddedStores {
@@ -169,7 +181,7 @@ class SqliteCoordinator {
   #closing = false;
   #closePromise: Promise<void> | undefined;
 
-  constructor(path: string, migration?: 'v1-to-v2') {
+  constructor(path: string, migration?: 'v1-to-v3' | 'v2-to-v3') {
     this.db = openSqliteDatabase(path);
     try {
       // The host must stop every old writer before this open. A version fence
@@ -182,9 +194,9 @@ class SqliteCoordinator {
         if (hasMetadata !== undefined) {
           const version = this.db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'")
             .get() as { value: string } | undefined;
-          if (version?.value !== SQLITE_SCHEMA_VERSION && !(version?.value === '1' && migration === 'v1-to-v2')) {
+          if (version?.value !== SQLITE_SCHEMA_VERSION && !((version?.value === '1' && migration === 'v1-to-v3') || (version?.value === '2' && migration === 'v2-to-v3'))) {
             throw new Error(`Unsupported BYOK SQLite schema version ${JSON.stringify(version?.value)}; ` +
-              `this build requires ${SQLITE_SCHEMA_VERSION}. For v1, stop all writers, back up the database and explicitly select migration: 'v1-to-v2'.`);
+              `this build requires ${SQLITE_SCHEMA_VERSION}. Stop all writers, back up the database and explicitly select migration: 'v1-to-v3' or 'v2-to-v3' for a receipt-free legacy database without task history.`);
           }
           // Do not silently recreate missing durable authorities in an existing file.
           for (const projection of [
@@ -198,20 +210,47 @@ class SqliteCoordinator {
           ]) {
             this.db.prepare(`SELECT ${projection} LIMIT 0`);
           }
+          if (version?.value !== SQLITE_SCHEMA_VERSION) {
+            // Old compositions lost these facts on restart. Never synthesize
+            // receipts from status, mailbox bodies or a caller's retry payload.
+            for (const table of ['task_attempt', 'mailbox_message', 'agent_message_admission']) {
+              if (this.db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get() !== undefined) {
+                throw new Error('Cannot migrate BYOK SQLite database with task history: historical receipts are unavailable; preserve this database for reconciliation');
+              }
+            }
+            if (this.db.prepare('SELECT 1 FROM mailbox_cursor WHERE next_seq <> 1 OR delivered_seq <> 0 OR acked_seq <> 0 LIMIT 1').get() !== undefined) {
+              throw new Error('Cannot migrate BYOK SQLite database with delivery history: historical receipts are unavailable; preserve this database for reconciliation');
+            }
+            if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'request_receipt'").get() !== undefined) {
+              throw new Error('Unexpected request receipt authority in legacy BYOK SQLite schema');
+            }
+            this.db.exec(RECEIPT_SCHEMA);
+          }
           if (version?.value === '1') {
             const unexpected = this.db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'device_directory'").get();
             if (unexpected !== undefined) throw new Error('Unexpected device directory in BYOK SQLite schema v1');
             this.db.exec(DEVICE_SCHEMA);
+          }
+          if (version?.value !== SQLITE_SCHEMA_VERSION) {
             this.db.prepare("UPDATE byok_sqlite_meta SET value = ? WHERE key = 'schema_version'").run(SQLITE_SCHEMA_VERSION);
           }
         } else {
           const existing = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get();
           if (existing !== undefined) throw new Error('Existing SQLite database has no BYOK schema metadata');
           this.db.exec(SCHEMA);
+          this.db.exec(RECEIPT_SCHEMA);
           this.db.exec(DEVICE_SCHEMA);
           this.db.prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('schema_version', ?)").run(SQLITE_SCHEMA_VERSION);
         }
         this.db.prepare('SELECT tenant_id, device_id, product_id, machine_id, device_name, device_public_key, proof_key_id, proof_key_epoch, capabilities_json, harnesses_json FROM device_directory LIMIT 0');
+        const receiptColumns = this.db.prepare('PRAGMA table_info(request_receipt)').all() as unknown as
+          { name: string; type: string; notnull: number; pk: number }[];
+        const expectedColumns = ['tenant_id', 'key', 'body', 'recorded_at'];
+        if (receiptColumns.length !== expectedColumns.length || receiptColumns.some((column, index) =>
+          column.name !== expectedColumns[index] || column.type !== 'TEXT' || column.notnull !== 1 ||
+          column.pk !== (index < 2 ? index + 1 : 0))) {
+          throw new Error('Invalid BYOK SQLite request receipt schema');
+        }
         this.db.exec('COMMIT');
       } catch (error) {
         this.db.exec('ROLLBACK');
@@ -309,6 +348,33 @@ function readTask(db: DatabaseSync, tenant: TenantId, taskId: string): TaskAttem
 
 function sameAgentRef(left: AgentRef | undefined, right: AgentRef | undefined): boolean {
   return left?.agentId === right?.agentId && left?.profileRevision === right?.profileRevision;
+}
+
+/** Receipts are lifetime facts: mailbox retirement must never delete them. */
+class SqliteRequestReceiptStore implements RequestReceiptStore {
+  constructor(private readonly coordinator: SqliteCoordinator, private readonly clock: Clock) {}
+
+  record(tenant: TenantId, input: { key: string; body: string }): Promise<{ receipt: RequestReceipt; created: boolean }> {
+    // The INSERT is atomic; rows are immutable and never deleted, so the
+    // following read cannot observe a different winner. No async lock is held.
+    return this.coordinator.run((db) => {
+      const result = db.prepare(
+        `INSERT INTO request_receipt (tenant_id, key, body, recorded_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT (tenant_id, key) DO NOTHING`,
+      ).run(tenant, input.key, input.body, this.clock.now().toISOString());
+      return { receipt: this.#read(db, tenant, input.key)!, created: Number(result.changes) === 1 };
+    });
+  }
+
+  get(tenant: TenantId, key: string): Promise<RequestReceipt | undefined> {
+    return this.coordinator.run((db) => this.#read(db, tenant, key));
+  }
+
+  #read(db: DatabaseSync, tenant: TenantId, key: string): RequestReceipt | undefined {
+    const row = db.prepare('SELECT body, recorded_at FROM request_receipt WHERE tenant_id = ? AND key = ?')
+      .get(tenant, key) as { body: string; recorded_at: string } | undefined;
+    return row === undefined ? undefined : { tenantId: tenant, key, body: row.body, recordedAt: row.recorded_at };
+  }
 }
 
 export class SqliteTaskAttemptStore implements TaskAttemptStore {
@@ -1052,7 +1118,7 @@ export class SqliteBlobContentProxy implements BlobContentProxy {
   }
 }
 
-/** Mixed embedded composition: seven durable interfaces, every other port unchanged in-memory. */
+/** Mixed embedded composition: eight durable interfaces, every other port unchanged in-memory. */
 export function createSqliteEmbeddedStores(
   options: SqliteEmbeddedStoreOptions,
   dependencies: { readonly clock: Clock; readonly crypto: CloudCrypto },
@@ -1092,6 +1158,7 @@ export function createSqliteEmbeddedStores(
     pairingCodes: { issue: pairing.issue.bind(pairing) },
     pairing: { redeemAndRegister: pairing.redeemAndRegister.bind(pairing) },
     tasks,
+    receipts: new SqliteRequestReceiptStore(coordinator, dependencies.clock),
     cancellations,
     blobs,
   };

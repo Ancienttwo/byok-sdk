@@ -124,7 +124,7 @@ server with `Ctrl-C`, and run the same command again with the same
 valid and reconnects without another pairing.
 Committed artifact links continue to resolve from the same database.
 
-Existing schema v1 files require explicit adoption before this example can
+Existing schema v1/v2 files without coordination history require explicit adoption before this example can
 start. Stop all writers and follow the one-shot migration instructions in
 `packages/server/README.md`; the example does not automatically migrate storage.
 

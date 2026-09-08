@@ -1,0 +1,43 @@
+{
+  "baseline": "fc4a49ca2495edae1e306a3441df80f78e92da6d",
+  "checks": {
+    "build": {
+      "status": "pass",
+      "logSha256": "01e943b5fe5c7c38f4fea916a60fcc294473d1df19d998720a0775f667c6ce9d"
+    },
+    "typecheck": {
+      "status": "pass",
+      "logSha256": "dfd1b1b246f8a25661e6e1327dad0f1d03c71a7500cdfa62f80fe88dad79bc25"
+    },
+    "api-surface": {
+      "status": "pass",
+      "logSha256": "9b8f2b5181f563105bd2efe1218023535d4126196fe554c12f332dc5b77ecbe5"
+    },
+    "version-authority": {
+      "status": "pass",
+      "logSha256": "e160d69f32e9d300a2d062993e537091d14280699b33f8bbcc4453a84150178d"
+    },
+    "workflow": {
+      "status": "pass",
+      "logSha256": "92916e09c848dbd6a5f6faa9c800ed158aadbfb1901b8653845a813dd79ce51a"
+    },
+    "test": {
+      "status": "pass",
+      "logSha256": "aeb5f6d4b734ad379db60c1f60a9b64b29b2d91b639980a8c0ee34ae50fa0d4c"
+    }
+  },
+  "tests": {
+    "passed": 3940,
+    "skipped": 135
+  },
+  "schema2CandidateRejectsSchema3": true,
+  "files": {
+    "packages/server/src/stores/sqlite/index.ts": "abee8a07bb0daf02771787fa5252224c005cb0b13829cd116709b83b922812d8",
+    "packages/server/src/types.ts": "d34192af08e09856562ff0d8ef1e9661a3926f27db4c3768d8d978d796f5e4b0",
+    "packages/server/src/index.ts": "d6ac34c4574ffdf2e72044dafe37cc893987525046f46daf175303871df14959",
+    "packages/server/src/__tests__/sqlite-receipts.test.ts": "547d96758caa55db56ec120c394236b3b64ce0722db3003f54edc45ba522875a",
+    "packages/server/src/__tests__/sqlite-device-directory.test.ts": "1683f6d67b4800842ce5f0658e8dbf3f4a7a1ad71e2094ef5f6fcbecbdf9a158",
+    "api-surface/server.d.ts": "7321638107570b083fcd14c6570e0f0e18636d4c846a2b2568b1f76cd41822b2"
+  },
+  "scope": "local source and deterministic store/kernel tests; no new SIGKILL/provider/consumer/production acceptance"
+}

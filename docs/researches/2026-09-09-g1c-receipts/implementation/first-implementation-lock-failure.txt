@@ -1,0 +1,29 @@
+$ vitest run src/__tests__/sqlite-receipts.test.ts
+
+ RUN  v4.1.10 <sdk-worktree>/packages/server
+
+ ❯ src/__tests__/sqlite-receipts.test.ts (2 tests | 1 failed) 5300ms
+     × keeps one immutable winner across independent connections, restart and tenants 5238ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/sqlite-receipts.test.ts > SQLite receipt recovery > keeps one immutable winner across independent connections, restart and tenants
+Error: database is locked
+ ❯ src/stores/sqlite/index.ts:267:10
+    265|   transaction<T>(operation: (db: DatabaseSync) => T | Promise<T>): Pro…
+    266|     return this.run(async (db) => {
+    267|       db.exec('BEGIN IMMEDIATE');
+       |          ^
+    268|       try {
+    269|         const result = await operation(db);
+ ❯ src/stores/sqlite/index.ts:260:42
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  03:44:47
+   Duration  5.72s (transform 219ms, setup 0ms, import 316ms, tests 5.30s, environment 0ms)
+
+error: script "test" exited with code 1

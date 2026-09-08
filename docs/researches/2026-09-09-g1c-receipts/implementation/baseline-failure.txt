@@ -1,0 +1,61 @@
+$ vitest run src/__tests__/sqlite-receipts.test.ts
+
+ RUN  v4.1.10 <sdk-worktree>/packages/server
+
+ ❯ src/__tests__/sqlite-receipts.test.ts (2 tests | 2 failed) 26ms
+     × keeps one immutable winner across independent connections, restart and tenants 15ms
+     × preserves canonical terminal and refuses same or changed offers after ACK, retention and restart 11ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/sqlite-receipts.test.ts > SQLite receipt recovery > keeps one immutable winner across independent connections, restart and tenants
+AssertionError: expected [ { receipt: { …(4) }, …(1) }, …(1) ] to have a length of 1 but got 2
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ src/__tests__/sqlite-receipts.test.ts:39:54
+     37|     const input = { key: 'same-key', body: 'original' };
+     38|     const winners = await Promise.all([a.stores.cloud.receipts.record(…
+     39|     expect(winners.filter(result => result.created)).toHaveLength(1);
+       |                                                      ^
+     40|     expect(winners[0]?.receipt).toEqual(winners[1]?.receipt);
+     41|     await a.stores.close(); await b.stores.close();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/__tests__/sqlite-receipts.test.ts > SQLite receipt recovery > preserves canonical terminal and refuses same or changed offers after ACK, retention and restart
+AssertionError: expected undefined to deeply equal { taskId: 'completed-task', …(4) }
+
+- Expected:
+{
+  "recordedAt": "2026-01-01T00:00:00.000Z",
+  "sessionRef": "session-first",
+  "state": "complete",
+  "summary": "first",
+  "taskId": "completed-task",
+}
+
++ Received:
+undefined
+
+ ❯ src/__tests__/sqlite-receipts.test.ts:63:66
+     61|       await runtime.stores.core.mailbox.collectRetired(tenant, { devic…
+     62|       await runtime.stores.close(); runtime = open();
+     63|       expect(await runtime.cloud.readTaskResult(tenant, taskId)).toEqu…
+       |                                                                  ^
+     64|       expect(await runtime.cloud.readTaskResult(other, taskId)).toBeUn…
+     65|       for (const retry of [input, { taskId, payload: { ...payload, ins…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  03:43:33
+   Duration  410ms (transform 187ms, setup 0ms, import 280ms, tests 26ms, environment 0ms)
+
+error: script "test" exited with code 1

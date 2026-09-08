@@ -27,38 +27,49 @@ logical-ID-only inventory; MCP commands and credentials remain device-local.
 
 MIT licensed. Node.js 22.22.0 or newer.
 
-## SQLite enrollment and schema adoption
+## SQLite enrollment, receipts and schema adoption
 
 `storage: { kind: 'sqlite', path }` persists device enrollment, authenticated
-capability declarations and the six coordination stores. Pairing and subsequent
-challenge/token reads share one directory; revoke and same-machine replacement
-delete durable grants. Presence and unredeemed pairing codes remain ephemeral.
-Keep the daemon OS credentials and the host token signer stable across restart.
-This does not restore TaskHandle promises, subscriptions or runtime processes.
+capabilities, request receipts and the six coordination interfaces. Pairing and
+authentication share the device directory. Receipt keys are tenant scoped and
+first-write-wins across connections and restart. Mailbox retention never deletes
+receipts: immutable offer, delivered and canonical terminal facts remain for the
+lifetime of the database. There is no receipt TTL or automatic pruning. Monitor
+disk usage; exhaustion is an error, not permission to delete identity fences.
 
-This build writes schema v2. Before adopting a v1 database, stop **all** server
-processes that can access it and take a consistent SQLite backup (including WAL
-state, or use SQLite's backup facility). An already-open old process is not
-stopped by the version fence. With writers stopped, explicitly open once:
+Unredeemed pairing codes, presence and other unmodified ports remain ephemeral.
+Keep daemon OS credentials, server URL and token signer stable across restart.
+This does not restore TaskHandle promises, subscriptions or provider processes,
+or add caller taskId/read/cancel methods to the server façade.
+
+This candidate writes schema v3. Stop **all** writers and take a consistent
+SQLite backup (including WAL state or using SQLite's backup facility) before
+explicit adoption. An already-open old writer is not stopped by the version
+fence. Only legacy databases with no task, mailbox-message, agent-admission or
+advanced cursor history can migrate: old in-memory receipts cannot be recovered
+from task status or fabricated from a retry payload. A pristine poll cursor is
+allowed. Preserve rejected databases for separate reconciliation; do not delete
+history, reset cursors or edit version markers to make adoption pass.
 
 ```ts
 const server = createByokServer({
   productId,
   tokenSigner,
-  storage: { kind: 'sqlite', path, migration: 'v1-to-v2' },
+  storage: { kind: 'sqlite', path, migration: 'v2-to-v3' },
 });
 await server.close();
 ```
 
-Remove `migration` from normal startup configuration. Adoption creates an empty
-device directory and updates the schema marker in one transaction while
-retaining tasks, mailbox and artifact data. Failed adoption rolls back. The old
-in-memory directory cannot be reconstructed: existing v1 installations require
-one explicit pairing after adoption; enrollments created on v2 survive restart.
-Unknown versions, missing metadata and missing durable tables fail closed.
+Use `v1-to-v3` for a v1 database meeting the same eligibility rules. Remove
+`migration` from normal startup. Adoption adds receipts, adds an empty device
+directory for v1, and updates the marker atomically; any failure rolls back.
+Existing v2 devices and artifacts remain. V1 enrollment was in-memory and needs
+explicit pairing. Unknown versions, missing authorities and malformed receipt
+columns/primary key fail closed. Broader validation of legacy table constraints
+is a separate tracked concern.
 
-**Breaking storage boundary:** 0.16 and earlier refuse to open v2. Do not edit
-the version marker to downgrade. Restoring a backup loses later state and can
-restore old grants; it requires a separately audited recovery procedure, never
-an automatic runtime fallback. This change belongs to the next MINOR release;
-local candidate artifacts are not a published upgrade.
+**Breaking storage boundary:** published 0.16 (schema v1) and earlier schema-v2
+candidate writers refuse v3. The previous unpublished `v1-to-v2` selector is
+replaced, without a compatibility alias. Restore of a backup requires a separate
+recovery procedure because it can lose new state or restore old grants. This
+belongs to the next MINOR release; these local changes are not a published upgrade.

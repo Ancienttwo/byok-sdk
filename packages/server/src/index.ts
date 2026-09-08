@@ -281,7 +281,7 @@ export interface ByokServer {
  * one, an in-process notification relay, and the observability an embedder used
  * to get from the hub.
  *
- * State is in-memory by default. Explicit SQLite mode persists the device directory and six
+ * State is in-memory by default. Explicit SQLite mode persists request receipts, the device directory and six
  * coordination interfaces whose contracts cross a process restart; all other
  * ports remain process-local.
  */

@@ -352,17 +352,23 @@ auth, task, cancellation, mailbox, or terminal state machine: those semantics
 belong to `@byok-sdk/cloud` and its injected stores.
 
 The default composition is in-memory. `BYOK_STORE=sqlite` selects the explicit
-SQLite composition for seven durable interfaces sharing one database and
-transaction coordinator: the device directory, task attempts, cancellation,
-mailbox, object manifests, blob metadata/grants, and blob bytes. Pairing writes
-and authentication read the same durable directory. Unredeemed pairing codes,
-nonces, presence and other ports remain in-memory by design. Schema v2 fences
-older builds; v1 adoption requires explicit `storage.migration: 'v1-to-v2'`
-after stopping every writer and backing up the database. Adoption is atomic,
-preserves coordination records and creates an empty device directory; it cannot
-recover previously lost enrollment. See `packages/server/README.md`. SQLite restores durable cloud records and mailbox state; it does not
-restore process-owned promises, live subscriptions, runtime processes, or
-connection lifecycle.
+SQLite composition for eight durable interfaces sharing one database and
+transaction coordinator: device directory, request receipts, task attempts,
+cancellation, mailbox, object manifests, blob metadata/grants, and blob bytes.
+Pairing and authentication share the device directory. Request receipts use a
+tenant/key primary key and atomic first-write-wins INSERT; immutable rows have
+no deletion/TTL path and outlive mailbox retention. Disk capacity is the first
+scaling limit; deleting receipts is not an admission strategy. Unredeemed pairing
+codes, nonces, presence and other ports remain in-memory.
+
+Schema v3 fences old writers. Explicit `v1-to-v3`/`v2-to-v3` adoption requires
+all writers stopped and a consistent backup. It rejects existing task/message/
+agent-admission or advanced cursor history because prior receipt authority was
+in-memory and cannot be reconstructed. Eligible v1 adoption adds an empty device
+directory; v2 preserves enrollment. See `packages/server/README.md`.
+SQLite restores durable records, not process-owned promises, subscriptions or
+provider processes. No façade recovery methods or consumer ACK authority are
+added by this slice. Postgres generic receipt retention remains a separate gap.
 
 ### 3.2 HTTP and kernel responsibilities
 
