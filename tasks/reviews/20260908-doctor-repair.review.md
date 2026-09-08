@@ -22,7 +22,7 @@ Original gate verdict: FAIL solely for `packages/client/src/diagnostics/types.ts
 
 Independent verification: Node 22.22.3, client `bun run test -- src/__tests__/device-doctor.test.ts`, 23/23 PASS. Reviewer verified the full-suite log SHA and all four test subject hashes against retained manifests; production/API/CLI source was unchanged between `06991fb` and the reviewed candidate. Full-suite evidence remains 3905 passed / 135 skipped, with unchanged-code build evidence reused.
 
-This is an independent reviewer report plus an explicitly authorized mechanical finding resolution. It is not a generated repo-harness AcceptanceReceipt, merge seal, published artifact or live provider qualification.
+The independent reviewer report and mechanical finding resolution above were subsequently bound to the generated harness AcceptanceReceipt projected below. No merge seal, published artifact or live provider qualification is claimed.
 
 ## Acceptance Receipt Projection
 

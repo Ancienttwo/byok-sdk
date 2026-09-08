@@ -16,7 +16,7 @@ Implementation and whole-repo local test acceptance are complete after the appro
 
 Initial read-only Claude plan session reached 330s without stdout/stderr plan; no external plan approval is claimed. Main-agent file plan records the decision. A bounded read-only explorer independently confirmed the source path and limitations. Initial plan extraction exposed missing template gates; the plan fields were completed and the final required `check-task-workflow --strict` passed. No successful plan-to-todo extraction or independent semantic acceptance receipt is claimed.
 
-## Verification
+## Historical implementation verification
 
 Node: 22.22.3, resolved through npm's version-pinned node package; Bun: 1.4.2. No direct OS credentials in tests: existing Vitest in-memory credential seam was used.
 
@@ -29,7 +29,7 @@ Node: 22.22.3, resolved through npm's version-pinned node package; Bun: 1.4.2. N
 - Targeted initial run: 49 existing auth/store/diagnostics tests passed. New fixture initially called nonexistent credential `save`; corrected to existing `replace`. All 22 new tests then passed. A readback refusal test and JSON failure assertion were added; final client suite includes all 23 new tests without failure.
 - `bun run test`: FAIL in client stage, 180 files passed / 4 failed / 2 skipped; 1853 tests passed / 7 failed / 11 skipped. Root sequential run stopped at the client failure; later package suites are not claimed passed. No whole-suite rerun was attempted.
 
-## Failing checks outside this slice
+## Historical failures — resolved by the approved continuations
 
 1. `agent-egress-spool.test.ts`: natural compaction retaining 1 and 3 records, 2 timeouts at 10s.
 2. `agent-message-outbox.test.ts`: natural compaction retaining 0 drafts, 1 timeout at 10s.
@@ -38,7 +38,7 @@ Node: 22.22.3, resolved through npm's version-pinned node package; Bun: 1.4.2. N
 
 These files and their feature implementations were not changed. Baseline reproduction was not run, so these are NOT declared pre-existing or unrelated by proven root cause. Under the user's scope boundary, stop and report rather than fix other features or repeatedly rerun expensive tests.
 
-## Evidence and next boundary
+## Historical evidence and then-current boundary
 
 Local full logs: `_ops/doctor-repair/build-final.log`, `typecheck-final.log`, `api-final.log`, `version-final.log`, `workflow-final.log`, `test-final.log`. Core source/API fingerprint and full-suite log hash below bind this evidence; document-only closeout does not change the tested source.
 
@@ -74,3 +74,9 @@ Final `repo-harness run check-task-workflow --strict` and `git diff --check`: PA
 ## Independent semantic acceptance continuation
 
 User approved the independent review. Read-only gatekeeper found no semantic contract violations, reran 23 doctor tests successfully, and validated existing source/log evidence. Original candidate 30743c8 failed cumulative diff whitespace only; main agent removed exactly the final blank line in diagnostics/types.ts as prescribed. No behavioral change or broad test rerun. Independent report and mechanical closure are in the review file; no formal harness AcceptanceReceipt or external operation is claimed. Plan status is Ready for Integration; automatic archive was not performed because it requires separate current verify-sprint/AcceptanceReceipt evidence.
+
+## Final closeout — 2026-09-08
+
+Implementation, tests, independent semantic acceptance and formal integration acceptance are complete. The final AcceptanceReceipt is external_pass with target_revision 62e83ae9ac76e38b5448307fec02850f780d7347. The older local-main receipt was superseded. verify-sprint finalized PASS; original required build/typecheck/full-test ledger passes are retained with current exact source/config-equality, single-field review-target-policy and 23 doctor/readback tests. This final state supersedes the historical blockers and next-step statements above.
+
+The base merge policy returns required=false; this is a verified policy outcome, not an issued merge seal. Remaining external boundaries are merge/push, a future MINOR release/downstream uptake and real OS-provider qualification; none was performed. The approved closeout archives only this plan family and prepares merge facts while preserving original-root WIP.

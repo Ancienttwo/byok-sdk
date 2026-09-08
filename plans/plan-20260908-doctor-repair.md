@@ -16,7 +16,7 @@ User authorized plan and implementation on 2026-09-08 after the SDK-owned downst
 
 ## P1 / P2 / P3
 
-- P1: CLI/diagnostics own local observation. DeviceCredentialStore owns the complete OS enrollment; DeviceStore owns its non-secret projection. AuthManager reconciles projection on startup, then may arm renewal. Public package root currently exposes neither diagnostics collector nor explicit projection repair. Cloud, Agent profile, credentials replacement, task execution and supervisor policy are outside this slice.
+- P1: CLI/diagnostics own local observation. DeviceCredentialStore owns the complete OS enrollment; DeviceStore owns its non-secret projection. AuthManager reconciles projection on startup, then may arm renewal. Public package root now exposes diagnoseDevice and repairDeviceEnrollmentMetadata. Cloud, Agent profile, credentials replacement, task execution and supervisor policy are outside this slice.
 - P2: startup -> store lease -> AuthManager.loadExisting -> loadRecord -> OS credentials.read -> DeviceStore.load/save. New explicit repair -> confirmation and expected tenant/device validation -> offline control check -> same store lease -> existing OS authority read -> exact target match -> shared projection reconciliation -> readback -> release. No AuthManager creation, renewal, network, runtime execution or secret output.
 - P3: extract one internal reconciliation primitive for startup and explicit repair. Public `diagnoseDevice` wraps the current collector with configured adapters, while private clock/control test seams remain private. Public `repairDeviceEnrollmentMetadata` restores missing/valid-stale metadata only. Existing doctor --fix remains health-only; a named --repair action selects metadata repair. No generic action registry, fallback credential files, journal rebuild, or runtime installation. At 10x, OS credential access and diagnostics dominate; explicit on-demand work stays bounded by existing platform operations and probe deadlines.
 
@@ -33,7 +33,7 @@ User authorized plan and implementation on 2026-09-08 after the SDK-owned downst
 - [x] Verify slow-sync controls and close whole-repo test acceptance on the frozen test-only correction.
 - [x] Obtain independent semantic acceptance of the public repair contract; resolve the sole EOF whitespace finding exactly as the reviewer prescribed.
 
-- [ ] Bind formal AcceptanceReceipt to the frozen candidate and evaluate the merge-seal policy on the exact target.
+- [x] Bind formal AcceptanceReceipt to the frozen candidate and evaluate the merge-seal policy on the exact target.
 
 ## Verification
 
@@ -52,13 +52,13 @@ Targeted new repair/API tests plus existing auth/store/diagnostics tests during 
 - **Merge/PR unit**: explicit metadata repair plus public diagnostics and integration contract.
 - **Rollback surface**: this candidate diff only.
 - **Verification boundary**: local source, targeted tests and required root checks; no registry or deployment claim.
-- **Review/acceptance boundary**: main-agent source review; independent semantic acceptance remains separate.
+- **Review/acceptance boundary**: independent gatekeeper review plus target-bound harness AcceptanceReceipt; both complete.
 - **High-risk surface**: OS enrollment read and non-secret projection write under store lease.
 - **Why not checklist row**: new public API and operator mutation require a dedicated plan/contract.
 
 ## Result
 
-Implementation and local required-check acceptance complete. The separately approved four-file test correction closes all seven failures: full `bun run test` exits 0 across 13 packages (3905 passed, 135 skipped), including client 1860 passed / 11 skipped. Root typecheck/API/version checks pass; prior passing build applies to unchanged production source. Independent semantic acceptance and live credential-provider qualification remain separate; no release is claimed.
+Implementation and local required-check acceptance complete. The separately approved four-file test correction closes all seven failures: full `bun run test` exits 0 across 13 packages (3905 passed, 135 skipped), including client 1860 passed / 11 skipped. Root typecheck/API/version checks pass; prior passing build applies to unchanged production source. Independent semantic acceptance and formal target-bound AcceptanceReceipt are complete; live credential-provider qualification and release remain outside this slice.
 
 ## Failure classification continuation
 
@@ -70,4 +70,4 @@ The user subsequently approved the four-file correction. All 12 natural-compacti
 
 ## Independent review closeout
 
-Independent gatekeeper reviewed frozen `30743c8`: no semantic findings, 23/23 focused tests pass, retained full-suite evidence matches. Sole finding was cumulative-diff EOF whitespace; main agent removes exactly that line and verifies the new frozen cumulative diff. See the review report. Implementation and local semantic acceptance are complete; formal integration/archive authority and release are separate, so this plan remains available for integration rather than claiming a generated harness acceptance seal.
+Independent gatekeeper reviewed frozen `30743c8`: no semantic findings, 23/23 focused tests pass, retained full-suite evidence matches. Sole finding was cumulative-diff EOF whitespace; main agent removes exactly that line and verifies the new frozen cumulative diff. See the review report. Implementation, independent semantic acceptance and formal integration acceptance are complete. AcceptanceReceipt external_pass binds target 62e83ae; verify-sprint finalized PASS. The target policy returns mergeGateRequired=false, so no merge seal is created. This plan is ready for Completed archival; release remains separate.
