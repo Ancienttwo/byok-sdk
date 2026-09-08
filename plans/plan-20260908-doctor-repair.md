@@ -1,6 +1,6 @@
 # Plan: Explicit device metadata repair and embedded diagnostics
 
-> **Status**: Ready for Integration
+> **Status**: Executing
 > **Artifact Level**: work-package
 > **Promotion Reason**: New public diagnostics and operator repair API.
 > **Verification Boundary**: Frozen local source and required checks; no release or deployment.
@@ -32,6 +32,8 @@ User authorized plan and implementation on 2026-09-08 after the SDK-owned downst
 - [x] Under subsequent user approval, correct local natural-compaction budgets and projection delivery/stop event ordering in the four named test files.
 - [x] Verify slow-sync controls and close whole-repo test acceptance on the frozen test-only correction.
 - [x] Obtain independent semantic acceptance of the public repair contract; resolve the sole EOF whitespace finding exactly as the reviewer prescribed.
+
+- [ ] Bind formal AcceptanceReceipt to the frozen candidate and evaluate the merge-seal policy on the exact target.
 
 ## Verification
 

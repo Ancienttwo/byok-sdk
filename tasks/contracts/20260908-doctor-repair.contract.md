@@ -60,3 +60,132 @@ Outcome: approved test correction and local full-suite acceptance complete; prio
 ## Approved independent semantic acceptance
 
 The user approved the bounded independent gatekeeper review. No semantic findings; sole safe_auto EOF whitespace finding was removed by the main agent per reviewer instructions, with cumulative-diff verification on the new candidate. Focused doctor tests 23/23 pass; exact retained full-suite evidence remains valid. Report: linked review file. This does not authorize merge, push, publish or live repair and does not claim a generated harness AcceptanceReceipt.
+
+## Acceptance Policy
+
+```json
+{"protocol": 1, "reviewer": "Codex", "user_waiver": "forbidden"}
+```
+
+## Change Assessment
+
+```json
+{"protocol": 1, "oracles": [{"id": "doctor-contract-tests", "kind": "deterministic_test", "paths": ["*"]}]}
+```
+
+## Verification Plan
+
+```json
+{
+  "protocol": 1,
+  "checks": [
+    {
+      "id": "build",
+      "kind": "command",
+      "command": "bun run build",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "expensive",
+      "evidence_policy": "current_exact",
+      "necessity": "Bind built SDK artifacts to the formal candidate.",
+      "inputs": {
+        "env": [
+          "PATH"
+        ]
+      }
+    },
+    {
+      "id": "typecheck",
+      "kind": "command",
+      "command": "bun run typecheck",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "expensive",
+      "evidence_policy": "current_exact",
+      "necessity": "Check public and internal TypeScript contracts.",
+      "inputs": {
+        "env": [
+          "PATH"
+        ]
+      }
+    },
+    {
+      "id": "tests",
+      "kind": "command",
+      "command": "bun run test",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "expensive",
+      "evidence_policy": "current_exact",
+      "necessity": "Record required whole-workspace tests in the harness execution ledger.",
+      "inputs": {
+        "env": [
+          "PATH"
+        ]
+      }
+    },
+    {
+      "id": "api",
+      "kind": "command",
+      "command": "bun run check:api-surface",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "normal",
+      "evidence_policy": "current_exact",
+      "necessity": "Verify public declaration goldens.",
+      "inputs": {
+        "env": [
+          "PATH"
+        ]
+      }
+    },
+    {
+      "id": "version",
+      "kind": "command",
+      "command": "bun run check:version-authority",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "normal",
+      "evidence_policy": "current_exact",
+      "necessity": "Verify version authority.",
+      "inputs": {
+        "env": [
+          "PATH"
+        ]
+      }
+    },
+    {
+      "id": "whitespace",
+      "kind": "command",
+      "command": "git diff --check 62e83ae",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "normal",
+      "evidence_policy": "current_exact",
+      "necessity": "Check the full candidate diff including the corrected EOF.",
+      "inputs": {
+        "env": [
+          "PATH"
+        ]
+      }
+    }
+  ]
+}
+```
+
+## Machine Exit Criteria
+
+```yaml
+exit_criteria:
+  files_exist:
+    - packages/client/src/diagnostics/device-doctor.ts
+    - packages/client/src/__tests__/device-doctor.test.ts
+    - docs/agent-diagnostics-integration.md
+```
+
+## Evidence Requirements
+
+```yaml
+evidence_requirements:
+  benchmark: not_applicable
+```
