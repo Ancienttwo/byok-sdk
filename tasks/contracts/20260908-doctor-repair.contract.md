@@ -1,6 +1,6 @@
 # Task Contract: Explicit device metadata repair and embedded diagnostics
 
-> **Status**: In Progress
+> **Status**: Ready for Integration
 > **Plan**: plans/plan-20260908-doctor-repair.md
 > **Task Profile**: code-change
 > **Owner**: Codex
@@ -56,3 +56,7 @@ User approved the bounded baseline/candidate classification of seven test failur
 User approved test-only corrections to agent-egress-spool, agent-message-outbox, durable-egress-faults and agent-home-projection tests. Natural compaction receives a local 60s budget with real threshold and sync assertions intact. A fetch barrier delivers the first projection page, parks the next poll until daemon stop, and preserves exact completion/cursor/restart assertions. No product behavior or package-wide timeout changes.
 
 Outcome: approved test correction and local full-suite acceptance complete; prior classification-only restrictions were superseded only for these four tests and validation. No independent acceptance, merge, push, publication or live repair claim.
+
+## Approved independent semantic acceptance
+
+The user approved the bounded independent gatekeeper review. No semantic findings; sole safe_auto EOF whitespace finding was removed by the main agent per reviewer instructions, with cumulative-diff verification on the new candidate. Focused doctor tests 23/23 pass; exact retained full-suite evidence remains valid. Report: linked review file. This does not authorize merge, push, publish or live repair and does not claim a generated harness AcceptanceReceipt.

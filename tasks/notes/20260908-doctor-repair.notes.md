@@ -4,7 +4,7 @@
 
 Implemented in isolated worktree `/Users/kito/Projects/byok-sdk-wt-doctor-repair`, branch `codex/doctor-repair`, base `62e83ae` (fresh origin/main). Plan commit: `6cd908d`. Original root WIP was preserved; the preceding guide and its navigation edits were imported deliberately.
 
-Implementation and whole-repo local test acceptance are complete after the approved test correction below; independent semantic acceptance remains pending. No push, merge, publication, live credential access, daemon operation, or deployment was performed. New public API requires a MINOR release boundary; package versions were not modified.
+Implementation and whole-repo local test acceptance are complete after the approved test correction below; independent semantic acceptance is now recorded below. No push, merge, publication, live credential access, daemon operation, or deployment was performed. New public API requires a MINOR release boundary; package versions were not modified.
 
 ## P1 / P2 / P3
 
@@ -70,3 +70,7 @@ Frozen full-suite result: `bun run test` PASS (exit 0), 13 packages, 3905 passed
 Workflow closeout keeps the active plan nonterminal for its pending independent acceptance boundary. An attempted terminal status triggered active-plan/terminal-plan-count validation; corrected only this plan status rather than archiving unrelated plans.
 
 Final `repo-harness run check-task-workflow --strict` and `git diff --check`: PASS. No test rerun after document-only closeout.
+
+## Independent semantic acceptance continuation
+
+User approved the independent review. Read-only gatekeeper found no semantic contract violations, reran 23 doctor tests successfully, and validated existing source/log evidence. Original candidate 30743c8 failed cumulative diff whitespace only; main agent removed exactly the final blank line in diagnostics/types.ts as prescribed. No behavioral change or broad test rerun. Independent report and mechanical closure are in the review file; no formal harness AcceptanceReceipt or external operation is claimed. Plan status is Ready for Integration; automatic archive was not performed because it requires separate current verify-sprint/AcceptanceReceipt evidence.

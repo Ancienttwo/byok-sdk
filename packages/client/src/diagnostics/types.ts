@@ -63,4 +63,3 @@ export interface DiagnosticsSnapshot {
   };
   checks: DiagnosticCheck[];
 }
-

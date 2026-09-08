@@ -1,6 +1,6 @@
 # Plan: Explicit device metadata repair and embedded diagnostics
 
-> **Status**: In Progress
+> **Status**: Ready for Integration
 > **Artifact Level**: work-package
 > **Promotion Reason**: New public diagnostics and operator repair API.
 > **Verification Boundary**: Frozen local source and required checks; no release or deployment.
@@ -31,7 +31,7 @@ User authorized plan and implementation on 2026-09-08 after the SDK-owned downst
 - [x] Classify the seven failures against pinned base and candidate under the user-approved diagnostic continuation.
 - [x] Under subsequent user approval, correct local natural-compaction budgets and projection delivery/stop event ordering in the four named test files.
 - [x] Verify slow-sync controls and close whole-repo test acceptance on the frozen test-only correction.
-- [ ] Obtain independent semantic acceptance of the public repair contract; implementation and local checks are complete, no dispatch or release is implied.
+- [x] Obtain independent semantic acceptance of the public repair contract; resolve the sole EOF whitespace finding exactly as the reviewer prescribed.
 
 ## Verification
 
@@ -65,3 +65,7 @@ Raw targeted seven: base 7/7 and candidate 7/7 passed. Controlled slow-file-sync
 ## Test correction closeout
 
 The user subsequently approved the four-file correction. All 12 natural-compaction slow-sync controls pass under local 60s budgets with package default 10s; the projection barrier test preserves exact completion/cursor/hook assertions and verifies stop abortion. Full-suite success supersedes the earlier local test blocker. Details: implementation notes and `test-repair-checks.json` in the classification evidence directory.
+
+## Independent review closeout
+
+Independent gatekeeper reviewed frozen `30743c8`: no semantic findings, 23/23 focused tests pass, retained full-suite evidence matches. Sole finding was cumulative-diff EOF whitespace; main agent removes exactly that line and verifies the new frozen cumulative diff. See the review report. Implementation and local semantic acceptance are complete; formal integration/archive authority and release are separate, so this plan remains available for integration rather than claiming a generated harness acceptance seal.
