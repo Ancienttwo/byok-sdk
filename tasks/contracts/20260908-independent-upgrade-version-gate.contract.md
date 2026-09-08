@@ -1,6 +1,6 @@
 # Task Contract: independent upgrade version admission
 
-> **Status**: In Progress
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260908-independent-upgrade-version-gate.md
 > **Task Profile**: bugfix
 > **Owner**: kito

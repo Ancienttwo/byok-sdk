@@ -42,3 +42,10 @@ The research return file owns the matrix and host usage. The standard local
 pack-and-smoke output will bind its own manifest to the frozen source commit;
 its receipt is separate from source acceptance and registry publication. No
 push, merge, npm publish, tag, Salesko mutation or production action is included.
+
+Standard pack-and-smoke passed for all ten packages from source
+6bcf659874be14ed27378d6dcb635a8a9a23a258, with isolated npm exact-edge readback.
+A separate probe loaded the actual protocol/cloud tarball bytes and proved v1
+decode plus v2 rejection before cloud store access. It reused the tested external
+zod/hono dependencies; it is not another claimed isolated install. All hashes,
+internal edges and local file pins are in the research delivery receipt.

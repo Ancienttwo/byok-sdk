@@ -2,6 +2,8 @@
 
 日期：2026-09-08。输入：Salesko `docs/researches/byok-sdk-independent-upgrade-handoff-20260908.md`。
 
+交付已完成：修复 commit `9049b01`；artifact source `6bcf659874be14ed27378d6dcb635a8a9a23a258`。本地required checks全部通过（3890 passed / 135 skipped），标准10包pack及isolated npm install smoke通过；实际解包后的protocol/cloud版本拒绝探针也通过。完整[交付receipt](evidence/independent-upgrade-20260908/delivery.json)、[candidate manifest](evidence/independent-upgrade-20260908/candidate-release-manifest.json)、[本地exact-pin消费清单](evidence/independent-upgrade-20260908/exact-pins.json)。本candidate未push、未跑远端CI、未merge、未发布；沿用prepared 0.15.0/keys0.4.1 metadata，不能用这些SemVer替代source/hash选择产物。
+
 ## 结论与 Gate
 
 **不能给出整体 `SALESKO_ONLY`。** 已证明 SDK 的 unsupported wire major admission 缺陷；本候选修复该缺陷。Salesko 消费的旧 SDK source 还缺少已经合并的 R7/R9 等持久化修复，本候选从包含这些修复的 main 开始，未重复实现。

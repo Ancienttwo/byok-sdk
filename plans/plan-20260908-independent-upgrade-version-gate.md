@@ -1,6 +1,6 @@
 # Plan: independent upgrade protocol admission
 
-> **Status**: In Progress
+> **Status**: Completed
 > **Spec**: docs/spec.md
 > **Base**: 62e83ae9ac76e38b5448307fec02850f780d7347
 
@@ -33,8 +33,8 @@ not. Existing R7–R13 repairs are reused from the base, not reimplemented.
 
 - [x] Prove the version bypass on the frozen base with real boundary regressions.
 - [x] Apply the smallest owning-layer correction and verify the regression.
-- [ ] Freeze the source; run required checks and disposable package smoke.
-- [ ] Return the seven-row responsibility matrix, source/artifact evidence,
+- [x] Freeze the source; run required checks and disposable package smoke.
+- [x] Return the seven-row responsibility matrix, source/artifact evidence,
   lifecycle usage and specific cross-version evidence gaps in docs/researches.
 
 ## Evidence boundary

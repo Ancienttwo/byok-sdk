@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import {createEnvelope,parseMessage,EnvelopeValidationError} from '@byok-sdk/protocol';
+import {handleInboundEnvelope} from '@byok-sdk/cloud';
+const good=createEnvelope('task.claim',{deviceId:'probe-device'},{taskId:'probe-task'});
+assert.deepEqual(parseMessage(good),good);
+const bad={...good,v:2};
+assert.throws(()=>parseMessage(bad),EnvelopeValidationError);
+const stores=new Proxy({}, {get(){throw new Error('unsupported version touched a store');}});
+assert.equal(await handleInboundEnvelope(stores,'probe-device',bad),'rejected');
+console.log(JSON.stringify({node:process.version,packedProtocolV1:true,packedProtocolV2Rejected:true,packedCloudV2RejectedBeforeStoreAccess:true}));
