@@ -1,0 +1,99 @@
+{
+  "protocol": 1,
+  "kind": "repo-harness-campaign-issue-manifest",
+  "projection_sha256": "sha256:bcd48c782ff92c2f9ede2de9c2cf43d6ad2d0a765139f1aea36e4b55b744aa69",
+  "receipt": {
+    "protocol": 1,
+    "kind": "repo-harness-campaign-issue-batch-adoption",
+    "campaign_id": "byok-brc1415-20260909-transport",
+    "group_number": 1,
+    "base_main_sha": "1da7afc09cc94bda563a94abf29d0b1d7d22db96",
+    "issue_batch_intent_sha256": "sha256:3a21559c80ad59110bbf9f093d60d8f55694a1bc9d35663d120f61e437b43fb8",
+    "authorization_sha256": "832afc7f096074dbac4c84aeed2e61c1d3a0ff854556b82e116298c9374de4ff",
+    "authoring_session_ref": "chgpt_20260909_023523_byok-brc1415-20260909-transport-group-1-issue-au",
+    "connector_evidence": "challenge_verified",
+    "issues": [
+      {
+        "slot": "01",
+        "provider_issue_id": "5388837683",
+        "issue_number": 177,
+        "source_observation_sha256": "sha256:3dd95e601420c91a03167e71b9f19dd32526806e44fe80225efdcf04ec1b3410",
+        "title_sha256": "sha256:4fe5adc3a4a5124e763f17d64280e7765840854157940d90c84367d9ee09e7aa",
+        "body_sha256": "sha256:97b577bcfbfd7930b57d9e2f21b4f9b5b826ef3e37f430bb4adb9b58f3989651",
+        "issue_kind": "bugfix",
+        "primary_capability": "capability.sdk.sdk-root",
+        "priority": 70,
+        "depends_on_slots": [],
+        "suspected_paths": [
+          "packages/sdk/README.md",
+          "packages/sdk/src/index.ts"
+        ]
+      },
+      {
+        "slot": "02",
+        "provider_issue_id": "5388839824",
+        "issue_number": 178,
+        "source_observation_sha256": "sha256:1c2a05ca2e4209b393c25e8ed0613c9f0d15e7eb1c65f6eb25d61a5c25002475",
+        "title_sha256": "sha256:26caee4de397350e5a615cb4e2ccd71aa239adcfe280371aa27b6335a973683a",
+        "body_sha256": "sha256:56b8d6212c854a43fccbdb64e100dd157d830c1fc9db2ed38cceb73076367508",
+        "issue_kind": "test_gap",
+        "primary_capability": "capability.sdk.sdk-root",
+        "priority": 60,
+        "depends_on_slots": [],
+        "suspected_paths": [
+          "packages/sdk/package.json",
+          "packages/sdk/src/index.test.ts",
+          "packages/sdk/tsup.config.ts"
+        ]
+      }
+    ],
+    "unfilled_slots": [],
+    "dependency_graph_sha256": "sha256:37127c41f24f2d4ed0ccd794a3221d65618617bb161a35698697703cce257349",
+    "receipt_sha256": "sha256:824413385da47b1441bf5378100649d162cc03f77050e3627de9721aaa0c8c09"
+  },
+  "evidence": {
+    "terminal_sha256": "8b44ac4857ce4d6ab5a7689aef183415674deb87c59ed6c29f449e242d522527",
+    "challenge_receipt_sha256": "sha256:d138588f5151367c478301d78fb8dc88907b244f89aeee55f0994630cf230b25"
+  },
+  "slots": [
+    {
+      "slot": "01",
+      "task_id": "593ed20527ae483ababd1794044b107fbdbbd49df0e1d7832f273ff552be5274",
+      "work_package_id": "campaign-3a21559c80ad5911-01"
+    },
+    {
+      "slot": "02",
+      "task_id": "1ddc61ff64bbc11f8b9acf0c8cfd7539f49532c85d84b8b019a5f47899484271",
+      "work_package_id": "campaign-3a21559c80ad5911-02"
+    }
+  ],
+  "publication_policy": {
+    "required_acceptance": [
+      {
+        "gate": "module",
+        "policy_id": "brc1415-repair",
+        "policy_ref": "plans/policies/brc1415-repair.json",
+        "policy_revision": "sha256:b18b0dbbac8dab3466d4cc4c7c1394c70a0a365357c01753b47ef29ea1cb063a"
+      }
+    ],
+    "rollback_boundary": {
+      "kind": "work_package",
+      "boundary_id": "brc1415-repair",
+      "boundary_ref": "plans/policies/brc1415-repair.json",
+      "boundary_revision": "sha256:b18b0dbbac8dab3466d4cc4c7c1394c70a0a365357c01753b47ef29ea1cb063a"
+    },
+    "retry_policy": {
+      "max_automated_attempts": 1,
+      "retryable_failure_classes": [
+        "transient_failure"
+      ],
+      "backoff": {
+        "kind": "fixed",
+        "initial_seconds": 30,
+        "maximum_seconds": 30
+      },
+      "attention_after_seconds": 120,
+      "revision_reset": "reset_on_work_package_revision"
+    }
+  }
+}
