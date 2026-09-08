@@ -7,12 +7,11 @@ composition over Postgres and R2.
 
 ## Release status
 
-The latest verified release is **0.16.0**, with independent keys **0.4.2**.
-See the [release notes](docs/releases/v0.16.0.md) for the three new public
-embedded-host operator APIs and the [publication record](docs/releases/v0.16.0-publication.md)
-for exact-source CI, frozen artifacts and registry verification.
-The [v0.16.0 GitHub Release](https://github.com/Ancienttwo/byok-sdk/releases/tag/v0.16.0)
-includes the verified release manifest.
+The current release candidate is **0.17.0**, with independent keys **0.4.3**.
+See the [release notes](docs/releases/v0.17.0.md) for durable SQLite receipts,
+caller task identity/read/cancel and the breaking schema-v3 migration boundary.
+Publication remains pending exact-source CI and registry verification.
+The previous verified release is [0.16.0](docs/releases/v0.16.0-publication.md).
 
 The bundled Pi runtime is pinned to
 `@earendil-works/pi-coding-agent@0.85.1`. Release SemVer is observability only;
@@ -32,10 +31,10 @@ sealed its credential-free manifest and claimed the offer. Do not ship an
 adapter that supports both shapes or allocates process/temp/workspace/session
 resources during `prepare()`; reject unsupported input before claim instead.
 
-Install the published release with:
+After publication, install this release with:
 
 ```sh
-npm install byok-sdk@0.16.0
+npm install byok-sdk@0.17.0
 ```
 
 ```ts
@@ -110,7 +109,7 @@ It is intentionally outside `byok-sdk` and the entire dispatch dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.4.2
+npm install @byok-sdk/keys@0.4.3
 ```
 
 ## Host connector composition
@@ -126,5 +125,5 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.4.2`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.4.3`
 require Node.js 22.22.0 or newer. MIT licensed.

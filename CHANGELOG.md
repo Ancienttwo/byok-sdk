@@ -1,14 +1,18 @@
 # Changelog
 
-## Unreleased — next MINOR
+## 0.17.0 / @byok-sdk/keys 0.4.3 — release candidate
 
-- Persist the embedded SQLite device directory, including capability declarations,
-  revocation and machine supersession; pairing and auth share that authority.
-- Breaking storage boundary: SQLite schema v2 rejects older writers on reopen.
-  Existing v1 requires explicit `storage.migration: 'v1-to-v2'` with every writer
-  stopped and a backup. Atomic adoption preserves coordination records without
-  inventing old device grants. Pair once after v1 adoption; subsequent v2
-  restarts retain enrollment. Memory mode and ephemeral presence are unchanged.
+- Persist SQLite device enrollment/capabilities/revocation and immutable request
+  receipts on the same database. Receipts survive restart and mailbox retention.
+- Breaking storage boundary: schema v3 rejects old writers. Explicit v1-to-v3 or
+  v2-to-v3 migration only accepts databases without coordination/delivery history;
+  historical receipt facts cannot be invented. Preserve rejected databases for
+  reconciliation. Remove the unpublished v1-to-v2 selector; no compatibility alias.
+- Add caller taskId with explicit device targeting; add cloud.readTaskOffer,
+  server.tasks.offer and server.tasks.cancel. Existing tasks.get returns canonical
+  results. Repeated dispatch remains a conflict requiring exact binding readback.
+- keys 0.4.3 carries the exact core 0.17.0 edge. Pi remains 0.85.1. No wire change,
+  automatic capability enablement, journal change, provider retry or downstream deployment.
 
 ## 0.16.0 / @byok-sdk/keys 0.4.2 — 2026-09-09
 

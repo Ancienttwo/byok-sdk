@@ -53,10 +53,10 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.16.0`; publication requires separate release
+aligned dispatch release is `0.17.0`; publication requires separate release
 authorization and registry readback. The current independent keys candidate is
-`0.4.2`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.16.0`, proven from an isolated standard npm install rather
+`0.4.3`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.17.0`, proven from an isolated standard npm install rather
 than the workspace graph.
 
 ## Local Agent application release authority
@@ -92,24 +92,39 @@ The release identity contract does not add Latest fetching, a
 minimum-supported-version policy, or self-update behavior; U3's observation
 projection below is not a release gate.
 
-## Embedded SQLite device authority (next MINOR)
+## Embedded SQLite device and receipt authority
 
-The explicit SQLite server composition persists the device directory alongside
-its six coordination interfaces. Pairing registration, capability declarations,
-challenge/token lookup, revocation and same-machine supersession share that
-single durable authority. Device IDs must identify one tenant globally; a
-cross-tenant collision fails closed. Revocation and supersession delete rows.
-Presence, nonces and unredeemed pairing codes remain process-local; persistence
-does not mint live readiness or restore runtime processes and TaskHandles.
+The explicit SQLite composition persists device enrollment, capabilities and
+request receipts alongside six coordination interfaces. Pairing, authenticated
+lookup, revoke and same-machine replacement share the durable device directory.
+Device IDs are globally tenant-unique. Presence, nonces and unredeemed pairing
+codes remain process-local; no runtime or TaskHandle is reconstructed.
 
-Schema v2 fences older builds on open. A host must stop every writer and back
-up before explicitly selecting `storage.migration: 'v1-to-v2'` for one adoption.
-Creation of the device table and version advancement commit atomically while
-preserving existing coordination records. No old enrollment is reconstructed.
-Normal startup neither migrates v1 nor falls back to memory. Already-open old
-writers are outside the version fence, so stopping them is a host precondition.
-This storage/API change requires a MINOR release; it is not part of the
-published 0.16.0 contract.
+Schema v3 fences older writers. Stop every writer and take a consistent backup
+before explicitly adopting eligible legacy storage with v1-to-v3 or v2-to-v3.
+Migration rejects any task, message, agent-admission or advanced cursor history:
+old in-memory receipt facts cannot be fabricated. Eligible v1 adds an empty
+device directory, v2 retains devices; tables and version advance atomically.
+Failure preserves the old database. Never delete history to pass this check.
+Receipts use tenant/key first-write-wins and have no TTL/deletion path; mailbox
+retention cannot remove the delivered/immutable/terminal facts. Receipt columns
+and composite primary key are validated on open. Capacity exhaustion is an
+error; deleting identity fences is not a quota strategy.
+
+Hosts can pre-persist one execution identity and pass caller taskId with an
+explicit device to ordinary/fresh-Agent dispatch. Concurrent same-id calls are
+excluded within one facade. The kernel readTaskOffer and facade tasks.offer
+validate immutable executable offer receipt and delivered marker; tasks.get
+already includes canonical terminal results, tasks.cancel invokes kernel cancel.
+A duplicate dispatch remains a conflict and requires exact host-binding readback;
+missing authority is not success. No transport seq, recovered promise, consumer
+ACK or management HTTP endpoint is invented. Hosts separately persist cancellation
+intent and bind host-only message context. A false delivered marker does not
+prove mailbox append never happened. End-to-end consumer/provider recovery and
+Postgres generic receipt retention remain separate boundaries.
+
+This new persistence/API authority belongs to the 0.17.0 MINOR candidate and is
+not part of the published 0.16.0 contract. A version bump is not publication.
 
 ## Tenant readiness observation
 
