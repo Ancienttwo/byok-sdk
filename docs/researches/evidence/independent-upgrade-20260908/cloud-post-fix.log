@@ -1,0 +1,10 @@
+$ vitest run src/__tests__/protocol-version-admission.test.ts
+
+ RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/packages/cloud
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  16:35:46
+   Duration  426ms (transform 220ms, setup 0ms, import 320ms, tests 28ms, environment 0ms)
+

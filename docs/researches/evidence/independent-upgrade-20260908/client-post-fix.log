@@ -1,0 +1,10 @@
+$ vitest run src/__tests__/protocol-version-admission.test.ts
+
+ RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-upgrade-version-gate/packages/client
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  16:35:45
+   Duration  613ms (transform 197ms, setup 0ms, import 302ms, tests 222ms, environment 0ms)
+

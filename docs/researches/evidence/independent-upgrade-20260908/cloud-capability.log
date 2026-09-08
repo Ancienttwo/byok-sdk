@@ -1,0 +1,10 @@
+$ vitest run src/__tests__/agent-home-contract.test.ts
+
+ RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-independent-upgrade-audit/packages/cloud
+
+
+ Test Files  1 passed (1)
+      Tests  12 passed (12)
+   Start at  16:20:31
+   Duration  438ms (transform 211ms, setup 0ms, import 312ms, tests 47ms, environment 0ms)
+
