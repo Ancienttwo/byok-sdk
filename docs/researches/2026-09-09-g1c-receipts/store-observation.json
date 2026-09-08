@@ -1,0 +1,24 @@
+{
+  "scope": "internal-store-characterization",
+  "taskSurvived": true,
+  "sameProcessFirstWriteWins": true,
+  "tenantIsolation": true,
+  "observations": [
+    {
+      "key": "task-offer:probe",
+      "missingAfterRestart": true,
+      "changedBodyAcceptedByReceiptStore": true
+    },
+    {
+      "key": "task-offer-delivered:probe",
+      "missingAfterRestart": true,
+      "changedBodyAcceptedByReceiptStore": true
+    },
+    {
+      "key": "task:probe:terminal",
+      "missingAfterRestart": true,
+      "changedBodyAcceptedByReceiptStore": true
+    }
+  ],
+  "limitations": "No enqueue, terminal projection, SIGKILL, provider or product acceptance."
+}
