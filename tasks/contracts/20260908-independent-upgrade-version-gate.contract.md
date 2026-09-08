@@ -1,7 +1,7 @@
 # Task Contract: independent upgrade version admission
 
 > **Status**: Fulfilled
-> **Plan**: plans/plan-20260908-independent-upgrade-version-gate.md
+> **Plan**: plans/archive/plan-20260908-independent-upgrade-version-gate.md
 > **Task Profile**: bugfix
 > **Owner**: kito
 > **Capability ID**: root
@@ -25,7 +25,7 @@ allowed_paths:
   - docs/protocol.md
   - docs/researches/2026-09-08-independent-upgrade-responsibility.md
   - docs/researches/evidence/independent-upgrade-20260908/**
-  - plans/plan-20260908-independent-upgrade-version-gate.md
+  - plans/archive/plan-20260908-independent-upgrade-version-gate.md
   - tasks/contracts/20260908-independent-upgrade-version-gate.contract.md
   - tasks/notes/20260908-independent-upgrade-version-gate.notes.md
 ```
