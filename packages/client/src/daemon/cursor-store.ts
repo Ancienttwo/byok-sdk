@@ -68,7 +68,7 @@ export class CursorStore {
     // observes a torn/partial file and falls back to `undefined` for a
     // cursor that was, in fact, already durably persisted — see
     // `util/atomic-write.ts`.
-    await atomicWriteFile(file, JSON.stringify({ cursor }));
+    await atomicWriteFile(file, JSON.stringify({ cursor }), { fsync: true });
   }
 
   /** Remove any persisted cursor for (serverUrl, deviceId) — a no-op if none exists. Called from `pair()` (finding F5) so a device that's about to be replaced never leaves a cursor a future, unrelated device could somehow inherit. */

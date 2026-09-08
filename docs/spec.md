@@ -913,7 +913,24 @@ For a daemon configured with hostedJournal, the existing tenant-scoped taskId is
 
 A durable pre-claim admission write separates unexecuted offers from possibly executed work. An unacknowledged offer without that commitment awaits authoritative mailbox redelivery, including cancellation suppression. An acknowledged or committed unfinished execution produces task.fail with reason daemon_interrupted and retryable false. Its original AgentRef, complete canonical terminal bytes and interruption marker commit atomically. A marker alone cannot conceal unfinished work.
 
-Recovery terminal delivery waits when the same execution has an activated durable Agent message without an exact persisted disposition. The outbox and journal remain the only durable authorities: restart reconstructs this dependency, retries the original message, and sends the original terminal after accepted, held or refused disposition is durable. Transport errors or mismatched dispositions cannot release the gate. Other executions settle independently; no runtime is rerun and cloud cancellation/admission rules remain unchanged.
+Recovery terminal delivery waits when the same execution has an activated durable Agent message without an exact persisted disposition. An explicit local cancellation durably revokes its message in that same outbox before publishing cancellation terminal truth; revoked records are not replayable. Ordinary failure preserves admission recovery for a message already handed to transport. The outbox and journal remain the only durable authorities: restart reconstructs this dependency, retries the original message, and sends the original terminal after accepted, held or refused disposition is durable. Transport errors or mismatched dispositions cannot release the gate. Other executions settle independently; no runtime is rerun and cloud cancellation/admission rules remain unchanged.
+
+Message outbox and reliable spool writers quarantine their mutation channel after
+uncertain append or durable-replacement failure. Reopening validates the complete
+JSONL framing and syncs recovered bytes before returning usable records; it does
+not silently repair partial frames or accept conflicting identities. An exact
+fixed-event-id retry reuses its recovered immutable record. Durable cursor saves
+and log compactions require the existing platform-native file synchronization
+barriers before success is exposed. Windows flushes writable file handles; Node
+provides no directory-flush equivalent there.
+
+Required-message sending quotas count unsatisfied drafts and held messages, but
+exclude refused or locally revoked terminal evidence. Complete terminal bodies
+and receipts remain in the live outbox until explicit operator archival under
+its single-writer Agent-home ownership: sync an audit snapshot, then durably
+compact the live log. Audit archives are never another recovery input. Finite
+disk retention remains an operator responsibility; historical refusal does not
+silently delete evidence or consume the active sending budget.
 
 The journal owns one immutable terminal byte record, including pre-claim declines. ConnectionManager uses its existing authenticated POST queue and retries the exact original envelope. Accepted transport disposition is durably recorded as confirmed before local delivery state is retired; an acknowledgement write failure retains the original batch. A rejected singleton is durably failed and remains inspectable. Confirmation records delivery acceptance; the cloud's immutable first terminal and cancellation authority remain product truth.
 

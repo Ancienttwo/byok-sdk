@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { constants as fsConstants, promises as fs } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   AgentMessageDispositionPayloadSchema,
@@ -11,6 +11,7 @@ import {
 } from '@byok-sdk/protocol';
 import type { AgentRef } from '../agent-home';
 import { atomicWriteFile } from '../util/atomic-write';
+import { DurableJsonlFile } from '../util/durable-jsonl';
 import { ensureSecureDir } from '../util/secure-dir';
 
 export const AGENT_MESSAGE_DIRECTORY = path.join('.byok', 'messages');
@@ -35,6 +36,7 @@ export interface AgentMessageOutboxRecord {
 type OutboxEntry =
   | Readonly<{ schema: 1; kind: 'append'; record: AgentMessageOutboxRecord }>
   | Readonly<{ schema: 1; kind: 'activate'; taskId: string; messageId: string; sessionRef: string }>
+  | Readonly<{ schema: 1; kind: 'revoke'; taskId: string; messageId: string }>
   | Readonly<{ schema: 1; kind: 'disposition'; taskId: string; disposition: AgentMessageDispositionPayload }>;
 
 export class AgentMessageOutboxError extends Error {
@@ -67,21 +69,26 @@ function exactDisposition(record: AgentMessageOutboxRecord, value: AgentMessageD
     && sameAgentRef(value.agentRef, record.agentRef);
 }
 
-/** Agent-local, append-before-send outbox. Only exact accepted disposition retires bytes. */
+/** Agent-local append-before-send authority. Only acceptance or explicit terminal archival retires bytes. */
 export class AgentMessageOutbox {
   private readonly pendingByTask = new Map<string, AgentMessageOutboxRecord>();
+  private readonly revokedTasks = new Set<string>();
   private readonly dispositionByTask = new Map<string, AgentMessageDispositionPayload>();
+  private readonly file: DurableJsonlFile;
   private nextCursor = 1;
   private logEntries = 0;
   private writeTail: Promise<unknown> = Promise.resolve();
 
-  private constructor(readonly homeDir: string, readonly outboxPath: string) {}
+  private constructor(readonly homeDir: string, readonly outboxPath: string) {
+    this.file = new DurableJsonlFile(outboxPath);
+  }
 
   static async open(homeDir: string): Promise<AgentMessageOutbox> {
     const directory = path.join(homeDir, AGENT_MESSAGE_DIRECTORY);
     await ensureSecureDir(directory);
     const outbox = new AgentMessageOutbox(homeDir, path.join(directory, AGENT_MESSAGE_OUTBOX_FILENAME));
     await outbox.load();
+    await outbox.file.confirmRecovered();
     return outbox;
   }
 
@@ -121,9 +128,9 @@ export class AgentMessageOutbox {
     return Object.freeze([...this.pendingByTask.values()].sort((a, b) => a.cursor - b.cursor));
   }
 
-  /** Activated records with no exact disposition yet; only these may be transport-replayed. */
+  /** Records without disposition or local revoke; transport replay additionally requires session binding. */
   retryableRecords(): readonly AgentMessageOutboxRecord[] {
-    return Object.freeze(this.records().filter((record) => !this.dispositionByTask.has(record.taskId)));
+    return Object.freeze(this.records().filter((record) => !this.dispositionByTask.has(record.taskId) && !this.revokedTasks.has(record.taskId)));
   }
 
   get(taskId: string): AgentMessageOutboxRecord | undefined {
@@ -147,13 +154,14 @@ export class AgentMessageOutbox {
       if (byteCount < 1 || byteCount > input.requirement.maxBytes) throw new AgentMessageOutboxError('message body exceeds the offer byte contract');
       const existing = this.pendingByTask.get(input.taskId);
       if (existing !== undefined) {
-        if (existing.tenantId !== input.tenantId || existing.contentType !== input.contentType || existing.body !== input.body || existing.contract !== input.requirement.contract || !sameAgentRef(existing.agentRef, input.agentRef)) {
+        if (existing.tenantId !== input.tenantId || existing.contentType !== input.contentType || existing.body !== input.body || existing.contract !== input.requirement.contract || (input.sessionRef !== undefined && existing.sessionRef !== input.sessionRef) || !sameAgentRef(existing.agentRef, input.agentRef)) {
           throw new AgentMessageOutboxError('required-message task already has a different immutable draft');
         }
         return existing;
       }
-      if (this.pendingByTask.size >= input.maxPendingEvents) throw new AgentMessageOutboxError('message outbox event quota is exhausted');
-      const pendingBytes = this.records().reduce((sum, record) => sum + record.byteCount, 0);
+      const sending = this.records().filter(record => !this.isTerminalEvidence(record.taskId));
+      if (sending.length >= input.maxPendingEvents) throw new AgentMessageOutboxError('message outbox event quota is exhausted');
+      const pendingBytes = sending.reduce((sum, record) => sum + record.byteCount, 0);
       if (pendingBytes + byteCount > input.maxPendingBytes) throw new AgentMessageOutboxError('message outbox byte quota is exhausted');
       const record: AgentMessageOutboxRecord = Object.freeze({
         schema: 1,
@@ -176,8 +184,9 @@ export class AgentMessageOutbox {
     });
   }
 
-  async activate(taskId: string, sessionRef: string): Promise<AgentMessageOutboxRecord | undefined> {
+  async activate(taskId: string, sessionRef: string, isCurrent: () => boolean = () => true): Promise<AgentMessageOutboxRecord | undefined> {
     return this.exclusive(async () => {
+      if (!isCurrent() || this.revokedTasks.has(taskId)) return undefined;
       const record = this.pendingByTask.get(taskId);
       if (record === undefined) return undefined;
       if (record.sessionRef !== undefined) {
@@ -189,6 +198,20 @@ export class AgentMessageOutbox {
       this.pendingByTask.set(taskId, activated);
       return activated;
     });
+  }
+
+  /** Local lifecycle cancellation, never a synthesized consumer disposition. */
+  async revoke(taskId: string): Promise<void> {
+    return this.exclusive(async () => {
+      const record = this.pendingByTask.get(taskId);
+      if (record === undefined || this.revokedTasks.has(taskId)) return;
+      await this.appendEntry({ schema: 1, kind: 'revoke', taskId, messageId: record.messageId });
+      this.revokedTasks.add(taskId);
+    });
+  }
+
+  private isTerminalEvidence(taskId: string): boolean {
+    return this.revokedTasks.has(taskId) || this.dispositionByTask.get(taskId)?.outcome === 'refused';
   }
 
   publishPayload(record: AgentMessageOutboxRecord): AgentMessagePublishPayload {
@@ -215,6 +238,7 @@ export class AgentMessageOutbox {
       await this.appendEntry({ schema: 1, kind: 'disposition', taskId, disposition });
       if (disposition.outcome === 'accepted') {
         this.pendingByTask.delete(taskId);
+        this.revokedTasks.delete(taskId);
         this.dispositionByTask.delete(taskId);
       } else {
         this.dispositionByTask.set(taskId, disposition);
@@ -234,6 +258,7 @@ export class AgentMessageOutbox {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
       throw error;
     }
+    if (raw.length > 0 && !raw.endsWith('\n')) throw new AgentMessageOutboxError('durable JSONL log has an incomplete trailing frame; preserve the file for explicit repair');
     for (const line of raw.split('\n')) {
       if (line.length === 0) continue;
       const entry = JSON.parse(line) as OutboxEntry;
@@ -248,11 +273,16 @@ export class AgentMessageOutbox {
         if (record === undefined || record.messageId !== entry.messageId) throw new AgentMessageOutboxError('message activation has no exact draft');
         if (record.sessionRef !== undefined && record.sessionRef !== entry.sessionRef) throw new AgentMessageOutboxError('message activation session conflicts');
         this.pendingByTask.set(entry.taskId, Object.freeze({ ...record, sessionRef: entry.sessionRef }));
+      } else if (entry.kind === 'revoke') {
+        const record = this.pendingByTask.get(entry.taskId);
+        if (record === undefined || record.messageId !== entry.messageId) throw new AgentMessageOutboxError('message revocation has no exact draft');
+        this.revokedTasks.add(entry.taskId);
       } else if (entry.kind === 'disposition') {
         const record = this.pendingByTask.get(entry.taskId);
         if (record === undefined || !exactDisposition(record, entry.disposition)) throw new AgentMessageOutboxError('message outbox contains a mismatched disposition');
         if (entry.disposition.outcome === 'accepted') {
           this.pendingByTask.delete(entry.taskId);
+          this.revokedTasks.delete(entry.taskId);
           this.dispositionByTask.delete(entry.taskId);
         } else {
           this.dispositionByTask.set(entry.taskId, entry.disposition);
@@ -264,23 +294,49 @@ export class AgentMessageOutbox {
   }
 
   private async appendEntry(entry: OutboxEntry): Promise<void> {
-    const handle = await fs.open(this.outboxPath, fsConstants.O_APPEND | fsConstants.O_CREAT | fsConstants.O_WRONLY, 0o600);
-    try {
-      await handle.write(`${stableJson(entry)}\n`, undefined, 'utf8');
-      await handle.sync();
-      this.logEntries += 1;
-    } finally {
-      await handle.close();
-    }
+    await this.file.append(stableJson(entry));
+    this.logEntries += 1;
+  }
+
+  /**
+   * Explicit operator maintenance under the Agent-home single-writer lease.
+   * Copy complete terminal evidence durably before removing it from the live log.
+   * Archives are audit artifacts, never another replay input. held remains live.
+   */
+  async archiveTerminalRecords(archiveDirectory: string): Promise<string | undefined> {
+    return this.exclusive(async () => {
+      if (!path.isAbsolute(archiveDirectory)) throw new AgentMessageOutboxError('message archive directory must be absolute');
+      const terminal = this.records().filter(record => this.isTerminalEvidence(record.taskId));
+      if (terminal.length === 0) return undefined;
+      await ensureSecureDir(archiveDirectory);
+      const archivePath = path.join(archiveDirectory, `message-terminal-${randomUUID()}.jsonl`);
+      await atomicWriteFile(archivePath, this.snapshotEntries(terminal).map(entry => `${stableJson(entry)}\n`).join(''), { mode: 0o600, fsync: true });
+      const retained = this.records().filter(record => !this.isTerminalEvidence(record.taskId));
+      const entries = this.snapshotEntries(retained);
+      await this.file.replace(entries.map(entry => stableJson(entry)));
+      for (const record of terminal) {
+        this.pendingByTask.delete(record.taskId);
+        this.dispositionByTask.delete(record.taskId);
+        this.revokedTasks.delete(record.taskId);
+      }
+      this.logEntries = entries.length;
+      return archivePath;
+    });
+  }
+
+  private snapshotEntries(records: readonly AgentMessageOutboxRecord[]): OutboxEntry[] {
+    return records.flatMap((record): OutboxEntry[] => {
+      const append: OutboxEntry = { schema: 1, kind: 'append', record };
+      const disposition = this.dispositionByTask.get(record.taskId);
+      const entries: OutboxEntry[] = disposition === undefined ? [append] : [append, { schema: 1, kind: 'disposition', taskId: record.taskId, disposition }];
+      if (this.revokedTasks.has(record.taskId)) entries.push({ schema: 1, kind: 'revoke', taskId: record.taskId, messageId: record.messageId });
+      return entries;
+    });
   }
 
   private async compact(): Promise<void> {
-    const entries = this.records().flatMap((record): OutboxEntry[] => {
-      const append: OutboxEntry = { schema: 1, kind: 'append', record };
-      const disposition = this.dispositionByTask.get(record.taskId);
-      return disposition === undefined ? [append] : [append, { schema: 1, kind: 'disposition', taskId: record.taskId, disposition }];
-    });
-    await atomicWriteFile(this.outboxPath, entries.map((entry) => `${stableJson(entry)}\n`).join(''), { mode: 0o600 });
+    const entries = this.snapshotEntries(this.records());
+    await this.file.replace(entries.map(entry => stableJson(entry)));
     this.logEntries = entries.length;
   }
 
@@ -289,6 +345,6 @@ export class AgentMessageOutbox {
     let release!: () => void;
     this.writeTail = new Promise<void>((resolve) => { release = resolve; });
     await prior;
-    try { return await fn(); } finally { release(); }
+    try { this.file.assertWritable(); return await fn(); } finally { release(); }
   }
 }

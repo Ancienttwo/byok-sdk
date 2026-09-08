@@ -179,3 +179,21 @@ The RC handoff must include exact source commit/tree hash, tarball paths, `sha25
 ## Implementation gate
 
 The downstream message-lane consumer is frozen by composite SHA-256 `5b1bde061de45995b74b5cc72f0e18a113db17cb01dc094d4659832ab85a6f80`; the pre-fix falsifier subject is `fe586f1b52daaea74d03471fbf8b87ca84f963b6c672bf7c6d65a6d69729403c`. Public naming may move only narrowly while preserving its exact `mode`/`contract`/`contentType`/`maxBytes` semantics. Implementation remains limited to an unpublished packed RC.
+
+
+## R10–R13 local durability amendment (2026-09-08)
+
+The current contract in `docs/spec.md` adds fail-closed uncertain-write quarantine,
+durable cursor/compaction barriers, and an explicit local revoke fact in the same
+message outbox. This is a task-lifecycle fact, not an invented consumer refusal.
+Cancellation persists it before terminal publication. Messages already handed
+to transport retain ordinary failure/admission recovery ordering.
+
+Sending quotas exclude refused/revoked evidence; held still counts. Full retained
+bodies and exact dispositions can only leave the live log through acceptance or
+explicit `archiveTerminalRecords(absoluteArchiveDirectory)`, under the existing
+single-writer Agent-home ownership. Archival durably writes complete audit facts
+before replacing the live log. Archives are not replay inputs; interrupted
+archival can leave an extra complete audit copy, never permission to drop facts.
+The existing 64 MiB live-log read ceiling remains; operators must archive before
+exhausting disk/retention capacity. No automatic expiry or body deletion is added.

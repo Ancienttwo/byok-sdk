@@ -664,6 +664,8 @@ interface ActiveTask {
   messageRequirement?: Readonly<AgentMessageEgressRequirement>;
   terminalProjection?: Readonly<TerminalProjectionSelection>;
   messageOutbox?: AgentMessageOutbox;
+  /** A send attempt may already have entered transport; failure must preserve its admission recovery. */
+  messageSendAttempted?: boolean;
   messageAccepted?: boolean;
   pendingMessageCompletion?: { readonly finalOutput: string; readonly document?: unknown };
   messageRetryTimer?: ReturnType<typeof setTimeout>;
@@ -1206,6 +1208,15 @@ export class TaskRunner {
       ? { taskId, agentRef: active.agentRef, requirement: active.messageRequirement, outbox: active.messageOutbox }
       : undefined);
     if (context === undefined) throw new Error('task has no active required Agent message contract');
+    const isCurrent = () => {
+      if (this.messageContextByToken.get(input.contextToken) !== taskId
+        || this.messageContextByTask.get(taskId) !== input.contextToken || this.pendingCancelled.has(taskId)) return false;
+      const current = this.tasks.get(taskId);
+      return current === undefined
+        ? active === undefined && this.pendingMessageTasks.get(taskId) === pending
+        : (active === undefined || current === active) && current.messageOutbox === context.outbox && this.canPublishAgentMessage(current);
+    };
+    if (!isCurrent()) throw new Error('invalid or expired Agent message task context');
     const record = await context.outbox.appendDraft({
       taskId,
       tenantId: this.deps.tenantId!,
@@ -1216,8 +1227,12 @@ export class TaskRunner {
       maxPendingEvents: 64,
       maxPendingBytes: 4 * 1024 * 1024,
     });
-    if (active === undefined) return { messageId: record.messageId, state: 'staged' };
-    const activated = await context.outbox.activate(taskId, active.session.sessionRef);
+    if (!isCurrent()) throw new Error('invalid or expired Agent message task context');
+    const current = this.tasks.get(taskId);
+    if (current === undefined) return { messageId: record.messageId, state: 'staged' };
+    const activated = await this.activateAgentMessage(context.outbox, taskId, current.session.sessionRef, isCurrent,
+      () => current.messageSendAttempted === true);
+    if (!isCurrent()) throw new Error('invalid or expired Agent message task context');
     if (activated === undefined) throw new Error('Agent message draft disappeared before activation');
     this.sendAgentMessageRecord(context.outbox, activated);
     return { messageId: activated.messageId, state: 'pending' };
@@ -1272,12 +1287,36 @@ export class TaskRunner {
     }
   }
 
+  private canPublishAgentMessage(active: ActiveTask): boolean {
+    return this.tasks.get(active.taskId) === active && !active.beingTornDown;
+  }
+
+  /** All authors and startup use the same queue-time and post-I/O authority check. */
+  private async activateAgentMessage(
+    outbox: AgentMessageOutbox, taskId: string, sessionRef: string, isCurrent: () => boolean,
+    wasSendAttempted: () => boolean = () => false,
+  ): Promise<AgentMessageOutboxRecord | undefined> {
+    if (!isCurrent()) return undefined;
+    const record = await outbox.activate(taskId, sessionRef, isCurrent);
+    if (!isCurrent()) {
+      if (!wasSendAttempted()) await outbox.revoke(taskId);
+      return undefined;
+    }
+    return record;
+  }
+
   private sendAgentMessageRecord(outbox: AgentMessageOutbox, record: AgentMessageOutboxRecord): void {
+    const active = this.tasks.get(record.taskId);
+    const authorized = active === undefined
+      ? this.recoveredMessageOutboxes.get(record.taskId) === outbox
+      : active.messageOutbox === outbox && this.canPublishAgentMessage(active);
+    if (!authorized || record.sessionRef === undefined
+      || !outbox.retryableRecords().some(pending => pending.messageId === record.messageId)) return;
+    if (active !== undefined) active.messageSendAttempted = true;
     this.deps.send(createEnvelope('agent.message.publish', outbox.publishPayload(record), {
       taskId: record.taskId,
       sessionRef: record.sessionRef,
     }));
-    const active = this.tasks.get(record.taskId);
     if (active?.messageOutbox === outbox) {
       if (active.messageRetryTimer !== undefined) clearTimeout(active.messageRetryTimer);
       active.messageRetryTimer = setTimeout(() => {
@@ -2472,7 +2511,8 @@ export class TaskRunner {
       }
       const activatedMessageRecord = active.messageOutbox === undefined
         ? undefined
-        : await active.messageOutbox.activate(taskId, session.sessionRef);
+        : await this.activateAgentMessage(active.messageOutbox, taskId, session.sessionRef,
+          () => !this.pendingCancelled.has(taskId) && !blobAbort.signal.aborted);
 
       // Finding F4, checkpoint 2 ("consulted when start() resolves"): a
       // task.cancel arrived while prepared-operation start() was in flight — i.e. AFTER
@@ -3038,7 +3078,8 @@ export class TaskRunner {
               // restart recovery republishes, so the draft is left inert
               // instead.
               if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
-              const activated = await outbox.activate(active.taskId, active.session.sessionRef);
+              const activated = await this.activateAgentMessage(outbox, active.taskId, active.session.sessionRef,
+                () => this.canPublishAgentMessage(active), () => active.messageSendAttempted === true);
               if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
               if (activated === undefined) throw new Error('Agent message draft disappeared before activation');
               this.sendAgentMessageRecord(outbox, activated);
@@ -3865,6 +3906,7 @@ export class TaskRunner {
     retryable: boolean,
     context: ClaimedAgentFailureContext,
   ): Promise<boolean> {
+    await this.pendingMessageTasks.get(taskId)?.outbox.revoke(taskId);
     const agentRef = context.binding.resolution.agentRef;
     const result = await this.retryAgentTerminalEvidence(() =>
       this.deps.agentHome!.mutateExecution(context.binding, () =>
@@ -4118,6 +4160,15 @@ export class TaskRunner {
     cause: AgentTerminalCause,
     reason?: string,
   ): Promise<boolean> {
+    // Cancellation revokes publication. Ordinary failure preserves a message that
+    // may already be in transport, including its existing admission recovery gate.
+    // For unsent messages, join activation and revoke before terminal truth.
+    if (cause === 'cancelled' || (cause === 'failed' && !active.messageSendAttempted)) {
+      try { await active.messageOutbox?.revoke(active.taskId); } catch (error) {
+        active.resolveSemanticTerminalSettled?.(false);
+        throw error;
+      }
+    }
     active.terminalCause = cause;
     active.terminalReason = reason;
     if (active.agentBinding === undefined || active.agentRef === undefined || active.agentHandoff === undefined) {
