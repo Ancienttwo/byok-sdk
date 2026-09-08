@@ -1,14 +1,24 @@
+> **Archived**: 2026-09-08 18:48
+> **Related Plan**: plans/archive/plan-20260908-doctor-repair.md
+> **Outcome**: Completed
+> **Lifecycle**: plan
+> **Parent Run ID**: run-20260908-1848
+> **Archive Projection V1**: `plans/plan-20260908-doctor-repair.md` => `plans/archive/plan-20260908-doctor-repair.md`
+> **Archive Projection V1**: `tasks/contracts/20260908-doctor-repair.contract.md` => `tasks/archive/contract-20260908-1848-plan-20260908-doctor-repair.md`
+> **Archive Projection V1**: `tasks/reviews/20260908-doctor-repair.review.md` => `tasks/archive/review-20260908-1848-plan-20260908-doctor-repair.md`
+> **Archive Projection V1**: `tasks/notes/20260908-doctor-repair.notes.md` => `tasks/archive/notes-20260908-1848-plan-20260908-doctor-repair.md`
+
 # Plan: Explicit device metadata repair and embedded diagnostics
 
-> **Status**: Executing
+> **Status**: Archived
 > **Artifact Level**: work-package
 > **Promotion Reason**: New public diagnostics and operator repair API.
 > **Verification Boundary**: Frozen local source and required checks; no release or deployment.
 > **Rollback Surface**: This isolated candidate diff.
 > **Spec**: docs/spec.md
-> **Task Contract**: tasks/contracts/20260908-doctor-repair.contract.md
-> **Implementation Notes**: tasks/notes/20260908-doctor-repair.notes.md
-> **Task Review**: tasks/reviews/20260908-doctor-repair.review.md
+> **Task Contract**: tasks/archive/contract-20260908-1848-plan-20260908-doctor-repair.md
+> **Implementation Notes**: tasks/archive/notes-20260908-1848-plan-20260908-doctor-repair.md
+> **Task Review**: tasks/archive/review-20260908-1848-plan-20260908-doctor-repair.md
 
 ## Authority and planning
 
@@ -41,7 +51,7 @@ Targeted new repair/API tests plus existing auth/store/diagnostics tests during 
 
 ## Evidence Contract
 
-- **State/progress path**: tasks/notes/20260908-doctor-repair.notes.md
+- **State/progress path**: tasks/archive/notes-20260908-1848-plan-20260908-doctor-repair.md
 - **Verification evidence**: targeted Vitest and required root check logs, summarized in implementation notes.
 - **Evaluator rubric**: exact target and lease gates, no credential mutation or exposure, projection readback, old --fix scope retained.
 - **Stop condition**: unavailable authority, invalid projection, unexpected identity, concurrent owner, or three failing fix rounds; report unrelated faults without repairing them.

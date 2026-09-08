@@ -1,12 +1,22 @@
+> **Archived**: 2026-09-08 18:48
+> **Related Plan**: plans/archive/plan-20260908-doctor-repair.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260908-1848
+> **Archive Projection V1**: `plans/plan-20260908-doctor-repair.md` => `plans/archive/plan-20260908-doctor-repair.md`
+> **Archive Projection V1**: `tasks/contracts/20260908-doctor-repair.contract.md` => `tasks/archive/contract-20260908-1848-plan-20260908-doctor-repair.md`
+> **Archive Projection V1**: `tasks/reviews/20260908-doctor-repair.review.md` => `tasks/archive/review-20260908-1848-plan-20260908-doctor-repair.md`
+> **Archive Projection V1**: `tasks/notes/20260908-doctor-repair.notes.md` => `tasks/archive/notes-20260908-1848-plan-20260908-doctor-repair.md`
+
 # Task Contract: Explicit device metadata repair and embedded diagnostics
 
 > **Status**: Fulfilled
-> **Plan**: plans/plan-20260908-doctor-repair.md
+> **Plan**: plans/archive/plan-20260908-doctor-repair.md
 > **Task Profile**: code-change
 > **Owner**: Codex
 > **Capability ID**: root
-> **Review File**: tasks/reviews/20260908-doctor-repair.review.md
-> **Notes File**: tasks/notes/20260908-doctor-repair.notes.md
+> **Review File**: tasks/archive/review-20260908-1848-plan-20260908-doctor-repair.md
+> **Notes File**: tasks/archive/notes-20260908-1848-plan-20260908-doctor-repair.md
 
 ## Goal
 
@@ -33,10 +43,10 @@ allowed_paths:
   - deploy/runbooks/self-hosted-operations.md
   - api-surface/client.d.ts
   - CHANGELOG.md
-  - plans/plan-20260908-doctor-repair.md
-  - tasks/contracts/20260908-doctor-repair.contract.md
-  - tasks/notes/20260908-doctor-repair.notes.md
-  - tasks/reviews/20260908-doctor-repair.review.md
+  - plans/archive/plan-20260908-doctor-repair.md
+  - tasks/archive/contract-20260908-1848-plan-20260908-doctor-repair.md
+  - tasks/archive/notes-20260908-1848-plan-20260908-doctor-repair.md
+  - tasks/archive/review-20260908-1848-plan-20260908-doctor-repair.md
   - tasks/current.md
 ```
 

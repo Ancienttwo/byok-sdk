@@ -1,8 +1,18 @@
+> **Archived**: 2026-09-08 18:48
+> **Related Plan**: plans/archive/plan-20260908-doctor-repair.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260908-1848
+> **Archive Projection V1**: `plans/plan-20260908-doctor-repair.md` => `plans/archive/plan-20260908-doctor-repair.md`
+> **Archive Projection V1**: `tasks/contracts/20260908-doctor-repair.contract.md` => `tasks/archive/contract-20260908-1848-plan-20260908-doctor-repair.md`
+> **Archive Projection V1**: `tasks/reviews/20260908-doctor-repair.review.md` => `tasks/archive/review-20260908-1848-plan-20260908-doctor-repair.md`
+> **Archive Projection V1**: `tasks/notes/20260908-doctor-repair.notes.md` => `tasks/archive/notes-20260908-1848-plan-20260908-doctor-repair.md`
+
 # Doctor repair review
 
 Status: Independent semantic review complete; sole nonsemantic finding resolved by the exact one-line correction below. Main-agent inspection covered exact target/confirmation, store ownership, shared reconciliation, secret-blind results, typed CLI failures, public type reachability and guide consistency. It prompted separating public data types from internal collector declarations. This is not an independent semantic acceptance receipt.
 
-Build/type/API/version/workflow checks pass. Final client run: 1853 passed, 7 failed, 11 skipped; all 23 new doctor tests passed. Full-suite failures remain unclassified against base. Details and hashes: `tasks/notes/20260908-doctor-repair.notes.md`. Do not claim ship readiness.
+Build/type/API/version/workflow checks pass. Final client run: 1853 passed, 7 failed, 11 skipped; all 23 new doctor tests passed. Full-suite failures remain unclassified against base. Details and hashes: `tasks/archive/notes-20260908-1848-plan-20260908-doctor-repair.md`. Do not claim ship readiness.
 
 Follow-up classification completed: both pinned subjects pass all seven unmodified targeted cases; slow-sync controls expose the same budget boundary, and delayed observer controls reproduce the same projection count assertion. See the classification report. These findings do not replace a passing full suite or independent acceptance receipt. No production/test fixes were made.
 
@@ -30,11 +40,11 @@ The independent reviewer report and mechanical finding resolution above were sub
 > **Reviewer**: Codex
 > **Source**: codex-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: sha256:c24db8e5a77ccd286a7aa46b371e18a1e7d9eb2a985dc92dd2946709134c8551
+> **Reviewed Subject SHA256**: sha256:8a48a87d4183098e73ae4f89c74fed8f1767410bd1f5272e245d4ec977b74183
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: 62e83ae9ac76e38b5448307fec02850f780d7347
-> **Verification Evidence SHA256**: sha256:bb5de6626065bfbc2606645de704aced23f9ff3b1a1dacff0c25be2abbdbc807
-> **Issued At**: 2026-09-08T10:18:50.608Z
+> **Reviewed Target Revision**: d4cbb3759c1de268e6c15c548313f84af56ed18e
+> **Verification Evidence SHA256**: sha256:09ff89a2fb2d51a1f7740149c2175c839b4b75fb292d882af8829764ba0bcfc0
+> **Issued At**: 2026-09-08T10:48:30.956Z
 
-- Summary: Supersedes the receipt for stale local main. Independent gatekeeper /root/doctor_acceptance found no semantic findings on 30743c8; sole EOF finding resolved at beb0b71. Current candidate adds formal verification declarations and only changes review_base from main to origin/main, verified by exact policy-delta assertion. Source/config equality, doctor filesystem readback and ledger baseline checks pass against target 62e83ae.
+- Summary: Independent gatekeeper /root/doctor_acceptance found no semantic violations on 30743c8; sole EOF whitespace issue resolved at beb0b71. Subsequent changes bind formal evidence to origin/main 62e83ae and reconcile completed plan/notes only. Current exact source/config equality, one-field review-target-policy assertion and doctor readback delta pass; build/typecheck/full-test ledger baselines remain valid. Approved Completed archival only; no merge, push or release.
 - Findings: none
