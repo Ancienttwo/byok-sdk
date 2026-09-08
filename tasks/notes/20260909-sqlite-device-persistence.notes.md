@@ -75,3 +75,49 @@ missing-column negative test has not run: the sequential full command stopped
 before server. Do not claim all seven directory tests passed on final source.
 The prior 3930-pass run remains preserved in `_ops/device-full-test.log`;
 `_ops/device-full-test-final.log` is the failed final revision attempt.
+
+## Follow-up: final test acceptance (explicitly approved)
+
+P1/P2: client Vitest configuration uses CPU-count-derived workers while tests
+spawn real probes/daemons and perform disk I/O. The runtime overflow fixture has
+an explicit 1-second probe deadline; the store fixture performs 200 serialized
+writes and concurrent independent reads under a 10-second test deadline. Previous
+failure evidence contains deadline/cleanup failures, not a demonstrated torn read.
+
+- Server targeted on c83345d: 5 files / 159 tests passed, including final migration
+  column rejection, pairing/restart and SQLite conformance.
+- The two previously failing client files, with file parallelism disabled:
+  35 tests passed, no source changes.
+- Unmodified full command rerun: 1869 passed / 2 failed / 11 skipped, but the two
+  failures moved to journal-offer-family and agent-content-read-integration
+  asynchronous observation assertions. Prior two failures did not recur.
+- P3: cap client file-level maxWorkers at 4. No timeouts, test assertions, skips,
+  intra-test concurrency, or product source change. Tradeoff is lower suite
+  throughput; bound resource contention rather than expanding wall-clock budgets.
+  Scheduling contention is a hypothesis, not a proven diagnosis of each failure.
+
+Root Cause Evidence (test-execution mitigation):
+- root_cause: likely resource contention from client file-level concurrency; exact
+  cause of each timing-sensitive failure remains unproven.
+- repro: bun run test, on c83345d, as recorded in device-full-test-final.log and
+  device-full-test-acceptance.log; failures differ between runs.
+- regression_guard: existing unchanged client assertions plus the complete suite.
+- pre_fix_failure_artifact: _ops/device-full-test-acceptance.log; isolated success
+  is separately recorded in _ops/device-client-isolated.log.
+
+## Follow-up acceptance result
+
+`bun run test` with client maxWorkers 4 exited 0: 3931 tests passed, 135 skipped.
+Client 1871 passed/11 skipped; server 356 passed/19 skipped. All seven new
+directory tests and the public restart regression are now covered on final source.
+The installed Vitest default was availableParallelism minus one, 11 on this host;
+only client file-level scheduling changes. Existing per-test races remain intact.
+This is an observed stabilization, not proof that all intermittent failures are
+eliminated. Product source is exactly c83345d; the final candidate package/runtime
+evidence therefore remains applicable and was not regenerated unnecessarily.
+
+Build, typecheck, API surface and version authority were rerun after the full
+suite and passed; strict workflow is checked on these updated task artifacts.
+Logs: `_ops/device-server-acceptance.log`, `_ops/device-client-isolated.log`,
+`_ops/device-full-test-bounded.log`, and `_ops/device-{build,typecheck,api,version}-acceptance.log`.
+The earlier failure logs remain available. No publish, merge or deployment.
