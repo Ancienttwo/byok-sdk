@@ -23,3 +23,18 @@ Original gate verdict: FAIL solely for `packages/client/src/diagnostics/types.ts
 Independent verification: Node 22.22.3, client `bun run test -- src/__tests__/device-doctor.test.ts`, 23/23 PASS. Reviewer verified the full-suite log SHA and all four test subject hashes against retained manifests; production/API/CLI source was unchanged between `06991fb` and the reviewed candidate. Full-suite evidence remains 3905 passed / 135 skipped, with unchanged-code build evidence reused.
 
 This is an independent reviewer report plus an explicitly authorized mechanical finding resolution. It is not a generated repo-harness AcceptanceReceipt, merge seal, published artifact or live provider qualification.
+
+## Acceptance Receipt Projection
+
+> **Disposition**: external_pass
+> **Reviewer**: Codex
+> **Source**: codex-review
+> **Actor**: not-applicable
+> **Reviewed Subject SHA256**: sha256:72dc1c390032dde19c292cd8bbab1c2bd9a8f00fe48f5097381c4339c6e704b0
+> **Reviewed Subject Scope**: normalized-final-content
+> **Reviewed Target Revision**: 1dcbff572d6dc201c8c9afb757fda743ef6f8319
+> **Verification Evidence SHA256**: sha256:08142030565df339e8bd42598ff606a6ff28fdaf817c1142ec1b1d0a9154bc48
+> **Issued At**: 2026-09-08T10:16:32.212Z
+
+- Summary: Independent gatekeeper /root/doctor_acceptance reviewed 30743c8: no semantic findings; the sole EOF whitespace finding was mechanically resolved at beb0b71 and cumulatively verified. Candidate 4a3d31c changes only formal plan/contract evidence declarations since that reviewed product source. Current exact source/config equality and doctor readback delta pass; baseline build/typecheck/full tests are ledger-bound.
+- Findings: none

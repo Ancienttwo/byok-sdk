@@ -48,7 +48,7 @@
   },
   "worktree_strategy": {
     "base_branch": "main",
-    "review_base": "main",
+    "review_base": "origin/main",
     "merge_back": {
       "target": "main"
     }

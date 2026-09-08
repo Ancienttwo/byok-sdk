@@ -20,6 +20,7 @@ Only missing/valid-stale device metadata is restored. Preserve malformed/legacy 
 
 ```yaml
 allowed_paths:
+  - .ai/harness/policy.json
   - packages/client/src/
   - packages/client/README.md
   - README.md
@@ -99,7 +100,8 @@ The user approved the bounded independent gatekeeper review. No semantic finding
       },
       "delta_checks": [
         "source-identical",
-        "doctor-readback"
+        "doctor-readback",
+        "review-target-policy"
       ]
     },
     {
@@ -122,7 +124,8 @@ The user approved the bounded independent gatekeeper review. No semantic finding
       },
       "delta_checks": [
         "source-identical",
-        "doctor-readback"
+        "doctor-readback",
+        "review-target-policy"
       ]
     },
     {
@@ -145,7 +148,8 @@ The user approved the bounded independent gatekeeper review. No semantic finding
       },
       "delta_checks": [
         "source-identical",
-        "doctor-readback"
+        "doctor-readback",
+        "review-target-policy"
       ]
     },
     {
@@ -196,12 +200,12 @@ The user approved the bounded independent gatekeeper review. No semantic finding
     {
       "id": "source-identical",
       "kind": "command",
-      "command": "git diff --exit-code 8b3771f -- packages examples scripts bun.lock package.json api-surface .ai .github",
+      "command": "git diff --exit-code 8b3771f -- packages examples scripts bun.lock package.json api-surface .ai .github ':(exclude).ai/harness/policy.json'",
       "cwd": ".",
       "phase": "verification",
       "cost": "normal",
       "evidence_policy": "current_exact",
-      "necessity": "Prove executable source, tests, dependencies and verifier/config inputs are unchanged from the bound baseline; only contract/plan evidence declarations changed.",
+      "necessity": "Prove executable source, tests, dependencies and verifier/config inputs are unchanged from the bound baseline; only contract/plan evidence declarations changed. The separately checked policy delta changes only review_base to the authorized remote target.",
       "inputs": {
         "env": [
           "PATH"
@@ -217,6 +221,21 @@ The user approved the bounded independent gatekeeper review. No semantic finding
       "cost": "normal",
       "evidence_policy": "current_exact",
       "necessity": "Exercise metadata write/readback and failure gates with the actual temporary filesystem and test credential authority.",
+      "inputs": {
+        "env": [
+          "PATH"
+        ]
+      }
+    },
+    {
+      "id": "review-target-policy",
+      "kind": "command",
+      "command": "node -e 'const fs=require(\"node:fs\");const cp=require(\"node:child_process\");const a=JSON.parse(cp.execFileSync(\"git\",[\"show\",\"8b3771f:.ai/harness/policy.json\"],{encoding:\"utf8\"}));const b=JSON.parse(fs.readFileSync(\".ai/harness/policy.json\",\"utf8\"));a.worktree_strategy.review_base=\"origin/main\";require(\"node:assert/strict\").deepEqual(b,a);'",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "normal",
+      "evidence_policy": "current_exact",
+      "necessity": "Prove the sole policy delta selects origin/main; no acceptance or merge requirement changes.",
       "inputs": {
         "env": [
           "PATH"
@@ -245,3 +264,5 @@ evidence_requirements:
 ```
 
 Formal evidence uses the existing ledger executions for build/typecheck/full test, with current exact source/config equality and real temporary-filesystem doctor readback as delta checks. The runtime_readback oracle refers to these existing repair/readback tests, not a live deployment. No policy exemption or user waiver is used.
+
+The integration target is origin/main at 62e83ae. This worktree policy review_base is corrected from the stale local main to origin/main. The exact one-field policy delta is checked; merge_gate policy and acceptance requirements are unchanged. The earlier receipt bound to local main is superseded and must not be used for this target.
