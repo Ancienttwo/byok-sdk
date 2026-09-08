@@ -55,9 +55,8 @@ export interface CollectDiagnosticsOptions {
   runtimeProbeTimeoutMs?: number;
 }
 
-export type OperationalHealthFixResult =
-  | { status: 'not-needed'; reason: 'missing' | 'valid' }
-  | { status: 'quarantined'; evidenceName: string; manifestName: string; sha256: string; sizeBytes: number };
+import type { OperationalHealthFixResult } from './types';
+export type { OperationalHealthFixResult } from './types';
 
 function safeProtocol(serverUrl: string): DiagnosticsSnapshot['config']['serverProtocol'] {
   try {

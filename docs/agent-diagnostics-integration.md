@@ -129,7 +129,40 @@ byok-agent doctor --repair restore-enrollment-metadata --expected-device-id DEVI
 
 验收记录保存 SDK/CLI artifact 身份、宿主版本、OS、目标绑定、检查时间、脱敏结果与动作回执。源码检查成功不能替代实际分发版本验收。
 
-## 6. P3：SDK 后续能力缺口与实施边界
+## 6. 新增 embedded-host operator API（0.16.0 source candidate）
+
+本节是未发布候选，不能以已有 0.15.0 registry pin 使用。package root 新增：
+
+```ts
+import {
+  quarantineDeviceOperationalHealth, exportDeviceSupportBundle,
+  archiveAgentTerminalMessages, DeviceOperatorError,
+} from '@byok-sdk/client';
+
+// Host 先取得用户确认，并通过其原 service manager 停止设备 daemon。
+const healthReceipt = await quarantineDeviceOperationalHealth(config, { confirmed: true });
+// 只读导出无需停服务；使用实际 adapters。输出 parent 必须已存在，文件不可存在。
+const bundleReceipt = await exportDeviceSupportBundle(config, {
+  adapters, outputPath: '/absolute/private/support.json',
+});
+// target 来自已授权的 enrollment/Placement；不是 hashed doctor 或待修复投影。
+const archiveReceipt = await archiveAgentTerminalMessages(config, {
+  confirmed: true,
+  expectedDeviceId: target.deviceId,
+  expectedTenantId: target.tenantId,
+  agentRef: target.agentRef,
+  archiveDirectory: '/absolute/private/new-agent-audit',
+});
+```
+
+- Health 保留原 bounded quarantine 实现和 evidence/manifest/hash receipt；missing/valid 为 `not-needed`。只隔离确认的损坏 health，不能修 journal 或业务任务。API 自行验证 control offline，并由底层取得 device owner lease；offline 本身不是停机证明。
+- Bundle 接收窄化的实际 adapters/probe timeout，拒绝内部 clock/connectControl/security DI seams。只输出 SDK allowlist-v1 脱敏结果，保留原子 no-overwrite/file sync；回执是 `written`，不证明设备或 Agent 健康，也不上传材料。
+- Archive 需要 device owner 和 Agent-home writer lease。它从 config 唯一 root 选择已有 Agent home，不执行 projection hook、不初始化业务文件。设备 metadata 必须匹配 expected tenant/device；所有 outbox records 必须匹配同 tenant 与 Agent ID。`agentRef` 选择当前授权的 Agent；历史 profile revisions 原样保留，不被改成当前 revision。
+- Archive 只退休 refused/locally revoked 终结证据，held/draft 仍 live。输出是**敏感完整审计材料**，不是 support bundle；目录必须是已有 parent 下的新目录，private ACL 在写正文前建立。原有 outbox 64 MiB 边界继续生效；先 sync 审计副本、后替换 live log。同步失败保留 live evidence，不自动删输出目录或重试。archive 不成为 replay 输入。
+- 三个 API 不启动/停止 supervisor，不读取 OS/provider 凭据、不重跑任务。Host 必须分别展示 action receipt、服务恢复和独立 Agent 验证；释放 lease 失败也拒绝报告完整成功。
+- `DeviceOperatorError.code` 是封闭的 `confirmation-required`、`invalid-input`、`daemon-running`、`store-busy`、`agent-busy`、`target-mismatch`、`source-unavailable`、`output-exists`、`operation-failed`。不解析 message，也不从错误反推成功。错误不附带任意 OS 文本、路径或 cause。
+
+## 7. P3：SDK 后续能力缺口与实施边界
 
 现状可交付 CLI 诊断页、有限 health 隔离和本地支持材料导出。尚不能交付通用的“单 Agent 自动修复”。SDK 需要承担的后续范围是：
 
@@ -137,7 +170,7 @@ byok-agent doctor --repair restore-enrollment-metadata --expected-device-id DEVI
 - 建立精确 AgentRef/device 绑定的诊断证据组合，区分 device 故障、Agent 配置、runtime 与 task 结果；缺少证据保持未知。
 - 对每项新增修复先定义影响范围、前置条件、用户授权、执行回执与复查标准，再开放动作；数据恢复不能通过泛化 `--fix` 隐式增加。
 
-本轮已实现公开诊断 API 与显式登记投影修复；上述 AgentRef 级组合与其他新修复动作仍待实现，没有远程命令通道或自动重试策略。10 倍设备/Agent 数量下，首先承压的是逐设备本地探测和支持材料读取；下游应按需触发、限制并发并标示报告时间，不能把缓存报告或 lossy presence 升格为 readiness authority。
+当前已实现公开诊断 API、显式登记投影修复，以及上述 source-candidate operator API；上述 AgentRef 级组合与其他新修复动作仍待实现，没有远程命令通道或自动重试策略。10 倍设备/Agent 数量下，首先承压的是逐设备本地探测和支持材料读取；下游应按需触发、限制并发并标示报告时间，不能把缓存报告或 lossy presence 升格为 readiness authority。
 
 ## 源码与 SDK 回归入口
 

@@ -1,0 +1,87 @@
+{
+  "status": "source-accepted-release-unverified",
+  "base": "9de5e12509f2c3823b22f568a8cbe04edf89b718",
+  "branch": "codex/embedded-operator-apis",
+  "toolchain": {
+    "node": "22.22.3",
+    "bun": "1.4.0"
+  },
+  "candidate": {
+    "sdk": "0.16.0",
+    "keys": "0.4.2",
+    "published": false
+  },
+  "tests": {
+    "passed": 3923,
+    "skipped": 135,
+    "packages": 13
+  },
+  "files_sha256": {
+    "CHANGELOG.md": "5e69c500c48d1a12c07080e176573e4bd84cb6da609a49d5203644a0d1155bff",
+    "README.md": "781a391e13f62bb95eb38f4c52e9e1c764eafcca3690fe1ea5908dc2eaada93c",
+    "api-surface/client.d.ts": "c8a03ce9fe22f9f66607141fc59217acfc2df8ece8aa2eda72e8b87d92921bcf",
+    "bun.lock": "9522db0e33492ec062e3e1a541a2d338b0e5067bbed6052aa564314636e934b2",
+    "docs/agent-diagnostics-integration.md": "a3043e37bb2c46850a7fd3e3b2b868987621da138cc0f91833958b98166423d1",
+    "docs/spec.md": "5ce0d40c08a26fd8b726dda5addd70f3544969b6116f31bcc3ce992e4a1f9abf",
+    "packages/client/package.json": "ef169097a64b211905f51c73a905a27bd0d32bfb15f8a58f038a77e0165c7acf",
+    "packages/client/src/__tests__/operator-actions.test.ts": "424b9a940ceba3e8d28fa2bcad0c7ce3eccce59aeffe3bc6ea91b3d74bd555eb",
+    "packages/client/src/daemon/agent-message-outbox.ts": "911c517fdb9707f63d3465bf01697518ed5a5370c8c8bae430ad20261fda33b6",
+    "packages/client/src/diagnostics/diagnostics.ts": "8da663b704f00cd31bae4d1527acaa5d42188145a02078126932072f37530d92",
+    "packages/client/src/diagnostics/operator-actions.ts": "858c9621afad698bb983974254aa305c26d21d545083f99634b674217615e3c8",
+    "packages/client/src/diagnostics/types.ts": "630748c56daf1425e7dca0f5e9afa33f8b51f6650531c832c6cdac74df26d85b",
+    "packages/client/src/index.ts": "c4d797de51c28cfcd60490f746523501b49203d6a8becb347f6c76e4cee476cc",
+    "packages/cloud-dataplane/package.json": "ebd5a2bf5992e7676fb6bdaf03b6842a596e313fe284140ed53f67b66f3f89a0",
+    "packages/cloud/package.json": "ddba95a60695aa8bc95e46b9b5d5804c57f33eeea49d1af9fa9891e9d1051b41",
+    "packages/core/package.json": "187875cf0ae705d2b95e5f407baf6f3d24cce03cec0731daac44396fa0a37201",
+    "packages/keys/package.json": "cafa264159bf8e3c6aadee206ec448434f660651caf356e0c9971ea64b447797",
+    "packages/protocol/package.json": "a3b4afed1c04233228f934f80f819ec60f13d0416e330fadac14ba8569de1c39",
+    "packages/sdk/package.json": "c398c4c4e5c1cc3b571528a2e9aceed87b388ffdd566554e8e236984f268a789",
+    "packages/server/package.json": "3e69c225c3ed3d028432c5b0f0d575ae1ed447a236c715fe7fb5fd8dc9aaaf21",
+    "packages/testkit/package.json": "f9b447d90c767b2b819a2564edc9d5e97a9321f453c91212bb105c6ebabef618",
+    "packages/ui-runtime/package.json": "0ed2844b2810b1ce13b0c61b4e9fd681f664373c2c488def7f115d28844908f1"
+  },
+  "logs": {
+    "/tmp/byok-operator-api-version.log": "4b21b68e7fe7d276bb9111b1a7078be40dd52a1e3810f5ea5ae535c384e0be95",
+    "/tmp/byok-operator-full-tests.log": "112166c7a2b91e44e4321704f8456d5d67e8c1045fd070e4815d051595672f8e",
+    "/tmp/byok-operator-workflow.log": "92916e09c848dbd6a5f6faa9c800ed158aadbfb1901b8653845a813dd79ce51a",
+    "/tmp/byok-operator-frozen-build.log": "aa557baeb80b22c94e981c1912a1d0232134738af87491917d9f83e6454dcfab",
+    "/tmp/byok-operator-compile-smoke.log": "53504bff19e7168eaf2ea5c1c448754a71f52fef912226a064927c4566470a95",
+    "/tmp/byok-operator-full-types.log": "af4d5134a328d5af9ea2027c10f1d7318429f855417c48e14792be8945725cef",
+    "/tmp/byok-operator-dist-smoke.log": "8068444e1e6af66495594632c1d57bd2366ebd66ea35ffa085806fa76b3ac0b6",
+    "/tmp/byok-operator-boundaries.log": "cf9bef4db944b6aa6af718bc67294cd3a90deb8c2fdb9a56d99f76ffa6c47709"
+  },
+  "compiled_host_sha256": "c2ee17b9dbe21aa88c249055b4d5587cf6b275d2567b95d53e392349a93aab7f",
+  "limitations": [
+    "independent review completed; one safe_auto documentation finding corrected and delta verified",
+    "no release pack or registry install",
+    "no live-device or hosted CI evidence"
+  ],
+  "independent_review": {
+    "reviewer": "operator_acceptance (gatekeeper)",
+    "initial_verdict": "FAIL",
+    "findings": [
+      {
+        "severity": "HIGH",
+        "file": "README.md",
+        "problem": "unpublished candidate described as published release",
+        "classification": "safe_auto",
+        "resolution": "source candidate explicitly unpublished; previous 0.15 release links restored; install example conditional on publication",
+        "delta_checks": [
+          "version-authority PASS",
+          "local release link existence PASS",
+          "git diff --check PASS"
+        ]
+      }
+    ],
+    "source_blockers": 0,
+    "focused_tests": {
+      "passed": 7,
+      "files": 1,
+      "runtime": "Node 22.22.3",
+      "command": "npx --yes node@22.22.3 node_modules/vitest/vitest.mjs run packages/client/src/__tests__/operator-actions.test.ts"
+    },
+    "final_disposition": "accepted by orchestrator after reviewer-prescribed documentation-only correction",
+    "reviewed_readme_sha256": "ca562773d1d6cad8ec5b8137b94f20eba8d4d0074325228b21e636254db26bfd",
+    "expensive_evidence": "source/log/binary hashes revalidated; unchanged runtime inputs, reused full checks"
+  }
+}

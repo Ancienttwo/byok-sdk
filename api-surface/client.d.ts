@@ -7930,6 +7930,70 @@ export declare class DeviceMetadataRepairError extends Error {
  * Ordinary doctor remains credential-blind; only this confirmed action opens the OS store.
  */
 export declare function repairDeviceEnrollmentMetadata(config: DaemonConfig, input: RepairDeviceEnrollmentMetadataInput): Promise<DeviceMetadataRepairResult>;
+// ==== @byok-sdk/client dist/diagnostics/operator-actions.d.ts ====
+import { type AgentRef } from '@byok-sdk/protocol';
+import type { DaemonConfig } from '../daemon/create-daemon';
+import type { OperationalHealthFixResult } from './types';
+import type { DiagnoseDeviceOptions } from './device-doctor';
+declare const MESSAGES: {
+    readonly 'confirmation-required': 'Explicit confirmation is required for this local maintenance action.';
+    readonly 'invalid-input': 'The maintenance action requires valid explicit inputs.';
+    readonly 'daemon-running': 'Stop the host daemon before local maintenance.';
+    readonly 'store-busy': 'Another operation owns the device store.';
+    readonly 'agent-busy': 'Another operation owns the Agent home.';
+    readonly 'target-mismatch': 'The stored device or Agent records do not match the authorized target.';
+    readonly 'source-unavailable': 'The local source cannot be accessed safely; preserve it for inspection.';
+    readonly 'output-exists': 'The selected output already exists; it will not be overwritten.';
+    readonly 'operation-failed': 'The maintenance operation did not complete; preserve evidence before retrying.';
+};
+export type DeviceOperatorErrorCode = keyof typeof MESSAGES;
+/** Closed codes only: never attach filesystem/OS error text, paths or nested causes. */
+export declare class DeviceOperatorError extends Error {
+    readonly code: DeviceOperatorErrorCode;
+    constructor(code: DeviceOperatorErrorCode);
+}
+export interface ConfirmDeviceMaintenanceInput {
+    confirmed: true;
+}
+export type DeviceHealthQuarantineResult = OperationalHealthFixResult & {
+    action: 'quarantine-operational-health';
+    scope: 'device';
+};
+export interface ExportDeviceSupportBundleInput extends DiagnoseDeviceOptions {
+    /** Absolute, previously unused file in an existing directory. */
+    outputPath: string;
+}
+export interface DeviceSupportBundleExportResult {
+    action: 'export-support-bundle';
+    scope: 'device';
+    status: 'written';
+    bundleVersion: 1;
+}
+export interface ArchiveAgentTerminalMessagesInput extends ConfirmDeviceMaintenanceInput {
+    expectedTenantId: string;
+    expectedDeviceId: string;
+    /** Selects one Agent home. Historical profile revisions are preserved verbatim. */
+    agentRef: AgentRef;
+    /** Absolute NEW directory in an existing parent; contains sensitive audit bodies. */
+    archiveDirectory: string;
+}
+export type AgentTerminalMessagesArchiveResult = {
+    action: 'archive-terminal-messages';
+    scope: 'agent';
+} & ({
+    status: 'not-needed';
+} | {
+    status: 'archived';
+    archivedRecords: number;
+    archiveFileName: string;
+});
+/** Quarantines confirmed-corrupt health only; the host owns supervisor stop/restart. */
+export declare function quarantineDeviceOperationalHealth(config: DaemonConfig, input: ConfirmDeviceMaintenanceInput): Promise<DeviceHealthQuarantineResult>;
+/** Read-only source observation; publishes only the SDK allowlisted bundle, never raw logs. */
+export declare function exportDeviceSupportBundle(config: DaemonConfig, input: ExportDeviceSupportBundleInput): Promise<DeviceSupportBundleExportResult>;
+/** Archive refused/revoked evidence for one Agent under device and Agent single-writer leases. */
+export declare function archiveAgentTerminalMessages(config: DaemonConfig, input: ArchiveAgentTerminalMessagesInput): Promise<AgentTerminalMessagesArchiveResult>;
+export {};
 // ==== @byok-sdk/client dist/diagnostics/types.d.ts ====
 import type { RuntimeDetectResult } from '../types';
 import type { ControlStatusResult } from '../daemon/control-protocol';
@@ -8013,6 +8077,16 @@ export interface DiagnosticsSnapshot {
     };
     checks: DiagnosticCheck[];
 }
+export type OperationalHealthFixResult = {
+    status: 'not-needed';
+    reason: 'missing' | 'valid';
+} | {
+    status: 'quarantined';
+    evidenceName: string;
+    manifestName: string;
+    sha256: string;
+    sizeBytes: number;
+};
 // ==== @byok-sdk/client dist/index.d.ts ====
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, Session, GitWorkspaceConfig, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
 export type { AgentRef } from './agent-home';
@@ -8100,6 +8174,8 @@ export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
 export { CodexAdapter, type CodexAdapterOptions } from './adapters/codex/codex-adapter';
 export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError } from './diagnostics/device-doctor';
 export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, } from './diagnostics/device-doctor';
+export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions';
+export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, ExportDeviceSupportBundleInput, DeviceSupportBundleExportResult, ArchiveAgentTerminalMessagesInput, AgentTerminalMessagesArchiveResult, DeviceOperatorErrorCode } from './diagnostics/operator-actions';
 // ==== @byok-sdk/client dist/lifecycle/create-service-lifecycle.d.ts ====
 import { type LaunchdDeps } from './launchd';
 import { type SystemdDeps } from './systemd';

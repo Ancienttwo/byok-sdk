@@ -7,15 +7,16 @@ composition over Postgres and R2.
 
 ## Release status
 
-The latest published npm SDK train is **0.15.0**, with independent keys **0.4.1**.
-See the [release notes](docs/releases/v0.15.0.md) for changes since 0.14.0,
-breaking custom adapter changes and required upgrade steps. `CHANGELOG.md`
-retains the detailed package history.
+This working tree prepares the **unpublished source candidate 0.16.0**, with
+independent keys **0.4.2**. Source verification is not publication or registry
+installation evidence. See `CHANGELOG.md` for the candidate changes.
 
-The [v0.15.0 GitHub Release](https://github.com/Ancienttwo/byok-sdk/releases/tag/v0.15.0)
-includes the manifest for the exact CI tarballs published to npm. Registry
-integrity, exact dependency closure and fresh installation were verified before
-the release tag was created.
+The previous verified release is **0.15.0**, with independent keys **0.4.1**.
+Its [release notes](docs/releases/v0.15.0.md) describe changes since 0.14.0,
+breaking custom adapter changes and required upgrade steps. The
+[v0.15.0 GitHub Release](https://github.com/Ancienttwo/byok-sdk/releases/tag/v0.15.0)
+records the manifest for its published CI tarballs; that release evidence does
+not apply to this unpublished candidate.
 
 The bundled Pi runtime is pinned to
 `@earendil-works/pi-coding-agent@0.85.1`. Release SemVer is observability only;
@@ -35,10 +36,10 @@ sealed its credential-free manifest and claimed the offer. Do not ship an
 adapter that supports both shapes or allocates process/temp/workspace/session
 resources during `prepare()`; reject unsupported input before claim instead.
 
-Install the published stable train:
+After this candidate is published, install it with:
 
 ```sh
-npm install byok-sdk@0.15.0
+npm install byok-sdk@0.16.0
 ```
 
 ```ts
@@ -113,7 +114,7 @@ It is intentionally outside `byok-sdk` and the entire dispatch dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.4.1
+npm install @byok-sdk/keys@0.4.2
 ```
 
 ## Host connector composition
@@ -129,5 +130,5 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.4.1`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.4.2`
 require Node.js 22.22.0 or newer. MIT licensed.

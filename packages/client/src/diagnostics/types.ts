@@ -63,3 +63,7 @@ export interface DiagnosticsSnapshot {
   };
   checks: DiagnosticCheck[];
 }
+
+export type OperationalHealthFixResult =
+  | { status: 'not-needed'; reason: 'missing' | 'valid' }
+  | { status: 'quarantined'; evidenceName: string; manifestName: string; sha256: string; sizeBytes: number };

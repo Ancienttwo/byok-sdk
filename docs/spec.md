@@ -53,10 +53,10 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.15.0`; publication requires separate release
+aligned dispatch release is `0.16.0`; publication requires separate release
 authorization and registry readback. The current independent keys candidate is
-`0.4.1`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.15.0`, proven from an isolated standard npm install rather
+`0.4.2`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.16.0`, proven from an isolated standard npm install rather
 than the workspace graph.
 
 ## Local Agent application release authority
@@ -961,6 +961,19 @@ its single-writer Agent-home ownership: sync an audit snapshot, then durably
 compact the live log. Audit archives are never another recovery input. Finite
 disk retention remains an operator responsibility; historical refusal does not
 silently delete evidence or consume the active sending budget.
+
+Embedded-host operator entrypoints expose the existing implementation through
+`quarantineDeviceOperationalHealth`, `exportDeviceSupportBundle`, and
+`archiveAgentTerminalMessages`. Mutating actions require explicit confirmation;
+archival additionally requires exact expected device/tenant and an authorized
+AgentRef, the stopped device owner lease and the Agent-home writer lease. No
+projection hook runs. The Agent ID scopes historical profile revisions without
+rewriting their identity. Refused/revoked evidence is archived; held/drafts stay
+live. New output paths never overwrite existing evidence. Support bundles are
+allowlist-redacted; message archives contain complete sensitive audit bodies.
+Closed DeviceOperatorError codes carry no raw OS errors or secrets. Hosts own
+supervisor stop/restore and independent readiness verification. The SDK does not
+create a remote maintenance channel or automatically replay tasks.
 
 The journal owns one immutable terminal byte record, including pre-claim declines. ConnectionManager uses its existing authenticated POST queue and retries the exact original envelope. Accepted transport disposition is durably recorded as confirmed before local delivery state is retired; an acknowledgement write failure retains the original batch. A rejected singleton is durably failed and remains inspectable. Confirmation records delivery acceptance; the cloud's immutable first terminal and cancellation authority remain product truth.
 

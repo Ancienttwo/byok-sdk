@@ -210,6 +210,11 @@ export class AgentMessageOutbox {
     });
   }
 
+  /** The same terminal classification used by operator receipts and archival. */
+  terminalRecords(): readonly AgentMessageOutboxRecord[] {
+    return Object.freeze(this.records().filter(record => this.isTerminalEvidence(record.taskId)));
+  }
+
   private isTerminalEvidence(taskId: string): boolean {
     return this.revokedTasks.has(taskId) || this.dispositionByTask.get(taskId)?.outcome === 'refused';
   }
@@ -306,7 +311,7 @@ export class AgentMessageOutbox {
   async archiveTerminalRecords(archiveDirectory: string): Promise<string | undefined> {
     return this.exclusive(async () => {
       if (!path.isAbsolute(archiveDirectory)) throw new AgentMessageOutboxError('message archive directory must be absolute');
-      const terminal = this.records().filter(record => this.isTerminalEvidence(record.taskId));
+      const terminal = this.terminalRecords();
       if (terminal.length === 0) return undefined;
       await ensureSecureDir(archiveDirectory);
       const archivePath = path.join(archiveDirectory, `message-terminal-${randomUUID()}.jsonl`);
