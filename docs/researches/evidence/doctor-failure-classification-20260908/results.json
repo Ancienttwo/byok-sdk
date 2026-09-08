@@ -1,0 +1,495 @@
+{
+  "subjects": {
+    "candidate": "06991fb945c3e5349a6ea0a9e77b4da562c935f5",
+    "base": "62e83ae9ac76e38b5448307fec02850f780d7347",
+    "node": "v22.22.3",
+    "bun": "1.4.2",
+    "files": {
+      "bun.lock": {
+        "base": "a21584ef270c90eff6b42210c36e966e0fc50eb1e79711790aae1d066164edc6",
+        "candidate": "a21584ef270c90eff6b42210c36e966e0fc50eb1e79711790aae1d066164edc6",
+        "identical": true
+      },
+      "packages/client/vitest.config.ts": {
+        "base": "6d4f54f02c5a39b39ce4cd217f575d32daa2d2c9502b8f8afdf39c773e9b7035",
+        "candidate": "6d4f54f02c5a39b39ce4cd217f575d32daa2d2c9502b8f8afdf39c773e9b7035",
+        "identical": true
+      },
+      "packages/client/src/__tests__/agent-egress-spool.test.ts": {
+        "base": "513e3b144c6fb28479cc8bd14df3523e2ea2baa5fcfba3802d8855021a772474",
+        "candidate": "513e3b144c6fb28479cc8bd14df3523e2ea2baa5fcfba3802d8855021a772474",
+        "identical": true
+      },
+      "packages/client/src/__tests__/agent-message-outbox.test.ts": {
+        "base": "99cf374e71fe0efc41938004799edcb57242cd606e96b2fb178665f161306891",
+        "candidate": "99cf374e71fe0efc41938004799edcb57242cd606e96b2fb178665f161306891",
+        "identical": true
+      },
+      "packages/client/src/__tests__/durable-egress-faults.test.ts": {
+        "base": "7b9034ec376fc6bdb2e6a84e21e2aaecd13164e7abe4729edb4657e43bf4ef54",
+        "candidate": "7b9034ec376fc6bdb2e6a84e21e2aaecd13164e7abe4729edb4657e43bf4ef54",
+        "identical": true
+      },
+      "packages/client/src/__tests__/agent-home-projection.test.ts": {
+        "base": "d5cf9815430bda66e19ac64db1aaa8121e16b2ec4bb436ee75d420432216ca28",
+        "candidate": "d5cf9815430bda66e19ac64db1aaa8121e16b2ec4bb436ee75d420432216ca28",
+        "identical": true
+      },
+      "packages/client/src/daemon/agent-egress-spool.ts": {
+        "base": "14a9cfb8a11d595d778b0c9bb16a7bdef2e427e514fceb602a86cc99b329d6ed",
+        "candidate": "14a9cfb8a11d595d778b0c9bb16a7bdef2e427e514fceb602a86cc99b329d6ed",
+        "identical": true
+      },
+      "packages/client/src/daemon/agent-message-outbox.ts": {
+        "base": "aff749c705fa2e2cdb62119c8273f67c0e0cdf88547b43df8f7df8a964dc8e9f",
+        "candidate": "aff749c705fa2e2cdb62119c8273f67c0e0cdf88547b43df8f7df8a964dc8e9f",
+        "identical": true
+      },
+      "packages/client/src/agent-home.ts": {
+        "base": "ec9f06218d5f0255a390c923eeb22f3ca4d9c821a791b29f1403551118b0b8b6",
+        "candidate": "ec9f06218d5f0255a390c923eeb22f3ca4d9c821a791b29f1403551118b0b8b6",
+        "identical": true
+      },
+      "packages/client/src/daemon/connection-manager.ts": {
+        "base": "b3daf23d0f90478ca2592c5e24cbaffdf943f84f59662b9f5835a458a3d84c29",
+        "candidate": "b3daf23d0f90478ca2592c5e24cbaffdf943f84f59662b9f5835a458a3d84c29",
+        "identical": true
+      },
+      "packages/client/src/util/durable-jsonl.ts": {
+        "base": "c976a87a69304d447fc7fa4f0401fa3af406e5673c0a3338b3de5e66fefba087",
+        "candidate": "c976a87a69304d447fc7fa4f0401fa3af406e5673c0a3338b3de5e66fefba087",
+        "identical": true
+      },
+      "packages/client/src/util/atomic-write.ts": {
+        "base": "18419be86773f22a4138a41e3a8a9581c72d11dc3a2b715b9d0b05f00677c20e",
+        "candidate": "18419be86773f22a4138a41e3a8a9581c72d11dc3a2b715b9d0b05f00677c20e",
+        "identical": true
+      },
+      "packages/client/src/daemon/create-daemon.ts": {
+        "base": "9a2a9dc20a3241a2e9fc53e3f9e0310b48a3eba7a8debeae559ea89121f5e765",
+        "candidate": "9a2a9dc20a3241a2e9fc53e3f9e0310b48a3eba7a8debeae559ea89121f5e765",
+        "identical": true
+      },
+      "packages/client/src/daemon/long-poll-transport.ts": {
+        "base": "9863bc73e6efdb5e545e02a98e5e8e4015a6f34aebceb78198a33a0e3e8b0839",
+        "candidate": "9863bc73e6efdb5e545e02a98e5e8e4015a6f34aebceb78198a33a0e3e8b0839",
+        "identical": true
+      }
+    }
+  },
+  "canonical_tests": [
+    {
+      "label": "base",
+      "commit": "62e83ae9ac76e38b5448307fec02850f780d7347",
+      "command": [
+        "bun",
+        "run",
+        "--cwd",
+        "packages/client",
+        "test",
+        "--",
+        "src/__tests__/agent-egress-spool.test.ts",
+        "src/__tests__/agent-message-outbox.test.ts",
+        "src/__tests__/durable-egress-faults.test.ts",
+        "src/__tests__/agent-home-projection.test.ts",
+        "-t",
+        "reopens after natural compaction retaining (1|3) records|reopens after natural compaction retaining 0 drafts|outbox: natural compaction propagates (temp|target|directory) sync failure|keeps the mailbox cursor behind exact completion",
+        "--reporter=json",
+        "--outputFile=/Users/kito/Projects/byok-sdk-wt-doctor-repair/_ops/doctor-classification/base-seven.json"
+      ],
+      "exit": 0,
+      "seconds": 18.866365909576416,
+      "tests": [
+        {
+          "name": "Agent reliable egress spool reopens after natural compaction retaining 1 records and another append",
+          "status": "passed",
+          "durationMs": 8202.500417,
+          "failureMessages": []
+        },
+        {
+          "name": "Agent reliable egress spool reopens after natural compaction retaining 3 records and another append",
+          "status": "passed",
+          "durationMs": 5519.205124999999,
+          "failureMessages": []
+        },
+        {
+          "name": "task-free Agent-home projection keeps the mailbox cursor behind exact completion and redelivers after daemon restart without starting a runtime",
+          "status": "passed",
+          "durationMs": 1105.610791,
+          "failureMessages": []
+        },
+        {
+          "name": "AgentMessageOutbox reopens after natural compaction retaining 0 drafts and another append",
+          "status": "passed",
+          "durationMs": 8334.620625,
+          "failureMessages": []
+        },
+        {
+          "name": "outbox: natural compaction propagates temp sync failure and quarantines the replacement",
+          "status": "passed",
+          "durationMs": 8225.510209,
+          "failureMessages": []
+        },
+        {
+          "name": "outbox: natural compaction propagates target sync failure and quarantines the replacement",
+          "status": "passed",
+          "durationMs": 5501.9192920000005,
+          "failureMessages": []
+        },
+        {
+          "name": "outbox: natural compaction propagates directory sync failure and quarantines the replacement",
+          "status": "passed",
+          "durationMs": 2635.6540829999994,
+          "failureMessages": []
+        }
+      ]
+    },
+    {
+      "label": "candidate",
+      "commit": "06991fb945c3e5349a6ea0a9e77b4da562c935f5",
+      "command": [
+        "bun",
+        "run",
+        "--cwd",
+        "packages/client",
+        "test",
+        "--",
+        "src/__tests__/agent-egress-spool.test.ts",
+        "src/__tests__/agent-message-outbox.test.ts",
+        "src/__tests__/durable-egress-faults.test.ts",
+        "src/__tests__/agent-home-projection.test.ts",
+        "-t",
+        "reopens after natural compaction retaining (1|3) records|reopens after natural compaction retaining 0 drafts|outbox: natural compaction propagates (temp|target|directory) sync failure|keeps the mailbox cursor behind exact completion",
+        "--reporter=json",
+        "--outputFile=/Users/kito/Projects/byok-sdk-wt-doctor-repair/_ops/doctor-classification/candidate-seven.json"
+      ],
+      "exit": 0,
+      "seconds": 22.775635957717896,
+      "tests": [
+        {
+          "name": "Agent reliable egress spool reopens after natural compaction retaining 1 records and another append",
+          "status": "passed",
+          "durationMs": 8384.765125,
+          "failureMessages": []
+        },
+        {
+          "name": "Agent reliable egress spool reopens after natural compaction retaining 3 records and another append",
+          "status": "passed",
+          "durationMs": 8201.540791,
+          "failureMessages": []
+        },
+        {
+          "name": "task-free Agent-home projection keeps the mailbox cursor behind exact completion and redelivers after daemon restart without starting a runtime",
+          "status": "passed",
+          "durationMs": 1129.322167,
+          "failureMessages": []
+        },
+        {
+          "name": "AgentMessageOutbox reopens after natural compaction retaining 0 drafts and another append",
+          "status": "passed",
+          "durationMs": 8430.235875,
+          "failureMessages": []
+        },
+        {
+          "name": "outbox: natural compaction propagates temp sync failure and quarantines the replacement",
+          "status": "passed",
+          "durationMs": 8332.128334,
+          "failureMessages": []
+        },
+        {
+          "name": "outbox: natural compaction propagates target sync failure and quarantines the replacement",
+          "status": "passed",
+          "durationMs": 8215.666959000002,
+          "failureMessages": []
+        },
+        {
+          "name": "outbox: natural compaction propagates directory sync failure and quarantines the replacement",
+          "status": "passed",
+          "durationMs": 5487.569457999998,
+          "failureMessages": []
+        }
+      ]
+    }
+  ],
+  "projection_control": [
+    {
+      "label": "base",
+      "kind": "projection",
+      "exit": 1,
+      "seconds": 2.4094958305358887,
+      "command": [
+        "bun",
+        "run",
+        "--cwd",
+        "packages/client",
+        "test",
+        "--",
+        "src/__tests__/doctor-projection-observer.test.ts",
+        "-t",
+        "keeps the mailbox cursor behind exact completion",
+        "--reporter=json",
+        "--outputFile=/Users/kito/Projects/byok-sdk-wt-doctor-repair/_ops/doctor-classification/base-projection.json"
+      ],
+      "tests": [
+        {
+          "name": "task-free Agent-home projection keeps the mailbox cursor behind exact completion and redelivers after daemon restart without starting a runtime",
+          "status": "failed",
+          "durationMs": 733.9732079999999,
+          "failureMessages": [
+            "AssertionError: expected [ …(3) ] to have a length of 2 but got 3\n    at Proxy.<anonymous> (file:///Users/kito/Projects/byok-sdk-wt-doctor-baseline/node_modules/.bun/@vitest+expect@4.1.10/node_modules/@vitest/expect/dist/index.js:1389:20)\n    at Proxy.<anonymous> (file:///Users/kito/Projects/byok-sdk-wt-doctor-baseline/node_modules/.bun/@vitest+expect@4.1.10/node_modules/@vitest/expect/dist/index.js:1156:15)\n    at Proxy.methodWrapper (file:///Users/kito/Projects/byok-sdk-wt-doctor-baseline/node_modules/.bun/chai@6.2.2/node_modules/chai/index.js:1700:25)\n    at /Users/kito/Projects/byok-sdk-wt-doctor-baseline/packages/client/src/__tests__/doctor-projection-observer.test.ts:240:22\n    at file:///Users/kito/Projects/byok-sdk-wt-doctor-baseline/node_modules/.bun/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "candidate",
+      "kind": "projection",
+      "exit": 1,
+      "seconds": 2.0210800170898438,
+      "command": [
+        "bun",
+        "run",
+        "--cwd",
+        "packages/client",
+        "test",
+        "--",
+        "src/__tests__/doctor-projection-observer.test.ts",
+        "-t",
+        "keeps the mailbox cursor behind exact completion",
+        "--reporter=json",
+        "--outputFile=/Users/kito/Projects/byok-sdk-wt-doctor-repair/_ops/doctor-classification/candidate-projection.json"
+      ],
+      "tests": [
+        {
+          "name": "task-free Agent-home projection keeps the mailbox cursor behind exact completion and redelivers after daemon restart without starting a runtime",
+          "status": "failed",
+          "durationMs": 706.6925410000001,
+          "failureMessages": [
+            "AssertionError: expected [ …(3) ] to have a length of 2 but got 3\n    at Proxy.<anonymous> (file:///Users/kito/Projects/byok-sdk-wt-doctor-repair/node_modules/.bun/@vitest+expect@4.1.10/node_modules/@vitest/expect/dist/index.js:1389:20)\n    at Proxy.<anonymous> (file:///Users/kito/Projects/byok-sdk-wt-doctor-repair/node_modules/.bun/@vitest+expect@4.1.10/node_modules/@vitest/expect/dist/index.js:1156:15)\n    at Proxy.methodWrapper (file:///Users/kito/Projects/byok-sdk-wt-doctor-repair/node_modules/.bun/chai@6.2.2/node_modules/chai/index.js:1700:25)\n    at /Users/kito/Projects/byok-sdk-wt-doctor-repair/packages/client/src/__tests__/doctor-projection-observer.test.ts:240:22\n    at file:///Users/kito/Projects/byok-sdk-wt-doctor-repair/node_modules/.bun/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+          ]
+        }
+      ]
+    }
+  ],
+  "sync_delay_control": [
+    {
+      "label": "base",
+      "kind": "sync-delay-v2",
+      "exit": 0,
+      "seconds": 49.91299796104431,
+      "command": [
+        "bun",
+        "run",
+        "--cwd",
+        "packages/client",
+        "test",
+        "--",
+        "src/__tests__/agent-egress-spool.test.ts",
+        "src/__tests__/agent-message-outbox.test.ts",
+        "src/__tests__/durable-egress-faults.test.ts",
+        "-t",
+        "reopens after natural compaction retaining (1|3) records|reopens after natural compaction retaining 0 drafts|outbox: natural compaction propagates (temp|target|directory) sync failure",
+        "--config",
+        "/Users/kito/Projects/byok-sdk-wt-doctor-baseline/_ops/doctor-classification/sync-delay.vitest.config.ts",
+        "--reporter=json",
+        "--outputFile=/Users/kito/Projects/byok-sdk-wt-doctor-repair/_ops/doctor-classification/base-sync-delay-v2.json"
+      ],
+      "tests": [
+        {
+          "name": "Agent reliable egress spool reopens after natural compaction retaining 1 records and another append",
+          "status": "passed",
+          "durationMs": 17339.654082999998,
+          "failureMessages": []
+        },
+        {
+          "name": "Agent reliable egress spool reopens after natural compaction retaining 3 records and another append",
+          "status": "passed",
+          "durationMs": 16298.543916999999,
+          "failureMessages": []
+        },
+        {
+          "name": "AgentMessageOutbox reopens after natural compaction retaining 0 drafts and another append",
+          "status": "passed",
+          "durationMs": 17479.799124999998,
+          "failureMessages": []
+        },
+        {
+          "name": "outbox: natural compaction propagates temp sync failure and quarantines the replacement",
+          "status": "passed",
+          "durationMs": 17440.83875,
+          "failureMessages": []
+        },
+        {
+          "name": "outbox: natural compaction propagates target sync failure and quarantines the replacement",
+          "status": "passed",
+          "durationMs": 16299.856916,
+          "failureMessages": []
+        },
+        {
+          "name": "outbox: natural compaction propagates directory sync failure and quarantines the replacement",
+          "status": "passed",
+          "durationMs": 15597.844125000003,
+          "failureMessages": []
+        }
+      ]
+    },
+    {
+      "label": "candidate",
+      "kind": "sync-delay-v2",
+      "exit": 0,
+      "seconds": 53.10167098045349,
+      "command": [
+        "bun",
+        "run",
+        "--cwd",
+        "packages/client",
+        "test",
+        "--",
+        "src/__tests__/agent-egress-spool.test.ts",
+        "src/__tests__/agent-message-outbox.test.ts",
+        "src/__tests__/durable-egress-faults.test.ts",
+        "-t",
+        "reopens after natural compaction retaining (1|3) records|reopens after natural compaction retaining 0 drafts|outbox: natural compaction propagates (temp|target|directory) sync failure",
+        "--config",
+        "/Users/kito/Projects/byok-sdk-wt-doctor-repair/_ops/doctor-classification/sync-delay.vitest.config.ts",
+        "--reporter=json",
+        "--outputFile=/Users/kito/Projects/byok-sdk-wt-doctor-repair/_ops/doctor-classification/candidate-sync-delay-v2.json"
+      ],
+      "tests": [
+        {
+          "name": "Agent reliable egress spool reopens after natural compaction retaining 1 records and another append",
+          "status": "passed",
+          "durationMs": 18221.591875000002,
+          "failureMessages": []
+        },
+        {
+          "name": "Agent reliable egress spool reopens after natural compaction retaining 3 records and another append",
+          "status": "passed",
+          "durationMs": 17193.309250000002,
+          "failureMessages": []
+        },
+        {
+          "name": "AgentMessageOutbox reopens after natural compaction retaining 0 drafts and another append",
+          "status": "passed",
+          "durationMs": 18300.663875,
+          "failureMessages": []
+        },
+        {
+          "name": "outbox: natural compaction propagates temp sync failure and quarantines the replacement",
+          "status": "passed",
+          "durationMs": 18299.116583000003,
+          "failureMessages": []
+        },
+        {
+          "name": "outbox: natural compaction propagates target sync failure and quarantines the replacement",
+          "status": "passed",
+          "durationMs": 17201.718375,
+          "failureMessages": []
+        },
+        {
+          "name": "outbox: natural compaction propagates directory sync failure and quarantines the replacement",
+          "status": "passed",
+          "durationMs": 17047.165167,
+          "failureMessages": []
+        }
+      ]
+    }
+  ],
+  "sync_measurements": {
+    "base": [
+      {
+        "test": "Agent reliable egress spool > reopens after natural compaction retaining 1 records and another append",
+        "syncCalls": 516,
+        "addedDelayMs": 11449.871088000013,
+        "realSyncMs": 3388.9614129999763
+      },
+      {
+        "test": "outbox: natural compaction propagates temp sync failure and quarantines the replacement",
+        "syncCalls": 514,
+        "addedDelayMs": 11388.868789999995,
+        "realSyncMs": 3294.958680000015
+      },
+      {
+        "test": "AgentMessageOutbox > reopens after natural compaction retaining 0 drafts and another append",
+        "syncCalls": 515,
+        "addedDelayMs": 11441.849237999984,
+        "realSyncMs": 3558.311408000006
+      },
+      {
+        "test": "Agent reliable egress spool > reopens after natural compaction retaining 3 records and another append",
+        "syncCalls": 516,
+        "addedDelayMs": 11592.653059999993,
+        "realSyncMs": 3020.480653999981
+      },
+      {
+        "test": "outbox: natural compaction propagates target sync failure and quarantines the replacement",
+        "syncCalls": 514,
+        "addedDelayMs": 11545.751506999983,
+        "realSyncMs": 2893.8300960000197
+      },
+      {
+        "test": "outbox: natural compaction propagates directory sync failure and quarantines the replacement",
+        "syncCalls": 515,
+        "addedDelayMs": 11960.480872000044,
+        "realSyncMs": 2367.727015000033
+      }
+    ],
+    "candidate": [
+      {
+        "test": "Agent reliable egress spool > reopens after natural compaction retaining 1 records and another append",
+        "syncCalls": 516,
+        "addedDelayMs": 11972.927040999984,
+        "realSyncMs": 3735.8361170000103
+      },
+      {
+        "test": "AgentMessageOutbox > reopens after natural compaction retaining 0 drafts and another append",
+        "syncCalls": 515,
+        "addedDelayMs": 11803.717865999988,
+        "realSyncMs": 3809.5519080000267
+      },
+      {
+        "test": "outbox: natural compaction propagates temp sync failure and quarantines the replacement",
+        "syncCalls": 514,
+        "addedDelayMs": 11894.53862399999,
+        "realSyncMs": 3971.906876000001
+      },
+      {
+        "test": "Agent reliable egress spool > reopens after natural compaction retaining 3 records and another append",
+        "syncCalls": 516,
+        "addedDelayMs": 11792.574984000014,
+        "realSyncMs": 3265.053870999993
+      },
+      {
+        "test": "outbox: natural compaction propagates target sync failure and quarantines the replacement",
+        "syncCalls": 514,
+        "addedDelayMs": 11771.148586999978,
+        "realSyncMs": 3356.2523269999474
+      },
+      {
+        "test": "outbox: natural compaction propagates directory sync failure and quarantines the replacement",
+        "syncCalls": 515,
+        "addedDelayMs": 11795.99812999997,
+        "realSyncMs": 2788.653547999973
+      }
+    ]
+  },
+  "discarded_attempt": {
+    "kind": "sync-delay-v1",
+    "reason": "vi.spyOn(fs.open) collided with tests own fs.open spy and recursively called itself; invalid observation, not product failure. Replaced only the disposable probe wrapper, not repository tests or product code."
+  },
+  "raw_report_sha256": {
+    "base-seven.json": "f2797d8dfe32de5ecfea62f4849a500bf8a34721a3f855aa9a452487249ecdf7",
+    "candidate-seven.json": "5cd4857af7db3bfbb977903d6cba545215bba42a79efce74919ad65eec2ba0fe",
+    "base-projection.json": "d7d959de5adb1561dadde8af6beed0ed3bb4aab0127c1608c5b28eecf7df9efc",
+    "candidate-projection.json": "26706764a72487a14d84c9143a66334904ab5247611c5dfcc08af818f1e7fb26",
+    "base-sync-delay-v2.json": "3957ac0fefb8861b15ce2cfa9a9be30952d7329b93c2f67c5f2301bbef70fa98",
+    "candidate-sync-delay-v2.json": "fa45af87df8371b225b9aa6c99904cad4a78679f6d14f77512ab95403e7e7a6a",
+    "base-sync-delay.log": "8e964d55bdfcc13c6a6525ac980af24917189716c1e0414fe8b948d5ad950e5f",
+    "candidate-sync-delay.log": "6fcec1a9d6ee482be744b37644efdd621948f4b42e283581ca15a89fd522a579"
+  },
+  "original_full_suite": {
+    "commit": "06991fb945c3e5349a6ea0a9e77b4da562c935f5",
+    "test_log_sha256": "f77a7a79af8573350e1d66ef6e226d5766097dddb25957e5a72fb656e067c7a2",
+    "status": "failed; not rerun or superseded"
+  }
+}

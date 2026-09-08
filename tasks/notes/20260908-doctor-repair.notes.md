@@ -46,3 +46,11 @@ Next bounded slice: isolate the seven failing checks on pinned base and candidat
 
 - Source/API SHA-256: `28383f665b7b1fad41635455f8e10527abbb0fae97581f9163408da5b2504267`
 - Full test log SHA-256: `f77a7a79af8573350e1d66ef6e226d5766097dddb25957e5a72fb656e067c7a2`
+
+## Approved follow-up: failure classification completed
+
+The user approved only pinned-base comparison and attribution. Base `62e83ae` and candidate `06991fb` were isolated; 14 relevant files/configs/lockfile hashes match. Raw targeted tests passed 7/7 on each. A temporary sync-delay overlay (21ms on real JSONL file sync, 60s observer budget) passed all six original assertions on each, taking 15.60–18.30s per case, beyond the original 10s timeout. The initial overlay's mock recursion made that attempt invalid; the corrected overlay was rerun once. A disposable copy of the projection test waited for the second 503 before stopping A and reproduced expected 2 / observed 3 on both subjects; earlier original completion/cursor assertions passed. All temporary copied test files were removed.
+
+Classification: shared baseline I/O-budget weakness for six cases; baseline scheduling assumption for projection. No doctor-specific functional regression was observed in these seven comparisons. Original failing-run disk load was not instrumented, so this is not an exact load measurement of that historical run or a performance benchmark. Product code and original tests were not changed, and whole-suite acceptance is still NOT passed.
+
+Durable report and exact commands/results/source hashes: `docs/researches/2026-09-08-doctor-failure-classification.md`, `docs/researches/evidence/doctor-failure-classification-20260908/results.json`. Next bounded slice is test-only budget/event-barrier correction; not executed under the classification approval.

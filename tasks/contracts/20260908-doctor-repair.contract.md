@@ -27,6 +27,8 @@ allowed_paths:
   - docs/spec.md
   - docs/architecture/sdk-architecture.md
   - docs/researches/2026-09-08-doctor-repair-plan.md
+  - docs/researches/2026-09-08-doctor-failure-classification.md
+  - docs/researches/evidence/doctor-failure-classification-20260908/
   - deploy/runbooks/self-hosted-operations.md
   - api-surface/client.d.ts
   - CHANGELOG.md
@@ -44,3 +46,7 @@ allowed_paths:
 - Only non-secret metadata is written, startup and repair share reconciliation, repeated repair is no-op, result is read back; no auth renewal, network request, task rerun or credential writes.
 - CLI supports the exact named action, rejects conflicting/invalid action input, leaves existing --fix health-only, and emits structured results without secret/error-detail leakage.
 - Required checks and artifact/version limits recorded honestly; original root WIP preserved.
+
+## Approved diagnostic continuation
+
+User approved the bounded baseline/candidate classification of seven test failures. No product/test repair, new whole-suite rerun, merge or publication is authorized by this continuation. Classification is complete; evidence lives in `docs/researches/2026-09-08-doctor-failure-classification.md`. Acceptance remains blocked on the original full-suite failure and separate review boundary.

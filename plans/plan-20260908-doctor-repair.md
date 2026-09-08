@@ -28,7 +28,8 @@ User authorized plan and implementation on 2026-09-08 after the SDK-owned downst
 - [x] Cover success, unchanged, missing authority, invalid projection, identity mismatch, concurrent owner, redaction, and public custom-adapter diagnostic paths.
 - [x] Update spec, integration guide, runbook, changelog and API golden.
 - [x] Freeze code, run required checks once, record results and residuals.
-- [ ] Close whole-repo test acceptance after classifying the seven failures; no out-of-scope repairs authorized by this slice.
+- [x] Classify the seven failures against pinned base and candidate under the user-approved diagnostic continuation.
+- [ ] Close whole-repo test acceptance; confirmed baseline test budget/scheduling issues remain, and test repairs need a separately authorized slice.
 
 ## Verification
 
@@ -53,4 +54,8 @@ Targeted new repair/API tests plus existing auth/store/diagnostics tests during 
 
 ## Result
 
-Implementation complete; acceptance blocked by seven failures in four unchanged client test files. All 23 new tests passed within the final client run; required non-test checks passed. See implementation notes for exact counts and evidence. No release or independent acceptance is claimed.
+Implementation complete; acceptance blocked by seven failures in four unchanged client test files; subsequent paired probes classify them as baseline budget/scheduling weaknesses, not doctor-specific functional regressions. All 23 new tests passed within the final client run; required non-test checks passed. See implementation notes for exact counts and evidence. No release or independent acceptance is claimed.
+
+## Failure classification continuation
+
+Raw targeted seven: base 7/7 and candidate 7/7 passed. Controlled slow-file-sync: both sides completed six original assertions beyond the original 10s budget. Controlled projection redelivery: both sides reproduced expected 2 / observed 3 with completion and cursor assertions satisfied. Report: `docs/researches/2026-09-08-doctor-failure-classification.md`. No original test or production source edits; no full-suite success claim.
