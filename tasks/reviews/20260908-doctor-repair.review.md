@@ -38,4 +38,3 @@ This is an independent reviewer report plus an explicitly authorized mechanical 
 
 - Summary: Supersedes the receipt for stale local main. Independent gatekeeper /root/doctor_acceptance found no semantic findings on 30743c8; sole EOF finding resolved at beb0b71. Current candidate adds formal verification declarations and only changes review_base from main to origin/main, verified by exact policy-delta assertion. Source/config equality, doctor filesystem readback and ledger baseline checks pass against target 62e83ae.
 - Findings: none
-
