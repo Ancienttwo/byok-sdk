@@ -1,0 +1,49 @@
+import assert from 'node:assert/strict';
+import {promises as fs,readFileSync,writeFileSync,mkdirSync,mkdtempSync} from 'node:fs';
+import {spawn} from 'node:child_process';
+import {createInterface} from 'node:readline';
+import {randomUUID,createHash} from 'node:crypto';
+import {resolve,dirname} from 'node:path';
+import {fileURLToPath} from 'node:url';
+const installs=resolve(process.argv[2]);const out=dirname(fileURLToPath(import.meta.url));
+const {createInMemoryByokCloud,tenantId,serve}=await import(installs+'/old/bridge.mjs');
+const defer=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
+const delay=ms=>new Promise(r=>setTimeout(r,ms));
+async function until(fn,label){const end=Date.now()+12000;while(Date.now()<end){const v=await fn();if(v)return v;await delay(10);}throw Error('timeout '+label);}
+const policy={policyRevision:'metadata-status-v1',activity:{mode:'metadata-status',delivery:'latest-value'},reliable:{maxPendingEventsPerAgent:256,maxPendingBytesPerAgent:4194304,maxPendingBytesPerTenant:16777216},transfers:{workspace:'disabled',transcript:'disabled',artifact:'disabled'}};
+const rows=[];
+for(const lane of ['old','new'])for(const fault of ['close-held','close-rejected','lease-release-rejected']){
+ const {createDaemonWithAdapters,freezeRuntimeAdapterDescriptor}=await import(installs+'/'+lane+'/bridge.mjs');
+ mkdirSync('_ops/continuation',{recursive:true});const dir=mkdtempSync(resolve('_ops/continuation')+'/case-');const productId='continuation-'+randomUUID();const tenant=tenantId('tenant-continuation');const wire=[];const sessions=[];const closeGate=defer();let closeCalls=0,closeFails=fault==='close-rejected',leaseFails=false,leaseFaultHits=0;let daemon;const oldRm=fs.rm;const marker=dir+'/home/agents/shared/.byok/agent-home.lease';let dropResponse=false,dropped=0,polls=0;
+ fs.rm=async function(path,...args){if(leaseFails&&String(path)===marker){leaseFaultHits++;throw Object.assign(Error('fixture lease rm denied'),{code:'EACCES'});}return oldRm.call(this,path,...args);};
+ const {cloud,core}=createInMemoryByokCloud({instanceProductId:productId,longPollHoldMs:50,longPollIntervalMs:5,agentMessage:{consume:async()=>({outcome:'accepted'})}});
+ await core.quota.writeEntitlement(tenant,{version:1n,hardLimitBytes:1000000000n,maxObjectBytes:100000000n,maxInlineBytes:1000000n,mailboxLimitBytes:100000000n,retentionPolicyId:'fixture'});
+ const http=serve({hostname:'127.0.0.1',port:0,fetch:async request=>{const url=new URL(request.url);if(url.pathname==='/byok/events')polls++;let msgs=[];if(url.pathname==='/byok/messages'&&request.method==='POST'){msgs=(await request.clone().json()).messages??[];wire.push(...msgs);}const response=await cloud.fetch(request);if(dropResponse&&msgs.some(m=>m.type==='task.claim')){dropResponse=false;dropped++;return new Response('fixture lost successful claim response',{status:503});}return response;}});
+ await until(()=>http.address(),'http');
+ class Session{constructor(input){this.input=input;this.sessionRef='fixture-'+input.manifest.taskId;this.finish=defer();this.closed=false;this.staged=false;}get events(){const s=this;return {async *[Symbol.asyncIterator](){const server=s.input.mcpServers.byokagentmessage;const child=spawn(server.command,server.args,{env:{...process.env,...server.env},stdio:['pipe','pipe','pipe']});const exit=new Promise(r=>child.on('exit',r));await new Promise((resolve,reject)=>{child.on('error',reject);createInterface({input:child.stdout}).on('line',line=>{const x=JSON.parse(line);if(x.id===1){if(x.error)reject(Error(JSON.stringify(x.error)));else resolve();}});child.stdin.write(JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'send_agent_message',arguments:{body:'fixture reply',contentType:'text/markdown'}}})+'\n');});child.kill('SIGTERM');await exit;s.staged=true;await s.finish.promise;if(!s.closed)yield {type:'turn_end'};}};}async close(){if(this===sessions[0]){closeCalls++;if(fault==='close-held')await closeGate.promise;if(closeFails)throw Error('fixture close rejected');}this.closed=true;this.finish.resolve();}async interrupt(){}async steer(){}async followUp(){}async resolveApproval(){throw Error('unsupported');}}
+ const adapter={descriptor:freezeRuntimeAdapterDescriptor({id:'pi',supportsDispatchSelection:true,capabilities:{steer:true,resume:true,approvalInteractive:false,mcpToolsets:true,permissionModes:['auto']},environmentRequirements:{credentialNames:[]}}),async detect(){return {kind:'available',version:'fixture',authPresent:true};},async prepare(){return {kind:'prepared',operation:{start:async input=>{const s=new Session(input);sessions.push(s);return s;}}};}};
+ const configuration={localAgentRelease:{version:'0.0.0-continuation-probe'},productName:'Continuation probe',productId,serverUrl:'http://127.0.0.1:'+http.address().port,storeDir:dir+'/store',workspaceRoot:dir+'/workspace',hostedJournal:{mode:'sqlite'},agentHome:{hostStorageRoot:dir+'/home'},agentEgress:{policy},mcpToolsets:{'salesko.read.v1':{mcpServers:{read:{command:process.execPath,args:['-e','process.exit(0)']}}},'salesko.propose.v1':{mcpServers:{propose:{command:process.execPath,args:['-e','process.exit(0)']}}}}};
+ const row={lane,fault,status:'RUNNING'};rows.push(row);
+ try{
+ daemon=createDaemonWithAdapters(configuration,[adapter],{longPoll:{retryDelayMs:20,idleDelayMs:10}});const pairing=await cloud.createPairingCode(tenant,{productId});await daemon.pair(pairing.code);await daemon.start();const device=daemon.status().deviceId;
+ const input=(id,revision='p1')=>({taskId:id,agentMessageContext:{destinationBinding:'fixture',freshnessCursor:id},payload:{instruction:'fixture bootstrap',policy:{mode:'auto'},runtime:'pi',agentRef:{agentId:'shared',profileRevision:revision},requiredToolsets:['salesko.read.v1','salesko.propose.v1'],egressPolicy:policy,messageEgress:{mode:'required',contract:'fixture.v1',contentType:'text/markdown',maxBytes:100000},terminalProjection:{mode:'none'}}});
+ const first='task-'+randomUUID();await cloud.enqueueFreshAgentEgressOffer(tenant,device,input(first));await until(()=>sessions[0]?.staged,'first staged');if(fault==='lease-release-rejected')leaseFails=true;sessions[0].finish.resolve();await until(()=>wire.some(m=>m.task_id===first&&m.type==='task.complete'),'first semantic terminal');await until(()=>closeCalls>0,'close attempted');if(leaseFails)await until(()=>leaseFaultHits>0,'lease failure');
+ row.before=daemon.status().agentHomeExecution;row.firstTask=first;row.firstClosed=sessions[0].closed;
+ const second='task-'+randomUUID();const secondInput=input(second,'p2');await cloud.enqueueFreshAgentEgressOffer(tenant,device,secondInput);
+ if(fault==='close-held'){
+ const queued=await cloud.readTaskAttempt(tenant,second);assert.equal(queued.status,'offered');assert.equal(sessions.length,1);assert.equal(daemon.status().agentHomeExecution.activeAttempts,1);
+ row.heldObservation='successor admitted to cloud, inbound may still be serialized behind predecessor disposition; not proof of busy refusal';
+ await assert.rejects(cloud.enqueueFreshAgentEgressOffer(tenant,device,secondInput),/already has a durable delivered attempt/);row.duplicateEnqueue='explicitly rejected';assert.equal(sessions.length,1);
+ closeGate.resolve();await until(()=>sessions.length===2&&sessions[1].staged,'held close released successor');assert.equal(sessions[0].closed,true);assert.equal(sessions[1].input.manifest.taskId,second);row.successorStarts=1;row.status='PASS_SERIALIZED_RELEASE';continue;
+ }
+ const declined=await until(()=>wire.find(m=>m.task_id===second&&m.type==='task.decline'),'successor refusal');assert.equal(sessions.length,1);row.decline=declined.payload;row.excludedBeforeRelease=true;
+ // Force reconnect without stopping daemon; wait for a new poll then redeliver exact immutable offer.
+ const priorPolls=polls;http.closeAllConnections();await until(()=>polls>priorPolls,'reconnect poll');await assert.rejects(cloud.enqueueFreshAgentEgressOffer(tenant,device,secondInput),/already has a durable delivered attempt/);row.duplicateEnqueue='explicitly rejected';const barrier=polls;await until(()=>polls>barrier+1,'post duplicate poll');assert.equal(sessions.length,1);row.reconnectDuplicateExcluded=true;
+ if(fault==='close-held'){closeGate.resolve();await until(()=>daemon.status().agentHomeExecution.activeAttempts===0,'close and home released');}
+ else if(fault==='lease-release-rejected'){leaseFails=false;}
+ else {row.onlineCleanupRetry='not attempted: no public per-task cleanup retry demonstrated';closeFails=false;row.status='PASS_EXCLUSION_ONLY';continue;}
+ const third='task-'+randomUUID();const thirdInput=input(third,'p2');dropResponse=true;await cloud.enqueueFreshAgentEgressOffer(tenant,device,thirdInput);await until(()=>sessions.length===2&&sessions[1].staged,'released successor start');await assert.rejects(cloud.enqueueFreshAgentEgressOffer(tenant,device,thirdInput),/already has a durable delivered attempt/);const next=polls;await until(()=>polls>next+1,'post response lost retry');assert.equal(sessions.length,2);assert.equal(dropped,1);assert.equal(sessions[0].closed,true);row.successorStarts=1;row.claimResponseLostRetries=wire.filter(m=>m.type==='task.claim'&&m.task_id===third).length;row.thirdTask=third;row.status='PASS';
+ }catch(error){row.status='FAIL';row.error=String(error);row.wire=wire.map(m=>({type:m.type,taskId:m.task_id,payload:m.type==='task.decline'?m.payload:undefined}));}
+ finally{closeFails=false;leaseFails=false;closeGate.resolve();fs.rm=oldRm;try{await daemon?.stop();await daemon?.unpair();row.cleanup=true;}catch(e){row.cleanup=false;row.cleanupError=String(e);}http.closeAllConnections();await new Promise(r=>http.close(r));writeFileSync(out+'/results.json',JSON.stringify({node:process.version,fixedCloud:'2752ffe86c4b222e2a23e75176dd2dd3a75901bb',rows},null,2)+'\n');console.log(JSON.stringify(row));}
+ if(row.status==='FAIL')process.exit(1);
+}

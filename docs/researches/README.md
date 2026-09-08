@@ -16,3 +16,5 @@ Reference reports:
 - [RAFT evidence impact on BYOK architecture (2026-08-10)](./2026-08-10_raft-evidence-impact-on-byok-architecture.md)
 
 - [Packed SDK 旧→新生命周期演练](2026-09-08-packed-upgrade-rehearsal.md)：固定 cloud 的实际 tarball 六切点结果。
+
+- [Continuation successor 排他核验](2026-09-08-continuation-exclusion.md)：实际 baseline/candidate 的在线释放与拒绝边界。
