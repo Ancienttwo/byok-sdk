@@ -26,3 +26,39 @@ inventory contains every required ID. `machines.list()` projects that same
 logical-ID-only inventory; MCP commands and credentials remain device-local.
 
 MIT licensed. Node.js 22.22.0 or newer.
+
+## SQLite enrollment and schema adoption
+
+`storage: { kind: 'sqlite', path }` persists device enrollment, authenticated
+capability declarations and the six coordination stores. Pairing and subsequent
+challenge/token reads share one directory; revoke and same-machine replacement
+delete durable grants. Presence and unredeemed pairing codes remain ephemeral.
+Keep the daemon OS credentials and the host token signer stable across restart.
+This does not restore TaskHandle promises, subscriptions or runtime processes.
+
+This build writes schema v2. Before adopting a v1 database, stop **all** server
+processes that can access it and take a consistent SQLite backup (including WAL
+state, or use SQLite's backup facility). An already-open old process is not
+stopped by the version fence. With writers stopped, explicitly open once:
+
+```ts
+const server = createByokServer({
+  productId,
+  tokenSigner,
+  storage: { kind: 'sqlite', path, migration: 'v1-to-v2' },
+});
+await server.close();
+```
+
+Remove `migration` from normal startup configuration. Adoption creates an empty
+device directory and updates the schema marker in one transaction while
+retaining tasks, mailbox and artifact data. Failed adoption rolls back. The old
+in-memory directory cannot be reconstructed: existing v1 installations require
+one explicit pairing after adoption; enrollments created on v2 survive restart.
+Unknown versions, missing metadata and missing durable tables fail closed.
+
+**Breaking storage boundary:** 0.16 and earlier refuse to open v2. Do not edit
+the version marker to downgrade. Restoring a backup loses later state and can
+restore old grants; it requires a separately audited recovery procedure, never
+an automatic runtime fallback. This change belongs to the next MINOR release;
+local candidate artifacts are not a published upgrade.

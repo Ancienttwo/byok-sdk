@@ -28,6 +28,7 @@ import {
   type TenantId,
 } from '@byok-sdk/core';
 import {
+  InMemoryPairingCodeStore,
   assertTaskAttemptListLimit,
   createInMemoryCloudStores,
   type AgentMessageAdmission,
@@ -60,7 +61,9 @@ const DEFAULT_MAILBOX_READ_LIMIT = 50;
 const DEFAULT_OBJECT_LIST_LIMIT = 100;
 const DEFAULT_BLOB_URL_TTL_MS = 15 * 60_000;
 const SIGNING_SECRET_BYTES = 32;
-const SQLITE_SCHEMA_VERSION = '1';
+const SQLITE_SCHEMA_VERSION = '2';
+
+import { SqliteDeviceDirectory, DEVICE_SCHEMA } from './device-directory';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS byok_sqlite_meta (
@@ -149,6 +152,7 @@ CREATE TABLE IF NOT EXISTS blob (
 export interface SqliteEmbeddedStoreOptions {
   readonly path: string;
   readonly urlTtlMs?: number;
+  readonly migration?: 'v1-to-v2';
 }
 
 export interface SqliteEmbeddedStores {
@@ -165,34 +169,58 @@ class SqliteCoordinator {
   #closing = false;
   #closePromise: Promise<void> | undefined;
 
-  constructor(path: string) {
+  constructor(path: string, migration?: 'v1-to-v2') {
     this.db = openSqliteDatabase(path);
     try {
-      const hasMetadata = this.db
-        .prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'byok_sqlite_meta'")
-        .get() as { present: number } | undefined;
-      if (hasMetadata !== undefined) {
-        const schemaVersion = this.db
-          .prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'")
-          .get() as { value: string } | undefined;
-        if (schemaVersion?.value !== SQLITE_SCHEMA_VERSION) {
-          throw new Error(
-            `Unsupported BYOK SQLite schema version ${JSON.stringify(schemaVersion?.value)}; ` +
-              `this build requires ${SQLITE_SCHEMA_VERSION}`,
-          );
+      // The host must stop every old writer before this open. A version fence
+      // prevents later downgrade opens, not writes through an already-open handle.
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        const hasMetadata = this.db
+          .prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'byok_sqlite_meta'")
+          .get();
+        if (hasMetadata !== undefined) {
+          const version = this.db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'")
+            .get() as { value: string } | undefined;
+          if (version?.value !== SQLITE_SCHEMA_VERSION && !(version?.value === '1' && migration === 'v1-to-v2')) {
+            throw new Error(`Unsupported BYOK SQLite schema version ${JSON.stringify(version?.value)}; ` +
+              `this build requires ${SQLITE_SCHEMA_VERSION}. For v1, stop all writers, back up the database and explicitly select migration: 'v1-to-v2'.`);
+          }
+          // Do not silently recreate missing durable authorities in an existing file.
+          for (const projection of [
+            'tenant_id, device_id, next_seq, delivered_seq, acked_seq, updated_at FROM mailbox_cursor',
+            'tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at FROM mailbox_message',
+            'tenant_id, task_id, device_id, agent_ref_json, owner_device_id, claimed_runtime, claimed_runtime_capabilities_json, status, terminal_cause, cancellation_requested_at, cancellation_reason, cancellation_message_id, updated_at FROM task_attempt',
+            'tenant_id, task_id, message_id, payload_body, terminal_body FROM agent_message_admission',
+            'tenant_id, hash, byte_size, content_type, state, created_at, updated_at, delete_pending_at FROM object_manifest',
+            'tenant_id, hash, ref_kind, ref_id, created_at FROM object_reference',
+            'blob_id, tenant_id, reservation_id, content_hash, byte_size, content_type, uploaded, data FROM blob',
+          ]) {
+            this.db.prepare(`SELECT ${projection} LIMIT 0`);
+          }
+          if (version?.value === '1') {
+            const unexpected = this.db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'device_directory'").get();
+            if (unexpected !== undefined) throw new Error('Unexpected device directory in BYOK SQLite schema v1');
+            this.db.exec(DEVICE_SCHEMA);
+            this.db.prepare("UPDATE byok_sqlite_meta SET value = ? WHERE key = 'schema_version'").run(SQLITE_SCHEMA_VERSION);
+          }
+        } else {
+          const existing = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get();
+          if (existing !== undefined) throw new Error('Existing SQLite database has no BYOK schema metadata');
+          this.db.exec(SCHEMA);
+          this.db.exec(DEVICE_SCHEMA);
+          this.db.prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('schema_version', ?)").run(SQLITE_SCHEMA_VERSION);
         }
-      }
-      this.db.exec(SCHEMA);
-      if (hasMetadata === undefined) {
-        this.db
-          .prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('schema_version', ?)")
-          .run(SQLITE_SCHEMA_VERSION);
+        this.db.prepare('SELECT tenant_id, device_id, product_id, machine_id, device_name, device_public_key, proof_key_id, proof_key_epoch, capabilities_json, harnesses_json FROM device_directory LIMIT 0');
+        this.db.exec('COMMIT');
+      } catch (error) {
+        this.db.exec('ROLLBACK');
+        throw error;
       }
       secureSqliteFilePermissions(path);
     } catch (error) {
       closeSqliteDatabaseAfterInitializationFailure(
-        this.db,
-        error,
+        this.db, error,
         'SQLite embedded composition initialization failed and its native handle could not be closed',
       );
     }
@@ -1024,12 +1052,12 @@ export class SqliteBlobContentProxy implements BlobContentProxy {
   }
 }
 
-/** Mixed embedded composition: exactly six durable interfaces, every other port unchanged in-memory. */
+/** Mixed embedded composition: seven durable interfaces, every other port unchanged in-memory. */
 export function createSqliteEmbeddedStores(
   options: SqliteEmbeddedStoreOptions,
   dependencies: { readonly clock: Clock; readonly crypto: CloudCrypto },
 ): SqliteEmbeddedStores {
-  const coordinator = new SqliteCoordinator(options.path);
+  const coordinator = new SqliteCoordinator(options.path, options.migration);
   const objects = new SqliteObjectStore(coordinator, dependencies.clock);
   const mailbox = new SqliteMailboxStore(coordinator, dependencies.clock);
   const tasks = new SqliteTaskAttemptStore(coordinator, dependencies.clock);
@@ -1056,8 +1084,13 @@ export function createSqliteEmbeddedStores(
     objects,
     mailbox,
   );
+  const devices = new SqliteDeviceDirectory(coordinator);
+  const pairing = new InMemoryPairingCodeStore(dependencies.clock, devices);
   const cloud: CloudStores = {
     ...inMemoryCloud.stores,
+    devices,
+    pairingCodes: { issue: pairing.issue.bind(pairing) },
+    pairing: { redeemAndRegister: pairing.redeemAndRegister.bind(pairing) },
     tasks,
     cancellations,
     blobs,

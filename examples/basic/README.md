@@ -112,16 +112,21 @@ BYOK_STORE=sqlite bun run --filter @byok-sdk/example-basic dev
 The default database is `examples/basic/data/byok.sqlite` (ignored by Git);
 override it with `BYOK_SQLITE_PATH=/absolute/path/to/byok.sqlite`. SQLite mode
 persists task attempts, cancellation delivery/mailbox state, object manifests,
-blob metadata, and blob bytes in one database. Pairing, device presence,
-receipts, quota counters, and the other ports remain in-memory by design, so a
-daemon must pair again after a server restart. An unavailable or invalid
+blob metadata, blob bytes and device enrollment in one database. Unredeemed
+pairing codes, device presence, receipts, quota counters and other ports remain
+in-memory. Successfully paired devices can renew authentication after restart;
+the host must retain the configured token signer and daemon credentials. An unavailable or invalid
 SQLite database aborts startup; there is no fallback to memory.
 
 To exercise restart readback manually, dispatch a task in SQLite mode, stop the
 server with `Ctrl-C`, and run the same command again with the same
-`BYOK_SQLITE_PATH`. The task snapshot remains in `/api/tasks`; pair the daemon
-again because device enrollment is intentionally outside the durable subset.
+`BYOK_SQLITE_PATH`. The task snapshot remains in `/api/tasks`; existing device enrollment remains
+valid and reconnects without another pairing.
 Committed artifact links continue to resolve from the same database.
+
+Existing schema v1 files require explicit adoption before this example can
+start. Stop all writers and follow the one-shot migration instructions in
+`packages/server/README.md`; the example does not automatically migrate storage.
 
 `GET /api/blobs/:blobId/url` now uses the trusted embedder blob surface and
 returns a committed blob's signed URL, or `404` when no downloadable blob is

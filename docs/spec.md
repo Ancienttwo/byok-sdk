@@ -92,6 +92,25 @@ The release identity contract does not add Latest fetching, a
 minimum-supported-version policy, or self-update behavior; U3's observation
 projection below is not a release gate.
 
+## Embedded SQLite device authority (next MINOR)
+
+The explicit SQLite server composition persists the device directory alongside
+its six coordination interfaces. Pairing registration, capability declarations,
+challenge/token lookup, revocation and same-machine supersession share that
+single durable authority. Device IDs must identify one tenant globally; a
+cross-tenant collision fails closed. Revocation and supersession delete rows.
+Presence, nonces and unredeemed pairing codes remain process-local; persistence
+does not mint live readiness or restore runtime processes and TaskHandles.
+
+Schema v2 fences older builds on open. A host must stop every writer and back
+up before explicitly selecting `storage.migration: 'v1-to-v2'` for one adoption.
+Creation of the device table and version advancement commit atomically while
+preserving existing coordination records. No old enrollment is reconstructed.
+Normal startup neither migrates v1 nor falls back to memory. Already-open old
+writers are outside the version fence, so stopping them is a host precondition.
+This storage/API change requires a MINOR release; it is not part of the
+published 0.16.0 contract.
+
 ## Tenant readiness observation
 
 The SDK exposes a tenant-scoped observed read model over two authorities:

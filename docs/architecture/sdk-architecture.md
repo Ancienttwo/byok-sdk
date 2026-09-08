@@ -352,10 +352,15 @@ auth, task, cancellation, mailbox, or terminal state machine: those semantics
 belong to `@byok-sdk/cloud` and its injected stores.
 
 The default composition is in-memory. `BYOK_STORE=sqlite` selects the explicit
-SQLite composition for the six atomic interfaces that must share one database
-and transaction coordinator: task attempts, cancellation, mailbox, object
-manifests, blob metadata/grants, and blob bytes. Other ports remain in-memory
-by design. SQLite restores durable cloud records and mailbox state; it does not
+SQLite composition for seven durable interfaces sharing one database and
+transaction coordinator: the device directory, task attempts, cancellation,
+mailbox, object manifests, blob metadata/grants, and blob bytes. Pairing writes
+and authentication read the same durable directory. Unredeemed pairing codes,
+nonces, presence and other ports remain in-memory by design. Schema v2 fences
+older builds; v1 adoption requires explicit `storage.migration: 'v1-to-v2'`
+after stopping every writer and backing up the database. Adoption is atomic,
+preserves coordination records and creates an empty device directory; it cannot
+recover previously lost enrollment. See `packages/server/README.md`. SQLite restores durable cloud records and mailbox state; it does not
 restore process-owned promises, live subscriptions, runtime processes, or
 connection lifecycle.
 

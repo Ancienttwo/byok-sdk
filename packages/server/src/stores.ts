@@ -104,6 +104,7 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
       ? createSqliteEmbeddedStores(
           {
             path: options.storage.path,
+            ...(options.storage.migration === undefined ? {} : { migration: options.storage.migration }),
             ...(options.storage.urlTtlMs === undefined ? {} : { urlTtlMs: options.storage.urlTtlMs }),
           },
           { clock, crypto },

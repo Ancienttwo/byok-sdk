@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — next MINOR
+
+- Persist the embedded SQLite device directory, including capability declarations,
+  revocation and machine supersession; pairing and auth share that authority.
+- Breaking storage boundary: SQLite schema v2 rejects older writers on reopen.
+  Existing v1 requires explicit `storage.migration: 'v1-to-v2'` with every writer
+  stopped and a backup. Atomic adoption preserves coordination records without
+  inventing old device grants. Pair once after v1 adoption; subsequent v2
+  restarts retain enrollment. Memory mode and ephemeral presence are unchanged.
+
 ## 0.16.0 / @byok-sdk/keys 0.4.2 — 2026-09-09
 
 - Add public embedded-host `quarantineDeviceOperationalHealth`, `exportDeviceSupportBundle`, and `archiveAgentTerminalMessages`, with closed `DeviceOperatorError` codes and narrow receipt types. Hosts retain confirmation, authenticated target selection and supervisor lifecycle ownership. Reuse SDK quarantine, allowlisted support bundle and terminal archive implementations; no OS credential access, automatic task retry, journal repair or remote shell API.

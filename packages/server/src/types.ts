@@ -34,6 +34,8 @@ export type ByokServerStorage =
       readonly path: string;
       /** Lifetime of signed blob upload/download URLs. Default 15 minutes. */
       readonly urlTtlMs?: number;
+      /** One-shot v1 adoption. Stop all writers and back up first; old builds cannot reopen v2. */
+      readonly migration?: 'v1-to-v2';
     };
 
 /** Options for {@link createByokServer}. */
