@@ -237,3 +237,7 @@ Salesko source3e39d96949220fa5091483ccf38839a4c1666085 installed retained SDK2da
 Control `bun run check` exits0:138 PASS/640 assertions, then TypeScript passes. Installed SDK integration exits0:2 PASS/25 assertions through actual dispatcher/repository. Logs salesko-rc-install.log, salesko-rc-check.log, salesko-rc-e2e.log. Earlier PG checks remain evidence for unchanged Salesko source with the prior SDK artifact; no claim they were rerun with this RC. Local overrides and lock remain uncommitted fixture inputs.
 
 P1: SDK public artifact -> Salesko control -> Host repository remains one authoring path. P2: strict fresh dispatch -> consumer commit/cancel arbitration -> typed exact readback/persistence passed. P3: phase closes artifact identity ambiguity, while keeping production dependency resolution, server recovery/A29, Summary/parameters/UI and target runtime distinct. Plan current checkpoint now replaces stale next-action accumulations; history remains here. No aiphabee access or publication.
+
+## Salesko shared recovery prerequisite
+
+Salesko7764553 unifies HTTP and initial-dispatch durable reconciliation before the S3 server scanner. A null durable transition no longer returns the old dispatch Turn as success. Route37 + repository/dispatch42 tests and API types/strict workflow pass. SDK installed-artifact integration pin updated to this candidate:2 PASS/25 assertions, salesko-shared-recovery-e2e.log. SDK executable/tarball subject remains2da3bf28. A29 scanner, fairness and browser-independent process recovery still unverified; no aiphabee access.
