@@ -6,7 +6,7 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 const root = process.env.SALESKO_TEST_ROOT;
 if (!root) throw new Error('Set SALESKO_TEST_ROOT to the isolated pinned Salesko checkout.');
 const sha = Bun.spawnSync(['git', '-C', root, 'rev-parse', 'HEAD']);
-if (sha.exitCode !== 0 || sha.stdout.toString().trim() !== 'dfb21e098145dc175255699b4f2699ac0b5ba188') throw new Error('Salesko test subject mismatch');
+if (sha.exitCode !== 0 || sha.stdout.toString().trim() !== '9e0251b9280386dcd65d0869812a40fc7afc08b6') throw new Error('Salesko test subject mismatch');
 const installed = (name: string) => import(pathToFileURL(Bun.resolveSync(name, root)).href);
 const { tenantId: sdkTenantId } = await installed('@byok-sdk/core');
 const { createEnvelope } = await installed('@byok-sdk/protocol');
@@ -15,7 +15,7 @@ const load = (file: string) => import(pathToFileURL(resolve(root, file)).href);
 const { InMemoryPrivateAgentChatRepository } = await load('apps/api/src/private-agent-chat-repository.ts');
 const { byokTenantRef, MemoryDatasetScope } = await load('apps/api/src/byok-tenant-ref.ts');
 const C = await load('packages/contracts/src/index.ts');
-const { offerPrivateAgentChat } = await load('apps/byok-control/src/private-agent-chat.ts');
+const { offerPrivateAgentChat, reconcilePrivateAgentChat } = await load('apps/byok-control/src/private-agent-chat.ts');
 const { privateAgentChatCloud } = await load('apps/byok-control/src/main.ts');
 
 for (const cancelFirst of [false, true]) test(`Salesko transaction + SDK recurring replay: cancelFirst=${cancelFirst}`, async () => {
@@ -57,11 +57,13 @@ for (const cancelFirst of [false, true]) test(`Salesko transaction + SDK recurri
   expect(dispatch).not.toBeNull();
   const taskId = dispatch.execution.taskId;
   const execution = dispatch.execution;
-  const result = await offerPrivateAgentChat(privateAgentChatCloud(harness.cloud, harness.stores.tasks), {
+  const dispatchInput = {
     tenantRef: tenant,
     execution: { conversationId, turnId, taskId, generation: execution.generation,
       snapshot: execution.snapshot, messageContext: execution.messageContext },
-  });
+  };
+  const port = privateAgentChatCloud(harness.cloud);
+  const result = await offerPrivateAgentChat(port, dispatchInput);
   expect(result).toMatchObject({ status: 'accepted', taskId });
   expect(recurringSubmissions).toBe(1);
   const payload = { agentRef: binding.agentRef, sessionRef: 'native-session', contract: C.PrivateAgentChatMessageContract,
@@ -82,6 +84,9 @@ for (const cancelFirst of [false, true]) test(`Salesko transaction + SDK recurri
   const receipt = await harness.cloud.readAgentMessageDisposition(tenant, device.deviceId, taskId, payload);
   expect(await (await publish()).json()).toEqual({ accepted: 1 });
   expect(await harness.cloud.readAgentMessageDisposition(tenant, device.deviceId, taskId, payload)).toEqual(receipt);
+  const observed = await reconcilePrivateAgentChat(port, { ...dispatchInput, message: payload });
+  expect(observed.messageReceipt).toEqual({ schemaVersion: 'salesko.sdk_message_receipt.v1', payload, disposition: receipt });
+  expect(await repository.recordMessageReceipt({ tenantId, taskId, receipt: observed.messageReceipt, now })).toBe(!cancelFirst);
   const view = await repository.readFullConversation({ tenantId, userId, conversationId });
   expect(view.messages.filter((m: { role: string }) => m.role === 'assistant')).toHaveLength(cancelFirst ? 0 : 1);
 });

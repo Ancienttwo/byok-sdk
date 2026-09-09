@@ -112,3 +112,11 @@ Extend scripts/integration/salesko-recurring.test.ts to resolve only public SDK 
 ## Salesko fresh-dispatch adoption candidate (isolated test checkout)
 
 Allowed local candidate edits at /Users/kito/Projects/salesko-new-wt-sdk-test-90fab70: apps/byok-control/src/private-agent-chat.ts, main.ts, private-agent-chat.test.ts, main.test.ts. Replace the fresh dispatch port with strict recurring submission; retain explicit resume selection and immutable frozen inputs. Tests register the required consumer instead of bypassing SDK preflight. This is a local downstream integration candidate against retained SDK artifacts, not product rollout/deploy or migration approval. Do not change receipt storage schema in this slice.
+
+## Salesko typed message receipt cutover candidate
+
+Scope in isolated adoption branch: packages/contracts/src/index.ts and private-agent-chat.test.ts; apps/api/src/private-agent-chat-repository.ts and its test, private-agent-chat-routes.test.ts; apps/byok-control/src/private-agent-chat.ts, main.ts and their tests; scripts/private-agent-chat-arbitration-rehearsal.ts, private-agent-chat-execution-migration-rehearsal.ts; new scripts/private-agent-chat-message-receipt-cutover.ts and .test.ts. New Host receipt is versioned payload + public disposition. Retire runtime SDK private terminalBody parsing and TaskAttemptStore read port in same slice. Preserve old bytes in operator-only archive via one-shot transactional conversion; fail closed on malformed/inconsistent old data, reruns and missing quiescence declaration. Run only disposable PG rehearsal, never production migration. Terminal receipt migration is outside this message-specific slice.
+
+Typed receipt call-path completion also includes apps/api/src/private-agent-chat-dispatch.ts: validate returned typed payload against the accepted message; do not retain retired payloadBody comparisons.
+
+Allow existing Salesko docs/researches/2026-09-09_private-agent-chat-host-reliability-scope.md and tasks/notes/20260910-chat-host-reliability.notes.md to record the migration order, stage evidence and no-production boundary.
