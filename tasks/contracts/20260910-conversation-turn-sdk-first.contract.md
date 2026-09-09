@@ -108,3 +108,7 @@ Owner directs Salesko first and no aiphabee work. Allowed test-only mutations: /
 ## Installed recurring consumer boundary
 
 Extend scripts/integration/salesko-recurring.test.ts to resolve only public SDK package entries from the pinned Salesko installation. Remove SDK source-test harness dependency. Pair a real authenticated fixture device using public Cloud fetch and compose the actual Salesko repository consumer. No downstream source or aiphabee changes.
+
+## Salesko fresh-dispatch adoption candidate (isolated test checkout)
+
+Allowed local candidate edits at /Users/kito/Projects/salesko-new-wt-sdk-test-90fab70: apps/byok-control/src/private-agent-chat.ts, main.ts, private-agent-chat.test.ts, main.test.ts. Replace the fresh dispatch port with strict recurring submission; retain explicit resume selection and immutable frozen inputs. Tests register the required consumer instead of bypassing SDK preflight. This is a local downstream integration candidate against retained SDK artifacts, not product rollout/deploy or migration approval. Do not change receipt storage schema in this slice.

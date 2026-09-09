@@ -82,3 +82,5 @@ Embedded facade reconstruction acceptance PASS: actual SQLite/HTTP, disk-persist
 Owner 最新范围：优先仅推进 Salesko；不读取、不修改、不执行 aiphabee。K6 暂停，保留原目标跟踪但本轮不开展。下一接入验证使用固定 Salesko 测试 checkout 与 69c9ae69 产物，不触碰并行产品工作树。
 
 Salesko installed recurring API integration now passes against real repository: 2 cases / 17 assertions. Test no longer imports SDK source harness; it resolves public packages from the byte-verified Salesko installation. K5 has concrete artifact/new-API consumer evidence; actual dispatcher adoption and PG/full product cases remain open.
+
+Salesko fresh dispatcher candidate dfb21e0 now consumes strict recurring API (four control source/test files, isolated branch). Actual dispatcher/repository/installed-artifact integration 2 PASS / 21 assertions; byok-control check135 PASS + typecheck. This is a stacked draft, not dependency release/rollout. Next K5 work is typed receipt contract adoption; no aiphabee access.
