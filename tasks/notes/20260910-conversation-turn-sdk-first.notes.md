@@ -189,3 +189,11 @@ Owner explicitly prioritizes Salesko and forbids touching aiphabee; no aiphabee 
 Salesko apps/byok-control `bun run check`: exit0, 135 PASS / 0 FAIL, 611 assertions, followed by tsc --noEmit PASS. Logs in _ops/sdk-first/salesko-artifact-install.log and salesko-artifact-check.log. No product source changes or deployment.
 
 P1: actual hosted control + shared Salesko contracts consume installed Cloud/data-plane/core/protocol. P2: private-agent-chat still calls enqueueFreshAgentEgressOffer/readTaskAttempt/readTaskOffer; current test suite validates that existing boundary against candidate bytes. P3: this proves artifact adoption baseline, not completion of migration to submitRecurringExecution or removal of private receipt parsing. That precise consumer change remains next. K6 is paused by Owner; do not resume it from the older plan.
+
+## Installed recurring API + real Salesko repository
+
+Replaced the source Cloud test harness in scripts/integration/salesko-recurring.test.ts with public core/protocol/cloud entries resolved from the pinned Salesko installation. Actual pairing, authenticated fetch handlers, strict recurring input and typed disposition all execute installed dist bytes. The consumer is the real pinned Salesko repository.
+
+Command: `SALESKO_TEST_ROOT=/Users/kito/Projects/salesko-new-wt-sdk-test-90fab70 bun test scripts/integration/salesko-recurring.test.ts`. Result 2 PASS / 17 assertions, exit0; `_ops/sdk-first/salesko-packed-recurring.log`. Expected lost-response exception stack points at Salesko node_modules/@byok-sdk/cloud/dist/index.js, followed by successful exact replay. Artifact subject remains69c9ae69, previously byte-verified. No SDK executable changes or need to repack.
+
+P1: installed public SDK -> authenticated handler -> actual Salesko repository. P2: persisted Salesko Execution -> strict recurring submit -> Host body commit or cancel -> SDK exact decision and replay. P3: removes source-harness evidence substitution while keeping one Host authoring path. This is in-memory consumer acceptance, not PostgreSQL or migrated product dispatcher. Next product integration gap is existing private-agent-chat.ts still using generic enqueue/private receipt shapes; do not report that gap closed by this test. No aiphabee access.

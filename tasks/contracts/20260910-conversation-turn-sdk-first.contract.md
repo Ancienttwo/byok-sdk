@@ -104,3 +104,7 @@ Allowed: packages/server/src/__tests__/recurring-restart.test.ts. P1: public ser
 ## Salesko-only artifact adoption test
 
 Owner directs Salesko first and no aiphabee work. Allowed test-only mutations: /Users/kito/Projects/salesko-new-wt-sdk-test-90fab70/package.json (exact local tarball overrides), bun.lock and installed dependencies. Product source remains pinned to 90fab70. Verify all artifact SHA256 before installation; run actual byok-control tests/typecheck. Keep these local fixture dependency changes out of product PRs. No aiphabee reads, edits, installs or tests.
+
+## Installed recurring consumer boundary
+
+Extend scripts/integration/salesko-recurring.test.ts to resolve only public SDK package entries from the pinned Salesko installation. Remove SDK source-test harness dependency. Pair a real authenticated fixture device using public Cloud fetch and compose the actual Salesko repository consumer. No downstream source or aiphabee changes.
