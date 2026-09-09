@@ -184,6 +184,8 @@ export interface ByokServer {
     requestId: string,
   ): Promise<AgentHomeProjectionStatusReadback | undefined>;
   tasks: {
+    /** Canonical durable attempt, including cancellation intent; not a resource-release observation. */
+    attempt(taskId: string): Promise<TaskAttempt | undefined>;
     get(taskId: string): Promise<TaskSnapshot | undefined>;
     /** Actual device terminal, independently of Host cancellation or home release. */
     deviceTerminal(taskId: string): Promise<import('@byok-sdk/cloud').DeviceTerminal | undefined>;
@@ -766,6 +768,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     recurring: { submit(input) { return cloud.submitRecurringExecution(tenant, input); } },
 
     tasks: {
+      attempt(taskId) { return cloud.readTaskAttempt(tenant, taskId); },
       deviceTerminal(taskId) { return cloud.readDeviceTerminal(tenant, taskId); },
       offer(taskId) { return cloud.readTaskOffer(tenant, taskId); },
       messageDisposition(taskId, deviceId, payload) {

@@ -72,7 +72,7 @@ export declare class DeviceConnections {
 }
 // ==== @byok-sdk/server dist/index.d.ts ====
 import { Hono } from 'hono';
-import { type EnqueuedOffer, type PairingCodeInfo } from '@byok-sdk/cloud';
+import { type EnqueuedOffer, type PairingCodeInfo, type TaskAttempt } from '@byok-sdk/cloud';
 import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
 import type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
 import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, TaskHandle, TaskSnapshot } from './types';
@@ -169,6 +169,8 @@ export interface ByokServer {
     /** Durable desired-state and terminal-outcome readback for one exact device-and-Agent request. */
     readAgentHomeProjection(deviceId: string, agentRef: AgentRef, requestId: string): Promise<AgentHomeProjectionStatusReadback | undefined>;
     tasks: {
+        /** Canonical durable attempt, including cancellation intent; not a resource-release observation. */
+        attempt(taskId: string): Promise<TaskAttempt | undefined>;
         get(taskId: string): Promise<TaskSnapshot | undefined>;
         /** Actual device terminal, independently of Host cancellation or home release. */
         deviceTerminal(taskId: string): Promise<import('@byok-sdk/cloud').DeviceTerminal | undefined>;

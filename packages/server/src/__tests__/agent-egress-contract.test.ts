@@ -75,11 +75,16 @@ describe('reference-server Agent egress contract', () => {
       egressPolicy: POLICY, messageEgress: { mode: 'required' as const, contract: 'conversation-turn/v1', contentType: 'text/markdown' as const, maxBytes: 1024 },
       terminalProjection: { mode: 'none' as const },
     }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn' } };
+    expect(await instance.tasks.attempt(input.taskId)).toBeUndefined();
     const offered = await instance.recurring.submit(input);
     expect(offered.taskId).toBe(input.taskId);
     expect(await awaitEnvelope(daemon, e => e.task_id === input.taskId)).toMatchObject({ type: 'task.offer_for_agent_with_egress_fresh', payload: input.payload });
     expect(await instance.tasks.offer(input.taskId)).toMatchObject({ delivered: true, payload: input.payload });
     await expect(instance.recurring.submit(input)).rejects.toThrow();
+    expect(await instance.tasks.attempt(input.taskId)).toMatchObject({ taskId: input.taskId, deviceId: daemon.deviceId, status: 'offered' });
+    await instance.tasks.cancel(input.taskId, 'stop remaining');
+    expect(await instance.tasks.attempt(input.taskId)).toMatchObject({ cancellation: { reason: 'stop remaining', requestedAt: expect.any(String) } });
+    expect(await instance.tasks.deviceTerminal(input.taskId)).toBeUndefined();
   });
 
   it('keeps user-visible message delivery outside activity and acks the exact authenticated task binding', async () => {

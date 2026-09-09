@@ -148,3 +148,22 @@ Command: `SALESKO_TEST_ROOT=/Users/kito/Projects/salesko-new-wt-sdk-test-90fab70
 Accept-first case asserts the actual Host body already exists while SDK disposition remains pending after injected lost consumer response, then cancels and replays to accepted without another body. Cancel-first case returns refused with zero assistant bodies. Both exact transport replays preserve the same SDK receipt. The deliberate exception printed in the log is the tested failure injection.
 
 A07/A08/A09 now have actual Host memory-repository + current SDK boundary evidence. PostgreSQL isolation, production behavior, full downstream dispatcher adoption, packed installation and native provider execution remain outside this result. This standalone Bun test requires an explicit pinned checkout and is not included in workspace Vitest by default.
+
+## Lifecycle observation source map and embedded parity
+
+| Fact | Hosted public source | Embedded public source | Limit |
+|---|---|---|---|
+| Frozen recurring input | RecurringExecutionInputSchema; Host durable snapshot | same schema via recurring.submit input | Host outbox commit is Host evidence |
+| Attempt / cancellation intent | readTaskAttempt | tasks.attempt | cancellation request does not prove device terminal |
+| Immutable offer / delivered marker | readTaskOffer | tasks.offer | attempt existence and delivered=false do not prove no mailbox append |
+| Exact SDK disposition | readAgentMessageDisposition | tasks.messageDisposition | full exact message required; pending is undefined; corruption throws |
+| Actual device terminal | readDeviceTerminal | tasks.deviceTerminal | preserves envelope type; no close/release inference |
+| Cancel request | cancelTask | tasks.cancel | not-found cannot retire Host durable cancel intent |
+| Resource release | no positive remote observation established | no positive remote observation established | retain unknown; local SDK home admission protects actual start |
+| Host body commit / queue settlement | Host repository | Host repository | never infer from SDK result projection |
+
+Source trace: server tasks.get -> projectTask -> toTaskSnapshot uses cancellation-first projection, dropping cancellation record. Added tasks.attempt as direct Cloud forwarding, returning the existing typed TaskAttempt rather than introducing a second shape/store. Regression initially failed with missing function, then passed missing -> offered -> cancellation record while device terminal remained absent. Existing HTTP suite: 10 PASS / 2 existing SKIP. Server build/typecheck, all 9 API goldens and version-authority PASS. No wire/version/downstream changes.
+
+This closes the observed facade information loss for embedded recurring recovery. It does not close restart adoption, resource-release visibility, packed verification for the new API, or whole Sprint acceptance. Prior packed evidence at e78ab5a7 excludes this change.
+
+Current server whole suite: 36 files, 372 PASS / 19 SKIP, exit 0 (`_ops/sdk-first/attempt-server-suite.log`). Strict workflow and diff whitespace checks PASS.

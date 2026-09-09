@@ -92,3 +92,7 @@ Allowed: scripts/release/recurring-smoke.mjs and scripts/release/pack-and-smoke.
 ## Pinned Salesko integration test slice
 
 Allowed: scripts/integration/salesko-recurring.test.ts. Test the actual Salesko in-memory repository at 90fab70c54895ee0bcf08f45a164bb823f9ada34 through current SDK recurring admission and message HTTP endpoints. No downstream product edits. This is Host acceptance/replay integration evidence, not PostgreSQL concurrency, packed dependency adoption or native provider proof.
+
+## Embedded durable attempt parity
+
+P1/P2: Cloud readTaskAttempt exposes canonical ownership/status/cancellation; embedded tasks.get projects through cancellation-first TaskSnapshot and omits the cancellation record. P3: expose the same TaskAttempt via tasks.attempt, directly delegating to Cloud; do not reconstruct cancellation from Cancelled or device terminal. Allowed: packages/server/src/index.ts, packages/server/src/__tests__/agent-egress-contract.test.ts, api-surface/server.d.ts, docs/spec.md and existing plan/notes. Validate missing, offered and cancellation intent independently from absent actual device terminal. No new wire/store or Host authority.

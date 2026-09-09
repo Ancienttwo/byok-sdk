@@ -1137,3 +1137,10 @@ until registration is restored; it does not clear persisted cancellation or
 message evidence. Partial initial admission can recover using exactly the
 persisted input, including server-held context. Changed context cannot reuse
 the execution identity. This does not authorize a new execution after failure.
+
+Embedded `tasks.attempt(taskId)` returns the same canonical durable TaskAttempt
+as Cloud `readTaskAttempt(tenant, taskId)`, including the independent cancellation
+record. `tasks.get` remains a product snapshot with cancellation precedence and
+must not be used to reconstruct that record. Missing attempts return undefined;
+store read failures propagate. An attempt, including its cancellation or terminal
+status, is not evidence of mailbox delivery or physical Agent-home release.

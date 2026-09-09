@@ -72,3 +72,5 @@ consumer 注册门禁和 recurring 同身份投递恢复已验证；当前 Cloud
 真实 HTTP + built public daemon/TaskRunner 两轮 recurring 集成 PASS（StubRuntimeAdapter，非真实模型）：独立 fresh session、required accepted、terminal 早于 close 释放均验证。原 A01–A29 已在 notes 逐组审计，无遗漏、无整案 PASS 冒认。下一步是 Salesko 测试路径接入当前 SDK，仍不扩产品实现。
 
 Pinned Salesko 实际 memory repository × 当前 SDK recurring/message HTTP 集成 2 PASS / 15 assertions：接受先提交后丢响应再取消，精确重放保留正文；取消先提交则拒绝迟到正文；重复回读同一 receipt。未修改下游产品代码，未证明 PG 并发。K2/K5 仍未全部关闭。
+
+Lifecycle public-source map is now recorded in notes. Embedded tasks.attempt closes the concrete cancellation/attempt information loss in tasks.get; existing Cloud TaskAttempt remains the single authority. Targeted HTTP 10 PASS / 2 SKIP, server build/typecheck and API/version checks PASS. Next SDK gate is current-subject full and packed acceptance plus embedded persisted-restart consumption; earlier packed evidence is not current for this API.
