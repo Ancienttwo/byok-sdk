@@ -87,7 +87,7 @@ Next bounded slice: 只给最影响推进的一刀，说明关闭条件
 ## 提交与隔离边界
 
 - BYOK 文档分支：`docs/fresh-mvp-review-20260910`，基于 `bb3e1b19ec28d99755e77231dcf39174c2fbe3f8`；本 handoff 与 PRD 一起提交，精确 SHA 由本文件所在提交标识。
-- Salesko 文档提交：`98bd0b50121b89a27a87e9846c5740e29e2ae400`，同名文档分支，基于 `6900ed6`。入口：[canonical Sprint](https://github.com/Ancienttwo/salesko-new/blob/98bd0b50121b89a27a87e9846c5740e29e2ae400/plans/plan-20260909-private-agent-chat-host-reliability-sprints.md)、[S0 草表](https://github.com/Ancienttwo/salesko-new/blob/98bd0b50121b89a27a87e9846c5740e29e2ae400/docs/researches/2026-09-09_private-agent-chat-host-reliability-s0-parameter-draft.md)。
+- Salesko 文档提交：`4e54cfe140d8d469143903c63f66f62fafb98853`，同名文档分支，基于 `6900ed6`。入口：[canonical Sprint](https://github.com/Ancienttwo/salesko-new/blob/4e54cfe140d8d469143903c63f66f62fafb98853/plans/plan-20260909-private-agent-chat-host-reliability-sprints.md)、[S0 草表](https://github.com/Ancienttwo/salesko-new/blob/4e54cfe140d8d469143903c63f66f62fafb98853/docs/researches/2026-09-09_private-agent-chat-host-reliability-s0-parameter-draft.md)。
 - Salesko 原工作区 `feat/private-agent-chat-layout` 的两笔 UI 提交及产品 dirty WIP **不在文档分支内**。文档中 `f0db2ee` 等表示原观察快照，不是本次 pushed base，也不是实现验收。
 - 验证：仅文档文件 allowlist、引用/哈希/编号/算术、diff whitespace、push 精确 ref 回读；未跑产品测试/provider，不声称源码、发布或部署通过。
 - 如收到合并 review bundle，它是从上述文档生成的只读附件，canonical authority 仍在两仓；不要在 bundle 中维护第二套任务状态。
@@ -95,3 +95,5 @@ Next bounded slice: 只给最影响推进的一刀，说明关闭条件
 ## S0-09 / G4 源码核验补充
 
 草表 §14 已核对 strictAgentOnly、fresh Agent egress、offer-scoped result-document 与 extractor 第二参数。SDK 可传递精确 contract，Salesko 当前 extractor 只接受 Research；内部 Summary schema/认证读回/job 恢复尚待接入。readonly/allowTools 的 runtime 差异单列；无设备/provider 实测。G4 未冻结，任务状态不提升，具体下一包为 Salesko Summary contract 与 extractor 显式路由，不能将其视为整个 S5 实现授权。
+
+SDK 结果门补充见草表 §14.2：Summary 不配置用户 required message，否则 document 完成仍等待消息 accepted；readTaskResult 的 cancellation tombstone 与实际执行终态分开。
