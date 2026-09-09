@@ -7,7 +7,12 @@ composition over Postgres and R2.
 
 ## Release status
 
-The current release is **0.17.0**, with independent keys **0.4.3**.
+This branch prepares **0.18.0-rc.1**, with independent keys **0.4.4-rc.1**.
+These are unpublished recurring-execution candidates; use verified local tarballs
+until a separately authorized prerelease publication. The package install examples
+below target that future candidate, not the current npm registry.
+
+The previous stable release is **0.17.0**, with keys **0.4.3**.
 See the [release notes](docs/releases/v0.17.0.md) for durable SQLite receipts,
 caller task identity/read/cancel and the breaking schema-v3 migration boundary.
 Publication, exact-source CI and registry verification are complete. See
@@ -35,7 +40,7 @@ resources during `prepare()`; reject unsupported input before claim instead.
 Install this release with:
 
 ```sh
-npm install byok-sdk@0.17.0
+npm install byok-sdk@0.18.0-rc.1
 ```
 
 ```ts
@@ -110,7 +115,7 @@ It is intentionally outside `byok-sdk` and the entire dispatch dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.4.3
+npm install @byok-sdk/keys@0.4.4-rc.1
 ```
 
 ## Host connector composition
@@ -126,5 +131,5 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.4.3`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.4.4-rc.1`
 require Node.js 22.22.0 or newer. MIT licensed.

@@ -124,3 +124,7 @@ Allow existing Salesko docs/researches/2026-09-09_private-agent-chat-host-reliab
 ## Salesko typed terminal observation without format migration
 
 Allowed candidate files: apps/byok-control/src/private-agent-chat.ts, main.ts and their tests; existing scope/notes. P1/P2: old terminal body is public encodeEnvelope wire representation, unlike retired private message wrapper. P3: read SDK DeviceTerminal, branch on its discriminated envelope, serialize via public encodeEnvelope into existing Host evidence. No semantic translator or dual read; validate actual SDK receipt-byte equality across terminal types before retaining storage contract. Preserve task/device/AgentRef checks and cancel/request separation. No terminal database migration.
+
+## Named recurring release candidate (local only)
+
+Prepare dispatch0.18.0-rc.1 and independent keys0.4.4-rc.1 under existing pre-1.0 breaking policy, not a compatibility restriction. Allowed: the ten public packages/*/package.json (core/protocol/client/server/cloud/cloud-dataplane/ui-runtime/testkit/sdk/keys), bun.lock, README.md, CHANGELOG.md, docs/spec.md and existing plan/notes. Preserve all internal workspace edges, freeze candidate manifests/lock/docs, then build and pack once. No registry publication/tag/deploy; prerelease publication remains separately authorized. Read-only npm queries for core/keys target versions returned E404 this turn, not a reservation.

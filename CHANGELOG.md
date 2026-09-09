@@ -1,15 +1,20 @@
 # Changelog
 
-## Unreleased — next MINOR
+## 0.18.0-rc.1 / @byok-sdk/keys 0.4.4-rc.1 — unpublished candidate
 
-- Add typed Cloud `readAgentMessageDisposition` and embedded server
-  `tasks.messageDisposition` for exact persisted Agent message decisions.
-  Hosts no longer need to parse internal receipt JSON. Pending remains
-  unconfirmed; corrupt or conflicting stored decisions fail closed.
-- Preserve accepted/held/refused across fresh/resume, cancellation and SQLite
-  restart. No Conversation store, execution fallback or wire field added.
-- This additive API is not part of published 0.17.0. Align the next release
-  train and keys core edge before producing publication artifacts.
+- Add one strict, persistable recurring execution input shared by hosted Cloud
+  and embedded server. Task/device/runtime, required message/context and a
+  registered consumer are mandatory; every new recurring execution is fresh.
+- Recover initial admission using the same frozen identity/input. Expose exact
+  message disposition, actual device terminal and embedded durable attempt
+  observations independently of cancellation and resource release.
+- Host acceptance/replay/cancel and SQLite reconstruction are verified with
+  Salesko integration inputs; transcript, queue, Summary and business retry
+  authority remain with the Host. Explicit session APIs remain distinct.
+- This pre-1.0 candidate supports the breaking recurring Host contract; it does
+  not add private-receipt compatibility parsers, resume fallback or Conversation
+  storage. Keys carries the exact candidate core edge. No publication, deployment
+  or Host data migration is performed by preparing these artifacts.
 
 ## 0.17.0 / @byok-sdk/keys 0.4.3 — release
 

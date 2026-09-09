@@ -88,3 +88,13 @@ Salesko fresh dispatcher candidate dfb21e0 now consumes strict recurring API (fo
 Salesko241 candidate9e0251b adopts typed message dispositions end to end with one-shot migration and disposable PG rollback/archive evidence. Installed SDK integrated readback+Host receipt persistence2 PASS/25 assertions. K5 still open for device terminal adoption/final dependency and full product acceptance; aiphabee remains paused.
 
 Salesko3e39d96 adopts typed device-terminal observation without storage migration: all4 terminal types preserve exact public envelope bytes and SDK recordedAt; control138 PASS + typecheck. Actual remote PR base fetched/merge reports already current. Next remaining K5 boundary is final candidate dependency/version and integrated stage review; K7 Host product/parameter/runtime requirements remain open.
+
+## 2026-09-10 requirement audit checkpoint
+
+- K1–K3 public capability/input/recovery implementation has concrete evidence: strict recurring input, immutable admission, exact disposition, cancellation/terminal/resource separation, embedded parity and authenticated Salesko consumer integration. This does not transfer Host product ownership to SDK.
+- K4 executable source69c9ae69 passed full3966/135-skipped and packed checks. Named candidate now becomes0.18.0-rc.1 / keys0.4.4-rc.1, so version-coupled build/pack evidence must be renewed on its frozen subject before K4 closes.
+- K5 Salesko241 source3e39d96 adopts fresh submission and typed observations. Existing remote base is incorporated; local parallel57b59f3 is unpushed and not imported. Exact version pins still need the named candidate artifacts.
+- K6 is PAUSED by explicit Owner instruction; no aiphabee access.
+- K7 is incomplete: original S3 server recovery runner/A29, S4 create-only continuity, S5 Summary/budgets, S6 queue/recovery/stop-send, S7 UI and S9 authorized runtime evidence are not proven by current API tests. G3/G4 numeric/model/Summary choices remain unresolved in the source parameter draft.
+
+A01–A29 remain the original acceptance scope: A01–A12/A19/A20 have varying local SDK, actual repository and PG fault evidence in notes; A13/A14 lifecycle tests are not operator recovery proof; A15/A21 lack product blocked/manual continuation; A16–A18/A24/A28 depend on complete ContextPack/Summary; A22/A23/A26/A29 require Host actions and server scheduler; A25 history and A27 actual two-mode coexistence remain incomplete in the adopted branch. None is upgraded to production PASS by this audit.
