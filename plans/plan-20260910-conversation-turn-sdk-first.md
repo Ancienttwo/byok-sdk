@@ -74,3 +74,5 @@ consumer 注册门禁和 recurring 同身份投递恢复已验证；当前 Cloud
 Pinned Salesko 实际 memory repository × 当前 SDK recurring/message HTTP 集成 2 PASS / 15 assertions：接受先提交后丢响应再取消，精确重放保留正文；取消先提交则拒绝迟到正文；重复回读同一 receipt。未修改下游产品代码，未证明 PG 并发。K2/K5 仍未全部关闭。
 
 Lifecycle public-source map is now recorded in notes. Embedded tasks.attempt closes the concrete cancellation/attempt information loss in tasks.get; existing Cloud TaskAttempt remains the single authority. Targeted HTTP 10 PASS / 2 SKIP, server build/typecheck and API/version checks PASS. Next SDK gate is current-subject full and packed acceptance plus embedded persisted-restart consumption; earlier packed evidence is not current for this API.
+
+Embedded facade reconstruction acceptance PASS: actual SQLite/HTTP, disk-persisted input, interrupted admission, two facade reconstructions, immutable accepted/cancel readback and consumer-once replay. No process-owned TaskHandle. SDK source is now frozen for current full-workspace and packed gates; results must identify this new subject.

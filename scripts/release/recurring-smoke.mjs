@@ -36,6 +36,7 @@ const server = createByokServer({ productId: 'packed-recurring' });
 try {
   assert.equal(typeof server.recurring.submit, 'function');
   assert.equal(typeof server.tasks.messageDisposition, 'function');
+  assert.equal(await server.tasks.attempt('absent'), undefined);
   assert.equal(await server.tasks.deviceTerminal('absent'), undefined);
   await assert.rejects(server.recurring.submit(input), /registered Agent message consumer/);
 } finally { server.stop(); }

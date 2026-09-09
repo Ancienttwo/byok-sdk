@@ -167,3 +167,9 @@ Source trace: server tasks.get -> projectTask -> toTaskSnapshot uses cancellatio
 This closes the observed facade information loss for embedded recurring recovery. It does not close restart adoption, resource-release visibility, packed verification for the new API, or whole Sprint acceptance. Prior packed evidence at e78ab5a7 excludes this change.
 
 Current server whole suite: 36 files, 372 PASS / 19 SKIP, exit 0 (`_ops/sdk-first/attempt-server-suite.log`). Strict workflow and diff whitespace checks PASS.
+
+## Embedded public-facade SQLite reconstruction
+
+New recurring-restart test uses createByokServer, persistent signing authority, real authenticated HTTP and file-backed SQLite. An injected mailbox INSERT failure leaves an attempt plus delivered=false offer. It closes the server, creates a fresh facade, reads the Host input JSON from disk, and recovers the original execution. Delivered duplicate rejects. A required message commits accepted; cancellation is requested; another fresh facade reads the exact attempt/cancellation and message disposition, while actual device terminal remains absent. HTTP replay skips the consumer (one invocation total). SQL is used only to install/remove the failure trigger, never to manufacture or decode receipt evidence.
+
+Targeted test 1 PASS; server typecheck PASS. `_ops/sdk-first/facade-restart.log`. This is real server/storage reconstruction in one test process, not OS process-kill or live model evidence. Added packed smoke coverage for tasks.attempt absent readback; packed results await the frozen-source run.

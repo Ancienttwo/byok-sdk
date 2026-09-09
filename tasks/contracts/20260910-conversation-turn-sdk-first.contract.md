@@ -96,3 +96,7 @@ Allowed: scripts/integration/salesko-recurring.test.ts. Test the actual Salesko 
 ## Embedded durable attempt parity
 
 P1/P2: Cloud readTaskAttempt exposes canonical ownership/status/cancellation; embedded tasks.get projects through cancellation-first TaskSnapshot and omits the cancellation record. P3: expose the same TaskAttempt via tasks.attempt, directly delegating to Cloud; do not reconstruct cancellation from Cancelled or device terminal. Allowed: packages/server/src/index.ts, packages/server/src/__tests__/agent-egress-contract.test.ts, api-surface/server.d.ts, docs/spec.md and existing plan/notes. Validate missing, offered and cancellation intent independently from absent actual device terminal. No new wire/store or Host authority.
+
+## Embedded SQLite facade restart acceptance
+
+Allowed: packages/server/src/__tests__/recurring-restart.test.ts. P1: public server facade with file-backed SQLite and authenticated HTTP device. P2: persist input -> interrupted admission -> close/recreate server -> same input recovery -> exact message acceptance -> cancel -> close/recreate -> independent durable observations. P3: use SQL only to inject/remove mailbox fault, never seed or parse receipt facts. Keep Host input separate from SDK storage and no TaskHandle across restart.
