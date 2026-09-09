@@ -261,3 +261,7 @@ Saleskoee84d4f requires explicit continuity{mode:session|fresh,version:1} on cre
 ## S5 guarded fresh context prerequisite
 
 Salesko3ec993b refuses truncated fresh handoff before input/Turn/Execution insertion and returns context-incomplete; HTTP readiness now respects fresh mode even after prior native session acceptance.84 repository/routes/dispatch tests, API types and strict workflow pass. No Summary/ContextPack budget defaults or fallback added. G4 Summary execution path question is pending Owner response (same BYOK Agent internal task versus separate Host model service). Continue independent logical-prefix/queue work; do not claim S5 complete. SDK executable artifacts remain2da3bf28; downstream test source pin advances. No aiphabee/production access.
+
+## S5 revision authority repair
+
+Salesko1f59167 fixes a real PG regression: accepted assistant body advanced message_count but not transcript_revision. Guard failed before fix (1 versus2); shared locked message transaction now increments revision by exact inserted message count. Accepted -> cancel -> exact replay stays2. Full temporary PG rehearsal and75 repository/routes tests pass; no public SDK/artifact change. Logs salesko-revision-before/after/tests.log. Zero-Execution queue requires the coupled contracts/events/cancel/repository/web cut, not optionalizing taskId alone. Summary path answer remains pending.
