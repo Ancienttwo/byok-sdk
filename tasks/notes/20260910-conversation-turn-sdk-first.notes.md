@@ -69,3 +69,11 @@ Full-test completion: session 34534 exit 0; 3952 passed, 135 skipped across work
 ## Owner breaking-design alignment
 
 Owner explicitly prioritizes clean recurring chat breaking design over MINOR concerns, with 0.17.0 stable. No manifest changes were made during the preceding registry readback (core 0.17.0, keys 0.4.3). Current plan consolidated stale incremental status into one checkpoint; contract now defines prepare/dispatch/deliver/stop/observe/recover obligations and next failing tests. Public names remain candidate, and typed message readback is not treated as complete recurring SDK. Read-only trace identifies optional fresh inputs and cancel-projected task results as next contract pressure points. No Salesko edits or new runtime validation this turn.
+
+## aiphabee second-consumer source map
+
+Owner identified `/Users/kito/Projects/aip-main-open` as aiphabee. Read-only subject 800f4552a5ead921a7c95c297c68352de92861f0; existing architecture docs WIP preserved. No .codegraph directory observed. Root AGENTS requires product upgrades via update:byok and forbids modifying SDK source from the downstream task; this SDK implementation remains in BYOK's isolated worktree.
+
+`packages/byok-host/package.json` pins client/server 0.17.0 and keys 0.4.3. `src/coordinator.ts` is an explicit Node-only public re-export boundary. Actual path: `apps/local-agent/src/research-pass-host.ts:159` creates SQLite-backed ByokServer and local daemon; execute at :211 dispatches persisted binding, reads tasks.offer, and polls tasks.get. This is existing research-pass execution, not evidence of recurring-chat implementation.
+
+Implication: shared SDK design must support embedded SQLite/Node and hosted Cloud composition without requiring aiphabee to copy Salesko's Cloud stores or product repository. Existing research pass must remain an explicit independent operation; do not silently convert it to recurring chat. No downstream code, dependency or staging deployment changed; read-only intake does not trigger deployment.

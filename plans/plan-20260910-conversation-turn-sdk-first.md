@@ -8,7 +8,7 @@ Owner 最新指令：先做 SDK，供 Salesko 与 aiphabee 接入；Salesko 是�
 
 产品权威仍为 `docs/spec.md`。本计划不把既有 fresh 原语等同于完整产品模式；也不预设新增 Conversation store、executionMode 或 wire 字段。保留 B1-A、B2、B3、D05。连续会话模式是可选接入方式，原 session 路径保持明确契约，禁止运行失败后改变语义。
 
-Salesko `codex/conversation-turn-fresh-mvp` 候选停在本轮回读的 `90fab70c54895ee0bcf08f45a164bb823f9ada34`，工作树干净。保留候选，不继续扩大产品实现，不重置或删除。历史 PR 信息需远端回读后再作为当前事实。aiphabee 的仓库、入口和需求尚未核实，不虚构其已有接入证据。
+Salesko `codex/conversation-turn-fresh-mvp` 候选停在本轮回读的 `90fab70c54895ee0bcf08f45a164bb823f9ada34`，工作树干净。保留候选，不继续扩大产品实现，不重置或删除。历史 PR 信息需远端回读后再作为当前事实。aiphabee 已由 Owner 指认为 `/Users/kito/Projects/aip-main-open`；现有入口是 Node-only byok-host/coordinator 与 SQLite research-pass host，不代表已有 recurring chat。
 
 生产迁移、发布、部署和真实付费 runtime 执行不因本计划自动获授权。当前主仓存在其他任务 WIP；不得接管 downstream-issue-intake 的 harness 状态或修改其文件。
 
@@ -59,4 +59,4 @@ K0 不是 SDK 交付；K4 不是发布；K5 不是生产部署。跨阶段有可
 
 ## Next action
 
-按实施契约的“Recurring chat lifecycle”完成 SDK 接入闭环。先将输入必填不变量和独立执行观察做成类型/运行时故障测试，再决定最终公开入口；不能用新名字包装旧 optional 参数组合就宣布模式完成。aiphabee 仓库路径已请求用户补充，其回答不阻塞 SDK/Salesko 证据工作。
+按实施契约的“Recurring chat lifecycle”完成 SDK 接入闭环。先将输入必填不变量和独立执行观察做成类型/运行时故障测试，再决定最终公开入口；不能用新名字包装旧 optional 参数组合就宣布模式完成。aiphabee 入口已回读：byok-host/coordinator → SQLite ByokServer → research-pass dispatch/offer/get。新契约须同时服务 embedded 与 hosted，具体 recurring 产品行为仍不可从 research pass 推导。
