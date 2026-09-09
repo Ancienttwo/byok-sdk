@@ -820,7 +820,7 @@ Security and packageability patch for local runtime adapters.
 
 ## 0.1.0 — 2026-08-09
 
-First release of the complete BYOK dispatch SDK.
+First release candidate of the complete BYOK dispatch SDK.
 
 ### Packages
 
