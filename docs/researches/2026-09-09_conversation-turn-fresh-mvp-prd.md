@@ -272,7 +272,9 @@ Summary 落后时可使用仍有效的旧 Summary 加全部未覆盖正文；这
 
 ### 9.4 Summary job 生命周期与冻结点
 
-本 PRD 的单一路径提案：Host 管理 durable Summary job，经既有 BYOK 普通任务/result-document 通道计算内部摘要，不使用用户 Turn 的 required-message consumer，不占用其唯一 assistant 槽位，也不新增默认云模型路径。该具体路径须由 S0 核实现有 API、产物读回与身份隔离能力后，在 S5 实施契约中冻结；核验失败则阻塞该路径并提交有界替代裁决，不能默默选择另一执行方式。
+本 PRD 的单一路径提案：Host 管理 durable Summary job，经既有 BYOK fresh Agent egress + offer-scoped result-document 通道计算内部摘要，不使用用户 Turn 的 required-message consumer，不占用其唯一 assistant 槽位，也不新增默认云模型路径。该具体路径须由 S0 核实现有 API、产物读回与身份隔离能力后，在 S5 实施契约中冻结；核验失败则阻塞该路径并提交有界替代裁决，不能默默选择另一执行方式。
+
+S0-09 源码核验已确认 SDK extractor 接收冻结的 `terminalProjection.contract`，但 Salesko 当前 extractor 固定 Research schema，且 strictAgentOnly 拒绝 legacy 普通 offer。故本路径是待接入候选，不是当前可直接启用能力；详细证据和 runtime 权限差异见 Salesko S0 草表 §14。缺口先收敛 Salesko contract/extractor/内部授权与恢复，不据此新增 SDK API。
 
 job 创建时冻结内部 job/task 身份、sourceTranscriptRevision、目标已结算 Turn 前缀、源 Summary 版本及输入字节；由 §8.4 服务端调度恢复。输出校验通过后，Host 在事务中条件提交：预期源版本仍匹配、覆盖边界不回退、覆盖内事实/历史规则未失效。同一输出 exact replay 不重复替换，较旧 job 晚到不能覆盖较新 Summary。因新 Turn 追加而 revision 前进不自动否定不变的历史前缀，具体 CAS 与验证依据须写入契约。
 

@@ -20,7 +20,7 @@ F01–F06 的最小关闭条件现已写入 PRD §9、S0 草表 §13 和既有 S
 
 1. BYOK `docs/researches/2026-09-09_conversation-turn-fresh-mvp-prd.md`：本轮 PRD，重点 §9.1–9.7、§5/§8、A01–A29。
 2. Salesko `plans/plan-20260909-private-agent-chat-host-reliability-sprints.md`：**唯一任务状态账本**；重点 G3/G4、S0-05/S0-09、S5、S8–S10。
-3. Salesko `docs/researches/2026-09-09_private-agent-chat-host-reliability-s0-parameter-draft.md`：重点 §8–§13；内容/安全模板、双模型预算、存储归属与 weekly 计量候选。
+3. Salesko `docs/researches/2026-09-09_private-agent-chat-host-reliability-s0-parameter-draft.md`：重点 §8–§14；内容/安全模板、双模型预算、存储归属与 weekly 计量候选。
 4. Salesko `docs/researches/2026-09-09_private-agent-chat-host-reliability-scope.md`：文档和实现授权边界；包含既有 S1 WIP 的来源，不代表本次提交了产品改动。
 5. BYOK `docs/researches/2026-09-10_hermes-context-prd-sprint-assessment.md`：Hermes pattern evidence 与不抄的机制。
 6. BYOK `docs/researches/2026-09-10_raft-storage-billing-reference.md`：官方文案、固定本地研究与 owner 实测分别标注。
@@ -87,7 +87,11 @@ Next bounded slice: 只给最影响推进的一刀，说明关闭条件
 ## 提交与隔离边界
 
 - BYOK 文档分支：`docs/fresh-mvp-review-20260910`，基于 `bb3e1b19ec28d99755e77231dcf39174c2fbe3f8`；本 handoff 与 PRD 一起提交，精确 SHA 由本文件所在提交标识。
-- Salesko 文档提交：`4b684644652564f75796b7b6e819fcae6edaba0c`，同名文档分支，基于 `6900ed6`。入口：[canonical Sprint](https://github.com/Ancienttwo/salesko-new/blob/4b684644652564f75796b7b6e819fcae6edaba0c/plans/plan-20260909-private-agent-chat-host-reliability-sprints.md)、[S0 草表](https://github.com/Ancienttwo/salesko-new/blob/4b684644652564f75796b7b6e819fcae6edaba0c/docs/researches/2026-09-09_private-agent-chat-host-reliability-s0-parameter-draft.md)。
+- Salesko 文档提交：`98bd0b50121b89a27a87e9846c5740e29e2ae400`，同名文档分支，基于 `6900ed6`。入口：[canonical Sprint](https://github.com/Ancienttwo/salesko-new/blob/98bd0b50121b89a27a87e9846c5740e29e2ae400/plans/plan-20260909-private-agent-chat-host-reliability-sprints.md)、[S0 草表](https://github.com/Ancienttwo/salesko-new/blob/98bd0b50121b89a27a87e9846c5740e29e2ae400/docs/researches/2026-09-09_private-agent-chat-host-reliability-s0-parameter-draft.md)。
 - Salesko 原工作区 `feat/private-agent-chat-layout` 的两笔 UI 提交及产品 dirty WIP **不在文档分支内**。文档中 `f0db2ee` 等表示原观察快照，不是本次 pushed base，也不是实现验收。
 - 验证：仅文档文件 allowlist、引用/哈希/编号/算术、diff whitespace、push 精确 ref 回读；未跑产品测试/provider，不声称源码、发布或部署通过。
 - 如收到合并 review bundle，它是从上述文档生成的只读附件，canonical authority 仍在两仓；不要在 bundle 中维护第二套任务状态。
+
+## S0-09 / G4 源码核验补充
+
+草表 §14 已核对 strictAgentOnly、fresh Agent egress、offer-scoped result-document 与 extractor 第二参数。SDK 可传递精确 contract，Salesko 当前 extractor 只接受 Research；内部 Summary schema/认证读回/job 恢复尚待接入。readonly/allowTools 的 runtime 差异单列；无设备/provider 实测。G4 未冻结，任务状态不提升，具体下一包为 Salesko Summary contract 与 extractor 显式路由，不能将其视为整个 S5 实现授权。
