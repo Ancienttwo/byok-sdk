@@ -164,6 +164,86 @@
         "attention_after_seconds": 120,
         "revision_reset": "reset_on_work_package_revision"
       }
+    },
+    {
+      "work_package_id": "campaign-548bc0a50d7f26dd-01",
+      "task_id": "c08388fc3352a53821afc75a4b0aefbda0a79caea76e7f276f09c15a037f27da",
+      "primary_capability": "capability.sdk.sdk-root",
+      "depends_on": [],
+      "priority": 70,
+      "concurrency": {
+        "scope": "repo",
+        "key": "capability.sdk.sdk-root"
+      },
+      "execution_surface": "contract",
+      "integration_group": null,
+      "required_acceptance": [
+        {
+          "gate": "module",
+          "policy_id": "brc1415-repair",
+          "policy_ref": "plans/policies/brc1415-repair.json",
+          "policy_revision": "sha256:b18b0dbbac8dab3466d4cc4c7c1394c70a0a365357c01753b47ef29ea1cb063a"
+        }
+      ],
+      "rollback_boundary": {
+        "kind": "work_package",
+        "boundary_id": "brc1415-repair",
+        "boundary_ref": "plans/policies/brc1415-repair.json",
+        "boundary_revision": "sha256:b18b0dbbac8dab3466d4cc4c7c1394c70a0a365357c01753b47ef29ea1cb063a"
+      },
+      "retry_policy": {
+        "max_automated_attempts": 1,
+        "retryable_failure_classes": [
+          "transient_failure"
+        ],
+        "backoff": {
+          "kind": "fixed",
+          "initial_seconds": 30,
+          "maximum_seconds": 30
+        },
+        "attention_after_seconds": 120,
+        "revision_reset": "reset_on_work_package_revision"
+      }
+    },
+    {
+      "work_package_id": "campaign-548bc0a50d7f26dd-02",
+      "task_id": "988bc2d43a4ab21f10b9e11e8b54f7fca7ac3edec11ae417d20f8efe7d1524ea",
+      "primary_capability": "capability.sdk.sdk-root",
+      "depends_on": [],
+      "priority": 60,
+      "concurrency": {
+        "scope": "repo",
+        "key": "capability.sdk.sdk-root"
+      },
+      "execution_surface": "contract",
+      "integration_group": null,
+      "required_acceptance": [
+        {
+          "gate": "module",
+          "policy_id": "brc1415-repair",
+          "policy_ref": "plans/policies/brc1415-repair.json",
+          "policy_revision": "sha256:b18b0dbbac8dab3466d4cc4c7c1394c70a0a365357c01753b47ef29ea1cb063a"
+        }
+      ],
+      "rollback_boundary": {
+        "kind": "work_package",
+        "boundary_id": "brc1415-repair",
+        "boundary_ref": "plans/policies/brc1415-repair.json",
+        "boundary_revision": "sha256:b18b0dbbac8dab3466d4cc4c7c1394c70a0a365357c01753b47ef29ea1cb063a"
+      },
+      "retry_policy": {
+        "max_automated_attempts": 1,
+        "retryable_failure_classes": [
+          "transient_failure"
+        ],
+        "backoff": {
+          "kind": "fixed",
+          "initial_seconds": 30,
+          "maximum_seconds": 30
+        },
+        "attention_after_seconds": 120,
+        "revision_reset": "reset_on_work_package_revision"
+      }
     }
   ]
 }
