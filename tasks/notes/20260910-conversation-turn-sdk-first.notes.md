@@ -241,3 +241,9 @@ P1: SDK public artifact -> Salesko control -> Host repository remains one author
 ## Salesko shared recovery prerequisite
 
 Salesko7764553 unifies HTTP and initial-dispatch durable reconciliation before the S3 server scanner. A null durable transition no longer returns the old dispatch Turn as success. Route37 + repository/dispatch42 tests and API types/strict workflow pass. SDK installed-artifact integration pin updated to this candidate:2 PASS/25 assertions, salesko-shared-recovery-e2e.log. SDK executable/tarball subject remains2da3bf28. A29 scanner, fairness and browser-independent process recovery still unverified; no aiphabee access.
+
+## Salesko server recovery candidate
+
+Salesko9d4ea2d introduces a25-row atomic due scan over existing outbox.available_at (60s next-check), using PostgreSQL SKIP LOCKED and original execution/claim fences. API minute cron now runs Chat beside research/profile; admission_paused preserves old recovery, full paused stops it. Sequential errors retain durable intent; control HTTP abort10s keeps ambiguous results unknown.
+
+90 related tests/670 assertions and API types/strict workflow pass. Actual temporary PostgreSQL verifies concurrent disjoint selection and abandoned-batch reconstruction to original taskIds, plus existing arbitration/fault cases. SDK installed RC integration at9d4ea2d:2 PASS/25 assertions. SDK executable/tarballs remain2da3bf28; no repack. Logs salesko-scanner-tests/types/pg/e2e.log. No deployed cron, OS-kill or native-provider proof; no aiphabee access. Operational guards are not provider/product budget acceptance.

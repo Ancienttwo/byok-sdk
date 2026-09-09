@@ -8,7 +8,7 @@ Owner 最新指令：先做 SDK，供 Salesko 与 aiphabee 接入；Salesko 是�
 
 产品权威仍为 `docs/spec.md`。本计划不把既有 fresh 原语等同于完整产品模式；也不预设新增 Conversation store、executionMode 或 wire 字段。保留 B1-A、B2、B3、D05。连续会话模式是可选接入方式，原 session 路径保持明确契约，禁止运行失败后改变语义。
 
-Salesko 实际集成候选为 `/Users/kito/Projects/salesko-new-wt-sdk-test-90fab70` 的 `codex/recurring-sdk-adoption-test`，source `7764553`，Draft PR #241。目录旧名不表示当前仍 detached 或固定在90fab70。并行产品候选57b59f3未导入；保留其 WIP。Owner 最新要求优先 Salesko、不要动 aiphabee：K6 暂停，不读取、不修改、不安装或测试。
+Salesko 实际集成候选为 `/Users/kito/Projects/salesko-new-wt-sdk-test-90fab70` 的 `codex/recurring-sdk-adoption-test`，source `9d4ea2d`，Draft PR #241。目录旧名不表示当前仍 detached 或固定在90fab70。并行产品候选57b59f3未导入；保留其 WIP。Owner 最新要求优先 Salesko、不要动 aiphabee：K6 暂停，不读取、不修改、不安装或测试。
 生产迁移、发布、部署和真实付费 runtime 执行不因本计划自动获授权。当前主仓存在其他任务 WIP；不得接管 downstream-issue-intake 的 harness 状态或修改其文件。
 
 ## P1 — Map
@@ -50,24 +50,26 @@ K0 不是 SDK 交付；K4 不是发布；K5 不是生产部署。跨阶段有可
 ## Current checkpoint
 
 - SDK Draft PR #181 的可执行候选为 `2da3bf2873640d285a6ef510e760fe0747495f77`，dispatch0.18.0-rc.1 / keys0.4.4-rc.1；未发布。完整 build/typecheck、API/version/workflow、3966 PASS /135 SKIP 和十包 packed gate 通过。具体局限与日志见 notes。
-- Salesko Draft PR #241 source7764553 使用上述精确 RC：全部十个 tarball hash 校验通过，实际安装的六包逐文件匹配。control138 PASS /640 assertions + typecheck；实际 dispatcher/repository 取消与重放2 PASS /25 assertions。
+- Salesko Draft PR #241 source9d4ea2d 使用上述精确 RC：全部十个 tarball hash 校验通过，实际安装的六包逐文件匹配。control138 PASS /640 assertions + typecheck；实际 dispatcher/repository 取消与重放2 PASS /25 assertions。
 - local tarball overrides 与 bun.lock 仅用于隔离测试，不提交成生产依赖。合并前仍需确定可分发的依赖来源与精确版本；当前 registry0.17.0 不具有新 API。
 - K5 的公共 API 与 artifact 接入已有证据；K7 的完整 Host 行为不能由这些集成测试替代。历史阶段证据与失败限制保留在同名 notes，不再将旧 next action 当作当前工作。
 
 ## Next action
 
-核对 Salesko 服务端恢复执行者与 A29：浏览器关闭或 worker 重启后，旧消息、取消、同身份 admission 的对账仍须被服务端持续驱动。先核实当前候选真实调用链与现有执行者，再收敛该有界缺口；不重新包装已经通过的 SDK API。Summary/预算/完整交互和授权 runtime 仍在 K7，禁止以该单项替代整 Sprint。
+Salesko 服务端扫描候选已接入 minute cron，90 项相关测试及 PG 并发扫描/批次丢失后恢复通过。继续验收 A29 的独立进程重启边界及 unknown/held 处置，不把对象重建当作 OS-kill 或部署证据。原 S4–S7 continuity/ContextPack/Summary/队列交互仍待完成，参数与授权 runtime 不由扫描器默认值替代。
 
 ## 2026-09-10 requirement audit checkpoint
 
 - K1–K3 public capability/input/recovery implementation has concrete evidence: strict recurring input, immutable admission, exact disposition, cancellation/terminal/resource separation, embedded parity and authenticated Salesko consumer integration. This does not transfer Host product ownership to SDK.
 - K4 named RC source2da3bf28 passed full3966/135-skipped and packed checks; earlier69c9 evidence remains historical.
-- K5 Salesko241 source7764553 adopts fresh submission and typed observations. Existing remote base is incorporated; local parallel57b59f3 is unpushed and not imported. Exact version pins still need the named candidate artifacts.
+- K5 Salesko241 source9d4ea2d adopts fresh submission and typed observations. Existing remote base is incorporated; local parallel57b59f3 is unpushed and not imported. Exact version pins still need the named candidate artifacts.
 - K6 is PAUSED by explicit Owner instruction; no aiphabee access.
-- K7 is incomplete: original S3 server recovery runner/A29, S4 create-only continuity, S5 Summary/budgets, S6 queue/recovery/stop-send, S7 UI and S9 authorized runtime evidence are not proven by current API tests. G3/G4 numeric/model/Summary choices remain unresolved in the source parameter draft.
+- K7 is incomplete: original S3 target-process recovery/A29, S4 create-only continuity, S5 Summary/budgets, S6 queue/recovery/stop-send, S7 UI and S9 authorized runtime evidence are not proven by current API tests. G3/G4 numeric/model/Summary choices remain unresolved in the source parameter draft.
 
 A01–A29 remain the original acceptance scope: A01–A12/A19/A20 have varying local SDK, actual repository and PG fault evidence in notes; A13/A14 lifecycle tests are not operator recovery proof; A15/A21 lack product blocked/manual continuation; A16–A18/A24/A28 depend on complete ContextPack/Summary; A22/A23/A26/A29 require Host actions and server scheduler; A25 history and A27 actual two-mode coexistence remain incomplete in the adopted branch. None is upgraded to production PASS by this audit.
 
 K1–K4 SDK candidate stage closes at2da3bf28: named RC build/typecheck/API/version/release-graph/workflow PASS, full3966 PASS/135 SKIP, ten-package isolated npm packed gate PASS. Required Host product cases, unexecuted runtime lanes and paused aiphabee are not included in this SDK-stage completion. No publication. Artifacts retained at _ops/sdk-first/artifacts-2da3bf28.
 
 K5/S3 prerequisite at Salesko7764553: one durable reconciliation path for initial dispatch and HTTP; conflict regression plus79 related tests and API types pass. Installed RC consumer integration2 PASS. Next remains bounded server outbox scan and scheduled recovery; A29 not closed.
+
+K5/S3 at Salesko9d4ea2d: server minute scheduler and bounded durable scan implemented;90 tests, PG concurrent selection/reconstruction, API types and installed RC integration pass. Full A29 runtime/operational evidence remains open.
