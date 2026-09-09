@@ -79,3 +79,6 @@ A29 local process evidence at Saleskoaf1e2d9: actual SIGKILL and distinct recove
 S4 API stage at Saleskoee84d4f: required immutable mode/version, fresh/session second-execution choice, PG persistence and client fixture cutover pass. S4 UI/S5/S6/S7/full runtime remain unfinished.
 
 S5 prerequisite at Salesko3ec993b: fresh truncated-context rejection and mode-consistent readiness pass84 tests/types. G4 Summary execution path requested from Owner, still pending; no dependent implementation chosen. Dispatch-time logical prefix and queue prerequisites remain open.
+
+
+K5/S5 prerequisite at Salesko30b3ba9: logical Turn history preserved through repository/handoff/schema despite interleaved physical sequences.100 API/contracts tests +43 control tests, API/contracts types, full disposable PostgreSQL rehearsal and installed RC integration2/25 pass. SDK executable/artifact subject remains2da3bf28; only integration subject pin changes. Zero-Execution queue, dispatch-time ContextPack and Summary remain unfinished; K6 stays paused.

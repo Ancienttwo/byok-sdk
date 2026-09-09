@@ -265,3 +265,8 @@ Salesko3ec993b refuses truncated fresh handoff before input/Turn/Execution inser
 ## S5 revision authority repair
 
 Salesko1f59167 fixes a real PG regression: accepted assistant body advanced message_count but not transcript_revision. Guard failed before fix (1 versus2); shared locked message transaction now increments revision by exact inserted message count. Accepted -> cancel -> exact replay stays2. Full temporary PG rehearsal and75 repository/routes tests pass; no public SDK/artifact change. Logs salesko-revision-before/after/tests.log. Zero-Execution queue requires the coupled contracts/events/cancel/repository/web cut, not optionalizing taskId alone. Summary path answer remains pending.
+
+
+## Salesko logical-history prerequisite — 30b3ba9
+
+Actual code path previously sorted physical message sequence in repository and handoff and required monotonic sequence in schema. Regression exposed U1/A1/U2/A2 becoming U1/U2/A1/A2. Salesko commit30b3ba972a8960cfeb58d1c9711d8caefa7d53ed preserves Turn order, retains physical identities and validates a maximum-included physical watermark (not Summary coverage).100 API/contracts tests725 assertions;43 control241; types; full disposable PG rehearsal; installed exact RC integration2/25 PASS. Evidence _ops/sdk-first/salesko-logical-*.log includes intentional pre-fix failure. SDK source/artifacts unchanged2da3bf28, no repack. Full zero-Execution queue/dispatch-time freeze/Summary/UI/runtime acceptance still open. No aiphabee activity.
