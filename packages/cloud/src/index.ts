@@ -347,3 +347,5 @@ export type {
 } from './stores/in-memory/index';
 
 export type { DeviceTerminal } from './terminal-result';
+
+export { RecurringExecutionInputSchema, type RecurringExecutionInput } from './recurring';

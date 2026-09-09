@@ -62,3 +62,5 @@ K0 不是 SDK 交付；K4 不是发布；K5 不是生产部署。跨阶段有可
 按实施契约的“Recurring chat lifecycle”完成 SDK 接入闭环。先将输入必填不变量和独立执行观察做成类型/运行时故障测试，再决定最终公开入口；不能用新名字包装旧 optional 参数组合就宣布模式完成。aiphabee 入口已回读：byok-host/coordinator → SQLite ByokServer → research-pass dispatch/offer/get。新契约须同时服务 embedded 与 hosted，具体 recurring 产品行为仍不可从 research pass 推导。
 
 Typed device terminal 已实现并完成定向验证：Cloud 9 PASS；server HTTP/SQLite 22 PASS / 2 SKIP；两包 build/typecheck/API golden PASS。完整 recurring 输入与接入契约仍未完成；旧全套测试不能证明本次新增代码。
+
+严格 recurring 输入及两种提交入口已实现，Cloud 19 PASS，server 10 PASS / 2 SKIP；不允许派发时补 taskId 或缺失 required message/context。仍需 consumer 注册门禁、持久输入恢复闭环、完整/packed 验收与下游验证。

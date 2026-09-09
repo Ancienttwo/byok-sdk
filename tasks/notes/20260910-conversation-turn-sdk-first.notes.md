@@ -85,3 +85,11 @@ Added Cloud readDeviceTerminal / embedded tasks.deviceTerminal returning DeviceT
 RED: missing public reader proved after an actual cancel request; malformed wrong-task test initially omitted required sessionRef, fixture corrected before validating receipt identity. GREEN: Cloud terminal-result suite 9 PASS; Cloud/server build and typecheck PASS; server HTTP and SQLite receipt suites 22 PASS / 2 existing SKIP, including device terminal after cancellation and reopen. Cloud/server API goldens regenerated and checked. No full-suite rerun claim for this new source; previous 3952 PASS applied to the preceding message-readback subject.
 
 This is an execution observation primitive for recurring chat, not complete recurring input/dispatch API. Next enforce strict recurring execution input and shared hosted/embedded lifecycle contract. Existing session operation remains explicit; version selection deferred per Owner direction.
+
+## Strict recurring input and shared submission
+
+Introduced SDK-owned RecurringExecutionInputSchema, Cloud submitRecurringExecution and embedded recurring.submit with identical input. Explicit taskId/device/runtime/message requirement/terminal projection/context are required; fresh rejects sessionRef. Protocol schemas remain authority, no duplicate field parser. Host can JSON-persist the validated input; execution returns durable EnqueuedOffer, not a required live TaskHandle. Existing fresh enqueue body moved into one local function used by both public surfaces; no duplicated dispatch writes or fallback.
+
+Tests: 7 invalid-field cases prove no attempt/mailbox write; valid JSON roundtrip dispatch emits fresh, keeps original taskId and refuses delivered duplicate. Cloud recurring plus existing egress suites 19 PASS. Embedded HTTP submission/readback suite 10 PASS / 2 existing SKIP. Cloud/server builds and typechecks passed. First async rejection test exposed synchronous schema throw from a Promise-returning submit method; marked method async so its public failure channel is consistently rejected Promise. No model/device live execution.
+
+Open: consumer-registration gate, typed observation composition and full recovery from persisted recurring input, packed artifacts and current full-suite gates. This is not complete recurring chat MVP.

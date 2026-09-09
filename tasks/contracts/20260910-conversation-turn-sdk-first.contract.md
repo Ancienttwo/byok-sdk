@@ -78,3 +78,7 @@ P3: 先保证 recurring 执行输入不允许这些非法组合，且统一 type
 Allowed: packages/cloud/src/terminal-result.ts, packages/cloud/src/index.ts, packages/cloud/src/cloud.ts, packages/cloud/src/__tests__/terminal-result.test.ts, packages/server/src/index.ts, api-surface/cloud.d.ts, api-surface/server.d.ts and existing spec/notes/plan.
 
 Expose the canonical device terminal as a typed discriminated envelope plus recordedAt. Preserve complete/fail/decline/cancelled type, not a guessed reason parser; task identity must match the receipt key. Cloud and embedded facade share the decoder. Host cancellation is not a device terminal and never produces this observation. This is a building block for the recurring contract, not the complete public product interface.
+
+## Strict recurring submission slice
+
+Allowed: packages/cloud/src/recurring.ts, packages/cloud/src/__tests__/recurring.test.ts plus existing cloud/index, cloud/cloud, server/index, spec and API goldens. Shared schema is a Host composition contract (not wire): explicit taskId/deviceId; existing fresh payload with runtime/messageEgress/terminalProjection required; required server-held context. No sessionRef, unknown fields or automatic IDs. Cloud submitRecurringExecution and embedded recurring.submit share this identical input and return durable EnqueuedOffer, not a process-owned TaskHandle. Existing fresh enqueue body is factored once, without a second dispatch/storage path.

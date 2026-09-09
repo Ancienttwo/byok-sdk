@@ -65,6 +65,23 @@ describe('reference-server Agent egress contract', () => {
     return { byok: instance, daemon };
   }
 
+  it('submits the same strict recurring contract through the embedded facade', async () => {
+    const { byok: instance, daemon } = await start([
+      'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack',
+      'agent-message-egress', 'terminal-projection-selection', AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
+    ], { agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+    const input = { taskId: 'recurring-embedded', deviceId: daemon.deviceId, payload: {
+      instruction: 'frozen context', runtime: 'codex' as const, policy: { mode: 'auto' as const }, agentRef: AGENT_REF,
+      egressPolicy: POLICY, messageEgress: { mode: 'required' as const, contract: 'conversation-turn/v1', contentType: 'text/markdown' as const, maxBytes: 1024 },
+      terminalProjection: { mode: 'none' as const },
+    }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn' } };
+    const offered = await instance.recurring.submit(input);
+    expect(offered.taskId).toBe(input.taskId);
+    expect(await awaitEnvelope(daemon, e => e.task_id === input.taskId)).toMatchObject({ type: 'task.offer_for_agent_with_egress_fresh', payload: input.payload });
+    expect(await instance.tasks.offer(input.taskId)).toMatchObject({ delivered: true, payload: input.payload });
+    await expect(instance.recurring.submit(input)).rejects.toThrow();
+  });
+
   it('keeps user-visible message delivery outside activity and acks the exact authenticated task binding', async () => {
     const consumed: unknown[] = [];
     const { byok: instance, daemon } = await start(

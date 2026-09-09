@@ -1118,3 +1118,15 @@ receipt recordedAt. The discriminated envelope preserves decline versus fail
 and the original payload. Host cancellation alone returns no device terminal.
 A terminal stored under a different task key or with a non-terminal type is an
 error. This observation does not prove native Session.close or home release.
+
+Recurring execution submission uses one public `RecurringExecutionInputSchema`
+for both Cloud `submitRecurringExecution(tenant, input)` and embedded
+`recurring.submit(input)`. The Host persists the validated input before dispatch:
+taskId, exact deviceId, fresh payload with explicit runtime, policy, AgentRef,
+egress policy, required message and terminal projection, plus server-held
+message context. SessionRef and unknown fields are rejected. The input may
+carry the existing instruction blob reference; this does not waive Host context
+budgets or blob retention. No task identity, target or execution mode is inferred.
+Submission returns the existing EnqueuedOffer; recovery reads the same durable
+task/offer rather than a process-owned TaskHandle. Already delivered duplicates
+remain conflicts requiring exact readback; they do not create new executions.

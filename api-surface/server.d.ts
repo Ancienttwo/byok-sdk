@@ -72,7 +72,7 @@ export declare class DeviceConnections {
 }
 // ==== @byok-sdk/server dist/index.d.ts ====
 import { Hono } from 'hono';
-import { type PairingCodeInfo } from '@byok-sdk/cloud';
+import { type EnqueuedOffer, type PairingCodeInfo } from '@byok-sdk/cloud';
 import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
 import type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
 import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, TaskHandle, TaskSnapshot } from './types';
@@ -154,6 +154,10 @@ export interface ByokServer {
     pairing: {
         /** Mint a single-use pairing code for this server's product and tenant (docs/protocol.md §6.1). */
         createPairingCode(input: CreatePairingCodeInput): Promise<PairingCodeInfo>;
+    };
+    /** Durable recurring submission; no TaskHandle is needed to recover after restart. */
+    recurring: {
+        submit(input: import('@byok-sdk/cloud').RecurringExecutionInput): Promise<EnqueuedOffer>;
     };
     dispatch(input: DispatchInput): Promise<TaskHandle>;
     /** Dispatch a fresh Agent execution whose runtime will mint its session after start. */

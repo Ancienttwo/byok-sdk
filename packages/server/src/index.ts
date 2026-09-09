@@ -166,6 +166,10 @@ export interface ByokServer {
     /** Mint a single-use pairing code for this server's product and tenant (docs/protocol.md §6.1). */
     createPairingCode(input: CreatePairingCodeInput): Promise<PairingCodeInfo>;
   };
+  /** Durable recurring submission; no TaskHandle is needed to recover after restart. */
+  recurring: {
+    submit(input: import('@byok-sdk/cloud').RecurringExecutionInput): Promise<EnqueuedOffer>;
+  };
   dispatch(input: DispatchInput): Promise<TaskHandle>;
   /** Dispatch a fresh Agent execution whose runtime will mint its session after start. */
   dispatchFreshAgentEgress(input: FreshAgentEgressDispatchInput): Promise<TaskHandle>;
@@ -758,6 +762,8 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
         projectionHash: desired.projectionHash,
       });
     },
+
+    recurring: { submit(input) { return cloud.submitRecurringExecution(tenant, input); } },
 
     tasks: {
       deviceTerminal(taskId) { return cloud.readDeviceTerminal(tenant, taskId); },
