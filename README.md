@@ -7,10 +7,11 @@ composition over Postgres and R2.
 
 ## Release status
 
-The current release candidate is **0.17.0**, with independent keys **0.4.3**.
+The current release is **0.17.0**, with independent keys **0.4.3**.
 See the [release notes](docs/releases/v0.17.0.md) for durable SQLite receipts,
 caller task identity/read/cancel and the breaking schema-v3 migration boundary.
-Publication remains pending exact-source CI and registry verification.
+Publication, exact-source CI and registry verification are complete. See
+[0.17.0 publication record](docs/releases/v0.17.0-publication.md).
 The previous verified release is [0.16.0](docs/releases/v0.16.0-publication.md).
 
 The bundled Pi runtime is pinned to
@@ -31,7 +32,7 @@ sealed its credential-free manifest and claimed the offer. Do not ship an
 adapter that supports both shapes or allocates process/temp/workspace/session
 resources during `prepare()`; reject unsupported input before claim instead.
 
-After publication, install this release with:
+Install this release with:
 
 ```sh
 npm install byok-sdk@0.17.0

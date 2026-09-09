@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.17.0 / @byok-sdk/keys 0.4.3 — release candidate
+## 0.17.0 / @byok-sdk/keys 0.4.3 — release
 
 - Persist SQLite device enrollment/capabilities/revocation and immutable request
   receipts on the same database. Receipts survive restart and mailbox retention.
@@ -820,7 +820,7 @@ Security and packageability patch for local runtime adapters.
 
 ## 0.1.0 — 2026-08-09
 
-First release candidate of the complete BYOK dispatch SDK.
+First release of the complete BYOK dispatch SDK.
 
 ### Packages
 
