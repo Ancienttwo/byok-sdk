@@ -93,3 +93,11 @@ Introduced SDK-owned RecurringExecutionInputSchema, Cloud submitRecurringExecuti
 Tests: 7 invalid-field cases prove no attempt/mailbox write; valid JSON roundtrip dispatch emits fresh, keeps original taskId and refuses delivered duplicate. Cloud recurring plus existing egress suites 19 PASS. Embedded HTTP submission/readback suite 10 PASS / 2 existing SKIP. Cloud/server builds and typechecks passed. First async rejection test exposed synchronous schema throw from a Promise-returning submit method; marked method async so its public failure channel is consistently rejected Promise. No model/device live execution.
 
 Open: consumer-registration gate, typed observation composition and full recovery from persisted recurring input, packed artifacts and current full-suite gates. This is not complete recurring chat MVP.
+
+## Consumer gate and recurring admission recovery
+
+Added recurring-only consumer registration gate before capability/admission side effects. Existing generic fresh/resume behavior unchanged. Missing-consumer regression was red before the guard, then passed. SQLite three-disposition path now first aborts mailbox append, closes/reopens DB, rejects changed frozen context and recovers from JSON-persisted original recurring input; exactly one mailbox offer is retained. It then exercises the existing finalize outage/reopen/exact-decision sequence.
+
+Targeted evidence: Cloud recurring 9 PASS; server SQLite receipts 13 PASS and server typecheck PASS. No live runtime, no automatic replacement execution and no downstream edits. Broader current-subject Cloud/server verification follows before commit.
+
+Broader current-subject results: Cloud entire suite 377 PASS; server entire suite 372 PASS / 19 SKIP; both commands exit 0. Logs `_ops/sdk-first/cloud-current.log` and `server-current.log`. All 9 API goldens and strict workflow pass; skips and packed/live runtime remain unverified.

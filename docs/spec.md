@@ -1130,3 +1130,10 @@ budgets or blob retention. No task identity, target or execution mode is inferre
 Submission returns the existing EnqueuedOffer; recovery reads the same durable
 task/offer rather than a process-owned TaskHandle. Already delivered duplicates
 remain conflicts requiring exact readback; they do not create new executions.
+
+Recurring submission requires a registered Agent message consumer before any
+admission side effect. An unavailable consumer after restart blocks submission
+until registration is restored; it does not clear persisted cancellation or
+message evidence. Partial initial admission can recover using exactly the
+persisted input, including server-held context. Changed context cannot reuse
+the execution identity. This does not authorize a new execution after failure.

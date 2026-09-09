@@ -64,3 +64,5 @@ K0 不是 SDK 交付；K4 不是发布；K5 不是生产部署。跨阶段有可
 Typed device terminal 已实现并完成定向验证：Cloud 9 PASS；server HTTP/SQLite 22 PASS / 2 SKIP；两包 build/typecheck/API golden PASS。完整 recurring 输入与接入契约仍未完成；旧全套测试不能证明本次新增代码。
 
 严格 recurring 输入及两种提交入口已实现，Cloud 19 PASS，server 10 PASS / 2 SKIP；不允许派发时补 taskId 或缺失 required message/context。仍需 consumer 注册门禁、持久输入恢复闭环、完整/packed 验收与下游验证。
+
+consumer 注册门禁和 recurring 同身份投递恢复已验证；当前 Cloud 全套 377 PASS、server 全套 372 PASS / 19 SKIP，API/workflow PASS。下一闭环为实际 tarball 公共入口消费，不再重复同一源码矩阵。

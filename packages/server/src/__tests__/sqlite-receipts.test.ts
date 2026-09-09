@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createMutableClock, tenantId } from '@byok-sdk/core';
-import { createByokCloud, createHmacTokenSigner, createWebCrypto, fullCapabilityDeclaration } from '@byok-sdk/cloud';
+import { createByokCloud, createHmacTokenSigner, createWebCrypto, fullCapabilityDeclaration, RecurringExecutionInputSchema } from '@byok-sdk/cloud';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { handleInboundEnvelope } from '../../../cloud/src/inbound';
 import { tenantStoresFor } from '../../../cloud/src/tenant-stores';
@@ -26,7 +26,8 @@ describe('SQLite receipt recovery', () => {
     function open(migration?: 'v1-to-v3' | 'v2-to-v3') {
       const stores = createSqliteEmbeddedStores({ path, ...(migration === undefined ? {} : { migration }) }, { clock, crypto });
       const cloud = createByokCloud({ ...stores, clock, crypto,
-        tokenSigner: createHmacTokenSigner(new Uint8Array(32), clock), capabilities: fullCapabilityDeclaration() });
+        tokenSigner: createHmacTokenSigner(new Uint8Array(32), clock), capabilities: fullCapabilityDeclaration(),
+        agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
       const bound = tenantStoresFor({ kind: 'device', tenantId: tenant, productId: 'probe', deviceId }, stores);
       return { stores, cloud, bound };
     }
@@ -53,14 +54,28 @@ describe('SQLite receipt recovery', () => {
         'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-message-egress',
         'terminal-projection-selection', 'agent-egress-fresh-session',
       ] });
-      await runtime.cloud.enqueueFreshAgentEgressOffer(tenant, deviceId, { taskId, payload: {
-        instruction: 'reply', agentRef, policy: { mode: 'auto' },
+      const execution = RecurringExecutionInputSchema.parse({ taskId, deviceId, payload: {
+        instruction: 'reply', runtime: 'codex', agentRef, policy: { mode: 'auto' },
         egressPolicy: { policyRevision: 'policy-v1', activity: { mode: 'metadata-status', delivery: 'latest-value' },
           reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
           transfers: { workspace: { maxBytes: 512, allowedMimeTypes: ['text/plain'] }, transcript: 'disabled', artifact: 'disabled' } },
         messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
         terminalProjection: { mode: 'none' },
       }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn' } });
+      const persistedInput = JSON.stringify(execution);
+      const appendFault = new DatabaseSync(path);
+      appendFault.exec("CREATE TRIGGER fail_recurring_append BEFORE INSERT ON mailbox_message BEGIN SELECT RAISE(ABORT, 'injected recurring append'); END;");
+      appendFault.close();
+      await expect(runtime.cloud.submitRecurringExecution(tenant, JSON.parse(persistedInput))).rejects.toThrow('injected recurring append');
+      expect(await runtime.cloud.readTaskOffer(tenant, taskId)).toMatchObject({ delivered: false });
+      await runtime.stores.close(); runtime = open();
+      const removeAppendFault = new DatabaseSync(path); removeAppendFault.exec('DROP TRIGGER fail_recurring_append'); removeAppendFault.close();
+      await expect(runtime.cloud.submitRecurringExecution(tenant, { ...execution,
+        agentMessageContext: { destinationBinding: 'different' } })).rejects.toThrow();
+      await runtime.cloud.submitRecurringExecution(tenant, JSON.parse(persistedInput));
+      expect(await runtime.cloud.readTaskOffer(tenant, taskId)).toMatchObject({ delivered: true, payload: execution.payload });
+      expect((await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages).toHaveLength(1);
+
       const fault = new DatabaseSync(path);
       fault.exec("CREATE TRIGGER fail_message_finalize BEFORE UPDATE OF terminal_body ON agent_message_admission BEGIN SELECT RAISE(ABORT, 'injected finalize fault'); END;");
       fault.close();

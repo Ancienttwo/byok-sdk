@@ -1731,6 +1731,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     async submitRecurringExecution(tenant, input) {
       const validated = RecurringExecutionInputSchema.parse(input);
+      if (typeof options.agentMessage?.consume !== 'function') throw new Error('Recurring execution requires a registered Agent message consumer.');
       return enqueueFreshAgentEgressOffer(tenant, validated.deviceId, validated);
     },
 
