@@ -189,7 +189,7 @@ import type {
   TaskAttemptPage,
   TaskAttemptStatus,
 } from './stores/ports';
-import { projectTerminalResult, type TerminalResult } from './terminal-result';
+import { projectTerminalResult, readDeviceTerminalReceipt, type DeviceTerminal, type TerminalResult } from './terminal-result';
 import { tenantStoresFor, type CloudRootStores, type TenantStores } from './tenant-stores';
 import type { TruthCommitter, TruthObjectDownloads } from './truth/contract';
 
@@ -592,6 +592,8 @@ export interface ByokCloud {
   listTaskAttempts(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
   /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
   readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
+  /** Actual device terminal only; cancellation intent never creates this observation. */
+  readDeviceTerminal(tenant: TenantId, taskId: string): Promise<DeviceTerminal | undefined>;
   /**
    * Exact durable message decision, independently of task cancellation/terminal.
    * Missing or pending admission returns undefined; invalid persisted evidence
@@ -1901,6 +1903,11 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     readTerminalReceipt(tenant, taskId) {
       return tenantStoresFor(controlPlane(tenant), root).receipts.get(terminalReceiptKey(taskId));
+    },
+
+    async readDeviceTerminal(tenant, taskId) {
+      const receipt = await tenantStoresFor(controlPlane(tenant), root).receipts.get(terminalReceiptKey(taskId));
+      return receipt === undefined ? undefined : readDeviceTerminalReceipt(taskId, receipt);
     },
 
     readAgentMessageDisposition(tenant, deviceId, taskId, payload) {

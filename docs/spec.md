@@ -1111,3 +1111,10 @@ The embedded server exposes the same decision as
 server composition. It delegates to Cloud and does not maintain another
 receipt authority. Fresh and exact-resume execution use the same readback
 identity; this API does not convert either execution mode.
+
+For recurring execution reconciliation, Cloud `readDeviceTerminal` and embedded
+`tasks.deviceTerminal` return the canonical device terminal envelope plus its
+receipt recordedAt. The discriminated envelope preserves decline versus fail
+and the original payload. Host cancellation alone returns no device terminal.
+A terminal stored under a different task key or with a non-terminal type is an
+error. This observation does not prove native Session.close or home release.

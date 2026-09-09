@@ -72,3 +72,9 @@ P3: 先保证 recurring 执行输入不允许这些非法组合，且统一 type
 5. 消息 once-commit、执行开始次数、工具副作用次数分开验收。
 
 这些是后续有界源代码切片的入口；尚未授予任意包级重构，具体修改路径继续逐个列入本契约。
+
+## Device terminal observation slice
+
+Allowed: packages/cloud/src/terminal-result.ts, packages/cloud/src/index.ts, packages/cloud/src/cloud.ts, packages/cloud/src/__tests__/terminal-result.test.ts, packages/server/src/index.ts, api-surface/cloud.d.ts, api-surface/server.d.ts and existing spec/notes/plan.
+
+Expose the canonical device terminal as a typed discriminated envelope plus recordedAt. Preserve complete/fail/decline/cancelled type, not a guessed reason parser; task identity must match the receipt key. Cloud and embedded facade share the decoder. Host cancellation is not a device terminal and never produces this observation. This is a building block for the recurring contract, not the complete public product interface.

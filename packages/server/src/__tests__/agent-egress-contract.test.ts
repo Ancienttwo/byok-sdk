@@ -149,6 +149,10 @@ describe('reference-server Agent egress contract', () => {
     await daemon.send(publish);
     expect(consumed).toHaveLength(1);
     await instance.tasks.cancel(handle.taskId, 'stop remaining');
+    expect(await instance.tasks.deviceTerminal(handle.taskId)).toBeUndefined();
+    const cancelled = createEnvelope('task.cancelled', { agentRef: AGENT_REF, reason: 'device stopped' }, { taskId: handle.taskId });
+    await daemon.send(cancelled);
+    expect(await instance.tasks.deviceTerminal(handle.taskId)).toMatchObject({ envelope: cancelled });
     expect(await instance.tasks.messageDisposition(handle.taskId, daemon.deviceId, publish.payload)).toEqual(firstDisposition.payload);
   });
 

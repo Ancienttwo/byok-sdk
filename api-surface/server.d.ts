@@ -166,6 +166,8 @@ export interface ByokServer {
     readAgentHomeProjection(deviceId: string, agentRef: AgentRef, requestId: string): Promise<AgentHomeProjectionStatusReadback | undefined>;
     tasks: {
         get(taskId: string): Promise<TaskSnapshot | undefined>;
+        /** Actual device terminal, independently of Host cancellation or home release. */
+        deviceTerminal(taskId: string): Promise<import('@byok-sdk/cloud').DeviceTerminal | undefined>;
         /** Immutable kernel offer readback for verifying a persisted host binding. No transport seq is inferred. */
         offer(taskId: string): Promise<import('@byok-sdk/cloud').TaskOfferReadback | undefined>;
         /** Exact SDK message decision; pending is undefined and corrupt persisted evidence throws. */

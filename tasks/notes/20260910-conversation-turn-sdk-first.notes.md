@@ -77,3 +77,11 @@ Owner identified `/Users/kito/Projects/aip-main-open` as aiphabee. Read-only sub
 `packages/byok-host/package.json` pins client/server 0.17.0 and keys 0.4.3. `src/coordinator.ts` is an explicit Node-only public re-export boundary. Actual path: `apps/local-agent/src/research-pass-host.ts:159` creates SQLite-backed ByokServer and local daemon; execute at :211 dispatches persisted binding, reads tasks.offer, and polls tasks.get. This is existing research-pass execution, not evidence of recurring-chat implementation.
 
 Implication: shared SDK design must support embedded SQLite/Node and hosted Cloud composition without requiring aiphabee to copy Salesko's Cloud stores or product repository. Existing research pass must remain an explicit independent operation; do not silently convert it to recurring chat. No downstream code, dependency or staging deployment changed; read-only intake does not trigger deployment.
+
+## Typed actual device terminal
+
+Added Cloud readDeviceTerminal / embedded tasks.deviceTerminal returning DeviceTerminal { envelope, recordedAt }. Canonical codec validates the envelope; receipt task key must equal envelope.task_id and type must be complete/fail/decline/cancelled. Host cancellation produces no observation. Actual type remains available rather than compressing decline/fail to generic failure. No resource-release claim or new storage authority.
+
+RED: missing public reader proved after an actual cancel request; malformed wrong-task test initially omitted required sessionRef, fixture corrected before validating receipt identity. GREEN: Cloud terminal-result suite 9 PASS; Cloud/server build and typecheck PASS; server HTTP and SQLite receipt suites 22 PASS / 2 existing SKIP, including device terminal after cancellation and reopen. Cloud/server API goldens regenerated and checked. No full-suite rerun claim for this new source; previous 3952 PASS applied to the preceding message-readback subject.
+
+This is an execution observation primitive for recurring chat, not complete recurring input/dispatch API. Next enforce strict recurring execution input and shared hosted/embedded lifecycle contract. Existing session operation remains explicit; version selection deferred per Owner direction.

@@ -834,7 +834,7 @@ import { type ByokCloudObserver } from './inbound';
 import { type AgentHomeProjectionReceiptInput } from './agent-home-projections';
 import type { AgentMemoryProjectionAuthorizer, AgentMemoryProjectionStore } from './agent-memory-projection';
 import type { BlobContentProxy, CloudStores, DeviceRecord, AgentEgressRecord, PairingCodeInfo, RequestReceipt, TaskAttempt, TaskAttemptListQuery, TaskAttemptPage } from './stores/ports';
-import { type TerminalResult } from './terminal-result';
+import { type DeviceTerminal, type TerminalResult } from './terminal-result';
 import type { TruthCommitter, TruthObjectDownloads } from './truth/contract';
 /** Matches the reference server's ceiling (§7). */
 export declare const DEFAULT_MAX_BLOB_SIZE_BYTES: number;
@@ -1164,6 +1164,8 @@ export interface ByokCloud {
     listTaskAttempts(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
     /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
     readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
+    /** Actual device terminal only; cancellation intent never creates this observation. */
+    readDeviceTerminal(tenant: TenantId, taskId: string): Promise<DeviceTerminal | undefined>;
     /**
      * Exact durable message decision, independently of task cancellation/terminal.
      * Missing or pending admission returns undefined; invalid persisted evidence
@@ -1851,6 +1853,7 @@ export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contra
 export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RequestReceipt, RequestReceiptStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports';
 export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryBlobs, createInMemoryCloudStores, } from './stores/in-memory/index';
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index';
+export type { DeviceTerminal } from './terminal-result';
 // ==== @byok-sdk/cloud dist/router/registry.d.ts ====
 /**
  * The route inventory (sprint I1).
@@ -3253,8 +3256,16 @@ export interface CloudRootStores {
 }
 export declare function tenantStoresFor(principal: Principal, root: CloudRootStores): TenantStores;
 // ==== @byok-sdk/cloud dist/terminal-result.d.ts ====
-import { type AgentRef, type BlobRef, type TerminalInferenceUsage, type TaskFailPayload } from '@byok-sdk/protocol';
+import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TaskFailPayload } from '@byok-sdk/protocol';
 import type { RequestReceipt } from './stores/ports';
+/** Canonical device evidence, independent of the Host cancellation projection. */
+export interface DeviceTerminal {
+    readonly envelope: Extract<Envelope, {
+        type: 'task.complete' | 'task.fail' | 'task.decline' | 'task.cancelled';
+    }>;
+    readonly recordedAt: string;
+}
+export declare function readDeviceTerminalReceipt(taskId: string, receipt: RequestReceipt): DeviceTerminal;
 /**
  * The typed terminal read model — the hosted counterpart of the embedded
  * coordinator's `TaskResult`, projected off the receipt the inbound gate

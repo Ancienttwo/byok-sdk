@@ -110,11 +110,13 @@ describe('SQLite receipt recovery', () => {
       expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { summary: 'first', sessionRef: 'session-first' }, { taskId }))).toBe('accepted');
       const receipt = await runtime.cloud.readTerminalReceipt(tenant, taskId);
       const result = await runtime.cloud.readTaskResult(tenant, taskId);
+      const deviceTerminal = await runtime.cloud.readDeviceTerminal(tenant, taskId);
       await runtime.stores.core.mailbox.recordDelivery(tenant, { deviceId, deliveredSeq: first.seq });
       await runtime.stores.core.mailbox.advanceCursor(tenant, { deviceId, ackedSeq: first.seq });
       await runtime.stores.core.mailbox.collectRetired(tenant, { deviceId, ackedBefore: '2999-01-01T00:00:00.000Z', expireUnackedBefore: '2999-01-01T00:00:00.000Z' });
       await runtime.stores.close(); runtime = open();
       expect(await runtime.cloud.readTaskResult(tenant, taskId)).toEqual(result);
+      expect(await runtime.cloud.readDeviceTerminal(tenant, taskId)).toEqual(deviceTerminal);
       expect(await runtime.cloud.readTaskResult(other, taskId)).toBeUndefined();
       for (const retry of [input, { taskId, payload: { ...payload, instruction: 'changed' } }]) {
         await expect(runtime.cloud.enqueueOffer(tenant, deviceId, retry)).rejects.toMatchObject({ code: 'coordination_input_invalid' });

@@ -345,3 +345,5 @@ export type {
   InMemoryBlobs,
   InMemoryCloudComposition,
 } from './stores/in-memory/index';
+
+export type { DeviceTerminal } from './terminal-result';

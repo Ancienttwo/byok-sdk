@@ -43,6 +43,25 @@ describe('readTaskResult', () => {
   let stores: TenantStores;
   let deviceId: string;
 
+  it('keeps host cancel separate from typed device terminal evidence', async () => {
+    const taskId = 'cancel-before-terminal';
+    await harness.cloud.enqueueOffer(TENANT_A, deviceId, { taskId, payload: offerPayload() });
+    await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId }, { taskId }));
+    await harness.cloud.cancelTask(TENANT_A, taskId, 'host stop');
+    expect(await harness.cloud.readTaskResult(TENANT_A, taskId)).toMatchObject({ state: 'cancelled' });
+    expect(await harness.cloud.readDeviceTerminal(TENANT_A, taskId)).toBeUndefined();
+    const terminal = createEnvelope('task.complete', { summary: 'already finished', sessionRef: 'native-session' }, { taskId });
+    await handleInboundEnvelope(stores, deviceId, terminal);
+    expect(await harness.cloud.readDeviceTerminal(TENANT_A, taskId)).toMatchObject({ envelope: terminal });
+    expect(await harness.cloud.readTaskResult(TENANT_A, taskId)).toMatchObject({ state: 'cancelled' });
+  });
+
+  it('rejects a terminal stored under another task identity', async () => {
+    await harness.stores.receipts.record(TENANT_A, { key: terminalReceiptKey('target'),
+      body: encodeEnvelope(createEnvelope('task.complete', { summary: 'wrong task', sessionRef: 'session' }, { taskId: 'other' })) });
+    await expect(harness.cloud.readDeviceTerminal(TENANT_A, 'target')).rejects.toThrow();
+  });
+
   beforeEach(async () => {
     harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
