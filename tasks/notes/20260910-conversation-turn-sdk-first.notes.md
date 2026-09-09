@@ -223,3 +223,17 @@ Fetched the actual remote Salesko PR base codex/conversation-turn-fresh-mvp and 
 ## Named candidate version preparation
 
 Public ten-package source manifests and workspace lock metadata now identify dispatch0.18.0-rc.1 / keys0.4.4-rc.1. README explicitly distinguishes unpublished candidate from previous stable0.17.0; spec and changelog align. No design requirement is reduced for compatibility. Read-only npm core/keys candidate lookups returned E404; no registry write or reservation. Frozen install, version authority and release graph pass. Existing source69c9ae69 artifact evidence is retained but does not identify the new candidate bytes. Next: freeze this commit and perform version-coupled required/packed gates once, then consume exact artifacts in Salesko only.
+
+## Named RC frozen acceptance
+
+Subject2da3bf2873640d285a6ef510e760fe0747495f77: dispatch0.18.0-rc.1/keys0.4.4-rc.1. Full build PASS; first concurrent typecheck overlapped declaration regeneration and failed module resolution; rerun after build PASS without source edits. Required ordering is build before checks that consume dist. API9 goldens/version/release-graph/workflow PASS. Full suite3966 PASS/135 SKIP exit0. Logs rc-build.log, rc-types-after-build.log, rc-tests.log.
+
+Pack exit0: ten tarballs, exact internal RC edges, isolated npm singleton/public recurring smoke; retained manifest/artifacts at _ops/sdk-first/artifacts-2da3bf28, all ten SHA256 verified. rc-pack.log. Previous stable-named artifact set is retained historical evidence, not the current RC. K1-K4 closes only this SDK candidate stage; K5/K7 and original Host matrix remain incomplete. No npm publication, production DB/runtime execution or aiphabee access.
+
+## Named RC consumed by Salesko
+
+Salesko source3e39d96949220fa5091483ccf38839a4c1666085 installed retained SDK2da3bf28 dispatch0.18.0-rc.1 / keys0.4.4-rc.1. Installation completed (six packages). All ten tarball SHA256 values match release-manifest; every packaged file in the six installed packages matches its tarball (core33, protocol21, cloud65, client184, dataplane60, keys30). No source-package substitution.
+
+Control `bun run check` exits0:138 PASS/640 assertions, then TypeScript passes. Installed SDK integration exits0:2 PASS/25 assertions through actual dispatcher/repository. Logs salesko-rc-install.log, salesko-rc-check.log, salesko-rc-e2e.log. Earlier PG checks remain evidence for unchanged Salesko source with the prior SDK artifact; no claim they were rerun with this RC. Local overrides and lock remain uncommitted fixture inputs.
+
+P1: SDK public artifact -> Salesko control -> Host repository remains one authoring path. P2: strict fresh dispatch -> consumer commit/cancel arbitration -> typed exact readback/persistence passed. P3: phase closes artifact identity ambiguity, while keeping production dependency resolution, server recovery/A29, Summary/parameters/UI and target runtime distinct. Plan current checkpoint now replaces stale next-action accumulations; history remains here. No aiphabee access or publication.

@@ -128,3 +128,5 @@ Allowed candidate files: apps/byok-control/src/private-agent-chat.ts, main.ts an
 ## Named recurring release candidate (local only)
 
 Prepare dispatch0.18.0-rc.1 and independent keys0.4.4-rc.1 under existing pre-1.0 breaking policy, not a compatibility restriction. Allowed: the ten public packages/*/package.json (core/protocol/client/server/cloud/cloud-dataplane/ui-runtime/testkit/sdk/keys), bun.lock, README.md, CHANGELOG.md, docs/spec.md and existing plan/notes. Preserve all internal workspace edges, freeze candidate manifests/lock/docs, then build and pack once. No registry publication/tag/deploy; prerelease publication remains separately authorized. Read-only npm queries for core/keys target versions returned E404 this turn, not a reservation.
+
+Salesko local tarball override scope advances to the verified 2da3bf28 RC artifact set; no production dependency/lockfile publication or registry writes.
