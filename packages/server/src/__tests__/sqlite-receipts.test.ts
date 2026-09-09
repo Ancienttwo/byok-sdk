@@ -33,6 +33,59 @@ describe('SQLite receipt recovery', () => {
     return { open, path };
   }
 
+  it.each(['accepted', 'held', 'refused'] as const)('recovers pending then immutable %s message disposition across SQLite reopen', async (outcome) => {
+    const { open, path } = fixture(); let runtime = open();
+    const taskId = `message-${outcome}`;
+    const agentRef = { agentId: 'receipt-agent', profileRevision: 'profile-v1' };
+    const message = createEnvelope('agent.message.publish', {
+      agentRef, sessionRef: 'native-session', contract: 'conversation-turn/v1',
+      messageId: '10000000-0000-4000-8000-000000000099', cursor: 1,
+      contentType: 'text/markdown', body: 'hello', byteCount: 5,
+      contentHash: 'sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
+    }, { taskId });
+    let calls = 0;
+    const consume = async () => { calls++; return { outcome }; };
+    const read = () => runtime.cloud.readAgentMessageDisposition(tenant, deviceId, taskId, message.payload);
+    try {
+      await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
+      await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: [
+        'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-message-egress',
+        'terminal-projection-selection', 'agent-egress-fresh-session',
+      ] });
+      await runtime.cloud.enqueueFreshAgentEgressOffer(tenant, deviceId, { taskId, payload: {
+        instruction: 'reply', agentRef, policy: { mode: 'auto' },
+        egressPolicy: { policyRevision: 'policy-v1', activity: { mode: 'metadata-status', delivery: 'latest-value' },
+          reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
+          transfers: { workspace: { maxBytes: 512, allowedMimeTypes: ['text/plain'] }, transcript: 'disabled', artifact: 'disabled' } },
+        messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
+        terminalProjection: { mode: 'none' },
+      }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn' } });
+      const fault = new DatabaseSync(path);
+      fault.exec("CREATE TRIGGER fail_message_finalize BEFORE UPDATE OF terminal_body ON agent_message_admission BEGIN SELECT RAISE(ABORT, 'injected finalize fault'); END;");
+      fault.close();
+      await expect(handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume)).rejects.toThrow('injected finalize fault');
+      expect(calls).toBe(1);
+      expect(await read()).toBeUndefined();
+      await runtime.stores.close(); runtime = open();
+      expect(await read()).toBeUndefined();
+      const repair = new DatabaseSync(path); repair.exec('DROP TRIGGER fail_message_finalize'); repair.close();
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume)).toBe('accepted');
+      expect(calls).toBe(2);
+      const receipt = await read();
+      expect(receipt).toMatchObject({ outcome, messageId: message.payload.messageId, agentRef });
+      await runtime.cloud.cancelTask(tenant, taskId, 'stop remaining');
+      await runtime.stores.close(); runtime = open();
+      expect(await read()).toEqual(receipt);
+      expect(await runtime.cloud.readAgentMessageDisposition(other, deviceId, taskId, message.payload)).toBeUndefined();
+      expect(await runtime.cloud.readAgentMessageDisposition(tenant, 'other-device', taskId, message.payload)).toBeUndefined();
+      // Envelope dedup is process-local; durable message replay must still skip the consumer.
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume)).toBe('accepted');
+      expect(calls).toBe(2);
+      expect(await read()).toEqual(receipt);
+    } finally { await runtime.stores.close(); }
+  });
+
   it('keeps one immutable winner across independent connections, restart and tenants', async () => {
     const { open } = fixture(); const a = open(); const b = open();
     const input = { key: 'same-key', body: 'original' };

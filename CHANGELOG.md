@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — next MINOR
+
+- Add typed Cloud `readAgentMessageDisposition` and embedded server
+  `tasks.messageDisposition` for exact persisted Agent message decisions.
+  Hosts no longer need to parse internal receipt JSON. Pending remains
+  unconfirmed; corrupt or conflicting stored decisions fail closed.
+- Preserve accepted/held/refused across fresh/resume, cancellation and SQLite
+  restart. No Conversation store, execution fallback or wire field added.
+- This additive API is not part of published 0.17.0. Align the next release
+  train and keys core edge before producing publication artifacts.
+
 ## 0.17.0 / @byok-sdk/keys 0.4.3 — release
 
 - Persist SQLite device enrollment/capabilities/revocation and immutable request

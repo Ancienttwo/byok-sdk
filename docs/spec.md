@@ -1093,3 +1093,21 @@ cannot reconstruct historical admission. The terminal read model preserves
 `recovery`, so the host can distinguish this observation from a cloud claim.
 This closes the local-admission/cloud-claim gap without assuming that runtime
 side effects did or did not occur before a crash. No automatic re-execution.
+
+## Host exact Agent message disposition readback
+
+The Cloud `readAgentMessageDisposition(tenant, deviceId, taskId, payload)` reads
+the SDK-owned immutable message decision through a typed public interface. The
+lookup binds the full protocol-validated payload and exact tenant/device/task.
+It does not infer acceptance from consumer return, task result or cancellation.
+Missing and pending admission return undefined; malformed or identity-conflicting
+persisted disposition evidence throws. Accepted, held and refused remain distinct.
+Exact historical decisions remain readable after task cancellation or terminal.
+Hosts do not parse the store's terminalBody representation. This adds no wire
+field, release receipt, Conversation storage or automatic execution retry.
+
+The embedded server exposes the same decision as
+`tasks.messageDisposition(taskId, deviceId, payload)`, with tenant fixed by the
+server composition. It delegates to Cloud and does not maintain another
+receipt authority. Fresh and exact-resume execution use the same readback
+identity; this API does not convert either execution mode.

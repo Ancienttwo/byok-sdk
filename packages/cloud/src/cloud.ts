@@ -83,6 +83,7 @@ import {
   AgentMemoryProjectionCommitRequestSchema,
   AgentEgressAckPayloadSchema,
   AgentMessageServerContextSchema,
+  AgentMessagePublishPayloadSchema,
   TaskOfferForAgentWithEgressPayloadSchema,
   TaskOfferForAgentWithEgressFreshPayloadSchema,
   TaskOfferForAgentPayloadSchema,
@@ -163,7 +164,7 @@ import {
   truthPutHandler,
 } from './handlers/truth';
 import { CloudRouteRegistry, type RouteDescriptor } from './router/registry';
-import { terminalReceiptKey, type ByokCloudObserver } from './inbound';
+import { readAgentMessageDisposition, terminalReceiptKey, type ByokCloudObserver } from './inbound';
 import {
   agentHomeProjectionRequestKey,
   readAgentHomeProjectionStatus,
@@ -591,6 +592,15 @@ export interface ByokCloud {
   listTaskAttempts(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
   /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
   readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
+  /**
+   * Exact durable message decision, independently of task cancellation/terminal.
+   * Missing or pending admission returns undefined; invalid persisted evidence
+   * throws. The Host supplies the complete original payload, not a Turn ID.
+   */
+  readAgentMessageDisposition(
+    tenant: TenantId, deviceId: string, taskId: string, payload: AgentMessagePublishPayload,
+  ): Promise<AgentMessageDispositionPayload | undefined>;
+
   /** Exact durable egress fact and receipt selected by (tenant, device, AgentRef, event id). */
   readAgentEgress(
     tenant: TenantId,
@@ -1891,6 +1901,11 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     readTerminalReceipt(tenant, taskId) {
       return tenantStoresFor(controlPlane(tenant), root).receipts.get(terminalReceiptKey(taskId));
+    },
+
+    readAgentMessageDisposition(tenant, deviceId, taskId, payload) {
+      const parsed = AgentMessagePublishPayloadSchema.parse(payload);
+      return readAgentMessageDisposition(tenantStoresFor(controlPlane(tenant), root), deviceId, taskId, parsed);
     },
 
     readAgentEgress(tenant, deviceId, agentRef, eventId) {

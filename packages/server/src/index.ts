@@ -27,6 +27,8 @@ import {
   TerminalProjectionSelectionSchema,
   type AgentHomeProjectionPayload,
   type AgentRef,
+  type AgentMessagePublishPayload,
+  type AgentMessageDispositionPayload,
   type PermissionPolicy,
   type TaskState,
 } from '@byok-sdk/protocol';
@@ -181,6 +183,8 @@ export interface ByokServer {
     get(taskId: string): Promise<TaskSnapshot | undefined>;
     /** Immutable kernel offer readback for verifying a persisted host binding. No transport seq is inferred. */
     offer(taskId: string): Promise<import('@byok-sdk/cloud').TaskOfferReadback | undefined>;
+    /** Exact SDK message decision; pending is undefined and corrupt persisted evidence throws. */
+    messageDisposition(taskId: string, deviceId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
     /** Request cancellation through the kernel without a process-owned TaskHandle. */
     cancel(taskId: string, reason?: string): Promise<void>;
     /**
@@ -755,6 +759,9 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
 
     tasks: {
       offer(taskId) { return cloud.readTaskOffer(tenant, taskId); },
+      messageDisposition(taskId, deviceId, payload) {
+        return cloud.readAgentMessageDisposition(tenant, deviceId, taskId, payload);
+      },
       async cancel(taskId, reason) {
         const attempt = await cloud.cancelTask(tenant, taskId, reason);
         if (attempt.cancellation !== undefined) {

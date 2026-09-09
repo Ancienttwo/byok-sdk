@@ -115,7 +115,7 @@ describe('reference-server Agent egress contract', () => {
     expect(consumed[0]).toMatchObject({ context: { destinationBinding: 'conversation/42/turn/7', freshnessCursor: 'turn-seq:7' } });
   });
 
-  it.each(['held', 'refused'] as const)('does not re-invoke the product consumer for an exact %s transport replay', async (outcome) => {
+  it.each(['accepted', 'held', 'refused'] as const)('does not re-invoke the product consumer for an exact %s transport replay', async (outcome) => {
     const consumed: unknown[] = [];
     const { byok: instance, daemon } = await start(
       ['agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-message-egress', 'terminal-projection-selection'],
@@ -141,11 +141,15 @@ describe('reference-server Agent egress contract', () => {
     await daemon.send(publish);
     const firstDisposition = await awaitEnvelope(daemon, (e) => e.type === 'agent.message.disposition');
     expect(firstDisposition).toMatchObject({ type: 'agent.message.disposition', task_id: handle.taskId, payload: { outcome } });
+    expect(await instance.tasks.messageDisposition(handle.taskId, daemon.deviceId, publish.payload)).toEqual(firstDisposition.payload);
+    expect(await instance.tasks.messageDisposition(handle.taskId, 'other-device', publish.payload)).toBeUndefined();
 
     // An EXACT transport replay: the awaited send is the barrier, since the
     // admission hook runs inline inside `POST /byok/messages`.
     await daemon.send(publish);
     expect(consumed).toHaveLength(1);
+    await instance.tasks.cancel(handle.taskId, 'stop remaining');
+    expect(await instance.tasks.messageDisposition(handle.taskId, daemon.deviceId, publish.payload)).toEqual(firstDisposition.payload);
   });
 
   // 2d gap: the second half of the `it.each` above. The deleted hub answered

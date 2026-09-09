@@ -73,7 +73,7 @@ export declare class DeviceConnections {
 // ==== @byok-sdk/server dist/index.d.ts ====
 import { Hono } from 'hono';
 import { type PairingCodeInfo } from '@byok-sdk/cloud';
-import { type AgentRef } from '@byok-sdk/protocol';
+import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
 import type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
 import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, TaskHandle, TaskSnapshot } from './types';
 export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, ServerTaskEvent, TaskHandle, TaskResult, TaskSnapshot, } from './types';
@@ -168,6 +168,8 @@ export interface ByokServer {
         get(taskId: string): Promise<TaskSnapshot | undefined>;
         /** Immutable kernel offer readback for verifying a persisted host binding. No transport seq is inferred. */
         offer(taskId: string): Promise<import('@byok-sdk/cloud').TaskOfferReadback | undefined>;
+        /** Exact SDK message decision; pending is undefined and corrupt persisted evidence throws. */
+        messageDisposition(taskId: string, deviceId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
         /** Request cancellation through the kernel without a process-owned TaskHandle. */
         cancel(taskId: string, reason?: string): Promise<void>;
         /**
