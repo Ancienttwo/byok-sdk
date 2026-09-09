@@ -1,0 +1,86 @@
+name: 下游集成反馈 / Downstream integration
+description: 报告集成问题、提出 SDK 通用能力需求或反馈文档缺口。
+title: "[Downstream] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请用中文或 English 描述一个独立问题或需求，提交前搜索现有 Issues。
+        仅提交已脱敏、可分享的证据，不要上传凭证、用户对话或原始 support bundle。
+  - type: dropdown
+    id: request-kind
+    attributes:
+      label: 反馈类型 / Request type
+      options:
+        - Bug / 现有行为不符合约定
+        - Feature / 缺少通用能力
+        - Documentation / 文档或示例缺口
+        - Integration question / 集成疑问
+    validations:
+      required: true
+  - type: input
+    id: downstream
+    attributes:
+      label: 下游项目 / Downstream project
+      description: 项目名称及可分享的关联链接；私有项目可仅写名称。
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: SDK 版本与环境 / Versions and environment
+      description: 填实际安装或打包的精确版本，不要只写 latest；不适用项写 N/A。
+      placeholder: |
+        SDK packages 与版本；源码集成请写 commit：
+        Node/Bun、OS/架构、安装或打包方式：
+        self-hosted / hosted 及相关存储：
+        Pi / Claude / Codex / custom adapter 与 runtime 版本：
+    validations:
+      required: true
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 集成场景与当前行为 / Scenario and current behavior
+      description: 正在完成什么流程，调用哪些 SDK API/CLI，在哪个边界受阻？需求请说明目前为什么做不到。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为与验收标准 / Expected behavior and acceptance
+      description: 描述可观察结果及验证方式，包括适用的错误或拒绝场景；接口方案可选。
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 最小复现或需求示例 / Reproduction or use case
+      description: Bug 请给步骤、最小代码、实际结果、脱敏错误及频率；无法复现请说明证据缺口。需求请给具体输入输出示例。
+    validations:
+      required: true
+  - type: dropdown
+    id: impact
+    attributes:
+      label: 下游影响 / Downstream impact
+      description: 不代表 SDK 已承诺优先级或交付时间。
+      options:
+        - 阻塞上线或升级 / Release blocked
+        - 影响现有用户 / Existing users affected
+        - 有临时绕行方案 / Workaround available
+        - 非阻塞改进 / Non-blocking improvement
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息 / Additional context
+      description: 可填绕行方案及代价、期望时间及原因、相关 Issue/PR/文档和 SDK 归属理由；边界不确定可直说。
+  - type: checkboxes
+    id: submission-checks
+    attributes:
+      label: 提交检查 / Submission checks
+      options:
+        - label: 我已搜索现有 Issues，并在正文关联相关记录。
+          required: true
+        - label: 我已检查正文与附件，移除凭证、个人数据和不可公开内容。
+          required: true
