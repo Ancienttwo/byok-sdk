@@ -48,18 +48,15 @@ Salesko `codex/conversation-turn-fresh-mvp` 候选停在本轮回读的 `90fab70
 
 K0 不是 SDK 交付；K4 不是发布；K5 不是生产部署。跨阶段有可复用证据时先核对 subject，不重复生成昂贵矩阵。
 
-## Verification and next action
+## Current checkpoint
 
-本轮仅文档改动与源码回读，不声明测试 PASS。下一执行点是 K1：在隔离 SDK worktree 中确定公开消息 disposition 与 device terminal 的 Host 消费契约及现有测试覆盖，形成 K2 的最小故障用例。先核实主仓/远端 subject 与并行 WIP，不直接沿用其他 harness 任务的 allowed_paths。
+- Owner 最新裁决：recurring chat 按 breaking 产品/API 设计；0.17.0 是既有稳定版本，不以维持其接口形状为新设计前提。版本号在契约收敛后处理。
+- SDK Draft PR #181，已推送 head `a21db6c0`。消息 typed 回读是已验证的基础切片，不等于完整 recurring chat SDK。该接口可以随新契约调整，不要求保留刚引入的候选别名。
+- 当前执行 worktree：`/Users/kito/Projects/byok-sdk-wt-conversation-turn-sdk-first`。这里的计划是本分支唯一执行账本；主仓副本仅为启动指针。
+- 已有证据：全仓 build/typecheck、9 包 API golden、strict workflow PASS；完整测试 3952 PASS / 135 SKIP。SQLite finalize 故障/重开套件 13 PASS；具体命令与 subject 见 notes。跳过项不算通过，不将 fake daemon 当真实 native runtime。
+- 未完成：完整 recurring chat 公共契约、严格执行输入、typed execution observation、打包消费、真实 Salesko 接入验证、aiphabee 接入边界以及原 PRD 全部 Host 产品验收。
+- Salesko Draft 候选保持不动；只读提取 SDK 测试需求。没有发布、部署或生产迁移。
 
-## K1/K2 checkpoint
+## Next action
 
-执行 worktree：`/Users/kito/Projects/byok-sdk-wt-conversation-turn-sdk-first`，branch `codex/conversation-turn-sdk-first`。实际 Salesko trace 确认 downstream 解析 SDK terminalBody；三态 public readback 回归已取得预期 RED。详见 `tasks/notes/20260910-conversation-turn-sdk-first.notes.md`。K1/K2 尚未完成；后续只在隔离 worktree 更新本计划。
-
-K3 增量：typed Cloud disposition readback 与共享校验已实现；Cloud build/typecheck、23 项定向测试 PASS。完整 required checks、公共 API/version/packed 与 facade/fresh 验收未完成，不能宣布 K3/K4 完成。命令范围误启动的 client 测试已停止，其未诊断失败只记录于 notes。
-
-Fresh/resume Cloud 消息回读故障矩阵及 server tasks.messageDisposition 已通过定向验证：Cloud 26 PASS；server HTTP 9 PASS、2 原有 SKIP；两包 build/typecheck、API golden 通过。SDK 完整/packed、跨重启持久回读与新 public API 的 MINOR 版本处理仍未完成，阶段 PR 尚未提交。
-
-SQLite 三态 finalize 故障/重开测试通过（套件 13 PASS）；全仓 build/typecheck、9 包 API golden 和 strict workflow PASS。完整测试运行中，日志 `_ops/sdk-first/test.log`，需回读完成结果。当前新增 API 以 Unreleased next MINOR 标记，版本冻结与 packed 验收未完成。
-
-完整测试已退出 0：3952 PASS / 135 SKIP；SKIP 未获验收。源码阶段提交 8e735d44，packed、下一 MINOR 版本与完整 Sprint 仍未完成。
+按实施契约的“Recurring chat lifecycle”完成 SDK 接入闭环。先将输入必填不变量和独立执行观察做成类型/运行时故障测试，再决定最终公开入口；不能用新名字包装旧 optional 参数组合就宣布模式完成。aiphabee 仓库路径已请求用户补充，其回答不阻塞 SDK/Salesko 证据工作。
