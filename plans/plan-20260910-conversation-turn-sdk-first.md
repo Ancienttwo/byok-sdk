@@ -61,3 +61,5 @@ K3 增量：typed Cloud disposition readback 与共享校验已实现；Cloud bu
 Fresh/resume Cloud 消息回读故障矩阵及 server tasks.messageDisposition 已通过定向验证：Cloud 26 PASS；server HTTP 9 PASS、2 原有 SKIP；两包 build/typecheck、API golden 通过。SDK 完整/packed、跨重启持久回读与新 public API 的 MINOR 版本处理仍未完成，阶段 PR 尚未提交。
 
 SQLite 三态 finalize 故障/重开测试通过（套件 13 PASS）；全仓 build/typecheck、9 包 API golden 和 strict workflow PASS。完整测试运行中，日志 `_ops/sdk-first/test.log`，需回读完成结果。当前新增 API 以 Unreleased next MINOR 标记，版本冻结与 packed 验收未完成。
+
+完整测试已退出 0：3952 PASS / 135 SKIP；SKIP 未获验收。源码阶段提交 8e735d44，packed、下一 MINOR 版本与完整 Sprint 仍未完成。
