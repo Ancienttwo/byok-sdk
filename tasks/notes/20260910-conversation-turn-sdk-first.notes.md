@@ -101,3 +101,11 @@ Added recurring-only consumer registration gate before capability/admission side
 Targeted evidence: Cloud recurring 9 PASS; server SQLite receipts 13 PASS and server typecheck PASS. No live runtime, no automatic replacement execution and no downstream edits. Broader current-subject Cloud/server verification follows before commit.
 
 Broader current-subject results: Cloud entire suite 377 PASS; server entire suite 372 PASS / 19 SKIP; both commands exit 0. Logs `_ops/sdk-first/cloud-current.log` and `server-current.log`. All 9 API goldens and strict workflow pass; skips and packed/live runtime remain unverified.
+
+## Actual packed consumer verification
+
+Extended existing release pack gate with recurring-smoke.mjs copied inside the isolated npm install. It imports public core/cloud/server roots only: validates persisted recurring input, registers fixture device through public stores, performs actual fresh enqueue and offer readback, rejects delivered duplicate, observes cancel without fabricated device terminal, and checks embedded recurring/message/device-observation entrypoints and consumer gate. No source or private-module imports. It does not execute a native model or materialize a product Conversation.
+
+`bun run check:release-pack` exit 0, source e78ab5a7775a1591498b2da56facc265a15693c8, Node v26.3.1 darwin arm64. All ten tarballs and exact internal dependency edges passed, isolated npm tree and core singleton passed, existing CLI/runtime packaging checks passed. Manifest retained in `_ops/sdk-first/packed-manifest.json`, full log `pack.log`. Default gate cleaned temporary tarballs/install after completion, so this is verification evidence, not retained downstream installation artifacts.
+
+Version strings remain local source manifests 0.17.0 / keys 0.4.3; these tarballs are NOT published stable artifacts. Owner deferred version selection until breaking recurring contract convergence. No registry writes. Stage PR remains draft; full Host MVP, real downstream runtime and actual recurring conversation acceptance remain incomplete.

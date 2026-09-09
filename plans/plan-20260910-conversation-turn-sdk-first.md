@@ -41,7 +41,7 @@ Salesko `codex/conversation-turn-fresh-mvp` 候选停在本轮回读的 `90fab70
 | K1 | SDK 公开能力与缺口核验 | fresh/resume、同身份 admission、exact message disposition、cancel/terminal/resource 分轴的来源表；真实 Salesko 调用 trace；aiphabee 入口核实 | IN_PROGRESS |
 | K2 | 测试先行 | 用 Salesko 场景形成 SDK 边界故障测试；区分现有 PASS、缺能力、Host 责任；不靠私有格式构造虚假成功 | IN_PROGRESS |
 | K3 | SDK 实现与契约 | 根据 K1/K2 的已证缺口冻结精确 allowed_paths，补公开 API/实现/spec；不默认扩 wire | IN_PROGRESS |
-| K4 | SDK 源码与 packed 验收、提交 PR | required checks、公共导入及打包消费、旧 session 回归、fresh 故障证据；阶段 PR 当前 subject | TODO |
+| K4 | SDK 源码与 packed 验收、提交 PR | required checks、公共导入及打包消费、旧 session 回归、fresh 故障证据；阶段 PR 当前 subject | IN_PROGRESS |
 | K5 | Salesko 真实接入验证 | 消费 K4 精确 artifact；复用已有候选证据但移除本应由 SDK 承担的重复实现；A01–A29 逐项归属 | TODO |
 | K6 | aiphabee 接入边界验证 | 核实第二使用者需求与公共 API 可消费性，不要求复制 Salesko 产品模型 | TODO |
 | K7 | 完整 Host MVP 与总验收 | 原 PRD、原 Salesko S0–S10/A01–A29 保留并逐项关闭；参数、Summary、恢复 UI、真实环境证据不得省略 | TODO |
@@ -66,3 +66,5 @@ Typed device terminal 已实现并完成定向验证：Cloud 9 PASS；server HTT
 严格 recurring 输入及两种提交入口已实现，Cloud 19 PASS，server 10 PASS / 2 SKIP；不允许派发时补 taskId 或缺失 required message/context。仍需 consumer 注册门禁、持久输入恢复闭环、完整/packed 验收与下游验证。
 
 consumer 注册门禁和 recurring 同身份投递恢复已验证；当前 Cloud 全套 377 PASS、server 全套 372 PASS / 19 SKIP，API/workflow PASS。下一闭环为实际 tarball 公共入口消费，不再重复同一源码矩阵。
+
+实际 packed 公共消费 PASS：source e78ab5a7，十包 tarball/隔离 npm 依赖闭合及 recurring smoke 通过。临时包已按既有 gate 清理，未发布；不是 stable 0.17.0 的新能力声明。K4 保持 IN_PROGRESS，原始整 Sprint 验收未收窄。
