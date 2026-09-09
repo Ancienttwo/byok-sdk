@@ -251,3 +251,9 @@ Salesko9d4ea2d introduces a25-row atomic due scan over existing outbox.available
 ## A29 independent process evidence
 
 Saleskoaf1e2d9 extends the disposable PostgreSQL rehearsal with actual child SIGKILL after committed batch reservation and a second child running recovery from DB. Parent observes SIGKILL; second PID differs, preserves both original taskIds and does not dispatch. PG18.4 full rehearsal PASS, provider starts0. Clock is injected and downstream replies are pending fixtures; not deployed cron/native provider evidence. Log salesko-process-recovery-pg.log. Product source unchanged from9d4ea2d; no SDK repack required. Next observed S4 gap: Salesko create SQL still writes session unconditionally; create-only fresh opt-in is not yet implemented. No aiphabee access.
+
+## S4 immutable Conversation continuity in Salesko
+
+Saleskoee84d4f requires explicit continuity{mode:session|fresh,version:1} on creation and exposes it in Conversation v5/list projections using existing immutable SQL columns. Fresh mode never resumes lastExecution; session mode retains exact session behavior. Web current create explicitly selects session, UI choice remains S7. Host/DB reject mode changes, omitted mode is invalid; no compatibility parser.
+
+92 Host/contracts +60 web +138 control tests pass, API/contracts/web/control types pass. PG mode persistence/immutable trigger/second execution tests and earlier SIGKILL/arbitration cases pass. SDK test fixture now creates fresh explicitly and remains installed-artifact based. SDK executable/tarballs remain2da3bf28. Next S5 is dispatch-time logical ContextPack and Summary; current tail is not complete-prefix proof. No aiphabee/production access.

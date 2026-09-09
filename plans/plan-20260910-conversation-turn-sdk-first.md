@@ -56,7 +56,7 @@ K0 不是 SDK 交付；K4 不是发布；K5 不是生产部署。跨阶段有可
 
 ## Next action
 
-A29 本地独立进程验收已通过：领取批次后实际 SIGKILL，另一个进程从临时 PostgreSQL 恢复原 taskId，未重新派发；部署后 cron/native-provider 仍无证据。下一产品缺口为 S4 create-only continuity：当前 Salesko create SQL 始终写 session，需将明确选定的 fresh/session 模式冻结到同一 Conversation 权威并贯穿后续 dispatch。Summary/预算/队列交互仍在原 K7 范围。
+S4 API create-only continuity 已在 Saleskoee84d4f 验收：创建必填模式，DB/Host 不可变，每轮 fresh 或明确 session 分支，前端选择 UI 仍属 S7。下一缺口为 S5：按 Turn 逻辑顺序构造 dispatch-time ContextPack，不能沿用当前截断 tail 冒充完整历史；Summary 的执行/返回路径和预算仍需按原 G3/G4 收敛。A29 本地独立进程已验收，部署与 native-provider 仍无证明。
 
 ## 2026-09-10 requirement audit checkpoint
 
@@ -75,3 +75,5 @@ K5/S3 prerequisite at Salesko7764553: one durable reconciliation path for initia
 K5/S3 at Salesko9d4ea2d: server minute scheduler and bounded durable scan implemented;90 tests, PG concurrent selection/reconstruction, API types and installed RC integration pass. Full A29 runtime/operational evidence remains open.
 
 A29 local process evidence at Saleskoaf1e2d9: actual SIGKILL and distinct recovery process passed in temporary PostgreSQL. No deployment/native runtime claim. Next S4 explicit Conversation continuity selection.
+
+S4 API stage at Saleskoee84d4f: required immutable mode/version, fresh/session second-execution choice, PG persistence and client fixture cutover pass. S4 UI/S5/S6/S7/full runtime remain unfinished.

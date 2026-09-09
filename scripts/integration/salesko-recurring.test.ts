@@ -6,7 +6,7 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 const root = process.env.SALESKO_TEST_ROOT;
 if (!root) throw new Error('Set SALESKO_TEST_ROOT to the isolated pinned Salesko checkout.');
 const sha = Bun.spawnSync(['git', '-C', root, 'rev-parse', 'HEAD']);
-if (sha.exitCode !== 0 || sha.stdout.toString().trim() !== 'af1e2d91bf5fa110a87f582316f86b917d2c8d2c') throw new Error('Salesko test subject mismatch');
+if (sha.exitCode !== 0 || sha.stdout.toString().trim() !== 'ee84d4fe274c10efe0558be92ba2cfd432dc97a8') throw new Error('Salesko test subject mismatch');
 const installed = (name: string) => import(pathToFileURL(Bun.resolveSync(name, root)).href);
 const { tenantId: sdkTenantId } = await installed('@byok-sdk/core');
 const { createEnvelope } = await installed('@byok-sdk/protocol');
@@ -51,7 +51,7 @@ for (const cancelFirst of [false, true]) test(`Salesko transaction + SDK recurri
   ] });
   const binding = { agentRef: { agentId: '7bf9cf51-8c51-4a67-b8f3-4f11de2cecb1', profileRevision: '1' }, deviceId: device.deviceId,
     placementRevision: '3', runtime: 'claude', cwd: 'byok-agent-home', egressPolicy: C.PrivateAgentEgressPolicy, tools: C.PrivateAgentChatToolBinding };
-  await repository.createConversation({ tenantId, userId, conversationId, title: 'Integration', agentId: binding.agentRef.agentId, execution: { epoch: 1 }, now });
+  await repository.createConversation({ continuity: { mode: "fresh", version: 1 }, tenantId, userId, conversationId, title: 'Integration', agentId: binding.agentRef.agentId, execution: { epoch: 1 }, now });
   await repository.submitTurn({ tenantId, userId, conversationId, turnId, clientRequestId: 'integration-request', message: 'U1', binding, expectedExecution: { epoch: 1 }, now });
   const dispatch = await repository.startDispatch({ tenantId, turnId, now });
   expect(dispatch).not.toBeNull();
