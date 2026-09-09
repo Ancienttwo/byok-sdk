@@ -88,3 +88,7 @@ Allowed: packages/cloud/src/recurring.ts, packages/cloud/src/__tests__/recurring
 Allowed: scripts/release/recurring-smoke.mjs and scripts/release/pack-and-smoke.mjs. Extend the existing clean-subject ten-package pack gate; copy the smoke into its isolated npm installation, use public package roots only. Verify strict schema, actual fresh admission/readback, exact duplicate conflict and embedded exports. Do not publish or change versions merely to run local artifact verification.
 
 - packages/client/src/__tests__/recurring-integration.test.ts: real HTTP server + daemon/TaskRunner/outbox with StubRuntimeAdapter; two explicit fresh executions, exact accepted readback and held close barrier. No real provider claim.
+
+## Pinned Salesko integration test slice
+
+Allowed: scripts/integration/salesko-recurring.test.ts. Test the actual Salesko in-memory repository at 90fab70c54895ee0bcf08f45a164bb823f9ada34 through current SDK recurring admission and message HTTP endpoints. No downstream product edits. This is Host acceptance/replay integration evidence, not PostgreSQL concurrency, packed dependency adoption or native provider proof.

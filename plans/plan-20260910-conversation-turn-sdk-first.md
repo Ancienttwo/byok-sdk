@@ -8,7 +8,7 @@ Owner 最新指令：先做 SDK，供 Salesko 与 aiphabee 接入；Salesko 是�
 
 产品权威仍为 `docs/spec.md`。本计划不把既有 fresh 原语等同于完整产品模式；也不预设新增 Conversation store、executionMode 或 wire 字段。保留 B1-A、B2、B3、D05。连续会话模式是可选接入方式，原 session 路径保持明确契约，禁止运行失败后改变语义。
 
-Salesko `codex/conversation-turn-fresh-mvp` 候选停在本轮回读的 `90fab70c54895ee0bcf08f45a164bb823f9ada34`，工作树干净。保留候选，不继续扩大产品实现，不重置或删除。历史 PR 信息需远端回读后再作为当前事实。aiphabee 已由 Owner 指认为 `/Users/kito/Projects/aip-main-open`；现有入口是 Node-only byok-host/coordinator 与 SQLite research-pass host，不代表已有 recurring chat。
+Salesko `codex/conversation-turn-fresh-mvp` 并行候选本轮已推进到 `57b59f377ff4a79a82da6481cf143d1547d395fa`，工作树干净；SDK 测试使用独立 detached checkout 固定 `90fab70c54895ee0bcf08f45a164bb823f9ada34`。保留候选，不继续扩大产品实现，不重置或删除。历史 PR 信息需远端回读后再作为当前事实。aiphabee 已由 Owner 指认为 `/Users/kito/Projects/aip-main-open`；现有入口是 Node-only byok-host/coordinator 与 SQLite research-pass host，不代表已有 recurring chat。
 
 生产迁移、发布、部署和真实付费 runtime 执行不因本计划自动获授权。当前主仓存在其他任务 WIP；不得接管 downstream-issue-intake 的 harness 状态或修改其文件。
 
@@ -70,3 +70,5 @@ consumer 注册门禁和 recurring 同身份投递恢复已验证；当前 Cloud
 实际 packed 公共消费 PASS：source e78ab5a7，十包 tarball/隔离 npm 依赖闭合及 recurring smoke 通过。临时包已按既有 gate 清理，未发布；不是 stable 0.17.0 的新能力声明。K4 保持 IN_PROGRESS，原始整 Sprint 验收未收窄。
 
 真实 HTTP + built public daemon/TaskRunner 两轮 recurring 集成 PASS（StubRuntimeAdapter，非真实模型）：独立 fresh session、required accepted、terminal 早于 close 释放均验证。原 A01–A29 已在 notes 逐组审计，无遗漏、无整案 PASS 冒认。下一步是 Salesko 测试路径接入当前 SDK，仍不扩产品实现。
+
+Pinned Salesko 实际 memory repository × 当前 SDK recurring/message HTTP 集成 2 PASS / 15 assertions：接受先提交后丢响应再取消，精确重放保留正文；取消先提交则拒绝迟到正文；重复回读同一 receipt。未修改下游产品代码，未证明 PG 并发。K2/K5 仍未全部关闭。

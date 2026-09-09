@@ -136,3 +136,15 @@ Test PASS (1). Initial attempt imported source daemon and failed before runtime 
 | A27 | explicit fresh and resume SDK paths; two distinct fresh sessions | old/new Host Conversation identity coexistence/migration mapping |
 
 All 29 IDs remain tracked; SDK stage completion cannot be substituted for product Sprint completion. Next bounded action is test-only Salesko integration of the current SDK public contract (no UI/queue product expansion), followed by the remaining SDK/runtime evidence before downstream implementation resumes.
+
+## Pinned Salesko acceptance integration
+
+P1: current SDK Cloud admission/message HTTP handler crosses into the actual Salesko in-memory repository consumer; no product source changed. P2: createConversation -> submitTurn -> startDispatch supplies persisted execution taskId/offer -> submitRecurringExecution -> agent.message.publish -> recordAgentMessage -> typed disposition readback. P3: preserve Host body authority and exact replay before later cancel; this fixture intentionally does not claim SQL transaction isolation.
+
+Salesko concurrent branch was observed at 57b59f377ff4a79a82da6481cf143d1547d395fa, clean. Earlier statements that it remains stopped at 90fab70 are superseded. Test uses separate detached checkout /Users/kito/Projects/salesko-new-wt-sdk-test-90fab70 at 90fab70c54895ee0bcf08f45a164bb823f9ada34. Frozen install passed; no downstream product or manifest changes.
+
+Command: `SALESKO_TEST_ROOT=/Users/kito/Projects/salesko-new-wt-sdk-test-90fab70 bun test scripts/integration/salesko-recurring.test.ts`. Result: 2 PASS, 15 assertions, exit 0. Log: `_ops/sdk-first/salesko-recurring.log`. First wiring attempt could not resolve workspace package names from scripts; explicit built package entrypoint imports fixed test resolution only.
+
+Accept-first case asserts the actual Host body already exists while SDK disposition remains pending after injected lost consumer response, then cancels and replays to accepted without another body. Cancel-first case returns refused with zero assistant bodies. Both exact transport replays preserve the same SDK receipt. The deliberate exception printed in the log is the tested failure injection.
+
+A07/A08/A09 now have actual Host memory-repository + current SDK boundary evidence. PostgreSQL isolation, production behavior, full downstream dispatcher adoption, packed installation and native provider execution remain outside this result. This standalone Bun test requires an explicit pinned checkout and is not included in workspace Vitest by default.
