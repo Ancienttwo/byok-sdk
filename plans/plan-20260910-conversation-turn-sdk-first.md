@@ -56,7 +56,7 @@ K0 不是 SDK 交付；K4 不是发布；K5 不是生产部署。跨阶段有可
 
 ## Next action
 
-Salesko6d89b8f now reads/replays/cancels zero-Execution input with strict Turn v6 and product input events. Next: change ordinary submission to persist input/order without allocating Execution, then prepare the queue head from current authorized Profile/readiness and closed logical history before external dispatch. Retain same-identity admission recovery for prepared tasks. Summary execution path and G3 budgets/history remain unresolved; no dependent choice is assumed. No aiphabee activity.
+Salesko00b6619 now has request-independent Profile/Placement, binding/session and readiness preparation, alongside Turn v6 zero-Execution read/cancel. Next implement input-only submission and atomic queue-head Execution preparation, then invoke it from HTTP/server recovery while existing frozen tasks continue same-identity reconciliation. Queue-head/prefix/claim checks must be inside the Host transaction; external Profile/control reads precede it. Summary G4 and G3 budgets/history remain unresolved. No aiphabee activity.
 
 ## 2026-09-10 requirement audit checkpoint
 
@@ -88,3 +88,6 @@ K5/S2 zero-Execution lifecycle at Salesko6d89b8f:148 API/contracts/control tests
 
 
 K5 preparation authority at Salesko19294a2: framework-independent readiness query used by HTTP rendering; shared continuity/session/epoch decision used by preflight and repository.111 tests662 assertions, API types, full PG arbitration/continuity/history and installed SDK integration2/25 PASS. SDK executable/artifact subject stays2da3bf28. Profile/successor resolution remains HTTP-bound; queue admission/preparation is still the next implementation, not delivered by this extraction.
+
+
+K5 Profile preparation at Salesko00b6619: shared environment-based pause/rebind/Agent preparation is used by HTTP create/submit and can be called without Hono.89 tests405 assertions + API types + installed SDK integration2/25 pass. Existing Placement CAS/error behavior preserved; no task allocation or queue enablement. SDK executable/artifacts remain2da3bf28.

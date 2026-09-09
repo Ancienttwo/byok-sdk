@@ -280,3 +280,8 @@ Turn v6 has explicit unprepared input with null execution/binding, no terminal/s
 ## Shared preparation authority — Salesko19294a2
 
 Current HTTP readiness now uses queryPrivateAgentReadiness(env, tenant, explicit target, control factory); it returns typed failure rather than requiring a fabricated Hono Context. HTTP rendering is a projection. Route and repository share privateAgentChatSessionSelection, including exact continuity/binding/epoch validation. Tests111/662, API types, complete PG arbitration/continuity/history and installed RC integration2/25 PASS. Logs _ops/sdk-first/salesko-preparation-*.log. No SDK source/artifact change from2da3bf28, no aiphabee, no live runtime. Ordinary submission remains single-active/prepared; Profile/successor resolution, true enqueue/preparation split and G3/G4/full Sprint remain open.
+
+
+## Profile preparation — Salesko00b6619
+
+Request-independent current Agent/Placement composition now owns chat binding/session/readiness. Existing HTTP create/submit calls it. Mutation pause and exact same-machine rebind use the existing CAS/projection authority, with thin HTTP failure rendering.89 tests405 assertions, API types and installed RC integration2/25 pass. Logs _ops/sdk-first/salesko-profile-preparation-*.log. SDK executable2da3bf28 remains unchanged. This stage does not allocate a task or wire queue-head preparation into cron; input-only submission/atomic preparation is next. G3/G4/full Host acceptance remain open; aiphabee untouched.
