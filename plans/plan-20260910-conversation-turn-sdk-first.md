@@ -56,7 +56,7 @@ K0 不是 SDK 交付；K4 不是发布；K5 不是生产部署。跨阶段有可
 
 ## Next action
 
-Salesko 服务端扫描候选已接入 minute cron，90 项相关测试及 PG 并发扫描/批次丢失后恢复通过。继续验收 A29 的独立进程重启边界及 unknown/held 处置，不把对象重建当作 OS-kill 或部署证据。原 S4–S7 continuity/ContextPack/Summary/队列交互仍待完成，参数与授权 runtime 不由扫描器默认值替代。
+A29 本地独立进程验收已通过：领取批次后实际 SIGKILL，另一个进程从临时 PostgreSQL 恢复原 taskId，未重新派发；部署后 cron/native-provider 仍无证据。下一产品缺口为 S4 create-only continuity：当前 Salesko create SQL 始终写 session，需将明确选定的 fresh/session 模式冻结到同一 Conversation 权威并贯穿后续 dispatch。Summary/预算/队列交互仍在原 K7 范围。
 
 ## 2026-09-10 requirement audit checkpoint
 
@@ -73,3 +73,5 @@ K1–K4 SDK candidate stage closes at2da3bf28: named RC build/typecheck/API/vers
 K5/S3 prerequisite at Salesko7764553: one durable reconciliation path for initial dispatch and HTTP; conflict regression plus79 related tests and API types pass. Installed RC consumer integration2 PASS. Next remains bounded server outbox scan and scheduled recovery; A29 not closed.
 
 K5/S3 at Salesko9d4ea2d: server minute scheduler and bounded durable scan implemented;90 tests, PG concurrent selection/reconstruction, API types and installed RC integration pass. Full A29 runtime/operational evidence remains open.
+
+A29 local process evidence at Saleskoaf1e2d9: actual SIGKILL and distinct recovery process passed in temporary PostgreSQL. No deployment/native runtime claim. Next S4 explicit Conversation continuity selection.
