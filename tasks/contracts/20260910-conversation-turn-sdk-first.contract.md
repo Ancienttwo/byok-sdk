@@ -82,3 +82,7 @@ Expose the canonical device terminal as a typed discriminated envelope plus reco
 ## Strict recurring submission slice
 
 Allowed: packages/cloud/src/recurring.ts, packages/cloud/src/__tests__/recurring.test.ts plus existing cloud/index, cloud/cloud, server/index, spec and API goldens. Shared schema is a Host composition contract (not wire): explicit taskId/deviceId; existing fresh payload with runtime/messageEgress/terminalProjection required; required server-held context. No sessionRef, unknown fields or automatic IDs. Cloud submitRecurringExecution and embedded recurring.submit share this identical input and return durable EnqueuedOffer, not a process-owned TaskHandle. Existing fresh enqueue body is factored once, without a second dispatch/storage path.
+
+## Packed consumer gate
+
+Allowed: scripts/release/recurring-smoke.mjs and scripts/release/pack-and-smoke.mjs. Extend the existing clean-subject ten-package pack gate; copy the smoke into its isolated npm installation, use public package roots only. Verify strict schema, actual fresh admission/readback, exact duplicate conflict and embedded exports. Do not publish or change versions merely to run local artifact verification.
