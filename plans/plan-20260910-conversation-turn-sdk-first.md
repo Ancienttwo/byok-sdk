@@ -85,3 +85,6 @@ K5/S5 prerequisite at Salesko30b3ba9: logical Turn history preserved through rep
 
 
 K5/S2 zero-Execution lifecycle at Salesko6d89b8f:148 API/contracts/control tests1000 assertions;56 web tests221; API/Web types and contracts build; two real PostgreSQL rehearsals, installed candidate integration2/25 PASS. No SDK executable change/repack. This is a public reader/cancel prerequisite, not multi-input queue admission. K7 remains open.
+
+
+K5 preparation authority at Salesko19294a2: framework-independent readiness query used by HTTP rendering; shared continuity/session/epoch decision used by preflight and repository.111 tests662 assertions, API types, full PG arbitration/continuity/history and installed SDK integration2/25 PASS. SDK executable/artifact subject stays2da3bf28. Profile/successor resolution remains HTTP-bound; queue admission/preparation is still the next implementation, not delivered by this extraction.
