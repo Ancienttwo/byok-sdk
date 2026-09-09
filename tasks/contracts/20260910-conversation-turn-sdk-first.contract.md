@@ -100,3 +100,7 @@ P1/P2: Cloud readTaskAttempt exposes canonical ownership/status/cancellation; em
 ## Embedded SQLite facade restart acceptance
 
 Allowed: packages/server/src/__tests__/recurring-restart.test.ts. P1: public server facade with file-backed SQLite and authenticated HTTP device. P2: persist input -> interrupted admission -> close/recreate server -> same input recovery -> exact message acceptance -> cancel -> close/recreate -> independent durable observations. P3: use SQL only to inject/remove mailbox fault, never seed or parse receipt facts. Keep Host input separate from SDK storage and no TaskHandle across restart.
+
+## Salesko-only artifact adoption test
+
+Owner directs Salesko first and no aiphabee work. Allowed test-only mutations: /Users/kito/Projects/salesko-new-wt-sdk-test-90fab70/package.json (exact local tarball overrides), bun.lock and installed dependencies. Product source remains pinned to 90fab70. Verify all artifact SHA256 before installation; run actual byok-control tests/typecheck. Keep these local fixture dependency changes out of product PRs. No aiphabee reads, edits, installs or tests.

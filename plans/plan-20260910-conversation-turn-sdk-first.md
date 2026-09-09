@@ -78,3 +78,5 @@ Lifecycle public-source map is now recorded in notes. Embedded tasks.attempt clo
 Embedded facade reconstruction acceptance PASS: actual SQLite/HTTP, disk-persisted input, interrupted admission, two facade reconstructions, immutable accepted/cancel readback and consumer-once replay. No process-owned TaskHandle. SDK source is now frozen for current full-workspace and packed gates; results must identify this new subject.
 
 69c9ae69 SDK candidate required source gates PASS: full workspace 3966 PASS / 135 SKIP; build/typecheck/API/version/workflow PASS. Ten-package packed gate PASS and artifacts retained in _ops/sdk-first/artifacts-69c9ae69 with source/hash manifest. K4 candidate evidence is current; overall Sprint and downstream adoption remain open. Next use retained exact artifacts for Salesko/aiphabee boundary tests; do not repack unchanged source.
+
+Owner 最新范围：优先仅推进 Salesko；不读取、不修改、不执行 aiphabee。K6 暂停，保留原目标跟踪但本轮不开展。下一接入验证使用固定 Salesko 测试 checkout 与 69c9ae69 产物，不触碰并行产品工作树。
