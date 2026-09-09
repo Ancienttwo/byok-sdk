@@ -3,6 +3,21 @@
 > **Status**: Approved
 > **Backlog Schema**: 2
 
+## PRD
+
+Execute the approved one-group, two-slot delivery canary for the original
+[Issue #177](https://github.com/Ancienttwo/byok-sdk/issues/177) and
+[Issue #178](https://github.com/Ancienttwo/byok-sdk/issues/178).
+The source scope and prior evidence are recorded in
+[the delivery continuation](../../docs/researches/20260909-brc1415-delivery-canary.md).
+
+Issue #177 requires the SDK README to document its existing seven namespaces,
+including uiRuntime, while retaining the keys exclusion. Issue #178 retains the
+verified existing packed-install smoke coverage and follows formal not-planned
+closure; do not invent a replacement gap. Completion requires real Docker
+worker/verifier execution, a repair PR, manual merge, automatic closeout and one
+fresh group-end audit. Deployment and package release remain outside this canary.
+
 ## Backlog
 
 | # | ID | Status | Task | Mode | Acceptance | Plan |
