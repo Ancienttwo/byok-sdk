@@ -56,7 +56,7 @@ K0 不是 SDK 交付；K4 不是发布；K5 不是生产部署。跨阶段有可
 
 ## Next action
 
-S4 API create-only continuity 已在 Saleskoee84d4f 验收：创建必填模式，DB/Host 不可变，每轮 fresh 或明确 session 分支，前端选择 UI 仍属 S7。下一缺口为 S5：按 Turn 逻辑顺序构造 dispatch-time ContextPack，不能沿用当前截断 tail 冒充完整历史；Summary 的执行/返回路径和预算仍需按原 G3/G4 收敛。A29 本地独立进程已验收，部署与 native-provider 仍无证明。
+Salesko6d89b8f now reads/replays/cancels zero-Execution input with strict Turn v6 and product input events. Next: change ordinary submission to persist input/order without allocating Execution, then prepare the queue head from current authorized Profile/readiness and closed logical history before external dispatch. Retain same-identity admission recovery for prepared tasks. Summary execution path and G3 budgets/history remain unresolved; no dependent choice is assumed. No aiphabee activity.
 
 ## 2026-09-10 requirement audit checkpoint
 
@@ -82,3 +82,6 @@ S5 prerequisite at Salesko3ec993b: fresh truncated-context rejection and mode-co
 
 
 K5/S5 prerequisite at Salesko30b3ba9: logical Turn history preserved through repository/handoff/schema despite interleaved physical sequences.100 API/contracts tests +43 control tests, API/contracts types, full disposable PostgreSQL rehearsal and installed RC integration2/25 pass. SDK executable/artifact subject remains2da3bf28; only integration subject pin changes. Zero-Execution queue, dispatch-time ContextPack and Summary remain unfinished; K6 stays paused.
+
+
+K5/S2 zero-Execution lifecycle at Salesko6d89b8f:148 API/contracts/control tests1000 assertions;56 web tests221; API/Web types and contracts build; two real PostgreSQL rehearsals, installed candidate integration2/25 PASS. No SDK executable change/repack. This is a public reader/cancel prerequisite, not multi-input queue admission. K7 remains open.
