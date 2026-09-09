@@ -68,3 +68,5 @@ Typed device terminal 已实现并完成定向验证：Cloud 9 PASS；server HTT
 consumer 注册门禁和 recurring 同身份投递恢复已验证；当前 Cloud 全套 377 PASS、server 全套 372 PASS / 19 SKIP，API/workflow PASS。下一闭环为实际 tarball 公共入口消费，不再重复同一源码矩阵。
 
 实际 packed 公共消费 PASS：source e78ab5a7，十包 tarball/隔离 npm 依赖闭合及 recurring smoke 通过。临时包已按既有 gate 清理，未发布；不是 stable 0.17.0 的新能力声明。K4 保持 IN_PROGRESS，原始整 Sprint 验收未收窄。
+
+真实 HTTP + built public daemon/TaskRunner 两轮 recurring 集成 PASS（StubRuntimeAdapter，非真实模型）：独立 fresh session、required accepted、terminal 早于 close 释放均验证。原 A01–A29 已在 notes 逐组审计，无遗漏、无整案 PASS 冒认。下一步是 Salesko 测试路径接入当前 SDK，仍不扩产品实现。

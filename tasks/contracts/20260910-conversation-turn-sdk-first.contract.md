@@ -86,3 +86,5 @@ Allowed: packages/cloud/src/recurring.ts, packages/cloud/src/__tests__/recurring
 ## Packed consumer gate
 
 Allowed: scripts/release/recurring-smoke.mjs and scripts/release/pack-and-smoke.mjs. Extend the existing clean-subject ten-package pack gate; copy the smoke into its isolated npm installation, use public package roots only. Verify strict schema, actual fresh admission/readback, exact duplicate conflict and embedded exports. Do not publish or change versions merely to run local artifact verification.
+
+- packages/client/src/__tests__/recurring-integration.test.ts: real HTTP server + daemon/TaskRunner/outbox with StubRuntimeAdapter; two explicit fresh executions, exact accepted readback and held close barrier. No real provider claim.

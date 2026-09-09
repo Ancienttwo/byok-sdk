@@ -109,3 +109,30 @@ Extended existing release pack gate with recurring-smoke.mjs copied inside the i
 `bun run check:release-pack` exit 0, source e78ab5a7775a1591498b2da56facc265a15693c8, Node v26.3.1 darwin arm64. All ten tarballs and exact internal dependency edges passed, isolated npm tree and core singleton passed, existing CLI/runtime packaging checks passed. Manifest retained in `_ops/sdk-first/packed-manifest.json`, full log `pack.log`. Default gate cleaned temporary tarballs/install after completion, so this is verification evidence, not retained downstream installation artifacts.
 
 Version strings remain local source manifests 0.17.0 / keys 0.4.3; these tarballs are NOT published stable artifacts. Owner deferred version selection until breaking recurring contract convergence. No registry writes. Stage PR remains draft; full Host MVP, real downstream runtime and actual recurring conversation acceptance remain incomplete.
+
+## Two-turn SDK integration and requirement audit
+
+Added real loopback HTTP server + built public client daemon/TaskRunner + durable message outbox integration with StubRuntimeAdapter. Two recurring submissions start distinct sessionRefs with no resume input. Both required replies receive typed accepted disposition. Each terminal becomes visible while Session.close is deliberately blocked and local active ownership remains; the next turn starts only after the test explicitly releases close. Second instruction contains the Host-provided U1/A1/U2 fixture. This proves execution/transmission and exact input carriage, not Host context-builder correctness or real model quality.
+
+Test PASS (1). Initial attempt imported source daemon and failed before runtime because Node helper path resolved to nonexistent src/bin/*.js. Diagnostic run retained exact decline reason; corrected test to consume built public @byok-sdk/client, without bypassing preflight or changing production source. Existing client build is required by this integration, as by other package-entry tests.
+
+### Original A01-A29 audit (no whole-case PASS implied by component tests)
+
+| IDs | Current SDK evidence | Remaining product / full-path evidence |
+|---|---|---|
+| A01,A04 | strict persisted input and exact delivered conflict/readback | Host outbox transaction and lost-return recovery |
+| A02,A03 | SQLite admission/append-marker fault tests; recurring pre-append reopen | recurring post-append marker path combined with actual Host recovery |
+| A05 | immutable SDK offer/context rejects changed identity reuse | Host multi-worker lease/CAS fencing |
+| A06,A07 | pending finalize fault and exact SDK replay across restart | actual Host transaction once-commit through new SDK surface |
+| A08,A09,A10 | immutable message decision survives cancel; device terminal separate; close barrier | Host cancel/accept arbitration through new surface |
+| A11 | no future SDK cancellation tombstone fabricated | Host durable cancel through in-flight enqueue |
+| A12 | exact tenant/device/task/payload isolation | Host generation and accepted-slot fencing |
+| A13,A14 | existing outbox/lifecycle tests are source evidence | latest complete recovery matrix and retained held operator handling |
+| A15,A21 | actual TaskRunner close barrier, existing home single-writer tests | product blocked/manual recovery and busy after delayed close |
+| A16,A17,A18,A24,A25,A28 | input schema/transport carries exact instruction; no context synthesis | logical history, summary coverage/CAS/quality, budgets and Unicode acceptance |
+| A19 | SDK storage tests do not prove Host DB lock order | actual Host transaction concurrency test |
+| A20 | recurring consumer registration gate PASS | deployment consumer readiness and runtime dependency failure path |
+| A22,A23,A26,A29 | SDK exposes durable operations independent of live TaskHandle | Host action IDs, settlement, stop-send and server recovery scanner |
+| A27 | explicit fresh and resume SDK paths; two distinct fresh sessions | old/new Host Conversation identity coexistence/migration mapping |
+
+All 29 IDs remain tracked; SDK stage completion cannot be substituted for product Sprint completion. Next bounded action is test-only Salesko integration of the current SDK public contract (no UI/queue product expansion), followed by the remaining SDK/runtime evidence before downstream implementation resumes.
