@@ -120,3 +120,7 @@ Scope in isolated adoption branch: packages/contracts/src/index.ts and private-a
 Typed receipt call-path completion also includes apps/api/src/private-agent-chat-dispatch.ts: validate returned typed payload against the accepted message; do not retain retired payloadBody comparisons.
 
 Allow existing Salesko docs/researches/2026-09-09_private-agent-chat-host-reliability-scope.md and tasks/notes/20260910-chat-host-reliability.notes.md to record the migration order, stage evidence and no-production boundary.
+
+## Salesko typed terminal observation without format migration
+
+Allowed candidate files: apps/byok-control/src/private-agent-chat.ts, main.ts and their tests; existing scope/notes. P1/P2: old terminal body is public encodeEnvelope wire representation, unlike retired private message wrapper. P3: read SDK DeviceTerminal, branch on its discriminated envelope, serialize via public encodeEnvelope into existing Host evidence. No semantic translator or dual read; validate actual SDK receipt-byte equality across terminal types before retaining storage contract. Preserve task/device/AgentRef checks and cancel/request separation. No terminal database migration.
