@@ -8,7 +8,7 @@ Owner 最新指令：先做 SDK，供 Salesko 与 aiphabee 接入；Salesko 是�
 
 产品权威仍为 `docs/spec.md`。本计划不把既有 fresh 原语等同于完整产品模式；也不预设新增 Conversation store、executionMode 或 wire 字段。保留 B1-A、B2、B3、D05。连续会话模式是可选接入方式，原 session 路径保持明确契约，禁止运行失败后改变语义。
 
-Salesko 实际集成候选为 `/Users/kito/Projects/salesko-new-wt-sdk-test-90fab70` 的 `codex/recurring-sdk-adoption-test`，source `e545026`，Draft PR #241。目录旧名不表示当前仍 detached 或固定在90fab70。并行产品候选57b59f3未导入；保留其 WIP。Owner 最新要求优先 Salesko、不要动 aiphabee：K6 暂停，不读取、不修改、不安装或测试。
+Salesko 实际集成候选为 `/Users/kito/Projects/salesko-new-wt-sdk-test-90fab70` 的 `codex/recurring-sdk-adoption-test`，product source `422b74c`，Draft PR #241。目录旧名不表示当前仍 detached 或固定在90fab70。并行产品候选57b59f3未导入；保留其 WIP。Owner 最新要求优先 Salesko、不要动 aiphabee：K6 暂停，不读取、不修改、不安装或测试。
 生产迁移、发布、部署和真实付费 runtime 执行不因本计划自动获授权。当前主仓存在其他任务 WIP；不得接管 downstream-issue-intake 的 harness 状态或修改其文件。
 
 ## P1 — Map
@@ -52,11 +52,11 @@ K0 不是 SDK 交付；K4 不是发布；K5 不是生产部署。跨阶段有可
 
 - SDK executable/artifact subject `3917c81554d9250efe74abe4b4d5b3cb6344a0fc`, dispatch0.18.0-rc.1 / keys0.4.4-rc.1, unpublished. Required build/types/API/version/workflow,3971PASS/135SKIP and clean ten-package packed gate pass. New public task-bound first-message discovery uses the existing admission row across memory/Postgres/SQLite; no wire/schema/compatibility path.
 - Salesko Draft PR241 source `422b74ccfac47070fa894916a0f78818607c96ac` discovers first held/refused without accepted body, validates frozen context/identity, persists transport evidence separately and displays it in Workspace. Accepted still requires exact product body. Its six actual installed SDK consumers match3917c815 tarball entry bytes; root overrides/bun.lock remain isolated fixtures.
-- A14 active held Stop, recovered held/refused, actual offline archive and Host recovery/UI pass. held remains unchanged/retained; refused archive preserves audit. Each recovered case uses3 daemon PIDs,1Execution/submission and starts1+0+0/native0. First-refusal PostgreSQL COMMIT rollback/response-loss/replay/body0 passes separately. Matrix23LOCAL_PASS/1PARTIAL/5BLOCKED; A29 remains PARTIAL. S5/S9 and full Sprint remain open, K6 paused.
+- A14 active held Stop, recovered held/refused, actual offline archive and Host recovery/UI pass. held remains unchanged/retained; refused archive preserves audit. Each recovered case uses3 daemon PIDs,1Execution/submission and starts1+0+0/native0. First-refusal PostgreSQL COMMIT rollback/response-loss/replay/body0 passes separately. A29 now adds real Host PG plus independent worker/daemon joint recovery for held/cancel/partial admission. Final installed integration at Host62b7fb2 (product422b74c unchanged) passes14 tests/476 assertions. Matrix24LOCAL_PASS/0PARTIAL/5BLOCKED; S8-03 local composition is DONE. S5/S9 and full Sprint remain open, K6 paused.
 
 ## Next action
 
-Close the bounded A29 combination gap using the existing Host recovery runner and owned process/PG fixtures: browser-independent restart must reconcile blocked/held/cancelled and same-identity partial admission without replacement model execution. Reuse A13/A14 SDK lifecycle and current source/artifact evidence; do not rerun unchanged package/packed matrices. Update the sole Salesko ledger rather than create another plan.
+A29 local joint recovery is closed; reconcile the remaining S0 G3/G4 freeze inputs against the existing Salesko parameter draft before dependent S5 implementation. Keep old-task recovery operational and the sole Salesko ledger current. No product defaults or native authority can be inferred from synthetic tests; do not rerun unchanged source/packed matrices.
 
 G3/G4 budget/model/quality inputs still block dependent S5 ContextPack/Summary implementation. The selected Summary path remains same-responder-home strict fresh/result-document before the dependent user Execution; no guessed numeric defaults, alternate provider, business tools or messageEgress slot. S9 native/provider/device authorization is separate; K6/aiphabee remains paused.
 

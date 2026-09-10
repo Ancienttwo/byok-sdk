@@ -501,3 +501,23 @@ Final fixture hashes:
 
 - `scripts/integration/salesko-recurring.test.ts`: `d1196c05eeafc84c0ae6a0434ca180c3b4e9a3e86ca2a347b90971ec66d40e9b`.
 - `scripts/integration/fixtures/salesko-recurring-daemon.ts`: `daccba972327703415d3ded3c4e41dc5d1734aaf05eed20f7b8091472e466af4`.
+
+## A29 real Host PostgreSQL and daemon joint recovery
+
+P1: actual Host PostgreSQL owns input/frozen Execution/cancel/message facts; independent Host worker children run the existing scanner/dispatcher/control; installed daemon children own SQLite journal/JSONL/home admission. Public Cloud test-memory stores remain alive in the parent. P2: held, durable cancel before SDK delivery, or attempt/offer before mailbox append -> Host worker reservation COMMIT -> SIGKILL worker and daemon -> distinct worker gets a real SDK-read exception -> preserved recovery -> exact old-task observation/admission -> restarted daemon terminal -> final and idle Host scans. P3: compose existing authorities without changing product behavior or fabricating a provider result. Existing bounded25-row scanner remains the load boundary; no home cap increase or automatic replacement.
+
+SDK `scripts/integration/salesko-recovery-postgres.test.ts`:3PASS/132 assertions in10.08s at Host422b74c before final exact-offer assertion strengthening. Initial bootstrap run failed because the candidate migration requires service_role; fixture now mirrors the established rehearsal bootstrap and uses disposable socket-only PG. No product failure/fix. held/cancel/partial_admission use5/5/6 distinct Host worker PIDs plus2 daemon PIDs each;1Execution/task/generation, submit calls1/1/2, synthetic starts1+0/1+0/0+1, bodies0/0/1. Host snapshot/context remain byte-equivalent JSON facts; final SDK readback retains the frozen offer with delivered=true. Actual device terminal is distinct from cancellation acknowledgement; Host resource staysunknown. held closes execution recovery but remains unsettled with explicit End, not automatic Retry. Native/provider/business-tool starts0.
+
+A29 LOCAL_PASS, S8-03 DONE(local), matrix24/0/5. S5/S9/source closure remain open. Exact final pin, test hash and log live in existing SDK notes. SDK executable3917c815 and Host product422b74c are unchanged; prior3971/135 source, packed, Host/control/PG/UI evidence retains its scope. No full Cloud-store restart, deployed scheduler, real provider, merge/release/deployment or aiphabee claim. Root package/lock artifact fixtures remain excluded from commits.
+
+### A29 final committed-Host evidence
+
+Host checkpoint `62b7fb288806592489df90457a04e78ed35a17d8` differs from product422b74c only in the existing plan/contract/notes; `git diff 422b74c..62b7fb2 -- apps packages deploy scripts` is empty. The two SDK integration files now pin that commit. `_ops/sdk-first/s8-a29-pinned-integration.log`: **14PASS/476 assertions/28.22s**, including3 joint-recovery cases/132 assertions. The strengthened partial-admission assertion compares the full original public offer readback with only delivered changing totrue. No failure in this final run.
+
+- `salesko-recurring.test.ts`: `f78abc58ddbaa150a38e96b50ece7044093e184c34f1e8ae3352fc49e7adaf72`.
+- `salesko-recovery-postgres.test.ts`: `b01f3906eef3ac77f09376d9353a1c3ee170a3657f5ec6a3a5cd7389cea02b4c`.
+- Existing daemon child: `daccba972327703415d3ded3c4e41dc5d1734aaf05eed20f7b8091472e466af4`.
+
+Reproduce: `SALESKO_TEST_ROOT=/Users/kito/Projects/salesko-new-wt-sdk-test-90fab70 bun test scripts/integration/salesko-recurring.test.ts scripts/integration/salesko-recovery-postgres.test.ts`. Both strict workflows and diff checks pass. SDK packages/release-smoke/API surfaces remain identical to3917c815; existing source/packed evidence is retained, not regenerated. Host root package/lock fixture hashes remain `de8ea7f6da640f6b92dc71d822ffc44c7cbc48ce68aa4a3c1fad3d5652c1e111` / `ba6a6934780c405437092c00bad28eb9154d3451c6b93d69cd19b6e1989aaae1`, uncommitted.
+
+Current S0 draft still requires explicit validation runtime/provider/model, separate main/Summary token and byte limits, content/redactor/quality version and immutable-store/lifecycle inputs. The already-approved cap8, settled no-reply history and same-home Summary path stay frozen; they do not supply those missing values. Dependent S5 remains B3-blocked and S9 native/device authority remains separate. The runtime/model clarification remains pending; no guessed default or additional model review was introduced.
