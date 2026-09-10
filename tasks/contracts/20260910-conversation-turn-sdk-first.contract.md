@@ -5,6 +5,8 @@ Subject base: bb3e1b19ec28d99755e77231dcf39174c2fbe3f8.
 
 Current slice: prove the missing typed Host disposition readback through actual SDK message admission. This is a candidate public contract, not a wire change. Host does not parse terminalBody or author SDK receipts.
 
+Current follow-up (2026-09-10): Owner selected `pi / z.ai / glm5.3-flash`; canonical validation target `pi / zai / glm-5.3-flash`, main and Summary share the same frozen binding. Read-only source/catalog/launcher probe plus the existing S0 synthetic-byte script and plan/contract/notes updates are in scope. No native model/credential/profile provisioning or budget freeze is inferred. SDK-first: record and resolve the actual adapter/credential-launcher composition boundary before native measurement, without ambient-key/native-provider fallback. Product packages and3917c815 artifacts remain unchanged in this observation slice.
+
 Allowed paths for this slice:
 - plans/plan-20260910-conversation-turn-sdk-first.md
 - tasks/contracts/20260910-conversation-turn-sdk-first.contract.md
