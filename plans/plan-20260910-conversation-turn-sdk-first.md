@@ -38,7 +38,7 @@ Owner-approved bounded repair: Windows keys -> package Pi launch fails EFTYPE. E
 
 ## Direct Pi follow-up (2026-09-11)
 
-Prior custody repair08ab85a2 passed native Windows Node22.22.3 ten-package CI (both runs,46 green). Owner continued the recorded direct-path risk: two pre-fix regressions prove detect/direct omit interpreter. Shared internal invocation now covers detect/direct/custody;60 focused tests pass. Required checks/packed/native Windows acceptance pending. No publication/merge or model calls.
+Prior custody repair08ab85a2 passed native Windows Node22.22.3 ten-package CI (both runs,46 green). Owner continued the recorded direct-path risk: two pre-fix regressions prove detect/direct omit interpreter. Shared internal invocation now covers detect/direct/custody;60 focused tests pass. Required checks and clean ten-package gate PASS at54b2b14f,4012PASS/135SKIP. Native Windows acceptance pending exact pushed-head CI. No publication/merge or model calls.
 
 ## Task Breakdown
 
