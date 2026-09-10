@@ -407,3 +407,11 @@ Pinned Host subject e3468f530871fb3386b29b844c5c51c42d190c3a. P1: real PG body/d
 Host script hash372e71b44a382382945abc3c9babf774b559ad2a151dc80417c3126ee7624631; application source and installed artifacts remain unchanged. A06/A07 are LOCAL_PASS for this boundary, leaving12 partial compositions and5 S5-blocked rows. Next A04/A11 remains bounded to the existing PG test. G3/G4 and the native/model target question remain unresolved; K6 paused. Root Host tarball overrides/lock stay uncommitted, no aiphabee/merge/publish/deploy/production operation.
 
 Pinned e3468f5 installed-SDK replay: `_ops/sdk-first/s8-consumer-integration.log`2 PASS/25 assertions. Strict workflow (`s8-consumer-workflow.log`) and diff check PASS; packages remain byte-for-source unchanged from84ff260e. The actual four PG cuts are separate evidence in the Host script/log.
+
+## Salesko S8-02 dispatch/cancel checkpoint
+
+Exact Host subjectc9ffdeb40de082681119566cba0e7834afe76842. P1: real PG authority plus actual Host dispatcher/control HTTP/installed SDK. P2: success before lost return/missing Host commit -> exact offered readback -> admission restored; second trace uses explicit enqueue/response barriers to keep durable cancel alive across missing task and delayed offer. P3: actual pre-fix PG assertion found Execution dispatch unknown despite running/dispatched. Two existing observation-writer calls fix it inside the fenced memory/PG transition; no identity or terminal inference. Host memory regression initially0/2, PG red log retained; final114/929 tests, API typecheck and whole disposable PG rehearsal PASS, including failed confirmation COMMIT rollback and three new dispatch cases. SDK memory stores and synthetic terminal are bounded local evidence.
+
+A04/A11 now local PASS alongside A06/A07;14/10/5 total. S8-03 lifecycle-to-Host and A27 first legacy in-flight acceptance remain independent gaps; S5 G3/G4/ContextPack/Summary and S9 native still open. Only SDK integration pin/plan/notes change, packages/ten artifacts84ff260e remain valid. Root Host overrides/lock excluded; aiphabee untouched.
+
+Pinned c9ffdeb installed-SDK integration2 PASS/25 (`s8-dispatch-integration.log`), strict workflow (`s8-dispatch-workflow.log`) and diff check PASS; packages diff from84ff260e empty. No artifact rebuild or repeated full SDK matrix.
