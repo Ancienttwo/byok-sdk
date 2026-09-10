@@ -1,0 +1,24 @@
+{
+  "protocol": 1,
+  "kind": "repo-harness-campaign-not-planned-decision",
+  "campaign_id": "byok-brc1415-20260910-completion",
+  "group_number": 1,
+  "intent_sha256": "sha256:8de427e965789d5e27e972b27b49d571bbf81ca3c9c1b9444593c51fb2a45a88",
+  "provider_issue_id": "5388839824",
+  "source_observation_sha256": "sha256:2dc1f9b1d0c2a8d0b1e8334159ff3d63845f374d9f32042232770b0a65d76bd3",
+  "disposition": "not_planned",
+  "tasks": [
+    {
+      "task_id": "cc390699e5a5d75ce321debd91105e16aa86084a9c66dad342c99d8fab555764",
+      "task_revision": "cb10becaf27c226dc9467c948a4b37f15a858811ac32c3e71eaebad56e6bc437",
+      "slot": "02"
+    }
+  ],
+  "falsifier": {
+    "command": "node scripts/release/pack-and-smoke.mjs --out-dir .ci-artifacts/release-pack",
+    "exit_code": 0,
+    "observation": "At baseline ce48120507bb51360d48aa2ab3a2ffbe4be67951, existing CI run34468443838 jobs102842448247/102842448243/102842448309 passed the installed ten-package consumer smoke, which asserts exactly seven umbrella namespaces including uiRuntime and excludes keys. The smoke source, SDK entrypoint and workflow remain byte-identical. This is reuse of those existing job results, not a new execution or a passing aggregate CI claim; the separate TS2532 job failure belongs to Issue177. Current source digest readback at 8ec7d9f61948528ae1bbc79cc1dbfd13ddd4d3f2 confirmed all three source inputs still equal that baseline.",
+    "artifact_path": "tasks/evidence/brc178-completion.falsifier.md",
+    "artifact_sha256": "sha256:67c3ed2db5f79fd7f57a6a8109294047f32e28cda3f19f34850236f49b7fc193"
+  }
+}

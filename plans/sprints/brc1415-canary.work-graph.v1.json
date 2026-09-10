@@ -564,6 +564,166 @@
         "attention_after_seconds": 120,
         "revision_reset": "reset_on_work_package_revision"
       }
+    },
+    {
+      "work_package_id": "campaign-8de427e965789d5e-01",
+      "task_id": "091ccd460c4f39305da271bb4724ceace7a247485ab067b16b171028692549bf",
+      "primary_capability": "capability.sdk.sdk-root",
+      "depends_on": [],
+      "priority": 70,
+      "concurrency": {
+        "scope": "repo",
+        "key": "capability.sdk.sdk-root"
+      },
+      "execution_surface": "contract",
+      "integration_group": null,
+      "required_acceptance": [
+        {
+          "gate": "module",
+          "policy_id": "brc1415-repair",
+          "policy_ref": "plans/policies/brc1415-repair.json",
+          "policy_revision": "sha256:b18b0dbbac8dab3466d4cc4c7c1394c70a0a365357c01753b47ef29ea1cb063a"
+        }
+      ],
+      "rollback_boundary": {
+        "kind": "work_package",
+        "boundary_id": "brc1415-repair",
+        "boundary_ref": "plans/policies/brc1415-repair.json",
+        "boundary_revision": "sha256:b18b0dbbac8dab3466d4cc4c7c1394c70a0a365357c01753b47ef29ea1cb063a"
+      },
+      "retry_policy": {
+        "max_automated_attempts": 1,
+        "retryable_failure_classes": [
+          "transient_failure"
+        ],
+        "backoff": {
+          "kind": "fixed",
+          "initial_seconds": 30,
+          "maximum_seconds": 30
+        },
+        "attention_after_seconds": 120,
+        "revision_reset": "reset_on_work_package_revision"
+      }
+    },
+    {
+      "work_package_id": "campaign-8de427e965789d5e-02",
+      "task_id": "cc390699e5a5d75ce321debd91105e16aa86084a9c66dad342c99d8fab555764",
+      "primary_capability": "capability.sdk.sdk-root",
+      "depends_on": [],
+      "priority": 60,
+      "concurrency": {
+        "scope": "repo",
+        "key": "capability.sdk.sdk-root"
+      },
+      "execution_surface": "contract",
+      "integration_group": null,
+      "required_acceptance": [
+        {
+          "gate": "module",
+          "policy_id": "brc1415-repair",
+          "policy_ref": "plans/policies/brc1415-repair.json",
+          "policy_revision": "sha256:b18b0dbbac8dab3466d4cc4c7c1394c70a0a365357c01753b47ef29ea1cb063a"
+        }
+      ],
+      "rollback_boundary": {
+        "kind": "work_package",
+        "boundary_id": "brc1415-repair",
+        "boundary_ref": "plans/policies/brc1415-repair.json",
+        "boundary_revision": "sha256:b18b0dbbac8dab3466d4cc4c7c1394c70a0a365357c01753b47ef29ea1cb063a"
+      },
+      "retry_policy": {
+        "max_automated_attempts": 1,
+        "retryable_failure_classes": [
+          "transient_failure"
+        ],
+        "backoff": {
+          "kind": "fixed",
+          "initial_seconds": 30,
+          "maximum_seconds": 30
+        },
+        "attention_after_seconds": 120,
+        "revision_reset": "reset_on_work_package_revision"
+      }
+    },
+    {
+      "work_package_id": "campaign-171639391acd0417-01",
+      "task_id": "918bc42ec95f5a62bda72af70b17a2b9b797bc21564deada976f0d7ba4244bea",
+      "primary_capability": "capability.sdk.sdk-root",
+      "depends_on": [],
+      "priority": 70,
+      "concurrency": {
+        "scope": "repo",
+        "key": "capability.sdk.sdk-root"
+      },
+      "execution_surface": "contract",
+      "integration_group": null,
+      "required_acceptance": [
+        {
+          "gate": "module",
+          "policy_id": "brc1415-repair",
+          "policy_ref": "plans/policies/brc1415-repair.json",
+          "policy_revision": "sha256:b18b0dbbac8dab3466d4cc4c7c1394c70a0a365357c01753b47ef29ea1cb063a"
+        }
+      ],
+      "rollback_boundary": {
+        "kind": "work_package",
+        "boundary_id": "brc1415-repair",
+        "boundary_ref": "plans/policies/brc1415-repair.json",
+        "boundary_revision": "sha256:b18b0dbbac8dab3466d4cc4c7c1394c70a0a365357c01753b47ef29ea1cb063a"
+      },
+      "retry_policy": {
+        "max_automated_attempts": 1,
+        "retryable_failure_classes": [
+          "transient_failure"
+        ],
+        "backoff": {
+          "kind": "fixed",
+          "initial_seconds": 30,
+          "maximum_seconds": 30
+        },
+        "attention_after_seconds": 120,
+        "revision_reset": "reset_on_work_package_revision"
+      }
+    },
+    {
+      "work_package_id": "campaign-171639391acd0417-02",
+      "task_id": "161307648a9b0689ea61f69c6ee91f0e3aa963766301b3935bd37c21953781a3",
+      "primary_capability": "capability.sdk.sdk-root",
+      "depends_on": [],
+      "priority": 60,
+      "concurrency": {
+        "scope": "repo",
+        "key": "capability.sdk.sdk-root"
+      },
+      "execution_surface": "contract",
+      "integration_group": null,
+      "required_acceptance": [
+        {
+          "gate": "module",
+          "policy_id": "brc1415-repair",
+          "policy_ref": "plans/policies/brc1415-repair.json",
+          "policy_revision": "sha256:b18b0dbbac8dab3466d4cc4c7c1394c70a0a365357c01753b47ef29ea1cb063a"
+        }
+      ],
+      "rollback_boundary": {
+        "kind": "work_package",
+        "boundary_id": "brc1415-repair",
+        "boundary_ref": "plans/policies/brc1415-repair.json",
+        "boundary_revision": "sha256:b18b0dbbac8dab3466d4cc4c7c1394c70a0a365357c01753b47ef29ea1cb063a"
+      },
+      "retry_policy": {
+        "max_automated_attempts": 1,
+        "retryable_failure_classes": [
+          "transient_failure"
+        ],
+        "backoff": {
+          "kind": "fixed",
+          "initial_seconds": 30,
+          "maximum_seconds": 30
+        },
+        "attention_after_seconds": 120,
+        "revision_reset": "reset_on_work_package_revision"
+      }
     }
   ]
 }
