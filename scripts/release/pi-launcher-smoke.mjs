@@ -11,6 +11,9 @@ import { createInterface } from 'node:readline';
 import { createServer } from 'node:http';
 import { SqliteProviderProfileStore, parseModelProviderProfile, exactProviderProfileBinding } from '@byok-sdk/keys';
 
+import { PiAdapter } from '@byok-sdk/client/adapters';
+import { sealRuntimeOperationManifest } from '@byok-sdk/client';
+
 const require = createRequire(import.meta.url);
 const keysRoot = path.dirname(require.resolve('@byok-sdk/keys/package.json'));
 const clientRoot = path.dirname(require.resolve('@byok-sdk/client/package.json'));
@@ -68,6 +71,53 @@ export default function() {
     BYOK_PI_MCP_CONFIG_PATH: mcpConfigPath, BYOK_PI_PERMISSION_MODE: 'readonly',
     ZAI_API_KEY: 'synthetic-must-not-forward', UNRELATED_CANARY: 'synthetic-must-not-forward',
   };
+  // Observe the actual installed adapter's direct command without ever sending its prompt.
+  const directExtension = path.join(dir, 'direct extension.mjs');
+  await writeFile(directExtension, `export default function() { if (process.env.BYOK_PI_PERMISSION_MODE !== 'readonly') throw new Error('Missing direct permission context'); }`);
+  let directInvocation;
+  const adapter = new PiAdapter({
+    resolveExtensions: () => Object.fromEntries(['webAccess', 'mcpAdapter', 'subagentsPolicy', 'subagents', 'todo'].map(name => [name, directExtension])),
+    spawnFn: (command, args, options) => { directInvocation = { command, args, options }; throw new Error('capture before prompt'); },
+  });
+  const detected = await adapter.detect();
+  assert.equal(detected.kind, 'available');
+  assert.equal(detected.version, piManifest.version);
+  const policy = { mode: 'readonly' };
+  const directEnv = { ...env, PI_CODING_AGENT_DIR: path.join(dir, 'direct-agent') };
+  delete directEnv.ZAI_API_KEY;
+  delete directEnv.UNRELATED_CANARY;
+  const prepared = await adapter.prepare({ offer: { instruction: 'Never sent', policy }, policy, descriptor: adapter.descriptor, requiredToolsetIds: [] });
+  assert.equal(prepared.kind, 'prepared');
+  const manifest = sealRuntimeOperationManifest({ taskId: 'packed-direct-capture', runtimeId: 'pi', descriptor: adapter.descriptor,
+    policy, requiredToolsetIds: [], workspace: { workspaceDir: dir }, forwardedEnvironmentNames: Object.keys(directEnv).sort() });
+  await assert.rejects(prepared.operation.start({ manifest, instruction: 'Never sent', env: directEnv }));
+  assert.equal(directInvocation.command, process.execPath);
+  assert.equal(directInvocation.args[0], path.join(piRoot, piManifest.bin.pi));
+  assert.equal(directInvocation.options.shell, undefined);
+  // Run that exact observed invocation with get_state only, no prompt/inference.
+  child = spawn(directInvocation.command, directInvocation.args, { cwd: dir, env: directInvocation.options.env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const directClosed = once(child, 'close');
+  let directStderr = '';
+  child.stderr.on('data', bytes => { directStderr += bytes.toString(); });
+  const directLines = createInterface({ input: child.stdout });
+  const directTimer = setTimeout(() => child.kill('SIGTERM'), 30_000);
+  try {
+    child.stdin.write(`${JSON.stringify({ type: 'get_state', id: 'direct-state' })}\n`);
+    let state;
+    for await (const line of directLines) {
+      const event = JSON.parse(line);
+      if (event.type === 'response' && event.id === 'direct-state') { state = event; break; }
+    }
+    assert.equal(state?.success, true, directStderr || 'Direct Pi did not return RPC state');
+    assert.equal(state.data.messageCount, 0);
+    assert.equal(requests, 0);
+  } finally {
+    clearTimeout(directTimer); directLines.close(); child.stdin.end(); child.kill('SIGTERM');
+    const force = setTimeout(() => child.kill('SIGKILL'), 5_000);
+    await directClosed; clearTimeout(force);
+  }
+  console.log(`[release-pack] installed Pi${piManifest.version} detect/direct RPC passed; prompts=0`);
+
   for (const [rejectedBinding, expected] of [
     [exactProviderProfileBinding(missingPi), /requires explicit pi_model/],
     [staleBinding, /hash mismatch/],

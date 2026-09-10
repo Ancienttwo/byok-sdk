@@ -2,7 +2,7 @@
 
 ## 0.18.0-rc.1 / @byok-sdk/keys 0.5.0-rc.1 — unpublished candidate
 
-- Launch package-resolved Pi through the current Node executable with an explicit script entry, avoiding Windows `spawn EFTYPE` without shell execution. Native executable overrides remain explicit.
+- Launch package-resolved Pi through the current Node executable for version detection, direct RPC and credential custody, avoiding Windows `spawn EFTYPE` without shell execution. Native executable overrides remain explicit.
 
 - Breaking keys profile/storage contract: Pi execution requires explicit
   `pi_model` settings, preserved in all profile stores, status and exact binding

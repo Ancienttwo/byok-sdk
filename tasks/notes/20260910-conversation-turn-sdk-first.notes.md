@@ -655,3 +655,12 @@ No real credentials/model call, publishing/deploy/aiphabee or remote CI action. 
 Source1a8b894d7b7dbf2cf0379a42b1d7f98191aa8661. Required build/typecheck/API/version/workflow PASS; full4010PASS/135SKIP/0FAIL from13 package summaries. Focused adapter2/2 and keys launcher15/15 pass. Official clean `check:release-pack -- --out-dir _ops/sdk-first/artifacts-1a8b894d` exit0 includes actual installed keys -> pinned Pi RPC, exact model/extension/custody and zero inference assertions. Ten SHA256/SHA512 tarballs independently reread and match manifest source. Runtime darwin/arm64 Node26.3.1; this is not native Windows qualification. Evidence files: windows-pi-{build,types,api,version,workflow,tests,pack}.log. No repack after this documentation checkpoint; no push or Windows rerun.
 
 Next bounded release gate: native Windows pack/install against the repaired commit. Keep existing CI failure visible until that gate passes. The adjacent non-custody direct Pi path remains report-only; this repair does not certify all Pi launch modes on Windows.
+
+## Direct Pi interpreter root cause evidence (2026-09-11)
+
+- root_cause: detect passed the package JS entry to execFile(--version); direct RPC passed the same entry to native spawn. The custody fix did not cover these paths.
+- reproduction: new non-executable package script (path includes spaces/non-ASCII) tests fail before fix: detect returns not-executable; direct RPC gets EACCES. This reproduces missing interpreter independently of Unix shebang execution; Windows EFTYPE shares the same concrete native-spawn input.
+- regression_guard: two existing pi-adapter tests exercise real execFile and real synthetic RPC; installed pack smoke uses real PiAdapter.detect and captures its exact direct invocation before prompt, then executes get_state only with that command/argv. Original custody assertions remain.
+- verification: focused Pi/detection/custody60PASS. Required checks and clean-source pack pending below. No native inference or live credentials.
+
+P1: package resolver determines entry; adapter owns launch shape; existing probe owns timeout/error classification. P2: source discriminator -> shared internal interpreter/entry projection -> detect prefix, direct RPC prefix or explicit custody flags. P3: share this observed three-consumer invariant without changing public ResolvedBin/API, shell execution or fallback semantics. At10x no new queue/process/retry path. Explicit env executable overrides stay native.

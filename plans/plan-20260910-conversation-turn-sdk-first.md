@@ -36,6 +36,10 @@ Salesko 实际集成候选为 `/Users/kito/Projects/salesko-new-wt-sdk-test-90fa
 
 Owner-approved bounded repair: Windows keys -> package Pi launch fails EFTYPE. Explicit interpreter/script contract and regression guard implemented; required checks PASS (4010PASS/135SKIP) and clean ten-package gate PASS at1a8b894d on darwin/arm64 Node26.3.1. Prior Windows CI failure remains open until native rerun; no publication or merge. Existing38e23804 artifacts are historical after this executable change.
 
+## Direct Pi follow-up (2026-09-11)
+
+Prior custody repair08ab85a2 passed native Windows Node22.22.3 ten-package CI (both runs,46 green). Owner continued the recorded direct-path risk: two pre-fix regressions prove detect/direct omit interpreter. Shared internal invocation now covers detect/direct/custody;60 focused tests pass. Required checks/packed/native Windows acceptance pending. No publication/merge or model calls.
+
 ## Task Breakdown
 
 | ID | 工作包 | 关闭证据 | 状态 |

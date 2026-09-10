@@ -65,6 +65,31 @@ describe('PiAdapter against the fake-pi fixture', () => {
     expect(result.version).toBe('0.0.0-fake');
   });
 
+  it('detects a package script without execute permission, preserving its version', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi package 空間 '));
+    try {
+      const script = path.join(dir, 'entry.mjs');
+      await fs.writeFile(script, "if (process.argv[2] !== '--version') process.exit(2); console.log('package-v1');", { mode: 0o600 });
+      const result = await new PiAdapter({ resolveBin: () => ({ command: script, source: 'package' }) }).detect();
+      expect(result).toMatchObject({ kind: 'available', version: 'package-v1' });
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+
+  it('starts direct package RPC through the interpreter, including a spaced script path', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi package 空間 '));
+    let session: Session | undefined;
+    try {
+      const script = path.join(dir, 'entry.mjs');
+      await fs.copyFile(FIXTURE_PATH, script);
+      await fs.chmod(script, 0o600);
+      await fs.copyFile(path.join(path.dirname(FIXTURE_PATH), 'process-tree-receipt.mjs'), path.join(dir, 'process-tree-receipt.mjs'));
+      const adapter = new PiAdapter({ resolveBin: () => ({ command: script, source: 'package' }), resolveExtensions: resolveFixtureExtensions });
+      session = await startAdapter(adapter, baseTask, { workspaceDir: dir, policy: { mode: 'auto' }, env: process.env });
+      expect(session.sessionRef.length).toBeGreaterThan(0);
+      expect(await takeEvents(session, 5)).toHaveLength(5);
+    } finally { await session?.close(); await fs.rm(dir, { recursive: true, force: true }); }
+  });
+
   it('detect() reports probe-failed when a bundle cannot resolve its required external pi sidecar', async () => {
     const adapter = new PiAdapter({
       resolveBin: () => {
