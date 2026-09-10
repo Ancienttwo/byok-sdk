@@ -264,6 +264,8 @@ Summary 落后时可使用仍有效的旧 Summary 加全部未覆盖正文；这
 
 历史规则版本随 ContextPack 和 Summary 来源持久保存。未结算的失败队首不能自动跳过；历史请求不携带新的执行授权，当前请求也不能绕过旧执行重试资格/副作用核对。Summary 保留必要指代、目标、约束及撤销/未完成/unknown 含义，不把历史压缩成新的待办。纳入仍受访问、脱敏和擦除规则约束，不复活已擦除内容；装不下则显式 blocked，不静默省略。
 
+**模型披露边界（F04，实施前冻结）：**原始 transcript、获授权的模型输入投影和实际冻结 instruction 分别记录来源与安全规则版本。main 与 Summary 的历史输入都须满足各自明确的披露政策；“旧摘要 + 全部未覆盖原文”中的历史同样经允许投影提供，不能绕过 Summary 路径暴露的安全拒绝。保真针对选定投影成立，不要求向 provider 发送原始凭证；不能安全生成且保留必要内容时 blocked，不以 regex 猜测业务语义后继续。规则或授权变化不能改写同 taskId 的 offer；停止/阻塞该 Execution 并按批准的恢复政策处理。framing 与样例通过不代表消除 prompt injection。
+
 ### 9.3 上线前必须冻结的参数
 
 队列容量已收口为 8 个未结算用户 Turn（§5.1）。以下仍未给定数值，不以该条数替代：instruction 硬字节上限、inline/blob 分界与持久保留要求、runtime context/output 预算、Summary 更新阈值、旧事实恢复退避与 unknown 对账告警阈值。B1-A 不存在自动新 Execution 的 busy 重试预算。
@@ -292,6 +294,8 @@ Summary 内容结构已收口为 `salesko.conversation_summary_content.v1`（共
 
 安全规则须覆盖摘要输入与输出持久化边界：对定义明确的 credential 类型生成有版本的脱敏投影，原 transcript 不被改写；不能按自然语言或 `MEDIA:` 关键字泛化删除所谓指令。凭证值不得保存在脱敏日志/替换映射中。普通正文保真、撤销不复活、连续摘要的信息漂移与合成 credential 样例分别验收；通过样例不宣称消除全部 prompt injection。具体识别范围与检测限制在 S0-09 固定，未定不实现依赖分支。
 
+**内部任务恢复（F06，G4 待冻结）：**Summary 独立于用户 Turn Execution，须核实实际设备准入、API、policy、工具/副作用权限及结果读回通道；提示词不能证明无副作用。unknown 继续原 job/task 对账；确定失败后，只有符合冻结政策的显式动作，绑定 action 身份、jobId、源版本和目标覆盖范围，才授权至多一个新 attempt/taskId。HTTP replay 返回同一动作结果，不生成额外 job，不重跑历史用户任务。来源/授权失效则撤销旧 job 的提交资格并请求取消，不复活旧输入。复用既有 blocked 入口；若 MVP 未提供此动作，应明确为 operator 处置边界，不能声称每类阻塞均有用户恢复出口。
+
 ### 9.5 存储归属、压力与回收
 
 - **设备本地：**Agent home 的 MEMORY/notes/项目文件及 native session；SDK 本地 journal、可靠 spool/message outbox。`hostedJournal` 是设备 SQLite，不是服务端聊天数据库。working memory 不能替代 Host 历史，也不默认上传整个 home。
@@ -303,6 +307,12 @@ Summary 内容结构已收口为 `salesko.conversation_summary_content.v1`（共
 Summary 压缩输入不删除原 transcript。活跃/unknown Execution、未决 job、pending replay/cancel 引用的对象不可按年龄回收；terminal 单独不足以证明可回收。稳定终结、恢复/重放窗口闭合且无引用后，才按冻结 retention 政策清理历史快照；产品历史删除/隐私擦除另有权威流程，不能被后台 TTL 冒充。对象上传与 GC 须解决并发新引用，删除后的迟到任务不得复活数据。
 
 S0 分别列出正文、逐轮快照、内部 job、SDK 传输副本、索引/WAL/备份的压力来源。冻结每 tenant 配额、inline/blob 分界、历史快照保留、孤儿宽限和拒绝新写策略前，不把这些数字藏在代码默认值。达到压力线时应保留确认/取消/恢复写入余量，拒绝未提交的新工作，不清 pending/unknown 证据解堵。具体传输 blob 读取能力和 GC owner 在 S5 前核实；本 PRD 不授权新增 SDK wire。
+
+**擦除优先级（F01，启用相关擦除前）：**普通取消、普通 retention/GC 和授权擦除分别处理。擦除先持久化绑定目标的 erasure generation/tombstone，关闭该代内容的新写入与新引用资格，再清理声明范围的正文与派生内容。历史接受事实不被改写，但不授权重新物化已擦除正文、Summary 或 ContextPack。擦除后的 exact replay 无正文终结响应、最小接受/取消/幂等/计量屏障及保留期须在实施契约冻结；不能假定现有 SDK 已支持该响应。
+
+SDK reservation 在 Host consumer 前接收 payload，finalize 也携带 payload；仅 Host consumer 拒绝不足以证明端到端擦除。S0-09 须核实首次存储、late finalize/replay、派生 job、备份与本地副本的删除流程；不能闭合则限定删除承诺或记录最小上游缺口，不默认扩 wire。Conversation 擦除不隐含清空 Agent 私有 MEMORY；未证明范围不宣称“全部删除”。
+
+**引用与容量仲裁（F03）：**所选 blob 路径的新 pin/引用与 deleting 标记须在同一对象 incarnation 元数据权威上仲裁；deleting 后拒绝新引用，物理删除只作用于选中的 incarnation，旧 delete 不得删除相同 hash 的重建对象。orphan grace 不是并发保护。新工作准入须 reservation 受限输出、必要快照及接受/取消/恢复写入的容量；未提交上传也占物理容量/reservation，虽不计用户新增。释放 reservation 的持久条件及恢复保证范围须冻结。unknown 长期 pin 可告警并拒绝新工作，不能依年龄清除。未选 blob 不建设该专有路径；inline 存储仍保护新增 Execution/job/unknown 状态的 retention。
 
 ### 9.6 面向 SaaS embedder 的数据与记忆分类
 
@@ -331,6 +341,10 @@ Owner 随后补充 RAFT 实测：其 100M“文件上传”额度会被保存到
 SDK 提供经认证、可幂等回读的持久化事实；SaaS billing ledger 根据明确版本的政策计量。底层上传流量、数据库 WAL/索引/备份、SDK 传输副本、Summary/ContextPack 的内部复制不能自动作为用户新增内容收费。同一已接受写入的网络重放不得重复入账；失败/未提交上传不计成功持久化用量。
 
 当前 `AgentMemoryProjection` receipt 的 `redactedByteCount` 是该次完整 snapshot 大小，不是相对上一版的新增字节。不可直接按周求和充当新增存储账单。每周新增用量、当前逻辑占用、物理存储成本三项分别观察；只按新增收费也不取消长期保留的容量成本，retention/配额仍需独立设计。
+
+**计量持久性（F02，仅收费启用前）：**唯一内容 authoring 提交边界须同时产生可恢复的无正文 usage fact/outbox，或证明等同持久性的既有机制。冻结稳定变更身份、真实串行提交的前后逻辑字节、来源 revision、首次接受时间语义及适用政策版本；异步汇总重放事实，不从可变 head 倒推。事件身份不随 policy version 或周界重生；政策更正走明确 adjustment，不能再次收费。源 receipt 可被 erase 删除时，须先确保必要事实已进入独立持久链路，或在受控边界完成转交，不为等待账务无限保留原文。周界、服务端时间来源、迟到与关账调整、更新/删除/版本基线仍待冻结。
+
+GPT Pro 推荐逻辑正增量 `max(0, bytesAfter - bytesBefore)`，此处仍为候选；等长改写为零、缩小后增长再计、删除重建按新对象计的含义须一起选择，不能暗改成高水位算法。三候选反例见 S0 草表 §12。收费公式只阻断收费；blob、restore、擦除各自约束实际启用范围，不作为整个 Fresh Sprint 的全局前置。上述六项为实施关闭条件，文档修订不构成参数冻结或运行验收。
 
 ## 10. Salesko 落点与变更边界
 

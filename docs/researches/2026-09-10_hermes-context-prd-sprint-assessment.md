@@ -4,8 +4,8 @@
 
 ## 输入与证据
 
-- [当前 PRD](./2026-09-09_conversation-turn-fresh-mvp-prd.md)：SHA-256 `ce4d3a1abd90d4857da761177255c1476c8741687559fa4e1530917200706fe5`。
-- [Salesko canonical Sprint](../../../salesko-new/plans/plan-20260909-private-agent-chat-host-reliability-sprints.md)：SHA-256 `35673bc5210100bcc24929e7d531d30b17083aab4823b5ef0322e9c9d7cee716`。它是唯一任务状态账本；本报告不建立第二账本。
+- [研究时 PRD 输入快照](./2026-09-09_conversation-turn-fresh-mvp-prd.md)：SHA-256 `ce4d3a1abd90d4857da761177255c1476c8741687559fa4e1530917200706fe5`。
+- [研究时 Salesko canonical Sprint 输入快照](../../../salesko-new/plans/plan-20260909-private-agent-chat-host-reliability-sprints.md)：SHA-256 `35673bc5210100bcc24929e7d531d30b17083aab4823b5ef0322e9c9d7cee716`。它是唯一任务状态账本；本报告不建立第二账本。
 - Hermes 本地基线 `a871948d8d4b0f774d4ec40467bab1078a9f28d5`，源码只读检查；不是最新上游研究，也不是模型行为实测。
 - [既有 Hermes 研究](./2026-08-12_hermes-buzz-extraction-assessment.md)已区分 runtime 所有权与可复用模式。
 
