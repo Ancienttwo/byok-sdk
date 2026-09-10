@@ -50,7 +50,7 @@ K0 不是 SDK 交付；K4 不是发布；K5 不是生产部署。跨阶段有可
 ## Current checkpoint
 
 - SDK executable/artifact subject remains `84ff260e973a21be4ed153311ceef87d72f77ae5`, dispatch0.18.0-rc.1 / keys0.4.4-rc.1, unpublished. Build/types/API/version/workflow,3971 PASS/135 SKIP and ten-package isolated packed gate remain the source evidence; synthetic adapters do not prove native provider acceptance.
-- Salesko Draft PR #241 subject `e5450269a784c2b70113d49f49804e4fe4b0cd40` includes cap8 input-only queueing, immutable continuity, server recovery, atomic preparation and End/Retry/Stop-and-send backends. The compound action freezes its target/input and commits cancellation plus input atomically; replay never retargets.
+- Salesko Draft PR #241 subject `0a7e59460fc9a16886dc5588a84f8b776226e684` includes cap8 input-only queueing, immutable continuity, server recovery, atomic preparation and End/Retry/Stop-and-send backends. The compound action freezes its target/input and commits cancellation plus input atomically; replay never retargets.
 - Current Stop-send evidence: memory53/464, HTTP42/296, related40/264 and control140/659 plus types; contracts/API/Web types, real PostgreSQL COMMIT cuts/concurrent replay/post-action capacity/order/claim-cancel races, migration and SQL/workflow pass. Host-only local withdrawal unblocks never-dispatched source tasks without inventing SDK terminal or home release. Existing packed/SDK native limits remain unchanged.
 - Root tarball overrides/bun.lock remain uncommitted isolated fixtures. SDK executable/tarballs are unchanged. Complete Host behavior, distributable pins and authorized native validation remain open; K6 stays paused.
 
@@ -122,3 +122,8 @@ K5/S6-05 at Saleskobb77830: explicit Retry API and transaction pass action/gener
 
 
 K5/S6-07 at Saleskoe545026: atomic Stop-and-send backend passes fixed-target replay, post-action capacity and no-half-commit tests. A26 reproduced prepared-but-never-dispatched cancellation blocking a successor; an immutable Host local withdrawal fact now closes that intent under claim/cancel arbitration, never an SDK terminal/resource receipt. Real PG tests prove both lock winners and delayed/unknown dispatch remains blocked. UI projection/actions, complete ContextPack/Summary/budgets/quality and native S9 remain unfinished. SDK executable/artifacts84ff260e unchanged; integration and ledger only.
+
+
+## S7 recovery read prerequisite checkpoint
+
+Salesko0a7e594 supplies a required versioned Conversation recovery response from the sole Host records. It preserves the logical unsettled head beyond the 100-Turn display tail and projects exact action eligibility plus local withdrawal without inventing device terminal/release. Existing action transactions share the eligibility predicates and still recheck current state. Host114/950, related23/131, web62/260 + detail11/44, control140/659 and types, contracts build, real PG read/cancel snapshot + head-window + existing failure matrix, migration/SQL/workflow pass. S7 UI controls and full S5 remain open. No SDK package/source artifact changes; subject84ff260e and frozen ten tarballs remain valid for their original evidence boundary.
