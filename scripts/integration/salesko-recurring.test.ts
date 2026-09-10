@@ -9,7 +9,7 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 const root = process.env.SALESKO_TEST_ROOT;
 if (!root) throw new Error('Set SALESKO_TEST_ROOT to the isolated pinned Salesko checkout.');
 const sha = Bun.spawnSync(['git', '-C', root, 'rev-parse', 'HEAD']);
-if (sha.exitCode !== 0 || sha.stdout.toString().trim() !== '73b45f5abba46d93439e629c62980ce3a21e62d0') throw new Error('Salesko test subject mismatch');
+if (sha.exitCode !== 0 || sha.stdout.toString().trim() !== '422b74ccfac47070fa894916a0f78818607c96ac') throw new Error('Salesko test subject mismatch');
 const installed = (name: string) => import(pathToFileURL(Bun.resolveSync(name, root)).href);
 const { tenantId: sdkTenantId } = await installed('@byok-sdk/core');
 const { createEnvelope } = await installed('@byok-sdk/protocol');
@@ -88,9 +88,9 @@ for (const cancelFirst of [false, true]) test(`Salesko transaction + SDK recurri
   const receipt = await harness.cloud.readAgentMessageDisposition(tenant, device.deviceId, taskId, payload);
   expect(await (await publish()).json()).toEqual({ accepted: 1 });
   expect(await harness.cloud.readAgentMessageDisposition(tenant, device.deviceId, taskId, payload)).toEqual(receipt);
-  const observed = await reconcilePrivateAgentChat(port, { ...dispatchInput, message: payload });
+  const observed = await reconcilePrivateAgentChat(port, dispatchInput);
   expect(observed.messageReceipt).toEqual({ schemaVersion: 'salesko.sdk_message_receipt.v1', payload, disposition: receipt });
-  expect(await repository.recordMessageReceipt({ tenantId, taskId, receipt: observed.messageReceipt, now })).toBe(!cancelFirst);
+  expect(await repository.recordMessageReceipt({ tenantId, taskId, receipt: observed.messageReceipt, now })).toBe(true);
   const view = await repository.readFullConversation({ tenantId, userId, conversationId });
   expect(view.messages.filter((m: { role: string }) => m.role === 'assistant')).toHaveLength(cancelFirst ? 0 : 1);
 });
@@ -449,7 +449,7 @@ for (const ending of ['cancel', 'fail'] as const) test(`Salesko + installed Task
 }, 45000);
 
 
-for (const cut of ['before_host_commit', 'after_host_commit'] as const) test(`Salesko + installed daemon process recovery: ${cut}`, async () => {
+for (const cut of ['before_host_commit', 'after_host_commit', 'held', 'refused'] as const) test(`Salesko + installed daemon process recovery: ${cut}`, async () => {
   const { Hono } = await installed('hono');
   const { createPrivateAgentChatRouter } = await load('apps/byok-control/src/main.ts');
   const { ByokPrivateAgentChatDispatcher } = await load('apps/api/src/private-agent-chat-dispatch.ts');
@@ -469,6 +469,7 @@ for (const cut of ['before_host_commit', 'after_host_commit'] as const) test(`Sa
     } },
     agentMessage: { consume: async ({ tenant: actualTenant, deviceId, taskId, context, payload }) => {
       publications.push(payload);
+      if (cut === 'held' || cut === 'refused') return { outcome: cut, reasonCode: 'synthetic_disposition_fixture' };
       if (unavailable && cut === 'before_host_commit') throw new Error('Synthetic consumer unavailable before Host commit');
       const result = await repository.recordAgentMessage({ now: now(), message: {
         schemaVersion: C.PrivateAgentChatMessageConsumeSchemaVersion, tenantRef: actualTenant, deviceId, taskId, context, payload } });
@@ -550,6 +551,61 @@ for (const cut of ['before_host_commit', 'after_host_commit'] as const) test(`Sa
     await control(first.child, '/emit', 'POST');
     await deadline(() => publications.length > 0, 'consumer failure cut');
     const original = publications[0];
+    if (cut === 'held' || cut === 'refused') {
+      await deadline(async () => (await entries()).some(entry => entry.kind === 'disposition'), 'first durable disposition');
+      const exact = await sdk.cloud.readTaskAgentMessage(tenant, first.deviceId, taskId, binding.agentRef);
+      expect(exact).toMatchObject({ payload: original, disposition: { outcome: cut } });
+      expect((await entries()).find(entry => entry.kind === 'append').record).toMatchObject({ taskId, body: 'A1', messageId: original.messageId });
+      if (cut === 'held') {
+        expect(await sdk.cloud.readDeviceTerminal(tenant, taskId)).toBeUndefined();
+        expect((await control(first.child, '/status')).status.agentHomeExecution.activeAttempts).toBe(1);
+      } else {
+        await deadline(async () => (await sdk.cloud.readDeviceTerminal(tenant, taskId))?.envelope.type === 'task.fail', 'active refused failure');
+        await deadline(async () => (await control(first.child, '/status')).status.agentHomeExecution.activeAttempts === 0, 'active refused disposal');
+      }
+      first.child.process.kill('SIGKILL'); await deadline(() => first.child.exited, 'retained outcome SIGKILL');
+      expect(await first.child.process.exited).not.toBe(0);
+      const count = publications.length;
+      const second = await start(); expect(second.deviceId).toBe(first.deviceId);
+      await deadline(async () => (await sdk.cloud.readDeviceTerminal(tenant, taskId))?.envelope.type === 'task.fail', 'retained outcome terminal');
+      await deadline(async () => (await control(second.child, '/status')).status.connected, 'recovered daemon connected');
+      expect(await control(second.child, '/status')).toMatchObject({ preparations: 0, starts: 0, status: { activeTaskCount: 0 } });
+      const at = now();
+      expect(await runPrivateAgentChatRecovery(new InMemoryPrivateAgentChatRepository(), dispatcher, {
+        now: at, nextCheckAt: new Date(Date.parse(at) + 1000).toISOString(), limit: 25,
+        prepare: async () => { throw new Error('Retained message must not restart model'); },
+      })).toMatchObject({ selected: 1, reconciled: 1, failures: [] });
+      const full = (await repository.readFullConversation(owner))!;
+      expect(full.messages.map((message: any) => message.content)).toEqual(['U1']);
+      expect(full.recovery.turns[0]).toMatchObject({ messageDisposition: cut, executionObservation: 'terminal',
+        resourceObservation: 'unknown', settlement: null, actions: { retry: false, end: true } });
+      expect(full.turns[0].execution).toMatchObject({ taskId, generation: 1 });
+      const terminal = await sdk.cloud.readDeviceTerminal(tenant, taskId);
+      if (cut === 'held') expect(terminal.envelope.payload.recovery).toEqual({ kind: 'daemon_interrupted', offerId: (await sdk.cloud.readTaskOffer(tenant, taskId)).messageId });
+      await stop(second.child);
+      const beforeArchive = await readFile(outboxPath, 'utf8');
+      const { archiveAgentTerminalMessages } = await installed('@byok-sdk/client');
+      const archiveDirectory = join(localRoot, 'message-audit');
+      const archived = await archiveAgentTerminalMessages({ productName: 'recovery fixture', productId, serverUrl: baseUrl,
+        workspaceRoot: join(localRoot, 'workspace'), storeDir: join(localRoot, 'store'),
+        agentHome: { hostStorageRoot: join(localRoot, 'home') },
+      }, { confirmed: true, expectedTenantId: tenant, expectedDeviceId: first.deviceId, agentRef: binding.agentRef, archiveDirectory });
+      if (cut === 'held') {
+        expect(archived.status).toBe('not-needed'); expect(await readFile(outboxPath, 'utf8')).toBe(beforeArchive);
+      } else {
+        expect(archived).toMatchObject({ status: 'archived', archivedRecords: 1 });
+        const audit = await readFile(join(archiveDirectory, archived.archiveFileName), 'utf8');
+        expect(audit).toContain(original.messageId); expect(audit).toContain('A1');
+      }
+      const third = await start(); await deadline(async () => (await control(third.child, '/status')).status.connected, 'retained third daemon');
+      expect(await control(third.child, '/status')).toMatchObject({ preparations: 0, starts: 0 }); await stop(third.child);
+      expect(new Set(children.map(child => child.pid)).size).toBe(3);
+      expect(publications).toHaveLength(count); expect(committed).toEqual(['task.fail']); expect(submissions).toBe(1);
+      expect(await sdk.cloud.readTaskAgentMessage(tenant, first.deviceId, taskId, binding.agentRef)).toEqual(exact);
+      expect(await sdk.cloud.readDeviceTerminal(tenant, taskId)).toEqual(terminal);
+      console.log(`A14 ${cut}=PASS; daemon_pids=3; body=0; execution/submission=1; starts=1+0+0; archive=${archived.status}; native_starts=0`);
+      return;
+    }
     const disk = await entries();
     expect(firstState.sessions[0].sessionRef).toBe(original.sessionRef);
     expect(disk.find(entry => entry.kind === 'append').record).toMatchObject({ taskId, body: 'A1', messageId: original.messageId, contentHash: original.contentHash });
@@ -623,7 +679,7 @@ test('Salesko observes first held reply after consumer configuration loss', asyn
   const { createDaemonWithAdapters } = await installed('@byok-sdk/client');
   const { createPrivateAgentChatRouter } = await load('apps/byok-control/src/main.ts');
   const { ByokPrivateAgentChatDispatcher } = await load('apps/api/src/private-agent-chat-dispatch.ts');
-  const { dispatchAndReconcile } = await load('apps/api/src/private-agent-chat-routes.ts');
+  const { dispatchAndReconcile, reconcileAndRecord } = await load('apps/api/src/private-agent-chat-routes.ts');
   const { runPrivateAgentChatRecovery } = await load('apps/api/src/private-agent-chat-recovery.ts');
   const repository = new InMemoryPrivateAgentChatRepository(); repository.resetForTests();
   const localRoot = await mkdtemp(join(tmpdir(), 'salesko-sdk-held-observation-'));
@@ -702,6 +758,24 @@ test('Salesko observes first held reply after consumer configuration loss', asyn
     expect(full.turns[0].execution).toMatchObject({ taskId: frozen.execution.taskId, generation: 1 });
     // The Host must discover this without the test feeding its observer payload.
     expect(full.recovery.turns[0].messageDisposition).toBe('held');
+    // Explicit Stop terminates the active execution without rewriting held to accepted.
+    const exact = await facade.readTaskAgentMessage(tenant, deviceId, frozen.execution.taskId, binding.agentRef);
+    expect(exact).toMatchObject({ payload: publications[0], context: frozen.execution.messageContext,
+      disposition: { outcome: 'held', reasonCode: 'consumer_unavailable' } });
+    expect((await repository.requestCancelExact({ ...owner, turnId: 'T1', execution: { taskId: frozen.execution.taskId, generation: 1 }, now: now() })).status).toBe('recorded');
+    const stopping = (await repository.reconcileDispatch({ ...owner, turnId: 'T1', now: now() }))!;
+    await reconcileAndRecord(repository, dispatcher, stopping, now());
+    await until(async () => (await facade.readDeviceTerminal(tenant, frozen.execution.taskId))?.envelope.type === 'task.cancelled', 'held Stop actual device terminal');
+    await until(() => daemon.status().agentHomeExecution.activeAttempts === 0, 'held Stop local close');
+    const afterStop = (await repository.reconcileDispatch({ ...owner, turnId: 'T1', now: now() }))!;
+    await reconcileAndRecord(repository, dispatcher, afterStop, now());
+    const settled = (await repository.readFullConversation(owner))!;
+    expect(settled.messages.map((message: any) => message.content)).toEqual(['U1']);
+    expect(settled.recovery.turns[0]).toMatchObject({ messageDisposition: 'held', executionObservation: 'terminal',
+      resourceObservation: 'unknown', settlement: { reason: 'cancelled_before_accept' }, actions: { retry: false } });
+    expect(await facade.readTaskAgentMessage(tenant, deviceId, frozen.execution.taskId, binding.agentRef)).toEqual(exact);
+    expect(adapter.sessions).toHaveLength(1);
+
   } finally {
     await daemon.stop(); http.stop(true); await rm(localRoot, { recursive: true, force: true });
   }
