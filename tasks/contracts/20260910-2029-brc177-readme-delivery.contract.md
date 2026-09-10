@@ -72,8 +72,7 @@ exit_criteria:
       "necessity": "Preserves the existing Issue177 failing regression and keys exclusion.",
       "inputs": {
         "env": [
-          "PATH",
-          "REPO_HARNESS_DIFF_BASE"
+          "PATH"
         ]
       },
       "path": "packages/sdk/src/readme.test.ts"
@@ -88,8 +87,7 @@ exit_criteria:
       "necessity": "Target AGENTS.md explicitly requires the workspace build before typecheck/test.",
       "inputs": {
         "env": [
-          "PATH",
-          "REPO_HARNESS_DIFF_BASE"
+          "PATH"
         ]
       },
       "command": "bun run build"
@@ -104,8 +102,7 @@ exit_criteria:
       "necessity": "Proves the required regex capture compiles with noUncheckedIndexedAccess and workspace types remain valid.",
       "inputs": {
         "env": [
-          "PATH",
-          "REPO_HARNESS_DIFF_BASE"
+          "PATH"
         ]
       },
       "command": "bun run typecheck"
@@ -120,8 +117,7 @@ exit_criteria:
       "necessity": "Target AGENTS.md explicitly requires the complete workspace test script; execute once on frozen implementation.",
       "inputs": {
         "env": [
-          "PATH",
-          "REPO_HARNESS_DIFF_BASE"
+          "PATH"
         ]
       },
       "command": "bun run test"
@@ -136,8 +132,7 @@ exit_criteria:
       "necessity": "Target-required API golden integrity.",
       "inputs": {
         "env": [
-          "PATH",
-          "REPO_HARNESS_DIFF_BASE"
+          "PATH"
         ]
       },
       "command": "bun run check:api-surface"
@@ -152,8 +147,7 @@ exit_criteria:
       "necessity": "Target-required version authority integrity.",
       "inputs": {
         "env": [
-          "PATH",
-          "REPO_HARNESS_DIFF_BASE"
+          "PATH"
         ]
       },
       "command": "bun run check:version-authority"
@@ -168,8 +162,7 @@ exit_criteria:
       "necessity": "Target-required strict workflow integrity.",
       "inputs": {
         "env": [
-          "PATH",
-          "REPO_HARNESS_DIFF_BASE"
+          "PATH"
         ]
       },
       "command": "repo-harness run check-task-workflow --strict"
