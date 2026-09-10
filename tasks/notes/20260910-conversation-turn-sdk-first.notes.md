@@ -285,3 +285,10 @@ Current HTTP readiness now uses queryPrivateAgentReadiness(env, tenant, explicit
 ## Profile preparation — Salesko00b6619
 
 Request-independent current Agent/Placement composition now owns chat binding/session/readiness. Existing HTTP create/submit calls it. Mutation pause and exact same-machine rebind use the existing CAS/projection authority, with thin HTTP failure rendering.89 tests405 assertions, API types and installed RC integration2/25 pass. Logs _ops/sdk-first/salesko-profile-preparation-*.log. SDK executable2da3bf28 remains unchanged. This stage does not allocate a task or wire queue-head preparation into cron; input-only submission/atomic preparation is next. G3/G4/full Host acceptance remain open; aiphabee untouched.
+
+
+## 2026-09-10 queue/history policy checkpoint
+
+Salesko320fe7c updates only its existing parameter table, contract, plan and notes: cap eight unsettled user Turns and settled no-reply history inclusion. Capacity is a product limit, not measured concurrency; settlement does not prove resource release. History carries outcome/unknown facts, never authorization to rerun old tasks. Main PRD received the same narrow changes and remains untracked owner WIP outside the SDK candidate. Summary selection is unresolved because the two supplied proposals conflict on shared responder-home usage. SDK executable/artifact subject remains2da3bf28; integration pin follows the docs-only Salesko commit without repacking. No aiphabee access, migration, publication or deployment.
+
+Validation: installed Salesko public SDK integration at320fe7c passes2 tests/25 assertions. The printed consumer exception is the intentional post-COMMIT lost-response injection and both replay/cancel cases pass. No queue/Summary implementation claim.

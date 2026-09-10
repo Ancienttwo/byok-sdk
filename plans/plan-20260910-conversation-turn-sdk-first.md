@@ -56,7 +56,7 @@ K0 不是 SDK 交付；K4 不是发布；K5 不是生产部署。跨阶段有可
 
 ## Next action
 
-Salesko00b6619 now has request-independent Profile/Placement, binding/session and readiness preparation, alongside Turn v6 zero-Execution read/cancel. Next implement input-only submission and atomic queue-head Execution preparation, then invoke it from HTTP/server recovery while existing frozen tasks continue same-identity reconciliation. Queue-head/prefix/claim checks must be inside the Host transaction; external Profile/control reads precede it. Summary G4 and G3 budgets/history remain unresolved. No aiphabee activity.
+Salesko00b6619 now has request-independent Profile/Placement, binding/session and readiness preparation, alongside Turn v6 zero-Execution read/cancel. Next implement input-only submission and atomic queue-head Execution preparation, then invoke it from HTTP/server recovery while existing frozen tasks continue same-identity reconciliation. Queue-head/prefix/claim checks must be inside the Host transaction; external Profile/control reads precede it. Queue cap eight and settled no-reply history inclusion are now closed in the existing Salesko S0 table/contract. Remaining model/storage budgets are unresolved. G4 still needs a choice between the supplied no-responder-home Host path and same-responder-home strict BYOK fresh/result-document path. No aiphabee activity.
 
 ## 2026-09-10 requirement audit checkpoint
 
@@ -91,3 +91,6 @@ K5 preparation authority at Salesko19294a2: framework-independent readiness quer
 
 
 K5 Profile preparation at Salesko00b6619: shared environment-based pause/rebind/Agent preparation is used by HTTP create/submit and can be called without Hono.89 tests405 assertions + API types + installed SDK integration2/25 pass. Existing Placement CAS/error behavior preserved; no task allocation or queue enablement. SDK executable/artifacts remain2da3bf28.
+
+
+2026-09-10 policy checkpoint: Salesko320fe7c is a documentation-only update over00b6619, freezing eight unsettled user Turns and inclusion of settled no-reply inputs with truthful outcome metadata and no renewed execution authority. Main checkout's existing untracked PRD was updated narrowly, not copied into this branch. G4 proposals disagree on responder-home use and remain an explicit pending choice; other G3 budgets and all dependent acceptance stay open. No SDK executable/artifact change or new stage PASS follows from policy selection.
