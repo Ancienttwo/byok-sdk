@@ -9,7 +9,7 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 const root = process.env.SALESKO_TEST_ROOT;
 if (!root) throw new Error('Set SALESKO_TEST_ROOT to the isolated pinned Salesko checkout.');
 const sha = Bun.spawnSync(['git', '-C', root, 'rev-parse', 'HEAD']);
-if (sha.exitCode !== 0 || sha.stdout.toString().trim() !== '39227626066ebae14f4a452998808a286bc2d26d') throw new Error('Salesko test subject mismatch');
+if (sha.exitCode !== 0 || sha.stdout.toString().trim() !== '07c13e9daab0b19ff8aba11e56f1d7d81ff1a49d') throw new Error('Salesko test subject mismatch');
 const installed = (name: string) => import(pathToFileURL(Bun.resolveSync(name, root)).href);
 const { tenantId: sdkTenantId } = await installed('@byok-sdk/core');
 const { createEnvelope } = await installed('@byok-sdk/protocol');
@@ -253,6 +253,196 @@ for (const disposal of ['delayed', 'failed'] as const) test(`Salesko + installed
   } finally {
     releaseClose?.();
     if (originalClose && adapter.sessions[0]) adapter.sessions[0].close = originalClose;
+    await daemon.stop(); http.stop(true);
+    await rm(localRoot, { recursive: true, force: true });
+  }
+}, 45000);
+
+for (const ending of ['cancel', 'fail'] as const) test(`Salesko + installed TaskRunner: early accepted reply survives ${ending}, close and next context`, async () => {
+  const { createDaemonWithAdapters } = await installed('@byok-sdk/client');
+  const { Hono } = await installed('hono');
+  const { createPrivateAgentChatRouter } = await load('apps/byok-control/src/main.ts');
+  const { ByokPrivateAgentChatDispatcher } = await load('apps/api/src/private-agent-chat-dispatch.ts');
+  const { dispatchAndReconcile, reconcileAndRecord } = await load('apps/api/src/private-agent-chat-routes.ts');
+  const localRoot = await mkdtemp(join(tmpdir(), 'salesko-sdk-accepted-ending-'));
+  const repository = new InMemoryPrivateAgentChatRepository(); repository.resetForTests();
+  const owner = { tenantId: 'accepted-ending-tenant', userId: 'accepted-ending-user', conversationId: `accepted-ending-${ending}` };
+  const tenant = sdkTenantId(await byokTenantRef(MemoryDatasetScope, owner.tenantId));
+  let tick = 0;
+  const now = () => new Date(Date.parse('2026-09-10T06:00:00.000Z') + tick++ * 1000).toISOString();
+  const messages: { taskId: string; payload: any }[] = [];
+  const terminals: { taskId: string; type: string }[] = [];
+  const sdk = createInMemoryByokCloud({ longPollHoldMs: 50,
+    observer: { onInboundCommitted: ({ envelope }: { envelope: any }) => {
+      if (['task.complete', 'task.cancelled', 'task.fail', 'task.decline'].includes(envelope.type)) terminals.push({ taskId: envelope.task_id, type: envelope.type });
+    } },
+    agentMessage: { consume: async ({ tenant: actualTenant, deviceId, taskId, context, payload }) => {
+      messages.push({ taskId, payload });
+      return repository.recordAgentMessage({ now: now(), message: { schemaVersion: C.PrivateAgentChatMessageConsumeSchemaVersion,
+        tenantRef: actualTenant, deviceId, taskId, context, payload } });
+    } },
+  });
+  let submissions = 0;
+  const submit = sdk.cloud.submitRecurringExecution.bind(sdk.cloud);
+  sdk.cloud.submitRecurringExecution = (...args: Parameters<typeof submit>) => { submissions++; return submit(...args); };
+  const token = 'disposable-accepted-ending-control';
+  const app = new Hono().route('/internal/private-agent-chat', createPrivateAgentChatRouter(privateAgentChatCloud(sdk.cloud), {
+    auth: { researchToken: token, adminToken: 'disposable-admin', privateAgentChatCallbackToken: 'disposable-chat',
+      privateAgentToolsCallbackToken: 'disposable-tools', profileProjectionToken: 'disposable-profile', tokenSigningSecret: new Uint8Array(32) },
+  }));
+  const http = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: request =>
+    new URL(request.url).pathname.startsWith('/internal/') ? app.fetch(request) : sdk.cloud.fetch(request) });
+  const baseUrl = `http://127.0.0.1:${http.port}`;
+  const dispatcher = new ByokPrivateAgentChatDispatcher({ baseUrl, datasetScope: MemoryDatasetScope, researchToken: token,
+    fetchImpl: async (input: RequestInfo | URL, init?: RequestInit) => {
+      const response = await fetch(input, init);
+      if (!response.ok) {
+        const body = await response.clone().json() as { error?: string };
+        throw new Error(`Accepted-ending control response ${response.status}: ${body.error}`);
+      }
+      return response;
+    },
+  });
+  const adapter = new StubRuntimeAdapter('claude', { kind: 'available', version: 'synthetic-test' },
+    { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true, permissionModes: ['auto', 'readonly', 'confirm', 'plan'] }, false);
+  const productId = 'salesko-accepted-ending-fixture';
+  const daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-ending-test' }, productName: 'ending fixture', productId,
+    serverUrl: baseUrl, workspaceRoot: join(localRoot, 'workspace'), storeDir: join(localRoot, 'store'),
+    agentHome: { hostStorageRoot: join(localRoot, 'home') }, agentEgress: { policy: C.PrivateAgentEgressPolicy },
+    mcpToolsets: { 'salesko.read.v1': { mcpServers: { read: { command: '/bin/false' } } },
+      'salesko.propose.v1': { mcpServers: { propose: { command: '/bin/false' } } } },
+  }, [adapter]);
+  const until = async (predicate: () => boolean | Promise<boolean>, label: string) => {
+    const deadline = Date.now() + 10000;
+    while (!await predicate()) {
+      if (Date.now() > deadline) throw new Error(`Timed out: ${label}`);
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  };
+  let releaseClose: (() => void) | undefined, releaseInterrupt: (() => void) | undefined;
+  let helper: ReturnType<typeof Bun.spawn> | undefined;
+  let helperReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  try {
+    await sdk.core.quota.writeEntitlement(tenant, { version: 1n, hardLimitBytes: 1_000_000_000n, maxObjectBytes: 100_000_000n,
+      maxInlineBytes: 1_000_000n, mailboxLimitBytes: 100_000_000n, retentionPolicyId: 'accepted-ending-test' });
+    const pairing = await sdk.cloud.createPairingCode(tenant, { productId });
+    const { deviceId } = await daemon.pair(pairing.code); await daemon.start();
+    await until(() => daemon.status().connected, 'daemon connection');
+    await until(async () => (await sdk.cloud.listDevices(tenant))[0]?.capabilities?.includes('agent-message-egress') === true, 'device capabilities');
+    const binding = { agentRef: { agentId: '7bf9cf51-8c51-4a67-b8f3-4f11de2cecb1', profileRevision: '1' }, deviceId,
+      placementRevision: '3', runtime: 'claude', cwd: 'byok-agent-home', egressPolicy: C.PrivateAgentEgressPolicy, tools: C.PrivateAgentChatToolBinding };
+    await repository.createConversation({ ...owner, continuity: { mode: 'fresh', version: 1 }, title: 'Accepted ending', agentId: binding.agentRef.agentId, execution: { epoch: 1 }, now: now() });
+    await submitAndPrepare(repository, { ...owner, turnId: 'T1', clientRequestId: 'input-T1', message: 'U1', now: now(), binding, expectedExecution: { epoch: 1 } });
+    await dispatchAndReconcile(repository, dispatcher, owner.tenantId, 'T1', now());
+    const first = (await repository.reconcileDispatch({ ...owner, turnId: 'T1', now: now() }))!;
+    const taskId = first.execution.taskId;
+    await until(() => adapter.sessions.length === 1, 'first fresh session');
+    const session = adapter.sessions[0]!;
+    releaseClose = session.blockClose();
+    const ctx = adapter.startCalls[0]!.ctx;
+    const messageTool = ctx.mcpServers?.byokagentmessage;
+    expect(messageTool).toBeDefined();
+    if (!messageTool) throw new Error('Missing installed reserved message helper');
+    expect(messageTool.args?.some(path => path.startsWith(resolve(root!, 'node_modules')))).toBe(true);
+    helper = Bun.spawn([messageTool.command, ...(messageTool.args ?? [])], { cwd: ctx.workspaceDir,
+      env: { ...ctx.env, ...messageTool.env }, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
+    helperReader = (helper.stdout as ReadableStream<Uint8Array>).getReader();
+    let buffer = '', requestId = 0;
+    const rpc = async (method: string, params: unknown) => {
+      const id = ++requestId;
+      (helper!.stdin as Bun.FileSink).write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+      await (helper!.stdin as Bun.FileSink).flush();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([(async () => {
+          while (true) {
+            const newline = buffer.indexOf('\n');
+            if (newline >= 0) {
+              const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);
+              if (!line.trim()) continue;
+              const reply = JSON.parse(line); expect(reply.id).toBe(id); return reply;
+            }
+            const chunk = await helperReader!.read();
+            if (chunk.done) throw new Error('Reserved helper exited before its RPC response');
+            buffer += new TextDecoder().decode(chunk.value);
+          }
+        })(), new Promise<never>((_, reject) => { timer = setTimeout(() => { helper!.kill('SIGKILL'); reject(new Error('Reserved helper RPC timed out')); }, 10000); })]);
+      } finally { clearTimeout(timer); }
+    };
+    expect((await rpc('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'sdk-fixture', version: '1' } })).result.serverInfo.name).toBe('byok-agent-message-mcp');
+    (helper.stdin as Bun.FileSink).write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
+    const listed = await rpc('tools/list', {});
+    expect(listed.result.tools.map((tool: { name: string }) => tool.name)).toEqual(['send_agent_message']);
+    const published = await rpc('tools/call', { name: 'send_agent_message', arguments: { body: 'A1', contentType: 'text/markdown' } });
+    expect(published.error).toBeUndefined();
+    const publication = JSON.parse(published.result.content[0].text);
+    await until(async () => messages.length === 1 && (await sdk.cloud.readAgentMessageDisposition(tenant, deviceId, taskId, messages[0]!.payload))?.outcome === 'accepted', 'early SDK accepted');
+    expect(publication.messageId).toBe(messages[0]!.payload.messageId);
+    const accepted = await sdk.cloud.readAgentMessageDisposition(tenant, deviceId, taskId, messages[0]!.payload);
+    expect(await sdk.cloud.readDeviceTerminal(tenant, taskId)).toBeUndefined();
+    expect(session.closeCalled).toBe(false); expect(daemon.status().agentHomeExecution.activeAttempts).toBe(1);
+    const acceptedBody = (await repository.readFullConversation(owner))!.turns[0].terminal;
+    expect(acceptedBody.outcome).toBe('succeeded');
+    if (ending === 'cancel') {
+      let interruptEntered = false;
+      const interrupt = session.interrupt.bind(session);
+      const interruptGate = new Promise<void>(resolve => { releaseInterrupt = resolve; });
+      session.interrupt = async () => { interruptEntered = true; await interruptGate; await interrupt(); };
+      expect((await repository.requestCancelExact({ ...owner, turnId: 'T1', execution: { taskId, generation: 1 }, now: now() })).status).toBe('recorded');
+      const pending = (await repository.reconcileDispatch({ ...owner, turnId: 'T1', now: now() }))!;
+      await reconcileAndRecord(repository, dispatcher, pending, now());
+      await until(() => interruptEntered, 'actual cancellation reaches session interrupt');
+      expect((await sdk.cloud.readTaskResult(tenant, taskId))?.state).toBe('cancelled');
+      expect(await sdk.cloud.readDeviceTerminal(tenant, taskId)).toBeUndefined();
+      expect(await repository.reconcileDispatch({ ...owner, turnId: 'T1', now: now() })).not.toBeNull();
+      expect((await repository.readFullConversation(owner))!.turns[0].terminal).toEqual(acceptedBody);
+      expect(daemon.status().agentHomeExecution.activeAttempts).toBe(1);
+      releaseInterrupt!(); releaseInterrupt = undefined;
+    } else session.fail(new Error('Synthetic runtime failure after accepted tool reply'));
+    const terminalType = ending === 'cancel' ? 'task.cancelled' : 'task.fail';
+    await until(async () => (await sdk.cloud.readDeviceTerminal(tenant, taskId))?.envelope.type === terminalType, 'actual terminal before blocked close');
+    if (ending === 'cancel') {
+      expect(session.interruptCalled).toBe(true);
+      session.emit({ type: 'progress', text: 'Late text must not become a second reply' }); session.emit({ type: 'turn_end' });
+    }
+    const closing = (await repository.reconcileDispatch({ ...owner, turnId: 'T1', now: now() }))!;
+    await reconcileAndRecord(repository, dispatcher, closing, now());
+    expect(await repository.reconcileDispatch({ ...owner, turnId: 'T1', now: now() })).toBeNull();
+    expect(daemon.status().agentHomeExecution.activeAttempts).toBe(1); expect(session.closeCalled).toBe(false);
+    const closedProduct = (await repository.readFullConversation(owner))!;
+    expect(closedProduct.turns[0].terminal).toEqual(acceptedBody);
+    expect(closedProduct.recovery.turns[0].resourceObservation).toBe('unknown');
+    expect(closedProduct.recovery.turns[0].messageDisposition).toBe('accepted');
+    expect(closedProduct.messages.map((message: { content: string }) => message.content)).toEqual(['U1', 'A1']);
+    expect((await rpc('tools/call', { name: 'send_agent_message', arguments: { body: 'A1', contentType: 'text/markdown' } })).error).toBeDefined();
+    expect(await sdk.cloud.readAgentMessageDisposition(tenant, deviceId, taskId, messages[0]!.payload)).toEqual(accepted);
+    releaseClose(); releaseClose = undefined;
+    await until(() => daemon.status().agentHomeExecution.activeAttempts === 0, 'home released after close');
+    expect(session.closeCalled).toBe(true);
+    expect((await repository.readFullConversation(owner))!.recovery.turns[0].resourceObservation).toBe('unknown');
+    await submitAndPrepare(repository, { ...owner, turnId: 'T2', clientRequestId: 'input-T2', message: 'U2', now: now(), binding,
+      expectedExecution: (await repository.readFullConversation(owner))!.conversation.execution });
+    await dispatchAndReconcile(repository, dispatcher, owner.tenantId, 'T2', now());
+    await until(() => adapter.sessions.length === 2, 'next fresh session after canceled/failed execution');
+    expect(adapter.startCalls[1]!.task.sessionRef).toBeUndefined();
+    expect(adapter.sessions[1]!.sessionRef).not.toBe(session.sessionRef);
+    const instruction = adapter.startCalls[1]!.task.instruction as string;
+    expect(instruction).toContain('U1'); expect(instruction).toContain('A1'); expect(instruction).toContain('U2');
+    expect(instruction).not.toContain('Late text must not become a second reply');
+    const second = (await repository.reconcileDispatch({ ...owner, turnId: 'T2', now: now() }))!;
+    adapter.sessions[1]!.emit({ type: 'progress', text: 'A2' }); adapter.sessions[1]!.emit({ type: 'turn_end' });
+    await until(async () => (await sdk.cloud.readDeviceTerminal(tenant, second.execution.taskId))?.envelope.type === 'task.complete', 'second terminal');
+    await reconcileAndRecord(repository, dispatcher, (await repository.reconcileDispatch({ ...owner, turnId: 'T2', now: now() }))!, now());
+    await until(() => daemon.status().agentHomeExecution.activeAttempts === 0, 'second close');
+    expect(terminals.filter(entry => entry.taskId === taskId)).toEqual([{ taskId, type: terminalType }]);
+    expect(messages.map(message => message.taskId)).toEqual([taskId, second.execution.taskId]);
+    expect((await repository.readFullConversation(owner))!.messages.map((message: { content: string }) => message.content)).toEqual(['U1', 'A1', 'U2', 'A2']);
+    expect(submissions).toBe(2); expect(adapter.startCalls).toHaveLength(2);
+    console.log(`A10/A25 installed-helper/daemon/Host ${ending}=PASS; bodies=1+1; submissions=2; synthetic_starts=2; native_starts=0`);
+  } finally {
+    releaseInterrupt?.(); releaseClose?.();
+    if (helper) { helper.kill('SIGTERM'); await helper.exited; }
+    await helperReader?.cancel(); helperReader?.releaseLock();
     await daemon.stop(); http.stop(true);
     await rm(localRoot, { recursive: true, force: true });
   }

@@ -167,3 +167,8 @@ Salesko7587703ece39ebc303157b93bf93e2390e0f0492 adds two actual child-process cr
 ## 2026-09-10 S8-02 A12 layered identity conflicts
 
 Salesko39227626066ebae14f4a452998808a286bc2d26d completes the local S8-02 fault-composition task. Actual paired devices in two tenants publish through installed SDK HTTP into PG: wrong principal/AgentRef and altered exact-message fields cannot read an accepted receipt. Seven explicit public-submission drift/hash cases each yield one stable Host refusal, body0 and exact SDK refused replay. Canonical synthetic decline/unclaimed readback plus explicit Host Retry creates generation2; old/new task/message aliases never borrow the accepted generation2 reply. Total10 submissions/9 consumer decisions, two independently accepted bodies and no native execution. Full PG rehearsal and workflow pass, matrix19/5/5. Remaining S8-03/04/05, S5 and S9 stay open; executable/artifacts84ff260e unchanged.
+
+
+## 2026-09-10 S8-03 A10/A25 accepted ending and next fresh history
+
+Host pin07c13e9daab0b19ff8aba11e56f1d7d81ff1a49d fixes a proven control status omission: a claimed SDK task durably acknowledges cancel_requested, now returned as pending rather than502. Exact device terminal remains necessary; no request/terminal/release collapse. Installed reserved MCP helper publishes before turn_end, then actual TaskRunner cancellation or failure precedes blocked close. Accepted message/receipt survive; a distinct fresh next execution receives U1/A1/U2. Final exact-pin integration6PASS/196 assertions; control142PASS/684 plus types, affected Host15PASS/95. Matrix21LOCAL_PASS/3PARTIAL/5BLOCKED; A13/A14/A29 remain the local composition gaps. S5 and S9 remain open, K6 paused; SDK executable/ten artifacts84ff260e unchanged.
