@@ -332,3 +332,10 @@ Logs _ops/sdk-first/salesko-summary-*.log; initial agent-check log includes a ty
 Pin installed-SDK integration to2dc15e7736fb38407c87e88ce3478c958514af38 after Host80 tests/583 assertions, API types, SQL/workflow and both real PG rehearsals. Settlement is product capacity closure, not execution/receipt cleanup or retention authorization. New code retains nonempty transcripts until G3 retention is frozen; previous SQL guard was reproduced deleting2 test Conversations. Evidence _ops/sdk-first/salesko-settlement-{host,types,pg,migration}.log and before-retention failure log. SDK executable/tarballs stay84ff260e and overrides/lock stay isolated. No full-Sprint/production claim.
 
 Pinned Salesko2dc15e7 installed-SDK recurring replay integration:2 PASS/25 assertions; the intentional consumer-response-loss error is the A07 fault injection, not a test failure. Strict workflow and diff checks pass. Only integration pin/notes/plan changed;84ff260e executable artifacts remain current.
+
+
+## Salesko input queue8d8cf0d
+
+Pinned subject8d8cf0d06456b95d30e10a47137668c88662eca0. SDK integration fixture explicitly composes downstream input admission and preparation using its test-only helper; no production combined-authoring wrapper. Host115 tests862 assertions and control138/640, API types and both real PG rehearsals pass; logs _ops/sdk-first/queue-{host-final,control,types-verified,pg-2,migration}.log. Same-schema snapshot key ordering is normalized only at the preparation boundary. Capacity8/full replay, zero-Execution COMMIT, one task from concurrent preparation and no dispatch before actual predecessor terminal are exercised. Model starts are synthetic/not run; no new SDK executable/package evidence or complete-Sprint claim.
+
+Pinned8d8cf0d installed-SDK integration2 PASS/25 assertions; intentional A07 response-loss injection remains covered. SDK strict workflow/diff checks pass; executable and tarballs remain84ff260e.
