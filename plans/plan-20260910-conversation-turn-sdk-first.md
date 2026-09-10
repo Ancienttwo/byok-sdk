@@ -8,7 +8,7 @@ Owner 最新指令：先做 SDK，供 Salesko 与 aiphabee 接入；Salesko 是�
 
 产品权威仍为 `docs/spec.md`。本计划不把既有 fresh 原语等同于完整产品模式；也不预设新增 Conversation store、executionMode 或 wire 字段。保留 B1-A、B2、B3、D05。连续会话模式是可选接入方式，原 session 路径保持明确契约，禁止运行失败后改变语义。
 
-Salesko 实际集成候选为 `/Users/kito/Projects/salesko-new-wt-sdk-test-90fab70` 的 `codex/recurring-sdk-adoption-test`，source `9d4ea2d`，Draft PR #241。目录旧名不表示当前仍 detached 或固定在90fab70。并行产品候选57b59f3未导入；保留其 WIP。Owner 最新要求优先 Salesko、不要动 aiphabee：K6 暂停，不读取、不修改、不安装或测试。
+Salesko 实际集成候选为 `/Users/kito/Projects/salesko-new-wt-sdk-test-90fab70` 的 `codex/recurring-sdk-adoption-test`，source `bb77830`，Draft PR #241。目录旧名不表示当前仍 detached 或固定在90fab70。并行产品候选57b59f3未导入；保留其 WIP。Owner 最新要求优先 Salesko、不要动 aiphabee：K6 暂停，不读取、不修改、不安装或测试。
 生产迁移、发布、部署和真实付费 runtime 执行不因本计划自动获授权。当前主仓存在其他任务 WIP；不得接管 downstream-issue-intake 的 harness 状态或修改其文件。
 
 ## P1 — Map
@@ -49,14 +49,14 @@ K0 不是 SDK 交付；K4 不是发布；K5 不是生产部署。跨阶段有可
 
 ## Current checkpoint
 
-- SDK Draft PR #181 的可执行候选为 `2da3bf2873640d285a6ef510e760fe0747495f77`，dispatch0.18.0-rc.1 / keys0.4.4-rc.1；未发布。完整 build/typecheck、API/version/workflow、3966 PASS /135 SKIP 和十包 packed gate 通过。具体局限与日志见 notes。
-- Salesko Draft PR #241 source9d4ea2d 使用上述精确 RC：全部十个 tarball hash 校验通过，实际安装的六包逐文件匹配。control138 PASS /640 assertions + typecheck；实际 dispatcher/repository 取消与重放2 PASS /25 assertions。
-- local tarball overrides 与 bun.lock 仅用于隔离测试，不提交成生产依赖。合并前仍需确定可分发的依赖来源与精确版本；当前 registry0.17.0 不具有新 API。
-- K5 的公共 API 与 artifact 接入已有证据；K7 的完整 Host 行为不能由这些集成测试替代。历史阶段证据与失败限制保留在同名 notes，不再将旧 next action 当作当前工作。
+- SDK executable/artifact subject remains `84ff260e973a21be4ed153311ceef87d72f77ae5`, dispatch0.18.0-rc.1 / keys0.4.4-rc.1, unpublished. Build/types/API/version/workflow,3971 PASS/135 SKIP and ten-package isolated packed gate remain the source evidence; selected result-document uses synthetic adapters, not native provider acceptance.
+- Salesko Draft PR #241 subject `bb77830fc877aae84e885800aca0b957d410a511` includes cap8 input-only queueing, explicit continuity, server recovery, atomic preparation, End and explicit Retry backends. Retry uses existing canonical terminal and terminal-unclaimed attempt observations, never reason parsing or automatic replacement.
+- Current Retry evidence: Host106/838, control140/659 plus TypeScript, related39/258, contracts/API/Web types, disposable PG COMMIT/concurrency/replay/identity fences, migration and SQL/workflow pass. Prior unchanged Summary extractor/policy and package-byte checks remain in notes; exact installed-SDK regression is pinned to this subject.
+- Root tarball overrides/bun.lock are isolated fixtures and stay uncommitted. SDK executable and ten frozen tarballs are unchanged. K5/K7 complete product acceptance, distributable dependency pins and authorized native validation remain open; K6 stays paused.
 
 ## Next action
 
-Salesko00b6619 now has request-independent Profile/Placement, binding/session and readiness preparation, alongside Turn v6 zero-Execution read/cancel. SDK source84ff260e now passes actual result return/durable readback and same-home gate tests with a stub runtime; required source and ten-package gates pass. Salesko6719945 now adopts the precise artifacts and its real daemon config passes explicit Summary extraction and readonly/no-business-tool projection with a test runtime. Next implement input-only submission and atomic queue-head Execution preparation and invoke it from HTTP/server recovery while existing frozen tasks continue same-identity reconciliation. Queue-head/prefix/claim checks must be inside the Host transaction; external Profile/control reads precede it. Queue cap eight and settled no-reply history inclusion are now closed in the existing Salesko S0 table/contract. Remaining model/storage budgets are unresolved. G4 execution choice is owner-confirmed: same frozen responder, strict BYOK fresh/result-document; Summary before dependent user Execution under unchanged home cap. Capability/policy/CAS/quality evidence remains open. No aiphabee activity.
+Implement Salesko S6-07 Stop-and-send: one authenticated action freezes the old cancellation target and new input, checks post-transaction unsettled count, appends without clearing/reordering queued inputs, and replays without retargeting. Then S7 exposes create-time continuity and recovery actions. No-reply ContextPack, Host SummaryJob/CAS, remaining model/storage budgets and quality/native verification remain required. G4 uses the same frozen responder home, strict fresh/result-document and Summary-before-dependent-user scheduling; no aiphabee access.
 
 ## 2026-09-10 requirement audit checkpoint
 
@@ -116,3 +116,6 @@ K5/S6 queue at Salesko8d8cf0d: input admission is now atomic zero-Execution queu
 
 
 K5/S2-04/S6-06 at Salesko96bf87e: End API/repository commits an exact action/task/generation settlement, preserves accepted/failed evidence and continues unknown old-task cancellation.120 Host/contracts tests923 assertions,57 Web tests223, API/Web types and both real PostgreSQL rehearsals plus SQL/workflow pass. End/accept COMMIT arbitration, lost response/concurrent replay and late terminal are verified; UI/Retry/Stop-send and no-reply ContextPack remain unfinished. SDK integration pin advances only; executable/artifacts remain84ff260e. K6 stays paused; K7/Sprint is not complete.
+
+
+K5/S6-05 at Saleskobb77830: explicit Retry API and transaction pass action/generation COMMIT replay, capacity, frozen snapshot and old-message/lease fences. Public SDK canonical decline plus failed/unclaimed attempt is the positive evidence; generic failure and reason strings are not. Late claimed decline is explicitly denied. Control140/659+types, Host106/838, related39/258, contracts/API/Web types and disposable PG/migration/SQL/workflow pass. SDK executable/artifacts84ff260e are unchanged; integration pin/ledger only. Stop-send/UI, no-reply ContextPack, SummaryJob/CAS/budgets/quality and native S9 remain open.
