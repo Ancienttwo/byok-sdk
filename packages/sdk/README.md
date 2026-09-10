@@ -1,10 +1,10 @@
 # byok-sdk
 
-The complete BYOK dispatch SDK. It groups the six public dispatch packages by
+The complete BYOK dispatch SDK. It groups the seven public dispatch packages by
 their ownership boundary:
 
 ```ts
-import { client, cloud, cloudDataplane, core, protocol, server } from 'byok-sdk';
+import { client, cloud, cloudDataplane, core, protocol, server, uiRuntime } from 'byok-sdk';
 ```
 
 - `client`: the end-user daemon and local runtime adapters.
@@ -13,6 +13,7 @@ import { client, cloud, cloudDataplane, core, protocol, server } from 'byok-sdk'
 - `cloudDataplane`: durable Postgres + R2 composition and migrations.
 - `core`: tenant-first platform contracts and store ports.
 - `protocol`: the frozen v1 device wire contract.
+- `uiRuntime`: browser runtime utilities for the user-interface layer.
 
 `@byok-sdk/keys` is deliberately not exported or installed by this package.
 Provider-key custody has a separate security model; install it explicitly only

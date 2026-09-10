@@ -9,7 +9,7 @@ describe('published umbrella README', () => {
   it('shows the full namespace surface in its consumer import', () => {
     const example = readme.match(/import \{([^}]+)\} from 'byok-sdk'/);
     expect(example).not.toBeNull();
-    expect(example![1].split(',').map(name => name.trim()).sort()).toEqual(namespaces);
+    expect(example![1]!.split(',').map(name => name.trim()).sort()).toEqual(namespaces);
   });
 
   it('describes all seven dispatch namespaces', () => {

@@ -1,0 +1,93 @@
+Source base: ce48120507bb51360d48aa2ab3a2ffbe4be67951
+README is unfixed; capture type assertion is corrected.
+Regression guard: packages/sdk/src/readme.test.ts
+Command: bun run --cwd packages/sdk test -- src/readme.test.ts
+$ vitest run src/readme.test.ts
+
+ RUN  v4.1.10 /Users/ancienttwo/Projects/byok-brc1415-canary-wt-brc177-readme-delivery/packages/sdk
+
+ ❯ src/readme.test.ts (3 tests | 2 failed) 10ms
+     × shows the full namespace surface in its consumer import 5ms
+     × describes all seven dispatch namespaces 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/readme.test.ts > published umbrella README > shows the full namespace surface in its consumer import
+AssertionError: expected [ 'client', 'cloud', …(4) ] to deeply equal [ 'client', 'cloud', …(5) ]
+
+- Expected
++ Received
+
+@@ -3,7 +3,6 @@
+    "cloud",
+    "cloudDataplane",
+    "core",
+    "protocol",
+    "server",
+-   "uiRuntime",
+  ]
+
+ ❯ src/readme.test.ts:12:69
+     10|     const example = readme.match(/import \{([^}]+)\} from 'byok-sdk'/);
+     11|     expect(example).not.toBeNull();
+     12|     expect(example![1]!.split(',').map(name => name.trim()).sort()).to…
+       |                                                                     ^
+     13|   });
+     14|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/readme.test.ts > published umbrella README > describes all seven dispatch namespaces
+AssertionError: expected '# byok-sdk\n\nThe complete BYOK dispa…' to contain 'seven public dispatch packages'
+
+- Expected
++ Received
+
+- seven public dispatch packages
++ # byok-sdk
++
++ The complete BYOK dispatch SDK. It groups the six public dispatch packages by
++ their ownership boundary:
++
++ ```ts
++ import { client, cloud, cloudDataplane, core, protocol, server } from 'byok-sdk';
++ ```
++
++ - `client`: the end-user daemon and local runtime adapters.
++ - `server`: the self-hosted in-memory coordinator.
++ - `cloud`: stateless hosted HTTP handlers and in-memory composition.
++ - `cloudDataplane`: durable Postgres + R2 composition and migrations.
++ - `core`: tenant-first platform contracts and store ports.
++ - `protocol`: the frozen v1 device wire contract.
++
++ `@byok-sdk/keys` is deliberately not exported or installed by this package.
++ Provider-key custody has a separate security model; install it explicitly only
++ when the host needs direct provider transports.
++
++ See the [repository README](https://github.com/Ancienttwo/byok-sdk#readme) for
++ composition examples and operational boundaries.
++
++ ## License
++
++ MIT. Node.js 22.22.0 or newer.
++
+
+ ❯ src/readme.test.ts:17:20
+     15|   it('describes all seven dispatch namespaces', () => {
+     16|     expect(namespaces).toHaveLength(7);
+     17|     expect(readme).toContain('seven public dispatch packages');
+       |                    ^
+     18|     for (const name of namespaces) expect(readme).toContain(`- \`${nam…
+     19|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 1 passed (3)
+   Start at  20:33:10
+   Duration  155ms (transform 18ms, setup 0ms, import 28ms, tests 10ms, environment 0ms)
+
+error: script "test" exited with code 1
+
+PRE_FIX_EXIT=1
