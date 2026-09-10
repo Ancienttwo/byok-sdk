@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 const hostRoot = process.env.SALESKO_TEST_ROOT;
 if (!hostRoot) throw new Error('Set SALESKO_TEST_ROOT to the isolated pinned Salesko checkout.');
 const hostSha = Bun.spawnSync(['git', '-C', hostRoot, 'rev-parse', 'HEAD']);
-if (hostSha.exitCode !== 0 || hostSha.stdout.toString().trim() !== '62b7fb288806592489df90457a04e78ed35a17d8') throw new Error('Salesko test subject mismatch');
+if (hostSha.exitCode !== 0 || hostSha.stdout.toString().trim() !== 'fe922d86cb1f0681c26b4bb661b55060cfd50e87') throw new Error('Salesko test subject mismatch');
 const installed = (name: string) => import(pathToFileURL(Bun.resolveSync(name, hostRoot)).href);
 const load = (name: string) => import(pathToFileURL(resolve(hostRoot, name)).href);
 const { Client } = (await installed('pg')).default;
