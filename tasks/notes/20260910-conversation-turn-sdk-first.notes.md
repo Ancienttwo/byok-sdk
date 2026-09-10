@@ -339,3 +339,10 @@ Pinned Salesko2dc15e7 installed-SDK recurring replay integration:2 PASS/25 asser
 Pinned subject8d8cf0d06456b95d30e10a47137668c88662eca0. SDK integration fixture explicitly composes downstream input admission and preparation using its test-only helper; no production combined-authoring wrapper. Host115 tests862 assertions and control138/640, API types and both real PG rehearsals pass; logs _ops/sdk-first/queue-{host-final,control,types-verified,pg-2,migration}.log. Same-schema snapshot key ordering is normalized only at the preparation boundary. Capacity8/full replay, zero-Execution COMMIT, one task from concurrent preparation and no dispatch before actual predecessor terminal are exercised. Model starts are synthetic/not run; no new SDK executable/package evidence or complete-Sprint claim.
 
 Pinned8d8cf0d installed-SDK integration2 PASS/25 assertions; intentional A07 response-loss injection remains covered. SDK strict workflow/diff checks pass; executable and tarballs remain84ff260e.
+
+
+## Salesko End backend96bf87e
+
+Public Host action targets the frozen taskId/generation/actionId; exact prior decision replays before queue-head checks. Product failure/input is retained, accepted reply wins its existing transaction, unknown old-task cancel/outbox continues without a new Execution.120 Host/contracts tests923 assertions and57 Web tests223 pass; API/Web types, real PG End/accept/COMMIT/replay/late-terminal/failed-task recovery, migration, SQL/workflow pass. Evidence is in the isolated Salesko worktree _ops/sdk-first/end-*.log. End UI/Retry/Stop-send, no-reply ContextPack and SummaryJob/budgets/native remain open. SDK executable and ten tarballs remain84ff260e; fixture overrides/lock stay uncommitted, no aiphabee or production actions.
+
+Pinned96bf87e installed-SDK integration:2 PASS/25 assertions; intentional A07 consumer-response-loss injection is expected. SDK strict workflow/diff checks PASS. This verifies existing replay/cancel regression with the changed Host; End's own acceptance is the Host/PG evidence above, not a native SDK run.
