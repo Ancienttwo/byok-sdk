@@ -1,6 +1,16 @@
 # Changelog
 
-## 0.18.0-rc.1 / @byok-sdk/keys 0.4.4-rc.1 — unpublished candidate
+## 0.18.0-rc.1 / @byok-sdk/keys 0.5.0-rc.1 — unpublished candidate
+
+- Breaking keys profile/storage contract: Pi execution requires explicit
+  `pi_model` settings, preserved in all profile stores, status and exact binding
+  hash. Older SQLite stores fail closed and are left intact; no automatic
+  migration or provider/model fallback. Direct transports remain independent
+  of Pi configuration.
+- Compose the actual Pi adapter with credential custody: accept bounded absolute
+  extension paths, preserve validated MCP/permission context and reject
+  delegated provider/model/thinking overrides. Installed Pi RPC verifies exact
+  model settings and extension loading without an inference request.
 
 - Add task-bound first-message discovery in Cloud and embedded server, including pending and held before a Host body exists. Custom TaskAttemptStore adapters on this breaking candidate train must implement the new read; no wire/store fallback. Received payload remains untrusted and does not author a product reply.
 

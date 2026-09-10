@@ -35,6 +35,23 @@ function profile(authMode: 'bearer' | 'none') {
 }
 
 describe('Pi provider launcher core', () => {
+  it('forwards only validated SDK extension context across custody', () => {
+    const mcp = path.join(os.tmpdir(), 'task-mcp.json');
+    const env = buildPiProviderChildEnvironment({
+      ambient: { BYOK_PI_MCP_CONFIG_PATH: mcp, BYOK_PI_PERMISSION_MODE: 'readonly', BYOK_PI_UNTRUSTED: 'discard', ZAI_API_KEY: CANARY },
+      projectionDir: '/projection', sessionDir: '/sessions', secret: undefined,
+    });
+    expect(env.BYOK_PI_MCP_CONFIG_PATH).toBe(mcp);
+    expect(env.BYOK_PI_PERMISSION_MODE).toBe('readonly');
+    expect(env.BYOK_PI_UNTRUSTED).toBeUndefined();
+    expect(env.ZAI_API_KEY).toBeUndefined();
+  });
+  it.each([
+    { BYOK_PI_MCP_CONFIG_PATH: './relative' }, { BYOK_PI_MCP_CONFIG_PATH: '/bad\npath' },
+    { BYOK_PI_PERMISSION_MODE: 'auto\n' }, { BYOK_PI_PERMISSION_MODE: 'confirm' },
+  ])('rejects malformed SDK extension context', (ambient) => {
+    expect(() => buildPiProviderChildEnvironment({ ambient, projectionDir: '/projection', sessionDir: '/sessions', secret: undefined })).toThrow();
+  });
   it('parses only the closed launcher contract and requires absolute custody paths', () => {
     const profileDbPath = path.join(os.tmpdir(), 'providers.sqlite');
     const sessionDir = path.join(os.tmpdir(), 'pi-sessions');

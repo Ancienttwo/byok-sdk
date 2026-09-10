@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { ByokKeysError } from './errors';
+import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
 import type { ModelProviderProfile } from './provider-profile';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import { isSqliteAvailable, openSqliteDatabase } from './sqlite-support';
@@ -248,6 +249,38 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
     await reader.close();
   });
 
+  it('retains declared Pi settings on disk and rejects malformed stored settings', async () => {
+    const store = new SqliteProviderProfileStore({ path: databasePath });
+    await store.save(profile('openai', { pi_model: PI_MODEL_FIXTURE }));
+    await store.close();
+    const reader = new SqliteProviderProfileStore({ path: databasePath, readOnly: true });
+    expect((await reader.get('openai'))?.pi_model).toEqual(PI_MODEL_FIXTURE);
+    await reader.close();
+    const raw = openSqliteDatabase(databasePath);
+    raw.prepare('UPDATE provider_profile SET pi_model = ?').run('{"contextWindow":1}');
+    raw.close();
+    const invalid = new SqliteProviderProfileStore({ path: databasePath, readOnly: true });
+    try { await expect(invalid.get('openai')).rejects.toThrow(); }
+    finally { await invalid.close(); }
+  });
+
+  it('rejects the preceding schema without modifying its existing profiles', async () => {
+    const store = new SqliteProviderProfileStore({ path: databasePath });
+    await store.save(profile('openai'));
+    await store.close();
+    const raw = openSqliteDatabase(databasePath);
+    raw.exec('ALTER TABLE provider_profile DROP COLUMN pi_model');
+    const before = raw.prepare("SELECT sql FROM sqlite_master WHERE name = 'provider_profile'").get();
+    const rows = raw.prepare('SELECT * FROM provider_profile').all();
+    raw.close();
+    expectSchemaStale(() => new SqliteProviderProfileStore({ path: databasePath, readOnly: true }));
+    const after = openSqliteDatabase(databasePath, { readOnly: true });
+    try {
+      expect(after.prepare("SELECT sql FROM sqlite_master WHERE name = 'provider_profile'").get()).toEqual(before);
+      expect(after.prepare('SELECT * FROM provider_profile').all()).toEqual(rows);
+    } finally { after.close(); }
+  });
+
   it('declares no column that could hold a secret', async () => {
     const store = new SqliteProviderProfileStore({ path: databasePath });
     await store.save(profile('openai'));
@@ -275,6 +308,7 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
       'enabled',
       'kind',
       'model',
+      'pi_model',
       'profile_ref',
       'provider_kind',
       'updated_at',

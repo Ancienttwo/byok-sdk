@@ -207,6 +207,7 @@ function encodeRegistry(profiles: readonly ModelProviderProfile[]): string {
       enabled: profile.enabled,
       kind: profile.kind,
       model: profile.model,
+      ...(profile.pi_model === undefined ? {} : { pi_model: profile.pi_model }),
       profile_ref: profile.profile_ref,
       provider_kind: profile.provider_kind,
       updated_at: profile.updated_at,
@@ -257,7 +258,8 @@ function decodeRegistryRecord(
   let profiles: ModelProviderProfile[];
   try {
     profiles = raw.profiles.map((candidate) => {
-      if (!isPlainRecord(candidate) || !hasExactKeys(candidate, PROFILE_KEYS)) {
+      if (!isPlainRecord(candidate) || !hasExactKeys(candidate,
+        Object.hasOwn(candidate, 'pi_model') ? [...PROFILE_KEYS, 'pi_model'] : PROFILE_KEYS)) {
         throw invalidTruth('Provider profile TruthStore body contains an unknown profile field');
       }
       return parseModelProviderProfile(candidate);

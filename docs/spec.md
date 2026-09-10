@@ -46,6 +46,26 @@ continues to use an explicitly selected, read-only SQLite profile database; P5
 does not add a network listener, remote secret provisioning, or a dispatch-to-
 keys dependency.
 
+Pi execution requires an explicit `pi_model` configuration in that local
+profile: context window, maximum output tokens, reasoning support, selected
+thinking level, a complete thinking-level map and supported protocol overrides.
+The configuration is validated, persisted and included in the exact profile
+hash. Missing or stale configuration rejects before credential access or Pi
+startup. Direct provider transports do not require Pi configuration. Vendor
+kind, endpoint and model name never infer it; Pi's built-in catalog does not
+override the namespaced local projection. Model limits do not constitute Host
+ContextPack budgets or measured available input tokens.
+
+The launcher accepts the adapter's bounded absolute extension paths and the
+two validated task inputs `BYOK_PI_MCP_CONFIG_PATH` and
+`BYOK_PI_PERMISSION_MODE`. Provider/model/thinking selection remains local
+profile authority; delegated flags cannot override it. Arbitrary environment
+names and provider credentials remain excluded. The profile SQLite schema
+adds nullable `pi_model`; an older store is rejected without migration or
+deletion. Operators must preserve it and explicitly provision a separate
+current-schema store. No automatic conversion or live-store mutation is part
+of this candidate.
+
 ## Pre-1.0 package version policy
 
 The aligned dispatch train uses one version. Before 1.0, PATCH is limited to
@@ -55,7 +75,7 @@ migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
 aligned dispatch release is `0.18.0-rc.1`; publication requires separate release
 authorization and registry readback. The current independent keys candidate is
-`0.4.4-rc.1`; its packed and published `@byok-sdk/core` edge must be the exact current
+`0.5.0-rc.1`; its packed and published `@byok-sdk/core` edge must be the exact current
 dispatch release, `0.18.0-rc.1`, proven from an isolated standard npm install rather
 than the workspace graph.
 

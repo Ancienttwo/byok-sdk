@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import path from 'node:path';
+import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
+const { thinkingLevel, ...modelSettings } = PI_MODEL_FIXTURE;
 
 import {
   PI_PROJECTED_KEY_ENV,
@@ -13,9 +16,31 @@ const timestamps = {
 };
 
 describe('buildPiProviderProjection', () => {
+  const argvProfile = () => parseModelProviderProfile({
+    ...timestamps, pi_model: PI_MODEL_FIXTURE, adapter: 'openai_compatible', auth_mode: 'none',
+    base_url: 'http://127.0.0.1:9191/v1', capabilities: [], display_name: 'Synthetic', enabled: true,
+    kind: 'model', model: 'explicit-model', profile_ref: 'synthetic', provider_kind: 'custom',
+  });
+
+  it.each([
+    ['--extension', './relative.js'], ['--extension', 'https://example.com/extension.js'],
+    ['--extension', path.resolve('bad\npath.js')], ['--extension'],
+    ['--model', 'override'], ['--thinking', 'max'], ['--settings', '/untrusted'],
+    ['--mode', 'rpc'], ['--no-tools', '--tools', 'bash'], ['--session', 'bad\nvalue'],
+  ])('rejects unsafe or conflicting delegated argv %j', (...tail) => {
+    expect(() => buildPiProviderArgs(argvProfile(), ['--mode', 'rpc', ...tail])).toThrow();
+  });
+
+  it('preserves absolute extensions and allow/deny tools under the exact model', () => {
+    const extension = path.resolve('owned-extension.js');
+    const args = ['--mode', 'rpc', '--extension', extension, '--tools', 'read', '--exclude-tools', 'bash'];
+    expect(buildPiProviderArgs(argvProfile(), args).slice(0, args.length)).toEqual(args);
+  });
+
   it('projects an OpenAI-compatible profile without embedding its secret', () => {
     const profile = parseModelProviderProfile({
       ...timestamps,
+      pi_model: PI_MODEL_FIXTURE,
       adapter: 'openai_compatible',
       auth_mode: 'bearer',
       base_url: 'https://api.openai.com/v1',
@@ -35,7 +60,7 @@ describe('buildPiProviderProjection', () => {
           api: 'openai-completions',
           apiKey: `$${PI_PROJECTED_KEY_ENV}`,
           authHeader: true,
-          models: [{ id: 'gpt-5.2', name: 'GPT', input: ['text'] }],
+          models: [{ ...modelSettings, id: 'gpt-5.2', name: 'GPT', input: ['text'] }],
         },
       },
     });
@@ -45,6 +70,7 @@ describe('buildPiProviderProjection', () => {
   it('uses Anthropic Messages/x-api-key semantics without a bearer authHeader', () => {
     const profile = parseModelProviderProfile({
       ...timestamps,
+      pi_model: PI_MODEL_FIXTURE,
       adapter: 'anthropic',
       auth_mode: 'x_api_key',
       base_url: 'https://api.anthropic.com',
@@ -62,7 +88,7 @@ describe('buildPiProviderProjection', () => {
           baseUrl: 'https://api.anthropic.com',
           api: 'anthropic-messages',
           apiKey: `$${PI_PROJECTED_KEY_ENV}`,
-          models: [{ id: 'claude-sonnet-5', name: 'Claude', input: ['text'] }],
+          models: [{ ...modelSettings, id: 'claude-sonnet-5', name: 'Claude', input: ['text'] }],
         },
       },
     });
@@ -73,6 +99,7 @@ describe('buildPiProviderProjection', () => {
       buildPiProviderProjection(
         parseModelProviderProfile({
           ...timestamps,
+      pi_model: PI_MODEL_FIXTURE,
           adapter: 'openai_compatible',
           auth_mode: 'bearer',
           base_url: 'https://openrouter.ai/api/v1',
@@ -102,6 +129,7 @@ describe('buildPiProviderProjection', () => {
   it('binds Pi to the namespaced projection and exact model', () => {
     const profile = parseModelProviderProfile({
       ...timestamps,
+      pi_model: PI_MODEL_FIXTURE,
       adapter: 'openai_compatible',
       auth_mode: 'bearer',
       base_url: 'https://api.openai.com/v1',
@@ -120,13 +148,14 @@ describe('buildPiProviderProjection', () => {
       '--provider',
       'byok-sdk-openai',
       '--model',
-      'gpt-5.2',
+      'gpt-5.2', '--thinking', thinkingLevel,
     ]);
   });
 
   it('rejects delegated provider/model overrides and non-RPC modes', () => {
     const profile = parseModelProviderProfile({
       ...timestamps,
+      pi_model: PI_MODEL_FIXTURE,
       adapter: 'openai_compatible',
       auth_mode: 'bearer',
       base_url: 'https://api.openai.com/v1',

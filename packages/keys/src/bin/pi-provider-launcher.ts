@@ -17,6 +17,7 @@ import { assertExactProviderProfileBinding } from '../provider-profile';
 import {
   buildPiProviderArgs,
   buildPiProviderProjection,
+  PI_PROJECTED_KEY_ENV,
 } from '../pi-provider-projection';
 import { type SecretStore } from '../secret-store';
 import { SqliteProviderProfileStore } from '../sqlite-profile-store';
@@ -73,32 +74,27 @@ async function run(options: PiProviderLauncherOptions): Promise<number> {
     if (options.expectedBinding !== undefined) {
       assertExactProviderProfileBinding(profile, options.expectedBinding);
     }
+    const projection = buildPiProviderProjection(profile);
     if (options.validateOnly) return 0;
-
-    const secret = await resolvePiProviderSecret(
-      profile,
-      () => createSecretStore(
-        options.secretServicePrefix,
-        options.macosKeychainPath,
-      ),
-    );
+    const childArgs = buildPiProviderArgs(profile, options.piArgs);
 
     projectionDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-provider-'));
     await fs.chmod(projectionDir, 0o700).catch(() => {});
     await ensurePiSessionDirectory(options.sessionDir);
+    const childEnv = buildPiProviderChildEnvironment({
+      ambient: process.env, projectionDir, sessionDir: options.sessionDir, secret: undefined,
+    });
+    const secret = await resolvePiProviderSecret(profile,
+      () => createSecretStore(options.secretServicePrefix, options.macosKeychainPath));
+    if (secret !== undefined) childEnv[PI_PROJECTED_KEY_ENV] = secret;
     await fs.writeFile(
       path.join(projectionDir, 'models.json'),
-      `${JSON.stringify(buildPiProviderProjection(profile))}\n`,
+      `${JSON.stringify(projection)}\n`,
       { mode: 0o600 },
     );
 
-    const child = spawn(options.piBin, buildPiProviderArgs(profile, options.piArgs), {
-      env: buildPiProviderChildEnvironment({
-        ambient: process.env,
-        projectionDir,
-        sessionDir: options.sessionDir,
-        secret,
-      }),
+    const child = spawn(options.piBin, childArgs, {
+      env: childEnv,
       stdio: 'inherit',
     });
 

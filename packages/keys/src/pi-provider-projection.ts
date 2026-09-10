@@ -1,4 +1,6 @@
 import type { ModelProviderProfile } from './provider-profile';
+import { isAbsolute } from 'node:path';
+import { PiModelConfigSchema } from './pi-model-config';
 
 export const PI_PROJECTED_KEY_ENV = 'PI_PROVIDER_API_KEY';
 
@@ -18,6 +20,7 @@ export function piProjectionProviderId(profileRef: string): string {
  * the model name or base URL.
  */
 export function buildPiProviderProjection(profile: ModelProviderProfile): object {
+  const { thinkingLevel: _, ...modelSettings } = requirePiModelConfig(profile);
   const projectedProviderId = piProjectionProviderId(profile.profile_ref);
   return {
     providers: {
@@ -33,6 +36,7 @@ export function buildPiProviderProjection(profile: ModelProviderProfile): object
         ...(profile.auth_mode === 'bearer' ? { authHeader: true } : {}),
         models: [
           {
+            ...modelSettings,
             id: profile.model,
             name: profile.display_name,
             input: [
@@ -54,10 +58,27 @@ export function buildPiProviderArgs(
   profile: ModelProviderProfile,
   delegatedArgs: readonly string[],
 ): string[] {
+  const config = requirePiModelConfig(profile);
+  if (delegatedArgs.length > 128) throw new Error('Pi launcher delegated argument limit exceeded');
   let modeCount = 0;
+  let extensionCount = 0;
+  const singleFlags = new Set<string>();
   for (let index = 0; index < delegatedArgs.length; index += 1) {
     const flag = delegatedArgs[index];
+    if (typeof flag !== 'string' || /[\u0000\r\n]/u.test(flag)) throw new Error('Pi launcher argument must be single-line');
+    if (flag !== '--extension') {
+      if (singleFlags.has(flag)) throw new Error(`Pi launcher duplicate argument ${flag}`);
+      singleFlags.add(flag);
+    }
     if (flag === '--no-tools') continue;
+    if (flag === '--extension') {
+      const value = delegatedArgs[++index];
+      if (typeof value !== 'string' || !isAbsolute(value) || /[\u0000\r\n]/u.test(value)) {
+        throw new Error('Pi launcher --extension requires an absolute single-line path');
+      }
+      if (++extensionCount > 16) throw new Error('Pi launcher extension limit exceeded');
+      continue;
+    }
     if (flag === '--mode') {
       modeCount += 1;
       const value = delegatedArgs[index + 1];
@@ -67,7 +88,7 @@ export function buildPiProviderArgs(
     }
     if (flag === '--session' || flag === '--tools' || flag === '--exclude-tools') {
       const value = delegatedArgs[index + 1];
-      if (!value || value.startsWith('--')) {
+      if (!value || value.startsWith('--') || /[\u0000\r\n]/u.test(value)) {
         throw new Error(`${flag} requires a value`);
       }
       index += 1;
@@ -76,6 +97,9 @@ export function buildPiProviderArgs(
     throw new Error(`Pi launcher does not allow delegated argument ${flag ?? '<missing>'}`);
   }
   if (modeCount !== 1) throw new Error('Pi launcher requires exactly one --mode rpc');
+  if (singleFlags.has('--no-tools') && singleFlags.has('--tools')) {
+    throw new Error('Pi launcher cannot combine --no-tools and --tools');
+  }
 
   return [
     ...delegatedArgs,
@@ -83,5 +107,12 @@ export function buildPiProviderArgs(
     piProjectionProviderId(profile.profile_ref),
     '--model',
     profile.model,
+    '--thinking',
+    config.thinkingLevel,
   ];
+}
+
+function requirePiModelConfig(profile: ModelProviderProfile) {
+  if (profile.pi_model === undefined) throw new Error('Pi execution requires explicit pi_model configuration');
+  return PiModelConfigSchema.parse(profile.pi_model);
 }

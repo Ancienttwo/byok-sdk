@@ -226,6 +226,16 @@ export function buildPiProviderChildEnvironment(options: {
       : name.startsWith('LC_') || name.startsWith('XDG_');
     if (isExact || isPrefixed) result[name] = value;
   }
+  const mcpPath = options.ambient.BYOK_PI_MCP_CONFIG_PATH;
+  if (mcpPath !== undefined) {
+    if (!path.isAbsolute(mcpPath) || /[\u0000\r\n]/u.test(mcpPath)) throw new Error('BYOK_PI_MCP_CONFIG_PATH must be an absolute single-line path');
+    result.BYOK_PI_MCP_CONFIG_PATH = mcpPath;
+  }
+  const permissionMode = options.ambient.BYOK_PI_PERMISSION_MODE;
+  if (permissionMode !== undefined) {
+    if (permissionMode !== 'auto' && permissionMode !== 'readonly') throw new Error('BYOK_PI_PERMISSION_MODE must be auto or readonly');
+    result.BYOK_PI_PERMISSION_MODE = permissionMode;
+  }
   result.PI_CODING_AGENT_DIR = options.projectionDir;
   result.PI_CODING_AGENT_SESSION_DIR = options.sessionDir;
   if (options.secret !== undefined) {

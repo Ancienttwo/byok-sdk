@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import * as keys from './index';
+import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
 
 describe('Agent-scoped provider profile binding', () => {
   it('exposes an opaque multi-instance profile identity instead of one fixed custom slot', async () => {
@@ -20,6 +21,7 @@ describe('Agent-scoped provider profile binding', () => {
 
   it('projects explicit image-input capability without exposing a credential', () => {
     const profile = keys.parseModelProviderProfile({
+      pi_model: PI_MODEL_FIXTURE,
       adapter: 'openai_compatible',
       auth_mode: 'bearer',
       base_url: 'https://openrouter.ai/api/v1',

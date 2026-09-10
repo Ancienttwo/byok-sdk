@@ -3,6 +3,7 @@ import { ByokKeysError } from './errors';
 import type { ProviderFetch } from './http';
 import { OpenAiCompatibleChatClient } from './openai-client';
 import type { ProviderProfileStore } from './profile-store';
+import type { PiModelConfig } from './pi-model-config';
 import {
   type ModelProviderAdapter,
   type ModelProviderKind,
@@ -31,6 +32,8 @@ export type ModelProviderClient =
  * persisted data.
  */
 export interface ProviderConfiguration {
+  /** Required for Pi execution; omitted profiles remain direct-transport-only. */
+  pi_model?: PiModelConfig;
   adapter: ModelProviderAdapter;
   auth_mode: ProviderAuthMode;
   base_url: string;
@@ -57,6 +60,7 @@ export interface ProviderConfiguration {
  * plaintext key".
  */
 export interface ProviderStatus {
+  pi_model?: PiModelConfig;
   adapter: ModelProviderAdapter;
   auth_mode: ProviderAuthMode;
   base_url: string;
@@ -267,6 +271,7 @@ export class ProviderRegistry {
       display_name: profile.display_name,
       enabled: profile.enabled,
       model: profile.model,
+      ...(profile.pi_model === undefined ? {} : { pi_model: profile.pi_model }),
       profile_ref: profile.profile_ref,
       profile_revision: binding.profileRevision,
       profile_hash: binding.profileHash,
