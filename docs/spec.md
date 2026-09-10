@@ -1170,3 +1170,25 @@ status, is not evidence of mailbox delivery or physical Agent-home release.
 ### Explicit internal result projection under Agent egress
 
 A strict fresh Agent task may select `terminalProjection: { mode: 'result-document', contract }` without user `messageEgress`. Under metadata-status, that frozen task selection authorizes the extracted document as a separate internal result; terminal summary and activity stay metadata-only. The daemon must preserve the selected document through outbound projection rather than silently deliver document-less success. An unselected document is not authorized by its presence in a payload. Existing extractor validation, server capability gates and configured Host sanitizer remain applicable. This is an execution/result primitive: Host owns SummaryJob, coverage/version CAS, budgets and scheduling; schema support alone is not native-runtime or tool-isolation acceptance.
+
+### Recurring Host composition requirements
+
+The [Conversation-turn Fresh MVP PRD](researches/2026-09-09_conversation-turn-fresh-mvp-prd.md)
+defines the approved Host composition below this SDK product authority. Recurring
+fresh and explicit session continuity remain selectable parallel contracts;
+failure cannot switch between them. The Host freezes a Conversation's selected
+continuity at creation and owns transcript, Turn/Execution association, queue
+settlement, context history and Summary jobs. No SDK Conversation store is added.
+
+Salesko is the current downstream acceptance target. Its cap of eight unsettled
+user Turns, settled no-reply history policy and same-home internal Summary
+ordering are Host product choices, not mandatory SDK policies for every embedder.
+Summary uses a separate strict fresh task with explicit result-document and no
+user messageEgress, followed by its dependent user Execution under the same home
+admission limit. Host coverage/CAS, input/output budgets, tool authorization and
+summary quality must be validated separately from the SDK result primitive.
+
+Requirements and local acceptance have separate authorities: the existing
+[SDK-first plan](../plans/plan-20260910-conversation-turn-sdk-first.md) links the
+sole detailed Host Sprint ledger. Public source and packed evidence do not imply
+complete ContextPack/Summary, native-runtime, migration or production acceptance.

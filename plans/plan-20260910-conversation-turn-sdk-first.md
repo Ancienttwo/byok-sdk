@@ -56,7 +56,7 @@ K0 不是 SDK 交付；K4 不是发布；K5 不是生产部署。跨阶段有可
 
 ## Next action
 
-A29 joint recovery, S3-05 allocation pause and S10-03 local creation/rollback-boundary contract are closed; S10-02 preflight checklist is prepared but unexecuted. Next audit S10-01 approved PRD/spec/implementation alignment using the original untracked PRD snapshot without changing main WIP. G3/G4 inputs still gate dependent S5, and S9/final acceptance remain open. Keep old-task recovery operational and the sole Salesko ledger current. No product defaults or native authority can be inferred from synthetic tests; do not rerun unchanged source/packed matrices.
+S10-01 imports the approved [PRD](../docs/researches/2026-09-09_conversation-turn-fresh-mvp-prd.md) and aligns both product specs/current contracts without changing main WIP. A29 joint recovery, S3-05 allocation pause and S10-03 local creation/correction contract are closed; S10-02 checklist is prepared but unexecuted. Next existing task is S10-04: report the bounded local verdict and unresolved S5/S9 gates from retained exact-subject evidence, without marking the Sprint complete. G3/G4 still gate dependent S5, K6 stays paused, and no defaults/native authority can be inferred from synthetic tests. Do not rerun unchanged source/packed matrices.
 
 G3/G4 budget/model/quality inputs still block dependent S5 ContextPack/Summary implementation. The selected Summary path remains same-responder-home strict fresh/result-document before the dependent user Execution; no guessed numeric defaults, alternate provider, business tools or messageEgress slot. S9 native/provider/device authorization is separate; K6/aiphabee remains paused.
 
