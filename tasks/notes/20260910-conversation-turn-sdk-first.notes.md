@@ -292,3 +292,10 @@ Request-independent current Agent/Placement composition now owns chat binding/se
 Salesko320fe7c updates only its existing parameter table, contract, plan and notes: cap eight unsettled user Turns and settled no-reply history inclusion. Capacity is a product limit, not measured concurrency; settlement does not prove resource release. History carries outcome/unknown facts, never authorization to rerun old tasks. Main PRD received the same narrow changes and remains untracked owner WIP outside the SDK candidate. Summary selection is unresolved because the two supplied proposals conflict on shared responder-home usage. SDK executable/artifact subject remains2da3bf28; integration pin follows the docs-only Salesko commit without repacking. No aiphabee access, migration, publication or deployment.
 
 Validation: installed Salesko public SDK integration at320fe7c passes2 tests/25 assertions. The printed consumer exception is the intentional post-COMMIT lost-response injection and both replay/cancel cases pass. No queue/Summary implementation claim.
+
+
+## 2026-09-10 Summary path owner confirmation
+
+The user explicitly accepts GPT's strict Agent fresh/result-document route on the same frozen responder home, superseding the pending choice above. Updated existing PRD/Salesko S0/contract/ledger and SDK plan/contract. P1: Host job/CAS versus SDK execution/result ownership. P2: Summary first -> durable result -> CAS -> dependent user fresh Execution. P3: serial shared-home composition preserves admission and avoids a cloud/legacy fallback; actual tool policy must prove isolation. Product policy selection is complete; capability/packed/runtime, quality and budgets are not. SDK executable/artifacts remain2da3bf28. Salesko942365c is documentation-only over320fe7c; integration identity pin follows it. No aiphabee, publish, merge, migration or deployment.
+
+Validation: both worktrees pass strict workflow and diff whitespace checks. Installed Salesko SDK regression at942365c passes2 tests/25 assertions (intentional post-COMMIT consumer failure remains the replay fixture). This is existing cancellation/replay regression, not Summary execution evidence.
