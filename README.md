@@ -108,6 +108,14 @@ for diagnostic UI, local CLI wiring, bounded health repair, support bundles,
 and acceptance scenarios. It distinguishes device diagnostics from Agent
 readiness and identifies SDK capabilities still needed by embedded hosts.
 
+## Downstream issues and requests
+
+Found a bug, missing SDK capability, or documentation gap during integration?
+Submit a [downstream integration issue](https://github.com/Ancienttwo/byok-sdk/issues/new?template=downstream-integration.yml).
+Include exact SDK versions, a minimal reproduction or use case, downstream
+impact, and acceptance criteria. See the [submission guide](docs/upstream-requests.md)
+for browser/CLI submission and follow-up expectations.
+
 ## Key management is separate
 
 `@byok-sdk/keys` stores provider credentials and makes direct provider calls.

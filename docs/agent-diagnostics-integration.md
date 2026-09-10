@@ -4,6 +4,9 @@
 
 适用范围：当前仓库的 `@byok-sdk/client` CLI。本文不是已发布版本或下游上线证明；集成验收必须绑定下游实际打包的 SDK/CLI 版本。产品权威见 [spec](spec.md)，本地运维细节见 [self-hosted runbook](../deploy/runbooks/self-hosted-operations.md)，云端故障另见 [hosted runbook](../deploy/runbooks/hosted-operations.md)。
 
+集成中发现问题或缺少 SDK 通用能力时，按[上游需求提交指南](upstream-requests.md)
+创建 GitHub Issue，附实际版本、脱敏证据和可验证的期望结果。
+
 ## 1. P1：能力与责任地图
 
 | 层 | SDK 提供并负责维护 | 下游需要接入 |
