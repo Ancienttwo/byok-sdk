@@ -425,3 +425,12 @@ Delayed close: after activeAttempts falls to0, scans still do not rerun T2 or pr
 At Host c9ffdeb, `_ops/sdk-first/s8-lifecycle-integration-final.log`4 PASS/117 assertions includes the two existing consumer cases. Initial fixture used an invalid equal now/nextCheckAt; source correctly rejected it, then only the test clock was fixed (`s8-lifecycle-integration-1.log` retained). No product source changed. Final pin is9027d5c81a3814aea47614608bfa9dff2118a793 (Host evidence docs only, unchanged application). Final verification also asserts each scan actually selected/skipped the waiting T3, rather than a vacuous empty scan. Both temporary daemon/home roots and HTTP servers are cleaned. PG evidence remains independent, no full PG/daemon or native PASS. Matrix16/8/5; next A27 coexistence first acceptance, remaining S8 gaps and S5/S9 explicit; K6 paused.
 
 Final pinned9027d5c integration (`s8-lifecycle-pinned-integration.log`):4 PASS/117 assertions, including nonempty recovery scan assertions. Strict workflow (`s8-lifecycle-workflow.log`) and diff check PASS; packages diff from84ff260e empty. No full SDK rerun/repack or Host PG/browser rerun for unchanged product surfaces.
+
+
+## S8-04 A27 Host migration coexistence pin
+
+Host5dab9af32cf123797a4c674aac39decd2371eaa2 adds only a disposable PG rehearsal and existing evidence documents; application remains c9ffdeb. The real migrated repository accepts an old running/resume task's first reply while a separately prepared fresh Conversation exists. Both slots begin empty; exchanged task/context/session refuse, each exact publication accepts once and cancel/exact replay preserves accepted facts and frozen snapshots. Five legacy identities survive, no legacy re-enqueue; messages are synthetic and no native starts occur. Host `s8-a27-migration-verified.log`, strict workflow and matrix recount pass. Test initialization errors and their fixture-only corrections are recorded in Host notes.
+
+SDK integration changes only its exact Host pin to5dab9af. No package/adapter/Cloud source or tarball rebuild. A27 becomes local PASS and matrix17/7/5; S5 G3/G4/budgets/quality, remaining A01/A10/A12/A13/A14/A25/A29 combinations, S9 and K6 remain as recorded. No aiphabee access or production/merge/release action.
+
+Final pinned5dab9af installed-SDK integration (`s8-a27-pinned-integration.log`):4 PASS/117 assertions. Strict workflow (`s8-a27-workflow.log`), diff check and unchanged packages relative to84ff260e pass. No full matrix or artifact rebuild repeated.
