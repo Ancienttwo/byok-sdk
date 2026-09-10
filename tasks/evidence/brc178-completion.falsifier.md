@@ -31,3 +31,7 @@ Frozen source digests:
 The complete CI run34468443838 failed in a different job because readme.test.ts had TS2532. That failure remains a failure and is covered by Issue177's approved repair; it does not erase the three independently passing installed-package smoke jobs. No source test was added, no assertion was weakened, and no replacement defect or Issue was introduced for Issue178.
 
 Disposition: not_planned because the original alleged test gap is already covered. This artifact does not assert current campaign acceptance; its exact bytes and the typed decision require their own local acceptance receipt before Issue closure.
+
+## Current source readback
+
+At canary commit 8ec7d9f61948528ae1bbc79cc1dbfd13ddd4d3f2, all three source files listed above were read again and their SHA-256 digests matched the ce481205 baseline exactly. This readback establishes that the cited installed-consumer coverage is still present after the current campaign planning and evidence metadata were integrated. It does not change the historical CI run identity or claim that its full aggregate passed. The artifact-only acceptance checks verify this same source equality and the decision-to-falsifier digest binding before semantic review.

@@ -17,8 +17,8 @@
   "falsifier": {
     "command": "node scripts/release/pack-and-smoke.mjs --out-dir .ci-artifacts/release-pack",
     "exit_code": 0,
-    "observation": "At baseline ce48120507bb51360d48aa2ab3a2ffbe4be67951, existing CI run34468443838 jobs102842448247/102842448243/102842448309 passed the installed ten-package consumer smoke, which asserts exactly seven umbrella namespaces including uiRuntime and excludes keys. The smoke source, SDK entrypoint and workflow remain byte-identical. This is reuse of those existing job results, not a new execution or a passing aggregate CI claim; the separate TS2532 job failure belongs to Issue177.",
+    "observation": "At baseline ce48120507bb51360d48aa2ab3a2ffbe4be67951, existing CI run34468443838 jobs102842448247/102842448243/102842448309 passed the installed ten-package consumer smoke, which asserts exactly seven umbrella namespaces including uiRuntime and excludes keys. The smoke source, SDK entrypoint and workflow remain byte-identical. This is reuse of those existing job results, not a new execution or a passing aggregate CI claim; the separate TS2532 job failure belongs to Issue177. Current source digest readback at 8ec7d9f61948528ae1bbc79cc1dbfd13ddd4d3f2 confirmed all three source inputs still equal that baseline.",
     "artifact_path": "tasks/evidence/brc178-completion.falsifier.md",
-    "artifact_sha256": "sha256:8770b98588d7352411c1f20377c1986ed837f3cac7f9873d4e2a68ec76d0a92f"
+    "artifact_sha256": "sha256:67c3ed2db5f79fd7f57a6a8109294047f32e28cda3f19f34850236f49b7fc193"
   }
 }
