@@ -807,6 +807,7 @@ export interface FullCapabilityDeclarationOptions {
 export declare function fullCapabilityDeclaration(version?: number, options?: FullCapabilityDeclarationOptions): CapabilityDeclaration;
 export declare function declares(declaration: CapabilityDeclaration, capability: CloudCapability): boolean;
 // ==== @byok-sdk/cloud dist/cloud.d.ts ====
+import { type TaskAgentMessage } from './task-agent-message';
 import { type RecurringExecutionInput } from './recurring';
 /**
  * `createByokCloud` — the hosted device surface, assembled.
@@ -1169,6 +1170,8 @@ export interface ByokCloud {
     readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
     /** Actual device terminal only; cancellation intent never creates this observation. */
     readDeviceTerminal(tenant: TenantId, taskId: string): Promise<DeviceTerminal | undefined>;
+    /** Discover first-message transmission evidence from the frozen execution binding, including pending/held without a Host body. */
+    readTaskAgentMessage(tenant: TenantId, deviceId: string, taskId: string, agentRef: AgentRef): Promise<TaskAgentMessage | undefined>;
     /**
      * Exact durable message decision, independently of task cancellation/terminal.
      * Missing or pending admission returns undefined; invalid persisted evidence
@@ -1778,6 +1781,7 @@ export declare function handleAgentMessagePublish(stores: TenantStores, deviceId
 }>;
 /** Reads only a terminal immutable admission; pending rows have no disposition to acknowledge. */
 export declare function readAgentMessageDisposition(stores: TenantStores, deviceId: string, taskId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
+export declare function parseAgentMessageDisposition(payload: AgentMessagePublishPayload, terminalBody: string): AgentMessageDispositionPayload;
 /** Receipt key a task's terminal is recorded under — the idempotency seam S3b's journal will share. */
 export declare function terminalReceiptKey(taskId: string): string;
 export declare function handleInboundEnvelope(stores: TenantStores, deviceId: string, envelope: Envelope, activityBounds?: ActivityBounds, agentMessageConsume?: Parameters<typeof handleAgentMessagePublish>[4], observer?: ByokCloudObserver): Promise<InboundOutcome>;
@@ -1799,6 +1803,7 @@ export declare function handleInboundEnvelope(stores: TenantStores, deviceId: st
 export { isTenantId, tenantId } from '@byok-sdk/core';
 export type { TenantId } from '@byok-sdk/core';
 export { createByokCloud } from './cloud';
+export type { TaskAgentMessage } from './task-agent-message';
 export type { ByokCloud, ByokCloudOptions, AgentDispatchInput, AgentEgressDispatchInput, AgentEgressFreshSessionDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, AgentHomeProjectionStatusInput, ApproveTaskOptions, EnqueueOfferInput, EnqueueToolsetOfferInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedOffer, TaskOfferReadback, } from './cloud';
 export { agentHomeProjectionCompletionKey, agentHomeProjectionRequestKey, readAgentHomeProjectionStatus, recordAgentHomeProjectionCompletion, } from './agent-home-projections';
 export type { AgentHomeProjectionReceiptInput } from './agent-home-projections';
@@ -2517,6 +2522,10 @@ export declare class InMemoryTaskAttemptStore implements TaskAttemptStore {
         readonly messageId: string;
         readonly payloadBody: string;
     }): Promise<'reserved' | 'pending' | 'rejected'>;
+    readTaskAgentMessage(tenant: TenantId, input: {
+        readonly taskId: string;
+        readonly deviceId: string;
+    }): Promise<AgentMessageAdmission | undefined>;
     readAgentMessage(tenant: TenantId, input: {
         readonly taskId: string;
         readonly deviceId: string;
@@ -2923,6 +2932,11 @@ export interface TaskAttemptStore {
         readonly messageId: string;
         readonly payloadBody: string;
     }): Promise<'reserved' | 'pending' | 'rejected'>;
+    /** Discover the unique immutable message for a tenant/device/task; caller validates its frozen Agent binding. */
+    readTaskAgentMessage(tenant: TenantId, input: {
+        readonly taskId: string;
+        readonly deviceId: string;
+    }): Promise<AgentMessageAdmission | undefined>;
     /** Read only an exact reservation; conflicting task/message bindings are not observable. */
     readAgentMessage(tenant: TenantId, input: {
         readonly taskId: string;
@@ -3194,6 +3208,18 @@ export interface CloudStores {
 /** Names of every port in {@link CloudStores}, in contract order. */
 export declare const CLOUD_STORE_NAMES: readonly ['activity', 'approvals', 'devices', 'pairingCodes', 'pairing', 'nonces', 'dedup', 'tasks', 'cancellations', 'receipts', 'egress', 'proofReceipts', 'blobs', 'rateLimiter'];
 export type CloudStoreName = (typeof CLOUD_STORE_NAMES)[number];
+// ==== @byok-sdk/cloud dist/task-agent-message.d.ts ====
+import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
+import type { TenantStores } from './tenant-stores';
+/** SDK transmission evidence; payload remains untrusted and never authors a Host product message. */
+export interface TaskAgentMessage {
+    readonly payload: AgentMessagePublishPayload;
+    readonly context: AgentMessageServerContext;
+    /** Absent while the exact first-message reservation remains pending. */
+    readonly disposition?: AgentMessageDispositionPayload;
+}
+/** Discover the one durable message without requiring the Host to have received its body. */
+export declare function readTaskAgentMessage(stores: TenantStores, deviceId: string, taskId: string, expectedRef: AgentRef): Promise<TaskAgentMessage | undefined>;
 // ==== @byok-sdk/cloud dist/tenant-stores.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
@@ -3284,6 +3310,10 @@ export interface TenantBoundTaskAttempts {
         readonly messageId: string;
         readonly payloadBody: string;
     }): Promise<'reserved' | 'pending' | 'rejected'>;
+    readTaskAgentMessage(input: {
+        readonly taskId: string;
+        readonly deviceId: string;
+    }): Promise<import('./stores/ports').AgentMessageAdmission | undefined>;
     readAgentMessage(input: {
         readonly taskId: string;
         readonly deviceId: string;

@@ -1304,6 +1304,10 @@ export declare class PostgresTaskAttemptStore implements TaskAttemptStore {
         readonly messageId: string;
         readonly payloadBody: string;
     }): Promise<'reserved' | 'pending' | 'rejected'>;
+    readTaskAgentMessage(tenant: TenantId, input: {
+        readonly taskId: string;
+        readonly deviceId: string;
+    }): Promise<AgentMessageAdmission | undefined>;
     readAgentMessage(tenant: TenantId, input: {
         readonly taskId: string;
         readonly deviceId: string;

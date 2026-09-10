@@ -41,6 +41,7 @@ Salesko 实际集成候选为 `/Users/kito/Projects/salesko-new-wt-sdk-test-90fa
 | K2 | 测试先行 | 用 Salesko 场景形成 SDK 边界故障测试；区分现有 PASS、缺能力、Host 责任；不靠私有格式构造虚假成功 | DONE — SDK candidate evidence; scope limits below |
 | K3 | SDK 实现与契约 | 根据 K1/K2 的已证缺口冻结精确 allowed_paths，补公开 API/实现/spec；不默认扩 wire | DONE — SDK candidate evidence; scope limits below |
 | K4 | SDK 源码与 packed 验收、提交 PR | required checks、公共导入及打包消费、旧 session 回归、fresh 故障证据；阶段 PR 当前 subject | DONE — SDK candidate evidence; scope limits below |
+| K5-A14 | SDK first-message discovery from proven missing-consumer held | Public identity-bound API, three store adapters, packed consumption, then actual Host adoption | IN_PROGRESS — source checks passed; packed/Host pending |
 | K5 | Salesko 真实接入验证 | 消费 K4 精确 artifact；复用已有候选证据但移除本应由 SDK 承担的重复实现；A01–A29 逐项归属 | IN_PROGRESS |
 | K6 | aiphabee 接入边界验证 | 核实第二使用者需求与公共 API 可消费性，不要求复制 Salesko 产品模型 | PAUSED — Owner: do not touch aiphabee |
 | K7 | 完整 Host MVP 与总验收 | 原 PRD、原 Salesko S0–S10/A01–A29 保留并逐项关闭；参数、Summary、恢复 UI、真实环境证据不得省略 | TODO |
@@ -177,3 +178,9 @@ Host pin07c13e9daab0b19ff8aba11e56f1d7d81ff1a49d fixes a proven control status o
 ## 2026-09-10 S8-03 A13 daemon process/outbox recovery
 
 Host documentation pin73b45f5abba46d93439e629c62980ce3a21e62d0 retains application07c13e9. Actual installed daemon with owned SQLite journal/JSONL outbox is SIGKILLed after publication either before Host commit or after body commit/before SDK finalize. A second PID recovers the exact message before sending daemon_interrupted terminal; actual Host runner reconciles the same generation without dispatch/preparation. Third PID does not resend accepted body or start a model. Each cut3 distinct PIDs,1task/submission/body and synthetic starts1+0+0/native0. Final exact-pin integration8PASS/278 assertions. Matrix22LOCAL_PASS/2PARTIAL/5BLOCKED; A14/A29 local compositions remain, S5/S9 still open and K6 paused. SDK packages/artifacts84ff260e and Host product unchanged.
+
+## A14 SDK-first discovery checkpoint
+
+Actual installed consumer-configuration loss proves held persists before any Host body, while the current Host remains unknown. SDK now reads that first message by frozen tenant/device/task/AgentRef through the existing admission row, returns server-held context and optional exact disposition, and leaves Host acceptance separate. Public Cloud plus embedded server and memory/Postgres/SQLite ports share the required contract; no wire/schema/compatibility path. Protocol enforces UTF-8 length; sender hash remains untrusted so a refused bad hash stays observable.
+
+Build/types/API/version and full3971PASS/135SKIP pass. Twenty focused readback/SQLite tests pass; a separate socket-only disposable Postgres smoke passes12 assertions including pool reconstruction and tenant/device/task isolation. It is not the canonical Postgres/S3 lane (still skipped without its full substrate). Freeze/pack this changed executable source before Host adoption; old84ff260e artifacts cannot prove the new API. A14 remains PARTIAL and matrix22/2/5 unchanged; S5/S9 and K6 boundaries unchanged.

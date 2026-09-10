@@ -70,6 +70,9 @@ it('recovers recurring admission and independent observations through a recreate
     await restart();
     expect(await instance.tasks.attempt(restored.taskId)).toEqual(attempt);
     expect(await instance.tasks.messageDisposition(restored.taskId, restored.deviceId, message.payload)).toEqual(receipt);
+    expect(await instance.tasks.agentMessage(restored.taskId, restored.deviceId, restored.payload.agentRef))
+      .toEqual({ payload: message.payload, context: restored.agentMessageContext, disposition: receipt });
+    expect(await instance.tasks.agentMessage(restored.taskId, restored.deviceId, { ...restored.payload.agentRef, agentId: 'wrong' })).toBeUndefined();
     expect(await instance.tasks.deviceTerminal(restored.taskId)).toBeUndefined();
     expect(await (await publish()).json()).toEqual({ accepted: 1 });
     expect(consumed).toBe(1);

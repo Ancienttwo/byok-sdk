@@ -225,7 +225,7 @@ export async function readAgentMessageDisposition(
   return admission?.terminalBody === undefined ? undefined : parseAgentMessageDisposition(payload, admission.terminalBody);
 }
 
-function parseAgentMessageDisposition(
+export function parseAgentMessageDisposition(
   payload: AgentMessagePublishPayload,
   terminalBody: string,
 ): AgentMessageDispositionPayload {

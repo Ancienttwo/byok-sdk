@@ -127,6 +127,7 @@ export interface TenantBoundTaskAttempts {
     readonly messageId: string;
     readonly payloadBody: string;
   }): Promise<'reserved' | 'pending' | 'rejected'>;
+  readTaskAgentMessage(input: { readonly taskId: string; readonly deviceId: string }): Promise<import('./stores/ports').AgentMessageAdmission | undefined>;
   readAgentMessage(input: {
     readonly taskId: string;
     readonly deviceId: string;
@@ -282,6 +283,7 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
       open: (input) => cloud.tasks.open(tenant, input),
       reserveAgentOffer: (input) => cloud.tasks.reserveAgentOffer(tenant, input),
       reserveAgentMessage: (input) => cloud.tasks.reserveAgentMessage(tenant, input),
+      readTaskAgentMessage: (input) => cloud.tasks.readTaskAgentMessage(tenant, input),
       readAgentMessage: (input) => cloud.tasks.readAgentMessage(tenant, input),
       finalizeAgentMessage: (input) => cloud.tasks.finalizeAgentMessage(tenant, input),
       get: (taskId) => cloud.tasks.get(tenant, taskId),

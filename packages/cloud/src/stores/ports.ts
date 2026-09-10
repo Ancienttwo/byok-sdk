@@ -398,6 +398,11 @@ export interface TaskAttemptStore {
       readonly payloadBody: string;
     },
   ): Promise<'reserved' | 'pending' | 'rejected'>;
+  /** Discover the unique immutable message for a tenant/device/task; caller validates its frozen Agent binding. */
+  readTaskAgentMessage(
+    tenant: TenantId,
+    input: { readonly taskId: string; readonly deviceId: string },
+  ): Promise<AgentMessageAdmission | undefined>;
   /** Read only an exact reservation; conflicting task/message bindings are not observable. */
   readAgentMessage(
     tenant: TenantId,

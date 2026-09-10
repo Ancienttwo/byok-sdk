@@ -29,6 +29,7 @@ export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string
     'reserveAgentOffer',
     'reserveAgentMessage',
     'readAgentMessage',
+    'readTaskAgentMessage',
     'finalizeAgentMessage',
     'get',
     'getMany',

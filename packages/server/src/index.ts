@@ -191,6 +191,8 @@ export interface ByokServer {
     deviceTerminal(taskId: string): Promise<import('@byok-sdk/cloud').DeviceTerminal | undefined>;
     /** Immutable kernel offer readback for verifying a persisted host binding. No transport seq is inferred. */
     offer(taskId: string): Promise<import('@byok-sdk/cloud').TaskOfferReadback | undefined>;
+    /** Discover the unique message and its pending/final disposition through the frozen Agent binding. */
+    agentMessage(taskId: string, deviceId: string, agentRef: AgentRef): Promise<import('@byok-sdk/cloud').TaskAgentMessage | undefined>;
     /** Exact SDK message decision; pending is undefined and corrupt persisted evidence throws. */
     messageDisposition(taskId: string, deviceId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
     /** Request cancellation through the kernel without a process-owned TaskHandle. */
@@ -771,6 +773,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       attempt(taskId) { return cloud.readTaskAttempt(tenant, taskId); },
       deviceTerminal(taskId) { return cloud.readDeviceTerminal(tenant, taskId); },
       offer(taskId) { return cloud.readTaskOffer(tenant, taskId); },
+      agentMessage(taskId, deviceId, agentRef) { return cloud.readTaskAgentMessage(tenant, deviceId, taskId, agentRef); },
       messageDisposition(taskId, deviceId, payload) {
         return cloud.readAgentMessageDisposition(tenant, deviceId, taskId, payload);
       },

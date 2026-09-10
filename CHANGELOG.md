@@ -2,6 +2,8 @@
 
 ## 0.18.0-rc.1 / @byok-sdk/keys 0.4.4-rc.1 — unpublished candidate
 
+- Add task-bound first-message discovery in Cloud and embedded server, including pending and held before a Host body exists. Custom TaskAttemptStore adapters on this breaking candidate train must implement the new read; no wire/store fallback. Received payload remains untrusted and does not author a product reply.
+
 - Preserve explicitly selected result documents through metadata-only Agent
   egress while keeping terminal summary and trajectory private. Strict fresh
   internal results no longer silently complete without their document.

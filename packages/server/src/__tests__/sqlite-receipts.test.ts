@@ -47,6 +47,7 @@ describe('SQLite receipt recovery', () => {
     let calls = 0;
     const consume = async () => { calls++; return { outcome }; };
     const read = () => runtime.cloud.readAgentMessageDisposition(tenant, deviceId, taskId, message.payload);
+    const discover = () => runtime.cloud.readTaskAgentMessage(tenant, deviceId, taskId, agentRef);
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
@@ -84,6 +85,7 @@ describe('SQLite receipt recovery', () => {
       expect(await read()).toBeUndefined();
       await runtime.stores.close(); runtime = open();
       expect(await read()).toBeUndefined();
+      expect(await discover()).toEqual({ payload: message.payload, context: execution.agentMessageContext });
       const repair = new DatabaseSync(path); repair.exec('DROP TRIGGER fail_message_finalize'); repair.close();
       expect(await handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume)).toBe('accepted');
       expect(calls).toBe(2);
@@ -92,6 +94,10 @@ describe('SQLite receipt recovery', () => {
       await runtime.cloud.cancelTask(tenant, taskId, 'stop remaining');
       await runtime.stores.close(); runtime = open();
       expect(await read()).toEqual(receipt);
+      expect(await discover()).toEqual({ payload: message.payload, context: execution.agentMessageContext, disposition: receipt });
+      expect(await runtime.cloud.readTaskAgentMessage(other, deviceId, taskId, agentRef)).toBeUndefined();
+      expect(await runtime.cloud.readTaskAgentMessage(tenant, 'other-device', taskId, agentRef)).toBeUndefined();
+      expect(await runtime.cloud.readTaskAgentMessage(tenant, deviceId, taskId, { ...agentRef, profileRevision: 'other' })).toBeUndefined();
       expect(await runtime.cloud.readAgentMessageDisposition(other, deviceId, taskId, message.payload)).toBeUndefined();
       expect(await runtime.cloud.readAgentMessageDisposition(tenant, 'other-device', taskId, message.payload)).toBeUndefined();
       // Envelope dedup is process-local; durable message replay must still skip the consumer.

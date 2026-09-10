@@ -32,10 +32,14 @@ await cloud.cancelTask(tenant, input.taskId, 'packed stop');
 assert.equal((await cloud.readTaskResult(tenant, input.taskId)).state, 'cancelled');
 assert.equal(await cloud.readDeviceTerminal(tenant, input.taskId), undefined);
 assert.equal(typeof cloud.readAgentMessageDisposition, 'function');
+assert.equal(typeof cloud.readTaskAgentMessage, 'function');
+assert.equal(await cloud.readTaskAgentMessage(tenant, deviceId, input.taskId, input.payload.agentRef), undefined);
 const server = createByokServer({ productId: 'packed-recurring' });
 try {
   assert.equal(typeof server.recurring.submit, 'function');
   assert.equal(typeof server.tasks.messageDisposition, 'function');
+  assert.equal(typeof server.tasks.agentMessage, 'function');
+  assert.equal(await server.tasks.agentMessage('absent', deviceId, input.payload.agentRef), undefined);
   assert.equal(await server.tasks.attempt('absent'), undefined);
   assert.equal(await server.tasks.deviceTerminal('absent'), undefined);
   await assert.rejects(server.recurring.submit(input), /registered Agent message consumer/);

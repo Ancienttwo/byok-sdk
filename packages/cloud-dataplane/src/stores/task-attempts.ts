@@ -237,6 +237,18 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
     }
   }
 
+  async readTaskAgentMessage(
+    tenant: TenantId, input: { readonly taskId: string; readonly deviceId: string },
+  ): Promise<AgentMessageAdmission | undefined> {
+    const result = await this.#pool.query<AgentMessageAdmissionRow>(
+      `SELECT ${AGENT_MESSAGE_ADMISSION_SELECT_COLUMNS}
+         FROM agent_message_admission
+        WHERE tenant_id = $1 AND device_id = $2 AND task_id = $3`,
+      [tenant, input.deviceId, input.taskId],
+    );
+    return result.rows[0] === undefined ? undefined : admissionRowToRecord(result.rows[0]);
+  }
+
   async readAgentMessage(
     tenant: TenantId,
     input: { readonly taskId: string; readonly deviceId: string; readonly messageId: string; readonly payloadBody: string },

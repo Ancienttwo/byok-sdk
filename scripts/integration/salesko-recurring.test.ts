@@ -615,3 +615,94 @@ for (const cut of ['before_host_commit', 'after_host_commit'] as const) test(`Sa
     http.stop(true); await rm(localRoot, { recursive: true, force: true });
   }
 }, 60000);
+
+
+test('Salesko observes first held reply after consumer configuration loss', async () => {
+  const { Hono } = await installed('hono');
+  const { createByokCloud, createHmacTokenSigner, fullCapabilityDeclaration } = await installed('@byok-sdk/cloud');
+  const { createDaemonWithAdapters } = await installed('@byok-sdk/client');
+  const { createPrivateAgentChatRouter } = await load('apps/byok-control/src/main.ts');
+  const { ByokPrivateAgentChatDispatcher } = await load('apps/api/src/private-agent-chat-dispatch.ts');
+  const { dispatchAndReconcile } = await load('apps/api/src/private-agent-chat-routes.ts');
+  const { runPrivateAgentChatRecovery } = await load('apps/api/src/private-agent-chat-recovery.ts');
+  const repository = new InMemoryPrivateAgentChatRepository(); repository.resetForTests();
+  const localRoot = await mkdtemp(join(tmpdir(), 'salesko-sdk-held-observation-'));
+  const owner = { tenantId: 'held-tenant', userId: 'held-user', conversationId: 'held-conversation' };
+  const tenant = sdkTenantId(await byokTenantRef(MemoryDatasetScope, owner.tenantId));
+  const signer = createHmacTokenSigner(crypto.getRandomValues(new Uint8Array(32)), { now: () => new Date() });
+  let consumerCalls = 0;
+  const publications: any[] = [];
+  const observer = { onInboundCommitted: ({ envelope }: { envelope: any }) => {
+    if (envelope.type === 'agent.message.publish') publications.push(envelope.payload);
+  } };
+  const sdk = createInMemoryByokCloud({ tokenSigner: signer, longPollHoldMs: 50, observer,
+    agentMessage: { consume: async input => { consumerCalls++; return repository.recordAgentMessage({ now: new Date().toISOString(),
+      message: { schemaVersion: C.PrivateAgentChatMessageConsumeSchemaVersion, tenantRef: input.tenant, deviceId: input.deviceId,
+        taskId: input.taskId, context: input.context, payload: input.payload } }); } },
+  });
+  let facade = sdk.cloud;
+  const token = 'disposable-held-control';
+  const router = () => new Hono().route('/internal/private-agent-chat', createPrivateAgentChatRouter(privateAgentChatCloud(facade), {
+    auth: { researchToken: token, adminToken: 'disposable-admin', privateAgentChatCallbackToken: 'disposable-chat',
+      privateAgentToolsCallbackToken: 'disposable-tools', profileProjectionToken: 'disposable-profile', tokenSigningSecret: new Uint8Array(32) },
+  }));
+  let app = router();
+  const http = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: request =>
+    new URL(request.url).pathname.startsWith('/internal/') ? app.fetch(request) : facade.fetch(request) });
+  const baseUrl = `http://127.0.0.1:${http.port}`;
+  const dispatcher = new ByokPrivateAgentChatDispatcher({ baseUrl, datasetScope: MemoryDatasetScope, researchToken: token, fetchImpl: fetch });
+  const adapter = new StubRuntimeAdapter('claude', { kind: 'available', version: 'synthetic-held' },
+    { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true, permissionModes: ['auto', 'readonly', 'confirm', 'plan'] }, false);
+  const productId = 'held-observation-fixture';
+  const daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-held-test' }, productName: 'held fixture', productId,
+    serverUrl: baseUrl, workspaceRoot: join(localRoot, 'workspace'), storeDir: join(localRoot, 'store'),
+    agentHome: { hostStorageRoot: join(localRoot, 'home') }, agentEgress: { policy: C.PrivateAgentEgressPolicy },
+    mcpToolsets: { 'salesko.read.v1': { mcpServers: { read: { command: '/bin/false' } } },
+      'salesko.propose.v1': { mcpServers: { propose: { command: '/bin/false' } } } },
+  }, [adapter]);
+  const until = async (predicate: () => boolean | Promise<boolean>, label: string) => {
+    const end = Date.now() + 10000;
+    while (!await predicate()) {
+      if (Date.now() > end) throw new Error(`Timed out: ${label}`);
+      await new Promise(resolve => setTimeout(resolve, 15));
+    }
+  };
+  let tick = 0;
+  const now = () => new Date(Date.parse('2026-09-10T16:00:00.000Z') + tick++ * 60000).toISOString();
+  try {
+    await sdk.core.quota.writeEntitlement(tenant, { version: 1n, hardLimitBytes: 1_000_000_000n, maxObjectBytes: 100_000_000n,
+      maxInlineBytes: 1_000_000n, mailboxLimitBytes: 100_000_000n, retentionPolicyId: 'held-observation-test' });
+    const pairing = await facade.createPairingCode(tenant, { productId });
+    const { deviceId } = await daemon.pair(pairing.code); await daemon.start();
+    await until(async () => (await facade.listDevices(tenant))[0]?.capabilities?.includes('agent-message-egress') === true, 'device capabilities');
+    const binding = { agentRef: { agentId: '7bf9cf51-8c51-4a67-b8f3-4f11de2cecb1', profileRevision: '1' }, deviceId,
+      placementRevision: '3', runtime: 'claude', cwd: 'byok-agent-home', egressPolicy: C.PrivateAgentEgressPolicy, tools: C.PrivateAgentChatToolBinding };
+    await repository.createConversation({ ...owner, continuity: { mode: 'fresh', version: 1 }, title: 'Held', agentId: binding.agentRef.agentId, execution: { epoch: 1 }, now: now() });
+    await submitAndPrepare(repository, { ...owner, turnId: 'T1', clientRequestId: 'T1', message: 'U1', now: now(), binding, expectedExecution: { epoch: 1 } });
+    await dispatchAndReconcile(repository, dispatcher, owner.tenantId, 'T1', now());
+    const frozen = (await repository.reconcileDispatch({ ...owner, turnId: 'T1', now: now() }))!;
+    await until(() => adapter.sessions.length === 1, 'active session before configuration loss');
+    facade = createByokCloud({ core: sdk.core, cloud: sdk.stores, crypto: sdk.crypto, clock: sdk.clock,
+      tokenSigner: signer, capabilities: fullCapabilityDeclaration(), blobContentProxy: sdk.blobContentProxy, longPollHoldMs: 50, observer });
+    app = router();
+    adapter.sessions[0]!.emit({ type: 'progress', text: 'Held reply' }); adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await until(() => publications.length > 0, 'real held publication');
+    expect(await facade.readAgentMessageDisposition(tenant, deviceId, frozen.execution.taskId, publications[0]))
+      .toMatchObject({ outcome: 'held', reasonCode: 'consumer_unavailable' });
+    expect(consumerCalls).toBe(0);
+    expect(await facade.readDeviceTerminal(tenant, frozen.execution.taskId)).toBeUndefined();
+    expect(daemon.status().agentHomeExecution.activeAttempts).toBe(1);
+    const at = now();
+    expect(await runPrivateAgentChatRecovery(new InMemoryPrivateAgentChatRepository(), dispatcher, {
+      now: at, nextCheckAt: new Date(Date.parse(at) + 1000).toISOString(), limit: 25,
+      prepare: async () => { throw new Error('Held Execution must not prepare again'); },
+    })).toMatchObject({ selected: 1, reconciled: 1, dispatchChecks: 0, failures: [] });
+    const full = (await repository.readFullConversation(owner))!;
+    expect(full.messages.map((message: any) => message.content)).toEqual(['U1']);
+    expect(full.turns[0].execution).toMatchObject({ taskId: frozen.execution.taskId, generation: 1 });
+    // The Host must discover this without the test feeding its observer payload.
+    expect(full.recovery.turns[0].messageDisposition).toBe('held');
+  } finally {
+    await daemon.stop(); http.stop(true); await rm(localRoot, { recursive: true, force: true });
+  }
+}, 45000);

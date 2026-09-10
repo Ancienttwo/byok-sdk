@@ -115,6 +115,13 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
     });
   }
 
+  async readTaskAgentMessage(
+    tenant: TenantId, input: { readonly taskId: string; readonly deviceId: string },
+  ): Promise<AgentMessageAdmission | undefined> {
+    const admission = this.#state.messageAdmissions.get(tenantKey(tenant, input.taskId));
+    return admission?.deviceId === input.deviceId ? admission : undefined;
+  }
+
   async readAgentMessage(
     tenant: TenantId,
     input: { readonly taskId: string; readonly deviceId: string; readonly messageId: string; readonly payloadBody: string },

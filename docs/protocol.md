@@ -2254,3 +2254,15 @@ even when SQLite rolled the task row back to `received`. SDK-generated oversize
 failures project the admitted execution identity, including automatically
 selected custom adapters, through the same identity projection as other SDK
 terminals. They do not copy the requested identity from the offer.
+
+
+### Host discovery of the first Agent message
+
+The SDK control plane can read the existing task-bound message reservation by
+frozen tenant/device/task/AgentRef (`Cloud.readTaskAgentMessage`, embedded
+`tasks.agentMessage`). It returns the received payload, frozen Host context and
+optional exact disposition. This is not a new device envelope or delivery ACK.
+Pending has no disposition; unknown identity returns no message. Invalid stored
+identity/receipt fails closed. Sender body/hash/byte claims remain untrusted;
+only the Host acceptance transaction authors transcript content. In particular,
+consumer-unavailable held can be observed before the Host ever sees a body.

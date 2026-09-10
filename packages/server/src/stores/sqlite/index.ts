@@ -435,6 +435,20 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
     });
   }
 
+  readTaskAgentMessage(
+    tenant: TenantId, input: { taskId: string; deviceId: string },
+  ): Promise<AgentMessageAdmission | undefined> {
+    return this.coordinator.run((db) => {
+      if (readTask(db, tenant, input.taskId)?.deviceId !== input.deviceId) return undefined;
+      const row = db.prepare(
+        `SELECT message_id, payload_body, terminal_body FROM agent_message_admission
+         WHERE tenant_id = ? AND task_id = ?`,
+      ).get(tenant, input.taskId) as { message_id: string; payload_body: string; terminal_body: string | null } | undefined;
+      return row === undefined ? undefined : { messageId: row.message_id, payloadBody: row.payload_body,
+        ...(row.terminal_body === null ? {} : { terminalBody: row.terminal_body }) };
+    });
+  }
+
   readAgentMessage(
     tenant: TenantId,
     input: { taskId: string; deviceId: string; messageId: string; payloadBody: string },

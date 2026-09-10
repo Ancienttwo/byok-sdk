@@ -22,6 +22,7 @@ export type { TenantId } from '@byok-sdk/core';
 
 // The composition entry points
 export { createByokCloud } from './cloud';
+export type { TaskAgentMessage } from './task-agent-message';
 export type {
   ByokCloud,
   ByokCloudOptions,

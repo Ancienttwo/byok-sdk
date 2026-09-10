@@ -1096,6 +1096,27 @@ side effects did or did not occur before a crash. No automatic re-execution.
 
 ## Host exact Agent message disposition readback
 
+Cloud `readTaskAgentMessage(tenant, deviceId, taskId, agentRef)` and embedded
+`tasks.agentMessage(taskId, deviceId, agentRef)` discover the one SDK-owned
+first-message reservation from a frozen execution binding. Hosts need not have
+accepted or received its payload. The result contains the received payload,
+server-held context and, when finalized, the exact immutable disposition.
+A reservation with no disposition is pending; undefined means no message for
+that matching identity, not proof that the execution never started. Wrong
+identity reveals no message; malformed persisted payload/binding/receipt throws.
+This uses the existing admission row, including after cancel/terminal, without
+a new wire field, message store, notification dependency or automatic retry.
+
+The payload is untrusted transmission evidence, not transcript authoring or
+product acceptance. Body/hash/byteCount remain sender claims: a consumer may
+have refused because those claims were invalid, and readback must preserve that
+refusal. The Host validates integrity, frozen context and first-acceptance rules
+before any product body write. Neither discovery nor held/refused rewrites a
+previously accepted body, clears retained local evidence or proves home release.
+`TaskAttemptStore.readTaskAgentMessage` is required for memory/Postgres/SQLite
+and custom compositions on this breaking train; absent adapters fail validation
+instead of silently losing observations.
+
 The Cloud `readAgentMessageDisposition(tenant, deviceId, taskId, payload)` reads
 the SDK-owned immutable message decision through a typed public interface. The
 lookup binds the full protocol-validated payload and exact tenant/device/task.

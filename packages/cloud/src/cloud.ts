@@ -1,3 +1,4 @@
+import { readTaskAgentMessage, type TaskAgentMessage } from './task-agent-message';
 import { RecurringExecutionInputSchema, type RecurringExecutionInput } from './recurring';
 import { uuidFromSha256, taskOfferMessageId } from './offer-identity';
 import { HarnessIdSchema } from '@byok-sdk/protocol';
@@ -597,6 +598,8 @@ export interface ByokCloud {
   readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
   /** Actual device terminal only; cancellation intent never creates this observation. */
   readDeviceTerminal(tenant: TenantId, taskId: string): Promise<DeviceTerminal | undefined>;
+  /** Discover first-message transmission evidence from the frozen execution binding, including pending/held without a Host body. */
+  readTaskAgentMessage(tenant: TenantId, deviceId: string, taskId: string, agentRef: AgentRef): Promise<TaskAgentMessage | undefined>;
   /**
    * Exact durable message decision, independently of task cancellation/terminal.
    * Missing or pending admission returns undefined; invalid persisted evidence
@@ -1921,6 +1924,10 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     async readDeviceTerminal(tenant, taskId) {
       const receipt = await tenantStoresFor(controlPlane(tenant), root).receipts.get(terminalReceiptKey(taskId));
       return receipt === undefined ? undefined : readDeviceTerminalReceipt(taskId, receipt);
+    },
+
+    readTaskAgentMessage(tenant, deviceId, taskId, agentRef) {
+      return readTaskAgentMessage(tenantStoresFor(controlPlane(tenant), root), deviceId, taskId, agentRef);
     },
 
     readAgentMessageDisposition(tenant, deviceId, taskId, payload) {
