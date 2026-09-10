@@ -9,7 +9,7 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 const root = process.env.SALESKO_TEST_ROOT;
 if (!root) throw new Error('Set SALESKO_TEST_ROOT to the isolated pinned Salesko checkout.');
 const sha = Bun.spawnSync(['git', '-C', root, 'rev-parse', 'HEAD']);
-if (sha.exitCode !== 0 || sha.stdout.toString().trim() !== '9c7a2c0fd8e05a07ba9e09be796595da4c10d20d') throw new Error('Salesko test subject mismatch');
+if (sha.exitCode !== 0 || sha.stdout.toString().trim() !== 'c9436003fe879bfba65d31352d51bddcf84b8869') throw new Error('Salesko test subject mismatch');
 const installed = (name: string) => import(pathToFileURL(Bun.resolveSync(name, root)).href);
 const { tenantId: sdkTenantId } = await installed('@byok-sdk/core');
 const { createEnvelope } = await installed('@byok-sdk/protocol');
@@ -22,7 +22,7 @@ const C = await load('packages/contracts/src/index.ts');
 const { offerPrivateAgentChat, reconcilePrivateAgentChat } = await load('apps/byok-control/src/private-agent-chat.ts');
 const { privateAgentChatCloud } = await load('apps/byok-control/src/main.ts');
 
-for (const cancelFirst of [false, true]) test(`Salesko transaction + SDK recurring replay: cancelFirst=${cancelFirst}`, async () => {
+for (const runtime of ['claude', 'pi'] as const) for (const cancelFirst of [false, true]) test(`Salesko transaction + SDK recurring replay: runtime=${runtime}, cancelFirst=${cancelFirst}`, async () => {
   const repository = new InMemoryPrivateAgentChatRepository(); repository.resetForTests();
   const tenantId = 'integration-tenant', userId = 'integration-user', conversationId = 'integration-conversation', turnId = 'integration-turn';
   const now = '2026-09-10T00:00:00.000Z';
@@ -54,7 +54,7 @@ for (const cancelFirst of [false, true]) test(`Salesko transaction + SDK recurri
     'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'agent-message-egress', 'terminal-projection-selection',
   ] });
   const binding = { agentRef: { agentId: '7bf9cf51-8c51-4a67-b8f3-4f11de2cecb1', profileRevision: '1' }, deviceId: device.deviceId,
-    placementRevision: '3', runtime: 'claude', cwd: 'byok-agent-home', egressPolicy: C.PrivateAgentEgressPolicy, tools: C.PrivateAgentChatToolBinding };
+    placementRevision: '3', runtime, ...(runtime === 'pi' ? { dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'integration-zai', modelId: 'glm-5.3-flash' } } : {}), cwd: 'byok-agent-home', egressPolicy: C.PrivateAgentEgressPolicy, tools: C.PrivateAgentChatToolBinding };
   await repository.createConversation({ continuity: { mode: "fresh", version: 1 }, tenantId, userId, conversationId, title: 'Integration', agentId: binding.agentRef.agentId, execution: { epoch: 1 }, now });
   await submitAndPrepare(repository, { tenantId, userId, conversationId, turnId, clientRequestId: 'integration-request', message: 'U1', binding, expectedExecution: { epoch: 1 }, now });
   const dispatch = await repository.startDispatch({ tenantId, turnId, now });
@@ -70,6 +70,10 @@ for (const cancelFirst of [false, true]) test(`Salesko transaction + SDK recurri
   const result = await offerPrivateAgentChat(port, dispatchInput);
   expect(result).toMatchObject({ status: 'accepted', taskId });
   expect(recurringSubmissions).toBe(1);
+  const recorded = await harness.cloud.readTaskOffer(tenant, taskId);
+  expect(recorded).toMatchObject({ type: 'task.offer_for_agent_with_egress_fresh', delivered: true, payload: { runtime } });
+  if (runtime === 'pi') expect(recorded.payload.dispatchSelection).toEqual(binding.dispatchSelection);
+
   const payload = { agentRef: binding.agentRef, sessionRef: 'native-session', contract: C.PrivateAgentChatMessageContract,
     messageId: '10000000-0000-4000-8000-000000000099', cursor: 1, contentType: 'text/markdown' as const, body: 'A1', byteCount: 2,
     contentHash: `sha256:${createHash('sha256').update('A1').digest('hex')}` as `sha256:${string}` };
