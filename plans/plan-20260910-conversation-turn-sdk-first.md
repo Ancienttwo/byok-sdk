@@ -50,11 +50,13 @@ K0 不是 SDK 交付；K4 不是发布；K5 不是生产部署。跨阶段有可
 ## Current checkpoint
 
 - SDK executable/artifact subject remains `84ff260e973a21be4ed153311ceef87d72f77ae5`, dispatch0.18.0-rc.1 / keys0.4.4-rc.1, unpublished. Build/types/API/version/workflow,3971 PASS/135 SKIP and ten-package isolated packed gate remain the source evidence; synthetic adapters do not prove native provider acceptance.
-- Salesko Draft PR #241 subject `afb39ea11ce647ffd8cb89dc5a3271adffd9654e` includes cap8 input-only queueing, immutable continuity, server recovery, atomic preparation and the S7 create/queue/Stop/End/Retry/Stop-and-send UI. The compound action freezes its target/input and commits cancellation plus input atomically; replay never retargets.
+- Salesko Draft PR #241 subject `6e7c7157e8f5beec5c1bd685270de187e03ed15f` includes cap8 input-only queueing, immutable continuity, server recovery, atomic preparation and the S7 create/queue/Stop/End/Retry/Stop-and-send UI. The compound action freezes its target/input and commits cancellation plus input atomically; replay never retargets.
 - S7 local evidence: Host115/957, Web131/589, contracts declaration build/API/Web types, strict workflow and disposable PostgreSQL Stop target/owner/generation/COMMIT replay pass. Chromium1440x1000/390x844 verifies ordinary queueing, response-loss/reload, stale second-tab Retry, End, post-action cap8, immutable fresh/session creation and no transcript overlap. Native runtime and complete Summary/ContextPack are not implied.
 - Root tarball overrides/bun.lock remain uncommitted isolated fixtures. SDK executable/tarballs are unchanged. Complete Host behavior, distributable pins and authorized native validation remain open; K6 stays paused.
 
 ## Next action
+
+S0 now includes21 synthetic byte/JSON boundary measurements and corrects the old100k instruction report to the current50k UTF-16-unit shape. Product source remains afb39ea; measurement/documentation commit6e7c715 adds no runtime behavior. The explicit validation runtime/provider/model has been requested; G3/G4 numbers and policy/quality remain unfrozen, so B3 blocks dependent S5 implementation. Complete the independent S8 acceptance-source mapping while these inputs are pending; do not infer token admission from post-turn usage.
 
 Continue the existing S5/S0 boundary: complete the no-reply ContextPack disclosure/framing contract and durable SummaryJob/CAS path after freezing the remaining model/storage budget and quality inputs. Reuse the existing parameter draft/ledger; do not invent numeric defaults or replace the selected execution path. Summary remains on the same frozen responder home via strict fresh/result-document, before its dependent user Execution. S8 acceptance mapping and S9 authorized native evidence remain required; K6/aiphabee stay paused.
 ## 2026-09-10 requirement audit checkpoint
@@ -130,3 +132,7 @@ Salesko0a7e594 supplies a required versioned Conversation recovery response from
 ## S7 interactive recovery checkpoint
 
 Salesko afb39ea supplies the existing UI's immutable create-time continuity, ordinary input queueing and Host-eligible Stop/End/Retry/Stop-send controls. Account-scoped sessionStorage preserves one unresolved exact request across reload; matching response validation and original-scope invalidation prevent target/generation or account drift. An obsolete Stop target now returns409 under the existing repository lock rather than canceling a replacement task. Source and real PG evidence accompany isolated Chromium1440x1000/390x844 interaction/response-loss/multitab/mobile checks. S7-01/S7-02 and S6-06 are locally accepted; S5/S8/S9 remain open. SDK executable/ten tarballs84ff260e unchanged; root Salesko fixture overrides/lock excluded, no native, release, production or aiphabee activity.
+
+## 2026-09-10 S0 serialization evidence checkpoint
+
+Salesko6e7c715 adds a reproducible source-only observation script and updates the existing parameter table/contract/ledger.21 synthetic cases verify raw code units, UTF-8, JSON escaping and submission-vs-instruction shape boundaries. No product code changes, token/window claims, native calls or budget freeze. Existing SDK usage is post-turn and the Claude projection omits cache-creation input; it cannot provide complete preflight prompt accounting. S5-05 is explicitly BLOCKED by B3; shared Summary execution choice, cap8 and no-reply history remain confirmed. The only SDK test edit pins the new Salesko document/script subject; executable/artifacts84ff260e and prior source/packed evidence are unchanged.
