@@ -1,5 +1,16 @@
 # SDK-first K1/K2 evidence
 
+## Exact Pi Host binding checkpoint (2026-09-10)
+
+Host product81ba2af68d7aa3fea5f9c226442b821447674ee4 closes the missing binding producer: actual installed keys Registry revision/hash -> explicit credential-free CLI export -> authenticated Profile/outbox transaction and projection v2 -> Chat/research frozen byok-profile -> existing SDK offer admission. Web imports only strict binding JSON; config/baseURL/secrets stay local. Pi readiness requires provider-profile-binding. Historical flat offers retain exact same-task recovery; the Host refuses a new flat retry generation. No new SDK wire/store/helper or product code was needed; executable and ten-package artifacts remain38e23804.
+
+Verification: combined installed Host/SDK18PASS/538assertions in26.37s (`_ops/sdk-first/profile-binding-salesko-integration.log`), covering exact Registry-derived Pi, historical-flat Pi and Claude accept-first/cancel-first, plus prior HTTP/TaskRunner/helper/SQLite/JSONL/owned-PG/worker recovery. Host260PASS/1743, completecontrol143/695, local-agent141/927, contracts build/types and API/Web/control/local-agent types. Owned socket-only PG18.4 candidate-schema create/update/read/projection rollback, tenant fence and immutable old-selection tests PASS. Earlier unrelated Placement continuity fixture remains report-only. No native inference or profile provisioning.
+
+Host documentation head a170002435f6e2a5ee8ed5e1432c89b62caf5888 has no product/test/SQL changes from81ba2af; integration pins follow it without duplicating the successful run. Candidate Host source expects provider_profile JSON and product projection v2. An operator-fenced old Profile/projection cutover is still required; no live store, migration, credential or device was changed. Root Host package/lock remain uncommitted38e23804 tarball fixtures, not distributable pins. The SDK source/API/release inputs have no diff from38e23804; prior full4004PASS/135SKIP and ten-package Pi RPC evidence remain applicable, not re-produced.
+
+Selected pi/zai/glm-5.3-flash; effective budgets, ContextPack/SummaryJob/CAS/quality, storage/retention, native S9 and rollout remain open. Host60tasks/A01–A29 remain24LOCAL_PASS/5BLOCKED, S5-01 PARTIAL; K6/aiphabee paused. Remote CI waived, no merge/publish/deploy. Next concrete prerequisite: exact operator Profile/projection cutover contract and owned-data rehearsal before any real provisioning or native acceptance.
+
+
 ## P1: Boundary
 
 SDK cloud owns message reservation/finalize and wire disposition. Host owns its own committed product message. The readback needed after consumer COMMIT / SDK finalize is SDK authority, not a Host-derived accepted flag.

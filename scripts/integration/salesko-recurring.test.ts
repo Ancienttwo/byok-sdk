@@ -9,7 +9,7 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 const root = process.env.SALESKO_TEST_ROOT;
 if (!root) throw new Error('Set SALESKO_TEST_ROOT to the isolated pinned Salesko checkout.');
 const sha = Bun.spawnSync(['git', '-C', root, 'rev-parse', 'HEAD']);
-if (sha.exitCode !== 0 || sha.stdout.toString().trim() !== 'c9436003fe879bfba65d31352d51bddcf84b8869') throw new Error('Salesko test subject mismatch');
+if (sha.exitCode !== 0 || sha.stdout.toString().trim() !== 'a170002435f6e2a5ee8ed5e1432c89b62caf5888') throw new Error('Salesko test subject mismatch');
 const installed = (name: string) => import(pathToFileURL(Bun.resolveSync(name, root)).href);
 const { tenantId: sdkTenantId } = await installed('@byok-sdk/core');
 const { createEnvelope } = await installed('@byok-sdk/protocol');
@@ -22,7 +22,8 @@ const C = await load('packages/contracts/src/index.ts');
 const { offerPrivateAgentChat, reconcilePrivateAgentChat } = await load('apps/byok-control/src/private-agent-chat.ts');
 const { privateAgentChatCloud } = await load('apps/byok-control/src/main.ts');
 
-for (const runtime of ['claude', 'pi'] as const) for (const cancelFirst of [false, true]) test(`Salesko transaction + SDK recurring replay: runtime=${runtime}, cancelFirst=${cancelFirst}`, async () => {
+for (const selection of ['claude', 'pi-exact', 'pi-historical-flat'] as const) for (const cancelFirst of [false, true]) test(`Salesko transaction + SDK recurring replay: selection=${selection}, cancelFirst=${cancelFirst}`, async () => {
+  const runtime = selection === 'claude' ? 'claude' : 'pi';
   const repository = new InMemoryPrivateAgentChatRepository(); repository.resetForTests();
   const tenantId = 'integration-tenant', userId = 'integration-user', conversationId = 'integration-conversation', turnId = 'integration-turn';
   const now = '2026-09-10T00:00:00.000Z';
@@ -51,10 +52,28 @@ for (const runtime of ['claude', 'pi'] as const) for (const cancelFirst of [fals
   expect(paired.status).toBe(200);
   const device = await paired.json();
   await harness.stores.devices.recordCapabilities(tenant, { deviceId: device.deviceId, capabilities: [
-    'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'agent-message-egress', 'terminal-projection-selection',
+    'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'agent-message-egress', 'terminal-projection-selection', 'provider-profile-binding',
   ] });
-  const binding = { agentRef: { agentId: '7bf9cf51-8c51-4a67-b8f3-4f11de2cecb1', profileRevision: '1' }, deviceId: device.deviceId,
+  let binding = { agentRef: { agentId: '7bf9cf51-8c51-4a67-b8f3-4f11de2cecb1', profileRevision: '1' }, deviceId: device.deviceId,
     placementRevision: '3', runtime, ...(runtime === 'pi' ? { dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'integration-zai', modelId: 'glm-5.3-flash' } } : {}), cwd: 'byok-agent-home', egressPolicy: C.PrivateAgentEgressPolicy, tools: C.PrivateAgentChatToolBinding };
+  if (selection === 'pi-exact') {
+    const { ProviderRegistry, InMemoryProviderProfileStore, InMemorySecretStore } = await installed('@byok-sdk/keys');
+    const { providerBindingReport } = await load('apps/local-agent/src/keys.ts');
+    const { createMemoryPrivateAgentAndProjection } = await load('apps/api/src/private-agent-profile-projection-outbox.ts');
+    const { privateAgentChatBinding } = await load('apps/api/src/private-agent-chat-preparation.ts');
+    const registry = new ProviderRegistry({ profileStore: new InMemoryProviderProfileStore(), secretStore: new InMemorySecretStore() });
+    try {
+      const status = await registry.configure({ profile_ref: 'integration-zai', provider_kind: 'custom', adapter: 'openai_compatible', auth_mode: 'none',
+        base_url: 'http://127.0.0.1:1/v1', display_name: 'owned-fixture', model: 'glm-5.3-flash', capabilities: [],
+        pi_model: { contextWindow: 10000, maxTokens: 1000, reasoning: false, thinkingLevel: 'off',
+          thinkingLevelMap: { off: null, minimal: null, low: null, medium: null, high: null, xhigh: null, max: null }, compat: {} } });
+      const providerProfile = providerBindingReport(status);
+      const agent = await createMemoryPrivateAgentAndProjection(tenantId, tenant,
+        { profile: { name: 'Exact Pi', runtimePreference: 'pi_provider_key', providerProfile, researchPreset: 'relationship_research' }, placement: { deviceId: device.deviceId } }, new Date(now));
+      binding = privateAgentChatBinding({ profile: agent.profile, placement: agent.placement });
+      expect(binding.dispatchSelection).toEqual({ lane: 'byok-profile', runtimeId: 'pi', providerProfile });
+    } finally { registry.close(); }
+  }
   await repository.createConversation({ continuity: { mode: "fresh", version: 1 }, tenantId, userId, conversationId, title: 'Integration', agentId: binding.agentRef.agentId, execution: { epoch: 1 }, now });
   await submitAndPrepare(repository, { tenantId, userId, conversationId, turnId, clientRequestId: 'integration-request', message: 'U1', binding, expectedExecution: { epoch: 1 }, now });
   const dispatch = await repository.startDispatch({ tenantId, turnId, now });
