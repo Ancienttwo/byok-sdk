@@ -222,3 +222,16 @@ describe('Pi provider launcher core', () => {
     }
   });
 });
+
+ describe('explicit interpreter entry', () => {
+  const args = ['--pi-bin', process.execPath, '--profile-db', path.join(os.tmpdir(), 'profiles.db'),
+    '--session-dir', path.join(os.tmpdir(), 'sessions'), '--provider', 'custom', '--model', 'local-model'];
+  it('preserves a spaced script path as one argument and leaves executable mode explicit', () => {
+    const piEntry = path.join(os.tmpdir(), 'Pi package with spaces', 'cli.js');
+    expect(parsePiProviderLauncherOptions([...args, '--pi-entry', piEntry, '--', '--mode', 'rpc']).piEntry).toBe(piEntry);
+    expect(parsePiProviderLauncherOptions([...args, '--', '--mode', 'rpc']).piEntry).toBeUndefined();
+  });
+  it.each(['relative.js', '', '/tmp/bad\nentry.js', '/tmp/bad\u0000entry.js'])('rejects invalid entry %j', entry => {
+    expect(() => parsePiProviderLauncherOptions([...args, '--pi-entry', entry, '--', '--mode', 'rpc'])).toThrow();
+  });
+ });

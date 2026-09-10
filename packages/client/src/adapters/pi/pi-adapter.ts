@@ -128,6 +128,7 @@ export function validatePiByokLauncherConfig(
   const reserved = new Set([
     '--',
     '--pi-bin',
+    '--pi-entry',
     '--profile-db',
     '--session-dir',
     '--macos-keychain-path',
@@ -271,7 +272,8 @@ export class PiAdapter implements RuntimeAdapter {
       launcherArgs = [
         ...(launcher.args ?? []),
         '--pi-bin',
-        bin.command,
+        bin.source === 'package' ? process.execPath : bin.command,
+        ...(bin.source === 'package' ? ['--pi-entry', bin.command] : []),
         '--profile-db',
         launcher.profileDbPath,
         '--session-dir',

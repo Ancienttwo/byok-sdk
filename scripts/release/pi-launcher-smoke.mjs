@@ -73,7 +73,7 @@ export default function() {
     [staleBinding, /hash mismatch/],
   ]) {
     const check = spawnSync(process.execPath, [path.join(keysRoot, 'dist/bin/pi-provider-launcher.js'),
-      '--pi-bin', path.join(piRoot, piManifest.bin.pi), '--profile-db', profileDbPath, '--session-dir', sessionDir,
+      '--pi-bin', process.execPath, '--pi-entry', path.join(piRoot, piManifest.bin.pi), '--profile-db', profileDbPath, '--session-dir', sessionDir,
       '--provider', rejectedBinding.profileRef, '--model', rejectedBinding.modelId,
       '--profile-revision', rejectedBinding.profileRevision, '--profile-hash', rejectedBinding.profileHash,
       '--required-capabilities', '[]', '--validate-only', 'true',
@@ -82,7 +82,7 @@ export default function() {
     assert.match(check.stderr, expected);
   }
   child = spawn(process.execPath, [path.join(keysRoot, 'dist/bin/pi-provider-launcher.js'),
-    '--pi-bin', path.join(piRoot, piManifest.bin.pi), '--profile-db', profileDbPath, '--session-dir', sessionDir,
+    '--pi-bin', process.execPath, '--pi-entry', path.join(piRoot, piManifest.bin.pi), '--profile-db', profileDbPath, '--session-dir', sessionDir,
     '--provider', binding.profileRef, '--model', binding.modelId,
     '--profile-revision', binding.profileRevision, '--profile-hash', binding.profileHash,
     '--required-capabilities', '[]', '--validate-only', 'false',

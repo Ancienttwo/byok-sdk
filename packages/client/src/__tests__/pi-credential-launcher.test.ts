@@ -10,14 +10,14 @@ import { parsePiProviderLauncherOptions, buildPiProviderChildEnvironment } from 
 import { PI_MODEL_FIXTURE } from '../../../keys/src/fixtures/pi-model-config';
 
 describe('Pi adapter / credential launcher composition', () => {
-  it('preserves actual SDK extension argv and task environment without forwarding ambient credentials', async () => {
+  it.each(['env', 'package'] as const)('%s preserves actual SDK extension argv and task environment without forwarding ambient credentials', async (source) => {
     const dir = await mkdtemp(path.join(tmpdir(), 'pi-launcher-composition-'));
     const extensions = Object.fromEntries(['webAccess', 'mcpAdapter', 'subagentsPolicy', 'subagents', 'todo']
       .map(name => [name, path.join(dir, `${name}.js`)])) as any;
     let captured: { args: string[]; env: NodeJS.ProcessEnv } | undefined;
     try {
       const adapter = new PiAdapter({
-        resolveBin: () => ({ command: path.join(dir, 'pi'), source: 'env' }),
+        resolveBin: () => ({ command: path.join(dir, 'pi'), source }),
         resolveExtensions: () => extensions,
         byokLauncher: { command: path.join(dir, 'launcher'), profileDbPath: path.join(dir, 'profiles.db'), sessionDir: path.join(dir, 'sessions') },
         spawnFn: ((_command: string, args: string[], options: { env: NodeJS.ProcessEnv }) => {
@@ -36,6 +36,8 @@ describe('Pi adapter / credential launcher composition', () => {
         profile_ref: 'test-zai', provider_kind: 'custom', pi_model: PI_MODEL_FIXTURE,
       });
       const options = parsePiProviderLauncherOptions(captured!.args);
+      expect(options.piBin).toBe(source === 'package' ? process.execPath : path.join(dir, 'pi'));
+      expect(options.piEntry).toBe(source === 'package' ? path.join(dir, 'pi') : undefined);
       expect(buildPiProviderArgs(profile, options.piArgs)).toEqual([
         ...options.piArgs, '--provider', 'byok-sdk-test-zai', '--model', 'glm-5.3-flash', '--thinking', 'low',
       ]);

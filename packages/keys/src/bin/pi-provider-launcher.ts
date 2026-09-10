@@ -93,7 +93,7 @@ async function run(options: PiProviderLauncherOptions): Promise<number> {
       { mode: 0o600 },
     );
 
-    const child = spawn(options.piBin, childArgs, {
+    const child = spawn(options.piBin, [...(options.piEntry === undefined ? [] : [options.piEntry]), ...childArgs], {
       env: childEnv,
       stdio: 'inherit',
     });

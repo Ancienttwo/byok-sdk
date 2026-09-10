@@ -32,6 +32,10 @@ Salesko 实际集成候选为 `/Users/kito/Projects/salesko-new-wt-sdk-test-90fa
 
 先从真实 Salesko 场景提取 SDK 验收，再在 SDK 内完成通用公开能力，最后推进下游接入。保持 Host 产品数据权威。不得复制 Salesko 的产品状态机到 SDK，也不得要求每个下游解析 SDK 私有存储格式。10 倍负载下的具体瓶颈尚无测量证据；同 home 串行和有界恢复必须保留，不能提高 cap 回避。
 
+## Windows release repair (2026-09-11)
+
+Owner-approved bounded repair: Windows keys -> package Pi launch fails EFTYPE. Explicit interpreter/script contract and regression guard implemented; required source validation and new packed subject in progress. Prior Windows CI failure remains open until native rerun; no publication or merge. Existing38e23804 artifacts are historical after this executable change.
+
 ## Task Breakdown
 
 | ID | 工作包 | 关闭证据 | 状态 |

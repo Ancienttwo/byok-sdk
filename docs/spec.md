@@ -1212,3 +1212,7 @@ Requirements and local acceptance have separate authorities: the existing
 [SDK-first plan](../plans/plan-20260910-conversation-turn-sdk-first.md) links the
 sole detailed Host Sprint ledger. Public source and packed evidence do not imply
 complete ContextPack/Summary, native-runtime, migration or production acceptance.
+
+### Pi credential launcher executable contract
+
+Package-resolved Pi is a JavaScript entry: the adapter passes the current Node executable as `--pi-bin` and the absolute package entry as `--pi-entry`. The launcher prepends this explicit entry to validated Pi arguments before spawning, with no shell, extension-based inference or spawn-failure fallback. Explicit native executable overrides omit `--pi-entry`. This preserves credential isolation and model/profile fencing.

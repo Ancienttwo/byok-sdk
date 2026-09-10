@@ -638,3 +638,14 @@ Host installs ten hash-verified38e23804 tarballs, six consumed package trees/395
 Host checkpoint c9436003fe879bfba65d31352d51bddcf84b8869 changes only plan/notes over tested76afa2e. The two integration pins now follow it; retained16/507 is evidence at76afa2e, not a second run at c943600. S0 selected Pi schema now accepts while21 historical byte samples and null token/budget freeze persist. Full60task/29A requirements unchanged24LOCAL_PASS/5BLOCKED.
 
 Important remaining boundary: current Salesko piProviderId/piModelId -> flat byok does not produce SDK byok-profile revision/hash/capability fencing. No missing local binding was fabricated and no real profile/credential read or provision occurred. Close the Host exact-binding producer deliberately before native validation; budgets, ContextPack/SummaryJob/CAS/quality, storage, distributable pins and S9 remain open. CI waived; no merge/publication/production migration/deployment/aiphabee.
+
+## Windows packed Pi launcher EFTYPE (2026-09-11)
+
+- root_cause: pinned Pi package resolves its JavaScript bin, but custody launcher calls native spawn on that file. Windows CI34503272825 and34503278301 report `pi provider launcher: spawn EFTYPE` before RPC response. No shell/interpreter is supplied.
+- reproduction: existing installed release smoke fails at state.success on Windows; new actual PiAdapter composition package-source case fails before production fix because piBin is the script rather than process.execPath (`windows-pi-red.log`:1FAIL/1PASS).
+- regression_guard: existing adapter/launcher test covers package and explicit executable sources; core validates absolute single-line entry including spaces and invalid values; unchanged installed RPC assertions require model settings, extension context, isolation and zero inference.
+- verification: build/types/API/version/workflow PASS before final packing. Full tests pending in windows-pi-tests.log. Direct invocation of installed-only smoke from monorepo root fails module resolution; use the official isolated installed-pack gate, not a source-import workaround.
+
+P1: client selects the pinned package; keys owns custody and native spawn; smoke owns installed acceptance. P2: explicit package script -> Node executable plus --pi-entry -> validated Pi argv -> RPC. P3: add explicit script entry without shell/suffix detection/failure fallback; native overrides stay executable inputs. No extra process/retry at10x. Public TypeScript API remains unchanged. Direct Pi mode without the keys launcher also spawns its resolved command directly; this observed adjacent path is report-only, outside this bounded custody-launcher fix.
+
+No real credentials/model call, publishing/deploy/aiphabee or remote CI action. Native Windows acceptance remains outstanding until the repaired source runs on Windows. Existing38e23804 artifacts remain historical and are not relabeled.
