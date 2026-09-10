@@ -649,3 +649,9 @@ Important remaining boundary: current Salesko piProviderId/piModelId -> flat byo
 P1: client selects the pinned package; keys owns custody and native spawn; smoke owns installed acceptance. P2: explicit package script -> Node executable plus --pi-entry -> validated Pi argv -> RPC. P3: add explicit script entry without shell/suffix detection/failure fallback; native overrides stay executable inputs. No extra process/retry at10x. Public TypeScript API remains unchanged. Direct Pi mode without the keys launcher also spawns its resolved command directly; this observed adjacent path is report-only, outside this bounded custody-launcher fix.
 
 No real credentials/model call, publishing/deploy/aiphabee or remote CI action. Native Windows acceptance remains outstanding until the repaired source runs on Windows. Existing38e23804 artifacts remain historical and are not relabeled.
+
+### Frozen repair evidence
+
+Source1a8b894d7b7dbf2cf0379a42b1d7f98191aa8661. Required build/typecheck/API/version/workflow PASS; full4010PASS/135SKIP/0FAIL from13 package summaries. Focused adapter2/2 and keys launcher15/15 pass. Official clean `check:release-pack -- --out-dir _ops/sdk-first/artifacts-1a8b894d` exit0 includes actual installed keys -> pinned Pi RPC, exact model/extension/custody and zero inference assertions. Ten SHA256/SHA512 tarballs independently reread and match manifest source. Runtime darwin/arm64 Node26.3.1; this is not native Windows qualification. Evidence files: windows-pi-{build,types,api,version,workflow,tests,pack}.log. No repack after this documentation checkpoint; no push or Windows rerun.
+
+Next bounded release gate: native Windows pack/install against the repaired commit. Keep existing CI failure visible until that gate passes. The adjacent non-custody direct Pi path remains report-only; this repair does not certify all Pi launch modes on Windows.
