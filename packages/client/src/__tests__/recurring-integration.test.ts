@@ -66,3 +66,113 @@ it('runs two recurring executions through real HTTP and TaskRunner with distinct
     await fs.rm(root, { recursive: true, force: true });
   }
 }, 30000);
+
+it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summary %s without the chat slot', async (outcome) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-summary-integration-'));
+  const messages: string[] = [];
+  const options = { productId: 'summary-integration', longPollHoldMs: 50,
+    storage: { kind: 'sqlite' as const, path: path.join(root, 'server.sqlite') },
+    agentMessage: { consume: async ({ taskId }: { taskId: string }) => {
+      messages.push(taskId); return { outcome: 'accepted' as const };
+    } } };
+  let sdk = createByokServer(options);
+  const http = await startServer(sdk);
+  const adapter = new StubRuntimeAdapter('pi');
+  const selector = { mode: 'result-document' as const, contract: 'test.internal-summary.v1' };
+  const agentRef = { agentId: 'shared-summary-agent', profileRevision: 'profile-v1' };
+  // Synthetic model output, not a production Summary schema/quality assessment.
+  const document = { schemaVersion: 'test.internal-summary.v1', text: 'Canceled request remains historical, not authorized.' };
+  const extracts: Array<{ taskId: string; sessionRef: string; terminalProjection?: unknown }> = [];
+  const daemon = createDaemonWithAdapters({
+    localAgentRelease: { version: '0.0.0-summary-test' }, productName: 'summary test', productId: options.productId,
+    serverUrl: http.baseUrl, workspaceRoot: path.join(root, 'workspace'), storeDir: path.join(root, 'store'),
+    agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
+    resultDocument: { extract: (output, task) => {
+      extracts.push(task);
+      if (task.terminalProjection?.mode !== selector.mode || task.terminalProjection.contract !== selector.contract) {
+        throw new Error('Unexpected internal result contract');
+      }
+      if (outcome === 'missing') return undefined;
+      return JSON.parse(output);
+    } },
+  }, [adapter]);
+  let releaseClose: (() => void) | undefined;
+  let daemonStopped = false;
+  let httpStopped = false;
+  try {
+    const pairing = await sdk.pairing.createPairingCode({ productId: options.productId });
+    const { deviceId } = await daemon.pair(pairing.code);
+    await daemon.start();
+    await vi.waitFor(() => expect(daemon.status().connected).toBe(true));
+    const taskId = `summary-${outcome}`;
+    const input = { taskId, deviceId, agentRef, runtime: 'pi' as const, policy: { mode: 'auto' as const },
+      instruction: 'Summarize only this frozen historical input.',
+      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selector };
+    await sdk.dispatchFreshAgentEgress(input);
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), { timeout: 10000 });
+    const session = adapter.sessions[0]!;
+    expect(adapter.startCalls[0]?.task.sessionRef).toBeUndefined();
+    const offer = await sdk.tasks.offer(taskId);
+    expect(offer).toMatchObject({ type: 'task.offer_for_agent_with_egress_fresh', payload: { agentRef, terminalProjection: selector } });
+    expect(offer?.payload).not.toHaveProperty('sessionRef');
+    expect(offer?.payload).not.toHaveProperty('messageEgress');
+    releaseClose = session.blockClose();
+    session.emit({ type: 'progress', text: outcome === 'invalid' ? '{invalid-json' : JSON.stringify(document) });
+    session.emit({ type: 'turn_end' });
+    await vi.waitFor(async () => expect(await sdk.tasks.deviceTerminal(taskId)).toMatchObject({
+      envelope: { type: outcome === 'document' ? 'task.complete' : 'task.fail' },
+    }), { timeout: 10000 });
+    const terminal = await sdk.tasks.deviceTerminal(taskId);
+    expect(extracts).toEqual([{ taskId, sessionRef: session.sessionRef, terminalProjection: selector }]);
+    expect(messages).toEqual([]);
+    expect(daemon.status().activeTaskCount).toBeGreaterThan(0);
+    if (outcome === 'document') {
+      expect(terminal).toMatchObject({ envelope: { payload: { document } } });
+      // Deliberate competing probe, not Host scheduling or automatic retry.
+      await sdk.dispatchFreshAgentEgress({ ...input, taskId: 'competing-before-close' });
+      await vi.waitFor(async () => expect(await sdk.tasks.deviceTerminal('competing-before-close')).toMatchObject({
+        envelope: { type: 'task.decline', payload: { retryable: true } },
+      }), { timeout: 10000 });
+      expect(adapter.sessions).toHaveLength(1);
+      expect(adapter.startCalls).toHaveLength(1);
+    } else {
+      expect(terminal).toMatchObject({ envelope: { payload: { retryable: false } } });
+      expect(terminal?.envelope.payload).not.toHaveProperty('document');
+    }
+    releaseClose(); releaseClose = undefined;
+    await vi.waitFor(() => expect(daemon.status().activeTaskCount).toBe(0));
+    if (outcome === 'document') {
+      // New explicit user execution after Summary, not a retry of the decline.
+      await sdk.recurring.submit({ taskId: 'dependent-user-turn', deviceId, payload: {
+        agentRef, runtime: 'pi', policy: { mode: 'auto' }, instruction: `${document.text}\nCurrent user request`,
+        egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' },
+        messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
+      }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'user-turn' } });
+      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2), { timeout: 10000 });
+      expect(adapter.startCalls[1]?.task.sessionRef).toBeUndefined();
+      expect(adapter.sessions[1]!.sessionRef).not.toBe(session.sessionRef);
+      adapter.sessions[1]!.emit({ type: 'progress', text: 'User answer' });
+      adapter.sessions[1]!.emit({ type: 'turn_end' });
+      await vi.waitFor(async () => expect(await sdk.tasks.deviceTerminal('dependent-user-turn')).toMatchObject({
+        envelope: { type: 'task.complete' },
+      }), { timeout: 10000 });
+      await vi.waitFor(() => expect(daemon.status().activeTaskCount).toBe(0));
+      expect(messages).toEqual(['dependent-user-turn']);
+      expect(extracts).toHaveLength(1);
+    }
+    await daemon.stop(); daemonStopped = true;
+    await stopServer(http.server); httpStopped = true;
+    await sdk.close();
+    sdk = createByokServer(options);
+    expect(await sdk.tasks.deviceTerminal(taskId)).toEqual(terminal);
+    expect(await sdk.tasks.offer(taskId)).toEqual(offer);
+    expect(await sdk.tasks.deviceTerminal('nonexistent-summary')).toBeUndefined();
+    expect(adapter.sessions).toHaveLength(outcome === 'document' ? 2 : 1);
+  } finally {
+    releaseClose?.();
+    if (!daemonStopped) await daemon.stop();
+    if (!httpStopped) await stopServer(http.server);
+    await sdk.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+}, 45000);

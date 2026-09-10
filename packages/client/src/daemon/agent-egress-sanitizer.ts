@@ -46,7 +46,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
-function contentlessPayload(envelope: Envelope): unknown | undefined {
+function contentlessPayload(envelope: Envelope, resultDocumentSelected: boolean): unknown | undefined {
   const payload = cloneJson(envelope.payload);
   const record = asRecord(payload);
   if (!record) return payload;
@@ -61,9 +61,9 @@ function contentlessPayload(envelope: Envelope): unknown | undefined {
     }
     case 'task.complete':
       if (typeof record.summary === 'string') record.summary = '[content omitted]';
-      // A result document is product content, not status. Omit its optional
-      // field rather than half-redacting it into an invalid document shape.
-      delete record.document;
+      // Only the frozen offer's explicit result lane authorizes this product
+      // content. Activity remains metadata-only; unselected documents stay hidden.
+      if (!resultDocumentSelected) delete record.document;
       return record;
     case 'task.fail':
     case 'task.decline':
@@ -111,11 +111,13 @@ export function sanitizeEgressEnvelope(
   sanitizer: AgentEgressSanitizer | undefined,
   context: Omit<AgentEgressSanitizerContext, 'lane' | 'policyRevision' | 'envelopeType'> & {
     lane?: 'latest-value' | 'reliable';
+    /** Set only from the active task's frozen terminalProjection, never payload inference. */
+    resultDocumentSelected?: boolean;
   } = {},
 ): SanitizedEnvelope {
   try {
     const payload = policy.activity.mode === 'metadata-status'
-      ? contentlessPayload(envelope)
+      ? contentlessPayload(envelope, context.resultDocumentSelected === true)
       : cloneJson(envelope.payload);
     if (payload === undefined) return { ok: false, reason: 'policy_denied' };
     const sanitizedPayload = applyHostSanitizer(payload, sanitizer, {

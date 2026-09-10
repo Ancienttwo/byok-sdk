@@ -1144,3 +1144,8 @@ record. `tasks.get` remains a product snapshot with cancellation precedence and
 must not be used to reconstruct that record. Missing attempts return undefined;
 store read failures propagate. An attempt, including its cancellation or terminal
 status, is not evidence of mailbox delivery or physical Agent-home release.
+
+
+### Explicit internal result projection under Agent egress
+
+A strict fresh Agent task may select `terminalProjection: { mode: 'result-document', contract }` without user `messageEgress`. Under metadata-status, that frozen task selection authorizes the extracted document as a separate internal result; terminal summary and activity stay metadata-only. The daemon must preserve the selected document through outbound projection rather than silently deliver document-less success. An unselected document is not authorized by its presence in a payload. Existing extractor validation, server capability gates and configured Host sanitizer remain applicable. This is an execution/result primitive: Host owns SummaryJob, coverage/version CAS, budgets and scheduling; schema support alone is not native-runtime or tool-isolation acceptance.

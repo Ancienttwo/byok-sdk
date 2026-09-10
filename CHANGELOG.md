@@ -2,6 +2,10 @@
 
 ## 0.18.0-rc.1 / @byok-sdk/keys 0.4.4-rc.1 — unpublished candidate
 
+- Preserve explicitly selected result documents through metadata-only Agent
+  egress while keeping terminal summary and trajectory private. Strict fresh
+  internal results no longer silently complete without their document.
+
 - Add one strict, persistable recurring execution input shared by hosted Cloud
   and embedded server. Task/device/runtime, required message/context and a
   registered consumer are mandatory; every new recurring execution is fresh.

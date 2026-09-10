@@ -1161,6 +1161,11 @@ export class TaskRunner {
     return this.tasks.get(taskId)?.egressEnabled === true;
   }
 
+  /** Frozen offer authority for the outbound result-document lane. */
+  selectsResultDocument(taskId: string): boolean {
+    return this.tasks.get(taskId)?.terminalProjection?.mode === 'result-document';
+  }
+
   /** M5 batch-3 (workstream 2): effective `maxTaskOutputBytes` cap for this daemon — see {@link DEFAULT_MAX_TASK_OUTPUT_BYTES}'s own doc comment. */
   private get maxTaskOutputBytes(): number {
     return this.deps.maxTaskOutputBytes ?? DEFAULT_MAX_TASK_OUTPUT_BYTES;

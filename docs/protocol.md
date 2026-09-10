@@ -1131,6 +1131,13 @@ just an object. Producing it is product glue: a daemon supplies
 the product's JSON, or returns `undefined` for "no structured result this
 time".
 
+For strict Agent egress under `metadata-status`, an explicit frozen
+`terminalProjection.mode:'result-document'` authorizes the extracted document
+as a separate product result. The daemon preserves that document through the
+outbound sanitizer while hiding terminal summary and activity content.
+Unselected documents remain suppressed. The configured Host sanitizer still
+applies; this selection does not authorize full trajectory disclosure.
+
 Strict Agent offers may additionally carry an offer-scoped
 `terminalProjection`. `{mode:'none'}` explicitly bypasses the host extractor;
 `{mode:'result-document', contract}` requires the extractor to return one
