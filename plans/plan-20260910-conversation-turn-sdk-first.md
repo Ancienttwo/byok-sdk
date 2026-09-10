@@ -40,6 +40,10 @@ Owner-approved bounded repair: Windows keys -> package Pi launch fails EFTYPE. E
 
 Prior custody repair08ab85a2 passed native Windows Node22.22.3 ten-package CI (both runs,46 green). Owner continued the recorded direct-path risk: two pre-fix regressions prove detect/direct omit interpreter. Shared internal invocation now covers detect/direct/custody;60 focused tests pass. Required checks and clean ten-package gate PASS at54b2b14f,4012PASS/135SKIP. Native Windows acceptance pending exact pushed-head CI. No publication/merge or model calls.
 
+## Stable release preparation (2026-09-11)
+
+Product review bb3e1b19..f3138751 closed with no confirmed blocker; ten version identities stabilized to SDK0.18.0/keys0.5.0 without third-party or product-logic changes. Build/types/API/version/graph/workflow and27release-script tests PASS. Exact stable-head push CI, downloaded artifact hashes/installed gate and publish-driver dry-run are the final preparation boundary; subject receipt in `_ops/sdk-first/release018-*` and PR181 readback. No merge/publication authorized. Host K5/K7 remain separate; K6 paused.
+
 ## Task Breakdown
 
 | ID | 工作包 | 关闭证据 | 状态 |

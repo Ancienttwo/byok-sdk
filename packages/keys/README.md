@@ -1,6 +1,6 @@
 # @byok-sdk/keys
 
-Pi launcher configuration in the unpublished 0.5.0-rc.1 candidate is explicit.
+Pi launcher configuration in the unpublished 0.5.0 candidate is explicit.
 Set `pi_model` on `ProviderRegistry.configure` for profiles used by Pi:
 
 ```ts

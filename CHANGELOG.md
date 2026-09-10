@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.18.0-rc.1 / @byok-sdk/keys 0.5.0-rc.1 — unpublished candidate
+## 0.18.0 / @byok-sdk/keys 0.5.0 — unpublished release candidate
 
 - Launch package-resolved Pi through the current Node executable for version detection, direct RPC and credential custody, avoiding Windows `spawn EFTYPE` without shell execution. Native executable overrides remain explicit.
 
@@ -23,6 +23,8 @@
 - Add one strict, persistable recurring execution input shared by hosted Cloud
   and embedded server. Task/device/runtime, required message/context and a
   registered consumer are mandatory; every new recurring execution is fresh.
+  Hosts persist the complete validated input before submission and reuse it for
+  admission recovery; the SDK does not author the Host outbox.
 - Recover initial admission using the same frozen identity/input. Expose exact
   message disposition, actual device terminal and embedded durable attempt
   observations independently of cancellation and resource release.

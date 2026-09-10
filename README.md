@@ -7,9 +7,9 @@ composition over Postgres and R2.
 
 ## Release status
 
-This branch prepares **0.18.0-rc.1**, with independent keys **0.5.0-rc.1**.
-These are unpublished recurring-execution candidates; use verified local tarballs
-until a separately authorized prerelease publication. The package install examples
+This branch prepares **0.18.0**, with independent keys **0.5.0**.
+These are unpublished release candidates; use verified local tarballs
+until a separately authorized publication. See the [release handoff](docs/releases/v0.18.0-handoff.md). The package install examples
 below target that future candidate, not the current npm registry.
 
 The previous stable release is **0.17.0**, with keys **0.4.3**.
@@ -40,7 +40,7 @@ resources during `prepare()`; reject unsupported input before claim instead.
 Install this release with:
 
 ```sh
-npm install byok-sdk@0.18.0-rc.1
+npm install byok-sdk@0.18.0
 ```
 
 ```ts
@@ -115,7 +115,7 @@ It is intentionally outside `byok-sdk` and the entire dispatch dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.5.0-rc.1
+npm install @byok-sdk/keys@0.5.0
 ```
 
 ## Host connector composition
@@ -131,5 +131,5 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.5.0-rc.1`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.5.0`
 require Node.js 22.22.0 or newer. MIT licensed.
