@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { resolve, join } from 'node:path';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { StubRuntimeAdapter } from '../../packages/client/src/__tests__/fixtures/stub-adapter';
 import { pathToFileURL } from 'node:url';
@@ -9,7 +9,7 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 const root = process.env.SALESKO_TEST_ROOT;
 if (!root) throw new Error('Set SALESKO_TEST_ROOT to the isolated pinned Salesko checkout.');
 const sha = Bun.spawnSync(['git', '-C', root, 'rev-parse', 'HEAD']);
-if (sha.exitCode !== 0 || sha.stdout.toString().trim() !== '07c13e9daab0b19ff8aba11e56f1d7d81ff1a49d') throw new Error('Salesko test subject mismatch');
+if (sha.exitCode !== 0 || sha.stdout.toString().trim() !== '73b45f5abba46d93439e629c62980ce3a21e62d0') throw new Error('Salesko test subject mismatch');
 const installed = (name: string) => import(pathToFileURL(Bun.resolveSync(name, root)).href);
 const { tenantId: sdkTenantId } = await installed('@byok-sdk/core');
 const { createEnvelope } = await installed('@byok-sdk/protocol');
@@ -447,3 +447,171 @@ for (const ending of ['cancel', 'fail'] as const) test(`Salesko + installed Task
     await rm(localRoot, { recursive: true, force: true });
   }
 }, 45000);
+
+
+for (const cut of ['before_host_commit', 'after_host_commit'] as const) test(`Salesko + installed daemon process recovery: ${cut}`, async () => {
+  const { Hono } = await installed('hono');
+  const { createPrivateAgentChatRouter } = await load('apps/byok-control/src/main.ts');
+  const { ByokPrivateAgentChatDispatcher } = await load('apps/api/src/private-agent-chat-dispatch.ts');
+  const { dispatchAndReconcile } = await load('apps/api/src/private-agent-chat-routes.ts');
+  const { runPrivateAgentChatRecovery } = await load('apps/api/src/private-agent-chat-recovery.ts');
+  const repository = new InMemoryPrivateAgentChatRepository(); repository.resetForTests();
+  const localRoot = await mkdtemp(join(tmpdir(), 'salesko-sdk-process-recovery-'));
+  const owner = { tenantId: 'process-recovery-tenant', userId: 'process-recovery-user', conversationId: cut };
+  const tenant = sdkTenantId(await byokTenantRef(MemoryDatasetScope, owner.tenantId));
+  let tick = 0;
+  const now = () => new Date(Date.parse('2026-09-10T12:00:00.000Z') + tick++ * 60000).toISOString();
+  let unavailable = true, submissions = 0;
+  const publications: any[] = [], committed: string[] = [];
+  const sdk = createInMemoryByokCloud({ longPollHoldMs: 50,
+    observer: { onInboundCommitted: ({ envelope }: { envelope: any }) => {
+      if (['task.complete', 'task.fail', 'task.cancelled', 'task.decline'].includes(envelope.type)) committed.push(envelope.type);
+    } },
+    agentMessage: { consume: async ({ tenant: actualTenant, deviceId, taskId, context, payload }) => {
+      publications.push(payload);
+      if (unavailable && cut === 'before_host_commit') throw new Error('Synthetic consumer unavailable before Host commit');
+      const result = await repository.recordAgentMessage({ now: now(), message: {
+        schemaVersion: C.PrivateAgentChatMessageConsumeSchemaVersion, tenantRef: actualTenant, deviceId, taskId, context, payload } });
+      if (unavailable) throw new Error('Synthetic response loss after Host commit');
+      return result;
+    } },
+  });
+  const submit = sdk.cloud.submitRecurringExecution.bind(sdk.cloud);
+  sdk.cloud.submitRecurringExecution = (...args: Parameters<typeof submit>) => { submissions++; return submit(...args); };
+  const token = 'disposable-process-control';
+  const app = new Hono().route('/internal/private-agent-chat', createPrivateAgentChatRouter(privateAgentChatCloud(sdk.cloud), {
+    auth: { researchToken: token, adminToken: 'disposable-admin', privateAgentChatCallbackToken: 'disposable-chat',
+      privateAgentToolsCallbackToken: 'disposable-tools', profileProjectionToken: 'disposable-profile', tokenSigningSecret: new Uint8Array(32) },
+  }));
+  const http = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: request =>
+    new URL(request.url).pathname.startsWith('/internal/') ? app.fetch(request) : sdk.cloud.fetch(request) });
+  const baseUrl = `http://127.0.0.1:${http.port}`;
+  const dispatcher = new ByokPrivateAgentChatDispatcher({ baseUrl, datasetScope: MemoryDatasetScope, researchToken: token, fetchImpl: fetch });
+  const children: { process: ReturnType<typeof Bun.spawn>; url: string; pid: number; stderrPath: string; exited: boolean }[] = [];
+  const controlToken = crypto.randomUUID();
+  const deadline = async (predicate: () => boolean | Promise<boolean>, label: string) => {
+    const end = Date.now() + 12000;
+    while (!await predicate()) {
+      if (Date.now() > end) throw new Error(`Timed out: ${label}`);
+      await new Promise(resolve => setTimeout(resolve, 15));
+    }
+  };
+  const productId = 'salesko-message-process-recovery';
+  const start = async (pairingCode?: string) => {
+    const index = children.length;
+    const readyPath = join(localRoot, `ready-${index}.json`);
+    const configPath = join(localRoot, `child-${index}.json`);
+    const stderrPath = join(localRoot, `stderr-${index}.log`);
+    await writeFile(configPath, JSON.stringify({ installRoot: root, localRoot, serverUrl: baseUrl, productId,
+      controlToken, readyPath, pairingCode, egressPolicy: C.PrivateAgentEgressPolicy }));
+    const process = Bun.spawn([Bun.which('bun')!, resolve(import.meta.dir, 'fixtures/salesko-recurring-daemon.ts'), configPath], {
+      cwd: localRoot, stdout: Bun.file(join(localRoot, `stdout-${index}.log`)), stderr: Bun.file(stderrPath),
+    });
+    const child = { process, url: '', pid: process.pid, stderrPath, exited: false }; children.push(child);
+    void process.exited.then(() => { child.exited = true; });
+    let ready: any;
+    await deadline(async () => {
+      if (child.exited) throw new Error(`Daemon child exited ${process.exitCode}: ${await readFile(stderrPath, 'utf8')}`);
+      try { ready = JSON.parse(await readFile(readyPath, 'utf8')); return true; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+    }, 'child ready');
+    expect(ready.pid).toBe(process.pid); child.url = ready.url;
+    return { child, deviceId: ready.deviceId };
+  };
+  const control = async (child: typeof children[number], path: string, method = 'GET') => {
+    if (child.exited) throw new Error(`Daemon child exited: ${await readFile(child.stderrPath, 'utf8')}`);
+    const response = await fetch(child.url + path, { method, headers: { 'x-test-control': controlToken }, signal: AbortSignal.timeout(10000) });
+    if (!response.ok) throw new Error(`Child control ${response.status}: ${await response.text()}`);
+    return response.json() as Promise<any>;
+  };
+  const stop = async (child: typeof children[number]) => {
+    await control(child, '/stop', 'POST');
+    await deadline(() => child.exited, 'graceful child exit');
+    expect(await child.process.exited).toBe(0);
+  };
+  try {
+    await sdk.core.quota.writeEntitlement(tenant, { version: 1n, hardLimitBytes: 1_000_000_000n, maxObjectBytes: 100_000_000n,
+      maxInlineBytes: 1_000_000n, mailboxLimitBytes: 100_000_000n, retentionPolicyId: 'process-recovery-test' });
+    const pairing = await sdk.cloud.createPairingCode(tenant, { productId });
+    const first = await start(pairing.code);
+    await deadline(async () => (await sdk.cloud.listDevices(tenant))[0]?.capabilities?.includes('agent-message-egress') === true, 'device capabilities');
+    const binding = { agentRef: { agentId: '7bf9cf51-8c51-4a67-b8f3-4f11de2cecb1', profileRevision: '1' }, deviceId: first.deviceId,
+      placementRevision: '3', runtime: 'claude', cwd: 'byok-agent-home', egressPolicy: C.PrivateAgentEgressPolicy, tools: C.PrivateAgentChatToolBinding };
+    await repository.createConversation({ ...owner, continuity: { mode: 'fresh', version: 1 }, title: 'Process recovery', agentId: binding.agentRef.agentId, execution: { epoch: 1 }, now: now() });
+    await submitAndPrepare(repository, { ...owner, turnId: 'T1', clientRequestId: 'T1', message: 'U1', now: now(), binding, expectedExecution: { epoch: 1 } });
+    await dispatchAndReconcile(repository, dispatcher, owner.tenantId, 'T1', now());
+    const frozen = (await repository.reconcileDispatch({ ...owner, turnId: 'T1', now: now() }))!;
+    const taskId = frozen.execution.taskId;
+    await deadline(async () => (await control(first.child, '/status')).starts === 1, 'first synthetic runtime');
+    const firstState = await control(first.child, '/status');
+    expect(firstState.preparations).toBe(1);
+    const outboxPath = join(firstState.sessions[0].workspaceDir, '.byok/messages/outbox-v1.jsonl');
+    const entries = async () => (await readFile(outboxPath, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    await control(first.child, '/emit', 'POST');
+    await deadline(() => publications.length > 0, 'consumer failure cut');
+    const original = publications[0];
+    const disk = await entries();
+    expect(firstState.sessions[0].sessionRef).toBe(original.sessionRef);
+    expect(disk.find(entry => entry.kind === 'append').record).toMatchObject({ taskId, body: 'A1', messageId: original.messageId, contentHash: original.contentHash });
+    expect(disk.find(entry => entry.kind === 'activate')).toMatchObject({ taskId, sessionRef: original.sessionRef, messageId: original.messageId });
+    expect(disk.some(entry => entry.kind === 'disposition')).toBe(false);
+    expect(disk.some(entry => entry.kind === 'revoke')).toBe(false);
+    expect(await sdk.cloud.readAgentMessageDisposition(tenant, first.deviceId, taskId, original)).toBeUndefined();
+    expect(await sdk.cloud.readDeviceTerminal(tenant, taskId)).toBeUndefined();
+    expect((await repository.readFullConversation(owner))!.messages.map((message: any) => message.content))
+      .toEqual(cut === 'before_host_commit' ? ['U1'] : ['U1', 'A1']);
+    first.child.process.kill('SIGKILL');
+    await deadline(() => first.child.exited, 'SIGKILL child exit');
+    expect(await first.child.process.exited).not.toBe(0);
+    const attemptsBeforeRestart = publications.length;
+    const second = await start();
+    expect(second.deviceId).toBe(first.deviceId); expect(second.child.pid).not.toBe(first.child.pid);
+    await deadline(() => publications.length > attemptsBeforeRestart, 'recovered exact publication while consumer unavailable');
+    expect(await sdk.cloud.readDeviceTerminal(tenant, taskId)).toBeUndefined();
+    expect(await control(second.child, '/status')).toMatchObject({ preparations: 0, starts: 0, status: { activeTaskCount: 0 } });
+    const scan = async () => {
+      const at = now();
+      return runPrivateAgentChatRecovery(new InMemoryPrivateAgentChatRepository(), dispatcher, {
+        now: at, nextCheckAt: new Date(Date.parse(at) + 1000).toISOString(), limit: 25,
+        prepare: async () => { throw new Error('Existing Execution must not prepare again'); },
+      });
+    };
+    expect(await scan()).toMatchObject({ selected: 1, reconciled: 1, dispatchChecks: 0, failures: [] });
+    expect(frozen.execution.snapshot.origin).toBe('frozen_dispatch_v1');
+    expect((await repository.reconcileDispatch({ ...owner, turnId: 'T1', now: now() }))!.execution).toMatchObject({
+      taskId, generation: 1, snapshot: frozen.execution.snapshot, messageContext: frozen.execution.messageContext });
+    expect(submissions).toBe(1); expect(committed).toEqual([]);
+    unavailable = false;
+    await deadline(async () => (await sdk.cloud.readAgentMessageDisposition(tenant, first.deviceId, taskId, original))?.outcome === 'accepted', 'recovered accepted');
+    await deadline(async () => (await sdk.cloud.readDeviceTerminal(tenant, taskId))?.envelope.type === 'task.fail', 'journal recovery terminal after exact message');
+    const terminal = await sdk.cloud.readDeviceTerminal(tenant, taskId);
+    expect(terminal.envelope.payload).toMatchObject({ reason: 'daemon_interrupted', recovery: { kind: 'daemon_interrupted' } });
+    expect((await entries()).find(entry => entry.kind === 'disposition').disposition).toMatchObject({ messageId: original.messageId, outcome: 'accepted', sessionRef: original.sessionRef });
+    expect(await scan()).toMatchObject({ selected: 1, reconciled: 1, failures: [] });
+    expect(await repository.reconcileDispatch({ ...owner, turnId: 'T1', now: now() })).toBeNull();
+    const full = (await repository.readFullConversation(owner))!;
+    expect(full.messages.map((message: any) => message.content)).toEqual(['U1', 'A1']);
+    expect(full.turns[0].execution).toMatchObject({ taskId, generation: 1 });
+    expect(full.recovery.turns[0]).toMatchObject({ messageDisposition: 'accepted', resourceObservation: 'unknown' });
+    expect(publications.every(payload => JSON.stringify(payload) === JSON.stringify(original))).toBe(true);
+    expect(await control(second.child, '/status')).toMatchObject({ preparations: 0, starts: 0 });
+    await stop(second.child);
+    const count = publications.length;
+    const accepted = await sdk.cloud.readAgentMessageDisposition(tenant, first.deviceId, taskId, original);
+    const third = await start();
+    expect(new Set(children.map(child => child.pid)).size).toBe(3); expect(third.deviceId).toBe(first.deviceId);
+    await deadline(async () => (await control(third.child, '/status')).status.connected, 'third daemon connected');
+    expect(await control(third.child, '/status')).toMatchObject({ preparations: 0, starts: 0, status: { activeTaskCount: 0 } });
+    await stop(third.child);
+    expect(publications).toHaveLength(count); expect(committed).toEqual(['task.fail']); expect(submissions).toBe(1);
+    expect(await sdk.cloud.readAgentMessageDisposition(tenant, first.deviceId, taskId, original)).toEqual(accepted);
+    expect(await sdk.cloud.readDeviceTerminal(tenant, taskId)).toEqual(terminal);
+    console.log(`A13 ${cut}=PASS; daemon_pids=3; body=1; execution/submission=1; synthetic_starts=1+0+0; native_starts=0`);
+  } finally {
+    for (const child of children) {
+      if (!child.exited) child.process.kill('SIGKILL');
+      await child.process.exited;
+    }
+    http.stop(true); await rm(localRoot, { recursive: true, force: true });
+  }
+}, 60000);
