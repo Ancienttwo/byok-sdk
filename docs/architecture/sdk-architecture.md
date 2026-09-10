@@ -2221,3 +2221,15 @@ never infers per-ID expiry or changes TeamWorkspace receipts. `PiRpcClient` adds
 an explicit hold policy; unattended callers retain native-dialog cancellation.
 JSONL GUI controls are operator-owned, separate from model-controlled MCP tools.
 Budget stops admission then drains Pi to agent_settled; no TaskRunner/cloud cutover.
+
+
+### Recurring first-message observation
+
+Cloud and embedded server discover the single existing agent_message_admission
+row using authenticated tenant and frozen task/device/AgentRef. The required
+TaskAttemptStore read is implemented by memory, PostgreSQL and SQLite; the
+Cloud decoder validates frozen message binding and exact receipt once for both
+control-plane compositions. Hosts can recover pending/held/refused without a
+prior accepted body or a reliable observer notification. Received payload stays
+untrusted; Host acceptance remains the sole transcript writer. This is a read
+boundary over existing storage, with no wire/session/home ownership change.

@@ -22,6 +22,7 @@ export type { TenantId } from '@byok-sdk/core';
 
 // The composition entry points
 export { createByokCloud } from './cloud';
+export type { TaskAgentMessage } from './task-agent-message';
 export type {
   ByokCloud,
   ByokCloudOptions,
@@ -345,3 +346,7 @@ export type {
   InMemoryBlobs,
   InMemoryCloudComposition,
 } from './stores/in-memory/index';
+
+export type { DeviceTerminal } from './terminal-result';
+
+export { RecurringExecutionInputSchema, type RecurringExecutionInput } from './recurring';

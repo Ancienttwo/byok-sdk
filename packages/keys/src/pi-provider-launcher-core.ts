@@ -46,6 +46,8 @@ const PI_CHILD_WINDOWS_ENV_NAMES = [
 
 export interface PiProviderLauncherOptions {
   piBin: string;
+  /** Explicit script entry for the selected interpreter; never inferred from a filename. */
+  piEntry?: string;
   profileDbPath: string;
   /** Carried by the `--provider` flag: the exact local profile to launch. */
   profileRef: ProviderProfileRef;
@@ -67,6 +69,7 @@ export function parsePiProviderLauncherOptions(
 
   const allowedFlags = new Set([
     '--pi-bin',
+    '--pi-entry',
     '--profile-db',
     '--provider',
     '--model',
@@ -160,7 +163,12 @@ export function parsePiProviderLauncherOptions(
       requiredCapabilities: parsedCapabilities.data,
     };
   }
+  const piEntry = values.get('--pi-entry');
+  if (piEntry !== undefined && (!path.isAbsolute(piEntry) || /[\u0000\r\n]/u.test(piEntry))) {
+    throw new Error('--pi-entry requires an absolute single-line path');
+  }
   return {
+    ...(piEntry === undefined ? {} : { piEntry }),
     piBin: required('--pi-bin'),
     profileDbPath,
     profileRef: profileRef.data,
@@ -225,6 +233,16 @@ export function buildPiProviderChildEnvironment(options: {
       ? platformName.startsWith('LC_') || platformName.startsWith('XDG_')
       : name.startsWith('LC_') || name.startsWith('XDG_');
     if (isExact || isPrefixed) result[name] = value;
+  }
+  const mcpPath = options.ambient.BYOK_PI_MCP_CONFIG_PATH;
+  if (mcpPath !== undefined) {
+    if (!path.isAbsolute(mcpPath) || /[\u0000\r\n]/u.test(mcpPath)) throw new Error('BYOK_PI_MCP_CONFIG_PATH must be an absolute single-line path');
+    result.BYOK_PI_MCP_CONFIG_PATH = mcpPath;
+  }
+  const permissionMode = options.ambient.BYOK_PI_PERMISSION_MODE;
+  if (permissionMode !== undefined) {
+    if (permissionMode !== 'auto' && permissionMode !== 'readonly') throw new Error('BYOK_PI_PERMISSION_MODE must be auto or readonly');
+    result.BYOK_PI_PERMISSION_MODE = permissionMode;
   }
   result.PI_CODING_AGENT_DIR = options.projectionDir;
   result.PI_CODING_AGENT_SESSION_DIR = options.sessionDir;

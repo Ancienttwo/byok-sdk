@@ -72,8 +72,8 @@ export declare class DeviceConnections {
 }
 // ==== @byok-sdk/server dist/index.d.ts ====
 import { Hono } from 'hono';
-import { type PairingCodeInfo } from '@byok-sdk/cloud';
-import { type AgentRef } from '@byok-sdk/protocol';
+import { type EnqueuedOffer, type PairingCodeInfo, type TaskAttempt } from '@byok-sdk/cloud';
+import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
 import type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
 import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, TaskHandle, TaskSnapshot } from './types';
 export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, ServerTaskEvent, TaskHandle, TaskResult, TaskSnapshot, } from './types';
@@ -155,6 +155,10 @@ export interface ByokServer {
         /** Mint a single-use pairing code for this server's product and tenant (docs/protocol.md §6.1). */
         createPairingCode(input: CreatePairingCodeInput): Promise<PairingCodeInfo>;
     };
+    /** Durable recurring submission; no TaskHandle is needed to recover after restart. */
+    recurring: {
+        submit(input: import('@byok-sdk/cloud').RecurringExecutionInput): Promise<EnqueuedOffer>;
+    };
     dispatch(input: DispatchInput): Promise<TaskHandle>;
     /** Dispatch a fresh Agent execution whose runtime will mint its session after start. */
     dispatchFreshAgentEgress(input: FreshAgentEgressDispatchInput): Promise<TaskHandle>;
@@ -165,9 +169,17 @@ export interface ByokServer {
     /** Durable desired-state and terminal-outcome readback for one exact device-and-Agent request. */
     readAgentHomeProjection(deviceId: string, agentRef: AgentRef, requestId: string): Promise<AgentHomeProjectionStatusReadback | undefined>;
     tasks: {
+        /** Canonical durable attempt, including cancellation intent; not a resource-release observation. */
+        attempt(taskId: string): Promise<TaskAttempt | undefined>;
         get(taskId: string): Promise<TaskSnapshot | undefined>;
+        /** Actual device terminal, independently of Host cancellation or home release. */
+        deviceTerminal(taskId: string): Promise<import('@byok-sdk/cloud').DeviceTerminal | undefined>;
         /** Immutable kernel offer readback for verifying a persisted host binding. No transport seq is inferred. */
         offer(taskId: string): Promise<import('@byok-sdk/cloud').TaskOfferReadback | undefined>;
+        /** Discover the unique message and its pending/final disposition through the frozen Agent binding. */
+        agentMessage(taskId: string, deviceId: string, agentRef: AgentRef): Promise<import('@byok-sdk/cloud').TaskAgentMessage | undefined>;
+        /** Exact SDK message decision; pending is undefined and corrupt persisted evidence throws. */
+        messageDisposition(taskId: string, deviceId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
         /** Request cancellation through the kernel without a process-owned TaskHandle. */
         cancel(taskId: string, reason?: string): Promise<void>;
         /**

@@ -41,6 +41,8 @@ import {
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
   AGENT_MESSAGE_EGRESS_CAPABILITY,
   AgentContentReadPayloadSchema,
+  AgentMessagePublishPayloadSchema,
+  AgentMessageDispositionPayloadSchema,
   DAEMON_TO_SERVER_TYPES,
   decodeEnvelope,
   encodeEnvelope,
@@ -223,21 +225,26 @@ export async function readAgentMessageDisposition(
   return admission?.terminalBody === undefined ? undefined : parseAgentMessageDisposition(payload, admission.terminalBody);
 }
 
-function parseAgentMessageDisposition(
+export function parseAgentMessageDisposition(
   payload: AgentMessagePublishPayload,
   terminalBody: string,
-): AgentMessageDispositionPayload | undefined {
-  try {
-    const decoded = JSON.parse(terminalBody) as {
-      readonly payload?: AgentMessagePublishPayload;
-      readonly disposition?: AgentMessageDispositionPayload;
-    };
-    return decoded.disposition !== undefined && JSON.stringify(decoded.payload) === JSON.stringify(payload)
-      ? decoded.disposition
-      : undefined;
-  } catch {
-    return undefined;
-  }
+): AgentMessageDispositionPayload {
+  // This is persisted SDK authority. Corruption cannot mean "not yet accepted".
+  const invalid = () => new Error('Invalid persisted Agent message disposition.');
+  let decoded: unknown;
+  try { decoded = JSON.parse(terminalBody); } catch { throw invalid(); }
+  if (decoded === null || typeof decoded !== 'object' || Array.isArray(decoded)) throw invalid();
+  const record = decoded as Record<string, unknown>;
+  const storedPayload = AgentMessagePublishPayloadSchema.safeParse(record.payload);
+  const storedDisposition = AgentMessageDispositionPayloadSchema.safeParse(record.disposition);
+  if (!storedPayload.success || !storedDisposition.success ||
+      JSON.stringify(record.payload) !== JSON.stringify(payload)) throw invalid();
+  const disposition = storedDisposition.data;
+  if (!sameAgentRef(payload.agentRef, disposition.agentRef) ||
+      disposition.sessionRef !== payload.sessionRef || disposition.contract !== payload.contract ||
+      disposition.messageId !== payload.messageId || disposition.cursor !== payload.cursor ||
+      disposition.contentHash !== payload.contentHash) throw invalid();
+  return disposition;
 }
 
 /** Receipt key a task's terminal is recorded under — the idempotency seam S3b's journal will share. */

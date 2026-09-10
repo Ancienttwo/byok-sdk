@@ -807,6 +807,8 @@ export interface FullCapabilityDeclarationOptions {
 export declare function fullCapabilityDeclaration(version?: number, options?: FullCapabilityDeclarationOptions): CapabilityDeclaration;
 export declare function declares(declaration: CapabilityDeclaration, capability: CloudCapability): boolean;
 // ==== @byok-sdk/cloud dist/cloud.d.ts ====
+import { type TaskAgentMessage } from './task-agent-message';
+import { type RecurringExecutionInput } from './recurring';
 /**
  * `createByokCloud` — the hosted device surface, assembled.
  *
@@ -826,7 +828,7 @@ export declare function declares(declaration: CapabilityDeclaration, capability:
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
+import { type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -834,7 +836,7 @@ import { type ByokCloudObserver } from './inbound';
 import { type AgentHomeProjectionReceiptInput } from './agent-home-projections';
 import type { AgentMemoryProjectionAuthorizer, AgentMemoryProjectionStore } from './agent-memory-projection';
 import type { BlobContentProxy, CloudStores, DeviceRecord, AgentEgressRecord, PairingCodeInfo, RequestReceipt, TaskAttempt, TaskAttemptListQuery, TaskAttemptPage } from './stores/ports';
-import { type TerminalResult } from './terminal-result';
+import { type DeviceTerminal, type TerminalResult } from './terminal-result';
 import type { TruthCommitter, TruthObjectDownloads } from './truth/contract';
 /** Matches the reference server's ceiling (§7). */
 export declare const DEFAULT_MAX_BLOB_SIZE_BYTES: number;
@@ -1073,6 +1075,8 @@ export interface ByokCloud {
      * mailbox reservation, so older resume-only daemons never receive it.
      */
     enqueueFreshAgentEgressOffer(tenant: TenantId, deviceId: string, input: AgentEgressFreshSessionDispatchInput): Promise<EnqueuedOffer>;
+    /** Strict recurring execution: caller persists the complete input before submission. */
+    submitRecurringExecution(tenant: TenantId, input: RecurringExecutionInput): Promise<EnqueuedOffer>;
     /** Host control plane: request one policy-bound content read without a task fallback. */
     enqueueAgentContentRead(tenant: TenantId, deviceId: string, input: AgentContentReadInput): Promise<EnqueuedAgentControl>;
     /** Durable, task-free projection request for precisely one admitted device. */
@@ -1164,6 +1168,16 @@ export interface ByokCloud {
     listTaskAttempts(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
     /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
     readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
+    /** Actual device terminal only; cancellation intent never creates this observation. */
+    readDeviceTerminal(tenant: TenantId, taskId: string): Promise<DeviceTerminal | undefined>;
+    /** Discover first-message transmission evidence from the frozen execution binding, including pending/held without a Host body. */
+    readTaskAgentMessage(tenant: TenantId, deviceId: string, taskId: string, agentRef: AgentRef): Promise<TaskAgentMessage | undefined>;
+    /**
+     * Exact durable message decision, independently of task cancellation/terminal.
+     * Missing or pending admission returns undefined; invalid persisted evidence
+     * throws. The Host supplies the complete original payload, not a Turn ID.
+     */
+    readAgentMessageDisposition(tenant: TenantId, deviceId: string, taskId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
     /** Exact durable egress fact and receipt selected by (tenant, device, AgentRef, event id). */
     readAgentEgress(tenant: TenantId, deviceId: string, agentRef: AgentRef, eventId: string): Promise<AgentEgressRecord | undefined>;
     /**
@@ -1767,6 +1781,7 @@ export declare function handleAgentMessagePublish(stores: TenantStores, deviceId
 }>;
 /** Reads only a terminal immutable admission; pending rows have no disposition to acknowledge. */
 export declare function readAgentMessageDisposition(stores: TenantStores, deviceId: string, taskId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
+export declare function parseAgentMessageDisposition(payload: AgentMessagePublishPayload, terminalBody: string): AgentMessageDispositionPayload;
 /** Receipt key a task's terminal is recorded under — the idempotency seam S3b's journal will share. */
 export declare function terminalReceiptKey(taskId: string): string;
 export declare function handleInboundEnvelope(stores: TenantStores, deviceId: string, envelope: Envelope, activityBounds?: ActivityBounds, agentMessageConsume?: Parameters<typeof handleAgentMessagePublish>[4], observer?: ByokCloudObserver): Promise<InboundOutcome>;
@@ -1788,6 +1803,7 @@ export declare function handleInboundEnvelope(stores: TenantStores, deviceId: st
 export { isTenantId, tenantId } from '@byok-sdk/core';
 export type { TenantId } from '@byok-sdk/core';
 export { createByokCloud } from './cloud';
+export type { TaskAgentMessage } from './task-agent-message';
 export type { ByokCloud, ByokCloudOptions, AgentDispatchInput, AgentEgressDispatchInput, AgentEgressFreshSessionDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, AgentHomeProjectionStatusInput, ApproveTaskOptions, EnqueueOfferInput, EnqueueToolsetOfferInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedOffer, TaskOfferReadback, } from './cloud';
 export { agentHomeProjectionCompletionKey, agentHomeProjectionRequestKey, readAgentHomeProjectionStatus, recordAgentHomeProjectionCompletion, } from './agent-home-projections';
 export type { AgentHomeProjectionReceiptInput } from './agent-home-projections';
@@ -1845,6 +1861,130 @@ export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contra
 export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RequestReceipt, RequestReceiptStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports';
 export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryBlobs, createInMemoryCloudStores, } from './stores/in-memory/index';
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index';
+export type { DeviceTerminal } from './terminal-result';
+export { RecurringExecutionInputSchema, type RecurringExecutionInput } from './recurring';
+// ==== @byok-sdk/cloud dist/recurring.d.ts ====
+import { z } from 'zod';
+/** Persist this validated input before dispatch; the Host owns Turn/generation and outbox. */
+export declare const RecurringExecutionInputSchema: z.ZodObject<{
+    taskId: z.ZodString;
+    deviceId: z.ZodString;
+    payload: z.ZodObject<{
+        instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strict>]>;
+        policy: z.ZodObject<{
+            mode: z.ZodEnum<{
+                auto: "auto";
+                confirm: "confirm";
+                plan: "plan";
+                readonly: "readonly";
+            }>;
+            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            workspaceRoot: z.ZodOptional<z.ZodString>;
+            network: z.ZodOptional<z.ZodBoolean>;
+        }, z.core.$strict>;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        runtime: z.ZodNonOptional<z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        terminalProjection: z.ZodNonOptional<z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            mode: z.ZodLiteral<"none">;
+        }, z.core.$strict>, z.ZodObject<{
+            mode: z.ZodLiteral<"result-document">;
+            contract: z.ZodString;
+        }, z.core.$strict>], "mode">>>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        egressPolicy: z.ZodObject<{
+            policyRevision: z.ZodString;
+            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
+                mode: z.ZodLiteral<"metadata-status">;
+                delivery: z.ZodLiteral<"latest-value">;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"contentful-trajectory">;
+                delivery: z.ZodLiteral<"latest-value">;
+                maxCoalesceMs: z.ZodNumber;
+                maxEventBytes: z.ZodNumber;
+            }, z.core.$strict>], "mode">;
+            reliable: z.ZodObject<{
+                maxPendingEventsPerAgent: z.ZodNumber;
+                maxPendingBytesPerAgent: z.ZodNumber;
+                maxPendingBytesPerTenant: z.ZodNumber;
+            }, z.core.$strict>;
+            transfers: z.ZodObject<{
+                workspace: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                transcript: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                artifact: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+        messageEgress: z.ZodNonOptional<z.ZodOptional<z.ZodObject<{
+            mode: z.ZodLiteral<"required">;
+            contract: z.ZodString;
+            contentType: z.ZodEnum<{
+                "text/markdown": "text/markdown";
+                "text/plain": "text/plain";
+            }>;
+            maxBytes: z.ZodNumber;
+        }, z.core.$strict>>>;
+    }, z.core.$strict>;
+    agentMessageContext: z.ZodObject<{
+        destinationBinding: z.ZodString;
+        freshnessCursor: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+export type RecurringExecutionInput = z.infer<typeof RecurringExecutionInputSchema>;
 // ==== @byok-sdk/cloud dist/router/registry.d.ts ====
 /**
  * The route inventory (sprint I1).
@@ -2382,6 +2522,10 @@ export declare class InMemoryTaskAttemptStore implements TaskAttemptStore {
         readonly messageId: string;
         readonly payloadBody: string;
     }): Promise<'reserved' | 'pending' | 'rejected'>;
+    readTaskAgentMessage(tenant: TenantId, input: {
+        readonly taskId: string;
+        readonly deviceId: string;
+    }): Promise<AgentMessageAdmission | undefined>;
     readAgentMessage(tenant: TenantId, input: {
         readonly taskId: string;
         readonly deviceId: string;
@@ -2788,6 +2932,11 @@ export interface TaskAttemptStore {
         readonly messageId: string;
         readonly payloadBody: string;
     }): Promise<'reserved' | 'pending' | 'rejected'>;
+    /** Discover the unique immutable message for a tenant/device/task; caller validates its frozen Agent binding. */
+    readTaskAgentMessage(tenant: TenantId, input: {
+        readonly taskId: string;
+        readonly deviceId: string;
+    }): Promise<AgentMessageAdmission | undefined>;
     /** Read only an exact reservation; conflicting task/message bindings are not observable. */
     readAgentMessage(tenant: TenantId, input: {
         readonly taskId: string;
@@ -3059,6 +3208,18 @@ export interface CloudStores {
 /** Names of every port in {@link CloudStores}, in contract order. */
 export declare const CLOUD_STORE_NAMES: readonly ['activity', 'approvals', 'devices', 'pairingCodes', 'pairing', 'nonces', 'dedup', 'tasks', 'cancellations', 'receipts', 'egress', 'proofReceipts', 'blobs', 'rateLimiter'];
 export type CloudStoreName = (typeof CLOUD_STORE_NAMES)[number];
+// ==== @byok-sdk/cloud dist/task-agent-message.d.ts ====
+import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
+import type { TenantStores } from './tenant-stores';
+/** SDK transmission evidence; payload remains untrusted and never authors a Host product message. */
+export interface TaskAgentMessage {
+    readonly payload: AgentMessagePublishPayload;
+    readonly context: AgentMessageServerContext;
+    /** Absent while the exact first-message reservation remains pending. */
+    readonly disposition?: AgentMessageDispositionPayload;
+}
+/** Discover the one durable message without requiring the Host to have received its body. */
+export declare function readTaskAgentMessage(stores: TenantStores, deviceId: string, taskId: string, expectedRef: AgentRef): Promise<TaskAgentMessage | undefined>;
 // ==== @byok-sdk/cloud dist/tenant-stores.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
@@ -3149,6 +3310,10 @@ export interface TenantBoundTaskAttempts {
         readonly messageId: string;
         readonly payloadBody: string;
     }): Promise<'reserved' | 'pending' | 'rejected'>;
+    readTaskAgentMessage(input: {
+        readonly taskId: string;
+        readonly deviceId: string;
+    }): Promise<import('./stores/ports').AgentMessageAdmission | undefined>;
     readAgentMessage(input: {
         readonly taskId: string;
         readonly deviceId: string;
@@ -3247,8 +3412,16 @@ export interface CloudRootStores {
 }
 export declare function tenantStoresFor(principal: Principal, root: CloudRootStores): TenantStores;
 // ==== @byok-sdk/cloud dist/terminal-result.d.ts ====
-import { type AgentRef, type BlobRef, type TerminalInferenceUsage, type TaskFailPayload } from '@byok-sdk/protocol';
+import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TaskFailPayload } from '@byok-sdk/protocol';
 import type { RequestReceipt } from './stores/ports';
+/** Canonical device evidence, independent of the Host cancellation projection. */
+export interface DeviceTerminal {
+    readonly envelope: Extract<Envelope, {
+        type: 'task.complete' | 'task.fail' | 'task.decline' | 'task.cancelled';
+    }>;
+    readonly recordedAt: string;
+}
+export declare function readDeviceTerminalReceipt(taskId: string, receipt: RequestReceipt): DeviceTerminal;
 /**
  * The typed terminal read model — the hosted counterpart of the embedded
  * coordinator's `TaskResult`, projected off the receipt the inbound gate

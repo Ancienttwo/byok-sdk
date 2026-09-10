@@ -11,6 +11,21 @@ import { sanitizeEgressEnvelope } from '../daemon/agent-egress-sanitizer';
 const agentRef = { agentId: 'agent-egress-policy', profileRevision: 'r1' };
 
 describe('Agent egress policy and sanitizer', () => {
+  it.each([false, true])('keeps only an explicitly selected result document (selected=%s)', (selected) => {
+    const document = { kind: 'internal-summary', text: 'authorized result' };
+    const envelope = createEnvelope('task.complete', {
+      summary: 'private trajectory', sessionRef: 'native-selected-result', document,
+    }, { taskId: 'selected-result' });
+    const result = sanitizeEgressEnvelope(envelope, DEFAULT_AGENT_EGRESS_POLICY, undefined,
+      { resultDocumentSelected: selected });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('valid result rejected');
+    expect(result.envelope.payload).toMatchObject({ summary: '[content omitted]' });
+    if (selected) expect(result.envelope.payload).toHaveProperty('document', document);
+    else expect(result.envelope.payload).not.toHaveProperty('document');
+    expect(encodeEnvelope(result.envelope)).not.toContain('private trajectory');
+  });
+
   it('removes trajectory/tool/prompt/environment/argv/path/credential bytes before either wire encoding', () => {
     const secret = 'trajectory SECRET=do-not-send /private/path --argv dangerous';
     const envelope = createEnvelope('task.progress', {

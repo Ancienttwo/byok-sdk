@@ -1765,6 +1765,8 @@ export type SanitizedEnvelope = Readonly<{
  */
 export declare function sanitizeEgressEnvelope(envelope: Envelope, policy: Readonly<AgentEgressPolicy>, sanitizer: AgentEgressSanitizer | undefined, context?: Omit<AgentEgressSanitizerContext, 'lane' | 'policyRevision' | 'envelopeType'> & {
     lane?: 'latest-value' | 'reliable';
+    /** Set only from the active task's frozen terminalProjection, never payload inference. */
+    resultDocumentSelected?: boolean;
 }): SanitizedEnvelope;
 /** Sanitizes a reliable payload before it is hashed/appended, never after. */
 export declare function sanitizeReliablePayload(payload: unknown, policy: Readonly<AgentEgressPolicy>, sanitizer: AgentEgressSanitizer | undefined, context?: Omit<AgentEgressSanitizerContext, 'lane' | 'policyRevision'>): unknown;
@@ -6918,6 +6920,8 @@ export declare class TaskRunner {
      * egress contract must never reclassify their existing wire semantics.
      */
     usesAgentEgress(taskId: string): boolean;
+    /** Frozen offer authority for the outbound result-document lane. */
+    selectsResultDocument(taskId: string): boolean;
     /** M5 batch-3 (workstream 2): effective `maxTaskOutputBytes` cap for this daemon — see {@link DEFAULT_MAX_TASK_OUTPUT_BYTES}'s own doc comment. */
     private get maxTaskOutputBytes();
     /** Effective per-event inline ceiling for this daemon — see `DaemonConfig.maxInlineEventBytes`. */

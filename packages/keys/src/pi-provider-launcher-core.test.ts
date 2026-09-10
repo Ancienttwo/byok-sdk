@@ -35,6 +35,23 @@ function profile(authMode: 'bearer' | 'none') {
 }
 
 describe('Pi provider launcher core', () => {
+  it('forwards only validated SDK extension context across custody', () => {
+    const mcp = path.join(os.tmpdir(), 'task-mcp.json');
+    const env = buildPiProviderChildEnvironment({
+      ambient: { BYOK_PI_MCP_CONFIG_PATH: mcp, BYOK_PI_PERMISSION_MODE: 'readonly', BYOK_PI_UNTRUSTED: 'discard', ZAI_API_KEY: CANARY },
+      projectionDir: '/projection', sessionDir: '/sessions', secret: undefined,
+    });
+    expect(env.BYOK_PI_MCP_CONFIG_PATH).toBe(mcp);
+    expect(env.BYOK_PI_PERMISSION_MODE).toBe('readonly');
+    expect(env.BYOK_PI_UNTRUSTED).toBeUndefined();
+    expect(env.ZAI_API_KEY).toBeUndefined();
+  });
+  it.each([
+    { BYOK_PI_MCP_CONFIG_PATH: './relative' }, { BYOK_PI_MCP_CONFIG_PATH: '/bad\npath' },
+    { BYOK_PI_PERMISSION_MODE: 'auto\n' }, { BYOK_PI_PERMISSION_MODE: 'confirm' },
+  ])('rejects malformed SDK extension context', (ambient) => {
+    expect(() => buildPiProviderChildEnvironment({ ambient, projectionDir: '/projection', sessionDir: '/sessions', secret: undefined })).toThrow();
+  });
   it('parses only the closed launcher contract and requires absolute custody paths', () => {
     const profileDbPath = path.join(os.tmpdir(), 'providers.sqlite');
     const sessionDir = path.join(os.tmpdir(), 'pi-sessions');
@@ -205,3 +222,16 @@ describe('Pi provider launcher core', () => {
     }
   });
 });
+
+ describe('explicit interpreter entry', () => {
+  const args = ['--pi-bin', process.execPath, '--profile-db', path.join(os.tmpdir(), 'profiles.db'),
+    '--session-dir', path.join(os.tmpdir(), 'sessions'), '--provider', 'custom', '--model', 'local-model'];
+  it('preserves a spaced script path as one argument and leaves executable mode explicit', () => {
+    const piEntry = path.join(os.tmpdir(), 'Pi package with spaces', 'cli.js');
+    expect(parsePiProviderLauncherOptions([...args, '--pi-entry', piEntry, '--', '--mode', 'rpc']).piEntry).toBe(piEntry);
+    expect(parsePiProviderLauncherOptions([...args, '--', '--mode', 'rpc']).piEntry).toBeUndefined();
+  });
+  it.each(['relative.js', '', '/tmp/bad\nentry.js', '/tmp/bad\u0000entry.js'])('rejects invalid entry %j', entry => {
+    expect(() => parsePiProviderLauncherOptions([...args, '--pi-entry', entry, '--', '--mode', 'rpc'])).toThrow();
+  });
+ });

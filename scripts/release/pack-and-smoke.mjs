@@ -463,6 +463,10 @@ try {
         `console.log('[release-pack] isolated imports OK');\n`,
     );
     run(nodeBin, ['smoke.mjs'], smokeDir);
+    copyFileSync(path.join(repoRoot, 'scripts/release/recurring-smoke.mjs'), path.join(smokeDir, 'recurring-smoke.mjs'));
+    run(nodeBin, ['recurring-smoke.mjs'], smokeDir);
+    copyFileSync(path.join(repoRoot, 'scripts/release/pi-launcher-smoke.mjs'), path.join(smokeDir, 'pi-launcher-smoke.mjs'));
+    run(nodeBin, ['pi-launcher-smoke.mjs'], smokeDir);
     assertSingleVersionSet(smokeDir, expectedPackageVersions);
     assertNpmCoreClosure(smokeDir);
     // The worker runtime subpath must stay deployable outside Node: the smoke

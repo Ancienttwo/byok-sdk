@@ -2,9 +2,9 @@
 
 Status: CURRENT boundary contract.
 
-For the 0.15.0 / keys 0.4.1 train, use the
-[publication record and checklist](../../docs/releases/v0.15.0-publication.md)
-and its linked release body.
+For the prepared 0.18.0 / keys 0.5.0 train, use the
+[release handoff](../../docs/releases/v0.18.0-handoff.md). Latest verified publication remains
+[0.17.0 / keys 0.4.3](../../docs/releases/v0.17.0-publication.md).
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
 
@@ -20,10 +20,10 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
-Small updates default to a patch increment (`0.x.y` → `0.x.(y+1)`). Do not
-promote them to a minor (`0.(x+1).0`) merely because APIs were added. A minor
-requires a concrete rationale and explicit user approval of that version choice;
-general approval to implement, merge or publish does not establish that choice.
+Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
+The 0.18.0 / keys 0.5.0 train stabilizes the previously selected breaking RC:
+required custom-store reads and explicit Pi profile/storage contracts make a patch
+inappropriate. Version preparation does not authorize registry publication.
 
 ## Release checklist
 

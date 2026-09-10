@@ -27,6 +27,8 @@ import {
   TerminalProjectionSelectionSchema,
   type AgentHomeProjectionPayload,
   type AgentRef,
+  type AgentMessagePublishPayload,
+  type AgentMessageDispositionPayload,
   type PermissionPolicy,
   type TaskState,
 } from '@byok-sdk/protocol';
@@ -164,6 +166,10 @@ export interface ByokServer {
     /** Mint a single-use pairing code for this server's product and tenant (docs/protocol.md §6.1). */
     createPairingCode(input: CreatePairingCodeInput): Promise<PairingCodeInfo>;
   };
+  /** Durable recurring submission; no TaskHandle is needed to recover after restart. */
+  recurring: {
+    submit(input: import('@byok-sdk/cloud').RecurringExecutionInput): Promise<EnqueuedOffer>;
+  };
   dispatch(input: DispatchInput): Promise<TaskHandle>;
   /** Dispatch a fresh Agent execution whose runtime will mint its session after start. */
   dispatchFreshAgentEgress(input: FreshAgentEgressDispatchInput): Promise<TaskHandle>;
@@ -178,9 +184,17 @@ export interface ByokServer {
     requestId: string,
   ): Promise<AgentHomeProjectionStatusReadback | undefined>;
   tasks: {
+    /** Canonical durable attempt, including cancellation intent; not a resource-release observation. */
+    attempt(taskId: string): Promise<TaskAttempt | undefined>;
     get(taskId: string): Promise<TaskSnapshot | undefined>;
+    /** Actual device terminal, independently of Host cancellation or home release. */
+    deviceTerminal(taskId: string): Promise<import('@byok-sdk/cloud').DeviceTerminal | undefined>;
     /** Immutable kernel offer readback for verifying a persisted host binding. No transport seq is inferred. */
     offer(taskId: string): Promise<import('@byok-sdk/cloud').TaskOfferReadback | undefined>;
+    /** Discover the unique message and its pending/final disposition through the frozen Agent binding. */
+    agentMessage(taskId: string, deviceId: string, agentRef: AgentRef): Promise<import('@byok-sdk/cloud').TaskAgentMessage | undefined>;
+    /** Exact SDK message decision; pending is undefined and corrupt persisted evidence throws. */
+    messageDisposition(taskId: string, deviceId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
     /** Request cancellation through the kernel without a process-owned TaskHandle. */
     cancel(taskId: string, reason?: string): Promise<void>;
     /**
@@ -753,8 +767,16 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       });
     },
 
+    recurring: { submit(input) { return cloud.submitRecurringExecution(tenant, input); } },
+
     tasks: {
+      attempt(taskId) { return cloud.readTaskAttempt(tenant, taskId); },
+      deviceTerminal(taskId) { return cloud.readDeviceTerminal(tenant, taskId); },
       offer(taskId) { return cloud.readTaskOffer(tenant, taskId); },
+      agentMessage(taskId, deviceId, agentRef) { return cloud.readTaskAgentMessage(tenant, deviceId, taskId, agentRef); },
+      messageDisposition(taskId, deviceId, payload) {
+        return cloud.readAgentMessageDisposition(tenant, deviceId, taskId, payload);
+      },
       async cancel(taskId, reason) {
         const attempt = await cloud.cancelTask(tenant, taskId, reason);
         if (attempt.cancellation !== undefined) {

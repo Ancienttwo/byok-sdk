@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.18.0 / @byok-sdk/keys 0.5.0 — unpublished release candidate
+
+- Launch package-resolved Pi through the current Node executable for version detection, direct RPC and credential custody, avoiding Windows `spawn EFTYPE` without shell execution. Native executable overrides remain explicit.
+
+- Breaking keys profile/storage contract: Pi execution requires explicit
+  `pi_model` settings, preserved in all profile stores, status and exact binding
+  hash. Older SQLite stores fail closed and are left intact; no automatic
+  migration or provider/model fallback. Direct transports remain independent
+  of Pi configuration.
+- Compose the actual Pi adapter with credential custody: accept bounded absolute
+  extension paths, preserve validated MCP/permission context and reject
+  delegated provider/model/thinking overrides. Installed Pi RPC verifies exact
+  model settings and extension loading without an inference request.
+
+- Add task-bound first-message discovery in Cloud and embedded server, including pending and held before a Host body exists. Custom TaskAttemptStore adapters on this breaking candidate train must implement the new read; no wire/store fallback. Received payload remains untrusted and does not author a product reply.
+
+- Preserve explicitly selected result documents through metadata-only Agent
+  egress while keeping terminal summary and trajectory private. Strict fresh
+  internal results no longer silently complete without their document.
+
+- Add one strict, persistable recurring execution input shared by hosted Cloud
+  and embedded server. Task/device/runtime, required message/context and a
+  registered consumer are mandatory; every new recurring execution is fresh.
+  Hosts persist the complete validated input before submission and reuse it for
+  admission recovery; the SDK does not author the Host outbox.
+- Recover initial admission using the same frozen identity/input. Expose exact
+  message disposition, actual device terminal and embedded durable attempt
+  observations independently of cancellation and resource release.
+- Host acceptance/replay/cancel and SQLite reconstruction are verified with
+  Salesko integration inputs; transcript, queue, Summary and business retry
+  authority remain with the Host. Explicit session APIs remain distinct.
+- This pre-1.0 candidate supports the breaking recurring Host contract; it does
+  not add private-receipt compatibility parsers, resume fallback or Conversation
+  storage. Keys carries the exact candidate core edge. No publication, deployment
+  or Host data migration is performed by preparing these artifacts.
+
 ## 0.17.0 / @byok-sdk/keys 0.4.3 — release
 
 - Persist SQLite device enrollment/capabilities/revocation and immutable request

@@ -1,5 +1,41 @@
 # @byok-sdk/keys
 
+Pi launcher configuration in the unpublished 0.5.0 candidate is explicit.
+Set `pi_model` on `ProviderRegistry.configure` for profiles used by Pi:
+
+```ts
+const pi_model = {
+  contextWindow: 1_000_000,
+  maxTokens: 131_072,
+  reasoning: true,
+  thinkingLevel: 'low',
+  thinkingLevelMap: {
+    off: null, minimal: null, low: 'low', medium: null,
+    high: 'high', xhigh: null, max: 'max',
+  },
+  compat: {
+    supportsStore: false, supportsDeveloperRole: false,
+    supportsReasoningEffort: true, supportsUsageInStreaming: true,
+    maxTokensField: 'max_tokens', thinkingFormat: 'zai', zaiToolStream: true,
+  },
+} satisfies PiModelConfig;
+```
+
+These illustrate declared GLM-5.3-Flash/Pi model settings, not Host input budgets
+or automatic defaults. Import `PiModelConfig` from this package. The bounded
+`PiModelConfigSchema` rejects unknown fields, incomplete level maps and
+unsupported selected levels; it accepts no identity, URL, header or secret.
+Use the exact provider's authoritative configuration. Missing `pi_model`
+permits direct provider transports but rejects Pi admission and launch.
+Configuration changes alter the profile hash and registry revision, fencing
+stale tasks before credential access. The launcher projects the selected
+thinking level through its own argv, not delegated overrides.
+
+The SQLite profile schema changes in this candidate. Existing stores are
+rejected and preserved: explicitly provision a separate current-schema store
+after reviewing the old configuration. Do not delete an old store or infer its
+missing model settings. No live-store conversion is performed by the SDK.
+
 Key-based BYOK: a validated provider profile, credential-backed auth headers, and
 direct transports to OpenAI-compatible and Anthropic providers.
 

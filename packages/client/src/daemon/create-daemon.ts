@@ -1926,7 +1926,9 @@ export function buildDaemonWithAdapters(
         sendSanitizedEnvelope(candidate);
         return;
       }
-      const sanitized = sanitizeEgressEnvelope(candidate, egressPolicy, config.agentEgress?.sanitizer);
+      const sanitized = sanitizeEgressEnvelope(candidate, egressPolicy, config.agentEgress?.sanitizer, {
+        resultDocumentSelected: runner.selectsResultDocument(candidate.task_id),
+      });
       if (!sanitized.ok) {
         // Fail closed at the single outbound boundary. In particular, a
         // throwing sanitizer does not leave original candidate bytes on the

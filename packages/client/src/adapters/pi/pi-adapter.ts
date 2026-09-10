@@ -31,6 +31,13 @@ import {
 const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5_000;
 
+/** Package scripts require an interpreter; explicit executable overrides do not. */
+function piInvocation(bin: ResolvedBin): { command: string; entry?: string } {
+  return bin.source === 'package'
+    ? { command: process.execPath, entry: bin.command }
+    : { command: bin.command };
+}
+
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -128,6 +135,7 @@ export function validatePiByokLauncherConfig(
   const reserved = new Set([
     '--',
     '--pi-bin',
+    '--pi-entry',
     '--profile-db',
     '--session-dir',
     '--macos-keychain-path',
@@ -177,7 +185,9 @@ export class PiAdapter implements RuntimeAdapter {
   async detect(): Promise<RuntimeDetectResult> {
     try {
       const bin = this.resolveBin();
-      const probe = await probeRuntimeVersion(bin.command, DETECT_TIMEOUT_MS);
+      const invocation = piInvocation(bin);
+      const probe = await probeRuntimeVersion(invocation.command, DETECT_TIMEOUT_MS,
+        invocation.entry === undefined ? [] : [invocation.entry]);
       if (probe.kind !== 'available') return probe;
       const version = probe.stdout.trim() || probe.stderr.trim();
       const authPresent = PROVIDER_CREDENTIAL_ENV_NAMES.some((name) => process.env[name] !== undefined);
@@ -240,7 +250,8 @@ export class PiAdapter implements RuntimeAdapter {
             }),
           }) as unknown as TaskOfferPayload['dispatchSelection']
         : Object.freeze({ ...selection }) as TaskOfferPayload['dispatchSelection'];
-    let command = bin.command;
+    const invocation = piInvocation(bin);
+    let command = invocation.command;
     let launcherArgs: string[] | undefined;
     if (pinnedSelection !== undefined) {
       if ((pinnedSelection.lane !== 'byok' && pinnedSelection.lane !== 'byok-profile') || pinnedSelection.runtimeId !== 'pi') {
@@ -271,7 +282,8 @@ export class PiAdapter implements RuntimeAdapter {
       launcherArgs = [
         ...(launcher.args ?? []),
         '--pi-bin',
-        bin.command,
+        invocation.command,
+        ...(invocation.entry === undefined ? [] : ['--pi-entry', invocation.entry]),
         '--profile-db',
         launcher.profileDbPath,
         '--session-dir',
@@ -357,7 +369,9 @@ export class PiAdapter implements RuntimeAdapter {
             ...(resumeSessionId ? ['--session', resumeSessionId] : []),
             ...mapping.args,
           ];
-          const args = launcherArgs === undefined ? piArgs : [...launcherArgs, '--', ...piArgs];
+          const args = launcherArgs === undefined
+            ? [...(invocation.entry === undefined ? [] : [invocation.entry]), ...piArgs]
+            : [...launcherArgs, '--', ...piArgs];
           let rpc: PiRpcClient;
           try {
             rpc = new PiRpcClient({

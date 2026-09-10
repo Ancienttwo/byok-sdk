@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createMutableClock, tenantId } from '@byok-sdk/core';
-import { createByokCloud, createHmacTokenSigner, createWebCrypto, fullCapabilityDeclaration } from '@byok-sdk/cloud';
+import { createByokCloud, createHmacTokenSigner, createWebCrypto, fullCapabilityDeclaration, RecurringExecutionInputSchema } from '@byok-sdk/cloud';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { handleInboundEnvelope } from '../../../cloud/src/inbound';
 import { tenantStoresFor } from '../../../cloud/src/tenant-stores';
@@ -26,12 +26,86 @@ describe('SQLite receipt recovery', () => {
     function open(migration?: 'v1-to-v3' | 'v2-to-v3') {
       const stores = createSqliteEmbeddedStores({ path, ...(migration === undefined ? {} : { migration }) }, { clock, crypto });
       const cloud = createByokCloud({ ...stores, clock, crypto,
-        tokenSigner: createHmacTokenSigner(new Uint8Array(32), clock), capabilities: fullCapabilityDeclaration() });
+        tokenSigner: createHmacTokenSigner(new Uint8Array(32), clock), capabilities: fullCapabilityDeclaration(),
+        agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
       const bound = tenantStoresFor({ kind: 'device', tenantId: tenant, productId: 'probe', deviceId }, stores);
       return { stores, cloud, bound };
     }
     return { open, path };
   }
+
+  it.each(['accepted', 'held', 'refused'] as const)('recovers pending then immutable %s message disposition across SQLite reopen', async (outcome) => {
+    const { open, path } = fixture(); let runtime = open();
+    const taskId = `message-${outcome}`;
+    const agentRef = { agentId: 'receipt-agent', profileRevision: 'profile-v1' };
+    const message = createEnvelope('agent.message.publish', {
+      agentRef, sessionRef: 'native-session', contract: 'conversation-turn/v1',
+      messageId: '10000000-0000-4000-8000-000000000099', cursor: 1,
+      contentType: 'text/markdown', body: 'hello', byteCount: 5,
+      contentHash: 'sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
+    }, { taskId });
+    let calls = 0;
+    const consume = async () => { calls++; return { outcome }; };
+    const read = () => runtime.cloud.readAgentMessageDisposition(tenant, deviceId, taskId, message.payload);
+    const discover = () => runtime.cloud.readTaskAgentMessage(tenant, deviceId, taskId, agentRef);
+    try {
+      await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
+      await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: [
+        'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-message-egress',
+        'terminal-projection-selection', 'agent-egress-fresh-session',
+      ] });
+      const execution = RecurringExecutionInputSchema.parse({ taskId, deviceId, payload: {
+        instruction: 'reply', runtime: 'codex', agentRef, policy: { mode: 'auto' },
+        egressPolicy: { policyRevision: 'policy-v1', activity: { mode: 'metadata-status', delivery: 'latest-value' },
+          reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
+          transfers: { workspace: { maxBytes: 512, allowedMimeTypes: ['text/plain'] }, transcript: 'disabled', artifact: 'disabled' } },
+        messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
+        terminalProjection: { mode: 'none' },
+      }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn' } });
+      const persistedInput = JSON.stringify(execution);
+      const appendFault = new DatabaseSync(path);
+      appendFault.exec("CREATE TRIGGER fail_recurring_append BEFORE INSERT ON mailbox_message BEGIN SELECT RAISE(ABORT, 'injected recurring append'); END;");
+      appendFault.close();
+      await expect(runtime.cloud.submitRecurringExecution(tenant, JSON.parse(persistedInput))).rejects.toThrow('injected recurring append');
+      expect(await runtime.cloud.readTaskOffer(tenant, taskId)).toMatchObject({ delivered: false });
+      await runtime.stores.close(); runtime = open();
+      const removeAppendFault = new DatabaseSync(path); removeAppendFault.exec('DROP TRIGGER fail_recurring_append'); removeAppendFault.close();
+      await expect(runtime.cloud.submitRecurringExecution(tenant, { ...execution,
+        agentMessageContext: { destinationBinding: 'different' } })).rejects.toThrow();
+      await runtime.cloud.submitRecurringExecution(tenant, JSON.parse(persistedInput));
+      expect(await runtime.cloud.readTaskOffer(tenant, taskId)).toMatchObject({ delivered: true, payload: execution.payload });
+      expect((await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages).toHaveLength(1);
+
+      const fault = new DatabaseSync(path);
+      fault.exec("CREATE TRIGGER fail_message_finalize BEFORE UPDATE OF terminal_body ON agent_message_admission BEGIN SELECT RAISE(ABORT, 'injected finalize fault'); END;");
+      fault.close();
+      await expect(handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume)).rejects.toThrow('injected finalize fault');
+      expect(calls).toBe(1);
+      expect(await read()).toBeUndefined();
+      await runtime.stores.close(); runtime = open();
+      expect(await read()).toBeUndefined();
+      expect(await discover()).toEqual({ payload: message.payload, context: execution.agentMessageContext });
+      const repair = new DatabaseSync(path); repair.exec('DROP TRIGGER fail_message_finalize'); repair.close();
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume)).toBe('accepted');
+      expect(calls).toBe(2);
+      const receipt = await read();
+      expect(receipt).toMatchObject({ outcome, messageId: message.payload.messageId, agentRef });
+      await runtime.cloud.cancelTask(tenant, taskId, 'stop remaining');
+      await runtime.stores.close(); runtime = open();
+      expect(await read()).toEqual(receipt);
+      expect(await discover()).toEqual({ payload: message.payload, context: execution.agentMessageContext, disposition: receipt });
+      expect(await runtime.cloud.readTaskAgentMessage(other, deviceId, taskId, agentRef)).toBeUndefined();
+      expect(await runtime.cloud.readTaskAgentMessage(tenant, 'other-device', taskId, agentRef)).toBeUndefined();
+      expect(await runtime.cloud.readTaskAgentMessage(tenant, deviceId, taskId, { ...agentRef, profileRevision: 'other' })).toBeUndefined();
+      expect(await runtime.cloud.readAgentMessageDisposition(other, deviceId, taskId, message.payload)).toBeUndefined();
+      expect(await runtime.cloud.readAgentMessageDisposition(tenant, 'other-device', taskId, message.payload)).toBeUndefined();
+      // Envelope dedup is process-local; durable message replay must still skip the consumer.
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume)).toBe('accepted');
+      expect(calls).toBe(2);
+      expect(await read()).toEqual(receipt);
+    } finally { await runtime.stores.close(); }
+  });
 
   it('keeps one immutable winner across independent connections, restart and tenants', async () => {
     const { open } = fixture(); const a = open(); const b = open();
@@ -57,11 +131,13 @@ describe('SQLite receipt recovery', () => {
       expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { summary: 'first', sessionRef: 'session-first' }, { taskId }))).toBe('accepted');
       const receipt = await runtime.cloud.readTerminalReceipt(tenant, taskId);
       const result = await runtime.cloud.readTaskResult(tenant, taskId);
+      const deviceTerminal = await runtime.cloud.readDeviceTerminal(tenant, taskId);
       await runtime.stores.core.mailbox.recordDelivery(tenant, { deviceId, deliveredSeq: first.seq });
       await runtime.stores.core.mailbox.advanceCursor(tenant, { deviceId, ackedSeq: first.seq });
       await runtime.stores.core.mailbox.collectRetired(tenant, { deviceId, ackedBefore: '2999-01-01T00:00:00.000Z', expireUnackedBefore: '2999-01-01T00:00:00.000Z' });
       await runtime.stores.close(); runtime = open();
       expect(await runtime.cloud.readTaskResult(tenant, taskId)).toEqual(result);
+      expect(await runtime.cloud.readDeviceTerminal(tenant, taskId)).toEqual(deviceTerminal);
       expect(await runtime.cloud.readTaskResult(other, taskId)).toBeUndefined();
       for (const retry of [input, { taskId, payload: { ...payload, instruction: 'changed' } }]) {
         await expect(runtime.cloud.enqueueOffer(tenant, deviceId, retry)).rejects.toMatchObject({ code: 'coordination_input_invalid' });

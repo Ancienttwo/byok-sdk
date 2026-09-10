@@ -67,6 +67,13 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres Agent-message admission — ${SKIP_REA
         messageId: MESSAGE_ID,
         payloadBody: second.payloadBody,
       });
+      expect(await tasks.readTaskAgentMessage(TENANT, { taskId: firstTaskId, deviceId: DEVICE }))
+        .toMatchObject({ payloadBody: first.payloadBody, terminalBody: JSON.stringify({ outcome: 'accepted', taskId: firstTaskId }) });
+      expect(await tasks.readTaskAgentMessage(TENANT, { taskId: secondTaskId, deviceId: DEVICE }))
+        .toMatchObject({ payloadBody: second.payloadBody });
+      expect(await tasks.readTaskAgentMessage(tenantId('other-message-tenant'), { taskId: firstTaskId, deviceId: DEVICE })).toBeUndefined();
+      expect(await tasks.readTaskAgentMessage(TENANT, { taskId: firstTaskId, deviceId: 'other-device' })).toBeUndefined();
+      expect(await tasks.readTaskAgentMessage(TENANT, { taskId: 'missing', deviceId: DEVICE })).toBeUndefined();
     } finally {
       await scope.dispose();
     }

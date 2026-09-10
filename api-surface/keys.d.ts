@@ -213,6 +213,8 @@ export declare function assertLiveModelResponse(value: string): void;
 // ==== @byok-sdk/keys dist/index.d.ts ====
 export { ByokKeysError, BYOK_KEYS_ERROR_CODES } from './errors';
 export type { ByokKeysErrorCode } from './errors';
+export { PiModelConfigSchema, PI_THINKING_LEVELS } from './pi-model-config';
+export type { PiModelConfig } from './pi-model-config';
 export { MODEL_PROVIDER_ADAPTERS, MODEL_PROVIDER_KINDS, PROVIDER_AUTH_MODES, PROVIDER_MODEL_CAPABILITIES, ModelProviderProfileSchema, ProviderModelCapabilitySchema, ProviderProfileRefSchema, parseModelProviderProfile, exactProviderProfileBinding, assertExactProviderProfileBinding, } from './provider-profile';
 export type { ModelProviderAdapter, ModelProviderKind, ModelProviderProfile, ModelProviderProfileInput, ExactProviderProfileBinding, ProviderAuthMode, ProviderModelCapability, ProviderProfileRef, } from './provider-profile';
 export { MODEL_PROVIDER_VENDORS, MODEL_PROVIDER_VENDOR_IDS, modelProviderVendor, } from './provider-catalog';
@@ -353,6 +355,58 @@ export declare class OpenAiCompatibleChatClient {
  * narrative method).
  */
 export declare function chatCompletionText(payload: Record<string, unknown>): string;
+// ==== @byok-sdk/keys dist/pi-model-config.d.ts ====
+import { z } from 'zod';
+export declare const PI_THINKING_LEVELS: readonly ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+/** Local declared Pi configuration, without identity, endpoint, headers or secrets. */
+export declare const PiModelConfigSchema: z.ZodObject<{
+    contextWindow: z.ZodNumber;
+    maxTokens: z.ZodNumber;
+    reasoning: z.ZodBoolean;
+    thinkingLevel: z.ZodEnum<{
+        high: "high";
+        low: "low";
+        max: "max";
+        medium: "medium";
+        minimal: "minimal";
+        off: "off";
+        xhigh: "xhigh";
+    }>;
+    thinkingLevelMap: z.ZodObject<{
+        off: z.ZodNullable<z.ZodString>;
+        minimal: z.ZodNullable<z.ZodString>;
+        low: z.ZodNullable<z.ZodString>;
+        medium: z.ZodNullable<z.ZodString>;
+        high: z.ZodNullable<z.ZodString>;
+        xhigh: z.ZodNullable<z.ZodString>;
+        max: z.ZodNullable<z.ZodString>;
+    }, z.core.$strict>;
+    compat: z.ZodObject<{
+        supportsStore: z.ZodOptional<z.ZodBoolean>;
+        supportsDeveloperRole: z.ZodOptional<z.ZodBoolean>;
+        supportsReasoningEffort: z.ZodOptional<z.ZodBoolean>;
+        supportsUsageInStreaming: z.ZodOptional<z.ZodBoolean>;
+        maxTokensField: z.ZodOptional<z.ZodEnum<{
+            max_completion_tokens: "max_completion_tokens";
+            max_tokens: "max_tokens";
+        }>>;
+        thinkingFormat: z.ZodOptional<z.ZodEnum<{
+            "ant-ling": "ant-ling";
+            baseten: "baseten";
+            "chat-template": "chat-template";
+            deepseek: "deepseek";
+            openai: "openai";
+            openrouter: "openrouter";
+            qwen: "qwen";
+            "qwen-chat-template": "qwen-chat-template";
+            "string-thinking": "string-thinking";
+            together: "together";
+            zai: "zai";
+        }>>;
+        zaiToolStream: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+export type PiModelConfig = z.infer<typeof PiModelConfigSchema>;
 // ==== @byok-sdk/keys dist/pi-provider-projection.d.ts ====
 import type { ModelProviderProfile } from './provider-profile';
 export declare const PI_PROJECTED_KEY_ENV = "PI_PROVIDER_API_KEY";
@@ -591,6 +645,53 @@ export declare const ModelProviderProfileSchema: z.ZodObject<{
     enabled: z.ZodBoolean;
     kind: z.ZodLiteral<"model">;
     model: z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>;
+    pi_model: z.ZodOptional<z.ZodObject<{
+        contextWindow: z.ZodNumber;
+        maxTokens: z.ZodNumber;
+        reasoning: z.ZodBoolean;
+        thinkingLevel: z.ZodEnum<{
+            high: "high";
+            low: "low";
+            max: "max";
+            medium: "medium";
+            minimal: "minimal";
+            off: "off";
+            xhigh: "xhigh";
+        }>;
+        thinkingLevelMap: z.ZodObject<{
+            off: z.ZodNullable<z.ZodString>;
+            minimal: z.ZodNullable<z.ZodString>;
+            low: z.ZodNullable<z.ZodString>;
+            medium: z.ZodNullable<z.ZodString>;
+            high: z.ZodNullable<z.ZodString>;
+            xhigh: z.ZodNullable<z.ZodString>;
+            max: z.ZodNullable<z.ZodString>;
+        }, z.core.$strict>;
+        compat: z.ZodObject<{
+            supportsStore: z.ZodOptional<z.ZodBoolean>;
+            supportsDeveloperRole: z.ZodOptional<z.ZodBoolean>;
+            supportsReasoningEffort: z.ZodOptional<z.ZodBoolean>;
+            supportsUsageInStreaming: z.ZodOptional<z.ZodBoolean>;
+            maxTokensField: z.ZodOptional<z.ZodEnum<{
+                max_completion_tokens: "max_completion_tokens";
+                max_tokens: "max_tokens";
+            }>>;
+            thinkingFormat: z.ZodOptional<z.ZodEnum<{
+                "ant-ling": "ant-ling";
+                baseten: "baseten";
+                "chat-template": "chat-template";
+                deepseek: "deepseek";
+                openai: "openai";
+                openrouter: "openrouter";
+                qwen: "qwen";
+                "qwen-chat-template": "qwen-chat-template";
+                "string-thinking": "string-thinking";
+                together: "together";
+                zai: "zai";
+            }>>;
+            zaiToolStream: z.ZodOptional<z.ZodBoolean>;
+        }, z.core.$strict>;
+    }, z.core.$strict>>;
     profile_ref: z.ZodString;
     provider_kind: z.ZodEnum<{
         "ant-ling": "ant-ling";
@@ -656,6 +757,7 @@ import { AnthropicMessagesClient } from './anthropic-client';
 import type { ProviderFetch } from './http';
 import { OpenAiCompatibleChatClient } from './openai-client';
 import type { ProviderProfileStore } from './profile-store';
+import type { PiModelConfig } from './pi-model-config';
 import { type ModelProviderAdapter, type ModelProviderKind, type ProviderAuthMode, type ProviderModelCapability, type ProviderProfileRef } from './provider-profile';
 import { type ModelProviderSecretName, type SecretStore } from './secret-store';
 /** A transport client for whichever dialect the resolved profile declares. */
@@ -667,6 +769,8 @@ export type ModelProviderClient = AnthropicMessagesClient | OpenAiCompatibleChat
  * persisted data.
  */
 export interface ProviderConfiguration {
+    /** Required for Pi execution; omitted profiles remain direct-transport-only. */
+    pi_model?: PiModelConfig;
     adapter: ModelProviderAdapter;
     auth_mode: ProviderAuthMode;
     base_url: string;
@@ -692,6 +796,7 @@ export interface ProviderConfiguration {
  * plaintext key".
  */
 export interface ProviderStatus {
+    pi_model?: PiModelConfig;
     adapter: ModelProviderAdapter;
     auth_mode: ProviderAuthMode;
     base_url: string;

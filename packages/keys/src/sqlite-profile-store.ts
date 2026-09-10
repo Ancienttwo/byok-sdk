@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS provider_profile (
   base_url      TEXT NOT NULL,
   auth_mode     TEXT NOT NULL CHECK (auth_mode IN (${sqlList(PROVIDER_AUTH_MODES)})),
   model         TEXT NOT NULL,
+  pi_model      TEXT,
   capabilities  TEXT NOT NULL,
   enabled       INTEGER NOT NULL CHECK (enabled IN (0, 1)),
   created_at    TEXT NOT NULL,
@@ -108,7 +109,7 @@ function assertProviderProfileSchemaIsCurrent(
   if (normalizeTableDdl(stored) === normalizeTableDdl(SCHEMA)) return;
   throw new ByokKeysError(
     'PROVIDER_STORE_SCHEMA_STALE',
-    `Provider profile store at ${path} was created by a different @byok-sdk/keys schema; recreate the store file to continue`,
+    `Provider profile store at ${path} was created by a different @byok-sdk/keys schema; preserve this store and explicitly provision a separate current-schema store before continuing`,
   );
 }
 
@@ -135,6 +136,7 @@ interface ProfileRow {
   enabled: number;
   kind: string;
   model: string;
+  pi_model: string | null;
   profile_ref: string;
   provider_kind: string;
   updated_at: string;
@@ -238,8 +240,8 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
         .prepare(
           `INSERT INTO provider_profile (
              profile_ref, provider_kind, kind, adapter, display_name, base_url,
-             auth_mode, model, capabilities, enabled, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             auth_mode, model, pi_model, capabilities, enabled, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(profile_ref) DO UPDATE SET
              provider_kind = excluded.provider_kind,
              adapter = excluded.adapter,
@@ -247,6 +249,7 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
              base_url = excluded.base_url,
              auth_mode = excluded.auth_mode,
              model = excluded.model,
+             pi_model = excluded.pi_model,
              capabilities = excluded.capabilities,
              enabled = excluded.enabled,
              updated_at = excluded.updated_at`,
@@ -260,6 +263,7 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
           validated.base_url,
           validated.auth_mode,
           validated.model,
+          validated.pi_model === undefined ? null : JSON.stringify(validated.pi_model),
           JSON.stringify(validated.capabilities),
           validated.enabled ? 1 : 0,
           validated.created_at,
@@ -309,6 +313,7 @@ function parseRow(row: ProfileRow): ModelProviderProfile {
   }
   return parseModelProviderProfile({
     ...row,
+    pi_model: row.pi_model === null ? undefined : JSON.parse(row.pi_model),
     capabilities,
     enabled: row.enabled === 1,
   });

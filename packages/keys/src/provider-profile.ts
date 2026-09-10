@@ -8,6 +8,7 @@ import {
   type ModelProviderVendorId,
 } from './provider-catalog';
 import { normalizeProviderUrl } from './url';
+import { PiModelConfigSchema } from './pi-model-config';
 
 /**
  * Opaque, portable identity of one locally configured provider profile.
@@ -162,6 +163,8 @@ export const ModelProviderProfileSchema = z
     enabled: z.boolean(),
     kind: z.literal('model'),
     model: boundedString('model', 160),
+    // Direct transports do not use Pi; Pi admission requires this explicit configuration.
+    pi_model: PiModelConfigSchema.optional(),
     profile_ref: ProviderProfileRefSchema,
     provider_kind: z.enum(MODEL_PROVIDER_KINDS),
     updated_at: isoTimestamp('updated_at'),
@@ -250,6 +253,7 @@ export function exactProviderProfileBinding(
     capabilities: normalizedCapabilities,
     kind: profile.kind,
     model: profile.model,
+    ...(profile.pi_model === undefined ? {} : { pi_model: profile.pi_model }),
     profile_ref: profile.profile_ref,
     provider_kind: profile.provider_kind,
   });

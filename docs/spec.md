@@ -46,6 +46,26 @@ continues to use an explicitly selected, read-only SQLite profile database; P5
 does not add a network listener, remote secret provisioning, or a dispatch-to-
 keys dependency.
 
+Pi execution requires an explicit `pi_model` configuration in that local
+profile: context window, maximum output tokens, reasoning support, selected
+thinking level, a complete thinking-level map and supported protocol overrides.
+The configuration is validated, persisted and included in the exact profile
+hash. Missing or stale configuration rejects before credential access or Pi
+startup. Direct provider transports do not require Pi configuration. Vendor
+kind, endpoint and model name never infer it; Pi's built-in catalog does not
+override the namespaced local projection. Model limits do not constitute Host
+ContextPack budgets or measured available input tokens.
+
+The launcher accepts the adapter's bounded absolute extension paths and the
+two validated task inputs `BYOK_PI_MCP_CONFIG_PATH` and
+`BYOK_PI_PERMISSION_MODE`. Provider/model/thinking selection remains local
+profile authority; delegated flags cannot override it. Arbitrary environment
+names and provider credentials remain excluded. The profile SQLite schema
+adds nullable `pi_model`; an older store is rejected without migration or
+deletion. Operators must preserve it and explicitly provision a separate
+current-schema store. No automatic conversion or live-store mutation is part
+of this candidate.
+
 ## Pre-1.0 package version policy
 
 The aligned dispatch train uses one version. Before 1.0, PATCH is limited to
@@ -53,10 +73,10 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.17.0`; publication requires separate release
+aligned dispatch release is `0.18.0`; publication requires separate release
 authorization and registry readback. The current independent keys candidate is
-`0.4.3`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.17.0`, proven from an isolated standard npm install rather
+`0.5.0`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.18.0`, proven from an isolated standard npm install rather
 than the workspace graph.
 
 ## Local Agent application release authority
@@ -1093,3 +1113,106 @@ cannot reconstruct historical admission. The terminal read model preserves
 `recovery`, so the host can distinguish this observation from a cloud claim.
 This closes the local-admission/cloud-claim gap without assuming that runtime
 side effects did or did not occur before a crash. No automatic re-execution.
+
+## Host exact Agent message disposition readback
+
+Cloud `readTaskAgentMessage(tenant, deviceId, taskId, agentRef)` and embedded
+`tasks.agentMessage(taskId, deviceId, agentRef)` discover the one SDK-owned
+first-message reservation from a frozen execution binding. Hosts need not have
+accepted or received its payload. The result contains the received payload,
+server-held context and, when finalized, the exact immutable disposition.
+A reservation with no disposition is pending; undefined means no message for
+that matching identity, not proof that the execution never started. Wrong
+identity reveals no message; malformed persisted payload/binding/receipt throws.
+This uses the existing admission row, including after cancel/terminal, without
+a new wire field, message store, notification dependency or automatic retry.
+
+The payload is untrusted transmission evidence, not transcript authoring or
+product acceptance. Body/hash/byteCount remain sender claims: a consumer may
+have refused because those claims were invalid, and readback must preserve that
+refusal. The Host validates integrity, frozen context and first-acceptance rules
+before any product body write. Neither discovery nor held/refused rewrites a
+previously accepted body, clears retained local evidence or proves home release.
+`TaskAttemptStore.readTaskAgentMessage` is required for memory/Postgres/SQLite
+and custom compositions on this breaking train; absent adapters fail validation
+instead of silently losing observations.
+
+The Cloud `readAgentMessageDisposition(tenant, deviceId, taskId, payload)` reads
+the SDK-owned immutable message decision through a typed public interface. The
+lookup binds the full protocol-validated payload and exact tenant/device/task.
+It does not infer acceptance from consumer return, task result or cancellation.
+Missing and pending admission return undefined; malformed or identity-conflicting
+persisted disposition evidence throws. Accepted, held and refused remain distinct.
+Exact historical decisions remain readable after task cancellation or terminal.
+Hosts do not parse the store's terminalBody representation. This adds no wire
+field, release receipt, Conversation storage or automatic execution retry.
+
+The embedded server exposes the same decision as
+`tasks.messageDisposition(taskId, deviceId, payload)`, with tenant fixed by the
+server composition. It delegates to Cloud and does not maintain another
+receipt authority. Fresh and exact-resume execution use the same readback
+identity; this API does not convert either execution mode.
+
+For recurring execution reconciliation, Cloud `readDeviceTerminal` and embedded
+`tasks.deviceTerminal` return the canonical device terminal envelope plus its
+receipt recordedAt. The discriminated envelope preserves decline versus fail
+and the original payload. Host cancellation alone returns no device terminal.
+A terminal stored under a different task key or with a non-terminal type is an
+error. This observation does not prove native Session.close or home release.
+
+Recurring execution submission uses one public `RecurringExecutionInputSchema`
+for both Cloud `submitRecurringExecution(tenant, input)` and embedded
+`recurring.submit(input)`. The Host persists the validated input before dispatch:
+taskId, exact deviceId, fresh payload with explicit runtime, policy, AgentRef,
+egress policy, required message and terminal projection, plus server-held
+message context. SessionRef and unknown fields are rejected. The input may
+carry the existing instruction blob reference; this does not waive Host context
+budgets or blob retention. No task identity, target or execution mode is inferred.
+Submission returns the existing EnqueuedOffer; recovery reads the same durable
+task/offer rather than a process-owned TaskHandle. Already delivered duplicates
+remain conflicts requiring exact readback; they do not create new executions.
+
+Recurring submission requires a registered Agent message consumer before any
+admission side effect. An unavailable consumer after restart blocks submission
+until registration is restored; it does not clear persisted cancellation or
+message evidence. Partial initial admission can recover using exactly the
+persisted input, including server-held context. Changed context cannot reuse
+the execution identity. This does not authorize a new execution after failure.
+
+Embedded `tasks.attempt(taskId)` returns the same canonical durable TaskAttempt
+as Cloud `readTaskAttempt(tenant, taskId)`, including the independent cancellation
+record. `tasks.get` remains a product snapshot with cancellation precedence and
+must not be used to reconstruct that record. Missing attempts return undefined;
+store read failures propagate. An attempt, including its cancellation or terminal
+status, is not evidence of mailbox delivery or physical Agent-home release.
+
+
+### Explicit internal result projection under Agent egress
+
+A strict fresh Agent task may select `terminalProjection: { mode: 'result-document', contract }` without user `messageEgress`. Under metadata-status, that frozen task selection authorizes the extracted document as a separate internal result; terminal summary and activity stay metadata-only. The daemon must preserve the selected document through outbound projection rather than silently deliver document-less success. An unselected document is not authorized by its presence in a payload. Existing extractor validation, server capability gates and configured Host sanitizer remain applicable. This is an execution/result primitive: Host owns SummaryJob, coverage/version CAS, budgets and scheduling; schema support alone is not native-runtime or tool-isolation acceptance.
+
+### Recurring Host composition requirements
+
+The [Conversation-turn Fresh MVP PRD](researches/2026-09-09_conversation-turn-fresh-mvp-prd.md)
+defines the approved Host composition below this SDK product authority. Recurring
+fresh and explicit session continuity remain selectable parallel contracts;
+failure cannot switch between them. The Host freezes a Conversation's selected
+continuity at creation and owns transcript, Turn/Execution association, queue
+settlement, context history and Summary jobs. No SDK Conversation store is added.
+
+Salesko is the current downstream acceptance target. Its cap of eight unsettled
+user Turns, settled no-reply history policy and same-home internal Summary
+ordering are Host product choices, not mandatory SDK policies for every embedder.
+Summary uses a separate strict fresh task with explicit result-document and no
+user messageEgress, followed by its dependent user Execution under the same home
+admission limit. Host coverage/CAS, input/output budgets, tool authorization and
+summary quality must be validated separately from the SDK result primitive.
+
+Requirements and local acceptance have separate authorities: the existing
+[SDK-first plan](../plans/plan-20260910-conversation-turn-sdk-first.md) links the
+sole detailed Host Sprint ledger. Public source and packed evidence do not imply
+complete ContextPack/Summary, native-runtime, migration or production acceptance.
+
+### Pi credential launcher executable contract
+
+Package-resolved Pi is a JavaScript entry: one internal invocation projection supplies the interpreter and entry to version detection, direct RPC and credential custody. The existing version probe retains its timeout and error-classification ownership. For custody, the adapter passes the current Node executable as `--pi-bin` and the absolute package entry as `--pi-entry`. The launcher prepends this explicit entry to validated Pi arguments before spawning, with no shell, extension-based inference or spawn-failure fallback. Explicit native executable overrides omit `--pi-entry`. This preserves credential isolation and model/profile fencing.

@@ -65,6 +65,28 @@ describe('reference-server Agent egress contract', () => {
     return { byok: instance, daemon };
   }
 
+  it('submits the same strict recurring contract through the embedded facade', async () => {
+    const { byok: instance, daemon } = await start([
+      'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack',
+      'agent-message-egress', 'terminal-projection-selection', AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
+    ], { agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+    const input = { taskId: 'recurring-embedded', deviceId: daemon.deviceId, payload: {
+      instruction: 'frozen context', runtime: 'codex' as const, policy: { mode: 'auto' as const }, agentRef: AGENT_REF,
+      egressPolicy: POLICY, messageEgress: { mode: 'required' as const, contract: 'conversation-turn/v1', contentType: 'text/markdown' as const, maxBytes: 1024 },
+      terminalProjection: { mode: 'none' as const },
+    }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn' } };
+    expect(await instance.tasks.attempt(input.taskId)).toBeUndefined();
+    const offered = await instance.recurring.submit(input);
+    expect(offered.taskId).toBe(input.taskId);
+    expect(await awaitEnvelope(daemon, e => e.task_id === input.taskId)).toMatchObject({ type: 'task.offer_for_agent_with_egress_fresh', payload: input.payload });
+    expect(await instance.tasks.offer(input.taskId)).toMatchObject({ delivered: true, payload: input.payload });
+    await expect(instance.recurring.submit(input)).rejects.toThrow();
+    expect(await instance.tasks.attempt(input.taskId)).toMatchObject({ taskId: input.taskId, deviceId: daemon.deviceId, status: 'offered' });
+    await instance.tasks.cancel(input.taskId, 'stop remaining');
+    expect(await instance.tasks.attempt(input.taskId)).toMatchObject({ cancellation: { reason: 'stop remaining', requestedAt: expect.any(String) } });
+    expect(await instance.tasks.deviceTerminal(input.taskId)).toBeUndefined();
+  });
+
   it('keeps user-visible message delivery outside activity and acks the exact authenticated task binding', async () => {
     const consumed: unknown[] = [];
     const { byok: instance, daemon } = await start(
@@ -115,7 +137,7 @@ describe('reference-server Agent egress contract', () => {
     expect(consumed[0]).toMatchObject({ context: { destinationBinding: 'conversation/42/turn/7', freshnessCursor: 'turn-seq:7' } });
   });
 
-  it.each(['held', 'refused'] as const)('does not re-invoke the product consumer for an exact %s transport replay', async (outcome) => {
+  it.each(['accepted', 'held', 'refused'] as const)('does not re-invoke the product consumer for an exact %s transport replay', async (outcome) => {
     const consumed: unknown[] = [];
     const { byok: instance, daemon } = await start(
       ['agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-message-egress', 'terminal-projection-selection'],
@@ -141,11 +163,19 @@ describe('reference-server Agent egress contract', () => {
     await daemon.send(publish);
     const firstDisposition = await awaitEnvelope(daemon, (e) => e.type === 'agent.message.disposition');
     expect(firstDisposition).toMatchObject({ type: 'agent.message.disposition', task_id: handle.taskId, payload: { outcome } });
+    expect(await instance.tasks.messageDisposition(handle.taskId, daemon.deviceId, publish.payload)).toEqual(firstDisposition.payload);
+    expect(await instance.tasks.messageDisposition(handle.taskId, 'other-device', publish.payload)).toBeUndefined();
 
     // An EXACT transport replay: the awaited send is the barrier, since the
     // admission hook runs inline inside `POST /byok/messages`.
     await daemon.send(publish);
     expect(consumed).toHaveLength(1);
+    await instance.tasks.cancel(handle.taskId, 'stop remaining');
+    expect(await instance.tasks.deviceTerminal(handle.taskId)).toBeUndefined();
+    const cancelled = createEnvelope('task.cancelled', { agentRef: AGENT_REF, reason: 'device stopped' }, { taskId: handle.taskId });
+    await daemon.send(cancelled);
+    expect(await instance.tasks.deviceTerminal(handle.taskId)).toMatchObject({ envelope: cancelled });
+    expect(await instance.tasks.messageDisposition(handle.taskId, daemon.deviceId, publish.payload)).toEqual(firstDisposition.payload);
   });
 
   // 2d gap: the second half of the `it.each` above. The deleted hub answered

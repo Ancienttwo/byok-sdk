@@ -9,6 +9,22 @@ import {
 import { ByokCloudError } from './errors';
 import type { RequestReceipt } from './stores/ports';
 
+/** Canonical device evidence, independent of the Host cancellation projection. */
+export interface DeviceTerminal {
+  readonly envelope: Extract<Envelope, { type: 'task.complete' | 'task.fail' | 'task.decline' | 'task.cancelled' }>;
+  readonly recordedAt: string;
+}
+
+export function readDeviceTerminalReceipt(taskId: string, receipt: RequestReceipt): DeviceTerminal {
+  const envelope = decodeEnvelope(receipt.body);
+  if (envelope.task_id !== taskId ||
+      (envelope.type !== 'task.complete' && envelope.type !== 'task.fail' &&
+       envelope.type !== 'task.decline' && envelope.type !== 'task.cancelled')) {
+    throw new ByokCloudError('terminal_receipt_unreadable', 'Device terminal receipt identity or type is invalid.');
+  }
+  return { envelope, recordedAt: receipt.recordedAt };
+}
+
 /**
  * The typed terminal read model — the hosted counterpart of the embedded
  * coordinator's `TaskResult`, projected off the receipt the inbound gate
