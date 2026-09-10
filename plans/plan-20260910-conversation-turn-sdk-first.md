@@ -8,7 +8,7 @@ Owner 最新指令：先做 SDK，供 Salesko 与 aiphabee 接入；Salesko 是�
 
 产品权威仍为 `docs/spec.md`。本计划不把既有 fresh 原语等同于完整产品模式；也不预设新增 Conversation store、executionMode 或 wire 字段。保留 B1-A、B2、B3、D05。连续会话模式是可选接入方式，原 session 路径保持明确契约，禁止运行失败后改变语义。
 
-Salesko 实际集成候选为 `/Users/kito/Projects/salesko-new-wt-sdk-test-90fab70` 的 `codex/recurring-sdk-adoption-test`，source `bb77830`，Draft PR #241。目录旧名不表示当前仍 detached 或固定在90fab70。并行产品候选57b59f3未导入；保留其 WIP。Owner 最新要求优先 Salesko、不要动 aiphabee：K6 暂停，不读取、不修改、不安装或测试。
+Salesko 实际集成候选为 `/Users/kito/Projects/salesko-new-wt-sdk-test-90fab70` 的 `codex/recurring-sdk-adoption-test`，source `e545026`，Draft PR #241。目录旧名不表示当前仍 detached 或固定在90fab70。并行产品候选57b59f3未导入；保留其 WIP。Owner 最新要求优先 Salesko、不要动 aiphabee：K6 暂停，不读取、不修改、不安装或测试。
 生产迁移、发布、部署和真实付费 runtime 执行不因本计划自动获授权。当前主仓存在其他任务 WIP；不得接管 downstream-issue-intake 的 harness 状态或修改其文件。
 
 ## P1 — Map
@@ -49,14 +49,14 @@ K0 不是 SDK 交付；K4 不是发布；K5 不是生产部署。跨阶段有可
 
 ## Current checkpoint
 
-- SDK executable/artifact subject remains `84ff260e973a21be4ed153311ceef87d72f77ae5`, dispatch0.18.0-rc.1 / keys0.4.4-rc.1, unpublished. Build/types/API/version/workflow,3971 PASS/135 SKIP and ten-package isolated packed gate remain the source evidence; selected result-document uses synthetic adapters, not native provider acceptance.
-- Salesko Draft PR #241 subject `bb77830fc877aae84e885800aca0b957d410a511` includes cap8 input-only queueing, explicit continuity, server recovery, atomic preparation, End and explicit Retry backends. Retry uses existing canonical terminal and terminal-unclaimed attempt observations, never reason parsing or automatic replacement.
-- Current Retry evidence: Host106/838, control140/659 plus TypeScript, related39/258, contracts/API/Web types, disposable PG COMMIT/concurrency/replay/identity fences, migration and SQL/workflow pass. Prior unchanged Summary extractor/policy and package-byte checks remain in notes; exact installed-SDK regression is pinned to this subject.
-- Root tarball overrides/bun.lock are isolated fixtures and stay uncommitted. SDK executable and ten frozen tarballs are unchanged. K5/K7 complete product acceptance, distributable dependency pins and authorized native validation remain open; K6 stays paused.
+- SDK executable/artifact subject remains `84ff260e973a21be4ed153311ceef87d72f77ae5`, dispatch0.18.0-rc.1 / keys0.4.4-rc.1, unpublished. Build/types/API/version/workflow,3971 PASS/135 SKIP and ten-package isolated packed gate remain the source evidence; synthetic adapters do not prove native provider acceptance.
+- Salesko Draft PR #241 subject `e5450269a784c2b70113d49f49804e4fe4b0cd40` includes cap8 input-only queueing, immutable continuity, server recovery, atomic preparation and End/Retry/Stop-and-send backends. The compound action freezes its target/input and commits cancellation plus input atomically; replay never retargets.
+- Current Stop-send evidence: memory53/464, HTTP42/296, related40/264 and control140/659 plus types; contracts/API/Web types, real PostgreSQL COMMIT cuts/concurrent replay/post-action capacity/order/claim-cancel races, migration and SQL/workflow pass. Host-only local withdrawal unblocks never-dispatched source tasks without inventing SDK terminal or home release. Existing packed/SDK native limits remain unchanged.
+- Root tarball overrides/bun.lock remain uncommitted isolated fixtures. SDK executable/tarballs are unchanged. Complete Host behavior, distributable pins and authorized native validation remain open; K6 stays paused.
 
 ## Next action
 
-Implement Salesko S6-07 Stop-and-send: one authenticated action freezes the old cancellation target and new input, checks post-transaction unsettled count, appends without clearing/reordering queued inputs, and replays without retargeting. Then S7 exposes create-time continuity and recovery actions. No-reply ContextPack, Host SummaryJob/CAS, remaining model/storage budgets and quality/native verification remain required. G4 uses the same frozen responder home, strict fresh/result-document and Summary-before-dependent-user scheduling; no aiphabee access.
+Implement Salesko S7 in the existing UI: explicit create-time fresh/session selection, queued input display and the approved Stop/End/qualified Retry/Stop-and-send actions. Project local no-dispatch withdrawal so the UI does not wait for a nonexistent device terminal. Preserve exact request/action identities across network retries and page recovery. S5 complete no-reply ContextPack, Host SummaryJob/CAS, remaining model/storage budgets and quality/native verification remain required. Summary uses the frozen same responder home, strict fresh/result-document and Summary-before-dependent-user scheduling. No aiphabee access.
 
 ## 2026-09-10 requirement audit checkpoint
 
@@ -119,3 +119,6 @@ K5/S2-04/S6-06 at Salesko96bf87e: End API/repository commits an exact action/tas
 
 
 K5/S6-05 at Saleskobb77830: explicit Retry API and transaction pass action/generation COMMIT replay, capacity, frozen snapshot and old-message/lease fences. Public SDK canonical decline plus failed/unclaimed attempt is the positive evidence; generic failure and reason strings are not. Late claimed decline is explicitly denied. Control140/659+types, Host106/838, related39/258, contracts/API/Web types and disposable PG/migration/SQL/workflow pass. SDK executable/artifacts84ff260e are unchanged; integration pin/ledger only. Stop-send/UI, no-reply ContextPack, SummaryJob/CAS/budgets/quality and native S9 remain open.
+
+
+K5/S6-07 at Saleskoe545026: atomic Stop-and-send backend passes fixed-target replay, post-action capacity and no-half-commit tests. A26 reproduced prepared-but-never-dispatched cancellation blocking a successor; an immutable Host local withdrawal fact now closes that intent under claim/cancel arbitration, never an SDK terminal/resource receipt. Real PG tests prove both lock winners and delayed/unknown dispatch remains blocked. UI projection/actions, complete ContextPack/Summary/budgets/quality and native S9 remain unfinished. SDK executable/artifacts84ff260e unchanged; integration and ledger only.

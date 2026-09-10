@@ -355,3 +355,14 @@ Pinned subject bb77830fc877aae84e885800aca0b957d410a511. The authenticated actio
 Salesko logs _ops/sdk-first/retry-*: Host106/838, control140/659 with TypeScript, related39/258; contracts/API/Web types, real PostgreSQL COMMIT rollback/lost response/concurrent action replay/full capacity/old-message/lease fence/immutable retry identity and migration legacy refusal/SQL/workflow PASS. UI/Stop-send and complete ContextPack/Summary remain unfinished. The installed-SDK integration below verifies the existing accepted/cancel replay lane at this new Host subject; Retry itself is covered by the Host+actual SDK observation and PG cases. Executable/tarballs84ff260e unchanged; root overrides/lock stay fixtures. No aiphabee, native model, production migration/deploy/merge.
 
 Pinned bb77830 installed-SDK integration:2 PASS/25 assertions; expected A07 consumer-response-loss injection remains covered. SDK strict workflow/diff checks PASS. No executable or package byte changed in this integration checkpoint.
+
+
+## Salesko Stop-and-send backend e545026
+
+Pinned subject e5450269a784c2b70113d49f49804e4fe4b0cd40. One Conversation transaction freezes null-or-exact execution target, validates compound action/body identity and post-action cap8, cancels and appends through existing writers, and stores an immutable association. Original queued order remains; response replay never selects a new target or creates a second input. Server recovery continues original cancel/new input independently from browser.
+
+A26 also proved a local pending task canceled before first dispatch could never produce the terminal required by the old predecessor gate. Host withdrawnBeforeDispatchAt now records that exact local cancel/claim winner, validates immutable evidence and allows later admission; already dispatched/unknown tasks retain canonical device terminal requirements. This is no SDK wire/release receipt or fallback.
+
+Salesko _ops/sdk-first/stop-send-* evidence: memory53/464, HTTP42/296, related40/264, control140/659 with types; contracts/API/Web types, declaration build, both disposable PG rehearsals, SQL/workflow PASS. PG includes cancellation/COMMIT fault cuts, concurrent replay, full-cap/accepted-overflow/order, immutable association and both claim/cancel winner orders. No native/aiphabee/production execution. Existing SDK executable/tarballs84ff260e unchanged; pinned replay integration below is an unchanged SDK regression, not full product/native acceptance. Next S7 UI; S5 complete ContextPack/Summary/budgets/quality and S9 remain open.
+
+Pinned e545026 installed-SDK accepted/cancel replay:2 PASS/25 assertions, expected A07 consumer-response-loss injection retained; SDK strict workflow and diff checks PASS. No executable/package bytes changed.
