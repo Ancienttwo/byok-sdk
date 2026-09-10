@@ -391,3 +391,11 @@ Salesko adds a source-schema and serialization probe (21 synthetic cases) plus c
 Pin only the existing installed-SDK replay fixture to6e7c715; actual application/S7 evidence remains valid for unchanged source and no full SDK matrix/repack is required. Root Salesko package/lock SHA-256 matches S7 fixture record; they remain uncommitted. K6 remains paused; no aiphabee or production access.
 
 Verification: `_ops/sdk-first/s0-boundary-integration.log`2 PASS/25 assertions against installed candidate and Salesko6e7c715; `_ops/sdk-first/s0-boundary-workflow.log` strict PASS; diff check PASS. Expected injected consumer-response loss remains a test failure window, not a suite failure.
+
+## Salesko S8-01 mapping checkpoint4317ebb
+
+Source/test/log inspection maps current PRD A01–A29 to29 unique rows in the sole Salesko task ledger.10 rows have the declared local assertions,14 still need composition/negative cases,5 depend on missing S5. Actual PG COMMIT fault evidence and actual SDK finalize fixture currently use different Host storage, so A06/A07 remain partial. End settles and retains cleanup but fresh next-input preparation deliberately blocks no-reply predecessors; no other checkout's history helper is assumed delivered here. A15/A21 lifecycle→Host and A27 old in-flight first acceptance remain explicit. S8-01 mapping DONE does not close S8/S9/Sprint.
+
+Salesko app/packages/deploy remain afb39ea; SDK packages remain84ff260e. Retained SDK full-test package totals re-read as3971/135 skipped. Current source/config correspondence, PRD SHA, local source links and29-ID/10+14+5 arithmetic validated; Salesko strict workflow/diff PASS. Only SDK integration subject pin and docs change here. No native/model/aiphabee/production/release activity. Next existing slice is PG+installed SDK consumer COMMIT/finalize fault composition, after exact test scope is recorded.
+
+Pinned4317ebb installed-SDK replay: `_ops/sdk-first/s8-mapping-integration.log`2 PASS/25 assertions; strict workflow in `s8-mapping-workflow.log` and diff check PASS. It preserves the existing local lane, not the still-missing PG/finalize composition.
