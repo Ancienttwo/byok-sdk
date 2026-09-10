@@ -434,3 +434,12 @@ Host5dab9af32cf123797a4c674aac39decd2371eaa2 adds only a disposable PG rehearsal
 SDK integration changes only its exact Host pin to5dab9af. No package/adapter/Cloud source or tarball rebuild. A27 becomes local PASS and matrix17/7/5; S5 G3/G4/budgets/quality, remaining A01/A10/A12/A13/A14/A25/A29 combinations, S9 and K6 remain as recorded. No aiphabee access or production/merge/release action.
 
 Final pinned5dab9af installed-SDK integration (`s8-a27-pinned-integration.log`):4 PASS/117 assertions. Strict workflow (`s8-a27-workflow.log`), diff check and unchanged packages relative to84ff260e pass. No full matrix or artifact rebuild repeated.
+
+
+## S8-02 A01 input/preparation crash integration pin
+
+Host7587703ece39ebc303157b93bf93e2390e0f0492 changes the existing PG rehearsal/child and evidence documents only. Each A01 cut uses its own database within the owned socket-only PG cluster. A child commits input only or input+prepared Execution, acknowledges the barrier and is SIGKILLed; another PID runs actual repository/scanner/runner/dispatcher/control into installed SDK HTTP. A third PID reconciles the existing delivered offer. Exact input replay/conflict, one input/Turn/outbox/Execution/generation/submission/mailbox, immutable prepared task/snapshot, original instruction bytes and resource unknown pass. Recovery counters distinguish dispatch/preparation from read-only reconciliation. Synthetic binding skips Profile/readiness; SDK stores remain in memory, native/consumer calls0.
+
+Host full `s8-a01-pg-verified.log`, strict workflow/diff and matrix18/6/5 pass; first test-only pg BIGINT text-vs-number correction and final explicit input-in-instruction assertion are documented there. No product/SDK package/migration source change. Integration pins this exact Host checkpoint; remaining A10/A12/A13/A14/A25/A29, S5 freezes/implementation, S9 and K6 stay open. No aiphabee/merge/release/deployment action.
+
+Final pinned7587703 integration (`s8-a01-pinned-integration.log`)4 PASS/117 assertions; strict workflow (`s8-a01-workflow.log`), diff check and empty packages diff from84ff260e pass. No full SDK matrix/repack for this test/document-only checkpoint.
