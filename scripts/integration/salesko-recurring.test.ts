@@ -9,7 +9,7 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 const root = process.env.SALESKO_TEST_ROOT;
 if (!root) throw new Error('Set SALESKO_TEST_ROOT to the isolated pinned Salesko checkout.');
 const sha = Bun.spawnSync(['git', '-C', root, 'rev-parse', 'HEAD']);
-if (sha.exitCode !== 0 || sha.stdout.toString().trim() !== '1a9b64f7a69be0ee19e64779a7c4112b5857a3a5') throw new Error('Salesko test subject mismatch');
+if (sha.exitCode !== 0 || sha.stdout.toString().trim() !== '84cdd6c8db86a5056699cec4b7d4745e5a00f0e5') throw new Error('Salesko test subject mismatch');
 const installed = (name: string) => import(pathToFileURL(Bun.resolveSync(name, root)).href);
 const { tenantId: sdkTenantId } = await installed('@byok-sdk/core');
 const { createEnvelope } = await installed('@byok-sdk/protocol');

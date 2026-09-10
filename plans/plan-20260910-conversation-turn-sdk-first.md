@@ -56,11 +56,13 @@ K0 不是 SDK 交付；K4 不是发布；K5 不是生产部署。跨阶段有可
 
 ## Next action
 
-S10-01 imports the approved [PRD](../docs/researches/2026-09-09_conversation-turn-fresh-mvp-prd.md) and aligns both product specs/current contracts without changing main WIP. A29 joint recovery, S3-05 allocation pause and S10-03 local creation/correction contract are closed; S10-02 checklist is prepared but unexecuted. Next existing task is S10-04: report the bounded local verdict and unresolved S5/S9 gates from retained exact-subject evidence, without marking the Sprint complete. G3/G4 still gate dependent S5, K6 stays paused, and no defaults/native authority can be inferred from synthetic tests. Do not rerun unchanged source/packed matrices.
+S10-04 local verdict is delivered in the [sole Host Sprint](https://github.com/Ancienttwo/salesko-new/blob/codex/recurring-sdk-adoption-test/plans/plan-20260909-private-agent-chat-host-reliability-sprints.md). Sixty tasks were audited individually; A01-A29 remains24 LOCAL_PASS/0 PARTIAL/5 BLOCKED. SDK candidate and local Host identity/recovery/action stages have evidence; complete ContextPack/Summary, S9 native, distributable Host dependency pins and CI are not closed. Do not call the whole Sprint complete.
 
-G3/G4 budget/model/quality inputs still block dependent S5 ContextPack/Summary implementation. The selected Summary path remains same-responder-home strict fresh/result-document before the dependent user Execution; no guessed numeric defaults, alternate provider, business tools or messageEgress slot. S9 native/provider/device authorization is separate; K6/aiphabee remains paused.
+The next executable dependency is the existing S0 section11 G3/G4 freeze: exact runtime/provider/model/window and counting source, independent main/Summary budgets, authorized redaction/quality inputs and immutable storage/retention/GC bounds. Until supplied, no budget-dependent S5 code, guessed default model, alternate Summary route or repeated unchanged benchmark. The runtime/model question is still unanswered. K6/aiphabee remains paused.
 
-## 2026-09-10 requirement audit checkpoint
+Retain the two Draft PRs. Last inspected SDK CI at e61b8950 fails WinSW cleanup with EBUSY; Host CI at1a9b64f fails before job startup for account payment/spending-limit reasons. These are report-only here, not waived or repaired; later documentation heads require their own CI readback. Publication, migration/deployment and real-device/provider invocation remain separate authority boundaries.
+
+## Historical 2026-09-10 requirement audit checkpoint (superseded by Current checkpoint / S10-04)
 
 - K1–K3 public capability/input/recovery implementation has concrete evidence: strict recurring input, immutable admission, exact disposition, cancellation/terminal/resource separation, embedded parity and authenticated Salesko consumer integration. This does not transfer Host product ownership to SDK.
 - K4 named RC source2da3bf28 passed full3966/135-skipped and packed checks; earlier69c9 evidence remains historical.
