@@ -16,7 +16,7 @@ The product diff is the previous worker's exact README patch plus one capture-sp
 
 ## Verification Evidence
 
-Required checks are pending on the frozen candidate. Parent Quick review is not a typed external AcceptanceReceipt or a campaign worker/verifier final.
+Six source checks passed on frozen33aab3f2bcb14948b09f6c63963d2bf2960a16e1: README regression, build, typecheck, complete workspace tests, API surface and version authority. After adding this plan's two required evidence/promotion sections, strict workflow passed separately. Execution IDs and the aggregate failure boundary are recorded in notes. Parent Quick review found no source defect; it is not a typed external AcceptanceReceipt or a campaign worker/verifier final.
 
 ## Acceptance Receipt Projection
 

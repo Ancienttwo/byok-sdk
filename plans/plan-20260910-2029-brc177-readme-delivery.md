@@ -37,5 +37,23 @@ Freeze the two-file implementation, then run the target's required build, typech
 
 ## Task Breakdown
 - [x] Preserve exact pre-fix README and typecheck evidence; freeze the bounded repair.
-- [ ] Run required verification and review the final diff.
+- [x] Run required verification and review the final diff.
 - [ ] Publish the repair PR against the canary base and read exact-head CI.
+
+
+## Promotion Gate
+
+- **Merge/PR unit**: Original Issue177 README correction and its existing test typing in one canary repair PR.
+- **Rollback surface**: Revert the bounded repair PR on codex/brc1415-canary.
+- **Verification boundary**: Target-required source checks and exact-head PR CI.
+- **Review/acceptance boundary**: Source semantic AcceptanceReceipt and campaign completed passing final remain separate and pending.
+- **High-risk surface**: No runtime, API, credential, storage or grant mutation.
+- **Why not checklist row**: This is an independently reviewable repair PR against the frozen canary base.
+
+## Evidence Contract
+
+- **State/progress path**: This plan's Task Breakdown and tasks/contracts/20260910-2029-brc177-readme-delivery.contract.md.
+- **Verification evidence**: .ai/harness/runs/ and tasks/evidence/brc177-readme-delivery-pre-fix.log; final source run at33aab3f2bcb14948b09f6c63963d2bf2960a16e1, with subsequent workflow-only delta documented in notes.
+- **Evaluator rubric**: Parent Waza check Quick covers the two-file diff; source semantic acceptance requires the contract's real typed receipt.
+- **Stop condition**: Required source checks pass and the draft repair PR with exact-head CI is published; source semantic acceptance and campaign closeout remain open.
+- **Rollback surface**: Revert the bounded repair PR.
