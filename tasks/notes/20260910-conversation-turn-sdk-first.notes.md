@@ -1,5 +1,13 @@
 # SDK-first K1/K2 evidence
 
+## Host operator cutover checkpoint (2026-09-11)
+
+Host dfb45a4be7b93493d5e0f46c79a57cff64967be0 delivers the separate one-shot current Profile/projection cutover script/runbook and actual old-schema rehearsal. Full exact binding map, external old writer fence, reviewed source data/schema fingerprint and restored-backup evidence precede an atomic archive/revision+1/provider_profile/v2-pending/drop-old-columns transaction. No historical task/accepted receipt/continuity conversion. Actual14 retained table surfaces include Placement and all Chat/Research histories.
+
+Local Host operator2PASS/4 assertions, strict script types, owned PG18.4 actual migration chain/backup restore/28 atomic refusals/complete historical fingerprint/accepted replay/lost COMMIT readback/BIGINT/RLS/erasure/new app writer checks pass. Projection is pending only; zero native starts/provider requests. Backup data fingerprints match; PostgreSQL reserialization of two legacy CHECKs remains visible in the two schema hashes with restored constraint tests, not hidden by a SQL parser. Source/fence/device access remains separately authorized; no real store or credentials changed.
+
+Host apps/packages/deploy/sql diff from81ba2af is empty. These SDK tests update only their exact checkout guard froma170002 todfb45a4be7b93493d5e0f46c79a57cff64967be0; existing integration18PASS/538 remains evidence at its original subject, not a newly executed result. SDK38e23804 executable/API/release inputs/artifacts remain unchanged; no repack or full runtime rerun. Both Draft PRs and local Host package/lock fixture remain. Current S0 model budget/authorized ContextPack/SummaryJob/CAS/quality/native readiness remain open; canonical60tasks/29A stay24LOCAL_PASS/5BLOCKED, S5-01PARTIAL. Next bounded work is the existing S0 target-readiness/budget preparation, preserving old local stores; this does not authorize provisioning or an LLM call.
+
 ## Exact Pi Host binding checkpoint (2026-09-10)
 
 Host product81ba2af68d7aa3fea5f9c226442b821447674ee4 closes the missing binding producer: actual installed keys Registry revision/hash -> explicit credential-free CLI export -> authenticated Profile/outbox transaction and projection v2 -> Chat/research frozen byok-profile -> existing SDK offer admission. Web imports only strict binding JSON; config/baseURL/secrets stay local. Pi readiness requires provider-profile-binding. Historical flat offers retain exact same-task recovery; the Host refuses a new flat retry generation. No new SDK wire/store/helper or product code was needed; executable and ten-package artifacts remain38e23804.
