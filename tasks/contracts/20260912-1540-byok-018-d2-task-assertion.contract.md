@@ -95,6 +95,18 @@ allowed_paths:
   - packages/conformance/src/device-assertion-replay.ts
   - packages/cloud-dataplane/src/__tests__/device-revocation.test.ts
   - packages/cloud/src/__tests__/device-assertion-auth.test.ts
+  # --- C05 slice 2 补登：§8.1/§8.2(1) 的 observer 与审计投影落点，以及 task lane 的
+  #     专属 broker 测试文件。C03 按 §14「SDK D2」行的八个源文件枚举，未包含
+  #     (a) `noteDeviceAssertion` 所在的 observer 事件定义、(b) 该事件既有的两个
+  #     投影消费者（stdout 行与审计文件）——§8.2(2) 要求两类凭证的账本可区分，
+  #     事件加 `lane` 判别段就必须同步这两处，否则投影层会把 task 凭证记成
+  #     device 凭证、(c) task lane 的 broker 测试文件（device lane 同名文件已在列；
+  #     §8.1「两条 lane 零互换」，测试同样不合并）。四条都不是新产品职责，按
+  #     §14:430 与本契约 Workflow Inventory 的 scope gate 先修订 allowlist 再写入。 ---
+  - packages/client/src/daemon/observer.ts
+  - packages/client/src/bin/format.ts
+  - packages/client/src/bin/audit-log.ts
+  - packages/client/src/__tests__/task-assertion-broker.test.ts
   - packages/client/src/__tests__/assertion-client.test.ts
   - packages/client/src/__tests__/control-protocol.test.ts
   - packages/client/src/__tests__/device-assertion-broker.test.ts

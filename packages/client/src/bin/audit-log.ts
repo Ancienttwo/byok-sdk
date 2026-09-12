@@ -333,15 +333,30 @@ function redactForAudit(event: DaemonEvent): Record<string, unknown> {
       // `audience` came from the allowlist and is kept verbatim, as are the
       // daemon's own `jti`/`expiresAt` (the `jti` ties a suspect assertion back
       // to the call that minted it).
+      //
+      // Contract §8.2(1): `lane` (and, on the task lane, `taskId`) is what
+      // keeps the two credential kinds distinguishable in this durable ledger.
+      // The `BYOK_HOST_TOOLSET_CONTEXT` nonce is not a field of the event, so
+      // it cannot reach this file — the same structural guarantee the signature
+      // already has.
       return event.result === 'issued'
         ? {
             ...base,
             result: 'issued',
+            lane: event.lane,
+            ...(event.taskId === undefined ? {} : { taskId: event.taskId }),
             audience: event.audience,
             jti: event.jti,
             expiresAt: event.expiresAt,
           }
-        : { ...base, result: 'denied', reason: event.reason, audienceSize: event.audienceSize };
+        : {
+            ...base,
+            result: 'denied',
+            lane: event.lane,
+            ...(event.taskId === undefined ? {} : { taskId: event.taskId }),
+            reason: event.reason,
+            audienceSize: event.audienceSize,
+          };
     case 'git-workspace':
       // Git observations are deliberately coarse: paths, commit ids,
       // filenames, messages, raw Git output, and free-form errors never cross
@@ -516,11 +531,19 @@ function reconstructDaemonEvent(raw: Record<string, unknown>): DaemonEvent | und
       // issuance. codex round-2 F4: the denied line only ever held a byte
       // size (there was never a raw audience on disk), so it reads back as a
       // number; the issued line's allowlist audience reads back verbatim.
+      //
+      // Contract §8.2(1): anything that is not exactly `'task'` reads back as
+      // the device lane, for the same reason the result does — a corrupt line
+      // must not replay as the more privileged, task-scoped credential.
+      const lane = raw.lane === 'task' ? 'task' : 'device';
+      const taskId = typeof raw.taskId === 'string' ? raw.taskId : undefined;
       if (raw.result === 'issued') {
         return {
           kind: 'device-assertion',
           ts,
           result: 'issued',
+          lane,
+          ...(taskId === undefined ? {} : { taskId }),
           audience: typeof raw.audience === 'string' ? raw.audience : '',
           jti: typeof raw.jti === 'string' ? raw.jti : '',
           expiresAt: typeof raw.expiresAt === 'string' ? raw.expiresAt : '',
@@ -531,6 +554,8 @@ function reconstructDaemonEvent(raw: Record<string, unknown>): DaemonEvent | und
         kind: 'device-assertion',
         ts,
         result: 'denied',
+        lane,
+        ...(taskId === undefined ? {} : { taskId }),
         reason: typeof raw.reason === 'string' ? raw.reason : '',
         ...(audienceSize === undefined ? {} : { audienceSize }),
       };

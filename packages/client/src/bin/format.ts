@@ -175,16 +175,25 @@ export function formatDaemonEventLine(event: DaemonEvent, options: FormatDaemonE
       // stdout line — the daemon prints these live to the
       // foreground/systemd/launchd/WinSW log. The ISSUED audience came from
       // the allowlist and is safe to print.
+      //
+      // Contract §8.2(1): `lane` tells the two credential kinds apart on one
+      // stream, and `taskId` names the task the nonce registry resolved. The
+      // nonce itself is not a field of this event, so no filter here has to
+      // remember to strip it.
       const parts =
         event.result === 'issued'
           ? [
               `${prefix} device-assertion result=issued`,
+              `lane=${event.lane}`,
+              event.taskId !== undefined ? `taskId=${event.taskId}` : undefined,
               `audience=${quote(event.audience)}`,
               `jti=${event.jti}`,
               `expiresAt=${event.expiresAt}`,
-            ]
+            ].filter((part): part is string => part !== undefined)
           : [
               `${prefix} device-assertion result=denied`,
+              `lane=${event.lane}`,
+              event.taskId !== undefined ? `taskId=${event.taskId}` : undefined,
               `reason=${event.reason}`,
               event.audienceSize !== undefined ? `audienceSize=${event.audienceSize}` : undefined,
             ].filter((part): part is string => part !== undefined);

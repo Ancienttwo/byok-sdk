@@ -72,7 +72,7 @@ import {
   PresencePublisher,
 } from './presence-publisher';
 import { assertServerUrlAllowed, formatServerUrl, toHttpBase } from './url';
-import { mintDeviceAssertion } from './device-assertion-signer';
+import { mintDeviceAssertion, mintTaskAssertion } from './device-assertion-signer';
 import type { ConnectionState } from './connection-manager';
 import { AnotherControlServerRunningError, startControlServer } from './control-server';
 import type { ControlMethods, ControlServerHandle } from './control-server';
@@ -87,6 +87,7 @@ import {
   parseAssertionIssueParams,
   parseEnrollmentPairParams,
   parseShutdownParams,
+  parseTaskAssertionIssueParams,
   parseTeamContextParams,
   parseTeamMessageAckParams,
   parseTeamMessageInspectParams,
@@ -101,6 +102,7 @@ import {
   type ControlStatusResult,
   type ControlStorageStatus,
   type ShutdownReason,
+  type TaskAssertionIssueResult,
 } from './control-protocol';
 import { decodeTeamMemberContext, encodeTeamMemberContext, LocalTeamWorkspace } from './team-workspace';
 import { McpToolsetRegistry, McpToolsetRevisionConflictError } from './toolset-registry';
@@ -3261,6 +3263,154 @@ export function buildDaemonWithAdapters(
         // codex round-2 F3: post-sign observer — non-secret metadata only,
         // reachable only from the internal test seam. Never sees the key,
         // never alters anything above it.
+        assertionProbe?.onIssued({ jti: minted.claims.jti, audience: minted.claims.audience });
+        return { assertion: minted.envelope, expiresAt: minted.expiresAt };
+      },
+      /**
+       * Contract §8.1 / §8.2(1): mint one task-scoped assertion for ONE
+       * upcoming tool invocation by the MCP child of an admitted host toolset
+       * server.
+       *
+       * A separate method from `assertion.issue`, never a mode of it (§8.1:
+       * the two lanes have zero interchange). EIGHT fail-closed gates, in this
+       * exact order — the device lane's six unchanged, then the two that make
+       * this lane task-scoped:
+       *
+       * 7. `context_token_invalid` — no registry entry for this nonce. The
+       *    same answer for "never existed" and "its task has been cleaned up",
+       *    so a refusal is not a probe for what this device has run.
+       * 8. `context_revoked` — the entry exists and its task's local authority
+       *    has been withdrawn (cancel accepted, terminal reached, shutdown).
+       *
+       * The gates are ordered so a refusal never leaks more than the caller
+       * already knew: the audience allowlist is checked BEFORE the registry, so
+       * a caller holding no nonce cannot use a denied audience to learn whether
+       * some guessed token exists.
+       *
+       * `taskId`, `agentRef` and `toolsetId` come from the registry entry and
+       * from nowhere else. `parseTaskAssertionIssueParams` rejects params that
+       * even mention them, so there is no "requested" value for this handler to
+       * prefer, reconcile, or accidentally trust.
+       *
+       * The honest limit, same as the device lane's: this is the SECOND
+       * fail-closed layer (I12). The authoritative revocation point is the
+       * host's own cancel/End commit; refusing here does not recall an
+       * assertion already issued, and nothing about this handler entitles
+       * anyone to claim the daemon delivers synchronous invalidation.
+       */
+      'task_assertion.issue': async (params): Promise<TaskAssertionIssueResult> => {
+        // Gate 1.
+        if (deviceAssertionAudiences === undefined) {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'assertion_disabled' });
+          throw new ControlError(
+            'assertion_disabled',
+            'this daemon is not configured to issue assertions (DaemonConfig.deviceAssertion.audiences is absent or empty)',
+          );
+        }
+        // Gate 2.
+        const parsed = parseTaskAssertionIssueParams(params);
+        if (!parsed) {
+          const rawAudience =
+            typeof params === 'object' && params !== null && typeof (params as { audience?: unknown }).audience === 'string'
+              ? (params as { audience: string }).audience
+              : undefined;
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'bad_request', audience: rawAudience });
+          throw new ControlError(
+            'bad_request',
+            `task_assertion.issue requires exactly {contextToken,audience} where each is a non-empty string of at most ${DEVICE_ASSERTION_AUDIENCE_MAX_BYTES} UTF-8 bytes; taskId, agentRef and toolsetId are resolved by this daemon and may not be sent`,
+          );
+        }
+        // Gate 3. Exact membership only, and BEFORE the registry lookup.
+        if (!deviceAssertionAudiences.has(parsed.audience)) {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'audience_denied', audience: parsed.audience });
+          throw new ControlError('audience_denied', 'the requested audience is not allowed by this daemon');
+        }
+        // Gate 4.
+        if (shuttingDown) {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'shutting_down', audience: parsed.audience });
+          throw new ControlError('shutting_down', 'this daemon is shutting down and will not issue new assertions');
+        }
+        // Gate 5.
+        if (auth.isRevoked()) {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'revoked', audience: parsed.audience });
+          throw new ControlError('revoked', 'this device has been revoked by the server; re-pair required');
+        }
+        // Gate 6. Read from disk every time — never a cached record.
+        let record: DeviceRecord | undefined;
+        try {
+          record = await auth.readCurrent();
+        } catch (error) {
+          if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
+        }
+        if (record === undefined) {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'not_paired', audience: parsed.audience });
+          throw new ControlError('not_paired', 'this device is not paired; nothing can be asserted about it');
+        }
+
+        // Gates 7/8, read AFTER the `await` above: a cancel can land during
+        // that disk read, and the only registry state that counts is the one
+        // that still holds on this side of it. A daemon with no runner has no
+        // registry at all, which is indistinguishable from an unknown token —
+        // deliberately, so "is this daemon started" is not answerable here
+        // either.
+        const context = runner?.hostToolsetContext(parsed.contextToken) ?? { status: 'unknown' as const };
+        if (context.status === 'unknown') {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'context_token_invalid', audience: parsed.audience });
+          throw new ControlError('context_token_invalid', 'no live host toolset context matches this token');
+        }
+        if (context.status === 'revoked') {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'context_revoked', audience: parsed.audience });
+          throw new ControlError('context_revoked', 'this task context has been revoked; no further assertions will be issued for it');
+        }
+
+        // Same check-then-await-then-sign discipline as the device lane above:
+        // shutdown and revocation are in-memory flags re-read at the signing
+        // point itself, and `auth.readCurrent()` returning a record is itself
+        // the fresh not-paired re-check.
+        if (shuttingDown) {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'shutting_down', audience: parsed.audience, taskId: context.taskId });
+          throw new ControlError('shutting_down', 'this daemon is shutting down and will not issue new assertions');
+        }
+        if (auth.isRevoked()) {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'revoked', audience: parsed.audience, taskId: context.taskId });
+          throw new ControlError('revoked', 'this device has been revoked by the server; re-pair required');
+        }
+
+        const minted = mintTaskAssertion({
+          record,
+          issuer: new URL(toHttpBase(config.serverUrl)).origin,
+          productId: config.productId,
+          audience: parsed.audience,
+          // §8.1: the task lane inherits the device lane's TTL ceiling rather
+          // than deriving a second lifetime from the task's own, unpredictable
+          // duration.
+          ttlMs: deviceAssertionTtlMs,
+          now: new Date(),
+          taskId: context.taskId,
+          agentRef: context.agentRef,
+          toolsetId: context.toolsetId,
+        });
+
+        // Second registry read, after signing: the envelope is discarded, not
+        // returned, if the task's authority ended while it was being produced.
+        // Signing is synchronous today, so this cannot currently observe a
+        // change — it is the gate that keeps that true, because a signed
+        // envelope leaving this handler after a cancel would be exactly the
+        // failure AC11 names, and the cost of proving it cannot happen is one
+        // map lookup.
+        if (runner?.hostToolsetContext(parsed.contextToken).status !== 'active') {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'context_revoked', audience: parsed.audience, taskId: context.taskId });
+          throw new ControlError('context_revoked', 'this task context was revoked while the assertion was being issued');
+        }
+
+        observer.noteDeviceAssertion({
+          result: 'issued',
+          lane: 'task',
+          taskId: context.taskId,
+          audience: minted.claims.audience,
+          jti: minted.claims.jti,
+          expiresAt: minted.expiresAt,
+        });
         assertionProbe?.onIssued({ jti: minted.claims.jti, audience: minted.claims.audience });
         return { assertion: minted.envelope, expiresAt: minted.expiresAt };
       },

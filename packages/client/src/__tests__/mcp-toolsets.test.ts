@@ -4,6 +4,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { AgentHomeManager } from '../agent-home';
+import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
+import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
@@ -525,6 +528,168 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
         },
         [adapter],
       ),
+    ).toThrow(/accepts only command and args/);
+  });
+});
+
+/**
+ * Contract §8.1: the daemon's own `BYOK_HOST_TOOLSET_CONTEXT` nonce, injected
+ * into each admitted host toolset server and into nothing else.
+ *
+ * These cases pin the INJECTION half of the task lane. The eight fail-closed
+ * gates a nonce then passes through live in `task-assertion-broker.test.ts`;
+ * what matters here is that the value the child receives is exactly the value
+ * the daemon's registry will recognize, that each `(task, server)` gets its
+ * own, and that a host's registry still cannot supply one of its own.
+ */
+describe('TaskRunner host toolset context nonce injection', () => {
+  const itWithMemoryMcp = isAgentMemorySecureFilesystemAvailable(true) ? it : it.skip;
+
+  async function agentRunner(
+    adapter: StubRuntimeAdapter,
+    sent: Envelope[],
+    mcpToolsets: ReadonlyMap<string, McpToolsetConfig>,
+    extra: Partial<TaskRunnerDeps> = {},
+  ): Promise<TaskRunner> {
+    const storeDir = await tmpDir('byok-host-toolset-store-');
+    const deps: TaskRunnerDeps = {
+      mcpToolsetToolsProbe: stubToolsProbe,
+      adapters: [adapter],
+      workspaceRoot: await tmpDir('byok-host-toolset-workspace-'),
+      agentHome: new AgentHomeManager({ hostStorageRoot: await tmpDir('byok-host-toolset-home-') }),
+      agentSessionHandoffs: new AgentSessionHandoffStore(),
+      deviceId: 'device-host-toolset',
+      send: (envelope) => sent.push(envelope),
+      blobClient: unusedBlobClient,
+      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
+      approvalRegistry: new ApprovalRegistry(),
+      storeDir,
+      productId: 'host-toolset-product',
+      tenantId: 'tenant-host-toolset',
+      getMcpToolsets: () => mcpToolsets,
+      ...extra,
+    };
+    return new TaskRunner(deps);
+  }
+
+  const twoToolsets = new Map<string, McpToolsetConfig>([
+    ['salesko.read.v1', { mcpServers: { saleskoread: { command: '/opt/salesko/read', args: ['--stdio'] } } }],
+    ['salesko.propose.v1', { mcpServers: { saleskopropose: { command: '/opt/salesko/propose' } } }],
+  ]);
+
+  async function offerAgentTask(runner: TaskRunner, taskId: string, requiredToolsets: string[]): Promise<void> {
+    await runner.handleEnvelope(
+      createEnvelope(
+        'task.offer_for_agent',
+        {
+          instruction: 'qualify the inbound lead',
+          policy: { mode: 'auto' },
+          runtime: 'pi',
+          agentRef: { agentId: 'salesko-agent', profileRevision: 'profile-rev-1' },
+          requiredToolsets,
+        },
+        { taskId, seq: 1 },
+      ),
+    );
+  }
+
+  it('gives every host toolset server its own nonce, resolving to that server\'s frozen toolset id', async () => {
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE, false);
+    const sent: Envelope[] = [];
+    const runner = await agentRunner(adapter, sent, twoToolsets);
+
+    await offerAgentTask(runner, 'task-host-toolset', ['salesko.read.v1', 'salesko.propose.v1']);
+
+    const servers = adapter.startCalls[0]?.ctx.mcpServers ?? {};
+    const readToken = servers.saleskoread?.env?.BYOK_HOST_TOOLSET_CONTEXT;
+    const proposeToken = servers.saleskopropose?.env?.BYOK_HOST_TOOLSET_CONTEXT;
+    expect(readToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(proposeToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(readToken).not.toBe(proposeToken);
+
+    // The injected value IS the registry key, and the registry — not the
+    // caller, and not the server name — supplies the claims.
+    expect(runner.hostToolsetContext(readToken!)).toEqual({
+      status: 'active',
+      taskId: 'task-host-toolset',
+      agentRef: { agentId: 'salesko-agent', profileRevision: 'profile-rev-1' },
+      toolsetId: 'salesko.read.v1',
+    });
+    expect(runner.hostToolsetContext(proposeToken!)).toMatchObject({ toolsetId: 'salesko.propose.v1' });
+    expect(runner.hostToolsetContext('not-a-nonce')).toEqual({ status: 'unknown' });
+
+    // The command/args the host configured are untouched, and the two env
+    // variables a child needs to dial this daemon travel with the nonce.
+    expect(servers.saleskoread).toMatchObject({ command: '/opt/salesko/read', args: ['--stdio'] });
+    expect(servers.saleskoread?.env?.BYOK_PRODUCT_ID).toBe('host-toolset-product');
+    // The nonce never leaves this device: nothing sent to the server carries it.
+    expect(JSON.stringify(sent)).not.toContain(readToken);
+    expect(JSON.stringify(sent)).not.toContain(proposeToken);
+
+    adapter.sessions[0]?.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
+  });
+
+  it('mints no nonce at all for a non-Agent toolset task', async () => {
+    // `byok-task-assertion-v1` REQUIRES the frozen offer's AgentRef, so an
+    // offer that has none gets no task lane rather than a weaker assertion.
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE, false);
+    const sent: Envelope[] = [];
+    const runner = await agentRunner(adapter, sent, twoToolsets);
+
+    await runner.handleEnvelope(
+      createEnvelope(
+        'task.offer_with_toolsets',
+        {
+          instruction: 'legacy toolset task',
+          policy: { mode: 'auto' },
+          runtime: 'pi',
+          requiredToolsets: ['salesko.read.v1'],
+        },
+        { taskId: 'task-no-agent', seq: 1 },
+      ),
+    );
+
+    expect(adapter.startCalls[0]?.ctx.mcpServers).toEqual({
+      saleskoread: { command: '/opt/salesko/read', args: ['--stdio'] },
+    });
+
+    adapter.sessions[0]?.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
+  });
+
+  itWithMemoryMcp('never injects the host toolset nonce into an SDK-reserved server', async () => {
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE, false);
+    const sent: Envelope[] = [];
+    const runner = await agentRunner(adapter, sent, twoToolsets, {
+      agentMemoryMcpBin: { command: 'node', args: ['memory-mcp.js'] },
+      ...(process.platform === 'darwin' ? { agentMemoryFilesystemHelperBin: '/opt/byok-agent-memory-fs' } : {}),
+    });
+
+    await offerAgentTask(runner, 'task-reserved-clean', ['salesko.read.v1']);
+
+    const servers = adapter.startCalls[0]?.ctx.mcpServers ?? {};
+    expect(servers.byokagentmemory).toBeDefined();
+    // The memory lane has its own context token and its own authority; the
+    // toolset nonce is not a general-purpose daemon credential.
+    expect(servers.byokagentmemory?.env?.BYOK_HOST_TOOLSET_CONTEXT).toBeUndefined();
+    expect(servers.byokagentmemory?.env?.BYOK_AGENT_MEMORY_CONTEXT).toBeDefined();
+    expect(servers.saleskoread?.env?.BYOK_HOST_TOOLSET_CONTEXT).toMatch(/^[A-Za-z0-9_-]{43}$/);
+
+    adapter.sessions[0]?.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
+  });
+
+  it('still refuses a host toolset registry that supplies its own env, nonce name included', () => {
+    expect(
+      () =>
+        new McpToolsetRegistry({
+          'salesko.read.v1': {
+            mcpServers: {
+              saleskoread: { command: '/opt/salesko/read', env: { BYOK_HOST_TOOLSET_CONTEXT: 'forged' } },
+            },
+          },
+        } as never),
     ).toThrow(/accepts only command and args/);
   });
 });

@@ -20,6 +20,40 @@ and the D2 version number belongs to a separate SDK release contract.
   the other's slot. There is no default and no inference: every caller states
   its lane. Custom `DeviceAssertionReplayAuthority` implementations must key on
   the new segment.
+- Issue task assertions from the daemon. Each admitted host toolset server's
+  child process receives an SDK-minted `BYOK_HOST_TOOLSET_CONTEXT` nonce — one
+  per `(task, server)`, 32 CSPRNG bytes — bound in the daemon's own registry to
+  that task, the frozen offer's `agentRef` and the frozen toolset id. A host's
+  `mcpToolsets` registry still cannot supply an `env` block, so the value can
+  only be one the daemon minted, and the nonce never reaches a prompt, a log, an
+  observer event, the audit file, or the server.
+- Add the `task_assertion.issue` control method, separate from
+  `assertion.issue` and not a mode of it. It takes exactly
+  `{contextToken, audience}`: `taskId`, `agentRef` and `toolsetId` come from the
+  registry entry, and params that even mention them are rejected. Eight
+  fail-closed gates run in a fixed order — the device lane's six unchanged, then
+  `context_token_invalid` and `context_revoked` — and the registry is re-read at
+  the signing point, so an envelope produced while a task's authority ended is
+  discarded rather than returned. Every call mints a fresh `jti`; the daemon
+  caches nothing.
+- Revoke a task's whole nonce set the moment this device accepts a cancel,
+  reaches any semantic terminal, or begins shutting down — synchronously, before
+  any await. Entries are retained through revocation so the refusal is the
+  precise `context_revoked`, and deleted with the task's resources, after which
+  it is indistinguishable from a token that never existed. This is the second
+  fail-closed layer only: the authoritative revocation point remains the host's
+  own cancel/End commit, and no refusal here recalls an assertion already
+  issued.
+- Add `requestTaskAssertion` to `@byok-sdk/client`'s public surface, beside
+  `requestDeviceAssertion`, along with the `task_assertion.issue` wire contract
+  (`parseTaskAssertionIssueParams`, its params/result types and its error
+  codes). The helper takes the context token explicitly and never reads it from
+  the environment, and it neither caches nor retries: every tool call, including
+  every transport retry, takes a new assertion with a new `jti`.
+- Record which lane a `device-assertion` daemon event belongs to. The event now
+  carries a required `lane` (`device` | `task`) and, on the task lane, the
+  `taskId`, through the live feed, the stdout line and the audit file, so the
+  two credential kinds stay distinguishable in the local ledger.
 - Add `deploy/sql/0022_task_assertion_replay_schema.sql`, which adds the
   `schema` column to `device_assertion_replay`, backfills the existing rows as
   device assertions once, drops the default so later writes must be explicit,

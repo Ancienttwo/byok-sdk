@@ -3,7 +3,7 @@ import { terminalIdentity } from './terminal-identity';
 import { startOwnedRuntime } from './runtime-start';
 import { DEFAULT_ARTIFACT_LIMITS, readArtifactBytes } from './artifact-read';
 import { validateRuntimeDetectResult } from '../runtime-detection';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { promises as fs, constants as fsConstants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
@@ -1006,6 +1006,49 @@ async function openArtifact(workspaceDir: string, name: string): Promise<OpenArt
 }
 
 /**
+ * The SDK-owned environment variable that carries one host toolset server's
+ * `BYOK_HOST_TOOLSET_CONTEXT` nonce (contract §8.1).
+ *
+ * Injected by the daemon beside `BYOK_STORE_DIR`/`BYOK_PRODUCT_ID` — the two a
+ * child already needs to dial this daemon's control socket. A host's own
+ * `mcpToolsets` registry still cannot supply an `env` block at all
+ * (`toolset-registry.ts`), so this name can only ever hold a value the daemon
+ * minted.
+ */
+export const HOST_TOOLSET_CONTEXT_ENV = 'BYOK_HOST_TOOLSET_CONTEXT';
+
+/** 32 bytes of CSPRNG, base64url unpadded — one per `(task, server)`, never reused, never derived. */
+function freshHostToolsetContextToken(): string {
+  return randomBytes(32).toString('base64url');
+}
+
+/** One `(task, host toolset server)` nonce and everything the task signer may claim about it. */
+interface HostToolsetContextEntry {
+  readonly taskId: string;
+  /** The FROZEN offer's Agent identity (§8.1) — captured at injection, never re-read from a profile later. */
+  readonly agentRef: AgentRef;
+  /** The logical toolset id from the frozen offer's `requiredToolsets` — the wire's `toolset` field (§8.2 AR-2). */
+  readonly toolsetId: string;
+  /** The MCP server the nonce was injected into; the `(task, server)` half of the binding §8.1 requires. */
+  readonly serverName: string;
+  state: 'active' | 'revoked';
+}
+
+/**
+ * What the daemon's `task_assertion.issue` handler learns about one token.
+ *
+ * Three outcomes, not a nullable entry: the handler must answer
+ * `context_revoked` and `context_token_invalid` differently, and neither may
+ * ever be reachable by a caller reading fields off an entry it should not see.
+ * Only the `active` case carries claims, and it carries exactly the three the
+ * envelope binds.
+ */
+export type HostToolsetContextLookup =
+  | { readonly status: 'active'; readonly taskId: string; readonly agentRef: AgentRef; readonly toolsetId: string }
+  | { readonly status: 'revoked' }
+  | { readonly status: 'unknown' };
+
+/**
  * Per-connection task orchestration: offer -> (decline | prepare -> seal ->
  * claim -> prepared operation -> started) -> seq-ordered progress batches -> complete/fail/
  * cancelled, plus approve/reject/cancel/steer handling.
@@ -1031,6 +1074,29 @@ export class TaskRunner {
   private readonly memoryInFlightByTask = new Map<string, Set<Promise<unknown>>>();
   private readonly memoryClosingTasks = new Set<string>();
   private readonly memoryFilesystemByTask = new Map<string, Promise<AgentMemoryFilesystem>>();
+  /**
+   * Contract §8.1: the `BYOK_HOST_TOOLSET_CONTEXT` nonce registry — one entry
+   * per `(task, host toolset server)`, keyed by the opaque nonce the daemon
+   * injected into that ONE child's environment and nowhere else.
+   *
+   * This map is the whole reason the task lane has authority at all. A device
+   * assertion deliberately carries no caller identity (see
+   * `device-assertion.ts`): under one UID every process can reach the control
+   * socket, so a "who asked" field would be synthesized. The nonce is different
+   * in kind — it is evidence, because the only way to hold one is to be the
+   * process the daemon spawned for this exact task and server. Every claim the
+   * task signer writes is read out of the entry here, never out of RPC params.
+   *
+   * Entries are RETAINED after revocation (`state: 'revoked'`) until the task's
+   * resources are cleaned up, so the refusal can be the precise
+   * `context_revoked` rather than collapsing into `context_token_invalid` the
+   * instant a task is cancelled. After cleanup the entry is deleted and the two
+   * refusals become indistinguishable on purpose — "this token is gone" must
+   * not be a probe for which tasks this device has run.
+   */
+  private readonly hostToolsetContextByToken = new Map<string, HostToolsetContextEntry>();
+  /** Per-task index over {@link hostToolsetContextByToken}, so one cancel revokes every server's nonce at once. */
+  private readonly hostToolsetContextTokensByTask = new Map<string, Set<string>>();
   private readonly recoveredMessageOutboxes = new Map<string, AgentMessageOutbox>();
   private readonly recoveredMessageRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /**
@@ -1395,6 +1461,11 @@ export class TaskRunner {
   /** M4 Phase 2: stop claiming any FUTURE `task.offer` — see `stoppingOffers`'s own doc comment. Idempotent. */
   stopAcceptingOffers(): void {
     this.stoppingOffers = true;
+    // Contract §8.2(1): a daemon on its way down signs nothing more for any
+    // task. The control handler's own `shutting_down` gate answers first, so
+    // this is not the refusal a caller sees — it is the registry telling the
+    // truth regardless of which path initiated the shutdown.
+    this.revokeAllHostToolsetContexts();
     if (this.startupRetryTimer) clearTimeout(this.startupRetryTimer);
     this.startupRetryTimer = undefined;
     for (const abort of this.inFlightBlobAborts.values()) abort.abort();
@@ -1491,6 +1562,7 @@ export class TaskRunner {
     this.pendingMessageTasks.delete(taskId);
     this.revokeAgentMessageContext(taskId);
     this.revokeAgentMemoryContext(taskId);
+    this.deleteHostToolsetContexts(taskId);
     return true;
   }
 
@@ -1945,8 +2017,15 @@ export class TaskRunner {
         requirements: pick.descriptor.environmentRequirements,
         locallyAllowedNames: this.deps.runtimeEnvironment?.[pick.descriptor.id]?.allow,
       });
+      // Contract §8.1: the host toolset servers this task will actually run
+      // get their per-`(task, server)` nonce here, on the copy handed to the
+      // adapter. The admission probe below keeps reading `resolvedMcp.servers`,
+      // which stays clean — a `tools/list` handshake is not this task's
+      // execution and has no business holding its tool authority.
       let taskMcpServers = this.withAgentMessageMcp(
-        resolvedMcp?.ok ? resolvedMcp.servers : undefined,
+        resolvedMcp?.ok
+          ? this.withHostToolsetContext(resolvedMcp.servers, taskId, agentRef, resolvedMcp.toolsetIdByServer)
+          : undefined,
         taskId,
         messageRequirement,
       );
@@ -2620,6 +2699,10 @@ export class TaskRunner {
         this.pendingMessageTasks.delete(taskId);
         this.revokeAgentMessageContext(taskId);
         this.revokeAgentMemoryContext(taskId);
+        // A declined/failed offer never becomes an execution, so the nonces
+        // minted for its would-be children die with it rather than outliving
+        // the attempt in the registry.
+        this.deleteHostToolsetContexts(taskId);
       }
       if (agentBinding !== undefined && !agentLeaseTransferred) {
         await agentBinding.lease.release().catch(() => {});
@@ -2813,23 +2896,151 @@ export class TaskRunner {
     void this.closeAgentMemoryFilesystem(taskId);
   }
 
+  /**
+   * Contract §8.1: mint one `BYOK_HOST_TOOLSET_CONTEXT` nonce per host toolset
+   * server of this task and inject it into that server's child environment.
+   *
+   * Only the SDK injects here. `toolset-registry.ts` still rejects an `env`
+   * block on a host-configured server outright, which is what makes this
+   * variable un-forgeable from configuration: the name can only ever hold a
+   * value this method minted.
+   *
+   * No `agentRef` means no nonce, and therefore no task lane at all for this
+   * task. That is not a degradation to a device-only path — it is the envelope
+   * schema being honest: `byok-task-assertion-v1` REQUIRES the frozen offer's
+   * AgentRef, and a non-Agent offer has none to bind. Signing something weaker
+   * and calling it a task assertion is exactly the fallback §8.1 forbids.
+   */
+  private withHostToolsetContext(
+    servers: Readonly<Record<string, McpStdioServerConfig>>,
+    taskId: string,
+    agentRef: AgentRef | undefined,
+    toolsetIdByServer: ReadonlyMap<string, string>,
+  ): Readonly<Record<string, McpStdioServerConfig>> {
+    if (agentRef === undefined) return servers;
+    // A re-offer of the same taskId must not leave the previous attempt's
+    // nonces mintable: the old child is gone, so its tokens are authority
+    // nobody holds any more.
+    this.deleteHostToolsetContexts(taskId);
+    const frozenAgentRef = Object.freeze({ ...agentRef });
+    const tokens = new Set<string>();
+    const injected: Record<string, McpStdioServerConfig> = {};
+    for (const [serverName, server] of Object.entries(servers)) {
+      const toolsetId = toolsetIdByServer.get(serverName);
+      // A server with no owning toolset would mean the resolution above lost
+      // the binding; minting a nonce for it would produce a claim no frozen
+      // offer can confirm, so it simply gets no task lane.
+      if (toolsetId === undefined) {
+        injected[serverName] = server;
+        continue;
+      }
+      const contextToken = freshHostToolsetContextToken();
+      this.hostToolsetContextByToken.set(contextToken, {
+        taskId,
+        agentRef: frozenAgentRef,
+        toolsetId,
+        serverName,
+        state: 'active',
+      });
+      tokens.add(contextToken);
+      injected[serverName] = Object.freeze({
+        ...server,
+        env: Object.freeze({
+          BYOK_STORE_DIR: this.deps.storeDir,
+          BYOK_PRODUCT_ID: this.deps.productId,
+          [HOST_TOOLSET_CONTEXT_ENV]: contextToken,
+        }),
+      });
+    }
+    if (tokens.size > 0) this.hostToolsetContextTokensByTask.set(taskId, tokens);
+    return Object.freeze(injected);
+  }
+
+  /**
+   * Contract §8.2(1) / I12: the daemon's SECOND fail-closed layer — stop
+   * signing for this task, now.
+   *
+   * Called synchronously, before any `await`, from every point at which this
+   * device learns the task's authority is over: an accepted cancel, any
+   * semantic terminal, and shutdown. Entries are kept (not deleted) so the
+   * refusal stays the precise `context_revoked` until the task's resources are
+   * actually cleaned up.
+   *
+   * The honest limit, which belongs here as much as in the contract: the
+   * AUTHORITATIVE revocation point is the host's own cancel/End commit. This
+   * stops the daemon minting promptly; it does not recall an assertion already
+   * in a caller's hands, and the host's admission check remains the layer that
+   * refuses one.
+   */
+  private revokeHostToolsetContexts(taskId: string): void {
+    const tokens = this.hostToolsetContextTokensByTask.get(taskId);
+    if (tokens === undefined) return;
+    for (const token of tokens) {
+      const entry = this.hostToolsetContextByToken.get(token);
+      if (entry !== undefined) entry.state = 'revoked';
+    }
+  }
+
+  /** Shutdown (contract §8.2(1)): no task on this device keeps a mintable context across it. */
+  private revokeAllHostToolsetContexts(): void {
+    for (const entry of this.hostToolsetContextByToken.values()) entry.state = 'revoked';
+  }
+
+  /** Task resource cleanup: drop the entries entirely, after which the refusal is `context_token_invalid`. */
+  private deleteHostToolsetContexts(taskId: string): void {
+    const tokens = this.hostToolsetContextTokensByTask.get(taskId);
+    if (tokens === undefined) return;
+    for (const token of tokens) this.hostToolsetContextByToken.delete(token);
+    this.hostToolsetContextTokensByTask.delete(taskId);
+  }
+
+  /**
+   * The daemon's only view of the nonce registry (contract §8.2(1)).
+   *
+   * Returns the three claims the task envelope binds, or a refusal status —
+   * never the entry itself, and never the token back. The caller (the
+   * `task_assertion.issue` handler) may not add to, narrow, or substitute any
+   * of these values: they ARE the assertion's task/Agent/toolset identity.
+   */
+  hostToolsetContext(contextToken: string): HostToolsetContextLookup {
+    const entry = this.hostToolsetContextByToken.get(contextToken);
+    if (entry === undefined) return { status: 'unknown' };
+    if (entry.state !== 'active') return { status: 'revoked' };
+    return { status: 'active', taskId: entry.taskId, agentRef: entry.agentRef, toolsetId: entry.toolsetId };
+  }
+
   /** Protocol §7: an instruction too large to inline arrives as a `blobRef` — resolve it via the blob client rather than failing closed. */
   private async resolveInstruction(instruction: TaskOfferPayload['instruction'], signal: AbortSignal): Promise<string> {
     if (typeof instruction === 'string') return instruction;
     return this.deps.blobClient.resolveInstruction(instruction.blobRef, { signal });
   }
 
-  /** Resolve every requested logical id locally and reject missing/colliding server authority before claim. */
+  /**
+   * Resolve every requested logical id locally and reject missing/colliding
+   * server authority before claim.
+   *
+   * `toolsetIdByServer` preserves the one fact the flattened `servers` map
+   * loses: which frozen-offer toolset each server belongs to. Contract §8.2's
+   * AR-2 fixes `toolsetId` as the wire's `toolset` field — a logical id from
+   * `requiredToolsets`, which is what the Host checks a task assertion's claim
+   * against. The server NAME is device-local configuration and would not match
+   * anything in the frozen offer, so the mapping has to survive this step.
+   */
   private resolveMcpServers(
     requiredToolsets: readonly string[],
   ):
-    | { ok: true; servers: Readonly<Record<string, McpStdioServerConfig>> }
+    | {
+        ok: true;
+        servers: Readonly<Record<string, McpStdioServerConfig>>;
+        toolsetIdByServer: ReadonlyMap<string, string>;
+      }
     | { ok: false; reason: string } {
     const registry = this.deps.getMcpToolsets?.();
     if (!registry || registry.size === 0) {
       return { ok: false, reason: 'offer requires MCP toolsets, but this device has no local mcpToolsets registry' };
     }
     const servers = Object.create(null) as Record<string, McpStdioServerConfig>;
+    const toolsetIdByServer = new Map<string, string>();
     for (const toolsetId of requiredToolsets) {
       const toolset = registry.get(toolsetId);
       if (!toolset) {
@@ -2846,12 +3057,13 @@ export class TaskRunner {
           command: server.command,
           ...(server.args ? { args: Object.freeze([...server.args]) } : {}),
         });
+        toolsetIdByServer.set(serverName, toolsetId);
       }
     }
     if (Object.keys(servers).length === 0) {
       return { ok: false, reason: 'required MCP toolsets resolved to no servers; refusing to run without tools' };
     }
-    return { ok: true, servers: Object.freeze(servers) };
+    return { ok: true, servers: Object.freeze(servers), toolsetIdByServer };
   }
 
   private async pump(active: ActiveTask): Promise<void> {
@@ -3262,6 +3474,14 @@ export class TaskRunner {
   }
 
   private async handleCancel(taskId: string, reason: string | undefined): Promise<void> {
+    // Contract §8.2(1) / AC11: the FIRST statement of this handler, before the
+    // active-task lookup and before any `await`. A cancel and a
+    // `task_assertion.issue` can arrive as two frames the daemon dispatches on
+    // the same tick; revoking anywhere below an await would leave a window in
+    // which a task this device has already agreed to cancel can still mint new
+    // tool authority. Unconditional, so it covers the not-yet-registered offer
+    // window too — a taskId with no nonces is simply a no-op here.
+    this.revokeHostToolsetContexts(taskId);
     const active = this.tasks.get(taskId);
     if (!active) {
       if (this.startupOwners.has(taskId) && !this.inFlightOffers.has(taskId)) {
@@ -4401,6 +4621,7 @@ export class TaskRunner {
       this.tasks.delete(taskId);
       this.revokeAgentMessageContext(taskId);
       this.revokeAgentMemoryContext(taskId);
+      this.deleteHostToolsetContexts(taskId);
       active.resolveSemanticTerminalSettled?.(leaseReleased);
       return leaseReleased;
     }
@@ -4408,12 +4629,18 @@ export class TaskRunner {
     this.tasks.delete(taskId);
     this.revokeAgentMessageContext(taskId);
     this.revokeAgentMemoryContext(taskId);
+    this.deleteHostToolsetContexts(taskId);
     active.resolveSemanticTerminalSettled?.(true);
     return true;
   }
 
   private reserveSemanticTerminal(active: ActiveTask): boolean {
     if (active.semanticTerminalReserved || active.finalizationStarted) return false;
+    // Contract §8.2(1): every semantic terminal (complete, fail, cancel,
+    // reject, shutdown) funnels through this single reservation, so revoking
+    // here covers all of them at the one point that can only be reached once,
+    // synchronously, and before any teardown `await`.
+    this.revokeHostToolsetContexts(active.taskId);
     active.semanticTerminalReserved = true;
     active.beingTornDown = true;
     active.semanticTerminalSettled = new Promise<boolean>((resolve) => {
