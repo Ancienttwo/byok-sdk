@@ -1,0 +1,23 @@
+{
+  "protocol": 1,
+  "kind": "repo-harness-module-engineer-profile",
+  "engineer_id": "engineer:capability.sdk.sdk-root",
+  "capability_id": "capability.sdk.sdk-root",
+  "sop_ref": "agents/engineers/sops/sdk-root.md",
+  "delegation_policy": {
+    "allowed_roles": [
+      "explorer",
+      "root-cause-prover",
+      "fast-worker",
+      "gatekeeper"
+    ],
+    "max_depth": 1,
+    "max_parallel_readers": 2,
+    "max_parallel_writers": 1
+  },
+  "max_active_claims": 1,
+  "escalation_policy": {
+    "cross_capability_change": "interface_request",
+    "acceptance": "independent_plane"
+  }
+}

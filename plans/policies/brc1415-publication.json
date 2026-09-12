@@ -1,0 +1,29 @@
+{
+  "required_acceptance": [
+    {
+      "gate": "module",
+      "policy_id": "brc1415-repair",
+      "policy_ref": "plans/policies/brc1415-repair.json",
+      "policy_revision": "sha256:b18b0dbbac8dab3466d4cc4c7c1394c70a0a365357c01753b47ef29ea1cb063a"
+    }
+  ],
+  "rollback_boundary": {
+    "kind": "work_package",
+    "boundary_id": "brc1415-repair",
+    "boundary_ref": "plans/policies/brc1415-repair.json",
+    "boundary_revision": "sha256:b18b0dbbac8dab3466d4cc4c7c1394c70a0a365357c01753b47ef29ea1cb063a"
+  },
+  "retry_policy": {
+    "max_automated_attempts": 1,
+    "retryable_failure_classes": [
+      "transient_failure"
+    ],
+    "backoff": {
+      "kind": "fixed",
+      "initial_seconds": 30,
+      "maximum_seconds": 30
+    },
+    "attention_after_seconds": 120,
+    "revision_reset": "reset_on_work_package_revision"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "protocol": 1,
+  "source": "Owner-approved BRC14/15 disposable canary scope; SDK fixes remain permitted, harness and deployment authority are protected.",
+  "capabilities": [],
+  "unmapped_surfaces": [
+    {
+      "paths": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        ".env",
+        ".env.local",
+        ".env.production"
+      ],
+      "reason": "Local instructions and credential configuration are outside automated repair scope."
+    }
+  ],
+  "unmapped_closure": {
+    "roots": [
+      ".ai",
+      ".github",
+      ".repo-harness",
+      "scripts",
+      "plans",
+      "tasks",
+      "deploy",
+      ".archcontext",
+      "agents"
+    ],
+    "exempt_paths": []
+  }
+}

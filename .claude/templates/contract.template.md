@@ -41,7 +41,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 
 - root_cause: one sentence naming file:line/condition (testable, not "a state issue").
 - repro: the command or UI path that reproduces the symptom.
-- regression_guard: path to a test that fails on the unfixed code and passes after the fix (must also appear under exit_criteria.tests_pass).
+- regression_guard: path to a test that fails on the unfixed code and passes after the fix (must also appear as a `package_test` check in Verification Plan).
 - pre_fix_failure_artifact: path to a captured run of regression_guard on the UNFIXED code. Capture with `bun test <regression_guard> > <artifact> 2>&1; echo "PRE_FIX_EXIT=$?" >> <artifact>` (no pipes — pipes swallow the exit status). The gate requires a non-zero `PRE_FIX_EXIT=` line plus the regression_guard path string in the artifact (see the Root Cause Evidence Gate section in docs/reference-configs/sprint-contracts.md).
 
 ## Workflow Inventory
@@ -64,7 +64,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ## Acceptance Policy
 
 ```json
-{"protocol":1,"reviewer":"Claude","user_waiver":"allowed"}
+{"protocol":2,"reviewer":"Codex","source":"codex-review","user_waiver":"allowed"}
 ```
 
 ## Allowed Paths
@@ -125,6 +125,11 @@ delegation:
 
 ## Exit Criteria (Machine Verifiable)
 
+This block contains only non-executable artifact requirements. Define every
+executable check once in the canonical Verification Plan below. Each check must
+state its phase, cost, evidence policy, necessity, and input environment; a
+missing or malformed plan fails closed.
+
 ```yaml
 exit_criteria:
   files_exist:
@@ -132,11 +137,43 @@ exit_criteria:
   artifacts_exist:
     - .ai/harness/checks/latest.json
     - {{NOTES_FILE}}
-  tests_pass:
-    - path: tests/unit/{{TASK_SLUG}}.test.ts
-  commands_succeed:
-    - bun run check:type
 ```
+
+## Verification Plan
+
+```json
+{
+  "protocol": 1,
+  "checks": [
+    {
+      "id": "focused-regression",
+      "kind": "package_test",
+      "path": "tests/unit/{{TASK_SLUG}}.test.ts",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "normal",
+      "evidence_policy": "current_exact",
+      "necessity": "Covers the changed behavior named by this contract.",
+      "inputs": { "env": [] }
+    },
+    {
+      "id": "typecheck",
+      "kind": "command",
+      "command": "bun run check:type",
+      "cwd": ".",
+      "phase": "preflight",
+      "cost": "normal",
+      "evidence_policy": "current_exact",
+      "necessity": "Checks TypeScript contracts before behavioral verification.",
+      "inputs": { "env": [] }
+    }
+  ]
+}
+```
+
+This is the sole executable verification authority. Use `baseline_with_delta`
+only when a referenced immutable baseline plus named current delta checks prove
+the intended coverage; do not infer that choice from paths or command text.
 
 ## Acceptance Notes (Human Review)
 

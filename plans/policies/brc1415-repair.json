@@ -1,0 +1,15 @@
+{
+  "protocol": 1,
+  "scope": "BYOK SDK canary branch only",
+  "required": [
+    "reproduce defect or characterize test gap",
+    "focused regression",
+    "required SDK build, typecheck, tests, API surface and version authority checks",
+    "manual merge before exact cleanup"
+  ],
+  "forbidden": [
+    "production deployment",
+    "npm publication or version bump",
+    "unrelated WIP mutation"
+  ]
+}

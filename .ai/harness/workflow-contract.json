@@ -81,6 +81,16 @@
       "stubMarker": "<!-- repo-harness: reference-config-stub v1 -->"
     }
   },
+  "cutoverClosure": {
+    "protocol": 1,
+    "categories": ["old_implementation", "callers", "fallback", "tests", "docs_and_projections", "compatibility_expiry"],
+    "dispositions": ["removed", "migrated", "retained_with_reason", "not_applicable"],
+    "selectorKinds": ["path", "relation", "symbol"],
+    "errorCodes": ["refactor_closure_residue", "refactor_closure_incomplete", "refactor_closure_missing"],
+    "authority": "scripts/cutover-closure.ts",
+    "projection": "assets/templates/helpers/cutover-closure.ts",
+    "evidenceKind": "cutover_closure"
+  },
   "helpers": {
     "runtimeDirectory": "package:assets/templates/helpers",
     "scripts": [
@@ -90,6 +100,7 @@
       "capture-plan.sh",
       "plan-to-todo.sh",
       "contract-run.ts",
+      "cutover-closure.ts",
       "contract-worktree.sh",
       "acceptance-receipt.ts",
       "change-assessment.ts",
@@ -102,6 +113,8 @@
       "refresh-current-status.sh",
       "prepare-handoff.sh",
       "verify-contract.sh",
+      "verification-plan.ts",
+      "migrate-verification-plan.ts",
       "run-bounded-verifier-command.ts",
       "validate-harness-profile-benchmark.ts",
       "summarize-failures.sh",
@@ -147,6 +160,7 @@
       "capture-plan": "Capture a finished planning note as a plan artifact or checklist rows",
       "plan-to-todo": "Activate an approved plan and start its contract worktree when enabled",
       "contract-run": "Preflight, dry-run, or run a task contract's delegated worker and verifier",
+      "cutover-closure": "Verify explicit refactor cutover closure against an exact Git candidate head",
       "contract-worktree": "Start, finish, clean up, or report status of a contract execution worktree",
       "acceptance-receipt": "Record, project, or verify the single structured semantic acceptance authority",
       "change-assessment": "Prepare or validate deterministic final-subject review selection evidence",
@@ -158,7 +172,9 @@
       "classify-historical-plans": "Classify historical root plans against the sealed terminal evidence contract",
       "refresh-current-status": "Refresh tasks/current.md from repo-local workflow artifacts",
       "prepare-handoff": "Write the current-state handoff snapshot and trigger a resume refresh",
-      "verify-contract": "Check a task contract's YAML exit criteria and update its status header",
+      "verify-contract": "Execute or reuse a task contract verification plan and check its artifact criteria",
+      "verification-plan": "Validate, evaluate, or explicitly execute the canonical Verification Plan",
+      "migrate-verification-plan": "Migrate legacy executable criteria once using an explicit typed mapping",
       "run-bounded-verifier-command": "Run a verifier command under an epoch-ms deadline, capturing log and timed exit result",
       "validate-harness-profile-benchmark": "Validate a harness profile benchmark report and emit its byte-bound evidence hash",
       "summarize-failures": "Summarize recorded workflow failure log entries",
@@ -250,7 +266,6 @@
       ".claude/templates/contract.template.md",
       ".claude/templates/review.template.md",
       ".claude/templates/implementation-notes.template.md",
-      "tasks/current.md",
       "tasks/todos.md",
       "tasks/lessons.md",
       "docs/architecture/index.md",
@@ -280,6 +295,7 @@
       ".ai/harness/failures/latest.jsonl",
       ".ai/harness/handoff/current.md",
       ".ai/harness/handoff/resume.md",
+      "tasks/current.md",
       ".ai/harness/capability-context/",
       ".ai/harness/architecture-projection/",
       ".ai/harness/security/.gitkeep",
@@ -341,7 +357,7 @@
       },
       "currentStatus": {
         "document": "currentStatus",
-        "reason": "Create tracked current-status snapshot when missing",
+        "reason": "Create local current-status snapshot when missing",
         "lines": [
           "# Current Status Snapshot",
           "",
@@ -350,7 +366,7 @@
           "> **Status**: Idle",
           "> **Reason**: repo-harness adoption bootstrap",
           "",
-          "This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate.",
+          "This file is an ignored local read model derived from this worktree's artifacts. It is not tracked, not a live lock, not a kanban board, and not an implementation gate.",
           ""
         ]
       },
