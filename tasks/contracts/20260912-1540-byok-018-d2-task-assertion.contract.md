@@ -181,6 +181,8 @@ allowed_paths:
   - plans/plan-20260912-1540-byok-018-d2-task-assertion.md
   - tasks/contracts/20260912-1540-byok-018-d2-task-assertion.contract.md
   - tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md
+  # 改名删除源：notes 由 20260912-byok-018-d2-task-assertion.notes.md 改名为 harness stem 命名（9dd2a818），追加证据后相似度低于 rename 阈值，diff 表现为删除旧路径。
+  - tasks/notes/20260912-byok-018-d2-task-assertion.notes.md
   - tasks/reviews/20260912-1540-byok-018-d2-task-assertion.review.md
 ```
 
