@@ -1497,12 +1497,16 @@ export function buildDaemonWithAdapters(
   let serviceEnrollmentTransitioning = false;
   let daemonOwnerLease: DaemonOwnerLease | undefined;
   // The presence producer (§12.3). Both are `undefined` whenever this daemon
-  // is not running, and neither is on the task path in any way: capability
-  // discovery runs off the connection critical path, and a failure to read a
-  // declaration leaves the publisher unstarted and every other daemon function
-  // untouched (ADR-010 fail-closed — never a 404 probe, never an assumed
-  // capability). The controller cancels an in-flight discovery during
-  // shutdown so teardown never waits on a hung deployment.
+  // is not running, and neither is on the task path in any way: a failure to
+  // read a declaration leaves the publisher unstarted and every other daemon
+  // function untouched (ADR-010 fail-closed — never a 404 probe, never an
+  // assumed capability). The single discovery pass they share does feed one
+  // task-path fact — `host-mcp-task-context` (§8.2(1)) — but its closed state
+  // is a fail-closed refusal, not a degraded task: no
+  // BYOK_HOST_TOOLSET_CONTEXT nonce is injected and `task_assertion.issue`
+  // answers `capability_undeclared`. So discovery still runs off the
+  // connection critical path. The controller cancels an in-flight discovery
+  // during shutdown so teardown never waits on a hung deployment.
   let presencePublisher: PresencePublisher | undefined;
   /** Runtime facts are probed once per start and reused by WS + first-hop HTTP presence. */
   let detectedRuntimeFacts: readonly RuntimeInfo[] = [];
@@ -2501,9 +2505,13 @@ export function buildDaemonWithAdapters(
    *
    * Deliberately NOT awaited by `startUnderLease` — the plan's "discovery is
    * asynchronous to the connection path" rule. A deployment that is slow to
-   * answer (or never answers) must cost this daemon nothing but presence: no
-   * capability here is on the task path, so there is no state a caller of
-   * `start()` could need this for.
+   * answer (or never answers) must cost this daemon nothing but presence and
+   * the task lane. Presence is not on the task path at all; the lane fact read
+   * here — `host-mcp-task-context` (§8.2(1)) — is, but its closed state is a
+   * fail-closed refusal rather than a degraded task path: until the
+   * declaration lands no BYOK_HOST_TOOLSET_CONTEXT nonce is injected and
+   * `task_assertion.issue` answers `capability_undeclared`. So there is still
+   * no state a caller of `start()` could need this for.
    *
    * Every failure is fail-closed and observable: the publisher stays off and a
    * single `console.warn` records why, matching the operator-facing warning

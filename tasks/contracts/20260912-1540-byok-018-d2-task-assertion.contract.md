@@ -147,6 +147,7 @@ allowed_paths:
   - packages/cloud/src/capabilities.ts
   - api-surface/protocol.d.ts
   - packages/protocol/src/__tests__/task-assertion.test.ts
+  # 预留：freeze golden 由此文件校验，本片未改动该文件。
   - packages/protocol/src/__tests__/version.test.ts
   - packages/client/src/__tests__/fixtures/test-server.ts
   # 同批补登：protocol freeze guard 的 golden 指纹包含 `CAPABILITY_FLAGS`。
