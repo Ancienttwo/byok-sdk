@@ -59,7 +59,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[]}
+{"protocol":1,"oracles":[{"id":"d2-sdk-required-checks","kind":"deterministic_test","paths":["*"]},{"id":"d2-packed-artifact-and-pg-migration-readback","kind":"runtime_readback","paths":["*"]}]}
 ```
 
 ## Acceptance Policy
