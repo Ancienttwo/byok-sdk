@@ -1496,23 +1496,20 @@ export function buildDaemonWithAdapters(
   let serviceEnrollmentWaiting = false;
   let serviceEnrollmentTransitioning = false;
   let daemonOwnerLease: DaemonOwnerLease | undefined;
-  // The presence producer (§12.3). Both are `undefined` whenever this daemon
-  // is not running, and neither is on the task path in any way: a failure to
-  // read a declaration leaves the publisher unstarted and every other daemon
-  // function untouched (ADR-010 fail-closed — never a 404 probe, never an
-  // assumed capability). The single discovery pass they share does feed one
-  // task-path fact — `host-mcp-task-context` (§8.2(1)) — but its closed state
-  // is a fail-closed refusal, not a degraded task: no
-  // BYOK_HOST_TOOLSET_CONTEXT nonce is injected and `task_assertion.issue`
-  // answers `capability_undeclared`. So discovery still runs off the
-  // connection critical path. The controller cancels an in-flight discovery
-  // during shutdown so teardown never waits on a hung deployment.
+  // Presence and task context share one deployment declaration. Discovery is
+  // asynchronous to start(); only Agent offers with host toolsets wait for it.
   let presencePublisher: PresencePublisher | undefined;
-  /** Runtime facts are probed once per start and reused by WS + first-hop HTTP presence. */
   let detectedRuntimeFacts: readonly RuntimeInfo[] = [];
   let presenceDiscovery: AbortController | undefined;
-  /** Guards against a reconnect storm stacking overlapping declaration reads. */
-  let presenceDiscoveryInFlight = false;
+  // One active read per connection generation; stale completions cannot publish.
+  let presenceDiscoveryPass: {
+    controller: AbortController;
+    completion: Promise<void>;
+    outcome: 'pending' | 'read' | 'failed' | 'timeout' | 'aborted';
+  } | undefined;
+  // Both network reads and individual offer waits are bounded. Reconnects do
+  // not extend an offer's deadline. This is an operational wait, not token TTL.
+  const capabilityDiscoveryTimeoutMs = 5_000;
   /**
    * The deployment declaration this daemon last READ (ADR-010), or `undefined`
    * when it has read none — which is what a failed read leaves behind too, on
@@ -2091,6 +2088,7 @@ export function buildDaemonWithAdapters(
       // `getServerCapabilities` is — the declaration lands after this `deps`
       // object is built.
       hostTaskContextAvailable: () => taskContextCapabilityAvailable(),
+      prepareHostTaskContext: waitForHostTaskContext,
       // S3b (L-003): the production admission guard — §12.7.2.1's hard-pressure
       // row. Reads the state the last maintenance tick computed (no disk work
       // on the offer path), and is absent entirely when no storage policy is
@@ -2382,13 +2380,9 @@ export function buildDaemonWithAdapters(
         }
       },
       onStateChange: (state) => {
-        // A newly established long-poll connection is the moment this daemon
-        // knows it may be talking to a different deployment build than it last
-        // read a declaration from —
-        // so it is also where re-discovery belongs. `runPresenceDiscovery` is
-        // a no-op before `startPresenceProducer` arms it and after shutdown
-        // disarms it, so the initial settle during `start()` is not a second
-        // discovery pass.
+        // Discovery is armed before the first connection can deliver offers.
+        // Every later open replaces the read, so rollout/reconnect facts cannot
+        // be borrowed from a previous connection generation.
         const wasSettled = connectionState === 'open';
         connectionState = state;
         observer.noteConnectionState(state);
@@ -2408,13 +2402,13 @@ export function buildDaemonWithAdapters(
       },
     });
     await replayRecoveryTerminals();
+    startPresenceProducer();
     await connection.start();
     await connection.waitForConnection();
     runner.retryRecoveredAgentMessages();
     for (const record of agentEgress.retryableReliableRecords(connection.getServerCapabilities())) {
       dispatchReliableRecord(record);
     }
-    startPresenceProducer();
     daemonStarted = true;
     } catch (err) {
       try {
@@ -2481,65 +2475,75 @@ export function buildDaemonWithAdapters(
     connection?.refreshHello();
   }
 
-  /**
-   * Arms capability discovery for this `start()` and runs the first pass.
-   * The controller lives for the whole run, so every later re-discovery
-   * (see `runPresenceDiscovery`) is cancelled by the same shutdown abort.
-   */
+  /** Arm before connection.start(); its first open callback starts the read. */
   function startPresenceProducer(): void {
     presenceDiscovery = new AbortController();
-    runPresenceDiscovery();
   }
 
-  /**
-   * ADR-010's client half: read the deployment's declaration, and run the
-   * presence heartbeat if and only if it contains `presence.hints`.
-   *
-   * Run on start AND on every connection re-settle (the `onStateChange` hook
-   * above), because a declaration is a deployment fact that a rollout can
-   * change under a long-lived daemon — and because that is also the only
-   * healing path a startup discovery failure gets. There is deliberately NO
-   * retry timer of its own: a failed pass simply leaves presence off until the
-   * next reconnect, which is the one event that already means "this deployment
-   * may not be the same one I last talked to".
-   *
-   * Deliberately NOT awaited by `startUnderLease` — the plan's "discovery is
-   * asynchronous to the connection path" rule. A deployment that is slow to
-   * answer (or never answers) must cost this daemon nothing but presence and
-   * the task lane. Presence is not on the task path at all; the lane fact read
-   * here — `host-mcp-task-context` (§8.2(1)) — is, but its closed state is a
-   * fail-closed refusal rather than a degraded task path: until the
-   * declaration lands no BYOK_HOST_TOOLSET_CONTEXT nonce is injected and
-   * `task_assertion.issue` answers `capability_undeclared`. So there is still
-   * no state a caller of `start()` could need this for.
-   *
-   * Every failure is fail-closed and observable: the publisher stays off and a
-   * single `console.warn` records why, matching the operator-facing warning
-   * convention the rest of this file already uses. There is no fallback branch
-   * — no "assume the usual capabilities", no 404-means-unsupported reading —
-   * because a declaration that could not be read is exactly as informative as
-   * one that declares nothing.
-   */
+  async function waitForHostTaskContext(taskId: string, signal: AbortSignal): Promise<void> {
+    if (deviceAssertionAudiences === undefined || signal.aborted) return;
+    let timedOut = false;
+    let interrupt!: () => void;
+    const interrupted = new Promise<void>((resolve) => { interrupt = resolve; });
+    const timer = setTimeout(() => { timedOut = true; interrupt(); }, capabilityDiscoveryTimeoutMs);
+    signal.addEventListener('abort', interrupt, { once: true });
+    try {
+      // A reconnect replaces the pass. Re-read that identity after each await,
+      // under this ONE offer deadline, rather than admitting on an old answer.
+      while (!signal.aborted && !timedOut && presenceDiscoveryPass?.outcome === 'pending') {
+        await Promise.race([presenceDiscoveryPass.completion, interrupted]);
+      }
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', interrupt);
+    }
+    if (signal.aborted || shuttingDown) return;
+    if (!taskContextCapabilityAvailable()) {
+      const outcome = timedOut ? 'timeout' : presenceDiscoveryPass?.outcome;
+      const reason = outcome === 'read' ? 'capability_undeclared'
+        : outcome === 'timeout' ? 'capability_discovery_timeout'
+        : outcome === 'failed' ? 'capability_discovery_failed'
+        : 'capability_discovery_unavailable';
+      observer.noteDeviceAssertion({ result: 'denied', lane: 'task', taskId, reason });
+    }
+  }
+
+  /** Each connection open starts a fresh, bounded declaration read. */
   function runPresenceDiscovery(): void {
-    const discovery = presenceDiscovery;
-    // Not started (or already torn down), or a pass is still in flight — a
-    // reconnect storm must not stack discovery requests on a deployment.
-    if (!discovery || presenceDiscoveryInFlight) return;
-    presenceDiscoveryInFlight = true;
-    void (async () => {
+    const lifecycle = presenceDiscovery;
+    if (!lifecycle || lifecycle.signal.aborted) return;
+    presenceDiscoveryPass?.controller.abort();
+    const controller = new AbortController();
+    const abort = (): void => controller.abort();
+    lifecycle.signal.addEventListener('abort', abort, { once: true });
+    const pass = {
+      controller,
+      completion: Promise.resolve(),
+      outcome: 'pending' as 'pending' | 'read' | 'failed' | 'timeout' | 'aborted',
+    };
+    presenceDiscoveryPass = pass;
+    // A previous connection's declaration cannot authorize a new offer while
+    // this deployment is still unknown. Existing nonces are never re-minted.
+    applyCapabilityDeclaration(undefined);
+    presencePublisher?.stop();
+    let rejectAbort!: () => void;
+    const aborted = new Promise<never>((_, reject) => {
+      rejectAbort = () => reject(new Error('capability discovery aborted'));
+      controller.signal.addEventListener('abort', rejectAbort, { once: true });
+    });
+    const timer = setTimeout(() => {
+      pass.outcome = 'timeout';
+      controller.abort();
+    }, capabilityDiscoveryTimeoutMs);
+    pass.completion = (async () => {
       try {
-        const declaration = await fetchCapabilityDeclaration(config.serverUrl, { signal: discovery.signal });
-        // Shutdown may have run while the declaration was in flight; starting a
-        // heartbeat after teardown would leave a timer nothing stops.
-        if (discovery.signal.aborted) return;
-        // Contract §8.1: this ONE read now answers two capabilities. The task
-        // lane's gate is recorded before the presence branch below, so the
-        // order of the two is not something a later edit can make matter.
+        const declaration = await Promise.race([
+          fetchCapabilityDeclaration(config.serverUrl, { signal: controller.signal }), aborted,
+        ]);
+        if (controller.signal.aborted || presenceDiscoveryPass !== pass) return;
         applyCapabilityDeclaration(declaration);
+        pass.outcome = 'read';
         if (declares(declaration, PRESENCE_HINTS_CAPABILITY)) {
-          // One publisher per `start()`, reused across reconnects: its
-          // revoked latch is a device-level fact, so a fresh declaration must
-          // never resurrect a publisher a revocation stopped.
           presencePublisher ??= new PresencePublisher({
             serverUrl: config.serverUrl,
             auth,
@@ -2551,24 +2555,21 @@ export function buildDaemonWithAdapters(
             onDegraded: (reason) => console.warn(`[byok/client] ${reason}`),
           });
           presencePublisher.start();
-        } else {
-          // The deployment withdrew the capability. A clean stop, not a
-          // permanent one: a later rollout that declares it again is free to
-          // start this same publisher back up.
-          presencePublisher?.stop();
         }
       } catch (err) {
-        if (discovery.signal.aborted) return;
-        // Fail closed for BOTH capabilities this pass answers: a declaration
-        // that could not be read is exactly as informative as one that declares
-        // nothing, so the task lane closes here the same way presence does —
-        // including a lane that a previous, successful pass had opened.
+        if (presenceDiscoveryPass !== pass || lifecycle.signal.aborted) {
+          pass.outcome = 'aborted';
+          return;
+        }
+        if (pass.outcome !== 'timeout') pass.outcome = 'failed';
         applyCapabilityDeclaration(undefined);
         console.warn(
-          `[byok/client] capability discovery failed; presence publishing and the task assertion lane stay off until the next reconnect: ${err instanceof Error ? err.message : String(err)}`,
+          `[byok/client] capability discovery ${pass.outcome}; presence publishing and the task assertion lane stay off until the next reconnect: ${err instanceof Error ? err.message : String(err)}`,
         );
       } finally {
-        presenceDiscoveryInFlight = false;
+        clearTimeout(timer);
+        controller.signal.removeEventListener('abort', rejectAbort);
+        lifecycle.signal.removeEventListener('abort', abort);
       }
     })();
   }
@@ -2685,10 +2686,8 @@ export function buildDaemonWithAdapters(
     // like every other step in this sequence.
     presenceDiscovery?.abort();
     presenceDiscovery = undefined;
-    // A fetch that ignores the abort and stalls would otherwise leave this
-    // latch true forever, silently swallowing every re-discovery a LATER
-    // `start()` asks for.
-    presenceDiscoveryInFlight = false;
+    // Detached reads cannot publish into a later daemon lifecycle.
+    presenceDiscoveryPass = undefined;
     presencePublisher?.stop();
     presencePublisher = undefined;
     const stoppingOwnedPressureEngine = ownedPressureEngine;

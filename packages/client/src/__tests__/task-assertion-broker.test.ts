@@ -187,6 +187,7 @@ describe('task assertion broker: task_assertion.issue', () => {
   async function pairedAndStartedUngated(
     productId: string,
     config: Partial<DaemonConfig> = {},
+    waitForRead = true,
   ): Promise<Started> {
     const workspaceRoot = await tmpDir(`byok-task-assert-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-task-assert-${productId}-store-`);
@@ -216,7 +217,7 @@ describe('task assertion broker: task_assertion.issue', () => {
     createdDaemons.push(built);
     await built.pair('pairing-code');
     await built.start();
-    await awaitCapabilityRead();
+    if (waitForRead) await awaitCapabilityRead();
     return { daemon: built, config: full, storeDir, adapter, signer };
   }
 
@@ -242,6 +243,7 @@ describe('task assertion broker: task_assertion.issue', () => {
     built: Started,
     taskId: string,
     requiredToolsets: readonly string[] = [READ_TOOLSET, PROPOSE_TOOLSET],
+    timeoutMs = 2000,
   ): Promise<Record<string, string>> {
     server.send(
       createEnvelope(
@@ -256,7 +258,7 @@ describe('task assertion broker: task_assertion.issue', () => {
         { taskId, seq: server.nextSeq() },
       ),
     );
-    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === taskId);
+    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === taskId, timeoutMs);
     await vi.waitFor(() => expect(built.adapter.startCalls.length).toBeGreaterThan(0));
     // One offer per test, so the single start call is this task's.
     const servers = built.adapter.startCalls[0]!.ctx.mcpServers ?? {};
@@ -622,6 +624,135 @@ describe('task assertion broker: task_assertion.issue', () => {
   // not `presence.hints`, which would start a heartbeat these cases never asked
   // for and make them assert about two features at once.
   const WITHOUT = { schema: 'byok-capabilities-v1', version: 3, capabilities: ['events.longpoll'] };
+
+  it('waits for the first declaration before freezing host toolset nonces', async () => {
+    let release!: () => void;
+    server.setCapabilityResponseGate(new Promise<void>((resolve) => { release = resolve; }));
+    const built = await pairedAndStartedUngated('acme-cap-first-offer', {}, false);
+    const events: DaemonEvent[] = [];
+    const unsubscribe = built.daemon.subscribe((event) => events.push(event));
+    const pending = offerAgentTask(built, 'task-before-declaration');
+    try {
+      await vi.waitFor(() => expect(events.some((event) => event.kind === 'offered')).toBe(true));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(built.adapter.startCalls).toHaveLength(0);
+      release();
+      const tokens = await pending;
+      expect(Object.keys(tokens).sort()).toEqual([PROPOSE_SERVER, READ_SERVER].sort());
+    } finally {
+      release();
+      await pending;
+      unsubscribe();
+    }
+  });
+
+  it('bounds a hung declaration, reports timeout, and ignores its late success', async () => {
+    let release!: () => void;
+    server.setCapabilityResponseGate(new Promise<void>((resolve) => { release = resolve; }));
+    const built = await pairedAndStartedUngated('acme-cap-timeout', {}, false);
+    const events: DaemonEvent[] = [];
+    const unsubscribe = built.daemon.subscribe((event) => events.push(event));
+    try {
+      expect(await offerAgentTask(built, 'task-discovery-timeout', undefined, 8000)).toEqual({});
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: 'device-assertion', lane: 'task', taskId: 'task-discovery-timeout', reason: 'capability_discovery_timeout' }),
+      ]));
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(server.received.some((event) => event.type === 'conn.hello' && hasTaskCapability(event))).toBe(false);
+      const client = await control(built.storeDir, built.config.productId);
+      expect((await expectControlError(client.request('task_assertion.issue', { contextToken: 'x'.repeat(43), audience: ALLOWED_AUDIENCE }))).code).toBe('capability_undeclared');
+    } finally {
+      release();
+      unsubscribe();
+    }
+  }, 12000);
+
+  it('reports unreadable declarations separately from an explicit missing capability', async () => {
+    server.setCapabilityDeclaration({ malformed: true });
+    const built = await pairedAndStartedUngated('acme-cap-unreadable');
+    const events: DaemonEvent[] = [];
+    const unsubscribe = built.daemon.subscribe((event) => events.push(event));
+    try {
+      expect(await offerAgentTask(built, 'task-discovery-failed')).toEqual({});
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: 'device-assertion', lane: 'task', taskId: 'task-discovery-failed', reason: 'capability_discovery_failed' }),
+      ]));
+    } finally { unsubscribe(); }
+  });
+
+  it('waits for the new connection declaration instead of borrowing the prior one', async () => {
+    const built = await pairedAndStarted('acme-cap-reconnect');
+    let release!: () => void;
+    server.setCapabilityResponseGate(new Promise<void>((resolve) => { release = resolve; }));
+    server.setFailEventsPolls(true);
+    await vi.waitFor(() => expect(built.daemon.status().connected).toBe(false), { timeout: 5000 });
+    server.setFailEventsPolls(false);
+    await vi.waitFor(() => expect(server.httpRequests.filter((r) => r.pathname === '/byok/capabilities').length).toBeGreaterThanOrEqual(2), { timeout: 5000 });
+    const events: DaemonEvent[] = [];
+    const unsubscribe = built.daemon.subscribe((event) => events.push(event));
+    const pending = offerAgentTask(built, 'task-after-reconnect');
+    try {
+      await vi.waitFor(() => expect(events.some((event) => event.kind === 'offered')).toBe(true));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(built.adapter.startCalls).toHaveLength(0);
+      release();
+      expect(Object.keys(await pending).sort()).toEqual([PROPOSE_SERVER, READ_SERVER].sort());
+    } finally { release(); await pending; unsubscribe(); }
+  }, 15000);
+
+  it('does not hold a task without host toolsets behind discovery', async () => {
+    let release!: () => void;
+    server.setCapabilityResponseGate(new Promise<void>((resolve) => { release = resolve; }));
+    const built = await pairedAndStartedUngated('acme-cap-no-tools', {}, false);
+    try {
+      server.send(createEnvelope('task.offer_for_agent', {
+        instruction: 'no host tools', policy: { mode: 'auto' }, runtime: 'pi',
+        agentRef: { agentId: AGENT_ID, profileRevision: PROFILE_REVISION },
+      }, { taskId: 'task-no-host-tools', seq: server.nextSeq() }));
+      await server.waitFor((event) => event.type === 'task.started' && event.task_id === 'task-no-host-tools');
+      expect(built.adapter.startCalls).toHaveLength(1);
+    } finally { release(); }
+  });
+
+  it('cancellation interrupts discovery admission without starting the task', async () => {
+    let release!: () => void;
+    server.setCapabilityResponseGate(new Promise<void>((resolve) => { release = resolve; }));
+    const built = await pairedAndStartedUngated('acme-cap-cancel-wait', {}, false);
+    const events: DaemonEvent[] = [];
+    const unsubscribe = built.daemon.subscribe((event) => events.push(event));
+    try {
+      server.send(createEnvelope('task.offer_for_agent', {
+        instruction: 'wait then cancel', policy: { mode: 'auto' }, runtime: 'pi',
+        agentRef: { agentId: AGENT_ID, profileRevision: PROFILE_REVISION }, requiredToolsets: [READ_TOOLSET],
+      }, { taskId: 'task-cancel-discovery', seq: server.nextSeq() }));
+      await vi.waitFor(() => expect(events.some((event) => event.kind === 'offered')).toBe(true));
+      server.send(createEnvelope('task.cancel', { reason: 'operator' }, { taskId: 'task-cancel-discovery', seq: server.nextSeq() }));
+      const declined = await server.waitFor((event) => event.type === 'task.decline' && event.task_id === 'task-cancel-discovery');
+      expect(declined.payload).toMatchObject({ retryable: false });
+      expect(built.adapter.startCalls).toHaveLength(0);
+    } finally { release(); unsubscribe(); }
+  });
+
+  it('shutdown releases a pending offer without starting its runtime', async () => {
+    let release!: () => void;
+    server.setCapabilityResponseGate(new Promise<void>((resolve) => { release = resolve; }));
+    const built = await pairedAndStartedUngated('acme-cap-stop', {}, false);
+    const events: DaemonEvent[] = [];
+    const unsubscribe = built.daemon.subscribe((event) => events.push(event));
+    try {
+      server.send(createEnvelope('task.offer_for_agent', {
+        instruction: 'wait then stop', policy: { mode: 'auto' }, runtime: 'pi',
+        agentRef: { agentId: AGENT_ID, profileRevision: PROFILE_REVISION }, requiredToolsets: [READ_TOOLSET],
+      }, { taskId: 'task-stop-during-discovery', seq: server.nextSeq() }));
+      await vi.waitFor(() => expect(events.some((event) => event.kind === 'offered')).toBe(true));
+      await built.daemon.stop();
+      expect(built.adapter.startCalls).toHaveLength(0);
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(built.adapter.startCalls).toHaveLength(0);
+    } finally { release(); unsubscribe(); }
+  });
 
   it('advertises host-mcp-task-context only when signing is enabled AND the deployment declares it', async () => {
     // Quadrant 1 — enabled x declared. The only one that advertises.

@@ -504,6 +504,8 @@ export interface TaskRunnerDeps {
    * (§8.2(1)) instead of quietly reaching for some other identity.
    */
   hostTaskContextAvailable?: () => boolean;
+  /** Wait for the current deployment declaration before freezing host toolset env. */
+  prepareHostTaskContext?: (taskId: string, signal: AbortSignal) => Promise<void>;
   /**
    * S3b (L-002): a pre-claim veto on new offers, consulted once per offer
    * immediately after the redelivery-dedup check and ahead of every other
@@ -2032,6 +2034,10 @@ export class TaskRunner {
         requirements: pick.descriptor.environmentRequirements,
         locallyAllowedNames: this.deps.runtimeEnvironment?.[pick.descriptor.id]?.allow,
       });
+      if (resolvedMcp?.ok && agentRef !== undefined && this.deps.prepareHostTaskContext) {
+        await this.deps.prepareHostTaskContext(taskId, blobAbort.signal);
+        if (admissionWithdrawn()) return;
+      }
       // Contract §8.1: the host toolset servers this task will actually run
       // get their per-`(task, server)` nonce here, on the copy handed to the
       // adapter. The admission probe below keeps reading `resolvedMcp.servers`,

@@ -6,7 +6,7 @@
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
-> **Last Updated**: 2026-09-12
+> **Last Updated**: 2026-09-13
 > **Review File**: `tasks/reviews/20260912-1540-byok-018-d2-task-assertion.review.md`
 > **Notes File**: `tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
@@ -17,11 +17,12 @@
 
 ## Goal
 
-在 `B/` 侧登记 D2 SDK 工作包的精确写入边界与验证面，使 C05 获得 SDK 实施授权后可直接在此契约内执行，无需再推断 allowlist。
+实现并验收冻结 draft-3 的 C05 SDK D2 task-scoped tool authority；在候选收口前修复 capability discovery 与首批 offer 的竞态，产出准确 subject-bound 本地候选证据。
 
 ## Scope
 
-- In scope: 契约 §8 / §13 C05·C09 / §14「SDK D2」行 / §15 / §16 在 `B/` 侧的执行元数据登记；`allowed_paths` 精确枚举；验证计划固定。
+- In scope: 契约 §8 / §13 C05 的 SDK 实现与验证、§14 SDK D2 精确登记；2026-09-13 Owner 批准接管本 worktree 写入、C05 discovery/offer 有界等待追加片及既有枚举补项追认。只生成 C05 候选级证据，不宣称 C06/C09 或发布完成。
+- Blocking workflow repair: 本任务唯一范围外修复为退役未声明实际源码 ownership 的旧 archcontext seed capability（保留文件及历史内容；实际 SDK 节点不变），消除 `capability_registry:invalid` 编辑硬阻塞。
 - Out of scope: 不改任何包版本或 lock 文件（§14 末段「包版本/lock 改动只能消费经验证的 D2 artifact；本轮不改」）；不发布、不升级设备、不触生产（§16「SDK release / native / prod 未授权」）；不动 `S/` 仓任何文件；不接管或修改 `plans/plan-20260910-0214-downstream-issue-intake.md` 及其 `.ai/harness/active-plan` marker；不复制契约正文进本仓。
 - Taste constraints: <!-- advisory only, no run gate; default style/taste lives in AGENTS.md and the minimal-change policy, use this to record a per-task override -->
 
@@ -38,12 +39,10 @@
 
 ## Root Cause Evidence
 
-Required when Task Profile is `bugfix`; leave as-is otherwise.
-
-- root_cause: one sentence naming file:line/condition (testable, not "a state issue").
-- repro: the command or UI path that reproduces the symptom.
-- regression_guard: path to a test that fails on the unfixed code and passes after the fix (must also appear as a `package_test` check in Verification Plan).
-- pre_fix_failure_artifact: path to a captured run of regression_guard on the UNFIXED code. Capture with `bun test <regression_guard> > <artifact> 2>&1; echo "PRE_FIX_EXIT=$?" >> <artifact>` (no pipes — pipes swallow the exit status). The gate requires a non-zero `PRE_FIX_EXIT=` line plus the regression_guard path string in the artifact (see the Root Cause Evidence Gate section in docs/reference-configs/sprint-contracts.md).
+- root_cause: `create-daemon.ts` 原始 startup 在 connection 已可投递 offer 后才启动异步 discovery；`task-runner.ts` 原 `withHostToolsetContext` 对尚未读取的 deployment 直接返回无 token servers，且 child env 生命周期内不重建。
+- repro: `bun run --cwd packages/client test -- src/__tests__/task-assertion-broker.test.ts -t 'waits for the first declaration'`，fixture 持有 capability HTTP response，首 task 已进入 runtime。
+- regression_guard: `packages/client/src/__tests__/task-assertion-broker.test.ts`，固定响应 barrier 下声明返回前 runtime start 必须为 0、返回后两个 host toolsets 必须各有不同 nonce。
+- pre_fix_failure_artifact: `_ops/byok-018-d2/discovery-prefx.log`（PRE_FIX_EXIT=1，expected 0 / received 1）；同 guard 修复后通过。
 
 ## Workflow Inventory
 
@@ -72,6 +71,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 
 ```yaml
 allowed_paths:
+  - .archcontext/model/nodes/capability.architecture-context.yaml
   # --- 契约 §14「SDK D2」行：八个源文件 ---
   - packages/core/src/device-assertion.ts
   - packages/cloud/src/auth/device-assertion.ts

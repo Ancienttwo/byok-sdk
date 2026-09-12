@@ -24,7 +24,7 @@
 
 ## Agentic Routing
 - Selected route: work-package plan + task contract（C05 实施前的 C03 登记）
-- Routing reason: C05 的前置是 C02 冻结 + C03 在 `B/` 侧登记 allowlist + 「SDK 对应实施授权」。本计划只完成登记，实施授权尚未授予，因此保持 Draft。
+- Routing reason: C05 的前置是 C02 冻结 + C03 在 `B/` 侧登记 allowlist + 「SDK 对应实施授权」。SDK 实施授权已于 2026-09-12 授予；2026-09-13 Owner 批准接管与 discovery/offer 追加片，当前执行 C05。
 - Due diligence:
   - P1 map: SDK D2 接缝落在四个包。`packages/core` 持 device assertion envelope 与 replay 消费接口（`src/device-assertion.ts`，`src/in-memory/device-assertion-replay.ts`）；`packages/cloud` 持云侧验证入口（`src/auth/device-assertion.ts`）；`packages/client` 持 daemon 侧签发与 control 协议（`src/daemon/{assertion-client,control-protocol,create-daemon,device-assertion-signer,task-runner,toolset-registry}.ts`）；`packages/cloud-dataplane` 持 Postgres replay authority（`src/stores/device-assertion-replay.ts`）。持久化边界是 `deploy/sql/0008_device_assertion_replay`，当前最大迁移号 0021。
   - P2 trace: 一次 assertion 签发到消费的现状路径为 `create-daemon.ts:3244` 调 `device-assertion-signer.ts:65` mintDeviceAssertion（jti 来自 `signer.ts:61`），RPC schema 在 `control-protocol.ts:600-670`，handler 在 `create-daemon.ts:3169-3260`（六道 gate，mint 前二次复核 shutting_down / revoked）；云侧 `packages/cloud/src/auth/device-assertion.ts` 校验后经 `DeviceAssertionReplayConsumeInput`（`core/src/device-assertion.ts:406-413`，六字段、无 `schema` 判别段）落到 replay authority，内存实现 `core/src/in-memory/device-assertion-replay.ts:6-14`，Postgres 实现 `cloud-dataplane/src/stores/device-assertion-replay.ts:8-35`（`ON CONFLICT` 六列，对应 `0008` 的六列主键）。当前撤权只有设备级 `revoked` 布尔（`core/src/device-assertion.ts:307` 要求 `revoked === false`），没有 task 级 revoke 通道；`host-mcp-task-context`、`BYOK_HOST_TOOLSET_CONTEXT`、`byok-task-assertion` 在本仓零命中。压力点即在此：replay 键没有 envelope kind 判别段，两种 schema 的同一 jti 会互相占位。
@@ -46,7 +46,7 @@ Complete this inventory before implementation. If any line is unknown, keep the 
 
 ## Approach
 ### Strategy
-本计划在 C03 阶段只做登记：固定契约权威与 hash、枚举 `B/` 侧精确 allowlist、把 C05 的执行清单按条款号挂上去。不写产品规范副本，不改源码，不动包版本/lock（§14 末段），不发布（§16「SDK release / native / prod 未授权」）。
+C03 登记已完成。当前按冻结契约实施并收口 C05，精确源码/测试/元数据边界见 Active contract；保留包版本/lock，不发布、不改生产。新增 discovery 等待只修复已授权 task lane 的准入时序。
 
 ### Trade-offs
 | Option | Pros | Cons | Decision |
@@ -124,6 +124,11 @@ Complete this inventory before implementation. If any line is unknown, keep the 
 | 7 | §15 AC13 | 新 SDK artifact / capability 连通；G2 候选证据 = `check:release-pack` packed artifact，标 candidate 不冒充 released | PARTIAL (SDK 两条通道就绪；G2 packed 候选 artifact 已产出 sourceGitSha 3e70523b；Host 连通待 C06) |
 | 8 | §13 C09 | SDK 侧必需检查执行与汇总（§15 实施阶段的六项 + release-pack） | READY (六项 root 检查 + release-pack 于 3e70523b 通过；最终矩阵待 C09 冻结 base) |
 
-### Owner 待拍板
+### C05 追加片（2026-09-13 Owner 已批准）
 
-offer 窗口内 nonce 不可补发，处置方案见 `tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md`「Owner 待拍板」。
+| # | 范围 | 状态 |
+| --- | --- | --- |
+| 9 | 首次连接/重连 discovery 在 host toolset nonce 冻结前有界等待；超时/不可读/未声明可观测；cancel/shutdown 释放等待 | IMPLEMENTED，focused 42 tests + cancel 增量 1 test 通过，root acceptance 待执行 |
+| 10 | 冻结新候选，root verification → typed AcceptanceReceipt → verify-sprint → Draft PR | PENDING |
+
+P1：部署 declaration 是 capability 权威；TaskRunner 构造 child env 是 nonce 的唯一作者。P2：首个 long-poll open → discovery 与 task offer 并发 → pickAdapter → 原代码直接冻结 nonce；pre-fix barrier 测试证明 declaration 尚未返回时 runtime 已启动。P3：在 nonce 冻结前等待最新 connection generation 的声明，单次 read 与每个 offer 均限 5000ms；10x 并发共享一次 read，每个等待者持有一个可清理 timer，重连不延长该 offer 的截止点。缺失声明仍不签发、不换 device lane；Agent task 没有 host toolsets 时不等待。

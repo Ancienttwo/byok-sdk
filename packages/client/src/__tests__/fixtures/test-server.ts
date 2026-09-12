@@ -94,6 +94,12 @@ export class TestServer {
    * `undefined` models a deployment that serves no declaration at all (404),
    * which is what every deployment looked like to this fixture before.
    */
+  private capabilityResponseGate: Promise<void> | undefined;
+
+  setCapabilityResponseGate(gate: Promise<void> | undefined): void {
+    this.capabilityResponseGate = gate;
+  }
+
   private capabilityDeclaration: unknown = {
     schema: 'byok-capabilities-v1',
     version: 1,
@@ -308,6 +314,7 @@ export class TestServer {
         return void this.handleBlobUrl(req, res, url.pathname.split('/')[3] ?? '');
       }
       if (method === 'GET' && url.pathname === BYOK_CAPABILITIES_PATH) {
+        await this.capabilityResponseGate;
         // Public by design (a client reads it before it holds a credential), so
         // no authorization check here — same as the real hosted route.
         if (this.capabilityDeclaration === undefined) return void res.writeHead(404).end();

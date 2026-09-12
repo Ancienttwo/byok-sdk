@@ -6881,6 +6881,8 @@ export interface TaskRunnerDeps {
      * (§8.2(1)) instead of quietly reaching for some other identity.
      */
     hostTaskContextAvailable?: () => boolean;
+    /** Wait for the current deployment declaration before freezing host toolset env. */
+    prepareHostTaskContext?: (taskId: string, signal: AbortSignal) => Promise<void>;
     /**
      * S3b (L-002): a pre-claim veto on new offers, consulted once per offer
      * immediately after the redelivery-dedup check and ahead of every other
