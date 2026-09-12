@@ -129,3 +129,37 @@ Commit `7fd61d72`（amend 自 `d8dd8819`，仅去除 commit message 末两行 at
 - AC13「连通」尚未证明：SDK 侧两条通道已备齐，连通需 S/ 侧接线后 `e2e:private-agent-chat-binary`；packed 候选 artifact 在最终 base 冻结后只产出一次（第四片）。
 
 Gatekeeper verdict：代码面 PASS；commit message attribution 已 amend 修正。
+
+## C05 slice 4 — AC13 G2 packed candidate artifact（2026-09-13）
+
+Subject sha：`3e70523bbc1a7e99df023403ab1317f599983c7b`（worktree `codex/byok-018-d2-task-assertion`，`git status --short` 空，冻结分支头）。
+
+命令：`bun run check:release-pack -- --out-dir _ops/byok-018-d2/artifacts-3e70523b`（全包 pack + 隔离 npm 安装 + smoke），exit 0。日志 `_ops/byok-018-d2/pack-3e70523b.log`。`_ops/` 是 ignored 本地运维目录，artifact 与日志都不入仓。
+
+环境：Node v24.18.0，darwin arm64，macOS 26.5 (25F71)，Bun 1.4.2。manifest `schemaVersion` 2，`releaseVersion` 0.18.0，`sourceGitSha` 与 subject sha 全 hash 一致。
+
+### 10 个 tarball
+
+| package | version | file | SHA256 |
+|---|---|---|---|
+| `@byok-sdk/core` | 0.18.0 | byok-sdk-core-0.18.0.tgz | `8dbaa5aa7cef6e52ed596294dc3ec55d2705caee2fa4c5c8ddf9adba1fa2ebfb` |
+| `@byok-sdk/protocol` | 0.18.0 | byok-sdk-protocol-0.18.0.tgz | `0c5f8db1fd183269b677bbe33a219068098c6032fcd419fd06a030c5db3011e6` |
+| `@byok-sdk/server` | 0.18.0 | byok-sdk-server-0.18.0.tgz | `9b0185d5136ce1e592031bea89d3a35e5af939b406544cdb205d4e1f247bd960` |
+| `@byok-sdk/cloud` | 0.18.0 | byok-sdk-cloud-0.18.0.tgz | `24c2f60037ce0ca1673b6ce432c81a65baf3b2bcd6712dd7502832e9cd3722b9` |
+| `@byok-sdk/client` | 0.18.0 | byok-sdk-client-0.18.0.tgz | `bef575465d166bc981724cd896a520783667fcbee227ae19a8692d378bbbed0e` |
+| `@byok-sdk/cloud-dataplane` | 0.18.0 | byok-sdk-cloud-dataplane-0.18.0.tgz | `75908e6dd284360195ec9a5a8c584643c12c3000c62c190a136cb5e3630c5658` |
+| `@byok-sdk/ui-runtime` | 0.18.0 | byok-sdk-ui-runtime-0.18.0.tgz | `eeacb3ecc85e9f36b0576cd38ca5839d0ec8b5b902bf7e58307385187771a1a0` |
+| `@byok-sdk/testkit` | 0.18.0 | byok-sdk-testkit-0.18.0.tgz | `99590e7749ed9752cc437899ce3af3c0d66492155c1d18480a9f161d492a2de5` |
+| `byok-sdk` | 0.18.0 | byok-sdk-0.18.0.tgz | `10ccb1701c9d29f5d279e601b86d0f91f0828ed5f4eb40dd01adf00842254d90` |
+| `@byok-sdk/keys` | 0.5.0 | byok-sdk-keys-0.5.0.tgz | `82702387fe7359a613d051f13937617b6900a910be5a63169464466cc02881dc` |
+
+### 抽查
+
+- keys 内部依赖边：`byok-sdk-keys-0.5.0.tgz` 内 `package/package.json` 唯一 `@byok-sdk` 依赖为 `dependencies["@byok-sdk/core"] = "0.18.0"`，指向本次 core。pack 脚本对 10 个包逐个打了 `internal @byok-sdk edges all pin 0.18.0`，隔离安装树 `npm ls @byok-sdk/core --all --json` 只解析出 0.18.0。
+- core tarball device-assertion 产物：`package/dist/device-assertion.d.ts`、`package/dist/in-memory/device-assertion-replay.d.ts`；运行时在 bundled `package/dist/index.js` 里，符号计数 `DeviceAssertion` 5、`deviceAssertionSigningInput` 3、`DeviceAssertionEnvelope(V)` 3+3、`DeviceAssertionClaimsSchema` 3、`deviceAssertionCanonicalJson` 3、`deviceAssertionCanonicalClaims` 3、`DeviceAssertionReplayAuthority` 2。
+- `host-mcp-task-context` 在解包 dist 内的命中（均 ≥1）：client 10 文件 / 20 次（含 `dist/index.js`、`dist/bin/byok-agent.js`、`dist/daemon/task-runner.d.ts`、`dist/daemon/control-protocol.d.ts`）；protocol 4 文件 / 6 次（含 `dist/task-assertion.d.ts`、`dist/index.js`、`dist/version.d.ts`）；cloud 3 文件 / 3 次（含 `dist/capabilities.d.ts`、`dist/index.js`）。
+- 确定性交叉核对：同一 subject sha 第二次 pack 到临时目录，10 个 SHA256 与 `sourceGitSha` 全部逐位一致。
+
+### 证据定级
+
+tarball 名义版本 0.18.0 / keys 0.5.0 与 registry 已发布同名，只能按 `sourceGitSha` 与 SHA256 识别，未发布、非 registry 替代；AC13 最终证据待 release contract 发布的 installed artifact 与 S/ 侧 `e2e:private-agent-chat-binary` 连通。
