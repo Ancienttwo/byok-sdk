@@ -181,3 +181,12 @@ P1：daemon 的 deployment declaration 是 capability 权威；TaskRunner 是每
 ### 候选产物保留与最终验证命令
 
 `44fd3661` 首次 prepare 中六项 root checks 全部 PASS；pack 因旧 expensive input 缓存拒绝，未执行。随后带新 subject 原因的重试在 pack 之前主动终止：检查发现原 `bun run check:release-pack` 默认使用临时目录并在 finally 删除产物，不满足本片可交付候选需要。正式 Verification Plan 的 pack 命令改为显式保留 `_ops/byok-018-d2/artifacts-c05-final`；产品源码维持 44fd3661，提交该元数据后再冻结完整 subject，执行一次保留产物的 pack。
+
+## C05 accepted candidate / workflow finish blocked（2026-09-13）
+
+- Frozen artifact source：90cf5de6a8f31154dfaa046491b4d7f9e9e54f64（runtime fix 44fd3661）。`verify-sprint --prepare-acceptance` 的 12/12 criteria 与七项命令全部 PASS；run snapshot `.ai/harness/runs/run-20260913T043139-17673-20260912-1540-byok-018-d2-task-assertion.json`。retained pack 28918ms，只执行这次新候选保留产物的 pack。
+- `_ops/byok-018-d2/artifacts-c05-final/release-manifest.json` 的 10 tarball SHA256 已与磁盘逐个匹配。client = 64c66b0c048a20b60f6b983b6016f378db2f6cab0feb2172c68351384c0b1bef，其余九包与旧 3e70523b 候选完全一致；名义版本不代表 registry 新版本。
+- Independent Codex gate PASS：复用已审 44fd3661 产品 delta，另审 final metadata。typed AcceptanceReceipt `external_pass` 已记录，subject `sha256:0ee5fcfbefda764c87b10eeacc4e15c0e59569e2be1becc45584e378972a0c57`；最终 `verify-sprint` exit 0，明确 `Sprint acceptance finalized without rerunning verification`。review projection commit b219902b。
+- 后续 `repo-harness run contract-worktree finish --no-merge --target main --gate-base origin/main` exit 1：`orphan workstream: tasks/workstreams/root/20260904-sdk-root.md`、`orphan workstream: tasks/workstreams/root/20260905-sdk-root.md`（原文在 `_ops/byok-018-d2/worktree-finish.log`）。这是历史 root → sdk/sdk-root 投影迁移未闭合，未改这两个文件或复制主 checkout WIP。
+- 本任务已使用一次范围外阻塞修复（retired seed node）；依 Owner global rule「第二个范围外发现即停」，停止进一步执行，不绕过 finish、不 push/PR、不开始 C04 产品代码。C04 实施授权已在 S/ commit 6c2335e 落盘；C04/C08 shared-schema 分片验收边界仍待 Owner 选择。
+- 下一步仅处理两个旧 workstream 的真实 capability 归属/迁移，再重试 finish；C05 code/root checks/pack/acceptance 不因这个工作流阻塞被冒充失败，也不无故重跑。
