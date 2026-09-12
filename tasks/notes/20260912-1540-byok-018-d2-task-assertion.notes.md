@@ -104,3 +104,28 @@ Commit `67cbea87` on `codex/byok-018-d2-task-assertion`（parent `a3098ac8`）�
 4. I12 权威撤权点在 Host commit，本仓不可验证；本片只实现第二层。
 
 Gatekeeper verdict：PASS（可进入第三片；不建议单独 merge）。
+
+## C05 slice 3 — cloud hosted task 组合 + capability 双通道宣告（2026-09-13）
+
+Commit `7fd61d72`（amend 自 `d8dd8819`，仅去除 commit message 末两行 attribution，tree hash 不变）on `codex/byok-018-d2-task-assertion`；后续 `47dfb726` 修两条 gate 非阻塞项。契约 hash 复核 `c7288bdb…c6678` 未变。
+
+### 落点
+- core：`AuthenticatedDeviceAssertion.lane:'device'`，`AuthenticatedTaskAssertion` 独立接口 `lane:'task'`（共用非导出 base），新导出联合 `AuthenticatedAssertion`。输出型加字段，零构造点，非 breaking。
+- cloud：`authenticateHostedTaskAssertion` + `HostedTaskAssertionAuthDeps`（`packages/cloud/src/auth/device-assertion.ts`），replay schema 段由 core 决定；`packages/cloud/src/index.ts` 导出。
+- 设备级通道：`packages/protocol/src/task-assertion.ts` `HOST_MCP_TASK_CONTEXT_CAPABILITY = 'host-mcp-task-context'`，进 `CAPABILITY_FLAGS` 封闭联合与 protocol freeze golden（官方 `BYOK_PROTOCOL_UPDATE_GOLDEN=1` 重生，diff 一行）；daemon hello flags 仅在「签发启用 ∧ 部署声明」时宣告（四象限测试）。
+- 部署级通道：`CLOUD_CAPABILITIES.hostMcpTaskContext`，`includeHostMcpTaskContext` 默认 off（与 truth.records / skills.pack 同形，§8.2(1)「完整实现后宣告」由部署显式开启）；daemon 复用既有 discovery pass 读取，失败 fail-closed 归零；未声明时 nonce 不注入（`hostTaskContextAvailable?.() !== true` 即视为不可用）、RPC 答 `capability_undeclared`（gate 2）。
+- 第二片两条 LOW 已修（bad_request 文案分引两常量；post-sign 复查与 gate 8 同形取值）。
+- `docs/spec.md` 新小节「Task-scoped tool authority」无版本号；CHANGELOG Unreleased 追加。
+- allowed_paths 补登 9 条（protocol 常量/index/version、cloud capabilities、api-surface/protocol.d.ts、两测试、test-server fixture、freeze golden），gate 逐条判属 §14「capability 声明/版本耦合元数据/对应测试」范围；26 个变更文件全部在 allowlist 内。
+
+### 验证（gatekeeper 只读实跑，全部 exit 0）
+`bun run build`、`typecheck`、`test`（client 1915 / cloud 384 / core 304 / protocol 365 / server 373 / keys 464 … 0 failed）、`check:api-surface`（9 golden match）、`check:version-authority`、`check-task-workflow --strict`、`git diff --check`；控制字节 0；package.json / lock / toolset-registry 约束未变。
+
+### Owner 待拍板（S/ 侧接 `declaresCapabilities` 之前必须知晓）
+**offer 窗口内 nonce 不可补发。** declaration 在连接建立后与首个 long-poll 并发异步读取；首个 `conn.hello` 不带 `host-mcp-task-context`，由 `refreshHello()` 补发。nonce 注入是 task 启动构造 `taskMcpServers` 时的一次性决定：在 declaration 落地前被 offer 的 task，即使 lane 随后打开，其工具服务器整个生命周期都无 token，MCP child 会以「无 SDK token」明确失败。方向 fail-closed、不违反契约（§8.3 unavailable 语义），但对用户呈现像产品 bug，且每次 discovery 失败后的重连都会复现。gate 评估：不建议在 `start()` 里 await declaration（把启动耦合到可选 hosted 路由、且不覆盖重连）；建议 gate offer（首个 offer 的 admission 有界等待首趟 discovery 落定）或至少让「lane 关闭态下准入 offer」在 observer 打一条可观测事件。待 Owner 择一，作为独立一刀。
+
+### 遗留（report-only）
+- `connection-manager-redelivery.test.ts` 并行偶发（第二、三片各出现一次，gate 两次全量均未复现）。
+- AC13「连通」尚未证明：SDK 侧两条通道已备齐，连通需 S/ 侧接线后 `e2e:private-agent-chat-binary`；packed 候选 artifact 在最终 base 冻结后只产出一次（第四片）。
+
+Gatekeeper verdict：代码面 PASS；commit message attribution 已 amend 修正。

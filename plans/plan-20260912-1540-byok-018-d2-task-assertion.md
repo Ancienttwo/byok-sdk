@@ -118,8 +118,12 @@ Complete this inventory before implementation. If any line is unknown, keep the 
 | 1 | §8.1 | `byok-task-assertion-v1` envelope / signed schema / capability `host-mcp-task-context` 两条通道 | DONE (slice 1, c6dc5b5, gate PASS) |
 | 2 | §8.2(1) | SDK/client 侧：context token RPC、registry 校验、每次 invoke 新 assertion/new jti、终止后拒签 | DONE (slice 2, 67cbea87, gate PASS) |
 | 3 | §8.2(2) | replay 键加 `schema` 判别段并扩 `DeviceAssertionReplayConsumeInput`（含新迁移与 Postgres 实现） | DONE (slice 1, c6dc5b5, gate PASS) |
-| 4 | §14「SDK D2」行 | 实施文件边界：本 contract `allowed_paths` 即该行在 `B/` 侧的精确枚举 | NOT_STARTED |
+| 4 | §14「SDK D2」行 | 实施文件边界：本 contract `allowed_paths` 即该行在 `B/` 侧的精确枚举 | DONE (slices 1–3; allowlist 按 §14:430 枚举补登共 18 条，见 contract) |
 | 5 | §15 AC11 | 越 task/AgentRef/toolset 拒绝、副作用前拒绝、两 schema 下 jti 各自一次消费 | PARTIAL (core/replay + daemon 侧已覆盖；Host cancel commit 侧待第三片/C06) |
 | 6 | §15 AC12 | cancel commit 与新工具准入线性化（SDK 侧可证伪面） | NOT_STARTED |
-| 7 | §15 AC13 | 新 SDK artifact / capability 连通；G2 候选证据 = `check:release-pack` packed artifact，标 candidate 不冒充 released | NOT_STARTED |
+| 7 | §15 AC13 | 新 SDK artifact / capability 连通；G2 候选证据 = `check:release-pack` packed artifact，标 candidate 不冒充 released | PARTIAL (SDK 两条 capability 通道就绪；Host 连通与 packed 候选 artifact 待) |
 | 8 | §13 C09 | SDK 侧必需检查执行与汇总（§15 实施阶段的六项 + release-pack） | NOT_STARTED |
+
+### Owner 待拍板
+
+offer 窗口内 nonce 不可补发，处置方案见 `tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md`「Owner 待拍板」。
