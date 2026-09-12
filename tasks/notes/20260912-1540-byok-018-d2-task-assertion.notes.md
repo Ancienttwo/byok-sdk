@@ -177,3 +177,7 @@ Owner 对本轮明确请求回复「批准」：Codex 接管 B/ 后续写入；�
 P1：daemon 的 deployment declaration 是 capability 权威；TaskRunner 是每个 child env/nonce 的唯一作者。P2：真实 HTTP fixture 持有首轮 declaration，未修源码已启动 runtime（`discovery-prefx.log` PRE_FIX_EXIT=1，expected 0/received 1）。P3：daemon 在 connection.start 前 arm discovery，由首次/每次 open 开始读取；TaskRunner 只为有 AgentRef + host toolsets 的 offer 在 nonce 冻结前等待。单轮 read 与每个 offer 各自有 5000ms 上限，重连替换 read 不延长 offer deadline；旧 completion 不能写新 pass；cancel/shutdown 释放等待。缺少声明不补 nonce、不接受 device-only fallback；observer 沿现有 task lane denial 事件区分 undeclared/failed/timeout。
 
 验证：`discovery-postfix.log` 同 guard 通过；`discovery-focused.log` task broker + presence 42/42 通过；`discovery-cancel.log` 1/1 通过（pre-claim cancel 的权威输出是 task.decline，非 task.cancelled）；client typecheck/build、API golden 再生、strict workflow、diff --check 均通过。根因生产修复一次；cancel 测试的首版 oracle 写错，按既有 admissionWithdrawn 契约修正，无产品行为改动。root checks/新 artifact/completion receipt 尚待执行。
+
+### 候选产物保留与最终验证命令
+
+`44fd3661` 首次 prepare 中六项 root checks 全部 PASS；pack 因旧 expensive input 缓存拒绝，未执行。随后带新 subject 原因的重试在 pack 之前主动终止：检查发现原 `bun run check:release-pack` 默认使用临时目录并在 finally 删除产物，不满足本片可交付候选需要。正式 Verification Plan 的 pack 命令改为显式保留 `_ops/byok-018-d2/artifacts-c05-final`；产品源码维持 44fd3661，提交该元数据后再冻结完整 subject，执行一次保留产物的 pack。

@@ -319,7 +319,7 @@ exit_criteria:
     {
       "id": "release-pack",
       "kind": "command",
-      "command": "bun run check:release-pack",
+      "command": "bun run check:release-pack -- --out-dir _ops/byok-018-d2/artifacts-c05-final",
       "cwd": ".",
       "phase": "verification",
       "cost": "expensive",
