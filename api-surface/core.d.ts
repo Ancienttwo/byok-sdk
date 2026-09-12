@@ -532,16 +532,40 @@ export declare const DEVICE_ASSERTION_SCHEMA_ID = "byok-device-assertion-v1";
  * Domain separation prefix, prepended to the canonical claim bytes before
  * signing.
  *
- * Must remain mutually NON-PREFIX with the other two things this same Ed25519
+ * Must remain mutually NON-PREFIX with the other three things this same Ed25519
  * device key signs — `byok-nonce-v1\n` (challenge/token renewal, see
- * `@byok-sdk/client`'s `device-keys.ts`) and `byok-device-proof-v1\n`
- * (`attestation.ts`) — so no signature over one domain can ever be reinterpreted
- * as a signature over another. `packages/core/src/__tests__/device-assertion.test.ts`
- * asserts the three-way non-prefix property directly; that assertion is the
- * falsifier for this whole design, not a nicety.
+ * `@byok-sdk/client`'s `device-keys.ts`), `byok-device-proof-v1\n`
+ * (`attestation.ts`), and `byok-task-assertion-v1\n` ({@link
+ * TASK_ASSERTION_DOMAIN_PREFIX}) — so no signature over one domain can ever be
+ * reinterpreted as a signature over another.
+ * `packages/core/src/__tests__/device-assertion.test.ts` asserts the property
+ * across the three core-owned prefixes and
+ * `packages/client/src/__tests__/device-assertion-broker.test.ts` across all
+ * four; those assertions are the falsifier for this whole design, not a nicety.
  */
 export declare const DEVICE_ASSERTION_DOMAIN_PREFIX = "byok-device-assertion-v1\n";
 export declare const DEVICE_ASSERTION_VERSION = 1;
+/**
+ * Envelope schema id of the task-scoped assertion (contract §8.1), kept beside
+ * the device one so the two are read — and reviewed — together.
+ */
+export declare const TASK_ASSERTION_SCHEMA_ID = "byok-task-assertion-v1";
+/**
+ * Domain separation prefix for `byok-task-assertion-v1`.
+ *
+ * Joins the mutually NON-PREFIX set the ONE Ed25519 device key signs under:
+ * `byok-nonce-v1\n`, `byok-device-proof-v1\n`,
+ * `byok-device-assertion-v1\n`, and this. Contract §8.1 requires the old and
+ * new envelopes to be non-interchangeable, and domain separation is the half of
+ * that which holds even when both envelopes parse: a device-lane signature can
+ * never be reinterpreted as a task-lane one, because the signed bytes differ in
+ * their first line. The four-way falsifier lives in
+ * `packages/client/src/__tests__/device-assertion-broker.test.ts` (the only
+ * suite that can import the real nonce domain); the three core-owned prefixes
+ * are cross-checked in `packages/core/src/__tests__/device-assertion.test.ts`.
+ */
+export declare const TASK_ASSERTION_DOMAIN_PREFIX = "byok-task-assertion-v1\n";
+export declare const TASK_ASSERTION_VERSION = 1;
 /** Signature algorithms this envelope version admits. */
 export declare const DEVICE_ASSERTION_ALGORITHMS: readonly ['ed25519'];
 export type DeviceAssertionAlgorithm = (typeof DEVICE_ASSERTION_ALGORITHMS)[number];
@@ -716,8 +740,21 @@ export interface DeviceAssertionExpectedBinding {
     readonly productId: string;
     readonly audience: string;
 }
+/**
+ * The envelope kinds that share one replay authority.
+ *
+ * A closed union with no default: contract §8.2(2) requires the replay key to
+ * carry an envelope-kind discriminator so the same `jti` presented as a device
+ * assertion and as a task assertion occupies two key slots and neither lane can
+ * burn the other's. A defaulted or optional field would reintroduce exactly the
+ * collision the discriminator exists to prevent, so every caller states its
+ * lane and a caller that forgets does not compile.
+ */
+export type DeviceAssertionReplaySchemaId = typeof DEVICE_ASSERTION_SCHEMA_ID | typeof TASK_ASSERTION_SCHEMA_ID;
 /** One replay key. Every field is derived from verified claims/current authority. */
 export interface DeviceAssertionReplayConsumeInput {
+    /** Which signed envelope kind produced this key. Required; never inferred, never defaulted. */
+    readonly schema: DeviceAssertionReplaySchemaId;
     readonly tenantId: TenantId;
     readonly issuer: string;
     readonly productId: string;
@@ -759,6 +796,161 @@ export interface AuthenticatedDeviceAssertion {
  * availability error without ever degrading to signature-only acceptance.
  */
 export declare function authenticateDeviceAssertion(input: unknown, deps: AuthenticateDeviceAssertionDeps): Promise<AuthenticatedDeviceAssertion | undefined>;
+/**
+ * The task-scoped assertion: a separate envelope, NOT a device assertion with
+ * extra claims.
+ *
+ * Contract §8.1 fixes the property this section exists to hold: the old and new
+ * envelopes are not interchangeable in either direction. Three independent
+ * mechanisms carry it, and none of them is "the verifier remembers to check":
+ *
+ * 1. **Different signed bytes.** {@link TASK_ASSERTION_DOMAIN_PREFIX} is
+ *    non-prefix with every other domain this device key signs under, so a
+ *    signature made in one lane cannot be reinterpreted in another even if the
+ *    claim sets were made to coincide.
+ * 2. **Different strict schemas.** `schema` is a literal and `protected` is a
+ *    `strictObject`, so a device envelope fails
+ *    {@link parseTaskAssertionEnvelope} on its missing `taskId`/`agentRef`/
+ *    `toolsetId` and a task envelope fails
+ *    {@link parseDeviceAssertionEnvelope} on those same claims being unknown.
+ * 3. **Different replay keys.** {@link DeviceAssertionReplayConsumeInput}
+ *    carries a required `schema` segment (§8.2(2)), so the two lanes' ledgers
+ *    are distinguishable and neither can burn the other's `jti`.
+ *
+ * What is deliberately NOT duplicated: `jti`/signature encodings, the audience
+ * byte bound, {@link DEVICE_ASSERTION_MAX_TTL_MS}, the window rule and the
+ * device-row rule are the SAME validators the device lane uses, referenced not
+ * copied. Contract §8.1: the task lane inherits the SDK's existing limits and
+ * does not define a second, looser set.
+ *
+ * The claim set carries no caller identity for the reason stated at the top of
+ * this file — under one UID every process can reach the control socket, so a
+ * self-reported "who asked" is synthesized authority. The task/AgentRef binding
+ * here is authority precisely because the daemon signs it after checking its
+ * own local registry, not because a caller sent it.
+ */
+/** Bound on each AgentRef scalar, in UTF-8 bytes. Mirrors `AGENT_REF_MAX_BYTES` in `@byok-sdk/protocol`. */
+export declare const TASK_ASSERTION_AGENT_REF_MAX_BYTES = 160;
+/** Bound on `toolsetId`. Mirrors the `ToolsetIdSchema` bound in `@byok-sdk/protocol`. */
+export declare const TASK_ASSERTION_TOOLSET_ID_MAX_LENGTH = 128;
+/** The frozen offer's Agent identity. Same shape and same rules as the SDK's `AgentRefSchema`. */
+export declare const TaskAssertionAgentRefSchema: z.ZodObject<{
+    agentId: z.ZodString;
+    profileRevision: z.ZodString;
+}, z.core.$strict>;
+export type TaskAssertionAgentRef = z.infer<typeof TaskAssertionAgentRefSchema>;
+/**
+ * The signed task claim set: the device claim set plus the three bindings that
+ * make the assertion task-scoped, every member required for the same reason the
+ * device claims are.
+ */
+export declare const TaskAssertionClaimsSchema: z.ZodObject<{
+    version: z.ZodLiteral<1>;
+    issuer: z.ZodString;
+    productId: z.ZodString;
+    deviceId: z.ZodString;
+    audience: z.ZodString;
+    jti: z.ZodString;
+    issuedAt: z.ZodISODateTime;
+    expiresAt: z.ZodISODateTime;
+    taskId: z.ZodString;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    toolsetId: z.ZodString;
+}, z.core.$strict>;
+export type TaskAssertionClaims = z.infer<typeof TaskAssertionClaimsSchema>;
+export declare const TaskAssertionEnvelopeV1Schema: z.ZodObject<{
+    schema: z.ZodLiteral<"byok-task-assertion-v1">;
+    algorithm: z.ZodEnum<{
+        ed25519: "ed25519";
+    }>;
+    protected: z.ZodObject<{
+        version: z.ZodLiteral<1>;
+        issuer: z.ZodString;
+        productId: z.ZodString;
+        deviceId: z.ZodString;
+        audience: z.ZodString;
+        jti: z.ZodString;
+        issuedAt: z.ZodISODateTime;
+        expiresAt: z.ZodISODateTime;
+        taskId: z.ZodString;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        toolsetId: z.ZodString;
+    }, z.core.$strict>;
+    signature: z.ZodString;
+}, z.core.$strict>;
+export type TaskAssertionEnvelopeV1 = z.infer<typeof TaskAssertionEnvelopeV1Schema>;
+/**
+ * Parses a task envelope fail-closed. A device assertion is not a degraded task
+ * assertion and is rejected here, not tolerated (§8.1: task lane zero fallback).
+ *
+ * @throws {ByokCoreError} code `assertion_envelope_invalid`.
+ */
+export declare function parseTaskAssertionEnvelope(input: unknown): TaskAssertionEnvelopeV1;
+/**
+ * Projects task claims into the exact JSON object that gets canonicalized.
+ *
+ * Built field by field, like the device projection, and covering EVERY claim —
+ * contract §8.1 requires the canonical projection to include all added claims,
+ * so an unsigned `taskId`, `agentRef` or `toolsetId` would be a claim a verifier
+ * reads but no signature covers.
+ */
+export declare function taskAssertionCanonicalClaims(claims: TaskAssertionClaims): JsonObject;
+/** Canonical JSON text of the task claim set, without the domain prefix. */
+export declare function taskAssertionCanonicalJson(claims: TaskAssertionClaims): string;
+/**
+ * The exact bytes a daemon signs and a verifier reconstructs:
+ * `byok-task-assertion-v1\n` followed by the canonical claim JSON, UTF-8
+ * encoded.
+ *
+ * Frozen by `src/__tests__/golden/task-assertion-v1.canonical.json`.
+ */
+export declare function taskAssertionSigningInput(claims: TaskAssertionClaims): Uint8Array;
+/**
+ * Verifies a task assertion and returns its claims, or `undefined`.
+ *
+ * The twin of {@link verifyDeviceAssertion}, with the same
+ * collapse-to-`undefined` discipline, the same injected row lookup, and the
+ * same window and ceiling rules ({@link assertionWindowAdmits},
+ * {@link resolveMaxLifetimeMs}) — and a schema this function will not widen: a
+ * `byok-device-assertion-v1` envelope is rejected at the parse step.
+ *
+ * What the caller MUST still do, exactly as in the device lane: compare
+ * `issuer`/`productId`/`audience` against its own deployment, burn the `jti`
+ * under this envelope's `schema` segment, and check that `taskId`/`agentRef`/
+ * `toolsetId` belong to the frozen offer (§8.2(2)) — the last of which is Host
+ * authority that core cannot hold.
+ */
+export declare function verifyTaskAssertion(input: unknown, deps: DeviceAssertionVerifyDeps): Promise<TaskAssertionClaims | undefined>;
+/** Audit-safe result of a consumed task assertion; no credential or signature is retained. */
+export interface AuthenticatedTaskAssertion extends AuthenticatedDeviceAssertion {
+    readonly taskId: string;
+    readonly agentRef: TaskAssertionAgentRef;
+    readonly toolsetId: string;
+}
+/**
+ * Authenticate one task assertion and atomically consume its JTI under the
+ * `byok-task-assertion-v1` replay segment.
+ *
+ * Identical in shape and failure discipline to
+ * {@link authenticateDeviceAssertion}: every invalid state collapses to
+ * `undefined`, and a replay-store operational failure REJECTS rather than
+ * degrading to signature-only acceptance (§8.2(2): an unavailable replay store
+ * fails, it does not downgrade authentication).
+ *
+ * Consumption is the last step, after every binding comparison, so a rejected
+ * assertion never burns a key — the "reject before side effects" ordering AC11
+ * requires. The frozen-offer check (`taskId`/`agentRef`/`toolsetId` belong to
+ * this Execution) is deliberately NOT here: that authority lives in the Host,
+ * and a core function that accepted it as an argument would be inviting a
+ * caller to synthesize it.
+ */
+export declare function authenticateTaskAssertion(input: unknown, deps: AuthenticateDeviceAssertionDeps): Promise<AuthenticatedTaskAssertion | undefined>;
 // ==== @byok-sdk/core dist/errors.d.ts ====
 /**
  * The one error taxonomy for `@byok-sdk/core`.
@@ -1076,7 +1268,8 @@ export { CORE_NON_COMPOSITION_PORT_NAMES, CORE_PORT_INTERFACES, CORE_PORT_METHOD
 export { DEVICE_PROOF_ALGORITHMS, DEVICE_PROOF_DOMAIN_PREFIX, DEVICE_PROOF_HEADER, DEVICE_PROOF_SCHEMA_ID, DEVICE_PROOF_VERSION, DeviceProofEnvelopeV1Schema, DeviceProofProtectedClaimsSchema, canonicalizeJson, canonicalizeJsonBytes, deviceProofCanonicalClaims, deviceProofCanonicalJson, deviceProofSigningInput, parseDeviceProofEnvelope, } from './attestation';
 export type { DeviceProofAlgorithm, DeviceProofEnvelopeV1, DeviceProofProtectedClaims, DeviceProofVerifier, DeviceProofVerifyInput, JsonObject, JsonPrimitive, JsonValue, } from './attestation';
 export { authenticateDeviceAssertion, DEVICE_ASSERTION_ALGORITHMS, DEVICE_ASSERTION_AUDIENCE_MAX_BYTES, DEVICE_ASSERTION_DEFAULT_TTL_MS, DEVICE_ASSERTION_DOMAIN_PREFIX, DEVICE_ASSERTION_MAX_TTL_MS, DEVICE_ASSERTION_SCHEMA_ID, DEVICE_ASSERTION_VERSION, DeviceAssertionClaimsSchema, DeviceAssertionEnvelopeV1Schema, deviceAssertionCanonicalClaims, deviceAssertionCanonicalJson, deviceAssertionSigningInput, parseDeviceAssertionEnvelope, verifyDeviceAssertion, } from './device-assertion';
-export type { AuthenticateDeviceAssertionDeps, AuthenticatedDeviceAssertion, DeviceAssertionAlgorithm, DeviceAssertionAuthorityRow, DeviceAssertionClaims, DeviceAssertionDeviceRow, DeviceAssertionEnvelopeV1, DeviceAssertionExpectedBinding, DeviceAssertionReplayConsumeInput, DeviceAssertionReplayAuthority, DeviceAssertionVerifier, DeviceAssertionVerifyDeps, DeviceAssertionVerifyInput, } from './device-assertion';
+export { authenticateTaskAssertion, TASK_ASSERTION_AGENT_REF_MAX_BYTES, TASK_ASSERTION_DOMAIN_PREFIX, TASK_ASSERTION_SCHEMA_ID, TASK_ASSERTION_TOOLSET_ID_MAX_LENGTH, TASK_ASSERTION_VERSION, TaskAssertionAgentRefSchema, TaskAssertionClaimsSchema, TaskAssertionEnvelopeV1Schema, parseTaskAssertionEnvelope, taskAssertionCanonicalClaims, taskAssertionCanonicalJson, taskAssertionSigningInput, verifyTaskAssertion, } from './device-assertion';
+export type { AuthenticateDeviceAssertionDeps, AuthenticatedDeviceAssertion, AuthenticatedTaskAssertion, DeviceAssertionAlgorithm, DeviceAssertionAuthorityRow, DeviceAssertionClaims, DeviceAssertionDeviceRow, DeviceAssertionEnvelopeV1, DeviceAssertionExpectedBinding, DeviceAssertionReplayConsumeInput, DeviceAssertionReplayAuthority, DeviceAssertionReplaySchemaId, DeviceAssertionVerifier, DeviceAssertionVerifyDeps, DeviceAssertionVerifyInput, TaskAssertionAgentRef, TaskAssertionClaims, TaskAssertionEnvelopeV1, } from './device-assertion';
 export { NONCE_SIGNING_DOMAIN, nonceSigningBytes } from './pairing';
 export { IN_MEMORY_CLOCK_EPOCH, InMemoryBoardStore, InMemoryMailboxStore, InMemoryDeviceAssertionReplayAuthority, InMemoryObjectStore, InMemoryPresenceStore, InMemoryQuotaStore, InMemorySkillPackStore, InMemoryTruthStore, createInMemoryCoreStores, createInMemoryCoreCompositionWithClock, createMutableClock, } from './in-memory/index';
 export type { InMemoryCoreComposition, InMemoryCoreOptions } from './in-memory/index';

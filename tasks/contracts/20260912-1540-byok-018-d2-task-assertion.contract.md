@@ -85,6 +85,15 @@ allowed_paths:
   - packages/core/src/__tests__/device-assertion.test.ts
   - packages/core/src/in-memory/device-assertion-replay.ts
   - packages/core/src/__tests__/golden/device-assertion-v1.canonical.json
+  # --- C05 slice 1 补登：§14「SDK D2」行的「对应测试/public export」在实施时的确切落点。
+  #     C03 以 `grep DeviceAssertionReplayConsumeInput` 枚举，漏掉了 (a) 新 envelope 的
+  #     golden fixture、(b) core 的 public-export 冻结守卫、(c) 必填 `schema` 字段在
+  #     §14 未列包中的两个编译点。四条都不是新产品职责，按 §14:430 与本契约
+  #     Workflow Inventory 的 scope gate 先修订 allowlist 再写入。 ---
+  - packages/core/src/__tests__/golden/task-assertion-v1.canonical.json
+  - packages/core/src/__tests__/constraints.test.ts
+  - packages/conformance/src/device-assertion-replay.ts
+  - packages/cloud-dataplane/src/__tests__/device-revocation.test.ts
   - packages/cloud/src/__tests__/device-assertion-auth.test.ts
   - packages/client/src/__tests__/assertion-client.test.ts
   - packages/client/src/__tests__/control-protocol.test.ts
@@ -108,6 +117,10 @@ allowed_paths:
   - packages/cloud-dataplane/src/__tests__/device-assertion-replay.test.ts
   # --- 候选新增迁移（§14「候选新迁移 <next>」，当前最大 0021 → 0022） ---
   - deploy/sql/0022_task_assertion_replay_schema.sql
+  # 新迁移的准入前提：`repo-harness run check-deploy-sql-order` 要求每个
+  # deploy/sql 文件在此不变量文件中被认领，否则新迁移本身不可合入。只加认领行，
+  # 不改任何既有断言（0022 不新增表，port_tables 下界不变）。
+  - tests/sql/control_plane_invariants.sql
   # --- public export ---
   - packages/core/src/index.ts
   - packages/cloud/src/index.ts

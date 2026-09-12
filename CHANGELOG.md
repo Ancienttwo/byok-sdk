@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+Deliberately not filed under 0.18.0: none of this is in a published artifact,
+and the D2 version number belongs to a separate SDK release contract.
+
+- Add the `byok-task-assertion-v1` envelope to `@byok-sdk/core` — a separate
+  Ed25519 envelope binding `taskId`, the frozen `agentRef` and `toolsetId`
+  alongside the device claims, under its own non-prefix signing domain. It
+  reuses the device lane's `jti`/signature encodings, audience byte bound and
+  `DEVICE_ASSERTION_MAX_TTL_MS` rather than defining looser ones, and the two
+  lanes are not interchangeable in either direction: each verifier accepts only
+  its own schema, with no fallback for a device-only assertion presented to the
+  task lane.
+- **Breaking** — `DeviceAssertionReplayConsumeInput.schema` is now required. The
+  shared replay key gains an envelope-kind discriminator segment,
+  `(tenant_id, issuer, product_id, device_id, audience, schema, jti)`, so one
+  `jti` is consumable exactly once per envelope kind and neither lane occupies
+  the other's slot. There is no default and no inference: every caller states
+  its lane. Custom `DeviceAssertionReplayAuthority` implementations must key on
+  the new segment.
+- Add `deploy/sql/0022_task_assertion_replay_schema.sql`, which adds the
+  `schema` column to `device_assertion_replay`, backfills the existing rows as
+  device assertions once, drops the default so later writes must be explicit,
+  constrains the column to the two known envelope kinds, and rebuilds the
+  primary key around the new segment. Forward-only, as every migration here is.
+
 ## 0.18.0 / @byok-sdk/keys 0.5.0 — unpublished release candidate
 
 - Launch package-resolved Pi through the current Node executable for version detection, direct RPC and credential custody, avoiding Windows `spawn EFTYPE` without shell execution. Native executable overrides remain explicit.
