@@ -151,7 +151,7 @@ export interface RequestTaskAssertionOptions {
 }
 
 /**
- * The eight refusals the daemon itself can answer with (see
+ * The nine refusals the daemon itself can answer with (see
  * `TASK_ASSERTION_ISSUE_ERROR_CODES`, `control-protocol.ts`) plus the two this
  * function produces on its own, with the same meanings they have in
  * {@link RequestDeviceAssertionErrorCode}.

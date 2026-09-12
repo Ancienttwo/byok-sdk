@@ -30,9 +30,10 @@ and the D2 version number belongs to a separate SDK release contract.
 - Add the `task_assertion.issue` control method, separate from
   `assertion.issue` and not a mode of it. It takes exactly
   `{contextToken, audience}`: `taskId`, `agentRef` and `toolsetId` come from the
-  registry entry, and params that even mention them are rejected. Eight
-  fail-closed gates run in a fixed order — the device lane's six unchanged, then
-  `context_token_invalid` and `context_revoked` — and the registry is re-read at
+  registry entry, and params that even mention them are rejected. Nine
+  fail-closed gates run in a fixed order — `capability_undeclared`, then the
+  device lane's six unchanged, then `context_token_invalid` and
+  `context_revoked` — and the registry is re-read at
   the signing point, so an envelope produced while a task's authority ended is
   discarded rather than returned. Every call mints a fresh `jti`; the daemon
   caches nothing.
@@ -59,6 +60,41 @@ and the D2 version number belongs to a separate SDK release contract.
   device assertions once, drops the default so later writes must be explicit,
   constrains the column to the two known envelope kinds, and rebuilds the
   primary key around the new segment. Forward-only, as every migration here is.
+- Add `authenticateHostedTaskAssertion` to `@byok-sdk/cloud`, the hosted
+  composition for the task lane, beside `authenticateHostedDeviceAssertion` and
+  taking the same deps (exported as `HostedTaskAssertionAuthDeps`). It performs
+  the strict parse, current-device-row, signature, exact issuer/product/audience,
+  time/TTL and atomic single-use `jti` checks under the task lane's own replay
+  segment; a device envelope presented to it authenticates as `undefined`, and a
+  replay store that cannot answer rejects rather than degrading. Whether the
+  claims belong to a live frozen offer remains the host's decision.
+- Add a `lane` discriminator to both authentication results.
+  `AuthenticatedDeviceAssertion` now carries `lane: 'device'` and
+  `AuthenticatedTaskAssertion` carries `lane: 'task'`. Not breaking for a
+  consumer that reads these values — both are outputs, so no caller constructs
+  one — but `AuthenticatedTaskAssertion` no longer EXTENDS
+  `AuthenticatedDeviceAssertion`: the two share a common field set and are
+  discriminated, so a task credential is no longer silently assignable wherever
+  device authority is expected. `AuthenticatedAssertion` is exported for the
+  consumer that genuinely serves both lanes.
+- Gate the task lane on `host-mcp-task-context`, on two independent channels
+  that must both hold. `@byok-sdk/protocol` exports the device-level capability
+  string (`HOST_MCP_TASK_CONTEXT_CAPABILITY`, registered in `CAPABILITY_FLAGS`);
+  `@byok-sdk/cloud`'s `CLOUD_CAPABILITIES` gains the deployment-level name,
+  withheld from `fullCapabilityDeclaration()` unless a composition passes
+  `includeHostMcpTaskContext` — a deployment declares it only once its host side
+  implements the verification. The daemon advertises the capability string only
+  when it can sign AND has read a deployment declaration naming it, injects no
+  `BYOK_HOST_TOOLSET_CONTEXT` nonce until then, and answers
+  `task_assertion.issue` with a new `capability_undeclared` code (checked second,
+  after `assertion_disabled`) while either channel is silent. A device that
+  cannot serve the lane is explicitly unavailable; there is no device-assertion
+  fallback.
+- Name the `contextToken` bound against its own limit in the
+  `task_assertion.issue` `bad_request` message, and answer
+  `context_token_invalid` rather than `context_revoked` when the post-signing
+  registry re-read finds no registry at all — a context that never existed is
+  not a context whose authority ended.
 
 ## 0.18.0 / @byok-sdk/keys 0.5.0 — unpublished release candidate
 

@@ -291,6 +291,7 @@ export {
 } from './device-assertion';
 export type {
   AuthenticateDeviceAssertionDeps,
+  AuthenticatedAssertion,
   AuthenticatedDeviceAssertion,
   AuthenticatedTaskAssertion,
   DeviceAssertionAlgorithm,

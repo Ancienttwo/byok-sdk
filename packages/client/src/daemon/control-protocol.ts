@@ -757,11 +757,21 @@ export interface TaskAssertionIssueResult {
 }
 
 /**
- * The eight `ControlError` codes `task_assertion.issue` can answer with, in the
- * exact order the handler checks them (`create-daemon.ts`). The first six are
- * the device lane's, unchanged and in the same order — the task lane inherits
- * the device gates rather than defining a second, looser sequence — followed by
- * the two that make this lane task-scoped:
+ * The nine `ControlError` codes `task_assertion.issue` can answer with, in the
+ * exact order the handler checks them (`create-daemon.ts`). The device lane's
+ * six are unchanged and in the same relative order — the task lane inherits the
+ * device gates rather than defining a second, looser sequence — with one gate
+ * ahead of them that only this lane has, and two behind them that make it
+ * task-scoped:
+ *
+ * - `capability_undeclared` — contract §8.1's capability gate
+ *   (`host-mcp-task-context`) is not in place: either this daemon issues no
+ *   assertions at all, or it has not read a deployment declaration that names
+ *   the capability. Checked immediately after `assertion_disabled` and BEFORE
+ *   the params are even parsed, because a daemon that cannot serve this lane
+ *   has nothing to say about the shape of a request for it. §8.3 is what makes
+ *   this a refusal rather than a degradation: an undeclared task lane is
+ *   `unavailable`, never a reason to reach for a device assertion.
  *
  * - `context_token_invalid` — no registry entry for this token. Deliberately
  *   the SAME answer for "never existed" and "existed, and its task has since
@@ -775,6 +785,7 @@ export interface TaskAssertionIssueResult {
  */
 export const TASK_ASSERTION_ISSUE_ERROR_CODES = [
   'assertion_disabled',
+  'capability_undeclared',
   'bad_request',
   'audience_denied',
   'shutting_down',

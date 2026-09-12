@@ -514,14 +514,34 @@ export interface AuthenticateDeviceAssertionDeps {
   readonly maxLifetimeMs?: number;
 }
 
-/** Audit-safe result of a consumed assertion; no credential or signature is retained. */
-export interface AuthenticatedDeviceAssertion {
+/**
+ * What both lanes' results carry: the current-authority principal plus the
+ * audit fields of the credential that was spent. Never a name a caller holds —
+ * a value is always one lane or the other, and {@link AuthenticatedAssertion}
+ * is the union to accept when a consumer genuinely serves both.
+ */
+interface AuthenticatedAssertionBase {
   readonly device: DevicePrincipal;
   readonly issuer: string;
   readonly audience: string;
   readonly jti: string;
   readonly issuedAt: string;
   readonly expiresAt: string;
+}
+
+/**
+ * Audit-safe result of a consumed DEVICE assertion; no credential or signature
+ * is retained.
+ *
+ * `lane` is the discriminator contract §8.1 requires the result to carry. The
+ * two lanes have zero interchange, so a consumer that serves only one of them
+ * has to be able to say which — and "which fields are present" is not that
+ * statement: a structural check drifts the moment either claim set grows, and
+ * an extension relationship would make a task credential satisfy every
+ * device-lane type check for free.
+ */
+export interface AuthenticatedDeviceAssertion extends AuthenticatedAssertionBase {
+  readonly lane: 'device';
 }
 
 function isNonEmptyExactString(value: unknown): value is string {
@@ -595,6 +615,7 @@ export async function authenticateDeviceAssertion(
   if (!consumed) return undefined;
 
   return {
+    lane: 'device',
     device: {
       kind: 'device',
       tenantId: authorityRow.tenantId,
@@ -862,12 +883,34 @@ export async function verifyTaskAssertion(
   return claims;
 }
 
-/** Audit-safe result of a consumed task assertion; no credential or signature is retained. */
-export interface AuthenticatedTaskAssertion extends AuthenticatedDeviceAssertion {
+/**
+ * Audit-safe result of a consumed TASK assertion; no credential or signature is
+ * retained.
+ *
+ * Deliberately NOT an extension of {@link AuthenticatedDeviceAssertion}. It was
+ * one, and that was the same mistake in the type system that §8.1 forbids on
+ * the wire: an extension is assignable to the thing it extends, so every
+ * consumer written for device authority would have accepted a task credential
+ * silently, with no fallback ever written down. The two results share
+ * {@link AuthenticatedAssertionBase} and differ in `lane`, so a consumer that
+ * must accept exactly one of them compares one field, and a consumer that must
+ * accept either says so with {@link AuthenticatedAssertion}.
+ */
+export interface AuthenticatedTaskAssertion extends AuthenticatedAssertionBase {
+  readonly lane: 'task';
   readonly taskId: string;
   readonly agentRef: TaskAssertionAgentRef;
   readonly toolsetId: string;
 }
+
+/**
+ * Either lane's result, discriminated by `lane`.
+ *
+ * For the consumer that genuinely serves both (an audit projection, a ledger
+ * writer). A consumer that serves ONE lane must name that lane's type instead —
+ * this union exists so "both" is stated on purpose, not reached by accident.
+ */
+export type AuthenticatedAssertion = AuthenticatedDeviceAssertion | AuthenticatedTaskAssertion;
 
 /**
  * Authenticate one task assertion and atomically consume its JTI under the
@@ -936,6 +979,7 @@ export async function authenticateTaskAssertion(
   if (!consumed) return undefined;
 
   return {
+    lane: 'task',
     device: {
       kind: 'device',
       tenantId: authorityRow.tenantId,

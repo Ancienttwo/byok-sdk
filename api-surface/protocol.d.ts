@@ -4496,6 +4496,7 @@ export { AGENT_HOME_PROJECTION_CAPABILITY, AGENT_HOME_PROJECTION_MAX_BYTES, AGEN
 export type { AgentHomeProjectionProfileRevision, AgentHomeProjectionHash, AgentHomeProjectionOutcome, AgentHomeProjectionValue, } from './agent-home-projection';
 export { AGENT_MEMORY_PROJECTION_CAPABILITY, AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES, AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE, AgentMemoryProjectionGrantRefSchema, AgentMemoryProjectionSessionRefSchema, AgentMemoryProjectionWriterEpochSchema, AgentMemoryProjectionSourceSeqSchema, AgentMemoryProjectionSnapshotSchema, AgentMemoryProjectionMeteringReceiptSchema, AgentMemoryProjectionMutationSchema, AgentMemoryProjectionReceiptSchema, AgentMemoryProjectionEraseResultSchema, agentMemoryProjectionBase64UrlByteLength, } from './agent-memory-projection';
 export type { AgentMemoryProjectionGrantRef, AgentMemoryProjectionSessionRef, AgentMemoryProjectionWriterEpoch, AgentMemoryProjectionSourceSeq, AgentMemoryProjectionSnapshot, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionEraseResult, } from './agent-memory-projection';
+export { HOST_MCP_TASK_CONTEXT_CAPABILITY } from './task-assertion';
 export { TERMINAL_PROJECTION_SELECTION_CAPABILITY, TerminalProjectionContractSchema, TerminalProjectionSelectionSchema, } from './terminal-projection';
 export type { TerminalProjectionSelection } from './terminal-projection';
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
@@ -7370,6 +7371,37 @@ export declare const ProviderProfileBindingSchema: z.ZodObject<{
     }>>;
 }, z.core.$strict>;
 export type ProviderProfileBinding = z.infer<typeof ProviderProfileBindingSchema>;
+// ==== @byok-sdk/protocol dist/task-assertion.d.ts ====
+/**
+ * The device-level half of the task lane's capability gate (contract §8.1).
+ *
+ * Contract §8.1 fixes ONE name, `host-mcp-task-context`, carried on two
+ * independent channels that must both be in place before a host may route a
+ * tool invocation through the task lane:
+ *
+ * 1. **Deployment level** — the ADR-010 `CapabilityDeclarationSchema` a
+ *    deployment serves (`@byok-sdk/cloud`'s `CLOUD_CAPABILITIES`). §8.2(1)
+ *    governs it: a deployment declares the capability only once it is
+ *    completely implemented.
+ * 2. **Device level** — this constant: a `conn.hello` capability string a host
+ *    consumes through `declaresCapabilities`. §8.3 governs it: a device whose
+ *    build cannot serve the lane simply does not advertise it, and the host
+ *    answers `unavailable` rather than reaching for the device assertion the
+ *    task lane does not accept.
+ *
+ * It lives in `@byok-sdk/protocol` for the same reason every other daemon
+ * capability flag does: this package is the wire vocabulary both sides compile
+ * against, and a name spelled twice is a name that can drift. It is registered
+ * in `CAPABILITY_FLAGS` (`./version`), which is what makes it a value a daemon
+ * can actually send.
+ *
+ * The spelling satisfies `@byok-sdk/core`'s `CAPABILITY_NAME_PATTERN`
+ * (`/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/`) on purpose: the deployment-level channel
+ * carries this exact literal, so a name legal in only one of the two channels
+ * would leave them naming different things.
+ */
+/** Contract §8.1's capability gate for `byok-task-assertion-v1` tool authority. */
+export declare const HOST_MCP_TASK_CONTEXT_CAPABILITY: 'host-mcp-task-context';
 // ==== @byok-sdk/protocol dist/task-state.d.ts ====
 export declare const TASK_STATES: readonly ['Offered', 'Claimed', 'Running', 'AwaitApproval', 'Complete', 'Failed', 'Cancelled'];
 export type TaskState = (typeof TASK_STATES)[number];
@@ -7515,5 +7547,5 @@ export declare const STRICT_AGENT_ONLY_CAPABILITY: 'strict-agent-only';
  * cannot accidentally execute the instruction without the required tools.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "terminal-projection-selection", "custom-harness", "mailbox-read-ahead"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];

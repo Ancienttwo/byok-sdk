@@ -20,6 +20,7 @@ import {
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
   AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
   AGENT_MESSAGE_EGRESS_CAPABILITY,
+  HOST_MCP_TASK_CONTEXT_CAPABILITY,
   AGENT_HOME_PROJECTION_CAPABILITY,
   TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   PROVIDER_PROFILE_BINDING_CAPABILITY,
@@ -64,6 +65,7 @@ import { AuthManager } from './auth-manager';
 import { BlobClient } from './blob-client';
 import { resolveMachineId } from './machine-id';
 import { declares, fetchCapabilityDeclaration, PRESENCE_HINTS_CAPABILITY } from './capabilities-client';
+import type { CapabilityDeclaration } from '@byok-sdk/core';
 import {
   assertPresenceHeartbeatCadence,
   DEFAULT_PRESENCE_HEARTBEAT_INTERVAL_MS,
@@ -97,6 +99,7 @@ import {
   parseTeamWorkspaceCreateParams,
   parseTeamWorkspaceJoinParams,
   parseToolsetsReloadParams,
+  TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES,
   type AssertionIssueResult,
   type ControlActiveTask,
   type ControlStatusResult,
@@ -1506,6 +1509,26 @@ export function buildDaemonWithAdapters(
   let presenceDiscovery: AbortController | undefined;
   /** Guards against a reconnect storm stacking overlapping declaration reads. */
   let presenceDiscoveryInFlight = false;
+  /**
+   * The deployment declaration this daemon last READ (ADR-010), or `undefined`
+   * when it has read none — which is what a failed read leaves behind too, on
+   * purpose: a declaration that could not be read is exactly as informative as
+   * one that declares nothing.
+   *
+   * Contract §8.1 is why this is now stored rather than consumed and dropped
+   * inside the discovery pass. The task lane's capability gate has TWO channels
+   * and both must hold, so the deployment-level answer has to outlive the read
+   * that produced it — see {@link taskContextCapabilityAvailable}.
+   */
+  let deploymentDeclaration: CapabilityDeclaration | undefined;
+  /**
+   * The exact `CapabilityFlag[]` instance handed to `ConnectionManager`, which
+   * reads it afresh for every `conn.hello` it builds. Held here so the one
+   * capability whose answer arrives asynchronously can be added to (or removed
+   * from) the advertisement a running daemon publishes, via `refreshHello()` —
+   * the same mechanism an `mcpToolsets` reload already uses.
+   */
+  let helloCapabilities: CapabilityFlag[] = [];
   let shutdownPromise: Promise<void> | undefined;
   const pendingLateMutationBarriers = new Set<Promise<void>>();
   /** M4 Phase 2: when this `start()` began — backs the control socket's `status.uptimeMs`. */
@@ -1867,6 +1890,16 @@ export function buildDaemonWithAdapters(
       : undefined;
 
     capabilities.push('custom-harness');
+    // Contract §8.1 / §8.3: the device-level capability string is NOT computed
+    // here. It is the one flag whose answer depends on a deployment fact this
+    // daemon has not read yet at this point in `start()`, so it is added (and
+    // removed again) by `applyCapabilityDeclaration` against this exact array —
+    // `ConnectionManager` rebuilds `conn.hello` from it, so a later change
+    // reaches the server through `refreshHello()`. Reset to "no declaration
+    // read" first: a restart must not inherit the previous run's answer about a
+    // deployment it has not spoken to yet.
+    deploymentDeclaration = undefined;
+    helloCapabilities = capabilities;
 
     // The journal owns terminal bytes; the transport owns one delivery queue.
     // A local write failure must never bypass durability and send different truth.
@@ -2049,6 +2082,11 @@ export function buildDaemonWithAdapters(
       // capability is only known once the handshake completes, strictly
       // after this `deps` object is constructed.
       getServerCapabilities: () => connection?.getServerCapabilities() ?? [],
+      // Contract §8.1: the nonce injection asks the SAME gate the RPC and the
+      // hello advertisement ask, read fresh at offer time for the same reason
+      // `getServerCapabilities` is — the declaration lands after this `deps`
+      // object is built.
+      hostTaskContextAvailable: () => taskContextCapabilityAvailable(),
       // S3b (L-003): the production admission guard — §12.7.2.1's hard-pressure
       // row. Reads the state the last maintenance tick computed (no disk work
       // on the offer path), and is absent entirely when no storage policy is
@@ -2388,6 +2426,58 @@ export function buildDaemonWithAdapters(
   }
 
   /**
+   * Contract §8.1 / §8.3: is the task lane's capability gate actually in place
+   * on this daemon, right now?
+   *
+   * BOTH halves, and nothing else counts as either:
+   *
+   * 1. This daemon can sign at all — `deviceAssertion.audiences` is configured
+   *    and non-empty. A daemon that issues no assertions cannot serve a lane
+   *    made of them.
+   * 2. This daemon has READ a deployment declaration that names
+   *    `host-mcp-task-context`. Not "assumed", not "the route 404'd so probably
+   *    old": an unread declaration leaves `deploymentDeclaration` undefined and
+   *    this answer `false`.
+   *
+   * Every consumer of the lane asks THIS function — the `conn.hello`
+   * advertisement, the nonce injection, and the `task_assertion.issue` RPC — so
+   * the three cannot disagree about whether the lane is open.
+   *
+   * §8.3 is the reason the false answer is a plain refusal: a missing
+   * capability makes the task lane `unavailable`, never a reason to fall back
+   * to a device assertion, which this lane does not accept in any case.
+   */
+  function taskContextCapabilityAvailable(): boolean {
+    if (deviceAssertionAudiences === undefined) return false;
+    if (deploymentDeclaration === undefined) return false;
+    return declares(deploymentDeclaration, HOST_MCP_TASK_CONTEXT_CAPABILITY);
+  }
+
+  /**
+   * Records what the latest discovery pass read (or, on failure, that it read
+   * nothing) and republishes the `conn.hello` advertisement if that changed the
+   * device-level half of §8.1's gate.
+   *
+   * The device capability string is advertised only after the deployment-level
+   * declaration has actually been read, so the FIRST `conn.hello` of a run
+   * never claims the task lane — discovery runs off the connection path and has
+   * not answered yet. That ordering is deliberate rather than tolerated: a
+   * daemon that advertised the capability before reading the declaration would
+   * be promising a lane whose other half it has not seen, which is the same
+   * assumption ADR-010 forbids a client to make about an unread deployment.
+   * `refreshHello()` is how the answer reaches the server once it exists.
+   */
+  function applyCapabilityDeclaration(declaration: CapabilityDeclaration | undefined): void {
+    deploymentDeclaration = declaration;
+    const wanted = taskContextCapabilityAvailable();
+    const index = helloCapabilities.indexOf(HOST_MCP_TASK_CONTEXT_CAPABILITY);
+    if (wanted === (index !== -1)) return;
+    if (wanted) helloCapabilities.push(HOST_MCP_TASK_CONTEXT_CAPABILITY);
+    else helloCapabilities.splice(index, 1);
+    connection?.refreshHello();
+  }
+
+  /**
    * Arms capability discovery for this `start()` and runs the first pass.
    * The controller lives for the whole run, so every later re-discovery
    * (see `runPresenceDiscovery`) is cancelled by the same shutdown abort.
@@ -2434,6 +2524,10 @@ export function buildDaemonWithAdapters(
         // Shutdown may have run while the declaration was in flight; starting a
         // heartbeat after teardown would leave a timer nothing stops.
         if (discovery.signal.aborted) return;
+        // Contract §8.1: this ONE read now answers two capabilities. The task
+        // lane's gate is recorded before the presence branch below, so the
+        // order of the two is not something a later edit can make matter.
+        applyCapabilityDeclaration(declaration);
         if (declares(declaration, PRESENCE_HINTS_CAPABILITY)) {
           // One publisher per `start()`, reused across reconnects: its
           // revoked latch is a device-level fact, so a fresh declaration must
@@ -2457,8 +2551,13 @@ export function buildDaemonWithAdapters(
         }
       } catch (err) {
         if (discovery.signal.aborted) return;
+        // Fail closed for BOTH capabilities this pass answers: a declaration
+        // that could not be read is exactly as informative as one that declares
+        // nothing, so the task lane closes here the same way presence does —
+        // including a lane that a previous, successful pass had opened.
+        applyCapabilityDeclaration(undefined);
         console.warn(
-          `[byok/client] capability discovery failed; presence publishing stays off until the next reconnect: ${err instanceof Error ? err.message : String(err)}`,
+          `[byok/client] capability discovery failed; presence publishing and the task assertion lane stay off until the next reconnect: ${err instanceof Error ? err.message : String(err)}`,
         );
       } finally {
         presenceDiscoveryInFlight = false;
@@ -3272,14 +3371,22 @@ export function buildDaemonWithAdapters(
        * server.
        *
        * A separate method from `assertion.issue`, never a mode of it (§8.1:
-       * the two lanes have zero interchange). EIGHT fail-closed gates, in this
-       * exact order — the device lane's six unchanged, then the two that make
-       * this lane task-scoped:
+       * the two lanes have zero interchange). NINE fail-closed gates, in this
+       * exact order — one this lane alone has, then the device lane's six
+       * unchanged, then the two that make this lane task-scoped:
        *
-       * 7. `context_token_invalid` — no registry entry for this nonce. The
+       * 2. `capability_undeclared` — §8.1's capability gate is not in place:
+       *    this daemon has read no deployment declaration naming
+       *    `host-mcp-task-context` (or read one that withdrew it). Checked
+       *    before the params are parsed, because a daemon that cannot serve
+       *    this lane has nothing to say about the shape of a request for it.
+       *    §8.3 makes this a refusal and not a degradation: an undeclared lane
+       *    is `unavailable`, never a reason to hand back a device assertion.
+       *
+       * 8. `context_token_invalid` — no registry entry for this nonce. The
        *    same answer for "never existed" and "its task has been cleaned up",
        *    so a refusal is not a probe for what this device has run.
-       * 8. `context_revoked` — the entry exists and its task's local authority
+       * 9. `context_revoked` — the entry exists and its task's local authority
        *    has been withdrawn (cancel accepted, terminal reached, shutdown).
        *
        * The gates are ordered so a refusal never leaks more than the caller
@@ -3308,6 +3415,14 @@ export function buildDaemonWithAdapters(
           );
         }
         // Gate 2.
+        if (!taskContextCapabilityAvailable()) {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'capability_undeclared' });
+          throw new ControlError(
+            'capability_undeclared',
+            `this deployment does not declare ${HOST_MCP_TASK_CONTEXT_CAPABILITY}, so no task-scoped assertion can be issued`,
+          );
+        }
+        // Gate 3.
         const parsed = parseTaskAssertionIssueParams(params);
         if (!parsed) {
           const rawAudience =
@@ -3317,25 +3432,25 @@ export function buildDaemonWithAdapters(
           observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'bad_request', audience: rawAudience });
           throw new ControlError(
             'bad_request',
-            `task_assertion.issue requires exactly {contextToken,audience} where each is a non-empty string of at most ${DEVICE_ASSERTION_AUDIENCE_MAX_BYTES} UTF-8 bytes; taskId, agentRef and toolsetId are resolved by this daemon and may not be sent`,
+            `task_assertion.issue requires exactly {contextToken,audience}, both non-empty strings, with contextToken at most ${TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES} and audience at most ${DEVICE_ASSERTION_AUDIENCE_MAX_BYTES} UTF-8 bytes; taskId, agentRef and toolsetId are resolved by this daemon and may not be sent`,
           );
         }
-        // Gate 3. Exact membership only, and BEFORE the registry lookup.
+        // Gate 4. Exact membership only, and BEFORE the registry lookup.
         if (!deviceAssertionAudiences.has(parsed.audience)) {
           observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'audience_denied', audience: parsed.audience });
           throw new ControlError('audience_denied', 'the requested audience is not allowed by this daemon');
         }
-        // Gate 4.
+        // Gate 5.
         if (shuttingDown) {
           observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'shutting_down', audience: parsed.audience });
           throw new ControlError('shutting_down', 'this daemon is shutting down and will not issue new assertions');
         }
-        // Gate 5.
+        // Gate 6.
         if (auth.isRevoked()) {
           observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'revoked', audience: parsed.audience });
           throw new ControlError('revoked', 'this device has been revoked by the server; re-pair required');
         }
-        // Gate 6. Read from disk every time — never a cached record.
+        // Gate 7. Read from disk every time — never a cached record.
         let record: DeviceRecord | undefined;
         try {
           record = await auth.readCurrent();
@@ -3347,7 +3462,7 @@ export function buildDaemonWithAdapters(
           throw new ControlError('not_paired', 'this device is not paired; nothing can be asserted about it');
         }
 
-        // Gates 7/8, read AFTER the `await` above: a cancel can land during
+        // Gates 8/9, read AFTER the `await` above: a cancel can land during
         // that disk read, and the only registry state that counts is the one
         // that still holds on this side of it. A daemon with no runner has no
         // registry at all, which is indistinguishable from an unknown token —
@@ -3398,9 +3513,23 @@ export function buildDaemonWithAdapters(
         // envelope leaving this handler after a cancel would be exactly the
         // failure AC11 names, and the cost of proving it cannot happen is one
         // map lookup.
-        if (runner?.hostToolsetContext(parsed.contextToken).status !== 'active') {
-          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'context_revoked', audience: parsed.audience, taskId: context.taskId });
-          throw new ControlError('context_revoked', 'this task context was revoked while the assertion was being issued');
+        //
+        // Read through the SAME `?? {status:'unknown'}` shape gate 8 uses. A
+        // missing runner is an unknown token, not a revoked context: the two
+        // refusals mean different things to a caller (`context_revoked` says a
+        // registry entry existed and its task's authority ended), and answering
+        // the wrong one from a defensive `?.` would teach a caller that its
+        // still-valid nonce had been withdrawn.
+        const stillActive = runner?.hostToolsetContext(parsed.contextToken) ?? { status: 'unknown' as const };
+        if (stillActive.status !== 'active') {
+          const reason = stillActive.status === 'unknown' ? 'context_token_invalid' : 'context_revoked';
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason, audience: parsed.audience, taskId: context.taskId });
+          throw new ControlError(
+            reason,
+            reason === 'context_token_invalid'
+              ? 'no live host toolset context matches this token'
+              : 'this task context was revoked while the assertion was being issued',
+          );
         }
 
         observer.noteDeviceAssertion({

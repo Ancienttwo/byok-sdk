@@ -124,6 +124,36 @@ allowed_paths:
   - packages/client/src/__tests__/task-runner-runtime-selection.test.ts
   - packages/client/src/__tests__/task-runner-shutdown.test.ts
   - packages/client/src/__tests__/task-runner-terminal-inference-usage.test.ts
+  # --- C05 slice 3 补登：§8.1 能力门 `host-mcp-task-context` 的两条通道
+  #     （AC13 / R2-N19：部署级 `CapabilityDeclarationSchema` 宣告 + 设备级
+  #     capability 字符串经 `declaresCapabilities` 消费）在 SDK 侧的确切落点。
+  #     C03 按 §14「SDK D2」行的八个源文件枚举，未包含：
+  #     (a) 设备级 capability 字符串的常量所在包——`packages/protocol` 是 daemon
+  #         hello flags 的唯一词汇权威，且 `CapabilityFlag` 是 `CAPABILITY_FLAGS`
+  #         的封闭联合，daemon 要 push 的 flag 不在那里注册就不编译；
+  #     (b) 部署级宣告的 cloud 词汇表 `CLOUD_CAPABILITIES`——§8.2(1)「capability
+  #         只有完整实现后宣告」要求它像 truth.records/skills.pack 一样按组合显式
+  #         开启，默认不宣告；
+  #     (c) protocol 的 api-surface golden（新公共常量必须落 golden，否则
+  #         `check:api-surface` 失败）；
+  #     (d) 三个对应测试落点：protocol 常量与 flag 注册各一处，以及 client 测试
+  #         夹具——`TestServer` 当前根本不提供 `GET /byok/capabilities`，部署级
+  #         通道在真实 daemon 测试里无法被读取，四象限断言就无从落地。
+  #     五条源文件都不是新产品职责（只是既有 capability 机制的词汇登记），按
+  #     §14:430 与本契约 Workflow Inventory 的 scope gate 先修订 allowlist 再写入。 ---
+  - packages/protocol/src/task-assertion.ts
+  - packages/protocol/src/index.ts
+  - packages/protocol/src/version.ts
+  - packages/cloud/src/capabilities.ts
+  - api-surface/protocol.d.ts
+  - packages/protocol/src/__tests__/task-assertion.test.ts
+  - packages/protocol/src/__tests__/version.test.ts
+  - packages/client/src/__tests__/fixtures/test-server.ts
+  # 同批补登：protocol freeze guard 的 golden 指纹包含 `CAPABILITY_FLAGS`。
+  # 该测试的 FREEZE_DIFF_MESSAGE 明确把「a new capability flag」列为纯增量、
+  # 需重新生成 golden 并在 commit message 说明的情形；不重新生成则新 flag 无法
+  # 合入。用其自带的 `BYOK_PROTOCOL_UPDATE_GOLDEN=1` 生成，不手改。
+  - packages/protocol/src/__tests__/golden/v1.frozen.json
   # --- 枚举补项：§14 未列，C03 按 §14:430 枚举补登，Owner 在 C05 实施授权时确认 ---
   - packages/cloud-dataplane/src/stores/device-assertion-replay.ts
   - packages/cloud-dataplane/src/__tests__/device-assertion-replay.test.ts

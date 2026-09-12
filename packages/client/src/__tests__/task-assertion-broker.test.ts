@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope } from '@byok-sdk/protocol';
+import { createEnvelope, HOST_MCP_TASK_CONTEXT_CAPABILITY } from '@byok-sdk/protocol';
 import {
   DEVICE_ASSERTION_SCHEMA_ID,
   TASK_ASSERTION_SCHEMA_ID,
@@ -13,7 +13,14 @@ import {
   type DeviceAssertionVerifier,
 } from '@byok-sdk/core';
 import { buildDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
-import { ControlError, type AssertionIssueResult, type TaskAssertionIssueResult } from '../daemon/control-protocol';
+import {
+  ASSERTION_AUDIENCE_MAX_BYTES,
+  ControlError,
+  TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES,
+  TASK_ASSERTION_ISSUE_ERROR_CODES,
+  type AssertionIssueResult,
+  type TaskAssertionIssueResult,
+} from '../daemon/control-protocol';
 import { connectControlClient, type ControlClient } from '../bin/control-client';
 import { createAuditAppender, auditLogPath } from '../bin/audit-log';
 import { formatDaemonEventLine } from '../bin/format';
@@ -136,6 +143,80 @@ describe('task assertion broker: task_assertion.issue', () => {
     createdDaemons.push(built);
     await built.pair('pairing-code');
     await built.start();
+    // Contract §8.1: the task lane is gated on a deployment declaration this
+    // daemon reads asynchronously, AFTER the connection settles, so the lane is
+    // shut until that read lands. `TestServer` declares
+    // `host-mcp-task-context` by default, and the re-published `conn.hello`
+    // carrying the capability string is this daemon's own statement that it has
+    // read the declaration — the only observable that is not a guess about
+    // timing. Cases that want the lane CLOSED call `awaitCapabilityRead`
+    // instead.
+    await server.waitFor(
+      (envelope) =>
+        envelope.type === 'conn.hello' &&
+        hasTaskCapability(envelope),
+    );
+    return { daemon: built, config: full, storeDir, adapter, signer };
+  }
+
+  /** Capability strings on a `conn.hello`, whatever else the payload carries. */
+  function helloCapabilities(envelope: { payload?: unknown }): readonly string[] {
+    const payload = envelope.payload as { capabilities?: unknown } | undefined;
+    return Array.isArray(payload?.capabilities) ? (payload.capabilities as string[]) : [];
+  }
+
+  function hasTaskCapability(envelope: { payload?: unknown }): boolean {
+    return helloCapabilities(envelope).includes(HOST_MCP_TASK_CONTEXT_CAPABILITY);
+  }
+
+  /**
+   * Settle point for the cases where the lane must stay CLOSED: the daemon has
+   * read (or failed to read) the declaration, so "no hello ever advertised the
+   * capability" is an assertion about a finished pass rather than about a race.
+   */
+  async function awaitCapabilityRead(): Promise<void> {
+    await vi.waitFor(() =>
+      expect(server.httpRequests.some((request) => request.pathname === '/byok/capabilities')).toBe(true),
+    );
+    // One macrotask past the response write, so the daemon's own handling of it
+    // has run. The assertions that follow are about state, not about the wire.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  /** Starts a daemon WITHOUT waiting for the lane to open — for the closed quadrants. */
+  async function pairedAndStartedUngated(
+    productId: string,
+    config: Partial<DaemonConfig> = {},
+  ): Promise<Started> {
+    const workspaceRoot = await tmpDir(`byok-task-assert-${productId}-ws-`);
+    const storeDir = await tmpDir(`byok-task-assert-${productId}-store-`);
+    const hostStorageRoot = await tmpDir(`byok-task-assert-${productId}-home-`);
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE, false);
+    const full: DaemonConfig = {
+      localAgentRelease: { version: '0.0.0-test' },
+      productName: 'Acme',
+      productId,
+      serverUrl: server.url,
+      workspaceRoot,
+      storeDir,
+      agentHome: { hostStorageRoot },
+      deviceAssertion: { audiences: [ALLOWED_AUDIENCE] },
+      mcpToolsets: {
+        [READ_TOOLSET]: { mcpServers: { [READ_SERVER]: { command: '/opt/salesko/read', args: ['--stdio'] } } },
+        [PROPOSE_TOOLSET]: { mcpServers: { [PROPOSE_SERVER]: { command: '/opt/salesko/propose' } } },
+      },
+      ...config,
+    };
+    const signer = { count: 0 };
+    const built = buildDaemonWithAdapters(full, [adapter], {}, {
+      onIssued: () => {
+        signer.count += 1;
+      },
+    });
+    createdDaemons.push(built);
+    await built.pair('pairing-code');
+    await built.start();
+    await awaitCapabilityRead();
     return { daemon: built, config: full, storeDir, adapter, signer };
   }
 
@@ -372,7 +453,10 @@ describe('task assertion broker: task_assertion.issue', () => {
   });
 
   it('answers assertion_disabled first when the broker is off at all', async () => {
-    const built = await pairedAndStarted('acme-task-off', { deviceAssertion: undefined });
+    // `assertion_disabled` is gate 1 and `capability_undeclared` is gate 2, so
+    // a daemon that cannot sign never advertises the lane and never reaches the
+    // capability check — hence the ungated start: there is no hello to wait for.
+    const built = await pairedAndStartedUngated('acme-task-off', { deviceAssertion: undefined });
     const tokens = await offerAgentTask(built, 'task-off');
     const client = await control(built.storeDir, built.config.productId);
 
@@ -527,5 +611,155 @@ describe('task assertion broker: task_assertion.issue', () => {
     expect(raw).not.toContain('"signature"');
     expect(raw).not.toContain(envelope.signature);
     expect(raw).toContain('"lane":"task"');
+  });
+  // -------------------------------------------------------------------------
+  // §8.1 capability gate — the two channels, and the four quadrants of the one
+  // this daemon controls
+  // -------------------------------------------------------------------------
+
+  const DECLARED = { schema: 'byok-capabilities-v1', version: 1, capabilities: [HOST_MCP_TASK_CONTEXT_CAPABILITY] };
+  // A real declaration that simply withholds this one capability. Deliberately
+  // not `presence.hints`, which would start a heartbeat these cases never asked
+  // for and make them assert about two features at once.
+  const WITHOUT = { schema: 'byok-capabilities-v1', version: 3, capabilities: ['events.longpoll'] };
+
+  it('advertises host-mcp-task-context only when signing is enabled AND the deployment declares it', async () => {
+    // Quadrant 1 — enabled x declared. The only one that advertises.
+    server.setCapabilityDeclaration(DECLARED);
+    const enabledAndDeclared = await pairedAndStarted('acme-cap-both');
+    expect(
+      server.received.some((envelope) => envelope.type === 'conn.hello' && hasTaskCapability(envelope)),
+    ).toBe(true);
+    await enabledAndDeclared.daemon.stop();
+  });
+
+  it('advertises nothing when the deployment declares the capability but this daemon issues no assertions', async () => {
+    // Quadrant 2 — declared, signing disabled. The deployment's half alone is
+    // not the gate: a daemon that cannot sign cannot serve a lane made of
+    // signatures, and saying otherwise would promise authority it cannot mint.
+    server.setCapabilityDeclaration(DECLARED);
+    const built = await pairedAndStartedUngated('acme-cap-nosign', { deviceAssertion: undefined });
+
+    expect(server.received.some((envelope) => envelope.type === 'conn.hello')).toBe(true);
+    expect(server.received.some((envelope) => envelope.type === 'conn.hello' && hasTaskCapability(envelope))).toBe(false);
+    await built.daemon.stop();
+  });
+
+  it('advertises nothing when this daemon can sign but the deployment withholds the capability', async () => {
+    // Quadrant 3 — enabled, undeclared. §8.3: the answer is `unavailable`, and
+    // there is no device-lane substitute to fall back to.
+    server.setCapabilityDeclaration(WITHOUT);
+    const built = await pairedAndStartedUngated('acme-cap-nodecl');
+
+    expect(server.received.some((envelope) => envelope.type === 'conn.hello')).toBe(true);
+    expect(server.received.some((envelope) => envelope.type === 'conn.hello' && hasTaskCapability(envelope))).toBe(false);
+    await built.daemon.stop();
+  });
+
+  it('advertises nothing when neither half holds, and treats an unreadable declaration as nothing', async () => {
+    // Quadrant 4 — neither. A deployment that serves no declaration at all is
+    // exactly as informative as one that declares nothing (ADR-010): no probe,
+    // no 404-means-old reading, no assumed capability.
+    server.setCapabilityDeclaration(undefined);
+    const built = await pairedAndStartedUngated('acme-cap-neither', { deviceAssertion: undefined });
+
+    expect(server.received.some((envelope) => envelope.type === 'conn.hello')).toBe(true);
+    expect(server.received.some((envelope) => envelope.type === 'conn.hello' && hasTaskCapability(envelope))).toBe(false);
+    await built.daemon.stop();
+  });
+
+  it('refuses task_assertion.issue and injects no nonce when the capability is undeclared', async () => {
+    server.setCapabilityDeclaration(WITHOUT);
+    const built = await pairedAndStartedUngated('acme-cap-refuse');
+    const tokens = await offerAgentTask(built, 'task-undeclared');
+
+    // §8.2(1): the MCP child is started with no `BYOK_HOST_TOOLSET_CONTEXT` at
+    // all, so a standalone run fails explicitly for want of a token rather than
+    // reaching for some other identity.
+    expect(tokens).toEqual({});
+    const servers = built.adapter.startCalls[0]?.ctx.mcpServers ?? {};
+    expect(Object.keys(servers).sort()).toEqual([PROPOSE_SERVER, READ_SERVER].sort());
+    for (const definition of Object.values(servers)) {
+      expect(definition.env?.BYOK_HOST_TOOLSET_CONTEXT).toBeUndefined();
+    }
+
+    // And the RPC says so in its own right, ahead of the params check — a
+    // caller that guessed a token learns nothing about whether it was real.
+    const client = await control(built.storeDir, built.config.productId);
+    const refused = await expectControlError(
+      client.request('task_assertion.issue', { contextToken: 'x'.repeat(43), audience: ALLOWED_AUDIENCE }),
+    );
+    expect(refused.code).toBe('capability_undeclared');
+    const malformed = await expectControlError(client.request('task_assertion.issue', { nonsense: true }));
+    expect(malformed.code).toBe('capability_undeclared');
+    expect(built.signer.count).toBe(0);
+  });
+
+  it('still mints the device lane while the task lane is undeclared', async () => {
+    // §8.1's other half: `device-only assertion 可服务其独立现有消费者`. The task
+    // lane's capability gate withdraws the TASK lane, and nothing else.
+    server.setCapabilityDeclaration(WITHOUT);
+    const built = await pairedAndStartedUngated('acme-cap-device-lane');
+    const client = await control(built.storeDir, built.config.productId);
+
+    const device = await client.request<AssertionIssueResult>('assertion.issue', { audience: ALLOWED_AUDIENCE });
+    expect((device.assertion as { schema: string }).schema).toBe(DEVICE_ASSERTION_SCHEMA_ID);
+  });
+
+  // -------------------------------------------------------------------------
+  // Refusal wording and refusal codes (slice 2 follow-ups)
+  // -------------------------------------------------------------------------
+
+  it('names the contextToken bound in the bad_request wording, not the audience bound', async () => {
+    const built = await pairedAndStarted('acme-task-badreq-wording');
+    const client = await control(built.storeDir, built.config.productId);
+
+    const refused = await expectControlError(
+      client.request('task_assertion.issue', { contextToken: 'y'.repeat(257), audience: ALLOWED_AUDIENCE }),
+    );
+    expect(refused.code).toBe('bad_request');
+    // 256 is the contextToken bound; the audience bound is a different number
+    // and quoting it here would send a caller to fix the wrong field.
+    expect(refused.message).toContain(`contextToken at most ${TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES}`);
+    expect(refused.message).toContain(`audience at most ${ASSERTION_AUDIENCE_MAX_BYTES}`);
+    // Both fields are named, each against its OWN bound. The old wording quoted
+    // the audience bound for both, which sends a caller to fix the wrong field
+    // the moment the two numbers stop coinciding.
+    expect(refused.message).toMatch(/contextToken at most \d+ and audience at most \d+/);
+  });
+
+  it('keeps one refusal vocabulary, with the capability gate ahead of the device gates', async () => {
+    // The order is the handler's own check order, and the list is what
+    // `assertion-client.ts` maps for a caller. The capability gate sits second
+    // because a daemon that cannot serve this lane has nothing to say about the
+    // shape of a request for it — see the `capability_undeclared` case above,
+    // where a malformed body still answers `capability_undeclared`.
+    expect([...TASK_ASSERTION_ISSUE_ERROR_CODES]).toEqual([
+      'assertion_disabled',
+      'capability_undeclared',
+      'bad_request',
+      'audience_denied',
+      'shutting_down',
+      'revoked',
+      'not_paired',
+      'context_token_invalid',
+      'context_revoked',
+    ]);
+  });
+
+  it('answers context_token_invalid for an unknown token on a live daemon', async () => {
+    // The reachable half of the post-sign re-read's refusal vocabulary: an
+    // unknown token is `context_token_invalid`, never `context_revoked`, which
+    // would claim a registry entry existed and its task's authority ended. The
+    // post-sign re-read now derives its code from the same lookup shape, so the
+    // two reads cannot answer differently for the same state.
+    const built = await pairedAndStarted('acme-task-unknown-token');
+    await offerAgentTask(built, 'task-unknown-token');
+    const client = await control(built.storeDir, built.config.productId);
+
+    const refused = await expectControlError(
+      client.request('task_assertion.issue', { contextToken: 'z'.repeat(43), audience: ALLOWED_AUDIENCE }),
+    );
+    expect(refused.code).toBe('context_token_invalid');
   });
 });

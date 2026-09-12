@@ -644,6 +644,10 @@ describe('authenticateDeviceAssertion', () => {
     const replay = new InMemoryDeviceAssertionReplayAuthority();
 
     await expect(authenticateDeviceAssertion(envelope, deps(replay))).resolves.toMatchObject({
+      // §8.1: the result carries its own lane discriminator, so a consumer that
+      // must accept ONLY device authority can say so in one comparison instead
+      // of inferring it from which task-shaped fields happen to be absent.
+      lane: 'device',
       device: {
         kind: 'device',
         tenantId: 'tenant-a',
@@ -1217,6 +1221,7 @@ describe('authenticateTaskAssertion', () => {
     const replay = new InMemoryDeviceAssertionReplayAuthority();
 
     await expect(authenticateTaskAssertion(envelope, deps(replay))).resolves.toMatchObject({
+      lane: 'task',
       device: { kind: 'device', tenantId: 'tenant-a', productId: 'product-a', deviceId: 'device-1' },
       issuer: expected.issuer,
       audience: expected.audience,
@@ -1227,6 +1232,20 @@ describe('authenticateTaskAssertion', () => {
     });
     // AC11: the second use of the same assertion is refused.
     await expect(authenticateTaskAssertion(envelope, deps(replay))).resolves.toBeUndefined();
+  });
+
+  it('is told apart from a device result by `lane` alone (§8.1)', async () => {
+    // The gate finding this closes: `AuthenticatedTaskAssertion` used to be an
+    // EXTENSION of the device result, so a task credential satisfied every
+    // device-lane type check and the only runtime difference was which extra
+    // fields happened to be present. A consumer that must accept exactly one
+    // lane now compares one field, and one that forgets does not typecheck.
+    const task = await authenticateTaskAssertion(signedTaskEnvelope(keys.privateKey), deps());
+    const device = await authenticateDeviceAssertion(signedEnvelope(keys.privateKey), deps());
+
+    expect(task?.lane).toBe('task');
+    expect(device?.lane).toBe('device');
+    expect([task, device].filter((result) => result?.lane === 'task')).toEqual([task]);
   });
 
   it('records the consumption under the task schema segment (§8.2(2))', async () => {

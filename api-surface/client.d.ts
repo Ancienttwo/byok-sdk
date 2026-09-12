@@ -2355,7 +2355,7 @@ export interface RequestTaskAssertionOptions {
     timeoutMs?: number;
 }
 /**
- * The eight refusals the daemon itself can answer with (see
+ * The nine refusals the daemon itself can answer with (see
  * `TASK_ASSERTION_ISSUE_ERROR_CODES`, `control-protocol.ts`) plus the two this
  * function produces on its own, with the same meanings they have in
  * {@link RequestDeviceAssertionErrorCode}.
@@ -3292,11 +3292,21 @@ export interface TaskAssertionIssueResult {
     expiresAt: string;
 }
 /**
- * The eight `ControlError` codes `task_assertion.issue` can answer with, in the
- * exact order the handler checks them (`create-daemon.ts`). The first six are
- * the device lane's, unchanged and in the same order — the task lane inherits
- * the device gates rather than defining a second, looser sequence — followed by
- * the two that make this lane task-scoped:
+ * The nine `ControlError` codes `task_assertion.issue` can answer with, in the
+ * exact order the handler checks them (`create-daemon.ts`). The device lane's
+ * six are unchanged and in the same relative order — the task lane inherits the
+ * device gates rather than defining a second, looser sequence — with one gate
+ * ahead of them that only this lane has, and two behind them that make it
+ * task-scoped:
+ *
+ * - `capability_undeclared` — contract §8.1's capability gate
+ *   (`host-mcp-task-context`) is not in place: either this daemon issues no
+ *   assertions at all, or it has not read a deployment declaration that names
+ *   the capability. Checked immediately after `assertion_disabled` and BEFORE
+ *   the params are even parsed, because a daemon that cannot serve this lane
+ *   has nothing to say about the shape of a request for it. §8.3 is what makes
+ *   this a refusal rather than a degradation: an undeclared task lane is
+ *   `unavailable`, never a reason to reach for a device assertion.
  *
  * - `context_token_invalid` — no registry entry for this token. Deliberately
  *   the SAME answer for "never existed" and "existed, and its task has since
@@ -3308,7 +3318,7 @@ export interface TaskAssertionIssueResult {
  *   point is the host's own cancel/End commit, and an assertion already in a
  *   caller's hands is not recalled by this refusal.
  */
-export declare const TASK_ASSERTION_ISSUE_ERROR_CODES: readonly ['assertion_disabled', 'bad_request', 'audience_denied', 'shutting_down', 'revoked', 'not_paired', 'context_token_invalid', 'context_revoked'];
+export declare const TASK_ASSERTION_ISSUE_ERROR_CODES: readonly ['assertion_disabled', 'capability_undeclared', 'bad_request', 'audience_denied', 'shutting_down', 'revoked', 'not_paired', 'context_token_invalid', 'context_revoked'];
 export type TaskAssertionIssueErrorCode = (typeof TASK_ASSERTION_ISSUE_ERROR_CODES)[number];
 export type ShutdownReason = 'unpair' | 'operator';
 export interface ShutdownParams {
@@ -6856,6 +6866,21 @@ export interface TaskRunnerDeps {
      * about this gate isn't forced to supply one — see `sendApprovalResolved`.
      */
     getServerCapabilities?: () => readonly string[];
+    /**
+     * Contract §8.1 / §8.3: is the task lane's capability gate in place right
+     * now — this daemon can sign, AND it has read a deployment declaration naming
+     * `host-mcp-task-context`?
+     *
+     * Read fresh at offer time for the same reason `getServerCapabilities` is:
+     * `create-daemon.ts` builds these deps before the declaration has been read.
+     *
+     * ABSENT MEANS UNAVAILABLE, not "assume yes". A runner with no way to ask
+     * whether the gate is open has not been told that it is, and §8.1 gives this
+     * lane zero fallback — so it injects no nonce, an MCP child gets no
+     * `BYOK_HOST_TOOLSET_CONTEXT`, and a standalone run fails explicitly
+     * (§8.2(1)) instead of quietly reaching for some other identity.
+     */
+    hostTaskContextAvailable?: () => boolean;
     /**
      * S3b (L-002): a pre-claim veto on new offers, consulted once per offer
      * immediately after the redelivery-dedup check and ahead of every other

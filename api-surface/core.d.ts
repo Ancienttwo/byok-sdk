@@ -779,14 +779,33 @@ export interface AuthenticateDeviceAssertionDeps {
     readonly now: Date;
     readonly maxLifetimeMs?: number;
 }
-/** Audit-safe result of a consumed assertion; no credential or signature is retained. */
-export interface AuthenticatedDeviceAssertion {
+/**
+ * What both lanes' results carry: the current-authority principal plus the
+ * audit fields of the credential that was spent. Never a name a caller holds —
+ * a value is always one lane or the other, and {@link AuthenticatedAssertion}
+ * is the union to accept when a consumer genuinely serves both.
+ */
+interface AuthenticatedAssertionBase {
     readonly device: DevicePrincipal;
     readonly issuer: string;
     readonly audience: string;
     readonly jti: string;
     readonly issuedAt: string;
     readonly expiresAt: string;
+}
+/**
+ * Audit-safe result of a consumed DEVICE assertion; no credential or signature
+ * is retained.
+ *
+ * `lane` is the discriminator contract §8.1 requires the result to carry. The
+ * two lanes have zero interchange, so a consumer that serves only one of them
+ * has to be able to say which — and "which fields are present" is not that
+ * statement: a structural check drifts the moment either claim set grows, and
+ * an extension relationship would make a task credential satisfy every
+ * device-lane type check for free.
+ */
+export interface AuthenticatedDeviceAssertion extends AuthenticatedAssertionBase {
+    readonly lane: 'device';
 }
 /**
  * Authenticate one device assertion and atomically consume its JTI.
@@ -927,12 +946,33 @@ export declare function taskAssertionSigningInput(claims: TaskAssertionClaims): 
  * authority that core cannot hold.
  */
 export declare function verifyTaskAssertion(input: unknown, deps: DeviceAssertionVerifyDeps): Promise<TaskAssertionClaims | undefined>;
-/** Audit-safe result of a consumed task assertion; no credential or signature is retained. */
-export interface AuthenticatedTaskAssertion extends AuthenticatedDeviceAssertion {
+/**
+ * Audit-safe result of a consumed TASK assertion; no credential or signature is
+ * retained.
+ *
+ * Deliberately NOT an extension of {@link AuthenticatedDeviceAssertion}. It was
+ * one, and that was the same mistake in the type system that §8.1 forbids on
+ * the wire: an extension is assignable to the thing it extends, so every
+ * consumer written for device authority would have accepted a task credential
+ * silently, with no fallback ever written down. The two results share
+ * {@link AuthenticatedAssertionBase} and differ in `lane`, so a consumer that
+ * must accept exactly one of them compares one field, and a consumer that must
+ * accept either says so with {@link AuthenticatedAssertion}.
+ */
+export interface AuthenticatedTaskAssertion extends AuthenticatedAssertionBase {
+    readonly lane: 'task';
     readonly taskId: string;
     readonly agentRef: TaskAssertionAgentRef;
     readonly toolsetId: string;
 }
+/**
+ * Either lane's result, discriminated by `lane`.
+ *
+ * For the consumer that genuinely serves both (an audit projection, a ledger
+ * writer). A consumer that serves ONE lane must name that lane's type instead —
+ * this union exists so "both" is stated on purpose, not reached by accident.
+ */
+export type AuthenticatedAssertion = AuthenticatedDeviceAssertion | AuthenticatedTaskAssertion;
 /**
  * Authenticate one task assertion and atomically consume its JTI under the
  * `byok-task-assertion-v1` replay segment.
@@ -951,6 +991,7 @@ export interface AuthenticatedTaskAssertion extends AuthenticatedDeviceAssertion
  * caller to synthesize it.
  */
 export declare function authenticateTaskAssertion(input: unknown, deps: AuthenticateDeviceAssertionDeps): Promise<AuthenticatedTaskAssertion | undefined>;
+export {};
 // ==== @byok-sdk/core dist/errors.d.ts ====
 /**
  * The one error taxonomy for `@byok-sdk/core`.
@@ -1269,7 +1310,7 @@ export { DEVICE_PROOF_ALGORITHMS, DEVICE_PROOF_DOMAIN_PREFIX, DEVICE_PROOF_HEADE
 export type { DeviceProofAlgorithm, DeviceProofEnvelopeV1, DeviceProofProtectedClaims, DeviceProofVerifier, DeviceProofVerifyInput, JsonObject, JsonPrimitive, JsonValue, } from './attestation';
 export { authenticateDeviceAssertion, DEVICE_ASSERTION_ALGORITHMS, DEVICE_ASSERTION_AUDIENCE_MAX_BYTES, DEVICE_ASSERTION_DEFAULT_TTL_MS, DEVICE_ASSERTION_DOMAIN_PREFIX, DEVICE_ASSERTION_MAX_TTL_MS, DEVICE_ASSERTION_SCHEMA_ID, DEVICE_ASSERTION_VERSION, DeviceAssertionClaimsSchema, DeviceAssertionEnvelopeV1Schema, deviceAssertionCanonicalClaims, deviceAssertionCanonicalJson, deviceAssertionSigningInput, parseDeviceAssertionEnvelope, verifyDeviceAssertion, } from './device-assertion';
 export { authenticateTaskAssertion, TASK_ASSERTION_AGENT_REF_MAX_BYTES, TASK_ASSERTION_DOMAIN_PREFIX, TASK_ASSERTION_SCHEMA_ID, TASK_ASSERTION_TOOLSET_ID_MAX_LENGTH, TASK_ASSERTION_VERSION, TaskAssertionAgentRefSchema, TaskAssertionClaimsSchema, TaskAssertionEnvelopeV1Schema, parseTaskAssertionEnvelope, taskAssertionCanonicalClaims, taskAssertionCanonicalJson, taskAssertionSigningInput, verifyTaskAssertion, } from './device-assertion';
-export type { AuthenticateDeviceAssertionDeps, AuthenticatedDeviceAssertion, AuthenticatedTaskAssertion, DeviceAssertionAlgorithm, DeviceAssertionAuthorityRow, DeviceAssertionClaims, DeviceAssertionDeviceRow, DeviceAssertionEnvelopeV1, DeviceAssertionExpectedBinding, DeviceAssertionReplayConsumeInput, DeviceAssertionReplayAuthority, DeviceAssertionReplaySchemaId, DeviceAssertionVerifier, DeviceAssertionVerifyDeps, DeviceAssertionVerifyInput, TaskAssertionAgentRef, TaskAssertionClaims, TaskAssertionEnvelopeV1, } from './device-assertion';
+export type { AuthenticateDeviceAssertionDeps, AuthenticatedAssertion, AuthenticatedDeviceAssertion, AuthenticatedTaskAssertion, DeviceAssertionAlgorithm, DeviceAssertionAuthorityRow, DeviceAssertionClaims, DeviceAssertionDeviceRow, DeviceAssertionEnvelopeV1, DeviceAssertionExpectedBinding, DeviceAssertionReplayConsumeInput, DeviceAssertionReplayAuthority, DeviceAssertionReplaySchemaId, DeviceAssertionVerifier, DeviceAssertionVerifyDeps, DeviceAssertionVerifyInput, TaskAssertionAgentRef, TaskAssertionClaims, TaskAssertionEnvelopeV1, } from './device-assertion';
 export { NONCE_SIGNING_DOMAIN, nonceSigningBytes } from './pairing';
 export { IN_MEMORY_CLOCK_EPOCH, InMemoryBoardStore, InMemoryMailboxStore, InMemoryDeviceAssertionReplayAuthority, InMemoryObjectStore, InMemoryPresenceStore, InMemoryQuotaStore, InMemorySkillPackStore, InMemoryTruthStore, createInMemoryCoreStores, createInMemoryCoreCompositionWithClock, createMutableClock, } from './in-memory/index';
 export type { InMemoryCoreComposition, InMemoryCoreOptions } from './in-memory/index';

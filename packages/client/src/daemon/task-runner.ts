@@ -490,6 +490,21 @@ export interface TaskRunnerDeps {
    */
   getServerCapabilities?: () => readonly string[];
   /**
+   * Contract §8.1 / §8.3: is the task lane's capability gate in place right
+   * now — this daemon can sign, AND it has read a deployment declaration naming
+   * `host-mcp-task-context`?
+   *
+   * Read fresh at offer time for the same reason `getServerCapabilities` is:
+   * `create-daemon.ts` builds these deps before the declaration has been read.
+   *
+   * ABSENT MEANS UNAVAILABLE, not "assume yes". A runner with no way to ask
+   * whether the gate is open has not been told that it is, and §8.1 gives this
+   * lane zero fallback — so it injects no nonce, an MCP child gets no
+   * `BYOK_HOST_TOOLSET_CONTEXT`, and a standalone run fails explicitly
+   * (§8.2(1)) instead of quietly reaching for some other identity.
+   */
+  hostTaskContextAvailable?: () => boolean;
+  /**
    * S3b (L-002): a pre-claim veto on new offers, consulted once per offer
    * immediately after the redelivery-dedup check and ahead of every other
    * admission check in `handleOffer`.
@@ -2917,6 +2932,12 @@ export class TaskRunner {
     agentRef: AgentRef | undefined,
     toolsetIdByServer: ReadonlyMap<string, string>,
   ): Readonly<Record<string, McpStdioServerConfig>> {
+    // §8.1's capability gate, asked before anything is minted. An undeclared
+    // lane gets no nonce at all — not a weaker one, and not a device
+    // assertion's identity wearing a task's name. The MCP child then fails
+    // explicitly for want of a token (§8.2(1)), which is the visible outcome
+    // §8.3 asks for when a device or a deployment cannot serve this lane.
+    if (this.deps.hostTaskContextAvailable?.() !== true) return servers;
     if (agentRef === undefined) return servers;
     // A re-offer of the same taskId must not leave the previous attempt's
     // nonces mintable: the old child is gone, so its tokens are authority

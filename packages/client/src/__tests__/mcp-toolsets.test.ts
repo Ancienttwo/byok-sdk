@@ -567,6 +567,10 @@ describe('TaskRunner host toolset context nonce injection', () => {
       productId: 'host-toolset-product',
       tenantId: 'tenant-host-toolset',
       getMcpToolsets: () => mcpToolsets,
+      // Contract §8.1's capability gate, open unless a case closes it via
+      // `extra`. These cases are about WHAT is injected once the lane is open;
+      // the gate itself gets its own case at the end of this block.
+      hostTaskContextAvailable: () => true,
       ...extra,
     };
     return new TaskRunner(deps);
@@ -678,6 +682,34 @@ describe('TaskRunner host toolset context nonce injection', () => {
 
     adapter.sessions[0]?.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
+  });
+
+  it('injects no nonce at all when the task lane capability is undeclared (§8.1/§8.3)', async () => {
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE, false);
+    const sent: Envelope[] = [];
+    const runner = await agentRunner(adapter, sent, twoToolsets, { hostTaskContextAvailable: () => false });
+
+    await offerAgentTask(runner, 'task-no-capability', ['salesko.read.v1', 'salesko.propose.v1']);
+
+    const servers = adapter.startCalls[0]?.ctx.mcpServers ?? {};
+    // The servers still run — an undeclared task lane withdraws tool AUTHORITY,
+    // it does not silently drop the toolset the offer asked for.
+    expect(Object.keys(servers).sort()).toEqual(['saleskopropose', 'saleskoread']);
+    expect(servers.saleskoread?.env?.BYOK_HOST_TOOLSET_CONTEXT).toBeUndefined();
+    expect(servers.saleskopropose?.env?.BYOK_HOST_TOOLSET_CONTEXT).toBeUndefined();
+  });
+
+  it('treats an absent capability hook as undeclared rather than as permission', async () => {
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE, false);
+    const sent: Envelope[] = [];
+    // `undefined`, not `() => false`: a runner nobody told about the gate has
+    // not been told the gate is open. §8.1 leaves no fallback for it to take.
+    const runner = await agentRunner(adapter, sent, twoToolsets, { hostTaskContextAvailable: undefined });
+
+    await offerAgentTask(runner, 'task-absent-hook', ['salesko.read.v1']);
+
+    const servers = adapter.startCalls[0]?.ctx.mcpServers ?? {};
+    expect(servers.saleskoread?.env?.BYOK_HOST_TOOLSET_CONTEXT).toBeUndefined();
   });
 
   it('still refuses a host toolset registry that supplies its own env, nonce name included', () => {
