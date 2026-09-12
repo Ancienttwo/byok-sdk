@@ -40,3 +40,36 @@
 - 未 commit、未 push、未创建分支或 worktree
 - 未接管 `.ai/harness/active-plan`（仍为 `plans/plan-20260910-0214-downstream-issue-intake.md`，Executing）
 - 未创建 review 文件（C05 实施时按契约流程生成）
+
+## C05 slice 1 — task assertion envelope + replay schema discriminator（2026-09-12）
+
+Commit `c6dc5b5` on `codex/byok-018-d2-task-assertion`（base `9dd2a818`）。契约 hash 复核 `c7288bdb…c6678` 未变。
+
+### 落点
+- `packages/core/src/device-assertion.ts`：`TASK_ASSERTION_SCHEMA_ID` / `TASK_ASSERTION_DOMAIN_PREFIX`、`TaskAssertionEnvelopeV1Schema`（strict，11 个 claim，`agentRef` 为对象）、`parseTaskAssertionEnvelope` / `verifyTaskAssertion` / `authenticateTaskAssertion`（镜像 device lane，issuer/productId/audience 精确匹配，jti 消费为最后一步）、共享 `resolveMaxLifetimeMs` / `assertionWindowAdmits`（TTL 天花板仍是 `DEVICE_ASSERTION_MAX_TTL_MS`）、`DeviceAssertionReplayConsumeInput.schema` 必填闭合联合。
+- `packages/core/src/in-memory/device-assertion-replay.ts`、`packages/cloud-dataplane/src/stores/device-assertion-replay.ts`：replay 键 `(tenant_id, issuer, product_id, device_id, audience, schema, jti)`，三处列序一致。
+- `deploy/sql/0022_task_assertion_replay_schema.sql`：ADD COLUMN NOT NULL DEFAULT（一次性回填既有 device 行）→ DROP DEFAULT → CHECK(schema IN 两值) → 主键重建；`migrate.ts` 规则 4 保证整文件单事务。
+- AgentRef / toolsetId：core 内重述 protocol 权威（`packages/protocol/src/messages.ts:119-155`），漂移测试 `packages/client/src/__tests__/device-assertion-broker.test.ts` 同时 import 两侧，35+18 候选逐个比对；变异验证（改 Windows 保留名规则）测试变红后还原。
+- `taskId` 取 `z.string().min(1)`，与 `packages/protocol/src/envelope.ts:5` `REQUIRED_TASK_ID` 一致。
+- public export 14 个符号，`api-surface/core.d.ts` 严格超集；CHANGELOG Unreleased 段（breaking：`schema` 必填）。
+
+### allowed_paths 补登 5 条（gatekeeper 逐条判定：均属 §14「对应测试/public export」登记缺口，无越界；Owner 于 C05 授权范围内追认）
+`packages/core/src/__tests__/golden/task-assertion-v1.canonical.json`、`packages/core/src/__tests__/constraints.test.ts`、`packages/conformance/src/device-assertion-replay.ts`、`packages/cloud-dataplane/src/__tests__/device-revocation.test.ts`、`tests/sql/control_plane_invariants.sql`（仅 1 行认领）。
+
+### 验证（gatekeeper 只读实跑，全部 exit 0）
+`bun run build`、`bun run typecheck`、`bun run test`（core 303、client 1882、conformance 161、cloud-dataplane 72 passed / 107 skipped）、`check:api-surface`（9 golden match）、`check:version-authority`、`check:deploy-sql`、`check-task-workflow --strict`、`git diff --check`。控制字节残留 0；fallback 路径 0；package.json / bun.lock / `packages/client/src` 生产代码 / `packages/cloud/src/auth` 未变。
+
+### Postgres 面（一次性 socket-less PG 18.4 集群，仅 TCP 5433；日志留 scratchpad `pg-c05/`）
+- 门 `SKIP_DATAPLANE = POSTGRES_URL === undefined || S3_ENDPOINT === undefined`（`support/dataplane.ts:97`）耦合两变量；以死 S3 端点开门。
+- `device-assertion-replay.test.ts` 6/6 绿，含 `migrates the durable primary key to carry the schema discriminator segment` 与 `consumes one JTI exactly once per schema without either lane occupying the other`。
+- cloud-dataplane 排除 5 个 S3 文件：228 passed / 5 skipped（worker-e2e，需 workerd）/ 0 failed；156 个原 skip 用例在 PG 下真实通过。S3 面 96 个失败全为 `ECONNREFUSED 127.0.0.1:9100`（无 MinIO），与本片无关。
+- psql 顺序执行 0001–0022 无错；`\d device_assertion_replay`：主键七列且 `schema` 在第 6 位，CHECK `device_assertion_replay_schema_shape`，`schema` NOT NULL 无 DEFAULT。
+
+### 遗留（report-only，不在本片修）
+1. `packages/core/src/__tests__/constraints.test.ts:79,:93` 的 no-import 守卫正则写成 `@byok/`，实际包名 `@byok-sdk/`，守卫空跑（历史 commit `8f39ceb8` 引入）。建议独立一刀改为 `/@byok-sdk\/protocol/` 与 `/from\s+'@byok-sdk\//`。
+2. `AuthenticatedTaskAssertion extends AuthenticatedDeviceAssertion` 无 lane 判别字段；第二片接 cloud auth 时加 `assertion: 'device' | 'task'` 或改组合。
+3. 漂移测试是有限候选采样；建议在 protocol 权威定义处加反向注释指向该测试。
+4. 0022 在大表上是 ACCESS EXCLUSIVE 窗口，发布排期事项。
+5. S3 面与 workerd e2e 未在本机验证。
+
+Gatekeeper verdict：PASS（可作为分支上的合格 commit 进入第二片；非 merge 建议）。

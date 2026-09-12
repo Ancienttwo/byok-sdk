@@ -115,11 +115,11 @@ Complete this inventory before implementation. If any line is unknown, keep the 
 
 | # | 条款 | 责任面 | 状态 |
 | --- | --- | --- | --- |
-| 1 | §8.1 | `byok-task-assertion-v1` envelope / signed schema / capability `host-mcp-task-context` 两条通道 | NOT_STARTED |
+| 1 | §8.1 | `byok-task-assertion-v1` envelope / signed schema / capability `host-mcp-task-context` 两条通道 | DONE (slice 1, c6dc5b5, gate PASS) |
 | 2 | §8.2(1) | SDK/client 侧：context token RPC、registry 校验、每次 invoke 新 assertion/new jti、终止后拒签 | NOT_STARTED |
-| 3 | §8.2(2) | replay 键加 `schema` 判别段并扩 `DeviceAssertionReplayConsumeInput`（含新迁移与 Postgres 实现） | NOT_STARTED |
+| 3 | §8.2(2) | replay 键加 `schema` 判别段并扩 `DeviceAssertionReplayConsumeInput`（含新迁移与 Postgres 实现） | DONE (slice 1, c6dc5b5, gate PASS) |
 | 4 | §14「SDK D2」行 | 实施文件边界：本 contract `allowed_paths` 即该行在 `B/` 侧的精确枚举 | NOT_STARTED |
-| 5 | §15 AC11 | 越 task/AgentRef/toolset 拒绝、副作用前拒绝、两 schema 下 jti 各自一次消费 | NOT_STARTED |
+| 5 | §15 AC11 | 越 task/AgentRef/toolset 拒绝、副作用前拒绝、两 schema 下 jti 各自一次消费 | PARTIAL (core/replay 负向条件已覆盖；daemon/Host 侧待第二、三片) |
 | 6 | §15 AC12 | cancel commit 与新工具准入线性化（SDK 侧可证伪面） | NOT_STARTED |
 | 7 | §15 AC13 | 新 SDK artifact / capability 连通；G2 候选证据 = `check:release-pack` packed artifact，标 candidate 不冒充 released | NOT_STARTED |
 | 8 | §13 C09 | SDK 侧必需检查执行与汇总（§15 实施阶段的六项 + release-pack） | NOT_STARTED |
