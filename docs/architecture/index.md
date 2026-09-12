@@ -15,5 +15,5 @@
 ## Pending Requests
 
 <!-- BEGIN ARCHITECTURE PENDING REQUESTS -->
-- [ ] 2026-09-08T18:43:13+0800 [high] `packages/client/src/__tests__/artifact-read.test.ts` -> [root](requests/root.md)
+- [ ] 2026-09-12T15:39:01+0800 [high] `packages/keys/src/provider-profile-binding.test.ts` -> [root](requests/root.md)
 <!-- END ARCHITECTURE PENDING REQUESTS -->
