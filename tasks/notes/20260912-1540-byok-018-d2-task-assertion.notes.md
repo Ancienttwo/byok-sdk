@@ -73,3 +73,34 @@ Commit `c6dc5b5` on `codex/byok-018-d2-task-assertion`（base `9dd2a818`）。�
 5. S3 面与 workerd e2e 未在本机验证。
 
 Gatekeeper verdict：PASS（可作为分支上的合格 commit 进入第二片；非 merge 建议）。
+
+## C05 slice 2 — daemon 侧 task-scoped 签发（2026-09-13）
+
+Commit `67cbea87` on `codex/byok-018-d2-task-assertion`（parent `a3098ac8`）。契约 hash 复核 `c7288bdb…c6678` 未变。
+
+### 落点
+- `packages/client/src/daemon/task-runner.ts`：`HOST_TOOLSET_CONTEXT_ENV` / `freshHostToolsetContextToken`（32 字节 CSPRNG base64url，每 (task, server) 一枚）；registry `hostToolsetContextByToken` + `hostToolsetContextTokensByTask`；注入点 `withHostToolsetContext`（只组装 `BYOK_STORE_DIR`/`BYOK_PRODUCT_ID`/`BYOK_HOST_TOOLSET_CONTEXT`；admission probe 用未注入副本）；撤销三处（`handleCancel` 首句同步、`reserveSemanticTerminal`、`stopAcceptingOffers`）；清理 `deleteHostToolsetContexts`；`resolveMcpServers` 增 `toolsetIdByServer`，claim `toolsetId` = frozen offer 的逻辑 toolset id（§8.2 AR-2），entry 另存 `serverName` 只作绑定。
+- `packages/client/src/daemon/control-protocol.ts`：`task_assertion.issue` strict params `{contextToken, audience}`、`TASK_ASSERTION_ISSUE_ERROR_CODES`（含 `context_token_invalid`、`context_revoked`）。
+- `packages/client/src/daemon/create-daemon.ts`：八道 gate（audience 门先于 registry 查询）；签名前后二次复核，二次失败丢弃已签结果；claims 三项只来自 registry；`profileRevision` 来自 offer payload 的 AgentRef。
+- `packages/client/src/daemon/device-assertion-signer.ts`：`mintTaskAssertion`，与 device lane 共用 `signWithDeviceKey`；TTL 越界抛出不 clamp。
+- `packages/client/src/daemon/assertion-client.ts`：`requestTaskAssertion`（不读 env、不缓存、不重试）。
+- `packages/client/src/daemon/observer.ts` + `bin/format.ts` + `bin/audit-log.ts`：事件加必填 `lane: 'device'|'task'` 与可选 `taskId`（输出型 union，非 breaking；audit reader 损坏行只回读为 device）。
+- `packages/client/src/index.ts`、`api-surface/client.d.ts`、`CHANGELOG.md`。
+- 未做（按契约留第三片）：capability `host-mcp-task-context` 宣告、`packages/cloud/src/auth/*` 接线。
+
+### allowed_paths 补登 4 条（gatekeeper 逐条判定均属 §14 登记缺口、无越界）
+`packages/client/src/daemon/observer.ts`、`packages/client/src/bin/format.ts`、`packages/client/src/bin/audit-log.ts`、`packages/client/src/__tests__/task-assertion-broker.test.ts`。
+
+### 测试
+红：`task-assertion-broker.test.ts` 12 failed / 1 passed（实现前）。绿：13/13；`mcp-toolsets.test.ts` 18/18（+4）；`assertion-client.test.ts` 13/13（+5）。覆盖：未知 token、多带 taskId、audience 拒绝、两次 issue 不同 jti 且 core `verifyTaskAssertion` 验过、cancel 后 `context_revoked`、terminal 后与清理后错误码、零互换、二次复核丢弃、nonce 不进 observer/format/audit（包含性断言）、SDK-reserved server 不收该变量。
+
+### 验证（gatekeeper 只读实跑，全部 exit 0）
+`bun run build`、`typecheck`、`test`（client 1904 passed / 11 skipped，无 flake）、`check:api-surface`（9 golden match）、`check:version-authority`、`check-task-workflow --strict`、`git diff --check`；`connection-manager-redelivery.test.ts` 单跑 5/5（执行者报告的并行偶发未复现）。控制字节 0；package.json / lock / cloud auth / toolset-registry 约束未变；`host-mcp-task-context` 生产代码零命中。
+
+### 遗留（report-only）
+1. `create-daemon.ts:3313` bad_request 文案对 contextToken 上限引用了 `DEVICE_ASSERTION_AUDIENCE_MAX_BYTES`（应引 `TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES`，两者现均 256）。
+2. `create-daemon.ts:3389` `runner` 为 undefined 时二次复核答 `context_revoked` 而非 `context_token_invalid`（fail-closed，实践不可达）。
+3. nonce 投递沿用既有 SDK-reserved context 通道（codex 经 `BYOK_MCP_PAYLOAD_*` 合并 env；claude/pi 写 0o600 mcp config），非本片引入。
+4. I12 权威撤权点在 Host commit，本仓不可验证；本片只实现第二层。
+
+Gatekeeper verdict：PASS（可进入第三片；不建议单独 merge）。
