@@ -47,10 +47,10 @@
     "capability_source_rule": "single authority selected by capability_source; registry reads .ai/context/capabilities.json, archcontext reads .archcontext/model/nodes/*.yaml; no dual-read and no fallback"
   },
   "worktree_strategy": {
-    "base_branch": "codex/brc1415-canary",
-    "review_base": "origin/codex/brc1415-canary",
+    "base_branch": "main",
+    "review_base": "origin/main",
     "merge_back": {
-      "target": "refs/heads/codex/brc1415-canary"
+      "target": "main"
     }
   },
   "harness": {

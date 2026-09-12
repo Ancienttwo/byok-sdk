@@ -184,6 +184,8 @@ allowed_paths:
   # 改名删除源：notes 由 20260912-byok-018-d2-task-assertion.notes.md 改名为 harness stem 命名（9dd2a818），追加证据后相似度低于 rename 阈值，diff 表现为删除旧路径。
   - tasks/notes/20260912-byok-018-d2-task-assertion.notes.md
   - tasks/reviews/20260912-1540-byok-018-d2-task-assertion.review.md
+  # 范围外阻塞修复（仅 worktree_strategy 一段）：fd1ae215 把 codex/brc1415-canary 的路由带进 main，review_base 指向已不存在的 origin/codex/brc1415-canary，change assessment 报 subject_unavailable 挡住本契约收口。恢复为 4e5c8cd8 时的 main / origin/main；policy 其余 canary 配置不动、只报告。
+  - .ai/harness/policy.json
 ```
 
 ## Evidence Requirements
