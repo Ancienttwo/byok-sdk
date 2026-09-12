@@ -1,14 +1,14 @@
 # Task Contract: byok-018-d2-task-assertion
 
-> **Status**: Pending
-> **Plan**: plans/plan-20260912-byok-018-d2-task-assertion.md
+> **Status**: Active
+> **Plan**: plans/plan-20260912-1540-byok-018-d2-task-assertion.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
 > **Last Updated**: 2026-09-12
-> **Review File**: `tasks/reviews/20260912-byok-018-d2-task-assertion.review.md`
-> **Notes File**: `tasks/notes/20260912-byok-018-d2-task-assertion.notes.md`
+> **Review File**: `tasks/reviews/20260912-1540-byok-018-d2-task-assertion.review.md`
+> **Notes File**: `tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
 
 ## Why
@@ -47,10 +47,10 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 
 ## Workflow Inventory
 
-- Source plan: `plans/plan-20260912-byok-018-d2-task-assertion.md`
+- Source plan: `plans/plan-20260912-1540-byok-018-d2-task-assertion.md`
 - Deferred-goal ledger: `tasks/todos.md`
-- Review file: `tasks/reviews/20260912-byok-018-d2-task-assertion.review.md`
-- Notes file: `tasks/notes/20260912-byok-018-d2-task-assertion.notes.md`
+- Review file: `tasks/reviews/20260912-1540-byok-018-d2-task-assertion.review.md`
+- Notes file: `tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md`
 - Checks file: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
 - Scope gate: edit only paths listed under `allowed_paths`; update this contract before widening scope.
@@ -122,10 +122,10 @@ allowed_paths:
   - docs/spec.md
   - CHANGELOG.md
   # --- 工作流文件 ---
-  - plans/plan-20260912-byok-018-d2-task-assertion.md
-  - tasks/contracts/20260912-byok-018-d2-task-assertion.contract.md
-  - tasks/notes/20260912-byok-018-d2-task-assertion.notes.md
-  - tasks/reviews/20260912-byok-018-d2-task-assertion.review.md
+  - plans/plan-20260912-1540-byok-018-d2-task-assertion.md
+  - tasks/contracts/20260912-1540-byok-018-d2-task-assertion.contract.md
+  - tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md
+  - tasks/reviews/20260912-1540-byok-018-d2-task-assertion.review.md
 ```
 
 ## Evidence Requirements
@@ -181,7 +181,7 @@ exit_criteria:
     - deploy/sql/0022_task_assertion_replay_schema.sql
   artifacts_exist:
     - .ai/harness/checks/latest.json
-    - tasks/notes/20260912-byok-018-d2-task-assertion.notes.md
+    - tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md
 ```
 
 ## Verification Plan
