@@ -13,6 +13,7 @@ import {
   type DeviceAssertionVerifier,
 } from '@byok-sdk/core';
 import { buildDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
+import * as agentMemory from '../daemon/agent-memory';
 import {
   ASSERTION_AUDIENCE_MAX_BYTES,
   ControlError,
@@ -291,8 +292,8 @@ describe('task assertion broker: task_assertion.issue', () => {
     expect(readServer?.args).toEqual(['--stdio']);
     expect(readServer?.env?.BYOK_STORE_DIR).toBe(built.storeDir);
     expect(readServer?.env?.BYOK_PRODUCT_ID).toBe(built.config.productId);
-    // No SDK-reserved server is in play here, and nothing but the host toolset
-    // servers ever carries the variable.
+    // SDK-reserved servers may also be present; only the host toolset servers
+    // ever carry the host authority variable.
     for (const [name, definition] of Object.entries(call.ctx.mcpServers ?? {})) {
       if (name !== READ_SERVER && name !== PROPOSE_SERVER) {
         expect(definition.env?.BYOK_HOST_TOOLSET_CONTEXT).toBeUndefined();
@@ -799,7 +800,8 @@ describe('task assertion broker: task_assertion.issue', () => {
     await built.daemon.stop();
   });
 
-  it('refuses task_assertion.issue and injects no nonce when the capability is undeclared', async () => {
+  it.each([false, true])('refuses task_assertion.issue and injects no nonce when the capability is undeclared (secure memory available: %s)', async (memoryAvailable) => {
+    vi.spyOn(agentMemory, 'isAgentMemorySecureFilesystemAvailable').mockReturnValue(memoryAvailable);
     server.setCapabilityDeclaration(WITHOUT);
     const built = await pairedAndStartedUngated('acme-cap-refuse');
     const tokens = await offerAgentTask(built, 'task-undeclared');
@@ -809,7 +811,16 @@ describe('task assertion broker: task_assertion.issue', () => {
     // reaching for some other identity.
     expect(tokens).toEqual({});
     const servers = built.adapter.startCalls[0]?.ctx.mcpServers ?? {};
-    expect(Object.keys(servers).sort()).toEqual([PROPOSE_SERVER, READ_SERVER].sort());
+    // Agent memory has its own admission and context authority. Withdrawing
+    // host task assertions must neither disable it nor give it a host nonce.
+    expect(Object.keys(servers).sort()).toEqual([
+      PROPOSE_SERVER,
+      READ_SERVER,
+      ...(memoryAvailable ? ['byokagentmemory'] : []),
+    ].sort());
+    if (memoryAvailable) {
+      expect(servers.byokagentmemory?.env?.BYOK_AGENT_MEMORY_CONTEXT).toEqual(expect.any(String));
+    }
     for (const definition of Object.values(servers)) {
       expect(definition.env?.BYOK_HOST_TOOLSET_CONTEXT).toBeUndefined();
     }
