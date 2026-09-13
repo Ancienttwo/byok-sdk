@@ -1,3 +1,13 @@
+> **Archived**: 2026-09-13 12:54
+> **Related Plan**: plans/archive/plan-20260912-1540-byok-018-d2-task-assertion.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260913-1254
+> **Archive Projection V1**: `plans/plan-20260912-1540-byok-018-d2-task-assertion.md` => `plans/archive/plan-20260912-1540-byok-018-d2-task-assertion.md`
+> **Archive Projection V1**: `tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md` => `tasks/archive/notes-20260913-1254-byok-018-d2-task-assertion.md`
+> **Archive Projection V1**: `tasks/contracts/20260912-1540-byok-018-d2-task-assertion.contract.md` => `tasks/archive/contract-20260913-1254-byok-018-d2-task-assertion.md`
+> **Archive Projection V1**: `tasks/reviews/20260912-1540-byok-018-d2-task-assertion.review.md` => `tasks/archive/review-20260913-1254-byok-018-d2-task-assertion.md`
+
 # Implementation Notes: byok-018-d2-task-assertion
 
 ## C03 B/ 侧登记记录（2026-09-12）

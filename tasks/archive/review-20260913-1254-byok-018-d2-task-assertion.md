@@ -1,9 +1,19 @@
+> **Archived**: 2026-09-13 12:54
+> **Related Plan**: plans/archive/plan-20260912-1540-byok-018-d2-task-assertion.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260913-1254
+> **Archive Projection V1**: `plans/plan-20260912-1540-byok-018-d2-task-assertion.md` => `plans/archive/plan-20260912-1540-byok-018-d2-task-assertion.md`
+> **Archive Projection V1**: `tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md` => `tasks/archive/notes-20260913-1254-byok-018-d2-task-assertion.md`
+> **Archive Projection V1**: `tasks/contracts/20260912-1540-byok-018-d2-task-assertion.contract.md` => `tasks/archive/contract-20260913-1254-byok-018-d2-task-assertion.md`
+> **Archive Projection V1**: `tasks/reviews/20260912-1540-byok-018-d2-task-assertion.review.md` => `tasks/archive/review-20260913-1254-byok-018-d2-task-assertion.md`
+
 # Task Review: byok-018-d2-task-assertion
 
 > **Status**: Accepted
-> **Plan**: plans/plan-20260912-1540-byok-018-d2-task-assertion.md
-> **Contract**: tasks/contracts/20260912-1540-byok-018-d2-task-assertion.contract.md
-> **Notes File**: tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md
+> **Plan**: plans/archive/plan-20260912-1540-byok-018-d2-task-assertion.md
+> **Contract**: tasks/archive/contract-20260913-1254-byok-018-d2-task-assertion.md
+> **Notes File**: tasks/archive/notes-20260913-1254-byok-018-d2-task-assertion.md
 > **Checks File**: .ai/harness/checks/latest.json
 > **Last Updated**: 2026-09-13
 > **Recommendation**: pass

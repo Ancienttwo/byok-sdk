@@ -1,14 +1,24 @@
+> **Archived**: 2026-09-13 12:54
+> **Related Plan**: plans/archive/plan-20260912-1540-byok-018-d2-task-assertion.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260913-1254
+> **Archive Projection V1**: `plans/plan-20260912-1540-byok-018-d2-task-assertion.md` => `plans/archive/plan-20260912-1540-byok-018-d2-task-assertion.md`
+> **Archive Projection V1**: `tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md` => `tasks/archive/notes-20260913-1254-byok-018-d2-task-assertion.md`
+> **Archive Projection V1**: `tasks/contracts/20260912-1540-byok-018-d2-task-assertion.contract.md` => `tasks/archive/contract-20260913-1254-byok-018-d2-task-assertion.md`
+> **Archive Projection V1**: `tasks/reviews/20260912-1540-byok-018-d2-task-assertion.review.md` => `tasks/archive/review-20260913-1254-byok-018-d2-task-assertion.md`
+
 # Task Contract: byok-018-d2-task-assertion
 
-> **Status**: Active
-> **Plan**: plans/plan-20260912-1540-byok-018-d2-task-assertion.md
+> **Status**: Fulfilled
+> **Plan**: plans/archive/plan-20260912-1540-byok-018-d2-task-assertion.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
 > **Last Updated**: 2026-09-13
-> **Review File**: `tasks/reviews/20260912-1540-byok-018-d2-task-assertion.review.md`
-> **Notes File**: `tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md`
+> **Review File**: `tasks/archive/review-20260913-1254-byok-018-d2-task-assertion.md`
+> **Notes File**: `tasks/archive/notes-20260913-1254-byok-018-d2-task-assertion.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
 
 ## Why
@@ -47,10 +57,10 @@
 
 ## Workflow Inventory
 
-- Source plan: `plans/plan-20260912-1540-byok-018-d2-task-assertion.md`
+- Source plan: `plans/archive/plan-20260912-1540-byok-018-d2-task-assertion.md`
 - Deferred-goal ledger: `tasks/todos.md`
-- Review file: `tasks/reviews/20260912-1540-byok-018-d2-task-assertion.review.md`
-- Notes file: `tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md`
+- Review file: `tasks/archive/review-20260913-1254-byok-018-d2-task-assertion.md`
+- Notes file: `tasks/archive/notes-20260913-1254-byok-018-d2-task-assertion.md`
 - Checks file: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
 - Scope gate: edit only paths listed under `allowed_paths`; update this contract before widening scope.
@@ -184,14 +194,14 @@ allowed_paths:
   - docs/spec.md
   - CHANGELOG.md
   # --- 工作流文件 ---
-  - plans/plan-20260912-1540-byok-018-d2-task-assertion.md
+  - plans/archive/plan-20260912-1540-byok-018-d2-task-assertion.md
   # 原登记契约已改名；扩充 evidence policy 后 Git 相似度下降，需显式列出删除源。
   - tasks/contracts/20260912-byok-018-d2-task-assertion.contract.md
-  - tasks/contracts/20260912-1540-byok-018-d2-task-assertion.contract.md
-  - tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md
+  - tasks/archive/contract-20260913-1254-byok-018-d2-task-assertion.md
+  - tasks/archive/notes-20260913-1254-byok-018-d2-task-assertion.md
   # 改名删除源：notes 由 20260912-byok-018-d2-task-assertion.notes.md 改名为 harness stem 命名（9dd2a818），追加证据后相似度低于 rename 阈值，diff 表现为删除旧路径。
   - tasks/notes/20260912-byok-018-d2-task-assertion.notes.md
-  - tasks/reviews/20260912-1540-byok-018-d2-task-assertion.review.md
+  - tasks/archive/review-20260913-1254-byok-018-d2-task-assertion.md
   # 范围外阻塞修复（仅 worktree_strategy 一段）：fd1ae215 把 codex/brc1415-canary 的路由带进 main，review_base 指向已不存在的 origin/codex/brc1415-canary，change assessment 报 subject_unavailable 挡住本契约收口。恢复为 4e5c8cd8 时的 main / origin/main；policy 其余 canary 配置不动、只报告。
   - .ai/harness/policy.json
 ```
@@ -249,7 +259,7 @@ exit_criteria:
     - deploy/sql/0022_task_assertion_replay_schema.sql
   artifacts_exist:
     - .ai/harness/checks/latest.json
-    - tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md
+    - tasks/archive/notes-20260913-1254-byok-018-d2-task-assertion.md
 ```
 
 ## Verification Plan

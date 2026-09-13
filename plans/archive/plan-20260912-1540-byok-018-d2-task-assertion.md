@@ -1,6 +1,16 @@
+> **Archived**: 2026-09-13 12:54
+> **Related Plan**: plans/archive/plan-20260912-1540-byok-018-d2-task-assertion.md
+> **Outcome**: Completed
+> **Lifecycle**: plan
+> **Parent Run ID**: run-20260913-1254
+> **Archive Projection V1**: `plans/plan-20260912-1540-byok-018-d2-task-assertion.md` => `plans/archive/plan-20260912-1540-byok-018-d2-task-assertion.md`
+> **Archive Projection V1**: `tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md` => `tasks/archive/notes-20260913-1254-byok-018-d2-task-assertion.md`
+> **Archive Projection V1**: `tasks/contracts/20260912-1540-byok-018-d2-task-assertion.contract.md` => `tasks/archive/contract-20260913-1254-byok-018-d2-task-assertion.md`
+> **Archive Projection V1**: `tasks/reviews/20260912-1540-byok-018-d2-task-assertion.review.md` => `tasks/archive/review-20260913-1254-byok-018-d2-task-assertion.md`
+
 # Plan: SDK D2 — task-scoped tool authority (byok-task-assertion-v1)
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 2026-09-12
 > **Slug**: byok-018-d2-task-assertion
 > **Artifact Level**: work-package
@@ -9,9 +19,9 @@
 > **Rollback Surface**: 未发布源码；回退即丢弃 contract worktree 分支，无已发布 artifact、无生产数据、无包版本/lock 改动。
 > **Spec**: `docs/spec.md`
 > **Research**: See `docs/researches/`
-> **Task Contract**: `tasks/contracts/20260912-1540-byok-018-d2-task-assertion.contract.md`
-> **Task Review**: `tasks/reviews/20260912-1540-byok-018-d2-task-assertion.review.md`
-> **Implementation Notes**: `tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md`
+> **Task Contract**: `tasks/archive/contract-20260913-1254-byok-018-d2-task-assertion.md`
+> **Task Review**: `tasks/archive/review-20260913-1254-byok-018-d2-task-assertion.md`
+> **Implementation Notes**: `tasks/archive/notes-20260913-1254-byok-018-d2-task-assertion.md`
 
 ## Authority
 
@@ -33,16 +43,16 @@
 ## Workflow Inventory
 Complete this inventory before implementation. If any line is unknown, keep the plan in Draft and fill it before projection.
 
-- Active plan: `plans/plan-20260912-1540-byok-018-d2-task-assertion.md`
-- Sprint contract: `tasks/contracts/20260912-1540-byok-018-d2-task-assertion.contract.md`
-- Sprint review: `tasks/reviews/20260912-1540-byok-018-d2-task-assertion.review.md`
-- Implementation notes: `tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md`
+- Active plan: `plans/archive/plan-20260912-1540-byok-018-d2-task-assertion.md`
+- Sprint contract: `tasks/archive/contract-20260913-1254-byok-018-d2-task-assertion.md`
+- Sprint review: `tasks/archive/review-20260913-1254-byok-018-d2-task-assertion.md`
+- Implementation notes: `tasks/archive/notes-20260913-1254-byok-018-d2-task-assertion.md`
 - Deferred-goal ledger: `tasks/todos.md`
 - Current checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
-- Scope authority: `tasks/contracts/20260912-1540-byok-018-d2-task-assertion.contract.md` `allowed_paths`
+- Scope authority: `tasks/archive/contract-20260913-1254-byok-018-d2-task-assertion.md` `allowed_paths`
 - Concurrency rule: `.ai/harness/active-plan` selects the active plan for this worktree when present; `.ai/harness/active-worktree` records the owning worktree. 本仓当前 `.ai/harness/active-plan` = `plans/plan-20260910-0214-downstream-issue-intake.md`（Executing）。**本计划不接管、不切换该 marker**；进入 C05 时按 `plan-to-todo` / `contract-worktree start` 在新 worktree 执行，不与 downstream-issue-intake 串行化在同一工作树上。
-- Execution isolation: approved contract-level work projects through `repo-harness run plan-to-todo --plan plans/plan-20260912-1540-byok-018-d2-task-assertion.md` and may start `repo-harness run contract-worktree start --plan plans/plan-20260912-1540-byok-018-d2-task-assertion.md`.
+- Execution isolation: approved contract-level work projects through `repo-harness run plan-to-todo --plan plans/archive/plan-20260912-1540-byok-018-d2-task-assertion.md` and may start `repo-harness run contract-worktree start --plan plans/archive/plan-20260912-1540-byok-018-d2-task-assertion.md`.
 
 ## Approach
 ### Strategy
@@ -76,11 +86,11 @@ C03 登记已完成。当前按冻结契约实施并收口 C05，精确源码/�
 | 迁移编号 0022 被其它分支抢占 | low | low | 实施时按当时最大值顺延（§14 明文允许） |
 
 ## Task Contracts
-- Contract file: `tasks/contracts/20260912-1540-byok-018-d2-task-assertion.contract.md`
-- Review file: `tasks/reviews/20260912-1540-byok-018-d2-task-assertion.review.md`
-- Implementation notes file: `tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md`
+- Contract file: `tasks/archive/contract-20260913-1254-byok-018-d2-task-assertion.md`
+- Review file: `tasks/archive/review-20260913-1254-byok-018-d2-task-assertion.md`
+- Implementation notes file: `tasks/archive/notes-20260913-1254-byok-018-d2-task-assertion.md`
 - Template: `.claude/templates/contract.template.md`
-- Verification command: `repo-harness run verify-contract --contract tasks/contracts/20260912-1540-byok-018-d2-task-assertion.contract.md --strict`
+- Verification command: `repo-harness run verify-contract --contract tasks/archive/contract-20260913-1254-byok-018-d2-task-assertion.md --strict`
 - Active plan rule: `.ai/harness/active-plan` is authoritative for this worktree when present; `.ai/harness/active-worktree` records the owning worktree. Do not infer active execution from the latest non-archived plan.
 
 ## Handoff
@@ -99,7 +109,7 @@ C03 登记已完成。当前按冻结契约实施并收口 C05，精确源码/�
 
 ## Evidence Contract
 
-- **State/progress path**: `tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md`
+- **State/progress path**: `tasks/archive/notes-20260913-1254-byok-018-d2-task-assertion.md`
 - **Verification evidence**: `.ai/harness/checks/latest.json` 与 `.ai/harness/runs/`
 - **Evaluator rubric**: 契约 §15 的 AC11 / AC12 / AC13 可证伪条件
 - **Stop condition**: 需要写 `allowed_paths` 之外的路径、或缺少 SDK 实施授权时停止并交回 Owner
