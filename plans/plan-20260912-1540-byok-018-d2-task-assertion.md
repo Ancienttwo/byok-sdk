@@ -129,6 +129,7 @@ C03 登记已完成。当前按冻结契约实施并收口 C05，精确源码/�
 | # | 范围 | 状态 |
 | --- | --- | --- |
 | 9 | 首次连接/重连 discovery 在 host toolset nonce 冻结前有界等待；超时/不可读/未声明可观测；cancel/shutdown 释放等待 | IMPLEMENTED，focused 42 tests + cancel 增量 1 test 通过，root acceptance 待执行 |
-| 10 | 冻结新候选，root verification → typed AcceptanceReceipt → verify-sprint → Draft PR | PENDING |
+| 10 | 冻结新候选，root verification → typed AcceptanceReceipt → verify-sprint → Draft PR | 候选 90cf5de6/root verification/typed receipt PASS；workflow finish 与 Draft PR 待本次归属修正后完成 |
+| 11 | Owner 2026-09-13 批准：两个历史 SDK workstream 目录与 Capability ID 修正；复用候选证据并补 workflow delta 验证 | IMPLEMENTED，待验证/finish |
 
 P1：部署 declaration 是 capability 权威；TaskRunner 构造 child env 是 nonce 的唯一作者。P2：首个 long-poll open → discovery 与 task offer 并发 → pickAdapter → 原代码直接冻结 nonce；pre-fix barrier 测试证明 declaration 尚未返回时 runtime 已启动。P3：在 nonce 冻结前等待最新 connection generation 的声明，单次 read 与每个 offer 均限 5000ms；10x 并发共享一次 read，每个等待者持有一个可清理 timer，重连不延长该 offer 的截止点。缺失声明仍不签发、不换 device lane；Agent task 没有 host toolsets 时不等待。

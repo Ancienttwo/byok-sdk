@@ -22,7 +22,8 @@
 ## Scope
 
 - In scope: 契约 §8 / §13 C05 的 SDK 实现与验证、§14 SDK D2 精确登记；2026-09-13 Owner 批准接管本 worktree 写入、C05 discovery/offer 有界等待追加片及既有枚举补项追认。只生成 C05 候选级证据，不宣称 C06/C09 或发布完成。
-- Blocking workflow repair: 本任务唯一范围外修复为退役未声明实际源码 ownership 的旧 archcontext seed capability（保留文件及历史内容；实际 SDK 节点不变），消除 `capability_registry:invalid` 编辑硬阻塞。
+- Blocking workflow repair: 此前已批准的阻塞修复为退役未声明实际源码 ownership 的旧 archcontext seed capability（保留文件及历史内容；实际 SDK 节点不变），消除 `capability_registry:invalid` 编辑硬阻塞。
+- Owner-approved follow-up (2026-09-13): Owner 再次回复「批准」，授权仅迁移两个历史 SDK workstream 到真实 capability 目录并修正 Capability ID，保留其状态/任务/历史，然后重试 finish、push 与 Draft PR；主 checkout 并发 WIP 不动。
 - Out of scope: 不改任何包版本或 lock 文件（§14 末段「包版本/lock 改动只能消费经验证的 D2 artifact；本轮不改」）；不发布、不升级设备、不触生产（§16「SDK release / native / prod 未授权」）；不动 `S/` 仓任何文件；不接管或修改 `plans/plan-20260910-0214-downstream-issue-intake.md` 及其 `.ai/harness/active-plan` marker；不复制契约正文进本仓。
 - Taste constraints: <!-- advisory only, no run gate; default style/taste lives in AGENTS.md and the minimal-change policy, use this to record a per-task override -->
 
@@ -71,6 +72,11 @@
 
 ```yaml
 allowed_paths:
+  # Owner 批准的两个 orphan workstream 归属修正（旧路径删除 + 新路径写入）。
+  - tasks/workstreams/root/20260904-sdk-root.md
+  - tasks/workstreams/root/20260905-sdk-root.md
+  - tasks/workstreams/sdk/sdk-root/20260904-sdk-root.md
+  - tasks/workstreams/sdk/sdk-root/20260905-sdk-root.md
   - .archcontext/model/nodes/capability.architecture-context.yaml
   # --- 契约 §14「SDK D2」行：八个源文件 ---
   - packages/core/src/device-assertion.ts
@@ -257,9 +263,21 @@ exit_criteria:
       "cwd": ".",
       "phase": "verification",
       "cost": "normal",
-      "evidence_policy": "current_exact",
-      "necessity": "SDK root required check (contract §15 implementation phase).",
-      "inputs": { "env": [] }
+      "evidence_policy": "baseline_with_delta",
+      "necessity": "SDK root required check (contract §15 implementation phase). Owner-approved workflow-only closeout reuses immutable 90cf5de6 execution; named current delta checks prove unchanged candidate source and artifact bytes.",
+      "inputs": {
+        "env": []
+      },
+      "baseline": {
+        "run_file": ".ai/harness/runs/verification-vx-30eaadebda1d4a1a8cc3.json",
+        "execution_id": "vx-30eaadebda1d4a1a8cc3"
+      },
+      "delta_checks": [
+        "candidate-source-unchanged",
+        "task-workflow",
+        "capability-workstreams",
+        "candidate-artifact-readback"
+      ]
     },
     {
       "id": "typecheck",
@@ -268,9 +286,21 @@ exit_criteria:
       "cwd": ".",
       "phase": "verification",
       "cost": "normal",
-      "evidence_policy": "current_exact",
-      "necessity": "SDK root required check (contract §15 implementation phase).",
-      "inputs": { "env": [] }
+      "evidence_policy": "baseline_with_delta",
+      "necessity": "SDK root required check (contract §15 implementation phase). Owner-approved workflow-only closeout reuses immutable 90cf5de6 execution; named current delta checks prove unchanged candidate source and artifact bytes.",
+      "inputs": {
+        "env": []
+      },
+      "baseline": {
+        "run_file": ".ai/harness/runs/verification-vx-6d600fa0342c4dfe9ad1.json",
+        "execution_id": "vx-6d600fa0342c4dfe9ad1"
+      },
+      "delta_checks": [
+        "candidate-source-unchanged",
+        "task-workflow",
+        "capability-workstreams",
+        "candidate-artifact-readback"
+      ]
     },
     {
       "id": "test",
@@ -279,9 +309,21 @@ exit_criteria:
       "cwd": ".",
       "phase": "verification",
       "cost": "normal",
-      "evidence_policy": "current_exact",
-      "necessity": "SDK root required check; carries the AC11/AC12 focused regressions.",
-      "inputs": { "env": [] }
+      "evidence_policy": "baseline_with_delta",
+      "necessity": "SDK root required check; carries the AC11/AC12 focused regressions. Owner-approved workflow-only closeout reuses immutable 90cf5de6 execution; named current delta checks prove unchanged candidate source and artifact bytes.",
+      "inputs": {
+        "env": []
+      },
+      "baseline": {
+        "run_file": ".ai/harness/runs/verification-vx-ade0882410c247cfa146.json",
+        "execution_id": "vx-ade0882410c247cfa146"
+      },
+      "delta_checks": [
+        "candidate-source-unchanged",
+        "task-workflow",
+        "capability-workstreams",
+        "candidate-artifact-readback"
+      ]
     },
     {
       "id": "api-surface",
@@ -290,9 +332,21 @@ exit_criteria:
       "cwd": ".",
       "phase": "verification",
       "cost": "normal",
-      "evidence_policy": "current_exact",
-      "necessity": "Public export changes must land in the api-surface golden files.",
-      "inputs": { "env": [] }
+      "evidence_policy": "baseline_with_delta",
+      "necessity": "Public export changes must land in the api-surface golden files. Owner-approved workflow-only closeout reuses immutable 90cf5de6 execution; named current delta checks prove unchanged candidate source and artifact bytes.",
+      "inputs": {
+        "env": []
+      },
+      "baseline": {
+        "run_file": ".ai/harness/runs/verification-vx-41c89c7fbad24818b31e.json",
+        "execution_id": "vx-41c89c7fbad24818b31e"
+      },
+      "delta_checks": [
+        "candidate-source-unchanged",
+        "task-workflow",
+        "capability-workstreams",
+        "candidate-artifact-readback"
+      ]
     },
     {
       "id": "version-authority",
@@ -301,9 +355,21 @@ exit_criteria:
       "cwd": ".",
       "phase": "verification",
       "cost": "normal",
-      "evidence_policy": "current_exact",
-      "necessity": "Guards the single version authority; §14 forbids package version/lock changes this round.",
-      "inputs": { "env": [] }
+      "evidence_policy": "baseline_with_delta",
+      "necessity": "Guards the single version authority; §14 forbids package version/lock changes this round. Owner-approved workflow-only closeout reuses immutable 90cf5de6 execution; named current delta checks prove unchanged candidate source and artifact bytes.",
+      "inputs": {
+        "env": []
+      },
+      "baseline": {
+        "run_file": ".ai/harness/runs/verification-vx-a67e36e8e2d5461194bf.json",
+        "execution_id": "vx-a67e36e8e2d5461194bf"
+      },
+      "delta_checks": [
+        "candidate-source-unchanged",
+        "task-workflow",
+        "capability-workstreams",
+        "candidate-artifact-readback"
+      ]
     },
     {
       "id": "task-workflow",
@@ -314,7 +380,9 @@ exit_criteria:
       "cost": "normal",
       "evidence_policy": "current_exact",
       "necessity": "SDK root required workflow check (contract §15 implementation phase).",
-      "inputs": { "env": [] }
+      "inputs": {
+        "env": []
+      }
     },
     {
       "id": "release-pack",
@@ -323,9 +391,60 @@ exit_criteria:
       "cwd": ".",
       "phase": "verification",
       "cost": "expensive",
+      "evidence_policy": "baseline_with_delta",
+      "necessity": "AC13 G2 候选 artifact 证据：本地 packed artifact（subject-bound 指纹），只标 candidate，不冒充 released。 Owner-approved workflow-only closeout reuses immutable 90cf5de6 execution; named current delta checks prove unchanged candidate source and artifact bytes.",
+      "inputs": {
+        "env": []
+      },
+      "baseline": {
+        "run_file": ".ai/harness/runs/verification-vx-82d3add0eede44a58100.json",
+        "execution_id": "vx-82d3add0eede44a58100"
+      },
+      "delta_checks": [
+        "candidate-source-unchanged",
+        "task-workflow",
+        "capability-workstreams",
+        "candidate-artifact-readback"
+      ]
+    },
+    {
+      "id": "candidate-source-unchanged",
+      "kind": "command",
+      "command": "git diff --exit-code 90cf5de6a8f31154dfaa046491b4d7f9e9e54f64 -- . ':(exclude)plans/**' ':(exclude)tasks/**'",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "normal",
       "evidence_policy": "current_exact",
-      "necessity": "AC13 G2 候选 artifact 证据：本地 packed artifact（subject-bound 指纹），只标 candidate，不冒充 released。",
-      "inputs": { "env": [] }
+      "necessity": "Prove all tracked non-workflow inputs equal the accepted candidate source.",
+      "inputs": {
+        "env": []
+      }
+    },
+    {
+      "id": "capability-workstreams",
+      "kind": "command",
+      "command": "repo-harness run capability-resolver validate --format json",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "normal",
+      "evidence_policy": "current_exact",
+      "necessity": "Validate real SDK ownership and absence of orphan workstreams.",
+      "inputs": {
+        "env": []
+      }
+    },
+    {
+      "id": "candidate-artifact-readback",
+      "kind": "command",
+      "command": "python3 -c 'import json,hashlib; from pathlib import Path; p=Path('\"'\"'_ops/byok-018-d2/artifacts-c05-final'\"'\"'); m=p/'\"'\"'release-manifest.json'\"'\"'; assert hashlib.sha256(m.read_bytes()).hexdigest()=='\"'\"'137de150a9b85e648c97571fd71e3d66b669e4e88cc7b8abcc2382635c3e12f1'\"'\"'; j=json.loads(m.read_text()); assert j['\"'\"'sourceGitSha'\"'\"']=='\"'\"'90cf5de6a8f31154dfaa046491b4d7f9e9e54f64'\"'\"'; assert len(j['\"'\"'packages'\"'\"'])==10; assert all(hashlib.sha256((p/x['\"'\"'file'\"'\"']).read_bytes()).hexdigest()==x['\"'\"'sha256'\"'\"'] for x in j['\"'\"'packages'\"'\"']); print('\"'\"'10 candidate package hashes verified'\"'\"')'",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "normal",
+      "evidence_policy": "current_exact",
+      "necessity": "Verify retained manifest identity and all 10 candidate tarball SHA256 values without rebuilding.",
+      "inputs": {
+        "env": []
+      }
     }
   ]
 }

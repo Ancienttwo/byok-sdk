@@ -190,3 +190,11 @@ P1：daemon 的 deployment declaration 是 capability 权威；TaskRunner 是每
 - 后续 `repo-harness run contract-worktree finish --no-merge --target main --gate-base origin/main` exit 1：`orphan workstream: tasks/workstreams/root/20260904-sdk-root.md`、`orphan workstream: tasks/workstreams/root/20260905-sdk-root.md`（原文在 `_ops/byok-018-d2/worktree-finish.log`）。这是历史 root → sdk/sdk-root 投影迁移未闭合，未改这两个文件或复制主 checkout WIP。
 - 本任务已使用一次范围外阻塞修复（retired seed node）；依 Owner global rule「第二个范围外发现即停」，停止进一步执行，不绕过 finish、不 push/PR、不开始 C04 产品代码。C04 实施授权已在 S/ commit 6c2335e 落盘；C04/C08 shared-schema 分片验收边界仍待 Owner 选择。
 - 下一步仅处理两个旧 workstream 的真实 capability 归属/迁移，再重试 finish；C05 code/root checks/pack/acceptance 不因这个工作流阻塞被冒充失败，也不无故重跑。
+
+
+## Owner 批准的 workstream 收口修复（2026-09-13）
+
+- Owner 在前次 orphan blocker 报告后回复「批准」；本片仅迁移 20260904/20260905 SDK workstreams 到 `tasks/workstreams/sdk/sdk-root/`，将 Capability ID 改为 `sdk-sdk-root`。历史 Purpose/状态/TODO/Source Plan 均保留。
+- P1：实际 ownership 来自 `.archcontext/model/nodes/capability.sdk.sdk-root.yaml`（packages/**），不是已退役 seed。P2：finish → capability resolver → 遍历 workstream → 旧 root 目录无对应 active capability，产生 orphan。P3：仅修正投影目录和 identity，不修改 capability 权威或接管主 checkout 并发 WIP。
+- Contract 先补登四个旧/新路径再迁移。原收据的 contract fingerprint 因授权修订失效，重新 prepare/record/finalize；产品 gate 复用，新增 delta 由 Codex 直接核验。
+- Verification Plan 显式引用 90cf5de6 的六项不可变 build/type/test/API/version/pack 执行记录为 baseline_with_delta；当前执行 source equality（全部 non-workflow tracked inputs）、strict task workflow、capability resolver、固定 manifest hash 与十包 SHA256 readback。不会重新生产同一候选包。
