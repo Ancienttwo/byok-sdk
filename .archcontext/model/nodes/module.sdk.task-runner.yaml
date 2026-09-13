@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "module.sdk.task-runner",
+  "kind": "module",
+  "name": "Task offer orchestration",
+  "status": "active",
+  "parent": "capability.sdk.sdk-root",
+  "summary": "Owns offer admission, task/runtime binding, input resolution and runtime startup ownership in the local SDK daemon.",
+  "source": {
+    "include": [
+      "packages/client/src/daemon/task-runner.ts"
+    ],
+    "entrypoints": [
+      {
+        "id": "task-runner.offer",
+        "path": "packages/client/src/daemon/task-runner.ts",
+        "symbols": [
+          {
+            "name": "handleOffer",
+            "sinks": [
+              {
+                "id": "task-runner.identity",
+                "path": "packages/client/src/daemon/task-runner.ts",
+                "symbol": "offeredAgentRef"
+              },
+              {
+                "id": "task-runner.start",
+                "path": "packages/client/src/daemon/runtime-start.ts",
+                "symbol": "startOwnedRuntime"
+              },
+              {
+                "id": "task-runner.decline",
+                "path": "packages/client/src/daemon/task-runner.ts",
+                "symbol": "decline"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "notes": [
+    "Representative local SDK path, not an exhaustive package decomposition. Host Execution creation, remote offer transport, injected stores and native provider requests have separate evidence. The existing adapter prepare call occurs after SDK offer and before claim; this is not the proposed pre-Execution compilation API."
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "schemaVersion": "archcontext.flow/v1",
+  "id": "flow.sdk.task-input",
+  "capabilityId": "capability.sdk.sdk-root",
+  "name": "Strict Agent offer identity to owned runtime startup",
+  "applicability": "required",
+  "participants": [
+    {
+      "id": "runner",
+      "nodeId": "module.sdk.task-runner"
+    },
+    {
+      "id": "validation",
+      "nodeId": "component.sdk.offer-validation"
+    },
+    {
+      "id": "startup",
+      "nodeId": "module.sdk.runtime-start"
+    }
+  ],
+  "steps": [
+    {
+      "id": "identity",
+      "from": "runner",
+      "to": "validation",
+      "label": "Read and validate the strict offer AgentRef",
+      "evidence": {
+        "entrypointId": "task-runner.offer",
+        "sourceSymbol": "handleOffer",
+        "sinkId": "task-runner.identity"
+      }
+    }
+  ],
+  "outcomes": [
+    {
+      "id": "admitted",
+      "kind": "success",
+      "label": "Offer passes local admission, input resolution and preparation",
+      "steps": [
+        {
+          "id": "start",
+          "from": "runner",
+          "to": "startup",
+          "label": "Await the owned startup wrapper with the prepared operation and resolved input",
+          "evidence": {
+            "entrypointId": "task-runner.offer",
+            "sourceSymbol": "handleOffer",
+            "sinkId": "task-runner.start"
+          }
+        }
+      ],
+      "terminal": {
+        "participant": "runner",
+        "label": "Receive Session from the wrapper; later binding, pumping and terminal settlement remain separate steps"
+      }
+    },
+    {
+      "id": "declined",
+      "kind": "error",
+      "label": "Invalid AgentRef or required local Agent-home capability unavailable",
+      "steps": [
+        {
+          "id": "decline",
+          "from": "runner",
+          "to": "validation",
+          "label": "Emit explicit task.decline and return before runtime startup",
+          "evidence": {
+            "entrypointId": "task-runner.offer",
+            "sourceSymbol": "handleOffer",
+            "sinkId": "task-runner.decline"
+          }
+        }
+      ],
+      "terminal": {
+        "participant": "runner",
+        "label": "Return from the offer handler without starting a runtime"
+      }
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.owned-runtime-start",
+  "kind": "calls",
+  "source": "module.sdk.task-runner",
+  "target": "module.sdk.runtime-start",
+  "synchrony": "asynchronous",
+  "intent": "Await prepared operation startup with the remaining admission deadline and preserve cleanup ownership on cancellation or failure."
+}

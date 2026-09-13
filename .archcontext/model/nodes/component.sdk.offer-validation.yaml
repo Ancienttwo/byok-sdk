@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "component.sdk.offer-validation",
+  "kind": "component",
+  "name": "Offer identity and decline helpers",
+  "status": "active",
+  "parent": "module.sdk.task-runner",
+  "summary": "Same-file offeredAgentRef validation and decline envelope construction used by TaskRunner offer admission.",
+  "source": {
+    "include": [
+      "packages/client/src/daemon/task-runner.ts"
+    ]
+  },
+  "notes": [
+    "Conceptual same-file helper responsibility; not a separate package, process, storage authority or alternate admission implementation."
+  ]
+}
