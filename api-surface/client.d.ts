@@ -2256,8 +2256,8 @@ export declare class ApprovalRegistry {
 }
 export {};
 // ==== @byok-sdk/client dist/daemon/assertion-client.d.ts ====
-import { type DeviceAssertionEnvelopeV1 } from '@byok-sdk/core';
-import { type AssertionIssueErrorCode } from './control-protocol';
+import { type DeviceAssertionEnvelopeV1, type TaskAssertionEnvelopeV1 } from '@byok-sdk/core';
+import { type AssertionIssueErrorCode, type TaskAssertionIssueErrorCode } from './control-protocol';
 /**
  * Plan `device-assertion-broker`: the ONE public entry point a sibling local
  * process uses to obtain a device assertion from an already-running daemon.
@@ -2324,6 +2324,72 @@ export type RequestDeviceAssertionResult = {
  * of a credential living outside the daemon that minted it.
  */
 export declare function requestDeviceAssertion(options: RequestDeviceAssertionOptions): Promise<RequestDeviceAssertionResult>;
+/**
+ * Contract §8.1 / §8.2(1): ask a running daemon for one task-scoped assertion,
+ * for one upcoming tool invocation.
+ *
+ * `contextToken` is the `BYOK_HOST_TOOLSET_CONTEXT` value the daemon injected
+ * into THIS process's environment when it started this task's toolset server.
+ * The caller passes it explicitly and this function never reads it from
+ * `process.env` itself — a helper that went looking for the variable would work
+ * just as well inside a process the daemon never spawned for this task, which
+ * is precisely the substitution the nonce exists to prevent. Reading the
+ * environment is the child's own decision, made once, at its own entry point.
+ *
+ * §8.1 again, on what this function must NOT grow: no cache, no refresh, no
+ * retry. Every tool call takes a NEW assertion with a NEW `jti`, and so does
+ * every transport retry of the same call — one credential held across
+ * invocations is a task pass, which is the thing the whole lane is built to not
+ * be. Retrying is the caller's decision, and a retry means calling this again.
+ */
+export interface RequestTaskAssertionOptions {
+    /** Same `productId` the daemon was configured with — selects which daemon's socket to dial. */
+    productId: string;
+    /** Same `storeDir` the daemon was configured with. Defaults to `~/.byok/<productId>`. */
+    storeDir?: string;
+    /** The `BYOK_HOST_TOOLSET_CONTEXT` nonce this process was started with. Never read from the environment here. */
+    contextToken: string;
+    /** The exact audience string, which must appear verbatim in the daemon's configured allowlist. */
+    audience: string;
+    /** Bound on the control-socket round trip, ms. Default 10s (the control client's own default). */
+    timeoutMs?: number;
+}
+/**
+ * The nine refusals the daemon itself can answer with (see
+ * `TASK_ASSERTION_ISSUE_ERROR_CODES`, `control-protocol.ts`) plus the two this
+ * function produces on its own, with the same meanings they have in
+ * {@link RequestDeviceAssertionErrorCode}.
+ *
+ * Note what a caller may NOT conclude from `context_token_invalid`: it does not
+ * distinguish "this token was never real" from "this task has finished and been
+ * cleaned up". The daemon collapses those deliberately, and a caller that
+ * reconstructs the difference by timing or retrying is reading an oracle that is
+ * not offered.
+ */
+export type RequestTaskAssertionErrorCode = TaskAssertionIssueErrorCode | 'unavailable' | 'bad_response' | (string & {});
+export type RequestTaskAssertionResult = {
+    ok: true;
+    assertion: TaskAssertionEnvelopeV1;
+    expiresAt: string;
+} | {
+    ok: false;
+    code: RequestTaskAssertionErrorCode;
+    reason: string;
+};
+/**
+ * Asks a running daemon for one short-lived task assertion.
+ *
+ * Never throws for an expected outcome, exactly like
+ * {@link requestDeviceAssertion}: a missing daemon, a denied audience, an
+ * unknown or revoked context, a revoked or unpaired device, and a daemon
+ * mid-shutdown all come back as `{ok: false, code, reason}`.
+ *
+ * A device assertion is NOT an acceptable answer here and cannot become one:
+ * this calls `task_assertion.issue`, and the envelope is parsed with
+ * `parseTaskAssertionEnvelope`, which rejects a device envelope outright rather
+ * than passing it on to a caller who would then present it as task authority.
+ */
+export declare function requestTaskAssertion(options: RequestTaskAssertionOptions): Promise<RequestTaskAssertionResult>;
 // ==== @byok-sdk/client dist/daemon/auth-manager.d.ts ====
 import { DeviceStore, type DeviceRecord } from './store';
 import type { DeviceCredentialStore, InMemoryDeviceCredentialStore } from './device-credential-store';
@@ -3178,6 +3244,82 @@ export interface AssertionIssueResult {
  */
 export declare const ASSERTION_ISSUE_ERROR_CODES: readonly ['assertion_disabled', 'bad_request', 'audience_denied', 'shutting_down', 'revoked', 'not_paired'];
 export type AssertionIssueErrorCode = (typeof ASSERTION_ISSUE_ERROR_CODES)[number];
+/**
+ * Params for `task_assertion.issue`: the MCP child of ONE admitted host
+ * toolset server asking the daemon to mint a task-scoped assertion for one
+ * upcoming tool invocation.
+ *
+ * A SEPARATE method from `assertion.issue`, not an optional field on it. The
+ * two lanes have zero interchange (§8.1): a device caller must not be able to
+ * reach the task signer by adding a field, and a task caller must not be able
+ * to fall back to a device assertion by dropping one. Two methods make that a
+ * property of the dispatch table rather than of a branch inside one handler.
+ *
+ * Exactly two fields, and in particular NOT `taskId`, `agentRef` or
+ * `toolsetId`: those are what the assertion asserts, and they come from the
+ * daemon's own registry entry for `contextToken`. Every process running as this
+ * UID can reach the control socket, so a caller-supplied identity would be
+ * synthesized authority — the nonce is evidence precisely because only the
+ * child the daemon spawned for this task ever received it.
+ */
+export interface TaskAssertionIssueParams {
+    contextToken: string;
+    audience: string;
+}
+/**
+ * Bound on the `contextToken` a caller may send. The daemon's own nonce is 43
+ * characters (32 CSPRNG bytes, base64url); this frame-level bound simply stops
+ * an unbounded string from reaching the registry lookup or an audit line, the
+ * same role `ASSERTION_AUDIENCE_MAX_BYTES` plays for the audience.
+ */
+export declare const TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES = 256;
+/**
+ * Strict shape check. `undefined` means `bad_request`.
+ *
+ * Rejects an unknown key outright — including `taskId`/`agentRef`/`toolsetId`.
+ * A tolerated extra field here is exactly how a caller would come to believe it
+ * can influence the claim set, which is the one thing this lane exists to
+ * prevent.
+ */
+export declare function parseTaskAssertionIssueParams(value: unknown): TaskAssertionIssueParams | undefined;
+/**
+ * Result of `task_assertion.issue`. `assertion` is a full
+ * `TaskAssertionEnvelopeV1`, carried opaquely on this wire exactly as the
+ * device lane carries its own envelope.
+ */
+export interface TaskAssertionIssueResult {
+    assertion: unknown;
+    expiresAt: string;
+}
+/**
+ * The nine `ControlError` codes `task_assertion.issue` can answer with, in the
+ * exact order the handler checks them (`create-daemon.ts`). The device lane's
+ * six are unchanged and in the same relative order — the task lane inherits the
+ * device gates rather than defining a second, looser sequence — with one gate
+ * ahead of them that only this lane has, and two behind them that make it
+ * task-scoped:
+ *
+ * - `capability_undeclared` — contract §8.1's capability gate
+ *   (`host-mcp-task-context`) is not in place: either this daemon issues no
+ *   assertions at all, or it has not read a deployment declaration that names
+ *   the capability. Checked immediately after `assertion_disabled` and BEFORE
+ *   the params are even parsed, because a daemon that cannot serve this lane
+ *   has nothing to say about the shape of a request for it. §8.3 is what makes
+ *   this a refusal rather than a degradation: an undeclared task lane is
+ *   `unavailable`, never a reason to reach for a device assertion.
+ *
+ * - `context_token_invalid` — no registry entry for this token. Deliberately
+ *   the SAME answer for "never existed" and "existed, and its task has since
+ *   been cleaned up": distinguishing them would turn the refusal into a probe
+ *   for which tasks this device has run.
+ * - `context_revoked` — the entry exists and its task's authority has been
+ *   withdrawn locally (cancel accepted, terminal reached, or shutdown). This is
+ *   the daemon's SECOND fail-closed layer (I12): the authoritative revocation
+ *   point is the host's own cancel/End commit, and an assertion already in a
+ *   caller's hands is not recalled by this refusal.
+ */
+export declare const TASK_ASSERTION_ISSUE_ERROR_CODES: readonly ['assertion_disabled', 'capability_undeclared', 'bad_request', 'audience_denied', 'shutting_down', 'revoked', 'not_paired', 'context_token_invalid', 'context_revoked'];
+export type TaskAssertionIssueErrorCode = (typeof TASK_ASSERTION_ISSUE_ERROR_CODES)[number];
 export type ShutdownReason = 'unpair' | 'operator';
 export interface ShutdownParams {
     reason?: ShutdownReason;
@@ -5698,21 +5840,39 @@ export type DaemonEvent = {
  * raw denied audience therefore never reaches the observer feed, `format.ts`,
  * daemon stdout, or the audit file — there is no field to carry it, rather
  * than a redactor that has to remember to strip it.
+ *
+ * Contract §8.2(1): `task_assertion.issue` resolves onto this SAME event kind
+ * with `lane: 'task'`, so an operator reads one issuance/refusal stream rather
+ * than correlating two. `lane` is required precisely so the two credential
+ * kinds stay distinguishable in the local ledger; `taskId` accompanies the
+ * task lane once the daemon has resolved which task the call belongs to.
+ *
+ * What is NOT a field here, and never can be: the
+ * `BYOK_HOST_TOOLSET_CONTEXT` nonce. It is the task lane's entire authority —
+ * a value that reaches a log is a value an operator's log shipper can replay
+ * — so, exactly like the signature, there is no field to carry it rather than
+ * a redactor that must remember to strip it.
  */
  | {
     kind: 'device-assertion';
     ts: string;
     result: 'issued';
+    lane: AssertionLane;
     audience: string;
     jti: string;
     expiresAt: string;
+    taskId?: string;
 } | {
     kind: 'device-assertion';
     ts: string;
     result: 'denied';
+    lane: AssertionLane;
     reason: string;
     audienceSize?: number;
+    taskId?: string;
 };
+/** Which assertion lane a `device-assertion` event belongs to (contract §8.1: the two have zero interchange). */
+export type AssertionLane = 'device' | 'task';
 export type DaemonEventListener = (event: DaemonEvent) => void;
 export type Unsubscribe = () => void;
 /** `daemon.tasks()`'s per-task view — current local state + whatever summary/outcome was last reported for it. */
@@ -5803,14 +5963,23 @@ export declare class DaemonObserver {
      * raw string is dropped — it is never placed on the emitted `DaemonEvent`, so
      * it cannot reach a subscriber, `format.ts`, stdout, or the audit file. The
      * ISSUED `audience` came from the allowlist and is kept verbatim.
+     *
+     * Contract §8.2(1): `lane` defaults to `'device'` for the existing caller and
+     * is passed explicitly by the task lane, which also passes the `taskId` its
+     * nonce registry resolved. There is no parameter for the context token, for
+     * the same structural reason there is none for the private key.
      */
     noteDeviceAssertion(event: {
         result: 'issued';
+        lane?: AssertionLane;
+        taskId?: string;
         audience: string;
         jti: string;
         expiresAt: string;
     } | {
         result: 'denied';
+        lane?: AssertionLane;
+        taskId?: string;
         reason: string;
         audience?: string;
     }): void;
@@ -6698,6 +6867,23 @@ export interface TaskRunnerDeps {
      */
     getServerCapabilities?: () => readonly string[];
     /**
+     * Contract §8.1 / §8.3: is the task lane's capability gate in place right
+     * now — this daemon can sign, AND it has read a deployment declaration naming
+     * `host-mcp-task-context`?
+     *
+     * Read fresh at offer time for the same reason `getServerCapabilities` is:
+     * `create-daemon.ts` builds these deps before the declaration has been read.
+     *
+     * ABSENT MEANS UNAVAILABLE, not "assume yes". A runner with no way to ask
+     * whether the gate is open has not been told that it is, and §8.1 gives this
+     * lane zero fallback — so it injects no nonce, an MCP child gets no
+     * `BYOK_HOST_TOOLSET_CONTEXT`, and a standalone run fails explicitly
+     * (§8.2(1)) instead of quietly reaching for some other identity.
+     */
+    hostTaskContextAvailable?: () => boolean;
+    /** Wait for the current deployment declaration before freezing host toolset env. */
+    prepareHostTaskContext?: (taskId: string, signal: AbortSignal) => Promise<void>;
+    /**
      * S3b (L-002): a pre-claim veto on new offers, consulted once per offer
      * immediately after the redelivery-dedup check and ahead of every other
      * admission check in `handleOffer`.
@@ -6772,6 +6958,36 @@ export type AdmissionGuardDecision = {
 };
 type AcceptedOfferPayload = TaskOfferPayload | TaskOfferWithToolsetsPayload | TaskOfferForAgentPayload | TaskOfferForAgentWithEgressPayload | TaskOfferForAgentWithEgressFreshPayload;
 /**
+ * The SDK-owned environment variable that carries one host toolset server's
+ * `BYOK_HOST_TOOLSET_CONTEXT` nonce (contract §8.1).
+ *
+ * Injected by the daemon beside `BYOK_STORE_DIR`/`BYOK_PRODUCT_ID` — the two a
+ * child already needs to dial this daemon's control socket. A host's own
+ * `mcpToolsets` registry still cannot supply an `env` block at all
+ * (`toolset-registry.ts`), so this name can only ever hold a value the daemon
+ * minted.
+ */
+export declare const HOST_TOOLSET_CONTEXT_ENV = "BYOK_HOST_TOOLSET_CONTEXT";
+/**
+ * What the daemon's `task_assertion.issue` handler learns about one token.
+ *
+ * Three outcomes, not a nullable entry: the handler must answer
+ * `context_revoked` and `context_token_invalid` differently, and neither may
+ * ever be reachable by a caller reading fields off an entry it should not see.
+ * Only the `active` case carries claims, and it carries exactly the three the
+ * envelope binds.
+ */
+export type HostToolsetContextLookup = {
+    readonly status: 'active';
+    readonly taskId: string;
+    readonly agentRef: AgentRef;
+    readonly toolsetId: string;
+} | {
+    readonly status: 'revoked';
+} | {
+    readonly status: 'unknown';
+};
+/**
  * Per-connection task orchestration: offer -> (decline | prepare -> seal ->
  * claim -> prepared operation -> started) -> seq-ordered progress batches -> complete/fail/
  * cancelled, plus approve/reject/cancel/steer handling.
@@ -6798,6 +7014,29 @@ export declare class TaskRunner {
     private readonly memoryInFlightByTask;
     private readonly memoryClosingTasks;
     private readonly memoryFilesystemByTask;
+    /**
+     * Contract §8.1: the `BYOK_HOST_TOOLSET_CONTEXT` nonce registry — one entry
+     * per `(task, host toolset server)`, keyed by the opaque nonce the daemon
+     * injected into that ONE child's environment and nowhere else.
+     *
+     * This map is the whole reason the task lane has authority at all. A device
+     * assertion deliberately carries no caller identity (see
+     * `device-assertion.ts`): under one UID every process can reach the control
+     * socket, so a "who asked" field would be synthesized. The nonce is different
+     * in kind — it is evidence, because the only way to hold one is to be the
+     * process the daemon spawned for this exact task and server. Every claim the
+     * task signer writes is read out of the entry here, never out of RPC params.
+     *
+     * Entries are RETAINED after revocation (`state: 'revoked'`) until the task's
+     * resources are cleaned up, so the refusal can be the precise
+     * `context_revoked` rather than collapsing into `context_token_invalid` the
+     * instant a task is cancelled. After cleanup the entry is deleted and the two
+     * refusals become indistinguishable on purpose — "this token is gone" must
+     * not be a probe for which tasks this device has run.
+     */
+    private readonly hostToolsetContextByToken;
+    /** Per-task index over {@link hostToolsetContextByToken}, so one cancel revokes every server's nonce at once. */
+    private readonly hostToolsetContextTokensByTask;
     private readonly recoveredMessageOutboxes;
     private readonly recoveredMessageRetryTimers;
     /**
@@ -7105,9 +7344,65 @@ export declare class TaskRunner {
     private bindAgentMemoryFilesystem;
     private closeAgentMemoryFilesystem;
     private revokeAgentMemoryContext;
+    /**
+     * Contract §8.1: mint one `BYOK_HOST_TOOLSET_CONTEXT` nonce per host toolset
+     * server of this task and inject it into that server's child environment.
+     *
+     * Only the SDK injects here. `toolset-registry.ts` still rejects an `env`
+     * block on a host-configured server outright, which is what makes this
+     * variable un-forgeable from configuration: the name can only ever hold a
+     * value this method minted.
+     *
+     * No `agentRef` means no nonce, and therefore no task lane at all for this
+     * task. That is not a degradation to a device-only path — it is the envelope
+     * schema being honest: `byok-task-assertion-v1` REQUIRES the frozen offer's
+     * AgentRef, and a non-Agent offer has none to bind. Signing something weaker
+     * and calling it a task assertion is exactly the fallback §8.1 forbids.
+     */
+    private withHostToolsetContext;
+    /**
+     * Contract §8.2(1) / I12: the daemon's SECOND fail-closed layer — stop
+     * signing for this task, now.
+     *
+     * Called synchronously, before any `await`, from every point at which this
+     * device learns the task's authority is over: an accepted cancel, any
+     * semantic terminal, and shutdown. Entries are kept (not deleted) so the
+     * refusal stays the precise `context_revoked` until the task's resources are
+     * actually cleaned up.
+     *
+     * The honest limit, which belongs here as much as in the contract: the
+     * AUTHORITATIVE revocation point is the host's own cancel/End commit. This
+     * stops the daemon minting promptly; it does not recall an assertion already
+     * in a caller's hands, and the host's admission check remains the layer that
+     * refuses one.
+     */
+    private revokeHostToolsetContexts;
+    /** Shutdown (contract §8.2(1)): no task on this device keeps a mintable context across it. */
+    private revokeAllHostToolsetContexts;
+    /** Task resource cleanup: drop the entries entirely, after which the refusal is `context_token_invalid`. */
+    private deleteHostToolsetContexts;
+    /**
+     * The daemon's only view of the nonce registry (contract §8.2(1)).
+     *
+     * Returns the three claims the task envelope binds, or a refusal status —
+     * never the entry itself, and never the token back. The caller (the
+     * `task_assertion.issue` handler) may not add to, narrow, or substitute any
+     * of these values: they ARE the assertion's task/Agent/toolset identity.
+     */
+    hostToolsetContext(contextToken: string): HostToolsetContextLookup;
     /** Protocol §7: an instruction too large to inline arrives as a `blobRef` — resolve it via the blob client rather than failing closed. */
     private resolveInstruction;
-    /** Resolve every requested logical id locally and reject missing/colliding server authority before claim. */
+    /**
+     * Resolve every requested logical id locally and reject missing/colliding
+     * server authority before claim.
+     *
+     * `toolsetIdByServer` preserves the one fact the flattened `servers` map
+     * loses: which frozen-offer toolset each server belongs to. Contract §8.2's
+     * AR-2 fixes `toolsetId` as the wire's `toolset` field — a logical id from
+     * `requiredToolsets`, which is what the Host checks a task assertion's claim
+     * against. The server NAME is device-local configuration and would not match
+     * anything in the frozen offer, so the mapping has to survive this step.
+     */
     private resolveMcpServers;
     private pump;
     private publishSuccessfulCompletion;
@@ -8133,8 +8428,20 @@ export type { ProgressBatcherOptions } from './daemon/progress-batcher';
  * would make all of it public API in one line. See `daemon/assertion-client.ts`
  * and the constraint test that pins this.
  */
-export { requestDeviceAssertion } from './daemon/assertion-client';
-export type { RequestDeviceAssertionOptions, RequestDeviceAssertionResult, RequestDeviceAssertionErrorCode, } from './daemon/assertion-client';
+export { requestDeviceAssertion, requestTaskAssertion } from './daemon/assertion-client';
+export type { RequestDeviceAssertionOptions, RequestDeviceAssertionResult, RequestDeviceAssertionErrorCode, RequestTaskAssertionOptions, RequestTaskAssertionResult, RequestTaskAssertionErrorCode, } from './daemon/assertion-client';
+/**
+ * Contract §8.1 / §8.2(1): the task lane's wire contract.
+ *
+ * `parseTaskAssertionIssueParams` is exported alongside the helper because it
+ * IS the definition of what `task_assertion.issue` accepts — a host building
+ * its own MCP child against this daemon needs the same strict shape the daemon
+ * enforces, and a hand-rolled copy on the caller's side is how the two drift
+ * apart. Nothing else about the control socket becomes public with it: this is
+ * a pure function over a params value, not a way to reach the client.
+ */
+export { parseTaskAssertionIssueParams, TASK_ASSERTION_ISSUE_ERROR_CODES, TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES, } from './daemon/control-protocol';
+export type { TaskAssertionIssueParams, TaskAssertionIssueResult, TaskAssertionIssueErrorCode, } from './daemon/control-protocol';
 export type { OperationalHealthSnapshot, OperationalHealthState } from './daemon/operational-health';
 export { journalHash, JournalUnavailableError, JournalCorruptError, JournalRecordTooLargeError, JournalUnknownTaskError, JournalClosedError, } from './daemon/journal/journal';
 export type { LocalTaskJournal, JournalIdentity, JournalReceipt, ReceivedEnvelopeRecord, AdmissionRecord, LocalTransitionRecord, LocalTerminalRecord, TerminalTruthState, RecoverableTask, RecoveryOutcome, RecoveryDisposition, LocalStorageUsage, StorageCategory, CategoryUsage, CleanableCategory, CleanupCandidate, CleanupResult, CompactOptions, CompactResult, } from './daemon/journal/journal';

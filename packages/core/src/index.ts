@@ -269,9 +269,31 @@ export {
   parseDeviceAssertionEnvelope,
   verifyDeviceAssertion,
 } from './device-assertion';
+// Task-scoped assertion (`byok-task-assertion-v1`, contract §8.1): a SEPARATE
+// envelope sharing the device lane's validators and replay authority, never a
+// device assertion with extra claims. The two verifiers each accept only their
+// own schema.
+export {
+  authenticateTaskAssertion,
+  TASK_ASSERTION_AGENT_REF_MAX_BYTES,
+  TASK_ASSERTION_DOMAIN_PREFIX,
+  TASK_ASSERTION_SCHEMA_ID,
+  TASK_ASSERTION_TOOLSET_ID_MAX_LENGTH,
+  TASK_ASSERTION_VERSION,
+  TaskAssertionAgentRefSchema,
+  TaskAssertionClaimsSchema,
+  TaskAssertionEnvelopeV1Schema,
+  parseTaskAssertionEnvelope,
+  taskAssertionCanonicalClaims,
+  taskAssertionCanonicalJson,
+  taskAssertionSigningInput,
+  verifyTaskAssertion,
+} from './device-assertion';
 export type {
   AuthenticateDeviceAssertionDeps,
+  AuthenticatedAssertion,
   AuthenticatedDeviceAssertion,
+  AuthenticatedTaskAssertion,
   DeviceAssertionAlgorithm,
   DeviceAssertionAuthorityRow,
   DeviceAssertionClaims,
@@ -280,9 +302,13 @@ export type {
   DeviceAssertionExpectedBinding,
   DeviceAssertionReplayConsumeInput,
   DeviceAssertionReplayAuthority,
+  DeviceAssertionReplaySchemaId,
   DeviceAssertionVerifier,
   DeviceAssertionVerifyDeps,
   DeviceAssertionVerifyInput,
+  TaskAssertionAgentRef,
+  TaskAssertionClaims,
+  TaskAssertionEnvelopeV1,
 } from './device-assertion';
 // Nonce signing domain (§6.2) — the one authority the daemon, the hosted
 // surface, and the reference server all sign/verify against.

@@ -690,6 +690,113 @@ export const ASSERTION_ISSUE_ERROR_CODES = [
 
 export type AssertionIssueErrorCode = (typeof ASSERTION_ISSUE_ERROR_CODES)[number];
 
+// ---------------------------------------------------------------------------
+// `task_assertion.issue` (contract §8.1 / §8.2(1))
+// ---------------------------------------------------------------------------
+
+/**
+ * Params for `task_assertion.issue`: the MCP child of ONE admitted host
+ * toolset server asking the daemon to mint a task-scoped assertion for one
+ * upcoming tool invocation.
+ *
+ * A SEPARATE method from `assertion.issue`, not an optional field on it. The
+ * two lanes have zero interchange (§8.1): a device caller must not be able to
+ * reach the task signer by adding a field, and a task caller must not be able
+ * to fall back to a device assertion by dropping one. Two methods make that a
+ * property of the dispatch table rather than of a branch inside one handler.
+ *
+ * Exactly two fields, and in particular NOT `taskId`, `agentRef` or
+ * `toolsetId`: those are what the assertion asserts, and they come from the
+ * daemon's own registry entry for `contextToken`. Every process running as this
+ * UID can reach the control socket, so a caller-supplied identity would be
+ * synthesized authority — the nonce is evidence precisely because only the
+ * child the daemon spawned for this task ever received it.
+ */
+export interface TaskAssertionIssueParams {
+  contextToken: string;
+  audience: string;
+}
+
+/**
+ * Bound on the `contextToken` a caller may send. The daemon's own nonce is 43
+ * characters (32 CSPRNG bytes, base64url); this frame-level bound simply stops
+ * an unbounded string from reaching the registry lookup or an audit line, the
+ * same role `ASSERTION_AUDIENCE_MAX_BYTES` plays for the audience.
+ */
+export const TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES = 256;
+
+/**
+ * Strict shape check. `undefined` means `bad_request`.
+ *
+ * Rejects an unknown key outright — including `taskId`/`agentRef`/`toolsetId`.
+ * A tolerated extra field here is exactly how a caller would come to believe it
+ * can influence the claim set, which is the one thing this lane exists to
+ * prevent.
+ */
+export function parseTaskAssertionIssueParams(value: unknown): TaskAssertionIssueParams | undefined {
+  if (!isRecord(value)) return undefined;
+  const keys = Object.keys(value);
+  if (keys.length !== 2) return undefined;
+  if (!keys.includes('contextToken') || !keys.includes('audience')) return undefined;
+  const { contextToken, audience } = value;
+  if (typeof contextToken !== 'string' || contextToken.length === 0) return undefined;
+  if (Buffer.byteLength(contextToken, 'utf8') > TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES) return undefined;
+  if (typeof audience !== 'string' || audience.length === 0) return undefined;
+  if (Buffer.byteLength(audience, 'utf8') > ASSERTION_AUDIENCE_MAX_BYTES) return undefined;
+  return { contextToken, audience };
+}
+
+/**
+ * Result of `task_assertion.issue`. `assertion` is a full
+ * `TaskAssertionEnvelopeV1`, carried opaquely on this wire exactly as the
+ * device lane carries its own envelope.
+ */
+export interface TaskAssertionIssueResult {
+  assertion: unknown;
+  expiresAt: string;
+}
+
+/**
+ * The nine `ControlError` codes `task_assertion.issue` can answer with, in the
+ * exact order the handler checks them (`create-daemon.ts`). The device lane's
+ * six are unchanged and in the same relative order — the task lane inherits the
+ * device gates rather than defining a second, looser sequence — with one gate
+ * ahead of them that only this lane has, and two behind them that make it
+ * task-scoped:
+ *
+ * - `capability_undeclared` — contract §8.1's capability gate
+ *   (`host-mcp-task-context`) is not in place: either this daemon issues no
+ *   assertions at all, or it has not read a deployment declaration that names
+ *   the capability. Checked immediately after `assertion_disabled` and BEFORE
+ *   the params are even parsed, because a daemon that cannot serve this lane
+ *   has nothing to say about the shape of a request for it. §8.3 is what makes
+ *   this a refusal rather than a degradation: an undeclared task lane is
+ *   `unavailable`, never a reason to reach for a device assertion.
+ *
+ * - `context_token_invalid` — no registry entry for this token. Deliberately
+ *   the SAME answer for "never existed" and "existed, and its task has since
+ *   been cleaned up": distinguishing them would turn the refusal into a probe
+ *   for which tasks this device has run.
+ * - `context_revoked` — the entry exists and its task's authority has been
+ *   withdrawn locally (cancel accepted, terminal reached, or shutdown). This is
+ *   the daemon's SECOND fail-closed layer (I12): the authoritative revocation
+ *   point is the host's own cancel/End commit, and an assertion already in a
+ *   caller's hands is not recalled by this refusal.
+ */
+export const TASK_ASSERTION_ISSUE_ERROR_CODES = [
+  'assertion_disabled',
+  'capability_undeclared',
+  'bad_request',
+  'audience_denied',
+  'shutting_down',
+  'revoked',
+  'not_paired',
+  'context_token_invalid',
+  'context_revoked',
+] as const;
+
+export type TaskAssertionIssueErrorCode = (typeof TASK_ASSERTION_ISSUE_ERROR_CODES)[number];
+
 export type ShutdownReason = 'unpair' | 'operator';
 
 export interface ShutdownParams {

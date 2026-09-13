@@ -1,7 +1,13 @@
+> **Archived**: 2026-09-13 12:54
+> **Related Plan**: plans/archive/plan-20260912-1540-byok-018-d2-task-assertion.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260913-1254
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: 2026-09-13 15:47
+> **Updated**: 2026-09-10 22:43
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.

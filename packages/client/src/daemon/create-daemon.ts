@@ -20,6 +20,7 @@ import {
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
   AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
   AGENT_MESSAGE_EGRESS_CAPABILITY,
+  HOST_MCP_TASK_CONTEXT_CAPABILITY,
   AGENT_HOME_PROJECTION_CAPABILITY,
   TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   PROVIDER_PROFILE_BINDING_CAPABILITY,
@@ -64,6 +65,7 @@ import { AuthManager } from './auth-manager';
 import { BlobClient } from './blob-client';
 import { resolveMachineId } from './machine-id';
 import { declares, fetchCapabilityDeclaration, PRESENCE_HINTS_CAPABILITY } from './capabilities-client';
+import type { CapabilityDeclaration } from '@byok-sdk/core';
 import {
   assertPresenceHeartbeatCadence,
   DEFAULT_PRESENCE_HEARTBEAT_INTERVAL_MS,
@@ -72,7 +74,7 @@ import {
   PresencePublisher,
 } from './presence-publisher';
 import { assertServerUrlAllowed, formatServerUrl, toHttpBase } from './url';
-import { mintDeviceAssertion } from './device-assertion-signer';
+import { mintDeviceAssertion, mintTaskAssertion } from './device-assertion-signer';
 import type { ConnectionState } from './connection-manager';
 import { AnotherControlServerRunningError, startControlServer } from './control-server';
 import type { ControlMethods, ControlServerHandle } from './control-server';
@@ -87,6 +89,7 @@ import {
   parseAssertionIssueParams,
   parseEnrollmentPairParams,
   parseShutdownParams,
+  parseTaskAssertionIssueParams,
   parseTeamContextParams,
   parseTeamMessageAckParams,
   parseTeamMessageInspectParams,
@@ -96,11 +99,13 @@ import {
   parseTeamWorkspaceCreateParams,
   parseTeamWorkspaceJoinParams,
   parseToolsetsReloadParams,
+  TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES,
   type AssertionIssueResult,
   type ControlActiveTask,
   type ControlStatusResult,
   type ControlStorageStatus,
   type ShutdownReason,
+  type TaskAssertionIssueResult,
 } from './control-protocol';
 import { decodeTeamMemberContext, encodeTeamMemberContext, LocalTeamWorkspace } from './team-workspace';
 import { McpToolsetRegistry, McpToolsetRevisionConflictError } from './toolset-registry';
@@ -1491,19 +1496,40 @@ export function buildDaemonWithAdapters(
   let serviceEnrollmentWaiting = false;
   let serviceEnrollmentTransitioning = false;
   let daemonOwnerLease: DaemonOwnerLease | undefined;
-  // The presence producer (§12.3). Both are `undefined` whenever this daemon
-  // is not running, and neither is on the task path in any way: capability
-  // discovery runs off the connection critical path, and a failure to read a
-  // declaration leaves the publisher unstarted and every other daemon function
-  // untouched (ADR-010 fail-closed — never a 404 probe, never an assumed
-  // capability). The controller cancels an in-flight discovery during
-  // shutdown so teardown never waits on a hung deployment.
+  // Presence and task context share one deployment declaration. Discovery is
+  // asynchronous to start(); only Agent offers with host toolsets wait for it.
   let presencePublisher: PresencePublisher | undefined;
-  /** Runtime facts are probed once per start and reused by WS + first-hop HTTP presence. */
   let detectedRuntimeFacts: readonly RuntimeInfo[] = [];
   let presenceDiscovery: AbortController | undefined;
-  /** Guards against a reconnect storm stacking overlapping declaration reads. */
-  let presenceDiscoveryInFlight = false;
+  // One active read per connection generation; stale completions cannot publish.
+  let presenceDiscoveryPass: {
+    controller: AbortController;
+    completion: Promise<void>;
+    outcome: 'pending' | 'read' | 'failed' | 'timeout' | 'aborted';
+  } | undefined;
+  // Both network reads and individual offer waits are bounded. Reconnects do
+  // not extend an offer's deadline. This is an operational wait, not token TTL.
+  const capabilityDiscoveryTimeoutMs = 5_000;
+  /**
+   * The deployment declaration this daemon last READ (ADR-010), or `undefined`
+   * when it has read none — which is what a failed read leaves behind too, on
+   * purpose: a declaration that could not be read is exactly as informative as
+   * one that declares nothing.
+   *
+   * Contract §8.1 is why this is now stored rather than consumed and dropped
+   * inside the discovery pass. The task lane's capability gate has TWO channels
+   * and both must hold, so the deployment-level answer has to outlive the read
+   * that produced it — see {@link taskContextCapabilityAvailable}.
+   */
+  let deploymentDeclaration: CapabilityDeclaration | undefined;
+  /**
+   * The exact `CapabilityFlag[]` instance handed to `ConnectionManager`, which
+   * reads it afresh for every `conn.hello` it builds. Held here so the one
+   * capability whose answer arrives asynchronously can be added to (or removed
+   * from) the advertisement a running daemon publishes, via `refreshHello()` —
+   * the same mechanism an `mcpToolsets` reload already uses.
+   */
+  let helloCapabilities: CapabilityFlag[] = [];
   let shutdownPromise: Promise<void> | undefined;
   const pendingLateMutationBarriers = new Set<Promise<void>>();
   /** M4 Phase 2: when this `start()` began — backs the control socket's `status.uptimeMs`. */
@@ -1865,6 +1891,16 @@ export function buildDaemonWithAdapters(
       : undefined;
 
     capabilities.push('custom-harness');
+    // Contract §8.1 / §8.3: the device-level capability string is NOT computed
+    // here. It is the one flag whose answer depends on a deployment fact this
+    // daemon has not read yet at this point in `start()`, so it is added (and
+    // removed again) by `applyCapabilityDeclaration` against this exact array —
+    // `ConnectionManager` rebuilds `conn.hello` from it, so a later change
+    // reaches the server through `refreshHello()`. Reset to "no declaration
+    // read" first: a restart must not inherit the previous run's answer about a
+    // deployment it has not spoken to yet.
+    deploymentDeclaration = undefined;
+    helloCapabilities = capabilities;
 
     // The journal owns terminal bytes; the transport owns one delivery queue.
     // A local write failure must never bypass durability and send different truth.
@@ -2047,6 +2083,12 @@ export function buildDaemonWithAdapters(
       // capability is only known once the handshake completes, strictly
       // after this `deps` object is constructed.
       getServerCapabilities: () => connection?.getServerCapabilities() ?? [],
+      // Contract §8.1: the nonce injection asks the SAME gate the RPC and the
+      // hello advertisement ask, read fresh at offer time for the same reason
+      // `getServerCapabilities` is — the declaration lands after this `deps`
+      // object is built.
+      hostTaskContextAvailable: () => taskContextCapabilityAvailable(),
+      prepareHostTaskContext: waitForHostTaskContext,
       // S3b (L-003): the production admission guard — §12.7.2.1's hard-pressure
       // row. Reads the state the last maintenance tick computed (no disk work
       // on the offer path), and is absent entirely when no storage policy is
@@ -2338,13 +2380,9 @@ export function buildDaemonWithAdapters(
         }
       },
       onStateChange: (state) => {
-        // A newly established long-poll connection is the moment this daemon
-        // knows it may be talking to a different deployment build than it last
-        // read a declaration from —
-        // so it is also where re-discovery belongs. `runPresenceDiscovery` is
-        // a no-op before `startPresenceProducer` arms it and after shutdown
-        // disarms it, so the initial settle during `start()` is not a second
-        // discovery pass.
+        // Discovery is armed before the first connection can deliver offers.
+        // Every later open replaces the read, so rollout/reconnect facts cannot
+        // be borrowed from a previous connection generation.
         const wasSettled = connectionState === 'open';
         connectionState = state;
         observer.noteConnectionState(state);
@@ -2364,13 +2402,13 @@ export function buildDaemonWithAdapters(
       },
     });
     await replayRecoveryTerminals();
+    startPresenceProducer();
     await connection.start();
     await connection.waitForConnection();
     runner.retryRecoveredAgentMessages();
     for (const record of agentEgress.retryableReliableRecords(connection.getServerCapabilities())) {
       dispatchReliableRecord(record);
     }
-    startPresenceProducer();
     daemonStarted = true;
     } catch (err) {
       try {
@@ -2386,56 +2424,126 @@ export function buildDaemonWithAdapters(
   }
 
   /**
-   * Arms capability discovery for this `start()` and runs the first pass.
-   * The controller lives for the whole run, so every later re-discovery
-   * (see `runPresenceDiscovery`) is cancelled by the same shutdown abort.
+   * Contract §8.1 / §8.3: is the task lane's capability gate actually in place
+   * on this daemon, right now?
+   *
+   * BOTH halves, and nothing else counts as either:
+   *
+   * 1. This daemon can sign at all — `deviceAssertion.audiences` is configured
+   *    and non-empty. A daemon that issues no assertions cannot serve a lane
+   *    made of them.
+   * 2. This daemon has READ a deployment declaration that names
+   *    `host-mcp-task-context`. Not "assumed", not "the route 404'd so probably
+   *    old": an unread declaration leaves `deploymentDeclaration` undefined and
+   *    this answer `false`.
+   *
+   * Every consumer of the lane asks THIS function — the `conn.hello`
+   * advertisement, the nonce injection, and the `task_assertion.issue` RPC — so
+   * the three cannot disagree about whether the lane is open.
+   *
+   * §8.3 is the reason the false answer is a plain refusal: a missing
+   * capability makes the task lane `unavailable`, never a reason to fall back
+   * to a device assertion, which this lane does not accept in any case.
    */
-  function startPresenceProducer(): void {
-    presenceDiscovery = new AbortController();
-    runPresenceDiscovery();
+  function taskContextCapabilityAvailable(): boolean {
+    if (deviceAssertionAudiences === undefined) return false;
+    if (deploymentDeclaration === undefined) return false;
+    return declares(deploymentDeclaration, HOST_MCP_TASK_CONTEXT_CAPABILITY);
   }
 
   /**
-   * ADR-010's client half: read the deployment's declaration, and run the
-   * presence heartbeat if and only if it contains `presence.hints`.
+   * Records what the latest discovery pass read (or, on failure, that it read
+   * nothing) and republishes the `conn.hello` advertisement if that changed the
+   * device-level half of §8.1's gate.
    *
-   * Run on start AND on every connection re-settle (the `onStateChange` hook
-   * above), because a declaration is a deployment fact that a rollout can
-   * change under a long-lived daemon — and because that is also the only
-   * healing path a startup discovery failure gets. There is deliberately NO
-   * retry timer of its own: a failed pass simply leaves presence off until the
-   * next reconnect, which is the one event that already means "this deployment
-   * may not be the same one I last talked to".
-   *
-   * Deliberately NOT awaited by `startUnderLease` — the plan's "discovery is
-   * asynchronous to the connection path" rule. A deployment that is slow to
-   * answer (or never answers) must cost this daemon nothing but presence: no
-   * capability here is on the task path, so there is no state a caller of
-   * `start()` could need this for.
-   *
-   * Every failure is fail-closed and observable: the publisher stays off and a
-   * single `console.warn` records why, matching the operator-facing warning
-   * convention the rest of this file already uses. There is no fallback branch
-   * — no "assume the usual capabilities", no 404-means-unsupported reading —
-   * because a declaration that could not be read is exactly as informative as
-   * one that declares nothing.
+   * The device capability string is advertised only after the deployment-level
+   * declaration has actually been read, so the FIRST `conn.hello` of a run
+   * never claims the task lane — discovery runs off the connection path and has
+   * not answered yet. That ordering is deliberate rather than tolerated: a
+   * daemon that advertised the capability before reading the declaration would
+   * be promising a lane whose other half it has not seen, which is the same
+   * assumption ADR-010 forbids a client to make about an unread deployment.
+   * `refreshHello()` is how the answer reaches the server once it exists.
    */
+  function applyCapabilityDeclaration(declaration: CapabilityDeclaration | undefined): void {
+    deploymentDeclaration = declaration;
+    const wanted = taskContextCapabilityAvailable();
+    const index = helloCapabilities.indexOf(HOST_MCP_TASK_CONTEXT_CAPABILITY);
+    if (wanted === (index !== -1)) return;
+    if (wanted) helloCapabilities.push(HOST_MCP_TASK_CONTEXT_CAPABILITY);
+    else helloCapabilities.splice(index, 1);
+    connection?.refreshHello();
+  }
+
+  /** Arm before connection.start(); its first open callback starts the read. */
+  function startPresenceProducer(): void {
+    presenceDiscovery = new AbortController();
+  }
+
+  async function waitForHostTaskContext(taskId: string, signal: AbortSignal): Promise<void> {
+    if (deviceAssertionAudiences === undefined || signal.aborted) return;
+    let timedOut = false;
+    let interrupt!: () => void;
+    const interrupted = new Promise<void>((resolve) => { interrupt = resolve; });
+    const timer = setTimeout(() => { timedOut = true; interrupt(); }, capabilityDiscoveryTimeoutMs);
+    signal.addEventListener('abort', interrupt, { once: true });
+    try {
+      // A reconnect replaces the pass. Re-read that identity after each await,
+      // under this ONE offer deadline, rather than admitting on an old answer.
+      while (!signal.aborted && !timedOut && presenceDiscoveryPass?.outcome === 'pending') {
+        await Promise.race([presenceDiscoveryPass.completion, interrupted]);
+      }
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', interrupt);
+    }
+    if (signal.aborted || shuttingDown) return;
+    if (!taskContextCapabilityAvailable()) {
+      const outcome = timedOut ? 'timeout' : presenceDiscoveryPass?.outcome;
+      const reason = outcome === 'read' ? 'capability_undeclared'
+        : outcome === 'timeout' ? 'capability_discovery_timeout'
+        : outcome === 'failed' ? 'capability_discovery_failed'
+        : 'capability_discovery_unavailable';
+      observer.noteDeviceAssertion({ result: 'denied', lane: 'task', taskId, reason });
+    }
+  }
+
+  /** Each connection open starts a fresh, bounded declaration read. */
   function runPresenceDiscovery(): void {
-    const discovery = presenceDiscovery;
-    // Not started (or already torn down), or a pass is still in flight — a
-    // reconnect storm must not stack discovery requests on a deployment.
-    if (!discovery || presenceDiscoveryInFlight) return;
-    presenceDiscoveryInFlight = true;
-    void (async () => {
+    const lifecycle = presenceDiscovery;
+    if (!lifecycle || lifecycle.signal.aborted) return;
+    presenceDiscoveryPass?.controller.abort();
+    const controller = new AbortController();
+    const abort = (): void => controller.abort();
+    lifecycle.signal.addEventListener('abort', abort, { once: true });
+    const pass = {
+      controller,
+      completion: Promise.resolve(),
+      outcome: 'pending' as 'pending' | 'read' | 'failed' | 'timeout' | 'aborted',
+    };
+    presenceDiscoveryPass = pass;
+    // A previous connection's declaration cannot authorize a new offer while
+    // this deployment is still unknown. Existing nonces are never re-minted.
+    applyCapabilityDeclaration(undefined);
+    presencePublisher?.stop();
+    let rejectAbort!: () => void;
+    const aborted = new Promise<never>((_, reject) => {
+      rejectAbort = () => reject(new Error('capability discovery aborted'));
+      controller.signal.addEventListener('abort', rejectAbort, { once: true });
+    });
+    const timer = setTimeout(() => {
+      pass.outcome = 'timeout';
+      controller.abort();
+    }, capabilityDiscoveryTimeoutMs);
+    pass.completion = (async () => {
       try {
-        const declaration = await fetchCapabilityDeclaration(config.serverUrl, { signal: discovery.signal });
-        // Shutdown may have run while the declaration was in flight; starting a
-        // heartbeat after teardown would leave a timer nothing stops.
-        if (discovery.signal.aborted) return;
+        const declaration = await Promise.race([
+          fetchCapabilityDeclaration(config.serverUrl, { signal: controller.signal }), aborted,
+        ]);
+        if (controller.signal.aborted || presenceDiscoveryPass !== pass) return;
+        applyCapabilityDeclaration(declaration);
+        pass.outcome = 'read';
         if (declares(declaration, PRESENCE_HINTS_CAPABILITY)) {
-          // One publisher per `start()`, reused across reconnects: its
-          // revoked latch is a device-level fact, so a fresh declaration must
-          // never resurrect a publisher a revocation stopped.
           presencePublisher ??= new PresencePublisher({
             serverUrl: config.serverUrl,
             auth,
@@ -2447,19 +2555,21 @@ export function buildDaemonWithAdapters(
             onDegraded: (reason) => console.warn(`[byok/client] ${reason}`),
           });
           presencePublisher.start();
-        } else {
-          // The deployment withdrew the capability. A clean stop, not a
-          // permanent one: a later rollout that declares it again is free to
-          // start this same publisher back up.
-          presencePublisher?.stop();
         }
       } catch (err) {
-        if (discovery.signal.aborted) return;
+        if (presenceDiscoveryPass !== pass || lifecycle.signal.aborted) {
+          pass.outcome = 'aborted';
+          return;
+        }
+        if (pass.outcome !== 'timeout') pass.outcome = 'failed';
+        applyCapabilityDeclaration(undefined);
         console.warn(
-          `[byok/client] capability discovery failed; presence publishing stays off until the next reconnect: ${err instanceof Error ? err.message : String(err)}`,
+          `[byok/client] capability discovery ${pass.outcome}; presence publishing and the task assertion lane stay off until the next reconnect: ${err instanceof Error ? err.message : String(err)}`,
         );
       } finally {
-        presenceDiscoveryInFlight = false;
+        clearTimeout(timer);
+        controller.signal.removeEventListener('abort', rejectAbort);
+        lifecycle.signal.removeEventListener('abort', abort);
       }
     })();
   }
@@ -2576,10 +2686,8 @@ export function buildDaemonWithAdapters(
     // like every other step in this sequence.
     presenceDiscovery?.abort();
     presenceDiscovery = undefined;
-    // A fetch that ignores the abort and stalls would otherwise leave this
-    // latch true forever, silently swallowing every re-discovery a LATER
-    // `start()` asks for.
-    presenceDiscoveryInFlight = false;
+    // Detached reads cannot publish into a later daemon lifecycle.
+    presenceDiscoveryPass = undefined;
     presencePublisher?.stop();
     presencePublisher = undefined;
     const stoppingOwnedPressureEngine = ownedPressureEngine;
@@ -3261,6 +3369,184 @@ export function buildDaemonWithAdapters(
         // codex round-2 F3: post-sign observer — non-secret metadata only,
         // reachable only from the internal test seam. Never sees the key,
         // never alters anything above it.
+        assertionProbe?.onIssued({ jti: minted.claims.jti, audience: minted.claims.audience });
+        return { assertion: minted.envelope, expiresAt: minted.expiresAt };
+      },
+      /**
+       * Contract §8.1 / §8.2(1): mint one task-scoped assertion for ONE
+       * upcoming tool invocation by the MCP child of an admitted host toolset
+       * server.
+       *
+       * A separate method from `assertion.issue`, never a mode of it (§8.1:
+       * the two lanes have zero interchange). NINE fail-closed gates, in this
+       * exact order — one this lane alone has, then the device lane's six
+       * unchanged, then the two that make this lane task-scoped:
+       *
+       * 2. `capability_undeclared` — §8.1's capability gate is not in place:
+       *    this daemon has read no deployment declaration naming
+       *    `host-mcp-task-context` (or read one that withdrew it). Checked
+       *    before the params are parsed, because a daemon that cannot serve
+       *    this lane has nothing to say about the shape of a request for it.
+       *    §8.3 makes this a refusal and not a degradation: an undeclared lane
+       *    is `unavailable`, never a reason to hand back a device assertion.
+       *
+       * 8. `context_token_invalid` — no registry entry for this nonce. The
+       *    same answer for "never existed" and "its task has been cleaned up",
+       *    so a refusal is not a probe for what this device has run.
+       * 9. `context_revoked` — the entry exists and its task's local authority
+       *    has been withdrawn (cancel accepted, terminal reached, shutdown).
+       *
+       * The gates are ordered so a refusal never leaks more than the caller
+       * already knew: the audience allowlist is checked BEFORE the registry, so
+       * a caller holding no nonce cannot use a denied audience to learn whether
+       * some guessed token exists.
+       *
+       * `taskId`, `agentRef` and `toolsetId` come from the registry entry and
+       * from nowhere else. `parseTaskAssertionIssueParams` rejects params that
+       * even mention them, so there is no "requested" value for this handler to
+       * prefer, reconcile, or accidentally trust.
+       *
+       * The honest limit, same as the device lane's: this is the SECOND
+       * fail-closed layer (I12). The authoritative revocation point is the
+       * host's own cancel/End commit; refusing here does not recall an
+       * assertion already issued, and nothing about this handler entitles
+       * anyone to claim the daemon delivers synchronous invalidation.
+       */
+      'task_assertion.issue': async (params): Promise<TaskAssertionIssueResult> => {
+        // Gate 1.
+        if (deviceAssertionAudiences === undefined) {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'assertion_disabled' });
+          throw new ControlError(
+            'assertion_disabled',
+            'this daemon is not configured to issue assertions (DaemonConfig.deviceAssertion.audiences is absent or empty)',
+          );
+        }
+        // Gate 2.
+        if (!taskContextCapabilityAvailable()) {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'capability_undeclared' });
+          throw new ControlError(
+            'capability_undeclared',
+            `this deployment does not declare ${HOST_MCP_TASK_CONTEXT_CAPABILITY}, so no task-scoped assertion can be issued`,
+          );
+        }
+        // Gate 3.
+        const parsed = parseTaskAssertionIssueParams(params);
+        if (!parsed) {
+          const rawAudience =
+            typeof params === 'object' && params !== null && typeof (params as { audience?: unknown }).audience === 'string'
+              ? (params as { audience: string }).audience
+              : undefined;
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'bad_request', audience: rawAudience });
+          throw new ControlError(
+            'bad_request',
+            `task_assertion.issue requires exactly {contextToken,audience}, both non-empty strings, with contextToken at most ${TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES} and audience at most ${DEVICE_ASSERTION_AUDIENCE_MAX_BYTES} UTF-8 bytes; taskId, agentRef and toolsetId are resolved by this daemon and may not be sent`,
+          );
+        }
+        // Gate 4. Exact membership only, and BEFORE the registry lookup.
+        if (!deviceAssertionAudiences.has(parsed.audience)) {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'audience_denied', audience: parsed.audience });
+          throw new ControlError('audience_denied', 'the requested audience is not allowed by this daemon');
+        }
+        // Gate 5.
+        if (shuttingDown) {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'shutting_down', audience: parsed.audience });
+          throw new ControlError('shutting_down', 'this daemon is shutting down and will not issue new assertions');
+        }
+        // Gate 6.
+        if (auth.isRevoked()) {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'revoked', audience: parsed.audience });
+          throw new ControlError('revoked', 'this device has been revoked by the server; re-pair required');
+        }
+        // Gate 7. Read from disk every time — never a cached record.
+        let record: DeviceRecord | undefined;
+        try {
+          record = await auth.readCurrent();
+        } catch (error) {
+          if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
+        }
+        if (record === undefined) {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'not_paired', audience: parsed.audience });
+          throw new ControlError('not_paired', 'this device is not paired; nothing can be asserted about it');
+        }
+
+        // Gates 8/9, read AFTER the `await` above: a cancel can land during
+        // that disk read, and the only registry state that counts is the one
+        // that still holds on this side of it. A daemon with no runner has no
+        // registry at all, which is indistinguishable from an unknown token —
+        // deliberately, so "is this daemon started" is not answerable here
+        // either.
+        const context = runner?.hostToolsetContext(parsed.contextToken) ?? { status: 'unknown' as const };
+        if (context.status === 'unknown') {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'context_token_invalid', audience: parsed.audience });
+          throw new ControlError('context_token_invalid', 'no live host toolset context matches this token');
+        }
+        if (context.status === 'revoked') {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'context_revoked', audience: parsed.audience });
+          throw new ControlError('context_revoked', 'this task context has been revoked; no further assertions will be issued for it');
+        }
+
+        // Same check-then-await-then-sign discipline as the device lane above:
+        // shutdown and revocation are in-memory flags re-read at the signing
+        // point itself, and `auth.readCurrent()` returning a record is itself
+        // the fresh not-paired re-check.
+        if (shuttingDown) {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'shutting_down', audience: parsed.audience, taskId: context.taskId });
+          throw new ControlError('shutting_down', 'this daemon is shutting down and will not issue new assertions');
+        }
+        if (auth.isRevoked()) {
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'revoked', audience: parsed.audience, taskId: context.taskId });
+          throw new ControlError('revoked', 'this device has been revoked by the server; re-pair required');
+        }
+
+        const minted = mintTaskAssertion({
+          record,
+          issuer: new URL(toHttpBase(config.serverUrl)).origin,
+          productId: config.productId,
+          audience: parsed.audience,
+          // §8.1: the task lane inherits the device lane's TTL ceiling rather
+          // than deriving a second lifetime from the task's own, unpredictable
+          // duration.
+          ttlMs: deviceAssertionTtlMs,
+          now: new Date(),
+          taskId: context.taskId,
+          agentRef: context.agentRef,
+          toolsetId: context.toolsetId,
+        });
+
+        // Second registry read, after signing: the envelope is discarded, not
+        // returned, if the task's authority ended while it was being produced.
+        // Signing is synchronous today, so this cannot currently observe a
+        // change — it is the gate that keeps that true, because a signed
+        // envelope leaving this handler after a cancel would be exactly the
+        // failure AC11 names, and the cost of proving it cannot happen is one
+        // map lookup.
+        //
+        // Read through the SAME `?? {status:'unknown'}` shape gate 8 uses. A
+        // missing runner is an unknown token, not a revoked context: the two
+        // refusals mean different things to a caller (`context_revoked` says a
+        // registry entry existed and its task's authority ended), and answering
+        // the wrong one from a defensive `?.` would teach a caller that its
+        // still-valid nonce had been withdrawn.
+        const stillActive = runner?.hostToolsetContext(parsed.contextToken) ?? { status: 'unknown' as const };
+        if (stillActive.status !== 'active') {
+          const reason = stillActive.status === 'unknown' ? 'context_token_invalid' : 'context_revoked';
+          observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason, audience: parsed.audience, taskId: context.taskId });
+          throw new ControlError(
+            reason,
+            reason === 'context_token_invalid'
+              ? 'no live host toolset context matches this token'
+              : 'this task context was revoked while the assertion was being issued',
+          );
+        }
+
+        observer.noteDeviceAssertion({
+          result: 'issued',
+          lane: 'task',
+          taskId: context.taskId,
+          audience: minted.claims.audience,
+          jti: minted.claims.jti,
+          expiresAt: minted.expiresAt,
+        });
         assertionProbe?.onIssued({ jti: minted.claims.jti, audience: minted.claims.audience });
         return { assertion: minted.envelope, expiresAt: minted.expiresAt };
       },

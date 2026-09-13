@@ -205,12 +205,35 @@ export type { ProgressBatcherOptions } from './daemon/progress-batcher';
  * would make all of it public API in one line. See `daemon/assertion-client.ts`
  * and the constraint test that pins this.
  */
-export { requestDeviceAssertion } from './daemon/assertion-client';
+export { requestDeviceAssertion, requestTaskAssertion } from './daemon/assertion-client';
 export type {
   RequestDeviceAssertionOptions,
   RequestDeviceAssertionResult,
   RequestDeviceAssertionErrorCode,
+  RequestTaskAssertionOptions,
+  RequestTaskAssertionResult,
+  RequestTaskAssertionErrorCode,
 } from './daemon/assertion-client';
+/**
+ * Contract §8.1 / §8.2(1): the task lane's wire contract.
+ *
+ * `parseTaskAssertionIssueParams` is exported alongside the helper because it
+ * IS the definition of what `task_assertion.issue` accepts — a host building
+ * its own MCP child against this daemon needs the same strict shape the daemon
+ * enforces, and a hand-rolled copy on the caller's side is how the two drift
+ * apart. Nothing else about the control socket becomes public with it: this is
+ * a pure function over a params value, not a way to reach the client.
+ */
+export {
+  parseTaskAssertionIssueParams,
+  TASK_ASSERTION_ISSUE_ERROR_CODES,
+  TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES,
+} from './daemon/control-protocol';
+export type {
+  TaskAssertionIssueParams,
+  TaskAssertionIssueResult,
+  TaskAssertionIssueErrorCode,
+} from './daemon/control-protocol';
 export type { OperationalHealthSnapshot, OperationalHealthState } from './daemon/operational-health';
 
 // S3b (L-001/L-002): the durable local journal (architecture §12.7.2). The

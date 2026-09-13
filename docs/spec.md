@@ -522,6 +522,56 @@ they do not enter the assertion envelope, replay ledger, core stores, or cloud
 store bundle. BYOK device revocation blocks future assertion exchanges but does
 not claim to revoke or delete an already established provider credential.
 
+### Task-scoped tool authority (`byok-task-assertion-v1`)
+
+A host toolset server the SDK runs for a task can authenticate an individual
+tool invocation as that task, rather than only as the device. The credential is
+a separate signed envelope, `byok-task-assertion-v1`, carrying the task, the
+frozen offer's AgentRef and the frozen toolset alongside the device claims. It
+is not a device assertion with extra fields, and the two are not interchangeable
+in either direction: a device envelope presented on this lane authenticates as
+nothing, and this lane never falls back to a device assertion. The device
+assertion exchange above is untouched and keeps serving its own consumers.
+
+The daemon injects one opaque `BYOK_HOST_TOOLSET_CONTEXT` nonce per
+`(task, server)` into the MCP child's environment, and nowhere else — a host's
+toolset registry still cannot set an environment block of its own, which is what
+makes the value unforgeable from configuration. The nonce is the child's evidence
+that it is the process the daemon started for that task; it never reaches a
+prompt, a log line, an audit record or the server.
+
+A child exchanges its nonce for one short-lived assertion per invocation through
+the daemon's `task_assertion.issue` control method, which resolves the task,
+AgentRef and toolset from its own registry entry — a caller may not send them.
+Every invocation, including a transport retry, takes a fresh assertion with a
+fresh JTI; TTL is the device lane's existing ceiling, not a second formula
+derived from a task's unpredictable lifetime. The daemon stops signing as soon as
+the task's local authority ends (an accepted cancel, any terminal, shutdown).
+That is a second fail-closed layer, not the authority: the host's own cancel/End
+commit is the point after which no new tool call may be admitted.
+
+The host verifies the assertion with the same discipline the device lane uses —
+strict parse, current non-revoked device row, signature, exact issuer, product
+and audience, valid time window and TTL, then one atomic JTI consumption — and
+the SDK ships that composition. The two lanes share one replay authority, but the
+replay key carries an envelope-kind segment, so the same JTI presented on each
+lane occupies two key slots, neither can burn the other's, and the two kinds of
+credential stay distinguishable in an audit ledger. A replay store that cannot
+answer fails the authentication; it never downgrades it. Whether the claimed
+task, AgentRef and toolset belong to this execution, and whether that execution
+still permits a new tool call, stays the host's decision — the SDK's answer is
+only that the claims are authentic and spent once.
+
+Availability is a declaration on two independent channels, both required. A
+deployment names `host-mcp-task-context` in its capability declaration, and only
+once its host side actually implements the verification; a device advertises the
+same capability string in its connection handshake, and only once it can both
+sign and read that deployment declaration. A device that does not advertise it is
+explicitly unavailable for this lane — never a reason to accept its device
+assertion instead. While either channel is silent the daemon injects no nonce at
+all, so a tool server started without one fails for want of a token rather than
+falling back to some other identity.
+
 ## Skill pack delivery
 
 A SaaS product using this SDK can distribute curated, declarative content — an

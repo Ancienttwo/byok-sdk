@@ -60,7 +60,7 @@ services:
       - ./packages/cloud-dataplane/src/__tests__/fixtures/schema-authority-bootstrap.sql:/docker-entrypoint-initdb.d/10-schema-authority-bootstrap.sql:ro
 
   minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
     # GitHub Actions `services:` containers cannot override CMD, which is the
     # concrete reason this substrate is a compose file rather than a service
     # block: MinIO does not start without `server`.

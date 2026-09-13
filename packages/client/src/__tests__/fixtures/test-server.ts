@@ -2,6 +2,8 @@ import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createPublicKey, randomUUID, verify as edVerify } from 'node:crypto';
 import {
+  BYOK_CAPABILITIES_PATH,
+  HOST_MCP_TASK_CONTEXT_CAPABILITY,
   createEnvelope,
   parseMessage,
   type Envelope,
@@ -79,6 +81,30 @@ export class TestServer {
   private dropNextBlobFinalizeResponse = false;
   /** Capabilities advertised in every subsequent long-poll response. */
   private ackCapabilities: string[] = [];
+  /**
+   * The ADR-010 declaration `GET /byok/capabilities` serves.
+   *
+   * Deliberately NOT `presence.hints`: a fixture that declared it would start
+   * the presence heartbeat under every daemon test that uses this server, which
+   * is a behavior change none of them asked for. `host-mcp-task-context` is here
+   * because the task lane's deployment-level channel (contract §8.1) is now a
+   * gate on the task path — without it every task-assertion test would be
+   * asserting against a deployment that withheld the capability.
+   *
+   * `undefined` models a deployment that serves no declaration at all (404),
+   * which is what every deployment looked like to this fixture before.
+   */
+  private capabilityResponseGate: Promise<void> | undefined;
+
+  setCapabilityResponseGate(gate: Promise<void> | undefined): void {
+    this.capabilityResponseGate = gate;
+  }
+
+  private capabilityDeclaration: unknown = {
+    schema: 'byok-capabilities-v1',
+    version: 1,
+    capabilities: [HOST_MCP_TASK_CONTEXT_CAPABILITY],
+  };
   private advertiseLongPollCapabilities = true;
 
   private constructor(private readonly httpServer: http.Server) {}
@@ -115,6 +141,14 @@ export class TestServer {
   /** Capabilities to advertise in every subsequent poll response (default `[]`, matching the wire's real additive-minor convention). */
   setAckCapabilities(capabilities: string[]): void {
     this.ackCapabilities = capabilities;
+  }
+
+  /**
+   * Replace the ADR-010 declaration this deployment serves. `undefined` makes
+   * `GET /byok/capabilities` 404 — a deployment with no declaration at all.
+   */
+  setCapabilityDeclaration(declaration: unknown): void {
+    this.capabilityDeclaration = declaration;
   }
 
   /** Simulate an N-1 responder whose additive events response predates `capabilities`. */
@@ -278,6 +312,15 @@ export class TestServer {
       }
       if (method === 'GET' && /^\/byok\/blobs\/[^/]+\/url$/.test(url.pathname)) {
         return void this.handleBlobUrl(req, res, url.pathname.split('/')[3] ?? '');
+      }
+      if (method === 'GET' && url.pathname === BYOK_CAPABILITIES_PATH) {
+        await this.capabilityResponseGate;
+        // Public by design (a client reads it before it holds a credential), so
+        // no authorization check here — same as the real hosted route.
+        if (this.capabilityDeclaration === undefined) return void res.writeHead(404).end();
+        return void res
+          .writeHead(200, { 'content-type': 'application/json' })
+          .end(JSON.stringify(this.capabilityDeclaration));
       }
       if (method === 'GET' && url.pathname === '/byok/events') return void (await this.handleEventsPoll(req, res));
       if (method === 'POST' && url.pathname === '/byok/messages') return void (await this.handleMessagesSend(req, res));
