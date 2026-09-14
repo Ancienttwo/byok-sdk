@@ -1,0 +1,182 @@
+{
+  "kind": "read-only-existing-evidence-revalidation",
+  "recordedAt": "2026-09-14T11:28:27.747787+08:00",
+  "frozenDraft3Sha256": "c7288bdbf399d71af6ec131fc86047ced363fb7541af5493c74cf990ae5c6678",
+  "frozenDraft3Unchanged": true,
+  "tokenizerEvidenceHashes": [
+    {
+      "path": "_ops/byok-018-c07/native-pi-request.json",
+      "match": true
+    },
+    {
+      "path": "_ops/byok-018-c07/coding-tokenizer-evidence.json",
+      "match": true
+    },
+    {
+      "path": "_ops/byok-018-c07/zai-openapi-tokenizer-source.json",
+      "match": true
+    },
+    {
+      "path": "_ops/byok-018-c07/native-pi-capture-extension.ts",
+      "match": true
+    },
+    {
+      "path": "_ops/byok-018-c07/native-pi-network-block.mjs",
+      "match": true
+    },
+    {
+      "path": "_ops/byok-018-c07/run-native-pi-capture.py",
+      "match": true
+    },
+    {
+      "path": "_ops/byok-018-c07/coding-tokenizer-probe.py",
+      "match": true
+    },
+    {
+      "path": "_ops/byok-018-c07/native-pi-capture-first-401.log",
+      "match": true
+    }
+  ],
+  "pathDesignSourceHashes": [
+    {
+      "path": "/Users/kito/Projects/salesko-new-wt-sdk-test-90fab70/apps/api/src/private-agent-chat-preparation.ts",
+      "match": true
+    },
+    {
+      "path": "/Users/kito/Projects/salesko-new-wt-sdk-test-90fab70/apps/api/src/private-agent-chat-repository.ts",
+      "match": true
+    },
+    {
+      "path": "/Users/kito/Projects/salesko-new-wt-sdk-test-90fab70/apps/api/src/private-agent-chat-dispatch.ts",
+      "match": true
+    },
+    {
+      "path": "/Users/kito/Projects/salesko-new-wt-sdk-test-90fab70/apps/api/src/private-agent-chat-recovery.ts",
+      "match": true
+    },
+    {
+      "path": "/Users/kito/Projects/salesko-new-wt-sdk-test-90fab70/apps/api/src/private-agent-readiness.ts",
+      "match": true
+    },
+    {
+      "path": "/Users/kito/Projects/salesko-new-wt-sdk-test-90fab70/packages/contracts/src/index.ts",
+      "match": true
+    },
+    {
+      "path": "packages/client/src/types.ts",
+      "match": true
+    },
+    {
+      "path": "packages/client/src/adapters/pi/pi-adapter.ts",
+      "match": true
+    },
+    {
+      "path": "packages/client/src/daemon/task-runner.ts",
+      "match": true
+    },
+    {
+      "path": "packages/client/src/adapters/pi/team-interaction-extension.ts",
+      "match": true
+    },
+    {
+      "path": "packages/keys/src/bin/pi-provider-launcher.ts",
+      "match": true
+    },
+    {
+      "path": "packages/keys/src/provider-profile.ts",
+      "match": true
+    },
+    {
+      "path": "packages/protocol/src/messages.ts",
+      "match": true
+    }
+  ],
+  "fixtureArithmetic": {
+    "complete": 1502,
+    "withoutTools": 741,
+    "userOnly": 24,
+    "toolsDelta": 761,
+    "systemAndFramingDelta": 717
+  },
+  "limitations": [
+    "Hash revalidation reuses prior observations; no new purity or runtime proof",
+    "Fixture deltas are not production overhead bounds"
+  ],
+  "newCredentialReads": 0,
+  "newProviderRequests": 0,
+  "newModelGenerations": 0,
+  "nativeHashMatches": [
+    {
+      "path": "package.json",
+      "match": true
+    },
+    {
+      "path": "dist/index.d.ts",
+      "match": true
+    },
+    {
+      "path": "dist/core/sdk.js",
+      "match": true
+    },
+    {
+      "path": "node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js",
+      "match": true
+    },
+    {
+      "path": "node_modules/@earendil-works/pi-ai/dist/api/openai-completions.d.ts",
+      "match": true
+    },
+    {
+      "path": "node_modules/@earendil-works/pi-ai/dist/providers/zai.js",
+      "match": true
+    },
+    {
+      "path": "dist/core/agent-session.js",
+      "match": true
+    },
+    {
+      "path": "dist/core/system-prompt.d.ts",
+      "match": true
+    }
+  ],
+  "spikeSourceMatches": [
+    {
+      "path": "/opt/homebrew/Cellar/node@24/24.18.0/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js",
+      "match": true
+    },
+    {
+      "path": "/opt/homebrew/Cellar/node@24/24.18.0/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-JVUZSMYM.js",
+      "match": true
+    },
+    {
+      "path": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/byok-runtime-input-tE5R0c/artifact-extension.ts",
+      "match": true
+    },
+    {
+      "path": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/byok-runtime-input-tE5R0c/transport.mjs",
+      "match": true
+    }
+  ],
+  "spikeProbeHashMatch": true,
+  "retainedByteEquality": {
+    "kind": "retained-byte-comparison-not-new-native-run",
+    "equal": true,
+    "preparedBytes": 6265,
+    "wireBytes": 6265,
+    "preparedSha256": "463a47a0e2b85ecd7244ca36d44ef4e79d5d44d1c6d704bac268f1d6a6cc6bf3",
+    "wireSha256": "463a47a0e2b85ecd7244ca36d44ef4e79d5d44d1c6d704bac268f1d6a6cc6bf3"
+  },
+  "reviewDocument": {
+    "path": "docs/researches/runtime-input-preparation-contract.md",
+    "sha256": "bcf2aae8e741b174e599b6c018044c64d20f93fcb4f1378ca10306c6a361ede5"
+  },
+  "checks": {
+    "ownerDecisionCount": 4,
+    "frozenDraft3Unchanged": true,
+    "trackedDiffScope": "one existing research document",
+    "newNativeRuns": 0,
+    "newProviderRequests": 0,
+    "newCredentialReads": 0,
+    "newModelGenerations": 0
+  }
+}
