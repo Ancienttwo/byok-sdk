@@ -1,6 +1,8 @@
 // This probe runs the RPC serializer shipped by the package pinned in this
-// workspace. It supplies the smallest possible in-memory session so it needs
-// neither credentials nor a network request.
+// workspace: the specifier below is an npm alias onto the SDK's Pi fork, so it
+// loads the forked build from the unchanged upstream path. It supplies the
+// smallest possible in-memory session so it needs neither credentials nor a
+// network request.
 
 const packageEntryUrl = import.meta.resolve('@earendil-works/pi-coding-agent');
 const rpcModeUrl = new URL('./modes/rpc/rpc-mode.js', packageEntryUrl);

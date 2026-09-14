@@ -10,6 +10,7 @@ import { once } from 'node:events';
 import { createInterface } from 'node:readline';
 import { createServer } from 'node:http';
 import { SqliteProviderProfileStore, parseModelProviderProfile, exactProviderProfileBinding } from '@byok-sdk/keys';
+import { parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER } from './pi-runtime-identity.mjs';
 
 import { PiAdapter } from '@byok-sdk/client/adapters';
 import { sealRuntimeOperationManifest } from '@byok-sdk/client';
@@ -17,12 +18,16 @@ import { sealRuntimeOperationManifest } from '@byok-sdk/client';
 const require = createRequire(import.meta.url);
 const keysRoot = path.dirname(require.resolve('@byok-sdk/keys/package.json'));
 const clientRoot = path.dirname(require.resolve('@byok-sdk/client/package.json'));
-// Exact client dependency, never an unversioned PATH executable.
-const piEntry = fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'));
+// Exact client dependency, never an unversioned PATH executable. The pin is an
+// npm alias onto the SDK's Pi fork, so the specifier and the installed path
+// stay upstream while the manifest inside carries the fork identity.
+const piEntry = fileURLToPath(import.meta.resolve(PI_DEPENDENCY_SPECIFIER));
 const piRoot = path.dirname(path.dirname(piEntry));
 const piManifest = JSON.parse(await readFile(path.join(piRoot, 'package.json'), 'utf8'));
 const clientManifest = JSON.parse(await readFile(path.join(clientRoot, 'package.json'), 'utf8'));
-assert.equal(piManifest.version, clientManifest.dependencies['@earendil-works/pi-coding-agent']);
+const piRuntime = parsePiRuntimeIdentity(clientManifest, '@byok-sdk/client package.json');
+assert.equal(piManifest.name, piRuntime.packageName);
+assert.equal(piManifest.version, piRuntime.version);
 const dir = await mkdtemp(path.join(tmpdir(), 'packed-pi-launcher-'));
 let requests = 0;
 const server = createServer((_req, res) => { requests++; res.writeHead(500); res.end('No inference allowed'); });

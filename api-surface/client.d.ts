@@ -769,22 +769,43 @@ export declare class PiAdapter implements RuntimeAdapter {
 }
 // ==== @byok-sdk/client dist/adapters/pi/resolve-bin.d.ts ====
 /**
- * The pi coding-agent CLI's real npm package name.
+ * The module specifier every Pi import and resolution in this package uses.
  *
  * IMPORTANT (empirically verified 2026-07-16, see the M0-3 report): the name
  * `@mariozechner/pi` — the identifier this task was originally briefed with —
  * is NOT the coding agent. On npm it resolves to an unrelated "CLI tool for
  * managing vLLM deployments on GPU pods" (bin: `pi-pods`). The real coding
  * agent was `@mariozechner/pi-coding-agent`, which is now deprecated in
- * favor of this package. `package.json` carries the exact supported version
- * as a required dependency; pi is a core BYOK capability, not an optional
+ * favor of this package. pi is a core BYOK capability, not an optional
  * enhancement or an unversioned global executable.
+ *
+ * This constant is the *resolution specifier* only. The *installed identity*
+ * behind it is a separate fact: `packages/client/package.json` pins this
+ * specifier to an exact npm alias (`npm:<name>@<x.y.z>`), because the SDK ships
+ * a fork of the upstream runtime. The specifier and the on-disk path stay
+ * `@earendil-works/pi-coding-agent`, so every import site and every extension
+ * path is unchanged; only the manifest inside that directory carries the fork's
+ * own name and version. `resolvePiRuntimeIdentity()` derives that identity from
+ * the same manifest entry, so there is exactly one authority for both.
  */
 export declare const PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 export interface ResolvedBin {
     command: string;
     source: 'package' | 'env';
 }
+/** The exact package `PI_PACKAGE_NAME` must resolve to on disk. */
+export interface PiRuntimeIdentity {
+    /** Manifest `name` of the installed runtime (the fork's own scope). */
+    readonly name: string;
+    /** Manifest `version` of the installed runtime. */
+    readonly version: string;
+}
+/**
+ * Read the exact Pi runtime identity this build of `@byok-sdk/client` pins,
+ * from the one place that declares it: the client's own manifest dependency on
+ * `PI_PACKAGE_NAME`.
+ */
+export declare function resolvePiRuntimeIdentity(): PiRuntimeIdentity;
 /**
  * Resolve the pi CLI executable from the required package installed alongside
  * `@byok-sdk/client`. There is intentionally no automatic PATH fallback: a
@@ -803,7 +824,12 @@ export interface ResolvedBin {
  * `ERR_PACKAGE_PATH_NOT_EXPORTED`. It also does NOT resolve the
  * `./package.json` subpath directly (also not exported); instead it resolves
  * the package's main entry via `import.meta.resolve` and walks upward to the
- * package root identified by its manifest name.
+ * enclosing package root.
+ *
+ * That root's manifest name is NOT `PI_PACKAGE_NAME`: the specifier is an npm
+ * alias for the SDK's fork, so the installed manifest carries the fork's own
+ * name and version. Both are compared against the pin, and a mismatch fails
+ * closed instead of launching an unverified runtime.
  */
 export declare function resolvePiBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/pi/resolve-extensions.d.ts ====

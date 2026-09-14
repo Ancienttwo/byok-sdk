@@ -348,8 +348,16 @@ remain the only device protocol.
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. `@byok-sdk/client` depends on the exact npm
-artifact `@earendil-works/pi-coding-agent@0.85.1`; the SDK does not accept an
-unversioned global `pi` on `PATH` as an implicit substitute. All workspace
+artifact `@byok-sdk/pi-coding-agent@0.85.1001` — the SDK's fork of upstream
+0.85.1 at `d981de1`, carrying the prepared-session-input seam — declared as
+`"@earendil-works/pi-coding-agent": "npm:@byok-sdk/pi-coding-agent@0.85.1001"`
+so the import specifier and the installed directory stay upstream while the
+resolved manifest carries the fork identity. That one manifest entry is the
+authority for both halves: `PI_PACKAGE_NAME` is the resolution specifier and
+`resolvePiRuntimeIdentity()` derives the exact installed name and version from
+the same line, and a launch whose resolved manifest does not match fails closed.
+The SDK does not accept an unversioned global `pi` on `PATH` as an implicit
+substitute. All workspace
 dispatch packages and private conformance tests require Node.js `>=22.22.0`,
 matching pi's published engine floor. The independent
 `@byok-sdk/keys` package remains outside the dispatch graph, depends only
