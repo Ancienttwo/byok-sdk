@@ -1,3 +1,9 @@
+> **Archived**: 2026-09-15 04:38
+> **Related Plan**: plans/archive/plan-20260824-0239-agent-home-profile-projection.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260915-0438
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog

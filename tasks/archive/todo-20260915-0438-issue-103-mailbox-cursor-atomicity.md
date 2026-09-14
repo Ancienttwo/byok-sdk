@@ -1,3 +1,9 @@
+> **Archived**: 2026-09-15 04:38
+> **Related Plan**: plans/archive/plan-20260831-2304-issue-103-mailbox-cursor-atomicity.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260915-0438
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog

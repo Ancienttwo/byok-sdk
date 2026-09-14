@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-09-13T12:54:25+0800 -->
+<!-- updated_at: 2026-09-15T04:38:42+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-09-13T12:54:25+0800
-> **Source Branch**: codex/byok-018-d2-task-assertion
-> **Source Commit**: 6e4f6e2f
+> **Updated At**: 2026-09-15T04:38:42+0800
+> **Source Branch**: codex/c07-g3-launch-binding
+> **Source Commit**: 5f09e3c6
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -27,6 +27,8 @@ This file is an ignored local read model derived from this worktree's artifacts.
 
 - linked-worktree-ce21c0c05deb: plans/plan-20260910-0214-downstream-issue-intake.md
 - linked-worktree-ce21c0c05deb: active-worktree owner -> self
+- linked-worktree-34bafe00c597: plans/plan-20260914-1028-agent-gateway-session-probe.md
+- linked-worktree-34bafe00c597: active-worktree owner -> self
 ## Active Sprint
 
 - Sprint: (none)
@@ -40,23 +42,53 @@ This file is an ignored local read model derived from this worktree's artifacts.
 
 ## Checks
 
-- status=pass, source=verify-sprint, exit_code=0, file=.ai/harness/checks/latest.json
+- status=(none), source=(none), file=.ai/harness/checks/latest.json
 
 ## Git Status
 
-- Summary: 10 changed/untracked path(s)
+- Summary: 164 changed/untracked path(s)
 
 ```
- D plans/plan-20260912-1540-byok-018-d2-task-assertion.md
- D tasks/contracts/20260912-1540-byok-018-d2-task-assertion.contract.md
- D tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md
- D tasks/reviews/20260912-1540-byok-018-d2-task-assertion.review.md
- M tasks/todos.md
-?? plans/archive/plan-20260912-1540-byok-018-d2-task-assertion.md
-?? tasks/archive/contract-20260913-1254-byok-018-d2-task-assertion.md
-?? tasks/archive/notes-20260913-1254-byok-018-d2-task-assertion.md
-?? tasks/archive/review-20260913-1254-byok-018-d2-task-assertion.md
-?? tasks/archive/todo-20260913-1254-byok-018-d2-task-assertion.md
+ D plans/plan-20260809-0001-s4b-c-cloud-cleanup.md
+ D plans/plan-20260809-0520-s7a-fleet-health.md
+ D plans/plan-20260813-2350-device-toolset-discovery.md
+ D plans/plan-20260821-2336-local-agent-version-tolerance.md
+ D plans/plan-20260823-1639-agent-local-cloud-egress-contract.md
+ D plans/plan-20260823-1908-release-0-6-1.md
+ D plans/plan-20260823-2025-authenticated-enrollment-tenant-projection.md
+ D plans/plan-20260824-0239-agent-home-profile-projection.md
+ D plans/plan-20260824-1223-release-0-8-0-docs.md
+ D plans/plan-20260826-1405-agent-provider-profile-binding.md
+ D plans/plan-20260831-2304-issue-103-mailbox-cursor-atomicity.md
+ D plans/plan-20260901-0058-issue-105-json-body-limits.md
+ D plans/plan-20260901-0149-issue-106-spool-initialization.md
+ D plans/plan-20260901-0253-issue-107-tenant-quota.md
+ D plans/plan-20260901-0335-issue-108-control-rpc-ids.md
+ D plans/plan-20260901-0409-issue-109-control-backpressure.md
+ D plans/plan-20260901-0409-issue-111-url-redaction.md
+ D plans/plan-20260901-0411-issue-110-auth-request-deadline.md
+ D tasks/contracts/20260809-0001-s4b-c-cloud-cleanup.contract.md
+ D tasks/contracts/20260809-0520-s7a-fleet-health.contract.md
+ D tasks/contracts/20260813-2350-device-toolset-discovery.contract.md
+ D tasks/contracts/20260821-2336-local-agent-version-tolerance.contract.md
+ D tasks/contracts/20260823-1639-agent-local-cloud-egress-contract.contract.md
+ D tasks/contracts/20260823-1908-release-0-6-1.contract.md
+ D tasks/contracts/20260823-2025-authenticated-enrollment-tenant-projection.contract.md
+ D tasks/contracts/20260824-0239-agent-home-profile-projection.contract.md
+ D tasks/contracts/20260824-1223-release-0-8-0-docs.contract.md
+ D tasks/contracts/20260826-1405-agent-provider-profile-binding.contract.md
+ D tasks/contracts/20260831-2304-issue-103-mailbox-cursor-atomicity.contract.md
+ D tasks/contracts/20260901-0058-issue-105-json-body-limits.contract.md
+ D tasks/contracts/20260901-0149-issue-106-spool-initialization.contract.md
+ D tasks/contracts/20260901-0253-issue-107-tenant-quota.contract.md
+ D tasks/contracts/20260901-0335-issue-108-control-rpc-ids.contract.md
+ D tasks/contracts/20260901-0409-issue-109-control-backpressure.contract.md
+ D tasks/contracts/20260901-0409-issue-111-url-redaction.contract.md
+ D tasks/contracts/20260901-0411-issue-110-auth-request-deadline.contract.md
+ M tasks/current.md
+ D tasks/notes/20260809-0001-s4b-c-cloud-cleanup.notes.md
+ D tasks/notes/20260809-0520-s7a-fleet-health.notes.md
+ D tasks/notes/20260813-2350-device-toolset-discovery.notes.md
 ```
 
 ## Source Artifacts

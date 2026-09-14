@@ -1,7 +1,13 @@
+> **Archived**: 2026-09-15 04:38
+> **Related Plan**: plans/archive/plan-20260809-0001-s4b-c-cloud-cleanup.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260915-0438
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: (archive-workflow)
+> **Updated**: 2026-09-14 01:42
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.

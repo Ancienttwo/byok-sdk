@@ -1,3 +1,9 @@
+> **Archived**: 2026-09-15 04:38
+> **Related Plan**: plans/archive/plan-20260901-0253-issue-107-tenant-quota.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260915-0438
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog

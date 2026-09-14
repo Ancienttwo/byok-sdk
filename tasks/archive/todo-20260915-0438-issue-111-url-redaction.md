@@ -1,3 +1,9 @@
+> **Archived**: 2026-09-15 04:38
+> **Related Plan**: plans/archive/plan-20260901-0409-issue-111-url-redaction.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260915-0438
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
