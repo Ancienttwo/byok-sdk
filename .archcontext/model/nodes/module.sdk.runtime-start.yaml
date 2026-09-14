@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "module.sdk.runtime-start",
+  "kind": "module",
+  "name": "Owned runtime startup",
+  "status": "active",
+  "parent": "capability.sdk.sdk-root",
+  "summary": "Starts an injected prepared RuntimeOperation under cancellation and a deadline, retaining cleanup responsibility until a real Session or disposal receipt exists.",
+  "source": {
+    "include": [
+      "packages/client/src/daemon/runtime-start.ts"
+    ]
+  },
+  "notes": [
+    "The call to the prepared operation crosses an injected runtime boundary. Static evidence proves the owned-start wrapper call, not native process startup, provider generation or quiescence."
+  ]
+}

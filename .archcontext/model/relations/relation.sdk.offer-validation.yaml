@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.offer-validation",
+  "kind": "calls",
+  "source": "module.sdk.task-runner",
+  "target": "component.sdk.offer-validation",
+  "synchrony": "synchronous",
+  "intent": "Validate the offered AgentRef and build an explicit decline for invalid identity or unavailable required local capabilities."
+}
