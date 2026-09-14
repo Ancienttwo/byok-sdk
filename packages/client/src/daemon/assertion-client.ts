@@ -1,6 +1,17 @@
-import { parseDeviceAssertionEnvelope, type DeviceAssertionEnvelopeV1 } from '@byok-sdk/core';
+import {
+  parseDeviceAssertionEnvelope,
+  parseTaskAssertionEnvelope,
+  type DeviceAssertionEnvelopeV1,
+  type TaskAssertionEnvelopeV1,
+} from '@byok-sdk/core';
 import { connectControlClient } from '../bin/control-client';
-import { ControlError, type AssertionIssueErrorCode, type AssertionIssueResult } from './control-protocol';
+import {
+  ControlError,
+  type AssertionIssueErrorCode,
+  type AssertionIssueResult,
+  type TaskAssertionIssueErrorCode,
+  type TaskAssertionIssueResult,
+} from './control-protocol';
 import { DeviceStore } from './store';
 
 /**
@@ -104,6 +115,101 @@ export async function requestDeviceAssertion(
   } finally {
     // One connection per call. Holding it open would keep a handle on a
     // privileged local socket for a credential that expires in two minutes.
+    connected.client.close();
+  }
+}
+
+/**
+ * Contract §8.1 / §8.2(1): ask a running daemon for one task-scoped assertion,
+ * for one upcoming tool invocation.
+ *
+ * `contextToken` is the `BYOK_HOST_TOOLSET_CONTEXT` value the daemon injected
+ * into THIS process's environment when it started this task's toolset server.
+ * The caller passes it explicitly and this function never reads it from
+ * `process.env` itself — a helper that went looking for the variable would work
+ * just as well inside a process the daemon never spawned for this task, which
+ * is precisely the substitution the nonce exists to prevent. Reading the
+ * environment is the child's own decision, made once, at its own entry point.
+ *
+ * §8.1 again, on what this function must NOT grow: no cache, no refresh, no
+ * retry. Every tool call takes a NEW assertion with a NEW `jti`, and so does
+ * every transport retry of the same call — one credential held across
+ * invocations is a task pass, which is the thing the whole lane is built to not
+ * be. Retrying is the caller's decision, and a retry means calling this again.
+ */
+export interface RequestTaskAssertionOptions {
+  /** Same `productId` the daemon was configured with — selects which daemon's socket to dial. */
+  productId: string;
+  /** Same `storeDir` the daemon was configured with. Defaults to `~/.byok/<productId>`. */
+  storeDir?: string;
+  /** The `BYOK_HOST_TOOLSET_CONTEXT` nonce this process was started with. Never read from the environment here. */
+  contextToken: string;
+  /** The exact audience string, which must appear verbatim in the daemon's configured allowlist. */
+  audience: string;
+  /** Bound on the control-socket round trip, ms. Default 10s (the control client's own default). */
+  timeoutMs?: number;
+}
+
+/**
+ * The nine refusals the daemon itself can answer with (see
+ * `TASK_ASSERTION_ISSUE_ERROR_CODES`, `control-protocol.ts`) plus the two this
+ * function produces on its own, with the same meanings they have in
+ * {@link RequestDeviceAssertionErrorCode}.
+ *
+ * Note what a caller may NOT conclude from `context_token_invalid`: it does not
+ * distinguish "this token was never real" from "this task has finished and been
+ * cleaned up". The daemon collapses those deliberately, and a caller that
+ * reconstructs the difference by timing or retrying is reading an oracle that is
+ * not offered.
+ */
+export type RequestTaskAssertionErrorCode =
+  | TaskAssertionIssueErrorCode
+  | 'unavailable'
+  | 'bad_response'
+  | (string & {});
+
+export type RequestTaskAssertionResult =
+  | { ok: true; assertion: TaskAssertionEnvelopeV1; expiresAt: string }
+  | { ok: false; code: RequestTaskAssertionErrorCode; reason: string };
+
+/**
+ * Asks a running daemon for one short-lived task assertion.
+ *
+ * Never throws for an expected outcome, exactly like
+ * {@link requestDeviceAssertion}: a missing daemon, a denied audience, an
+ * unknown or revoked context, a revoked or unpaired device, and a daemon
+ * mid-shutdown all come back as `{ok: false, code, reason}`.
+ *
+ * A device assertion is NOT an acceptable answer here and cannot become one:
+ * this calls `task_assertion.issue`, and the envelope is parsed with
+ * `parseTaskAssertionEnvelope`, which rejects a device envelope outright rather
+ * than passing it on to a caller who would then present it as task authority.
+ */
+export async function requestTaskAssertion(
+  options: RequestTaskAssertionOptions,
+): Promise<RequestTaskAssertionResult> {
+  const storeDir = DeviceStore.resolveDir(options.productId, options.storeDir);
+  const connected = await connectControlClient({
+    storeDir,
+    productId: options.productId,
+    ...(options.timeoutMs === undefined ? {} : { requestTimeoutMs: options.timeoutMs }),
+  });
+  if (!connected.ok) return { ok: false, code: 'unavailable', reason: connected.reason };
+
+  try {
+    const result = await connected.client.request<TaskAssertionIssueResult>('task_assertion.issue', {
+      contextToken: options.contextToken,
+      audience: options.audience,
+    });
+    if (result === null || typeof result !== 'object' || typeof result.expiresAt !== 'string') {
+      return { ok: false, code: 'bad_response', reason: 'daemon returned a malformed task_assertion.issue result' };
+    }
+    const assertion = parseTaskAssertionEnvelope(result.assertion);
+    return { ok: true, assertion, expiresAt: result.expiresAt };
+  } catch (err) {
+    if (err instanceof ControlError) return { ok: false, code: err.code, reason: err.message };
+    return { ok: false, code: 'bad_response', reason: errorMessage(err) };
+  } finally {
     connected.client.close();
   }
 }

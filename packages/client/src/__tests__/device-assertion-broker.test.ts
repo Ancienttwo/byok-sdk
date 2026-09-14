@@ -3,13 +3,16 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope } from '@byok-sdk/protocol';
+import { AgentRefSchema, ToolsetIdSchema, createEnvelope } from '@byok-sdk/protocol';
 import {
   DEVICE_ASSERTION_DOMAIN_PREFIX,
   DEVICE_ASSERTION_MAX_TTL_MS,
   DEVICE_ASSERTION_SCHEMA_ID,
   DEVICE_PROOF_DOMAIN_PREFIX,
   DeviceAssertionClaimsSchema,
+  TASK_ASSERTION_DOMAIN_PREFIX,
+  TaskAssertionAgentRefSchema,
+  TaskAssertionClaimsSchema,
   deviceAssertionSigningInput,
   parseDeviceAssertionEnvelope,
   verifyDeviceAssertion,
@@ -619,19 +622,23 @@ describe('device assertion broker: assertion.issue', () => {
 });
 
 // ---------------------------------------------------------------------------
-// codex F6c: the authoritative three-way domain-separation falsifier — the
-// only place that imports the REAL production `NONCE_SIGNING_DOMAIN` alongside
-// core's two exported prefixes, so drift in ANY of the three turns this red.
+// codex F6c: the authoritative domain-separation falsifier — the only place
+// that imports the REAL production `NONCE_SIGNING_DOMAIN` alongside core's
+// exported prefixes, so drift in ANY of them turns this red. Contract §8.1
+// added the fourth domain (`byok-task-assertion-v1\n`): the task and device
+// envelopes must not be interchangeable, and a shared or prefix-related domain
+// would make one signature reusable in the other lane.
 // ---------------------------------------------------------------------------
 
-describe('domain separation across all three signing domains (falsifier)', () => {
+describe('domain separation across all four signing domains (falsifier)', () => {
   const DOMAINS: readonly (readonly [string, string])[] = [
     ['nonce', NONCE_SIGNING_DOMAIN],
     ['device proof', DEVICE_PROOF_DOMAIN_PREFIX],
     ['device assertion', DEVICE_ASSERTION_DOMAIN_PREFIX],
+    ['task assertion', TASK_ASSERTION_DOMAIN_PREFIX],
   ];
 
-  it('keeps the three production prefixes pairwise distinct and pairwise non-prefix', () => {
+  it('keeps the four production prefixes pairwise distinct and pairwise non-prefix', () => {
     for (const [leftName, left] of DOMAINS) {
       for (const [rightName, right] of DOMAINS) {
         if (leftName === rightName) continue;
@@ -646,6 +653,104 @@ describe('domain separation across all three signing domains (falsifier)', () =>
     for (const [, domain] of DOMAINS) {
       expect(domain.endsWith('\n')).toBe(true);
       expect(domain.slice(0, -1)).not.toContain('\n');
+    }
+  });
+
+  /**
+   * Contract §8.1 requires the task envelope's `agentRef`/`toolsetId` to reuse
+   * the SDK's authoritative validators rather than a weakened restatement.
+   * Core cannot import `@byok-sdk/protocol` (the §12.1 invariant
+   * `packages/core/src/__tests__/constraints.test.ts` enforces on shipped
+   * source AND tests), so core restates them — and this is where the
+   * restatement is held to the authority, for the same reason the nonce domain
+   * is checked here: this package is the one that can import both.
+   *
+   * Behavioural, not textual: every candidate must get the same verdict from
+   * both schemas. A copy that dropped the Windows-reserved rule, widened the
+   * byte bound, or accepted an uppercase toolset id fails here.
+   */
+  it('keeps core\'s task-assertion AgentRef/toolsetId validators identical to the protocol authority', () => {
+    const agentRefCandidates: readonly unknown[] = [
+      { agentId: 'agent-1', profileRevision: 'rev-1' },
+      { agentId: '代理-b', profileRevision: 'rev/2' },
+      { agentId: '.', profileRevision: 'rev-1' },
+      { agentId: '..', profileRevision: 'rev-1' },
+      { agentId: 'a/b', profileRevision: 'rev-1' },
+      { agentId: 'a\\b', profileRevision: 'rev-1' },
+      { agentId: 'a:b', profileRevision: 'rev-1' },
+      { agentId: 'a*b', profileRevision: 'rev-1' },
+      { agentId: 'a?b', profileRevision: 'rev-1' },
+      { agentId: 'a"b', profileRevision: 'rev-1' },
+      { agentId: 'a<b>', profileRevision: 'rev-1' },
+      { agentId: 'a|b', profileRevision: 'rev-1' },
+      { agentId: 'CON', profileRevision: 'rev-1' },
+      { agentId: 'nul.txt', profileRevision: 'rev-1' },
+      { agentId: 'com1', profileRevision: 'rev-1' },
+      { agentId: 'lpt9', profileRevision: 'rev-1' },
+      { agentId: 'trailing.', profileRevision: 'rev-1' },
+      { agentId: 'trailing ', profileRevision: 'rev-1' },
+      { agentId: 'a\u0001b', profileRevision: 'rev-1' },
+      { agentId: 'a\u007fb', profileRevision: 'rev-1' },
+      { agentId: 'a\nb', profileRevision: 'rev-1' },
+      { agentId: '', profileRevision: 'rev-1' },
+      { agentId: 'agent-1', profileRevision: '' },
+      { agentId: 'agent-1', profileRevision: 'r'.repeat(160) },
+      { agentId: 'agent-1', profileRevision: 'r'.repeat(161) },
+      { agentId: 'a'.repeat(160), profileRevision: 'rev-1' },
+      { agentId: 'a'.repeat(161), profileRevision: 'rev-1' },
+      { agentId: '受'.repeat(54), profileRevision: 'rev-1' },
+      { agentId: 'agent-1', profileRevision: '受'.repeat(54) },
+      { agentId: 'agent-1', profileRevision: 'rev-1', extra: 'x' },
+      { agentId: 'agent-1' },
+      { profileRevision: 'rev-1' },
+      'agent-1',
+      null,
+      42,
+    ];
+    for (const candidate of agentRefCandidates) {
+      expect(
+        TaskAssertionAgentRefSchema.safeParse(candidate).success,
+        `AgentRef verdict drift: ${JSON.stringify(candidate)}`,
+      ).toBe(AgentRefSchema.safeParse(candidate).success);
+    }
+
+    const toolsetCandidates: readonly unknown[] = [
+      'salesko.read.v1',
+      'salesko.propose.v1',
+      'a',
+      'a-b_c.d',
+      'a1',
+      '',
+      'Salesko.Read.V1',
+      'salesko..read',
+      'salesko.read.',
+      '.salesko',
+      '-salesko',
+      'salesko read',
+      'salesko/read',
+      'a'.repeat(128),
+      'a'.repeat(129),
+      '受众',
+      null,
+      42,
+    ];
+    for (const candidate of toolsetCandidates) {
+      const mirrored = TaskAssertionClaimsSchema.safeParse({
+        version: 1,
+        issuer: 'https://api.example.com',
+        productId: 'product-a',
+        deviceId: 'device-1',
+        audience: ALLOWED_AUDIENCE,
+        jti: 'AAAAAAAAAAAAAAAAAAAAAA',
+        issuedAt: '2026-08-12T04:45:00.000Z',
+        expiresAt: '2026-08-12T04:47:00.000Z',
+        taskId: 'task-1',
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+        toolsetId: candidate,
+      }).success;
+      expect(mirrored, `toolsetId verdict drift: ${JSON.stringify(candidate)}`).toBe(
+        ToolsetIdSchema.safeParse(candidate).success,
+      );
     }
   });
 

@@ -16,7 +16,7 @@
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { createMutableClock, tenantId } from '@byok-sdk/core';
+import { DEVICE_ASSERTION_SCHEMA_ID, createMutableClock, tenantId } from '@byok-sdk/core';
 import { createWebCrypto } from '@byok-sdk/cloud';
 import { migrate } from '../migrate';
 import { PostgresDeviceDirectory } from '../stores/devices';
@@ -96,6 +96,7 @@ async function fixture(pool: Pool): Promise<Fixture> {
       await nonces.issue(tenantBrand, deviceId);
       await dedup.checkAndRecord(tenantBrand, deviceId, `${deviceId}-envelope`);
       await replay.consume({
+        schema: DEVICE_ASSERTION_SCHEMA_ID,
         tenantId: tenantBrand,
         issuer: 'https://api.example.com',
         productId: PRODUCT,

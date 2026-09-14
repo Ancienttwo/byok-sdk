@@ -1,6 +1,7 @@
 /** U5: real Postgres + MinIO evidence for the package-owned erasure authority. */
 import { fileURLToPath } from 'node:url';
 import {
+  DEVICE_ASSERTION_SCHEMA_ID,
   contentHash,
   objectKeyPrefix,
   tenantId,
@@ -257,9 +258,9 @@ async function seedEveryTenantTable(pool: Pool, tenant: TenantId, suffix: string
   );
   await pool.query(
     `INSERT INTO device_assertion_replay (
-       tenant_id, issuer, product_id, device_id, audience, jti, expires_at
-     ) VALUES ($1, 'issuer', 'product', $2, 'audience', 'jti', $3)`,
-    [tenant, device, now],
+       tenant_id, issuer, product_id, device_id, audience, schema, jti, expires_at
+     ) VALUES ($1, 'issuer', 'product', $2, 'audience', $4, 'jti', $3)`,
+    [tenant, device, now, DEVICE_ASSERTION_SCHEMA_ID],
   );
   await pool.query(
     `INSERT INTO agent_egress_event (

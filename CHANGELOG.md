@@ -1,5 +1,101 @@
 # Changelog
 
+## Unreleased
+
+Deliberately not filed under 0.18.0: none of this is in a published artifact,
+and the D2 version number belongs to a separate SDK release contract.
+
+- Add the `byok-task-assertion-v1` envelope to `@byok-sdk/core` — a separate
+  Ed25519 envelope binding `taskId`, the frozen `agentRef` and `toolsetId`
+  alongside the device claims, under its own non-prefix signing domain. It
+  reuses the device lane's `jti`/signature encodings, audience byte bound and
+  `DEVICE_ASSERTION_MAX_TTL_MS` rather than defining looser ones, and the two
+  lanes are not interchangeable in either direction: each verifier accepts only
+  its own schema, with no fallback for a device-only assertion presented to the
+  task lane.
+- **Breaking** — `DeviceAssertionReplayConsumeInput.schema` is now required. The
+  shared replay key gains an envelope-kind discriminator segment,
+  `(tenant_id, issuer, product_id, device_id, audience, schema, jti)`, so one
+  `jti` is consumable exactly once per envelope kind and neither lane occupies
+  the other's slot. There is no default and no inference: every caller states
+  its lane. Custom `DeviceAssertionReplayAuthority` implementations must key on
+  the new segment.
+- Issue task assertions from the daemon. Each admitted host toolset server's
+  child process receives an SDK-minted `BYOK_HOST_TOOLSET_CONTEXT` nonce — one
+  per `(task, server)`, 32 CSPRNG bytes — bound in the daemon's own registry to
+  that task, the frozen offer's `agentRef` and the frozen toolset id. A host's
+  `mcpToolsets` registry still cannot supply an `env` block, so the value can
+  only be one the daemon minted, and the nonce never reaches a prompt, a log, an
+  observer event, the audit file, or the server.
+- Add the `task_assertion.issue` control method, separate from
+  `assertion.issue` and not a mode of it. It takes exactly
+  `{contextToken, audience}`: `taskId`, `agentRef` and `toolsetId` come from the
+  registry entry, and params that even mention them are rejected. Nine
+  fail-closed gates run in a fixed order — `capability_undeclared`, then the
+  device lane's six unchanged, then `context_token_invalid` and
+  `context_revoked` — and the registry is re-read at
+  the signing point, so an envelope produced while a task's authority ended is
+  discarded rather than returned. Every call mints a fresh `jti`; the daemon
+  caches nothing.
+- Revoke a task's whole nonce set the moment this device accepts a cancel,
+  reaches any semantic terminal, or begins shutting down — synchronously, before
+  any await. Entries are retained through revocation so the refusal is the
+  precise `context_revoked`, and deleted with the task's resources, after which
+  it is indistinguishable from a token that never existed. This is the second
+  fail-closed layer only: the authoritative revocation point remains the host's
+  own cancel/End commit, and no refusal here recalls an assertion already
+  issued.
+- Add `requestTaskAssertion` to `@byok-sdk/client`'s public surface, beside
+  `requestDeviceAssertion`, along with the `task_assertion.issue` wire contract
+  (`parseTaskAssertionIssueParams`, its params/result types and its error
+  codes). The helper takes the context token explicitly and never reads it from
+  the environment, and it neither caches nor retries: every tool call, including
+  every transport retry, takes a new assertion with a new `jti`.
+- Record which lane a `device-assertion` daemon event belongs to. The event now
+  carries a required `lane` (`device` | `task`) and, on the task lane, the
+  `taskId`, through the live feed, the stdout line and the audit file, so the
+  two credential kinds stay distinguishable in the local ledger.
+- Add `deploy/sql/0022_task_assertion_replay_schema.sql`, which adds the
+  `schema` column to `device_assertion_replay`, backfills the existing rows as
+  device assertions once, drops the default so later writes must be explicit,
+  constrains the column to the two known envelope kinds, and rebuilds the
+  primary key around the new segment. Forward-only, as every migration here is.
+- Add `authenticateHostedTaskAssertion` to `@byok-sdk/cloud`, the hosted
+  composition for the task lane, beside `authenticateHostedDeviceAssertion` and
+  taking the same deps (exported as `HostedTaskAssertionAuthDeps`). It performs
+  the strict parse, current-device-row, signature, exact issuer/product/audience,
+  time/TTL and atomic single-use `jti` checks under the task lane's own replay
+  segment; a device envelope presented to it authenticates as `undefined`, and a
+  replay store that cannot answer rejects rather than degrading. Whether the
+  claims belong to a live frozen offer remains the host's decision.
+- Add a `lane` discriminator to both authentication results.
+  `AuthenticatedDeviceAssertion` now carries `lane: 'device'` and
+  `AuthenticatedTaskAssertion` carries `lane: 'task'`. Not breaking for a
+  consumer that reads these values — both are outputs, so no caller constructs
+  one — but `AuthenticatedTaskAssertion` no longer EXTENDS
+  `AuthenticatedDeviceAssertion`: the two share a common field set and are
+  discriminated, so a task credential is no longer silently assignable wherever
+  device authority is expected. `AuthenticatedAssertion` is exported for the
+  consumer that genuinely serves both lanes.
+- Gate the task lane on `host-mcp-task-context`, on two independent channels
+  that must both hold. `@byok-sdk/protocol` exports the device-level capability
+  string (`HOST_MCP_TASK_CONTEXT_CAPABILITY`, registered in `CAPABILITY_FLAGS`);
+  `@byok-sdk/cloud`'s `CLOUD_CAPABILITIES` gains the deployment-level name,
+  withheld from `fullCapabilityDeclaration()` unless a composition passes
+  `includeHostMcpTaskContext` — a deployment declares it only once its host side
+  implements the verification. The daemon advertises the capability string only
+  when it can sign AND has read a deployment declaration naming it, injects no
+  `BYOK_HOST_TOOLSET_CONTEXT` nonce until then, and answers
+  `task_assertion.issue` with a new `capability_undeclared` code (checked second,
+  after `assertion_disabled`) while either channel is silent. A device that
+  cannot serve the lane is explicitly unavailable; there is no device-assertion
+  fallback.
+- Name the `contextToken` bound against its own limit in the
+  `task_assertion.issue` `bad_request` message, and answer
+  `context_token_invalid` rather than `context_revoked` when the post-signing
+  registry re-read finds no registry at all — a context that never existed is
+  not a context whose authority ended.
+
 ## 0.18.0 / @byok-sdk/keys 0.5.0 — unpublished release candidate
 
 - Launch package-resolved Pi through the current Node executable for version detection, direct RPC and credential custody, avoiding Windows `spawn EFTYPE` without shell execution. Native executable overrides remain explicit.

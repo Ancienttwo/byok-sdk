@@ -64,6 +64,23 @@ export const CLOUD_CAPABILITIES = {
   skillPacks: 'skills.pack',
   /** Optional, one-way redacted Agent-memory snapshot mutation route. */
   agentMemoryProjection: 'agent.memory.projection',
+  /**
+   * Contract §8.1's capability gate for task-scoped tool authority
+   * (`byok-task-assertion-v1`), deployment-level channel.
+   *
+   * The SAME literal name `@byok-sdk/protocol`'s
+   * `HOST_MCP_TASK_CONTEXT_CAPABILITY` carries on the device-level channel —
+   * §8.1 requires both to be in place, and a name spelled differently in the
+   * two would make "both" unverifiable.
+   *
+   * Unlike its siblings above this capability mounts no route in this package:
+   * what a deployment promises by declaring it is that its host side actually
+   * VERIFIES task assertions (`authenticateHostedTaskAssertion` plus the frozen
+   * offer check that only the host can make). That is why it is default-off
+   * below and not derivable from anything this package can inspect — §8.2(1):
+   * the capability is declared only once it is completely implemented.
+   */
+  hostMcpTaskContext: 'host-mcp-task-context',
 } as const;
 
 export type CloudCapability = (typeof CLOUD_CAPABILITIES)[keyof typeof CLOUD_CAPABILITIES];
@@ -91,6 +108,13 @@ export interface FullCapabilityDeclarationOptions {
    * mutation route.
    */
   readonly includeAgentMemoryProjection?: boolean;
+  /**
+   * Contract §8.2(1): the task lane is declared only by a deployment whose host
+   * side verifies task assertions end to end. There is nothing this package can
+   * probe to decide that for an embedder, and guessing would declare a gate the
+   * deployment does not hold — so it is off unless a composition says otherwise.
+   */
+  readonly includeHostMcpTaskContext?: boolean;
 }
 
 /** Every capability the standard composition can serve, plus explicitly wired composition-bound ones. */
@@ -106,6 +130,9 @@ export function fullCapabilityDeclaration(
       if (capability === CLOUD_CAPABILITIES.skillPacks) return options.includeSkillPacks === true;
       if (capability === CLOUD_CAPABILITIES.agentMemoryProjection) {
         return options.includeAgentMemoryProjection === true;
+      }
+      if (capability === CLOUD_CAPABILITIES.hostMcpTaskContext) {
+        return options.includeHostMcpTaskContext === true;
       }
       return true;
     }),

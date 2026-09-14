@@ -540,7 +540,7 @@ export interface BearerAuthDeps {
 export declare function extractBearerToken(header: string | undefined): string | undefined;
 export declare function authenticateBearer(header: string | undefined, deps: BearerAuthDeps): Promise<DevicePrincipal | undefined>;
 // ==== @byok-sdk/cloud dist/auth/device-assertion.d.ts ====
-import { type AuthenticatedDeviceAssertion, type Clock, type DeviceAssertionExpectedBinding, type DeviceAssertionReplayAuthority } from '@byok-sdk/core';
+import { type AuthenticatedDeviceAssertion, type AuthenticatedTaskAssertion, type Clock, type DeviceAssertionExpectedBinding, type DeviceAssertionReplayAuthority } from '@byok-sdk/core';
 import type { CloudCrypto } from '../crypto/port';
 import type { DeviceDirectory } from '../stores/ports';
 export interface HostedDeviceAssertionAuthDeps {
@@ -558,6 +558,46 @@ export interface HostedDeviceAssertionAuthDeps {
  * host-owned and are never represented by this short-lived credential.
  */
 export declare function authenticateHostedDeviceAssertion(input: unknown, deps: HostedDeviceAssertionAuthDeps): Promise<AuthenticatedDeviceAssertion | undefined>;
+/**
+ * The task lane needs exactly the same hosted authorities as the device lane —
+ * the same directory rows, the same verifier, the same replay ledger, the same
+ * clock and the same expected binding. An alias rather than a second interface,
+ * because two structurally identical declarations are two places for the
+ * hosted composition's requirements to drift apart.
+ */
+export type HostedTaskAssertionAuthDeps = HostedDeviceAssertionAuthDeps;
+/**
+ * Hosted composition for the task-scoped tool-authority exchange
+ * (`byok-task-assertion-v1`, contract §8.1 / §8.2(2)).
+ *
+ * Everything §8.2(2) puts on this side is here or in the core function it
+ * composes: strict parse, the CURRENT device row (exists, not revoked, legal
+ * key), signature, exact issuer/product/audience, valid time window, the TTL
+ * ceiling, and one atomic `jti` consumption under the task lane's own `schema`
+ * segment — so the same `jti` presented as a device assertion and as a task
+ * assertion occupies two key slots and neither lane can burn the other's. The
+ * replay segment is chosen inside core from the envelope kind; this function
+ * deliberately has no say in it, because a caller able to name the segment
+ * would be a caller able to spend the other lane's key.
+ *
+ * A DEVICE envelope presented here authenticates as `undefined`, always: §8.1
+ * gives the task lane zero acceptance and zero fallback, and that is a property
+ * of core's parser (`parseTaskAssertionEnvelope`), not a branch anyone here
+ * could relax.
+ *
+ * A replay store that cannot answer REJECTS the promise rather than resolving
+ * to a principal — §8.2(2)'s "an unavailable replay store fails, it does not
+ * downgrade authentication". A host turns that into an availability error; it
+ * must never turn it into signature-only acceptance.
+ *
+ * What this deliberately does NOT do is the frozen-offer check — that the
+ * task, AgentRef and toolset in the claims belong to THIS Execution, and that
+ * the Execution still permits a new tool call. That authority is the host's
+ * (§8.2(3)), and a parameter for it here would be an invitation to synthesize
+ * it. This function's answer is "these claims are authentic and spent once",
+ * never "this invocation is admitted".
+ */
+export declare function authenticateHostedTaskAssertion(input: unknown, deps: HostedTaskAssertionAuthDeps): Promise<AuthenticatedTaskAssertion | undefined>;
 // ==== @byok-sdk/cloud dist/auth/device-proof.d.ts ====
 import { type Clock, type DevicePrincipal } from '@byok-sdk/core';
 import type { CloudCrypto } from '../crypto/port';
@@ -774,6 +814,23 @@ export declare const CLOUD_CAPABILITIES: {
     readonly skillPacks: 'skills.pack';
     /** Optional, one-way redacted Agent-memory snapshot mutation route. */
     readonly agentMemoryProjection: 'agent.memory.projection';
+    /**
+     * Contract §8.1's capability gate for task-scoped tool authority
+     * (`byok-task-assertion-v1`), deployment-level channel.
+     *
+     * The SAME literal name `@byok-sdk/protocol`'s
+     * `HOST_MCP_TASK_CONTEXT_CAPABILITY` carries on the device-level channel —
+     * §8.1 requires both to be in place, and a name spelled differently in the
+     * two would make "both" unverifiable.
+     *
+     * Unlike its siblings above this capability mounts no route in this package:
+     * what a deployment promises by declaring it is that its host side actually
+     * VERIFIES task assertions (`authenticateHostedTaskAssertion` plus the frozen
+     * offer check that only the host can make). That is why it is default-off
+     * below and not derivable from anything this package can inspect — §8.2(1):
+     * the capability is declared only once it is completely implemented.
+     */
+    readonly hostMcpTaskContext: 'host-mcp-task-context';
 };
 export type CloudCapability = (typeof CLOUD_CAPABILITIES)[keyof typeof CLOUD_CAPABILITIES];
 /** The wire DTO for `GET /byok/capabilities` — core's shape, bound to a cloud-owned route. */
@@ -802,6 +859,13 @@ export interface FullCapabilityDeclarationOptions {
      * mutation route.
      */
     readonly includeAgentMemoryProjection?: boolean;
+    /**
+     * Contract §8.2(1): the task lane is declared only by a deployment whose host
+     * side verifies task assertions end to end. There is nothing this package can
+     * probe to decide that for an embedder, and guessing would declare a gate the
+     * deployment does not hold — so it is off unless a composition says otherwise.
+     */
+    readonly includeHostMcpTaskContext?: boolean;
 }
 /** Every capability the standard composition can serve, plus explicitly wired composition-bound ones. */
 export declare function fullCapabilityDeclaration(version?: number, options?: FullCapabilityDeclarationOptions): CapabilityDeclaration;
@@ -1827,8 +1891,8 @@ export { authenticateBearer, extractBearerToken } from './auth/bearer';
 export type { BearerAuthDeps } from './auth/bearer';
 export { DEFAULT_DEVICE_PROOF_CLOCK_SKEW_MS, DEFAULT_DEVICE_PROOF_MAX_LIFETIME_MS, MAX_DEVICE_PROOF_CLOCK_SKEW_MS, MAX_DEVICE_PROOF_MAX_LIFETIME_MS, authenticateDeviceProof, } from './auth/device-proof';
 export type { AuthenticatedDeviceProof, DeviceProofAuthDeps, DeviceProofRequestBinding, } from './auth/device-proof';
-export { authenticateHostedDeviceAssertion } from './auth/device-assertion';
-export type { HostedDeviceAssertionAuthDeps } from './auth/device-assertion';
+export { authenticateHostedDeviceAssertion, authenticateHostedTaskAssertion } from './auth/device-assertion';
+export type { HostedDeviceAssertionAuthDeps, HostedTaskAssertionAuthDeps } from './auth/device-assertion';
 export { DEVICE_IDENTITY_PROOF_KEY_EPOCH, DEVICE_IDENTITY_PROOF_KEY_ID, PAIRING_CODE_TTL_MS, createAuthPlane, } from './auth/plane';
 export type { AuthPlane, AuthPlaneDeps, MintedAccessToken, PairInput } from './auth/plane';
 export { createWebCrypto } from './crypto/web-crypto';

@@ -126,6 +126,7 @@ try {
   writeFileSync(
     path.join(smokeDir, 'migrate-smoke.mjs'),
     `import assert from 'node:assert/strict';\n` +
+      `import { DEVICE_ASSERTION_SCHEMA_ID, TASK_ASSERTION_SCHEMA_ID } from '@byok-sdk/core';\n` +
       `import { createByokPool, migrate, migrationsDir, PostgresDeviceAssertionReplayAuthority } from '@byok-sdk/cloud-dataplane';\n` +
       `const expected = ${JSON.stringify(expected)};\n` +
       `const baseline = ${JSON.stringify(baselineExpected)};\n` +
@@ -210,16 +211,25 @@ try {
       `  const replayTable = await upgradePool.query("SELECT indexname FROM pg_indexes WHERE schemaname = 'byok_upgrade_v042' AND tablename = 'device_assertion_replay' ORDER BY indexname");\n` +
       `  assert.deepEqual(replayTable.rows.map((row) => row.indexname), ['device_assertion_replay_expiry_idx', 'device_assertion_replay_pkey']);\n` +
       `  const replay = new PostgresDeviceAssertionReplayAuthority(upgradePool);\n` +
-      `  const replayInput = { tenantId: 'tenant-upgrade', issuer: 'https://api.example.com', productId: 'product-upgrade', deviceId: 'device-upgrade', audience: 'connector-binding', jti: 'AAAAAAAAAAAAAAAAAAAAAA', expiresAt: '2099-01-01T00:00:00.000Z' };\n` +
+      // This calls the installed candidate API, not a v0.4.2 runtime: every
+      // new replay consume must explicitly identify its envelope schema.
+      `  const replayInput = { tenantId: 'tenant-upgrade', issuer: 'https://api.example.com', productId: 'product-upgrade', deviceId: 'device-upgrade', audience: 'connector-binding', schema: DEVICE_ASSERTION_SCHEMA_ID, jti: 'AAAAAAAAAAAAAAAAAAAAAA', expiresAt: '2099-01-01T00:00:00.000Z' };\n` +
       `  const replayResults = await Promise.all(Array.from({ length: 64 }, () => replay.consume(replayInput)));\n` +
       `  assert.equal(replayResults.filter(Boolean).length, 1, 'exactly one concurrent installed-package replay consume must win');\n` +
       `  assert.equal(await replay.consume(replayInput), false, 'the consumed replay key must remain rejected');\n` +
+      `  const taskReplayInput = { ...replayInput, schema: TASK_ASSERTION_SCHEMA_ID };\n` +
+      `  const taskReplayResults = await Promise.all(Array.from({ length: 64 }, () => replay.consume(taskReplayInput)));\n` +
+      `  assert.equal(taskReplayResults.filter(Boolean).length, 1, 'the same JTI must admit exactly one task-schema consume independently of the device lane');\n` +
+      `  assert.equal(await replay.consume(taskReplayInput), false, 'the task replay key must remain rejected');\n` +
+      `  assert.equal(await replay.consume(replayInput), false, 'task consumption must not reset the device replay key');\n` +
+      `  const replayRows = await upgradePool.query('SELECT schema, jti FROM device_assertion_replay ORDER BY schema');\n` +
+      `  assert.deepEqual(replayRows.rows, [DEVICE_ASSERTION_SCHEMA_ID, TASK_ASSERTION_SCHEMA_ID].map((schema) => ({ schema, jti: replayInput.jti })), 'both replay lanes must stay distinguishable in the upgraded ledger');\n` +
       `  const final = await migrate(upgradePool, directory);\n` +
       `  assert.deepEqual([...final.applied], []);\n` +
       `  assert.deepEqual([...final.alreadyApplied], expected);\n` +
       `  const publicTables = await controlPool.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name");\n` +
       `  assert.deepEqual(publicTables.rows, [], 'role-isolated migrations must leave public empty');\n` +
-      `  console.log('[pg-migrate-smoke] role-isolated empty install applied ' + expected.length + ' migration(s); tag-bound v0.4.2 fixture preserved stream/mailbox/task/truth/quota rows, applied ' + upgraded.applied.join(', ') + ', and admitted exactly one of 64 concurrent replay consumes');\n` +
+      `  console.log('[pg-migrate-smoke] role-isolated empty install applied ' + expected.length + ' migration(s); tag-bound v0.4.2 fixture preserved stream/mailbox/task/truth/quota rows, applied ' + upgraded.applied.join(', ') + ', and admitted exactly one of 64 concurrent replay consumes per schema for the same JTI');\n` +
       `} finally {\n` +
       `  await Promise.allSettled([emptyPool?.end(), upgradePool?.end()]);\n` +
       `  try {\n` +

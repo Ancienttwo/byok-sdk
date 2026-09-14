@@ -1,0 +1,51 @@
+{
+  "schema": "byok-task-assertion-v1",
+  "domainPrefix": "byok-task-assertion-v1\n",
+  "note": "Canonical signing bytes for byok-task-assertion-v1. Regenerate with BYOK_CORE_UPDATE_GOLDEN=1 bun run --filter @byok-sdk/core test, and treat any diff as a breaking change to the signature format.",
+  "cases": [
+    {
+      "name": "minimal ascii claim set",
+      "claims": {
+        "version": 1,
+        "issuer": "https://api.example.com",
+        "productId": "product-a",
+        "deviceId": "device-1",
+        "audience": "salesko-api",
+        "jti": "AAAAAAAAAAAAAAAAAAAAAA",
+        "issuedAt": "2026-08-12T04:45:00.000Z",
+        "expiresAt": "2026-08-12T04:47:00.000Z",
+        "taskId": "task-1",
+        "agentRef": {
+          "agentId": "agent-1",
+          "profileRevision": "rev-1"
+        },
+        "toolsetId": "salesko.read.v1"
+      },
+      "canonicalJson": "{\"agentRef\":{\"agentId\":\"agent-1\",\"profileRevision\":\"rev-1\"},\"audience\":\"salesko-api\",\"deviceId\":\"device-1\",\"expiresAt\":\"2026-08-12T04:47:00.000Z\",\"issuedAt\":\"2026-08-12T04:45:00.000Z\",\"issuer\":\"https://api.example.com\",\"jti\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"productId\":\"product-a\",\"taskId\":\"task-1\",\"toolsetId\":\"salesko.read.v1\",\"version\":1}",
+      "signingInputUtf8": "byok-task-assertion-v1\n{\"agentRef\":{\"agentId\":\"agent-1\",\"profileRevision\":\"rev-1\"},\"audience\":\"salesko-api\",\"deviceId\":\"device-1\",\"expiresAt\":\"2026-08-12T04:47:00.000Z\",\"issuedAt\":\"2026-08-12T04:45:00.000Z\",\"issuer\":\"https://api.example.com\",\"jti\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"productId\":\"product-a\",\"taskId\":\"task-1\",\"toolsetId\":\"salesko.read.v1\",\"version\":1}",
+      "signingInputHex": "62796f6b2d7461736b2d617373657274696f6e2d76310a7b226167656e74526566223a7b226167656e744964223a226167656e742d31222c2270726f66696c655265766973696f6e223a227265762d31227d2c2261756469656e6365223a2273616c65736b6f2d617069222c226465766963654964223a226465766963652d31222c22657870697265734174223a22323032362d30382d31325430343a34373a30302e3030305a222c226973737565644174223a22323032362d30382d31325430343a34353a30302e3030305a222c22697373756572223a2268747470733a2f2f6170692e6578616d706c652e636f6d222c226a7469223a2241414141414141414141414141414141414141414141222c2270726f647563744964223a2270726f647563742d61222c227461736b4964223a227461736b2d31222c22746f6f6c7365744964223a2273616c65736b6f2e726561642e7631222c2276657273696f6e223a317d"
+    },
+    {
+      "name": "non-ascii claims and a slash-bearing profile revision",
+      "claims": {
+        "version": 1,
+        "issuer": "https://staging.example.com:8443",
+        "productId": "产品-b",
+        "deviceId": "device-2",
+        "audience": "受众/\"quoted\"\u0000",
+        "jti": "ZmFrZS1qdGktZm9yLWdvbA",
+        "issuedAt": "2026-08-12T04:45:00.000Z",
+        "expiresAt": "2026-08-12T04:50:00.000Z",
+        "taskId": "任务/\"2\"",
+        "agentRef": {
+          "agentId": "代理-b",
+          "profileRevision": "rev/2"
+        },
+        "toolsetId": "salesko.propose.v1"
+      },
+      "canonicalJson": "{\"agentRef\":{\"agentId\":\"代理-b\",\"profileRevision\":\"rev/2\"},\"audience\":\"受众/\\\"quoted\\\"\\u0000\",\"deviceId\":\"device-2\",\"expiresAt\":\"2026-08-12T04:50:00.000Z\",\"issuedAt\":\"2026-08-12T04:45:00.000Z\",\"issuer\":\"https://staging.example.com:8443\",\"jti\":\"ZmFrZS1qdGktZm9yLWdvbA\",\"productId\":\"产品-b\",\"taskId\":\"任务/\\\"2\\\"\",\"toolsetId\":\"salesko.propose.v1\",\"version\":1}",
+      "signingInputUtf8": "byok-task-assertion-v1\n{\"agentRef\":{\"agentId\":\"代理-b\",\"profileRevision\":\"rev/2\"},\"audience\":\"受众/\\\"quoted\\\"\\u0000\",\"deviceId\":\"device-2\",\"expiresAt\":\"2026-08-12T04:50:00.000Z\",\"issuedAt\":\"2026-08-12T04:45:00.000Z\",\"issuer\":\"https://staging.example.com:8443\",\"jti\":\"ZmFrZS1qdGktZm9yLWdvbA\",\"productId\":\"产品-b\",\"taskId\":\"任务/\\\"2\\\"\",\"toolsetId\":\"salesko.propose.v1\",\"version\":1}",
+      "signingInputHex": "62796f6b2d7461736b2d617373657274696f6e2d76310a7b226167656e74526566223a7b226167656e744964223a22e4bba3e790862d62222c2270726f66696c655265766973696f6e223a227265762f32227d2c2261756469656e6365223a22e58f97e4bc972f5c2271756f7465645c225c7530303030222c226465766963654964223a226465766963652d32222c22657870697265734174223a22323032362d30382d31325430343a35303a30302e3030305a222c226973737565644174223a22323032362d30382d31325430343a34353a30302e3030305a222c22697373756572223a2268747470733a2f2f73746167696e672e6578616d706c652e636f6d3a38343433222c226a7469223a225a6d46725a53317164476b745a6d39794c5764766241222c2270726f647563744964223a22e4baa7e593812d62222c227461736b4964223a22e4bbbbe58aa12f5c22325c22222c22746f6f6c7365744964223a2273616c65736b6f2e70726f706f73652e7631222c2276657273696f6e223a317d"
+    }
+  ]
+}

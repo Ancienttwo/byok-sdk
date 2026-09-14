@@ -145,9 +145,41 @@ export type DaemonEvent =
    * raw denied audience therefore never reaches the observer feed, `format.ts`,
    * daemon stdout, or the audit file — there is no field to carry it, rather
    * than a redactor that has to remember to strip it.
+   *
+   * Contract §8.2(1): `task_assertion.issue` resolves onto this SAME event kind
+   * with `lane: 'task'`, so an operator reads one issuance/refusal stream rather
+   * than correlating two. `lane` is required precisely so the two credential
+   * kinds stay distinguishable in the local ledger; `taskId` accompanies the
+   * task lane once the daemon has resolved which task the call belongs to.
+   *
+   * What is NOT a field here, and never can be: the
+   * `BYOK_HOST_TOOLSET_CONTEXT` nonce. It is the task lane's entire authority —
+   * a value that reaches a log is a value an operator's log shipper can replay
+   * — so, exactly like the signature, there is no field to carry it rather than
+   * a redactor that must remember to strip it.
    */
-  | { kind: 'device-assertion'; ts: string; result: 'issued'; audience: string; jti: string; expiresAt: string }
-  | { kind: 'device-assertion'; ts: string; result: 'denied'; reason: string; audienceSize?: number };
+  | {
+      kind: 'device-assertion';
+      ts: string;
+      result: 'issued';
+      lane: AssertionLane;
+      audience: string;
+      jti: string;
+      expiresAt: string;
+      taskId?: string;
+    }
+  | {
+      kind: 'device-assertion';
+      ts: string;
+      result: 'denied';
+      lane: AssertionLane;
+      reason: string;
+      audienceSize?: number;
+      taskId?: string;
+    };
+
+/** Which assertion lane a `device-assertion` event belongs to (contract §8.1: the two have zero interchange). */
+export type AssertionLane = 'device' | 'task';
 
 export type DaemonEventListener = (event: DaemonEvent) => void;
 export type Unsubscribe = () => void;
@@ -400,20 +432,28 @@ export class DaemonObserver {
    * raw string is dropped — it is never placed on the emitted `DaemonEvent`, so
    * it cannot reach a subscriber, `format.ts`, stdout, or the audit file. The
    * ISSUED `audience` came from the allowlist and is kept verbatim.
+   *
+   * Contract §8.2(1): `lane` defaults to `'device'` for the existing caller and
+   * is passed explicitly by the task lane, which also passes the `taskId` its
+   * nonce registry resolved. There is no parameter for the context token, for
+   * the same structural reason there is none for the private key.
    */
   noteDeviceAssertion(
     event:
-      | { result: 'issued'; audience: string; jti: string; expiresAt: string }
-      | { result: 'denied'; reason: string; audience?: string },
+      | { result: 'issued'; lane?: AssertionLane; taskId?: string; audience: string; jti: string; expiresAt: string }
+      | { result: 'denied'; lane?: AssertionLane; taskId?: string; reason: string; audience?: string },
   ): void {
+    const lane: AssertionLane = event.lane ?? 'device';
     if (event.result === 'issued') {
       this.emit({
         kind: 'device-assertion',
         ts: nowIso(),
         result: 'issued',
+        lane,
         audience: event.audience,
         jti: event.jti,
         expiresAt: event.expiresAt,
+        ...(event.taskId === undefined ? {} : { taskId: event.taskId }),
       });
       return;
     }
@@ -421,8 +461,10 @@ export class DaemonObserver {
       kind: 'device-assertion',
       ts: nowIso(),
       result: 'denied',
+      lane,
       reason: event.reason,
       audienceSize: event.audience === undefined ? undefined : Buffer.byteLength(event.audience, 'utf8'),
+      ...(event.taskId === undefined ? {} : { taskId: event.taskId }),
     });
   }
 

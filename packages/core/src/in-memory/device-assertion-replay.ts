@@ -3,6 +3,18 @@ import type {
   DeviceAssertionReplayAuthority,
 } from '../device-assertion';
 
+/**
+ * The reference key, in the SAME segment order as the durable primary key
+ * (`deploy/sql/0022_task_assertion_replay_schema.sql`):
+ * `(tenant_id, issuer, product_id, device_id, audience, schema, jti)`.
+ *
+ * The `schema` segment is what contract §8.2(2) requires: one `jti` presented
+ * as a device assertion and as a task assertion produces two distinct keys, so
+ * each lane is consumed exactly once and neither occupies the other's slot.
+ * Order matters only in that it must match the SQL key — a reference authority
+ * that keyed differently from the durable one would let the two implementations
+ * disagree about which credentials collide.
+ */
 function replayKey(input: DeviceAssertionReplayConsumeInput): string {
   return JSON.stringify([
     input.tenantId,
@@ -10,6 +22,7 @@ function replayKey(input: DeviceAssertionReplayConsumeInput): string {
     input.productId,
     input.deviceId,
     input.audience,
+    input.schema,
     input.jti,
   ]);
 }

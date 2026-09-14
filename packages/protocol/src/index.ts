@@ -129,6 +129,8 @@ export type {
   AgentMemoryProjectionEraseResult,
 } from './agent-memory-projection';
 
+export { HOST_MCP_TASK_CONTEXT_CAPABILITY } from './task-assertion';
+
 export {
   TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   TerminalProjectionContractSchema,

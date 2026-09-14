@@ -21,6 +21,7 @@
     "agent-content-artifact-read",
     "agent-home-projection",
     "terminal-projection-selection",
+    "host-mcp-task-context",
     "custom-harness",
     "mailbox-read-ahead"
   ],

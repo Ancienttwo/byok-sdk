@@ -3,10 +3,11 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { verifyDeviceAssertion } from '@byok-sdk/core';
+import { verifyDeviceAssertion, verifyTaskAssertion } from '@byok-sdk/core';
 import { createPublicKey, verify as edVerify } from 'node:crypto';
 import * as publicApi from '../index';
-import { requestDeviceAssertion } from '../daemon/assertion-client';
+import { createEnvelope } from '@byok-sdk/protocol';
+import { requestDeviceAssertion, requestTaskAssertion } from '../daemon/assertion-client';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -37,6 +38,9 @@ describe('client public surface', () => {
     expect(exported).not.toContain('ControlError');
     expect(exported).not.toContain('isControlDaemonGone');
     expect(exported).toContain('requestDeviceAssertion');
+    // Contract §8.1: the task lane is a second public entry point, and still
+    // the ONLY other one — it reaches exactly one control method.
+    expect(exported).toContain('requestTaskAssertion');
   });
 
   it('re-exports no module from bin/ except through requestDeviceAssertion', () => {
@@ -271,5 +275,196 @@ describe('requestDeviceAssertion', () => {
     if (result.ok) return;
     expect(result.code).toBe('unavailable');
     expect(result.reason).toContain('daemon is not running');
+  });
+});
+
+/**
+ * Contract §8.1 / §8.2(1), public-surface half of the task lane.
+ *
+ * `requestTaskAssertion` is the ONE function a host's MCP child calls, and the
+ * properties pinned here are the ones that stop it from quietly becoming a
+ * credential cache: it never reads the nonce out of the environment itself, it
+ * mints nothing on its own, and every call is a fresh round trip.
+ */
+describe('requestTaskAssertion', () => {
+  let server: TestServer;
+  const daemons: Daemon[] = [];
+
+  beforeEach(async () => {
+    server = await TestServer.start();
+  });
+
+  afterEach(async () => {
+    for (const started of daemons.splice(0)) await started.stop().catch(() => undefined);
+    await server.close();
+  });
+
+  const TOOLSET = 'salesko.read.v1';
+  const SERVER_NAME = 'saleskoread';
+
+  async function startedWithTask(productId: string): Promise<{
+    storeDir: string;
+    productId: string;
+    contextToken: string;
+    adapter: StubRuntimeAdapter;
+  }> {
+    const workspaceRoot = await tmpDir(`byok-task-client-${productId}-ws-`);
+    const storeDir = await tmpDir(`byok-task-client-${productId}-store-`);
+    const hostStorageRoot = await tmpDir(`byok-task-client-${productId}-home-`);
+    const adapter = new StubRuntimeAdapter(
+      'pi',
+      { kind: 'available' },
+      { steer: false, resume: true, approvalInteractive: true, mcpToolsets: true, permissionModes: ['auto'] },
+      false,
+    );
+    const config: DaemonConfig = {
+      localAgentRelease: { version: '0.0.0-test' },
+      productName: 'Acme',
+      productId,
+      serverUrl: server.url,
+      workspaceRoot,
+      storeDir,
+      agentHome: { hostStorageRoot },
+      deviceAssertion: { audiences: [ALLOWED_AUDIENCE] },
+      mcpToolsets: { [TOOLSET]: { mcpServers: { [SERVER_NAME]: { command: '/opt/salesko/read' } } } },
+    };
+    const built = createDaemonWithAdapters(config, [adapter]);
+    daemons.push(built);
+    await built.pair('pairing-code');
+    await built.start();
+
+    server.send(
+      createEnvelope(
+        'task.offer_for_agent',
+        {
+          instruction: 'qualify the inbound lead',
+          policy: { mode: 'auto' },
+          runtime: 'pi',
+          agentRef: { agentId: 'salesko-agent', profileRevision: 'profile-rev-1' },
+          requiredToolsets: [TOOLSET],
+        },
+        { taskId: `${productId}-task`, seq: server.nextSeq() },
+      ),
+    );
+    await server.waitFor((envelope) => envelope.type === 'task.started');
+    const contextToken = adapter.startCalls[0]?.ctx.mcpServers?.[SERVER_NAME]?.env?.BYOK_HOST_TOOLSET_CONTEXT;
+    if (contextToken === undefined) throw new Error('expected the daemon to inject a host toolset context');
+    return { storeDir, productId, contextToken, adapter };
+  }
+
+  it('returns a verifiable task assertion whose claims came from the daemon, not the caller', async () => {
+    const built = await startedWithTask('acme-task-req-ok');
+
+    const result = await requestTaskAssertion({
+      productId: built.productId,
+      storeDir: built.storeDir,
+      contextToken: built.contextToken,
+      audience: ALLOWED_AUDIENCE,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.assertion.schema).toBe('byok-task-assertion-v1');
+    expect(result.assertion.protected.taskId).toBe('acme-task-req-ok-task');
+    expect(result.assertion.protected.toolsetId).toBe(TOOLSET);
+    expect(result.assertion.protected.agentRef).toEqual({ agentId: 'salesko-agent', profileRevision: 'profile-rev-1' });
+    expect(result.expiresAt).toBe(result.assertion.protected.expiresAt);
+
+    const record = JSON.parse(await fs.readFile(path.join(built.storeDir, 'device.json'), 'utf8')) as {
+      devicePublicKey: string;
+    };
+    await expect(
+      verifyTaskAssertion(result.assertion, {
+        verifier: {
+          verify: ({ publicKey, signature, signingInput }) =>
+            Promise.resolve(
+              edVerify(
+                null,
+                signingInput,
+                createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: publicKey }, format: 'jwk' }),
+                Buffer.from(signature, 'base64url'),
+              ),
+            ),
+        },
+        lookupDevice: () => ({ publicKeyJwkX: record.devicePublicKey, revoked: false }),
+        now: new Date(result.assertion.protected.issuedAt),
+      }),
+    ).resolves.toBeDefined();
+  });
+
+  it('caches nothing: two calls are two round trips and two jti', async () => {
+    const built = await startedWithTask('acme-task-req-fresh');
+    const options = {
+      productId: built.productId,
+      storeDir: built.storeDir,
+      contextToken: built.contextToken,
+      audience: ALLOWED_AUDIENCE,
+    };
+
+    const first = await requestTaskAssertion(options);
+    const second = await requestTaskAssertion(options);
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(first.assertion.protected.jti).not.toBe(second.assertion.protected.jti);
+    expect(first.assertion.signature).not.toBe(second.assertion.signature);
+  });
+
+  it('surfaces the two task-lane refusals verbatim rather than throwing', async () => {
+    const built = await startedWithTask('acme-task-req-denied');
+
+    const unknown = await requestTaskAssertion({
+      productId: built.productId,
+      storeDir: built.storeDir,
+      contextToken: 'a'.repeat(43),
+      audience: ALLOWED_AUDIENCE,
+    });
+    expect(unknown).toEqual({ ok: false, code: 'context_token_invalid', reason: expect.any(String) });
+
+    const denied = await requestTaskAssertion({
+      productId: built.productId,
+      storeDir: built.storeDir,
+      contextToken: built.contextToken,
+      audience: 'salesko-api.evil.com',
+    });
+    expect(denied).toEqual({ ok: false, code: 'audience_denied', reason: expect.any(String) });
+
+    // A cancelled task's nonce is refused with the precise second-layer code.
+    const release = built.adapter.sessions[0]!.blockClose();
+    server.send(
+      createEnvelope('task.cancel', { reason: 'operator' }, { taskId: 'acme-task-req-denied-task', seq: server.nextSeq() }),
+    );
+    await server.waitFor((envelope) => envelope.type === 'task.cancelled');
+    const revoked = await requestTaskAssertion({
+      productId: built.productId,
+      storeDir: built.storeDir,
+      contextToken: built.contextToken,
+      audience: ALLOWED_AUDIENCE,
+    });
+    expect(revoked).toEqual({ ok: false, code: 'context_revoked', reason: expect.any(String) });
+    release();
+  });
+
+  it('reports unavailable — never a context or pairing claim — when no daemon is running', async () => {
+    const storeDir = await tmpDir('byok-task-client-none-store-');
+    const result = await requestTaskAssertion({
+      productId: 'acme-task-req-none',
+      storeDir,
+      contextToken: 'b'.repeat(43),
+      audience: ALLOWED_AUDIENCE,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('unavailable');
+    expect(result.reason).toContain('daemon is not running');
+  });
+
+  it('never reads the context token out of its own environment', async () => {
+    // A helper that fell back to `process.env` would work just as well inside a
+    // process the daemon never spawned for this task, which is exactly the
+    // substitution the nonce exists to prevent. Structural, so it stays true.
+    const source = readFileSync(new URL('../daemon/assertion-client.ts', import.meta.url), 'utf8');
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    expect(code).not.toContain('process.env');
+    expect(code).not.toContain('BYOK_HOST_TOOLSET_CONTEXT');
   });
 });
