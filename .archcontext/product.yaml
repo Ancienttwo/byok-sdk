@@ -1,5 +1,5 @@
 capabilities:
-  - "architecture-context"
+  - "sdk-root"
 id: "product.archcontext-project"
 name: "ArchContext Project"
 nonGoals: []
