@@ -16,6 +16,18 @@ import {
   randomNonceHex,
   timingSafeEqualHex,
 } from '../daemon/control-protocol';
+import {
+  INPUT_PREPARATION_CANCEL_METHOD,
+  INPUT_PREPARATION_LOOKUP_METHOD,
+  INPUT_PREPARATION_PREPARE_METHOD,
+  type InputPreparationResult,
+} from '../daemon/control-protocol';
+import type {
+  InputPreparationCancelParamsV1,
+  InputPreparationLookupParamsV1,
+  InputPreparationReceiptV1,
+  InputPreparationRequestV1,
+} from '../input-preparation';
 
 /**
  * M4 Phase 2: the CLI-side half of the control socket — connects, performs
@@ -391,4 +403,55 @@ export async function isControlDaemonGone(storeDir: string, productId: string): 
     socket.once('connect', () => finish(false));
     socket.once('error', (err: NodeJS.ErrnoException) => finish(err.code === 'ECONNREFUSED' || err.code === 'ENOENT'));
   });
+}
+
+/**
+ * B-P2 local primitive: the three typed control-client verbs for
+ * `input_preparation.prepare` / `.lookup` / `.cancel`
+ * (`docs/researches/runtime-input-preparation-contract.md` §10.3 / §10.4).
+ *
+ * They exist here, next to the client that already speaks this socket, rather
+ * than as three more `byok-agent` subcommands: the operator-facing command
+ * table is not part of this slice's file scope, and a typed verb is what both a
+ * future subcommand and a host-side caller actually need. Each one is a thin,
+ * strict wrapper — it fixes the method name and the params shape so a caller
+ * cannot invent a fourth field, and it returns the receipt the daemon answered
+ * with, unmodified.
+ *
+ * None of them interprets readiness. `receipt.ready` and
+ * `receipt.readinessReasons` are the daemon's evidence, and a CLI that
+ * summarised them would become a second opinion about admission.
+ */
+
+/** Send one preparation request and return its receipt. Rejects with a {@link ControlError} carrying the daemon's own typed code. */
+export async function requestInputPreparation(
+  client: ControlClient,
+  request: InputPreparationRequestV1,
+): Promise<InputPreparationReceiptV1> {
+  const result = await client.request<InputPreparationResult>(INPUT_PREPARATION_PREPARE_METHOD, request);
+  return result.receipt;
+}
+
+/** Re-read an existing preparation receipt. The scope is re-authorized daemon-side on every call. */
+export async function lookupInputPreparation(
+  client: ControlClient,
+  params: InputPreparationLookupParamsV1,
+): Promise<InputPreparationReceiptV1> {
+  const result = await client.request<InputPreparationResult>(INPUT_PREPARATION_LOOKUP_METHOD, params);
+  return result.receipt;
+}
+
+/**
+ * Cancel a preparation that has not settled yet.
+ *
+ * Cancelling an already-terminal record is not an error and changes nothing —
+ * including a record whose counter outcome is unknown, which stays
+ * `counter_interrupted` rather than being rewritten as a clean cancellation.
+ */
+export async function cancelInputPreparation(
+  client: ControlClient,
+  params: InputPreparationCancelParamsV1,
+): Promise<InputPreparationReceiptV1> {
+  const result = await client.request<InputPreparationResult>(INPUT_PREPARATION_CANCEL_METHOD, params);
+  return result.receipt;
 }
