@@ -1022,7 +1022,8 @@ remain covered by the local gate.
 ### Owned Pi RPC team member and GUI interaction
 
 `byok-agent team pi-relay` binds one exact existing Codex thread and one newly
-owned Pi 0.85.1 RPC session. The private version-1 binding document has `codex`
+owned RPC session on the pinned Pi fork runtime (see the Core pi runtime
+contract). The private version-1 binding document has `codex`
 (context, threadId, endpoint, afterSeq) and `pi` (context, afterSeq, absolute cwd,
 fresh absolute sessionDir, provider, model, systemPrompt, extensionPaths) fields.
 Both grants belong to distinct members of the same workspace. The CLI creates
