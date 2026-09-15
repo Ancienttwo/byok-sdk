@@ -58,7 +58,8 @@ and the D2 version number belongs to a separate SDK release contract.
   `BYOK_PI_PERMISSION_MODE` are deliberately NOT on the list: they are set on
   the Pi process and the server pool strips the whole `/^BYOK_PI_/` shape off
   before it spawns anything, so neither reaches a gated child — one arriving at
-  the gate is precisely the unaccountable case, and is refused. The loader deny list is disjoint from both projections, so a
+  the gate is precisely the unaccountable case, and is refused. The loader deny
+  list is disjoint from both projections, so a
   `NODE_OPTIONS`, `DYLD_*` or `BASH_ENV` that reaches a child is still a
   refusal, as is a `PYTHONPATH` that appeared or a variable that was renamed.
   Neither verdict is a `ToolImplementationUnavailableReasonV1`: the resolver

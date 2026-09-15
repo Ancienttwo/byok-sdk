@@ -135,8 +135,8 @@ export interface ToolImplementationUnavailableV1 {
  * gets mapped in beside the bundle — and is carried because the interpreter's
  * file digest alone does not describe that.
  *
- * `path` goes through the same {@link measureCanonicalPathIdentity} as the
- * artifact, at resolve and at every spawn, and is bound to its inode by
+ * `path` goes through the same canonical path identity rule as the
+ * artifact (symlink-free parent chain, regular non-symlink leaf), at resolve and at every spawn, and is bound to its inode by
  * `interpreterStat` for the same reason.
  */
 export interface ToolImplementationInterpreterV1 {
@@ -197,7 +197,8 @@ export interface ToolImplementationAttestedV1 {
    * The versioned immutable install path: an absolute path whose directory
    * chain is symlink-free and whose leaf is a regular, non-symlink file. It is
    * the NAME; the identity is the inode it named, carried in
-   * {@link installStat}. See {@link measureCanonicalPathIdentity}.
+   * {@link installStat}. The rule: symlink-free parent chain, regular
+   * non-symlink leaf, identity bound by the inode.
    */
   readonly installPath: string;
   /** sha256 hex of the executable or bundle artifact's bytes. */
@@ -997,7 +998,7 @@ export type ToolImplementationReverifyResult =
  * spawned.
  *
  * The path is canonicalized again — symlink-free parent chain, regular
- * non-symlink leaf ({@link measureCanonicalPathIdentity}) — and the artifact's
+ * non-symlink leaf — and the artifact's
  * bytes are hashed again. On top of that runs the check that
  * only exists once there is something to compare against: the stat tuple must
  * be the tuple that was measured at resolve, `uid`, `gid` and `mode` included.
