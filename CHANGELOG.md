@@ -5,6 +5,65 @@
 Deliberately not filed under 0.18.0: none of this is in a published artifact,
 and the D2 version number belongs to a separate SDK release contract.
 
+- **Breaking** — `McpToolsetToolObservation` now carries full tool
+  descriptors. It was `Record<serverName, toolName[]>`; it is now
+  `Record<serverName, {toolsetId, serverName, serverInfo{name,version},
+  protocolVersion, tools: {name, description, inputSchema}[]}>`. The three
+  runtimes need different parts of the same fact and only one of them can be
+  authoritative: claude and codex pre-grant by name, pi now registers one tool
+  per MCP tool with the server's real schema, and the prepared-input path binds
+  the schema digest. The names-only view every grant resolver uses is derived
+  from this object (`mcpToolsetToolNames`) rather than transported beside it,
+  so a grant and a registered schema can no longer describe different tool
+  sets. `TaskRunnerDeps.mcpToolsetToolsProbe` changes shape with it and takes
+  the server name as its first argument. A pre-1.0 breaking cut is MINOR under
+  `docs/spec.md`'s package version policy; no version is bumped here, since a
+  bump does not authorize publish.
+- Add the SDK's own MCP core at `packages/client/src/mcp/`, built on
+  `@modelcontextprotocol/client@2.0.0`, stdio only, declaring no `sampling`,
+  `elicitation` or `roots` client capability. It owns connect/initialize,
+  `tools/list`, `tools/call`, in-band cancellation and close; a bounded
+  transport that caps both a single JSON-RPC frame and, for an observation, the
+  server's total stdout; the `GRANTABLE_TOOL_NAME` rule under which one bad
+  name fails the whole observation; set-equality drift detection with distinct
+  reasons for an added tool, a removed tool, a changed description, a changed
+  schema, changed server identity and a changed protocol version; and the
+  canonical `(toolsetId, serverName, toolName)` projection every consumer
+  orders by. Schema comparison is structural, so re-serializing a schema with
+  its keys in another order is not drift.
+- Retire `pi-mcp-adapter`. The Pi MCP extension is now SDK-owned and registers
+  one Pi tool per observed MCP tool, carrying that tool's real schema, instead
+  of a single `mcp` proxy plus `mcpScript`. Two consequences the proxy caused
+  are gone: a toolset's schemas now reach the model's first request rather than
+  arriving only after a discovery call, and a toolset is no longer indivisible
+  for permission purposes. The extension discovers nothing of its own — it
+  registers from the daemon's observation and re-verifies each server against
+  it before the first call, refusing on any drift. Dropped from the install
+  graph with it: `@napi-rs/keyring` (and its twelve platform binaries),
+  `@modelcontextprotocol/ext-apps`, `recheck` (and its four platform
+  binaries), `smol-toml`, `open`, `strip-json-comments`, and their transitive
+  closure — 36 packages for one added.
+- The pi adapter now declares `requiresMcpToolsetToolObservation: true`, so a
+  pi-routed toolset offer is admitted on the same observation claude and codex
+  already require.
+- Replace the pi adapter's `auto`-only toolset refusal. Per-tool registration
+  makes a per-tool permission decision expressible, but nothing on the device
+  makes it decidable: `McpToolsetConfig` carries `command`/`args` only, and a
+  server's own `annotations.readOnlyHint` is its self-assessment, not a
+  security authority. A non-`auto` toolset task is therefore still refused, but
+  as an inexpressible policy naming the operator configuration that would make
+  it expressible (`McpToolsetConfig.readOnlyTools`), rather than on the retired
+  proxy's behalf.
+- Add `executor_identity_unproven` to `InputPreparationReadinessReasonV1`, and
+  always report it once an artifact exists. Tool executor strings are
+  observation FINGERPRINTS — they bind a toolset definition revision, a
+  server's self-reported identity, a negotiated protocol version and a schema
+  digest — and none of that proves which executable serves a call. Observation
+  and launch are separate spawns of a command the daemon knows only as
+  `command`/`args`, so the fingerprint carries an explicit
+  `implementationIdentity` marker whose only value today is "unattested", and
+  no receipt can be `ready` on the strength of one.
+
 - Add the `byok-task-assertion-v1` envelope to `@byok-sdk/core` — a separate
   Ed25519 envelope binding `taskId`, the frozen `agentRef` and `toolsetId`
   alongside the device claims, under its own non-prefix signing domain. It
