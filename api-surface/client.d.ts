@@ -4672,6 +4672,357 @@ export declare function prependGitWorkspaceGuidance(instruction: string): string
 export declare function isGitWorkspaceConfig(value: unknown): value is GitWorkspaceConfig;
 export declare function canonicalWorkspaceRoot(value: string): Promise<string>;
 export { DEFAULT_MAX_OUTPUT_BYTES as GIT_WORKSPACE_MAX_OUTPUT_BYTES, DEFAULT_TIMEOUT_MS as GIT_WORKSPACE_TIMEOUT_MS };
+// ==== @byok-sdk/client dist/daemon/input-preparation-store.d.ts ====
+import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INPUT_PREPARATION_VERSION, type InputPreparationBindingV1, type InputPreparationArtifactSummaryV1, type InputPreparationCounterEvidenceV1, type InputPreparationModelV1, type InputPreparationPinV1, type InputPreparationStateV1 } from '../input-preparation';
+/**
+ * Durable request / receipt / artifact persistence for the B-P2 local
+ * primitive (`docs/researches/runtime-input-preparation-contract.md` §10.3.5,
+ * §10.3.6, §10.3.8).
+ *
+ * One durable namespace, `(authenticated scope, Agent, preparation requestId)`,
+ * bound to the entire normalized request digest. This file owns exactly that
+ * namespace plus the retained artifact bytes; it chooses no policy number,
+ * resolves no authority and places no counter call. Everything above it is
+ * `input-preparation-service.ts`.
+ *
+ * It does enforce the bounds that service hands it, because a bound is only
+ * real where the write is: admission is decided inside the same serialized
+ * closure that appends the record, never on a value someone read first.
+ *
+ * Durability comes from the package's existing primitives, not from `rename`
+ * alone: the record log is a `DurableJsonlFile` (append + fsync + directory
+ * fsync, and QUARANTINED after any uncertain write until the log is
+ * revalidated), and each artifact is an `atomicWriteFile` with `fsync`. An
+ * uncertain write is therefore an error the caller sees, never a silent
+ * success — §10.3.8.
+ *
+ * Two horizons, deliberately separate:
+ *
+ * - `artifactExpiresAt = createdAt + retentionMs` — after this the retained
+ *   bytes are removed and the receipt reports `artifact_expired`.
+ * - `recordExpiresAt = artifactExpiresAt + retryHorizonMs` — the TOMBSTONE
+ *   outlives its own artifact by the whole advertised retry horizon, which is
+ *   what makes "an expired key cannot silently become a fresh call inside that
+ *   horizon" true rather than aspirational: a duplicate `requestId` inside the
+ *   horizon still finds a record, and a found record never triggers a second
+ *   counter call.
+ */
+/** The durable idempotency key. Never a task id, and never caller-asserted: `scopeId` comes from the trusted authority grant. */
+export interface InputPreparationRecordKey {
+    readonly scopeId: string;
+    readonly agentRef: string;
+    readonly requestId: string;
+}
+export interface InputPreparationRecord {
+    readonly format: typeof INPUT_PREPARATION_RECORD_FORMAT;
+    readonly version: typeof INPUT_PREPARATION_VERSION;
+    readonly recordId: string;
+    readonly key: InputPreparationRecordKey;
+    /** Digest over the whole normalized request, scope and runtime identity. */
+    readonly requestDigest: string;
+    readonly state: InputPreparationStateV1;
+    readonly binding: InputPreparationBindingV1;
+    /**
+     * The exact model identity the request was compiled for.
+     *
+     * Durable, and BESIDE the binding rather than inside it. Beside, because the
+     * binding is the wire projection a receipt discloses and a model identity
+     * carries a base URL and a cost table a receipt has no business publishing.
+     * Durable, because a prepared launch must re-present it to the native
+     * verifier as an INDEPENDENT expectation — the only other copy of it lives
+     * inside the retained envelope, and the native contract is explicit that a
+     * value read out of the envelope can never serve as its own expectation.
+     */
+    readonly model: InputPreparationModelV1;
+    readonly artifact?: InputPreparationArtifactSummaryV1;
+    readonly counter?: InputPreparationCounterEvidenceV1;
+    /** Retained bytes attributable to this record, counted against the per-scope aggregate. */
+    readonly artifactBytes: number;
+    /** Counter invocations this record has consumed. Never decremented. */
+    readonly counterCalls: number;
+    /** Stable code on a terminal non-`counted` state; never provider or stack text. */
+    readonly detail?: string;
+    readonly createdAt: string;
+    readonly updatedAt: string;
+    readonly artifactExpiresAt: string;
+    readonly recordExpiresAt: string;
+    /** The committed Execution that consumed this record, written once by {@link InputPreparationStore.pin}. */
+    readonly pin?: InputPreparationPinV1;
+}
+/** The retained immutable artifact. `requestBody` is D verbatim. */
+export interface InputPreparationArtifact {
+    readonly format: typeof INPUT_PREPARATION_ARTIFACT_FORMAT;
+    readonly version: typeof INPUT_PREPARATION_VERSION;
+    readonly recordId: string;
+    readonly requestDigest: string;
+    readonly envelopeDigest: string;
+    readonly toolManifestDigest: string;
+    /** D — the exact provider request body bytes, unchanged. */
+    readonly requestBody: string;
+    /** P(D) — the counted projection, unchanged. */
+    readonly counterProjection: string;
+    readonly coverage: string;
+    /** The native envelope, retained verbatim so a later consumer re-verifies rather than recompiles. */
+    readonly envelope: unknown;
+}
+export declare function isTerminalInputPreparationState(state: InputPreparationStateV1): boolean;
+/** Same key, different normalized request digest. Never resolved by overwriting either side. */
+export declare class InputPreparationConflictError extends Error {
+    readonly recordId: string;
+    constructor(recordId: string);
+}
+/** A durable write was uncertain, or the log is quarantined pending revalidation. */
+export declare class InputPreparationDurabilityError extends Error {
+    constructor(message: string, options?: {
+        cause?: unknown;
+    });
+}
+/**
+ * A bound the caller passed in was already spent when the write was about to
+ * happen.
+ *
+ * The store owns no policy: every number it compares against arrives on the
+ * call that asks for the write. What it does own is the only moment at which
+ * that comparison is meaningful — inside the serialized tail, in the same
+ * closure as the append. A caller that read an aggregate and then asked for a
+ * write would be deciding on a snapshot another caller can invalidate before
+ * the write lands (§10.3.7).
+ */
+export type InputPreparationLimitDetail = 'in_flight_limit_exceeded' | 'scope_aggregate_bytes_exceeded' | 'counter_call_limit_exceeded';
+export declare class InputPreparationLimitError extends Error {
+    readonly detail: InputPreparationLimitDetail;
+    constructor(detail: InputPreparationLimitDetail, message: string);
+}
+/** The stored record or artifact does not match what was persisted. */
+export declare class InputPreparationIntegrityError extends Error {
+    constructor(message: string);
+}
+export interface InputPreparationStoreOptions {
+    /** The daemon's store directory. The subtree below it is created 0700 on open. */
+    readonly storeDir: string;
+    readonly retentionMs: number;
+    readonly retryHorizonMs: number;
+    readonly now?: () => number;
+}
+export interface ReserveInput {
+    readonly key: InputPreparationRecordKey;
+    readonly requestDigest: string;
+    readonly binding: InputPreparationBindingV1;
+    /** See {@link InputPreparationRecord.model}. */
+    readonly model: InputPreparationModelV1;
+    /**
+     * The caller's in-flight bound, enforced in the same closure that appends the
+     * new record. Never consulted for a key that already exists: reading back an
+     * existing durable fact is not a new admission.
+     */
+    readonly maxInFlight: number;
+}
+/** The bounds one counter reservation is admitted against. Supplied by the caller, compared here. */
+export interface CounterReservationBounds {
+    readonly maxScopeAggregateBytes: number;
+    readonly maxCounterCallsPerScope: number;
+}
+export interface CounterReservationInput {
+    readonly recordId: string;
+    /** The immutable artifact, written inside the same closure that charges its bytes. */
+    readonly artifact: InputPreparationArtifact;
+    /** The identities and sizes the receipt publishes. */
+    readonly summary: InputPreparationArtifactSummaryV1;
+    readonly bounds: CounterReservationBounds;
+}
+export type ReserveOutcome = {
+    readonly kind: 'created';
+    readonly record: InputPreparationRecord;
+} | {
+    readonly kind: 'existing';
+    readonly record: InputPreparationRecord;
+};
+/**
+ * The result of one compare-and-set against a record's single pin slot.
+ *
+ * `occupied` is not an error: it is the answer the losing runner of a race is
+ * supposed to get, and it carries the record so the caller can report WHICH
+ * Execution holds it.
+ */
+export type PinOutcome = {
+    readonly kind: 'pinned';
+    readonly record: InputPreparationRecord;
+} | {
+    readonly kind: 'occupied';
+    readonly record: InputPreparationRecord;
+};
+/** The mutable fields one durable transition may set. Identity and key are immutable. */
+export interface RecordPatch {
+    readonly state?: InputPreparationStateV1;
+    readonly artifact?: InputPreparationArtifactSummaryV1;
+    readonly counter?: InputPreparationCounterEvidenceV1;
+    readonly artifactBytes?: number;
+    readonly counterCalls?: number;
+    readonly detail?: string;
+}
+export interface ScopeUsage {
+    readonly artifactBytes: number;
+    readonly counterCalls: number;
+    readonly liveRecords: number;
+}
+/** `recordId` is a digest of the key, so two scopes can never collide and no key value ever becomes a filename. */
+export declare function inputPreparationRecordId(key: InputPreparationRecordKey): string;
+export declare class InputPreparationStore {
+    private readonly options;
+    private readonly root;
+    private readonly artifactDir;
+    private readonly now;
+    private log;
+    private records;
+    /** Serializes every mutation so two callers never interleave a read-modify-append. */
+    private tail;
+    private opened;
+    constructor(options: InputPreparationStoreOptions);
+    /**
+     * Create the subtree, replay the log and confirm the recovered bytes.
+     *
+     * Replay alone is not a durability receipt — `confirmRecovered()` fsyncs what
+     * was read back before any of it is treated as fact, which is the same rule
+     * `DurableJsonlFile` documents for its own consumers.
+     */
+    open(): Promise<void>;
+    private replay;
+    /**
+     * Re-open and revalidate a quarantined log.
+     *
+     * `DurableJsonlFile` latches after an uncertain write and refuses every later
+     * append. That latch is the contract, so recovery is explicit: read the log
+     * back, confirm the recovered bytes, and only then accept writes again.
+     */
+    revalidate(): Promise<void>;
+    private assertOpen;
+    /** Serialize a mutation behind every mutation already queued. */
+    private enqueue;
+    private append;
+    /**
+     * Durably reserve the key BEFORE anything is compiled or counted.
+     *
+     * Same key and same digest returns the existing record — the caller decides
+     * whether that is a completed receipt, a pending fact or a terminal
+     * interruption. Same key and a DIFFERENT digest conflicts: neither side is
+     * overwritten, because one of the two callers is wrong about what it asked
+     * for and guessing which is how a counted artifact gets swapped underneath a
+     * receipt.
+     *
+     * The in-flight admission is decided HERE, in the same closure as the append,
+     * because two different requestIds share no caller-side lock: a bound checked
+     * before this closure is a bound two concurrent admissions can both pass.
+     */
+    reserve(input: ReserveInput): Promise<ReserveOutcome>;
+    /** Append one durable transition. Terminal records never transition again. */
+    update(recordId: string, patch: RecordPatch): Promise<InputPreparationRecord>;
+    get(recordId: string): InputPreparationRecord | undefined;
+    find(key: InputPreparationRecordKey): InputPreparationRecord | undefined;
+    /** Every live record, for tests and for the aggregate below. */
+    list(): readonly InputPreparationRecord[];
+    /**
+     * Retained bytes and consumed counter calls for one authenticated scope.
+     *
+     * Both survive restart because both are fields of the durable record, not
+     * in-memory counters — which is exactly what stops a restart from becoming a
+     * fresh counter-call allowance.
+     */
+    scopeUsage(scopeId: string): ScopeUsage;
+    /**
+     * Records that are neither terminal nor expired, across every scope.
+     *
+     * Expiry is part of the question, not a detail GC will get to eventually: a
+     * `reserved` record whose owning run died holds no work, and letting it keep
+     * a slot past its own record horizon would turn an abandoned key into a
+     * permanent hole in the in-flight allowance.
+     */
+    inFlightCount(nowMs?: number): number;
+    private artifactPath;
+    /**
+     * Admit one counter call: check the caller's bounds, persist the immutable
+     * artifact (fsynced, 0600, D verbatim) and durably reserve the call — all in
+     * ONE serialized closure.
+     *
+     * Fusing the three is the point. Retained bytes and consumed counter calls
+     * are per-SCOPE aggregates, so they are shared by requests that share nothing
+     * else: different requestIds are different records, different keys and
+     * different caller-side locks. Checking the aggregate anywhere but here would
+     * be a read another admission can invalidate before the write lands, which is
+     * exactly how two concurrent requests both pass a bound of one.
+     *
+     * The artifact is written after the bounds pass and before the record is
+     * charged, so a refused admission leaves no retained bytes behind and a
+     * charged record always has its artifact on disk.
+     */
+    commitCounterReservation(input: CounterReservationInput): Promise<InputPreparationRecord>;
+    /**
+     * The absolute path of one record's retained artifact.
+     *
+     * Exposed because a prepared Execution is handed a PATH, not bytes: the
+     * artifact carries D, P(D) and the whole native envelope, and there is
+     * exactly one retained copy of it. A second inline representation crossing to
+     * the adapter would be a second authority over the same bytes. Deriving the
+     * path anywhere else would be a second authority over the layout instead.
+     */
+    artifactPathOf(record: InputPreparationRecord): string;
+    /**
+     * Bind one committed Execution to this record, or report that another one
+     * already did.
+     *
+     * A compare-and-set, inside the same serialized closure as the append, for
+     * the same reason every other admission in this file is: two runners racing
+     * the same reference share no caller-side lock, so a `pin === undefined`
+     * check made before this closure is a check both of them pass. The loser gets
+     * `occupied` with the pin that won, and its caller sends zero claim and
+     * dispatches nothing.
+     *
+     * Idempotent for the SAME Execution: a replay that re-presents the identical
+     * taskId and manifest digest reads back `pinned` with the record it already
+     * has, because re-deriving the same seal is not a second consumer. A
+     * different taskId, or the same taskId with a different sealed manifest, is
+     * `occupied` — it is a different Execution.
+     *
+     * Only a `counted` record with a retained artifact may be pinned: a pin on a
+     * record that has no artifact would keep a tombstone alive forever without
+     * ever being launchable.
+     */
+    pin(recordId: string, pin: InputPreparationPinV1): Promise<PinOutcome>;
+    /**
+     * Release the pin this Execution holds.
+     *
+     * Scoped to the holder on purpose: `taskId` must match, so a task cannot
+     * release a record another Execution consumed. Releasing a record that is
+     * already unpinned is not an error — the pin's job is done either way, and a
+     * terminal path that had to know whether it ever pinned would grow a second
+     * answer to a question the record already holds.
+     *
+     * WHEN a pin is released is a single rule: the Execution reached a terminal.
+     * Not at claim, not at start, not when the session closes — a record stays
+     * pinned for exactly as long as the Execution that consumed it can still be
+     * running, which is also exactly as long as GC must not collect it.
+     */
+    unpin(recordId: string, taskId: string): Promise<InputPreparationRecord>;
+    /**
+     * Read the artifact back and re-check the identity it claims.
+     *
+     * The digest comparison is integrity, not authorization: authority was
+     * already resolved before the caller reached this method.
+     */
+    readArtifact(record: InputPreparationRecord): Promise<InputPreparationArtifact | undefined>;
+    /**
+     * Drop expired artifacts and, one retry horizon later, expired records.
+     *
+     * A pinned record is never collected — not its artifact and not its
+     * tombstone. That is what makes a pin meaningful: the Execution holding it
+     * has not reached a terminal yet, so the bytes it is about to send (or is
+     * sending) must still be on disk, whatever the retention horizon says. The
+     * horizon resumes the moment `unpin` lands.
+     */
+    gc(nowMs?: number): Promise<{
+        artifactsRemoved: number;
+        recordsRemoved: number;
+    }>;
+}
 // ==== @byok-sdk/client dist/daemon/journal/journal.d.ts ====
 /**
  * The daemon's durable local journal port (sprint S3.3 / architecture
@@ -6663,8 +7014,10 @@ export declare class DeviceStore {
  */
 export declare function readDeviceEnrollmentStatus(options: DeviceEnrollmentStatusOptions): Promise<DeviceEnrollmentStatus>;
 // ==== @byok-sdk/client dist/daemon/task-runner.d.ts ====
-import { type AgentMessageContentType, type AgentEgressPolicy, type Envelope, type PermissionPolicy, type RuntimeId, type TerminalProjectionSelection, type TaskOfferPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
+import { type AgentMessageContentType, type AgentEgressPolicy, type Envelope, type PermissionPolicy, type RuntimeId, type TerminalProjectionSelection, type TaskOfferPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferPreparedPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import { type McpStdioServerConfig, type McpToolsetConfig, type RuntimeAdapter } from '../types';
+import type { InputPreparationStore } from './input-preparation-store';
+import { type InputPreparationRuntimeIdentityV1 } from '../input-preparation';
 import { AgentHomeManager, type AgentRef } from '../agent-home';
 import { AgentSessionHandoffStore, type AgentTerminalCause } from './agent-session-handoff-store';
 import { type RuntimeDisposalStage } from '../runtime-failure';
@@ -6875,6 +7228,26 @@ export interface TaskRunnerDeps {
     }>;
     /** Reads the daemon's current validated device-local registry once per offer. */
     getMcpToolsets?: () => ReadonlyMap<string, McpToolsetConfig>;
+    /**
+     * The prepared-Execution lane. Absent on a daemon with no `inputPreparation`
+     * section, and a `task.offer_prepared` arriving there is declined by name
+     * rather than reinterpreted as an ordinary offer.
+     *
+     * It carries the durable store plus the three device facts a prepared
+     * admission compares against, resolved by the daemon that already owns them —
+     * never re-derived here, because a second derivation of the installed runtime
+     * identity or the operator's policy revision is a second opinion about the
+     * same configuration.
+     */
+    inputPreparationLane?: {
+        readonly store: InputPreparationStore;
+        /** The VERIFIED installed runtime/compiler identity every artifact is bound to. */
+        readonly runtime: InputPreparationRuntimeIdentityV1;
+        /** The operator's configured limits-policy revision currently in force. */
+        readonly policyRevision: string;
+        /** `toolsetId` -> definition revision, from one registry read per call. */
+        readonly toolsetDefinitionRevisions: () => ReadonlyMap<string, string>;
+    };
     /**
      * Operator input to the MCP toolset launch boundary
      * (`./trusted-launch-cwd.ts`). Unset means the platform default directory
@@ -7140,7 +7513,7 @@ export type AdmissionGuardDecision = {
     readonly reason: string;
     readonly retryable: boolean;
 };
-type AcceptedOfferPayload = TaskOfferPayload | TaskOfferWithToolsetsPayload | TaskOfferForAgentPayload | TaskOfferForAgentWithEgressPayload | TaskOfferForAgentWithEgressFreshPayload;
+type AcceptedOfferPayload = TaskOfferPayload | TaskOfferWithToolsetsPayload | TaskOfferForAgentPayload | TaskOfferForAgentWithEgressPayload | TaskOfferForAgentWithEgressFreshPayload | TaskOfferPreparedPayload;
 /**
  * The SDK-owned environment variable that carries one host toolset server's
  * `BYOK_HOST_TOOLSET_CONTEXT` nonce (contract §8.1).
@@ -7273,6 +7646,16 @@ export declare class TaskRunner {
      * `MAX_TRACKED_TASK_IDS`), so scanning past it to find an evictable entry
      * costs nothing.
      */
+    /**
+     * `taskId` -> the preparation record this Execution pinned.
+     *
+     * The pin is a durable single-consumer claim on already-counted tokens, so it
+     * is held for exactly as long as the Execution that took it can still be
+     * running — and released at ONE moment, the Execution's terminal. Not at
+     * claim, not at start, not when the session closes: GC must not collect a
+     * record whose bytes a live process may still be sending.
+     */
+    private readonly preparationPinsByTask;
     private readonly inFlightOffers;
     /** Blob I/O before an offer becomes an active task still belongs to that offer's cancellation authority. */
     private readonly inFlightBlobAborts;
@@ -7993,6 +8376,16 @@ export declare class TaskRunner {
     private finish;
     private finishOnce;
     private reserveSemanticTerminal;
+    /**
+     * Release the preparation pin this Execution holds, if it took one.
+     *
+     * Best effort by design, and loudly: a pin that cannot be released costs
+     * retention, not correctness — the record stays uncollectable until an
+     * operator intervenes — whereas turning a release failure into a task-terminal
+     * would rewrite an already-established result for a reason the task itself had
+     * nothing to do with.
+     */
+    private releasePreparationPin;
     /** M3-B: bounded insert for `finishedTaskIds` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest (first-inserted) entry once over cap, same idiom as `ConnectionHub.checkAndRecordDuplicate` (packages/server/src/hub.ts). */
     private addFinishedTaskId;
     private addStrictDeclinedTaskId;
