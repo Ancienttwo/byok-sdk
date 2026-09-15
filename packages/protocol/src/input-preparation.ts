@@ -235,7 +235,18 @@ export const InputPreparationStateSchema = z.enum([
 ]);
 export type InputPreparationState = z.infer<typeof InputPreparationStateSchema>;
 
-/** Why a receipt is not ready. An empty list is the only thing that makes `ready` true. */
+/**
+ * Why a receipt is not ready. An empty list is the only thing that makes
+ * `ready` true.
+ *
+ * `ready` means the preparation CAN BE CONSUMED — the artifact is intact and
+ * unexpired, the native compiler's projection is content-complete, every
+ * residual key is ruled by an applicable Host accounting policy, the count is
+ * present and bound to that exact projection, and every executor identity is
+ * attested. It is deliberately NOT Host budget admission: the device performs
+ * no budget arithmetic, so a ready receipt says the evidence holds, never that
+ * the spend is allowed.
+ */
 export const InputPreparationReadinessReasonSchema = z.enum([
   'not_counted',
   'counter_interrupted',
@@ -244,7 +255,16 @@ export const InputPreparationReadinessReasonSchema = z.enum([
   'artifact_expired',
   'counter_authority_not_production',
   'counter_coverage_incomplete',
-  'compiler_coverage_unknown',
+  /** No counter evidence is persisted on the record. */
+  'counter_missing',
+  /** The native compiler's projection kind is not `content_complete`. */
+  'projection_unknown',
+  /** The artifact carries a residual key the accounting policy does not rule on. */
+  'residual_not_ruled',
+  /** The request named no accounting policy. There is no default. */
+  'accounting_policy_missing',
+  /** The named policy was ruled for a different runtime, endpoint or model. */
+  'accounting_policy_inapplicable',
   'executor_identity_unproven',
 ]);
 export type InputPreparationReadinessReason = z.infer<typeof InputPreparationReadinessReasonSchema>;
@@ -272,6 +292,60 @@ export const InputPreparationCounterTargetSchema = z
   .strict();
 
 /**
+ * The Host's ruling about which residual keys of D its accounting already
+ * accounts for.
+ *
+ * Host authority, carried verbatim. The device performs exactly one check
+ * against it — APPLICABILITY — and never any budget arithmetic: every residual
+ * key the artifact carries must be named here, and the ruling must have been
+ * made for this preparation's own runtime identity and endpoint/model. There
+ * is no default: a request that names none produces a receipt carrying
+ * `accounting_policy_missing`, because "nobody ruled" and "everything is
+ * ruled" are different facts.
+ */
+export const InputPreparationAccountingPolicyRefSchema = z
+  .object({
+    revision: OPAQUE_ID,
+    /** The runtime identity string this ruling was made for. */
+    ruledRuntime: OPAQUE_ID,
+    /** The endpoint/model this ruling was made for. */
+    ruledTarget: InputPreparationCounterTargetSchema,
+    /** Every residual key the Host's accounting already accounts for. */
+    ruledResidualKeys: z.array(OPAQUE_ID).max(64),
+  })
+  .strict();
+export type InputPreparationAccountingPolicyRef = z.infer<typeof InputPreparationAccountingPolicyRefSchema>;
+
+/**
+ * What the provider side of a count asserted, and which exact projection it
+ * was asserted about.
+ *
+ * Required, fixture included: a number without the identity of the bytes it
+ * was taken over is not evidence. The device compares `projectionDigest`
+ * against the artifact's own projection digest and `endpoint`/`modelId`
+ * against the counted target, and refuses the count outright on a mismatch.
+ *
+ * `asserted` is the provider's own answer, stored and never second-guessed —
+ * re-deriving a usage number locally is the shadow accounting this surface
+ * exists to avoid. It carries no output or whole-request field: the Host holds
+ * its own request, and `binding.requestDigest` is the check that ties the two.
+ */
+export const InputPreparationCounterProviderEvidenceSchema = z
+  .object({
+    projectionDigest: z.string().regex(/^[0-9a-f]{64}$/u, 'a projection digest is lowercase sha-256 hex'),
+    endpoint: OPAQUE_TEXT,
+    modelId: OPAQUE_ID,
+    asserted: z
+      .object({
+        httpStatus: z.number().int(),
+        usageFields: z.record(OPAQUE_ID, z.number().finite()),
+        responseDigest: OPAQUE_ID,
+      })
+      .strict(),
+  })
+  .strict();
+
+/**
  * Counter evidence exactly as the device's adapter reported it.
  *
  * `authority: 'test_fixture'` is a first-class value, not a debug flag: a
@@ -288,6 +362,7 @@ export const InputPreparationCounterEvidenceSchema = z
     coverage: z
       .object({ covered: z.boolean(), reason: z.string().max(512).optional() })
       .strict(),
+    providerEvidence: InputPreparationCounterProviderEvidenceSchema,
     target: InputPreparationCounterTargetSchema,
     calledAt: z.iso.datetime({ offset: true }),
     completedAt: z.iso.datetime({ offset: true }),
@@ -308,7 +383,54 @@ export const InputPreparationToolImplementationKindSchema = z
   .regex(/^(?:attested|unavailable:[a-z_]{1,64})$/u, 'a tool implementation kind is "attested" or "unavailable:<reason>"');
 
 /**
- * Identities and sizes only. Never D, never P(D), never the snapshot.
+ * What the native compiler proved about ONE top-level key of D that lies
+ * outside P(D).
+ *
+ * These classes describe STRUCTURE and nothing else. No class states, implies
+ * or denies that a key influences a provider's token count — that is an
+ * external accounting fact the compiler cannot prove — which is exactly why
+ * the device re-derives nothing from them and routes the question to the
+ * Host's own {@link InputPreparationAccountingPolicyRefSchema}.
+ */
+export const InputPreparationResidualValueClassSchema = z.enum([
+  'constant',
+  'boolean',
+  'bounded_integer',
+  'bounded_number',
+  'finite_number',
+  'closed_enum',
+  'nonempty_string',
+  'object_shape',
+]);
+export type InputPreparationResidualValueClass = z.infer<typeof InputPreparationResidualValueClassSchema>;
+
+export const InputPreparationResidualKeySchema = z
+  .object({ key: OPAQUE_ID, valueClass: InputPreparationResidualValueClassSchema })
+  .strict();
+
+/**
+ * What the native compiler proves about P(D), copied verbatim off the envelope.
+ *
+ * `content_complete` — every context-derived byte of D is byte-identically
+ * inside P(D), and every remaining top-level key was classified. `unknown` —
+ * the compiler failed closed, claims nothing, and leaves `residual` empty.
+ *
+ * `digest` is sha-256 over the exact counted-projection bytes. The device
+ * recomputes it and refuses the artifact on a mismatch; it never recomputes
+ * the KIND, because the classification table belongs to the compiler and a
+ * local copy of it would be a shadow parser for the same semantic fact.
+ */
+export const InputPreparationProjectionSchema = z
+  .object({
+    version: z.literal(2),
+    kind: z.enum(['content_complete', 'unknown']),
+    digest: z.string().regex(/^[0-9a-f]{64}$/u, 'a projection digest is lowercase sha-256 hex'),
+  })
+  .strict();
+
+/**
+ * Identities, sizes and the native compiler's structural projection contract.
+ * Never D, never P(D), never the snapshot.
  *
  * The three tool-surface fields are what make drift between preparation and
  * launch checkable rather than assumed:
@@ -335,7 +457,8 @@ export const InputPreparationArtifactSummarySchema = z
     toolManifestDigest: OPAQUE_ID,
     requestBytes: z.number().int().nonnegative(),
     projectionBytes: z.number().int().nonnegative(),
-    coverage: OPAQUE_ID,
+    projection: InputPreparationProjectionSchema,
+    residual: z.array(InputPreparationResidualKeySchema).max(64),
     observationDigest: OPAQUE_ID,
     toolBindingDigest: OPAQUE_ID,
     toolImplementationKinds: z.record(OPAQUE_ID, InputPreparationToolImplementationKindSchema),
@@ -363,6 +486,12 @@ export const InputPreparationBindingSchema = z
     permissionMode: InputPreparationPermissionModeSchema,
     runtime: InputPreparationRuntimeIdentitySchema,
     requestDigest: OPAQUE_ID,
+    /**
+     * The Host's accounting ruling this preparation was requested under,
+     * copied verbatim. Absent when the request named none — never filled in,
+     * and never narrowed to one the device would have chosen.
+     */
+    accountingPolicyRef: InputPreparationAccountingPolicyRefSchema.optional(),
   })
   .strict();
 

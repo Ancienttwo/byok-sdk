@@ -25,7 +25,9 @@ import {
   INPUT_PREPARATION_VERSION,
   inputPreparationRuntimeIdentityString,
   preparedToolBindingDigest,
+  type InputPreparationAccountingPolicyRefV1,
   type InputPreparationBindingV1,
+  type InputPreparationCounterEvidenceV1,
   type InputPreparationModelV1,
   type InputPreparationPinV1,
   type InputPreparationRuntimeIdentityV1,
@@ -143,7 +145,7 @@ const RUNTIME: InputPreparationRuntimeIdentityV1 = {
   envelopeFormat: 'pi.session.prepared-input',
   requestFormat: 'pi.openai-completions.prepared',
   forkBuild: 2,
-  compilerVersion: 1,
+  compilerVersion: 2,
 };
 
 const MODEL: InputPreparationModelV1 = {
@@ -271,6 +273,35 @@ const runner = new TaskRunner({
   },
 });
 
+/** The projection, Host ruling and count a READY record on this device carries. */
+const PROJECTION = { version: 2, kind: 'content_complete', digest: 'a'.repeat(64) } as const;
+const RESIDUAL = [{ key: 'max_tokens', valueClass: 'bounded_integer' }] as const;
+
+const ACCOUNTING_POLICY_REF: InputPreparationAccountingPolicyRefV1 = {
+  revision: 'accounting-r1',
+  ruledRuntime: inputPreparationRuntimeIdentityString(RUNTIME),
+  ruledTarget: { endpoint: MODEL.baseUrl, modelId: MODEL.id },
+  ruledResidualKeys: ['max_tokens'],
+};
+
+const COUNTER_EVIDENCE: InputPreparationCounterEvidenceV1 = {
+  method: 'fixture.tokenizer',
+  methodVersion: '0',
+  authority: 'provider',
+  kind: 'count',
+  value: 128,
+  coverage: { covered: true },
+  providerEvidence: {
+    projectionDigest: PROJECTION.digest,
+    endpoint: MODEL.baseUrl,
+    modelId: MODEL.id,
+    asserted: { httpStatus: 200, usageFields: { prompt_tokens: 128 }, responseDigest: 'e'.repeat(64) },
+  },
+  target: { endpoint: MODEL.baseUrl, modelId: MODEL.id },
+  calledAt: '2026-01-01T00:00:00.000Z',
+  completedAt: '2026-01-01T00:00:01.000Z',
+};
+
 function binding(agentId: string): InputPreparationBindingV1 {
   return {
     scopeId: SCOPE_ID,
@@ -284,6 +315,7 @@ function binding(agentId: string): InputPreparationBindingV1 {
     permissionMode: 'auto',
     runtime: RUNTIME,
     requestDigest: REQUEST_DIGEST,
+    accountingPolicyRef: ACCOUNTING_POLICY_REF,
   };
 }
 
@@ -297,8 +329,9 @@ function artifact(recordId: string): InputPreparationArtifact {
     toolManifestDigest: TOOL_MANIFEST_DIGEST,
     requestBody: '{"model":"glm-4.6","messages":[]}',
     counterProjection: '{"model":"glm-4.6"}',
-    coverage: 'complete',
-    envelope: { format: 'pi.session.prepared-input', version: 1 },
+    projection: PROJECTION,
+    residual: [...RESIDUAL],
+    envelope: { format: 'pi.session.prepared-input', version: 2 },
   };
 }
 
@@ -342,14 +375,15 @@ async function seed(requestId: string, agentId: string): Promise<Record<string, 
       toolManifestDigest: TOOL_MANIFEST_DIGEST,
       requestBytes: 33,
       projectionBytes: 19,
-      coverage: 'complete',
+      projection: PROJECTION,
+      residual: [...RESIDUAL],
       observationDigest: fingerprinted.fingerprint.observationDigest,
       toolBindingDigest,
       toolImplementationKinds: fingerprinted.fingerprint.toolImplementationKinds,
     },
     bounds: { maxScopeAggregateBytes: 10_000_000, maxCounterCallsPerScope: 4 },
   });
-  await store.update(reserved.record.recordId, { state: 'counted' });
+  await store.update(reserved.record.recordId, { state: 'counted', counter: COUNTER_EVIDENCE });
   return {
     recordId: reserved.record.recordId,
     requestDigest: REQUEST_DIGEST,

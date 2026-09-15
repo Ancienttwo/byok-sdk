@@ -12,6 +12,8 @@ import {
   type InputPreparationCounterEvidenceV1,
   type InputPreparationModelV1,
   type InputPreparationPinV1,
+  type InputPreparationProjectionV1,
+  type InputPreparationResidualKeyV1,
   type InputPreparationStateV1,
 } from '../input-preparation';
 
@@ -65,15 +67,24 @@ import {
  * for the log would make the log's meaning depend on an agreement it is not a
  * party to.
  *
- * 3 is the first version in which `model` is a required durable fact (a
+ * 3 was the first version in which `model` is a required durable fact (a
  * prepared launch must re-present the counted model identity as an INDEPENDENT
  * expectation, and the only other copy of it lives inside the retained
  * envelope, which the native contract forbids using as its own expectation).
+ *
+ * 4 is the first version whose artifact carries the native compiler's
+ * structural projection contract — `projection` plus a classified `residual`
+ * list — in place of the single opaque `coverage` label version 3 wrote. A
+ * version-3 record cannot be read forward: nothing can honestly decide whether
+ * a record frozen under an opaque label had a content-complete projection or
+ * which residual keys its request carried, and inventing either is precisely
+ * the shadow accounting this contract forbids.
+ *
  * A record at any other version is refused — see
  * {@link InputPreparationUnsupportedRecordVersionError}. There is no
  * compatibility read.
  */
-export const INPUT_PREPARATION_RECORD_VERSION = 3;
+export const INPUT_PREPARATION_RECORD_VERSION = 4;
 
 /** The durable idempotency key. Never a task id, and never caller-asserted: `scopeId` comes from the trusted authority grant. */
 export interface InputPreparationRecordKey {
@@ -132,7 +143,10 @@ export interface InputPreparationArtifact {
   readonly requestBody: string;
   /** P(D) — the counted projection, unchanged. */
   readonly counterProjection: string;
-  readonly coverage: string;
+  /** What the native compiler proved about P(D), copied verbatim off the envelope. */
+  readonly projection: InputPreparationProjectionV1;
+  /** Every top-level key of D outside P(D), classified by the native compiler. */
+  readonly residual: readonly InputPreparationResidualKeyV1[];
   /** The native envelope, retained verbatim so a later consumer re-verifies rather than recompiles. */
   readonly envelope: unknown;
 }

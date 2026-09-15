@@ -4736,7 +4736,7 @@ export declare function isGitWorkspaceConfig(value: unknown): value is GitWorksp
 export declare function canonicalWorkspaceRoot(value: string): Promise<string>;
 export { DEFAULT_MAX_OUTPUT_BYTES as GIT_WORKSPACE_MAX_OUTPUT_BYTES, DEFAULT_TIMEOUT_MS as GIT_WORKSPACE_TIMEOUT_MS };
 // ==== @byok-sdk/client dist/daemon/input-preparation-store.d.ts ====
-import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INPUT_PREPARATION_VERSION, type InputPreparationBindingV1, type InputPreparationArtifactSummaryV1, type InputPreparationCounterEvidenceV1, type InputPreparationModelV1, type InputPreparationPinV1, type InputPreparationStateV1 } from '../input-preparation';
+import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INPUT_PREPARATION_VERSION, type InputPreparationBindingV1, type InputPreparationArtifactSummaryV1, type InputPreparationCounterEvidenceV1, type InputPreparationModelV1, type InputPreparationPinV1, type InputPreparationProjectionV1, type InputPreparationResidualKeyV1, type InputPreparationStateV1 } from '../input-preparation';
 /**
  * Durable request / receipt / artifact persistence for the B-P2 local
  * primitive (`docs/researches/runtime-input-preparation-contract.md` §10.3.5,
@@ -4782,15 +4782,24 @@ import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INP
  * for the log would make the log's meaning depend on an agreement it is not a
  * party to.
  *
- * 3 is the first version in which `model` is a required durable fact (a
+ * 3 was the first version in which `model` is a required durable fact (a
  * prepared launch must re-present the counted model identity as an INDEPENDENT
  * expectation, and the only other copy of it lives inside the retained
  * envelope, which the native contract forbids using as its own expectation).
+ *
+ * 4 is the first version whose artifact carries the native compiler's
+ * structural projection contract — `projection` plus a classified `residual`
+ * list — in place of the single opaque `coverage` label version 3 wrote. A
+ * version-3 record cannot be read forward: nothing can honestly decide whether
+ * a record frozen under an opaque label had a content-complete projection or
+ * which residual keys its request carried, and inventing either is precisely
+ * the shadow accounting this contract forbids.
+ *
  * A record at any other version is refused — see
  * {@link InputPreparationUnsupportedRecordVersionError}. There is no
  * compatibility read.
  */
-export declare const INPUT_PREPARATION_RECORD_VERSION = 3;
+export declare const INPUT_PREPARATION_RECORD_VERSION = 4;
 /** The durable idempotency key. Never a task id, and never caller-asserted: `scopeId` comes from the trusted authority grant. */
 export interface InputPreparationRecordKey {
     readonly scopeId: string;
@@ -4846,7 +4855,10 @@ export interface InputPreparationArtifact {
     readonly requestBody: string;
     /** P(D) — the counted projection, unchanged. */
     readonly counterProjection: string;
-    readonly coverage: string;
+    /** What the native compiler proved about P(D), copied verbatim off the envelope. */
+    readonly projection: InputPreparationProjectionV1;
+    /** Every top-level key of D outside P(D), classified by the native compiler. */
+    readonly residual: readonly InputPreparationResidualKeyV1[];
     /** The native envelope, retained verbatim so a later consumer re-verifies rather than recompiles. */
     readonly envelope: unknown;
 }
@@ -10028,11 +10040,12 @@ export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, Expor
  * This module is the ONE authority for the wire/receipt shapes the daemon's
  * `input_preparation.*` control methods speak. It deliberately imports nothing
  * from the native coding-agent package: the native envelope
- * (`PreparedSessionInputV1`) is an implementation fact owned by
+ * (`PreparedSessionInputV2`) is an implementation fact owned by
  * `adapters/pi/input-preparation.ts`, and the only native-derived values that
- * ever cross this boundary are opaque digests, byte counts and the coverage
- * label. A host integrating against this surface therefore never has to
- * resolve, or pin, the native runtime's own type closure.
+ * ever cross this boundary are opaque digests, byte counts and the native
+ * compiler's own structural projection contract, copied verbatim. A host
+ * integrating against this surface therefore never has to resolve, or pin, the
+ * native runtime's own type closure.
  *
  * What this surface is NOT, and must never quietly become:
  *
@@ -10045,9 +10058,19 @@ export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, Expor
  *   InputPreparationPinV1} exists here only so that later binding is a field
  *   that was always reserved rather than a schema break; nothing in this
  *   package ever writes it.
- * - Coverage is whatever the native compiler proved, and it currently proves
- *   `"unknown"`. A receipt therefore cannot be `ready` today, and a fixture
- *   counter can never make one ready (§10.2's G4 stays closed).
+ * - It states nothing of its own about token semantics. What P(D) covers is the
+ *   native compiler's structural projection contract v2 — a {@link
+ *   InputPreparationProjectionV1} and a classified {@link
+ *   InputPreparationResidualKeyV1} list — copied verbatim off the envelope.
+ *   Whether the residual keys are RULED is a Host accounting fact carried as
+ *   {@link InputPreparationAccountingPolicyRefV1}; this package only checks
+ *   applicability, never budget arithmetic.
+ * - `ready` means "the preparation can be consumed": the artifact is intact and
+ *   unexpired, its projection is content-complete, its residual keys are ruled
+ *   by an applicable Host accounting policy, its counter evidence is present
+ *   and bound to this exact projection, and every executor identity is
+ *   attested. It is NOT Host budget admission, which stays on the Host side of
+ *   the accounting policy this surface only names.
  */
 import type { PermissionMode } from '@byok-sdk/protocol';
 import type { McpLaunchAttestation } from './daemon/trusted-launch-cwd';
@@ -10063,15 +10086,25 @@ export declare const INPUT_PREPARATION_ARTIFACT_FORMAT = "byok.input-preparation
 /**
  * The single supported version of every shape in this module.
  *
- * Bumped to 2 by the phase-2 executor-identity slice, which REMOVED
- * caller-supplied `toolExecutors` and `snapshot.tools` from the request and
- * added `requiredToolsets` + `permissionMode`. The request, the receipt, the
- * durable record and the retained artifact all carry this number, so a record
- * written under version 1 is refused on replay rather than read through a
- * compatibility branch: its artifact was frozen over a tool manifest a caller
- * stated, and this version's rule is that no caller may state one.
+ * Version 2 REMOVED caller-supplied `toolExecutors` and `snapshot.tools` from
+ * the request and added `requiredToolsets` + `permissionMode`.
+ *
+ * Bumped to 3 by the projection-contract slice, which REMOVED the artifact
+ * summary's `coverage` string — a single opaque label that said nothing
+ * checkable about what P(D) covers — and replaced it with the native
+ * compiler's structural projection contract v2: {@link
+ * InputPreparationArtifactSummaryV1.projection} and {@link
+ * InputPreparationArtifactSummaryV1.residual}. The request and binding gained
+ * {@link InputPreparationAccountingPolicyRefV1}, and counter evidence gained
+ * {@link InputPreparationCounterProviderEvidenceV1}.
+ *
+ * The request, the receipt, the durable record and the retained artifact all
+ * carry this number, so a record written under an older version is refused on
+ * replay rather than read through a compatibility branch: its artifact was
+ * frozen under a claim this version cannot re-derive, and there is no honest
+ * value to translate an opaque coverage label into.
  */
-export declare const INPUT_PREPARATION_VERSION = 2;
+export declare const INPUT_PREPARATION_VERSION = 3;
 /**
  * Key-sorted JSON, so two structurally equal values always produce the same
  * bytes and therefore the same digest. Field ORDER must never be able to turn
@@ -10140,6 +10173,75 @@ export interface InputPreparationOptionsV1 {
 export interface InputPreparationSelectionV1 {
     readonly model: InputPreparationModelV1;
     readonly options: InputPreparationOptionsV1;
+}
+/**
+ * What the native compiler proved about ONE top-level key of D that lies
+ * outside P(D).
+ *
+ * These classes describe STRUCTURE and nothing else. No class states, implies
+ * or denies that a key influences a provider's token count — that is an
+ * external accounting fact the compiler cannot prove and never asserts, and it
+ * is precisely why this SDK re-derives nothing from them and routes the
+ * question to a Host-authored {@link InputPreparationAccountingPolicyRefV1}
+ * instead.
+ *
+ * The set is the native compiler's, copied verbatim. Widening it is a
+ * registration against a new fork, not a parser relaxation: a value outside
+ * this set is refused rather than carried through as an unclassified key.
+ */
+export type InputPreparationResidualValueClassV1 = 'constant' | 'boolean' | 'bounded_integer' | 'bounded_number' | 'finite_number' | 'closed_enum' | 'nonempty_string' | 'object_shape';
+/** One residual key of D, with the only thing the native compiler proves about it: its shape. */
+export interface InputPreparationResidualKeyV1 {
+    readonly key: string;
+    readonly valueClass: InputPreparationResidualValueClassV1;
+}
+/**
+ * What the native compiler proves about P(D), copied verbatim off the envelope.
+ *
+ * `content_complete` — every context-derived byte of D is byte-identically
+ * inside P(D), and every remaining top-level key of D was classified by the
+ * compiler-owned table. `unknown` — D carries a key the table does not
+ * classify, or a classified key whose value does not match its declared shape;
+ * the compiler fails closed, claims nothing, and leaves `residual` empty.
+ *
+ * `digest` is SHA-256 over the exact `counterProjection` bytes. The SDK may
+ * recompute it and refuse on mismatch; it never recomputes the KIND, because
+ * the classification table belongs to the compiler and a second local copy of
+ * it would be a shadow parser for the same semantic fact.
+ */
+export interface InputPreparationProjectionV1 {
+    readonly version: 2;
+    readonly kind: 'content_complete' | 'unknown';
+    /** SHA-256 hex over the exact counted-projection bytes. */
+    readonly digest: string;
+}
+/**
+ * The Host's ruling about which residual keys its accounting already accounts
+ * for, named on the request and recorded on the binding.
+ *
+ * It is HOST AUTHORITY, carried verbatim. This SDK performs exactly one check
+ * against it — APPLICABILITY — and never any budget arithmetic:
+ *
+ * - every residual key the artifact carries must appear in `ruledResidualKeys`
+ *   (otherwise {@link InputPreparationReadinessReasonV1} `residual_not_ruled`);
+ * - `ruledRuntime` must equal this preparation's own runtime identity string,
+ *   and `ruledTarget` must equal the counted target, or the ruling is about a
+ *   different compiler or a different endpoint/model and does not apply here
+ *   (`accounting_policy_inapplicable`).
+ *
+ * There is no default. A request that names none leaves the receipt carrying
+ * `accounting_policy_missing`, because "nobody ruled on these keys" and "every
+ * key is ruled" are different facts and only one of them is safe.
+ */
+export interface InputPreparationAccountingPolicyRefV1 {
+    /** Opaque Host-assigned revision of the accounting ruling. Never interpreted here. */
+    readonly revision: string;
+    /** The runtime identity string this ruling was made for — {@link inputPreparationRuntimeIdentityString}. */
+    readonly ruledRuntime: string;
+    /** The endpoint/model this ruling was made for. */
+    readonly ruledTarget: InputPreparationCounterTargetV1;
+    /** Every residual key the Host's accounting already accounts for. */
+    readonly ruledResidualKeys: readonly string[];
 }
 /** One authorized context file, exactly as the caller resolved it. Never read from disk here. */
 export interface InputPreparationContextFileV1 {
@@ -10268,6 +10370,12 @@ export interface InputPreparationRequestV1 {
     /** Configured MCP toolset ids. The locator is the toolset id; MCP only. */
     readonly requiredToolsets: readonly string[];
     readonly snapshot: InputPreparationSnapshotV1;
+    /**
+     * The Host's accounting ruling for this preparation, carried verbatim onto
+     * the binding. Optional on the wire and defaulted NOWHERE: a request that
+     * omits it produces a receipt that says so.
+     */
+    readonly accountingPolicyRef?: InputPreparationAccountingPolicyRefV1;
 }
 /**
  * The request keys this contract RETIRED in version 2, named so a daemon can
@@ -10422,6 +10530,40 @@ export interface InputPreparationCoverageProofV1 {
  * ever looking like production accounting evidence (§10.3.3).
  */
 export type InputPreparationCounterAuthorityV1 = 'provider' | 'test_fixture';
+/**
+ * What the provider side of a count asserted, and which exact projection it
+ * was asserted about.
+ *
+ * Required on every result, fixture included. A number without the identity of
+ * the bytes it was taken over is not evidence: the service compares
+ * `projectionDigest` against the artifact's own
+ * {@link InputPreparationProjectionV1.digest} and `endpoint`/`modelId` against
+ * the counted target, and a missing or mismatched one refuses the count as
+ * `counter_unavailable` rather than persisting a number bound to nothing.
+ *
+ * `asserted` is the provider's own answer, verbatim: the HTTP status it
+ * returned, the usage fields it reported, and a digest of the response those
+ * came from. The SDK stores it and compares nothing inside it — re-deriving a
+ * usage number locally is the shadow accounting this whole surface exists to
+ * avoid.
+ *
+ * It carries no O (output) or W (whole-request) field, deliberately. The Host
+ * holds its own request, and `binding.requestDigest` is what ties this evidence
+ * to it.
+ */
+export interface InputPreparationCounterProviderEvidenceV1 {
+    /** SHA-256 hex of the exact counted projection this count was taken over. */
+    readonly projectionDigest: string;
+    readonly endpoint: string;
+    readonly modelId: string;
+    readonly asserted: {
+        readonly httpStatus: number;
+        /** The usage fields the provider reported, verbatim. Never re-derived here. */
+        readonly usageFields: Readonly<Record<string, number>>;
+        /** Digest of the provider response the usage fields were read from. */
+        readonly responseDigest: string;
+    };
+}
 export interface InputPreparationCounterResultV1 {
     /** Counting method identity, e.g. the provider tokenizer route. */
     readonly method: string;
@@ -10431,6 +10573,8 @@ export interface InputPreparationCounterResultV1 {
     readonly kind: 'count' | 'bound';
     readonly value: number;
     readonly coverage: InputPreparationCoverageProofV1;
+    /** What the provider asserted, and the projection identity it asserted it about. */
+    readonly providerEvidence: InputPreparationCounterProviderEvidenceV1;
 }
 /**
  * The separately authorized counter. Exactly one method, and it performs no
@@ -10480,8 +10624,9 @@ export interface InputPreparationRuntimeIdentityV1 {
 export declare function inputPreparationRuntimeIdentityString(runtime: InputPreparationRuntimeIdentityV1): string;
 /**
  * Everything a receipt discloses about the stored artifact: identities, sizes
- * and coverage. Never D itself, never P(D), never the snapshot — a scoped
- * reference plus a digest is content identity, not a disclosure channel.
+ * and the native compiler's structural projection contract. Never D itself,
+ * never P(D), never the snapshot — a scoped reference plus a digest is content
+ * identity, not a disclosure channel.
  */
 export interface InputPreparationArtifactSummaryV1 {
     /** Digest of the low-level provider request D. */
@@ -10491,8 +10636,18 @@ export interface InputPreparationArtifactSummaryV1 {
     readonly toolManifestDigest: string;
     readonly requestBytes: number;
     readonly projectionBytes: number;
-    /** Whatever the native compiler proved. It currently proves `"unknown"`. */
-    readonly coverage: string;
+    /**
+     * What the native compiler proved about P(D), copied verbatim. The SDK
+     * re-derives no part of it except the digest, which it recomputes over the
+     * envelope's own counted-projection bytes and refuses on mismatch.
+     */
+    readonly projection: InputPreparationProjectionV1;
+    /**
+     * Every top-level key of D outside P(D), classified by the compiler-owned
+     * table and copied verbatim. Empty when {@link InputPreparationProjectionV1.kind}
+     * is `unknown`, because the compiler claims nothing in that case.
+     */
+    readonly residual: readonly InputPreparationResidualKeyV1[];
     /**
      * Digest of everything the device OBSERVED for this preparation — the
      * projected tools, their executor fingerprints, the launch attestation and
@@ -10536,6 +10691,12 @@ export interface InputPreparationBindingV1 {
     readonly runtime: InputPreparationRuntimeIdentityV1;
     /** Digest over the whole normalized request, scope and runtime identity. */
     readonly requestDigest: string;
+    /**
+     * The Host's accounting ruling this preparation was requested under, copied
+     * verbatim from the request. Absent when the request named none — never
+     * filled in, and never narrowed to one this device would have chosen.
+     */
+    readonly accountingPolicyRef?: InputPreparationAccountingPolicyRefV1;
 }
 /**
  * The committed Execution one counted preparation is bound to (§10.3.7).
@@ -10582,8 +10743,30 @@ export interface InputPreparationPinV1 {
  * The last four are terminal and never transition again.
  */
 export type InputPreparationStateV1 = 'reserved' | 'counting' | 'counted' | 'cancelled' | 'failed' | 'counter_interrupted';
-/** Why a receipt is not ready. An empty list is the only thing that makes `ready` true. */
-export type InputPreparationReadinessReasonV1 = 'not_counted' | 'counter_interrupted' | 'cancelled' | 'failed' | 'artifact_expired' | 'counter_authority_not_production' | 'counter_coverage_incomplete' | 'compiler_coverage_unknown' | 'executor_identity_unproven';
+/**
+ * Why a receipt is not ready. An empty list is the only thing that makes
+ * `ready` true.
+ *
+ * `ready` answers exactly one question — CAN THIS PREPARATION BE CONSUMED —
+ * and it is deliberately not Host budget admission. A ready receipt says the
+ * artifact is intact, its projection is content-complete, every residual key
+ * is ruled by an applicable Host accounting policy, the count is present and
+ * bound to this exact projection, and every executor identity is attested. It
+ * says nothing about whether the Host's budget allows the spend; that decision
+ * needs the ruling this surface only names.
+ *
+ * - `projection_unknown` — the native compiler's projection kind is not
+ *   `content_complete`, so it claims nothing about what P(D) covers.
+ * - `residual_not_ruled` — the artifact carries a residual key the binding's
+ *   accounting policy does not rule on.
+ * - `accounting_policy_missing` — the request named no accounting policy.
+ * - `accounting_policy_inapplicable` — the named policy was ruled for a
+ *   different runtime or a different endpoint/model.
+ * - `counter_missing` — no counter evidence is persisted on the record. Stated
+ *   on its own, because it used to be implied by an always-present coverage
+ *   reason and is a different fact from either.
+ */
+export type InputPreparationReadinessReasonV1 = 'not_counted' | 'counter_interrupted' | 'cancelled' | 'failed' | 'artifact_expired' | 'counter_authority_not_production' | 'counter_coverage_incomplete' | 'counter_missing' | 'projection_unknown' | 'residual_not_ruled' | 'accounting_policy_missing' | 'accounting_policy_inapplicable' | 'executor_identity_unproven';
 /**
  * The scoped reference plus readiness evidence one preparation answers with.
  *

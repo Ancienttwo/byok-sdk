@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -118,6 +119,14 @@ function fixtureCounter(): RecordingCounter {
         kind: 'bound',
         value: 4_242,
         coverage: { covered: false, reason: 'offline fixture' },
+        // Bound to the exact projection the adapter was handed: a count whose
+        // projection nobody can name is refused before it is persisted.
+        providerEvidence: {
+          projectionDigest: createHash('sha256').update(request.counterProjection, 'utf8').digest('hex'),
+          endpoint: request.target.endpoint,
+          modelId: request.target.modelId,
+          asserted: { httpStatus: 200, usageFields: { prompt_tokens: 4_242 }, responseDigest: 'e'.repeat(64) },
+        },
       };
     },
   };
@@ -257,7 +266,16 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
 
     expect(receipt.format).toBe('byok.input-preparation.receipt');
     expect(receipt.state).toBe('counted');
-    expect(receipt.artifact?.coverage).toBe('unknown');
+    // The native compiler's own structural projection contract, carried
+    // verbatim — not a label this SDK chose.
+    expect(receipt.artifact?.projection.version).toBe(2);
+    expect(receipt.artifact?.projection.kind).toBe('content_complete');
+    expect(receipt.artifact?.projection.digest).toMatch(/^[0-9a-f]{64}$/u);
+    expect(receipt.artifact?.residual.length).toBeGreaterThan(0);
+    for (const entry of receipt.artifact?.residual ?? []) {
+      expect(typeof entry.key).toBe('string');
+      expect(typeof entry.valueClass).toBe('string');
+    }
     expect(receipt.artifact?.requestBytes).toBeGreaterThan(0);
     expect(receipt.binding.runtime.packageName).toBe('@byok-sdk/pi-coding-agent');
     expect(receipt.binding.runtime.upstreamCommit).toMatch(/^[0-9a-f]{40}$/u);
@@ -280,16 +298,20 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     expect(await trustedCwd()).toBeTruthy();
     expect(receipt.counter).toMatchObject({ authority: 'test_fixture', kind: 'bound', value: 4_242 });
 
-    // A fixture count and unknown compiler coverage can never be ready.
+    // A fixture count, an unruled residual set and unattested executors can
+    // never be ready. `projection_unknown` is absent on purpose: the compiler
+    // DID prove a content-complete projection, so what is missing is the Host's
+    // accounting ruling, which this request deliberately does not carry.
     expect(receipt.ready).toBe(false);
     expect(receipt.readinessReasons).toEqual(
       expect.arrayContaining([
-        'compiler_coverage_unknown',
+        'accounting_policy_missing',
         'counter_authority_not_production',
         'counter_coverage_incomplete',
         'executor_identity_unproven',
       ]),
     );
+    expect(receipt.readinessReasons).not.toContain('projection_unknown');
 
     // Task-free: nothing entered the runner.
     const status = await client!.request<{ activeTasks: unknown[]; runtimeIds: string[] }>('status');

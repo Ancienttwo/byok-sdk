@@ -23,6 +23,7 @@ import {
   AgentHomeProjectionValueSchema,
 } from './agent-home-projection';
 import {
+  InputPreparationAccountingPolicyRefSchema,
   InputPreparationContentHashSchema,
   InputPreparationOfferBindingSchema,
   InputPreparationPermissionModeSchema,
@@ -685,6 +686,13 @@ export const AgentInputPreparationPayloadSchema = z
     context: z.union([InputPreparationInlineContextSchema, InputPreparationBlobContextSchema]),
     requiredToolsets: RequiredToolsetsSchema,
     permissionMode: InputPreparationPermissionModeSchema,
+    /**
+     * The Host's accounting ruling for this preparation, carried verbatim onto
+     * the receipt's binding. Optional and defaulted NOWHERE: a payload that
+     * omits it produces a receipt that says `accounting_policy_missing`, which
+     * is the honest answer — the device rules on no residual key by itself.
+     */
+    accountingPolicyRef: InputPreparationAccountingPolicyRefSchema.optional(),
   })
   .strict();
 export type AgentInputPreparationPayload = z.infer<typeof AgentInputPreparationPayloadSchema>;

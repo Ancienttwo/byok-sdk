@@ -2,12 +2,15 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import type { PreparedSessionInputV1 } from '@earendil-works/pi-coding-agent/prepared-session-input';
+import type { PreparedSessionInputV2 } from '@earendil-works/pi-coding-agent/prepared-session-input';
 import type { PermissionMode } from '@byok-sdk/protocol';
 import type {
   InputPreparationCompiledSnapshotV1,
   InputPreparationModelV1,
   InputPreparationOptionsV1,
+  InputPreparationProjectionV1,
+  InputPreparationResidualKeyV1,
+  InputPreparationResidualValueClassV1,
   InputPreparationRuntimeIdentityV1,
 } from '../../input-preparation';
 import type { McpToolsetServerObservation } from '../../mcp/observation';
@@ -32,7 +35,8 @@ import { PI_PACKAGE_NAME, resolvePiRuntimeIdentity } from './resolve-bin';
  *    fork provenance that manifest records. §10.3.1 forbids deriving this from
  *    caller text or a version label, so nothing on the wire can influence it.
  * 2. Hands already-resolved immutable data to the native pure compile and
- *    returns the envelope's digests, bytes and coverage.
+ *    returns the envelope's digests, bytes and its structural projection
+ *    contract, copied verbatim.
  *
  * Step 2 is PURE by native contract (§11.2): no home discovery, no settings or
  * resource loading, no session/MCP startup, no tool execution, no credentials,
@@ -62,6 +66,29 @@ function loadNativePrepare(): Promise<PrepareCodingAgentSessionInput> {
   return nativePrepare;
 }
 
+/**
+ * The ONE prepared-request compiler version this SDK consumes.
+ *
+ * It is this package's SUPPORTED constant, never a claim about the native: the
+ * identity below states it, and every compile proves the envelope the native
+ * actually produced carries the same number
+ * (`unsupported_compiler_version`, fail closed). A fork that compiles to a
+ * different contract is refused rather than read through this one.
+ */
+export const SUPPORTED_PREPARED_COMPILER_VERSION = 2;
+
+/** The residual value classes the supported compiler contract defines. Copied, never invented. */
+const SUPPORTED_RESIDUAL_VALUE_CLASSES: ReadonlySet<string> = new Set<InputPreparationResidualValueClassV1>([
+  'constant',
+  'boolean',
+  'bounded_integer',
+  'bounded_number',
+  'finite_number',
+  'closed_enum',
+  'nonempty_string',
+  'object_shape',
+]);
+
 /** The immutable compile output, in this package's own vocabulary. */
 export interface CompiledPreparedInput {
   /** The exact low-level provider request body D. */
@@ -75,10 +102,12 @@ export interface CompiledPreparedInput {
   /** Native digest of the whole envelope. */
   readonly envelopeDigest: string;
   readonly toolManifestDigest: string;
-  /** Whatever the native compiler proved. It currently proves `"unknown"`. */
-  readonly coverage: string;
+  /** What the native compiler proved about P(D), copied verbatim. */
+  readonly projection: InputPreparationProjectionV1;
+  /** Every top-level key of D outside P(D), classified by the native compiler. */
+  readonly residual: readonly InputPreparationResidualKeyV1[];
   /** The full native envelope, retained verbatim for the durable artifact. */
-  readonly envelope: PreparedSessionInputV1;
+  readonly envelope: PreparedSessionInputV2;
 }
 
 /** Explicit, already-authorized and already-authority-resolved compile input. */
@@ -100,9 +129,18 @@ export interface CompilePreparedInputRequest {
  * `unsupported_input` wire code: nothing is filled in, defaulted or downgraded.
  */
 export class InputPreparationCompileError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
+  /**
+   * A stable code for the refusals that name a specific broken contract, so the
+   * durable record says WHICH one rather than only `compile_rejected`. Absent
+   * for a refusal the native compiler itself raised: its message is native
+   * text and this package invents no code for it.
+   */
+  readonly detail?: string;
+
+  constructor(message: string, options?: { cause?: unknown; detail?: string }) {
     super(message, options);
     this.name = 'InputPreparationCompileError';
+    if (options?.detail !== undefined) this.detail = options.detail;
   }
 }
 
@@ -222,7 +260,7 @@ export function resolveInstalledPiRuntimeIdentity(): InputPreparationRuntimeIden
     forkBuild: fork.forkBuild as number,
     envelopeFormat: 'pi.session.prepared-input',
     requestFormat: 'pi.openai-completions.prepared',
-    compilerVersion: 1,
+    compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,
   });
 }
 
@@ -250,7 +288,7 @@ export function createPiInputPreparationCompiler(): InputPreparationCompiler {
           { cause },
         );
       }
-      let envelope: PreparedSessionInputV1;
+      let envelope: PreparedSessionInputV2;
       try {
         envelope = await prepare({
           // Structurally the native `CodingAgentInputSnapshot`. The wire cannot
@@ -314,27 +352,94 @@ export function createPiInputPreparationCompiler(): InputPreparationCompiler {
           { cause },
         );
       }
-      // Belt-and-suspenders on the two format tags the artifact claims. The
-      // identity above was derived from the installed manifest; this proves the
-      // code that actually ran produced the envelope shape that identity
-      // promises, rather than trusting the manifest alone.
-      if (envelope.format !== runtime.envelopeFormat || envelope.providerRequest.format !== runtime.requestFormat) {
-        throw new InputPreparationCompileError(
-          `the native compiler produced ${envelope.format}/${envelope.providerRequest.format}, not ${runtime.envelopeFormat}/${runtime.requestFormat}`,
-        );
-      }
-      return {
-        requestBody: envelope.providerRequest.body,
-        counterProjection: envelope.providerRequest.counterProjection,
-        requestBytes: Buffer.byteLength(envelope.providerRequest.body, 'utf8'),
-        projectionBytes: Buffer.byteLength(envelope.providerRequest.counterProjection, 'utf8'),
-        requestDigest: envelope.providerRequest.digest,
-        envelopeDigest: envelope.digest,
-        toolManifestDigest: envelope.toolManifest.digest,
-        coverage: envelope.providerRequest.coverage,
-        envelope,
-      };
+      return verifyCompiledPreparedInput(envelope, runtime);
     },
+  };
+}
+
+/**
+ * Turn one native envelope into this package's compile output, refusing
+ * anything that is not the contract the runtime identity promises.
+ *
+ * Exported because it is the whole fail-closed boundary between the fork and
+ * this SDK, and a boundary that can only be exercised through a live native
+ * compile is a boundary whose refusals nobody tests. It re-derives NOTHING
+ * about token semantics: the projection kind and the residual classification
+ * are the compiler's, carried verbatim. The one value it recomputes is the
+ * projection digest, over the envelope's own counted-projection bytes, because
+ * a digest that only ever travels beside the bytes it describes is not a check.
+ */
+export function verifyCompiledPreparedInput(
+  envelope: PreparedSessionInputV2,
+  runtime: InputPreparationRuntimeIdentityV1,
+): CompiledPreparedInput {
+  // Belt-and-suspenders on the two format tags the artifact claims. The
+  // identity was derived from the installed manifest; this proves the code that
+  // actually ran produced the envelope shape that identity promises, rather
+  // than trusting the manifest alone.
+  if (envelope.format !== runtime.envelopeFormat || envelope.providerRequest.format !== runtime.requestFormat) {
+    throw new InputPreparationCompileError(
+      `the native compiler produced ${envelope.format}/${envelope.providerRequest.format}, not ${runtime.envelopeFormat}/${runtime.requestFormat}`,
+      { detail: 'unsupported_envelope_format' },
+    );
+  }
+  // The OBSERVED compiler version, never a literal claim about the native. The
+  // identity states what this SDK supports; this proves the envelope in hand
+  // was compiled to exactly that contract.
+  if (envelope.providerRequest.compilerVersion !== runtime.compilerVersion) {
+    throw new InputPreparationCompileError(
+      `the native compiler produced prepared-request compiler version ${String(envelope.providerRequest.compilerVersion)},`
+      + ` but this build consumes version ${String(runtime.compilerVersion)} only`,
+      { detail: 'unsupported_compiler_version' },
+    );
+  }
+  const projection = envelope.providerRequest.projection;
+  if (
+    projection === null ||
+    typeof projection !== 'object' ||
+    projection.version !== 2 ||
+    (projection.kind !== 'content_complete' && projection.kind !== 'unknown') ||
+    typeof projection.digest !== 'string'
+  ) {
+    throw new InputPreparationCompileError(
+      'the native compiler produced a projection outside the supported structural contract',
+      { detail: 'unsupported_projection_shape' },
+    );
+  }
+  const recomputed = createHash('sha256').update(envelope.providerRequest.counterProjection, 'utf8').digest('hex');
+  if (recomputed !== projection.digest) {
+    throw new InputPreparationCompileError(
+      'the prepared projection digest does not describe the counted projection bytes it travels with',
+      { detail: 'projection_digest_mismatch' },
+    );
+  }
+  const residual: InputPreparationResidualKeyV1[] = [];
+  for (const entry of envelope.providerRequest.residual) {
+    if (
+      entry === null ||
+      typeof entry !== 'object' ||
+      typeof entry.key !== 'string' ||
+      entry.key.length === 0 ||
+      !SUPPORTED_RESIDUAL_VALUE_CLASSES.has(entry.valueClass)
+    ) {
+      throw new InputPreparationCompileError(
+        'the native compiler classified a residual key with a value class outside the supported contract',
+        { detail: 'unsupported_residual_value_class' },
+      );
+    }
+    residual.push({ key: entry.key, valueClass: entry.valueClass });
+  }
+  return {
+    requestBody: envelope.providerRequest.body,
+    counterProjection: envelope.providerRequest.counterProjection,
+    requestBytes: Buffer.byteLength(envelope.providerRequest.body, 'utf8'),
+    projectionBytes: Buffer.byteLength(envelope.providerRequest.counterProjection, 'utf8'),
+    requestDigest: envelope.providerRequest.digest,
+    envelopeDigest: envelope.digest,
+    toolManifestDigest: envelope.toolManifest.digest,
+    projection: { version: 2, kind: projection.kind, digest: projection.digest },
+    residual,
+    envelope,
   };
 }
 

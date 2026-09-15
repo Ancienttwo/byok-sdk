@@ -4079,6 +4079,62 @@
             "readonly",
             "plan"
           ]
+        },
+        "accountingPolicyRef": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            },
+            "ruledRuntime": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            },
+            "ruledTarget": {
+              "type": "object",
+              "properties": {
+                "endpoint": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "modelId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                }
+              },
+              "required": [
+                "endpoint",
+                "modelId"
+              ],
+              "additionalProperties": false
+            },
+            "ruledResidualKeys": {
+              "maxItems": 64,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512,
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+              }
+            }
+          },
+          "required": [
+            "revision",
+            "ruledRuntime",
+            "ruledTarget",
+            "ruledResidualKeys"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -8848,6 +8904,62 @@
                   "readonly",
                   "plan"
                 ]
+              },
+              "accountingPolicyRef": {
+                "type": "object",
+                "properties": {
+                  "revision": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                  },
+                  "ruledRuntime": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                  },
+                  "ruledTarget": {
+                    "type": "object",
+                    "properties": {
+                      "endpoint": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2048,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                      }
+                    },
+                    "required": [
+                      "endpoint",
+                      "modelId"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "ruledResidualKeys": {
+                    "maxItems": 64,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    }
+                  }
+                },
+                "required": [
+                  "revision",
+                  "ruledRuntime",
+                  "ruledTarget",
+                  "ruledResidualKeys"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -15970,6 +16082,62 @@
                           "readonly",
                           "plan"
                         ]
+                      },
+                      "accountingPolicyRef": {
+                        "type": "object",
+                        "properties": {
+                          "revision": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          },
+                          "ruledRuntime": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          },
+                          "ruledTarget": {
+                            "type": "object",
+                            "properties": {
+                              "endpoint": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 2048,
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                              },
+                              "modelId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 512,
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                              }
+                            },
+                            "required": [
+                              "endpoint",
+                              "modelId"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "ruledResidualKeys": {
+                            "maxItems": 64,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512,
+                              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                            }
+                          }
+                        },
+                        "required": [
+                          "revision",
+                          "ruledRuntime",
+                          "ruledTarget",
+                          "ruledResidualKeys"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -22140,6 +22308,62 @@
                           "readonly",
                           "plan"
                         ]
+                      },
+                      "accountingPolicyRef": {
+                        "type": "object",
+                        "properties": {
+                          "revision": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          },
+                          "ruledRuntime": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          },
+                          "ruledTarget": {
+                            "type": "object",
+                            "properties": {
+                              "endpoint": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 2048,
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                              },
+                              "modelId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 512,
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                              }
+                            },
+                            "required": [
+                              "endpoint",
+                              "modelId"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "ruledResidualKeys": {
+                            "maxItems": 64,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512,
+                              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                            }
+                          }
+                        },
+                        "required": [
+                          "revision",
+                          "ruledRuntime",
+                          "ruledTarget",
+                          "ruledResidualKeys"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -24926,6 +25150,62 @@
                       "minLength": 1,
                       "maxLength": 512,
                       "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "accountingPolicyRef": {
+                      "type": "object",
+                      "properties": {
+                        "revision": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                        },
+                        "ruledRuntime": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                        },
+                        "ruledTarget": {
+                          "type": "object",
+                          "properties": {
+                            "endpoint": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 2048,
+                              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                            },
+                            "modelId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512,
+                              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                            }
+                          },
+                          "required": [
+                            "endpoint",
+                            "modelId"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "ruledResidualKeys": {
+                          "maxItems": 64,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          }
+                        }
+                      },
+                      "required": [
+                        "revision",
+                        "ruledRuntime",
+                        "ruledTarget",
+                        "ruledResidualKeys"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -24974,11 +25254,64 @@
                       "minimum": 0,
                       "maximum": 9007199254740991
                     },
-                    "coverage": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512,
-                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    "projection": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "number",
+                          "const": 2
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "content_complete",
+                            "unknown"
+                          ]
+                        },
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        }
+                      },
+                      "required": [
+                        "version",
+                        "kind",
+                        "digest"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "residual": {
+                      "maxItems": 64,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          },
+                          "valueClass": {
+                            "type": "string",
+                            "enum": [
+                              "constant",
+                              "boolean",
+                              "bounded_integer",
+                              "bounded_number",
+                              "finite_number",
+                              "closed_enum",
+                              "nonempty_string",
+                              "object_shape"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "valueClass"
+                        ],
+                        "additionalProperties": false
+                      }
                     },
                     "observationDigest": {
                       "type": "string",
@@ -25012,7 +25345,8 @@
                     "toolManifestDigest",
                     "requestBytes",
                     "projectionBytes",
-                    "coverage",
+                    "projection",
+                    "residual",
                     "observationDigest",
                     "toolBindingDigest",
                     "toolImplementationKinds"
@@ -25069,6 +25403,68 @@
                       ],
                       "additionalProperties": false
                     },
+                    "providerEvidence": {
+                      "type": "object",
+                      "properties": {
+                        "projectionDigest": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "endpoint": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2048,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                        },
+                        "modelId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                        },
+                        "asserted": {
+                          "type": "object",
+                          "properties": {
+                            "httpStatus": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "usageFields": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 512,
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                              },
+                              "additionalProperties": {
+                                "type": "number"
+                              }
+                            },
+                            "responseDigest": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512,
+                              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                            }
+                          },
+                          "required": [
+                            "httpStatus",
+                            "usageFields",
+                            "responseDigest"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "projectionDigest",
+                        "endpoint",
+                        "modelId",
+                        "asserted"
+                      ],
+                      "additionalProperties": false
+                    },
                     "target": {
                       "type": "object",
                       "properties": {
@@ -25109,6 +25505,7 @@
                     "kind",
                     "value",
                     "coverage",
+                    "providerEvidence",
                     "target",
                     "calledAt",
                     "completedAt"
@@ -25131,7 +25528,11 @@
                       "artifact_expired",
                       "counter_authority_not_production",
                       "counter_coverage_incomplete",
-                      "compiler_coverage_unknown",
+                      "counter_missing",
+                      "projection_unknown",
+                      "residual_not_ruled",
+                      "accounting_policy_missing",
+                      "accounting_policy_inapplicable",
                       "executor_identity_unproven"
                     ]
                   }
@@ -25515,6 +25916,62 @@
                   "minLength": 1,
                   "maxLength": 512,
                   "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "accountingPolicyRef": {
+                  "type": "object",
+                  "properties": {
+                    "revision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "ruledRuntime": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "ruledTarget": {
+                      "type": "object",
+                      "properties": {
+                        "endpoint": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2048,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                        },
+                        "modelId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                        }
+                      },
+                      "required": [
+                        "endpoint",
+                        "modelId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "ruledResidualKeys": {
+                      "maxItems": 64,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                      }
+                    }
+                  },
+                  "required": [
+                    "revision",
+                    "ruledRuntime",
+                    "ruledTarget",
+                    "ruledResidualKeys"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": [
@@ -25563,11 +26020,64 @@
                   "minimum": 0,
                   "maximum": 9007199254740991
                 },
-                "coverage": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 512,
-                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                "projection": {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "type": "number",
+                      "const": 2
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "content_complete",
+                        "unknown"
+                      ]
+                    },
+                    "digest": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "kind",
+                    "digest"
+                  ],
+                  "additionalProperties": false
+                },
+                "residual": {
+                  "maxItems": 64,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                      },
+                      "valueClass": {
+                        "type": "string",
+                        "enum": [
+                          "constant",
+                          "boolean",
+                          "bounded_integer",
+                          "bounded_number",
+                          "finite_number",
+                          "closed_enum",
+                          "nonempty_string",
+                          "object_shape"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "valueClass"
+                    ],
+                    "additionalProperties": false
+                  }
                 },
                 "observationDigest": {
                   "type": "string",
@@ -25601,7 +26111,8 @@
                 "toolManifestDigest",
                 "requestBytes",
                 "projectionBytes",
-                "coverage",
+                "projection",
+                "residual",
                 "observationDigest",
                 "toolBindingDigest",
                 "toolImplementationKinds"
@@ -25658,6 +26169,68 @@
                   ],
                   "additionalProperties": false
                 },
+                "providerEvidence": {
+                  "type": "object",
+                  "properties": {
+                    "projectionDigest": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "endpoint": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "modelId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "asserted": {
+                      "type": "object",
+                      "properties": {
+                        "httpStatus": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "usageFields": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          },
+                          "additionalProperties": {
+                            "type": "number"
+                          }
+                        },
+                        "responseDigest": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                        }
+                      },
+                      "required": [
+                        "httpStatus",
+                        "usageFields",
+                        "responseDigest"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "projectionDigest",
+                    "endpoint",
+                    "modelId",
+                    "asserted"
+                  ],
+                  "additionalProperties": false
+                },
                 "target": {
                   "type": "object",
                   "properties": {
@@ -25698,6 +26271,7 @@
                 "kind",
                 "value",
                 "coverage",
+                "providerEvidence",
                 "target",
                 "calledAt",
                 "completedAt"
@@ -25720,7 +26294,11 @@
                   "artifact_expired",
                   "counter_authority_not_production",
                   "counter_coverage_incomplete",
-                  "compiler_coverage_unknown",
+                  "counter_missing",
+                  "projection_unknown",
+                  "residual_not_ruled",
+                  "accounting_policy_missing",
+                  "accounting_policy_inapplicable",
                   "executor_identity_unproven"
                 ]
               }

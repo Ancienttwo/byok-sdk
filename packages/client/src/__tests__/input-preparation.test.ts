@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,10 +12,13 @@ import {
   type InputPreparationAuthorityResolver,
   type InputPreparationCounterAdapter,
   type InputPreparationCounterRequestV1,
+  type InputPreparationAccountingPolicyRefV1,
+  type InputPreparationCounterProviderEvidenceV1,
   type InputPreparationCounterResultV1,
   type InputPreparationLimitsPolicyV1,
   type InputPreparationRequestV1,
 } from '../input-preparation';
+import { inputPreparationRuntimeIdentityString } from '../input-preparation';
 import {
   createInputPreparationService,
   InputPreparationRequestError,
@@ -107,7 +111,46 @@ interface StubCompiler extends InputPreparationCompiler {
   readonly calls: CompilePreparedInputRequest[];
 }
 
-function stubCompiler(options: { fail?: boolean; body?: () => string } = {}): StubCompiler {
+/** The exact identity string the service binds, so a Host ruling can name it. */
+function runtimeIdentityOf(compiler: InputPreparationCompiler): string {
+  return inputPreparationRuntimeIdentityString(compiler.runtime);
+}
+
+function sha256Hex(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+/** Provider evidence bound to the exact projection and target the adapter was handed. */
+function fixtureEvidence(counterRequest: InputPreparationCounterRequestV1): InputPreparationCounterProviderEvidenceV1 {
+  return {
+    projectionDigest: sha256Hex(counterRequest.counterProjection),
+    endpoint: counterRequest.target.endpoint,
+    modelId: counterRequest.target.modelId,
+    asserted: { httpStatus: 200, usageFields: { prompt_tokens: 123 }, responseDigest: 'e'.repeat(64) },
+  };
+}
+
+/** The Host ruling that makes the stub compiler's one residual key applicable. */
+function accountingPolicyRef(
+  overrides: Partial<InputPreparationAccountingPolicyRefV1> = {},
+): InputPreparationAccountingPolicyRefV1 {
+  return {
+    revision: 'accounting-rev-1',
+    ruledRuntime: '@byok-sdk/pi-coding-agent@0.85.1005+d981de1229ef899957bbe968bc8dcda02a21f477.1',
+    ruledTarget: { endpoint: 'https://api.z.ai/api/coding/paas/v4', modelId: 'glm-4.6' },
+    ruledResidualKeys: ['max_tokens'],
+    ...overrides,
+  };
+}
+
+function stubCompiler(
+  options: {
+    fail?: boolean;
+    body?: () => string;
+    projectionKind?: 'content_complete' | 'unknown';
+    residual?: readonly { readonly key: string; readonly valueClass: 'bounded_integer' }[];
+  } = {},
+): StubCompiler {
   const calls: CompilePreparedInputRequest[] = [];
   return {
     calls,
@@ -119,7 +162,7 @@ function stubCompiler(options: { fail?: boolean; body?: () => string } = {}): St
       forkBuild: 1,
       envelopeFormat: 'pi.session.prepared-input',
       requestFormat: 'pi.openai-completions.prepared',
-      compilerVersion: 1,
+      compilerVersion: 2,
     },
     async compile(compileRequest: CompilePreparedInputRequest): Promise<CompiledPreparedInput> {
       // Deep-copy at capture time so a later mutation of the service's own
@@ -127,16 +170,25 @@ function stubCompiler(options: { fail?: boolean; body?: () => string } = {}): St
       calls.push(structuredClone(compileRequest) as CompilePreparedInputRequest);
       if (options.fail === true) throw new InputPreparationCompileError('stub refuses this input');
       const body = options.body?.() ?? JSON.stringify({ model: compileRequest.model.id, snapshot: compileRequest.snapshot });
+      const counterProjection = JSON.stringify({ model: compileRequest.model.id });
       return {
         requestBody: body,
-        counterProjection: JSON.stringify({ model: compileRequest.model.id }),
+        counterProjection,
         requestBytes: Buffer.byteLength(body, 'utf8'),
         projectionBytes: 32,
         requestDigest: 'a'.repeat(64),
         envelopeDigest: 'b'.repeat(64),
         toolManifestDigest: 'c'.repeat(64),
-        coverage: 'unknown',
-        envelope: { format: 'pi.session.prepared-input', version: 1 } as never,
+        // The digest a real compiler would have taken over these exact bytes,
+        // so a fixture counter's evidence can bind to the same projection the
+        // service compares it against.
+        projection: {
+          version: 2,
+          kind: options.projectionKind ?? 'content_complete',
+          digest: sha256Hex(counterProjection),
+        },
+        residual: options.residual ?? [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
+        envelope: { format: 'pi.session.prepared-input', version: 2 } as never,
       };
     },
   };
@@ -147,13 +199,16 @@ interface StubCounter extends InputPreparationCounterAdapter {
 }
 
 function fixtureCounter(
-  behaviour: (request: InputPreparationCounterRequestV1) => Promise<InputPreparationCounterResultV1> = async () => ({
+  behaviour: (request: InputPreparationCounterRequestV1) => Promise<InputPreparationCounterResultV1> = async (
+    counterRequest,
+  ) => ({
     method: 'fixture.tokenizer',
     methodVersion: '0',
     authority: 'test_fixture',
     kind: 'count',
     value: 123,
     coverage: { covered: true },
+    providerEvidence: fixtureEvidence(counterRequest),
   }),
 ): StubCounter {
   const calls: InputPreparationCounterRequestV1[] = [];
@@ -326,21 +381,112 @@ describe('B-P2 service: binding authority', () => {
 });
 
 describe('B-P2 service: readiness never reaches ready offline', () => {
-  it('returns explicit not-ready reasons for a fixture counter and unknown compiler coverage', async () => {
+  it('returns explicit not-ready reasons for a fixture counter and an unruled residual key', async () => {
     const service = await makeService();
     const receipt = await service.prepare(request());
 
     expect(receipt.state).toBe('counted');
     expect(receipt.ready).toBe(false);
-    expect(receipt.readinessReasons).toContain('compiler_coverage_unknown');
+    // The projection IS content-complete — the stub compiles what a real one
+    // compiles — so what keeps this receipt unready is the missing Host
+    // accounting ruling and the fixture counter authority, not a blanket
+    // coverage label that could never be cleared.
+    expect(receipt.readinessReasons).not.toContain('projection_unknown');
+    expect(receipt.readinessReasons).toContain('accounting_policy_missing');
     expect(receipt.readinessReasons).toContain('counter_authority_not_production');
     expect(receipt.counter).toMatchObject({ authority: 'test_fixture', kind: 'count', value: 123 });
-    expect(receipt.artifact?.coverage).toBe('unknown');
+    expect(receipt.artifact?.projection).toEqual({
+      version: 2,
+      kind: 'content_complete',
+      digest: sha256Hex(JSON.stringify({ model: 'glm-4.6' })),
+    });
+    expect(receipt.artifact?.residual).toEqual([{ key: 'max_tokens', valueClass: 'bounded_integer' }]);
     // A receipt discloses identities and sizes, never D, P(D) or the snapshot.
     expect(JSON.stringify(receipt)).not.toContain('hello');
     // Nothing here is, or reserves, an Execution.
     expect(receipt.pin).toBeUndefined();
     expect(JSON.stringify(receipt)).not.toContain('taskId');
+  });
+
+  it('clears every projection and accounting reason when the policy rules the compiler\'s residual keys', async () => {
+    const compiler = stubCompiler();
+    const service = await makeService({ compiler });
+    const receipt = await service.prepare(
+      request({ accountingPolicyRef: accountingPolicyRef({ ruledRuntime: runtimeIdentityOf(compiler) }) }),
+    );
+
+    expect(receipt.readinessReasons).not.toContain('projection_unknown');
+    expect(receipt.readinessReasons).not.toContain('residual_not_ruled');
+    expect(receipt.readinessReasons).not.toContain('accounting_policy_missing');
+    expect(receipt.readinessReasons).not.toContain('accounting_policy_inapplicable');
+    expect(receipt.readinessReasons).not.toContain('counter_missing');
+    // The fixture counter authority is what is left, which is the honest state
+    // of an offline suite and is exactly what must never be clearable here.
+    expect(receipt.readinessReasons).toContain('counter_authority_not_production');
+  });
+
+  it('carries projection_unknown when the native compiler claims nothing about P(D)', async () => {
+    const compiler = stubCompiler({ projectionKind: 'unknown', residual: [] });
+    const service = await makeService({ compiler });
+    const receipt = await service.prepare(
+      request({ accountingPolicyRef: accountingPolicyRef({ ruledRuntime: runtimeIdentityOf(compiler) }) }),
+    );
+
+    expect(receipt.artifact?.projection.kind).toBe('unknown');
+    expect(receipt.readinessReasons).toContain('projection_unknown');
+  });
+
+  it('carries residual_not_ruled for a classified key the Host ruling does not name', async () => {
+    const compiler = stubCompiler();
+    const service = await makeService({ compiler });
+    const receipt = await service.prepare(
+      request({
+        accountingPolicyRef: accountingPolicyRef({
+          ruledRuntime: runtimeIdentityOf(compiler),
+          ruledResidualKeys: ['temperature'],
+        }),
+      }),
+    );
+
+    expect(receipt.readinessReasons).toContain('residual_not_ruled');
+    expect(receipt.readinessReasons).not.toContain('accounting_policy_inapplicable');
+  });
+
+  it.each([
+    ['a runtime the ruling was not made for', () => accountingPolicyRef({ ruledRuntime: 'some-other-runtime@1+abc.1' })],
+    [
+      'a target the ruling was not made for',
+      () => accountingPolicyRef({ ruledTarget: { endpoint: 'https://elsewhere.example', modelId: 'glm-4.6' } }),
+    ],
+  ])('carries accounting_policy_inapplicable for %s', async (_label, build) => {
+    const compiler = stubCompiler();
+    const service = await makeService({ compiler });
+    const receipt = await service.prepare(request({ accountingPolicyRef: build() }));
+
+    expect(receipt.readinessReasons).toContain('accounting_policy_inapplicable');
+    // Applicability is decided before the key subset: a ruling about another
+    // runtime says nothing about these keys, so claiming they are unruled
+    // would be a second, invented verdict.
+    expect(receipt.readinessReasons).not.toContain('residual_not_ruled');
+  });
+
+  it('refuses counter evidence that names a projection this preparation did not compile', async () => {
+    const service = await makeService({
+      counter: fixtureCounter(async (counterRequest) => ({
+        method: 'fixture.tokenizer',
+        methodVersion: '0',
+        authority: 'provider',
+        kind: 'count',
+        value: 11,
+        coverage: { covered: true },
+        providerEvidence: { ...fixtureEvidence(counterRequest), projectionDigest: 'f'.repeat(64) },
+      })),
+    });
+
+    expect(await codeOf(service.prepare(request()))).toBe('counter_unavailable');
+    const receipt = await service.lookup({ requestId: 'prep-1', scope: request().scope });
+    expect(receipt.counter).toBeUndefined();
+    expect(receipt.readinessReasons).toContain('counter_missing');
   });
 
   it('hands the counter only P(D), the target and an explicit call policy', async () => {
@@ -357,7 +503,15 @@ describe('B-P2 service: readiness never reaches ready offline', () => {
 
   it('refuses a counter result outside the accepted shape rather than inventing one', async () => {
     const service = await makeService({
-      counter: fixtureCounter(async () => ({ method: '', methodVersion: '', authority: 'provider', kind: 'count', value: -1, coverage: { covered: true } })),
+      counter: fixtureCounter(async (counterRequest) => ({
+        method: '',
+        methodVersion: '',
+        authority: 'provider',
+        kind: 'count',
+        value: -1,
+        coverage: { covered: true },
+        providerEvidence: fixtureEvidence(counterRequest),
+      })),
     });
     // The call WAS placed, so the record is an unknown outcome; the wire code
     // says which half failed. Neither invents a number.
@@ -375,9 +529,17 @@ describe('B-P2 service: idempotency and uncertainty', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const counter = fixtureCounter(async () => {
+    const counter = fixtureCounter(async (counterRequest) => {
       await gate;
-      return { method: 'fixture.tokenizer', methodVersion: '0', authority: 'test_fixture', kind: 'count', value: 7, coverage: { covered: true } };
+      return {
+        method: 'fixture.tokenizer',
+        methodVersion: '0',
+        authority: 'test_fixture',
+        kind: 'count',
+        value: 7,
+        coverage: { covered: true },
+        providerEvidence: fixtureEvidence(counterRequest),
+      };
     });
     const service = await makeService({ compiler, counter });
 
@@ -600,9 +762,17 @@ describe('B-P2 service: byte, call and in-flight policy', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const counter = fixtureCounter(async () => {
+    const counter = fixtureCounter(async (counterRequest) => {
       await gate;
-      return { method: 'fixture.tokenizer', methodVersion: '0', authority: 'test_fixture', kind: 'count', value: 1, coverage: { covered: true } };
+      return {
+        method: 'fixture.tokenizer',
+        methodVersion: '0',
+        authority: 'test_fixture',
+        kind: 'count',
+        value: 1,
+        coverage: { covered: true },
+        providerEvidence: fixtureEvidence(counterRequest),
+      };
     });
     const service = await makeService({ limits, counter });
 
@@ -731,9 +901,17 @@ describe('B-P2 service: restart reconciliation', () => {
     const gate = new Promise<void>((resolve) => {
       stall = resolve;
     });
-    const counter = fixtureCounter(async () => {
+    const counter = fixtureCounter(async (counterRequest) => {
       await gate;
-      return { method: 'fixture.tokenizer', methodVersion: '0', authority: 'test_fixture', kind: 'count', value: 1, coverage: { covered: true } };
+      return {
+        method: 'fixture.tokenizer',
+        methodVersion: '0',
+        authority: 'test_fixture',
+        kind: 'count',
+        value: 1,
+        coverage: { covered: true },
+        providerEvidence: fixtureEvidence(counterRequest),
+      };
     });
     const first = await makeService({ storeDir, counter });
     const held = first.prepare(request());

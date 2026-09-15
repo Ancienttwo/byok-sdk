@@ -102,8 +102,9 @@ function artifact(recordId: string, overrides: Partial<InputPreparationArtifact>
     toolManifestDigest: 'manifest-digest-1',
     requestBody: REQUEST_BODY,
     counterProjection: '{"model":"glm-4.6"}',
-    coverage: 'unknown',
-    envelope: { format: 'pi.session.prepared-input', version: 1 },
+    projection: { version: 2, kind: 'content_complete', digest: 'a'.repeat(64) },
+    residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
+    envelope: { format: 'pi.session.prepared-input', version: 2 },
     ...overrides,
   };
 }
@@ -114,7 +115,8 @@ const SUMMARY: InputPreparationArtifactSummaryV1 = {
   toolManifestDigest: 'manifest-digest-1',
   requestBytes: Buffer.byteLength(REQUEST_BODY, 'utf8'),
   projectionBytes: 19,
-  coverage: 'unknown',
+  projection: { version: 2, kind: 'content_complete', digest: 'a'.repeat(64) },
+  residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
   observationDigest: 'observation-digest-1',
   toolBindingDigest: 'tool-binding-digest-1',
   toolImplementationKinds: { mcp__team__list: 'unavailable:resolver_unconfigured' },
@@ -223,7 +225,8 @@ describe('B-P2 store: restart roundtrip', () => {
     const readBack = await restarted.readArtifact(record!);
     expect(readBack?.requestBody).toBe(REQUEST_BODY);
     expect(Buffer.from(readBack!.requestBody, 'utf8').equals(Buffer.from(REQUEST_BODY, 'utf8'))).toBe(true);
-    expect(readBack?.coverage).toBe('unknown');
+    expect(readBack?.projection).toEqual({ version: 2, kind: 'content_complete', digest: 'a'.repeat(64) });
+    expect(readBack?.residual).toEqual([{ key: 'max_tokens', valueClass: 'bounded_integer' }]);
   });
 
   it('rejects an artifact whose stored identity drifted from its record binding', async () => {
@@ -259,11 +262,24 @@ describe('B-P2 store: restart roundtrip', () => {
     const created = await store.reserve(reserve());
     await store.commitCounterReservation(commit(created.record.recordId));
 
-    // A record exactly as version 2 wrote it: no `model`, because `model`
-    // became a required durable fact only at version 3.
+    // A record exactly as version 3 wrote it: its artifact summary carries the
+    // opaque `coverage` label, because the structural projection contract
+    // became the recorded fact only at version 4. Nothing can honestly decide
+    // what that label meant about P(D), which is why the refusal below is the
+    // only correct answer.
     const logPath = path.join(storeDir, 'input-preparation', 'records.jsonl');
-    const { model: _dropped, ...withoutModel } = store.get(created.record.recordId)!;
-    await fs.writeFile(logPath, `${JSON.stringify({ ...withoutModel, format: INPUT_PREPARATION_RECORD_FORMAT, version: 2 })}\n`, 'utf8');
+    const recorded = store.get(created.record.recordId)!;
+    const { projection: _projection, residual: _residual, ...summaryWithoutProjection } = recorded.artifact!;
+    await fs.writeFile(
+      logPath,
+      `${JSON.stringify({
+        ...recorded,
+        format: INPUT_PREPARATION_RECORD_FORMAT,
+        version: 3,
+        artifact: { ...summaryWithoutProjection, coverage: 'unknown' },
+      })}\n`,
+      'utf8',
+    );
     const before = await fs.readFile(logPath);
     const treeBefore = await inventory(storeDir);
 
@@ -293,9 +309,9 @@ describe('B-P2 store: restart roundtrip', () => {
     const created = await store.reserve(reserve());
 
     expect(created.record.version).toBe(INPUT_PREPARATION_RECORD_VERSION);
-    expect(INPUT_PREPARATION_RECORD_VERSION).toBe(3);
-    // The wire version is a different agreement and did not move with it.
-    expect(INPUT_PREPARATION_VERSION).toBe(2);
+    expect(INPUT_PREPARATION_RECORD_VERSION).toBe(4);
+    // The wire version is a different agreement, moved by a different reason.
+    expect(INPUT_PREPARATION_VERSION).toBe(3);
     expect((await openStore(storeDir)).get(created.record.recordId)?.version).toBe(INPUT_PREPARATION_RECORD_VERSION);
   });
 });

@@ -11,6 +11,7 @@ import {
   type InputPreparationCancelParamsV1,
   type InputPreparationCounterAdapter,
   type InputPreparationCounterEvidenceV1,
+  type InputPreparationCounterProviderEvidenceV1,
   type InputPreparationCounterResultV1,
   type InputPreparationCounterTargetV1,
   type InputPreparationErrorCodeV1,
@@ -160,17 +161,35 @@ export interface InputPreparationService {
 // ---------------------------------------------------------------------------
 
 /**
- * Why this record is not ready to admit an Execution.
+ * Why this record is not ready to be CONSUMED.
  *
- * An empty list is the only thing that makes `ready` true, and today the list
- * can never be empty: the native compiler proves `coverage: "unknown"`, so
- * `compiler_coverage_unknown` is always present, and with no implementation
- * authority configured every executor identity resolves `unavailable`, so
- * `executor_identity_unproven` joins it (derived per record from
- * `toolImplementationKinds` below, not added unconditionally). That is the honest state of
- * §10.2's G4, not a placeholder — a fixture counter adds
- * `counter_authority_not_production` on top of it, so an offline suite cannot
- * even accidentally look like production accounting evidence.
+ * An empty list is the only thing that makes `ready` true. `ready` answers
+ * exactly one question — can this preparation be consumed — and it is
+ * deliberately NOT Host budget admission: the Host decides the spend against
+ * the accounting ruling this service only NAMES, and nothing here performs
+ * budget arithmetic.
+ *
+ * Every reason is read off recorded evidence rather than asserted:
+ *
+ * - `projection_unknown` — the native compiler's own projection kind is not
+ *   `content_complete`. The SDK never re-derives that kind: the compiler owns
+ *   the classification table, and a second local copy of it would be a shadow
+ *   parser for the same semantic fact.
+ * - `accounting_policy_missing` / `accounting_policy_inapplicable` /
+ *   `residual_not_ruled` — pure APPLICABILITY of the Host's accounting ruling.
+ *   Was one named at all; was it ruled for this runtime and this
+ *   endpoint/model; does it name every residual key the compiler classified.
+ *   There is no default ruling, so a request that named none stays unready
+ *   rather than being silently treated as ruled.
+ * - `counter_missing` — no counter evidence is persisted. It used to be
+ *   implied by an always-present coverage reason, and it is a different fact.
+ * - `executor_identity_unproven` — derived from the recorded per-tool
+ *   implementation kinds: a manifest is only as proven as its least proven
+ *   entry. On this SDK's default — no configured `toolImplementationAuthority`
+ *   — every kind is `unavailable:resolver_unconfigured`.
+ * - `counter_authority_not_production` — a fixture count can never make a
+ *   receipt ready, so an offline suite cannot look like production accounting
+ *   evidence.
  */
 export function inputPreparationReadinessReasons(
   record: InputPreparationRecord,
@@ -197,7 +216,24 @@ export function inputPreparationReadinessReasons(
   if (record.artifact === undefined) {
     if (!reasons.includes('not_counted')) reasons.push('not_counted');
   } else {
-    if (record.artifact.coverage !== 'complete') reasons.push('compiler_coverage_unknown');
+    if (record.artifact.projection.kind !== 'content_complete') reasons.push('projection_unknown');
+    // Applicability of the Host's accounting ruling, and nothing else. The SDK
+    // compares names and identities; it never decides what a residual key COSTS,
+    // because the compiler proved only the key's SHAPE and the price of a shape
+    // is an external accounting fact no local rule can re-derive.
+    const policy = record.binding.accountingPolicyRef;
+    if (policy === undefined) {
+      reasons.push('accounting_policy_missing');
+    } else if (
+      policy.ruledRuntime !== inputPreparationRuntimeIdentityString(record.binding.runtime) ||
+      policy.ruledTarget.endpoint !== record.binding.target.endpoint ||
+      policy.ruledTarget.modelId !== record.binding.target.modelId
+    ) {
+      reasons.push('accounting_policy_inapplicable');
+    } else {
+      const ruled = new Set(policy.ruledResidualKeys);
+      if (record.artifact.residual.some((entry) => !ruled.has(entry.key))) reasons.push('residual_not_ruled');
+    }
     // A tool executor string is an OBSERVATION fingerprint. It binds what a
     // server said about a tool AND the implementation identity this daemon
     // resolved for that server — so whether it proves anything about the
@@ -216,7 +252,9 @@ export function inputPreparationReadinessReasons(
     }
     if (record.artifactBytes === 0 || nowMs >= Date.parse(record.artifactExpiresAt)) reasons.push('artifact_expired');
   }
-  if (record.counter !== undefined) {
+  if (record.counter === undefined) {
+    reasons.push('counter_missing');
+  } else {
     if (record.counter.authority !== 'provider') reasons.push('counter_authority_not_production');
     if (!record.counter.coverage.covered) reasons.push('counter_coverage_incomplete');
   }
@@ -284,6 +322,60 @@ function validateCounterResult(value: unknown): InputPreparationCounterResultV1 
     coverage: {
       covered: coverage.covered,
       ...(coverage.reason === undefined ? {} : { reason: coverage.reason as string }),
+    },
+    providerEvidence: validateProviderEvidence(result.providerEvidence),
+  };
+}
+
+/**
+ * The provider half of a count, validated as a SHAPE only.
+ *
+ * Nothing inside `asserted` is recomputed or second-guessed here: it is what
+ * the provider answered, and re-deriving a usage number locally would be the
+ * shadow accounting this whole surface exists to avoid. What IS checked, and
+ * checked elsewhere against the artifact, is the identity of the bytes the
+ * count was taken over — a number whose projection nobody can name is not
+ * evidence about this preparation.
+ */
+function validateProviderEvidence(value: unknown): InputPreparationCounterProviderEvidenceV1 {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new InputPreparationRequestError('counter_unavailable', 'the counter adapter returned no provider evidence');
+  }
+  const evidence = value as Record<string, unknown>;
+  const asserted = evidence.asserted as Record<string, unknown> | undefined;
+  if (
+    typeof evidence.projectionDigest !== 'string' ||
+    !/^[0-9a-f]{64}$/u.test(evidence.projectionDigest) ||
+    typeof evidence.endpoint !== 'string' ||
+    evidence.endpoint.length === 0 ||
+    typeof evidence.modelId !== 'string' ||
+    evidence.modelId.length === 0 ||
+    typeof asserted !== 'object' ||
+    asserted === null ||
+    Array.isArray(asserted) ||
+    !Number.isSafeInteger(asserted.httpStatus) ||
+    typeof asserted.responseDigest !== 'string' ||
+    asserted.responseDigest.length === 0 ||
+    typeof asserted.usageFields !== 'object' ||
+    asserted.usageFields === null ||
+    Array.isArray(asserted.usageFields) ||
+    !Object.values(asserted.usageFields as Record<string, unknown>).every(
+      (field) => typeof field === 'number' && Number.isFinite(field),
+    )
+  ) {
+    throw new InputPreparationRequestError(
+      'counter_unavailable',
+      'the counter adapter returned provider evidence outside the accepted shape',
+    );
+  }
+  return {
+    projectionDigest: evidence.projectionDigest,
+    endpoint: evidence.endpoint,
+    modelId: evidence.modelId,
+    asserted: {
+      httpStatus: asserted.httpStatus as number,
+      usageFields: { ...(asserted.usageFields as Record<string, number>) },
+      responseDigest: asserted.responseDigest,
     },
   };
 }
@@ -463,6 +555,18 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       permissionMode: request.permissionMode,
       runtime: options.compiler.runtime,
       requestDigest,
+      // Host authority, carried verbatim. Never defaulted: a preparation whose
+      // request named no accounting ruling answers with a receipt that says so.
+      ...(request.accountingPolicyRef === undefined
+        ? {}
+        : {
+          accountingPolicyRef: {
+            revision: request.accountingPolicyRef.revision,
+            ruledRuntime: request.accountingPolicyRef.ruledRuntime,
+            ruledTarget: { ...request.accountingPolicyRef.ruledTarget },
+            ruledResidualKeys: [...request.accountingPolicyRef.ruledResidualKeys],
+          },
+        }),
     };
   }
 
@@ -538,7 +642,14 @@ export function createInputPreparationService(options: InputPreparationServiceOp
         toolExecutors: surface.toolExecutors,
       });
     } catch (cause) {
-      await markFailed(record.recordId, 'compile_rejected');
+      // A compile refusal that names a specific broken contract — an
+      // unsupported compiler version, a projection digest that does not
+      // describe its own bytes — records THAT code, so a later `lookup`
+      // answers the same fact instead of a generic `compile_rejected`.
+      await markFailed(
+        record.recordId,
+        cause instanceof InputPreparationCompileError && cause.detail !== undefined ? cause.detail : 'compile_rejected',
+      );
       if (cause instanceof InputPreparationCompileError) {
         throw new InputPreparationRequestError('unsupported_input', cause.message, { cause });
       }
@@ -555,7 +666,8 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       toolManifestDigest: compiled.toolManifestDigest,
       requestBody: compiled.requestBody,
       counterProjection: compiled.counterProjection,
-      coverage: compiled.coverage,
+      projection: compiled.projection,
+      residual: compiled.residual,
       envelope: compiled.envelope,
     } as const;
     // The per-ARTIFACT bound is a property of this one artifact, so it is
@@ -596,7 +708,8 @@ export function createInputPreparationService(options: InputPreparationServiceOp
           toolManifestDigest: compiled.toolManifestDigest,
           requestBytes: compiled.requestBytes,
           projectionBytes: compiled.projectionBytes,
-          coverage: compiled.coverage,
+          projection: compiled.projection,
+          residual: compiled.residual,
           observationDigest: surface.observationDigest,
           toolBindingDigest: surface.toolBindingDigest,
           toolImplementationKinds: surface.toolImplementationKinds,
@@ -651,6 +764,23 @@ export function createInputPreparationService(options: InputPreparationServiceOp
         // The adapter resolved, but this run was already aborted: the outcome
         // reached us after the decision to stop, so it is not a clean count.
         throw new InputPreparationRequestError('counter_interrupted', 'the counter call was aborted before its result was accepted');
+      }
+      // The count must be evidence about THIS preparation. The adapter was
+      // handed P(D) and a target; the evidence it answers with names a
+      // projection digest and an endpoint/model, and both are compared against
+      // the compiled artifact rather than taken on trust. A number bound to a
+      // different projection is not a smaller count, it is a count of something
+      // else, and persisting it would make the receipt claim a fact nobody
+      // established.
+      if (
+        counted.providerEvidence.projectionDigest !== compiled.projection.digest ||
+        counted.providerEvidence.endpoint !== target.endpoint ||
+        counted.providerEvidence.modelId !== target.modelId
+      ) {
+        throw new InputPreparationRequestError(
+          'counter_unavailable',
+          'the counter evidence names a projection or target other than the one this preparation compiled',
+        );
       }
     } catch (cause) {
       const detail = run.cancelRequested

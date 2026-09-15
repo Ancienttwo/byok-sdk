@@ -84,13 +84,14 @@ const RECEIPT: InputPreparationReceiptSummary = {
     toolManifestDigest: 'sha256:tools',
     requestBytes: 1024,
     projectionBytes: 900,
-    coverage: 'unknown',
+    projection: { version: 2, kind: 'content_complete', digest: 'a'.repeat(64) },
+    residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
     observationDigest: 'sha256:observation',
     toolBindingDigest: 'sha256:binding',
     toolImplementationKinds: { mcp__teamserver__list: 'unavailable:resolver_unconfigured' },
   },
   ready: false,
-  readinessReasons: ['compiler_coverage_unknown', 'executor_identity_unproven'],
+  readinessReasons: ['accounting_policy_missing', 'executor_identity_unproven'],
   artifactExpiresAt: '2026-01-01T01:00:00.000Z',
 };
 

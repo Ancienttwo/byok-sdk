@@ -244,6 +244,15 @@ describe('control-protocol: NdjsonLineReader', () => {
 describe('control-protocol: input_preparation param gates', () => {
   const scope = { deviceId: 'device-1', agentRef: 'agent-1', profileId: 'profile-1', profileRevision: 'profile-rev-1' };
 
+  function accountingPolicyRef(): Record<string, unknown> {
+    return {
+      revision: 'accounting-r1',
+      ruledRuntime: '@byok-sdk/pi-coding-agent@0.85.1005+d981de1229ef899957bbe968bc8dcda02a21f477.5',
+      ruledTarget: { endpoint: 'https://api.z.ai/api/coding/paas/v4', modelId: 'glm-4.6' },
+      ruledResidualKeys: ['max_tokens'],
+    };
+  }
+
   function validRequest(): Record<string, unknown> {
     return {
       format: INPUT_PREPARATION_REQUEST_FORMAT,
@@ -339,7 +348,8 @@ describe('control-protocol: input_preparation param gates', () => {
     ['an unknown top-level field', (r: Record<string, unknown>) => ({ ...r, runtimeIdentity: 'forged' })],
     ['a wrong format tag', (r: Record<string, unknown>) => ({ ...r, format: 'byok.input-preparation.request.v2' })],
     ['the RETIRED version 1', (r: Record<string, unknown>) => ({ ...r, version: 1 })],
-    ['a future version', (r: Record<string, unknown>) => ({ ...r, version: 3 })],
+    ['the RETIRED version 2', (r: Record<string, unknown>) => ({ ...r, version: 2 })],
+    ['a future version', (r: Record<string, unknown>) => ({ ...r, version: 4 })],
     ['an unknown scope field', (r: Record<string, unknown>) => ({ ...r, scope: { ...scope, tenantId: 't' } })],
     ['a non-openai-completions api', (r: Record<string, unknown>) => ({ ...r, selection: { ...(r.selection as object), model: { ...((r.selection as { model: object }).model), api: 'anthropic-messages' } } })],
     ['an unsupported model field', (r: Record<string, unknown>) => ({ ...r, selection: { ...(r.selection as object), model: { ...((r.selection as { model: object }).model), compat: {} } } })],
@@ -354,6 +364,10 @@ describe('control-protocol: input_preparation param gates', () => {
     ['a duplicate toolset id', (r: Record<string, unknown>) => ({ ...r, requiredToolsets: ['team', 'team'] })],
     ['a non-string toolset id', (r: Record<string, unknown>) => ({ ...r, requiredToolsets: [7] })],
     ['an empty requestId', (r: Record<string, unknown>) => ({ ...r, requestId: '' })],
+    ['an accounting ruling with an unknown field', (r: Record<string, unknown>) => ({ ...r, accountingPolicyRef: { ...accountingPolicyRef(), budget: 10 } })],
+    ['an accounting ruling naming no runtime', (r: Record<string, unknown>) => { const { ruledRuntime: _runtime, ...rest } = accountingPolicyRef(); return { ...r, accountingPolicyRef: rest }; }],
+    ['an accounting ruling naming no target', (r: Record<string, unknown>) => { const { ruledTarget: _target, ...rest } = accountingPolicyRef(); return { ...r, accountingPolicyRef: rest }; }],
+    ['an accounting ruling repeating a residual key', (r: Record<string, unknown>) => ({ ...r, accountingPolicyRef: { ...accountingPolicyRef(), ruledResidualKeys: ['max_tokens', 'max_tokens'] } })],
     ['a null params value', () => null],
     ['an array params value', () => []],
   ])('rejects %s', (_label, mutate) => {
@@ -361,6 +375,20 @@ describe('control-protocol: input_preparation param gates', () => {
     expect(parsed.ok).toBe(false);
     if (parsed.ok) throw new Error('unreachable');
     expect(parsed.code).toBe('bad_request');
+  });
+
+  it('carries the Host accounting ruling verbatim, and defaults none when it is absent', () => {
+    const withoutRuling = parseInputPreparationRequestParams(validRequest());
+    expect(withoutRuling.ok).toBe(true);
+    if (!withoutRuling.ok) throw new Error('unreachable');
+    // No default: a request that rules on nothing produces a request that says
+    // so, and the receipt answers `accounting_policy_missing`.
+    expect(withoutRuling.request.accountingPolicyRef).toBeUndefined();
+
+    const parsed = parseInputPreparationRequestParams({ ...validRequest(), accountingPolicyRef: accountingPolicyRef() });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error('unreachable');
+    expect(parsed.request.accountingPolicyRef).toEqual(accountingPolicyRef());
   });
 
   it('gates lookup and cancel on exactly {requestId, scope}', () => {

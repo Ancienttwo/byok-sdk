@@ -4,6 +4,7 @@ import {
   type AgentInputPreparationPayload,
   type InputPreparationCompletionRequest,
   type InputPreparationContextDocument,
+  type InputPreparationReadinessReason,
   type InputPreparationReceiptSummary,
   type InputPreparationRejectionReason,
 } from '@byok-sdk/protocol';
@@ -12,6 +13,7 @@ import {
   INPUT_PREPARATION_VERSION,
   type InputPreparationErrorCodeV1,
   type InputPreparationLimitsPolicyV1,
+  type InputPreparationReadinessReasonV1,
   type InputPreparationReceiptV1,
   type InputPreparationRequestV1,
 } from '../input-preparation';
@@ -69,6 +71,19 @@ type _LocalCodesAreWireReasons = InputPreparationErrorCodeV1 extends InputPrepar
 const _localCodesAreWireReasons: _LocalCodesAreWireReasons = true;
 void _localCodesAreWireReasons;
 
+/**
+ * Same constraint, one surface over: every local readiness reason is a legal
+ * wire readiness reason. There is no single schema authority for this pair —
+ * the local set is a hand-written union in `../input-preparation` and the wire
+ * set is a zod enum in `@byok-sdk/protocol` — so this assertion is what makes
+ * adding a reason to one and forgetting the other a COMPILE error rather than
+ * a receipt the cloud rejects at parse time.
+ */
+type _LocalReadinessReasonsAreWireReasons =
+  InputPreparationReadinessReasonV1 extends InputPreparationReadinessReason ? true : never;
+const _localReadinessReasonsAreWireReasons: _LocalReadinessReasonsAreWireReasons = true;
+void _localReadinessReasonsAreWireReasons;
+
 export interface RemoteInputPreparationDeps {
   /** The authenticated local device record. Never the payload's word for it. */
   readonly deviceId: string;
@@ -109,14 +124,42 @@ function sha256Hash(text: string): string {
  * whatever the local receipt gains next. The assignment to the PROTOCOL type is
  * also the drift check between the local receipt and the wire summary.
  */
+/**
+ * The binding, with the Host's accounting ruling copied into a mutable shape.
+ *
+ * Written out rather than spread so the ruling that leaves this device is
+ * provably the one the record holds, field by field — a spread would carry
+ * whatever the local binding gains next straight onto the wire.
+ */
+function toWireBinding(
+  binding: InputPreparationReceiptV1['binding'],
+): InputPreparationReceiptSummary['binding'] {
+  const { accountingPolicyRef, ...rest } = binding;
+  return {
+    ...rest,
+    ...(accountingPolicyRef === undefined
+      ? {}
+      : {
+        accountingPolicyRef: {
+          revision: accountingPolicyRef.revision,
+          ruledRuntime: accountingPolicyRef.ruledRuntime,
+          ruledTarget: { ...accountingPolicyRef.ruledTarget },
+          ruledResidualKeys: [...accountingPolicyRef.ruledResidualKeys],
+        },
+      }),
+  };
+}
+
 export function toInputPreparationReceiptSummary(
   receipt: InputPreparationReceiptV1,
 ): InputPreparationReceiptSummary {
   return {
     reference: receipt.reference,
     state: receipt.state,
-    binding: receipt.binding,
-    ...(receipt.artifact === undefined ? {} : { artifact: receipt.artifact }),
+    binding: toWireBinding(receipt.binding),
+    ...(receipt.artifact === undefined
+      ? {}
+      : { artifact: { ...receipt.artifact, residual: receipt.artifact.residual.map((entry) => ({ ...entry })) } }),
     ...(receipt.counter === undefined ? {} : { counter: receipt.counter }),
     ready: receipt.ready,
     readinessReasons: [...receipt.readinessReasons],
@@ -197,6 +240,11 @@ async function buildRequest(
     permissionMode: payload.permissionMode,
     requiredToolsets: Object.freeze([...payload.requiredToolsets]),
     snapshot: { prompt: context.prompt, messages: context.messages },
+    // Host authority, carried verbatim. Absent stays absent: this lane never
+    // supplies an accounting ruling the Host did not state.
+    ...(payload.accountingPolicyRef === undefined
+      ? {}
+      : { accountingPolicyRef: payload.accountingPolicyRef }),
   };
 }
 

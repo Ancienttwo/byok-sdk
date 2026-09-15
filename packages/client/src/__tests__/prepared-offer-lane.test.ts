@@ -29,8 +29,10 @@ import {
   INPUT_PREPARATION_VERSION,
   inputPreparationRuntimeIdentityString,
   preparedToolBindingDigest,
+  type InputPreparationAccountingPolicyRefV1,
   type InputPreparationArtifactSummaryV1,
   type InputPreparationBindingV1,
+  type InputPreparationCounterEvidenceV1,
   type InputPreparationModelV1,
   type InputPreparationRuntimeIdentityV1,
 } from '../input-preparation';
@@ -113,7 +115,42 @@ const RUNTIME: InputPreparationRuntimeIdentityV1 = {
   forkBuild: 2,
   envelopeFormat: 'pi.session.prepared-input',
   requestFormat: 'pi.openai-completions.prepared',
-  compilerVersion: 1,
+  compilerVersion: 2,
+};
+
+/** The projection a compiler would have proved over this lane's P(D). */
+const PROJECTION = { version: 2, kind: 'content_complete', digest: 'a'.repeat(64) } as const;
+const RESIDUAL = [{ key: 'max_tokens', valueClass: 'bounded_integer' }] as const;
+
+/** The Host ruling that makes this lane's one residual key applicable. */
+const ACCOUNTING_POLICY_REF: InputPreparationAccountingPolicyRefV1 = {
+  revision: 'accounting-r1',
+  ruledRuntime: inputPreparationRuntimeIdentityString(RUNTIME),
+  ruledTarget: { endpoint: 'https://api.z.ai/api/coding/paas/v4', modelId: 'glm-4.6' },
+  ruledResidualKeys: ['max_tokens'],
+};
+
+/**
+ * The counter evidence a counted record carries. A record with none is unready
+ * by `counter_missing`, so a lane fixture that omitted it would be declining
+ * for the fixture's own gap rather than for the case under test.
+ */
+const COUNTER_EVIDENCE: InputPreparationCounterEvidenceV1 = {
+  method: 'fixture.tokenizer',
+  methodVersion: '0',
+  authority: 'provider',
+  kind: 'count',
+  value: 128,
+  coverage: { covered: true },
+  providerEvidence: {
+    projectionDigest: PROJECTION.digest,
+    endpoint: 'https://api.z.ai/api/coding/paas/v4',
+    modelId: 'glm-4.6',
+    asserted: { httpStatus: 200, usageFields: { prompt_tokens: 128 }, responseDigest: 'e'.repeat(64) },
+  },
+  target: { endpoint: 'https://api.z.ai/api/coding/paas/v4', modelId: 'glm-4.6' },
+  calledAt: '2026-01-01T00:00:00.000Z',
+  completedAt: '2026-01-01T00:00:01.000Z',
 };
 
 const MODEL: InputPreparationModelV1 = {
@@ -187,6 +224,7 @@ function binding(overrides: Partial<InputPreparationBindingV1> = {}): InputPrepa
     permissionMode: 'auto',
     runtime: RUNTIME,
     requestDigest: REQUEST_DIGEST,
+    accountingPolicyRef: ACCOUNTING_POLICY_REF,
     ...overrides,
   };
 }
@@ -201,8 +239,9 @@ function artifact(recordId: string): InputPreparationArtifact {
     toolManifestDigest: TOOL_MANIFEST_DIGEST,
     requestBody: '{"model":"glm-4.6","messages":[]}',
     counterProjection: '{"model":"glm-4.6"}',
-    coverage: 'complete',
-    envelope: { format: 'pi.session.prepared-input', version: 1 },
+    projection: PROJECTION,
+    residual: [...RESIDUAL],
+    envelope: { format: 'pi.session.prepared-input', version: 2 },
   };
 }
 
@@ -288,9 +327,11 @@ async function lane(options: {
     toolManifestDigest: TOOL_MANIFEST_DIGEST,
     requestBytes: 33,
     projectionBytes: 19,
-    // The one readiness input a fixture must state honestly: an `unknown`
-    // coverage keeps every record unready, which is the SDK's real default.
-    coverage: 'complete',
+    // The readiness inputs a fixture must state honestly: a projection the
+    // compiler did NOT prove content-complete, or a residual key the Host
+    // ruling does not name, keeps every record unready.
+    projection: PROJECTION,
+    residual: [...RESIDUAL],
     observationDigest: fingerprinted.fingerprint.observationDigest,
     toolBindingDigest,
     toolImplementationKinds: fingerprinted.fingerprint.toolImplementationKinds,
@@ -318,7 +359,9 @@ async function lane(options: {
     bounds: { maxScopeAggregateBytes: 10_000_000, maxCounterCallsPerScope: 4 },
   };
   await store.commitCounterReservation(reservation);
-  if (options.counted !== false) await store.update(reserved.record.recordId, { state: 'counted' });
+  if (options.counted !== false) {
+    await store.update(reserved.record.recordId, { state: 'counted', counter: COUNTER_EVIDENCE });
+  }
 
   return {
     store,
@@ -605,10 +648,34 @@ describe('every compared item declines by its own name, with no claim and no pin
       },
     },
     {
-      name: 'a record whose compiler coverage was never complete',
+      name: 'a record whose compiler proved nothing about P(D)',
       reason: 'preparation_not_ready',
       build: async () => {
-        const built = await lane({ summaryOverrides: { coverage: 'unknown' } });
+        const built = await lane({
+          summaryOverrides: { projection: { version: 2, kind: 'unknown', digest: PROJECTION.digest }, residual: [] },
+        });
+        return { built, offered: reference(built) };
+      },
+    },
+    {
+      name: 'a record carrying a residual key the Host ruling never covered',
+      reason: 'preparation_not_ready',
+      build: async () => {
+        const built = await lane({
+          summaryOverrides: { residual: [{ key: 'stream_options', valueClass: 'object_shape' }] },
+        });
+        return { built, offered: reference(built) };
+      },
+    },
+    {
+      name: 'a record whose accounting ruling was made for another runtime',
+      reason: 'preparation_not_ready',
+      build: async () => {
+        const built = await lane({
+          bindingOverrides: {
+            accountingPolicyRef: { ...ACCOUNTING_POLICY_REF, ruledRuntime: 'another-runtime@1+abc.1' },
+          },
+        });
         return { built, offered: reference(built) };
       },
     },
@@ -672,7 +739,19 @@ describe('every compared item declines by its own name, with no claim and no pin
       name: 'an artifact compiled against a native closure this device no longer has',
       reason: 'preparation_runtime_identity_mismatch',
       build: async () => {
-        const built = await lane({ bindingOverrides: { runtime: { ...RUNTIME, forkBuild: 1, packageVersion: '0.85.1001' } } });
+        const runtime = { ...RUNTIME, forkBuild: 1, packageVersion: '0.85.1001' };
+        // The accounting ruling moves WITH the runtime it was ruled for, so the
+        // record stays ready and the only difference left is the one this case
+        // is about: the closure the device has now.
+        const built = await lane({
+          bindingOverrides: {
+            runtime,
+            accountingPolicyRef: {
+              ...ACCOUNTING_POLICY_REF,
+              ruledRuntime: inputPreparationRuntimeIdentityString(runtime),
+            },
+          },
+        });
         return { built, offered: reference(built) };
       },
     },

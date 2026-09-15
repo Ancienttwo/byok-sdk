@@ -9,6 +9,7 @@ import type { LocalAgentReleaseIdentity } from '../release-identity';
 import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types';
 import type { AgentHomeExecutionStatus } from '../agent-home';
 import type {
+  InputPreparationAccountingPolicyRefV1,
   InputPreparationCancelParamsV1,
   InputPreparationLookupParamsV1,
   InputPreparationModelV1,
@@ -1076,6 +1077,37 @@ function parseSnapshot(value: unknown): InputPreparationSnapshotV1 | undefined {
   return { prompt, messages };
 }
 
+/**
+ * The Host's accounting ruling, validated as a SHAPE and carried verbatim.
+ *
+ * Nothing here interprets the ruling: `ruledResidualKeys` is a list of names
+ * this daemon only compares against what the native compiler classified, and
+ * `ruledRuntime`/`ruledTarget` are what the applicability check compares the
+ * binding against. An empty key list is legal and means exactly what it says —
+ * the Host ruled on no residual key — so any preparation whose request D
+ * carries one stays unready.
+ */
+function parseAccountingPolicyRef(value: unknown): InputPreparationAccountingPolicyRefV1 | undefined {
+  if (!plainRecord(value) || !exactKeys(value, ['revision', 'ruledRuntime', 'ruledTarget', 'ruledResidualKeys'])) {
+    return undefined;
+  }
+  if (!identifier(value.revision) || !identifier(value.ruledRuntime)) return undefined;
+  if (!plainRecord(value.ruledTarget) || !exactKeys(value.ruledTarget, ['endpoint', 'modelId'])) return undefined;
+  if (!identifier(value.ruledTarget.endpoint) || !identifier(value.ruledTarget.modelId)) return undefined;
+  if (!Array.isArray(value.ruledResidualKeys)) return undefined;
+  const keys = new Set<string>();
+  for (const entry of value.ruledResidualKeys) {
+    if (!identifier(entry) || keys.has(entry)) return undefined;
+    keys.add(entry as string);
+  }
+  return {
+    revision: value.revision,
+    ruledRuntime: value.ruledRuntime,
+    ruledTarget: { endpoint: value.ruledTarget.endpoint, modelId: value.ruledTarget.modelId },
+    ruledResidualKeys: Object.freeze([...keys]),
+  };
+}
+
 /** Configured MCP toolset ids: non-empty, deduplicated, and each a usable identifier. */
 function parseRequiredToolsets(value: unknown): string[] | undefined {
   if (!Array.isArray(value) || value.length === 0) return undefined;
@@ -1169,6 +1201,7 @@ export function parseInputPreparationRequestParams(value: unknown): InputPrepara
       'permissionMode',
       'requiredToolsets',
       'snapshot',
+      'accountingPolicyRef',
     ])
   ) {
     return badRequest('the params carry a field this request shape does not define');
@@ -1205,6 +1238,15 @@ export function parseInputPreparationRequestParams(value: unknown): InputPrepara
   }
   const snapshot = parseSnapshot(value.snapshot);
   if (!snapshot) return badRequest('snapshot must be exactly {prompt, messages}');
+  let accountingPolicyRef: InputPreparationAccountingPolicyRefV1 | undefined;
+  if (value.accountingPolicyRef !== undefined) {
+    accountingPolicyRef = parseAccountingPolicyRef(value.accountingPolicyRef);
+    if (!accountingPolicyRef) {
+      return badRequest(
+        'accountingPolicyRef must be exactly {revision, ruledRuntime, ruledTarget: {endpoint, modelId}, ruledResidualKeys}',
+      );
+    }
+  }
   return {
     ok: true,
     request: {
@@ -1218,6 +1260,7 @@ export function parseInputPreparationRequestParams(value: unknown): InputPrepara
       permissionMode: value.permissionMode as PermissionMode,
       requiredToolsets: Object.freeze(requiredToolsets),
       snapshot,
+      ...(accountingPolicyRef === undefined ? {} : { accountingPolicyRef }),
     },
   };
 }

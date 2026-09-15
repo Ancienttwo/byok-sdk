@@ -88,13 +88,14 @@ const RECEIPT = {
     toolManifestDigest: 'sha256:tools',
     requestBytes: 1024,
     projectionBytes: 900,
-    coverage: 'unknown',
+    projection: { version: 2, kind: 'content_complete', digest: 'a'.repeat(64) },
+    residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
     observationDigest: 'sha256:observation',
     toolBindingDigest: 'sha256:binding',
     toolImplementationKinds: { mcp__team__list: 'unavailable:resolver_unconfigured' },
   },
   ready: false,
-  readinessReasons: ['compiler_coverage_unknown', 'executor_identity_unproven'],
+  readinessReasons: ['accounting_policy_missing', 'executor_identity_unproven'],
   artifactExpiresAt: '2026-01-01T01:00:00.000Z',
 } as const;
 
@@ -140,6 +141,10 @@ describe('agent.input.preparation envelope', () => {
   it('carries no tools, tool executors, runtime identity, tenant or device', () => {
     const shape = Object.keys(AgentInputPreparationPayloadSchema.shape).sort();
     expect(shape).toEqual([
+      // Host accounting authority, carried verbatim. It rules on residual KEYS
+      // by name; it states no tool, no executor and no runtime identity, all of
+      // which stay local observations the device alone can make.
+      'accountingPolicyRef',
       'agentRef',
       'context',
       'deadlineAt',

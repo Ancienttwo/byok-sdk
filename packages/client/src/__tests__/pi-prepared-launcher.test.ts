@@ -295,7 +295,8 @@ async function prepareOnThisDevice(
     toolManifestDigest: compiled.toolManifestDigest,
     requestBody: compiled.requestBody,
     counterProjection: compiled.counterProjection,
-    coverage: compiled.coverage,
+    projection: compiled.projection,
+    residual: [...compiled.residual],
     envelope: compiled.envelope,
   }), { mode: 0o600 });
 

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -193,8 +194,13 @@ function stubCompiler(): StubCompiler {
         requestDigest: 'a'.repeat(64),
         envelopeDigest: 'b'.repeat(64),
         toolManifestDigest: 'c'.repeat(64),
-        coverage: 'unknown',
-        envelope: { format: 'pi.session.prepared-input', version: 1 } as never,
+        projection: {
+          version: 2,
+          kind: 'content_complete',
+          digest: createHash('sha256').update('{}', 'utf8').digest('hex'),
+        },
+        residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
+        envelope: { format: 'pi.session.prepared-input', version: 2 } as never,
       };
     },
   };
@@ -213,6 +219,12 @@ function fixtureCounter() {
         kind: 'count',
         value: 7,
         coverage: { covered: true },
+        providerEvidence: {
+          projectionDigest: createHash('sha256').update(request.counterProjection, 'utf8').digest('hex'),
+          endpoint: request.target.endpoint,
+          modelId: request.target.modelId,
+          asserted: { httpStatus: 200, usageFields: { prompt_tokens: 7 }, responseDigest: 'e'.repeat(64) },
+        },
       };
     },
   };

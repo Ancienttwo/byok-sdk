@@ -105,6 +105,10 @@ const CONTEXT_DOCUMENT = {
 const CONTEXT_JSON = JSON.stringify(CONTEXT_DOCUMENT);
 const CONTEXT_HASH = `sha256:${createHash('sha256').update(CONTEXT_JSON, 'utf8').digest('hex')}`;
 
+function sha256Hex(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
 function payload(overrides: Record<string, unknown> = {}): AgentInputPreparationPayload {
   return AgentInputPreparationPayloadSchema.parse({
     requestId: REQUEST_ID,
@@ -164,8 +168,13 @@ function stubCompiler(): StubCompiler {
         requestDigest: 'a'.repeat(64),
         envelopeDigest: 'b'.repeat(64),
         toolManifestDigest: 'c'.repeat(64),
-        coverage: 'unknown',
-        envelope: { format: 'pi.session.prepared-input', version: 1 } as never,
+        projection: {
+          version: 2,
+          kind: 'content_complete',
+          digest: sha256Hex(JSON.stringify({ model: request.model.id })),
+        },
+        residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
+        envelope: { format: 'pi.session.prepared-input', version: 2 } as never,
       };
     },
   };
@@ -184,6 +193,12 @@ function fixtureCounter() {
         kind: 'count',
         value: 123,
         coverage: { covered: true },
+        providerEvidence: {
+          projectionDigest: sha256Hex(request.counterProjection),
+          endpoint: request.target.endpoint,
+          modelId: request.target.modelId,
+          asserted: { httpStatus: 200, usageFields: { prompt_tokens: 123 }, responseDigest: 'e'.repeat(64) },
+        },
       };
     },
   };
@@ -262,13 +277,17 @@ describe('remote input preparation: in-process, never the control socket', () =>
     if (completion.outcome !== 'prepared') throw new Error('unreachable');
 
     // The summary discloses identity, not content.
-    expect(completion.receipt.artifact).toMatchObject({ coverage: 'unknown', requestDigest: 'a'.repeat(64) });
+    expect(completion.receipt.artifact).toMatchObject({
+      requestDigest: 'a'.repeat(64),
+      projection: { version: 2, kind: 'content_complete' },
+      residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
+    });
     expect(Object.keys(completion.receipt)).not.toContain('request');
     expect(Object.keys(completion.receipt)).not.toContain('snapshot');
-    // A fixture counter and an unknown compiler coverage can never be ready.
+    // A fixture counter and a Host ruling nobody stated can never be ready.
     expect(completion.receipt.ready).toBe(false);
     expect(completion.receipt.readinessReasons).toContain('counter_authority_not_production');
-    expect(completion.receipt.readinessReasons).toContain('compiler_coverage_unknown');
+    expect(completion.receipt.readinessReasons).toContain('accounting_policy_missing');
     expect(harness.completions).toEqual([completion]);
   });
 
