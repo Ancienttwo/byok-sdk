@@ -536,6 +536,12 @@ jobs:
               Write-Host "[lowpriv] private dir OK: $d"
             }
 
+            # Inherited from the administrator parent and pointing at a file only
+            # that token can write: vitest appends its summary there and dies with
+            # EPERM under this one. Unset in the child only -- the parent job keeps
+            # its own summary file and writes to it untouched.
+            Remove-Item Env:GITHUB_STEP_SUMMARY -ErrorAction SilentlyContinue
+
             # git compares safe.directory against its own forward-slash spelling of
             # this exact checkout. Never '*'.
             $env:GIT_CONFIG_COUNT = '1'
