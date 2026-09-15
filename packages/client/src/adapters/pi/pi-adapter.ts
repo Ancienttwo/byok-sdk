@@ -202,6 +202,13 @@ export class PiAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    // The policy mapping runs FIRST: a mode pi cannot express at all is a
+    // refusal about the mode, and resolving toolset grants before it would
+    // answer that task with a toolset-shaped reason instead.
+    const mapping = mapPermissionPolicyToPiArgs(input.policy);
+    if (!mapping.ok) {
+      return { kind: 'reject', reason: mapping.reason ?? 'policy rejected by pi adapter', retryable: false };
+    }
     // Fail closed BEFORE anything is spawned, on the same resolution claude
     // and codex use. pi does not interpolate these names into a CLI grant —
     // it registers one tool per observed tool — but it reads exactly the same
@@ -213,10 +220,10 @@ export class PiAdapter implements RuntimeAdapter {
     // instead, and declines non-retryably like its siblings.
     // Per-tool registration also makes the task's permission mode decidable
     // per tool: the same resolution applies the operator's
-    // `McpToolsetConfig.readOnlyTools` classification, so a non-`auto` toolset
-    // task is admitted with exactly the read-only tools the device declared,
-    // and an unclassified toolset is refused by name here rather than running
-    // with everything enabled.
+    // `McpToolsetConfig.readOnlyTools` classification, so a task under a
+    // narrowing mode is admitted with exactly the read-only tools the device
+    // declared, and an unclassified toolset is refused by name here rather
+    // than running with everything enabled.
     const toolsetGrants = resolveMcpToolsetGrants(input.mcpServers, input.mcpToolsetTools, input.policy.mode);
     if (!toolsetGrants.ok) {
       return {
@@ -224,10 +231,6 @@ export class PiAdapter implements RuntimeAdapter {
         reason: `pi adapter cannot register projected MCP toolset tools: ${toolsetGrants.reason}`,
         retryable: false,
       };
-    }
-    const mapping = mapPermissionPolicyToPiArgs(input.policy);
-    if (!mapping.ok) {
-      return { kind: 'reject', reason: mapping.reason ?? 'policy rejected by pi adapter', retryable: false };
     }
 
     const bin = this.resolveBin();
@@ -387,10 +390,18 @@ export class PiAdapter implements RuntimeAdapter {
             // the task's permission mode alongside it. The extension needs
             // both: it registers only the tools the mode allows (running the
             // same `filterMcpObservationForPolicy` this adapter just ran), but
-            // it verifies a server against everything the daemon observed —
-            // a mutation tool that appeared since admission is still drift,
-            // and a frozen list already narrowed by policy would read every
+            // it verifies a connected server against everything written here,
+            // so a frozen list already narrowed by policy would read every
             // excluded tool back as a newly added one.
+            //
+            // What is written is the START observation, so the prepare->start
+            // window is deliberately unfingerprinted for the tools a narrowing
+            // mode excludes: those tools are unreachable in this session, so a
+            // mutation tool appearing in that window changes nothing the model
+            // can call. Everything that IS reachable still trips the
+            // fingerprint compared above — a read-only tool added, removed, or
+            // reclassified between prepare and start changes the grant set and
+            // the operation is refused.
             await fs.writeFile(
               mcpConfigPath,
               JSON.stringify({

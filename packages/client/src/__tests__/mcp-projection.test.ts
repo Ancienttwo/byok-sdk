@@ -416,9 +416,6 @@ describe('MCP projection — grants derive from the same observation', () => {
         { server: 'salesko_proposals', tools: ['propose_update'] },
       ],
     });
-    // `auto` filters nothing, so the resolution carries the observation the
-    // grants were read from, unchanged — the object pi hands its extension.
-    expect((resolution as { observation: unknown }).observation).toEqual(observation);
     // The same names the runtimes are granted are the names the projection
     // registers — one authority, two views.
     expect(mcpToolsetToolNames(observation)).toEqual({
@@ -565,5 +562,34 @@ describe('MCP projection — one policy filter, every consumer', () => {
   it('auto is every observed tool, classified or not', async () => {
     const unclassified = await classifiedObservation(null);
     expect(filterMcpObservationForPolicy(unclassified, 'auto')).toEqual({ ok: true, observation: unclassified });
+  });
+
+  it('confirm is every observed tool and needs no classification at all', async () => {
+    // Confirm gates each call on a human rather than on a tool set, so it is
+    // NOT a narrowing mode: an unclassified toolset must pass through it
+    // unchanged instead of being refused for a missing `readOnlyTools`.
+    const unclassified = await classifiedObservation(null);
+    expect(filterMcpObservationForPolicy(unclassified, 'confirm'))
+      .toEqual({ ok: true, observation: unclassified });
+    const classified = await classifiedObservation();
+    expect(filterMcpObservationForPolicy(classified, 'confirm'))
+      .toEqual({ ok: true, observation: classified });
+  });
+
+  it('plan narrows exactly like readonly', async () => {
+    // `daemon/policy.ts` ranks plan as the mode that produces NO side effects,
+    // so it may never be wider than readonly.
+    const observation = await classifiedObservation();
+    const plan = filterMcpObservationForPolicy(observation, 'plan');
+    const readonly = filterMcpObservationForPolicy(observation, 'readonly');
+    expect(plan).toEqual(readonly);
+    expect(projectMcpTools((plan as { observation: typeof observation }).observation)
+      .map((tool) => qualifiedMcpToolName(tool.serverName, tool.toolName)))
+      .toEqual(READ_TOOLS.map((tool) => `mcp__salesko__${tool}`));
+    // And it inherits readonly's fail-closed refusal, not auto's pass-through.
+    expect(filterMcpObservationForPolicy(await classifiedObservation(null), 'plan')).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('declares no McpToolsetConfig.readOnlyTools'),
+    });
   });
 });

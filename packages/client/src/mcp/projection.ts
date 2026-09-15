@@ -1,3 +1,4 @@
+import type { PermissionMode } from '@byok-sdk/protocol';
 import { compareCodeUnits } from '../util/compare-code-units';
 import { McpAuthorityError, type McpStdioServerSpec } from './client';
 import {
@@ -105,18 +106,57 @@ export type McpObservationPolicyResolution =
   | { readonly ok: false; readonly reason: string };
 
 /**
+ * Which permission modes reduce a toolset to its read-only tools.
+ *
+ * A POSITIVE set, decided per mode by an exhaustive `switch`, so a mode added
+ * to `PERMISSION_MODES` later fails to compile here instead of silently
+ * inheriting whichever half of an "everything except `auto`" test it happened
+ * to land on.
+ *
+ * - `readonly`: narrows. The mode's entire contract is that the task runs
+ *   autonomously without mutating anything.
+ * - `plan`: narrows. `daemon/policy.ts` defines plan as the mode that produces
+ *   NO side effects, so it may not be wider than `readonly`.
+ * - `auto`: does not narrow. Every observed tool, no classification needed.
+ * - `confirm`: does not narrow. A human answers each call, so the gate is per
+ *   call rather than per tool set — and claude deliberately emits no MCP
+ *   pre-grant at all under confirm (`adapters/claude/permission-mapping.ts`),
+ *   so narrowing here would only refuse an unclassified toolset a human was
+ *   going to adjudicate anyway.
+ */
+function narrowsToReadOnlyTools(permissionMode: PermissionMode): boolean {
+  switch (permissionMode) {
+    case 'readonly':
+    case 'plan':
+      return true;
+    case 'auto':
+    case 'confirm':
+      return false;
+    default: {
+      const exhaustive: never = permissionMode;
+      return exhaustive;
+    }
+  }
+}
+
+/**
  * Reduce one observation to exactly the tools a permission mode allows — the
  * ONE place any runtime's toolset policy is decided.
  *
- * `auto` is every observed tool. Any other mode keeps only the tools the
- * device's operator classified read-only
- * (`McpToolsetConfig.readOnlyTools`), and the excluded tools are excluded
- * everywhere at once: they are not granted to claude or codex, not registered
- * with pi, and not fingerprinted into a prepared manifest. There is no
- * "register it and refuse the call" state, because a tool the model can see is
- * a tool the model will spend tokens attempting.
+ * Exactly two modes narrow, and they are named positively rather than as
+ * "everything except `auto`" — see {@link narrowsToReadOnlyTools} for which
+ * and why. A narrowing mode keeps only the tools the device's operator
+ * classified read-only (`McpToolsetConfig.readOnlyTools`), and the excluded
+ * tools are excluded everywhere at once: they are not granted to claude or
+ * codex, not registered with pi, and not fingerprinted into a prepared
+ * manifest. There is no "register it and refuse the call" state, because a
+ * tool the model can see is a tool the model will spend tokens attempting.
  *
- * Two refusals, both fail-closed:
+ * A non-narrowing mode returns the observation unchanged and demands NO
+ * classification at all: refusing it for a missing `readOnlyTools` would
+ * refuse a toolset whose every tool that mode would have allowed.
+ *
+ * Two refusals, both fail-closed, and both only under a narrowing mode:
  *
  * - A tool with no classification at all means the toolset carries no
  *   declaration. That is an INEXPRESSIBLE policy, not a small one, so it is
@@ -132,9 +172,9 @@ export type McpObservationPolicyResolution =
  */
 export function filterMcpObservationForPolicy(
   observation: Readonly<Record<string, McpToolsetServerObservation>>,
-  permissionMode: string,
+  permissionMode: PermissionMode,
 ): McpObservationPolicyResolution {
-  if (permissionMode === 'auto') return { ok: true, observation };
+  if (!narrowsToReadOnlyTools(permissionMode)) return { ok: true, observation };
   const filtered: Record<string, McpToolsetServerObservation> = {};
   for (const serverName of Object.keys(observation).sort(compareCodeUnits)) {
     const server = observation[serverName]!;

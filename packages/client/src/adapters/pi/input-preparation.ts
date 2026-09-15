@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { PreparedSessionInputV1 } from '@earendil-works/pi-coding-agent/prepared-session-input';
+import type { PermissionMode } from '@byok-sdk/protocol';
 import type {
   InputPreparationModelV1,
   InputPreparationOptionsV1,
@@ -467,7 +468,7 @@ export interface ToolExecutorsRequest {
    * that had to remember to filter first is a caller that eventually forgets,
    * and the failure would be a manifest quietly wider than the session.
    */
-  readonly permissionMode: string;
+  readonly permissionMode: PermissionMode;
   /** `toolsetId` -> the registry's definition revision for it. Every observed toolset must appear. */
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
   /** Pi's own tools, already filtered by policy, in the order they are registered. */

@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent, PermissionMode, TaskOfferPayload } from '@byok-sdk/protocol';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
 import type { Session } from '../types';
@@ -671,7 +671,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     const configPath = calls[0]?.env.BYOK_PI_MCP_CONFIG_PATH as string;
     expect(calls[0]?.env.BYOK_PI_PERMISSION_MODE).toBe('readonly');
     const written = JSON.parse(await fs.readFile(configPath, 'utf8')) as {
-      permissionMode: string;
+      permissionMode: PermissionMode;
       observation: Record<string, McpToolsetServerObservation>;
     };
     // The mode travels with the observation, so the extension applies the SAME

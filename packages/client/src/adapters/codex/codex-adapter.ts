@@ -4,7 +4,7 @@ import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { promisify } from 'node:util';
-import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent, PermissionMode, TaskOfferPayload } from '@byok-sdk/protocol';
 import {
   PolicyUnsupportedError,
   SteerUnsupportedError,
@@ -217,7 +217,7 @@ export class CodexAdapter implements RuntimeAdapter {
     preparedToolsetGrants: readonly McpToolsetGrant[],
     preparedMcpGrants: readonly McpToolsetGrant[],
     /** The mode the grants were resolved under; re-filtering with any other would compare two different policies. */
-    permissionMode: string,
+    permissionMode: PermissionMode,
   ): Promise<Session> {
     // Same fail-closed re-check the model selection below gets: the grants
     // were probed against the ADMISSION input, so start() may not arrive with

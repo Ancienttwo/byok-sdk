@@ -1,5 +1,5 @@
+import type { PermissionMode } from '@byok-sdk/protocol';
 import type { McpStdioServerConfig, McpToolsetToolObservation } from '../types';
-import type { McpToolsetServerObservation } from '../mcp/observation';
 import {
   AGENT_MEMORY_MCP_SERVER_NAME,
   AGENT_MESSAGE_MCP_SERVER_NAME,
@@ -45,18 +45,7 @@ export function resolveReservedMcpToolGrants(
 }
 
 export type McpToolsetGrantResolution =
-  | {
-      ok: true;
-      grants: readonly McpToolsetGrant[];
-      /**
-       * The observation the grants were resolved FROM, after the permission
-       * policy was applied. Returned rather than left to each caller to
-       * recompute: pi hands this exact object's tools to its extension, the
-       * prepared path fingerprints them, and claude and codex grant their
-       * names. One filtered object, one set of tools, every runtime.
-       */
-      observation: Readonly<Record<string, McpToolsetServerObservation>>;
-    }
+  | { ok: true; grants: readonly McpToolsetGrant[] }
   | { ok: false; reason: string };
 
 /**
@@ -86,7 +75,7 @@ export type McpToolsetGrantResolution =
 export function resolveMcpToolsetGrants(
   servers: Readonly<Record<string, McpStdioServerConfig>> | undefined,
   observation: McpToolsetToolObservation | undefined,
-  permissionMode: string,
+  permissionMode: PermissionMode,
 ): McpToolsetGrantResolution {
   const projected = Object.keys(servers ?? {}).filter((name) => !isReservedMcpServerName(name)).sort();
   // The server half of `mcp__<server>__<tool>` / `mcp_servers.<server>
@@ -147,7 +136,7 @@ export function resolveMcpToolsetGrants(
     }
     grants.push({ server, tools: Object.freeze([...tools].sort()) });
   }
-  return { ok: true, grants: Object.freeze(grants), observation: policy.observation };
+  return { ok: true, grants: Object.freeze(grants) };
 }
 
 /** Order-independent identity of one grant set, for adapters that must prove start() received the authority prepare() was admitted with. */

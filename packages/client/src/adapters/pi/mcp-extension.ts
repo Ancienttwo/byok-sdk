@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { PERMISSION_MODES, type PermissionMode } from '@byok-sdk/protocol';
 import type { CallToolResult } from '@modelcontextprotocol/client';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { McpAuthorityError, McpStdioClient, type McpStdioServerSpec } from '../../mcp/client';
@@ -49,7 +50,7 @@ interface TaskScopedMcpConfig {
    */
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
   /** This task's permission mode, applied to the observation by the shared core. */
-  readonly permissionMode: string;
+  readonly permissionMode: PermissionMode;
 }
 
 /**
@@ -143,8 +144,13 @@ function loadTaskScopedConfig(): TaskScopedMcpConfig {
   if (!isPlainObject(parsed)) fail('the task-scoped configuration must be an object');
   if (!isPlainObject(parsed.mcpServers)) fail('the task-scoped configuration must contain an mcpServers object');
   if (!isPlainObject(parsed.observation)) fail('the task-scoped configuration must contain an observation object');
-  if (typeof parsed.permissionMode !== 'string' || parsed.permissionMode.length === 0) {
-    fail('the task-scoped configuration must contain a permissionMode string');
+  // Validated against the protocol's own enumeration, not merely "a non-empty
+  // string": this file reads a mode the shared core then decides policy from,
+  // and an unrecognized value would otherwise reach
+  // `filterMcpObservationForPolicy` as a mode nobody wrote a rule for.
+  if (typeof parsed.permissionMode !== 'string'
+    || !(PERMISSION_MODES as readonly string[]).includes(parsed.permissionMode)) {
+    fail(`the task-scoped configuration must contain a permissionMode of [${PERMISSION_MODES.join(', ')}]`);
   }
   const mcpServers: Record<string, McpStdioServerSpec> = {};
   for (const [name, raw] of Object.entries(parsed.mcpServers)) mcpServers[name] = parseServer(name, raw);
@@ -166,7 +172,7 @@ function loadTaskScopedConfig(): TaskScopedMcpConfig {
   return Object.freeze({
     mcpServers: Object.freeze(mcpServers),
     observation: Object.freeze(observation),
-    permissionMode: parsed.permissionMode,
+    permissionMode: parsed.permissionMode as PermissionMode,
   });
 }
 
