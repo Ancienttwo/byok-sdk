@@ -15,8 +15,12 @@ assert.deepEqual(adaptersExport, {
 assert.equal(manifest.dependencies?.['@earendil-works/pi-coding-agent'], 'npm:@byok-sdk/pi-coding-agent@0.85.1001');
 assert.equal(manifest.optionalDependencies?.['@earendil-works/pi-coding-agent'], undefined);
 assert.equal(manifest.dependencies?.['pi-web-access'], '0.24.1');
-assert.equal(manifest.dependencies?.['pi-mcp-adapter'], '2.27.0');
 assert.equal(manifest.dependencies?.['pi-subagents'], '0.60.0');
+// The MCP client this package's own core is built on. `pi-mcp-adapter` is
+// retired: the SDK owns its MCP connection, observation and tool projection
+// (`src/mcp/`), so there is no second MCP authority in the graph to pin.
+assert.equal(manifest.dependencies?.['@modelcontextprotocol/client'], '2.0.0');
+assert.equal(manifest.dependencies?.['pi-mcp-adapter'], undefined);
 assert.equal(manifest.dependencies?.['@juicesharp/rpiv-todo'], '2.8.0');
 assert.equal(existsSync(new URL('../dist/adapters/pi/team-interaction-extension.js', import.meta.url)), true);
 assert.equal(existsSync(new URL('../dist/adapters/pi/mcp-extension.js', import.meta.url)), true);
