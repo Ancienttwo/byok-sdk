@@ -1053,12 +1053,19 @@ The authority split is deliberate and total:
   to `spawn` (`buildRuntimeEnv`'s output for that task on that device). A host
   does not have that object, must not reconstruct one from its own
   `process.env`, and must not keep a copy of this SDK's loader deny list. Both
-  digests are taken over a projection that excludes the two name sets THIS SDK
-  itself adds or removes between measuring and spawning — the `BYOK_*` control
-  variables and the provider-credential names stripped at subscription and
-  BYOK-custody boundaries — so one identity survives both spawn points without
-  binding a difference the SDK made on purpose. Nothing that can influence a
-  loader is excluded.
+  digests are taken over a projection that excludes two NAMED sets THIS SDK
+  itself adds or removes between measuring and spawning: an exact, enumerated
+  list of the SDK-minted lifecycle names (`BYOK_PI_MCP_CONFIG_PATH`,
+  `BYOK_PI_PERMISSION_MODE`, `BYOK_HOST_TOOLSET_CONTEXT`, `BYOK_STORE_DIR`,
+  `BYOK_PRODUCT_ID`), and the provider-credential names stripped at
+  subscription and BYOK-custody boundaries by the existing credential-custody
+  authority. So one identity survives both spawn points without binding a
+  difference the SDK made on purpose. It is NOT a `BYOK_*` prefix exemption:
+  the prefix is not intrinsically inert, so any other name wearing this SDK's
+  control prefix on the environment of a child about to start under an
+  attested identity refuses the spawn with `launch_env_unexpected_control_name`
+  rather than being projected away. Nothing that can influence a loader is
+  excluded from either digest.
 
 **This SDK ships no resolver and no default.** An absent
 `toolImplementationAuthority` is the supported state, and it means every
@@ -1085,10 +1092,13 @@ root-owned or grew a write bit fails it — and the same content digest, for the
 artifact AND for the interpreter of an `interpreter+bundle`; the refusal names
 which of the two moved. It also re-digests the environment that child is about
 to be handed, and answers `launch_env_drift` when a name appeared, vanished or
-was renamed, or a loader-affecting value reached the child. `launch_env_drift`
-is a spawn-only verdict and never an unavailable reason: at resolve there is
-nothing to disagree with, because that is the moment the environment is
-measured. A failure REFUSES the spawn non-retryably with its reason; it is never downgraded
+was renamed, or a loader-affecting value reached the child — and
+`launch_env_unexpected_control_name` when that child's environment carries a
+`BYOK_*` control name this SDK mints on no gated path, which fails closed even
+when the same name was already present at resolve and the digests therefore
+agree. Both are spawn-only verdicts and never unavailable reasons: at resolve
+there is nothing to disagree with, because that is the moment the environment
+is measured, and the host-facing resolution contract is unchanged by either. A failure REFUSES the spawn non-retryably with its reason; it is never downgraded
 to unavailable-and-continue, because a server that was attested and no longer
 measures the same is a server that changed under a claim somebody relied on.
 
@@ -1096,7 +1106,9 @@ What an attested identity proves is exactly that: at resolve, and again at each
 spawn, the file at that versioned realpath — and the interpreter beside it —
 was a root-owned, non-symlink, non-writable regular file whose bytes hash to
 the attested digest and whose stat tuple had not moved, and the environment
-handed to that spawn was the environment that was measured. What it does
+handed to that spawn agreed with the environment measured at resolve over the
+names projection plus the controlled loader-values scope — not that the two
+environments were identical. What it does
 **not** prove, carried honestly rather than implied away:
 
 - post-hoc modification by root, which no measurement by a non-root daemon can

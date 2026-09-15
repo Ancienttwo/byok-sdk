@@ -32,6 +32,7 @@ import {
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { probeMcpServer } from '../daemon/mcp-tools-probe';
 import {
+  assertToolImplementationBeforeSpawn,
   parseToolImplementationIdentity,
   realToolImplementationFsProbe,
   toolImplementationLaunchEnvNamesDigest,
@@ -526,6 +527,90 @@ describe('a tampered install refuses the preparation before it is fingerprinted'
     if (result.ok) throw new Error('unreachable');
     expect(result.code).toBe('toolsets_unobservable');
     expect(result.message).toMatch(/failed implementation reverification before launch/u);
+  });
+
+  it('spawns with the environment stage 1 measured, even when runtimeEnv answers differently the second time', async () => {
+    // The two stages are two moments, and `deps.runtimeEnv()` is resolved per
+    // call so an operator reload is never shadowed. A reload that lands
+    // BETWEEN them must not make stage 2 spawn under an environment stage 1
+    // never measured — that is `launch_env_drift` at the gate for a difference
+    // the preparation itself introduced.
+    const probe = rootOwnedProbe();
+    const artifact = path.join(await tempDir(), 'teamserver-install');
+    await fs.writeFile(artifact, 'original bytes\n');
+    const attested = await attestReal(artifact, probe);
+
+    const authority: ToolImplementationAuthority = {
+      resolve: async () => ({
+        kind: 'attested',
+        authority: 'host-install-record',
+        manifestRevision: attested.manifestRevision,
+        form: 'compiled-executable',
+        installPath: attested.installPath,
+        closureDigest: attested.closureDigest,
+        closureKind: 'artifact',
+        launchArgv: [],
+        launchCwd: '/',
+      }),
+    };
+
+    let envCalls = 0;
+    const spawnedEnvs: Readonly<Record<string, string>>[] = [];
+    const result = await assembler(registryWith(), {
+      // First answer: the environment the identity is measured against.
+      // Every later answer carries an extra name, which would move the names
+      // digest and refuse the spawn if stage 2 asked again.
+      runtimeEnv: () => {
+        envCalls += 1;
+        return envCalls === 1
+          ? { ...ASSEMBLER_ENV }
+          : { ...ASSEMBLER_ENV, RELOADED_BETWEEN_STAGES: '1' };
+      },
+      toolImplementationAuthority: authority,
+      toolImplementationFsProbe: probe,
+      probe: async (serverName, server, options) => {
+        const env = options.env ?? {};
+        spawnedEnvs.push(env);
+        // The pre-spawn gate `mcp/client.ts` asks before it starts the child,
+        // asked here with the ownership seam a non-root test needs —
+        // `probeMcpServer` forwards no fs probe, so the real one inside it
+        // would refuse every identity this suite attests as root-owned. The
+        // identity is then withheld from the real probe so the gate is asked
+        // exactly once, on the evidence under test.
+        const { implementation, ...withoutIdentity } = options;
+        await assertToolImplementationBeforeSpawn(
+          `MCP toolset server ${JSON.stringify(serverName)}`,
+          implementation,
+          env,
+          probe,
+        );
+        return probeMcpServer(serverName, server, withoutIdentity);
+      },
+    }).assemble({ requiredToolsets: ['team'], permissionMode: 'auto', runtimeIdentity: RUNTIME_IDENTITY });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    // The gate passed: the identity stayed attested rather than refusing the
+    // preparation for drift the stub's second answer would have produced.
+    expect(new Set(Object.values(result.surface.toolImplementationKinds))).toEqual(new Set(['attested']));
+    expect(spawnedEnvs).toHaveLength(1);
+    expect(spawnedEnvs[0]).not.toHaveProperty('RELOADED_BETWEEN_STAGES');
+    expect(toolImplementationLaunchEnvNamesDigest(spawnedEnvs[0]!))
+      .toBe(toolImplementationLaunchEnvNamesDigest(ASSEMBLER_ENV));
+  });
+
+  it('carries the measured environment on the binding, so stage 1 alone answers it', async () => {
+    let envCalls = 0;
+    const binding = await assembler(registryWith(), {
+      runtimeEnv: () => {
+        envCalls += 1;
+        return envCalls === 1 ? { ...ASSEMBLER_ENV } : { ...ASSEMBLER_ENV, RELOADED: '1' };
+      },
+    }).resolveBinding({ requiredToolsets: ['team'] });
+    expect(binding.ok).toBe(true);
+    if (!binding.ok) throw new Error('unreachable');
+    expect(envCalls).toBe(1);
+    expect(binding.binding.launchEnv).toEqual(ASSEMBLER_ENV);
   });
 });
 

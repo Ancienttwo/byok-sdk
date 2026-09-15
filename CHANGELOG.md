@@ -17,15 +17,44 @@ and the D2 version number belongs to a separate SDK release contract.
   digests itself, at resolve, off the exact environment its caller will spawn
   with, and re-measures them at the spawn gate against the environment actually
   being handed to the child; a mismatch refuses the spawn with the new
-  spawn-only verdict `launch_env_drift`. The digests are taken over a
-  projection that excludes the `BYOK_*` control variables and the
-  provider-credential names this SDK itself strips between the daemon's
-  measurement and the Pi pool's spawn, and nothing else — the loader deny list
-  is disjoint from both, so a `NODE_OPTIONS`, `DYLD_*` or `BASH_ENV` that
-  reaches a child is still a refusal, as is a `PYTHONPATH` that appeared or a
-  variable that was renamed. A prepared record's `toolBindingDigest` now
-  commits to that projection, so a daemon whose runtime environment gains or
-  loses a bound name between prepare and admission declines the prepared offer.
+  spawn-only verdict `launch_env_drift`.
+
+  The digests are taken over a projection that subtracts two NAMED sets: the
+  exact lifecycle names this SDK mints between resolve and spawn
+  (`TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES` —
+  `BYOK_PI_MCP_CONFIG_PATH`, `BYOK_PI_PERMISSION_MODE`,
+  `BYOK_HOST_TOOLSET_CONTEXT`, `BYOK_STORE_DIR`, `BYOK_PRODUCT_ID`), and
+  `PROVIDER_CREDENTIAL_ENV_DENY_NAMES`, the credential surface the existing
+  custody boundary strips. It is not a `BYOK_*` prefix exemption: the prefix is
+  a live knob elsewhere in this SDK, so any other `BYOK_*` name on the
+  environment of a child about to start under an attested identity fails closed
+  with a second spawn-only verdict, `launch_env_unexpected_control_name` —
+  raised before the digests, so it refuses even when the same name was present
+  at resolve. The loader deny list is disjoint from both projections, so a
+  `NODE_OPTIONS`, `DYLD_*` or `BASH_ENV` that reaches a child is still a
+  refusal, as is a `PYTHONPATH` that appeared or a variable that was renamed.
+  Neither verdict is a `ToolImplementationUnavailableReasonV1`: the resolver
+  contract a host implements is unchanged.
+
+  A prepared record's `toolBindingDigest` now commits to that projection, so a
+  daemon whose runtime environment gains or loses a bound name between prepare
+  and admission declines the prepared offer. The bound set includes
+  session-dependent platform names (`TERM`, `SHELL`, `USER`, `LC_*`, `XDG_*`),
+  so a daemon restarted under a different launch context invalidates earlier
+  prepared records with `preparation_tool_binding_digest_mismatch` — intended,
+  and something a host must expect and re-prepare for.
+
+- **Fixed (daemon, unreleased contract)** — a preparation spawns its probe
+  children with the environment it measured its identities against.
+
+  `assemblePreparedToolSurface` called `deps.runtimeEnv()` a second time for
+  the probe spawn, while the stage-1 comment claimed the environment was taken
+  once. `runtimeEnv` resolves per call so an operator reload is never shadowed,
+  so a reload landing between the two stages would have spawned under an
+  environment the identities were never measured against — `launch_env_drift`
+  at the gate for a difference the preparation itself introduced. The measured
+  object is now carried on `PreparedToolBinding.launchEnv` and stage 2 spawns
+  with exactly it.
 
 - **Fixed (daemon, unreleased contract)** — an `interpreter+bundle` identity
   re-measures its interpreter at every spawn as strictly as its artifact.

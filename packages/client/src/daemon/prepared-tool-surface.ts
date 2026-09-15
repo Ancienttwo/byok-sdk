@@ -120,6 +120,15 @@ export interface PreparedToolBinding {
   readonly servers: readonly PreparedToolServerBinding[];
   /** Digest over the launch attestation, the definition revisions, the argv and the identities. */
   readonly toolBindingDigest: string;
+  /**
+   * The exact environment object every identity above was measured against,
+   * carried forward so stage 2 spawns with the object stage 1 measured rather
+   * than with a second `deps.runtimeEnv()` answer. Asking twice is how a
+   * preparation measures one environment and starts its probe children in
+   * another — `launch_env_drift` at the spawn gate, for a difference nobody
+   * introduced on purpose.
+   */
+  readonly launchEnv: Readonly<Record<string, string>>;
 }
 
 /** Stage 2: the frozen tool surface one preparation is compiled and counted over. */
@@ -307,9 +316,10 @@ export async function resolvePreparedToolBinding(
   // says so. What refuses is the re-measurement at spawn, and only for a
   // server that WAS attested.
   const resolved: PreparedToolServerBinding[] = [];
-  // The exact environment the probe below spawns each server with, taken ONCE:
-  // the identity binds the environment this SDK hands to `spawn`, so a second
-  // `deps.runtimeEnv()` call could measure one value and spawn with another.
+  // The exact environment the stage-2 probe spawns each server with, taken
+  // ONCE and carried on the binding as `launchEnv`: the identity binds the
+  // environment this SDK hands to `spawn`, so a second `deps.runtimeEnv()`
+  // call could measure one value and spawn with another.
   const launchEnv = deps.runtimeEnv();
   for (const serverName of [...servers.keys()].sort(compareServerNames)) {
     const entry = servers.get(serverName)!;
@@ -357,6 +367,7 @@ export async function resolvePreparedToolBinding(
       toolsetDefinitionRevisions: Object.freeze(toolsetDefinitionRevisions),
       servers: Object.freeze(resolved),
       toolBindingDigest,
+      launchEnv,
     }),
   });
 }
@@ -423,7 +434,11 @@ export async function assemblePreparedToolSurface(
   const binding = bound.binding;
 
   const probe = deps.probe ?? probeMcpServer;
-  const env = deps.runtimeEnv();
+  // The environment stage 1 MEASURED the identities against, not a fresh
+  // `deps.runtimeEnv()` answer: the identity binds the object handed to
+  // `spawn`, so asking again here could measure one value and spawn with
+  // another.
+  const env = binding.launchEnv;
   const timeoutMs = deps.probeTimeoutMs ?? MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS;
   // All servers concurrently under one shared deadline, the same budget
   // admission uses: a serial loop would multiply the timeout by the server

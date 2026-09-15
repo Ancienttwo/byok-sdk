@@ -56,6 +56,7 @@ export function recordingToolSurface(
           ),
           servers: [],
           toolBindingDigest: state.toolBindingDigest,
+          launchEnv: Object.freeze({ PATH: '/usr/bin:/bin' }),
         },
       };
     },
