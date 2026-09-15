@@ -47,10 +47,27 @@ describe('SDK-reserved helper host composition', () => {
     const helper = await fixture('helper.mjs', `
       import { createInterface } from 'node:readline';
       const reader = createInterface({ input: process.stdin, terminal: false });
+      let initialized = false;
+      const reply = (id, result) => console.log(JSON.stringify({ jsonrpc: '2.0', id, result }));
       reader.on('line', (line) => {
         const request = JSON.parse(line);
-        if (request.id === 1) console.log(JSON.stringify({ jsonrpc: '2.0', id: 1, result: {} }));
-        if (request.id === 2) console.log(JSON.stringify({ jsonrpc: '2.0', id: 2, result: { tools: [{ name: 'send_agent_message' }] } }));
+        if (request.id === undefined || request.id === null) {
+          if (request.method === 'notifications/initialized') initialized = true;
+          return;
+        }
+        if (request.method === 'initialize') {
+          reply(request.id, {
+            protocolVersion: request.params.protocolVersion,
+            capabilities: { tools: {} },
+            serverInfo: { name: 'byok-message-helper', version: '0.0.0' },
+          });
+          return;
+        }
+        if (request.method === 'tools/list' && initialized) {
+          reply(request.id, {
+            tools: [{ name: 'send_agent_message', description: '', inputSchema: { type: 'object' } }],
+          });
+        }
       });
     `);
     await expect(preflightAgentMessageMcp({
@@ -61,17 +78,35 @@ describe('SDK-reserved helper host composition', () => {
 
     const broken = await fixture('broken.mjs', `process.stderr.write('unknown command\\n'); process.exit(2);`);
     await expect(preflightAgentMessageMcp({ command: process.execPath, args: [broken] }, PROBE_BASE_ENV))
-      .rejects.toThrow(/exited before handshake.*unknown command/);
+      .rejects.toThrow(/exited before.*unknown command/s);
   });
 
   it('admits an exact helper whose single-file startup exceeds the former three-second bound', async () => {
     const delayedHelper = await fixture('delayed-helper.mjs', `
       import { createInterface } from 'node:readline';
       const reader = createInterface({ input: process.stdin, terminal: false });
+      let initialized = false;
+      const reply = (id, result) => console.log(JSON.stringify({ jsonrpc: '2.0', id, result }));
       reader.on('line', (line) => {
         const request = JSON.parse(line);
-        if (request.id === 1) setTimeout(() => console.log(JSON.stringify({ jsonrpc: '2.0', id: 1, result: {} })), 3250);
-        if (request.id === 2) setTimeout(() => console.log(JSON.stringify({ jsonrpc: '2.0', id: 2, result: { tools: [{ name: 'send_agent_message' }] } })), 3250);
+        if (request.id === undefined || request.id === null) {
+          if (request.method === 'notifications/initialized') initialized = true;
+          return;
+        }
+        if (request.method === 'initialize') {
+          reply(request.id, {
+            protocolVersion: request.params.protocolVersion,
+            capabilities: { tools: {} },
+            serverInfo: { name: 'byok-message-helper', version: '0.0.0' },
+          });
+          return;
+        }
+        if (request.method === 'tools/list' && initialized) {
+          // Slower than the former three-second bound, on purpose.
+          setTimeout(() => reply(request.id, {
+            tools: [{ name: 'send_agent_message', description: '', inputSchema: { type: 'object' } }],
+          }), 3250);
+        }
       });
     `);
 

@@ -43,9 +43,73 @@ try {
   const sessionDir = path.join(dir, 'sessions');
   const profileDbPath = path.join(dir, 'profiles.db');
   const marker = path.join(dir, 'extension-observed.json');
+  const toolsMarker = path.join(dir, 'active-tools.json');
   const mcpConfigPath = path.join(dir, 'mcp.json');
   const extension = path.join(dir, 'extension.mjs');
-  await writeFile(mcpConfigPath, JSON.stringify({ mcpServers: {} }));
+  const toolsObserver = path.join(dir, 'tools-observer.mjs');
+  // A real stdio MCP server, so the installed package's own MCP extension is
+  // run against a server that really has to start and really has to answer,
+  // rather than stubbed away. Hand-rolled for the same reason the in-repo
+  // fixtures are: the SDK ships an MCP client, not a server, and the release
+  // smoke must not grow a dependency the published package does not have.
+  //
+  // What this proves and what it does not: the extension loads inside the
+  // installed Pi, registers one tool per OBSERVED tool for the host toolset
+  // server, and — for the SDK-reserved helper below — really connects,
+  // handshakes and reads `tools/list` off a live child through
+  // `McpServerPool`. It does NOT reach `tools/call`: only a model turn invokes
+  // a registered tool, and this smoke sends no prompt and allows no inference.
+  // The call path (lazy open, drift re-verification, the call itself, the
+  // close) is covered against the same shape of server by
+  // `packages/client/src/__tests__/mcp-extension-call.test.ts`.
+  const fixtureServer = path.join(dir, 'fixture-mcp-server.mjs');
+  await writeFile(fixtureServer, `import { createInterface } from 'node:readline';
+let initialized = false;
+const TOOL = { name: process.argv[2] ?? 'echo', description: 'Echo text back.', inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false } };
+const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n');
+createInterface({ input: process.stdin }).on('line', line => {
+  if (!line.trim()) return;
+  const request = JSON.parse(line);
+  if (request.id === undefined || request.id === null) {
+    if (request.method === 'notifications/initialized') initialized = true;
+    return;
+  }
+  if (request.method === 'initialize') return reply(request.id, { protocolVersion: request.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'byok-release-fixture', version: '1.0.0' } });
+  if (request.method === 'tools/list' && initialized) return reply(request.id, { tools: [TOOL] });
+  if (request.method === 'tools/call') return reply(request.id, { content: [{ type: 'text', text: 'ok' }], isError: false });
+});
+`);
+  // Exactly what the daemon would hand a task: the servers plus the
+  // observation it took at admission. The extension registers from the
+  // observation and discovers nothing of its own.
+  const mcpTaskConfig = {
+    mcpServers: {
+      fixture: { command: process.execPath, args: [fixtureServer] },
+      // An SDK-RESERVED helper, which the extension reads live at
+      // `session_start` instead of from an observation. It is the one entry
+      // that makes the installed `McpServerPool` open a real connection during
+      // this smoke; a host toolset server stays unopened until it is called.
+      byokagentteam: { command: process.execPath, args: [fixtureServer, 'relay_probe'] },
+    },
+    observation: {
+      fixture: {
+        toolsetId: 'release.smoke.v1',
+        serverName: 'fixture',
+        serverInfo: { name: 'byok-release-fixture', version: '1.0.0' },
+        protocolVersion: '2025-11-25',
+        tools: [{
+          name: 'echo',
+          description: 'Echo text back.',
+          inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false },
+        }],
+      },
+    },
+  };
+  await writeFile(mcpConfigPath, JSON.stringify(mcpTaskConfig));
+  await writeFile(toolsObserver, `import {writeFileSync} from 'node:fs';
+export default function (pi) {
+ pi.on('session_start', () => { writeFileSync(${JSON.stringify(toolsMarker)}, JSON.stringify(pi.getActiveTools())); });
+}`);
   await writeFile(extension, `import {writeFileSync} from 'node:fs';
 export default function() {
  if (process.env.BYOK_PI_MCP_CONFIG_PATH !== ${JSON.stringify(mcpConfigPath)} || process.env.BYOK_PI_PERMISSION_MODE !== 'readonly') throw new Error('Missing task context');
@@ -80,8 +144,10 @@ export default function() {
   const directExtension = path.join(dir, 'direct extension.mjs');
   await writeFile(directExtension, `export default function() { if (process.env.BYOK_PI_PERMISSION_MODE !== 'readonly') throw new Error('Missing direct permission context'); }`);
   let directInvocation;
+  // No `resolveExtensions` stub: the installed adapter resolves its REAL
+  // extension stack, so the invocation captured below is the one a task would
+  // actually run — the SDK's own MCP extension included.
   const adapter = new PiAdapter({
-    resolveExtensions: () => Object.fromEntries(['webAccess', 'mcpAdapter', 'subagentsPolicy', 'subagents', 'todo'].map(name => [name, directExtension])),
     spawnFn: (command, args, options) => { directInvocation = { command, args, options }; throw new Error('capture before prompt'); },
   });
   const detected = await adapter.detect();
@@ -99,6 +165,21 @@ export default function() {
   assert.equal(directInvocation.command, process.execPath);
   assert.equal(directInvocation.args[0], path.join(piRoot, piManifest.bin.pi));
   assert.equal(directInvocation.options.shell, undefined);
+  // The real, installed extension stack — and the MCP extension is the SDK's
+  // own dist file, not a third-party package.
+  const loadedExtensions = directInvocation.args.filter((arg, index) => directInvocation.args[index - 1] === '--extension');
+  assert.equal(loadedExtensions.length, 5);
+  const sdkMcpExtension = path.join(clientRoot, 'dist/adapters/pi/mcp-extension.js');
+  assert.ok(loadedExtensions.includes(sdkMcpExtension), `real MCP extension missing from ${loadedExtensions.join(', ')}`);
+  assert.ok(!loadedExtensions.some(entry => entry.includes('pi-mcp-adapter')), 'pi-mcp-adapter is retired');
+  // The adapter creates its task-scoped MCP config, then removes it when the
+  // captured spawn throws. Re-create it at the exact path the captured
+  // environment names, so the observed invocation stays byte-identical while
+  // the real MCP extension has the task file it refuses to start without.
+  const capturedConfigPath = directInvocation.options.env.BYOK_PI_MCP_CONFIG_PATH;
+  assert.equal(typeof capturedConfigPath, 'string');
+  await mkdir(path.dirname(capturedConfigPath), { recursive: true });
+  await writeFile(capturedConfigPath, JSON.stringify(mcpTaskConfig));
   // Run that exact observed invocation with get_state only, no prompt/inference.
   child = spawn(directInvocation.command, directInvocation.args, { cwd: dir, env: directInvocation.options.env, stdio: ['pipe', 'pipe', 'pipe'] });
   const directClosed = once(child, 'close');
@@ -121,7 +202,8 @@ export default function() {
     const force = setTimeout(() => child.kill('SIGKILL'), 5_000);
     await directClosed; clearTimeout(force);
   }
-  console.log(`[release-pack] installed Pi${piManifest.version} detect/direct RPC passed; prompts=0`);
+  await rm(path.dirname(capturedConfigPath), { recursive: true, force: true });
+  console.log(`[release-pack] installed Pi${piManifest.version} detect/direct RPC with the real extension stack passed; prompts=0`);
 
   for (const [rejectedBinding, expected] of [
     [exactProviderProfileBinding(missingPi), /requires explicit pi_model/],
@@ -141,7 +223,12 @@ export default function() {
     '--provider', binding.profileRef, '--model', binding.modelId,
     '--profile-revision', binding.profileRevision, '--profile-hash', binding.profileHash,
     '--required-capabilities', '[]', '--validate-only', 'false',
-    '--', '--mode', 'rpc', '--extension', extension, '--no-tools',
+    '--', '--mode', 'rpc',
+    '--extension', extension,
+    // The real SDK-owned MCP extension, against the real stdio MCP servers
+    // configured above.
+    '--extension', path.join(clientRoot, 'dist/adapters/pi/mcp-extension.js'),
+    '--extension', toolsObserver,
   ], { cwd: dir, env, stdio: ['pipe', 'pipe', 'pipe'] });
   const closed = once(child, 'close');
   let stderr = '';
@@ -166,6 +253,20 @@ export default function() {
     assert.equal(state.data.thinkingLevel, modelConfig.thinkingLevel);
     assert.equal(state.data.messageCount, 0);
     assert.equal(JSON.parse(await readFile(marker, 'utf8')).loaded, true);
+    // One Pi tool per observed MCP tool, carrying the server's real schema —
+    // not a single `mcp` proxy, and not `mcpScript`. The name is spelled out
+    // rather than derived from the core's `projectMcpTools`: that helper is
+    // not part of the published surface, and re-deriving the qualified form
+    // here would make this file a second authority on the naming rule. That
+    // the registered set IS exactly the projection is asserted in-repo, in
+    // `packages/client/src/__tests__/mcp-projection.test.ts`.
+    const activeTools = JSON.parse(await readFile(toolsMarker, 'utf8'));
+    assert.ok(activeTools.includes('mcp__fixture__echo'), `registered tools: ${activeTools.join(', ')}`);
+    // The reserved helper is read LIVE off a connected child, so its bare tool
+    // name appearing here is proof the pool really handshook with a server.
+    assert.ok(activeTools.includes('relay_probe'), `reserved helper tool missing from: ${activeTools.join(', ')}`);
+    assert.ok(!activeTools.includes('mcp'), 'the retired MCP proxy tool must not be registered');
+    assert.ok(!activeTools.includes('mcpScript'), 'the retired mcpScript tool must not be registered');
     assert.equal(requests, 0);
   } finally {
     clearTimeout(timer); lines.close(); child.stdin.end(); child.kill('SIGTERM');

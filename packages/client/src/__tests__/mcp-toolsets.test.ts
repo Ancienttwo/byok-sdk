@@ -13,13 +13,14 @@ import { createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-da
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import {
-  McpToolsProbeAuthorityError,
+  McpAuthorityError,
   MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
-  probeMcpServerTools,
+  probeMcpServer,
 } from '../daemon/mcp-tools-probe';
 import { McpToolsetRegistry, McpToolsetRevisionConflictError } from '../daemon/toolset-registry';
 import type { McpToolsetConfig, RuntimeCapabilities } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { observationOf } from './fixtures/mcp-observation';
 
 const MCP_CAPABLE: RuntimeCapabilities = {
   steer: false,
@@ -55,7 +56,8 @@ async function tmpDir(prefix: string): Promise<string> {
  * that never exist on disk, so the observation is injected rather than
  * spawned — `salesko-mcp-e2e.test.ts` covers the real handshake end to end.
  */
-const stubToolsProbe: NonNullable<TaskRunnerDeps['mcpToolsetToolsProbe']> = async () => ['find_leads'];
+const stubToolsProbe: NonNullable<TaskRunnerDeps['mcpToolsetToolsProbe']> =
+  async (serverName) => observationOf({ [serverName]: ['find_leads'] })[serverName]!;
 
 /** A server that completes no handshake at all — used to time the admission deadline. */
 const SILENT_PROBE_FIXTURE = fileURLToPath(new URL('./fixtures/probe-mcp-server.mjs', import.meta.url));
@@ -126,7 +128,11 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     });
     // The observed tool names travel beside the server definition; they are
     // the only names an adapter may pre-grant to a runtime.
-    expect(adapter.startCalls[0]?.ctx.mcpToolsetTools).toEqual({ salesko: ['find_leads'] });
+    // Keyed by projected server name and carrying the registry's toolset id:
+    // the observation the adapter receives says which toolset each server came
+    // from, so no parallel map has to agree with it.
+    expect(adapter.startCalls[0]?.ctx.mcpToolsetTools)
+      .toEqual(observationOf({ salesko: ['find_leads'] }, { toolsetId: 'salesko' }));
     expect('requiredToolsets' in (adapter.startCalls[0]?.task ?? {})).toBe(false);
     expect(JSON.stringify(sent)).not.toContain('/opt/salesko/bin/mcp');
 
@@ -210,7 +216,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
   it('declines pre-claim, retryably, when a projected toolset server cannot be observed', async () => {
     for (const probe of [
       async () => { throw new Error('server exited before handshake'); },
-      async () => [],
+      async (serverName) => ({ ...observationOf({ [serverName]: [] })[serverName]!, tools: [] }),
     ] satisfies Array<NonNullable<TaskRunnerDeps['mcpToolsetToolsProbe']>>) {
       const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
       const sent: Envelope[] = [];
@@ -266,7 +272,8 @@ describe('TaskRunner logical MCP toolset resolution', () => {
 
     expect(adapter.startCalls[0]?.ctx.mcpServers).toEqual({ salesko: { command: '/opt/salesko/mcp-v1' } });
     expect(adapter.startCalls[1]?.ctx.mcpServers).toEqual({ salesko: { command: '/opt/salesko/mcp-v2' } });
-    expect(adapter.startCalls[1]?.ctx.mcpToolsetTools).toEqual({ salesko: ['find_leads'] });
+    expect(adapter.startCalls[1]?.ctx.mcpToolsetTools)
+      .toEqual(observationOf({ salesko: ['find_leads'] }, { toolsetId: 'salesko' }));
 
     await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-before-reload', seq: 3 }));
     await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-after-reload', seq: 4 }));
@@ -274,16 +281,17 @@ describe('TaskRunner logical MCP toolset resolution', () => {
 });
 
 describe('TaskRunner toolset tools/list probe — who pays for it, and for how long', () => {
-  it('never probes for an adapter that grants projected toolset tools itself', async () => {
-    // The pi shape: `mcpToolsets: true`, but it projects servers through its
-    // own extension and reads no observation, so an offer routed to it must
-    // not wait on a `tools/list` handshake per projected server.
+  it('never observes for an adapter that declares it consumes no observation', async () => {
+    // An adapter that binds no observed tool must not make an offer wait on a
+    // `tools/list` handshake per projected server. No shipped adapter is in
+    // this shape any more — claude, codex and pi all bind observed tools — but
+    // the descriptor flag is the contract, so it is tested on its own.
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: true, resume: true, approvalInteractive: false, mcpToolsets: true,
       permissionModes: ['auto', 'readonly'],
     }, false);
     const sent: Envelope[] = [];
-    const probe = vi.fn<NonNullable<TaskRunnerDeps['mcpToolsetToolsProbe']>>(async () => ['find_leads']);
+    const probe = vi.fn<NonNullable<TaskRunnerDeps['mcpToolsetToolsProbe']>>(stubToolsProbe);
     const runner = await makeRunner(
       adapter,
       sent,
@@ -320,7 +328,7 @@ describe('TaskRunner toolset tools/list probe — who pays for it, and for how l
       new Map([['salesko', { mcpServers: { salesko: { command: '/opt/salesko/bin/mcp' } } }]]),
       undefined,
       async () => {
-        throw new McpToolsProbeAuthorityError(
+        throw new McpAuthorityError(
           'MCP toolset server "salesko" tools/list reported an ungrantable tool name "evil,tool"',
         );
       },
@@ -360,9 +368,9 @@ describe('TaskRunner toolset tools/list probe — who pays for it, and for how l
       // Forwards to the REAL handshake, recording the budget the runner chose
       // and shortening it so the case stays fast. Concurrency, not the value
       // of the constant, is what the elapsed assertion below proves.
-      async (server, options) => {
+      async (serverName, server, options) => {
         budgets.push(options.timeoutMs);
-        return probeMcpServerTools(server, { ...options, timeoutMs: SHORTENED_PROBE_TIMEOUT_MS });
+        return probeMcpServer(serverName, server, { ...options, timeoutMs: SHORTENED_PROBE_TIMEOUT_MS });
       },
     );
 

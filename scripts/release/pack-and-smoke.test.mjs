@@ -52,15 +52,15 @@ test('release pack accepts exact prerelease versions while Pi remains a stable p
 
 test('the Pi runtime identity authority admits only an exact fork alias', () => {
   assert.deepEqual(
-    parsePiRuntimeIdentity({ dependencies: { [PI_DEPENDENCY_SPECIFIER]: 'npm:@byok-sdk/pi-coding-agent@0.85.1001' } }),
+    parsePiRuntimeIdentity({ dependencies: { [PI_DEPENDENCY_SPECIFIER]: 'npm:@byok-sdk/pi-coding-agent@0.85.1002' } }),
     {
       specifier: PI_DEPENDENCY_SPECIFIER,
-      spec: 'npm:@byok-sdk/pi-coding-agent@0.85.1001',
+      spec: 'npm:@byok-sdk/pi-coding-agent@0.85.1002',
       packageName: '@byok-sdk/pi-coding-agent',
-      version: '0.85.1001',
+      version: '0.85.1002',
     },
   );
-  for (const rejected of ['0.85.1', 'npm:@byok-sdk/pi-coding-agent@^0.85.1001', 'npm:@byok-sdk/pi-coding-agent@latest', 'npm:@byok-sdk/pi-coding-agent', '']) {
+  for (const rejected of ['0.85.1', 'npm:@byok-sdk/pi-coding-agent@^0.85.1002', 'npm:@byok-sdk/pi-coding-agent@latest', 'npm:@byok-sdk/pi-coding-agent', '']) {
     assert.throws(
       () => parsePiRuntimeIdentity({ dependencies: { [PI_DEPENDENCY_SPECIFIER]: rejected } }),
       /must be pinned to an exact npm:<name>@x\.y\.z fork alias/,
