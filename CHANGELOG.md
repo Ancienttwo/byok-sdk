@@ -5,6 +5,49 @@
 Deliberately not filed under 0.18.0: none of this is in a published artifact,
 and the D2 version number belongs to a separate SDK release contract.
 
+- **Breaking (adapter seam)** — `RuntimeOperationStartInput` is a discriminated
+  union. The ordinary start is `{ kind: 'instruction', instruction, ... }`; a
+  prepared Execution is `{ kind: 'prepared', preparation, ... }` and carries no
+  instruction at all.
+
+  A union rather than an optional field beside `instruction`, because the two
+  are mutually exclusive authority over the same request bytes: on one shape
+  every adapter would have to decide which wins, and the answer would be
+  written three times. claude and codex refuse the prepared variant by name;
+  only the pi lane can consume one, because the artifact is compiled against
+  the verified installed pi closure.
+
+- **Added** — `byok-pi-prepared`, the SDK-owned prepared launch host for the pi
+  runtime.
+
+  `pi --mode rpc` can never consume a prepared request: only a session built by
+  the fork's `createPreparedAgentSession` carries the authorized binding, so the
+  ordinary CLI answers `prompt_prepared` with `prepared_session_unsupported`.
+  The new bin is that session — a zero-extension, zero-resource in-process host
+  that hands the native factory an explicit tool closure and then runs the same
+  `runRpcMode` loop, so the adapter speaks one RPC protocol either way. Its MCP
+  toolset tools come from the same task-scoped pool the ordinary Pi extension
+  uses (extracted to `adapters/pi/mcp-server-pool.ts`), so a tool call has
+  exactly one executor, and every server it starts goes through the same
+  trusted launch directory and the same implementation identity gate.
+
+  It compiles nothing. The native compiler remains the only authority on the
+  request bytes: the artifact's envelope crosses verbatim, the native session
+  verifies it against expectations taken from the durable record rather than
+  from the envelope, and every prepared failure code is raised before any
+  provider transport and is terminal — none of them permits re-sending a
+  different input under the same accounting. A prepared Execution never resumes,
+  and one admitted under a permission mode its manifest was not counted for is
+  refused rather than reconciled.
+
+  PARTIAL, unchanged from the preparation side and now stated on both: the
+  prepared Main tool set is policy-filtered native tools plus MCP toolset tools,
+  and only the MCP half is counted. The fork's API is not the limit — its
+  `tools` option would take Pi's built-ins unchanged — so the launch entry
+  resolves the native selection for real from the whole admitted policy
+  (`allowTools`/`denyTools`, not just `mode`) and refuses a non-empty result by
+  name instead of registering a tool the frozen manifest does not contain.
+
 - **Breaking (control contract)** — a preparation request no longer carries a
   tool manifest. This changes the UNRELEASED candidate contract relative to
   0.18; no published artifact speaks the old shape.

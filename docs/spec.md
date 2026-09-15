@@ -258,6 +258,59 @@ before claim. A prepared operation receives runtime resources only after the
 sealed manifest exists and claim has succeeded. This is a client-internal
 admission/lifecycle cut: protocol-v1 bytes and runtime ids are unchanged.
 
+### Prepared launch
+
+A prepared Execution does not carry an instruction. It carries a reference to
+an already-counted preparation record plus the retained artifact that record
+retained, and the runtime's job is to send those exact bytes — not to compile a
+request of its own. `RuntimeOperationStartInput` is therefore discriminated:
+the ordinary variant carries a resolved `instruction`, the prepared variant
+carries the preparation, and an adapter that has no prepared lane refuses the
+variant by name. Only the pi lane can consume one, because the artifact is
+compiled against the verified installed pi closure.
+
+`pi --mode rpc` is never that lane. Only a session built by the fork's
+`createPreparedAgentSession` carries the authorized binding, so the ordinary
+CLI answers `prompt_prepared` with `prepared_session_unsupported`. The pi
+adapter instead launches the SDK-owned `byok-pi-prepared` host: an in-process
+Node child that constructs the prepared session with an explicit, complete tool
+closure and then runs the same RPC loop, so one protocol serves both lanes.
+
+What the prepared host IS authoritative for: the tool closure it registers, the
+launch boundary its MCP children start in, and the identity gate applied to
+every one of them. It reaches those servers through the same task-scoped pool
+the ordinary Pi extension uses, so a tool call has exactly one executor. It
+loads no extension, skill, prompt template, theme or context file at all — its
+resource loader is constructed and never reloaded — which is what makes the
+session's own prompt projection predictable enough for the native drift check
+to mean something.
+
+What it is NOT authoritative for: the request bytes. It compiles nothing. The
+native compiler produced D, the artifact retains it verbatim, and the native
+session verifies the envelope against expectations taken from the durable
+record rather than from the envelope itself. Every prepared failure —
+`prepared_context_drift`, `prepared_model_drift`, `prepared_registry_drift` and
+the rest — is raised before any provider transport, is reported to the caller
+with its native code, and is terminal: no prepared failure permits re-sending a
+different input under the same accounting.
+
+Two refusals are structural rather than incidental. A prepared Execution never
+resumes: a sealed `sessionRef` and a preparation reference together fail closed,
+because resuming binds the frozen request to a history nobody counted. And a
+prepared operation admitted under a permission mode its manifest was not counted
+for is refused, because a manifest is the policy-filtered set for exactly one
+mode.
+
+PARTIAL, and stated where it is: the prepared Main tool set is Q1's
+policy-filtered native tools plus the MCP toolset tools, and only the MCP half
+exists today. The fork's own API is not the limit — `createPreparedAgentSession`
+takes an explicit tool array and would accept Pi's built-ins beside the MCP
+tools unchanged — but nothing counts them yet, so a policy that selects a native
+tool is refused by name rather than registered into guaranteed drift. The
+selection is resolved from the whole admitted policy (`allowTools` and
+`denyTools`, not merely `mode`) so that the day the preparation side counts a
+native half, the policy that chose it is already what gets bound.
+
 ### Post-admission runtime failure authority
 
 After claim, every expected adapter failure crosses one of two boundaries as a
