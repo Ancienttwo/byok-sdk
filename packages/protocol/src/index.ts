@@ -105,6 +105,7 @@ export type {
 export {
   AGENT_INPUT_PREPARATION_CAPABILITY,
   InputPreparationContentHashSchema,
+  InputPreparationPermissionModeSchema,
   InputPreparationPolicyRevisionSchema,
   InputPreparationProfileIdSchema,
   InputPreparationSourceSchema,
@@ -122,12 +123,14 @@ export {
   InputPreparationRuntimeIdentitySchema,
   InputPreparationCounterTargetSchema,
   InputPreparationCounterEvidenceSchema,
+  InputPreparationToolImplementationKindSchema,
   InputPreparationArtifactSummarySchema,
   InputPreparationBindingSchema,
   InputPreparationReceiptSummarySchema,
   InputPreparationRejectionReasonSchema,
 } from './input-preparation';
 export type {
+  InputPreparationPermissionMode,
   InputPreparationSource,
   InputPreparationModel,
   InputPreparationOptions,

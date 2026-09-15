@@ -24,6 +24,7 @@ import {
 } from './agent-home-projection';
 import {
   InputPreparationContentHashSchema,
+  InputPreparationPermissionModeSchema,
   InputPreparationPolicyRevisionSchema,
   InputPreparationProfileIdSchema,
   InputPreparationSelectionSchema,
@@ -633,6 +634,14 @@ const InputPreparationBlobContextSchema = z
  * `deadlineAt` may only ever be TIGHTENED locally: the device clamps to
  * `min(deadlineAt - now, limits.preparationDeadlineMs)`, so a generous Host
  * deadline cannot enlarge a configured local bound.
+ *
+ * `permissionMode` is DECLARED by the requester and validated by the device;
+ * the device never infers it. A preparation counts tokens for one concrete
+ * tool manifest, and that manifest is the policy-filtered set for exactly one
+ * mode (`mcp/projection.ts`'s `filterMcpObservationForPolicy`) — so a
+ * preparation whose mode is unstated is a count of a manifest nobody named.
+ * The device applies the declared mode to its own observation and records it
+ * in the artifact binding; it is not a grant, and it authorizes nothing.
  */
 export const AgentInputPreparationPayloadSchema = z
   .object({
@@ -645,6 +654,7 @@ export const AgentInputPreparationPayloadSchema = z
     deadlineAt: z.iso.datetime({ offset: true }),
     context: z.union([InputPreparationInlineContextSchema, InputPreparationBlobContextSchema]),
     requiredToolsets: RequiredToolsetsSchema,
+    permissionMode: InputPreparationPermissionModeSchema,
   })
   .strict();
 export type AgentInputPreparationPayload = z.infer<typeof AgentInputPreparationPayloadSchema>;

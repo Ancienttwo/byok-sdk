@@ -3751,6 +3751,15 @@
             "maxLength": 128,
             "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
           }
+        },
+        "permissionMode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "confirm",
+            "readonly",
+            "plan"
+          ]
         }
       },
       "required": [
@@ -3762,7 +3771,8 @@
         "selection",
         "deadlineAt",
         "context",
-        "requiredToolsets"
+        "requiredToolsets",
+        "permissionMode"
       ],
       "additionalProperties": false
     },
@@ -8152,6 +8162,15 @@
                   "maxLength": 128,
                   "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
                 }
+              },
+              "permissionMode": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "confirm",
+                  "readonly",
+                  "plan"
+                ]
               }
             },
             "required": [
@@ -8163,7 +8182,8 @@
               "selection",
               "deadlineAt",
               "context",
-              "requiredToolsets"
+              "requiredToolsets",
+              "permissionMode"
             ],
             "additionalProperties": false
           }
@@ -14906,6 +14926,15 @@
                           "maxLength": 128,
                           "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
                         }
+                      },
+                      "permissionMode": {
+                        "type": "string",
+                        "enum": [
+                          "auto",
+                          "confirm",
+                          "readonly",
+                          "plan"
+                        ]
                       }
                     },
                     "required": [
@@ -14917,7 +14946,8 @@
                       "selection",
                       "deadlineAt",
                       "context",
-                      "requiredToolsets"
+                      "requiredToolsets",
+                      "permissionMode"
                     ],
                     "additionalProperties": false
                   }
@@ -20708,6 +20738,15 @@
                           "maxLength": 128,
                           "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
                         }
+                      },
+                      "permissionMode": {
+                        "type": "string",
+                        "enum": [
+                          "auto",
+                          "confirm",
+                          "readonly",
+                          "plan"
+                        ]
                       }
                     },
                     "required": [
@@ -20719,7 +20758,8 @@
                       "selection",
                       "deadlineAt",
                       "context",
-                      "requiredToolsets"
+                      "requiredToolsets",
+                      "permissionMode"
                     ],
                     "additionalProperties": false
                   }
@@ -23417,6 +23457,15 @@
                       "maxLength": 512,
                       "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
+                    "permissionMode": {
+                      "type": "string",
+                      "enum": [
+                        "auto",
+                        "confirm",
+                        "readonly",
+                        "plan"
+                      ]
+                    },
                     "runtime": {
                       "type": "object",
                       "properties": {
@@ -23495,6 +23544,7 @@
                     "source",
                     "target",
                     "policyRevision",
+                    "permissionMode",
                     "runtime",
                     "requestDigest"
                   ],
@@ -23536,6 +23586,31 @@
                       "minLength": 1,
                       "maxLength": 512,
                       "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "observationDigest": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "toolBindingDigest": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "toolImplementationKinds": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                      },
+                      "additionalProperties": {
+                        "type": "string",
+                        "pattern": "^(?:attested|unavailable:[a-z_]{1,64})$"
+                      }
                     }
                   },
                   "required": [
@@ -23544,7 +23619,10 @@
                     "toolManifestDigest",
                     "requestBytes",
                     "projectionBytes",
-                    "coverage"
+                    "coverage",
+                    "observationDigest",
+                    "toolBindingDigest",
+                    "toolImplementationKinds"
                   ],
                   "additionalProperties": false
                 },
@@ -23771,7 +23849,9 @@
                 "context_unresolvable",
                 "context_hash_mismatch",
                 "toolsets_unobservable",
-                "deadline_elapsed"
+                "deadline_elapsed",
+                "launch_boundary_unavailable",
+                "observation_drift"
               ]
             }
           },
@@ -23965,6 +24045,15 @@
                   "maxLength": 512,
                   "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 },
+                "permissionMode": {
+                  "type": "string",
+                  "enum": [
+                    "auto",
+                    "confirm",
+                    "readonly",
+                    "plan"
+                  ]
+                },
                 "runtime": {
                   "type": "object",
                   "properties": {
@@ -24043,6 +24132,7 @@
                 "source",
                 "target",
                 "policyRevision",
+                "permissionMode",
                 "runtime",
                 "requestDigest"
               ],
@@ -24084,6 +24174,31 @@
                   "minLength": 1,
                   "maxLength": 512,
                   "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "observationDigest": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "toolBindingDigest": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "toolImplementationKinds": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                  },
+                  "additionalProperties": {
+                    "type": "string",
+                    "pattern": "^(?:attested|unavailable:[a-z_]{1,64})$"
+                  }
                 }
               },
               "required": [
@@ -24092,7 +24207,10 @@
                 "toolManifestDigest",
                 "requestBytes",
                 "projectionBytes",
-                "coverage"
+                "coverage",
+                "observationDigest",
+                "toolBindingDigest",
+                "toolImplementationKinds"
               ],
               "additionalProperties": false
             },
@@ -24255,7 +24373,9 @@
             "context_unresolvable",
             "context_hash_mismatch",
             "toolsets_unobservable",
-            "deadline_elapsed"
+            "deadline_elapsed",
+            "launch_boundary_unavailable",
+            "observation_drift"
           ]
         },
         "completedAt": {

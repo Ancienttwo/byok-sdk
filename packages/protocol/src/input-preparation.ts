@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AgentEgressContentHashSchema } from './agent-egress';
+import { PERMISSION_MODES } from './permission';
 
 /**
  * Remote authenticated runtime input preparation — the wire half of
@@ -70,6 +71,22 @@ export const InputPreparationPolicyRevisionSchema = OPAQUE_ID;
  * anything is compiled.
  */
 export const InputPreparationProfileIdSchema = OPAQUE_ID;
+
+/**
+ * The permission mode a preparation is compiled FOR.
+ *
+ * It is the same closed set every task policy uses (`permission.ts`'s
+ * `PERMISSION_MODES`), spelled here as its own schema because a preparation
+ * carries a mode without carrying a policy: there is no task, no grant and no
+ * approval seam on this wire. The mode selects which tools the device's own
+ * observation projects into the counted manifest, and nothing else.
+ *
+ * Declared by the requester rather than inferred by the device: a device that
+ * guessed would be counting a manifest the requester never asked for, and a
+ * device that defaulted would silently count the widest one.
+ */
+export const InputPreparationPermissionModeSchema = z.enum(PERMISSION_MODES);
+export type InputPreparationPermissionMode = z.infer<typeof InputPreparationPermissionModeSchema>;
 
 // ---------------------------------------------------------------------------
 // Source / selection
@@ -273,7 +290,40 @@ export const InputPreparationCounterEvidenceSchema = z
   })
   .strict();
 
-/** Identities and sizes only. Never D, never P(D), never the snapshot. */
+/**
+ * What the device established about the implementation behind ONE
+ * model-visible tool: `attested`, or `unavailable:<reason>` naming which of
+ * the SDK's closed unavailable reasons applies.
+ *
+ * A kind, never the identity itself: an install path, a closure digest or a
+ * stat tuple is device-local filesystem detail, and a receipt discloses
+ * identity facts, not the machine's layout.
+ */
+export const InputPreparationToolImplementationKindSchema = z
+  .string()
+  .regex(/^(?:attested|unavailable:[a-z_]{1,64})$/u, 'a tool implementation kind is "attested" or "unavailable:<reason>"');
+
+/**
+ * Identities and sizes only. Never D, never P(D), never the snapshot.
+ *
+ * The three tool-surface fields are what make drift between preparation and
+ * launch checkable rather than assumed:
+ *
+ * - `observationDigest` binds everything the device OBSERVED — the projected
+ *   tools, their executor fingerprints, the launch attestation and the
+ *   implementation identities — so a launch whose live observation differs is
+ *   a different manifest, whatever the schemas say.
+ * - `toolBindingDigest` binds only the facts that can be re-derived WITHOUT
+ *   spawning a server: the launch attestation, the toolset definition
+ *   revisions and the implementation identities. It is what a replay of an
+ *   already-recorded requestId compares against, because re-probing to detect
+ *   drift would be the second executor fact the idempotency key exists to
+ *   prevent.
+ * - `toolImplementationKinds` states, per model-visible tool name, whether the
+ *   implementation behind it was attested. It is the evidence behind
+ *   `executor_identity_unproven`, so a reader does not have to take that
+ *   readiness reason on trust.
+ */
 export const InputPreparationArtifactSummarySchema = z
   .object({
     requestDigest: OPAQUE_ID,
@@ -282,6 +332,9 @@ export const InputPreparationArtifactSummarySchema = z
     requestBytes: z.number().int().nonnegative(),
     projectionBytes: z.number().int().nonnegative(),
     coverage: OPAQUE_ID,
+    observationDigest: OPAQUE_ID,
+    toolBindingDigest: OPAQUE_ID,
+    toolImplementationKinds: z.record(OPAQUE_ID, InputPreparationToolImplementationKindSchema),
   })
   .strict();
 
@@ -296,6 +349,14 @@ export const InputPreparationBindingSchema = z
     source: InputPreparationSourceSchema,
     target: InputPreparationCounterTargetSchema,
     policyRevision: OPAQUE_ID,
+    /**
+     * The mode the counted manifest was filtered for. Recorded on the binding
+     * rather than only inside the request digest so a consumer can COMPARE it
+     * without re-deriving the digest: an Execution offered under a different
+     * mode is an Execution whose registered tool set differs from the one
+     * these tokens were counted for.
+     */
+    permissionMode: InputPreparationPermissionModeSchema,
     runtime: InputPreparationRuntimeIdentitySchema,
     requestDigest: OPAQUE_ID,
   })
@@ -362,5 +423,22 @@ export const InputPreparationRejectionReasonSchema = z.enum([
   'context_hash_mismatch',
   'toolsets_unobservable',
   'deadline_elapsed',
+  /**
+   * The device could not prove a non-writable launch directory (or a trusted
+   * launcher) for the MCP toolset servers this preparation names, so it
+   * refused rather than observing them in a directory the agent's own uid can
+   * write. The specific `TrustedLaunchCwdUnavailableReason` travels in the
+   * receipt's `detail`; it is not widened into a spawn.
+   */
+  'launch_boundary_unavailable',
+  /**
+   * A repeat of an already-recorded `requestId` arrived after the facts its
+   * executor fingerprints were frozen against changed — a toolset definition
+   * revision, the launch attestation, or an implementation identity that no
+   * longer measures the same. The recorded receipt is not re-derived and no
+   * server is re-probed; the repeat is refused so the caller mints a new
+   * preparation instead of silently receiving one bound to stale evidence.
+   */
+  'observation_drift',
 ]);
 export type InputPreparationRejectionReason = z.infer<typeof InputPreparationRejectionReasonSchema>;

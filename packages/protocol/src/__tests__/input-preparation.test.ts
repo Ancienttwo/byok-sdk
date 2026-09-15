@@ -50,6 +50,7 @@ function payload(overrides: Record<string, unknown> = {}): Record<string, unknow
     deadlineAt: '2026-01-01T00:01:00.000Z',
     context: { inline: '{"prompt":{},"messages":[]}' },
     requiredToolsets: ['team'],
+    permissionMode: 'auto',
     ...overrides,
   };
 }
@@ -63,6 +64,7 @@ const BINDING = {
   source: SOURCE,
   target: { endpoint: 'https://provider.example/v1', modelId: 'model-1' },
   policyRevision: 'limits-r1',
+  permissionMode: 'auto',
   runtime: {
     packageName: '@byok-sdk/pi-coding-agent',
     packageVersion: '0.85.1001',
@@ -87,6 +89,9 @@ const RECEIPT = {
     requestBytes: 1024,
     projectionBytes: 900,
     coverage: 'unknown',
+    observationDigest: 'sha256:observation',
+    toolBindingDigest: 'sha256:binding',
+    toolImplementationKinds: { mcp__team__list: 'unavailable:resolver_unconfigured' },
   },
   ready: false,
   readinessReasons: ['compiler_coverage_unknown', 'executor_identity_unproven'],
@@ -138,6 +143,7 @@ describe('agent.input.preparation envelope', () => {
       'agentRef',
       'context',
       'deadlineAt',
+      'permissionMode',
       'policyRevision',
       'profileId',
       'requestId',

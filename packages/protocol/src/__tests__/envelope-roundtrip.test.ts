@@ -367,6 +367,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
           deadlineAt: '2026-01-01T00:01:00.000Z',
           context: { inline: '{"prompt":{},"messages":[]}' },
           requiredToolsets: ['team'],
+          permissionMode: 'readonly',
         },
         { seq: 9 },
       ),
