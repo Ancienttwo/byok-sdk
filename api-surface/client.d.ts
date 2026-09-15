@@ -9801,17 +9801,29 @@ export interface InputPreparationBindingV1 {
     readonly requestDigest: string;
 }
 /**
- * G3b placeholder. Reserved so a committed Execution can later bind
- * `(taskId, attempt, source identity)` onto an existing receipt without a
- * schema break. Nothing in this package ever writes it, and a control client
- * cannot set it: only an independently validated committed Execution may pin
- * (§10.3.7).
+ * The committed Execution one counted preparation is bound to (§10.3.7).
+ *
+ * Written exactly once per record, by `InputPreparationStore.pin`, through a
+ * compare-and-set inside the store's own serialized closure. It is the record's
+ * single-consumer proof: a preparation counts ONE request, so a second runner
+ * that reaches the same reference finds the pin occupied and declines with zero
+ * claim and zero dispatch.
+ *
+ * A control client cannot set it. The only writer is the daemon's offer
+ * admission, after it has sealed a manifest it already proved equal to this
+ * record's binding and artifact summary — which is why `manifestDigest` is
+ * here: the pin names the exact sealed Execution that consumed the record, so a
+ * later reader does not have to take "some task claimed it" on trust.
+ *
+ * `sealedAt` is the moment the manifest was sealed, not the moment the append
+ * landed: the seal is the fact being recorded.
  */
 export interface InputPreparationPinV1 {
+    /** The protocol task id of the Execution that consumed this preparation. */
     readonly taskId: string;
-    readonly attempt: number;
-    readonly sourceIdentity: string;
-    readonly pinnedAt: string;
+    /** `inputPreparationDigest` over the sealed `RuntimeOperationManifest`. */
+    readonly manifestDigest: string;
+    readonly sealedAt: string;
 }
 /**
  * Durable lifecycle state of one preparation record.
@@ -9861,7 +9873,7 @@ export interface InputPreparationReceiptV1 {
     readonly updatedAt: string;
     readonly artifactExpiresAt: string;
     readonly recordExpiresAt: string;
-    /** Always absent in B-P2. See {@link InputPreparationPinV1}. */
+    /** Present once a committed Execution consumed this record. See {@link InputPreparationPinV1}. */
     readonly pin?: InputPreparationPinV1;
 }
 /**

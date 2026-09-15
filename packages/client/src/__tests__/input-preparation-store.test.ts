@@ -393,28 +393,77 @@ describe('B-P2 store: policy accounting and retention', () => {
     expect(store.scopeUsage('scope-a').counterCalls).toBe(1);
   });
 
-  it('never collects a pinned record, so a later G3b pin cannot race GC', async () => {
+  it('never collects a pinned record, and collects it again once the pin is released', async () => {
     const storeDir = await tmpStoreDir();
     let clock = 1_000_000;
     const store = await openStore(storeDir, { retentionMs: 10_000, retryHorizonMs: 1_000, now: () => clock });
     const created = await store.reserve(reserve());
-    await store.update(created.record.recordId, { state: 'counted', counterCalls: 1 });
+    await store.commitCounterReservation(commit(created.record.recordId));
+    await store.update(created.record.recordId, { state: 'counted' });
+    await store.pin(created.record.recordId, { taskId: 't-1', manifestDigest: 'm-1', sealedAt: new Date(clock).toISOString() });
 
-    // This package never writes `pin`; reaching in here proves the GC guard
-    // exists BEFORE G3b can depend on it.
-    const logPath = path.join(storeDir, 'input-preparation', 'records.jsonl');
-    const lines = (await fs.readFile(logPath, 'utf8')).split('\n').filter((line) => line.length > 0);
-    const last = JSON.parse(lines[lines.length - 1]!) as Record<string, unknown>;
-    await fs.appendFile(
-      logPath,
-      `${JSON.stringify({ ...last, pin: { taskId: 't-1', attempt: 1, sourceIdentity: 's-1', pinnedAt: new Date(clock).toISOString() } })}\n`,
-      'utf8',
-    );
-
+    // Long past both horizons: the pin, not the clock, is what keeps the record
+    // and its retained bytes alive.
     const restarted = await openStore(storeDir, { retentionMs: 10_000, retryHorizonMs: 1_000, now: () => clock });
     clock += 1_000_000;
     expect(await restarted.gc()).toEqual({ artifactsRemoved: 0, recordsRemoved: 0 });
     expect(restarted.find(key())?.pin?.taskId).toBe('t-1');
+
+    await restarted.unpin(created.record.recordId, 't-1');
+    expect(await restarted.gc()).toEqual({ artifactsRemoved: 0, recordsRemoved: 1 });
+    expect(restarted.find(key())).toBeUndefined();
+  });
+
+  it('admits exactly one of two Executions racing the same record, and tells the loser who won', async () => {
+    const storeDir = await tmpStoreDir();
+    const store = await openStore(storeDir);
+    const created = await store.reserve(reserve());
+    await store.commitCounterReservation(commit(created.record.recordId));
+    await store.update(created.record.recordId, { state: 'counted' });
+
+    const at = new Date().toISOString();
+    const outcomes = await Promise.all([
+      store.pin(created.record.recordId, { taskId: 'task-left', manifestDigest: 'manifest-left', sealedAt: at }),
+      store.pin(created.record.recordId, { taskId: 'task-right', manifestDigest: 'manifest-right', sealedAt: at }),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.kind === 'pinned')).toHaveLength(1);
+    const loser = outcomes.find((outcome) => outcome.kind === 'occupied');
+    expect(loser).toBeDefined();
+    // The loser learns WHICH Execution holds the record, not merely that one does.
+    expect(loser!.record.pin?.taskId).toBe(store.get(created.record.recordId)?.pin?.taskId);
+    expect(['task-left', 'task-right']).toContain(store.get(created.record.recordId)?.pin?.taskId);
+  });
+
+  it('reads back the same pin for a replay of the same Execution, and refuses a different seal of the same task', async () => {
+    const storeDir = await tmpStoreDir();
+    const store = await openStore(storeDir);
+    const created = await store.reserve(reserve());
+    await store.commitCounterReservation(commit(created.record.recordId));
+    await store.update(created.record.recordId, { state: 'counted' });
+    const pin = { taskId: 'task-1', manifestDigest: 'manifest-1', sealedAt: new Date().toISOString() } as const;
+
+    expect((await store.pin(created.record.recordId, pin)).kind).toBe('pinned');
+    expect((await store.pin(created.record.recordId, pin)).kind).toBe('pinned');
+    expect((await store.pin(created.record.recordId, { ...pin, manifestDigest: 'manifest-2' })).kind).toBe('occupied');
+  });
+
+  it('refuses to pin a record that retains no artifact, and refuses a release by a task that does not hold the pin', async () => {
+    const storeDir = await tmpStoreDir();
+    const store = await openStore(storeDir);
+    const created = await store.reserve(reserve());
+    await expect(store.pin(created.record.recordId, { taskId: 't', manifestDigest: 'm', sealedAt: new Date().toISOString() }))
+      .rejects.toBeInstanceOf(InputPreparationIntegrityError);
+
+    await store.commitCounterReservation(commit(created.record.recordId));
+    await store.update(created.record.recordId, { state: 'counted' });
+    await store.pin(created.record.recordId, { taskId: 'holder', manifestDigest: 'm', sealedAt: new Date().toISOString() });
+    await expect(store.unpin(created.record.recordId, 'someone-else')).rejects.toBeInstanceOf(InputPreparationIntegrityError);
+    expect(store.get(created.record.recordId)?.pin?.taskId).toBe('holder');
+
+    // Releasing a record nobody pinned is not an error: the pin's job is done either way.
+    const second = await store.reserve(reserve({ key: key({ requestId: 'req-unpinned' }), requestDigest: 'digest-unpinned' }));
+    expect((await store.unpin(second.record.recordId, 'holder')).pin).toBeUndefined();
   });
 });
 

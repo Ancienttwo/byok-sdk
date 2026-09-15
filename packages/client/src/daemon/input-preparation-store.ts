@@ -80,7 +80,7 @@ export interface InputPreparationRecord {
   readonly updatedAt: string;
   readonly artifactExpiresAt: string;
   readonly recordExpiresAt: string;
-  /** Reserved for G3b. This package never writes it. */
+  /** The committed Execution that consumed this record, written once by {@link InputPreparationStore.pin}. */
   readonly pin?: InputPreparationPinV1;
 }
 
@@ -209,6 +209,17 @@ export interface CounterReservationInput {
 export type ReserveOutcome =
   | { readonly kind: 'created'; readonly record: InputPreparationRecord }
   | { readonly kind: 'existing'; readonly record: InputPreparationRecord };
+
+/**
+ * The result of one compare-and-set against a record's single pin slot.
+ *
+ * `occupied` is not an error: it is the answer the losing runner of a race is
+ * supposed to get, and it carries the record so the caller can report WHICH
+ * Execution holds it.
+ */
+export type PinOutcome =
+  | { readonly kind: 'pinned'; readonly record: InputPreparationRecord }
+  | { readonly kind: 'occupied'; readonly record: InputPreparationRecord };
 
 /** The mutable fields one durable transition may set. Identity and key are immutable. */
 export interface RecordPatch {
@@ -541,6 +552,94 @@ export class InputPreparationStore {
   }
 
   /**
+   * The absolute path of one record's retained artifact.
+   *
+   * Exposed because a prepared Execution is handed a PATH, not bytes: the
+   * artifact carries D, P(D) and the whole native envelope, and there is
+   * exactly one retained copy of it. A second inline representation crossing to
+   * the adapter would be a second authority over the same bytes. Deriving the
+   * path anywhere else would be a second authority over the layout instead.
+   */
+  artifactPathOf(record: InputPreparationRecord): string {
+    return this.artifactPath(record.recordId);
+  }
+
+  /**
+   * Bind one committed Execution to this record, or report that another one
+   * already did.
+   *
+   * A compare-and-set, inside the same serialized closure as the append, for
+   * the same reason every other admission in this file is: two runners racing
+   * the same reference share no caller-side lock, so a `pin === undefined`
+   * check made before this closure is a check both of them pass. The loser gets
+   * `occupied` with the pin that won, and its caller sends zero claim and
+   * dispatches nothing.
+   *
+   * Idempotent for the SAME Execution: a replay that re-presents the identical
+   * taskId and manifest digest reads back `pinned` with the record it already
+   * has, because re-deriving the same seal is not a second consumer. A
+   * different taskId, or the same taskId with a different sealed manifest, is
+   * `occupied` — it is a different Execution.
+   *
+   * Only a `counted` record with a retained artifact may be pinned: a pin on a
+   * record that has no artifact would keep a tombstone alive forever without
+   * ever being launchable.
+   */
+  pin(recordId: string, pin: InputPreparationPinV1): Promise<PinOutcome> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      const current = this.records.get(recordId);
+      if (!current) throw new InputPreparationIntegrityError(`no input-preparation record ${recordId}`);
+      if (current.state !== 'counted' || current.artifact === undefined || current.artifactBytes === 0) {
+        throw new InputPreparationIntegrityError(
+          `input-preparation record ${recordId} is in state ${current.state} with no retained artifact and cannot be pinned`,
+        );
+      }
+      const existing = current.pin;
+      if (existing !== undefined) {
+        const same = existing.taskId === pin.taskId && existing.manifestDigest === pin.manifestDigest;
+        if (!same) return { kind: 'occupied', record: current } as const;
+        return { kind: 'pinned', record: current } as const;
+      }
+      const next: InputPreparationRecord = { ...current, pin, updatedAt: new Date(this.now()).toISOString() };
+      await this.append(next);
+      return { kind: 'pinned', record: next } as const;
+    });
+  }
+
+  /**
+   * Release the pin this Execution holds.
+   *
+   * Scoped to the holder on purpose: `taskId` must match, so a task cannot
+   * release a record another Execution consumed. Releasing a record that is
+   * already unpinned is not an error — the pin's job is done either way, and a
+   * terminal path that had to know whether it ever pinned would grow a second
+   * answer to a question the record already holds.
+   *
+   * WHEN a pin is released is a single rule: the Execution reached a terminal.
+   * Not at claim, not at start, not when the session closes — a record stays
+   * pinned for exactly as long as the Execution that consumed it can still be
+   * running, which is also exactly as long as GC must not collect it.
+   */
+  unpin(recordId: string, taskId: string): Promise<InputPreparationRecord> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      const current = this.records.get(recordId);
+      if (!current) throw new InputPreparationIntegrityError(`no input-preparation record ${recordId}`);
+      if (current.pin === undefined) return current;
+      if (current.pin.taskId !== taskId) {
+        throw new InputPreparationIntegrityError(
+          `input-preparation record ${recordId} is pinned by task ${current.pin.taskId} and cannot be released by ${taskId}`,
+        );
+      }
+      const { pin: _released, ...rest } = current;
+      const next: InputPreparationRecord = { ...rest, updatedAt: new Date(this.now()).toISOString() };
+      await this.append(next);
+      return next;
+    });
+  }
+
+  /**
    * Read the artifact back and re-check the identity it claims.
    *
    * The digest comparison is integrity, not authorization: authority was
@@ -574,10 +673,11 @@ export class InputPreparationStore {
   /**
    * Drop expired artifacts and, one retry horizon later, expired records.
    *
-   * A pinned record is never collected. Nothing in this package pins today, so
-   * the guard is the shape §10.3.7 requires rather than live behavior — but it
-   * is enforced here, not deferred, so G3b cannot introduce a GC race by
-   * forgetting it.
+   * A pinned record is never collected — not its artifact and not its
+   * tombstone. That is what makes a pin meaningful: the Execution holding it
+   * has not reached a terminal yet, so the bytes it is about to send (or is
+   * sending) must still be on disk, whatever the retention horizon says. The
+   * horizon resumes the moment `unpin` lands.
    */
   gc(nowMs = this.now()): Promise<{ artifactsRemoved: number; recordsRemoved: number }> {
     return this.enqueue(async () => {
