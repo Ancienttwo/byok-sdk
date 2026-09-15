@@ -43,6 +43,43 @@ describe('SDK-reserved helper host composition', () => {
     })).toThrow(/absolute executable path/);
   });
 
+  /**
+   * The registry refuses a non-absolute MCP server `command` for operator
+   * configuration (`toolset-registry.ts`), but the reserved helpers never pass
+   * through it — they are built here. Pinning the same property at the source
+   * keeps the two from drifting apart silently: a helper resolved to a bare
+   * name would reach a launcher-wrapped runtime as a PATH lookup performed
+   * after the chdir, which is exactly what the registry rule exists to prevent.
+   */
+  it('builds every reserved helper command absolute by construction, in both host modes', () => {
+    for (const kind of ['agent-message-mcp', 'agent-memory-mcp', 'approval-mcp', 'agent-team-mcp', 'mcp-env'] as const) {
+      const distScript = resolveSdkReservedHelperBin(kind);
+      expect(distScript.source).toBe('dist-script');
+      // `process.execPath` is the absolute path of the running executable,
+      // unlike a bare `node` that a PATH lookup would have to resolve.
+      expect(distScript.command).toBe(process.execPath);
+      expect(path.isAbsolute(distScript.command)).toBe(true);
+      expect(distScript.command.startsWith('-')).toBe(false);
+      expect(distScript.args.every((arg) => path.isAbsolute(arg))).toBe(true);
+
+      const selfExecutable = resolveSdkReservedHelperBin(kind, { mode: 'self-executable' });
+      expect(selfExecutable.command).toBe(process.execPath);
+      expect(path.isAbsolute(selfExecutable.command)).toBe(true);
+
+      const hosted = resolveSdkReservedHelperBin(kind, {
+        mode: 'self-executable', executable: '/product/salesko-agent',
+      });
+      expect(path.isAbsolute(hosted.command)).toBe(true);
+      expect(hosted.command.startsWith('-')).toBe(false);
+      // The only way an operator-supplied executable enters this shape is
+      // through the assertion, so a relative one can never become a command.
+      expect(() => resolveSdkReservedHelperBin(kind, { mode: 'self-executable', executable: './salesko-agent' }))
+        .toThrow(/absolute executable path/);
+      expect(() => resolveSdkReservedHelperBin(kind, { mode: 'self-executable', executable: 'salesko-agent' }))
+        .toThrow(/absolute executable path/);
+    }
+  });
+
   it('handshakes the exact message helper command before runtime admission', async () => {
     const helper = await fixture('helper.mjs', `
       import { createInterface } from 'node:readline';

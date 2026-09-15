@@ -509,7 +509,7 @@ try {
           `${installedAgentVersion.stdout}${installedAgentVersion.stderr}`,
       );
     }
-    run(nodeBin, [path.join(repoRoot, 'packages/client/scripts/packed-cli-mcp-smoke.mjs'), '--install-root', smokeDir]);
+    console.log(run(nodeBin, [path.join(repoRoot, 'packages/client/scripts/packed-cli-mcp-smoke.mjs'), '--install-root', smokeDir]));
     const expectedAgentVersionOutput = `${clientManifest.version}\n`;
     if (installedAgentVersion.stdout !== expectedAgentVersionOutput || installedAgentVersion.stderr !== '') {
       throw new Error(

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
 import { PERMISSION_MODES, type PermissionMode } from '@byok-sdk/protocol';
 import type { CallToolResult } from '@modelcontextprotocol/client';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
@@ -51,6 +52,18 @@ interface TaskScopedMcpConfig {
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
   /** This task's permission mode, applied to the observation by the shared core. */
   readonly permissionMode: PermissionMode;
+  /**
+   * The working directory every server below is spawned in — the one the
+   * daemon proved this uid cannot write and probed each server in
+   * (`daemon/trusted-launch-cwd.ts`).
+   *
+   * Required whenever this task projects any server, and NOT defaulted here:
+   * omitting it would silently hand the child this extension's own cwd, which
+   * is the Pi child's cwd, which is the canonical Agent home — a directory the
+   * agent writes by design, and from which a `bun --compile` server binary
+   * reads `bunfig.toml` `preload` before running its own code.
+   */
+  readonly launchCwd?: string;
 }
 
 /**
@@ -169,10 +182,19 @@ function loadTaskScopedConfig(): TaskScopedMcpConfig {
       fail(`mcpServers.${name} has no daemon observation; refusing to discover its tools here`);
     }
   }
+  const launchCwd = parsed.launchCwd;
+  if (Object.keys(mcpServers).length > 0) {
+    if (typeof launchCwd !== 'string' || !isAbsolute(launchCwd)) {
+      fail('the task-scoped configuration must contain an absolute launchCwd whenever it projects any server');
+    }
+  } else if (launchCwd !== undefined && typeof launchCwd !== 'string') {
+    fail('the task-scoped configuration launchCwd must be a string');
+  }
   return Object.freeze({
     mcpServers: Object.freeze(mcpServers),
     observation: Object.freeze(observation),
     permissionMode: parsed.permissionMode as PermissionMode,
+    ...(typeof launchCwd === 'string' ? { launchCwd } : {}),
   });
 }
 
@@ -225,6 +247,10 @@ class McpServerPool implements McpToolCallHost {
       throw new McpAuthorityError(`MCP server "${serverName}" is not projected for this task`);
     }
     const frozen = this.config.observation[serverName];
+    const launchCwd = this.config.launchCwd;
+    if (launchCwd === undefined) {
+      fail(`MCP server "${serverName}" has no launchCwd; refusing to start it in this process's own directory`);
+    }
     const client = new McpStdioClient(server, {
       label: `MCP toolset server "${serverName}"`,
       // The extension runs INSIDE the Pi child the adapter already spawned
@@ -232,6 +258,11 @@ class McpServerPool implements McpToolCallHost {
       // task's environment — it is not the daemon's. The SDK's own Pi control
       // variables are still stripped; see `childEnv`.
       env: this.childEnv(),
+      // Passed explicitly rather than inherited: this process's cwd is the
+      // Agent home. `spawn` chdirs in the child before exec, so the server
+      // binary's own runtime initialisation — `bunfig.toml` preload included
+      // — already sees the trusted directory.
+      cwd: launchCwd,
     });
     try {
       await client.connect();

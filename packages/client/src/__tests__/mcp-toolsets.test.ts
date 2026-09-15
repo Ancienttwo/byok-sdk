@@ -21,6 +21,7 @@ import { McpToolsetRegistry, McpToolsetRevisionConflictError } from '../daemon/t
 import type { McpToolsetConfig, RuntimeCapabilities } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { observationOf } from './fixtures/mcp-observation';
+import { trustedCwd } from './fixtures/launch-cwd';
 
 const MCP_CAPABLE: RuntimeCapabilities = {
   steer: false,
@@ -317,6 +318,46 @@ describe('TaskRunner toolset tools/list probe — who pays for it, and for how l
     await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-pi-no-probe', seq: 2 }));
   });
 
+  it('probes and starts every toolset server in the proven-non-writable launch directory', async () => {
+    // The admission probe and the adapter's own launch must agree on ONE
+    // directory, and it must not be the Agent home: that is the directory the
+    // agent writes, and a `bun --compile` server binary reads
+    // `$cwd/bunfig.toml` `preload` from its cwd before its own code runs.
+    const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const observed: Array<string | undefined> = [];
+    const runner = await makeRunner(
+      adapter,
+      sent,
+      new Map([['salesko', { mcpServers: { salesko: { command: '/opt/salesko/bin/mcp' } } }]]),
+      undefined,
+      async (serverName, _server, options) => {
+        observed.push(options.cwd);
+        return observationOf({ [serverName]: ['find_leads'] })[serverName]!;
+      },
+    );
+    await runner.handleEnvelope(
+      createEnvelope(
+        'task.offer_with_toolsets',
+        { instruction: 'x', policy: { mode: 'auto' }, runtime: 'claude', requiredToolsets: ['salesko'] },
+        { taskId: 'task-launch-cwd', seq: 1 },
+      ),
+    );
+
+    const trusted = await trustedCwd();
+    expect(observed).toEqual([trusted]);
+    // The stub declares no `mcpServerLaunch`, so it is treated as spawning
+    // its own servers: it gets the directory and no launcher. The launcher is
+    // resolved only for the adapters that declare they need one (claude,
+    // codex — see `claude-adapter.test.ts` and `codex-adapter.test.ts`).
+    expect(adapter.startCalls[0]?.ctx.mcpLaunch).toEqual({ cwd: trusted });
+    // The workspace the runtime CLI itself runs in is a different, writable
+    // directory — it is deliberately NOT moved.
+    expect(adapter.startCalls[0]?.ctx.workspaceDir).not.toBe(trusted);
+
+    await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-launch-cwd', seq: 2 }));
+  });
+
   it('declines permanently when a server reports an ungrantable tool name', async () => {
     // A retry would start the same configured command and get the same answer,
     // so a retryable decline here is an infinite re-offer loop.
@@ -537,6 +578,102 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
         [adapter],
       ),
     ).toThrow(/accepts only command and args/);
+  });
+
+  /**
+   * Owner ruling (2026-09-15): every configured MCP server `command` is an
+   * absolute path, refused at the registry rather than at one runtime's
+   * launcher. An absolute path is not executor attestation — it only means the
+   * device named a file instead of a PATH lookup performed in the child's
+   * environment after the launch-directory chdir.
+   */
+  it('refuses a non-absolute or option-like server command on every path that admits a definition', () => {
+    const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
+    const bare = { salesko: { mcpServers: { salesko: { command: 'salesko-agent' } } } };
+    const relative = { salesko: { mcpServers: { salesko: { command: './bin/salesko-agent' } } } };
+    const optionLike = { salesko: { mcpServers: { salesko: { command: '-n' } } } };
+
+    // Writer 1: daemon construction, which is the only place `DaemonConfig`
+    // reaches the registry.
+    expect(() => createDaemonWithAdapters({ ...baseConfig, mcpToolsets: bare }, [adapter]))
+      .toThrow(/mcp_toolset_command_not_absolute/);
+    expect(() => createDaemonWithAdapters({ ...baseConfig, mcpToolsets: relative }, [adapter]))
+      .toThrow(/mcp_toolset_command_not_absolute/);
+    expect(() => createDaemonWithAdapters({ ...baseConfig, mcpToolsets: optionLike }, [adapter]))
+      .toThrow(/mcp_toolset_command_option_like/);
+
+    // Writer 2: the registry's own constructor, reached directly by hosts that
+    // build one themselves.
+    expect(() => new McpToolsetRegistry(bare)).toThrow(/mcp_toolset_command_not_absolute/);
+    expect(() => new McpToolsetRegistry(optionLike)).toThrow(/mcp_toolset_command_option_like/);
+
+    // Writer 3: `reload`, the runtime update path — and it stays fail-closed,
+    // leaving the previously admitted state untouched.
+    const registry = new McpToolsetRegistry({
+      salesko: { mcpServers: { salesko: { command: '/opt/salesko/mcp' } } },
+    });
+    const before = registry.status();
+    expect(() => registry.reload(bare, before.revision)).toThrow(/mcp_toolset_command_not_absolute/);
+    expect(() => registry.reload(optionLike, before.revision)).toThrow(/mcp_toolset_command_option_like/);
+    expect(registry.status()).toEqual(before);
+    expect(registry.snapshot().toolsets.get('salesko')?.mcpServers.salesko?.command).toBe('/opt/salesko/mcp');
+  });
+
+  it('rejects rather than resolves, so no PATH lookup or normalization is attempted', () => {
+    // `env` is on PATH on every box this suite runs on; a registry that
+    // resolved would admit it by finding it, and the case would pass for the
+    // wrong reason. It must be refused on shape alone.
+    expect(() => new McpToolsetRegistry({ salesko: { mcpServers: { salesko: { command: 'env' } } } }))
+      .toThrow(/mcp_toolset_command_not_absolute/);
+    // A non-absolute spelling that WOULD normalize to an absolute path is
+    // refused too: normalizing here would be this module inventing a second
+    // authority over what the operator wrote.
+    expect(() => new McpToolsetRegistry({
+      salesko: { mcpServers: { salesko: { command: 'opt/../opt/salesko/mcp' } } },
+    })).toThrow(/mcp_toolset_command_not_absolute/);
+  });
+});
+
+/**
+ * The rule is one rule for all three runtimes: a refused definition is refused
+ * before anything downstream of the registry — the admission `tools/list` probe,
+ * the claim, and every adapter's `start()` — can act on it, so no adapter's
+ * launch shape (`direct-cwd` for pi, launcher-wrapped for codex/claude) decides
+ * whether the operator's command was acceptable.
+ */
+describe('absolute toolset command, consistently across every runtime', () => {
+  const baseConfig: DaemonConfig = {
+    localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
+    productId: 'test-product',
+    serverUrl: 'http://localhost:3000',
+    workspaceRoot: '/tmp/byok-test-workspace',
+  };
+  const configured = { salesko: { mcpServers: { salesko: { command: 'salesko-agent' } } } };
+
+  it('never probes, claims or starts a toolset whose command the registry refused, on pi, codex or claude', async () => {
+    for (const runtime of ['pi', 'codex', 'claude'] as const) {
+      const adapter = new StubRuntimeAdapter(runtime, { kind: 'available' }, MCP_CAPABLE);
+      expect(() => createDaemonWithAdapters({ ...baseConfig, mcpToolsets: configured }, [adapter]))
+        .toThrow(/mcp_toolset_command_not_absolute/);
+
+      // A daemon that refused the definition holds no snapshot carrying it, so
+      // an offer requiring it reaches the runner as an unconfigured id.
+      const sent: Envelope[] = [];
+      const probe = vi.fn(stubToolsProbe);
+      const runner = await makeRunner(adapter, sent, new Map<string, McpToolsetConfig>(), undefined, probe);
+      await runner.handleEnvelope(
+        createEnvelope(
+          'task.offer_with_toolsets',
+          { instruction: 'x', policy: { mode: 'auto' }, runtime, requiredToolsets: ['salesko'] },
+          { taskId: `task-refused-${runtime}`, seq: 1 },
+        ),
+      );
+
+      expect(probe).not.toHaveBeenCalled();
+      expect(adapter.startCalls).toHaveLength(0);
+      expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(false);
+      expect(sent.some((envelope) => envelope.type === 'task.decline')).toBe(true);
+    }
   });
 });
 

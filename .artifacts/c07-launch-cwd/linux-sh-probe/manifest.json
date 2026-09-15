@@ -1,0 +1,24 @@
+{
+  "producedAt": "2026-09-15T17:42:00+08:00",
+  "host": "Colima docker linux/aarch64 29.5.2",
+  "images": [
+    "oven/bun:1.4.0",
+    "oven/bun:1.4.0-alpine"
+  ],
+  "shells": {
+    "dash": "0.5.12 /usr/bin/dash root:root 755",
+    "bash-as-sh": "5.2.37 /usr/bin/bash root:root 755 (symlink named sh)",
+    "busybox": "/bin/busybox root:root 755"
+  },
+  "script": "cd -- \"$0\" && exec \"$@\"",
+  "rejectedScript": "exec -- \"$@\" (dash: exec: --: not found, 127)",
+  "files": {
+    "inside.sh": "61f516ce1e20485380e9e6387e5296b697135b78bd0a56b3e44d4ebaf4858424",
+    "result-bash-as-sh.json": "208d21fbd6f73d56929019f83f54109223334259599a1172932b12f425f73509",
+    "result-busybox.json": "7ca8e565f06ac317b27f9a7efad4661081efff18b3dcd38e4baa82552e258a08",
+    "result-dash.json": "c7068a897a3bd3e12a40b09a7d5d1a13e6917808b4597b9d9af6849c3cd2d5a1",
+    "spawn.ts": "e95373583be32479dd3bbde2333e549650e5486c70bc0706a207b601b759f5c4",
+    "target.ts": "b9ea3109647a0d7a3f60534c6feb89e1cf074c128602e06e394c2b3299f83305"
+  },
+  "sourceHead": "8921889a12b11e19a6cd02f0df20f311a6b7a774"
+}

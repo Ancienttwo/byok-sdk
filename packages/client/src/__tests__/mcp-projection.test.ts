@@ -18,6 +18,12 @@ import { createPiMcpTools } from '../adapters/pi/mcp-tools';
 import { buildToolExecutorsFromObservation } from '../adapters/pi/input-preparation';
 import { resolveMcpToolsetGrants } from '../adapters/mcp-tool-grants';
 import { BYOK_PI_MCP_CONFIG_PATH } from '../adapters/pi/mcp-config';
+import { trustedCwd } from './fixtures/launch-cwd';
+
+const LAUNCH = {
+  launchCwd: '/',
+  launcher: { kind: 'node', interpreter: '/usr/bin/node', script: '/pkg/bin/byok-launch-cwd.mjs' },
+} as const;
 
 /**
  * The single-projection property: the ordinary Pi extension and the core must
@@ -125,7 +131,7 @@ async function registeredByRealExtension(
   const dir = await tempDir();
   const configPath = path.join(dir, 'mcp-config.json');
   const mcpServers = Object.fromEntries(Object.keys(observation).map((name) => [name, serverSpec()]));
-  await fs.writeFile(configPath, JSON.stringify({ mcpServers, observation, permissionMode }));
+  await fs.writeFile(configPath, JSON.stringify({ mcpServers, observation, permissionMode, launchCwd: await trustedCwd() }));
   process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
 
   const definitions: Array<{ name: string; description: string; parameters: unknown }> = [];
@@ -188,6 +194,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
       mcpServers: { byokagentteam: serverSpec() },
       observation: {},
       permissionMode: 'auto',
+      launchCwd: await trustedCwd(),
     }));
     process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
 
@@ -219,6 +226,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
       },
       observation,
       permissionMode: 'auto',
+      launchCwd: await trustedCwd(),
     }));
     process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
 
@@ -250,6 +258,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
       mcpServers: { byokagentteam: serverSpec(), byokagentmessage: serverSpec() },
       observation: {},
       permissionMode: 'auto',
+      launchCwd: await trustedCwd(),
     }));
     process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
 
@@ -272,6 +281,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
       mcpServers: { salesko: serverSpec() },
       observation: {},
       permissionMode: 'auto',
+      launchCwd: await trustedCwd(),
     }));
     process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
     const extension = await import('../adapters/pi/mcp-extension');
@@ -295,7 +305,7 @@ describe('MCP projection — executor fingerprints', () => {
       permissionMode: 'auto',
       toolsetDefinitionRevisions: REVISIONS,
       nativeTools: [{ name: 'read', parameters: { type: 'object' } }],
-      runtimeIdentity: RUNTIME,
+      runtimeIdentity: RUNTIME, launch: LAUNCH,
     });
     expect(Object.keys(toolExecutors)).toEqual([
       'read',
@@ -313,7 +323,7 @@ describe('MCP projection — executor fingerprints', () => {
       permissionMode: 'auto',
       toolsetDefinitionRevisions: REVISIONS,
       nativeTools: [],
-      runtimeIdentity: RUNTIME,
+      runtimeIdentity: RUNTIME, launch: LAUNCH,
     });
     expect((await build()).toolExecutors).toEqual((await build()).toolExecutors);
   });
@@ -343,19 +353,53 @@ describe('MCP projection — executor fingerprints', () => {
   ])('changes when %s changes', async (_label, mutate, revisions) => {
     const observation = await realObservation();
     const base = await buildToolExecutorsFromObservation({
-      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
+      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH,
     });
     const after = await buildToolExecutorsFromObservation({
-      observation: mutate(observation), permissionMode: 'auto', toolsetDefinitionRevisions: revisions, nativeTools: [], runtimeIdentity: RUNTIME,
+      observation: mutate(observation), permissionMode: 'auto', toolsetDefinitionRevisions: revisions, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH,
     });
     expect(after.toolExecutors['mcp__salesko__find_leads'])
       .not.toBe(base.toolExecutors['mcp__salesko__find_leads']);
   });
 
+  it('changes when the launch directory or the launcher changes, and the operator revision does not', async () => {
+    // The launch boundary is bound as its OWN fact, beside the toolset's
+    // `definitionRevision` rather than inside it. A server started in a
+    // different directory, or reached through a different launcher, is not the
+    // same executor — so a manifest frozen under one must not validate under
+    // the other. The operator's configured `{command, args}` revision is
+    // untouched by any of it, so an SDK launcher upgrade never churns the
+    // device configuration's own digest.
+    const observation = await realObservation();
+    const base = await buildToolExecutorsFromObservation({
+      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH,
+    });
+    const movedCwd = await buildToolExecutorsFromObservation({
+      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
+      launch: { ...LAUNCH, launchCwd: '/opt/byok/releases/1.2.3-abcdef' },
+    });
+    const newLauncher = await buildToolExecutorsFromObservation({
+      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
+      launch: { ...LAUNCH, launcher: { kind: 'node', interpreter: '/usr/local/bin/node', script: LAUNCH.launcher.script } },
+    });
+    const noLauncher = await buildToolExecutorsFromObservation({
+      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
+      launch: { launchCwd: LAUNCH.launchCwd, launcher: null },
+    });
+    const key = 'mcp__salesko__find_leads';
+    const fingerprints = [base, movedCwd, newLauncher, noLauncher].map((r) => r.toolExecutors[key]);
+    expect(new Set(fingerprints).size).toBe(4);
+    // Same toolset revisions throughout: the operator changed nothing.
+    expect(REVISIONS).toEqual({
+      'salesko.read.v1': `sha256:${'1'.repeat(64)}`,
+      'salesko.propose.v1': `sha256:${'2'.repeat(64)}`,
+    });
+  });
+
   it('does NOT change when a schema is re-serialized with its keys in another order', async () => {
     const observation = await realObservation();
     const base = await buildToolExecutorsFromObservation({
-      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
+      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH,
     });
     const reordered = {
       ...observation,
@@ -375,7 +419,7 @@ describe('MCP projection — executor fingerprints', () => {
       },
     };
     const after = await buildToolExecutorsFromObservation({
-      observation: reordered, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
+      observation: reordered, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH,
     });
     expect(after.toolExecutors).toEqual(base.toolExecutors);
   });
@@ -386,7 +430,7 @@ describe('MCP projection — executor fingerprints', () => {
       permissionMode: 'auto',
       toolsetDefinitionRevisions: REVISIONS,
       nativeTools: [],
-      runtimeIdentity: RUNTIME,
+      runtimeIdentity: RUNTIME, launch: LAUNCH,
     });
     // A fingerprint binds what a server SAID, never which executable will run.
     // The gap travels into the receipt instead of being quietly dropped.
@@ -399,7 +443,7 @@ describe('MCP projection — executor fingerprints', () => {
       permissionMode: 'auto',
       toolsetDefinitionRevisions: { 'salesko.read.v1': REVISIONS['salesko.read.v1'] },
       nativeTools: [],
-      runtimeIdentity: RUNTIME,
+      runtimeIdentity: RUNTIME, launch: LAUNCH,
     })).rejects.toThrow(/no definition revision/u);
   });
 });
@@ -535,7 +579,7 @@ describe('MCP projection — one policy filter, every consumer', () => {
       permissionMode: 'readonly',
       toolsetDefinitionRevisions: { 'salesko.read.v1': `sha256:${'1'.repeat(64)}` },
       nativeTools: [],
-      runtimeIdentity: '@byok-sdk/pi-coding-agent@0.85.1002+test',
+      runtimeIdentity: '@byok-sdk/pi-coding-agent@0.85.1002+test', launch: LAUNCH,
     });
     expect(Object.keys(toolExecutors)).toEqual(names);
   });
@@ -546,7 +590,7 @@ describe('MCP projection — one policy filter, every consumer', () => {
       permissionMode: 'readonly',
       toolsetDefinitionRevisions: { 'salesko.read.v1': `sha256:${'1'.repeat(64)}` },
       nativeTools: [],
-      runtimeIdentity: '@byok-sdk/pi-coding-agent@0.85.1002+test',
+      runtimeIdentity: '@byok-sdk/pi-coding-agent@0.85.1002+test', launch: LAUNCH,
     })).rejects.toThrow(/declares no McpToolsetConfig\.readOnlyTools/u);
   });
 

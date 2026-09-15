@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import path from 'node:path';
 import {
   CONFIGURED_TOOLSETS_MAX_ITEMS,
   ToolsetIdSchema,
@@ -74,6 +75,36 @@ export class McpToolsetDefinitionRevisionConflictError extends Error {
 
 function isNonEmptySingleLine(value: unknown, maxChars = MAX_LOCAL_MCP_TOKEN_CHARS): value is string {
   return typeof value === 'string' && value.trim().length > 0 && value.length <= maxChars && !/[\u0000\r\n]/u.test(value);
+}
+
+/**
+ * Every configured MCP server `command` must be an absolute path, checked here
+ * — at the single gate through which a toolset definition enters the registry —
+ * so no probe, claim, projection or adapter `start()` ever sees a command this
+ * device cannot name.
+ *
+ * A bare name is a PATH lookup resolved in the child's environment at spawn
+ * time, which means the registry's content revision would identify a string
+ * rather than a program: the same configuration could run two different
+ * executables on two days, and the launch-directory boundary would chdir before
+ * the lookup happened. A `command` starting with `-` is refused separately
+ * because `exec`/`spawn` argument vectors read a leading dash as an option of
+ * their own rather than as a program.
+ *
+ * Nothing is resolved, normalized or looked up here. This module does not own a
+ * PATH search and does not invent one; an operator whose configuration carries a
+ * bare `salesko-agent` changes their configuration.
+ *
+ * An absolute path is NOT an attestation of WHICH executor runs: it says the
+ * device named one file, not that the file is the product it claims to be.
+ */
+function assertAbsoluteServerCommand(label: string, command: string): void {
+  if (command.startsWith('-')) {
+    throw new Error(`${label} must not start with "-": mcp_toolset_command_option_like ${JSON.stringify(command)}`);
+  }
+  if (!path.isAbsolute(command)) {
+    throw new Error(`${label} must be an absolute path: mcp_toolset_command_not_absolute ${JSON.stringify(command)}`);
+  }
 }
 
 function digest(value: unknown): string {
@@ -169,6 +200,10 @@ function buildState(configured: McpToolsetConfigInput): RegistryState {
           `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName}.command must be a non-empty single-line string no longer than ${MAX_LOCAL_MCP_TOKEN_CHARS} characters`,
         );
       }
+      assertAbsoluteServerCommand(
+        `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName}.command`,
+        server.command,
+      );
       if (server.args !== undefined && !Array.isArray(server.args)) {
         throw new Error(`DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName}.args must be an array`);
       }

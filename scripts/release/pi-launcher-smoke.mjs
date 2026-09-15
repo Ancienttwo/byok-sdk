@@ -1,6 +1,6 @@
 // Installed composition: no prompt, provider request, real profile or OS key access.
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, writeFile, readFile, realpath, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -13,7 +13,7 @@ import { SqliteProviderProfileStore, parseModelProviderProfile, exactProviderPro
 import { parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER } from './pi-runtime-identity.mjs';
 
 import { PiAdapter } from '@byok-sdk/client/adapters';
-import { sealRuntimeOperationManifest } from '@byok-sdk/client';
+import { resolveTrustedLaunchCwd, sealRuntimeOperationManifest } from '@byok-sdk/client';
 
 const require = createRequire(import.meta.url);
 const keysRoot = path.dirname(require.resolve('@byok-sdk/keys/package.json'));
@@ -47,6 +47,37 @@ try {
   const mcpConfigPath = path.join(dir, 'mcp.json');
   const extension = path.join(dir, 'extension.mjs');
   const toolsObserver = path.join(dir, 'tools-observer.mjs');
+  const reservedServerCwdMarker = path.join(dir, 'reserved-server-cwd.txt');
+  // The directory proof is a property of the HOST, not of the packed tarball,
+  // and a host that cannot prove it is not a packaging failure. An elevated
+  // Windows runner can write `%SystemRoot%` (`platform_default_is_writable`)
+  // and a uid-0 POSIX daemon can write everything
+  // (`root_cannot_prove_write_boundary`); both refusals are the boundary
+  // working. So this smoke branches rather than asserting a proof it cannot
+  // demand: with a directory, it runs the full launch smoke below; without
+  // one, it asserts the FAIL-CLOSED path instead — the packed adapter must
+  // refuse to start a non-empty `mcpServers` task with no launch binding, and
+  // must surface why. Any other `unavailable` reason still fails the smoke.
+  //
+  // `BYOK_RELEASE_SMOKE_FORCE_UNPROVABLE_LAUNCH_CWD=1` makes the resolver
+  // report `root_cannot_prove_write_boundary` on a host where the proof would
+  // have succeeded. It exists so the fail-closed branch is executable — and is
+  // executed — off Windows; it is a test seam, never a product path.
+  const trustedLaunch = await resolveTrustedLaunchCwd(
+    undefined,
+    process.env.BYOK_RELEASE_SMOKE_FORCE_UNPROVABLE_LAUNCH_CWD === '1' ? { getuid: () => 0 } : {},
+  );
+  const launchUnprovable = trustedLaunch.kind !== 'resolved';
+  if (launchUnprovable) {
+    assert.ok(
+      trustedLaunch.reason === 'platform_default_is_writable'
+        || trustedLaunch.reason === 'root_cannot_prove_write_boundary',
+      `no trusted MCP launch directory here, and the reason is not one this smoke accepts: ${trustedLaunch.reason}`,
+    );
+    console.log(`pi-launcher-smoke: trusted launch directory unavailable (${trustedLaunch.reason}); asserted fail-closed refusal instead`);
+  } else {
+    assert.notEqual(trustedLaunch.dir, dir);
+  }
   // A real stdio MCP server, so the installed package's own MCP extension is
   // run against a server that really has to start and really has to answer,
   // rather than stubbed away. Hand-rolled for the same reason the in-repo
@@ -64,6 +95,12 @@ try {
   // `packages/client/src/__tests__/mcp-extension-call.test.ts`.
   const fixtureServer = path.join(dir, 'fixture-mcp-server.mjs');
   await writeFile(fixtureServer, `import { createInterface } from 'node:readline';
+import { writeFileSync } from 'node:fs';
+// The directory this server was actually started in, read back out of the
+// child. It must be the daemon's proven-non-writable launch directory and NOT
+// the Pi child's own cwd — a compiled server binary reads \`$cwd/bunfig.toml\`
+// \`preload\` before its own code, and the Pi child's cwd is the Agent home.
+if (process.argv[3]) writeFileSync(process.argv[3], process.cwd());
 let initialized = false;
 const TOOL = { name: process.argv[2] ?? 'echo', description: 'Echo text back.', inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false } };
 const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n');
@@ -89,7 +126,7 @@ createInterface({ input: process.stdin }).on('line', line => {
       // `session_start` instead of from an observation. It is the one entry
       // that makes the installed `McpServerPool` open a real connection during
       // this smoke; a host toolset server stays unopened until it is called.
-      byokagentteam: { command: process.execPath, args: [fixtureServer, 'relay_probe'] },
+      byokagentteam: { command: process.execPath, args: [fixtureServer, 'relay_probe', reservedServerCwdMarker] },
     },
     observation: {
       fixture: {
@@ -100,10 +137,21 @@ createInterface({ input: process.stdin }).on('line', line => {
         tools: [{
           name: 'echo',
           description: 'Echo text back.',
+          // The operator's own read/mutation classification. Required under
+          // the `readonly` policy this smoke runs, which is what makes the
+          // tool registrable at all.
+          readOnly: true,
           inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false },
         }],
       },
     },
+    permissionMode: 'readonly',
+    // The daemon resolves this once per offer and the extension refuses to open
+    // any server without it; the installed package must therefore honour it out
+    // of the packed tarball, launcher script included. Absent on a host where
+    // no directory could be proven — which is exactly the shape the fail-closed
+    // branch below requires the packed extension to refuse.
+    ...(launchUnprovable ? {} : { launchCwd: trustedLaunch.dir }),
   };
   await writeFile(mcpConfigPath, JSON.stringify(mcpTaskConfig));
   await writeFile(toolsObserver, `import {writeFileSync} from 'node:fs';
@@ -188,22 +236,38 @@ export default function() {
   const directLines = createInterface({ input: child.stdout });
   const directTimer = setTimeout(() => child.kill('SIGTERM'), 30_000);
   try {
-    child.stdin.write(`${JSON.stringify({ type: 'get_state', id: 'direct-state' })}\n`);
-    let state;
-    for await (const line of directLines) {
-      const event = JSON.parse(line);
-      if (event.type === 'response' && event.id === 'direct-state') { state = event; break; }
+    if (launchUnprovable) {
+      // THE FAIL-CLOSED ASSERTION. No `get_state` is sent: the SDK's own MCP
+      // extension throws while it loads, so this child must die instead of
+      // answering, and the reason must reach stderr. A packed adapter that
+      // started this task anyway would have launched every server in the Pi
+      // child's own cwd — the Agent home — which is the whole vector.
+      directLines.close();
+      child.stdin.end();
+      const [code] = await directClosed;
+      assert.notEqual(code, 0, `the packed Pi started a non-empty mcpServers task with no launch binding: ${directStderr}`);
+      assert.match(directStderr, /absolute launchCwd whenever it projects any server/, directStderr);
+      assert.equal(requests, 0);
+    } else {
+      child.stdin.write(`${JSON.stringify({ type: 'get_state', id: 'direct-state' })}\n`);
+      let state;
+      for await (const line of directLines) {
+        const event = JSON.parse(line);
+        if (event.type === 'response' && event.id === 'direct-state') { state = event; break; }
+      }
+      assert.equal(state?.success, true, directStderr || 'Direct Pi did not return RPC state');
+      assert.equal(state.data.messageCount, 0);
+      assert.equal(requests, 0);
     }
-    assert.equal(state?.success, true, directStderr || 'Direct Pi did not return RPC state');
-    assert.equal(state.data.messageCount, 0);
-    assert.equal(requests, 0);
   } finally {
     clearTimeout(directTimer); directLines.close(); child.stdin.end(); child.kill('SIGTERM');
     const force = setTimeout(() => child.kill('SIGKILL'), 5_000);
     await directClosed; clearTimeout(force);
   }
   await rm(path.dirname(capturedConfigPath), { recursive: true, force: true });
-  console.log(`[release-pack] installed Pi${piManifest.version} detect/direct RPC with the real extension stack passed; prompts=0`);
+  console.log(launchUnprovable
+    ? `[release-pack] installed Pi${piManifest.version} detect/direct capture passed, and the real extension stack REFUSED the unbound MCP task (${trustedLaunch.reason}); prompts=0`
+    : `[release-pack] installed Pi${piManifest.version} detect/direct RPC with the real extension stack passed; prompts=0`);
 
   for (const [rejectedBinding, expected] of [
     [exactProviderProfileBinding(missingPi), /requires explicit pi_model/],
@@ -218,62 +282,79 @@ export default function() {
     assert.equal(check.status, 1);
     assert.match(check.stderr, expected);
   }
-  child = spawn(process.execPath, [path.join(keysRoot, 'dist/bin/pi-provider-launcher.js'),
-    '--pi-bin', process.execPath, '--pi-entry', path.join(piRoot, piManifest.bin.pi), '--profile-db', profileDbPath, '--session-dir', sessionDir,
-    '--provider', binding.profileRef, '--model', binding.modelId,
-    '--profile-revision', binding.profileRevision, '--profile-hash', binding.profileHash,
-    '--required-capabilities', '[]', '--validate-only', 'false',
-    '--', '--mode', 'rpc',
-    '--extension', extension,
-    // The real SDK-owned MCP extension, against the real stdio MCP servers
-    // configured above.
-    '--extension', path.join(clientRoot, 'dist/adapters/pi/mcp-extension.js'),
-    '--extension', toolsObserver,
-  ], { cwd: dir, env, stdio: ['pipe', 'pipe', 'pipe'] });
-  const closed = once(child, 'close');
-  let stderr = '';
-  child.stderr.on('data', bytes => { stderr += bytes.toString(); });
-  const lines = createInterface({ input: child.stdout });
-  const timer = setTimeout(() => child.kill('SIGTERM'), 30_000);
-  let state;
-  try {
-    child.stdin.write(`${JSON.stringify({ type: 'get_state', id: 'packed-state' })}\n`);
-    for await (const line of lines) {
-      const event = JSON.parse(line);
-      if (event.type === 'response' && event.id === 'packed-state') { state = event; break; }
+  // The full launch smoke: only reachable with a proven launch directory,
+  // because everything it asserts is about WHERE the servers started.
+  if (launchUnprovable) {
+    // The one fact in that block that is about the TARBALL rather than about
+    // this host, so it is asserted on both branches.
+    await access(path.join(clientRoot, 'bin', 'byok-launch-cwd.mjs'));
+    console.log(`[release-pack] launch boundary unprovable on this host (${trustedLaunch.reason}); the packed tarball's fail-closed refusal was asserted instead of the launch smoke`);
+  } else {
+    child = spawn(process.execPath, [path.join(keysRoot, 'dist/bin/pi-provider-launcher.js'),
+      '--pi-bin', process.execPath, '--pi-entry', path.join(piRoot, piManifest.bin.pi), '--profile-db', profileDbPath, '--session-dir', sessionDir,
+      '--provider', binding.profileRef, '--model', binding.modelId,
+      '--profile-revision', binding.profileRevision, '--profile-hash', binding.profileHash,
+      '--required-capabilities', '[]', '--validate-only', 'false',
+      '--', '--mode', 'rpc',
+      '--extension', extension,
+      // The real SDK-owned MCP extension, against the real stdio MCP servers
+      // configured above.
+      '--extension', path.join(clientRoot, 'dist/adapters/pi/mcp-extension.js'),
+      '--extension', toolsObserver,
+    ], { cwd: dir, env, stdio: ['pipe', 'pipe', 'pipe'] });
+    const closed = once(child, 'close');
+    let stderr = '';
+    child.stderr.on('data', bytes => { stderr += bytes.toString(); });
+    const lines = createInterface({ input: child.stdout });
+    const timer = setTimeout(() => child.kill('SIGTERM'), 30_000);
+    let state;
+    try {
+      child.stdin.write(`${JSON.stringify({ type: 'get_state', id: 'packed-state' })}\n`);
+      for await (const line of lines) {
+        const event = JSON.parse(line);
+        if (event.type === 'response' && event.id === 'packed-state') { state = event; break; }
+      }
+      assert.equal(state?.success, true, stderr || 'Pi did not return RPC state');
+      assert.equal(state.data.model.provider, 'byok-sdk-packed-zai');
+      assert.equal(state.data.model.id, profile.model);
+      assert.equal(state.data.model.contextWindow, modelConfig.contextWindow);
+      assert.equal(state.data.model.maxTokens, modelConfig.maxTokens);
+      assert.equal(state.data.model.reasoning, true);
+      assert.deepEqual(state.data.model.thinkingLevelMap, modelConfig.thinkingLevelMap);
+      for (const [key, value] of Object.entries(modelConfig.compat)) assert.equal(state.data.model.compat[key], value);
+      assert.equal(state.data.thinkingLevel, modelConfig.thinkingLevel);
+      assert.equal(state.data.messageCount, 0);
+      assert.equal(JSON.parse(await readFile(marker, 'utf8')).loaded, true);
+      // One Pi tool per observed MCP tool, carrying the server's real schema —
+      // not a single `mcp` proxy, and not `mcpScript`. The name is spelled out
+      // rather than derived from the core's `projectMcpTools`: that helper is
+      // not part of the published surface, and re-deriving the qualified form
+      // here would make this file a second authority on the naming rule. That
+      // the registered set IS exactly the projection is asserted in-repo, in
+      // `packages/client/src/__tests__/mcp-projection.test.ts`.
+      const activeTools = JSON.parse(await readFile(toolsMarker, 'utf8'));
+      assert.ok(activeTools.includes('mcp__fixture__echo'), `registered tools: ${activeTools.join(', ')}`);
+      // The reserved helper is read LIVE off a connected child, so its bare tool
+      // name appearing here is proof the pool really handshook with a server.
+      assert.ok(activeTools.includes('relay_probe'), `reserved helper tool missing from: ${activeTools.join(', ')}`);
+      // ...and that child is where the launch boundary is actually observable
+      // out of the packed tarball: it started in the proven-non-writable launch
+      // directory, not in the Pi process's own cwd.
+      const reservedServerCwd = (await readFile(reservedServerCwdMarker, 'utf8')).trim();
+      assert.equal(await realpath(reservedServerCwd), await realpath(trustedLaunch.dir));
+      assert.notEqual(reservedServerCwd, dir);
+      // The packed tarball really ships the launcher the claude/codex paths need.
+      await access(path.join(clientRoot, 'bin', 'byok-launch-cwd.mjs'));
+      assert.ok(!activeTools.includes('mcp'), 'the retired MCP proxy tool must not be registered');
+      assert.ok(!activeTools.includes('mcpScript'), 'the retired mcpScript tool must not be registered');
+      assert.equal(requests, 0);
+    } finally {
+      clearTimeout(timer); lines.close(); child.stdin.end(); child.kill('SIGTERM');
+      const force = setTimeout(() => child.kill('SIGKILL'), 5_000);
+      await closed; clearTimeout(force);
     }
-    assert.equal(state?.success, true, stderr || 'Pi did not return RPC state');
-    assert.equal(state.data.model.provider, 'byok-sdk-packed-zai');
-    assert.equal(state.data.model.id, profile.model);
-    assert.equal(state.data.model.contextWindow, modelConfig.contextWindow);
-    assert.equal(state.data.model.maxTokens, modelConfig.maxTokens);
-    assert.equal(state.data.model.reasoning, true);
-    assert.deepEqual(state.data.model.thinkingLevelMap, modelConfig.thinkingLevelMap);
-    for (const [key, value] of Object.entries(modelConfig.compat)) assert.equal(state.data.model.compat[key], value);
-    assert.equal(state.data.thinkingLevel, modelConfig.thinkingLevel);
-    assert.equal(state.data.messageCount, 0);
-    assert.equal(JSON.parse(await readFile(marker, 'utf8')).loaded, true);
-    // One Pi tool per observed MCP tool, carrying the server's real schema —
-    // not a single `mcp` proxy, and not `mcpScript`. The name is spelled out
-    // rather than derived from the core's `projectMcpTools`: that helper is
-    // not part of the published surface, and re-deriving the qualified form
-    // here would make this file a second authority on the naming rule. That
-    // the registered set IS exactly the projection is asserted in-repo, in
-    // `packages/client/src/__tests__/mcp-projection.test.ts`.
-    const activeTools = JSON.parse(await readFile(toolsMarker, 'utf8'));
-    assert.ok(activeTools.includes('mcp__fixture__echo'), `registered tools: ${activeTools.join(', ')}`);
-    // The reserved helper is read LIVE off a connected child, so its bare tool
-    // name appearing here is proof the pool really handshook with a server.
-    assert.ok(activeTools.includes('relay_probe'), `reserved helper tool missing from: ${activeTools.join(', ')}`);
-    assert.ok(!activeTools.includes('mcp'), 'the retired MCP proxy tool must not be registered');
-    assert.ok(!activeTools.includes('mcpScript'), 'the retired mcpScript tool must not be registered');
-    assert.equal(requests, 0);
-  } finally {
-    clearTimeout(timer); lines.close(); child.stdin.end(); child.kill('SIGTERM');
-    const force = setTimeout(() => child.kill('SIGKILL'), 5_000);
-    await closed; clearTimeout(force);
+    console.log(`[release-pack] keys -> Pi${piManifest.version} RPC model/extension/custody passed; LLM requests=0`);
   }
-  console.log(`[release-pack] keys -> Pi${piManifest.version} RPC model/extension/custody passed; LLM requests=0`);
 } finally {
   if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
   await new Promise(resolve => server.close(resolve));

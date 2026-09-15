@@ -1,0 +1,80 @@
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+lrwxrwxrwx 1 root root 4 Feb  4  2025 /bin/sh -> dash
+SH_IDENTITY /usr/bin/dash root:root 755 nobash /usr/bin/dash: 0: Illegal option --
+{
+  "sh": "/bin/sh",
+  "spawnerPid": 26,
+  "baseline": {
+    "injected": true,
+    "cwd": "/tmp/probe-dash/agenthome",
+    "code": 0
+  },
+  "bootstrap_S1": {
+    "injected": false,
+    "cwd": "/tmp/probe-dash/trusted",
+    "cwdOk": true,
+    "argvIdentical": true,
+    "pidIsSpawned": true,
+    "ppidIsSpawner": true,
+    "code": 0
+  },
+  "bootstrap_S2": {
+    "injected": false,
+    "cwdOk": false,
+    "argvIdentical": false,
+    "pidIsSpawned": false,
+    "ppidIsSpawner": false,
+    "code": 127,
+    "lines": [
+      "STDERR /tmp/probe-dash/trusted: 1: exec: --: not found"
+    ]
+  },
+  "bootstrap_S3": {
+    "injected": false,
+    "cwd": "/tmp/probe-dash/trusted",
+    "cwdOk": true,
+    "argvIdentical": true,
+    "pidIsSpawned": true,
+    "ppidIsSpawner": true,
+    "code": 0
+  },
+  "weirdcwd_S1": {
+    "cwd": "/tmp/probe-dash/-weird dir",
+    "cwdOk": true,
+    "code": 0
+  },
+  "weirdcwd_S3": {
+    "cwd": "/tmp/probe-dash/-weird dir",
+    "cwdOk": true,
+    "code": 0
+  },
+  "negative_control": {
+    "injected": true,
+    "cwd": "/tmp/probe-dash/agenthome"
+  },
+  "exit_code": {
+    "code": 42,
+    "signal": null
+  },
+  "signal": {
+    "code": null,
+    "signal": "SIGTERM",
+    "targetPidIsSpawned": true
+  },
+  "env_traps": {
+    "injected": false,
+    "trapSourced": false,
+    "cwdOk": true,
+    "argvIdentical": true,
+    "markPassed": true,
+    "lines": []
+  },
+  "cdpath_relative_negative": {
+    "code": 2,
+    "lines": [
+      "STDERR trusted: 1: cd: can't cd to trusted"
+    ]
+  }
+}

@@ -5,6 +5,127 @@
 Deliberately not filed under 0.18.0: none of this is in a published artifact,
 and the D2 version number belongs to a separate SDK release contract.
 
+- **Breaking (security)** — every MCP server child the daemon is responsible
+  for now starts in a directory this daemon's uid has been PROVEN unable to
+  write, instead of inheriting the canonical Agent home. A `bun --compile`
+  single-file binary reads `$cwd/bunfig.toml` and runs its `preload` before any
+  of its own code, and `--config=/dev/null` does not suppress that for a
+  compiled binary (measured on Bun 1.4.2) — so the old inherited cwd let an
+  agent hand arbitrary preload code to the very MCP server it was being served
+  by. The runtime CLI itself is unchanged and keeps its manifest cwd.
+
+  Non-writability is proven by attempting a create and requiring
+  `EACCES`/`EPERM`/`EROFS`, never inferred from mode bits; a symlink is refused
+  rather than followed. The probe alone is not the boundary: a directory owned
+  by this uid answers it with `EACCES` while its owner can `chmod` the write bit
+  back, and `rename(2)` replaces a directory using write permission on its
+  PARENT — so the candidate and every ancestor up to the volume root must each
+  be a real directory, owned by another uid, and refuse the same probe
+  (`..._owned_by_current_uid`, `..._ancestor_writable` and the rest of the
+  `..._ancestor_*` reasons). The candidate is the new
+  `DaemonConfig.mcpLaunchCwd.dir` when configured, otherwise `/` on POSIX and
+  `%SystemRoot%` on Windows. `os.tmpdir()` is deliberately not a candidate: the
+  agent runs at the daemon's own uid in the common deployment, so a 0700 random
+  directory isolates other users and nothing else.
+
+  Breaking in four places. `RuntimeOperationStartInput` carries
+  `mcpLaunch: {cwd, launcher?}`, resolved once per offer; an adapter handed MCP
+  servers without it now fails the start non-retryably. `RuntimeAdapterDescriptor`
+  carries `mcpServerLaunch: 'direct-cwd' | 'launcher-wrapped'`, which is how the
+  daemon knows whether that adapter needs a launcher. The pi task-scoped MCP
+  config file carries `launchCwd`, and the extension refuses to open a server
+  without it. claude's and codex's generated MCP configuration now reaches each
+  server through a launcher, because neither configuration format has a
+  per-server cwd field; argv is forwarded structurally, so a server argument
+  containing a space, a quote, `$(...)`, a `;` or a newline is byte-identical on
+  the other side. On POSIX the launcher is the trusted system `/bin/sh`, run as
+  `sh -c 'cd -- "$0" && exec "$@"' <dir> <command> [...args]` — verified
+  byte-identical over 17 argument classes on dash 0.5.12, bash 5.2.37 invoked as
+  `sh`, busybox ash and macOS `/bin/sh`. On win32 it is this package's new
+  `bin/byok-launch-cwd.mjs` (shipped in the published tarball), which needs a
+  real Node host.
+
+  Two conditions refuse an offer non-retryably rather than admitting an
+  unprotected launch: running as uid 0 (`root_cannot_prove_write_boundary` — no
+  directory is unwritable by root, a documented limitation rather than a filled-in
+  default), and having no trusted launcher for claude/codex. On POSIX that means
+  a `/bin/sh` that is not a root-owned, non-group/other-writable regular file
+  (`launch_cwd_shell_not_root_owned`, `launch_cwd_shell_writable`,
+  `launch_cwd_shell_not_a_regular_file`, `launch_cwd_shell_unreadable`); on win32
+  it means a host that is not provably plain Node, since Bun would preload before
+  the launcher's first statement (`launch_cwd_launcher_unavailable`). A POSIX
+  host needs no Node and no configuration at all;
+  `DaemonConfig.mcpLaunchCwd.launcherInterpreter` remains as an escape hatch, not
+  a supported path.
+
+  `wrapMcpServerWithLaunchCwd` now refuses, rather than repairs, a binding it
+  cannot address unambiguously: a relative launch directory
+  (`launch_cwd_binding_cwd_not_absolute`, which `cd` would resolve through
+  `CDPATH`), a server `command` starting with `-` (`launch_cwd_target_command_option_like`,
+  which `exec` would read as one of its own options), and a relative server
+  `command` (`launch_cwd_target_command_not_absolute`, a PATH lookup performed
+  after the chdir rather than the identity the binding attested).
+
+  **Breaking (configuration)** — per the Owner ruling 2026-09-15, every
+  `DaemonConfig.mcpToolsets`
+  server `command` must be an absolute path, and the rule is global rather than
+  per-runtime. `McpToolsetRegistry` refuses a bare-name or relative command
+  (`mcp_toolset_command_not_absolute`) and one starting with `-`
+  (`mcp_toolset_command_option_like`) when the definition enters the registry —
+  at construction and at every `reload` — so the rejection happens before any
+  admission probe, claim or adapter `start()`, and pi, codex and claude all
+  receive only validated servers. Nothing is resolved, normalized or looked up
+  on PATH; the command is rejected, and an operator whose configuration carries
+  a bare `salesko-agent` must give it an absolute path. An absolute path is not
+  executor attestation: it says the device named one file, not that the file is
+  the product it claims to be. The SDK's own reserved helpers (agent-message,
+  agent-memory, approval, mcp-env) are unaffected — they are built from
+  `process.execPath` or an asserted-absolute host executable. The
+  `wrapMcpServerWithLaunchCwd` refusals above remain as a second, independent
+  fail-closed layer behind that rule.
+
+- The launch working-directory boundary now covers every MCP server a task
+  GENERATES, not only the host toolsets the device projects. `TaskRunner` used
+  to resolve the binding only for a task that probed or projected a toolset
+  server, so a task whose only MCP server came later — the reserved
+  agent-memory helper, or the approval server claude generates for itself under
+  `policy.mode: 'confirm'` — reached `start()` with no binding and had those
+  servers written unwrapped, inheriting the CLI's manifest cwd (the
+  Agent-writable home). The predicate now asks whether the task will generate
+  at least one server of any origin, and claude's fail-closed guard counts the
+  configuration it generated rather than the daemon's projected map.
+  `RuntimeAdapterDescriptor` carries the new optional
+  `generatesApprovalMcpServer`, which is how the daemon knows a `confirm`-mode
+  task on that adapter will produce a server the daemon never sees; omitting it
+  means "generates none". A task that generates no MCP server is still admitted
+  with no binding, and a `confirm`-mode task on a launcher-wrapped adapter with
+  no trusted launcher is now declined non-retryably before
+  any spawn.
+
+- `DaemonConfig.mcpLaunchCwd` (`{dir?, launcherInterpreter?}`) now carries the
+  operator's launch-boundary input through `createDaemon`, forwarded verbatim to
+  `TaskRunnerDeps.mcpLaunchCwd`; a host no longer has to compose its own
+  `TaskRunner` to configure either override. A present section is validated at
+  construction — `dir` absolute, `launcherInterpreter` an absolute path to an
+  existing regular file — so a host that configured a boundary it cannot have
+  fails to start instead of failing a spawn inside the first task that needed
+  one. Whether the directory is still outside this uid's control stays a
+  per-offer proof, never a cached construction-time answer.
+
+  `buildRuntimeEnv` additionally hard-denies `NODE_OPTIONS`,
+  `NODE_REPL_EXTERNAL_MODULE`, `NODE_PATH`, `BUN_*`, `DYLD_*`, `LD_*`, and — for
+  the shell bootstrap — `ENV`, `BASH_ENV`, `SHELLOPTS`, `BASHOPTS`, `CDPATH` and
+  `PS4`, above every allowlist layer including the operator's own
+  `runtimeEnvironment.<id>.allow`: they change how an interpreter loads code
+  before the launcher's first statement. The launcher re-asserts the same list
+  on itself and exits 78 if it sees one. The launch directory and launcher
+  identity are bound into the prepared-launch executor fingerprints as their own
+  fact, beside the toolset's `definitionRevision` rather than inside it, so an
+  SDK launcher upgrade is drift without churning the operator's configured
+  revision. A pre-1.0 breaking cut is MINOR under `docs/spec.md`'s package
+  version policy; no version is bumped here, since a bump does not authorize
+  publish.
+
 - **Breaking** — `McpToolsetConfig` accepts `readOnlyTools`, an
   operator-owned read/mutation classification per `(server, tool)`, and a
   toolset task's permission mode is applied to it. `readonly` and `plan` are
