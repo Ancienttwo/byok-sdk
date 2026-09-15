@@ -457,14 +457,14 @@ jobs:
         shell: pwsh
         run: |
           # This one script runs twice: once as the runner's administrator (parent),
-          # and once as the synthetic standard user, which re-invokes this same file
-          # with -LowPrivMode child. Same bytes, two tokens.
-          param(
-            [string]$LowPrivMode = '',
-            [string]$ScratchRoot = '',
-            [string]$Workspace = '',
-            [string]$NodeDir = ''
-          )
+          # and once as the synthetic standard user, which runs a byte-identical copy
+          # of this same file. Same bytes, two tokens. The mode and the three child
+          # paths travel in BYOK_LOWPRIV_* environment variables, NOT in a top-level
+          # `param(...)`: the Actions runner prepends `$ErrorActionPreference = 'stop'`
+          # to every pwsh `run:` script (ScriptHandlerHelpers.FixUpScriptContents), so
+          # `param` would no longer be the first statement and the script would not
+          # parse. A three-line launcher written next to the copy sets those variables
+          # and dot-invokes the copy in-process.
           $ErrorActionPreference = 'Stop'
           $ProgressPreference = 'SilentlyContinue'
 
@@ -473,8 +473,14 @@ jobs:
             exit $code
           }
 
-          if ($LowPrivMode -eq 'child') {
+          if ($env:BYOK_LOWPRIV_MODE -eq 'child') {
             # ---------------- standard-user half ----------------
+            $ScratchRoot = $env:BYOK_LOWPRIV_SCRATCH
+            $Workspace = $env:BYOK_LOWPRIV_WORKSPACE
+            $NodeDir = $env:BYOK_LOWPRIV_NODEDIR
+            foreach ($pair in @(@('BYOK_LOWPRIV_SCRATCH', $ScratchRoot), @('BYOK_LOWPRIV_WORKSPACE', $Workspace), @('BYOK_LOWPRIV_NODEDIR', $NodeDir))) {
+              if ([string]::IsNullOrWhiteSpace($pair[1])) { Fail 86 "child mode is missing $($pair[0])" }
+            }
 
             # 1. The token is evidence INPUT, not decoration: assert it, do not just print it.
             $me = (whoami).Trim()
@@ -557,7 +563,9 @@ jobs:
             exit 0
           }
 
-          if ($LowPrivMode -ne '') { throw "unknown -LowPrivMode '$LowPrivMode'" }
+          if (-not [string]::IsNullOrWhiteSpace($env:BYOK_LOWPRIV_MODE)) {
+            throw "unknown BYOK_LOWPRIV_MODE '$($env:BYOK_LOWPRIV_MODE)'"
+          }
 
           # ---------------- administrator half ----------------
           $selfScript = $PSCommandPath
@@ -580,7 +588,10 @@ jobs:
           Write-Host "[lowpriv] node dir=$nodeHome bun=$bunSrc"
 
           $created = $false
+          $accountSid = $null
+          $scratchCreated = $false
           $childCode = $null
+          $cleanupFailures = @()
           try {
             # Password: generated in memory into a PSCredential. Never echoed, never on
             # a command line, never in GITHUB_ENV, never in a step output.
@@ -591,10 +602,18 @@ jobs:
 
             New-LocalUser -Name $account -Password $secret -AccountNeverExpires -PasswordNeverExpires -UserMayNotChangePassword -Description 'ephemeral byok CI standard user' | Out-Null
             $created = $true
+            # Captured now, while the name still resolves: teardown revokes ACEs by SID
+            # so that revocation does not depend on the account still existing.
+            $accountSid = (Get-LocalUser -Name $account).SID.Value
+            Write-Host "[lowpriv] account SID: $accountSid"
             Add-LocalGroupMember -Group 'Users' -Member $account
             $cred = [System.Management.Automation.PSCredential]::new("$env:COMPUTERNAME\$account", $secret)
 
-            New-Item -ItemType Directory -Force -Path $scratch | Out-Null
+            # Only a scratch root THIS run creates is ever torn down. A pre-existing
+            # path of the same name is refused, never adopted and never deleted.
+            if (Test-Path -LiteralPath $scratch) { throw "scratch root $scratch already exists; refusing to adopt or delete a path this run did not create" }
+            New-Item -ItemType Directory -Path $scratch | Out-Null
+            $scratchCreated = $true
             # The only two grants this account ever gets: the scratch root and the checkout.
             icacls $scratch /grant "${account}:(OI)(CI)(M)" /Q
             if ($LASTEXITCODE -ne 0) { throw "icacls grant on $scratch failed ($LASTEXITCODE)" }
@@ -607,9 +626,24 @@ jobs:
             $childScript = Join-Path $scratch 'run-lowpriv.ps1'
             Copy-Item -LiteralPath $selfScript -Destination $childScript
 
+            # The launcher carries no logic: it sets the four variables and invokes the
+            # byte-identical copy in its own process, then propagates its exit code.
+            $q = { param([string]$v) "'" + $v.Replace("'", "''") + "'" }
+            $launcher = Join-Path $scratch 'launch-lowpriv.ps1'
+            $launcherLines = [string[]] @(
+              ('$env:BYOK_LOWPRIV_MODE = ' + (& $q 'child')),
+              ('$env:BYOK_LOWPRIV_SCRATCH = ' + (& $q $scratch)),
+              ('$env:BYOK_LOWPRIV_WORKSPACE = ' + (& $q $checkout)),
+              ('$env:BYOK_LOWPRIV_NODEDIR = ' + (& $q $nodeHome)),
+              ('& ' + (& $q $childScript)),
+              'exit $LASTEXITCODE'
+            )
+            Set-Content -LiteralPath $launcher -Value $launcherLines -Encoding utf8
+            Write-Host "[lowpriv] launcher written to $launcher"
+
             $stdoutLog = Join-Path $scratch 'logs\child-stdout.log'
             $stderrLog = Join-Path $scratch 'logs\child-stderr.log'
-            $argLine = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -LowPrivMode child -ScratchRoot "{1}" -Workspace "{2}" -NodeDir "{3}"' -f $childScript, $scratch, $checkout, $nodeHome
+            $argLine = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}"' -f $launcher
             $proc = Start-Process -FilePath $pwshExe -ArgumentList $argLine -Credential $cred -WorkingDirectory $scratch -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -Wait -PassThru
             # An unreadable exit code must never read as success.
             try { $childCode = $proc.ExitCode } catch { $childCode = $null }
@@ -624,18 +658,62 @@ jobs:
               Write-Host "===== end $(Split-Path -Leaf $logFile) ====="
             }
           } finally {
-            if ($created) {
-              try { Remove-LocalUser -Name $account } catch { Write-Host "[lowpriv] teardown: Remove-LocalUser failed: $($_.Exception.Message)" }
-              try { icacls $checkout /remove:g $account /T /C /Q | Out-Null } catch { Write-Host "[lowpriv] teardown: icacls /remove failed: $($_.Exception.Message)" }
-              Remove-Item -LiteralPath "C:\Users\$account" -Recurse -Force -ErrorAction SilentlyContinue
+            # Order matters: revoke the ACEs while the SID is still meaningful, THEN
+            # delete the account, THEN the profile and the scratch root. `icacls` is a
+            # native command -- its failure is an exit code, not a terminating error,
+            # so every call is checked explicitly instead of relying on `catch`.
+            if ($accountSid) {
+              $aceTargets = @($checkout)
+              if ($scratchCreated) { $aceTargets += $scratch }
+              foreach ($target in $aceTargets) {
+                if ([string]::IsNullOrWhiteSpace($target) -or -not (Test-Path -LiteralPath $target)) { continue }
+                icacls $target /remove:g "*$accountSid" /T /C /Q | Out-Null
+                if ($LASTEXITCODE -ne 0) {
+                  $cleanupFailures += "icacls /remove:g *$accountSid on $target exited $LASTEXITCODE"
+                } else {
+                  Write-Host "[lowpriv] teardown: revoked *$accountSid on $target"
+                }
+              }
+            } elseif ($created) {
+              $cleanupFailures += "no SID was captured for $account; its ACEs could not be revoked by SID"
             }
-            Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
-            if (Test-Path -LiteralPath $scratch) { Write-Host "[lowpriv] teardown: $scratch is still present" }
+
+            if ($created) {
+              try {
+                if ($accountSid) {
+                  Remove-LocalUser -SID ([System.Security.Principal.SecurityIdentifier]$accountSid)
+                } else {
+                  Remove-LocalUser -Name $account
+                }
+                Write-Host "[lowpriv] teardown: removed local account $account"
+              } catch {
+                $cleanupFailures += "Remove-LocalUser for $account failed: $($_.Exception.Message)"
+              }
+
+              $profileDir = "C:\Users\$account"
+              if (Test-Path -LiteralPath $profileDir) {
+                Remove-Item -LiteralPath $profileDir -Recurse -Force -ErrorAction SilentlyContinue
+                if (Test-Path -LiteralPath $profileDir) { $cleanupFailures += "profile directory $profileDir is still present" }
+              }
+            }
+
+            if ($scratchCreated) {
+              Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
+              if (Test-Path -LiteralPath $scratch) { $cleanupFailures += "scratch root $scratch is still present" }
+            }
+
+            foreach ($failure in $cleanupFailures) { Write-Host "[lowpriv] teardown FAILED: $failure" }
           }
 
           # Never report success without a real exit code from the standard-user child.
           if ($null -eq $childCode) { throw 'the standard-user child exit code could not be read; refusing to report success' }
           Write-Host "[lowpriv] standard-user child exited with $childCode"
+          # A failed main run keeps its own exit code (the teardown failures above are
+          # already printed). A clean main run with a failed teardown is not a pass.
+          if ($childCode -eq 0 -and $cleanupFailures.Count -gt 0) {
+            Write-Host "[lowpriv] the run itself passed but $($cleanupFailures.Count) teardown step(s) failed; failing the step"
+            exit 70
+          }
           exit $childCode
 
       # The release driver's --artifacts mode publishes exactly the bytes this job
