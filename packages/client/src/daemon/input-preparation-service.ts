@@ -1,5 +1,6 @@
-import { createHash } from 'node:crypto';
 import {
+  canonicalInputPreparationJson,
+  inputPreparationDigest,
   INPUT_PREPARATION_ARTIFACT_FORMAT,
   INPUT_PREPARATION_RECEIPT_FORMAT,
   INPUT_PREPARATION_VERSION,
@@ -24,6 +25,11 @@ import {
   InputPreparationCompileError,
   type InputPreparationCompiler,
 } from '../adapters/pi/input-preparation';
+import type {
+  PreparedToolSurface,
+  PreparedToolSurfaceAssembler,
+  PreparedToolSurfaceRefusal,
+} from './prepared-tool-surface';
 import {
   InputPreparationConflictError,
   InputPreparationDurabilityError,
@@ -63,7 +69,12 @@ import {
  *     installed closure. Caller text contributes nothing to that identity.
  *  5. Durable reserve, before the counter is ever invoked. Same key and digest
  *     returns the existing fact; a different digest conflicts (§10.3.5).
- *  6. Pure compile, then ONE serialized closure that admits the call against the
+ *  6. The ONE prepared-tool-surface assembly (`./prepared-tool-surface.ts`) —
+ *     launch boundary, implementation identities, probe, policy filter,
+ *     projection, fingerprints — deliberately AFTER the reserve, so a
+ *     re-delivery of an already-recorded requestId answers from the durable
+ *     record without starting a single server.
+ *  7. Pure compile, then ONE serialized closure that admits the call against the
  *     per-scope bounds, retains the artifact and durably reserves the counter
  *     call, then the counter, then the durably persisted result — in that
  *     order, so no success is ever reported that is not already on disk, and no
@@ -110,6 +121,16 @@ export interface InputPreparationServiceOptions {
   readonly authorityResolver: InputPreparationAuthorityResolver;
   readonly counter: InputPreparationCounterAdapter;
   readonly compiler: InputPreparationCompiler;
+  /**
+   * The ONE prepared-tool-surface entry (`./prepared-tool-surface.ts`).
+   *
+   * Required, with no default: a service constructed without one could not
+   * derive a tool manifest at all, and the only alternative to deriving one is
+   * accepting a caller's — which is precisely what this version of the request
+   * contract removed. Injected rather than constructed here so this module
+   * still names no registry, no launch configuration and no MCP probe.
+   */
+  readonly toolSurface: PreparedToolSurfaceAssembler;
   readonly now?: () => number;
 }
 
@@ -144,32 +165,6 @@ export interface InputPreparationService {
   readonly runtime: InputPreparationRuntimeIdentityV1;
   /** Internal test seam: the durable store behind this service. */
   readonly store: InputPreparationStore;
-}
-
-// ---------------------------------------------------------------------------
-// Canonical serialization
-// ---------------------------------------------------------------------------
-
-/**
- * Key-sorted JSON, so two structurally equal requests always produce the same
- * bytes and therefore the same digest. Field ORDER on the wire must never be
- * able to turn one request into two idempotency keys.
- */
-export function canonicalInputPreparationJson(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
-  if (Array.isArray(value)) return `[${value.map((entry) => canonicalInputPreparationJson(entry)).join(',')}]`;
-  const record = value as Record<string, unknown>;
-  const parts: string[] = [];
-  for (const key of Object.keys(record).sort()) {
-    const entry = record[key];
-    if (entry === undefined) continue;
-    parts.push(`${JSON.stringify(key)}:${canonicalInputPreparationJson(entry)}`);
-  }
-  return `{${parts.join(',')}}`;
-}
-
-function sha256Hex(input: string): string {
-  return createHash('sha256').update(input, 'utf8').digest('hex');
 }
 
 // ---------------------------------------------------------------------------
@@ -214,17 +209,22 @@ export function inputPreparationReadinessReasons(
     if (!reasons.includes('not_counted')) reasons.push('not_counted');
   } else {
     if (record.artifact.coverage !== 'complete') reasons.push('compiler_coverage_unknown');
-    // Tool executor strings are OBSERVATION fingerprints: they bind what a
-    // server said about a tool — its toolset revision, its self-reported
-    // identity, its negotiated protocol version, its schema — and none of that
-    // proves which executable will actually serve the call. Observation and
-    // launch are two separate spawns of a command the daemon only knows as
-    // `command`/`args`, so even hashing the binary would be a TOCTOU claim.
-    // Until an implementation-identity proof exists, no receipt may be ready
-    // on the strength of a fingerprint, exactly as `compiler_coverage_unknown`
-    // keeps one from being ready on unproven token coverage. The condition
-    // changes when the proof does, not before.
-    reasons.push('executor_identity_unproven');
+    // A tool executor string is an OBSERVATION fingerprint. It binds what a
+    // server said about a tool AND the implementation identity this daemon
+    // resolved for that server — so whether it proves anything about the
+    // executable depends entirely on whether that identity was attested.
+    //
+    // The receipt therefore reads the recorded kinds rather than asserting the
+    // limitation unconditionally: any tool whose implementation is
+    // `unavailable` keeps the whole preparation unready, because a manifest is
+    // only as proven as its least proven entry. On this SDK's default — no
+    // configured `toolImplementationAuthority` — every kind is
+    // `unavailable:resolver_unconfigured` and the reason is always present,
+    // which is the same honest answer as before; what changed is that it is
+    // now derived from evidence instead of hard-coded.
+    if (Object.values(record.artifact.toolImplementationKinds).some((kind) => kind !== 'attested')) {
+      reasons.push('executor_identity_unproven');
+    }
     if (record.artifactBytes === 0 || nowMs >= Date.parse(record.artifactExpiresAt)) reasons.push('artifact_expired');
   }
   if (record.counter !== undefined) {
@@ -471,9 +471,25 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       source: { revision: request.source.revision, digest: request.source.digest },
       target,
       policyRevision: limits.revision,
+      permissionMode: request.permissionMode,
       runtime: options.compiler.runtime,
       requestDigest,
     };
+  }
+
+  /**
+   * Turn one assembly refusal into the typed rejection the wire carries, and
+   * record WHY on the durable record before it leaves.
+   *
+   * The refusal detail is a stable code, so a later `lookup` answers the same
+   * fact the original call did rather than only "failed".
+   */
+  async function refuseAssembly(
+    recordId: string,
+    refusal: PreparedToolSurfaceRefusal,
+  ): Promise<never> {
+    await markFailed(recordId, refusal.detail);
+    throw new InputPreparationRequestError(refusal.code, refusal.message);
   }
 
   async function runPreparation(
@@ -483,6 +499,23 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     target: InputPreparationCounterTargetV1,
     run: ActiveRun,
   ): Promise<InputPreparationRecord> {
+    // --- observation stage ------------------------------------------------
+    // The one entry that resolves the launch boundary, resolves an
+    // implementation identity per server, probes through both, and returns the
+    // frozen tool surface. It runs AFTER the durable reserve above, which is
+    // what makes a re-delivery return the recorded fact without a second
+    // spawn: no server is started until this key is provably new.
+    let surface: PreparedToolSurface;
+    {
+      const assembled = await options.toolSurface.assemble({
+        requiredToolsets: request.requiredToolsets,
+        permissionMode: request.permissionMode,
+        runtimeIdentity: inputPreparationRuntimeIdentityString(options.compiler.runtime),
+      });
+      if (!assembled.ok) await refuseAssembly(record.recordId, assembled);
+      surface = (assembled as { readonly surface: PreparedToolSurface }).surface;
+    }
+
     // --- pure stage -------------------------------------------------------
     // No filesystem, environment, session, process, tool or network access
     // happens inside this call; the runtime identity it is bound to was read
@@ -490,7 +523,13 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     let compiled;
     try {
       compiled = await options.compiler.compile({
-        snapshot: request.snapshot,
+        snapshot: {
+          prompt: request.snapshot.prompt,
+          messages: request.snapshot.messages,
+          // Daemon-derived, never caller-stated. The tools the model is shown
+          // and the executors the manifest binds come from the same assembly.
+          tools: surface.tools,
+        },
         model: request.selection.model,
         options: request.selection.options,
         binding: {
@@ -499,7 +538,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
           policyIdentity: limits.revision,
           profileRevision: grant.profileRevision,
         },
-        toolExecutors: request.toolExecutors,
+        toolExecutors: surface.toolExecutors,
       });
     } catch (cause) {
       await markFailed(record.recordId, 'compile_rejected');
@@ -561,6 +600,9 @@ export function createInputPreparationService(options: InputPreparationServiceOp
           requestBytes: compiled.requestBytes,
           projectionBytes: compiled.projectionBytes,
           coverage: compiled.coverage,
+          observationDigest: surface.observationDigest,
+          toolBindingDigest: surface.toolBindingDigest,
+          toolImplementationKinds: surface.toolImplementationKinds,
         },
         bounds: {
           maxScopeAggregateBytes: limits.maxScopeAggregateBytes,
@@ -670,14 +712,12 @@ export function createInputPreparationService(options: InputPreparationServiceOp
 
     const grant = await resolveAuthority(request.scope);
     const runtime = options.compiler.runtime;
-    const requestDigest = sha256Hex(
-      canonicalInputPreparationJson({
-        request,
-        scopeId: grant.scopeId,
-        runtime,
-        policyRevision: limits.revision,
-      }),
-    );
+    const requestDigest = inputPreparationDigest({
+      request,
+      scopeId: grant.scopeId,
+      runtime,
+      policyRevision: limits.revision,
+    });
     const target: InputPreparationCounterTargetV1 = {
       endpoint: request.selection.model.baseUrl,
       modelId: request.selection.model.id,
@@ -717,8 +757,40 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       }
       if (outcome.kind === 'existing') {
         // Idempotent: the durable fact is the answer. Never a second compile,
-        // never a second counter call — including for a record whose counter
-        // outcome is unknown.
+        // never a second counter call, and — since the tool manifest became a
+        // daemon observation rather than caller text — never a second PROBE
+        // either. A repeat that re-observed would mint a second executor fact
+        // under one idempotency key, which is the substitution this key exists
+        // to prevent.
+        //
+        // Drift is still checked, on the half of the evidence that can be
+        // re-derived without starting anything: the launch attestation, the
+        // toolset definition revisions, the configured argv and the
+        // implementation identities. If any of those moved since the recorded
+        // artifact was frozen, the recorded receipt no longer describes this
+        // device and the repeat is REFUSED rather than answered — the caller
+        // mints a new preparation instead of silently receiving one bound to
+        // stale evidence.
+        //
+        // A record with no artifact yet (a concurrent duplicate still in
+        // flight, or one that failed before it froze anything) has nothing to
+        // compare against, so it answers with its own durable state.
+        const recorded = outcome.record.artifact;
+        if (recorded !== undefined) {
+          const rebound = await options.toolSurface.resolveBinding({
+            requiredToolsets: request.requiredToolsets,
+          });
+          if (!rebound.ok) {
+            throw new InputPreparationRequestError(rebound.code, rebound.message);
+          }
+          if (rebound.binding.toolBindingDigest !== recorded.toolBindingDigest) {
+            throw new InputPreparationRequestError(
+              'observation_drift',
+              'the launch binding, toolset definitions or tool implementations behind this preparation'
+                + ' changed after its artifact was frozen; it will not be re-derived under the same requestId',
+            );
+          }
+        }
         return toReceipt(outcome.record, now());
       }
 

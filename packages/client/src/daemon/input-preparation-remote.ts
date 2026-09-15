@@ -14,14 +14,9 @@ import {
   type InputPreparationLimitsPolicyV1,
   type InputPreparationReceiptV1,
   type InputPreparationRequestV1,
-  type InputPreparationToolV1,
 } from '../input-preparation';
-import type { McpToolsetServerObservation } from '../mcp/observation';
-import { projectMcpTools, qualifiedMcpToolName } from '../mcp/projection';
-import { buildToolExecutorsFromObservation } from '../adapters/pi/input-preparation';
 import {
   InputPreparationRequestError,
-  inputPreparationRuntimeIdentityString,
   type InputPreparationService,
 } from './input-preparation-service';
 import type { InputPreparationCompletionClient } from './input-preparation-completion-client';
@@ -48,8 +43,12 @@ import type { InputPreparationCompletionClient } from './input-preparation-compl
  *    never from the payload. A sender that could name them could bind a
  *    preparation to a device it does not own.
  * 2. Tools and tool-executor identities are LOCAL observations. The payload
- *    names required toolsets; this module probes those servers itself and
- *    fingerprints what they actually report.
+ *    names required toolsets and a permission mode; the daemon's ONE prepared
+ *    tool-surface entry (`./prepared-tool-surface.ts`, reached through
+ *    `InputPreparationService.prepare`) resolves the launch boundary, resolves
+ *    an implementation identity per server, probes them itself and
+ *    fingerprints what they actually report. This module states no tool and no
+ *    executor, which is why it no longer has an observation seam of its own.
  * 3. The Host's `deadlineAt` may only TIGHTEN the configured local deadline.
  *
  * Failure posture: a business refusal is REPORTED as a terminal completion so
@@ -70,13 +69,6 @@ type _LocalCodesAreWireReasons = InputPreparationErrorCodeV1 extends InputPrepar
 const _localCodesAreWireReasons: _LocalCodesAreWireReasons = true;
 void _localCodesAreWireReasons;
 
-/** What the daemon observed for the payload's `requiredToolsets`. */
-export interface RemoteInputPreparationObservation {
-  readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
-  /** `toolsetId` -> the registry's definition revision. Every observed toolset must appear. */
-  readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
-}
-
 export interface RemoteInputPreparationDeps {
   /** The authenticated local device record. Never the payload's word for it. */
   readonly deviceId: string;
@@ -94,7 +86,6 @@ export interface RemoteInputPreparationDeps {
   readonly resolveBlobText: (
     blobRef: Extract<AgentInputPreparationPayload['context'], { blobRef: unknown }>['blobRef'],
   ) => Promise<string>;
-  readonly observeToolsets: (requiredToolsets: readonly string[]) => Promise<RemoteInputPreparationObservation>;
   readonly now?: () => number;
 }
 
@@ -174,54 +165,21 @@ async function resolveContextDocument(
   return result.data;
 }
 
+/**
+ * Turn one authorized envelope into the LOCAL request shape.
+ *
+ * It is a projection, not an assembly: every field is either copied from the
+ * payload or read off this device's authenticated record. Nothing about tools
+ * is decided here — `requiredToolsets` and `permissionMode` travel through to
+ * the service, which reaches the one assembly entry. That is what makes "the
+ * remote lane cannot state a tool schema or an executor" a structural fact
+ * about this file rather than a rule it has to remember.
+ */
 async function buildRequest(
   payload: AgentInputPreparationPayload,
   deps: RemoteInputPreparationDeps,
-  service: InputPreparationService,
 ): Promise<InputPreparationRequestV1> {
   const context = await resolveContextDocument(payload, deps);
-
-  let observed: RemoteInputPreparationObservation;
-  try {
-    observed = await deps.observeToolsets(payload.requiredToolsets);
-  } catch (cause) {
-    throw new RemoteRejection(
-      'toolsets_unobservable',
-      'a required MCP toolset server could not be observed on this device',
-      { cause },
-    );
-  }
-
-  // The model-visible tool set is what the servers THEMSELVES reported, in the
-  // core's one canonical order — the same order the ordinary extension
-  // registers and the model is shown, so a prepared digest cannot depend on
-  // which consumer built it.
-  const tools: InputPreparationToolV1[] = projectMcpTools(observed.observation).map((tool) => ({
-    name: qualifiedMcpToolName(tool.serverName, tool.toolName),
-    description: tool.description,
-    // No `?? {}` fallback: `observation.ts`'s `validateTool` already refuses a
-    // tool whose `inputSchema` is absent or is not a JSON object, so an
-    // empty-schema default here would be dead code posing as a safety net —
-    // and, if it ever were reachable, it would count a schema no model was shown.
-    parameters: tool.inputSchema as Readonly<Record<string, unknown>>,
-  }));
-
-  let toolExecutors: Readonly<Record<string, string>>;
-  try {
-    ({ toolExecutors } = await buildToolExecutorsFromObservation({
-      observation: observed.observation,
-      toolsetDefinitionRevisions: observed.toolsetDefinitionRevisions,
-      // Declared limit for this slice: the remote lane compiles the observed
-      // MCP toolset tools only. Pi's own native tools are selected by a runtime
-      // policy this task-free path never resolves, and inventing one here would
-      // put a tool in the manifest that no authority admitted.
-      nativeTools: [],
-      runtimeIdentity: inputPreparationRuntimeIdentityString(service.runtime),
-    }));
-  } catch (cause) {
-    throw new RemoteRejection('unsupported_input', 'the observed toolsets could not be fingerprinted', { cause });
-  }
-
   return {
     format: INPUT_PREPARATION_REQUEST_FORMAT,
     version: INPUT_PREPARATION_VERSION,
@@ -236,8 +194,9 @@ async function buildRequest(
     },
     source: payload.source,
     selection: payload.selection,
-    snapshot: { prompt: context.prompt, messages: context.messages, tools },
-    toolExecutors,
+    permissionMode: payload.permissionMode,
+    requiredToolsets: Object.freeze([...payload.requiredToolsets]),
+    snapshot: { prompt: context.prompt, messages: context.messages },
   };
 }
 
@@ -281,7 +240,7 @@ export function createRemoteInputPreparationHandler(deps: RemoteInputPreparation
         throw new RemoteRejection('deadline_elapsed', 'the authorized preparation deadline has already elapsed');
       }
 
-      const request = await buildRequest(payload, deps, service);
+      const request = await buildRequest(payload, deps);
       // Re-delivery is absorbed by the store's own reserve -> `existing` path:
       // the same `(scope, Agent, requestId)` under the same normalized digest
       // returns the durable receipt without a second compile or a second

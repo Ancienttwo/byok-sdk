@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
-import type { TaskState } from '@byok-sdk/protocol';
+import { PERMISSION_MODES, type PermissionMode, type TaskState } from '@byok-sdk/protocol';
 import type { ApprovalDecision, PendingApproval } from './approvals';
 import type { StorageCategory } from './journal/journal';
 import type { StoragePressureState } from './journal/storage-policy';
@@ -18,10 +18,14 @@ import type {
   InputPreparationRequestV1,
   InputPreparationScopeClaimV1,
   InputPreparationSnapshotV1,
-  InputPreparationToolV1,
   InputPreparationUserMessageV1,
 } from '../input-preparation';
-import { INPUT_PREPARATION_REQUEST_FORMAT, INPUT_PREPARATION_VERSION } from '../input-preparation';
+import {
+  INPUT_PREPARATION_REQUEST_FORMAT,
+  INPUT_PREPARATION_RETIRED_REQUEST_KEYS,
+  INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS,
+  INPUT_PREPARATION_VERSION,
+} from '../input-preparation';
 
 
 /**
@@ -1062,82 +1066,148 @@ function parseMessages(value: unknown): InputPreparationUserMessageV1[] | undefi
   return messages;
 }
 
-/** Complete model-visible schemas only: a tool without a JSON-object `parameters` is unsupported, never defaulted to `{}`. */
-function parseTools(value: unknown): InputPreparationToolV1[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const tools: InputPreparationToolV1[] = [];
-  const seen = new Set<string>();
-  for (const entry of value) {
-    if (!plainRecord(entry) || !exactKeys(entry, ['name', 'description', 'parameters'])) return undefined;
-    if (!identifier(entry.name) || seen.has(entry.name)) return undefined;
-    if (typeof entry.description !== 'string' || entry.description.length === 0) return undefined;
-    if (!plainRecord(entry.parameters)) return undefined;
-    seen.add(entry.name);
-    tools.push({ name: entry.name, description: entry.description, parameters: entry.parameters });
-  }
-  return tools;
-}
-
 function parseSnapshot(value: unknown): InputPreparationSnapshotV1 | undefined {
-  if (!plainRecord(value) || !exactKeys(value, ['prompt', 'messages', 'tools'])) return undefined;
+  // `tools` is NOT parsed here and is not accepted: the model-visible schemas
+  // are a local observation assembled by `./prepared-tool-surface.ts`. The
+  // retired key is caught by name above this function so the caller hears
+  // which authority it tried to assert, rather than a generic shape error.
+  if (!plainRecord(value) || !exactKeys(value, ['prompt', 'messages'])) return undefined;
   const prompt = parsePromptSnapshot(value.prompt);
   const messages = parseMessages(value.messages);
-  const tools = parseTools(value.tools);
-  if (!prompt || !messages || !tools) return undefined;
-  return { prompt, messages, tools };
+  if (!prompt || !messages) return undefined;
+  return { prompt, messages };
+}
+
+/** Configured MCP toolset ids: non-empty, deduplicated, and each a usable identifier. */
+function parseRequiredToolsets(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (!identifier(entry) || seen.has(entry)) return undefined;
+    seen.add(entry as string);
+  }
+  return [...seen];
+}
+
+/**
+ * Why `input_preparation.prepare` params were refused.
+ *
+ * Two distinct codes, because they are two distinct facts. `bad_request` is
+ * "this is not the shape" — a wrong type, a missing field, an unknown extra.
+ * `unsupported_input` is "this is the OLD shape": the caller sent a key this
+ * contract retired, which means it is asserting authority over the tool
+ * manifest that version 2 moved onto the device. Answering that with a generic
+ * shape error would leave the caller adjusting field types forever.
+ */
+export type InputPreparationRequestParseResult =
+  | { readonly ok: true; readonly request: InputPreparationRequestV1 }
+  | { readonly ok: false; readonly code: 'bad_request' | 'unsupported_input'; readonly detail: string };
+
+function badRequest(detail: string): InputPreparationRequestParseResult {
+  return { ok: false, code: 'bad_request', detail };
 }
 
 /**
  * Strict shape gate for `input_preparation.prepare`.
  *
- * `undefined` means `bad_request`. Every object is key-exact: an unknown field
- * anywhere in the request is a rejection, never an ignored extra — a tolerated
- * field is how a caller comes to believe it can influence the compiled body,
- * the runtime identity or the policy this daemon enforces.
+ * Every object is key-exact: an unknown field anywhere in the request is a
+ * rejection, never an ignored extra — a tolerated field is how a caller comes
+ * to believe it can influence the compiled body, the runtime identity or the
+ * policy this daemon enforces.
  *
  * This gate validates SHAPE only. Scope authority, policy revision, runtime
- * identity and every limit are resolved by `input-preparation-service.ts`; none
- * of them can be asserted here by a caller.
+ * identity, the tool manifest and every limit are resolved by
+ * `input-preparation-service.ts`; none of them can be asserted here by a
+ * caller.
  */
-export function parseInputPreparationRequestParams(value: unknown): InputPreparationRequestV1 | undefined {
-  if (
-    !plainRecord(value) ||
-    !exactKeys(value, ['format', 'version', 'requestId', 'policyRevision', 'scope', 'source', 'selection', 'snapshot', 'toolExecutors'])
-  ) {
-    return undefined;
+export function parseInputPreparationRequestParams(value: unknown): InputPreparationRequestParseResult {
+  if (!plainRecord(value)) return badRequest('the params must be an object');
+  // Named first, and by name: a caller still sending either key is not sending
+  // a slightly wrong request, it is claiming an authority this contract moved.
+  for (const retired of INPUT_PREPARATION_RETIRED_REQUEST_KEYS) {
+    if (retired in value) {
+      return {
+        ok: false,
+        code: 'unsupported_input',
+        detail: `this contract no longer accepts ${JSON.stringify(retired)}: tool executor identity is a local`
+          + ' observation this daemon derives from `requiredToolsets`, never a value a caller may state',
+      };
+    }
   }
-  if (value.format !== INPUT_PREPARATION_REQUEST_FORMAT || value.version !== INPUT_PREPARATION_VERSION) return undefined;
-  if (!identifier(value.requestId) || !identifier(value.policyRevision)) return undefined;
+  if (plainRecord(value.snapshot)) {
+    for (const retired of INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS) {
+      if (retired in value.snapshot) {
+        return {
+          ok: false,
+          code: 'unsupported_input',
+          detail: `this contract no longer accepts ${JSON.stringify(`snapshot.${retired}`)}: the model-visible tool`
+            + ' schemas are a local observation this daemon derives from `requiredToolsets`',
+        };
+      }
+    }
+  }
+  if (
+    !exactKeys(value, [
+      'format',
+      'version',
+      'requestId',
+      'policyRevision',
+      'scope',
+      'source',
+      'selection',
+      'permissionMode',
+      'requiredToolsets',
+      'snapshot',
+    ])
+  ) {
+    return badRequest('the params carry a field this request shape does not define');
+  }
+  if (value.format !== INPUT_PREPARATION_REQUEST_FORMAT || value.version !== INPUT_PREPARATION_VERSION) {
+    return badRequest(
+      `the request must carry format ${JSON.stringify(INPUT_PREPARATION_REQUEST_FORMAT)}`
+      + ` and version ${String(INPUT_PREPARATION_VERSION)}`,
+    );
+  }
+  if (!identifier(value.requestId) || !identifier(value.policyRevision)) {
+    return badRequest('requestId and policyRevision must be non-empty single-line identifiers');
+  }
   const scope = parseScopeClaim(value.scope);
-  if (!scope) return undefined;
-  if (!plainRecord(value.source) || !exactKeys(value.source, ['revision', 'digest'])) return undefined;
-  if (!identifier(value.source.revision) || !identifier(value.source.digest)) return undefined;
-  if (!plainRecord(value.selection) || !exactKeys(value.selection, ['model', 'options'])) return undefined;
+  if (!scope) return badRequest('scope must be exactly {deviceId, agentRef, profileId, profileRevision}');
+  if (!plainRecord(value.source) || !exactKeys(value.source, ['revision', 'digest'])) {
+    return badRequest('source must be exactly {revision, digest}');
+  }
+  if (!identifier(value.source.revision) || !identifier(value.source.digest)) {
+    return badRequest('source.revision and source.digest must be non-empty single-line identifiers');
+  }
+  if (!plainRecord(value.selection) || !exactKeys(value.selection, ['model', 'options'])) {
+    return badRequest('selection must be exactly {model, options}');
+  }
   const model = parseModel(value.selection.model);
   const options = parseOptions(value.selection.options);
-  if (!model || !options) return undefined;
-  const snapshot = parseSnapshot(value.snapshot);
-  if (!snapshot) return undefined;
-  if (!stringMap(value.toolExecutors)) return undefined;
-  // Executable identity must cover exactly the model-visible tools — no more,
-  // no fewer. Schema equality alone never proves the same executable closure.
-  const executorNames = Object.keys(value.toolExecutors);
-  if (executorNames.length !== snapshot.tools.length) return undefined;
-  const toolNames = new Set(snapshot.tools.map((tool) => tool.name));
-  for (const name of executorNames) {
-    if (!toolNames.has(name)) return undefined;
-    if (!identifier(value.toolExecutors[name])) return undefined;
+  if (!model || !options) return badRequest('selection.model / selection.options are outside the accepted shape');
+  if (typeof value.permissionMode !== 'string' || !(PERMISSION_MODES as readonly string[]).includes(value.permissionMode)) {
+    return badRequest(`permissionMode must be one of ${PERMISSION_MODES.map((mode) => JSON.stringify(mode)).join(', ')}`);
   }
+  const requiredToolsets = parseRequiredToolsets(value.requiredToolsets);
+  if (!requiredToolsets) {
+    return badRequest('requiredToolsets must be a non-empty array of distinct configured toolset ids');
+  }
+  const snapshot = parseSnapshot(value.snapshot);
+  if (!snapshot) return badRequest('snapshot must be exactly {prompt, messages}');
   return {
-    format: INPUT_PREPARATION_REQUEST_FORMAT,
-    version: INPUT_PREPARATION_VERSION,
-    requestId: value.requestId,
-    policyRevision: value.policyRevision,
-    scope,
-    source: { revision: value.source.revision, digest: value.source.digest },
-    selection: { model, options },
-    snapshot,
-    toolExecutors: { ...value.toolExecutors },
+    ok: true,
+    request: {
+      format: INPUT_PREPARATION_REQUEST_FORMAT,
+      version: INPUT_PREPARATION_VERSION,
+      requestId: value.requestId,
+      policyRevision: value.policyRevision,
+      scope,
+      source: { revision: value.source.revision, digest: value.source.digest },
+      selection: { model, options },
+      permissionMode: value.permissionMode as PermissionMode,
+      requiredToolsets: Object.freeze(requiredToolsets),
+      snapshot,
+    },
   };
 }
 

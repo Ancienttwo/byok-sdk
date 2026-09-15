@@ -5,11 +5,10 @@ import { fileURLToPath } from 'node:url';
 import type { PreparedSessionInputV1 } from '@earendil-works/pi-coding-agent/prepared-session-input';
 import type { PermissionMode } from '@byok-sdk/protocol';
 import type {
+  InputPreparationCompiledSnapshotV1,
   InputPreparationModelV1,
   InputPreparationOptionsV1,
-  InputPreparationReadinessReasonV1,
   InputPreparationRuntimeIdentityV1,
-  InputPreparationSnapshotV1,
 } from '../../input-preparation';
 import type { McpToolsetServerObservation } from '../../mcp/observation';
 import type { McpLaunchAttestation } from '../../daemon/trusted-launch-cwd';
@@ -84,7 +83,7 @@ export interface CompiledPreparedInput {
 
 /** Explicit, already-authorized and already-authority-resolved compile input. */
 export interface CompilePreparedInputRequest {
-  readonly snapshot: InputPreparationSnapshotV1;
+  readonly snapshot: InputPreparationCompiledSnapshotV1;
   readonly model: InputPreparationModelV1;
   readonly options: InputPreparationOptionsV1;
   readonly binding: {
@@ -354,31 +353,42 @@ export function createPiInputPreparationCompiler(): InputPreparationCompiler {
  * fingerprint changes, which is what makes drift between preparation and
  * launch a hard refusal.
  *
- * What it does NOT bind is which executable will serve the call. The daemon
- * holds a server only as `command`/`args`; observation and launch are two
- * separate spawns, so even hashing the binary in between would be a TOCTOU
- * claim rather than a proof. Folding `command`/`args` into the fingerprint and
- * calling the result an identity would be worse than leaving the gap open —
- * it would read as an integrity guarantee that nothing verifies. So the gap is
- * carried explicitly instead, as {@link ToolImplementationIdentityV1}, and it
- * travels into the receipt as a readiness reason that no preparation can clear
- * (`executor_identity_unproven`).
+ * What it binds ABOUT the executable is exactly what a host authority attested
+ * and this SDK then measured: the {@link ToolImplementationIdentityV1} the
+ * daemon resolved for that server, bound whole. Where no authority attested
+ * one — which is every server on a daemon constructed without a resolver — the
+ * bound value is the named unavailable reason, not a guess. Folding raw
+ * `command`/`args` in and calling the result an identity would be worse than
+ * leaving the gap open: it would read as an integrity guarantee that nothing
+ * verifies.
+ *
+ * So the gap is carried explicitly rather than papered over, and it travels
+ * into the receipt: a preparation whose every tool is `attested` clears
+ * `executor_identity_unproven`, and one with any `unavailable` tool does not.
  */
 
 /**
- * The identity a fingerprint binds when no host authority has attested one.
+ * The identity a NATIVE tool's fingerprint binds.
  *
  * The TYPE and every rule about it live in
  * `daemon/tool-implementation-identity.ts`, which is the single authority for
  * what an implementation identity is and the only file that can produce an
- * attested one. This file only names the value it hashes, because that value
- * is part of what every fingerprint already commits to: the day a real proof
- * reaches this call site, every previously issued fingerprint changes — which
- * is correct. A tool whose implementation is proven is not the same tool as
- * one whose implementation was merely assumed, and nothing frozen under the
- * weaker claim should silently validate under the stronger one.
+ * attested one. This file only names the value it hashes.
+ *
+ * MCP tools no longer use it: the daemon now resolves one real identity per
+ * projected server (`daemon/prepared-tool-surface.ts`) and passes it in, so an
+ * MCP fingerprint commits to whatever was actually established — attested, or
+ * a named unavailable reason. Pi's own native tools have no install record to
+ * resolve against and no separate executable to measure: they are code inside
+ * the verified runtime closure the `runtimeIdentity` already binds, so the
+ * honest value for them is "nobody attested this separately".
+ *
+ * Both halves changed the day a real proof reached the MCP call site, which is
+ * correct: a tool whose implementation is proven is not the same tool as one
+ * whose implementation was merely assumed, and nothing frozen under the weaker
+ * claim should silently validate under the stronger one.
  */
-const TOOL_IMPLEMENTATION_IDENTITY_UNAVAILABLE: ToolImplementationIdentityV1 =
+const NATIVE_TOOL_IMPLEMENTATION_IDENTITY: ToolImplementationIdentityV1 =
   toolImplementationUnavailable('implementation_identity_unattested');
 
 type CanonicalPreparedValue =
@@ -434,6 +444,16 @@ export interface McpToolFingerprintInput {
    * every SDK release.
    */
   readonly launch: McpLaunchAttestation;
+  /**
+   * What the daemon established about the implementation behind this server
+   * (`daemon/tool-implementation-identity.ts`), bound WHOLE rather than as a
+   * label: an attested identity carries the install path, the closure digest
+   * and the stat tuple that was measured, and a fingerprint that bound only
+   * the word "attested" would validate a different install under the same
+   * claim. Required, not optional — a caller that could omit it would freeze a
+   * manifest whose implementation claim is silently absent.
+   */
+  readonly implementation: ToolImplementationIdentityV1;
 }
 
 /** Everything one Pi-native tool's fingerprint binds. */
@@ -457,7 +477,7 @@ export async function mcpToolObservationFingerprint(input: McpToolFingerprintInp
     toolSchemaDigest: await canonicalDigest(input.inputSchema),
     runtimeIdentity: input.runtimeIdentity,
     launch: { launchCwd: input.launch.launchCwd, launcher: input.launch.launcher },
-    implementationIdentity: TOOL_IMPLEMENTATION_IDENTITY_UNAVAILABLE,
+    implementationIdentity: input.implementation,
   });
 }
 
@@ -468,7 +488,7 @@ export async function nativeToolObservationFingerprint(input: NativeToolFingerpr
     toolName: input.toolName,
     toolSchemaDigest: await canonicalDigest(input.parameters),
     runtimeIdentity: input.runtimeIdentity,
-    implementationIdentity: TOOL_IMPLEMENTATION_IDENTITY_UNAVAILABLE,
+    implementationIdentity: NATIVE_TOOL_IMPLEMENTATION_IDENTITY,
   });
 }
 
@@ -493,6 +513,14 @@ export interface ToolExecutorsRequest {
    * fact it exists to pin.
    */
   readonly launch: McpLaunchAttestation;
+  /**
+   * `serverName` -> the implementation identity this daemon resolved for it,
+   * once, before anything was spawned. Every observed server must appear;
+   * a missing one is a compile refusal rather than an assumed absence,
+   * because "nobody resolved this" and "the resolver said unavailable" are
+   * different facts and only the second one is a fingerprint input.
+   */
+  readonly implementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
   /** Pi's own tools, already filtered by policy, in the order they are registered. */
   readonly nativeTools: readonly { readonly name: string; readonly parameters: unknown }[];
   readonly runtimeIdentity: string;
@@ -501,12 +529,6 @@ export interface ToolExecutorsRequest {
 export interface ToolExecutorsResult {
   /** Keyed by the model-visible tool name, exactly as the native manifest expects. */
   readonly toolExecutors: Readonly<Record<string, string>>;
-  /**
-   * Always contains `executor_identity_unproven`. Surfaced rather than
-   * asserted, so the caller carries the limitation into the receipt instead of
-   * a reader having to know it.
-   */
-  readonly readinessReasons: readonly InputPreparationReadinessReasonV1[];
 }
 
 /**
@@ -543,6 +565,13 @@ export async function buildToolExecutorsFromObservation(
         `toolset ${JSON.stringify(tool.toolsetId)} has no definition revision; its tools cannot be fingerprinted`,
       );
     }
+    const implementation = request.implementations[tool.serverName];
+    if (implementation === undefined) {
+      throw new InputPreparationCompileError(
+        `MCP server ${JSON.stringify(tool.serverName)} has no resolved implementation identity;`
+        + ' its tools cannot be fingerprinted',
+      );
+    }
     toolExecutors[qualifiedMcpToolName(tool.serverName, tool.toolName)] = await mcpToolObservationFingerprint({
       toolsetId: tool.toolsetId,
       toolsetDefinitionRevision,
@@ -553,10 +582,8 @@ export async function buildToolExecutorsFromObservation(
       inputSchema: tool.inputSchema,
       runtimeIdentity: request.runtimeIdentity,
       launch: request.launch,
+      implementation,
     });
   }
-  return Object.freeze({
-    toolExecutors: Object.freeze(toolExecutors),
-    readinessReasons: Object.freeze(['executor_identity_unproven' as const]),
-  });
+  return Object.freeze({ toolExecutors: Object.freeze(toolExecutors) });
 }

@@ -178,9 +178,8 @@ import { AgentHomeProjectionCompletionClient } from './agent-home-projection-cli
 import { InputPreparationCompletionClient } from './input-preparation-completion-client';
 import {
   createRemoteInputPreparationHandler,
-  type RemoteInputPreparationObservation,
 } from './input-preparation-remote';
-import { MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS, probeMcpServer } from './mcp-tools-probe';
+import { createPreparedToolSurfaceAssembler } from './prepared-tool-surface';
 import { buildRuntimeEnv } from './environment';
 import { resolveAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
 import type { McpLaunchCwdConfig } from './trusted-launch-cwd';
@@ -1481,6 +1480,42 @@ export function buildDaemonWithAdapters(
    */
   const inputPreparationLimits =
     config.inputPreparation === undefined ? undefined : validateInputPreparationLimits(config.inputPreparation.limits);
+  /**
+   * The ONE prepared-tool-surface entry, bound to this daemon's registry,
+   * launch-cwd configuration and implementation authority
+   * (`./prepared-tool-surface.ts`).
+   *
+   * It replaces the remote lane's former `observeRequiredToolsets`, which
+   * probed with a label, a timeout and an environment and nothing else — no
+   * trusted launch directory and no implementation identity. There is
+   * deliberately no second path left: both the local `input_preparation.prepare`
+   * control call and the remote `agent.input.preparation` envelope reach this
+   * assembler through `InputPreparationService.prepare`, so a preparation's
+   * fingerprints and an offer's admission bind the same launch boundary.
+   *
+   * The runtime environment is resolved PER CALL, from the pi descriptor and
+   * `config.runtimeEnvironment`, exactly as the offer path builds it — a value
+   * captured at construction would shadow a later configuration reload.
+   */
+  const preparedToolSurface = createPreparedToolSurfaceAssembler({
+    toolsetRegistry,
+    ...(mcpLaunchCwd === undefined ? {} : { mcpLaunchCwd }),
+    runtimeEnv: () => {
+      const piDescriptor = adapters.find((adapter) => adapter.descriptor.id === 'pi')?.descriptor;
+      return buildRuntimeEnv({
+        ambient: process.env,
+        ...(piDescriptor?.environmentRequirements === undefined
+          ? {}
+          : { requirements: piDescriptor.environmentRequirements }),
+        ...(config.runtimeEnvironment?.pi?.allow === undefined
+          ? {}
+          : { locallyAllowedNames: config.runtimeEnvironment.pi.allow }),
+      });
+    },
+    ...(config.toolImplementationAuthority === undefined
+      ? {}
+      : { toolImplementationAuthority: config.toolImplementationAuthority }),
+  });
   let inputPreparationService: InputPreparationService | undefined;
   let inputPreparationRuntimeError: unknown;
   if (config.inputPreparation !== undefined && inputPreparationLimits !== undefined) {
@@ -1491,6 +1526,7 @@ export function buildDaemonWithAdapters(
         authorityResolver: config.inputPreparation.authorityResolver,
         counter: config.inputPreparation.counter,
         compiler: createPiInputPreparationCompiler(),
+        toolSurface: preparedToolSurface,
       });
     } catch (error) {
       inputPreparationRuntimeError = error;
@@ -2135,69 +2171,7 @@ export function buildDaemonWithAdapters(
         blobClient.resolveInstruction(blobRef, {
           ...(blobLifecycleAbort === undefined ? {} : { signal: blobLifecycleAbort.signal }),
         }),
-      observeToolsets: (requiredToolsets) => observeRequiredToolsets(requiredToolsets),
     });
-
-    /**
-     * Observe the payload's required toolsets with the SAME probe the task
-     * runner admits an offer with (`mcpToolsetToolsProbe` ->
-     * `probeMcpServer`). A second observation path would be a second answer to
-     * "what tools does this device have", and the prepared digest would then
-     * depend on which one asked.
-     *
-     * Every server is probed concurrently under one shared deadline, and a
-     * single failure refuses the whole preparation: a partial tool set is not
-     * a smaller preparation, it is a different one.
-     */
-    async function observeRequiredToolsets(
-      requiredToolsets: readonly string[],
-    ): Promise<RemoteInputPreparationObservation> {
-      const snapshot = toolsetRegistry.snapshot();
-      const status = toolsetRegistry.status();
-      const revisionByToolsetId = new Map(status.toolsets.map((row) => [row.id as string, row.definitionRevision]));
-      const servers = new Map<string, { toolsetId: string; server: McpStdioServerConfig }>();
-      const toolsetDefinitionRevisions: Record<string, string> = {};
-      for (const toolsetId of requiredToolsets) {
-        const toolset = snapshot.toolsets.get(toolsetId);
-        const definitionRevision = revisionByToolsetId.get(toolsetId);
-        if (toolset === undefined || definitionRevision === undefined) {
-          throw new Error(`required MCP toolset ${JSON.stringify(toolsetId)} is not configured on this device`);
-        }
-        toolsetDefinitionRevisions[toolsetId] = definitionRevision;
-        for (const [serverName, server] of Object.entries(toolset.mcpServers)) {
-          if (servers.has(serverName)) {
-            throw new Error(`required MCP toolsets collide on server name ${JSON.stringify(serverName)}`);
-          }
-          servers.set(serverName, { toolsetId, server });
-        }
-      }
-      if (servers.size === 0) throw new Error('required MCP toolsets resolved to no servers');
-
-      const piDescriptor = adapters.find((adapter) => adapter.descriptor.id === 'pi')?.descriptor;
-      const env = buildRuntimeEnv({
-        ambient: process.env,
-        ...(piDescriptor?.environmentRequirements === undefined
-          ? {}
-          : { requirements: piDescriptor.environmentRequirements }),
-        ...(config.runtimeEnvironment?.pi?.allow === undefined
-          ? {}
-          : { locallyAllowedNames: config.runtimeEnvironment.pi.allow }),
-      });
-      const entries = [...servers.entries()];
-      const observed = await Promise.all(entries.map(async ([serverName, entry]) => {
-        const observation = await probeMcpServer(serverName, entry.server, {
-          label: `MCP toolset server "${serverName}"`,
-          timeoutMs: MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
-          env,
-        });
-        if (observation.tools.length === 0) throw new Error(`MCP toolset server "${serverName}" reported no tools`);
-        return [serverName, Object.freeze({ ...observation, toolsetId: entry.toolsetId })] as const;
-      }));
-      return {
-        observation: Object.freeze(Object.fromEntries(observed)),
-        toolsetDefinitionRevisions: Object.freeze(toolsetDefinitionRevisions),
-      };
-    }
 
     capabilities.push('custom-harness');
     // Contract §8.1 / §8.3: the device-level capability string is NOT computed
@@ -3479,13 +3453,17 @@ export function buildDaemonWithAdapters(
       [INPUT_PREPARATION_PREPARE_METHOD]: (params) =>
         runInputPreparation((service) => {
           const parsed = parseInputPreparationRequestParams(params);
-          if (!parsed) {
+          if (!parsed.ok) {
+            // Two distinct codes, forwarded as the parser classified them: a
+            // caller sending a RETIRED key hears `unsupported_input` and which
+            // key, rather than adjusting field types against a generic shape
+            // error forever.
             throw new ControlError(
-              'bad_request',
-              `${INPUT_PREPARATION_PREPARE_METHOD} requires exactly the one strict request shape; unknown fields are rejected`,
+              parsed.code,
+              `${INPUT_PREPARATION_PREPARE_METHOD}: ${parsed.detail}`,
             );
           }
-          return service.prepare(parsed);
+          return service.prepare(parsed.request);
         }),
       [INPUT_PREPARATION_LOOKUP_METHOD]: (params) =>
         runInputPreparation((service) => {
