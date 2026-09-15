@@ -153,10 +153,20 @@ The case now measures BOTH processes:
   `platform=<os> launcher pid=<n> target pid=<n> target ppid=<n>`. The ppid is
   asserted to be the launcher, so the pid being probed is provably the process
   the launcher exec'd.
+- The same probe asserts the target is ALIVE before the kill, so the later
+  "gone" verdict is against a pid that probe was able to see; a probe that can
+  see nothing would otherwise report a live target as gone and pass vacuously.
 - After the launcher exits, the target's terminal state is READ, not inferred:
   `process.kill(pid, 0)` with `ESRCH` as the only "gone" answer on POSIX, and
-  `tasklist /FI "PID eq <pid>"` on win32 (no zombies there, and a `tasklist`
-  that cannot run rejects rather than reporting a clean kill). Polled up to 2 s.
+  `tasklist /FI "PID eq <pid>"` on win32 (no zombies there). Polled up to 2 s.
+  On win32 only exit code 0 may produce a verdict: a probe that fails to run,
+  exits non-zero, or is killed by a signal REJECTS — whatever it printed — and
+  the error carries the first 200 chars of its stdout and stderr. Resolving
+  "gone" from a failed probe would be an invented clean kill, so the probe
+  takes `deps = { platform, spawnFn }` (defaulting to this host and the real
+  `spawn`) and five injected cases pin those refusals plus the two exit-0
+  readings on EVERY leg, including ubuntu-latest, where the real `tasklist`
+  branch is otherwise unreachable.
 - The launcher assertion is platform-shaped because the kill is: POSIX keeps
   `signal === 'SIGTERM'`; win32 asserts the launcher was terminated at all
   (non-zero exit or a signal). The TARGET assertion is identical everywhere and

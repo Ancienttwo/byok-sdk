@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -93,12 +94,38 @@ interface Run { code: number | null; signal: NodeJS.Signals | null; stderr: stri
  *
  * win32: there are no POSIX signals and no zombies; a terminated process leaves
  * the table, so `tasklist` filtered on the pid is the terminal-state read. It
- * must never answer "gone" for a reason other than the pid being absent, so a
- * failure to run `tasklist` at all REJECTS rather than returning false — a
- * broken probe fails the test instead of silently reporting a clean kill.
+ * must never answer "gone" for a reason other than the pid being absent, so
+ * ONLY exit code 0 is allowed to produce a verdict: any non-zero code, and a
+ * `null` code (the probe itself was killed by a signal), REJECTS and carries a
+ * bounded slice of stdout and stderr so the failure names what the probe said.
+ * A probe that exited non-zero has not observed the process table, whatever it
+ * happened to print — resolving `false` from that output is a false "clean
+ * kill" verdict, which is exactly the answer this suite must never invent.
+ *
+ * `deps` exists so those refusals are testable on every host. Its default is
+ * the production shape — this process's real platform and the real `spawn` —
+ * so an uninjected call behaves exactly as it does on a Windows runner.
  */
-function isRunning(pid: number): Promise<boolean> {
-  if (process.platform !== 'win32') {
+interface ProbeChild {
+  stdout: { on(event: 'data', listener: (chunk: Buffer) => void): unknown };
+  stderr: { on(event: 'data', listener: (chunk: Buffer) => void): unknown };
+  once(event: 'error', listener: (error: Error) => void): unknown;
+  once(event: 'close', listener: (code: number | null) => void): unknown;
+}
+
+interface ProbeDeps {
+  platform: NodeJS.Platform | string;
+  spawnFn: typeof spawn;
+}
+
+/** First 200 chars, so a failure message carries evidence without carrying a dump. */
+const slice = (text: string): string => (text.length > 200 ? `${text.slice(0, 200)}…` : text);
+
+function isRunning(
+  pid: number,
+  deps: ProbeDeps = { platform: process.platform, spawnFn: spawn },
+): Promise<boolean> {
+  if (deps.platform !== 'win32') {
     try {
       process.kill(pid, 0);
       return Promise.resolve(true);
@@ -107,20 +134,25 @@ function isRunning(pid: number): Promise<boolean> {
     }
   }
   return new Promise((resolve, reject) => {
-    const probe = spawn('tasklist', ['/FI', `PID eq ${pid}`, '/NH', '/FO', 'CSV'], {
-      stdio: ['ignore', 'pipe', 'ignore'],
+    const probe = deps.spawnFn('tasklist', ['/FI', `PID eq ${pid}`, '/NH', '/FO', 'CSV'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
-    });
+    }) as unknown as ProbeChild;
     let stdout = '';
+    let stderr = '';
     probe.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8'); });
+    probe.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
     probe.once('error', (error) => reject(new Error(`tasklist probe for pid ${pid} could not run: ${error.message}`)));
     probe.once('close', (code) => {
-      // tasklist exits 0 with an "INFO: No tasks..." line when the filter
-      // matches nothing; the CSV pid field is the positive match.
-      if (code !== 0 && stdout === '') {
-        reject(new Error(`tasklist probe for pid ${pid} exited ${code} with no output`));
+      if (code !== 0) {
+        reject(new Error(
+          `tasklist probe for pid ${pid} exited ${code} and did not observe the process table; `
+          + `stdout=${JSON.stringify(slice(stdout))} stderr=${JSON.stringify(slice(stderr))}`,
+        ));
         return;
       }
+      // Exit 0 only. tasklist exits 0 with an "INFO: No tasks..." line when the
+      // filter matches nothing; the quoted CSV pid field is the positive match.
       resolve(stdout.includes(`"${pid}"`));
     });
   });
@@ -231,6 +263,14 @@ describe('bin/byok-launch-cwd.mjs', () => {
     // Captured before the kill: after it, the target may be unidentifiable.
     console.log(`platform=${process.platform} launcher pid=${pid} target pid=${targetPid} target ppid=${report.ppid}`);
     expect(report.ppid, 'the target must be a direct child of the launcher').toBe(pid);
+
+    // The "gone" verdict below is only worth anything against a pid the SAME
+    // probe first reported alive: if the probe cannot see a running target it
+    // would also report a dead one as gone, and the case would pass vacuously.
+    expect(
+      await isRunning(targetPid),
+      `target pid ${targetPid} was not reported alive by the probe before the kill on ${process.platform}`,
+    ).toBe(true);
 
     try {
       process.kill(pid!, 'SIGTERM');
@@ -420,5 +460,74 @@ describe('the loader deny list', () => {
     const launcherNames = [...block![1]!.matchAll(/\/\^([A-Z0-9_]+)(\$)?\//gu)]
       .map(([, name, anchored]) => (anchored === undefined ? `${name}*` : name));
     expect([...launcherNames].sort()).toEqual([...LOADER_ENV_DENY_PATTERNS].sort());
+  });
+});
+
+/**
+ * The win32 probe's refusals, exercised on EVERY platform by injecting the
+ * platform and a fake `spawn` — the real `tasklist` branch is otherwise
+ * unreachable off Windows, which is how a probe that resolves "gone" from a
+ * failed run reaches CI unnoticed.
+ */
+function fakeTasklist(
+  outcome: { stdout?: string; stderr?: string; code: number | null },
+): typeof spawn {
+  return (() => {
+    const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    // After the caller has attached its listeners on this same turn.
+    setTimeout(() => {
+      if (outcome.stdout !== undefined) child.stdout.emit('data', Buffer.from(outcome.stdout, 'utf8'));
+      if (outcome.stderr !== undefined) child.stderr.emit('data', Buffer.from(outcome.stderr, 'utf8'));
+      child.emit('close', outcome.code);
+    }, 0);
+    return child;
+  }) as unknown as typeof spawn;
+}
+
+const WIN32 = (spawnFn: typeof spawn): ProbeDeps => ({ platform: 'win32', spawnFn });
+
+describe('the win32 existence probe', () => {
+  it('a tasklist probe that exits non-zero cannot report the target as gone', async () => {
+    // Non-empty output that does not contain the pid: the exact shape the old
+    // `code !== 0 && stdout === ''` guard waved through as a clean kill.
+    await expect(isRunning(4242, WIN32(fakeTasklist({
+      stdout: 'ERROR: The search filter cannot be recognized.\r\n',
+      stderr: 'access denied\r\n',
+      code: 1,
+    })))).rejects.toThrow(/exited 1 and did not observe the process table/u);
+  });
+
+  it('a tasklist probe killed by a signal cannot report the target as gone', async () => {
+    await expect(isRunning(4242, WIN32(fakeTasklist({ stdout: 'partial', code: null }))))
+      .rejects.toThrow(/exited null and did not observe the process table/u);
+  });
+
+  it('carries a bounded slice of what the failed probe said', async () => {
+    await expect(isRunning(4242, WIN32(fakeTasklist({ stdout: 'x'.repeat(500), stderr: 'y'.repeat(500), code: 9 }))))
+      .rejects.toThrow(/stdout="x{200}…" stderr="y{200}…"/u);
+  });
+
+  it('reads the verdict out of a clean run: the quoted pid is alive, "no tasks" is gone', async () => {
+    await expect(isRunning(4242, WIN32(fakeTasklist({
+      stdout: '"node.exe","4242","Console","1","12,345 K"\r\n',
+      code: 0,
+    })))).resolves.toBe(true);
+    await expect(isRunning(4242, WIN32(fakeTasklist({
+      stdout: 'INFO: No tasks are running which match the specified criteria.\r\n',
+      code: 0,
+    })))).resolves.toBe(false);
+  });
+
+  it('rejects when the probe could not be run at all', async () => {
+    const spawnFn = (() => {
+      const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter };
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      setTimeout(() => { child.emit('error', new Error('spawn tasklist ENOENT')); }, 0);
+      return child;
+    }) as unknown as typeof spawn;
+    await expect(isRunning(4242, WIN32(spawnFn))).rejects.toThrow(/could not run: spawn tasklist ENOENT/u);
   });
 });
