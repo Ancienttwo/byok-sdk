@@ -222,6 +222,29 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     );
   });
 
+  it('task.offer_prepared', () => {
+    const type = 'task.offer_prepared' as const;
+    testedTypes.push(type);
+    roundTrip(
+      type,
+      createEnvelope(
+        type,
+        {
+          policy: { mode: 'auto' },
+          runtime: 'pi',
+          agentRef: { agentId: 'agent-prepared', profileRevision: 'profile-prepared-r1' },
+          requiredToolsets: ['team'],
+          preparation: {
+            reference: 'prep-record-1',
+            requestDigest: 'request-digest-1',
+            artifactDigest: 'envelope-digest-1',
+          },
+        },
+        { taskId: 'task-agent-prepared-1', seq: 7 },
+      ),
+    );
+  });
+
   it('agent.egress.reliable', () => {
     const type = 'agent.egress.reliable' as const;
     testedTypes.push(type);

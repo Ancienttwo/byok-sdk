@@ -71,6 +71,15 @@ function minimalPayload(type: MessageType): unknown {
           transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
         },
       };
+    case 'task.offer_prepared':
+      return {
+        policy: { mode: 'auto' },
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+        preparation: {
+          reference: 'prep-record-1',
+          requestDigest: 'request-digest-1',
+        },
+      };
     case 'agent.egress.reliable':
       return {
         agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },

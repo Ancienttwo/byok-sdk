@@ -127,6 +127,8 @@ export {
   InputPreparationArtifactSummarySchema,
   InputPreparationBindingSchema,
   InputPreparationReceiptSummarySchema,
+  InputPreparationReferenceSchema,
+  InputPreparationOfferBindingSchema,
   InputPreparationRejectionReasonSchema,
 } from './input-preparation';
 export type {
@@ -140,6 +142,7 @@ export type {
   InputPreparationReadinessReason,
   InputPreparationRuntimeIdentity,
   InputPreparationReceiptSummary,
+  InputPreparationOfferBinding,
   InputPreparationRejectionReason,
 } from './input-preparation';
 
@@ -211,6 +214,7 @@ export {
   TaskOfferForAgentPayloadSchema,
   TaskOfferForAgentWithEgressPayloadSchema,
   TaskOfferForAgentWithEgressFreshPayloadSchema,
+  TaskOfferPreparedPayloadSchema,
   AgentEgressReliablePayloadSchema,
   AgentEgressAckPayloadSchema,
   AgentMessagePublishPayloadSchema,
@@ -259,6 +263,7 @@ export type {
   TaskOfferForAgentPayload,
   TaskOfferForAgentWithEgressPayload,
   TaskOfferForAgentWithEgressFreshPayload,
+  TaskOfferPreparedPayload,
   AgentEgressReliablePayload,
   AgentEgressAckPayload,
   AgentMessagePublishPayload,

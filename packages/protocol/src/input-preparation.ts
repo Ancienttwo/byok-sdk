@@ -400,6 +400,48 @@ export const InputPreparationReceiptSummarySchema = z
   });
 export type InputPreparationReceiptSummary = z.infer<typeof InputPreparationReceiptSummarySchema>;
 
+// ---------------------------------------------------------------------------
+// Offer binding — what a prepared Execution names on the offer wire
+// ---------------------------------------------------------------------------
+
+/**
+ * The device-local reference one receipt answered with
+ * ({@link InputPreparationReceiptSummarySchema}'s `reference`).
+ *
+ * The same opaque identifier, spelled as its own schema so the offer wire and
+ * the receipt wire cannot drift into two definitions of one value. It is NOT a
+ * capability: the device re-resolves authority on every lookup and derives the
+ * record key from its own trusted grant, so presenting another scope's
+ * reference finds nothing.
+ */
+export const InputPreparationReferenceSchema = OPAQUE_ID;
+
+/**
+ * The preparation a `task.offer_prepared` names, re-presented by the Host from
+ * the receipt it was given.
+ *
+ * Nothing here is authority. Every value is COMPARED against the device's own
+ * durable record before an Execution is admitted, and a difference declines the
+ * offer non-retryably — a Host that could state a binding would be stating what
+ * this device counted.
+ *
+ * `artifactDigest` is optional for one structural reason, not as a compatibility
+ * seam: a receipt discloses `artifact` only once there is one
+ * ({@link InputPreparationArtifactSummarySchema} is optional on the receipt), so
+ * a Host holding a not-yet-counted receipt has no envelope digest to re-present.
+ * When it is present it is compared like everything else.
+ */
+export const InputPreparationOfferBindingSchema = z
+  .object({
+    reference: InputPreparationReferenceSchema,
+    /** `InputPreparationBindingSchema.requestDigest`, as the receipt reported it. */
+    requestDigest: OPAQUE_ID,
+    /** `InputPreparationArtifactSummarySchema.envelopeDigest`, when the receipt carried one. */
+    artifactDigest: OPAQUE_ID.optional(),
+  })
+  .strict();
+export type InputPreparationOfferBinding = z.infer<typeof InputPreparationOfferBindingSchema>;
+
 /**
  * Why a device refused to prepare at all. These are the device-owned typed
  * rejections; none of them ever accompanies an artifact.

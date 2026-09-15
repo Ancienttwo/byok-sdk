@@ -24,6 +24,7 @@ import {
 } from './agent-home-projection';
 import {
   InputPreparationContentHashSchema,
+  InputPreparationOfferBindingSchema,
   InputPreparationPermissionModeSchema,
   InputPreparationPolicyRevisionSchema,
   InputPreparationProfileIdSchema,
@@ -387,6 +388,35 @@ export const TaskOfferForAgentWithEgressFreshPayloadSchema = TaskOfferForAgentPa
   })
   .strict();
 export type TaskOfferForAgentWithEgressFreshPayload = z.infer<typeof TaskOfferForAgentWithEgressFreshPayloadSchema>;
+
+/**
+ * Strict offer for an already-counted prepared Execution.
+ *
+ * A DISTINCT message type, not a `preparation` field added to
+ * `task.offer_for_agent`, for the same N/N-1 reason the toolset and egress
+ * variants are distinct: an older daemon skips a message type it does not know
+ * (`UnknownMessageTypeError`, and the long-poll transport skips that entry
+ * whole), whereas it would legally STRIP an unknown optional field and run the
+ * task as an ordinary instruction offer — compiling a request of its own
+ * against tokens that were already counted for a different one.
+ *
+ * It carries no `instruction`: the user request is already inside the frozen
+ * envelope the referenced record retained, and an offer that carried both would
+ * have two answers to what the runtime is about to send. `sessionRef` is absent
+ * for the same structural reason the adapter refuses the pair — a prepared
+ * Execution never resumes.
+ *
+ * Every value under `preparation` is the Host RE-PRESENTING what the device
+ * already told it. The device compares each one against its own durable record
+ * and declines non-retryably on any difference; nothing here is authority.
+ */
+export const TaskOfferPreparedPayloadSchema = TaskOfferForAgentPayloadSchema.omit({
+  instruction: true,
+  sessionRef: true,
+})
+  .extend({ preparation: InputPreparationOfferBindingSchema })
+  .strict();
+export type TaskOfferPreparedPayload = z.infer<typeof TaskOfferPreparedPayloadSchema>;
 
 const EGRESS_SAFE_VALUE = z
   .json()
@@ -1239,6 +1269,7 @@ const TASK_OFFER_PAYLOAD_SCHEMAS = {
   'task.offer_for_agent': TaskOfferForAgentPayloadSchema,
   'task.offer_for_agent_with_egress': TaskOfferForAgentWithEgressPayloadSchema,
   'task.offer_for_agent_with_egress_fresh': TaskOfferForAgentWithEgressFreshPayloadSchema,
+  'task.offer_prepared': TaskOfferPreparedPayloadSchema,
 } as const;
 
 export type TaskOfferType = keyof typeof TASK_OFFER_PAYLOAD_SCHEMAS;
@@ -1295,6 +1326,7 @@ export const SERVER_TO_DAEMON_TYPES = [
   'task.offer_for_agent',
   'task.offer_for_agent_with_egress',
   'task.offer_for_agent_with_egress_fresh',
+  'task.offer_prepared',
   'agent.egress.ack',
   'agent.message.disposition',
   'agent.content.read',

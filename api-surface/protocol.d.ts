@@ -675,6 +675,10 @@ interface EnvelopeShapeOptions {
         taskId: string;
         seq: number;
     };
+    'task.offer_prepared': {
+        taskId: string;
+        seq: number;
+    };
     'agent.egress.reliable': {
         taskId?: string;
         seq?: number;
@@ -1321,6 +1325,80 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             }>;
             maxBytes: z.ZodNumber;
         }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strip>, z.ZodObject<{
+    v: z.ZodNumber;
+    id: z.ZodUUID;
+    ts: z.ZodISODateTime;
+    type: z.ZodLiteral<"task.offer_prepared">;
+    task_id: z.ZodString;
+    session_ref: z.ZodOptional<z.ZodString>;
+    seq: z.ZodNumber;
+    payload: z.ZodObject<{
+        policy: z.ZodObject<{
+            mode: z.ZodEnum<{
+                auto: "auto";
+                confirm: "confirm";
+                plan: "plan";
+                readonly: "readonly";
+            }>;
+            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            workspaceRoot: z.ZodOptional<z.ZodString>;
+            network: z.ZodOptional<z.ZodBoolean>;
+        }, z.core.$strict>;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        runtime: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            mode: z.ZodLiteral<"none">;
+        }, z.core.$strict>, z.ZodObject<{
+            mode: z.ZodLiteral<"result-document">;
+            contract: z.ZodString;
+        }, z.core.$strict>], "mode">>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        preparation: z.ZodObject<{
+            reference: z.ZodString;
+            requestDigest: z.ZodString;
+            artifactDigest: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>;
     }, z.core.$strict>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -2667,6 +2745,80 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
         v: z.ZodNumber;
         id: z.ZodUUID;
         ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"task.offer_prepared">;
+        task_id: z.ZodString;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodNumber;
+        payload: z.ZodObject<{
+            policy: z.ZodObject<{
+                mode: z.ZodEnum<{
+                    auto: "auto";
+                    confirm: "confirm";
+                    plan: "plan";
+                    readonly: "readonly";
+                }>;
+                allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                workspaceRoot: z.ZodOptional<z.ZodString>;
+                network: z.ZodOptional<z.ZodBoolean>;
+            }, z.core.$strict>;
+            agentRef: z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>;
+            requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            runtime: z.ZodOptional<z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+                pi: "pi";
+            }>>;
+            harnessId: z.ZodOptional<z.ZodString>;
+            dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                lane: z.ZodLiteral<"subscription">;
+                runtimeId: z.ZodEnum<{
+                    claude: "claude";
+                    codex: "codex";
+                }>;
+                providerId: z.ZodNull;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                lane: z.ZodLiteral<"byok">;
+                runtimeId: z.ZodLiteral<"pi">;
+                providerId: z.ZodString;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                lane: z.ZodLiteral<"byok-profile">;
+                runtimeId: z.ZodLiteral<"pi">;
+                providerProfile: z.ZodObject<{
+                    profileRef: z.ZodString;
+                    profileRevision: z.ZodString;
+                    profileHash: z.ZodString;
+                    modelId: z.ZodString;
+                    requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                        "image-input": "image-input";
+                    }>>;
+                }, z.core.$strict>;
+            }, z.core.$strict>], "lane">>;
+            terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                mode: z.ZodLiteral<"none">;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"result-document">;
+                contract: z.ZodString;
+            }, z.core.$strict>], "mode">>;
+            limits: z.ZodOptional<z.ZodObject<{
+                maxDurationMs: z.ZodOptional<z.ZodNumber>;
+                maxTokens: z.ZodOptional<z.ZodNumber>;
+            }, z.core.$strip>>;
+            preparation: z.ZodObject<{
+                reference: z.ZodString;
+                requestDigest: z.ZodString;
+                artifactDigest: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
         type: z.ZodLiteral<"agent.egress.ack">;
         task_id: z.ZodOptional<z.ZodString>;
         session_ref: z.ZodOptional<z.ZodString>;
@@ -3880,6 +4032,80 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
         v: z.ZodNumber;
         id: z.ZodUUID;
         ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"task.offer_prepared">;
+        task_id: z.ZodString;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodNumber;
+        payload: z.ZodObject<{
+            policy: z.ZodObject<{
+                mode: z.ZodEnum<{
+                    auto: "auto";
+                    confirm: "confirm";
+                    plan: "plan";
+                    readonly: "readonly";
+                }>;
+                allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                workspaceRoot: z.ZodOptional<z.ZodString>;
+                network: z.ZodOptional<z.ZodBoolean>;
+            }, z.core.$strict>;
+            agentRef: z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>;
+            requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            runtime: z.ZodOptional<z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+                pi: "pi";
+            }>>;
+            harnessId: z.ZodOptional<z.ZodString>;
+            dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                lane: z.ZodLiteral<"subscription">;
+                runtimeId: z.ZodEnum<{
+                    claude: "claude";
+                    codex: "codex";
+                }>;
+                providerId: z.ZodNull;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                lane: z.ZodLiteral<"byok">;
+                runtimeId: z.ZodLiteral<"pi">;
+                providerId: z.ZodString;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                lane: z.ZodLiteral<"byok-profile">;
+                runtimeId: z.ZodLiteral<"pi">;
+                providerProfile: z.ZodObject<{
+                    profileRef: z.ZodString;
+                    profileRevision: z.ZodString;
+                    profileHash: z.ZodString;
+                    modelId: z.ZodString;
+                    requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                        "image-input": "image-input";
+                    }>>;
+                }, z.core.$strict>;
+            }, z.core.$strict>], "lane">>;
+            terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                mode: z.ZodLiteral<"none">;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"result-document">;
+                contract: z.ZodString;
+            }, z.core.$strict>], "mode">>;
+            limits: z.ZodOptional<z.ZodObject<{
+                maxDurationMs: z.ZodOptional<z.ZodNumber>;
+                maxTokens: z.ZodOptional<z.ZodNumber>;
+            }, z.core.$strip>>;
+            preparation: z.ZodObject<{
+                reference: z.ZodString;
+                requestDigest: z.ZodString;
+                artifactDigest: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
         type: z.ZodLiteral<"agent.egress.ack">;
         task_id: z.ZodOptional<z.ZodString>;
         session_ref: z.ZodOptional<z.ZodString>;
@@ -5050,8 +5276,8 @@ export { AgentEgressPolicySchema, AgentEgressActivityPolicySchema, AgentReliable
 export type { AgentEgressPolicy, AgentEgressActivityPolicy, AgentReliableQuotaPolicy, ContentReadPolicy, AgentEgressLane, AgentEgressDropReason, AgentMessageContentType, AgentMessageEgressRequirement, AgentMessageServerContext, AgentContentReadSurface, AgentContentActorKind, AgentContentActor, AgentContentDecodeAs, AgentContentReadDecision, AgentContentReadDenialReason, } from './agent-egress';
 export { AGENT_HOME_PROJECTION_CAPABILITY, AGENT_HOME_PROJECTION_MAX_BYTES, AGENT_HOME_PROJECTION_PROFILE_REVISION_MAXIMUM, AgentHomeProjectionProfileRevisionSchema, AgentHomeProjectionHashSchema, AgentHomeProjectionOutcomeSchema, AgentHomeProjectionValueSchema, } from './agent-home-projection';
 export type { AgentHomeProjectionProfileRevision, AgentHomeProjectionHash, AgentHomeProjectionOutcome, AgentHomeProjectionValue, } from './agent-home-projection';
-export { AGENT_INPUT_PREPARATION_CAPABILITY, InputPreparationContentHashSchema, InputPreparationPermissionModeSchema, InputPreparationPolicyRevisionSchema, InputPreparationProfileIdSchema, InputPreparationSourceSchema, InputPreparationModelCostSchema, InputPreparationModelSchema, InputPreparationOptionsSchema, InputPreparationSelectionSchema, InputPreparationContextFileSchema, InputPreparationDocsPathsSchema, InputPreparationPromptSnapshotSchema, InputPreparationUserMessageSchema, InputPreparationContextDocumentSchema, InputPreparationStateSchema, InputPreparationReadinessReasonSchema, InputPreparationRuntimeIdentitySchema, InputPreparationCounterTargetSchema, InputPreparationCounterEvidenceSchema, InputPreparationToolImplementationKindSchema, InputPreparationArtifactSummarySchema, InputPreparationBindingSchema, InputPreparationReceiptSummarySchema, InputPreparationRejectionReasonSchema, } from './input-preparation';
-export type { InputPreparationPermissionMode, InputPreparationSource, InputPreparationModel, InputPreparationOptions, InputPreparationSelection, InputPreparationContextDocument, InputPreparationState, InputPreparationReadinessReason, InputPreparationRuntimeIdentity, InputPreparationReceiptSummary, InputPreparationRejectionReason, } from './input-preparation';
+export { AGENT_INPUT_PREPARATION_CAPABILITY, InputPreparationContentHashSchema, InputPreparationPermissionModeSchema, InputPreparationPolicyRevisionSchema, InputPreparationProfileIdSchema, InputPreparationSourceSchema, InputPreparationModelCostSchema, InputPreparationModelSchema, InputPreparationOptionsSchema, InputPreparationSelectionSchema, InputPreparationContextFileSchema, InputPreparationDocsPathsSchema, InputPreparationPromptSnapshotSchema, InputPreparationUserMessageSchema, InputPreparationContextDocumentSchema, InputPreparationStateSchema, InputPreparationReadinessReasonSchema, InputPreparationRuntimeIdentitySchema, InputPreparationCounterTargetSchema, InputPreparationCounterEvidenceSchema, InputPreparationToolImplementationKindSchema, InputPreparationArtifactSummarySchema, InputPreparationBindingSchema, InputPreparationReceiptSummarySchema, InputPreparationReferenceSchema, InputPreparationOfferBindingSchema, InputPreparationRejectionReasonSchema, } from './input-preparation';
+export type { InputPreparationPermissionMode, InputPreparationSource, InputPreparationModel, InputPreparationOptions, InputPreparationSelection, InputPreparationContextDocument, InputPreparationState, InputPreparationReadinessReason, InputPreparationRuntimeIdentity, InputPreparationReceiptSummary, InputPreparationOfferBinding, InputPreparationRejectionReason, } from './input-preparation';
 export { AGENT_MEMORY_PROJECTION_CAPABILITY, AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES, AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE, AgentMemoryProjectionGrantRefSchema, AgentMemoryProjectionSessionRefSchema, AgentMemoryProjectionWriterEpochSchema, AgentMemoryProjectionSourceSeqSchema, AgentMemoryProjectionSnapshotSchema, AgentMemoryProjectionMeteringReceiptSchema, AgentMemoryProjectionMutationSchema, AgentMemoryProjectionReceiptSchema, AgentMemoryProjectionEraseResultSchema, agentMemoryProjectionBase64UrlByteLength, } from './agent-memory-projection';
 export type { AgentMemoryProjectionGrantRef, AgentMemoryProjectionSessionRef, AgentMemoryProjectionWriterEpoch, AgentMemoryProjectionSourceSeq, AgentMemoryProjectionSnapshot, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionEraseResult, } from './agent-memory-projection';
 export { HOST_MCP_TASK_CONTEXT_CAPABILITY } from './task-assertion';
@@ -5059,8 +5285,8 @@ export { TERMINAL_PROJECTION_SELECTION_CAPABILITY, TerminalProjectionContractSch
 export type { TerminalProjectionSelection } from './terminal-projection';
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
-export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
-export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, ConnAckPayload, TaskOfferPayload, TaskOfferWithToolsetsPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, } from './messages';
+export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, TaskOfferPreparedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
+export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, ConnAckPayload, TaskOfferPayload, TaskOfferWithToolsetsPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, TaskOfferPreparedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, } from './messages';
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';
 export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
@@ -5581,6 +5807,38 @@ export declare const InputPreparationReceiptSummarySchema: z.ZodObject<{
     artifactExpiresAt: z.ZodISODateTime;
 }, z.core.$strict>;
 export type InputPreparationReceiptSummary = z.infer<typeof InputPreparationReceiptSummarySchema>;
+/**
+ * The device-local reference one receipt answered with
+ * ({@link InputPreparationReceiptSummarySchema}'s `reference`).
+ *
+ * The same opaque identifier, spelled as its own schema so the offer wire and
+ * the receipt wire cannot drift into two definitions of one value. It is NOT a
+ * capability: the device re-resolves authority on every lookup and derives the
+ * record key from its own trusted grant, so presenting another scope's
+ * reference finds nothing.
+ */
+export declare const InputPreparationReferenceSchema: z.ZodString;
+/**
+ * The preparation a `task.offer_prepared` names, re-presented by the Host from
+ * the receipt it was given.
+ *
+ * Nothing here is authority. Every value is COMPARED against the device's own
+ * durable record before an Execution is admitted, and a difference declines the
+ * offer non-retryably — a Host that could state a binding would be stating what
+ * this device counted.
+ *
+ * `artifactDigest` is optional for one structural reason, not as a compatibility
+ * seam: a receipt discloses `artifact` only once there is one
+ * ({@link InputPreparationArtifactSummarySchema} is optional on the receipt), so
+ * a Host holding a not-yet-counted receipt has no envelope digest to re-present.
+ * When it is present it is compared like everything else.
+ */
+export declare const InputPreparationOfferBindingSchema: z.ZodObject<{
+    reference: z.ZodString;
+    requestDigest: z.ZodString;
+    artifactDigest: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
+export type InputPreparationOfferBinding = z.infer<typeof InputPreparationOfferBindingSchema>;
 /**
  * Why a device refused to prepare at all. These are the device-owned typed
  * rejections; none of them ever accompanies an artifact.
@@ -6267,6 +6525,94 @@ export declare const TaskOfferForAgentWithEgressFreshPayloadSchema: z.ZodObject<
     }, z.core.$strict>>;
 }, z.core.$strict>;
 export type TaskOfferForAgentWithEgressFreshPayload = z.infer<typeof TaskOfferForAgentWithEgressFreshPayloadSchema>;
+/**
+ * Strict offer for an already-counted prepared Execution.
+ *
+ * A DISTINCT message type, not a `preparation` field added to
+ * `task.offer_for_agent`, for the same N/N-1 reason the toolset and egress
+ * variants are distinct: an older daemon skips a message type it does not know
+ * (`UnknownMessageTypeError`, and the long-poll transport skips that entry
+ * whole), whereas it would legally STRIP an unknown optional field and run the
+ * task as an ordinary instruction offer — compiling a request of its own
+ * against tokens that were already counted for a different one.
+ *
+ * It carries no `instruction`: the user request is already inside the frozen
+ * envelope the referenced record retained, and an offer that carried both would
+ * have two answers to what the runtime is about to send. `sessionRef` is absent
+ * for the same structural reason the adapter refuses the pair — a prepared
+ * Execution never resumes.
+ *
+ * Every value under `preparation` is the Host RE-PRESENTING what the device
+ * already told it. The device compares each one against its own durable record
+ * and declines non-retryably on any difference; nothing here is authority.
+ */
+export declare const TaskOfferPreparedPayloadSchema: z.ZodObject<{
+    policy: z.ZodObject<{
+        mode: z.ZodEnum<{
+            auto: "auto";
+            confirm: "confirm";
+            plan: "plan";
+            readonly: "readonly";
+        }>;
+        allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        workspaceRoot: z.ZodOptional<z.ZodString>;
+        network: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strict>;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    runtime: z.ZodOptional<z.ZodEnum<{
+        claude: "claude";
+        codex: "codex";
+        pi: "pi";
+    }>>;
+    harnessId: z.ZodOptional<z.ZodString>;
+    dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        lane: z.ZodLiteral<"subscription">;
+        runtimeId: z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+        }>;
+        providerId: z.ZodNull;
+        modelId: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        lane: z.ZodLiteral<"byok">;
+        runtimeId: z.ZodLiteral<"pi">;
+        providerId: z.ZodString;
+        modelId: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        lane: z.ZodLiteral<"byok-profile">;
+        runtimeId: z.ZodLiteral<"pi">;
+        providerProfile: z.ZodObject<{
+            profileRef: z.ZodString;
+            profileRevision: z.ZodString;
+            profileHash: z.ZodString;
+            modelId: z.ZodString;
+            requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                "image-input": "image-input";
+            }>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>], "lane">>;
+    terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        mode: z.ZodLiteral<"none">;
+    }, z.core.$strict>, z.ZodObject<{
+        mode: z.ZodLiteral<"result-document">;
+        contract: z.ZodString;
+    }, z.core.$strict>], "mode">>;
+    limits: z.ZodOptional<z.ZodObject<{
+        maxDurationMs: z.ZodOptional<z.ZodNumber>;
+        maxTokens: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>;
+    preparation: z.ZodObject<{
+        reference: z.ZodString;
+        requestDigest: z.ZodString;
+        artifactDigest: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+export type TaskOfferPreparedPayload = z.infer<typeof TaskOfferPreparedPayloadSchema>;
 /** Daemon -> cloud: one durable reliable-lane item after local sanitization. */
 export declare const AgentEgressReliablePayloadSchema: z.ZodObject<{
     agentRef: z.ZodObject<{
@@ -7590,6 +7936,72 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
             maxBytes: z.ZodNumber;
         }, z.core.$strict>>;
     }, z.core.$strict>;
+    readonly 'task.offer_prepared': z.ZodObject<{
+        policy: z.ZodObject<{
+            mode: z.ZodEnum<{
+                auto: "auto";
+                confirm: "confirm";
+                plan: "plan";
+                readonly: "readonly";
+            }>;
+            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            workspaceRoot: z.ZodOptional<z.ZodString>;
+            network: z.ZodOptional<z.ZodBoolean>;
+        }, z.core.$strict>;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        runtime: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            mode: z.ZodLiteral<"none">;
+        }, z.core.$strict>, z.ZodObject<{
+            mode: z.ZodLiteral<"result-document">;
+            contract: z.ZodString;
+        }, z.core.$strict>], "mode">>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        preparation: z.ZodObject<{
+            reference: z.ZodString;
+            requestDigest: z.ZodString;
+            artifactDigest: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
 };
 export type TaskOfferType = keyof typeof TASK_OFFER_PAYLOAD_SCHEMAS;
 export declare const TASK_OFFER_TYPES: readonly TaskOfferType[];
@@ -8010,6 +8422,72 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             }>;
             maxBytes: z.ZodNumber;
         }, z.core.$strict>>;
+    }, z.core.$strict>;
+    readonly 'task.offer_prepared': z.ZodObject<{
+        policy: z.ZodObject<{
+            mode: z.ZodEnum<{
+                auto: "auto";
+                confirm: "confirm";
+                plan: "plan";
+                readonly: "readonly";
+            }>;
+            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            workspaceRoot: z.ZodOptional<z.ZodString>;
+            network: z.ZodOptional<z.ZodBoolean>;
+        }, z.core.$strict>;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        runtime: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>>;
+        harnessId: z.ZodOptional<z.ZodString>;
+        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"subscription">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+            }>;
+            providerId: z.ZodNull;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerId: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"byok-profile">;
+            runtimeId: z.ZodLiteral<"pi">;
+            providerProfile: z.ZodObject<{
+                profileRef: z.ZodString;
+                profileRevision: z.ZodString;
+                profileHash: z.ZodString;
+                modelId: z.ZodString;
+                requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                    "image-input": "image-input";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "lane">>;
+        terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            mode: z.ZodLiteral<"none">;
+        }, z.core.$strict>, z.ZodObject<{
+            mode: z.ZodLiteral<"result-document">;
+            contract: z.ZodString;
+        }, z.core.$strict>], "mode">>;
+        limits: z.ZodOptional<z.ZodObject<{
+            maxDurationMs: z.ZodOptional<z.ZodNumber>;
+            maxTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        preparation: z.ZodObject<{
+            reference: z.ZodString;
+            requestDigest: z.ZodString;
+            artifactDigest: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>;
     }, z.core.$strict>;
     readonly 'conn.hello': z.ZodObject<{
         protocolVersions: z.ZodArray<z.ZodNumber>;
@@ -8570,7 +9048,7 @@ export declare const MESSAGE_TYPES: MessageType[];
  * (`envelope.ts`) to decide which branches require envelope `seq` (M1
  * redelivery cursor).
  */
-export declare const SERVER_TO_DAEMON_TYPES: readonly ["conn.ack", "task.offer", "task.offer_with_toolsets", "task.offer_for_agent", "task.offer_for_agent_with_egress", "task.offer_for_agent_with_egress_fresh", "agent.egress.ack", "agent.message.disposition", "agent.content.read", "agent.home.projection", "agent.input.preparation", "task.approve", "task.reject", "task.cancel", "task.steer"];
+export declare const SERVER_TO_DAEMON_TYPES: readonly ["conn.ack", "task.offer", "task.offer_with_toolsets", "task.offer_for_agent", "task.offer_for_agent_with_egress", "task.offer_for_agent_with_egress_fresh", "task.offer_prepared", "agent.egress.ack", "agent.message.disposition", "agent.content.read", "agent.home.projection", "agent.input.preparation", "task.approve", "task.reject", "task.cancel", "task.steer"];
 /**
  * Message types the daemon sends to the server — the flip side of
  * {@link SERVER_TO_DAEMON_TYPES}. `conn.hello` is deliberately excluded: it's
