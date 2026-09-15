@@ -6,6 +6,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
+import { resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
 import type { Session } from '../types';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 import { RuntimeExecutionFailure } from '../runtime-failure';
@@ -627,6 +628,8 @@ describe('PiAdapter against the pinned package runtime (no network/API key requi
   it('detect() reads back the pinned executable version', async () => {
     const adapter = new PiAdapter();
     const result = await adapter.detect();
-    expect(result).toMatchObject({ kind: 'available', version: '0.85.1' });
+    // The pin is an npm alias onto the SDK's Pi fork, so the executable reports
+    // the fork's own version; the client manifest is the one authority for it.
+    expect(result).toMatchObject({ kind: 'available', version: resolvePiRuntimeIdentity().version });
   });
 });

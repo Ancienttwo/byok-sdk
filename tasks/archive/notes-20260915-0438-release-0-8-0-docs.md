@@ -1,0 +1,64 @@
+> **Archived**: 2026-09-15 04:38
+> **Related Plan**: plans/archive/plan-20260824-1223-release-0-8-0-docs.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260915-0438
+> **Archive Projection V1**: `plans/plan-20260824-1223-release-0-8-0-docs.md` => `plans/archive/plan-20260824-1223-release-0-8-0-docs.md`
+> **Archive Projection V1**: `tasks/notes/20260824-1223-release-0-8-0-docs.notes.md` => `tasks/archive/notes-20260915-0438-release-0-8-0-docs.md`
+> **Archive Projection V1**: `tasks/contracts/20260824-1223-release-0-8-0-docs.contract.md` => `tasks/archive/contract-20260915-0438-release-0-8-0-docs.md`
+> **Archive Projection V1**: `tasks/reviews/20260824-1223-release-0-8-0-docs.review.md` => `tasks/archive/review-20260915-0438-release-0-8-0-docs.md`
+
+# Implementation Notes: release-0-8-0-docs
+
+> **Status**: Complete
+> **Plan**: plans/archive/plan-20260824-1223-release-0-8-0-docs.md
+> **Contract**: tasks/archive/contract-20260915-0438-release-0-8-0-docs.md
+> **Review**: tasks/archive/review-20260915-0438-release-0-8-0-docs.md
+> **Last Updated**: 2026-08-24 12:29
+> **Lifecycle**: notes
+
+## Design Decisions
+
+- Keep the release tag bound to the frozen package source and land the public
+  documentation as a post-release main commit. The registry and release
+  manifest remain the version authorities; README and CHANGELOG are projections.
+- Describe task-free projection and fresh-session dispatch separately so the
+  projection lane does not imply task/runtime/session side effects.
+
+## Deviations From Plan Or Spec
+
+- None recorded.
+
+## Tradeoffs Considered
+
+| Option | Decision | Reason |
+|--------|----------|--------|
+| Rewrite `v0.8.0` to include docs | Rejected | Would mutate frozen release provenance. |
+| Post-release docs commit | Adopted | Corrects public guidance without changing published bytes. |
+
+## Open Questions
+
+- None.
+
+## Evidence Links
+
+- Checks: `.ai/harness/checks/latest.json`
+- Run snapshots: `.ai/harness/runs/`
+- Frozen release manifest:
+  `/Users/kito/Projects/byok-sdk-rc/20260824-agent-home-projection-release-49be56f/release-manifest.json`.
+- Live npm dist-tags identify the aligned train as `0.8.0` and keys as `0.3.1`.
+- Remote `v0.8.0` peels to the manifest's source revision; this docs-only slice
+  does not move or recreate the tag.
+- Remote main readback contains the `0.8.0` / `0.3.1` install pins and CHANGELOG
+  entry. Registry latest remains `0.8.0` / `0.3.1`, and the release tag still
+  peels to the frozen manifest source rather than the post-release docs commit.
+
+## Promotion Filter
+
+Promote a candidate to `tasks/lessons.md`, `docs/researches/`, or harness asset files only when all three hold: hard to reverse, surprising without local context, and a real trade-off existed. If any one is missing, keep it in this notes file instead.
+
+## Promotion Candidates
+
+- Promote to `tasks/lessons.md` only after a repeated correction or failure pattern.
+- Promote to `docs/researches/` only when it is durable repo knowledge with evidence.
+- Promote to harness asset files only after verification across more than one task or fixture.
