@@ -1,9 +1,19 @@
+> **Archived**: 2026-09-15 13:14
+> **Related Plan**: plans/archive/plan-20260914-1028-agent-gateway-session-probe.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260915-1314
+> **Archive Projection V1**: `plans/plan-20260914-1028-agent-gateway-session-probe.md` => `plans/archive/plan-20260914-1028-agent-gateway-session-probe.md`
+> **Archive Projection V1**: `tasks/notes/20260914-1028-agent-gateway-session-probe.notes.md` => `tasks/archive/notes-20260915-1314-agent-gateway-session-probe.md`
+> **Archive Projection V1**: `tasks/contracts/20260914-1028-agent-gateway-session-probe.contract.md` => `tasks/archive/contract-20260915-1314-agent-gateway-session-probe.md`
+> **Archive Projection V1**: `tasks/reviews/20260914-1028-agent-gateway-session-probe.review.md` => `tasks/archive/review-20260915-1314-agent-gateway-session-probe.md`
+
 # Task Review: agent-gateway-session-probe
 
 > **Status**: Accepted
-> **Plan**: plans/plan-20260914-1028-agent-gateway-session-probe.md
-> **Contract**: tasks/contracts/20260914-1028-agent-gateway-session-probe.contract.md
-> **Notes File**: tasks/notes/20260914-1028-agent-gateway-session-probe.notes.md
+> **Plan**: plans/archive/plan-20260914-1028-agent-gateway-session-probe.md
+> **Contract**: tasks/archive/contract-20260915-1314-agent-gateway-session-probe.md
+> **Notes File**: tasks/archive/notes-20260915-1314-agent-gateway-session-probe.md
 > **Checks File**: .ai/harness/checks/latest.json
 > **Recommendation**: pass
 > **Review Rubric Version**: 2

@@ -1,9 +1,19 @@
+> **Archived**: 2026-09-15 13:14
+> **Related Plan**: plans/archive/plan-20260914-1028-agent-gateway-session-probe.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260915-1314
+> **Archive Projection V1**: `plans/plan-20260914-1028-agent-gateway-session-probe.md` => `plans/archive/plan-20260914-1028-agent-gateway-session-probe.md`
+> **Archive Projection V1**: `tasks/notes/20260914-1028-agent-gateway-session-probe.notes.md` => `tasks/archive/notes-20260915-1314-agent-gateway-session-probe.md`
+> **Archive Projection V1**: `tasks/contracts/20260914-1028-agent-gateway-session-probe.contract.md` => `tasks/archive/contract-20260915-1314-agent-gateway-session-probe.md`
+> **Archive Projection V1**: `tasks/reviews/20260914-1028-agent-gateway-session-probe.review.md` => `tasks/archive/review-20260915-1314-agent-gateway-session-probe.md`
+
 # Implementation Notes: agent-gateway-session-probe
 
 > **Status**: Active
-> **Plan**: plans/plan-20260914-1028-agent-gateway-session-probe.md
-> **Contract**: tasks/contracts/20260914-1028-agent-gateway-session-probe.contract.md
-> **Review**: tasks/reviews/20260914-1028-agent-gateway-session-probe.review.md
+> **Plan**: plans/archive/plan-20260914-1028-agent-gateway-session-probe.md
+> **Contract**: tasks/archive/contract-20260915-1314-agent-gateway-session-probe.md
+> **Review**: tasks/archive/review-20260915-1314-agent-gateway-session-probe.md
 > **Last Updated**: 2026-09-14T10:56:44+08:00
 > **Lifecycle**: notes
 
@@ -63,7 +73,7 @@ Promote a candidate to `tasks/lessons.md`, `docs/researches/`, or harness asset 
 
 ## Stop boundary — 2026-09-15
 
-- `repo-harness run verify-sprint --prepare-acceptance --contract tasks/contracts/20260914-1028-agent-gateway-session-probe.contract.md` exits 1 before acceptance freeze: automatic architecture projection returns `human-action-required`, `unresolved-major-change`, affected node `capability.sdk.sdk-root`, reason `verified-flow-proof-changed`; its snapshot reports CodeGraph 1.5.0 unavailable.
+- `repo-harness run verify-sprint --prepare-acceptance --contract tasks/archive/contract-20260915-1314-agent-gateway-session-probe.md` exits 1 before acceptance freeze: automatic architecture projection returns `human-action-required`, `unresolved-major-change`, affected node `capability.sdk.sdk-root`, reason `verified-flow-proof-changed`; its snapshot reports CodeGraph 1.5.0 unavailable.
 - Projection receipt digest: `sha256:83f9cd6c3fff819a351128b77f2c05b014458ab30fdac46c2fd0d6ab4eab7d1d`. This is a separate architecture boundary, not a failed native probe. No architecture or CodeGraph repair performed.
 - The owner rule permits one directly blocking out-of-scope repair, then stops at a second discovery. Historical-plan archival consumed that repair; this second discovery stops closeout. G4 remains unchecked, no formal acceptance, commit, push, PR or merge.
 - Production design remains independent but has only a read-only research pass in this turn; no production design artifact/contract or implementation was captured before this stop boundary.

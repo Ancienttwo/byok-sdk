@@ -1,12 +1,22 @@
+> **Archived**: 2026-09-15 13:14
+> **Related Plan**: plans/archive/plan-20260914-1028-agent-gateway-session-probe.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260915-1314
+> **Archive Projection V1**: `plans/plan-20260914-1028-agent-gateway-session-probe.md` => `plans/archive/plan-20260914-1028-agent-gateway-session-probe.md`
+> **Archive Projection V1**: `tasks/notes/20260914-1028-agent-gateway-session-probe.notes.md` => `tasks/archive/notes-20260915-1314-agent-gateway-session-probe.md`
+> **Archive Projection V1**: `tasks/contracts/20260914-1028-agent-gateway-session-probe.contract.md` => `tasks/archive/contract-20260915-1314-agent-gateway-session-probe.md`
+> **Archive Projection V1**: `tasks/reviews/20260914-1028-agent-gateway-session-probe.review.md` => `tasks/archive/review-20260915-1314-agent-gateway-session-probe.md`
+
 # Task Contract: Agent Gateway session probe
 
 > **Status**: Fulfilled
-> **Plan**: plans/plan-20260914-1028-agent-gateway-session-probe.md
+> **Plan**: plans/archive/plan-20260914-1028-agent-gateway-session-probe.md
 > **Task Profile**: eval-only
 > **Owner**: kito
 > **Capability ID**: sdk-sdk-root
-> **Review File**: tasks/reviews/20260914-1028-agent-gateway-session-probe.review.md
-> **Notes File**: tasks/notes/20260914-1028-agent-gateway-session-probe.notes.md
+> **Review File**: tasks/archive/review-20260915-1314-agent-gateway-session-probe.md
+> **Notes File**: tasks/archive/notes-20260915-1314-agent-gateway-session-probe.md
 
 ## Why
 Owner approved an existing Pi session to SDK to Codex bounded validation, retaining SDK message authority and native session ownership.
@@ -30,10 +40,10 @@ Wrong target delivery, uncorrelated outcome, session replacement or duplicate du
 ## Allowed Paths
 ```yaml
 allowed_paths:
-  - plans/plan-20260914-1028-agent-gateway-session-probe.md
-  - tasks/contracts/20260914-1028-agent-gateway-session-probe.contract.md
-  - tasks/notes/20260914-1028-agent-gateway-session-probe.notes.md
-  - tasks/reviews/20260914-1028-agent-gateway-session-probe.review.md
+  - plans/archive/plan-20260914-1028-agent-gateway-session-probe.md
+  - tasks/archive/contract-20260915-1314-agent-gateway-session-probe.md
+  - tasks/archive/notes-20260915-1314-agent-gateway-session-probe.md
+  - tasks/archive/review-20260915-1314-agent-gateway-session-probe.md
   - tasks/todos.md
   - docs/researches/agent-gateway-session-probe.md
   - scripts/experiments/agent-gateway/fixture.ts
