@@ -320,6 +320,15 @@ async function main(): Promise<void> {
     })),
   });
 
+  // Established here rather than left to whatever this device's settings say.
+  // The native session refuses a prepared request outright while either is on
+  // (`prepared_session_ineligible`), because an auto-compaction or an
+  // application-level retry would write to, or re-issue, the very request that
+  // was frozen. A prepared host that inherited them would be a host whose
+  // admission depends on a user's settings file.
+  created.session.setAutoCompactionEnabled(false);
+  created.session.setAutoRetryEnabled(false);
+
   // No session-shutdown hook is registered for the pool: `runRpcMode` never
   // returns, and the adapter that spawned this process owns its whole tree
   // (`../adapters/pi/rpc-client.ts`'s `adoptOwnedProcessTree`), so the server
