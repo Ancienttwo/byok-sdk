@@ -427,6 +427,15 @@ export class PiAdapter implements RuntimeAdapter {
                 observation: startInput.mcpToolsetTools ?? {},
                 permissionMode: input.policy.mode,
                 ...(mcpLaunchCwd === undefined ? {} : { launchCwd: mcpLaunchCwd }),
+                // The daemon resolved these once, at admission, alongside the
+                // launch directory (`daemon/tool-implementation-identity.ts`).
+                // The extension opens the servers in this child, so the
+                // identities travel here and are re-measured there before each
+                // spawn. This adapter resolves nothing of its own: a second
+                // resolve would be a second opinion about the same install.
+                ...(startInput.mcpToolImplementations === undefined
+                  ? {}
+                  : { toolImplementations: startInput.mcpToolImplementations }),
               }),
               { mode: 0o600 },
             );

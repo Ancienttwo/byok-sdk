@@ -122,20 +122,27 @@ export interface ToolImplementationStatTupleV1 {
 }
 
 /**
- * Nominal brand. Declared, never present at runtime, and never assignable from
- * outside this module — so `attested` is unconstructible from any parsed
- * value, and the only paths that produce one are
- * {@link resolveToolImplementationIdentity} (which measures the filesystem
- * first) and {@link parseToolImplementationIdentity} (which the daemon's own
- * task-scoped configuration reader calls, and which is deliberately NOT part of
- * this package's public surface).
+ * An attested identity, and what makes one unconstructible by a caller.
  *
- * The control surface needs no such defence in depth and does not rely on it:
- * `daemon/control-protocol.ts` has no field anywhere in which a caller could
- * put an identity at all.
+ * Not a type-level brand. A `unique symbol` brand is nominal per DECLARATION
+ * site, so the one emitted into this package's `.d.ts` is a different type from
+ * the one in its source — the brand would make the package incompatible with
+ * itself rather than protect anything. Two structural facts carry the
+ * guarantee instead, and both are tested:
+ *
+ * 1. NOTHING ON THE WIRE CAN CARRY ONE. `daemon/control-protocol.ts` is
+ *    key-exact everywhere and has no field, anywhere, in which a control
+ *    client could put an implementation identity. There is no shape to reject
+ *    because there is no slot to fill.
+ * 2. A FORGED ONE BUYS NOTHING. The only two producers are
+ *    {@link resolveToolImplementationIdentity}, which measures the filesystem
+ *    before it returns, and {@link parseToolImplementationIdentity}, which
+ *    reads a daemon-authored task-scoped file and is deliberately not part of
+ *    this package's public surface. Whatever either returns is measured AGAIN
+ *    before every spawn, so an identity nobody earned names a file that is not
+ *    a root-owned, non-writable artifact hashing to its own claimed digest, and
+ *    the spawn is refused.
  */
-declare const TOOL_IMPLEMENTATION_ATTESTED: unique symbol;
-
 export interface ToolImplementationAttestedV1 {
   readonly kind: 'attested';
   /** The only authority this SDK recognises. A resolver cannot name another. */
@@ -165,7 +172,6 @@ export interface ToolImplementationAttestedV1 {
   readonly loaderEnvValuesDigest: string;
   /** SDK-measured at resolve. See {@link ToolImplementationStatTupleV1}. */
   readonly installStat: ToolImplementationStatTupleV1;
-  readonly [TOOL_IMPLEMENTATION_ATTESTED]: true;
 }
 
 export type ToolImplementationIdentityV1 = ToolImplementationUnavailableV1 | ToolImplementationAttestedV1;
@@ -195,13 +201,10 @@ export interface ToolImplementationLocatorV1 {
 
 /**
  * The install record a resolver returns, which is an attested identity MINUS
- * the two things a host does not get to assert: the brand, and the stat tuple
- * this SDK measures itself.
+ * the one thing a host does not get to assert: the stat tuple this SDK
+ * measures itself.
  */
-export type ToolImplementationInstallRecordV1 = Omit<
-  ToolImplementationAttestedV1,
-  typeof TOOL_IMPLEMENTATION_ATTESTED | 'installStat'
->;
+export type ToolImplementationInstallRecordV1 = Omit<ToolImplementationAttestedV1, 'installStat'>;
 
 export type ToolImplementationResolutionV1 =
   | ToolImplementationUnavailableV1
@@ -440,20 +443,19 @@ export function parseToolImplementationIdentity(value: unknown): ToolImplementat
   if (typeof record === 'string') return undefined;
   const installStat = validateStatTuple(rawStat);
   if (installStat === undefined) return undefined;
-  return brand(record, installStat);
+  return seal(record, installStat);
 }
 
 /**
- * The single cast in this module, and the only place an `attested` value comes
- * into existence. Both callers have already validated the record; the brand is
- * type-level and never present at runtime, so it never reaches a digest, a
- * JSON file or the wire.
+ * The only place an `attested` value comes into existence. Both callers have
+ * already validated the record against {@link INSTALL_RECORD_KEYS}; this adds
+ * the one field a host does not get to choose.
  */
-function brand(
+function seal(
   record: ToolImplementationInstallRecordV1,
   installStat: ToolImplementationStatTupleV1,
 ): ToolImplementationAttestedV1 {
-  return Object.freeze({ ...record, installStat }) as ToolImplementationAttestedV1;
+  return Object.freeze({ ...record, installStat });
 }
 
 // ---------------------------------------------------------------------------
@@ -471,19 +473,13 @@ function brand(
 export type ToolImplementationMeasurementFailure = 'install_record_mismatch' | 'reverify_failed';
 
 /**
- * The four facts every attested path has to satisfy, in the order that makes
- * each one meaningful:
+ * The shape facts every attested path has to satisfy, at resolve and at every
+ * later spawn:
  *
  * 1. It is its own realpath. A path that resolves elsewhere is a path whoever
  *    owns the intervening link chooses.
  * 2. `lstat`, not `stat`: a symlink is rejected rather than followed, and the
  *    entry is a regular file.
- * 3. It is root-owned. A file owned by the uid the daemon and the agent share
- *    is a file the agent can `chmod` and rewrite, so a cleared write bit on its
- *    own proves nothing.
- * 4. No write bit is set for anyone. Owner included: the owner is root, and a
- *    root-writable install is one a compromised root service rewrites without
- *    a `chmod` first.
  */
 async function measurePath(
   target: string,
@@ -504,9 +500,32 @@ async function measurePath(
   }
   if (stats.isSymbolicLink) return 'install_record_mismatch';
   if (!stats.isFile) return 'install_record_mismatch';
+  return stats;
+}
+
+/**
+ * The two OWNERSHIP facts, asserted once — at resolve — because they are
+ * properties of the install rather than of this particular launch:
+ *
+ * 1. It is root-owned. A file owned by the uid the daemon and the agent share
+ *    is a file the agent can `chmod` and rewrite, so a cleared write bit on its
+ *    own proves nothing.
+ * 2. No write bit is set for anyone. Owner included: the owner is root, and a
+ *    root-writable install is one a compromised root service rewrites without a
+ *    `chmod` first.
+ *
+ * They are NOT re-asserted as absolutes at spawn, and do not need to be:
+ * `uid`, `gid` and `mode` are part of the stat tuple this SDK measured here,
+ * and {@link reverifyToolImplementationIdentity} requires that whole tuple to
+ * be unchanged. An install that stopped being root-owned, or grew a write bit,
+ * fails that comparison for exactly the reason it would fail the absolute
+ * check — with the added strength that it also fails when it changed into some
+ * OTHER root-owned, non-writable file.
+ */
+function measureOwnership(stats: ToolImplementationStatEntry): ToolImplementationMeasurementFailure | undefined {
   if (stats.uid !== 0) return 'install_record_mismatch';
   if ((stats.mode & 0o222) !== 0) return 'install_record_mismatch';
-  return stats;
+  return undefined;
 }
 
 async function digestMatches(
@@ -573,17 +592,21 @@ export async function resolveToolImplementationIdentity(
   if (record === 'not_a_record') return toolImplementationUnavailable('implementation_identity_unattested');
   const measured = await measurePath(record.installPath, probe);
   if (typeof measured === 'string') return toolImplementationUnavailable(measured);
+  const ownership = measureOwnership(measured);
+  if (ownership !== undefined) return toolImplementationUnavailable(ownership);
   const matches = await digestMatches(record.installPath, record.closureDigest, probe);
   if (matches === 'unreadable') return toolImplementationUnavailable('reverify_failed');
   if (!matches) return toolImplementationUnavailable('install_record_mismatch');
   if (record.interpreter !== undefined) {
     const interpreter = await measurePath(record.interpreter.path, probe);
     if (typeof interpreter === 'string') return toolImplementationUnavailable(interpreter);
+    const interpreterOwnership = measureOwnership(interpreter);
+    if (interpreterOwnership !== undefined) return toolImplementationUnavailable(interpreterOwnership);
     const interpreterMatches = await digestMatches(record.interpreter.path, record.interpreter.digest, probe);
     if (interpreterMatches === 'unreadable') return toolImplementationUnavailable('reverify_failed');
     if (!interpreterMatches) return toolImplementationUnavailable('install_record_mismatch');
   }
-  return brand(record, {
+  return seal(record, {
     dev: measured.dev,
     ino: measured.ino,
     size: measured.size,
@@ -606,11 +629,13 @@ export type ToolImplementationReverifyResult =
  * Re-measure an attested identity immediately before the server it describes is
  * spawned.
  *
- * Every check `resolveToolImplementationIdentity` made runs again, plus the one
- * that only exists once there is something to compare against: the stat tuple
- * must be the tuple that was measured at resolve. That is what catches a
- * replacement whose bytes happen to agree, and a touch that changed nothing but
- * the mtime.
+ * The path is measured again — own realpath, non-symlink, regular file — and
+ * the artifact's bytes are hashed again. On top of that runs the check that
+ * only exists once there is something to compare against: the stat tuple must
+ * be the tuple that was measured at resolve, `uid`, `gid` and `mode` included.
+ * That is what catches a replacement whose bytes happen to agree, a touch that
+ * changed nothing but the mtime, and an install that stopped being root-owned
+ * or grew a write bit since it was attested.
  *
  * Not memoized and not cached. The whole point is that resolve and spawn are
  * two different moments, and a cached answer would assert the first moment's

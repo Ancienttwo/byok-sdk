@@ -20,6 +20,10 @@ import {
 import { createPiMcpTools, type McpToolCallHost, type PiMcpToolNaming } from './mcp-tools';
 import { BYOK_PI_MCP_CONFIG_PATH } from './mcp-config';
 import { isReservedMcpServerName } from '../../sdk-reserved-mcp';
+import {
+  parseToolImplementationIdentity,
+  type ToolImplementationIdentityV1,
+} from '../../daemon/tool-implementation-identity';
 import { compareCodeUnits } from '../../util/compare-code-units';
 
 /**
@@ -64,6 +68,19 @@ interface TaskScopedMcpConfig {
    * reads `bunfig.toml` `preload` before running its own code.
    */
   readonly launchCwd?: string;
+  /**
+   * What the daemon established about the implementation behind each projected
+   * server, keyed by projected server name
+   * (`daemon/tool-implementation-identity.ts`).
+   *
+   * The values are the daemon's, resolved once at admission; this file does
+   * not resolve, repair or default them. An ATTESTED one is re-measured
+   * against the filesystem before its server is spawned, so a forged entry in
+   * this file buys an immediate refusal rather than a trusted identity — and
+   * an entry that is malformed refuses the whole configuration, because a
+   * silently dropped identity is a spawn that quietly stopped being checked.
+   */
+  readonly toolImplementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
 }
 
 /**
@@ -182,6 +199,20 @@ function loadTaskScopedConfig(): TaskScopedMcpConfig {
       fail(`mcpServers.${name} has no daemon observation; refusing to discover its tools here`);
     }
   }
+  const toolImplementations: Record<string, ToolImplementationIdentityV1> = {};
+  if (parsed.toolImplementations !== undefined) {
+    if (!isPlainObject(parsed.toolImplementations)) {
+      fail('the task-scoped configuration toolImplementations must be an object');
+    }
+    for (const [name, raw] of Object.entries(parsed.toolImplementations)) {
+      if (mcpServers[name] === undefined) {
+        fail(`toolImplementations.${name} names a server this task does not project`);
+      }
+      const identity = parseToolImplementationIdentity(raw);
+      if (identity === undefined) fail(`toolImplementations.${name} is not an implementation identity this SDK issued`);
+      toolImplementations[name] = identity;
+    }
+  }
   const launchCwd = parsed.launchCwd;
   if (Object.keys(mcpServers).length > 0) {
     if (typeof launchCwd !== 'string' || !isAbsolute(launchCwd)) {
@@ -194,6 +225,7 @@ function loadTaskScopedConfig(): TaskScopedMcpConfig {
     mcpServers: Object.freeze(mcpServers),
     observation: Object.freeze(observation),
     permissionMode: parsed.permissionMode as PermissionMode,
+    toolImplementations: Object.freeze(toolImplementations),
     ...(typeof launchCwd === 'string' ? { launchCwd } : {}),
   });
 }
@@ -251,8 +283,16 @@ class McpServerPool implements McpToolCallHost {
     if (launchCwd === undefined) {
       fail(`MCP server "${serverName}" has no launchCwd; refusing to start it in this process's own directory`);
     }
+    const implementation = this.config.toolImplementations[serverName];
     const client = new McpStdioClient(server, {
       label: `MCP toolset server "${serverName}"`,
+      // Spawn point two. The core re-measures an ATTESTED identity before it
+      // spawns the child and refuses the connection if the install no longer
+      // measures the way the daemon attested it — never downgrading it to
+      // unavailable-and-continue. A server with no identity (an SDK-reserved
+      // helper, or any server on an unconfigured daemon) carries no claim, so
+      // there is nothing to re-measure.
+      ...(implementation === undefined ? {} : { implementation }),
       // The extension runs INSIDE the Pi child the adapter already spawned
       // with a filtered environment, so this process's own environment is the
       // task's environment — it is not the daemon's. The SDK's own Pi control

@@ -3440,6 +3440,7 @@ import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agen
 import type { AgentRef } from '../agent-home';
 import { type LocalAgentReleaseIdentity } from '../release-identity';
 import { type InputPreparationAuthorityResolver, type InputPreparationCounterAdapter, type InputPreparationLimitsPolicyV1 } from '../input-preparation';
+import type { ToolImplementationAuthority } from './tool-implementation-identity';
 import { type OperationalHealthSnapshot } from './operational-health';
 import { type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
 import { GitWorkspaceManager } from './git-workspace';
@@ -3908,6 +3909,23 @@ export interface DaemonConfig {
      * is proven once per offer and never cached.
      */
     mcpLaunchCwd?: McpLaunchCwdConfig;
+    /**
+     * The host's install-record authority for MCP toolset server
+     * implementations (`./tool-implementation-identity.ts`), forwarded verbatim
+     * to `TaskRunnerDeps.toolImplementationAuthority`.
+     *
+     * This SDK ships NO resolver and NO default, and there is nothing to
+     * validate here: an absent section is the supported state, and it means
+     * every implementation identity this daemon resolves is
+     * `resolver_unconfigured`. An absolute path is not an attestation, so a
+     * daemon without this section proves nothing about which executable serves a
+     * tool call and says so rather than implying otherwise.
+     *
+     * What a PRESENT authority buys is the refusal: an install it attested is
+     * re-measured before every spawn of that server, and a spawn whose artifact
+     * no longer measures the same is declined non-retryably.
+     */
+    toolImplementationAuthority?: ToolImplementationAuthority;
 }
 /**
  * Every part of the local preparation surface is required together. There is no
@@ -5628,6 +5646,7 @@ export declare function createStatfsFreeBytesProvider(dir: string): () => Promis
 import type { McpStdioServerConfig } from '../types';
 import { McpAuthorityError } from '../mcp/client';
 import { type McpServerObservation } from '../mcp/observation';
+import type { ToolImplementationIdentityV1 } from './tool-implementation-identity';
 /**
  * The daemon's admission-time use of the shared MCP core (`../mcp/`).
  *
@@ -5675,6 +5694,17 @@ export interface McpToolsProbeOptions {
      * admission.
      */
     cwd?: string;
+    /**
+     * What this daemon established about the implementation behind this server
+     * (`./tool-implementation-identity.ts`), forwarded to the shared MCP core so
+     * the probe spawn re-measures an attested one before starting it.
+     *
+     * Absent means nothing was claimed. The core refuses the spawn rather than
+     * demoting the claim, so a probe of an attested server that no longer
+     * measures the same fails with an {@link McpAuthorityError} and the task
+     * declines permanently.
+     */
+    implementation?: ToolImplementationIdentityV1;
 }
 /**
  * Observe one projected toolset server: start it, complete `initialize` +
@@ -6612,6 +6642,7 @@ import { type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } fro
 import type { BlobResolver } from './blob-client';
 import type { TaskQueueWatermark } from './control-protocol';
 import { type McpLaunchCwdConfig } from './trusted-launch-cwd';
+import { type ToolImplementationAuthority, type ToolImplementationFsProbe } from './tool-implementation-identity';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import { type ProgressBatcherOptions } from './progress-batcher';
 import type { SessionWorkspaceStore } from './session-workspace-store';
@@ -6823,6 +6854,18 @@ export interface TaskRunnerDeps {
      * is declined non-retryably instead of being started without one.
      */
     mcpLaunchCwd?: McpLaunchCwdConfig;
+    /**
+     * The host's install-record authority for MCP toolset server
+     * implementations (`./tool-implementation-identity.ts`).
+     *
+     * Unset means EVERY implementation identity resolves to
+     * `resolver_unconfigured` — this SDK ships no resolver and no default. It is
+     * not a degradation: an unconfigured daemon simply proves nothing about its
+     * executors and says so, and no spawn is refused for a claim nobody made.
+     */
+    toolImplementationAuthority?: ToolImplementationAuthority;
+    /** Test seam for the implementation measurement; see {@link ToolImplementationFsProbe}. */
+    toolImplementationFsProbe?: ToolImplementationFsProbe;
     permissionDefaults?: PermissionPolicy;
     workspaceRoot: string;
     /** Strict Agent offer authority. Absent means legacy offers never resolve an Agent home. */
@@ -8261,19 +8304,27 @@ export interface ToolImplementationStatTupleV1 {
     readonly gid: number;
 }
 /**
- * Nominal brand. Declared, never present at runtime, and never assignable from
- * outside this module — so `attested` is unconstructible from any parsed
- * value, and the only paths that produce one are
- * {@link resolveToolImplementationIdentity} (which measures the filesystem
- * first) and {@link parseToolImplementationIdentity} (which the daemon's own
- * task-scoped configuration reader calls, and which is deliberately NOT part of
- * this package's public surface).
+ * An attested identity, and what makes one unconstructible by a caller.
  *
- * The control surface needs no such defence in depth and does not rely on it:
- * `daemon/control-protocol.ts` has no field anywhere in which a caller could
- * put an identity at all.
+ * Not a type-level brand. A `unique symbol` brand is nominal per DECLARATION
+ * site, so the one emitted into this package's `.d.ts` is a different type from
+ * the one in its source — the brand would make the package incompatible with
+ * itself rather than protect anything. Two structural facts carry the
+ * guarantee instead, and both are tested:
+ *
+ * 1. NOTHING ON THE WIRE CAN CARRY ONE. `daemon/control-protocol.ts` is
+ *    key-exact everywhere and has no field, anywhere, in which a control
+ *    client could put an implementation identity. There is no shape to reject
+ *    because there is no slot to fill.
+ * 2. A FORGED ONE BUYS NOTHING. The only two producers are
+ *    {@link resolveToolImplementationIdentity}, which measures the filesystem
+ *    before it returns, and {@link parseToolImplementationIdentity}, which
+ *    reads a daemon-authored task-scoped file and is deliberately not part of
+ *    this package's public surface. Whatever either returns is measured AGAIN
+ *    before every spawn, so an identity nobody earned names a file that is not
+ *    a root-owned, non-writable artifact hashing to its own claimed digest, and
+ *    the spawn is refused.
  */
-declare const TOOL_IMPLEMENTATION_ATTESTED: unique symbol;
 export interface ToolImplementationAttestedV1 {
     readonly kind: 'attested';
     /** The only authority this SDK recognises. A resolver cannot name another. */
@@ -8303,7 +8354,6 @@ export interface ToolImplementationAttestedV1 {
     readonly loaderEnvValuesDigest: string;
     /** SDK-measured at resolve. See {@link ToolImplementationStatTupleV1}. */
     readonly installStat: ToolImplementationStatTupleV1;
-    readonly [TOOL_IMPLEMENTATION_ATTESTED]: true;
 }
 export type ToolImplementationIdentityV1 = ToolImplementationUnavailableV1 | ToolImplementationAttestedV1;
 export declare function toolImplementationUnavailable(reason: ToolImplementationUnavailableReasonV1): ToolImplementationUnavailableV1;
@@ -8319,10 +8369,10 @@ export interface ToolImplementationLocatorV1 {
 }
 /**
  * The install record a resolver returns, which is an attested identity MINUS
- * the two things a host does not get to assert: the brand, and the stat tuple
- * this SDK measures itself.
+ * the one thing a host does not get to assert: the stat tuple this SDK
+ * measures itself.
  */
-export type ToolImplementationInstallRecordV1 = Omit<ToolImplementationAttestedV1, typeof TOOL_IMPLEMENTATION_ATTESTED | 'installStat'>;
+export type ToolImplementationInstallRecordV1 = Omit<ToolImplementationAttestedV1, 'installStat'>;
 export type ToolImplementationResolutionV1 = ToolImplementationUnavailableV1 | ToolImplementationInstallRecordV1;
 /**
  * The host's install-record authority.
@@ -8401,11 +8451,13 @@ export type ToolImplementationReverifyResult = 'ok' | {
  * Re-measure an attested identity immediately before the server it describes is
  * spawned.
  *
- * Every check `resolveToolImplementationIdentity` made runs again, plus the one
- * that only exists once there is something to compare against: the stat tuple
- * must be the tuple that was measured at resolve. That is what catches a
- * replacement whose bytes happen to agree, and a touch that changed nothing but
- * the mtime.
+ * The path is measured again — own realpath, non-symlink, regular file — and
+ * the artifact's bytes are hashed again. On top of that runs the check that
+ * only exists once there is something to compare against: the stat tuple must
+ * be the tuple that was measured at resolve, `uid`, `gid` and `mode` included.
+ * That is what catches a replacement whose bytes happen to agree, a touch that
+ * changed nothing but the mtime, and an install that stopped being root-owned
+ * or grew a write bit since it was attested.
  *
  * Not memoized and not cached. The whole point is that resolve and spawn are
  * two different moments, and a cached answer would assert the first moment's
@@ -8433,7 +8485,6 @@ export declare class ToolImplementationReverifyError extends Error {
     readonly reason: ToolImplementationMeasurementFailure;
     constructor(message: string, reason: ToolImplementationMeasurementFailure);
 }
-export {};
 // ==== @byok-sdk/client dist/daemon/toolset-registry.d.ts ====
 import { type ToolsetId } from '@byok-sdk/protocol';
 import type { McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types';
@@ -10264,6 +10315,7 @@ export declare const localStateRelocation: Readonly<{
 }>;
 export {};
 // ==== @byok-sdk/client dist/mcp/client.d.ts ====
+import { type ToolImplementationFsProbe, type ToolImplementationIdentityV1 } from '../daemon/tool-implementation-identity';
 import { type CallToolResult, type Tool } from '@modelcontextprotocol/client';
 /**
  * The SDK's single MCP client authority.
@@ -10357,6 +10409,24 @@ export interface McpStdioClientOptions {
     readonly timeoutMs?: number;
     /** Opt-in lifetime stdout cap; see {@link MCP_OBSERVATION_MAX_STDOUT_BYTES}. */
     readonly maxStdoutBytes?: number;
+    /**
+     * What this SDK has established about the implementation behind the command
+     * below (`../daemon/tool-implementation-identity.ts`).
+     *
+     * Every spawn of an ATTESTED server re-measures it first — see
+     * {@link McpStdioClient.connect}. This is the one choke point both spawn
+     * points share: the daemon's admission probe and the Pi extension's pool
+     * both build their child through this class, so neither can start an
+     * attested server that no longer measures the way it was attested.
+     *
+     * Absent, or `unavailable`, means no claim was made about this server and
+     * there is nothing to re-measure. It never means "assume it is fine": the
+     * receipt that carried such an identity already says the implementation is
+     * unproven.
+     */
+    readonly implementation?: ToolImplementationIdentityV1;
+    /** Test seam, forwarded verbatim; see {@link ToolImplementationFsProbe}. */
+    readonly implementationFsProbe?: ToolImplementationFsProbe;
 }
 /**
  * One connected stdio MCP server.
@@ -10375,7 +10445,21 @@ export declare class McpStdioClient {
     private readonly timeoutMs;
     private connected;
     constructor(server: McpStdioServerSpec, options: McpStdioClientOptions);
-    /** Start the child and complete `initialize`. */
+    /**
+     * Start the child and complete `initialize`.
+     *
+     * An attested implementation is re-measured BEFORE the spawn, every time.
+     * Resolve and launch are two different moments, and an identity established
+     * at the first one asserts nothing about the second — so the check runs here
+     * rather than being cached with the identity.
+     *
+     * A failure is a refusal, not a downgrade: the connection is never opened
+     * with the identity quietly demoted to `unavailable`, because a server that
+     * was attested and no longer measures the same is a server that changed
+     * under a claim somebody relied on. It surfaces as {@link McpAuthorityError}
+     * so the daemon declines the offer permanently — re-offering spawns the same
+     * changed file and reaches the same verdict.
+     */
     connect(signal?: AbortSignal): Promise<void>;
     /** The server's self-reported identity, as returned by `initialize`. */
     serverInfo(): {
@@ -10713,6 +10797,7 @@ export declare function isReservedMcpServerName(name: string): boolean;
 import type { AgentEvent, PermissionPolicy, TaskOfferPayload } from '@byok-sdk/protocol';
 import type { RuntimeEnvironmentRequirements } from './daemon/environment';
 import type { McpLaunchBinding } from './daemon/trusted-launch-cwd';
+import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
 import type { AgentRef } from './agent-home';
 import type { McpToolsetServerObservation } from './mcp/observation';
 export type { AgentRef } from './agent-home';
@@ -11088,6 +11173,18 @@ export interface RuntimeOperationStartInput {
      * without it must refuse rather than fall back to its own cwd.
      */
     readonly mcpLaunch?: McpLaunchBinding;
+    /**
+     * What this daemon established about the implementation behind each
+     * projected toolset server, keyed by projected server name
+     * (`daemon/tool-implementation-identity.ts`).
+     *
+     * Resolved ONCE per offer by `TaskRunner`, alongside the launch binding
+     * above and for the same reason: the admission probe and every adapter spawn
+     * of one task must be talking about the same install. An adapter that spawns
+     * toolset servers itself carries these values to its spawn point unchanged;
+     * it never resolves its own.
+     */
+    readonly mcpToolImplementations?: Readonly<Record<string, ToolImplementationIdentityV1>>;
     /** Optional, adapter-agnostic out-of-band approval channel. */
     readonly approvalChannel?: ApprovalChannel;
 }

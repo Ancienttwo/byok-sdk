@@ -1,6 +1,7 @@
 import type { AgentEgressPolicy, AgentEvent, PermissionPolicy, TaskOfferPayload } from '@byok-sdk/protocol';
 import type { RuntimeEnvironmentRequirements } from './daemon/environment';
 import type { McpLaunchBinding } from './daemon/trusted-launch-cwd';
+import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
 import type { AgentRef } from './agent-home';
 import type { McpToolsetServerObservation } from './mcp/observation';
 
@@ -412,6 +413,18 @@ export interface RuntimeOperationStartInput {
    * without it must refuse rather than fall back to its own cwd.
    */
   readonly mcpLaunch?: McpLaunchBinding;
+  /**
+   * What this daemon established about the implementation behind each
+   * projected toolset server, keyed by projected server name
+   * (`daemon/tool-implementation-identity.ts`).
+   *
+   * Resolved ONCE per offer by `TaskRunner`, alongside the launch binding
+   * above and for the same reason: the admission probe and every adapter spawn
+   * of one task must be talking about the same install. An adapter that spawns
+   * toolset servers itself carries these values to its spawn point unchanged;
+   * it never resolves its own.
+   */
+  readonly mcpToolImplementations?: Readonly<Record<string, ToolImplementationIdentityV1>>;
   /** Optional, adapter-agnostic out-of-band approval channel. */
   readonly approvalChannel?: ApprovalChannel;
 }

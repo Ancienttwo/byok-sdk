@@ -67,7 +67,7 @@ function installRecord(installPath: string, closureDigest: string): ToolImplemen
     launchCwd: '/',
     launchEnvNamesDigest: EMPTY_MAP_DIGEST,
     loaderEnvValuesDigest: EMPTY_MAP_DIGEST,
-  } as ToolImplementationInstallRecordV1;
+  };
 }
 
 function authorityReturning(answer: unknown): ToolImplementationAuthority {
@@ -234,7 +234,7 @@ describe('the install record shape is strict', () => {
   });
 });
 
-describe('an attested identity is unconstructible from a parsed value it did not measure', () => {
+describe('an attested identity is unconstructible from a value nobody measured', () => {
   it('refuses a parsed record that carries no SDK-measured stat tuple', () => {
     expect(parseToolImplementationIdentity(installRecord(artifact, artifactDigest))).toBeUndefined();
   });

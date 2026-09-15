@@ -70,11 +70,18 @@ import { DEFAULT_MAX_INLINE_EVENT_BYTES, spillOversizedEvent } from './event-spi
 import { buildRuntimeEnv } from './environment';
 import { computeEffectivePolicy } from './policy';
 import {
+  mcpLaunchAttestation,
   resolveMcpLaunchCwdLauncher,
   resolveTrustedLaunchCwd,
   type McpLaunchBinding,
   type McpLaunchCwdConfig,
 } from './trusted-launch-cwd';
+import {
+  resolveToolImplementationIdentity,
+  type ToolImplementationAuthority,
+  type ToolImplementationFsProbe,
+  type ToolImplementationIdentityV1,
+} from './tool-implementation-identity';
 import { toRuntimeInfoCapabilities } from './runtime-capabilities';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import {
@@ -358,6 +365,18 @@ export interface TaskRunnerDeps {
    * is declined non-retryably instead of being started without one.
    */
   mcpLaunchCwd?: McpLaunchCwdConfig;
+  /**
+   * The host's install-record authority for MCP toolset server
+   * implementations (`./tool-implementation-identity.ts`).
+   *
+   * Unset means EVERY implementation identity resolves to
+   * `resolver_unconfigured` — this SDK ships no resolver and no default. It is
+   * not a degradation: an unconfigured daemon simply proves nothing about its
+   * executors and says so, and no spawn is refused for a claim nobody made.
+   */
+  toolImplementationAuthority?: ToolImplementationAuthority;
+  /** Test seam for the implementation measurement; see {@link ToolImplementationFsProbe}. */
+  toolImplementationFsProbe?: ToolImplementationFsProbe;
   permissionDefaults?: PermissionPolicy;
   workspaceRoot: string;
   /** Strict Agent offer authority. Absent means legacy offers never resolve an Agent home. */
@@ -2151,6 +2170,42 @@ export class TaskRunner {
         });
       }
       const probeCwd = mcpLaunch?.cwd;
+      // The ONE implementation identity this task carries per projected
+      // toolset server, resolved HERE and consumed by both spawn points:
+      // the admission probe immediately below, and — through
+      // `startInput.mcpToolImplementations` and the task-scoped MCP config the
+      // pi adapter writes — the extension's server pool inside the runtime
+      // child. Resolving it once is the point. A second resolve at launch
+      // would be a second opinion about the same install, and the two could
+      // disagree without anything noticing; one value, measured again at each
+      // spawn, cannot.
+      //
+      // Resolution NEVER declines the offer. This SDK ships no resolver, so
+      // the unconfigured answer is `resolver_unconfigured` for every server,
+      // and a task whose executors are unproven still runs — it simply proves
+      // nothing about them. What does refuse is the re-measurement at spawn,
+      // and only for a server that WAS attested.
+      let mcpToolImplementations: Readonly<Record<string, ToolImplementationIdentityV1>> | undefined;
+      if (resolvedMcp?.ok === true && mcpLaunch !== undefined) {
+        const launch = mcpLaunchAttestation(mcpLaunch);
+        const identities: Record<string, ToolImplementationIdentityV1> = {};
+        for (const [serverName, server] of Object.entries(resolvedMcp.servers)) {
+          const toolsetId = resolvedMcp.toolsetIdByServer.get(serverName);
+          if (toolsetId === undefined) continue;
+          identities[serverName] = await resolveToolImplementationIdentity(
+            this.deps.toolImplementationAuthority,
+            {
+              toolsetId,
+              serverName,
+              command: server.command,
+              args: Object.freeze([...(server.args ?? [])]),
+              launch,
+            },
+            this.deps.toolImplementationFsProbe,
+          );
+        }
+        mcpToolImplementations = Object.freeze(identities);
+      }
       if (messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined) {
         try {
           await this.deps.agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, env, probeCwd);
@@ -2193,11 +2248,16 @@ export class TaskRunner {
         const probe = this.deps.mcpToolsetToolsProbe ?? probeMcpServer;
         const entries = Object.entries(resolvedMcp!.servers);
         const settled = await Promise.allSettled(entries.map(async ([serverName, server]) => {
+          const implementation = mcpToolImplementations?.[serverName];
           const observation = await probe(serverName, server, {
             label: `MCP toolset server "${serverName}"`,
             timeoutMs: MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
             env,
             ...(probeCwd === undefined ? {} : { cwd: probeCwd }),
+            // Spawn point one. An attested server is re-measured before this
+            // child starts; a failure raises `McpAuthorityError`, which the
+            // decline below already treats as permanent.
+            ...(implementation === undefined ? {} : { implementation }),
           });
           if (observation.tools.length === 0) throw new Error('tools/list reported no tools');
           // The toolset id and the operator's read/mutation classification are
@@ -2520,6 +2580,7 @@ export class TaskRunner {
         ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
         ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
         ...(mcpLaunch === undefined ? {} : { mcpLaunch }),
+        ...(mcpToolImplementations === undefined ? {} : { mcpToolImplementations }),
         approvalChannel: {
           taskId,
           storeDir: this.deps.storeDir,

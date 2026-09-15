@@ -131,6 +131,7 @@ import {
 import { createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
 import { decodeTeamMemberContext, encodeTeamMemberContext, LocalTeamWorkspace } from './team-workspace';
 import { McpToolsetRegistry, McpToolsetRevisionConflictError } from './toolset-registry';
+import type { ToolImplementationAuthority } from './tool-implementation-identity';
 import { ConnectionManager } from './connection-manager';
 import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
 import { OperationalHealthTracker, type OperationalHealthSnapshot } from './operational-health';
@@ -656,6 +657,23 @@ export interface DaemonConfig {
    * is proven once per offer and never cached.
    */
   mcpLaunchCwd?: McpLaunchCwdConfig;
+  /**
+   * The host's install-record authority for MCP toolset server
+   * implementations (`./tool-implementation-identity.ts`), forwarded verbatim
+   * to `TaskRunnerDeps.toolImplementationAuthority`.
+   *
+   * This SDK ships NO resolver and NO default, and there is nothing to
+   * validate here: an absent section is the supported state, and it means
+   * every implementation identity this daemon resolves is
+   * `resolver_unconfigured`. An absolute path is not an attestation, so a
+   * daemon without this section proves nothing about which executable serves a
+   * tool call and says so rather than implying otherwise.
+   *
+   * What a PRESENT authority buys is the refusal: an install it attested is
+   * re-measured before every spawn of that server, and a spawn whose artifact
+   * no longer measures the same is declined non-retryably.
+   */
+  toolImplementationAuthority?: ToolImplementationAuthority;
 }
 
 /**
@@ -2166,6 +2184,9 @@ export function buildDaemonWithAdapters(
       // through unchanged: the daemon holds no second opinion about which
       // directory is trusted — `resolveTrustedLaunchCwd` proves it per offer.
       ...(mcpLaunchCwd === undefined ? {} : { mcpLaunchCwd }),
+      ...(config.toolImplementationAuthority === undefined
+        ? {}
+        : { toolImplementationAuthority: config.toolImplementationAuthority }),
       // M3-2a: `send` is already this file's OWN closure (not something
       // `TaskRunner` builds) — every `task.claim`/`task.started`/
       // `task.progress`/`task.artifact`/`task.await_approval`/
