@@ -5,6 +5,43 @@
 Deliberately not filed under 0.18.0: none of this is in a published artifact,
 and the D2 version number belongs to a separate SDK release contract.
 
+- **Fixed (daemon, unreleased contract)** — a prepared offer no longer declines
+  a durable record that a restart left unread.
+
+  `task.offer_prepared` reached the record lookup with a store that only the
+  preparation service's `ensureOpen` had ever opened, and that path is reached
+  only from prepare/lookup/cancel. A daemon that restarted and then received an
+  offer before any control call therefore read an EMPTY in-memory map and
+  declined `preparation_not_found` with `retryable: false` — permanently, for a
+  record sitting durably on disk. The lane now carries that same once-only open
+  latch and awaits it before its first lookup, so the open authority and the
+  log replay stay single. Every store read (`get`, `find`, `list`,
+  `scopeUsage`, `inFlightCount`, `readArtifact`) now refuses on an unopened
+  store instead of answering `undefined`: an unread store and an empty one are
+  indistinguishable from the map and mean opposite things.
+
+- **Changed (daemon, unreleased contract)** — the durable preparation record
+  has its own schema version, now `3`, separate from the wire version.
+
+  `INPUT_PREPARATION_VERSION` (2) versions what two parties agree on — the
+  control request, the receipt, the retained artifact — and did not move.
+  `INPUT_PREPARATION_RECORD_VERSION` (3) versions what one daemon's own on-disk
+  log is written in. Version 3 is the first in which `model` is a required
+  durable fact, and the version check is now the ONLY thing that discriminates
+  a supported record from an older one; the ad-hoc "does this record carry a
+  `model`?" probe that stood in for it is gone, because a field probe is a
+  second, weaker authority over the same question.
+
+  An unsupported older record is refused as
+  `InputPreparationUnsupportedRecordVersionError` /
+  `unsupported_record_version` during replay, before the store is open — zero
+  writes, zero cleanup, the log and every artifact beside it left exactly as
+  found. There is no compatibility read and no migration. The refusal text says
+  the record is an unsupported older version left untouched pending explicit
+  operator disposition; it no longer advises removing the store directory,
+  because the record may be the only surviving evidence of a counter call that
+  already happened.
+
 - **Added (protocol, unreleased contract)** — `task.offer_prepared`, the strict
   offer that dispatches an already-counted preparation back to the device that
   counted it.

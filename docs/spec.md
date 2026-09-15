@@ -355,6 +355,29 @@ The expectations it carries come from the durable record, never from the
 envelope on disk: the native contract is explicit that a value read out of the
 envelope can never serve as its own expectation.
 
+The record has to be READ before any of that, and on a restarted daemon that
+means opening the store: the offer path is reachable before any control call
+has, and a store nobody opened holds an empty map, not an empty device. The
+lane awaits the preparation service's own open latch before its first lookup,
+and every store read refuses on an unopened store rather than answering
+`undefined` — an absent record and an unread one mean opposite things.
+
+The durable record carries its own schema version, separate from the wire
+version the control request, receipt and artifact share. A record written at
+any other record schema version is refused on replay: no compatibility read and
+no migration, because the older shape is missing facts a prepared Execution
+cannot be launched without. The refusal lands before the store opens, so it
+writes nothing and collects nothing — the log and its artifacts stay exactly as
+found, pending explicit operator disposition.
+
+On a default install, meanwhile, no record can reach READY at all. The native
+compiler reports `coverage: unknown`, and with no `toolImplementationAuthority`
+configured every implementation identity resolves to
+`executor_identity_unproven`. A real prepared offer against such a record
+declines `preparation_not_ready` — and will keep doing so until G4-count and a
+Salesko resolver land. That is the SDK's shipped default, not a
+misconfiguration.
+
 ### Post-admission runtime failure authority
 
 After claim, every expected adapter failure crosses one of two boundaries as a
