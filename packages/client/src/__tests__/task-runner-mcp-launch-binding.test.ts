@@ -104,22 +104,30 @@ describe('TaskRunner MCP launch binding — every generated server, not only hos
     // because the adapter itself will generate one.
     expect(adapter.startCalls[0]?.ctx.mcpServers).toBeUndefined();
     const launcher = resolveMcpLaunchCwdLauncher();
-    if (launcher.kind !== 'resolved') throw new Error('no launcher on this machine');
+    if (launcher.kind === 'unavailable') throw new Error('no launcher on this machine');
     expect(adapter.startCalls[0]?.ctx.mcpLaunch).toEqual({
       cwd: await trustedCwd(),
-      launcher: { interpreter: launcher.interpreter, script: launcher.script },
+      launcher,
     });
 
     await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-confirm-binding', seq: 2 }));
   });
 
-  it('declines a confirm-mode task non-retryably, before any spawn, when this daemon build cannot host the launcher (compiled-Bun shape, no configured interpreter)', async () => {
-    // A compiled Salesko daemon is the bun binary: `process.execPath` would
-    // read `$cwd/bunfig.toml` `preload` itself, so the launcher has no host
-    // and the operator must configure `mcpLaunchCwd.launcherInterpreter`.
+  it('declines a confirm-mode task non-retryably, before any spawn, when no trusted launcher exists for this host', async () => {
+    // The one host shape that has no trusted launcher: Windows, where the
+    // launcher needs a real Node host, running a compiled-Bun daemon whose
+    // `process.execPath` would read `$cwd/bunfig.toml` `preload` itself.
     // Declining is the only fail-closed answer — the alternative is starting
     // the approval server in the Agent's own writable home.
+    //
+    // `SystemRoot` is supplied so the DIRECTORY half resolves on this machine
+    // and the decline can only come from the launcher half. (`/` is root-owned
+    // and unwritable here exactly as `%SystemRoot%` is on a real Windows host.)
+    const realPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     Object.defineProperty(process.versions, 'bun', { value: '1.2.0', configurable: true });
+    const realSystemRoot = process.env.SystemRoot;
+    process.env.SystemRoot = '/';
     try {
       const adapter = claudeShaped();
       const sent: Envelope[] = [];
@@ -133,11 +141,14 @@ describe('TaskRunner MCP launch binding — every generated server, not only hos
 
       const decline = sent.find((envelope) => envelope.type === 'task.decline');
       expect(decline?.payload).toMatchObject({ retryable: false });
-      expect(JSON.stringify(decline)).toContain('launch_cwd_launcher_interpreter_unconfigured');
+      expect(JSON.stringify(decline)).toContain('launch_cwd_launcher_unavailable');
       expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(false);
       expect(adapter.startCalls).toHaveLength(0);
     } finally {
+      Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
       delete (process.versions as Record<string, unknown>).bun;
+      if (realSystemRoot === undefined) delete process.env.SystemRoot;
+      else process.env.SystemRoot = realSystemRoot;
     }
   });
 
@@ -203,10 +214,10 @@ describe('TaskRunner MCP launch binding — every generated server, not only hos
     expect(adapter.startCalls).toHaveLength(1);
     expect(adapter.startCalls[0]?.ctx.mcpServers?.byokagentmemory).toMatchObject({ command: 'node' });
     const launcher = resolveMcpLaunchCwdLauncher();
-    if (launcher.kind !== 'resolved') throw new Error('no launcher on this machine');
+    if (launcher.kind === 'unavailable') throw new Error('no launcher on this machine');
     expect(adapter.startCalls[0]?.ctx.mcpLaunch).toEqual({
       cwd: await trustedCwd(),
-      launcher: { interpreter: launcher.interpreter, script: launcher.script },
+      launcher,
     });
 
     adapter.sessions[0]?.emit({ type: 'turn_end' });

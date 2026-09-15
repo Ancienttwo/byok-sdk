@@ -801,38 +801,68 @@ non-retryably instead of admitting an unprotected launch:
   the daemon reports `root_cannot_prove_write_boundary`. This is a documented
   limitation of running the daemon as root, not a default that is quietly
   filled in.
-- **No trusted launcher interpreter.** claude's `mcpServers` JSON and codex's
+- **No trusted launcher.** claude's `mcpServers` JSON and codex's
   `-c mcp_servers.*` have no per-server cwd field, so each server there is
-  reached through this package's `bin/byok-launch-cwd.mjs`, which changes
-  directory and then execs the real command with its argv passed through
-  structurally — no shell, no quoting, so an argument containing a space, a
-  quote, `$(...)`, a `;` or a newline arrives byte-identical. That launcher must
-  run on a real Node: a daemon embedded in a `bun --compile` product executable
-  must not run it on `process.execPath`, because Bun would read `bunfig.toml`
-  and preload before the launcher's own first statement. The SDK uses
-  `process.execPath` only when this process is provably plain Node (not Bun, not
-  Deno, not a single-executable application); otherwise the operator must attest
-  one in `TaskRunnerDeps.mcpLaunchCwd.launcherInterpreter`, and without it those
-  runtimes are refused with `launch_cwd_launcher_interpreter_unconfigured`.
+  reached through a launcher that changes directory and then execs the real
+  command with its argv passed through structurally — no shell word splitting,
+  no quoting, so an argument containing a space, a tab, a newline, a quote,
+  `$(...)`, a backtick, `*`, `;` or `&&` arrives byte-identical. Which launcher
+  depends on the platform, and a host that has neither is refused:
+
+  | Platform | Launcher | Evidence |
+  |---|---|---|
+  | darwin | trusted system `/bin/sh` bootstrap | verified on the development host |
+  | linux | trusted system `/bin/sh` bootstrap (dash, bash-as-sh, busybox) | verified in containers |
+  | win32 | `bin/byok-launch-cwd.mjs` on a real Node host; a non-Node host without a trusted launcher is refused | code path + unit tests only, not verified on Windows |
+
+  On POSIX the launcher is `sh -c 'cd -- "$0" && exec "$@"' <dir> <command>
+  [...args]`: `$0` is the trusted directory and `"$@"` is the target's argv, so
+  nothing is ever interpolated into the program text. The shell is required to
+  be a root-owned, non-group/other-writable regular file (checked on the
+  realpath, with the `/bin/sh` symlink itself required to be root-owned too);
+  otherwise the offer is refused with `launch_cwd_shell_not_root_owned`,
+  `launch_cwd_shell_writable`, `launch_cwd_shell_not_a_regular_file` or
+  `launch_cwd_shell_unreadable`. No Node host is needed, so a daemon embedded in
+  a `bun --compile` product executable has a trusted launcher with no
+  configuration at all.
+
+  On win32 the launcher is this package's `bin/byok-launch-cwd.mjs`, which needs
+  a real Node: a daemon embedded in a `bun --compile` product executable must not
+  run it on `process.execPath`, because Bun would read `bunfig.toml` and preload
+  before the launcher's own first statement. `process.execPath` is used only when
+  the process is provably plain Node (not Bun, not Deno, not a single-executable
+  application); any other win32 host is refused with
+  `launch_cwd_launcher_unavailable`. There is deliberately no Windows shell path.
+
+  A launch-cwd PASS asserts WHERE the server starts. It does **not** assert that
+  the launcher or the executor is the binary it claims to be — launcher/executor
+  identity integrity is the separate attested-install work (§26).
 
 `McpLaunchCwdConfig` reaches the daemon as `DaemonConfig.mcpLaunchCwd`, which
 `createDaemon` forwards verbatim to `TaskRunnerDeps.mcpLaunchCwd`. An absent
-section leaves the host on the platform default and the provably-plain-Node
-launcher interpreter. A present one is validated at CONSTRUCTION — `dir` must be
-absolute, and `launcherInterpreter` must be an absolute path to an existing
-regular file — so a host that configured a boundary it cannot have fails to
-start rather than discovering it on the first offer that needed one. What
-construction deliberately does not decide is whether the directory is still
-outside this uid's control: that is a fact about the filesystem now, so it is
-proven once per offer and never cached.
+section leaves the host on the platform default directory and the platform
+launcher above, which is the supported shape. `launcherInterpreter` is an
+ESCAPE HATCH for a host that has neither platform launcher and can attest a Node
+binary of its own; it is not a supported path, and a host that sets it takes on
+proving the binary it names is one the agent's uid cannot replace. A present
+section is validated at CONSTRUCTION — `dir` must be absolute, and
+`launcherInterpreter` must be an absolute path to an existing regular file — so
+a host that configured a boundary it cannot have fails to start rather than
+discovering it on the first offer that needed one. What construction deliberately
+does not decide is whether the directory is still outside this uid's control:
+that is a fact about the filesystem now, so it is proven once per offer and
+never cached.
 
 Loader environment variables are denied absolutely, above every allowlist layer
-including the operator's own `runtimeEnvironment.<id>.allow`: `NODE_OPTIONS`,
-`NODE_REPL_EXTERNAL_MODULE`, `NODE_PATH`, `BUN_*`, `DYLD_*` and `LD_*` all
-change how an interpreter loads code before the launcher's first statement. The
-launcher re-asserts the same list on itself and refuses to start if it sees one,
-because it is also reached through a runtime CLI that composes its own child
-environment.
+including the operator's own `runtimeEnvironment.<id>.allow`. `NODE_OPTIONS`,
+`NODE_REPL_EXTERNAL_MODULE`, `NODE_PATH`, `BUN_*`, `DYLD_*` and `LD_*` change how
+an interpreter loads code before the launcher's first statement; `ENV`,
+`BASH_ENV`, `SHELLOPTS`, `BASHOPTS`, `CDPATH` and `PS4` do the same to the shell
+bootstrap (`ENV`/`BASH_ENV` name a file the shell sources first, `SHELLOPTS` is
+imported by bash-as-sh and applied before the script, `CDPATH` redirects a
+relative `cd`, `PS4` is expanded while tracing). The Node launcher re-asserts the
+same list on itself and refuses to start if it sees one, because it is also
+reached through a runtime CLI that composes its own child environment.
 
 The launch directory and the launcher's identity are bound into the prepared
 launch path's executor fingerprints as their own fact, beside the toolset's

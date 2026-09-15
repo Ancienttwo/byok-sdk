@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { lstatSync, realpathSync, statSync, type Stats } from 'node:fs';
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -44,6 +45,25 @@ import type { McpStdioServerConfig } from '../types';
  *   A root-owned 0555 directory sitting inside a directory this uid can write
  *   is a directory this uid can swap out wholesale. So every ancestor up to the
  *   volume root is put through the identical check.
+ *
+ * WHAT DOES THE CHDIR, on each platform:
+ *
+ * - POSIX (darwin, linux): the trusted system `/bin/sh`, run as
+ *   `sh -c 'cd -- "$0" && exec "$@"' <dir> <command> [...args]`. The shell is
+ *   already on the machine, is root-owned and not group/other-writable (both
+ *   proven here, not assumed), reads no rc file for `-c`, and `exec`s so the
+ *   runtime CLI's child IS the server. No Node host is required, which is the
+ *   point: a daemon embedded in a `bun --compile` product executable has a
+ *   trusted launcher without attesting anything.
+ * - win32: this package's `bin/byok-launch-cwd.mjs`, which needs a real Node
+ *   host. A host that is not plain Node (Bun, Deno, a single-executable
+ *   application) and attests no interpreter is REFUSED, fail-closed. There is
+ *   deliberately no Windows shell path: `cmd.exe` has no `exec`, and its
+ *   quoting rules are not something a boundary should be built on.
+ *
+ * A launch-cwd PASS asserts WHERE the server starts. It does not assert that
+ * the launcher or the executor is the binary it claims to be — that is the
+ * separate attested-install work.
  */
 
 /** Operator-supplied inputs to {@link resolveTrustedLaunchCwd}. Both fields are optional and both are validated. */
@@ -61,17 +81,16 @@ export interface McpLaunchCwdConfig {
    */
   readonly dir?: string;
   /**
-   * Absolute path to a Node executable used to run this package's
-   * `bin/byok-launch-cwd.mjs` for the runtimes whose MCP configuration cannot
-   * express a per-server cwd (claude, codex).
+   * ESCAPE HATCH, not a supported path. An absolute path to a Node executable
+   * used to run this package's `bin/byok-launch-cwd.mjs` for the runtimes whose
+   * MCP configuration cannot express a per-server cwd (claude, codex).
    *
-   * There is no default when this process is not itself plain Node. A daemon
-   * embedded in a `bun --compile` product executable (Salesko's compiled
-   * `salesko-agent` is one) must NOT run the launcher on `process.execPath`:
-   * Bun would read `$cwd/bunfig.toml` and run its `preload` before the
-   * launcher's own first statement, which is the exact vector this boundary
-   * closes. Such a deployment has to attest a real Node binary here, or those
-   * runtimes are refused a toolset rather than served an unprotected one.
+   * The supported launchers need no configuration: POSIX bootstraps through the
+   * trusted system `/bin/sh`, and win32 runs the shipped launcher script on a
+   * real Node host. This field exists for the deployment that has neither and
+   * can attest a Node binary of its own. A host that sets it takes on proving
+   * the binary it names is one the agent's uid cannot replace — nothing here
+   * can prove that for an arbitrary path.
    */
   readonly launcherInterpreter?: string;
 }
@@ -120,11 +139,52 @@ export type TrustedLaunchCwd =
   | { readonly kind: 'resolved'; readonly dir: string }
   | { readonly kind: 'unavailable'; readonly reason: TrustedLaunchCwdUnavailableReason };
 
+/** The three facts the POSIX launcher check reads off one path. */
+export interface LaunchCwdShellStatEntry {
+  readonly uid: number;
+  /** The permission bits, as `st_mode` carries them. */
+  readonly mode: number;
+  readonly isFile: boolean;
+}
+
+/**
+ * The `node:fs` calls {@link resolveMcpLaunchCwdLauncher} makes on the system
+ * shell, as one injectable triple. Each call throws exactly as `fs` does when
+ * the path cannot be inspected.
+ */
+export interface LaunchCwdShellStat {
+  readonly lstat: (target: string) => LaunchCwdShellStatEntry;
+  readonly stat: (target: string) => LaunchCwdShellStatEntry;
+  readonly realpath: (target: string) => string;
+}
+
+function toShellStatEntry(stats: Stats): LaunchCwdShellStatEntry {
+  return { uid: stats.uid, mode: stats.mode, isFile: stats.isFile() };
+}
+
+const realShellStat: LaunchCwdShellStat = Object.freeze({
+  lstat: (target: string) => toShellStatEntry(lstatSync(target)),
+  stat: (target: string) => toShellStatEntry(statSync(target)),
+  realpath: (target: string) => realpathSync(target),
+});
+
 /** Seam for the tests that must run the uid-0 and filesystem branches without being root. */
 export interface TrustedLaunchCwdEnvironment {
   readonly platform?: NodeJS.Platform;
   readonly getuid?: () => number;
   readonly env?: Readonly<Record<string, string | undefined>>;
+  /**
+   * The system shell the POSIX launcher bootstraps through. Defaults to
+   * `/bin/sh` and is overridden only by tests, which point it at a shell built
+   * to fail one specific trust check.
+   */
+  readonly systemShell?: string;
+  /**
+   * How the shell's ownership and mode are read. Defaults to real `node:fs`.
+   * Injected by the tests that must exercise a root-owned-but-group-writable
+   * shell, which a non-root test process cannot create on disk.
+   */
+  readonly shellStat?: LaunchCwdShellStat;
 }
 
 type CheckPrefix = 'configured_dir' | 'platform_default';
@@ -279,29 +339,94 @@ export async function resolveTrustedLaunchCwd(
 // The launcher, for runtimes whose MCP configuration has no cwd field
 // ---------------------------------------------------------------------------
 
-export type McpLaunchCwdLauncherUnavailableReason = 'launch_cwd_launcher_interpreter_unconfigured';
+/**
+ * The POSIX bootstrap program, run as `sh -c <SCRIPT> <trustedCwd> <command>
+ * [...args]`.
+ *
+ * `sh -c` assigns the first word after the program text to `$0` and the rest
+ * to `$1...`, so `$0` is the trusted directory and `"$@"` is the target's argv
+ * with no shell word splitting, no globbing and no quoting round trip: an
+ * argument containing a space, a tab, a newline, a quote, `$(...)`, a backtick,
+ * `*`, `;`, `&&`, `~` or non-ASCII bytes arrives byte-identical.
+ *
+ * `cd --` (rather than a bare `cd`) is what keeps a directory named `-L` or
+ * `-P` from being read as an option. The target is reached through `exec`, so
+ * the shell replaces itself and the runtime CLI's child IS the server: one
+ * pid, signals and exit status pass through with nothing in between.
+ *
+ * `exec -- "$@"` is NOT used, and must not be: dash rejects it outright
+ * (`exec: --: not found`, exit 127). The form below is the one verified on
+ * dash 0.5.12, bash 5.2.37 invoked as `sh`, busybox ash, and macOS `/bin/sh`.
+ *
+ * `cd` is given an ABSOLUTE realpath by {@link wrapMcpServerWithLaunchCwd},
+ * because a relative argument to `cd` is resolved through `CDPATH` — which is
+ * why `CDPATH` (along with `ENV`, `BASH_ENV`, `SHELLOPTS`, `BASHOPTS` and
+ * `PS4`) is in the loader deny list `daemon/environment.ts` enforces.
+ */
+export const MCP_LAUNCH_CWD_SHELL_SCRIPT = 'cd -- "$0" && exec "$@"';
 
-export type McpLaunchCwdLauncher =
-  | { readonly kind: 'resolved'; readonly interpreter: string; readonly script: string }
-  | { readonly kind: 'unavailable'; readonly reason: McpLaunchCwdLauncherUnavailableReason };
+/** The system shell, and the only shell this module will bootstrap through. */
+const SYSTEM_SHELL_PATH = '/bin/sh';
 
 /**
- * `process.execPath`, but only when this process is provably a plain Node
- * that runs the script it is handed.
+ * Why no trusted launcher could be produced for this host. Every one of these
+ * refuses the offer: there is no fallback launcher, because every fallback
+ * available here is one the agent's own uid could have written.
+ */
+export type McpLaunchCwdLauncherUnavailableReason =
+  /**
+   * win32 only: this process is not a plain Node that would run the launcher
+   * script it is handed (Bun, Deno, or a single-executable application), and
+   * the operator attested no interpreter. A compiled Bun host is the case that
+   * matters — it would read `$cwd/bunfig.toml` and run its `preload` before the
+   * launcher's own first statement, which is the exact vector this boundary
+   * closes.
+   */
+  | 'launch_cwd_launcher_unavailable'
+  /** POSIX: `/bin/sh` could not be inspected at all. */
+  | 'launch_cwd_shell_unreadable'
+  /** POSIX: `/bin/sh` resolves to something that is not a regular file. */
+  | 'launch_cwd_shell_not_a_regular_file'
+  /**
+   * POSIX: `/bin/sh`, or the symlink standing at that path, is not owned by
+   * root. A shell this uid owns is a shell the agent can replace, and the
+   * bootstrap would then be running the agent's own program.
+   */
+  | 'launch_cwd_shell_not_root_owned'
+  /** POSIX: `/bin/sh` is group- or world-writable, so its owner is not the only writer. */
+  | 'launch_cwd_shell_writable';
+
+/** A launcher that was resolved: which mechanism, what runs it, and what it runs. */
+export type ResolvedMcpLaunchCwdLauncher =
+  /** POSIX: `interpreter` is the realpath of the system shell, `script` is {@link MCP_LAUNCH_CWD_SHELL_SCRIPT}. */
+  | { readonly kind: 'shell'; readonly interpreter: string; readonly script: string }
+  /** win32: `interpreter` is a plain-Node executable, `script` is this package's `bin/byok-launch-cwd.mjs`. */
+  | { readonly kind: 'node'; readonly interpreter: string; readonly script: string };
+
+export type McpLaunchCwdLauncher =
+  | ResolvedMcpLaunchCwdLauncher
+  | { readonly kind: 'unavailable'; readonly reason: McpLaunchCwdLauncherUnavailableReason };
+
+/** The shipped launcher script, resolved from this package's own root so it works from `dist/` and from source. */
+export function launchCwdScriptPath(): string {
+  return path.join(clientPackageRoot(), 'bin', 'byok-launch-cwd.mjs');
+}
+
+/**
+ * `process.execPath`, but only when this process is provably a plain Node that
+ * runs the script it is handed. win32 only — POSIX bootstraps through the
+ * system shell and never needs a Node host at all.
  *
  * Bun is excluded because a compiled Bun binary executes `$cwd/bunfig.toml`
- * `preload` before user code — using it to run the launcher would reintroduce
- * the vector inside the mitigation. A single-executable-application Node is
- * excluded because it ignores a script argument entirely and runs its own
- * embedded entrypoint. Deno likewise is not this launcher's host.
+ * `preload` before user code. A single-executable-application Node is excluded
+ * because it ignores a script argument entirely and runs its own embedded
+ * entrypoint. Deno likewise is not this launcher's host.
  */
-function defaultLauncherInterpreter(): string | undefined {
+function plainNodeInterpreter(): string | undefined {
   const versions = process.versions as Record<string, string | undefined>;
   if (typeof versions.bun === 'string') return undefined;
   if (typeof versions.deno === 'string') return undefined;
   if (typeof versions.node !== 'string') return undefined;
-  // `process.execPath` of a single-executable-application build is the product
-  // binary, which ignores a script argument and runs its own embedded entry.
   try {
     const sea = createRequire(import.meta.url)('node:sea') as { isSea?: () => boolean };
     if (sea.isSea?.() === true) return undefined;
@@ -311,27 +436,77 @@ function defaultLauncherInterpreter(): string | undefined {
   return process.execPath;
 }
 
-/** The shipped launcher script, resolved from this package's own root so it works from `dist/` and from source. */
-export function launchCwdScriptPath(): string {
-  return path.join(clientPackageRoot(), 'bin', 'byok-launch-cwd.mjs');
+function launcherUnavailable(reason: McpLaunchCwdLauncherUnavailableReason): McpLaunchCwdLauncher {
+  return Object.freeze({ kind: 'unavailable' as const, reason });
 }
 
-export function resolveMcpLaunchCwdLauncher(config?: McpLaunchCwdConfig): McpLaunchCwdLauncher {
+/**
+ * Prove the shell at `shellPath` is one only root can have written.
+ *
+ * `/bin/sh` is a symlink on most Linux distributions (dash, or busybox), so the
+ * checks run on the realpath — and the symlink standing at the path is checked
+ * for root ownership too, because whoever owns the link chooses the target.
+ *
+ * Deliberately NOT checked: the darwin `SF_RESTRICTED` (SIP) flag. `/bin/sh` on
+ * this platform does carry it (`ls -lO` reports `restricted`), but Node's
+ * `fs.Stats` has no `st_flags` field at all — `'flags' in fs.statSync('/bin/sh')`
+ * is `false` on darwin — so there is nothing to read without a native addon.
+ * Asserting a flag this process cannot observe would be a check that always
+ * passed, which is worse than no check; the root-ownership and write-bit proofs
+ * here are what carry the boundary on darwin.
+ */
+function checkSystemShell(
+  shellPath: string,
+  stat: LaunchCwdShellStat,
+): McpLaunchCwdLauncherUnavailableReason | { readonly realpath: string } {
+  let link;
+  let realpath: string;
+  let target;
+  try {
+    link = stat.lstat(shellPath);
+    realpath = stat.realpath(shellPath);
+    target = stat.stat(realpath);
+  } catch {
+    return 'launch_cwd_shell_unreadable';
+  }
+  if (link.uid !== 0) return 'launch_cwd_shell_not_root_owned';
+  if (!target.isFile) return 'launch_cwd_shell_not_a_regular_file';
+  if (target.uid !== 0) return 'launch_cwd_shell_not_root_owned';
+  // Group/other write. The owner's own write bit is not a finding: the owner is
+  // root, which is the trust anchor this check establishes in the first place.
+  if ((target.mode & 0o022) !== 0) return 'launch_cwd_shell_writable';
+  return { realpath };
+}
+
+export function resolveMcpLaunchCwdLauncher(
+  config?: McpLaunchCwdConfig,
+  environment: TrustedLaunchCwdEnvironment = {},
+): McpLaunchCwdLauncher {
+  const platform = environment.platform ?? process.platform;
   const configured = config?.launcherInterpreter;
   if (configured !== undefined) {
-    if (!path.isAbsolute(configured) || /[\u0000\r\n]/u.test(configured)) {
+    if (!path.isAbsolute(configured) || /[ \r\n]/u.test(configured)) {
       throw new Error('McpLaunchCwdConfig.launcherInterpreter must be an absolute executable path');
     }
-    return Object.freeze({ kind: 'resolved' as const, interpreter: configured, script: launchCwdScriptPath() });
+    // The operator's escape hatch, and the one input this module does not
+    // second-guess: an attested interpreter runs the shipped launcher script on
+    // both platforms. It is not the supported path and the documentation does
+    // not present it as one.
+    return Object.freeze({ kind: 'node' as const, interpreter: configured, script: launchCwdScriptPath() });
   }
-  const fallback = defaultLauncherInterpreter();
-  if (fallback === undefined) {
-    return Object.freeze({
-      kind: 'unavailable' as const,
-      reason: 'launch_cwd_launcher_interpreter_unconfigured' as const,
-    });
+  if (platform === 'win32') {
+    const interpreter = plainNodeInterpreter();
+    if (interpreter === undefined) return launcherUnavailable('launch_cwd_launcher_unavailable');
+    return Object.freeze({ kind: 'node' as const, interpreter, script: launchCwdScriptPath() });
   }
-  return Object.freeze({ kind: 'resolved' as const, interpreter: fallback, script: launchCwdScriptPath() });
+  const shellPath = environment.systemShell ?? SYSTEM_SHELL_PATH;
+  const checked = checkSystemShell(shellPath, environment.shellStat ?? realShellStat);
+  if (typeof checked === 'string') return launcherUnavailable(checked);
+  return Object.freeze({
+    kind: 'shell' as const,
+    interpreter: checked.realpath,
+    script: MCP_LAUNCH_CWD_SHELL_SCRIPT,
+  });
 }
 
 /** What the daemon resolved once per offer and every adapter of that offer launches through. */
@@ -339,32 +514,53 @@ export interface McpLaunchBinding {
   /** The proven non-writable directory every MCP toolset server child starts in. */
   readonly cwd: string;
   /** Present only for adapters whose MCP configuration cannot carry a cwd. */
-  readonly launcher?: { readonly interpreter: string; readonly script: string };
+  readonly launcher?: ResolvedMcpLaunchCwdLauncher;
 }
 
 /**
  * Rewrite one server's `command`/`args` so the child reaches its real
  * executable already chdir'd into the trusted directory.
  *
- * argv is passed through structurally — no shell, no quoting, no
- * concatenation — so a server argument containing a space, a quote, `$(...)`,
- * a semicolon or a newline arrives byte-identical.
+ * argv is passed through structurally — no shell word splitting, no quoting,
+ * no concatenation — so a server argument containing a space, a quote,
+ * `$(...)`, a semicolon or a newline arrives byte-identical. The `shell`
+ * launcher runs a fixed program text that never interpolates an argument into
+ * itself; the arguments reach it as positional parameters.
  *
  * `env` is carried through untouched: it is the server's own task-scoped
  * authority and the launcher is not a place to edit it.
+ *
+ * Three refusals, all fail-closed, all specific to the fact that a shell now
+ * stands between the runtime and the server:
+ *
+ * - A relative `cwd` would be resolved by `cd` through `CDPATH`, so the
+ *   directory the boundary names must be absolute.
+ * - A `command` starting with `-` would be read by `exec` as one of ITS own
+ *   options rather than as the program to run.
+ * - A relative `command` is a PATH lookup performed after the chdir, which is
+ *   not the identity the binding attested. It is not resolved here — this
+ *   module does not own a PATH lookup and is not the place to invent one — so
+ *   it is refused.
  */
 export function wrapMcpServerWithLaunchCwd(
   server: Readonly<McpStdioServerConfig>,
-  binding: McpLaunchBinding & { readonly launcher: { readonly interpreter: string; readonly script: string } },
+  binding: McpLaunchBinding & { readonly launcher: ResolvedMcpLaunchCwdLauncher },
 ): McpStdioServerConfig {
+  if (!path.isAbsolute(binding.cwd)) {
+    throw new Error(`launch_cwd_binding_cwd_not_absolute: ${JSON.stringify(binding.cwd)}`);
+  }
+  if (server.command.startsWith('-')) {
+    throw new Error(`launch_cwd_target_command_option_like: ${JSON.stringify(server.command)}`);
+  }
+  if (!path.isAbsolute(server.command)) {
+    throw new Error(`launch_cwd_target_command_not_absolute: ${JSON.stringify(server.command)}`);
+  }
+  const args = binding.launcher.kind === 'shell'
+    ? ['-c', binding.launcher.script, binding.cwd, server.command, ...(server.args ?? [])]
+    : [binding.launcher.script, binding.cwd, server.command, ...(server.args ?? [])];
   return Object.freeze({
     command: binding.launcher.interpreter,
-    args: Object.freeze([
-      binding.launcher.script,
-      binding.cwd,
-      server.command,
-      ...(server.args ?? []),
-    ]),
+    args: Object.freeze(args),
     ...(server.env === undefined ? {} : { env: Object.freeze({ ...server.env }) }),
   });
 }
@@ -378,17 +574,22 @@ export function wrapMcpServerWithLaunchCwd(
  * declared. An SDK launcher upgrade is not a change to their configuration,
  * and making it one would churn every stored revision on every SDK release.
  * It is drift of a different fact, so it is bound as a different fact.
+ *
+ * `kind` is part of the bound value: a shell bootstrap and a Node launcher are
+ * different launch mechanisms and must never fingerprint equal, even in the
+ * degenerate case where they were handed the same two strings.
  */
 export interface McpLaunchAttestation {
   readonly launchCwd: string;
-  readonly launcher: { readonly interpreter: string; readonly script: string } | null;
+  readonly launcher: ResolvedMcpLaunchCwdLauncher | null;
 }
 
 export function mcpLaunchAttestation(binding: McpLaunchBinding): McpLaunchAttestation {
+  const launcher = binding.launcher;
   return Object.freeze({
     launchCwd: binding.cwd,
-    launcher: binding.launcher === undefined
+    launcher: launcher === undefined
       ? null
-      : Object.freeze({ interpreter: binding.launcher.interpreter, script: binding.launcher.script }),
+      : Object.freeze({ ...launcher }),
   });
 }

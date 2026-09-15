@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
+import { realpathSync, statSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  MCP_LAUNCH_CWD_SHELL_SCRIPT,
   mcpLaunchAttestation,
   resolveMcpLaunchCwdLauncher,
   resolveTrustedLaunchCwd,
   wrapMcpServerWithLaunchCwd,
+  type LaunchCwdShellStat,
+  type LaunchCwdShellStatEntry,
 } from '../daemon/trusted-launch-cwd';
 
 /**
@@ -128,50 +132,201 @@ describe('resolveTrustedLaunchCwd', () => {
   });
 });
 
+
+/** A shell stat triple that answers with exactly what a case needs to pin. */
+function fakeShellStat(
+  answers: {
+    link?: Partial<LaunchCwdShellStatEntry>;
+    target?: Partial<LaunchCwdShellStatEntry>;
+    realpath?: string;
+    throws?: boolean;
+  },
+): LaunchCwdShellStat {
+  const root = { uid: 0, mode: 0o100755, isFile: true };
+  return {
+    lstat: () => {
+      if (answers.throws === true) throw new Error('ENOENT');
+      return { ...root, ...answers.link };
+    },
+    stat: () => ({ ...root, ...answers.target }),
+    realpath: () => answers.realpath ?? '/bin/dash',
+  };
+}
+
+describe('the POSIX shell bootstrap program', () => {
+  it('chdirs through $0 and execs the remaining argv, in the one form every tested sh accepts', () => {
+    // Pinned as a literal, not rebuilt from parts: `exec -- "$@"` — the obvious
+    // "safer" spelling — is rejected outright by dash (`exec: --: not found`,
+    // exit 127), so the exact text is a verified fact about real shells rather
+    // than a style choice. `cd --` IS required: it keeps a directory named `-L`
+    // from being read as an option.
+    expect(MCP_LAUNCH_CWD_SHELL_SCRIPT).toBe('cd -- "$0" && exec "$@"');
+  });
+});
+
 describe('resolveMcpLaunchCwdLauncher', () => {
-  it('uses this plain-Node process as the interpreter and this package\'s own script', () => {
-    const launcher = resolveMcpLaunchCwdLauncher();
-    expect(launcher).toEqual({
-      kind: 'resolved',
+  it.skipIf(process.platform === 'win32')(
+    'bootstraps through this machine\'s real system shell, and names the shell rather than a script file',
+    () => {
+      const launcher = resolveMcpLaunchCwdLauncher();
+      expect(launcher).toEqual({
+        kind: 'shell',
+        interpreter: realpathSync('/bin/sh'),
+        script: MCP_LAUNCH_CWD_SHELL_SCRIPT,
+      });
+      // Non-vacuous: the interpreter is a real executable on this machine, and
+      // it is the one the OS would have run for `/bin/sh`.
+      expect(statSync(realpathSync('/bin/sh')).isFile()).toBe(true);
+    },
+  );
+
+  it('refuses a shell this uid could have written, rather than bootstrapping through it', async () => {
+    const shell = path.join(await tempRoot(), 'sh');
+    await fs.writeFile(shell, '#!/bin/sh\n', { mode: 0o755 });
+    // Owned by the test uid, not root: a shell the agent can replace is a shell
+    // that would be running the agent's own program.
+    expect(resolveMcpLaunchCwdLauncher(undefined, { platform: 'linux', systemShell: shell }))
+      .toEqual({ kind: 'unavailable', reason: 'launch_cwd_shell_not_root_owned' });
+  });
+
+  it('refuses a root-owned shell that anyone but root can write', () => {
+    // Group-writable, which a non-root test process cannot create on disk, so
+    // the stat triple is injected while everything else stays real.
+    expect(resolveMcpLaunchCwdLauncher(undefined, {
+      platform: 'linux',
+      shellStat: fakeShellStat({ target: { mode: 0o100775 } }),
+    })).toEqual({ kind: 'unavailable', reason: 'launch_cwd_shell_writable' });
+    expect(resolveMcpLaunchCwdLauncher(undefined, {
+      platform: 'linux',
+      shellStat: fakeShellStat({ target: { mode: 0o100757 } }),
+    })).toEqual({ kind: 'unavailable', reason: 'launch_cwd_shell_writable' });
+  });
+
+  it('follows the /bin/sh symlink but refuses when the link itself is not root-owned', () => {
+    // dash and busybox both sit behind a symlink named `sh`. Whoever owns the
+    // LINK chooses the target, so the link is checked as well as what it names.
+    expect(resolveMcpLaunchCwdLauncher(undefined, {
+      platform: 'linux',
+      shellStat: fakeShellStat({ link: { uid: 1000 }, realpath: '/usr/bin/dash' }),
+    })).toEqual({ kind: 'unavailable', reason: 'launch_cwd_shell_not_root_owned' });
+    expect(resolveMcpLaunchCwdLauncher(undefined, {
+      platform: 'linux',
+      shellStat: fakeShellStat({ realpath: '/usr/bin/dash' }),
+    })).toEqual({ kind: 'shell', interpreter: '/usr/bin/dash', script: MCP_LAUNCH_CWD_SHELL_SCRIPT });
+  });
+
+  it('refuses a shell that is not a regular file, and one it cannot inspect at all', () => {
+    expect(resolveMcpLaunchCwdLauncher(undefined, {
+      platform: 'linux',
+      shellStat: fakeShellStat({ target: { isFile: false } }),
+    })).toEqual({ kind: 'unavailable', reason: 'launch_cwd_shell_not_a_regular_file' });
+    expect(resolveMcpLaunchCwdLauncher(undefined, {
+      platform: 'linux',
+      shellStat: fakeShellStat({ throws: true }),
+    })).toEqual({ kind: 'unavailable', reason: 'launch_cwd_shell_unreadable' });
+  });
+
+  it('runs the shipped launcher script on a real Node host on win32', () => {
+    expect(resolveMcpLaunchCwdLauncher(undefined, { platform: 'win32' })).toEqual({
+      kind: 'node',
       interpreter: process.execPath,
       script: expect.stringMatching(/bin[/\\]byok-launch-cwd\.mjs$/u),
     });
   });
 
-  it('prefers an operator-attested interpreter and refuses a relative one', () => {
-    expect(resolveMcpLaunchCwdLauncher({ launcherInterpreter: '/usr/local/bin/node' }))
-      .toMatchObject({ kind: 'resolved', interpreter: '/usr/local/bin/node' });
+  it('refuses a win32 host that cannot run the launcher script it would be handed', () => {
+    // A compiled-Bun product executable reads `$cwd/bunfig.toml` `preload`
+    // before the launcher's first statement — the exact vector this boundary
+    // closes — so there is no launcher for it and no fallback to one.
+    Object.defineProperty(process.versions, 'bun', { value: '1.4.2', configurable: true });
+    try {
+      expect(resolveMcpLaunchCwdLauncher(undefined, { platform: 'win32' }))
+        .toEqual({ kind: 'unavailable', reason: 'launch_cwd_launcher_unavailable' });
+    } finally {
+      delete (process.versions as Record<string, unknown>).bun;
+    }
+    // And a POSIX host of the same shape still has a trusted launcher, because
+    // the shell bootstrap needs no Node at all.
+    Object.defineProperty(process.versions, 'bun', { value: '1.4.2', configurable: true });
+    try {
+      expect(resolveMcpLaunchCwdLauncher(undefined, { platform: 'linux', shellStat: fakeShellStat({}) }))
+        .toMatchObject({ kind: 'shell' });
+    } finally {
+      delete (process.versions as Record<string, unknown>).bun;
+    }
+  });
+
+  it('takes an operator-attested interpreter on either platform, and refuses a relative one', () => {
+    for (const platform of ['linux', 'win32'] as const) {
+      expect(resolveMcpLaunchCwdLauncher({ launcherInterpreter: '/usr/local/bin/node' }, { platform }))
+        .toEqual({
+          kind: 'node',
+          interpreter: '/usr/local/bin/node',
+          script: expect.stringMatching(/bin[/\\]byok-launch-cwd\.mjs$/u),
+        });
+    }
     expect(() => resolveMcpLaunchCwdLauncher({ launcherInterpreter: 'node' })).toThrow(/absolute executable path/u);
   });
 });
 
 describe('wrapMcpServerWithLaunchCwd', () => {
-  const binding = {
-    cwd: '/',
-    launcher: { interpreter: '/usr/bin/node', script: '/pkg/bin/byok-launch-cwd.mjs' },
-  } as const;
+  const shell = { cwd: '/', launcher: { kind: 'shell', interpreter: '/bin/dash', script: MCP_LAUNCH_CWD_SHELL_SCRIPT } } as const;
+  const node = { cwd: '/', launcher: { kind: 'node', interpreter: '/usr/bin/node', script: '/pkg/bin/byok-launch-cwd.mjs' } } as const;
+  const args = ['a b', '"q"', "'q'", '$(id)', '`id`', ';rm -rf /', 'line\nbreak', '-n', '--', ''];
 
-  it('carries every argument through structurally, shell metacharacters included', () => {
-    const args = ['a b', '"q"', "'q'", '$(id)', '`id`', ';rm -rf /', 'line\nbreak', '-n', '--', ''];
-    expect(wrapMcpServerWithLaunchCwd({ command: '/opt/server', args }, binding)).toEqual({
+  it('hands the shell its program text and the target argv as positional parameters, never interpolated', () => {
+    expect(wrapMcpServerWithLaunchCwd({ command: '/opt/server', args }, shell)).toEqual({
+      command: '/bin/dash',
+      args: ['-c', 'cd -- "$0" && exec "$@"', '/', '/opt/server', ...args],
+    });
+  });
+
+  it('hands the Node launcher the same argv with no -c, since it is a script and not a shell', () => {
+    expect(wrapMcpServerWithLaunchCwd({ command: '/opt/server', args }, node)).toEqual({
       command: '/usr/bin/node',
       args: ['/pkg/bin/byok-launch-cwd.mjs', '/', '/opt/server', ...args],
     });
   });
 
   it('leaves the task-scoped env alone and tolerates a server with no args', () => {
-    expect(wrapMcpServerWithLaunchCwd({ command: '/opt/server', env: { A: '1' } }, binding)).toEqual({
-      command: '/usr/bin/node',
-      args: ['/pkg/bin/byok-launch-cwd.mjs', '/', '/opt/server'],
+    expect(wrapMcpServerWithLaunchCwd({ command: '/opt/server', env: { A: '1' } }, shell)).toEqual({
+      command: '/bin/dash',
+      args: ['-c', 'cd -- "$0" && exec "$@"', '/', '/opt/server'],
       env: { A: '1' },
     });
+  });
+
+  it('refuses a target this launch shape cannot address unambiguously', () => {
+    // A relative cwd is resolved by `cd` through CDPATH; a command starting
+    // with `-` is read by `exec` as one of its own options; a relative command
+    // is a PATH lookup done after the chdir, which is not the identity the
+    // binding attested. None of the three is repaired here.
+    expect(() => wrapMcpServerWithLaunchCwd({ command: '/opt/server' }, { ...shell, cwd: 'releases/1.2.3' }))
+      .toThrow(/launch_cwd_binding_cwd_not_absolute/u);
+    expect(() => wrapMcpServerWithLaunchCwd({ command: '-n' }, shell))
+      .toThrow(/launch_cwd_target_command_option_like/u);
+    expect(() => wrapMcpServerWithLaunchCwd({ command: 'salesko-agent' }, shell))
+      .toThrow(/launch_cwd_target_command_not_absolute/u);
+    // The same refusals on the Node launcher: the binding's meaning does not
+    // change with the mechanism that carries it out.
+    expect(() => wrapMcpServerWithLaunchCwd({ command: 'salesko-agent' }, node))
+      .toThrow(/launch_cwd_target_command_not_absolute/u);
   });
 });
 
 describe('mcpLaunchAttestation', () => {
   it('records the directory, and an explicit null for a launcher that was not used', () => {
     expect(mcpLaunchAttestation({ cwd: '/' })).toEqual({ launchCwd: '/', launcher: null });
-    expect(mcpLaunchAttestation({ cwd: '/', launcher: { interpreter: '/n', script: '/s' } }))
-      .toEqual({ launchCwd: '/', launcher: { interpreter: '/n', script: '/s' } });
+    expect(mcpLaunchAttestation({ cwd: '/', launcher: { kind: 'node', interpreter: '/n', script: '/s' } }))
+      .toEqual({ launchCwd: '/', launcher: { kind: 'node', interpreter: '/n', script: '/s' } });
+  });
+
+  it('distinguishes a shell bootstrap from a Node launcher that was handed the same strings', () => {
+    // Without `kind` in the bound value these two would be one attestation, and
+    // a host that silently moved between launch mechanisms would not be drift.
+    const asShell = mcpLaunchAttestation({ cwd: '/', launcher: { kind: 'shell', interpreter: '/x', script: '/y' } });
+    const asNode = mcpLaunchAttestation({ cwd: '/', launcher: { kind: 'node', interpreter: '/x', script: '/y' } });
+    expect(asShell).not.toEqual(asNode);
+    expect(JSON.stringify(asShell)).not.toBe(JSON.stringify(asNode));
   });
 });

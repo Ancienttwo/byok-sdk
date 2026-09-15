@@ -35,22 +35,37 @@ and the D2 version number belongs to a separate SDK release contract.
   daemon knows whether that adapter needs a launcher. The pi task-scoped MCP
   config file carries `launchCwd`, and the extension refuses to open a server
   without it. claude's and codex's generated MCP configuration now reaches each
-  server through this package's new `bin/byok-launch-cwd.mjs` (shipped in the
-  published tarball), because neither configuration format has a per-server cwd
-  field; argv is forwarded structurally, so a server argument containing a
-  space, a quote, `$(...)`, a `;` or a newline is byte-identical on the other
-  side.
+  server through a launcher, because neither configuration format has a
+  per-server cwd field; argv is forwarded structurally, so a server argument
+  containing a space, a quote, `$(...)`, a `;` or a newline is byte-identical on
+  the other side. On POSIX the launcher is the trusted system `/bin/sh`, run as
+  `sh -c 'cd -- "$0" && exec "$@"' <dir> <command> [...args]` — verified
+  byte-identical over 17 argument classes on dash 0.5.12, bash 5.2.37 invoked as
+  `sh`, busybox ash and macOS `/bin/sh`. On win32 it is this package's new
+  `bin/byok-launch-cwd.mjs` (shipped in the published tarball), which needs a
+  real Node host.
 
   Two conditions refuse an offer non-retryably rather than admitting an
   unprotected launch: running as uid 0 (`root_cannot_prove_write_boundary` — no
   directory is unwritable by root, a documented limitation rather than a filled-in
-  default), and having no trusted launcher interpreter for claude/codex
-  (`launch_cwd_launcher_interpreter_unconfigured`). The launcher must run on a
-  real Node — a daemon embedded in a `bun --compile` product executable must not
-  run it on `process.execPath`, or Bun would preload before the launcher's first
-  statement — so `process.execPath` is used only when this process is provably
-  plain Node, and any other host attests one in
-  `DaemonConfig.mcpLaunchCwd.launcherInterpreter`.
+  default), and having no trusted launcher for claude/codex. On POSIX that means
+  a `/bin/sh` that is not a root-owned, non-group/other-writable regular file
+  (`launch_cwd_shell_not_root_owned`, `launch_cwd_shell_writable`,
+  `launch_cwd_shell_not_a_regular_file`, `launch_cwd_shell_unreadable`); on win32
+  it means a host that is not provably plain Node, since Bun would preload before
+  the launcher's first statement (`launch_cwd_launcher_unavailable`). A POSIX
+  host needs no Node and no configuration at all;
+  `DaemonConfig.mcpLaunchCwd.launcherInterpreter` remains as an escape hatch, not
+  a supported path.
+
+  `wrapMcpServerWithLaunchCwd` now refuses, rather than repairs, a binding it
+  cannot address unambiguously: a relative launch directory
+  (`launch_cwd_binding_cwd_not_absolute`, which `cd` would resolve through
+  `CDPATH`), a server `command` starting with `-` (`launch_cwd_target_command_option_like`,
+  which `exec` would read as one of its own options), and a relative server
+  `command` (`launch_cwd_target_command_not_absolute`, a PATH lookup performed
+  after the chdir rather than the identity the binding attested). Hosts whose
+  configured MCP server `command` is a bare name must give an absolute path.
 
 - The launch working-directory boundary now covers every MCP server a task
   GENERATES, not only the host toolsets the device projects. `TaskRunner` used
@@ -67,8 +82,8 @@ and the D2 version number belongs to a separate SDK release contract.
   task on that adapter will produce a server the daemon never sees; omitting it
   means "generates none". A task that generates no MCP server is still admitted
   with no binding, and a `confirm`-mode task on a launcher-wrapped adapter with
-  no trusted launcher interpreter is now declined non-retryably
-  (`launch_cwd_launcher_interpreter_unconfigured`) before any spawn.
+  no trusted launcher is now declined non-retryably before
+  any spawn.
 
 - `DaemonConfig.mcpLaunchCwd` (`{dir?, launcherInterpreter?}`) now carries the
   operator's launch-boundary input through `createDaemon`, forwarded verbatim to
@@ -81,8 +96,9 @@ and the D2 version number belongs to a separate SDK release contract.
   per-offer proof, never a cached construction-time answer.
 
   `buildRuntimeEnv` additionally hard-denies `NODE_OPTIONS`,
-  `NODE_REPL_EXTERNAL_MODULE`, `NODE_PATH`, `BUN_*`, `DYLD_*` and `LD_*` above
-  every allowlist layer including the operator's own
+  `NODE_REPL_EXTERNAL_MODULE`, `NODE_PATH`, `BUN_*`, `DYLD_*`, `LD_*`, and — for
+  the shell bootstrap — `ENV`, `BASH_ENV`, `SHELLOPTS`, `BASHOPTS`, `CDPATH` and
+  `PS4`, above every allowlist layer including the operator's own
   `runtimeEnvironment.<id>.allow`: they change how an interpreter loads code
   before the launcher's first statement. The launcher re-asserts the same list
   on itself and exits 78 if it sees one. The launch directory and launcher

@@ -11,7 +11,7 @@ import { SteerUnsupportedError, type Session } from '../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 import { observationOf } from './fixtures/mcp-observation';
-import { trustedLaunchBinding } from './fixtures/launch-cwd';
+import { launchArgvPrefix, trustedLaunchBinding } from './fixtures/launch-cwd';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 
@@ -254,7 +254,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const adapter = new ClaudeAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
       spawnFn: spyingSpawnFn,
-      resolveApprovalMcpBin: () => ({ command: 'fake-approval-mcp-command', args: ['--fixture-arg'], source: 'env' }),
+      resolveApprovalMcpBin: () => ({ command: '/opt/fixtures/fake-approval-mcp-command', args: ['--fixture-arg'], source: 'env' }),
     });
     const ctx = await makeCtx();
     ctx.policy = { mode: 'confirm' };
@@ -293,7 +293,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       mcpServers: {
         byokapproval: {
           command: approvalLaunch.launcher!.interpreter,
-          args: [approvalLaunch.launcher!.script, approvalLaunch.cwd, 'fake-approval-mcp-command', '--fixture-arg'],
+          args: [...launchArgvPrefix(approvalLaunch), '/opt/fixtures/fake-approval-mcp-command', '--fixture-arg'],
           env: {
             BYOK_STORE_DIR: '/fake/store-dir',
             BYOK_PRODUCT_ID: 'fake-product',
@@ -319,7 +319,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const adapter = new ClaudeAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
       spawnFn: spawnFn as unknown as SpawnFn,
-      resolveApprovalMcpBin: () => ({ command: 'fake-approval-mcp-command', args: [], source: 'env' }),
+      resolveApprovalMcpBin: () => ({ command: '/opt/fixtures/fake-approval-mcp-command', args: [], source: 'env' }),
     });
     const ctx = await makeCtx();
     ctx.policy = { mode: 'confirm' };
@@ -345,7 +345,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
   it('surfaces task-scoped MCP cleanup failure as typed disposal evidence and permits a clean retry', async () => {
     const adapter = new ClaudeAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
-      resolveApprovalMcpBin: () => ({ command: 'fake-approval-mcp-command', args: [], source: 'env' }),
+      resolveApprovalMcpBin: () => ({ command: '/opt/fixtures/fake-approval-mcp-command', args: [], source: 'env' }),
     });
     const ctx = await makeCtx();
     ctx.policy = { mode: 'confirm' };
@@ -407,7 +407,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       mcpServers: {
         salesko: {
           command: launch.launcher!.interpreter,
-          args: [launch.launcher!.script, launch.cwd, process.execPath, '/opt/salesko/fake-mcp.mjs'],
+          args: [...launchArgvPrefix(launch), process.execPath, '/opt/salesko/fake-mcp.mjs'],
           env: { BYOK_AGENT_MESSAGE_CONTEXT: 'sealed-context' },
         },
       },

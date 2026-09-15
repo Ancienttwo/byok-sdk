@@ -1,5 +1,9 @@
 #!/usr/bin/env node
-// The SDK-owned launch-cwd launcher.
+// The SDK-owned launch-cwd launcher — the WIN32 launcher, and the host-attested
+// escape hatch. POSIX hosts do not reach this file: they bootstrap through the
+// trusted system `/bin/sh` instead (`src/daemon/trusted-launch-cwd.ts`), which
+// needs no Node host at all. Nothing about the behaviour below changed when
+// that became true.
 //
 // `node byok-launch-cwd.mjs <trustedCwd> <command> [...args]` changes this
 // process's working directory and then execs the target there. It exists for
@@ -27,6 +31,10 @@ import process from 'node:process';
 // can only refuse to continue. `buildRuntimeEnv` (`daemon/environment.ts`)
 // hard-denies the same list on the way in; this is the assertion at the point
 // where the boundary is actually established.
+// Kept byte-for-byte equivalent to `LOADER_ENV_DENY_PATTERNS`
+// (`daemon/environment.ts`); `launch-cwd-launcher.test.ts` asserts the two
+// lists name the same variables. The shell entries are here too even though
+// this launcher is not a shell: it execs a target that may well be one.
 const LOADER_ENV_DENY = [
   /^NODE_OPTIONS$/,
   /^NODE_REPL_EXTERNAL_MODULE$/,
@@ -34,6 +42,12 @@ const LOADER_ENV_DENY = [
   /^BUN_/,
   /^DYLD_/,
   /^LD_/,
+  /^ENV$/,
+  /^BASH_ENV$/,
+  /^SHELLOPTS$/,
+  /^BASHOPTS$/,
+  /^CDPATH$/,
+  /^PS4$/,
 ];
 
 function fail(message) {

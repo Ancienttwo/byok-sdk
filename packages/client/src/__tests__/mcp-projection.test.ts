@@ -22,7 +22,7 @@ import { trustedCwd } from './fixtures/launch-cwd';
 
 const LAUNCH = {
   launchCwd: '/',
-  launcher: { interpreter: '/usr/bin/node', script: '/pkg/bin/byok-launch-cwd.mjs' },
+  launcher: { kind: 'node', interpreter: '/usr/bin/node', script: '/pkg/bin/byok-launch-cwd.mjs' },
 } as const;
 
 /**
@@ -380,7 +380,7 @@ describe('MCP projection — executor fingerprints', () => {
     });
     const newLauncher = await buildToolExecutorsFromObservation({
       observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
-      launch: { ...LAUNCH, launcher: { interpreter: '/usr/local/bin/node', script: LAUNCH.launcher.script } },
+      launch: { ...LAUNCH, launcher: { kind: 'node', interpreter: '/usr/local/bin/node', script: LAUNCH.launcher.script } },
     });
     const noLauncher = await buildToolExecutorsFromObservation({
       observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,

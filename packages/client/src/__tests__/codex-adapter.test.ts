@@ -10,7 +10,7 @@ import { SteerUnsupportedError, type Session } from '../types';
 import { CodexProcessRunner } from '../adapters/codex/process-runner';
 import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
-import { trustedLaunchBinding } from './fixtures/launch-cwd';
+import { launchArgvPrefix, trustedLaunchBinding } from './fixtures/launch-cwd';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-codex.mjs', import.meta.url));
 
@@ -239,8 +239,9 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     expect(JSON.parse(commandArg.slice('mcp_servers.byokagentmessage.command='.length)))
       .toBe(launch.launcher!.interpreter);
     const wrappedArgs = JSON.parse(argsArg.slice('mcp_servers.byokagentmessage.args='.length)) as string[];
-    expect(wrappedArgs.slice(0, 2)).toEqual([launch.launcher!.script, launch.cwd]);
-    expect(wrappedArgs.length).toBeGreaterThan(2);
+    const prefix = launchArgvPrefix(launch);
+    expect(wrappedArgs.slice(0, prefix.length)).toEqual(prefix);
+    expect(wrappedArgs.length).toBeGreaterThan(prefix.length);
   });
 
   it('replays the first turn\'s exact MCP config argv on a resumed turn, so the MCP tool still resolves', async () => {

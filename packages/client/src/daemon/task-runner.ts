@@ -2143,7 +2143,7 @@ export class TaskRunner {
             );
             return;
           }
-          launcher = { interpreter: resolvedLauncher.interpreter, script: resolvedLauncher.script };
+          launcher = resolvedLauncher;
         }
         mcpLaunch = Object.freeze({
           cwd: trusted.dir,

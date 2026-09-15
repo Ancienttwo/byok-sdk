@@ -151,11 +151,12 @@ const WINDOWS_BASE_ALLOWLIST: readonly string[] = [
 /**
  * Environment variable names that change how an interpreter LOADS code, and
  * which therefore take effect before the first statement of whatever it was
- * asked to run — including this package's own `bin/byok-launch-cwd.mjs`,
- * whose entire job is to establish a trusted working directory before an MCP
- * server binary starts (`./trusted-launch-cwd.ts`). The launcher re-asserts
- * this same list on itself, because it is also reached through a runtime CLI
- * that composes its own child environment.
+ * asked to run — including the two launch-cwd launchers, whose entire job is to
+ * establish a trusted working directory before an MCP server binary starts
+ * (`./trusted-launch-cwd.ts`): the POSIX `/bin/sh -c` bootstrap, and this
+ * package's own `bin/byok-launch-cwd.mjs` on win32. The Node launcher
+ * re-asserts this same list on itself, because it is also reached through a
+ * runtime CLI that composes its own child environment.
  */
 export const LOADER_ENV_DENY_PATTERNS: readonly string[] = Object.freeze([
   'NODE_OPTIONS',
@@ -164,6 +165,26 @@ export const LOADER_ENV_DENY_PATTERNS: readonly string[] = Object.freeze([
   'BUN_*',
   'DYLD_*',
   'LD_*',
+  // The shell half of the same problem. A variable that makes a shell run
+  // code, trace itself, or resolve `cd` somewhere else is loader injection
+  // against the POSIX bootstrap exactly as NODE_OPTIONS is against a Node one:
+  //
+  // - ENV / BASH_ENV: a file the shell sources before the `-c` program text.
+  // - SHELLOPTS / BASHOPTS: bash invoked as `sh` imports these from the
+  //   environment and applies them before the script — `SHELLOPTS=xtrace`
+  //   alone writes `+ cd ...` trace lines onto the server's stderr, observed
+  //   on bash 5.2.37.
+  // - CDPATH: makes a RELATIVE `cd` argument land somewhere else entirely. The
+  //   launcher passes an absolute realpath, so this is the second line of the
+  //   same defence.
+  // - PS4: the trace prefix, which is expanded — command substitution
+  //   included — whenever tracing is on.
+  'ENV',
+  'BASH_ENV',
+  'SHELLOPTS',
+  'BASHOPTS',
+  'CDPATH',
+  'PS4',
 ]);
 
 /**
