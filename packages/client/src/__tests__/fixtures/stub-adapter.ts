@@ -8,6 +8,7 @@ import {
   type RuntimeCapabilities,
   type RuntimeDetectResult,
   type RuntimeOperationStartInput,
+  type RuntimePreparedLaunchV1,
   type Session,
 } from '../../types';
 import { AsyncQueue } from '../../util/async-queue';
@@ -194,6 +195,18 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
       approvalChannel?: RuntimeOperationStartInput['approvalChannel'];
     };
   }> = [];
+  /**
+   * Every prepared start this adapter was handed, in order.
+   *
+   * Recorded separately from {@link startCalls} rather than folded into it: the
+   * two lanes carry mutually exclusive authority over the request bytes, and a
+   * single list would let a test assert "it started" without saying which
+   * request it started.
+   */
+  readonly preparedStartCalls: Array<{
+    preparation: RuntimePreparedLaunchV1;
+    manifest: RuntimeOperationStartInput['manifest'];
+  }> = [];
   readonly sessions: StubSession[] = [];
   private readonly detectResult: RuntimeDetectResult;
   private sessionCounter = 0;
@@ -280,11 +293,17 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
   }
 
   private async startPrepared(prepared: RuntimeAdapterPrepareInput, startInput: RuntimeOperationStartInput): Promise<Session> {
-    // This stub stands in for the ordinary instruction lane only; a prepared
-    // start has no instruction to record and is refused rather than recorded
-    // as an empty one.
-    if (startInput.kind !== 'instruction') {
-      throw new Error('StubRuntimeAdapter has no prepared-input lane');
+    // The prepared lane carries no instruction at all, so it is recorded as
+    // itself rather than as an instruction start with an empty string.
+    if (startInput.kind === 'prepared') {
+      this.preparedStartCalls.push({ preparation: startInput.preparation, manifest: startInput.manifest });
+      void prepared;
+      if (this.startError) throw this.startError;
+      if (this.startGate) await this.startGate;
+      this.sessionCounter += 1;
+      const preparedSession = new StubSession(`stub-session-${this.sessionCounter}`);
+      this.sessions.push(preparedSession);
+      return preparedSession;
     }
     this.startCalls.push({
       task: {
