@@ -8743,8 +8743,16 @@ import type { McpLaunchAttestation } from './trusted-launch-cwd';
  * beside it — was a root-owned, non-symlink, non-writable regular file whose
  * bytes hash to its attested digest and whose `(dev, ino, size, mtime, mode,
  * uid, gid)` tuple is the one that was measured at resolve, and that the
- * environment handed to that spawn is the environment that was measured at
- * resolve (see {@link toolImplementationLaunchEnvNamesDigest}).
+ * environment handed to that spawn agrees with the environment measured at
+ * resolve over the NAMES PROJECTION plus the CONTROLLED LOADER-VALUES SCOPE
+ * defined by {@link toolImplementationLaunchEnvNamesDigest} and
+ * {@link toolImplementationLoaderEnvValuesDigest}. It is not a claim that the
+ * two environments are identical: the projection subtracts an exact,
+ * enumerated set of names this SDK itself mints or strips between the two
+ * moments ({@link TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES} and
+ * {@link PROVIDER_CREDENTIAL_ENV_DENY_NAMES}), and every other name — this
+ * SDK's `BYOK_*` control prefix included — is either bound by the names digest
+ * or refused outright at the spawn gate.
  *
  * What it does NOT prove (§26, carried honestly rather than implied away):
  * post-hoc modification by root, the integrity of the kernel, dyld, SIP-owned
@@ -8771,10 +8779,21 @@ import type { McpLaunchAttestation } from './trusted-launch-cwd';
  *   in a way no attestation covers (an interpreter on a compiled executable, or
  *   a bundle with no interpreter).
  * - `install_record_mismatch` — the record does not describe the filesystem:
- *   wrong realpath, a symlink, not a regular file, not root-owned, writable, or
- *   a stat tuple that moved.
- * - `reverify_failed` — the artifact's own bytes no longer hash to the digest
- *   that was attested, or could not be read at all.
+ *   wrong realpath, a symlink, not a regular file, not root-owned, writable, a
+ *   stat tuple that moved, or — AT RESOLVE — bytes that do not hash to the
+ *   `closureDigest` the record claims. A digest disagreement at resolve is the
+ *   record being wrong about the filesystem, not a verification that decayed:
+ *   nothing has been verified yet, so there is nothing to have changed.
+ * - `reverify_failed` — a file that could not be READ at all, at either layer;
+ *   and, at the spawn gate only, bytes that no longer hash to the digest this
+ *   SDK itself measured at resolve. That is the one digest disagreement that
+ *   means "it changed since we checked", and the reverify verdict carries the
+ *   `subject` (`artifact` or `interpreter`) saying which file it was.
+ *
+ * The rule across the two layers, stated once: a digest disagreement is
+ * `install_record_mismatch` at resolve and `reverify_failed` at reverify,
+ * because at resolve the digest is the HOST's claim and at reverify it is this
+ * SDK's own prior measurement.
  */
 export type ToolImplementationUnavailableReasonV1 = 'implementation_identity_unattested' | 'resolver_unconfigured' | 'unencapsulated_source' | 'interpreter_not_encapsulated' | 'interpreter_form_unsupported' | 'install_record_mismatch' | 'reverify_failed';
 export declare const TOOL_IMPLEMENTATION_UNAVAILABLE_REASONS: readonly ToolImplementationUnavailableReasonV1[];
@@ -8946,6 +8965,65 @@ export interface ToolImplementationFsProbe {
 }
 export declare const realToolImplementationFsProbe: ToolImplementationFsProbe;
 /**
+ * The EXACT names this SDK itself mints into a gated child's environment
+ * between the moment an identity is resolved and the moment the server it
+ * describes is spawned.
+ *
+ * An identity is resolved ONCE, by the daemon, off the environment
+ * `buildRuntimeEnv` produced — which hard-denies the whole `BYOK_*` prefix, so
+ * it contains none of these. It then travels to two spawns in two processes:
+ * the daemon's own admission probe, and the Pi extension's server pool inside
+ * the runtime child. Each of those layers a per-task or per-server control
+ * value on top, and the list is enumerated here rather than matched by prefix
+ * because the prefix is not intrinsically inert — a `BYOK_*` name is a knob
+ * this SDK reads elsewhere, so "starts with BYOK_" is not a reason to project
+ * a name away unnoticed.
+ *
+ * Every entry, with where it is minted:
+ *
+ * - `BYOK_PI_MCP_CONFIG_PATH` — `adapters/pi/mcp-config.ts:1`, set on the Pi
+ *   process at `adapters/pi/pi-adapter.ts:490`. The pool strips it back off
+ *   before it spawns a server (`adapters/pi/mcp-server-pool.ts:271`).
+ * - `BYOK_PI_PERMISSION_MODE` — `adapters/pi/subagents-policy-config.ts:1`, set
+ *   at `adapters/pi/pi-adapter.ts:491`, stripped by the same pool filter.
+ * - `BYOK_HOST_TOOLSET_CONTEXT` — the per-server task-lane nonce minted at
+ *   `daemon/task-runner.ts:3355` (name at `:1148`) into the server's own `env`
+ *   block, which `mcp/client.ts:244` layers onto the child environment the
+ *   gate below measures.
+ * - `BYOK_STORE_DIR` / `BYOK_PRODUCT_ID` — minted into the same per-server
+ *   `env` block at `daemon/task-runner.ts:3353-3354`, and reaching the gated
+ *   child by the same path.
+ *
+ * OUT OF SCOPE, deliberately, and NOT exempt — a name below appearing on a
+ * gated child environment is a refusal, not a projection:
+ *
+ * - `adapters/claude/resolve-bin.ts:29` / `resolve-approval-mcp-bin.ts:49`'s
+ *   `BYOK_*_BIN` overrides are daemon-pre-child inputs read out of the
+ *   daemon's own `process.env`; they are never placed on a spawned child's
+ *   environment.
+ * - `BYOK_MCP_ENV_KEY` / `BYOK_MCP_PAYLOAD_*` (`adapters/codex/codex-adapter
+ *   .ts:467,484`, `bin/mcp-env-launcher.ts:8-26`) are the Codex CLI's own
+ *   launcher knobs. The Codex lane's MCP children are spawned by the CLI, not
+ *   through this package's gate, so they are not names an attested spawn here
+ *   may carry.
+ * - The SDK-reserved helper servers' `BYOK_STORE_DIR`/`BYOK_TASK_ID`/
+ *   `BYOK_*_CONTEXT` blocks (`bin/sdk-reserved-helper-runners.ts`) back this
+ *   package's own bins, which carry no host install record and therefore never
+ *   reach an attested gate.
+ */
+export declare const TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES: readonly string[];
+/**
+ * Every `BYOK_*` name on a child environment that this SDK cannot account for.
+ *
+ * `buildRuntimeEnv` hard-denies the whole prefix, and the only names that may
+ * legitimately be layered back on afterwards are the enumerated lifecycle ones
+ * above. Anything else wearing this SDK's control prefix on the environment of
+ * a child about to be started under an attested identity is a control-plane
+ * name from somewhere this SDK does not mint — so the gate refuses rather than
+ * projecting it away or letting it pass as an ordinary bound name.
+ */
+export declare function unexpectedLaunchEnvControlNames(env: Readonly<Record<string, string>>): readonly string[];
+/**
  * The NAMES the child's environment carries, digested. Never their values:
  * this is the fact that catches a variable appearing, disappearing or being
  * renamed between resolve and spawn, and a value digest of the whole
@@ -9004,8 +9082,20 @@ export declare function resolveToolImplementationIdentity(authority: ToolImpleme
  * that is the moment the environment is MEASURED. It can only be reached by a
  * later spawn whose environment is not the one that was measured, and a
  * resolver cannot claim it because a resolver never sees an environment.
+ *
+ * `launch_env_unexpected_control_name` is the second, and exists for the same
+ * reason: a child about to be started under an attested identity carries a
+ * `BYOK_*` control name this SDK does not mint on any gated path
+ * ({@link TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES}). It is a distinct
+ * reason rather than drift because drift is "the environment moved" and this
+ * is "the environment carries control-plane authority from nowhere" — and
+ * because it must fail closed even when the same name was already present at
+ * resolve, which drift alone would not catch.
+ *
+ * Neither is a {@link ToolImplementationUnavailableReasonV1}: the host-facing
+ * resolution contract is unchanged, and a resolver can claim neither.
  */
-export type ToolImplementationReverifyFailure = ToolImplementationMeasurementFailure | 'launch_env_drift';
+export type ToolImplementationReverifyFailure = ToolImplementationMeasurementFailure | 'launch_env_drift' | 'launch_env_unexpected_control_name';
 /**
  * WHICH of the things an identity binds moved. Carried beside the reason
  * because `reverify_failed` on the artifact and `reverify_failed` on the
@@ -9036,10 +9126,15 @@ export type ToolImplementationReverifyResult = 'ok' | {
  * weaker at spawn than it was at resolve.
  *
  * `launchEnv` is the exact environment object the caller is about to hand to
- * `spawn`, re-digested here. A name that appeared, vanished or was renamed, or
- * a loader-affecting value that reached the child, is `launch_env_drift`: the
- * identity was measured against one environment and the child would be started
- * in another.
+ * `spawn`. It is checked twice, and the check is over the names projection
+ * plus the controlled loader-values scope, never over the whole environment.
+ * A `BYOK_*` name this SDK does not mint on a gated path is
+ * `launch_env_unexpected_control_name` — control-plane authority from nowhere,
+ * refused whether or not it was there at resolve. Otherwise the two digests
+ * are recomputed: a name that appeared, vanished or was renamed, or a
+ * loader-affecting value that reached the child, is `launch_env_drift`, the
+ * identity having been measured against one environment while the child would
+ * be started in another.
  *
  * Not memoized and not cached. The whole point is that resolve and spawn are
  * two different moments, and a cached answer would assert the first moment's

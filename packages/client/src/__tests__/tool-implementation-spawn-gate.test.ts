@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
@@ -492,9 +492,28 @@ async function loadExtension(
 describe('the Pi extension re-measures an attested server before opening it', () => {
   const configPathBefore = process.env[BYOK_PI_MCP_CONFIG_PATH];
 
+  /**
+   * `vitest.config.ts` injects `BYOK_TEST_DEVICE_CREDENTIAL_STORE` into THIS
+   * process, and the pool's child environment is this process's own
+   * (`adapters/pi/mcp-server-pool.ts`). In production no such name can be
+   * there: `buildRuntimeEnv` hard-denies the whole `BYOK_*` prefix, so the Pi
+   * child carries only the two control variables the adapter adds and the
+   * per-server block the core layers on. Left in place it is an unaccountable
+   * control name on a gated child environment, which the spawn gate refuses by
+   * design — so the harness's own flag is removed for the duration of these
+   * cases rather than being enumerated into the projection.
+   */
+  const credentialStoreFlag = process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE;
+
+  beforeEach(() => {
+    delete process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE;
+  });
+
   afterEach(() => {
     if (configPathBefore === undefined) delete process.env[BYOK_PI_MCP_CONFIG_PATH];
     else process.env[BYOK_PI_MCP_CONFIG_PATH] = configPathBefore;
+    if (credentialStoreFlag === undefined) delete process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE;
+    else process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE = credentialStoreFlag;
   });
 
   async function artifactCopy(): Promise<string> {
@@ -536,6 +555,22 @@ describe('the Pi extension re-measures an attested server before opening it', ()
         .rejects.toThrow(/launch_env_drift \(launch-env\)/u);
     } finally {
       delete process.env.PYTHONPATH;
+    }
+  }, 30_000);
+
+  it('refuses to open the server when an unaccountable control name reached this process', async () => {
+    const script = await artifactCopy();
+    const identity = await attestReal(script, poolChildEnv());
+    // Not a name this SDK mints on any gated path, and not one the projection
+    // subtracts: the prefix alone is not a reason to let it through.
+    process.env.BYOK_LOADER_PATH = '/tmp/injected';
+    try {
+      const tools = await loadExtension(script, { salesko: identity });
+      const echo = tools.find((tool) => tool.name === 'mcp__salesko__echo')!;
+      await expect(echo.execute('call-1', { text: 'hello' }, undefined))
+        .rejects.toThrow(/launch_env_unexpected_control_name \(launch-env\)/u);
+    } finally {
+      delete process.env.BYOK_LOADER_PATH;
     }
   }, 30_000);
 

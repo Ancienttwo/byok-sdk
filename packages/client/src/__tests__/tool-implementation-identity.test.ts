@@ -9,15 +9,19 @@ import {
   realToolImplementationFsProbe,
   resolveToolImplementationIdentity,
   reverifyToolImplementationIdentity,
+  TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES,
   toolImplementationLaunchEnvNamesDigest,
   toolImplementationLoaderEnvValuesDigest,
   ToolImplementationReverifyError,
+  unexpectedLaunchEnvControlNames,
   type ToolImplementationAttestedV1,
   type ToolImplementationAuthority,
   type ToolImplementationFsProbe,
   type ToolImplementationInstallRecordV1,
   type ToolImplementationLocatorV1,
 } from '../daemon/tool-implementation-identity';
+import { LOADER_ENV_DENY_PATTERNS } from '../daemon/environment';
+import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credential-environment';
 
 /**
  * Every check in this module requires a ROOT-OWNED, non-writable file, which a
@@ -605,5 +609,307 @@ describe('an interpreter+bundle reverifies its interpreter as strictly as its bu
   it('round-trips through JSON with both tuples intact', async () => {
     const attested = await attest();
     expect(parseToolImplementationIdentity(JSON.parse(JSON.stringify(attested)))).toEqual(attested);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reverify_failed: the bytes moved while the stat tuple did not
+// ---------------------------------------------------------------------------
+
+/**
+ * `install_record_mismatch` and `reverify_failed` are two different facts and
+ * the tests above only reach the first one: every real mutation of a file on
+ * disk moves its `(size, mtime, ino)` tuple too, so the tuple check fires
+ * before the digest ever disagrees.
+ *
+ * The one case that reaches the digest check is bytes that changed WITHOUT the
+ * tuple changing — a same-length in-place overwrite that also restored the
+ * mtime, which is exactly the shape an attacker who can write the file would
+ * aim for. It is produced here through the {@link ToolImplementationFsProbe}
+ * seam rather than on disk, because the seam is the only place a test can hold
+ * the tuple still while the content hash moves.
+ */
+describe('a byte change that leaves the stat tuple untouched is reverify_failed', () => {
+  let interpreter: string;
+  let interpreterDigest: string;
+
+  beforeEach(async () => {
+    interpreter = path.join(dir, 'salesko-node');
+    await fs.writeFile(interpreter, 'the attested interpreter\n');
+    interpreterDigest = await realToolImplementationFsProbe.digest(interpreter);
+  });
+
+  /** The root-owned probe, with ONE path's content digest answering differently. */
+  function bytesMovedProbe(target: string): ToolImplementationFsProbe {
+    const base = rootOwnedProbe();
+    return {
+      lstat: (candidate) => base.lstat(candidate),
+      realpath: (candidate) => base.realpath(candidate),
+      digest: async (candidate) => (candidate === target
+        ? createHash('sha256').update('different bytes, identical tuple\n').digest('hex')
+        : base.digest(candidate)),
+    };
+  }
+
+  async function attestCompiled(): Promise<ToolImplementationAttestedV1> {
+    const identity = await resolveToolImplementationIdentity(
+      authorityReturning(installRecord(artifact, artifactDigest)),
+      locator(artifact),
+      ENV,
+      rootOwnedProbe(),
+    );
+    expect(identity.kind).toBe('attested');
+    return identity as ToolImplementationAttestedV1;
+  }
+
+  async function attestBundle(): Promise<ToolImplementationAttestedV1> {
+    const identity = await resolveToolImplementationIdentity(
+      authorityReturning({
+        ...installRecord(artifact, artifactDigest),
+        form: 'interpreter+bundle',
+        interpreter: { path: interpreter, digest: interpreterDigest, loadCommandsDigest: 'e'.repeat(64) },
+      }),
+      locator(artifact),
+      ENV,
+      rootOwnedProbe(),
+    );
+    expect(identity.kind).toBe('attested');
+    return identity as ToolImplementationAttestedV1;
+  }
+
+  it('names the artifact when the artifact hashed differently under an unchanged tuple', async () => {
+    const attested = await attestCompiled();
+    expect(await reverifyToolImplementationIdentity(attested, ENV, bytesMovedProbe(artifact)))
+      .toEqual({ reason: 'reverify_failed', subject: 'artifact' });
+  });
+
+  it('names the interpreter when only the interpreter hashed differently', async () => {
+    const attested = await attestBundle();
+    // The artifact is untouched, so the refusal must not be attributed to it:
+    // `reverify_failed (artifact)` and `reverify_failed (interpreter)` send an
+    // operator to two different files.
+    expect(await reverifyToolImplementationIdentity(attested, ENV, bytesMovedProbe(interpreter)))
+      .toEqual({ reason: 'reverify_failed', subject: 'interpreter' });
+  });
+
+  it('maps the same disagreement to install_record_mismatch at resolve and reverify_failed at the gate', async () => {
+    // One rule, two layers: at resolve the digest under test is the HOST's
+    // claim about a file nothing has verified yet, so a disagreement is the
+    // record being wrong; at the gate it is this SDK's own prior measurement,
+    // so a disagreement is a verification that decayed.
+    const atResolve = await resolveToolImplementationIdentity(
+      authorityReturning(installRecord(artifact, artifactDigest)),
+      locator(artifact),
+      ENV,
+      bytesMovedProbe(artifact),
+    );
+    expect(atResolve).toEqual({ kind: 'unavailable', reason: 'install_record_mismatch' });
+    expect(await reverifyToolImplementationIdentity(await attestCompiled(), ENV, bytesMovedProbe(artifact)))
+      .toEqual({ reason: 'reverify_failed', subject: 'artifact' });
+  });
+
+  it('refuses the spawn itself with the reason and the subject, for either half', async () => {
+    const attested = await attestBundle();
+    await expect(assertToolImplementationBeforeSpawn('probe', attested, ENV, bytesMovedProbe(artifact)))
+      .rejects.toThrow(/reverify_failed \(artifact\)/u);
+    await expect(assertToolImplementationBeforeSpawn('probe', attested, ENV, bytesMovedProbe(interpreter)))
+      .rejects.toThrow(/reverify_failed \(interpreter\)/u);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The stat tuples are sealed measurements, never resolver inputs
+// ---------------------------------------------------------------------------
+
+describe('a record that supplies a sealed measurement is not an install record', () => {
+  const TUPLE = Object.freeze({
+    dev: 1, ino: 2, size: 3, mtimeMs: 4, mode: 0o100444, uid: 0, gid: 0,
+  });
+
+  it('refuses a record carrying installStat', async () => {
+    const identity = await resolveToolImplementationIdentity(
+      authorityReturning({ ...installRecord(artifact, artifactDigest), installStat: TUPLE }),
+      locator(artifact),
+      ENV,
+      rootOwnedProbe(),
+    );
+    expect(identity).toEqual({ kind: 'unavailable', reason: 'implementation_identity_unattested' });
+  });
+
+  it('refuses a record carrying interpreterStat', async () => {
+    const interpreter = path.join(dir, 'salesko-node');
+    await fs.writeFile(interpreter, 'the attested interpreter\n');
+    const identity = await resolveToolImplementationIdentity(
+      authorityReturning({
+        ...installRecord(artifact, artifactDigest),
+        form: 'interpreter+bundle',
+        interpreter: {
+          path: interpreter,
+          digest: await realToolImplementationFsProbe.digest(interpreter),
+          loadCommandsDigest: 'e'.repeat(64),
+        },
+        interpreterStat: TUPLE,
+      }),
+      locator(artifact),
+      ENV,
+      rootOwnedProbe(),
+    );
+    expect(identity).toEqual({ kind: 'unavailable', reason: 'implementation_identity_unattested' });
+  });
+
+  it('refuses a compiled-executable record carrying interpreterStat alone', async () => {
+    const identity = await resolveToolImplementationIdentity(
+      authorityReturning({ ...installRecord(artifact, artifactDigest), interpreterStat: TUPLE }),
+      locator(artifact),
+      ENV,
+      rootOwnedProbe(),
+    );
+    expect(identity).toEqual({ kind: 'unavailable', reason: 'implementation_identity_unattested' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The names projection is an enumeration, and everything else fails closed
+// ---------------------------------------------------------------------------
+
+describe('the launch-env projection subtracts an enumerated set, never a prefix', () => {
+  async function attest(): Promise<ToolImplementationAttestedV1> {
+    const identity = await resolveToolImplementationIdentity(
+      authorityReturning(installRecord(artifact, artifactDigest)),
+      locator(artifact),
+      ENV,
+      rootOwnedProbe(),
+    );
+    expect(identity.kind).toBe('attested');
+    return identity as ToolImplementationAttestedV1;
+  }
+
+  it('projects away exactly the lifecycle names this SDK mints between resolve and spawn', () => {
+    const baseline = toolImplementationLaunchEnvNamesDigest(ENV);
+    for (const name of TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES) {
+      expect(toolImplementationLaunchEnvNamesDigest({ ...ENV, [name]: 'x' })).toBe(baseline);
+    }
+  });
+
+  it('projects away the credential surface the custody boundary strips', () => {
+    const baseline = toolImplementationLaunchEnvNamesDigest(ENV);
+    for (const name of PROVIDER_CREDENTIAL_ENV_DENY_NAMES) {
+      expect(toolImplementationLaunchEnvNamesDigest({ ...ENV, [name]: 'sk-x' })).toBe(baseline);
+    }
+  });
+
+  it('does NOT project away a BYOK_* name it does not mint: the prefix is not inert', () => {
+    // `BYOK_MCP_ENV_KEY` and the `BYOK_*_BIN` overrides are real knobs this SDK
+    // reads elsewhere, so "starts with BYOK_" cannot mean "harmless".
+    const baseline = toolImplementationLaunchEnvNamesDigest(ENV);
+    expect(toolImplementationLaunchEnvNamesDigest({ ...ENV, BYOK_LOADER_PATH: '/tmp/x' })).not.toBe(baseline);
+    expect(unexpectedLaunchEnvControlNames({ ...ENV, BYOK_LOADER_PATH: '/tmp/x' })).toEqual(['BYOK_LOADER_PATH']);
+    expect(unexpectedLaunchEnvControlNames(ENV)).toEqual([]);
+    for (const name of TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES) {
+      expect(unexpectedLaunchEnvControlNames({ ...ENV, [name]: 'x' })).toEqual([]);
+    }
+  });
+
+  it('refuses the spawn when an unaccountable control name is on the child environment', async () => {
+    const attested = await attest();
+    expect(await reverifyToolImplementationIdentity(
+      attested,
+      { ...ENV, BYOK_LOADER_PATH: '/tmp/x' },
+      rootOwnedProbe(),
+    )).toEqual({ reason: 'launch_env_unexpected_control_name', subject: 'launch-env' });
+    await expect(assertToolImplementationBeforeSpawn(
+      'probe',
+      attested,
+      { ...ENV, BYOK_LOADER_PATH: '/tmp/x' },
+      rootOwnedProbe(),
+    )).rejects.toThrow(/launch_env_unexpected_control_name \(launch-env\)/u);
+  });
+
+  it('refuses it even when the same name was present at resolve and the digests agree', async () => {
+    // The digests cannot catch this one: the name was there both times. Fail
+    // closed on the name itself, or an unaccountable control variable rides
+    // along for the whole life of the identity.
+    const withControl = { ...ENV, BYOK_LOADER_PATH: '/tmp/x' };
+    const identity = await resolveToolImplementationIdentity(
+      authorityReturning(installRecord(artifact, artifactDigest)),
+      locator(artifact),
+      withControl,
+      rootOwnedProbe(),
+    ) as ToolImplementationAttestedV1;
+    expect(identity.launchEnvNamesDigest).toBe(toolImplementationLaunchEnvNamesDigest(withControl));
+    expect(await reverifyToolImplementationIdentity(identity, withControl, rootOwnedProbe()))
+      .toEqual({ reason: 'launch_env_unexpected_control_name', subject: 'launch-env' });
+  });
+
+  it('refuses a renamed control variable, lifecycle name or not', async () => {
+    const attested = await attest();
+    expect(await reverifyToolImplementationIdentity(
+      attested,
+      { ...ENV, BYOK_PI_MCP_CONFIG_PATHH: '/tmp/c' },
+      rootOwnedProbe(),
+    )).toEqual({ reason: 'launch_env_unexpected_control_name', subject: 'launch-env' });
+  });
+
+  it('still admits the real Pi, host-toolset and credential transformations', async () => {
+    const attested = await attest();
+    // The pool's strip, the per-server nonce block `mcp/client.ts` layers on,
+    // and a hosted-manifest credential strip: all three are this SDK's own
+    // doing between resolve and spawn, and none of them is a refusal.
+    expect(await reverifyToolImplementationIdentity(attested, {
+      ...ENV,
+      BYOK_PI_MCP_CONFIG_PATH: '/tmp/c.json',
+      BYOK_PI_PERMISSION_MODE: 'auto',
+      BYOK_HOST_TOOLSET_CONTEXT: 'nonce',
+      BYOK_STORE_DIR: '/var/byok',
+      BYOK_PRODUCT_ID: 'salesko',
+    }, rootOwnedProbe())).toBe('ok');
+    expect(await reverifyToolImplementationIdentity(attested, { ...ENV }, rootOwnedProbe())).toBe('ok');
+    expect(await reverifyToolImplementationIdentity(
+      attested,
+      { ...ENV, ANTHROPIC_API_KEY: 'sk-x' },
+      rootOwnedProbe(),
+    )).toBe('ok');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The projection never weakens the loader-values digest
+// ---------------------------------------------------------------------------
+
+/**
+ * The invariant the whole projection rests on: a name it subtracts can never
+ * be a name `daemon/environment.ts` denies for loader reasons. If the two sets
+ * ever overlapped, a loader-affecting variable would be projected out of the
+ * names digest AND out of the §27.2 values digest, and the gate would stop
+ * seeing the one class of variable it exists to see.
+ */
+describe('the two projections are disjoint from the loader deny list', () => {
+  function matchesPattern(name: string, pattern: string): boolean {
+    return pattern.endsWith('*') ? name.startsWith(pattern.slice(0, -1)) : name === pattern;
+  }
+
+  it('has no loader deny pattern matching a lifecycle name', () => {
+    for (const pattern of LOADER_ENV_DENY_PATTERNS) {
+      for (const name of TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES) {
+        expect(matchesPattern(name, pattern)).toBe(false);
+      }
+    }
+  });
+
+  it('has no loader deny pattern present in the credential-surface projection', () => {
+    for (const pattern of LOADER_ENV_DENY_PATTERNS) {
+      for (const name of PROVIDER_CREDENTIAL_ENV_DENY_NAMES) {
+        expect(matchesPattern(name, pattern)).toBe(false);
+      }
+    }
+  });
+
+  it('keeps every loader-affecting name inside the values digest', () => {
+    // The end-to-end statement of the two invariants above: a loader name
+    // still moves the §27.2 values digest off the empty map.
+    for (const injected of ['NODE_OPTIONS', 'BUN_INSPECT', 'DYLD_INSERT_LIBRARIES', 'LD_PRELOAD', 'BASH_ENV']) {
+      expect(toolImplementationLoaderEnvValuesDigest({ ...ENV, [injected]: '/tmp/x' }))
+        .not.toBe(EMPTY_MAP_DIGEST);
+    }
   });
 });
