@@ -1,4 +1,11 @@
-import type { AgentEgressPolicy, AgentEvent, PermissionPolicy, TaskOfferPayload } from '@byok-sdk/protocol';
+import type {
+  AgentEgressPolicy,
+  AgentEvent,
+  PermissionMode,
+  PermissionPolicy,
+  TaskOfferPayload,
+} from '@byok-sdk/protocol';
+import type { InputPreparationModelV1 } from './input-preparation';
 import type { RuntimeEnvironmentRequirements } from './daemon/environment';
 import type { McpLaunchBinding } from './daemon/trusted-launch-cwd';
 import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
@@ -392,12 +399,90 @@ export interface RuntimeOperationManifest {
   readonly forwardedEnvironmentNames: readonly string[];
 }
 
-/** Runtime resources only available after TaskRunner has sealed the manifest and claimed the task. */
-export interface RuntimeOperationStartInput {
+/**
+ * The durable identity of one already-counted preparation record
+ * (`daemon/input-preparation-store.ts`'s {@link InputPreparationRecordKey} plus
+ * its derived `recordId`).
+ *
+ * Carried so a prepared launch names the record it consumes rather than being
+ * handed anonymous bytes: the launch is refused if the artifact on disk does
+ * not carry this `recordId`.
+ */
+export interface RuntimePreparedLaunchReferenceV1 {
+  readonly scopeId: string;
+  readonly agentRef: string;
+  readonly requestId: string;
+  readonly recordId: string;
+}
+
+/**
+ * The independently trusted expectations the native prepared-input verifier
+ * requires (`@earendil-works/pi-coding-agent/prepared-session-input`'s
+ * `PreparedSessionExpectedV1`).
+ *
+ * They come from the DURABLE record — its artifact summary and its binding —
+ * never from the artifact file itself. The native contract is explicit that a
+ * value read out of the envelope can never serve as its own expectation, so
+ * carrying them here is what makes the envelope on disk checkable at all.
+ */
+export interface RuntimePreparedLaunchExpectationV1 {
+  /** `InputPreparationArtifactSummaryV1.envelopeDigest`. */
+  readonly envelopeDigest: string;
+  /** `InputPreparationArtifactSummaryV1.toolManifestDigest`. */
+  readonly toolManifestDigest: string;
+  /** The exact model identity the record's binding pinned. */
+  readonly model: InputPreparationModelV1;
+  /** The compiler binding the record's request was compiled under. */
+  readonly binding: {
+    readonly inputIdentity: string;
+    readonly runtimeIdentity: string;
+    readonly policyIdentity: string;
+    readonly profileRevision: string;
+  };
+}
+
+/**
+ * Everything one prepared Execution needs to launch the frozen request it was
+ * counted for.
+ *
+ * There is no `instruction` here and no way to supply one: the user request is
+ * already inside the frozen envelope, and a prepared run that accepted a
+ * separate instruction would have two answers to what it is about to send.
+ *
+ * The admitted permission POLICY is not repeated — it is
+ * `RuntimeOperationManifest.policy`, already sealed. Only the mode the manifest
+ * was COUNTED for is carried, so the adapter can refuse a manifest admitted
+ * under a different mode instead of discovering the divergence as tool drift.
+ */
+export interface RuntimePreparedLaunchV1 {
+  readonly reference: RuntimePreparedLaunchReferenceV1;
+  /**
+   * Absolute path of the retained `InputPreparationArtifact` JSON.
+   *
+   * A path rather than inline bytes on purpose: the artifact carries D, P(D)
+   * and the whole native envelope, and there is exactly one retained copy of
+   * it. A second inline representation would be a second authority over the
+   * same bytes.
+   */
+  readonly artifactPath: string;
+  readonly expected: RuntimePreparedLaunchExpectationV1;
+  /** The mode `daemon/prepared-tool-surface.ts` filtered the counted manifest for. */
+  readonly permissionMode: PermissionMode;
+  readonly toolBindingDigest: string;
+  readonly observationDigest: string;
+  /** The same trusted launch boundary the preparation observed every server under. */
+  readonly launch: McpLaunchBinding;
+  /** The implementation identity the preparation resolved per projected server. */
+  readonly toolImplementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
+  /** `toolsetId` -> the registry definition revision the preparation bound. */
+  readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
+}
+
+/** Runtime resources shared by every start variant. */
+interface RuntimeOperationStartBase {
   /** Startup cancellation only; rejection must preserve unresolved process ownership. */
   readonly signal?: AbortSignal;
   readonly manifest: RuntimeOperationManifest;
-  readonly instruction: string;
   readonly env: NodeJS.ProcessEnv;
   /** Local MCP authority resolved from logical wire ids. */
   readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
@@ -428,6 +513,38 @@ export interface RuntimeOperationStartInput {
   /** Optional, adapter-agnostic out-of-band approval channel. */
   readonly approvalChannel?: ApprovalChannel;
 }
+
+/** The ordinary start: a resolved instruction the runtime turns into its own first request. */
+export interface RuntimeOperationInstructionStartInput extends RuntimeOperationStartBase {
+  readonly kind: 'instruction';
+  readonly instruction: string;
+}
+
+/**
+ * The prepared start: an already-compiled, already-counted provider request the
+ * runtime must send verbatim.
+ *
+ * A separate variant rather than an optional field beside `instruction`,
+ * because the two are mutually exclusive authority over the same bytes: with
+ * both reachable on one shape every adapter would have to decide which one
+ * wins, and the answer would be written three times.
+ */
+export interface RuntimeOperationPreparedStartInput extends RuntimeOperationStartBase {
+  readonly kind: 'prepared';
+  readonly preparation: RuntimePreparedLaunchV1;
+}
+
+/**
+ * Runtime resources only available after TaskRunner has sealed the manifest and
+ * claimed the task.
+ *
+ * Discriminated, not an optional bag: an adapter that does not implement the
+ * prepared lane must refuse it by name, and a union is what makes forgetting to
+ * a compile error rather than a silently ignored field.
+ */
+export type RuntimeOperationStartInput =
+  | RuntimeOperationInstructionStartInput
+  | RuntimeOperationPreparedStartInput;
 
 /** A pinned provider/runtime decision. `start()` receives resources only, never a raw offer. */
 export interface PreparedRuntimeOperation {

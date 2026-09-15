@@ -235,6 +235,27 @@ function matchesAny(name: string, patterns: readonly string[], caseInsensitive: 
 }
 
 /**
+ * The loader-injection variables present in one environment.
+ *
+ * Exported so a process that ESTABLISHES a boundary can re-assert the same list
+ * on ITSELF: `bin/byok-launch-cwd.mjs` does it with its own inlined copy (it
+ * ships as source and must run with nothing of this package installed), and the
+ * prepared launch entry (`bin/byok-pi-prepared.ts`) does it by calling this.
+ * Neither can sanitize these for itself — they took effect before its first
+ * statement — so the only correct answer is to refuse to continue.
+ */
+export function loaderEnvInjections(
+  env: Readonly<Record<string, string | undefined>>,
+  platform: NodeJS.Platform = process.platform,
+): readonly string[] {
+  const caseInsensitive = platform === 'win32';
+  return Object.keys(env)
+    .filter((name) => env[name] !== undefined
+      && matchesAny(name, LOADER_ENV_DENY_PATTERNS, caseInsensitive))
+    .sort();
+}
+
+/**
  * Build the environment one specific runtime's spawned child process should
  * actually receive — a fresh object, never `options.ambient` itself and
  * never mutated in place. See this module's own doc comment for the full

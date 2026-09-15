@@ -2572,6 +2572,10 @@ export class TaskRunner {
       }
 
       const startInput: RuntimeOperationStartInput = {
+        // The ordinary lane. A prepared Execution carries no instruction at
+        // all and reaches an adapter through its own admission path, so
+        // nothing here has to choose between the two.
+        kind: 'instruction',
         manifest,
         instruction: agentBinding === undefined
           ? (gitWorkspaceId ? prependGitWorkspaceGuidance(resolvedInstruction) : resolvedInstruction)

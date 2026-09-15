@@ -233,6 +233,17 @@ export class CodexAdapter implements RuntimeAdapter {
         reason: 'prepared codex operation received different MCP toolset tool authority than it was admitted with',
       });
     }
+    // No prepared-input lane here either: a frozen provider request is compiled
+    // against the pi runtime's own verified closure. Refused by name so a
+    // prepared Execution routed to codex fails visibly.
+    if (startInput.kind !== 'instruction') {
+      throw new RuntimeExecutionFailure({
+        phase: 'start',
+        category: 'authority',
+        retry: 'non-retryable',
+        reason: 'the codex adapter has no prepared-input lane',
+      });
+    }
     if (typeof startInput.instruction !== 'string') {
       throw new RuntimeExecutionFailure({
         phase: 'start',

@@ -1,5 +1,9 @@
 import type { PermissionMode, PermissionPolicy } from '@byok-sdk/protocol';
-import { inputPreparationDigest, type InputPreparationToolV1 } from '../input-preparation';
+import {
+  preparedToolBindingDigest,
+  preparedToolSurfaceObservationDigest,
+  type InputPreparationToolV1,
+} from '../input-preparation';
 import type { McpStdioServerConfig } from '../types';
 import type { McpToolsetServerObservation } from '../mcp/observation';
 import { classifyMcpToolsetServerObservation } from '../mcp/observation';
@@ -325,9 +329,11 @@ export async function resolvePreparedToolBinding(
     }));
   }
 
-  const toolBindingDigest = inputPreparationDigest({
-    v: 1,
-    launch: { launchCwd: launch.launchCwd, launcher: launch.launcher },
+  // The formula itself lives in `../input-preparation.ts`, because the prepared
+  // LAUNCH entry recomputes this same digest to decide whether the device still
+  // matches the artifact (`adapters/pi/prepared-tools.ts`).
+  const toolBindingDigest = preparedToolBindingDigest({
+    launch,
     toolsetDefinitionRevisions,
     servers: resolved.map((entry) => ({
       serverName: entry.serverName,
@@ -508,19 +514,18 @@ export async function assemblePreparedToolSurface(
       identity === undefined ? 'unavailable:implementation_identity_unattested' : implementationKind(identity);
   }
 
-  const observationDigest = inputPreparationDigest({
-    v: 1,
-    launch: { launchCwd: binding.launch.launchCwd, launcher: binding.launch.launcher },
+  const observationDigest = preparedToolSurfaceObservationDigest({
+    launch: binding.launch,
     permissionMode: input.permissionMode,
     runtimeIdentity: input.runtimeIdentity,
     toolsetDefinitionRevisions: binding.toolsetDefinitionRevisions,
-    tools: tools.map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      parametersDigest: inputPreparationDigest(tool.parameters),
-    })),
+    tools,
     toolExecutors,
     implementations,
+    // PARTIAL, for the same reason `nativeTools: []` above is: this entry
+    // assembles no native half, so there is no admitted policy selection to
+    // bind. The day the native half becomes countable here, the selection and
+    // the policy that produced it are bound by passing `nativeSelection`.
   });
 
   return Object.freeze({

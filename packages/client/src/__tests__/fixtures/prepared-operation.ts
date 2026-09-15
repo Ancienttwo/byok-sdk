@@ -80,6 +80,7 @@ export async function startPreparedOperation(
     : resources.mcpLaunch
       ?? (resources.mcpServers === undefined && !generatesApprovalMcp ? undefined : await trustedLaunchBinding());
   return prepared.operation.start({
+    kind: 'instruction',
     manifest,
     instruction: offer.instruction,
     env: resources.env,

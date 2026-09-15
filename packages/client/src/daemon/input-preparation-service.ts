@@ -1,6 +1,7 @@
 import {
   canonicalInputPreparationJson,
   inputPreparationDigest,
+  inputPreparationRuntimeIdentityString,
   INPUT_PREPARATION_ARTIFACT_FORMAT,
   INPUT_PREPARATION_RECEIPT_FORMAT,
   INPUT_PREPARATION_VERSION,
@@ -96,19 +97,6 @@ export class InputPreparationRequestError extends Error {
     super(message, options);
     this.name = 'InputPreparationRequestError';
   }
-}
-
-/**
- * The ONE spelling of a runtime identity string.
- *
- * It binds every artifact through `CompilePreparedInputRequest.binding` and it
- * binds every tool-executor fingerprint. Those two must agree exactly, so the
- * formula lives here rather than being written out at each site.
- */
-export function inputPreparationRuntimeIdentityString(
-  runtime: InputPreparationRuntimeIdentityV1,
-): string {
-  return `${runtime.packageName}@${runtime.packageVersion}+${runtime.upstreamCommit}.${String(runtime.forkBuild)}`;
 }
 
 // ---------------------------------------------------------------------------

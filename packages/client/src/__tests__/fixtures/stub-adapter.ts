@@ -280,6 +280,12 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
   }
 
   private async startPrepared(prepared: RuntimeAdapterPrepareInput, startInput: RuntimeOperationStartInput): Promise<Session> {
+    // This stub stands in for the ordinary instruction lane only; a prepared
+    // start has no instruction to record and is refused rather than recorded
+    // as an empty one.
+    if (startInput.kind !== 'instruction') {
+      throw new Error('StubRuntimeAdapter has no prepared-input lane');
+    }
     this.startCalls.push({
       task: {
         instruction: startInput.instruction,

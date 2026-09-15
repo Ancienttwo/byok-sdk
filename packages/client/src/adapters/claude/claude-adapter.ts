@@ -269,6 +269,19 @@ export class ClaudeAdapter implements RuntimeAdapter {
       retry: 'non-retryable',
       reason: 'prepared claude permission mapping was invalid',
     });
+    // This adapter has no prepared-input lane: a frozen provider request is
+    // compiled against the pi runtime's own verified closure, and claude cannot
+    // be told to send someone else's bytes. Refused by name rather than
+    // ignored, so a prepared Execution routed here fails visibly instead of
+    // running as an ordinary turn with no instruction at all.
+    if (startInput.kind !== 'instruction') {
+      throw new RuntimeExecutionFailure({
+        phase: 'start',
+        category: 'authority',
+        retry: 'non-retryable',
+        reason: 'the claude adapter has no prepared-input lane',
+      });
+    }
     if (typeof startInput.instruction !== 'string') {
       throw new RuntimeExecutionFailure({
         phase: 'start',

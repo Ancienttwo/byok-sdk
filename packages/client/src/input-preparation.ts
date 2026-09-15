@@ -30,6 +30,8 @@
 
 import { createHash } from 'node:crypto';
 import type { PermissionMode } from '@byok-sdk/protocol';
+import type { McpLaunchAttestation } from './daemon/trusted-launch-cwd';
+import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
 
 // ---------------------------------------------------------------------------
 // Format identifiers
@@ -605,6 +607,21 @@ export interface InputPreparationRuntimeIdentityV1 {
 }
 
 /**
+ * The ONE spelling of a runtime identity string.
+ *
+ * It binds every artifact through `CompilePreparedInputRequest.binding` and it
+ * binds every tool-executor fingerprint. Those two must agree exactly, so the
+ * formula lives here rather than being written out at each site — beside the
+ * identity shape itself, so the prepared LAUNCH entry can re-derive the same
+ * string without importing the preparation service.
+ */
+export function inputPreparationRuntimeIdentityString(
+  runtime: InputPreparationRuntimeIdentityV1,
+): string {
+  return `${runtime.packageName}@${runtime.packageVersion}+${runtime.upstreamCommit}.${String(runtime.forkBuild)}`;
+}
+
+/**
  * Everything a receipt discloses about the stored artifact: identities, sizes
  * and coverage. Never D itself, never P(D), never the snapshot — a scoped
  * reference plus a digest is content identity, not a disclosure channel.
@@ -824,3 +841,128 @@ export const INPUT_PREPARATION_ERROR_CODES = [
 ] as const;
 
 export type InputPreparationErrorCodeV1 = (typeof INPUT_PREPARATION_ERROR_CODES)[number];
+
+// ---------------------------------------------------------------------------
+// Prepared tool-surface digests
+// ---------------------------------------------------------------------------
+
+/**
+ * The two digests that bind one prepared tool surface, written ONCE here.
+ *
+ * `daemon/prepared-tool-surface.ts` computes them while it assembles a
+ * preparation, and `adapters/pi/prepared-tools.ts` recomputes them at launch
+ * to decide whether the device still matches the artifact it is about to send.
+ * Two copies of either formula would make "the launch matches the preparation"
+ * an agreement between two serializers rather than a property of one.
+ *
+ * They live beside {@link inputPreparationDigest} rather than in the daemon
+ * module, so the in-process prepared launch entry can reach them without
+ * pulling the registry, the probe and the policy resolver into a subprocess
+ * that uses none of them.
+ */
+
+/** One projected server, reduced to exactly what a binding digest commits to. */
+export interface PreparedToolBindingServerDigestInputV1 {
+  readonly serverName: string;
+  readonly toolsetId: string;
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly implementation: ToolImplementationIdentityV1;
+}
+
+export interface PreparedToolBindingDigestInputV1 {
+  readonly launch: McpLaunchAttestation;
+  readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
+  /** Canonically ordered by server name; the canonical JSON preserves array order. */
+  readonly servers: readonly PreparedToolBindingServerDigestInputV1[];
+}
+
+/**
+ * The spawn-free half: the launch attestation, the definition revisions, the
+ * configured argv and the implementation identities.
+ */
+export function preparedToolBindingDigest(input: PreparedToolBindingDigestInputV1): string {
+  return inputPreparationDigest({
+    v: 1,
+    launch: { launchCwd: input.launch.launchCwd, launcher: input.launch.launcher },
+    toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
+    servers: input.servers.map((entry) => ({
+      serverName: entry.serverName,
+      toolsetId: entry.toolsetId,
+      command: entry.command,
+      args: [...entry.args],
+      implementation: entry.implementation,
+    })),
+  });
+}
+
+/**
+ * The Pi-native half of a prepared Main tool set, bound to the ADMITTED policy
+ * that selected it — not merely to the mode.
+ *
+ * `allowTools`/`denyTools` are what actually decide which built-ins a task gets
+ * (`adapters/pi/permission-mapping.ts`), so a digest that bound only `mode`
+ * would validate a launch whose native half is a different set from the one
+ * that was counted.
+ *
+ * Absent while the native half is not countable: `daemon/prepared-tool-surface.ts`
+ * assembles a preparation with no native tools at all, so there is no selection
+ * to bind and the key is omitted rather than written as an empty one.
+ */
+export interface PreparedNativeToolSelectionV1 {
+  /** Model-visible native tool names, in registration order. Never empty. */
+  readonly names: readonly string[];
+  /** The admitted policy that produced `names`, whole. */
+  readonly policy: {
+    readonly mode: PermissionMode;
+    readonly allowTools?: readonly string[];
+    readonly denyTools?: readonly string[];
+  };
+}
+
+export interface PreparedToolSurfaceDigestInputV1 {
+  readonly launch: McpLaunchAttestation;
+  readonly permissionMode: PermissionMode;
+  readonly runtimeIdentity: string;
+  readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
+  readonly tools: readonly InputPreparationToolV1[];
+  readonly toolExecutors: Readonly<Record<string, string>>;
+  readonly implementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
+  /** Omitted while the prepared native half stays empty; see the type above. */
+  readonly nativeSelection?: PreparedNativeToolSelectionV1;
+}
+
+/** The whole observed surface: the schemas, the executors, the launch and the identities. */
+export function preparedToolSurfaceObservationDigest(input: PreparedToolSurfaceDigestInputV1): string {
+  return inputPreparationDigest({
+    v: 1,
+    launch: { launchCwd: input.launch.launchCwd, launcher: input.launch.launcher },
+    permissionMode: input.permissionMode,
+    runtimeIdentity: input.runtimeIdentity,
+    toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
+    tools: input.tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      parametersDigest: inputPreparationDigest(tool.parameters),
+    })),
+    toolExecutors: input.toolExecutors,
+    implementations: input.implementations,
+    // `canonicalInputPreparationJson` drops an `undefined` value, so a surface
+    // with no native half digests to exactly the bytes it did before this key
+    // existed.
+    nativeSelection: input.nativeSelection === undefined
+      ? undefined
+      : {
+        names: [...input.nativeSelection.names],
+        policy: {
+          mode: input.nativeSelection.policy.mode,
+          allowTools: input.nativeSelection.policy.allowTools === undefined
+            ? undefined
+            : [...input.nativeSelection.policy.allowTools],
+          denyTools: input.nativeSelection.policy.denyTools === undefined
+            ? undefined
+            : [...input.nativeSelection.policy.denyTools],
+        },
+      },
+  });
+}
