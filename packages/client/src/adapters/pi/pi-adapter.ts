@@ -163,11 +163,14 @@ export class PiAdapter implements RuntimeAdapter {
   readonly descriptor = freezeRuntimeAdapterDescriptor({
     id: 'pi',
     supportsDispatchSelection: true,
-    // `requiresMcpToolsetToolObservation` is deliberately absent: pi projects
-    // MCP servers through its own adapter extension and grants their tools
-    // itself, so it never reads `mcpToolsetTools`. Declaring the requirement
-    // would make every pi-routed toolset offer wait on a `tools/list` probe of
-    // every projected server for an observation nothing consumes.
+    // Pi registers ONE tool per observed MCP tool, carrying that tool's real
+    // schema (`./mcp-extension.ts`), so it consumes the daemon's observation
+    // exactly like claude and codex do. It previously declared nothing here
+    // because the retired `pi-mcp-adapter` exposed a single `mcp` proxy and
+    // discovered the tools behind it itself — which kept the schemas out of
+    // the model's first request and left the extension, not the daemon, as the
+    // authority on what a toolset contains.
+    requiresMcpToolsetToolObservation: true,
     capabilities: {
       steer: true,
       resume: true,
@@ -202,10 +205,26 @@ export class PiAdapter implements RuntimeAdapter {
     if (!mapping.ok) {
       return { kind: 'reject', reason: mapping.reason ?? 'policy rejected by pi adapter', retryable: false };
     }
+    // Per-tool registration makes a per-tool permission decision expressible
+    // for the first time — but expressible is not the same as decidable. Under
+    // any mode other than `auto` the runtime must be told which of a toolset's
+    // tools merely read and which mutate, and nothing on this device can say:
+    // `McpToolsetConfig` carries `command`/`args` only, the wire carries a
+    // toolset id, and a server's own `annotations.readOnlyHint` is the
+    // server's self-assessment, explicitly not a security authority.
+    //
+    // Guessing from a name, a description or a schema would be exactly the
+    // heuristic that makes a permission boundary meaningless. So a non-`auto`
+    // toolset task is refused as an INEXPRESSIBLE policy, naming the operator
+    // configuration that would make it expressible, rather than quietly
+    // running with every tool enabled or with none.
     if (input.requiredToolsetIds.length > 0 && input.policy.mode !== 'auto') {
       return {
         kind: 'reject',
-        reason: 'pi MCP toolsets require permission mode "auto" because pi-mcp-adapter exposes one proxy across read and mutation tools',
+        reason: `pi cannot express permission mode "${input.policy.mode}" for an MCP toolset: the device's`
+          + ' mcpToolsets configuration declares no per-tool read/mutation classification'
+          + ' (McpToolsetConfig.readOnlyTools), and this adapter will not infer one from tool names,'
+          + ' descriptions, schemas, or a server\'s own readOnlyHint',
         retryable: false,
       };
     }
@@ -340,7 +359,15 @@ export class PiAdapter implements RuntimeAdapter {
             mcpConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-mcp-'));
             await fs.chmod(mcpConfigDir, 0o700).catch(() => {});
             mcpConfigPath = path.join(mcpConfigDir, 'mcp-config.json');
-            await fs.writeFile(mcpConfigPath, JSON.stringify({ mcpServers: taskMcpServers }), { mode: 0o600 });
+            // The daemon's observation travels WITH the servers: the extension
+            // registers exactly the tools named here and discovers nothing of
+            // its own, so the tools the model is shown are the tools this task
+            // was admitted with.
+            await fs.writeFile(
+              mcpConfigPath,
+              JSON.stringify({ mcpServers: taskMcpServers, observation: startInput.mcpToolsetTools ?? {} }),
+              { mode: 0o600 },
+            );
           } catch (cause) {
             await cleanupMcpConfigDir(mcpConfigDir);
             throw new RuntimeExecutionFailure({

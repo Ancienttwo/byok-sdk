@@ -84,11 +84,12 @@ import type { AgentEgressController } from './agent-egress-controller';
 import { AgentMessageOutbox, type AgentMessageOutboxRecord } from './agent-message-outbox';
 import { AGENT_MEMORY_MCP_SERVER_NAME, AGENT_MESSAGE_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
 import {
-  McpToolsProbeAuthorityError,
+  McpAuthorityError,
   MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
-  probeMcpServerTools,
+  probeMcpServer,
   type McpToolsProbeOptions,
 } from './mcp-tools-probe';
+import type { McpServerObservation, McpToolsetServerObservation } from '../mcp/observation';
 import type { ResolvedAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
 import { prependAgentMemoryGuidance } from './memory-guidance';
 import type { ResolvedAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
@@ -555,17 +556,18 @@ export interface TaskRunnerDeps {
     cwd?: string,
   ) => Promise<void>;
   /**
-   * Override the `tools/list` observation of a projected toolset MCP server.
-   * Defaults to the real handshake (`mcp-tools-probe.ts`); tests substitute a
-   * stub. It is deliberately NOT optional-with-no-default the way
-   * `agentMessageMcpPreflight` is: an adapter may only grant tool names that
-   * were observed, so a runner with no observation at all would silently
-   * project toolsets the model can list and never call.
+   * Override the `initialize` + `tools/list` observation of a projected
+   * toolset MCP server. Defaults to the real handshake
+   * (`mcp-tools-probe.ts`); tests substitute a stub. It is deliberately NOT
+   * optional-with-no-default the way `agentMessageMcpPreflight` is: an adapter
+   * may only bind tools that were observed, so a runner with no observation at
+   * all would silently project toolsets the model can list and never call.
    */
   mcpToolsetToolsProbe?: (
+    serverName: string,
     server: Readonly<McpStdioServerConfig>,
     options: McpToolsProbeOptions,
-  ) => Promise<readonly string[]>;
+  ) => Promise<McpServerObservation>;
   /** SDK-owned MCP helper injected only into strict Agent tasks. */
   agentMemoryMcpBin?: Readonly<ResolvedAgentMemoryMcpBin>;
   /** Explicit external secure-fs helper. No PATH discovery or bundled native addon exists. */
@@ -2112,21 +2114,28 @@ export class TaskRunner {
       // permanent fact about itself — re-offering the task would probe the
       // same command and get the same answer forever, so that declines
       // non-retryably and names the server and the tool.
-      let mcpToolsetTools: Record<string, readonly string[]> | undefined;
+      let mcpToolsetTools: Record<string, McpToolsetServerObservation> | undefined;
       if (needsToolsetObservation) {
-        const probe = this.deps.mcpToolsetToolsProbe ?? probeMcpServerTools;
+        const probe = this.deps.mcpToolsetToolsProbe ?? probeMcpServer;
         const entries = Object.entries(resolvedMcp!.servers);
         const settled = await Promise.allSettled(entries.map(async ([serverName, server]) => {
-          const tools = await probe(server, {
+          const observation = await probe(serverName, server, {
             label: `MCP toolset server "${serverName}"`,
             timeoutMs: MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
             env,
             ...(probeCwd === undefined ? {} : { cwd: probeCwd }),
           });
-          if (tools.length === 0) throw new Error('tools/list reported no tools');
-          return Object.freeze([...tools]) as readonly string[];
+          if (observation.tools.length === 0) throw new Error('tools/list reported no tools');
+          // The toolset id is the registry's fact about this server, joined on
+          // here so the adapter receives one self-describing record instead of
+          // an observation plus a parallel map that could disagree with it.
+          const toolsetId = resolvedMcp!.toolsetIdByServer.get(serverName);
+          if (toolsetId === undefined) {
+            throw new Error('observed a server that belongs to no projected toolset');
+          }
+          return Object.freeze({ ...observation, toolsetId });
         }));
-        const observed: Record<string, readonly string[]> = {};
+        const observed: Record<string, McpToolsetServerObservation> = {};
         let failure: { serverName: string; error: unknown } | undefined;
         for (let index = 0; index < entries.length; index += 1) {
           const serverName = entries[index]![0];
@@ -2137,7 +2146,7 @@ export class TaskRunner {
         if (failure !== undefined) {
           decline(
             `required MCP toolset server "${failure.serverName}" could not be observed: ${errorMessage(failure.error)}`,
-            !(failure.error instanceof McpToolsProbeAuthorityError),
+            !(failure.error instanceof McpAuthorityError),
           );
           return;
         }

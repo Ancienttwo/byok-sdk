@@ -9,7 +9,8 @@ import {
   AGENT_MEMORY_RECALL_TOOL_NAME,
   AGENT_MEMORY_SAVE_TOOL_NAME,
 } from '../bin/agent-memory-mcp-server';
-import { GRANTABLE_MCP_SERVER_NAME, GRANTABLE_TOOL_NAME } from '../daemon/mcp-tools-probe';
+import { GRANTABLE_MCP_SERVER_NAME, GRANTABLE_TOOL_NAME } from '../mcp/observation';
+import { mcpToolsetToolNames } from '../mcp/projection';
 
 /** One projected toolset server and the exact tool names observed on it. */
 export interface McpToolsetGrant {
@@ -81,7 +82,11 @@ export function resolveMcpToolsetGrants(
       reason: `projected MCP toolset server name(s) [${ungrantableServers.join(', ')}] cannot be expressed as a runtime tool grant — refusing to start a task whose grants would be ambiguous`,
     };
   }
-  const observed = observation ?? {};
+  // The names come from the observation object itself, never from a
+  // separately supplied list: one authority for "which tools exist" means the
+  // grant a runtime is given and the schema the model is shown cannot describe
+  // different tool sets.
+  const observed = mcpToolsetToolNames(observation ?? {});
   const unexpected = Object.keys(observed).filter((name) => !projected.includes(name)).sort();
   if (unexpected.length > 0) {
     return {

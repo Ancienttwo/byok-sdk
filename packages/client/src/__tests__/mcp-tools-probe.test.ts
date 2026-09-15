@@ -3,20 +3,20 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import {
-  McpToolsProbeAuthorityError,
-  MCP_TOOLS_PROBE_MAX_STDOUT_BYTES,
-  probeMcpServerTools,
-} from '../daemon/mcp-tools-probe';
+import { McpAuthorityError, probeMcpServerTools } from '../daemon/mcp-tools-probe';
+import { MCP_OBSERVATION_MAX_STDOUT_BYTES } from '../mcp';
 import { buildRuntimeEnv } from '../daemon/environment';
 import type { McpStdioServerConfig } from '../types';
 
 /**
- * `probeMcpServerTools` is the SDK's only authority on which MCP tool names an
- * adapter may interpolate into runtime grant surfaces, and it starts a
- * host-configured command to get them. These cases pin both halves of that:
- * what it accepts from the server's own answer, and what the spawned child is
- * allowed to see of the daemon's environment.
+ * The daemon-facing half of the MCP observation: what the spawned child is
+ * allowed to see of the daemon's environment and working directory, that it is
+ * always gone once the observation settles, and how a failure is classified
+ * for the runner's retry decision.
+ *
+ * The protocol contract underneath — framing, byte bounds, drift, the full
+ * name-rule matrix — belongs to the shared core and is covered by
+ * `./mcp-core.test.ts`.
  */
 const PROBE_FIXTURE = fileURLToPath(new URL('./fixtures/probe-mcp-server.mjs', import.meta.url));
 const ECHO_FIXTURE = fileURLToPath(new URL('./fixtures/toolset-echo-mcp.mjs', import.meta.url));
@@ -61,11 +61,16 @@ async function probe(
 }
 
 describe('probeMcpServerTools — observed tool names', () => {
-  it('returns the sorted, de-duplicated names of a well-formed server', async () => {
-    const tools = await probe(fixtureServer({
-      tools: [{ name: 'find_leads' }, { name: 'echo' }, { name: 'find_leads' }],
-    }));
+  it('returns the sorted names of a well-formed server', async () => {
+    const tools = await probe(fixtureServer({ tools: [{ name: 'find_leads' }, { name: 'echo' }] }));
     expect(tools).toEqual(['echo', 'find_leads']);
+  });
+
+  it('rejects a repeated tool name instead of quietly de-duplicating it', async () => {
+    // Two entries with one name is a server that cannot say what it exposes.
+    // Collapsing them would pick a winner on the model's behalf.
+    await expect(probe(fixtureServer({ tools: [{ name: 'echo' }, { name: 'echo' }] })))
+      .rejects.toThrow(/more than once/u);
   });
 
   it('observes the shipped toolset-echo fixture the live smokes use', async () => {
@@ -100,34 +105,34 @@ describe('probeMcpServerTools — observed tool names', () => {
   for (const [label, name] of ungrantable) {
     it(`rejects the whole observation for a tool name with ${label}`, async () => {
       await expect(probe(fixtureServer({ tools: [{ name: 'echo' }, { name }] })))
-        .rejects.toThrow(McpToolsProbeAuthorityError);
+        .rejects.toThrow(McpAuthorityError);
       await expect(probe(fixtureServer({ tools: [{ name: 'echo' }, { name }] })))
         .rejects.toThrow(/ungrantable tool name/);
     });
   }
 
-  it('rejects a non-string tool name', async () => {
-    await expect(probe(fixtureServer({ tools: [{ name: 42 }] })))
-      .rejects.toThrow(/ungrantable tool name 42/);
-  });
-
-  it('rejects a non-object tool entry', async () => {
-    await expect(probe(fixtureServer({ tools: ['echo'] })))
-      .rejects.toThrow(/malformed tool entry/);
+  it.each([
+    ['a non-string tool name', [{ name: 42 }]],
+    ['a non-object tool entry', ['echo']],
+  ])('rejects %s as the server\'s own answer', async (_label, tools) => {
+    // Caught by the MCP package's own result validation rather than by this
+    // SDK's name rules, so the message is the package's. What must hold is the
+    // classification: a `tools/list` result that is not one is permanent.
+    await expect(probe(fixtureServer({ tools }))).rejects.toThrow(McpAuthorityError);
   });
 
   it('classifies an ungrantable answer as a permanent authority failure, not a transient one', async () => {
     // The distinction the task runner declines on: a retry cannot change what
     // the same configured command reports about itself.
     await expect(probe(fixtureServer({ tools: [{ name: 'a.b' }] })))
-      .rejects.toBeInstanceOf(McpToolsProbeAuthorityError);
-    await expect(probe(fixtureServer({ silent: true }), { timeoutMs: 250 }))
-      .rejects.not.toBeInstanceOf(McpToolsProbeAuthorityError);
+      .rejects.toBeInstanceOf(McpAuthorityError);
+    await expect(probe(fixtureServer({ silent: true }), { timeoutMs: 1_000 }))
+      .rejects.not.toBeInstanceOf(McpAuthorityError);
   });
 
   it('rejects a server that floods stdout past the byte cap instead of buffering it', async () => {
     await expect(probe(
-      fixtureServer({ floodBytes: MCP_TOOLS_PROBE_MAX_STDOUT_BYTES + 64_000 }),
+      fixtureServer({ floodBytes: MCP_OBSERVATION_MAX_STDOUT_BYTES + 64_000 }),
       { timeoutMs: 15_000 },
     )).rejects.toThrow(/more than \d+ bytes of stdout/);
   }, 20_000);
@@ -178,8 +183,8 @@ describe('probeMcpServerTools — spawned child', () => {
   it('times out and leaves no lingering child behind', async () => {
     const root = await tmpRoot();
     const dumpPidTo = path.join(root, 'pid.txt');
-    await expect(probe(fixtureServer({ silent: true, dumpPidTo }), { timeoutMs: 400 }))
-      .rejects.toThrow(/handshake timed out after 400ms/);
+    await expect(probe(fixtureServer({ silent: true, dumpPidTo }), { timeoutMs: 750 }))
+      .rejects.toThrow(/timed out|timeout/iu);
     const pid = Number(await fs.readFile(dumpPidTo, 'utf8'));
     expect(Number.isInteger(pid)).toBe(true);
     await expect.poll(() => {
@@ -195,6 +200,6 @@ describe('probeMcpServerTools — spawned child', () => {
   it('reports a command that cannot start at all', async () => {
     const root = await tmpRoot();
     await expect(probe({ command: path.join(root, 'does-not-exist') }))
-      .rejects.toThrow(/failed to start|exited before handshake/);
+      .rejects.toThrow(/failed to start|exited before/u);
   });
 });
