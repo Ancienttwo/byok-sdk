@@ -151,7 +151,7 @@ export function preparedNativeToolSelection(
 ): PreparedPiNativeSelection | PreparedPiToolSurfaceRefusal {
   const resolved = resolvePiNativeToolSelection(policy);
   if (!resolved.ok) {
-    return refuse('policy_inexpressible', resolved.reason ?? 'the admitted policy is not expressible on the pi runtime');
+    return refuse('policy_inexpressible', resolved.reason);
   }
   if (resolved.names.length === 0) return Object.freeze({ ok: true as const, selection: undefined });
   return Object.freeze({

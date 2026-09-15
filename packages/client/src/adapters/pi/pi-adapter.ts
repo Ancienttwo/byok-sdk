@@ -1,6 +1,6 @@
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { execFile } from 'node:child_process';
-import { promises as fs, readFileSync } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path, { isAbsolute } from 'node:path';
 import { promisify } from 'node:util';
@@ -607,11 +607,16 @@ function authorityFailure(reason: string, cause?: unknown): RuntimeExecutionFail
  * addressed by path here, and a path is not an identity. Nothing else about the
  * file is interpreted — the envelope crosses to the native session verbatim,
  * because the native compiler is the only authority on what those bytes mean.
+ *
+ * Asynchronous because this runs on the daemon's own loop: a retained artifact
+ * carries D, P(D) and the whole native envelope, and reading megabytes of it
+ * synchronously would stall every other task's cancel, approval and heartbeat
+ * for the duration.
  */
-function readPreparedArtifact(preparation: RuntimePreparedLaunchV1): unknown {
+async function readPreparedArtifact(preparation: RuntimePreparedLaunchV1): Promise<unknown> {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(preparation.artifactPath, 'utf8'));
+    parsed = JSON.parse(await fs.readFile(preparation.artifactPath, 'utf8'));
   } catch (cause) {
     throw authorityFailure('prepared pi operation could not read its counted artifact', cause);
   }
@@ -691,7 +696,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     );
   }
 
-  const envelope = readPreparedArtifact(preparation);
+  const envelope = await readPreparedArtifact(preparation);
 
   const bin = preparedPiLaunchBin();
   let configDir: string | undefined;

@@ -89,17 +89,21 @@ export function mapPermissionPolicyToPiArgs(policy: PermissionPolicy): PiPermiss
  * default registry into this package, where it would silently rot against the
  * next fork bump — so it is refused instead, by name.
  */
-export interface PiNativeToolSelection {
-  ok: boolean;
-  /** Model-visible native tool names, deduplicated, in the policy's own order. Meaningful when `ok`. */
-  names: readonly string[];
-  /** Present when `ok` is false. */
-  reason?: string;
-}
+export type PiNativeToolSelection =
+  | {
+    readonly ok: true;
+    /** Model-visible native tool names, deduplicated, in the policy's own order. */
+    readonly names: readonly string[];
+  }
+  | {
+    readonly ok: false;
+    /** Why the policy has no nameable native tool set. */
+    readonly reason: string;
+  };
 
 export function resolvePiNativeToolSelection(policy: PermissionPolicy): PiNativeToolSelection {
   const mapping = mapPermissionPolicyToPiArgs(policy);
-  if (!mapping.ok) return { ok: false, names: [], reason: mapping.reason ?? 'policy rejected by pi adapter' };
+  if (!mapping.ok) return { ok: false, reason: mapping.reason ?? 'policy rejected by pi adapter' };
   const denied = new Set(policy.denyTools ?? []);
   if (policy.mode === 'readonly') {
     const base = policy.allowTools
@@ -110,7 +114,6 @@ export function resolvePiNativeToolSelection(policy: PermissionPolicy): PiNative
   if (policy.allowTools === undefined || policy.allowTools.length === 0) {
     return {
       ok: false,
-      names: [],
       reason: 'permission mode "auto" without an explicit allowTools list leaves the tool set to pi\'s own'
         + ' default registry, which an in-process prepared session cannot enumerate without copying it',
     };

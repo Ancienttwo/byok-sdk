@@ -447,11 +447,20 @@ describe('the prepared pi launch entry', () => {
       const snapshot = envelope.snapshot as { prompt: { promptGuidelines: string[] } };
       snapshot.prompt.promptGuidelines = ['a guideline nobody counted'];
     });
-    await expect(startPrepared(prepared)).rejects.toThrow(/prepared_(context_drift|digest_mismatch)/u);
+    await expect(startPrepared(prepared)).rejects.toThrow(/prepared_context_drift/u);
     expect(endpoint.bodies).toHaveLength(0);
   }, 60_000);
 
-  it('reports a tampered model as prepared_model_drift, before any transport', async () => {
+  // `prepared_model_drift` is a LATER fork: it is what the session reports when
+  // its own resolved model disagrees with the expectation. The expectation
+  // handed in here is checked first, against the model the envelope itself
+  // carries (`verifyPreparedSessionInput`, fork 0.85.1002's
+  // `dist/core/prepared-session-input.js`), so an expectation nobody counted is
+  // reported as `prepared_expectation_mismatch` and never reaches the session
+  // comparison. The single code is pinned rather than an alternation, so a fork
+  // bump that moves this case to the other fork fails here instead of passing
+  // quietly.
+  it('reports a model expectation the counted envelope does not carry as prepared_expectation_mismatch, before any transport', async () => {
     const endpoint = await providerEndpoint();
     const prepared = await prepareOnThisDevice(endpoint);
     const drifted: RuntimePreparedLaunchV1 = {
@@ -462,7 +471,7 @@ describe('the prepared pi launch entry', () => {
       },
     };
     await expect(startPrepared(prepared, { preparation: drifted }))
-      .rejects.toThrow(/prepared_(model_drift|expectation_mismatch)/u);
+      .rejects.toThrow(/prepared_expectation_mismatch/u);
     expect(endpoint.bodies).toHaveLength(0);
   }, 60_000);
 

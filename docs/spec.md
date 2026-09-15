@@ -306,10 +306,12 @@ policy-filtered native tools plus the MCP toolset tools, and only the MCP half
 exists today. The fork's own API is not the limit — `createPreparedAgentSession`
 takes an explicit tool array and would accept Pi's built-ins beside the MCP
 tools unchanged — but nothing counts them yet, so a policy that selects a native
-tool is refused by name rather than registered into guaranteed drift. The
-selection is resolved from the whole admitted policy (`allowTools` and
-`denyTools`, not merely `mode`) so that the day the preparation side counts a
-native half, the policy that chose it is already what gets bound.
+tool is refused by name rather than registered into guaranteed drift. A
+preparation therefore counts the MCP half only, and the final Main set stays the
+runtime's decision; this document does not settle it. The selection is resolved
+from the whole admitted policy (`allowTools` and `denyTools`, not merely `mode`)
+so that the day the preparation side counts a native half, the policy that chose
+it is already what gets bound.
 
 ### Post-admission runtime failure authority
 
