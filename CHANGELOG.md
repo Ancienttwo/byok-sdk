@@ -12,8 +12,8 @@ and the D2 version number belongs to a separate SDK release contract.
   device declared read-only, on every runtime. The rest are not granted to
   claude or codex, not registered with pi, and not fingerprinted into a
   prepared manifest — never registered-then-refused. `auto` still gets every
-  observed tool, and `confirm` is unaffected — a human answers each call, so it
-  narrows nothing and needs no classification. Three fail-closed rules come
+  observed tool, and `confirm` is unaffected — a human answers each call, so
+  it narrows nothing and needs no classification. Three fail-closed rules come
   with it: an observed tool the declaration omits is a mutation tool, a
   declared tool the server does not expose is stale configuration and declines
   the task permanently, and a toolset with no declaration at all cannot run
@@ -21,16 +21,17 @@ and the D2 version number belongs to a separate SDK release contract.
   classification is never inferred from tool names, descriptions, schemas, or
   a server's own `readOnlyHint`.
 
-  Breaking in three places: `resolveMcpToolsetGrants` takes the permission mode
-  as a required third argument; `McpToolsetServerObservation.tools` carries the per-tool
-  `readOnly` classification; and the pi task-scoped MCP config file carries the
-  task's `permissionMode` beside the observation. The classification is part of
-  a toolset's `definitionRevision`, so changing one changes the toolset
-  revision and every executor fingerprint derived from it. A toolset task that
-  ran under `readonly` before this change was declined outright; the same task
-  now runs once the device declares its read-only tools. A pre-1.0 breaking cut
-  is MINOR under `docs/spec.md`'s package version policy; no version is bumped
-  here, since a bump does not authorize publish.
+  Breaking in three places: `resolveMcpToolsetGrants` takes the permission
+  mode as a required third argument; `McpToolsetServerObservation.tools`
+  carries the per-tool `readOnly` classification; and the pi task-scoped MCP
+  config file carries the task's `permissionMode` beside the observation. The
+  classification is part of a toolset's `definitionRevision`, so changing one
+  changes the toolset revision and every executor fingerprint derived from it.
+  A toolset task that ran under `readonly` before this change was declined
+  outright; the same task now runs once the device declares its read-only
+  tools. A pre-1.0 breaking cut is MINOR under `docs/spec.md`'s package
+  version policy; no version is bumped here, since a bump does not authorize
+  publish.
 - **Breaking** — `McpToolsetToolObservation` now carries full tool
   descriptors. It was `Record<serverName, toolName[]>`; it is now
   `Record<serverName, {toolsetId, serverName, serverInfo{name,version},
