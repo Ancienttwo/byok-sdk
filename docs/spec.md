@@ -723,15 +723,19 @@ fail-closed default, so a tool an operator forgot to classify is never granted.
 The daemon records the result per tool in the observation it hands the adapter,
 derived from configuration only.
 
-One policy rule then applies to every runtime. Under `auto` a task gets every
-observed tool. Under any other permission mode it gets exactly the tools
-classified read-only: the rest are not granted to claude or codex, not
-registered with pi, and not fingerprinted into a prepared manifest — a tool the
-model can see is a tool it will spend tokens attempting, so there is no
-"register it and refuse the call" state. Two refusals stay fail-closed: a
-toolset with no declaration at all cannot run under a non-`auto` mode and is
-declined by name, and a projected server the mode leaves with no callable tool
-declines the whole admission rather than half-satisfying it.
+One policy rule then applies to every runtime, and exactly two permission modes
+narrow. Under `readonly` and `plan` a task gets exactly the tools classified
+read-only: the rest are not granted to claude or codex, not registered with pi,
+and not fingerprinted into a prepared manifest — a tool the model can see is a
+tool it will spend tokens attempting, so there is no "register it and refuse
+the call" state. `plan` narrows because plan mode produces no side effects at
+all, so it may not be wider than `readonly`. Under `auto` a task gets every
+observed tool. `confirm` is unaffected: a human answers each call, so the gate
+is per call rather than per tool set, and no classification is required to run
+under it. The two fail-closed refusals therefore apply only under a narrowing
+mode: a toolset with no declaration at all cannot run under `readonly` or
+`plan` and is declined by name, and a projected server the mode leaves with no
+callable tool declines the whole admission rather than half-satisfying it.
 
 The authenticated local control socket accepts an expected-revision
 compare-and-swap reload of the complete registry. The CLI host reads

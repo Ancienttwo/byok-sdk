@@ -7,16 +7,17 @@ and the D2 version number belongs to a separate SDK release contract.
 
 - **Breaking** — `McpToolsetConfig` accepts `readOnlyTools`, an
   operator-owned read/mutation classification per `(server, tool)`, and a
-  toolset task's permission mode is applied to it. `readonly` (and any mode
-  other than `auto`) is now expressible for an MCP toolset: the task gets
-  exactly the tools the device declared read-only, on every runtime. The rest
-  are not granted to claude or codex, not registered with pi, and not
-  fingerprinted into a prepared manifest — never registered-then-refused. Three
-  fail-closed rules come with it: an observed tool the declaration omits is a
-  mutation tool, a declared tool the server does not expose is stale
-  configuration and declines the task permanently, and a toolset with no
-  declaration at all cannot run under a non-`auto` mode (the refusal names the
-  missing field). A classification is never inferred from tool names,
+  toolset task's permission mode is applied to it. `readonly` and `plan` are
+  now expressible for an MCP toolset: the task gets exactly the tools the
+  device declared read-only, on every runtime. The rest are not granted to
+  claude or codex, not registered with pi, and not fingerprinted into a
+  prepared manifest — never registered-then-refused. `auto` still gets every
+  observed tool, and `confirm` is unaffected — a human answers each call, so it
+  narrows nothing and needs no classification. Three fail-closed rules come
+  with it: an observed tool the declaration omits is a mutation tool, a
+  declared tool the server does not expose is stale configuration and declines
+  the task permanently, and a toolset with no declaration at all cannot run
+  under `readonly` or `plan` (the refusal names the missing field). A classification is never inferred from tool names,
   descriptions, schemas, or a server's own `readOnlyHint`.
 
   Breaking in three places: `resolveMcpToolsetGrants` takes the permission mode
