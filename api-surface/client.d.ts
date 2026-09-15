@@ -3453,6 +3453,7 @@ import { type ProgressBatcherOptions } from './progress-batcher';
 import { type AgentEgressReliableAppendResult } from './agent-egress-controller';
 import { type AgentEgressStatus } from './agent-egress-policy';
 import { type AgentEgressSanitizer } from './agent-egress-sanitizer';
+import type { McpLaunchCwdConfig } from './trusted-launch-cwd';
 import { type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
 import { type AgentMemoryHostedProjection } from './agent-memory';
 import type { AgentMemoryFilesystemHelperConfig } from './agent-memory-filesystem';
@@ -3887,6 +3888,26 @@ export interface DaemonConfig {
      * believes a limit is in force.
      */
     inputPreparation?: InputPreparationDaemonConfig;
+    /**
+     * Operator input to the MCP toolset launch boundary
+     * (`./trusted-launch-cwd.ts`), forwarded verbatim to
+     * `TaskRunnerDeps.mcpLaunchCwd`.
+     *
+     * Absent means the platform default directory and — only when this process
+     * is provably plain Node — `process.execPath` as the launcher interpreter.
+     * Neither default is assumed: both are proven per offer, and an offer whose
+     * boundary this daemon cannot prove is declined non-retryably rather than
+     * started without one.
+     *
+     * A PRESENT section is validated here, at construction, the same discipline
+     * `deviceAssertion` and `inputPreparation` follow: a non-absolute `dir`, or a
+     * `launcherInterpreter` that is not an existing regular file, is a
+     * construction error rather than a per-offer decline nobody reads. What
+     * cannot be decided here is deliberately left to the resolver: whether the
+     * directory is still non-writable is a fact about the filesystem NOW, so it
+     * is proven once per offer and never cached.
+     */
+    mcpLaunchCwd?: McpLaunchCwdConfig;
 }
 /**
  * Every part of the local preparation surface is required together. There is no
@@ -8205,6 +8226,18 @@ import type { McpStdioServerConfig } from '../types';
  * (and the probe file removed) even if its permissions looked right — mode
  * bits do not account for ACLs, for the effective uid, or for a filesystem
  * that was remounted read-write.
+ *
+ * The probe alone is not the boundary, because both of its premises are things
+ * this uid can change:
+ *
+ * - A directory OWNED by this uid answers the probe with `EACCES` while its
+ *   owner remains free to `chmod` it writable first. Ownership by another uid
+ *   (root, for the intended immutable versioned release directory) is therefore
+ *   required, not just a cleared write bit.
+ * - `rename(2)` replaces a directory using write permission on its PARENT.
+ *   A root-owned 0555 directory sitting inside a directory this uid can write
+ *   is a directory this uid can swap out wholesale. So every ancestor up to the
+ *   volume root is put through the identical check.
  */
 /** Operator-supplied inputs to {@link resolveTrustedLaunchCwd}. Both fields are optional and both are validated. */
 export interface McpLaunchCwdConfig {
@@ -8241,7 +8274,22 @@ export interface McpLaunchCwdConfig {
  * SUCCEEDED, so this uid can create files there and the directory isolates
  * nobody the agent is not already running as.
  */
-export type LaunchCwdRejection = 'not_absolute' | 'unreadable' | 'is_a_symlink' | 'not_a_directory' | 'is_writable';
+export type LaunchCwdRejection = 'not_absolute' | 'unreadable' | 'is_a_symlink' | 'not_a_directory' | 'is_writable'
+/**
+ * The candidate is owned by the uid this daemon runs as. A mode bit is not a
+ * boundary against its own owner: the agent, running at that same uid, can
+ * `chmod` the directory writable and then plant `bunfig.toml` in it. Only an
+ * owner OUTSIDE this uid (root, in the intended immutable-release shape) puts
+ * the directory beyond the agent's reach.
+ */
+ | 'owned_by_current_uid'
+/**
+ * An ancestor could not be inspected, is a symlink, is not a directory, is
+ * owned by this uid, or accepted the write probe. Any of those lets this uid
+ * `rename` the candidate out of the way and put its own directory at the same
+ * path — the leaf's own mode never comes into it.
+ */
+ | 'ancestor_unreadable' | 'ancestor_is_a_symlink' | 'ancestor_not_a_directory' | 'ancestor_owned_by_current_uid' | 'ancestor_writable';
 /**
  * `root_cannot_prove_write_boundary` is uid 0: no directory on the machine is
  * unwritable by this process, so the boundary cannot be proven at all. The

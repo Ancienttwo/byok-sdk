@@ -8,6 +8,7 @@ import {
   DEVICE_ASSERTION_MAX_TTL_MS,
 } from '@byok-sdk/core';
 import path from 'node:path';
+import { statSync } from 'node:fs';
 import {
   createEnvelope,
   decodeEnvelope,
@@ -172,6 +173,7 @@ import type { AgentContentReceiptWithoutReliableIdentity, AgentReliableEgressRec
 import { AgentContentAuditStore } from './agent-content-audit-store';
 import { AgentHomeProjectionCompletionClient } from './agent-home-projection-client';
 import { resolveAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
+import type { McpLaunchCwdConfig } from './trusted-launch-cwd';
 import { preflightAgentMessageMcp } from './agent-message-mcp-preflight';
 import { resolveAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
 import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
@@ -634,6 +636,26 @@ export interface DaemonConfig {
    * believes a limit is in force.
    */
   inputPreparation?: InputPreparationDaemonConfig;
+  /**
+   * Operator input to the MCP toolset launch boundary
+   * (`./trusted-launch-cwd.ts`), forwarded verbatim to
+   * `TaskRunnerDeps.mcpLaunchCwd`.
+   *
+   * Absent means the platform default directory and — only when this process
+   * is provably plain Node — `process.execPath` as the launcher interpreter.
+   * Neither default is assumed: both are proven per offer, and an offer whose
+   * boundary this daemon cannot prove is declined non-retryably rather than
+   * started without one.
+   *
+   * A PRESENT section is validated here, at construction, the same discipline
+   * `deviceAssertion` and `inputPreparation` follow: a non-absolute `dir`, or a
+   * `launcherInterpreter` that is not an existing regular file, is a
+   * construction error rather than a per-offer decline nobody reads. What
+   * cannot be decided here is deliberately left to the resolver: whether the
+   * directory is still non-writable is a fact about the filesystem NOW, so it
+   * is proven once per offer and never cached.
+   */
+  mcpLaunchCwd?: McpLaunchCwdConfig;
 }
 
 /**
@@ -1213,6 +1235,47 @@ function resolveDeviceAssertionTtlMs(config: DeviceAssertionConfig | undefined):
   return ttlMs;
 }
 
+/**
+ * Validates `DaemonConfig.mcpLaunchCwd` — see that field's own doc comment for
+ * why this is a construction error and what is deliberately NOT checked here.
+ *
+ * `launcherInterpreter` is stat'ed (following symlinks: a packaged Node is
+ * routinely a symlink into a versioned prefix) and required to be a regular
+ * file. An attested interpreter that does not exist would otherwise surface as
+ * a spawn failure inside the first task that needed a launcher-wrapped
+ * runtime, long after the operator could connect it to what they configured.
+ */
+function validateMcpLaunchCwd(config: McpLaunchCwdConfig | undefined): McpLaunchCwdConfig | undefined {
+  if (config === undefined) return undefined;
+  if (config.dir !== undefined && (!path.isAbsolute(config.dir) || /[\u0000\r\n]/u.test(config.dir))) {
+    throw new Error(
+      `DaemonConfig.mcpLaunchCwd.dir must be an absolute directory path — got ${JSON.stringify(config.dir)}. Omit the section to use the platform default (\`/\` on POSIX, %SystemRoot% on Windows).`,
+    );
+  }
+  const interpreter = config.launcherInterpreter;
+  if (interpreter !== undefined) {
+    if (!path.isAbsolute(interpreter) || /[\u0000\r\n]/u.test(interpreter)) {
+      throw new Error(
+        `DaemonConfig.mcpLaunchCwd.launcherInterpreter must be an absolute executable path — got ${JSON.stringify(interpreter)}`,
+      );
+    }
+    let stats;
+    try {
+      stats = statSync(interpreter);
+    } catch {
+      throw new Error(
+        `DaemonConfig.mcpLaunchCwd.launcherInterpreter ${JSON.stringify(interpreter)} does not exist`,
+      );
+    }
+    if (!stats.isFile()) {
+      throw new Error(
+        `DaemonConfig.mcpLaunchCwd.launcherInterpreter ${JSON.stringify(interpreter)} is not a regular file`,
+      );
+    }
+  }
+  return config;
+}
+
 export function createDaemonWithAdapters(
   config: DaemonConfig,
   adapters: RuntimeAdapter[],
@@ -1351,6 +1414,7 @@ export function buildDaemonWithAdapters(
   // Resolved into a `Set` (exact membership, no ordering, no pattern) and a
   // number here, once, so the handler below cannot read a different allowlist
   // or a different TTL than the one that was validated.
+  const mcpLaunchCwd = validateMcpLaunchCwd(config.mcpLaunchCwd);
   const deviceAssertionAudiences = resolveDeviceAssertionAudiences(config.deviceAssertion);
   const deviceAssertionTtlMs = resolveDeviceAssertionTtlMs(config.deviceAssertion);
   /**
@@ -2098,6 +2162,10 @@ export function buildDaemonWithAdapters(
       // M5: see `DaemonConfig.runtimeEnvironment`'s own doc comment above.
       runtimeEnvironment: config.runtimeEnvironment,
       getMcpToolsets: () => toolsetRegistry.snapshot().toolsets,
+      // The operator's launch-boundary input, already validated above. Passed
+      // through unchanged: the daemon holds no second opinion about which
+      // directory is trusted — `resolveTrustedLaunchCwd` proves it per offer.
+      ...(mcpLaunchCwd === undefined ? {} : { mcpLaunchCwd }),
       // M3-2a: `send` is already this file's OWN closure (not something
       // `TaskRunner` builds) — every `task.claim`/`task.started`/
       // `task.progress`/`task.artifact`/`task.await_approval`/

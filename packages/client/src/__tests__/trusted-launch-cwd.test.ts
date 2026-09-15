@@ -9,6 +9,14 @@ import {
   wrapMcpServerWithLaunchCwd,
 } from '../daemon/trusted-launch-cwd';
 
+/**
+ * A uid that owns nothing under `os.tmpdir()` here, injected so an ownership
+ * rejection cannot stand in for the write-probe rejection a case is pinning.
+ * The probes themselves still run as the real uid, so what they measure is the
+ * real filesystem.
+ */
+const NOBODY_UID = 65534;
+
 async function tempRoot(): Promise<string> {
   return fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-launch-cwd-')));
 }
@@ -27,13 +35,60 @@ describe('resolveTrustedLaunchCwd', () => {
     // accepted anything would still "prove" a boundary. `os.tmpdir()` is the
     // exact shape of directory that looks isolated (0700, random name) and is
     // not, because the agent's tools run at this same uid.
+    //
+    // The uid is spoofed to one that owns nothing here so the OWNERSHIP check
+    // cannot be what rejects this: the write probe has to carry it alone, which
+    // is the thing this case exists to prove still works.
     const writable = await tempRoot();
-    await expect(resolveTrustedLaunchCwd({ dir: writable }))
+    await expect(resolveTrustedLaunchCwd({ dir: writable }, { getuid: () => NOBODY_UID }))
       .resolves.toEqual({ kind: 'unavailable', reason: 'configured_dir_is_writable' });
     // The rejection is a real write that happened and was cleaned up, not a
     // mode-bit inspection.
     expect((await fs.readdir(writable)).filter((n) => n.startsWith('.byok-launch-cwd-probe-'))).toEqual([]);
   });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'REJECTS a 0555 directory OWNED by this uid, whose mode its owner can simply change back',
+    async () => {
+      // A cleared write bit is not a boundary against the uid that owns the
+      // directory: the agent runs at that uid and `chmod`ping it back is one
+      // syscall. The resolver must refuse on ownership, before the probe's
+      // EACCES can make this look isolated.
+      const owned = path.join(await tempRoot(), 'release');
+      await fs.mkdir(owned, 0o555);
+      await expect(resolveTrustedLaunchCwd({ dir: owned }))
+        .resolves.toEqual({ kind: 'unavailable', reason: 'configured_dir_owned_by_current_uid' });
+
+      // Non-vacuous: this same uid really can take the write bit back, which is
+      // exactly why the EACCES the probe would have seen proves nothing here.
+      await fs.chmod(owned, 0o755);
+      await fs.writeFile(path.join(owned, 'bunfig.toml'), 'preload = ["./x.js"]\n');
+      expect(await fs.readdir(owned)).toEqual(['bunfig.toml']);
+    },
+  );
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'REJECTS a non-writable directory whose PARENT this uid can write — rename replaces it wholesale',
+    async () => {
+      // `rename(2)` needs write permission on the parent, not on the directory
+      // being replaced. A 0555 leaf under a writable parent can therefore be
+      // swapped for an attacker-controlled directory at the same path, so the
+      // leaf's own mode says nothing. The uid is spoofed again so the leaf and
+      // the parent both pass the ownership check and the ANCESTOR write probe
+      // is what has to reject.
+      const parent = await tempRoot();
+      const leaf = path.join(parent, 'release');
+      await fs.mkdir(leaf, 0o555);
+      await expect(resolveTrustedLaunchCwd({ dir: leaf }, { getuid: () => NOBODY_UID }))
+        .resolves.toEqual({ kind: 'unavailable', reason: 'configured_dir_ancestor_writable' });
+
+      // Non-vacuous: the replacement the rejection is about really is possible.
+      const planted = path.join(parent, 'planted');
+      await fs.mkdir(planted);
+      await fs.rename(planted, leaf + '-moved');
+      await fs.rm(leaf + '-moved', { recursive: true });
+    },
+  );
 
   it('rejects a symlink even when it points at a directory that would pass', async () => {
     const root = await tempRoot();

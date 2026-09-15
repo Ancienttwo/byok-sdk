@@ -16,8 +16,14 @@ and the D2 version number belongs to a separate SDK release contract.
 
   Non-writability is proven by attempting a create and requiring
   `EACCES`/`EPERM`/`EROFS`, never inferred from mode bits; a symlink is refused
-  rather than followed. The candidate is the new
-  `TaskRunnerDeps.mcpLaunchCwd.dir` when configured, otherwise `/` on POSIX and
+  rather than followed. The probe alone is not the boundary: a directory owned
+  by this uid answers it with `EACCES` while its owner can `chmod` the write bit
+  back, and `rename(2)` replaces a directory using write permission on its
+  PARENT — so the candidate and every ancestor up to the volume root must each
+  be a real directory, owned by another uid, and refuse the same probe
+  (`..._owned_by_current_uid`, `..._ancestor_writable` and the rest of the
+  `..._ancestor_*` reasons). The candidate is the new
+  `DaemonConfig.mcpLaunchCwd.dir` when configured, otherwise `/` on POSIX and
   `%SystemRoot%` on Windows. `os.tmpdir()` is deliberately not a candidate: the
   agent runs at the daemon's own uid in the common deployment, so a 0700 random
   directory isolates other users and nothing else.
@@ -44,12 +50,17 @@ and the D2 version number belongs to a separate SDK release contract.
   run it on `process.execPath`, or Bun would preload before the launcher's first
   statement — so `process.execPath` is used only when this process is provably
   plain Node, and any other host attests one in
-  `TaskRunnerDeps.mcpLaunchCwd.launcherInterpreter`. `createDaemon`'s
-  `DaemonConfig` does not forward `mcpLaunchCwd` yet — that wiring belongs to
-  the `create-daemon.ts` work package — so a `createDaemon` host currently gets
-  the platform default and the provably-plain-Node interpreter, and a host that
-  needs either override composes its `TaskRunner` through
-  `createDaemonWithAdapters`.
+  `DaemonConfig.mcpLaunchCwd.launcherInterpreter`.
+
+- `DaemonConfig.mcpLaunchCwd` (`{dir?, launcherInterpreter?}`) now carries the
+  operator's launch-boundary input through `createDaemon`, forwarded verbatim to
+  `TaskRunnerDeps.mcpLaunchCwd`; a host no longer has to compose its own
+  `TaskRunner` to configure either override. A present section is validated at
+  construction — `dir` absolute, `launcherInterpreter` an absolute path to an
+  existing regular file — so a host that configured a boundary it cannot have
+  fails to start instead of failing a spawn inside the first task that needed
+  one. Whether the directory is still outside this uid's control stays a
+  per-offer proof, never a cached construction-time answer.
 
   `buildRuntimeEnv` additionally hard-denies `NODE_OPTIONS`,
   `NODE_REPL_EXTERNAL_MODULE`, `NODE_PATH`, `BUN_*`, `DYLD_*` and `LD_*` above

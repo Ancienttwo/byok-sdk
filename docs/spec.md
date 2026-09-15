@@ -758,13 +758,27 @@ than assumed: the daemon attempts to create a file in the candidate and requires
 the attempt to fail with `EACCES`, `EPERM` or `EROFS`. A candidate that accepts
 the write is rejected even if its mode bits looked right — mode bits do not
 account for ACLs, for the effective uid, or for a filesystem remounted
-read-write. The candidate is `TaskRunnerDeps.mcpLaunchCwd.dir` when the operator
-configured one (the intended value is an immutable, root-owned versioned release
-directory), otherwise the platform default: `/` on POSIX, `%SystemRoot%` on
-Windows. A directory this same uid can write — anything under `os.tmpdir()`
-included — is refused: the agent's tools run at that same uid, so a 0700 random
-directory isolates other users and nothing else. A symlink is refused rather
-than followed.
+read-write. The candidate is `DaemonConfig.mcpLaunchCwd.dir` (forwarded to
+`TaskRunnerDeps.mcpLaunchCwd`) when the operator configured one (the intended
+value is an immutable, root-owned versioned release directory), otherwise the
+platform default: `/` on POSIX, `%SystemRoot%` on Windows. A directory this same
+uid can write — anything under `os.tmpdir()` included — is refused: the agent's
+tools run at that same uid, so a 0700 random directory isolates other users and
+nothing else. A symlink is refused rather than followed.
+
+The probe alone is not the boundary, because both of its premises are facts this
+uid can change, so the directory AND every ancestor up to the volume root must
+lie outside this uid's control. A directory OWNED by this uid answers the probe
+with `EACCES` while its owner stays free to `chmod` the write bit back, so
+ownership by another uid (root, in the intended shape) is required rather than a
+cleared write bit — `..._owned_by_current_uid` names that rejection. And
+`rename(2)` replaces a directory using write permission on its PARENT, not on
+the directory being replaced, so a root-owned 0555 directory inside a directory
+this uid can write is one this uid can swap out wholesale; every ancestor is put
+through the identical check, and `..._ancestor_writable`,
+`..._ancestor_owned_by_current_uid`, `..._ancestor_is_a_symlink`,
+`..._ancestor_not_a_directory` and `..._ancestor_unreadable` name which link of
+the chain failed.
 
 Two conditions make the boundary unprovable, and both refuse the offer
 non-retryably instead of admitting an unprotected launch:
@@ -787,11 +801,16 @@ non-retryably instead of admitting an unprotected launch:
   one in `TaskRunnerDeps.mcpLaunchCwd.launcherInterpreter`, and without it those
   runtimes are refused with `launch_cwd_launcher_interpreter_unconfigured`.
 
-`McpLaunchCwdConfig` reaches the daemon through `TaskRunnerDeps.mcpLaunchCwd`,
-which `createDaemonWithAdapters` embedders set directly. `createDaemon`'s own
-`DaemonConfig` does not yet forward it; until it does, a `createDaemon` host runs
-on the platform default and the provably-plain-Node launcher interpreter, and a
-host that needs either override composes its `TaskRunner` itself.
+`McpLaunchCwdConfig` reaches the daemon as `DaemonConfig.mcpLaunchCwd`, which
+`createDaemon` forwards verbatim to `TaskRunnerDeps.mcpLaunchCwd`. An absent
+section leaves the host on the platform default and the provably-plain-Node
+launcher interpreter. A present one is validated at CONSTRUCTION — `dir` must be
+absolute, and `launcherInterpreter` must be an absolute path to an existing
+regular file — so a host that configured a boundary it cannot have fails to
+start rather than discovering it on the first offer that needed one. What
+construction deliberately does not decide is whether the directory is still
+outside this uid's control: that is a fact about the filesystem now, so it is
+proven once per offer and never cached.
 
 Loader environment variables are denied absolutely, above every allowlist layer
 including the operator's own `runtimeEnvironment.<id>.allow`: `NODE_OPTIONS`,

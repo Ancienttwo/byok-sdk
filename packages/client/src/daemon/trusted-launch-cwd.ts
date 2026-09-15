@@ -32,6 +32,18 @@ import type { McpStdioServerConfig } from '../types';
  * (and the probe file removed) even if its permissions looked right — mode
  * bits do not account for ACLs, for the effective uid, or for a filesystem
  * that was remounted read-write.
+ *
+ * The probe alone is not the boundary, because both of its premises are things
+ * this uid can change:
+ *
+ * - A directory OWNED by this uid answers the probe with `EACCES` while its
+ *   owner remains free to `chmod` it writable first. Ownership by another uid
+ *   (root, for the intended immutable versioned release directory) is therefore
+ *   required, not just a cleared write bit.
+ * - `rename(2)` replaces a directory using write permission on its PARENT.
+ *   A root-owned 0555 directory sitting inside a directory this uid can write
+ *   is a directory this uid can swap out wholesale. So every ancestor up to the
+ *   volume root is put through the identical check.
  */
 
 /** Operator-supplied inputs to {@link resolveTrustedLaunchCwd}. Both fields are optional and both are validated. */
@@ -70,7 +82,31 @@ export interface McpLaunchCwdConfig {
  * SUCCEEDED, so this uid can create files there and the directory isolates
  * nobody the agent is not already running as.
  */
-export type LaunchCwdRejection = 'not_absolute' | 'unreadable' | 'is_a_symlink' | 'not_a_directory' | 'is_writable';
+export type LaunchCwdRejection =
+  | 'not_absolute'
+  | 'unreadable'
+  | 'is_a_symlink'
+  | 'not_a_directory'
+  | 'is_writable'
+  /**
+   * The candidate is owned by the uid this daemon runs as. A mode bit is not a
+   * boundary against its own owner: the agent, running at that same uid, can
+   * `chmod` the directory writable and then plant `bunfig.toml` in it. Only an
+   * owner OUTSIDE this uid (root, in the intended immutable-release shape) puts
+   * the directory beyond the agent's reach.
+   */
+  | 'owned_by_current_uid'
+  /**
+   * An ancestor could not be inspected, is a symlink, is not a directory, is
+   * owned by this uid, or accepted the write probe. Any of those lets this uid
+   * `rename` the candidate out of the way and put its own directory at the same
+   * path — the leaf's own mode never comes into it.
+   */
+  | 'ancestor_unreadable'
+  | 'ancestor_is_a_symlink'
+  | 'ancestor_not_a_directory'
+  | 'ancestor_owned_by_current_uid'
+  | 'ancestor_writable';
 
 /**
  * `root_cannot_prove_write_boundary` is uid 0: no directory on the machine is
@@ -118,20 +154,80 @@ async function provesNonWritable(dir: string): Promise<boolean> {
   return false;
 }
 
-async function checkCandidate(dir: string, prefix: CheckPrefix): Promise<TrustedLaunchCwd> {
-  if (!path.isAbsolute(dir)) return unavailable(`${prefix}_not_absolute`);
+/**
+ * Every ancestor of `dir` up to and including the volume root, nearest first.
+ *
+ * The leaf's own mode is only half the boundary: `rename(2)` needs write
+ * permission on the PARENT, not on the directory being replaced, so a
+ * 0555 root-owned leaf inside a directory this uid can write is a directory
+ * this uid can swap for one of its own. The same argument applies one level up
+ * for the parent, so the walk continues to the root.
+ */
+function ancestorsOf(dir: string): string[] {
+  const ancestors: string[] = [];
+  let current = path.dirname(dir);
+  for (;;) {
+    ancestors.push(current);
+    const next = path.dirname(current);
+    if (next === current) return ancestors;
+    current = next;
+  }
+}
+
+/**
+ * The three facts every directory on the path has to satisfy: it is a real
+ * directory (not a symlink whoever owns it can repoint), it is not owned by the
+ * uid this daemon runs as, and this process cannot create a file in it.
+ *
+ * `currentUid` is `undefined` only where the platform has no uid at all
+ * (Windows); the ownership half of the check is then skipped and the write
+ * probe carries the boundary on its own.
+ */
+type PathComponentRejection = 'unreadable' | 'is_a_symlink' | 'not_a_directory' | 'owned_by_current_uid' | 'is_writable';
+
+async function checkOnePathComponent(
+  target: string,
+  currentUid: number | undefined,
+): Promise<PathComponentRejection | undefined> {
   let stats;
   try {
-    stats = await fs.lstat(dir);
+    stats = await fs.lstat(target);
   } catch {
-    return unavailable(`${prefix}_unreadable`);
+    return 'unreadable';
   }
   // `lstat`, not `stat`: a symlink is rejected rather than followed. Whoever
   // can repoint the link chooses the cwd, which is the authority this module
   // exists to take away from them.
-  if (stats.isSymbolicLink()) return unavailable(`${prefix}_is_a_symlink`);
-  if (!stats.isDirectory()) return unavailable(`${prefix}_not_a_directory`);
-  if (!(await provesNonWritable(dir))) return unavailable(`${prefix}_is_writable`);
+  if (stats.isSymbolicLink()) return 'is_a_symlink';
+  if (!stats.isDirectory()) return 'not_a_directory';
+  if (currentUid !== undefined && stats.uid === currentUid) return 'owned_by_current_uid';
+  if (!(await provesNonWritable(target))) return 'is_writable';
+  return undefined;
+}
+
+const ANCESTOR_REJECTION = Object.freeze({
+  unreadable: 'ancestor_unreadable',
+  is_a_symlink: 'ancestor_is_a_symlink',
+  not_a_directory: 'ancestor_not_a_directory',
+  owned_by_current_uid: 'ancestor_owned_by_current_uid',
+  is_writable: 'ancestor_writable',
+} as const satisfies Record<PathComponentRejection, LaunchCwdRejection>);
+
+async function checkCandidate(
+  dir: string,
+  prefix: CheckPrefix,
+  currentUid: number | undefined,
+): Promise<TrustedLaunchCwd> {
+  if (!path.isAbsolute(dir)) return unavailable(`${prefix}_not_absolute`);
+  const leaf = await checkOnePathComponent(dir, currentUid);
+  if (leaf !== undefined) return unavailable(`${prefix}_${leaf}`);
+  for (const ancestor of ancestorsOf(dir)) {
+    const rejection = await checkOnePathComponent(ancestor, currentUid);
+    if (rejection === undefined) continue;
+    // `not_absolute` cannot reach here — every ancestor of an absolute path is
+    // absolute — so the map is total over what this loop can produce.
+    return unavailable(`${prefix}_${ANCESTOR_REJECTION[rejection]}`);
+  }
   return Object.freeze({ kind: 'resolved' as const, dir });
 }
 
@@ -169,13 +265,14 @@ export async function resolveTrustedLaunchCwd(
   // limitation of running the daemon as root, not a default to be papered
   // over — the fix is the immutable-install work (§26), not a directory.
   const getuid = environment.getuid ?? process.getuid;
-  if (getuid !== undefined && getuid.call(process) === 0) {
+  const currentUid = getuid === undefined ? undefined : getuid.call(process);
+  if (currentUid === 0) {
     return unavailable('root_cannot_prove_write_boundary');
   }
-  if (config?.dir !== undefined) return checkCandidate(config.dir, 'configured_dir');
+  if (config?.dir !== undefined) return checkCandidate(config.dir, 'configured_dir', currentUid);
   const fallback = platformDefault(environment);
   if (fallback === undefined) return unavailable('no_platform_default_directory');
-  return checkCandidate(fallback, 'platform_default');
+  return checkCandidate(fallback, 'platform_default', currentUid);
 }
 
 // ---------------------------------------------------------------------------
