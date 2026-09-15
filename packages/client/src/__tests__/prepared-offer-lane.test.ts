@@ -7,6 +7,7 @@ import { AgentHomeManager } from '../agent-home';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
+import { buildRuntimeEnv } from '../daemon/environment';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import {
@@ -82,6 +83,22 @@ const SCOPE_ID = 'scope-prepared-1';
 const REQUEST_ID = 'prep-request-1';
 const REQUEST_DIGEST = 'request-digest-1';
 const ENVELOPE_DIGEST = 'envelope-digest-1';
+
+/**
+ * The environment `TaskRunner.handleOffer` builds for this task, recomputed
+ * here from the same three inputs (`daemon/task-runner.ts`'s own
+ * `buildRuntimeEnv` call) — the stub adapter declares no environment
+ * requirements and this lane wires no local override.
+ *
+ * It has to be the SAME value: an implementation identity binds the
+ * environment the SDK measured it against, so a fixture that resolved against
+ * a different one would recompute a different binding digest at admission and
+ * every case below would decline for the fixture's reason instead of its own.
+ */
+const LANE_ENV: Readonly<Record<string, string>> = Object.freeze(buildRuntimeEnv({
+  ambient: process.env,
+  requirements: { credentialNames: [] },
+}));
 const TOOL_MANIFEST_DIGEST = 'tool-manifest-digest-1';
 const POLICY_REVISION = 'limits-policy-r1';
 const TOOLSET_ID = 'team';
@@ -206,8 +223,9 @@ async function lane(options: {
   const serverCommand = path.join(await tempDir('byok-prepared-bin-'), 'teamserver');
   await fs.writeFile(serverCommand, '#!/bin/sh\nexec true\n');
   const closureDigest = await realToolImplementationFsProbe.digest(serverCommand);
-  // An install RECORD: the stat tuple is deliberately absent, because that is
-  // the one fact the SDK measures itself rather than accepting from a host.
+  // An install RECORD: the stat tuples and the two launch-environment digests
+  // are deliberately absent, because those are the facts the SDK measures
+  // itself rather than accepting from a host.
   const authority: ToolImplementationAuthority = {
     resolve: async () => ({
       kind: 'attested',
@@ -219,8 +237,6 @@ async function lane(options: {
       closureKind: 'artifact',
       launchArgv: ['--stdio'],
       launchCwd: '/',
-      launchEnvNamesDigest: 'c'.repeat(64),
-      loaderEnvValuesDigest: 'd'.repeat(64),
     } as never),
   };
 
@@ -237,6 +253,7 @@ async function lane(options: {
   const implementation = await resolveToolImplementationIdentity(
     authority,
     { toolsetId: TOOLSET_ID, serverName: SERVER_NAME, command: serverCommand, args: ['--stdio'], launch: attestation },
+    LANE_ENV,
     rootOwnedProbe(),
   );
   expect(implementation.kind).toBe('attested');

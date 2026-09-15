@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credential-environment';
+import { loaderEnvInjections } from './environment';
 import type { McpLaunchAttestation } from './trusted-launch-cwd';
 
 /**
@@ -23,11 +25,27 @@ import type { McpLaunchAttestation } from './trusted-launch-cwd';
  *   every spawn. An absolute path is not an attestation, and a resolver that
  *   reports one is answered with a refusal rather than a promotion.
  *
+ * WHAT EACH SIDE SUPPLIES, exactly:
+ *
+ * - The resolver returns a {@link ToolImplementationInstallRecordV1} — the
+ *   manifest revision, the form, the versioned realpath, the artifact digest,
+ *   the interpreter triple for an `interpreter+bundle`, the entry, the launch
+ *   argv and cwd — or an {@link ToolImplementationUnavailableV1} reason. That
+ *   is the whole of the host's authority.
+ * - The SDK measures everything else and seals it on: `installStat`,
+ *   `interpreterStat`, `launchEnvNamesDigest` and `loaderEnvValuesDigest`.
+ *   None of the four is a resolver input, and a record that carries one is not
+ *   an install record. A host cannot know the environment object this SDK will
+ *   hand to `spawn`, and must never guess it from its own `process.env`.
+ *
  * What an `attested` identity proves is therefore exactly this: at the moment
  * it was resolved, and again at the moment the server was spawned, the file at
- * that versioned realpath was a root-owned, non-symlink, non-writable regular
- * file whose bytes hash to `closureDigest` and whose `(dev, ino, size, mtime,
- * mode, uid, gid)` tuple is the one that was measured at resolve.
+ * that versioned realpath — and, for an `interpreter+bundle`, the interpreter
+ * beside it — was a root-owned, non-symlink, non-writable regular file whose
+ * bytes hash to its attested digest and whose `(dev, ino, size, mtime, mode,
+ * uid, gid)` tuple is the one that was measured at resolve, and that the
+ * environment handed to that spawn is the environment that was measured at
+ * resolve (see {@link toolImplementationLaunchEnvNamesDigest}).
  *
  * What it does NOT prove (§26, carried honestly rather than implied away):
  * post-hoc modification by root, the integrity of the kernel, dyld, SIP-owned
@@ -104,7 +122,8 @@ export interface ToolImplementationInterpreterV1 {
 
 /**
  * The filesystem tuple measured at resolve and required to be unchanged at
- * every later spawn.
+ * every later spawn. One is measured for the artifact (`installStat`) and, for
+ * an `interpreter+bundle`, one for the interpreter (`interpreterStat`).
  *
  * SDK-measured, never resolver-supplied: it is the one field of an attested
  * identity whose value a host cannot choose. A record whose digest still
@@ -159,19 +178,33 @@ export interface ToolImplementationAttestedV1 {
   readonly entry?: string;
   readonly launchArgv: readonly string[];
   readonly launchCwd: string;
-  /** Digest of the NAMES the child's environment carries. Never their values. */
+  /**
+   * SDK-measured at resolve: the digest of the NAMES the child's environment
+   * carries, never their values. See
+   * {@link toolImplementationLaunchEnvNamesDigest} for the projection it is
+   * taken over and why that projection exists.
+   */
   readonly launchEnvNamesDigest: string;
   /**
-   * §27.2: digest of the sanitized loader-affecting env VALUES as they would
-   * reach the child — the values of the names `daemon/environment.ts` already
-   * denies, which is expected to be the empty canonical map. Never the full
-   * task environment: the probe carries no execution nonce, and binding a task
-   * or server nonce into an identity would make every task's identity
-   * different for reasons that have nothing to do with the implementation.
+   * SDK-measured at resolve. §27.2: digest of the sanitized loader-affecting
+   * env VALUES as they would reach the child — the values of the names
+   * `daemon/environment.ts` already denies, which is expected to be the empty
+   * canonical map. Never the full task environment: the probe carries no
+   * execution nonce, and binding a task or server nonce into an identity would
+   * make every task's identity different for reasons that have nothing to do
+   * with the implementation.
    */
   readonly loaderEnvValuesDigest: string;
   /** SDK-measured at resolve. See {@link ToolImplementationStatTupleV1}. */
   readonly installStat: ToolImplementationStatTupleV1;
+  /**
+   * SDK-measured at resolve, present iff {@link interpreter} is. The
+   * interpreter half of an `interpreter+bundle` is re-measured at every spawn
+   * exactly as the artifact is, and a tuple it cannot be compared against
+   * would make that half a digest check alone — blind to a replaced inode, a
+   * touched mtime, and an interpreter that stopped being root-owned.
+   */
+  readonly interpreterStat?: ToolImplementationStatTupleV1;
 }
 
 export type ToolImplementationIdentityV1 = ToolImplementationUnavailableV1 | ToolImplementationAttestedV1;
@@ -201,10 +234,22 @@ export interface ToolImplementationLocatorV1 {
 
 /**
  * The install record a resolver returns, which is an attested identity MINUS
- * the one thing a host does not get to assert: the stat tuple this SDK
- * measures itself.
+ * everything a host does not get to assert:
+ *
+ * - `installStat` / `interpreterStat` — the filesystem tuples this SDK
+ *   measures itself. A host that could choose them would be the authority on
+ *   whether its own install moved.
+ * - `launchEnvNamesDigest` / `loaderEnvValuesDigest` — facts about the exact
+ *   environment object THIS SDK will hand to `spawn`. A host does not have
+ *   that object: it is `daemon/environment.ts`'s `buildRuntimeEnv` output for
+ *   one task on one device, not the host's `process.env`, and a resolver that
+ *   reconstructed it from its own environment (or from a copy of this
+ *   package's deny list) would be attesting a guess.
  */
-export type ToolImplementationInstallRecordV1 = Omit<ToolImplementationAttestedV1, 'installStat'>;
+export type ToolImplementationInstallRecordV1 = Omit<
+  ToolImplementationAttestedV1,
+  'installStat' | 'interpreterStat' | 'launchEnvNamesDigest' | 'loaderEnvValuesDigest'
+>;
 
 export type ToolImplementationResolutionV1 =
   | ToolImplementationUnavailableV1
@@ -281,6 +326,92 @@ export const realToolImplementationFsProbe: ToolImplementationFsProbe = Object.f
 });
 
 // ---------------------------------------------------------------------------
+// Launch environment measurement
+// ---------------------------------------------------------------------------
+
+/**
+ * The environment an MCP toolset child is spawned with, as an identity is
+ * allowed to bind it.
+ *
+ * An identity is resolved ONCE, by the daemon, and then travels to two
+ * different spawns in two different processes: the daemon's own admission
+ * probe, and the Pi extension's server pool inside the runtime child. Those
+ * two receive environments that differ by exactly the names THIS SDK adds or
+ * removes between them, and by nothing else:
+ *
+ * - `BYOK_*` — `buildRuntimeEnv` hard-denies the whole prefix, so none reaches
+ *   a runtime child except the two Pi control variables the adapter sets on
+ *   the Pi process itself (`adapters/pi/pi-adapter.ts`), which the pool strips
+ *   back off before it spawns a server (`adapters/pi/mcp-server-pool.ts`).
+ * - {@link PROVIDER_CREDENTIAL_ENV_DENY_NAMES} — stripped at the subscription
+ *   and BYOK-custody boundaries (`withoutProviderCredentials`), so a task
+ *   dispatched with a hosted manifest selection reaches the pool with up to
+ *   eleven fewer names than the daemon measured.
+ *
+ * Both sets are therefore excluded from what the digests below bind. Binding
+ * them would make the names digest a value that legitimately differs between
+ * the two spawn points, and every attested spawn in the hosted Pi lane would
+ * be refused for a difference this SDK made on purpose — the same reasoning
+ * §27.2 already applies to the task and server nonces added at launch.
+ *
+ * Nothing that can influence a loader is excluded: the loader deny list and
+ * these two sets are disjoint, so the §27.2 values digest is unweakened, and
+ * the names digest still catches every added, removed or renamed variable
+ * outside them — `PYTHONPATH`, `PERL5LIB`, `CLASSPATH`, `GEM_HOME` included.
+ */
+function launchEnvUnderIdentity(env: Readonly<Record<string, string>>): Record<string, string> {
+  const bound: Record<string, string> = {};
+  for (const name of Object.keys(env).sort()) {
+    if (name.startsWith('BYOK_')) continue;
+    if ((PROVIDER_CREDENTIAL_ENV_DENY_NAMES as readonly string[]).includes(name)) continue;
+    bound[name] = env[name]!;
+  }
+  return bound;
+}
+
+/**
+ * sha256 over the canonical JSON of one already-ordered value. Keys are
+ * inserted in sorted order by every caller below, and `JSON.stringify`
+ * preserves insertion order for non-index string keys, so the bytes hashed are
+ * a function of the content alone.
+ */
+function canonicalDigest(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
+}
+
+/**
+ * The NAMES the child's environment carries, digested. Never their values:
+ * this is the fact that catches a variable appearing, disappearing or being
+ * renamed between resolve and spawn, and a value digest of the whole
+ * environment would bind every task-scoped secret and nonce in it.
+ *
+ * Taken over {@link launchEnvUnderIdentity}, for the reasons documented there.
+ */
+export function toolImplementationLaunchEnvNamesDigest(env: Readonly<Record<string, string>>): string {
+  return canonicalDigest(Object.keys(launchEnvUnderIdentity(env)));
+}
+
+/**
+ * §27.2: the loader-affecting VALUES as they would reach the child, digested.
+ *
+ * The names are `daemon/environment.ts`'s own {@link loaderEnvInjections} —
+ * this module keeps no second copy of that list, and neither may a host. In
+ * every environment `buildRuntimeEnv` produces the set is empty, so the
+ * expected value is the digest of the empty canonical map; a non-empty one is
+ * loader injection that reached the child, and at spawn it is a refusal.
+ */
+export function toolImplementationLoaderEnvValuesDigest(
+  env: Readonly<Record<string, string>>,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const bound = launchEnvUnderIdentity(env);
+  const values: Record<string, string> = {};
+  // `loaderEnvInjections` returns the present names already sorted.
+  for (const name of loaderEnvInjections(bound, platform)) values[name] = bound[name]!;
+  return canonicalDigest(values);
+}
+
+// ---------------------------------------------------------------------------
 // Strict record validation
 // ---------------------------------------------------------------------------
 
@@ -330,6 +461,15 @@ const INSTALL_RECORD_KEYS = [
   'entry',
   'launchArgv',
   'launchCwd',
+] as const;
+
+/**
+ * The four facts this SDK measures and seals onto a record. `interpreterStat`
+ * is present iff the record names an interpreter; the other three always are.
+ */
+const SEALED_KEYS = [
+  'installStat',
+  'interpreterStat',
   'launchEnvNamesDigest',
   'loaderEnvValuesDigest',
 ] as const;
@@ -360,12 +500,6 @@ function validateInstallRecord(
   if (value.form !== 'compiled-executable' && value.form !== 'interpreter+bundle') return 'not_a_record';
   if (!nonEmptyString(value.installPath) || !path.isAbsolute(value.installPath)) return 'not_a_record';
   if (typeof value.closureDigest !== 'string' || !SHA256_HEX.test(value.closureDigest)) return 'not_a_record';
-  if (typeof value.launchEnvNamesDigest !== 'string' || !SHA256_HEX.test(value.launchEnvNamesDigest)) {
-    return 'not_a_record';
-  }
-  if (typeof value.loaderEnvValuesDigest !== 'string' || !SHA256_HEX.test(value.loaderEnvValuesDigest)) {
-    return 'not_a_record';
-  }
   if (!nonEmptyString(value.launchCwd) || !path.isAbsolute(value.launchCwd)) return 'not_a_record';
   if (!Array.isArray(value.launchArgv) || value.launchArgv.some((arg) => typeof arg !== 'string')) {
     return 'not_a_record';
@@ -394,8 +528,6 @@ function validateInstallRecord(
     ...(value.entry === undefined ? {} : { entry: value.entry as string }),
     launchArgv: Object.freeze([...(value.launchArgv as string[])]),
     launchCwd: value.launchCwd,
-    launchEnvNamesDigest: value.launchEnvNamesDigest,
-    loaderEnvValuesDigest: value.loaderEnvValuesDigest,
   });
 }
 
@@ -437,25 +569,58 @@ export function parseToolImplementationIdentity(value: unknown): ToolImplementat
     }
     return toolImplementationUnavailable(value.reason as ToolImplementationUnavailableReasonV1);
   }
-  if (!exactKeys(value, [...INSTALL_RECORD_KEYS, 'installStat'])) return undefined;
-  const { installStat: rawStat, ...rest } = value;
+  if (!exactKeys(value, [...INSTALL_RECORD_KEYS, ...SEALED_KEYS])) return undefined;
+  const {
+    installStat: rawStat,
+    interpreterStat: rawInterpreterStat,
+    launchEnvNamesDigest,
+    loaderEnvValuesDigest,
+    ...rest
+  } = value;
   const record = validateInstallRecord(rest);
   if (typeof record === 'string') return undefined;
   const installStat = validateStatTuple(rawStat);
   if (installStat === undefined) return undefined;
-  return seal(record, installStat);
+  if (typeof launchEnvNamesDigest !== 'string' || !SHA256_HEX.test(launchEnvNamesDigest)) return undefined;
+  if (typeof loaderEnvValuesDigest !== 'string' || !SHA256_HEX.test(loaderEnvValuesDigest)) return undefined;
+  // Present iff the record names an interpreter, both directions. A bundle
+  // whose interpreter carries no tuple is an identity whose interpreter half
+  // could only be reverified by digest, and an artifact-only identity that
+  // carries one describes a measurement nothing here made.
+  if (record.interpreter === undefined) {
+    if (rawInterpreterStat !== undefined) return undefined;
+    return seal(record, { installStat, launchEnvNamesDigest, loaderEnvValuesDigest });
+  }
+  const interpreterStat = validateStatTuple(rawInterpreterStat);
+  if (interpreterStat === undefined) return undefined;
+  return seal(record, { installStat, interpreterStat, launchEnvNamesDigest, loaderEnvValuesDigest });
+}
+
+/** Everything an install record is missing before it is an identity. */
+interface ToolImplementationSealedMeasurements {
+  readonly installStat: ToolImplementationStatTupleV1;
+  /** Present iff the record names an interpreter. */
+  readonly interpreterStat?: ToolImplementationStatTupleV1;
+  readonly launchEnvNamesDigest: string;
+  readonly loaderEnvValuesDigest: string;
 }
 
 /**
  * The only place an `attested` value comes into existence. Both callers have
  * already validated the record against {@link INSTALL_RECORD_KEYS}; this adds
- * the one field a host does not get to choose.
+ * the fields a host does not get to choose ({@link SEALED_KEYS}).
  */
 function seal(
   record: ToolImplementationInstallRecordV1,
-  installStat: ToolImplementationStatTupleV1,
+  measured: ToolImplementationSealedMeasurements,
 ): ToolImplementationAttestedV1 {
-  return Object.freeze({ ...record, installStat });
+  return Object.freeze({
+    ...record,
+    launchEnvNamesDigest: measured.launchEnvNamesDigest,
+    loaderEnvValuesDigest: measured.loaderEnvValuesDigest,
+    installStat: measured.installStat,
+    ...(measured.interpreterStat === undefined ? {} : { interpreterStat: measured.interpreterStat }),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -540,6 +705,18 @@ async function digestMatches(
   }
 }
 
+function statTupleOf(stats: ToolImplementationStatEntry): ToolImplementationStatTupleV1 {
+  return Object.freeze({
+    dev: stats.dev,
+    ino: stats.ino,
+    size: stats.size,
+    mtimeMs: stats.mtimeMs,
+    mode: stats.mode,
+    uid: stats.uid,
+    gid: stats.gid,
+  });
+}
+
 function sameStatTuple(left: ToolImplementationStatTupleV1, right: ToolImplementationStatTupleV1): boolean {
   return left.dev === right.dev
     && left.ino === right.ino
@@ -567,6 +744,7 @@ function sameStatTuple(left: ToolImplementationStatTupleV1, right: ToolImplement
 export async function resolveToolImplementationIdentity(
   authority: ToolImplementationAuthority | undefined,
   locator: ToolImplementationLocatorV1,
+  launchEnv: Readonly<Record<string, string>>,
   probe: ToolImplementationFsProbe = realToolImplementationFsProbe,
 ): Promise<ToolImplementationIdentityV1> {
   if (authority === undefined) return TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED;
@@ -597,33 +775,57 @@ export async function resolveToolImplementationIdentity(
   const matches = await digestMatches(record.installPath, record.closureDigest, probe);
   if (matches === 'unreadable') return toolImplementationUnavailable('reverify_failed');
   if (!matches) return toolImplementationUnavailable('install_record_mismatch');
-  if (record.interpreter !== undefined) {
-    const interpreter = await measurePath(record.interpreter.path, probe);
-    if (typeof interpreter === 'string') return toolImplementationUnavailable(interpreter);
-    const interpreterOwnership = measureOwnership(interpreter);
-    if (interpreterOwnership !== undefined) return toolImplementationUnavailable(interpreterOwnership);
-    const interpreterMatches = await digestMatches(record.interpreter.path, record.interpreter.digest, probe);
-    if (interpreterMatches === 'unreadable') return toolImplementationUnavailable('reverify_failed');
-    if (!interpreterMatches) return toolImplementationUnavailable('install_record_mismatch');
-  }
-  return seal(record, {
-    dev: measured.dev,
-    ino: measured.ino,
-    size: measured.size,
-    mtimeMs: measured.mtimeMs,
-    mode: measured.mode,
-    uid: measured.uid,
-    gid: measured.gid,
-  });
+  // The env facts are measured HERE, off the exact object the caller will hand
+  // to `spawn`, and are not part of what the resolver was asked. A host does
+  // not have this object and must not reconstruct one.
+  const measurements: ToolImplementationSealedMeasurements = {
+    installStat: statTupleOf(measured),
+    launchEnvNamesDigest: toolImplementationLaunchEnvNamesDigest(launchEnv),
+    loaderEnvValuesDigest: toolImplementationLoaderEnvValuesDigest(launchEnv),
+  };
+  if (record.interpreter === undefined) return seal(record, measurements);
+  const interpreter = await measurePath(record.interpreter.path, probe);
+  if (typeof interpreter === 'string') return toolImplementationUnavailable(interpreter);
+  const interpreterOwnership = measureOwnership(interpreter);
+  if (interpreterOwnership !== undefined) return toolImplementationUnavailable(interpreterOwnership);
+  const interpreterMatches = await digestMatches(record.interpreter.path, record.interpreter.digest, probe);
+  if (interpreterMatches === 'unreadable') return toolImplementationUnavailable('reverify_failed');
+  if (!interpreterMatches) return toolImplementationUnavailable('install_record_mismatch');
+  // The interpreter's own tuple, kept for the same reason the artifact's is:
+  // without it the spawn gate can only re-hash the interpreter's bytes, and a
+  // replaced inode, a touched mtime or an interpreter that stopped being
+  // root-owned would all pass.
+  return seal(record, { ...measurements, interpreterStat: statTupleOf(interpreter) });
 }
 
 // ---------------------------------------------------------------------------
 // Reverify
 // ---------------------------------------------------------------------------
 
+/**
+ * The one failure that exists only at spawn.
+ *
+ * `launch_env_drift` is not a {@link ToolImplementationUnavailableReasonV1}
+ * and never will be: at resolve there is nothing to disagree with, because
+ * that is the moment the environment is MEASURED. It can only be reached by a
+ * later spawn whose environment is not the one that was measured, and a
+ * resolver cannot claim it because a resolver never sees an environment.
+ */
+export type ToolImplementationReverifyFailure = ToolImplementationMeasurementFailure | 'launch_env_drift';
+
+/**
+ * WHICH of the things an identity binds moved. Carried beside the reason
+ * because `reverify_failed` on the artifact and `reverify_failed` on the
+ * interpreter send an operator to two different files.
+ */
+export type ToolImplementationReverifySubject = 'artifact' | 'interpreter' | 'launch-env';
+
 export type ToolImplementationReverifyResult =
   | 'ok'
-  | { readonly reason: ToolImplementationMeasurementFailure };
+  | {
+    readonly reason: ToolImplementationReverifyFailure;
+    readonly subject: ToolImplementationReverifySubject;
+  };
 
 /**
  * Re-measure an attested identity immediately before the server it describes is
@@ -637,30 +839,55 @@ export type ToolImplementationReverifyResult =
  * changed nothing but the mtime, and an install that stopped being root-owned
  * or grew a write bit since it was attested.
  *
+ * The interpreter of an `interpreter+bundle` runs the SAME two checks against
+ * the SAME two recorded facts. It is the thing that maps the bundle in and
+ * decides what else gets mapped beside it, so an identity that re-hashed the
+ * artifact byte for byte while accepting any interpreter that still hashed
+ * right — replaced inode, cleared ownership, new mtime — would be strictly
+ * weaker at spawn than it was at resolve.
+ *
+ * `launchEnv` is the exact environment object the caller is about to hand to
+ * `spawn`, re-digested here. A name that appeared, vanished or was renamed, or
+ * a loader-affecting value that reached the child, is `launch_env_drift`: the
+ * identity was measured against one environment and the child would be started
+ * in another.
+ *
  * Not memoized and not cached. The whole point is that resolve and spawn are
  * two different moments, and a cached answer would assert the first moment's
  * facts about the second one.
  */
 export async function reverifyToolImplementationIdentity(
   identity: ToolImplementationAttestedV1,
+  launchEnv: Readonly<Record<string, string>>,
   probe: ToolImplementationFsProbe = realToolImplementationFsProbe,
 ): Promise<ToolImplementationReverifyResult> {
   const measured = await measurePath(identity.installPath, probe);
-  if (typeof measured === 'string') return { reason: measured };
-  if (!sameStatTuple(measured, identity.installStat)) return { reason: 'install_record_mismatch' };
+  if (typeof measured === 'string') return { reason: measured, subject: 'artifact' };
+  if (!sameStatTuple(measured, identity.installStat)) {
+    return { reason: 'install_record_mismatch', subject: 'artifact' };
+  }
   const matches = await digestMatches(identity.installPath, identity.closureDigest, probe);
-  if (matches === 'unreadable') return { reason: 'reverify_failed' };
-  if (!matches) return { reason: 'reverify_failed' };
+  if (matches !== true) return { reason: 'reverify_failed', subject: 'artifact' };
   if (identity.interpreter !== undefined) {
     const interpreter = await measurePath(identity.interpreter.path, probe);
-    if (typeof interpreter === 'string') return { reason: interpreter };
+    if (typeof interpreter === 'string') return { reason: interpreter, subject: 'interpreter' };
+    // `interpreterStat` is present on every identity this module seals for an
+    // `interpreter+bundle`, and `parseToolImplementationIdentity` refuses one
+    // that arrives without it, so an absent tuple here is an identity from
+    // nowhere rather than an older shape to tolerate.
+    if (identity.interpreterStat === undefined || !sameStatTuple(interpreter, identity.interpreterStat)) {
+      return { reason: 'install_record_mismatch', subject: 'interpreter' };
+    }
     const interpreterMatches = await digestMatches(
       identity.interpreter.path,
       identity.interpreter.digest,
       probe,
     );
-    if (interpreterMatches === 'unreadable') return { reason: 'reverify_failed' };
-    if (!interpreterMatches) return { reason: 'reverify_failed' };
+    if (interpreterMatches !== true) return { reason: 'reverify_failed', subject: 'interpreter' };
+  }
+  if (toolImplementationLaunchEnvNamesDigest(launchEnv) !== identity.launchEnvNamesDigest
+    || toolImplementationLoaderEnvValuesDigest(launchEnv) !== identity.loaderEnvValuesDigest) {
+    return { reason: 'launch_env_drift', subject: 'launch-env' };
   }
   return 'ok';
 }
@@ -668,6 +895,9 @@ export async function reverifyToolImplementationIdentity(
 /**
  * The shared pre-spawn gate, so both spawn points refuse on the same evidence
  * with the same words.
+ *
+ * `launchEnv` must be the env the CALLER is about to spawn with, not the one
+ * it resolved with — that is the whole comparison.
  *
  * An identity that is `unavailable` carries no claim to break, so there is
  * nothing to re-measure and the spawn proceeds — the receipt already says the
@@ -679,14 +909,16 @@ export async function reverifyToolImplementationIdentity(
 export async function assertToolImplementationBeforeSpawn(
   label: string,
   identity: ToolImplementationIdentityV1 | undefined,
+  launchEnv: Readonly<Record<string, string>>,
   probe: ToolImplementationFsProbe = realToolImplementationFsProbe,
 ): Promise<void> {
   if (identity === undefined || identity.kind !== 'attested') return;
-  const result = await reverifyToolImplementationIdentity(identity, probe);
+  const result = await reverifyToolImplementationIdentity(identity, launchEnv, probe);
   if (result === 'ok') return;
   throw new ToolImplementationReverifyError(
-    `${label} failed implementation reverification before launch: ${result.reason}`,
+    `${label} failed implementation reverification before launch: ${result.reason} (${result.subject})`,
     result.reason,
+    result.subject,
   );
 }
 
@@ -696,7 +928,11 @@ export async function assertToolImplementationBeforeSpawn(
  * fact instead of on a substring.
  */
 export class ToolImplementationReverifyError extends Error {
-  constructor(message: string, readonly reason: ToolImplementationMeasurementFailure) {
+  constructor(
+    message: string,
+    readonly reason: ToolImplementationReverifyFailure,
+    readonly subject: ToolImplementationReverifySubject,
+  ) {
     super(message);
     this.name = 'ToolImplementationReverifyError';
   }

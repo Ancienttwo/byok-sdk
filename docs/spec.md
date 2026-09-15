@@ -1028,13 +1028,37 @@ The authority split is deliberate and total:
 - **The host owns the install record.** Only the host knows where it put a
   versioned immutable release, which manifest revision produced it, and which
   interpreter (if any) is encapsulated with it. It supplies that record through
-  `DaemonConfig.toolImplementationAuthority`.
-- **The SDK owns the assertion.** A record is never believed. Before it becomes
-  an identity the daemon measures the path itself: it must be its own
-  `realpath`, a non-symlink regular file, root-owned, carry no write bit for
-  anyone, and hash to the `closureDigest` the record claims. The
-  `(dev, ino, size, mtime, mode, uid, gid)` tuple measured at that moment is
-  recorded ON the identity by the SDK, never supplied by the host.
+  `DaemonConfig.toolImplementationAuthority`. A resolver returns exactly one of
+  two things: an install record, or an unavailable reason. The record is the
+  manifest revision, the form, the versioned install path, the artifact's
+  closure digest, the interpreter triple (`path`, `digest`,
+  `loadCommandsDigest`) for an `interpreter+bundle`, the optional entry, and
+  the launch argv and cwd. That is the whole of the host's authority.
+- **The SDK owns the assertion, and everything it can measure itself.** A
+  record is never believed. Before it becomes an identity the daemon measures
+  the path itself: it must be its own `realpath`, a non-symlink regular file,
+  root-owned, carry no write bit for anyone, and hash to the `closureDigest`
+  the record claims — and, for an `interpreter+bundle`, the interpreter must
+  satisfy the same five facts against its own digest. Four fields are then
+  sealed onto the identity by the SDK and are **not** part of what a resolver
+  may send; a record that carries one of them is not an install record:
+  - `installStat` — the artifact's `(dev, ino, size, mtime, mode, uid, gid)`.
+  - `interpreterStat` — the same tuple for the interpreter, present iff the
+    record names one.
+  - `launchEnvNamesDigest` — the names the spawned child's environment carries.
+  - `loaderEnvValuesDigest` — §27.2, the loader-affecting values as they would
+    reach that child, expected to be the empty canonical map.
+
+  The last two are facts about the exact environment object the SDK will hand
+  to `spawn` (`buildRuntimeEnv`'s output for that task on that device). A host
+  does not have that object, must not reconstruct one from its own
+  `process.env`, and must not keep a copy of this SDK's loader deny list. Both
+  digests are taken over a projection that excludes the two name sets THIS SDK
+  itself adds or removes between measuring and spawning — the `BYOK_*` control
+  variables and the provider-credential names stripped at subscription and
+  BYOK-custody boundaries — so one identity survives both spawn points without
+  binding a difference the SDK made on purpose. Nothing that can influence a
+  loader is excluded.
 
 **This SDK ships no resolver and no default.** An absent
 `toolImplementationAuthority` is the supported state, and it means every
@@ -1057,16 +1081,23 @@ binding, and both spawn points consume that one value; a second resolve at
 launch would be a second opinion about the same install. Reverification
 requires the same realpath, the same non-symlink regular file, the same stat
 tuple — `uid`, `gid` and `mode` included, so an install that stopped being
-root-owned or grew a write bit fails it — and the same content digest. A
-failure REFUSES the spawn non-retryably with its reason; it is never downgraded
+root-owned or grew a write bit fails it — and the same content digest, for the
+artifact AND for the interpreter of an `interpreter+bundle`; the refusal names
+which of the two moved. It also re-digests the environment that child is about
+to be handed, and answers `launch_env_drift` when a name appeared, vanished or
+was renamed, or a loader-affecting value reached the child. `launch_env_drift`
+is a spawn-only verdict and never an unavailable reason: at resolve there is
+nothing to disagree with, because that is the moment the environment is
+measured. A failure REFUSES the spawn non-retryably with its reason; it is never downgraded
 to unavailable-and-continue, because a server that was attested and no longer
 measures the same is a server that changed under a claim somebody relied on.
 
 What an attested identity proves is exactly that: at resolve, and again at each
-spawn, the file at that versioned realpath was a root-owned, non-symlink,
-non-writable regular file whose bytes hash to the attested digest and whose
-stat tuple had not moved. What it does **not** prove, carried honestly rather
-than implied away:
+spawn, the file at that versioned realpath — and the interpreter beside it —
+was a root-owned, non-symlink, non-writable regular file whose bytes hash to
+the attested digest and whose stat tuple had not moved, and the environment
+handed to that spawn was the environment that was measured. What it does
+**not** prove, carried honestly rather than implied away:
 
 - post-hoc modification by root, which no measurement by a non-root daemon can
   exclude;

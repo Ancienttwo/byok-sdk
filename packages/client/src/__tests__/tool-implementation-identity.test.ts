@@ -9,6 +9,8 @@ import {
   realToolImplementationFsProbe,
   resolveToolImplementationIdentity,
   reverifyToolImplementationIdentity,
+  toolImplementationLaunchEnvNamesDigest,
+  toolImplementationLoaderEnvValuesDigest,
   ToolImplementationReverifyError,
   type ToolImplementationAttestedV1,
   type ToolImplementationAuthority,
@@ -54,6 +56,19 @@ function locator(command: string): ToolImplementationLocatorV1 {
 
 const EMPTY_MAP_DIGEST = createHash('sha256').update('{}', 'utf8').digest('hex');
 
+/**
+ * The environment a runtime child of this task would receive
+ * (`daemon/environment.ts`'s `buildRuntimeEnv` output): no loader-affecting
+ * name, because that module denies every one of them unconditionally.
+ *
+ * It is an argument to resolve AND to every spawn gate below, never part of
+ * the locator: a host resolver is not asked about it and could not answer.
+ */
+const ENV: Readonly<Record<string, string>> = Object.freeze({
+  PATH: '/usr/bin:/bin',
+  HOME: '/home/agent',
+});
+
 function installRecord(installPath: string, closureDigest: string): ToolImplementationInstallRecordV1 {
   return {
     kind: 'attested',
@@ -65,8 +80,6 @@ function installRecord(installPath: string, closureDigest: string): ToolImplemen
     closureKind: 'artifact',
     launchArgv: ['mcp', 'serve'],
     launchCwd: '/',
-    launchEnvNamesDigest: EMPTY_MAP_DIGEST,
-    loaderEnvValuesDigest: EMPTY_MAP_DIGEST,
   };
 }
 
@@ -91,7 +104,7 @@ afterEach(async () => {
 
 describe('an unconfigured daemon attests nothing', () => {
   it('resolves every identity to resolver_unconfigured when no authority is wired', async () => {
-    const identity = await resolveToolImplementationIdentity(undefined, locator(artifact));
+    const identity = await resolveToolImplementationIdentity(undefined, locator(artifact), ENV);
     expect(identity).toEqual({ kind: 'unavailable', reason: 'resolver_unconfigured' });
   });
 
@@ -101,6 +114,7 @@ describe('an unconfigured daemon attests nothing', () => {
     const identity = await resolveToolImplementationIdentity(
       authorityReturning(installRecord(artifact, artifactDigest)),
       locator(artifact),
+      ENV,
       realToolImplementationFsProbe,
     );
     expect(identity).toEqual({ kind: 'unavailable', reason: 'install_record_mismatch' });
@@ -112,6 +126,7 @@ describe('a resolver answer is measured, not believed', () => {
     const identity = await resolveToolImplementationIdentity(
       authorityReturning(installRecord(artifact, artifactDigest)),
       locator(artifact),
+      ENV,
       rootOwnedProbe(),
     );
     expect(identity.kind).toBe('attested');
@@ -126,6 +141,7 @@ describe('a resolver answer is measured, not believed', () => {
     const identity = await resolveToolImplementationIdentity(
       authorityReturning(installRecord(artifact, 'f'.repeat(64))),
       locator(artifact),
+      ENV,
       rootOwnedProbe(),
     );
     expect(identity).toEqual({ kind: 'unavailable', reason: 'install_record_mismatch' });
@@ -137,6 +153,7 @@ describe('a resolver answer is measured, not believed', () => {
     const identity = await resolveToolImplementationIdentity(
       authorityReturning(installRecord(link, artifactDigest)),
       locator(link),
+      ENV,
       rootOwnedProbe(),
     );
     expect(identity).toEqual({ kind: 'unavailable', reason: 'install_record_mismatch' });
@@ -146,6 +163,7 @@ describe('a resolver answer is measured, not believed', () => {
     const identity = await resolveToolImplementationIdentity(
       authorityReturning(installRecord(artifact, artifactDigest)),
       locator(artifact),
+      ENV,
       rootOwnedProbe({ mode: 0o100644 }),
     );
     expect(identity).toEqual({ kind: 'unavailable', reason: 'install_record_mismatch' });
@@ -155,6 +173,7 @@ describe('a resolver answer is measured, not believed', () => {
     const identity = await resolveToolImplementationIdentity(
       { resolve: async () => { throw new Error('install record unavailable'); } },
       locator(artifact),
+      ENV,
       rootOwnedProbe(),
     );
     expect(identity).toEqual({ kind: 'unavailable', reason: 'implementation_identity_unattested' });
@@ -164,6 +183,7 @@ describe('a resolver answer is measured, not believed', () => {
     const identity = await resolveToolImplementationIdentity(
       authorityReturning({ kind: 'unavailable', reason: 'unencapsulated_source' }),
       locator(artifact),
+      ENV,
       rootOwnedProbe(),
     );
     expect(identity).toEqual({ kind: 'unavailable', reason: 'unencapsulated_source' });
@@ -173,6 +193,7 @@ describe('a resolver answer is measured, not believed', () => {
     const identity = await resolveToolImplementationIdentity(
       authorityReturning({ kind: 'unavailable', reason: 'trust_me' }),
       locator(artifact),
+      ENV,
       rootOwnedProbe(),
     );
     expect(identity).toEqual({ kind: 'unavailable', reason: 'implementation_identity_unattested' });
@@ -184,6 +205,7 @@ describe('the install record shape is strict', () => {
     const identity = await resolveToolImplementationIdentity(
       authorityReturning({ ...installRecord(artifact, artifactDigest), trusted: true }),
       locator(artifact),
+      ENV,
       rootOwnedProbe(),
     );
     expect(identity).toEqual({ kind: 'unavailable', reason: 'implementation_identity_unattested' });
@@ -193,6 +215,7 @@ describe('the install record shape is strict', () => {
     const identity = await resolveToolImplementationIdentity(
       authorityReturning({ ...installRecord(artifact, artifactDigest), authority: 'self-declared' }),
       locator(artifact),
+      ENV,
       rootOwnedProbe(),
     );
     expect(identity).toEqual({ kind: 'unavailable', reason: 'implementation_identity_unattested' });
@@ -205,6 +228,7 @@ describe('the install record shape is strict', () => {
         interpreter: { path: '/usr/bin/node', digest: 'a'.repeat(64), loadCommandsDigest: 'b'.repeat(64) },
       }),
       locator(artifact),
+      ENV,
       rootOwnedProbe(),
     );
     expect(identity).toEqual({ kind: 'unavailable', reason: 'interpreter_form_unsupported' });
@@ -214,6 +238,7 @@ describe('the install record shape is strict', () => {
     const identity = await resolveToolImplementationIdentity(
       authorityReturning({ ...installRecord(artifact, artifactDigest), form: 'interpreter+bundle' }),
       locator(artifact),
+      ENV,
       rootOwnedProbe(),
     );
     expect(identity).toEqual({ kind: 'unavailable', reason: 'interpreter_form_unsupported' });
@@ -227,6 +252,7 @@ describe('the install record shape is strict', () => {
       const identity = await resolveToolImplementationIdentity(
         authorityReturning(broken),
         locator(artifact),
+        ENV,
         rootOwnedProbe(),
       );
       expect(identity).toEqual({ kind: 'unavailable', reason: 'implementation_identity_unattested' });
@@ -243,6 +269,7 @@ describe('an attested identity is unconstructible from a value nobody measured',
     const attested = await resolveToolImplementationIdentity(
       authorityReturning(installRecord(artifact, artifactDigest)),
       locator(artifact),
+      ENV,
       rootOwnedProbe(),
     ) as ToolImplementationAttestedV1;
     expect(parseToolImplementationIdentity({ ...attested, trusted: true })).toBeUndefined();
@@ -252,6 +279,7 @@ describe('an attested identity is unconstructible from a value nobody measured',
     const attested = await resolveToolImplementationIdentity(
       authorityReturning(installRecord(artifact, artifactDigest)),
       locator(artifact),
+      ENV,
       rootOwnedProbe(),
     ) as ToolImplementationAttestedV1;
     const parsed = parseToolImplementationIdentity(JSON.parse(JSON.stringify(attested)));
@@ -270,6 +298,7 @@ describe('reverification measures the artifact again at spawn', () => {
     const identity = await resolveToolImplementationIdentity(
       authorityReturning(installRecord(artifact, artifactDigest)),
       locator(artifact),
+      ENV,
       rootOwnedProbe(),
     );
     expect(identity.kind).toBe('attested');
@@ -277,14 +306,14 @@ describe('reverification measures the artifact again at spawn', () => {
   }
 
   it('passes when nothing about the artifact changed', async () => {
-    expect(await reverifyToolImplementationIdentity(await attest(), rootOwnedProbe())).toBe('ok');
+    expect(await reverifyToolImplementationIdentity(await attest(), ENV, rootOwnedProbe())).toBe('ok');
   });
 
   it('fails when one byte of the artifact is rewritten between resolve and spawn', async () => {
     const attested = await attest();
     await fs.appendFile(artifact, '!');
-    expect(await reverifyToolImplementationIdentity(attested, rootOwnedProbe()))
-      .toEqual({ reason: 'install_record_mismatch' });
+    expect(await reverifyToolImplementationIdentity(attested, ENV, rootOwnedProbe()))
+      .toEqual({ reason: 'install_record_mismatch', subject: 'artifact' });
   });
 
   it('fails on an mtime-only change, with the bytes still identical', async () => {
@@ -292,8 +321,8 @@ describe('reverification measures the artifact again at spawn', () => {
     const moved = new Date(Date.now() + 120_000);
     await fs.utimes(artifact, moved, moved);
     expect(await realToolImplementationFsProbe.digest(artifact)).toBe(attested.closureDigest);
-    expect(await reverifyToolImplementationIdentity(attested, rootOwnedProbe()))
-      .toEqual({ reason: 'install_record_mismatch' });
+    expect(await reverifyToolImplementationIdentity(attested, ENV, rootOwnedProbe()))
+      .toEqual({ reason: 'install_record_mismatch', subject: 'artifact' });
   });
 
   it('fails when the artifact is replaced by a file with the same bytes', async () => {
@@ -302,32 +331,279 @@ describe('reverification measures the artifact again at spawn', () => {
     await fs.writeFile(replacement, 'the attested bytes\n');
     await fs.rename(replacement, artifact);
     expect(await realToolImplementationFsProbe.digest(artifact)).toBe(attested.closureDigest);
-    expect(await reverifyToolImplementationIdentity(attested, rootOwnedProbe()))
-      .toEqual({ reason: 'install_record_mismatch' });
+    expect(await reverifyToolImplementationIdentity(attested, ENV, rootOwnedProbe()))
+      .toEqual({ reason: 'install_record_mismatch', subject: 'artifact' });
   });
 
   it('fails when the artifact is gone', async () => {
     const attested = await attest();
     await fs.rm(artifact);
-    expect(await reverifyToolImplementationIdentity(attested, rootOwnedProbe()))
-      .toEqual({ reason: 'install_record_mismatch' });
+    expect(await reverifyToolImplementationIdentity(attested, ENV, rootOwnedProbe()))
+      .toEqual({ reason: 'install_record_mismatch', subject: 'artifact' });
   });
 
   it('refuses the spawn, non-retryably and with the reason, when reverification fails', async () => {
     const attested = await attest();
     await fs.appendFile(artifact, '!');
-    await expect(assertToolImplementationBeforeSpawn('MCP toolset server "salesko"', attested, rootOwnedProbe()))
+    await expect(assertToolImplementationBeforeSpawn('MCP toolset server "salesko"', attested, ENV, rootOwnedProbe()))
       .rejects.toThrow(ToolImplementationReverifyError);
-    await expect(assertToolImplementationBeforeSpawn('MCP toolset server "salesko"', attested, rootOwnedProbe()))
+    await expect(assertToolImplementationBeforeSpawn('MCP toolset server "salesko"', attested, ENV, rootOwnedProbe()))
       .rejects.toThrow(/install_record_mismatch/u);
   });
 
   it('lets an unavailable identity and an absent one through: neither carries a claim to break', async () => {
-    await expect(assertToolImplementationBeforeSpawn('probe', undefined, rootOwnedProbe())).resolves.toBeUndefined();
+    await expect(assertToolImplementationBeforeSpawn('probe', undefined, ENV, rootOwnedProbe())).resolves.toBeUndefined();
     await expect(assertToolImplementationBeforeSpawn(
       'probe',
       { kind: 'unavailable', reason: 'resolver_unconfigured' },
+      ENV,
       rootOwnedProbe(),
     )).resolves.toBeUndefined();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// The launch environment is measured, never supplied
+// ---------------------------------------------------------------------------
+
+describe('the launch environment is an SDK measurement, not a resolver input', () => {
+  it('refuses a record that tries to supply the env digests itself', async () => {
+    for (const forged of [
+      { ...installRecord(artifact, artifactDigest), launchEnvNamesDigest: 'c'.repeat(64) },
+      { ...installRecord(artifact, artifactDigest), loaderEnvValuesDigest: 'd'.repeat(64) },
+    ]) {
+      const identity = await resolveToolImplementationIdentity(
+        authorityReturning(forged),
+        locator(artifact),
+        ENV,
+        rootOwnedProbe(),
+      );
+      expect(identity).toEqual({ kind: 'unavailable', reason: 'implementation_identity_unattested' });
+    }
+  });
+
+  it('measures both digests off the environment the caller will spawn with', async () => {
+    const identity = await resolveToolImplementationIdentity(
+      authorityReturning(installRecord(artifact, artifactDigest)),
+      locator(artifact),
+      ENV,
+      rootOwnedProbe(),
+    ) as ToolImplementationAttestedV1;
+    expect(identity.launchEnvNamesDigest).toBe(toolImplementationLaunchEnvNamesDigest(ENV));
+    // Nothing `buildRuntimeEnv` produces carries a loader-affecting name, so
+    // the expected value is the digest of the empty canonical map.
+    expect(identity.loaderEnvValuesDigest).toBe(EMPTY_MAP_DIGEST);
+    expect(toolImplementationLoaderEnvValuesDigest(ENV)).toBe(EMPTY_MAP_DIGEST);
+  });
+
+  it('binds the NAMES, not the values: changing a non-loader value changes neither digest', () => {
+    const changed = { ...ENV, HOME: '/home/somebody-else' };
+    expect(toolImplementationLaunchEnvNamesDigest(changed))
+      .toBe(toolImplementationLaunchEnvNamesDigest(ENV));
+    expect(toolImplementationLoaderEnvValuesDigest(changed)).toBe(EMPTY_MAP_DIGEST);
+  });
+
+  it('changes the names digest when a name is added, removed or renamed', () => {
+    const baseline = toolImplementationLaunchEnvNamesDigest(ENV);
+    const { HOME, ...removed } = ENV;
+    expect(toolImplementationLaunchEnvNamesDigest({ ...ENV, PYTHONPATH: '/tmp/x' })).not.toBe(baseline);
+    expect(toolImplementationLaunchEnvNamesDigest(removed)).not.toBe(baseline);
+    expect(toolImplementationLaunchEnvNamesDigest({ PATH: ENV.PATH!, HOMEDIR: HOME! })).not.toBe(baseline);
+  });
+
+  it('excludes exactly the names this SDK itself adds or strips between resolve and spawn', () => {
+    // `withoutProviderCredentials` at a subscription boundary and the two Pi
+    // control variables are the SDK's own doing, so an identity resolved
+    // before them still matches the environment that reaches the child.
+    const baseline = toolImplementationLaunchEnvNamesDigest(ENV);
+    expect(toolImplementationLaunchEnvNamesDigest({ ...ENV, ANTHROPIC_API_KEY: 'sk-x' })).toBe(baseline);
+    expect(toolImplementationLaunchEnvNamesDigest({ ...ENV, BYOK_PI_MCP_CONFIG_PATH: '/tmp/c' })).toBe(baseline);
+  });
+});
+
+describe('a spawn is refused when its environment is not the one that was measured', () => {
+  async function attest(): Promise<ToolImplementationAttestedV1> {
+    const identity = await resolveToolImplementationIdentity(
+      authorityReturning(installRecord(artifact, artifactDigest)),
+      locator(artifact),
+      ENV,
+      rootOwnedProbe(),
+    );
+    expect(identity.kind).toBe('attested');
+    return identity as ToolImplementationAttestedV1;
+  }
+
+  it('admits the spawn when the environment is the one the identity was measured against', async () => {
+    expect(await reverifyToolImplementationIdentity(await attest(), { ...ENV }, rootOwnedProbe())).toBe('ok');
+  });
+
+  it('refuses a loader-affecting variable that appeared after the identity was measured', async () => {
+    const attested = await attest();
+    const injections: readonly Record<string, string>[] = [
+      { NODE_OPTIONS: '--require /tmp/x.js' },
+      { DYLD_INSERT_LIBRARIES: '/tmp/x.dylib' },
+      { BASH_ENV: '/tmp/x.sh' },
+    ];
+    for (const injected of injections) {
+      expect(await reverifyToolImplementationIdentity(attested, { ...ENV, ...injected }, rootOwnedProbe()))
+        .toEqual({ reason: 'launch_env_drift', subject: 'launch-env' });
+    }
+  });
+
+  it('refuses a renamed variable even though the name count is unchanged', async () => {
+    const attested = await attest();
+    expect(await reverifyToolImplementationIdentity(
+      attested,
+      { PATH: ENV.PATH!, HOMEDIR: ENV.HOME! },
+      rootOwnedProbe(),
+    )).toEqual({ reason: 'launch_env_drift', subject: 'launch-env' });
+  });
+
+  it('admits a changed value on a name that cannot influence a loader', async () => {
+    const attested = await attest();
+    expect(await reverifyToolImplementationIdentity(attested, { ...ENV, HOME: '/home/other' }, rootOwnedProbe()))
+      .toBe('ok');
+  });
+
+  it('refuses the spawn itself, naming the drift', async () => {
+    const attested = await attest();
+    await expect(assertToolImplementationBeforeSpawn(
+      'MCP toolset server "salesko"',
+      attested,
+      { ...ENV, NODE_OPTIONS: '--require /tmp/x.js' },
+      rootOwnedProbe(),
+    )).rejects.toThrow(/launch_env_drift \(launch-env\)/u);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// interpreter+bundle: the interpreter is measured exactly as the artifact is
+// ---------------------------------------------------------------------------
+
+describe('an interpreter+bundle reverifies its interpreter as strictly as its bundle', () => {
+  let interpreter: string;
+  let interpreterDigest: string;
+
+  beforeEach(async () => {
+    interpreter = path.join(dir, 'salesko-node');
+    await fs.writeFile(interpreter, 'the attested interpreter\n');
+    interpreterDigest = await realToolImplementationFsProbe.digest(interpreter);
+  });
+
+  function bundleRecord(): ToolImplementationInstallRecordV1 {
+    return {
+      ...installRecord(artifact, artifactDigest),
+      form: 'interpreter+bundle',
+      interpreter: {
+        path: interpreter,
+        digest: interpreterDigest,
+        loadCommandsDigest: 'e'.repeat(64),
+      },
+    };
+  }
+
+  async function attest(): Promise<ToolImplementationAttestedV1> {
+    const identity = await resolveToolImplementationIdentity(
+      authorityReturning(bundleRecord()),
+      locator(artifact),
+      ENV,
+      rootOwnedProbe(),
+    );
+    expect(identity.kind).toBe('attested');
+    return identity as ToolImplementationAttestedV1;
+  }
+
+  it('measures an interpreter stat tuple at resolve, which no host supplied', async () => {
+    const attested = await attest();
+    const live = await realToolImplementationFsProbe.lstat(interpreter);
+    expect(attested.interpreterStat).toMatchObject({ ino: live.ino, size: live.size, mtimeMs: live.mtimeMs });
+    // Measured through the same seam as the artifact's: root-owned there,
+    // root-owned here, and it is the SDK that says so.
+    expect(attested.interpreterStat?.uid).toBe(0);
+  });
+
+  it('admits the spawn while nothing about either file changed', async () => {
+    expect(await reverifyToolImplementationIdentity(await attest(), ENV, rootOwnedProbe())).toBe('ok');
+  });
+
+  it('refuses a byte flipped in the interpreter, naming the interpreter', async () => {
+    const attested = await attest();
+    await fs.appendFile(interpreter, '!');
+    expect(await reverifyToolImplementationIdentity(attested, ENV, rootOwnedProbe()))
+      .toEqual({ reason: 'install_record_mismatch', subject: 'interpreter' });
+  });
+
+  it('refuses an mtime-only touch of the interpreter, with its bytes identical', async () => {
+    const attested = await attest();
+    const moved = new Date(Date.now() + 120_000);
+    await fs.utimes(interpreter, moved, moved);
+    expect(await realToolImplementationFsProbe.digest(interpreter)).toBe(attested.interpreter!.digest);
+    expect(await reverifyToolImplementationIdentity(attested, ENV, rootOwnedProbe()))
+      .toEqual({ reason: 'install_record_mismatch', subject: 'interpreter' });
+  });
+
+  it('refuses an interpreter that stopped being root-owned or grew a write bit', async () => {
+    const attested = await attest();
+    // The ownership seam, applied to the interpreter alone: every other fact
+    // is still the real one read off disk.
+    const movedOwnership: ToolImplementationFsProbe = {
+      async lstat(target) {
+        const real = await realToolImplementationFsProbe.lstat(target);
+        if (target === interpreter) return { ...real, uid: 501, mode: real.mode & ~0o222 };
+        return { ...real, uid: 0, mode: real.mode & ~0o222 };
+      },
+      realpath: (target) => realToolImplementationFsProbe.realpath(target),
+      digest: (target) => realToolImplementationFsProbe.digest(target),
+    };
+    expect(await reverifyToolImplementationIdentity(attested, ENV, movedOwnership))
+      .toEqual({ reason: 'install_record_mismatch', subject: 'interpreter' });
+    const grewWriteBit: ToolImplementationFsProbe = {
+      async lstat(target) {
+        const real = await realToolImplementationFsProbe.lstat(target);
+        if (target === interpreter) return { ...real, uid: 0, mode: (real.mode & ~0o222) | 0o200 };
+        return { ...real, uid: 0, mode: real.mode & ~0o222 };
+      },
+      realpath: (target) => realToolImplementationFsProbe.realpath(target),
+      digest: (target) => realToolImplementationFsProbe.digest(target),
+    };
+    expect(await reverifyToolImplementationIdentity(attested, ENV, grewWriteBit))
+      .toEqual({ reason: 'install_record_mismatch', subject: 'interpreter' });
+  });
+
+  it('refuses an interpreter replaced by a different file with the same bytes', async () => {
+    const attested = await attest();
+    const replacement = path.join(dir, 'replacement-node');
+    await fs.writeFile(replacement, 'the attested interpreter\n');
+    await fs.rename(replacement, interpreter);
+    expect(await realToolImplementationFsProbe.digest(interpreter)).toBe(attested.interpreter!.digest);
+    expect(await reverifyToolImplementationIdentity(attested, ENV, rootOwnedProbe()))
+      .toEqual({ reason: 'install_record_mismatch', subject: 'interpreter' });
+  });
+
+  it('refuses the spawn itself, naming which half moved', async () => {
+    const attested = await attest();
+    await fs.appendFile(interpreter, '!');
+    await expect(assertToolImplementationBeforeSpawn('probe', attested, ENV, rootOwnedProbe()))
+      .rejects.toThrow(/install_record_mismatch \(interpreter\)/u);
+  });
+
+  it('refuses an identity whose interpreter carries no SDK-measured tuple', async () => {
+    const attested = await attest();
+    const { interpreterStat, ...withoutTuple } = attested;
+    expect(parseToolImplementationIdentity(withoutTuple)).toBeUndefined();
+    // And the other direction: an artifact-only identity that carries one.
+    const compiled = await resolveToolImplementationIdentity(
+      authorityReturning(installRecord(artifact, artifactDigest)),
+      locator(artifact),
+      ENV,
+      rootOwnedProbe(),
+    ) as ToolImplementationAttestedV1;
+    expect(parseToolImplementationIdentity({ ...compiled, interpreterStat })).toBeUndefined();
+  });
+
+  it('round-trips through JSON with both tuples intact', async () => {
+    const attested = await attest();
+    expect(parseToolImplementationIdentity(JSON.parse(JSON.stringify(attested)))).toEqual(attested);
   });
 });

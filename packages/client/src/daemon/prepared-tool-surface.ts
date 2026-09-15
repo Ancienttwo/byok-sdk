@@ -307,6 +307,10 @@ export async function resolvePreparedToolBinding(
   // says so. What refuses is the re-measurement at spawn, and only for a
   // server that WAS attested.
   const resolved: PreparedToolServerBinding[] = [];
+  // The exact environment the probe below spawns each server with, taken ONCE:
+  // the identity binds the environment this SDK hands to `spawn`, so a second
+  // `deps.runtimeEnv()` call could measure one value and spawn with another.
+  const launchEnv = deps.runtimeEnv();
   for (const serverName of [...servers.keys()].sort(compareServerNames)) {
     const entry = servers.get(serverName)!;
     const implementation = await resolveToolImplementationIdentity(
@@ -318,6 +322,7 @@ export async function resolvePreparedToolBinding(
         args: Object.freeze([...(entry.server.args ?? [])]),
         launch,
       },
+      launchEnv,
       deps.toolImplementationFsProbe,
     );
     resolved.push(Object.freeze({

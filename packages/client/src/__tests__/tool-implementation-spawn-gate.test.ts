@@ -9,9 +9,13 @@ import type { BlobResolver } from '../daemon/blob-client';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { McpAuthorityError, probeMcpServer } from '../daemon/mcp-tools-probe';
+import { buildRuntimeEnv } from '../daemon/environment';
+import { withoutProviderCredentials } from '../adapters/provider-credential-environment';
 import {
   parseToolImplementationIdentity,
   realToolImplementationFsProbe,
+  toolImplementationLaunchEnvNamesDigest,
+  toolImplementationLoaderEnvValuesDigest,
   type ToolImplementationAttestedV1,
   type ToolImplementationAuthority,
   type ToolImplementationFsProbe,
@@ -39,6 +43,23 @@ import { trustedCwd } from './fixtures/launch-cwd';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/mcp-fixture-server.mjs', import.meta.url));
 const ENV = { PATH: process.env.PATH ?? '' } as const;
+
+/**
+ * The environment `McpServerPool` spawns a server with, recomputed here from
+ * the same rule the pool applies (`adapters/pi/mcp-server-pool.ts`): this
+ * process's own environment, minus the SDK's Pi control variables.
+ *
+ * The pool runs inside the Pi child, so this is the second of the two
+ * environments one identity has to survive.
+ */
+function poolChildEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [name, value] of Object.entries(process.env)) {
+    if (value === undefined || name.startsWith('BYOK_PI_')) continue;
+    env[name] = value;
+  }
+  return env;
+}
 
 const MCP_CAPABLE: RuntimeCapabilities = {
   steer: false,
@@ -81,7 +102,10 @@ const SHA256_HEX = /^[0-9a-f]{64}$/u;
  * exercise compares the identity against the filesystem, so a fabricated tuple
  * or digest would make every case fail for the wrong reason.
  */
-async function attestReal(installPath: string): Promise<ToolImplementationAttestedV1> {
+async function attestReal(
+  installPath: string,
+  launchEnv: Readonly<Record<string, string>> = ENV,
+): Promise<ToolImplementationAttestedV1> {
   const stats = await realToolImplementationFsProbe.lstat(installPath);
   const digest = await realToolImplementationFsProbe.digest(installPath);
   const identity = parseToolImplementationIdentity({
@@ -94,8 +118,12 @@ async function attestReal(installPath: string): Promise<ToolImplementationAttest
     closureKind: 'artifact',
     launchArgv: [],
     launchCwd: '/',
-    launchEnvNamesDigest: 'a'.repeat(64),
-    loaderEnvValuesDigest: 'b'.repeat(64),
+    // The environment fact is measured off the object the spawn under test
+    // will hand to `spawn`, exactly as the daemon measures it: the gate
+    // re-digests that object, so a fabricated pair would refuse every spawn
+    // here for `launch_env_drift`.
+    launchEnvNamesDigest: toolImplementationLaunchEnvNamesDigest(launchEnv),
+    loaderEnvValuesDigest: toolImplementationLoaderEnvValuesDigest(launchEnv),
     installStat: {
       dev: stats.dev,
       ino: stats.ino,
@@ -183,6 +211,9 @@ describe('one resolve per server reaches both spawn points', () => {
           args: ['--stdio'],
         });
         expect(input.launch.launchCwd).toBe(await trustedCwd());
+        // The locator is the whole of what a host is asked. It carries no
+        // environment, and a resolver that wanted one could not have it.
+        expect(Object.keys(input).sort()).toEqual(['args', 'command', 'launch', 'serverName', 'toolsetId']);
         return {
           kind: 'attested',
           authority: 'host-install-record',
@@ -193,8 +224,6 @@ describe('one resolve per server reaches both spawn points', () => {
           closureKind: 'artifact',
           launchArgv: ['--stdio'],
           launchCwd: '/',
-          launchEnvNamesDigest: 'c'.repeat(64),
-          loaderEnvValuesDigest: 'd'.repeat(64),
         } as never;
       }),
     };
@@ -223,6 +252,12 @@ describe('one resolve per server reaches both spawn points', () => {
     // SDK-measured, not resolver-supplied: the resolver's record carried no
     // stat tuple at all.
     expect((carried!.salesko as ToolImplementationAttestedV1).closureDigest).toMatch(SHA256_HEX);
+    // The two launch-environment digests are the same kind of fact: the
+    // resolver's record carried neither, and the SDK measured both off the
+    // environment it built for this task.
+    expect((carried!.salesko as ToolImplementationAttestedV1).launchEnvNamesDigest).toMatch(SHA256_HEX);
+    expect((carried!.salesko as ToolImplementationAttestedV1).loaderEnvValuesDigest)
+      .toBe(toolImplementationLoaderEnvValuesDigest({}));
 
     await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-impl-both', seq: 2 }));
   });
@@ -249,6 +284,68 @@ describe('one resolve per server reaches both spawn points', () => {
 });
 
 // ---------------------------------------------------------------------------
+// The environment one identity has to survive at BOTH spawn points
+// ---------------------------------------------------------------------------
+
+/**
+ * The daemon measures the launch environment once, at resolve, off the value
+ * `buildRuntimeEnv` produced for the task. That identity is then re-measured
+ * at two spawns in two processes, and the environment they hand to `spawn` is
+ * not byte-identical: the Pi adapter strips provider credentials at a
+ * subscription boundary and adds its own control variables, and the pool
+ * strips those back off.
+ *
+ * Every one of those differences is this SDK's own doing, and the digests are
+ * taken over a projection that excludes exactly them
+ * (`daemon/tool-implementation-identity.ts`). If that projection ever stops
+ * matching what the adapter and the pool actually do, this fails — and every
+ * attested spawn in the hosted Pi lane would otherwise start being refused for
+ * a difference nobody made maliciously.
+ */
+describe('the launch environment digests survive the Pi lane transformations', () => {
+  it('measures the same digests for the daemon env and the env the pool spawns with', () => {
+    const daemonEnv = buildRuntimeEnv({
+      ambient: {
+        PATH: '/usr/bin:/bin',
+        HOME: '/home/agent',
+        ANTHROPIC_API_KEY: 'sk-ant-x',
+        OPENAI_API_KEY: 'sk-oai-x',
+        BYOK_DAEMON_SECRET: 'never-inherited',
+      },
+      requirements: { credentialNames: ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'] },
+    });
+    // Non-vacuous: the credentials really are in the value the daemon measured.
+    expect(daemonEnv.ANTHROPIC_API_KEY).toBe('sk-ant-x');
+
+    // `adapters/pi/pi-adapter.ts`: a hosted manifest selection strips provider
+    // credentials, then the two control variables are added.
+    const piChildEnv = {
+      ...withoutProviderCredentials(daemonEnv),
+      BYOK_PI_MCP_CONFIG_PATH: '/tmp/byok-pi-mcp/mcp-config.json',
+      BYOK_PI_PERMISSION_MODE: 'auto',
+    } as Record<string, string>;
+    // `adapters/pi/mcp-server-pool.ts`: the pool strips the control variables.
+    const spawned: Record<string, string> = {};
+    for (const [name, value] of Object.entries(piChildEnv)) {
+      if (name.startsWith('BYOK_PI_')) continue;
+      spawned[name] = value;
+    }
+    expect(spawned.ANTHROPIC_API_KEY).toBeUndefined();
+
+    expect(toolImplementationLaunchEnvNamesDigest(spawned))
+      .toBe(toolImplementationLaunchEnvNamesDigest(daemonEnv));
+    expect(toolImplementationLoaderEnvValuesDigest(spawned))
+      .toBe(toolImplementationLoaderEnvValuesDigest(daemonEnv));
+  });
+
+  it('still refuses a name that neither the adapter nor the pool would have added', () => {
+    const daemonEnv = { PATH: '/usr/bin', HOME: '/home/agent' };
+    expect(toolImplementationLaunchEnvNamesDigest({ ...daemonEnv, PYTHONPATH: '/tmp/evil' }))
+      .not.toBe(toolImplementationLaunchEnvNamesDigest(daemonEnv));
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Spawn point one: the admission probe
 // ---------------------------------------------------------------------------
 
@@ -271,6 +368,24 @@ describe('the admission probe re-measures an attested server before spawning it'
       implementation: await attestReal(script),
     });
     expect(observation.tools.map((tool) => tool.name)).toContain('echo');
+  }, 30_000);
+
+  it('refuses the spawn when the environment is not the one the identity was measured against', async () => {
+    const script = await artifactCopy();
+    const identity = await attestReal(script, ENV);
+    // The artifact is untouched: only the environment this child would be
+    // handed differs, by one loader-affecting variable.
+    await expect(probeMcpServer('salesko', spec(script), {
+      env: { ...ENV, NODE_OPTIONS: '--require /tmp/injected.js' },
+      timeoutMs: 15_000,
+      implementation: identity,
+    })).rejects.toThrow(/launch_env_drift \(launch-env\)/u);
+    // And by one renamed variable, which no deny list would have caught.
+    await expect(probeMcpServer('salesko', spec(script), {
+      env: { PATHS: ENV.PATH },
+      timeoutMs: 15_000,
+      implementation: identity,
+    })).rejects.toThrow(/launch_env_drift \(launch-env\)/u);
   }, 30_000);
 
   it('refuses the spawn when one byte of the artifact is rewritten after it was attested', async () => {
@@ -390,7 +505,7 @@ describe('the Pi extension re-measures an attested server before opening it', ()
 
   it('calls the tool when the artifact still measures the way the daemon attested it', async () => {
     const script = await artifactCopy();
-    const tools = await loadExtension(script, { salesko: await attestReal(script) });
+    const tools = await loadExtension(script, { salesko: await attestReal(script, poolChildEnv()) });
     const echo = tools.find((tool) => tool.name === 'mcp__salesko__echo')!;
     const result = await echo.execute('call-1', { text: 'hello' }, undefined);
     expect(result.content).toEqual([{ type: 'text', text: 'byok-fixture:echo:{"text":"hello"}' }]);
@@ -406,6 +521,22 @@ describe('the Pi extension re-measures an attested server before opening it', ()
     const echo = tools.find((tool) => tool.name === 'mcp__salesko__echo')!;
     await expect(echo.execute('call-1', { text: 'hello' }, undefined))
       .rejects.toThrow(/install_record_mismatch/u);
+  }, 30_000);
+
+  it('refuses to open the server when this process gained a variable after the daemon measured it', async () => {
+    const script = await artifactCopy();
+    // Attested against the environment the pool WOULD have spawned with, then
+    // a name appears in it — the pool's child env is this process's own.
+    const identity = await attestReal(script, poolChildEnv());
+    process.env.PYTHONPATH = '/tmp/injected';
+    try {
+      const tools = await loadExtension(script, { salesko: identity });
+      const echo = tools.find((tool) => tool.name === 'mcp__salesko__echo')!;
+      await expect(echo.execute('call-1', { text: 'hello' }, undefined))
+        .rejects.toThrow(/launch_env_drift \(launch-env\)/u);
+    } finally {
+      delete process.env.PYTHONPATH;
+    }
   }, 30_000);
 
   it('opens the server normally when the daemon attested nothing about it', async () => {

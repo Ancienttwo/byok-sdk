@@ -5,6 +5,41 @@
 Deliberately not filed under 0.18.0: none of this is in a published artifact,
 and the D2 version number belongs to a separate SDK release contract.
 
+- **Changed (daemon, unreleased contract)** — the tool implementation resolver
+  is asked only for what a host knows. `ToolImplementationInstallRecordV1` no
+  longer carries `launchEnvNamesDigest` or `loaderEnvValuesDigest`, and a
+  record that sends either is rejected as not an install record.
+
+  A host cannot know the environment object this SDK hands to `spawn` — it is
+  `buildRuntimeEnv`'s output for one task on one device, not the host's own
+  `process.env` — so asking it to digest one made every resolver either guess
+  or keep a copy of this package's loader deny list. The SDK now measures both
+  digests itself, at resolve, off the exact environment its caller will spawn
+  with, and re-measures them at the spawn gate against the environment actually
+  being handed to the child; a mismatch refuses the spawn with the new
+  spawn-only verdict `launch_env_drift`. The digests are taken over a
+  projection that excludes the `BYOK_*` control variables and the
+  provider-credential names this SDK itself strips between the daemon's
+  measurement and the Pi pool's spawn, and nothing else — the loader deny list
+  is disjoint from both, so a `NODE_OPTIONS`, `DYLD_*` or `BASH_ENV` that
+  reaches a child is still a refusal, as is a `PYTHONPATH` that appeared or a
+  variable that was renamed. A prepared record's `toolBindingDigest` now
+  commits to that projection, so a daemon whose runtime environment gains or
+  loses a bound name between prepare and admission declines the prepared offer.
+
+- **Fixed (daemon, unreleased contract)** — an `interpreter+bundle` identity
+  re-measures its interpreter at every spawn as strictly as its artifact.
+
+  Resolve checked the interpreter's realpath, ownership, write bits and digest;
+  the spawn gate re-hashed its bytes alone. A replaced interpreter inode, an
+  mtime-only touch, or an interpreter that stopped being root-owned passed a
+  gate the artifact half would have refused. The identity now carries an
+  SDK-measured `interpreterStat`, present iff the record names an interpreter
+  and required in both directions when an identity is parsed back, and the gate
+  compares the interpreter's live stat tuple and digest exactly as the
+  artifact's. Every reverification verdict now names its subject — `artifact`,
+  `interpreter` or `launch-env` — in the reason and in the refusal message.
+
 - **Fixed (daemon, unreleased contract)** — a prepared offer no longer declines
   a durable record that a restart left unread.
 

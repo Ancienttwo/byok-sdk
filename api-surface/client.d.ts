@@ -8724,11 +8724,27 @@ import type { McpLaunchAttestation } from './trusted-launch-cwd';
  *   every spawn. An absolute path is not an attestation, and a resolver that
  *   reports one is answered with a refusal rather than a promotion.
  *
+ * WHAT EACH SIDE SUPPLIES, exactly:
+ *
+ * - The resolver returns a {@link ToolImplementationInstallRecordV1} — the
+ *   manifest revision, the form, the versioned realpath, the artifact digest,
+ *   the interpreter triple for an `interpreter+bundle`, the entry, the launch
+ *   argv and cwd — or an {@link ToolImplementationUnavailableV1} reason. That
+ *   is the whole of the host's authority.
+ * - The SDK measures everything else and seals it on: `installStat`,
+ *   `interpreterStat`, `launchEnvNamesDigest` and `loaderEnvValuesDigest`.
+ *   None of the four is a resolver input, and a record that carries one is not
+ *   an install record. A host cannot know the environment object this SDK will
+ *   hand to `spawn`, and must never guess it from its own `process.env`.
+ *
  * What an `attested` identity proves is therefore exactly this: at the moment
  * it was resolved, and again at the moment the server was spawned, the file at
- * that versioned realpath was a root-owned, non-symlink, non-writable regular
- * file whose bytes hash to `closureDigest` and whose `(dev, ino, size, mtime,
- * mode, uid, gid)` tuple is the one that was measured at resolve.
+ * that versioned realpath — and, for an `interpreter+bundle`, the interpreter
+ * beside it — was a root-owned, non-symlink, non-writable regular file whose
+ * bytes hash to its attested digest and whose `(dev, ino, size, mtime, mode,
+ * uid, gid)` tuple is the one that was measured at resolve, and that the
+ * environment handed to that spawn is the environment that was measured at
+ * resolve (see {@link toolImplementationLaunchEnvNamesDigest}).
  *
  * What it does NOT prove (§26, carried honestly rather than implied away):
  * post-hoc modification by root, the integrity of the kernel, dyld, SIP-owned
@@ -8780,7 +8796,8 @@ export interface ToolImplementationInterpreterV1 {
 }
 /**
  * The filesystem tuple measured at resolve and required to be unchanged at
- * every later spawn.
+ * every later spawn. One is measured for the artifact (`installStat`) and, for
+ * an `interpreter+bundle`, one for the interpreter (`interpreterStat`).
  *
  * SDK-measured, never resolver-supplied: it is the one field of an attested
  * identity whose value a host cannot choose. A record whose digest still
@@ -8834,19 +8851,33 @@ export interface ToolImplementationAttestedV1 {
     readonly entry?: string;
     readonly launchArgv: readonly string[];
     readonly launchCwd: string;
-    /** Digest of the NAMES the child's environment carries. Never their values. */
+    /**
+     * SDK-measured at resolve: the digest of the NAMES the child's environment
+     * carries, never their values. See
+     * {@link toolImplementationLaunchEnvNamesDigest} for the projection it is
+     * taken over and why that projection exists.
+     */
     readonly launchEnvNamesDigest: string;
     /**
-     * §27.2: digest of the sanitized loader-affecting env VALUES as they would
-     * reach the child — the values of the names `daemon/environment.ts` already
-     * denies, which is expected to be the empty canonical map. Never the full
-     * task environment: the probe carries no execution nonce, and binding a task
-     * or server nonce into an identity would make every task's identity
-     * different for reasons that have nothing to do with the implementation.
+     * SDK-measured at resolve. §27.2: digest of the sanitized loader-affecting
+     * env VALUES as they would reach the child — the values of the names
+     * `daemon/environment.ts` already denies, which is expected to be the empty
+     * canonical map. Never the full task environment: the probe carries no
+     * execution nonce, and binding a task or server nonce into an identity would
+     * make every task's identity different for reasons that have nothing to do
+     * with the implementation.
      */
     readonly loaderEnvValuesDigest: string;
     /** SDK-measured at resolve. See {@link ToolImplementationStatTupleV1}. */
     readonly installStat: ToolImplementationStatTupleV1;
+    /**
+     * SDK-measured at resolve, present iff {@link interpreter} is. The
+     * interpreter half of an `interpreter+bundle` is re-measured at every spawn
+     * exactly as the artifact is, and a tuple it cannot be compared against
+     * would make that half a digest check alone — blind to a replaced inode, a
+     * touched mtime, and an interpreter that stopped being root-owned.
+     */
+    readonly interpreterStat?: ToolImplementationStatTupleV1;
 }
 export type ToolImplementationIdentityV1 = ToolImplementationUnavailableV1 | ToolImplementationAttestedV1;
 export declare function toolImplementationUnavailable(reason: ToolImplementationUnavailableReasonV1): ToolImplementationUnavailableV1;
@@ -8862,10 +8893,19 @@ export interface ToolImplementationLocatorV1 {
 }
 /**
  * The install record a resolver returns, which is an attested identity MINUS
- * the one thing a host does not get to assert: the stat tuple this SDK
- * measures itself.
+ * everything a host does not get to assert:
+ *
+ * - `installStat` / `interpreterStat` — the filesystem tuples this SDK
+ *   measures itself. A host that could choose them would be the authority on
+ *   whether its own install moved.
+ * - `launchEnvNamesDigest` / `loaderEnvValuesDigest` — facts about the exact
+ *   environment object THIS SDK will hand to `spawn`. A host does not have
+ *   that object: it is `daemon/environment.ts`'s `buildRuntimeEnv` output for
+ *   one task on one device, not the host's `process.env`, and a resolver that
+ *   reconstructed it from its own environment (or from a copy of this
+ *   package's deny list) would be attesting a guess.
  */
-export type ToolImplementationInstallRecordV1 = Omit<ToolImplementationAttestedV1, 'installStat'>;
+export type ToolImplementationInstallRecordV1 = Omit<ToolImplementationAttestedV1, 'installStat' | 'interpreterStat' | 'launchEnvNamesDigest' | 'loaderEnvValuesDigest'>;
 export type ToolImplementationResolutionV1 = ToolImplementationUnavailableV1 | ToolImplementationInstallRecordV1;
 /**
  * The host's install-record authority.
@@ -8906,6 +8946,25 @@ export interface ToolImplementationFsProbe {
 }
 export declare const realToolImplementationFsProbe: ToolImplementationFsProbe;
 /**
+ * The NAMES the child's environment carries, digested. Never their values:
+ * this is the fact that catches a variable appearing, disappearing or being
+ * renamed between resolve and spawn, and a value digest of the whole
+ * environment would bind every task-scoped secret and nonce in it.
+ *
+ * Taken over {@link launchEnvUnderIdentity}, for the reasons documented there.
+ */
+export declare function toolImplementationLaunchEnvNamesDigest(env: Readonly<Record<string, string>>): string;
+/**
+ * §27.2: the loader-affecting VALUES as they would reach the child, digested.
+ *
+ * The names are `daemon/environment.ts`'s own {@link loaderEnvInjections} —
+ * this module keeps no second copy of that list, and neither may a host. In
+ * every environment `buildRuntimeEnv` produces the set is empty, so the
+ * expected value is the digest of the empty canonical map; a non-empty one is
+ * loader injection that reached the child, and at spawn it is a refusal.
+ */
+export declare function toolImplementationLoaderEnvValuesDigest(env: Readonly<Record<string, string>>, platform?: NodeJS.Platform): string;
+/**
  * Read one identity back out of a daemon-authored task-scoped file.
  *
  * Deliberately NOT exported from this package's index: it is the one function
@@ -8936,9 +8995,26 @@ export type ToolImplementationMeasurementFailure = 'install_record_mismatch' | '
  * every record the resolver returns, including the ones it is most confident
  * about.
  */
-export declare function resolveToolImplementationIdentity(authority: ToolImplementationAuthority | undefined, locator: ToolImplementationLocatorV1, probe?: ToolImplementationFsProbe): Promise<ToolImplementationIdentityV1>;
+export declare function resolveToolImplementationIdentity(authority: ToolImplementationAuthority | undefined, locator: ToolImplementationLocatorV1, launchEnv: Readonly<Record<string, string>>, probe?: ToolImplementationFsProbe): Promise<ToolImplementationIdentityV1>;
+/**
+ * The one failure that exists only at spawn.
+ *
+ * `launch_env_drift` is not a {@link ToolImplementationUnavailableReasonV1}
+ * and never will be: at resolve there is nothing to disagree with, because
+ * that is the moment the environment is MEASURED. It can only be reached by a
+ * later spawn whose environment is not the one that was measured, and a
+ * resolver cannot claim it because a resolver never sees an environment.
+ */
+export type ToolImplementationReverifyFailure = ToolImplementationMeasurementFailure | 'launch_env_drift';
+/**
+ * WHICH of the things an identity binds moved. Carried beside the reason
+ * because `reverify_failed` on the artifact and `reverify_failed` on the
+ * interpreter send an operator to two different files.
+ */
+export type ToolImplementationReverifySubject = 'artifact' | 'interpreter' | 'launch-env';
 export type ToolImplementationReverifyResult = 'ok' | {
-    readonly reason: ToolImplementationMeasurementFailure;
+    readonly reason: ToolImplementationReverifyFailure;
+    readonly subject: ToolImplementationReverifySubject;
 };
 /**
  * Re-measure an attested identity immediately before the server it describes is
@@ -8952,14 +9028,30 @@ export type ToolImplementationReverifyResult = 'ok' | {
  * changed nothing but the mtime, and an install that stopped being root-owned
  * or grew a write bit since it was attested.
  *
+ * The interpreter of an `interpreter+bundle` runs the SAME two checks against
+ * the SAME two recorded facts. It is the thing that maps the bundle in and
+ * decides what else gets mapped beside it, so an identity that re-hashed the
+ * artifact byte for byte while accepting any interpreter that still hashed
+ * right — replaced inode, cleared ownership, new mtime — would be strictly
+ * weaker at spawn than it was at resolve.
+ *
+ * `launchEnv` is the exact environment object the caller is about to hand to
+ * `spawn`, re-digested here. A name that appeared, vanished or was renamed, or
+ * a loader-affecting value that reached the child, is `launch_env_drift`: the
+ * identity was measured against one environment and the child would be started
+ * in another.
+ *
  * Not memoized and not cached. The whole point is that resolve and spawn are
  * two different moments, and a cached answer would assert the first moment's
  * facts about the second one.
  */
-export declare function reverifyToolImplementationIdentity(identity: ToolImplementationAttestedV1, probe?: ToolImplementationFsProbe): Promise<ToolImplementationReverifyResult>;
+export declare function reverifyToolImplementationIdentity(identity: ToolImplementationAttestedV1, launchEnv: Readonly<Record<string, string>>, probe?: ToolImplementationFsProbe): Promise<ToolImplementationReverifyResult>;
 /**
  * The shared pre-spawn gate, so both spawn points refuse on the same evidence
  * with the same words.
+ *
+ * `launchEnv` must be the env the CALLER is about to spawn with, not the one
+ * it resolved with — that is the whole comparison.
  *
  * An identity that is `unavailable` carries no claim to break, so there is
  * nothing to re-measure and the spawn proceeds — the receipt already says the
@@ -8968,15 +9060,16 @@ export declare function reverifyToolImplementationIdentity(identity: ToolImpleme
  * unavailable-and-continue, because a server that was attested and no longer
  * measures the same is a server that changed under a claim somebody relied on.
  */
-export declare function assertToolImplementationBeforeSpawn(label: string, identity: ToolImplementationIdentityV1 | undefined, probe?: ToolImplementationFsProbe): Promise<void>;
+export declare function assertToolImplementationBeforeSpawn(label: string, identity: ToolImplementationIdentityV1 | undefined, launchEnv: Readonly<Record<string, string>>, probe?: ToolImplementationFsProbe): Promise<void>;
 /**
  * Raised when an attested server no longer measures the way it was attested.
  * Carries the reason rather than only a message, so a caller refuses on the
  * fact instead of on a substring.
  */
 export declare class ToolImplementationReverifyError extends Error {
-    readonly reason: ToolImplementationMeasurementFailure;
-    constructor(message: string, reason: ToolImplementationMeasurementFailure);
+    readonly reason: ToolImplementationReverifyFailure;
+    readonly subject: ToolImplementationReverifySubject;
+    constructor(message: string, reason: ToolImplementationReverifyFailure, subject: ToolImplementationReverifySubject);
 }
 // ==== @byok-sdk/client dist/daemon/toolset-registry.d.ts ====
 import { type ToolsetId } from '@byok-sdk/protocol';
@@ -11177,10 +11270,12 @@ export declare class McpStdioClient {
     /**
      * Start the child and complete `initialize`.
      *
-     * An attested implementation is re-measured BEFORE the spawn, every time.
-     * Resolve and launch are two different moments, and an identity established
-     * at the first one asserts nothing about the second — so the check runs here
-     * rather than being cached with the identity.
+     * An attested implementation is re-measured BEFORE the spawn, every time:
+     * the artifact, the interpreter of an `interpreter+bundle`, and the
+     * environment this child is about to be handed. Resolve and launch are two
+     * different moments, and an identity established at the first one asserts
+     * nothing about the second — so the check runs here rather than being cached
+     * with the identity.
      *
      * A failure is a refusal, not a downgrade: the connection is never opened
      * with the identity quietly demoted to `unavailable`, because a server that

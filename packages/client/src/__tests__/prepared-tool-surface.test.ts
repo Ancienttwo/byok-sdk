@@ -34,6 +34,8 @@ import { probeMcpServer } from '../daemon/mcp-tools-probe';
 import {
   parseToolImplementationIdentity,
   realToolImplementationFsProbe,
+  toolImplementationLaunchEnvNamesDigest,
+  toolImplementationLoaderEnvValuesDigest,
   type ToolImplementationAttestedV1,
   type ToolImplementationAuthority,
   type ToolImplementationFsProbe,
@@ -44,6 +46,12 @@ import type {
   InputPreparationCompiler,
 } from '../adapters/pi/input-preparation';
 import { trustedCwd } from './fixtures/launch-cwd';
+
+/**
+ * The environment this assembler hands to every server it spawns — the stand-in
+ * for `buildRuntimeEnv`'s output, which carries no loader-affecting name.
+ */
+const ASSEMBLER_ENV: Readonly<Record<string, string>> = Object.freeze({ PATH: process.env.PATH ?? '' });
 
 /**
  * The ONE prepared-tool-surface entry (`daemon/prepared-tool-surface.ts`),
@@ -108,7 +116,7 @@ function assembler(
 ): PreparedToolSurfaceAssembler {
   return createPreparedToolSurfaceAssembler({
     toolsetRegistry: registry,
-    runtimeEnv: () => ({ PATH: process.env.PATH ?? '' }),
+    runtimeEnv: () => ({ ...ASSEMBLER_ENV }),
     ...extra,
   });
 }
@@ -423,8 +431,12 @@ describe('a tampered install refuses the preparation before it is fingerprinted'
       closureKind: 'artifact',
       launchArgv: [],
       launchCwd: '/',
-      launchEnvNamesDigest: 'a'.repeat(64),
-      loaderEnvValuesDigest: 'b'.repeat(64),
+      // Measured off the same environment the assembler hands to `spawn`
+      // (`runtimeEnv` above), because that is the fact an identity binds and
+      // the gate re-measures. A fabricated pair would refuse every spawn here
+      // for `launch_env_drift` instead of for the tampering under test.
+      launchEnvNamesDigest: toolImplementationLaunchEnvNamesDigest(ASSEMBLER_ENV),
+      loaderEnvValuesDigest: toolImplementationLoaderEnvValuesDigest(ASSEMBLER_ENV),
       installStat: {
         dev: stats.dev, ino: stats.ino, size: stats.size, mtimeMs: stats.mtimeMs,
         mode: stats.mode, uid: stats.uid, gid: stats.gid,
@@ -453,8 +465,6 @@ describe('a tampered install refuses the preparation before it is fingerprinted'
         closureKind: 'artifact',
         launchArgv: [],
         launchCwd: '/',
-        launchEnvNamesDigest: attested.launchEnvNamesDigest,
-        loaderEnvValuesDigest: attested.loaderEnvValuesDigest,
       }),
     };
 
@@ -497,8 +507,6 @@ describe('a tampered install refuses the preparation before it is fingerprinted'
         closureKind: 'artifact',
         launchArgv: [],
         launchCwd: '/',
-        launchEnvNamesDigest: attested.launchEnvNamesDigest,
-        loaderEnvValuesDigest: attested.loaderEnvValuesDigest,
       }),
     };
 

@@ -225,11 +225,24 @@ class BoundedStdioTransport implements Transport {
   private closed = false;
   private firstFailure?: Error;
 
+  /**
+   * The environment this transport will hand to `spawn`, resolved once in the
+   * constructor.
+   *
+   * Read by {@link McpStdioClient.connect}'s implementation gate before the
+   * child starts and by {@link start} when it starts it, so the environment
+   * that is re-measured is the environment that is spawned rather than a
+   * second object built the same way.
+   */
+  readonly childEnv: Readonly<Record<string, string>>;
+
   constructor(
     private readonly server: McpStdioServerSpec,
     private readonly options: McpStdioClientOptions,
     private readonly label: string,
-  ) {}
+  ) {
+    this.childEnv = Object.freeze({ ...options.env, ...(server.env ?? {}) });
+  }
 
   /** Whatever the child wrote to stderr, for error messages only. */
   get stderr(): string {
@@ -250,7 +263,7 @@ class BoundedStdioTransport implements Transport {
     let child: ChildProcessWithoutNullStreams;
     try {
       child = spawn(this.server.command, [...(this.server.args ?? [])], {
-        env: { ...this.options.env, ...(this.server.env ?? {}) },
+        env: this.childEnv,
         ...(this.options.cwd === undefined ? {} : { cwd: this.options.cwd }),
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
@@ -407,10 +420,12 @@ export class McpStdioClient {
   /**
    * Start the child and complete `initialize`.
    *
-   * An attested implementation is re-measured BEFORE the spawn, every time.
-   * Resolve and launch are two different moments, and an identity established
-   * at the first one asserts nothing about the second — so the check runs here
-   * rather than being cached with the identity.
+   * An attested implementation is re-measured BEFORE the spawn, every time:
+   * the artifact, the interpreter of an `interpreter+bundle`, and the
+   * environment this child is about to be handed. Resolve and launch are two
+   * different moments, and an identity established at the first one asserts
+   * nothing about the second — so the check runs here rather than being cached
+   * with the identity.
    *
    * A failure is a refusal, not a downgrade: the connection is never opened
    * with the identity quietly demoted to `unavailable`, because a server that
@@ -425,6 +440,10 @@ export class McpStdioClient {
       await assertToolImplementationBeforeSpawn(
         this.label,
         this.options.implementation,
+        // The environment the child is about to receive, not the one this
+        // client was configured with: `server.env` is layered on for
+        // SDK-reserved servers, and an identity binds what reaches the child.
+        this.transport.childEnv,
         this.options.implementationFsProbe,
       );
     } catch (cause) {

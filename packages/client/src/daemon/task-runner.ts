@@ -2320,6 +2320,11 @@ export class TaskRunner {
               args: Object.freeze([...(server.args ?? [])]),
               launch,
             },
+            // The environment fact is the SDK's, never the resolver's: this is
+            // the exact object the admission probe below spawns with and the
+            // one the runtime child is started with, so it is the one the
+            // identity binds. The locator carries no environment at all.
+            env,
             this.deps.toolImplementationFsProbe,
           );
         }
