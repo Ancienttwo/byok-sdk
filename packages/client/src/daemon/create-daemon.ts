@@ -23,6 +23,7 @@ import {
   AGENT_MESSAGE_EGRESS_CAPABILITY,
   HOST_MCP_TASK_CONTEXT_CAPABILITY,
   AGENT_HOME_PROJECTION_CAPABILITY,
+  AGENT_INPUT_PREPARATION_CAPABILITY,
   TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   PROVIDER_PROFILE_BINDING_CAPABILITY,
   AgentContentReceiptPayloadSchema,
@@ -40,6 +41,7 @@ import type { PermissionPolicy } from '@byok-sdk/protocol';
 import type {
   RuntimeAdapter,
   GitWorkspaceConfig,
+  McpStdioServerConfig,
   McpToolsetConfig,
   McpToolsetObservation,
   McpToolsetRegistryStatus,
@@ -173,6 +175,13 @@ import { sanitizeEgressEnvelope, type AgentEgressSanitizer } from './agent-egres
 import type { AgentContentReceiptWithoutReliableIdentity, AgentReliableEgressRecord } from './agent-egress-spool';
 import { AgentContentAuditStore } from './agent-content-audit-store';
 import { AgentHomeProjectionCompletionClient } from './agent-home-projection-client';
+import { InputPreparationCompletionClient } from './input-preparation-completion-client';
+import {
+  createRemoteInputPreparationHandler,
+  type RemoteInputPreparationObservation,
+} from './input-preparation-remote';
+import { MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS, probeMcpServer } from './mcp-tools-probe';
+import { buildRuntimeEnv } from './environment';
 import { resolveAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
 import type { McpLaunchCwdConfig } from './trusted-launch-cwd';
 import { preflightAgentMessageMcp } from './agent-message-mcp-preflight';
@@ -1046,6 +1055,7 @@ function computeCapabilities(
   agentEgressConfigured = false,
   contentReadPolicies?: Readonly<Record<AgentContentReadSurface, AgentContentReadPolicySelection>>,
   providerProfileBindingConfigured = false,
+  inputPreparationConfigured = false,
 ): CapabilityFlag[] {
   const flags: CapabilityFlag[] = [];
   if (adapters.some((adapter) => adapter.descriptor.capabilities.steer)) flags.push('steer');
@@ -1073,6 +1083,12 @@ function computeCapabilities(
   if (agentHomeConfigured) flags.push('agent-home-contract');
   if (strictAgentOnly) flags.push(STRICT_AGENT_ONLY_CAPABILITY);
   if (agentHomeProjectionConfigured) flags.push(AGENT_HOME_PROJECTION_CAPABILITY);
+  // Advertised only by a daemon whose `inputPreparation` section is present
+  // AND whose native closure verified, because that pair is exactly what makes
+  // the remote lane servable. The cloud reads this durable flag before it
+  // allocates a receipt, so an unconfigured device is refused at the Host
+  // rather than handed a row it can only answer with a rejection.
+  if (inputPreparationConfigured) flags.push(AGENT_INPUT_PREPARATION_CAPABILITY);
   if (agentEgressConfigured) {
     flags.push(
       AGENT_EGRESS_POLICY_CAPABILITY,
@@ -2069,6 +2085,7 @@ export function buildDaemonWithAdapters(
       config.agentEgress !== undefined,
       agentContentReadPolicies,
       config.piByokLauncher !== undefined,
+      inputPreparationService !== undefined,
     );
     const agentHomeProjectionCompletion = agentHomeManager?.supportsTaskFreeProjection() === true
       ? new AgentHomeProjectionCompletionClient({
@@ -2078,6 +2095,109 @@ export function buildDaemonWithAdapters(
           deviceId: record.deviceId,
         })
       : undefined;
+
+    /**
+     * C07 G4-remote. Constructed UNCONDITIONALLY, unlike the projection client
+     * above: a daemon with no `inputPreparation` section still has to be able
+     * to answer a stale or mis-targeted envelope with a typed
+     * `input_preparation_unconfigured` completion. Throwing instead would
+     * freeze this device's redelivery cursor behind a row it can never
+     * discharge, which is a worse failure than reporting the truth.
+     *
+     * That completion is ACCEPTED by cloud: the completion route asserts no
+     * device capability (`cloud.ts`'s `completeInputPreparationFromStores`),
+     * precisely so this rejection is recordable by a device that never
+     * advertised `agent-input-preparation`. The flag remains the admission
+     * gate on `enqueueInputPreparation`.
+     *
+     * The handler takes the service directly, so a preparation runs IN-PROCESS.
+     * Nothing here touches the local control socket — see
+     * `input-preparation-remote.ts` for why that is the point.
+     */
+    const inputPreparationCompletion = new InputPreparationCompletionClient({
+      serverUrl: config.serverUrl,
+      auth,
+      tenantId: record.tenantId,
+      deviceId: record.deviceId,
+    });
+    const handleRemoteInputPreparation = createRemoteInputPreparationHandler({
+      deviceId: record.deviceId,
+      service: inputPreparationService,
+      limits: inputPreparationLimits,
+      // The two absences are different facts and the Host is told which:
+      // "this daemon does not do preparation" versus "its native closure did
+      // not verify". Neither is ever widened into a compiled artifact.
+      ...(config.inputPreparation !== undefined && inputPreparationService === undefined
+        ? { unavailableReason: 'runtime_identity_unavailable' as const }
+        : {}),
+      completion: inputPreparationCompletion,
+      resolveBlobText: (blobRef) =>
+        blobClient.resolveInstruction(blobRef, {
+          ...(blobLifecycleAbort === undefined ? {} : { signal: blobLifecycleAbort.signal }),
+        }),
+      observeToolsets: (requiredToolsets) => observeRequiredToolsets(requiredToolsets),
+    });
+
+    /**
+     * Observe the payload's required toolsets with the SAME probe the task
+     * runner admits an offer with (`mcpToolsetToolsProbe` ->
+     * `probeMcpServer`). A second observation path would be a second answer to
+     * "what tools does this device have", and the prepared digest would then
+     * depend on which one asked.
+     *
+     * Every server is probed concurrently under one shared deadline, and a
+     * single failure refuses the whole preparation: a partial tool set is not
+     * a smaller preparation, it is a different one.
+     */
+    async function observeRequiredToolsets(
+      requiredToolsets: readonly string[],
+    ): Promise<RemoteInputPreparationObservation> {
+      const snapshot = toolsetRegistry.snapshot();
+      const status = toolsetRegistry.status();
+      const revisionByToolsetId = new Map(status.toolsets.map((row) => [row.id as string, row.definitionRevision]));
+      const servers = new Map<string, { toolsetId: string; server: McpStdioServerConfig }>();
+      const toolsetDefinitionRevisions: Record<string, string> = {};
+      for (const toolsetId of requiredToolsets) {
+        const toolset = snapshot.toolsets.get(toolsetId);
+        const definitionRevision = revisionByToolsetId.get(toolsetId);
+        if (toolset === undefined || definitionRevision === undefined) {
+          throw new Error(`required MCP toolset ${JSON.stringify(toolsetId)} is not configured on this device`);
+        }
+        toolsetDefinitionRevisions[toolsetId] = definitionRevision;
+        for (const [serverName, server] of Object.entries(toolset.mcpServers)) {
+          if (servers.has(serverName)) {
+            throw new Error(`required MCP toolsets collide on server name ${JSON.stringify(serverName)}`);
+          }
+          servers.set(serverName, { toolsetId, server });
+        }
+      }
+      if (servers.size === 0) throw new Error('required MCP toolsets resolved to no servers');
+
+      const piDescriptor = adapters.find((adapter) => adapter.descriptor.id === 'pi')?.descriptor;
+      const env = buildRuntimeEnv({
+        ambient: process.env,
+        ...(piDescriptor?.environmentRequirements === undefined
+          ? {}
+          : { requirements: piDescriptor.environmentRequirements }),
+        ...(config.runtimeEnvironment?.pi?.allow === undefined
+          ? {}
+          : { locallyAllowedNames: config.runtimeEnvironment.pi.allow }),
+      });
+      const entries = [...servers.entries()];
+      const observed = await Promise.all(entries.map(async ([serverName, entry]) => {
+        const observation = await probeMcpServer(serverName, entry.server, {
+          label: `MCP toolset server "${serverName}"`,
+          timeoutMs: MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
+          env,
+        });
+        if (observation.tools.length === 0) throw new Error(`MCP toolset server "${serverName}" reported no tools`);
+        return [serverName, Object.freeze({ ...observation, toolsetId: entry.toolsetId })] as const;
+      }));
+      return {
+        observation: Object.freeze(Object.fromEntries(observed)),
+        toolsetDefinitionRevisions: Object.freeze(toolsetDefinitionRevisions),
+      };
+    }
 
     capabilities.push('custom-harness');
     // Contract §8.1 / §8.3: the device-level capability string is NOT computed
@@ -2331,6 +2451,15 @@ export function buildDaemonWithAdapters(
       });
       return true;
     };
+    const handleAgentInputPreparationEnvelope = async (envelope: Envelope): Promise<boolean> => {
+      if (envelope.type !== 'agent.input.preparation') return false;
+      // Resolves once the completion is durably recorded by the cloud. Anything
+      // that prevents that recording throws, so the cursor stays put and the
+      // row is redelivered — a redelivery is idempotent because the durable
+      // record answers the second one without a second compile or count.
+      await handleRemoteInputPreparation(envelope.payload);
+      return true;
+    };
     const handleAgentEgressEnvelope = async (envelope: Envelope): Promise<boolean> => {
       if (envelope.type !== 'agent.egress.ack') return false;
       if (config.agentEgress === undefined) return true;
@@ -2511,6 +2640,7 @@ export function buildDaemonWithAdapters(
               }
               observer.handleInboundEnvelope(envelope);
               if (await handleAgentHomeProjectionEnvelope(envelope)) return;
+              if (await handleAgentInputPreparationEnvelope(envelope)) return;
               if (await handleAgentEgressEnvelope(envelope)) return;
               if (await handleAgentContentReadEnvelope(envelope)) return;
               // S3b (L-003): §12.7.2.1's `emergency` row — "fail-closed，不 ack
@@ -2551,6 +2681,7 @@ export function buildDaemonWithAdapters(
               }
               observer.handleInboundEnvelope(envelope);
               if (envelope.type === 'agent.home.projection') return handleAgentHomeProjectionEnvelope(envelope).then(() => undefined);
+              if (envelope.type === 'agent.input.preparation') return handleAgentInputPreparationEnvelope(envelope).then(() => undefined);
               if (envelope.type === 'agent.egress.ack') return handleAgentEgressEnvelope(envelope).then(() => undefined);
               if (envelope.type === 'agent.message.disposition') return runner?.handleEnvelope(envelope) ?? Promise.resolve();
               if (envelope.type === 'agent.content.read') return handleAgentContentReadEnvelope(envelope).then(() => undefined);

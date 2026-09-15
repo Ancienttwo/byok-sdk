@@ -32,12 +32,15 @@ export type {
   AgentContentReadInput,
   AgentHomeProjectionInput,
   AgentHomeProjectionStatusInput,
+  InputPreparationInput,
+  InputPreparationStatusInput,
   ApproveTaskOptions,
   EnqueueOfferInput,
   EnqueueToolsetOfferInput,
   RejectTaskOptions,
   EnqueuedAgentControl,
   EnqueuedAgentHomeProjection,
+  EnqueuedInputPreparation,
   EnqueuedOffer,
   TaskOfferReadback,
 } from './cloud';
@@ -48,6 +51,14 @@ export {
   recordAgentHomeProjectionCompletion,
 } from './agent-home-projections';
 export type { AgentHomeProjectionReceiptInput } from './agent-home-projections';
+export {
+  inputPreparationCompletionKey,
+  inputPreparationRequestKey,
+  readInputPreparationStatus,
+  recordInputPreparationCompletion,
+  sameInputPreparationRequest,
+} from './input-preparations';
+export type { InputPreparationReceiptInput } from './input-preparations';
 export {
   AGENT_HOME_CONTRACT_CAPABILITY,
   DEFAULT_EVENTS_PAGE_LIMIT,

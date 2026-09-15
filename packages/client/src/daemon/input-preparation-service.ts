@@ -17,6 +17,7 @@ import {
   type InputPreparationReadinessReasonV1,
   type InputPreparationReceiptV1,
   type InputPreparationRequestV1,
+  type InputPreparationRuntimeIdentityV1,
   type InputPreparationScopeClaimV1,
 } from '../input-preparation';
 import {
@@ -86,6 +87,19 @@ export class InputPreparationRequestError extends Error {
   }
 }
 
+/**
+ * The ONE spelling of a runtime identity string.
+ *
+ * It binds every artifact through `CompilePreparedInputRequest.binding` and it
+ * binds every tool-executor fingerprint. Those two must agree exactly, so the
+ * formula lives here rather than being written out at each site.
+ */
+export function inputPreparationRuntimeIdentityString(
+  runtime: InputPreparationRuntimeIdentityV1,
+): string {
+  return `${runtime.packageName}@${runtime.packageVersion}+${runtime.upstreamCommit}.${String(runtime.forkBuild)}`;
+}
+
 // ---------------------------------------------------------------------------
 // Options
 // ---------------------------------------------------------------------------
@@ -99,14 +113,35 @@ export interface InputPreparationServiceOptions {
   readonly now?: () => number;
 }
 
+/**
+ * Per-call bounds a caller may TIGHTEN, never loosen.
+ *
+ * The remote lane (`input-preparation-remote.ts`) carries a Host-stated
+ * `deadlineAt`. It is applied here as `min(requested, configured)` so a
+ * generous Host deadline can never enlarge this daemon's configured
+ * `preparationDeadlineMs` — the local policy stays the ceiling, and the caller
+ * only ever gets less time than it asked for.
+ */
+export interface InputPreparationCallOptions {
+  readonly deadlineMs?: number;
+}
+
 export interface InputPreparationService {
   /** Replay, confirm and reconcile the durable log. Must complete before any method answers. */
   open(): Promise<void>;
-  prepare(request: InputPreparationRequestV1): Promise<InputPreparationReceiptV1>;
+  prepare(request: InputPreparationRequestV1, options?: InputPreparationCallOptions): Promise<InputPreparationReceiptV1>;
   lookup(params: InputPreparationLookupParamsV1): Promise<InputPreparationReceiptV1>;
   cancel(params: InputPreparationCancelParamsV1): Promise<InputPreparationReceiptV1>;
   /** Aborts every owned counter call. Outcomes stay observable in the durable record. */
   stop(): Promise<void>;
+  /**
+   * The runtime/compiler identity this service binds every artifact to,
+   * derived from the VERIFIED installed closure. Exposed because a caller that
+   * builds `toolExecutors` must fingerprint against the SAME identity the
+   * compiler will bind, and re-deriving it from its own copy of the compiler
+   * is how those two silently drift apart.
+   */
+  readonly runtime: InputPreparationRuntimeIdentityV1;
   /** Internal test seam: the durable store behind this service. */
   readonly store: InputPreparationStore;
 }
@@ -460,7 +495,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
         options: request.selection.options,
         binding: {
           inputIdentity: `${request.source.revision}:${request.source.digest}`,
-          runtimeIdentity: `${options.compiler.runtime.packageName}@${options.compiler.runtime.packageVersion}+${options.compiler.runtime.upstreamCommit}.${String(options.compiler.runtime.forkBuild)}`,
+          runtimeIdentity: inputPreparationRuntimeIdentityString(options.compiler.runtime),
           policyIdentity: limits.revision,
           profileRevision: grant.profileRevision,
         },
@@ -614,7 +649,10 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     }
   }
 
-  async function prepare(rawRequest: InputPreparationRequestV1): Promise<InputPreparationReceiptV1> {
+  async function prepare(
+    rawRequest: InputPreparationRequestV1,
+    callOptions?: InputPreparationCallOptions,
+  ): Promise<InputPreparationReceiptV1> {
     // Copy before the first await. Everything below reads this copy only.
     const request = structuredClone(rawRequest) as InputPreparationRequestV1;
     await ensureOpen();
@@ -692,7 +730,12 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       // The whole preparation's deadline. The single counter call has its own,
       // separate bound, started inside `runPreparation` when that call actually
       // begins. Both are explicit policy; neither is a default.
-      const deadline = setTimeout(() => controller.abort(), limits.preparationDeadlineMs);
+      const requestedDeadlineMs = callOptions?.deadlineMs;
+      const deadlineMs =
+        requestedDeadlineMs === undefined || !Number.isFinite(requestedDeadlineMs)
+          ? limits.preparationDeadlineMs
+          : Math.max(1, Math.min(requestedDeadlineMs, limits.preparationDeadlineMs));
+      const deadline = setTimeout(() => controller.abort(), deadlineMs);
       deadline.unref?.();
       active.set(recordId, run);
       const settled = runPreparation(outcome.record, request, grant, target, run);
@@ -730,6 +773,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     store,
     open: ensureOpen,
     prepare,
+    runtime: options.compiler.runtime,
     async lookup(params: InputPreparationLookupParamsV1): Promise<InputPreparationReceiptV1> {
       const { record } = await locate(params);
       return toReceipt(record, now());
