@@ -177,6 +177,11 @@ export class ClaudeAdapter implements RuntimeAdapter {
     // without the daemon's own `tools/list` observation of it.
     requiresMcpToolsetToolObservation: true,
     mcpServerLaunch: 'launcher-wrapped',
+    // `permission-mapping.ts`'s `needsApprovalMcp`: mode 'confirm' makes
+    // `start()` below generate the approval server, so the daemon must
+    // resolve the launch binding for such a task even when it projects no
+    // toolset of its own.
+    generatesApprovalMcpServer: true,
     capabilities: {
       steer: false,
       resume: true,
@@ -358,8 +363,14 @@ export class ClaudeAdapter implements RuntimeAdapter {
       //
       // The CLI's OWN cwd is deliberately unchanged: session resume and
       // relative path resolution depend on it (`agent-home-contract.test.ts`).
+      //
+      // The guard below counts the GENERATED map, not the daemon's projected
+      // one: the approval server this adapter adds itself is an MCP server
+      // child like any other, and a `confirm`-mode task with no host toolset
+      // at all used to slip past a host-toolset-only guard and be written
+      // unwrapped.
       const launchBinding = startInput.mcpLaunch;
-      if (Object.keys(taskMcpServers).length > 0
+      if (Object.keys(mcpServers).length > 0
         && (launchBinding === undefined || launchBinding.launcher === undefined)) {
         throw new RuntimeExecutionFailure({
           phase: 'start', category: 'authority', retry: 'non-retryable',

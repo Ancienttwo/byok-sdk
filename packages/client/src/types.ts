@@ -278,6 +278,24 @@ export interface RuntimeAdapterDescriptor {
    * toolset task whose servers might start in the Agent's own writable home.
    */
   readonly mcpServerLaunch?: 'direct-cwd' | 'launcher-wrapped';
+  /**
+   * Whether this adapter GENERATES a reserved approval MCP server of its own
+   * when it is started under `policy.mode: 'confirm'` (claude's
+   * `--permission-prompt-tool` server, `adapters/claude/claude-adapter.ts`).
+   *
+   * Such a server exists nowhere in the daemon's projected `mcpServers` map,
+   * so the daemon cannot see it by counting that map — but it is an MCP
+   * server child of the task like any other, and it must start in the same
+   * proven-non-writable launch directory (`daemon/trusted-launch-cwd.ts`).
+   * `TaskRunner` therefore resolves the launch binding for a `confirm`-mode
+   * task on an adapter that declares this, even when the task projects no
+   * host toolset and needs no reserved helper at all.
+   *
+   * Omission means "generates none": an adapter that generates one and does
+   * not declare it would receive no binding and its own fail-closed guard
+   * refuses the start rather than launching the server unwrapped.
+   */
+  readonly generatesApprovalMcpServer?: boolean;
 }
 
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
@@ -434,6 +452,9 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
     supportsDispatchSelection: descriptor.supportsDispatchSelection === true,
     requiresMcpToolsetToolObservation: descriptor.requiresMcpToolsetToolObservation === true,
     ...(descriptor.mcpServerLaunch === undefined ? {} : { mcpServerLaunch: descriptor.mcpServerLaunch }),
+    ...(descriptor.generatesApprovalMcpServer === undefined
+      ? {}
+      : { generatesApprovalMcpServer: descriptor.generatesApprovalMcpServer === true }),
     capabilities: Object.freeze({
       steer: descriptor.capabilities.steer === true,
       resume: descriptor.capabilities.resume === true,

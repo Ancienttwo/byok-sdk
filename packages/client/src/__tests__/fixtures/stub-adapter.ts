@@ -2,6 +2,7 @@ import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import {
   freezeRuntimeAdapterDescriptor,
   type RuntimeAdapter,
+  type RuntimeAdapterDescriptor,
   type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult,
   type RuntimeCapabilities,
@@ -220,6 +221,18 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
     detectResult: RuntimeDetectResult = { kind: 'available', version: '0.0.0' },
     capabilities: RuntimeCapabilities = DEFAULT_STUB_CAPABILITIES,
     requiresMcpToolsetToolObservation = true,
+    /**
+     * The two descriptor declarations that drive the daemon's MCP launch
+     * boundary: HOW this adapter's servers reach the trusted directory
+     * (`mcpServerLaunch`) and whether it generates a reserved approval server
+     * of its own under `confirm` (`generatesApprovalMcpServer`). Omitted
+     * everywhere except the tests that pin that boundary, so the default stub
+     * stays the "spawns its own servers, generates none" shape.
+     */
+    launchDeclarations: Pick<
+      RuntimeAdapterDescriptor,
+      'mcpServerLaunch' | 'generatesApprovalMcpServer'
+    > = {},
   ) {
     this.detectResult = detectResult;
     this.descriptor = freezeRuntimeAdapterDescriptor({
@@ -228,6 +241,12 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
       requiresMcpToolsetToolObservation,
       capabilities,
       environmentRequirements: { credentialNames: [] },
+      ...(launchDeclarations.mcpServerLaunch === undefined
+        ? {}
+        : { mcpServerLaunch: launchDeclarations.mcpServerLaunch }),
+      ...(launchDeclarations.generatesApprovalMcpServer === undefined
+        ? {}
+        : { generatesApprovalMcpServer: launchDeclarations.generatesApprovalMcpServer }),
     });
   }
 

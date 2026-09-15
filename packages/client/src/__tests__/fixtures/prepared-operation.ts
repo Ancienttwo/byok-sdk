@@ -69,9 +69,16 @@ export async function startPreparedOperation(
     },
     forwardedEnvironmentNames: Object.keys(resources.env).sort(),
   });
+  // Mirrors `TaskRunner`'s own predicate: the daemon resolves the binding for
+  // every task that will GENERATE an MCP server, which includes an adapter
+  // that generates a reserved approval server of its own under
+  // `policy.mode: 'confirm'` even when the daemon projects no server at all.
+  const generatesApprovalMcp = resources.policy.mode === 'confirm'
+    && adapter.descriptor.generatesApprovalMcpServer === true;
   const mcpLaunch = resources.mcpLaunch === null
     ? undefined
-    : resources.mcpLaunch ?? (resources.mcpServers === undefined ? undefined : await trustedLaunchBinding());
+    : resources.mcpLaunch
+      ?? (resources.mcpServers === undefined && !generatesApprovalMcp ? undefined : await trustedLaunchBinding());
   return prepared.operation.start({
     manifest,
     instruction: offer.instruction,

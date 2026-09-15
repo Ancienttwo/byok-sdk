@@ -52,6 +52,24 @@ and the D2 version number belongs to a separate SDK release contract.
   plain Node, and any other host attests one in
   `DaemonConfig.mcpLaunchCwd.launcherInterpreter`.
 
+- The launch working-directory boundary now covers every MCP server a task
+  GENERATES, not only the host toolsets the device projects. `TaskRunner` used
+  to resolve the binding only for a task that probed or projected a toolset
+  server, so a task whose only MCP server came later — the reserved
+  agent-memory helper, or the approval server claude generates for itself under
+  `policy.mode: 'confirm'` — reached `start()` with no binding and had those
+  servers written unwrapped, inheriting the CLI's manifest cwd (the
+  Agent-writable home). The predicate now asks whether the task will generate
+  at least one server of any origin, and claude's fail-closed guard counts the
+  configuration it generated rather than the daemon's projected map.
+  `RuntimeAdapterDescriptor` carries the new optional
+  `generatesApprovalMcpServer`, which is how the daemon knows a `confirm`-mode
+  task on that adapter will produce a server the daemon never sees; omitting it
+  means "generates none". A task that generates no MCP server is still admitted
+  with no binding, and a `confirm`-mode task on a launcher-wrapped adapter with
+  no trusted launcher interpreter is now declined non-retryably
+  (`launch_cwd_launcher_interpreter_unconfigured`) before any spawn.
+
 - `DaemonConfig.mcpLaunchCwd` (`{dir?, launcherInterpreter?}`) now carries the
   operator's launch-boundary input through `createDaemon`, forwarded verbatim to
   `TaskRunnerDeps.mcpLaunchCwd`; a host no longer has to compose its own

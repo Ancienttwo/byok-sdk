@@ -745,6 +745,20 @@ writes them — starts in a directory this daemon's uid has been PROVEN unable t
 write. The runtime CLI itself is unaffected and keeps its manifest cwd, because
 session resume and relative-path resolution depend on it.
 
+The boundary is scoped by ORIGIN-INDEPENDENCE: it covers every MCP server the
+task will generate, not only the host toolsets the device projects. The
+reserved SDK helpers the daemon injects (agent messaging, agent memory) and the
+reserved approval server a runtime adapter generates for itself under
+`policy.mode: 'confirm'` are the same kind of child, launched by the same CLI
+from the same inherited cwd. `TaskRunner` therefore resolves the binding
+whenever a task will generate at least one server of any origin — the projected
+toolsets, the reserved helpers it adds, or a server the picked adapter declares
+it generates itself (`RuntimeAdapterDescriptor.generatesApprovalMcpServer`
+paired with the effective mode) — and an adapter's own fail-closed guard counts
+the configuration it GENERATED, not the map the daemon handed it. A task that
+generates no MCP server at all resolves no binding and is never refused for
+one.
+
 The reason is an interpreter fact, not a hypothetical: a `bun --compile`
 single-file binary reads `$cwd/bunfig.toml` and runs its `preload` entries
 before any of the program's own code, and `--config=/dev/null` does not suppress

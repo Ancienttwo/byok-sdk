@@ -470,6 +470,41 @@ describe('PiAdapter against the fake-pi fixture', () => {
     await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/No API key found/);
   });
 
+  it('carries the trusted launch directory for a task whose only MCP server is a reserved SDK helper', async () => {
+    // The reserved helpers (memory, messaging) are MCP server children like
+    // any projected toolset server, and pi's own extension opens them from
+    // this config — so the boundary has to be in the file even when the
+    // device projected no host toolset at all.
+    const calls: Array<{ env: NodeJS.ProcessEnv }> = [];
+    const spawnFn = ((_command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
+      calls.push({ env: options?.env ?? {} });
+      return realSpawn(FIXTURE_PATH, args, options);
+    }) as never;
+    const adapter = new PiAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
+      resolveExtensions: resolveFixtureExtensions,
+      spawnFn,
+    });
+    const ctx = await makeCtx();
+    ctx.mcpServers = { byokagentmemory: { command: '/opt/byok-agent-memory-mcp' } };
+
+    const session = await startAdapter(adapter, baseTask, ctx);
+    openSessions.push(session);
+
+    const configPath = calls[0]?.env.BYOK_PI_MCP_CONFIG_PATH;
+    if (typeof configPath !== 'string') throw new Error('missing pi mcp config path');
+    expect(JSON.parse(await fs.readFile(configPath, 'utf8'))).toMatchObject({
+      mcpServers: { byokagentmemory: { command: '/opt/byok-agent-memory-mcp' } },
+      // `mcp-extension.ts` refuses to open any server without this and passes
+      // it straight to `spawn` as the child's cwd (`pi-mcp-launch-cwd.test.ts`
+      // reads it back out of a real child).
+      launchCwd: await trustedCwd(),
+    });
+
+    await session.close();
+    openSessions.splice(openSessions.indexOf(session), 1);
+  });
+
   it('loads bundled web access, subagents, and an isolated task-scoped MCP config, then removes the config on close', async () => {
     const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
     const spawnFn = ((_command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {

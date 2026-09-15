@@ -2088,11 +2088,35 @@ export class TaskRunner {
       // before its own code, and the Agent home is writable by the very agent
       // the server is serving — see `./trusted-launch-cwd.ts`. The RUNTIME
       // CLI keeps the manifest cwd; only its MCP server children move.
-      const projectsMcpServers = resolvedMcp?.ok === true && Object.keys(resolvedMcp.servers).length > 0;
+      //
+      // The binding covers EVERY MCP server this task will generate, whatever
+      // its origin — not only the host toolsets the device projects. The
+      // reserved SDK helpers (agent message, agent memory) and the reserved
+      // approval server the picked adapter generates itself under
+      // `policy.mode: 'confirm'` are the same kind of child process, launched
+      // by the same CLI, from the same inherited cwd; a task whose only MCP
+      // server is one of those used to reach `start()` with no binding at all
+      // and have it written unwrapped.
+      //
+      // The predicate lives HERE, once, computed from the same inputs the
+      // adapters themselves branch on: the projected toolsets, the reserved
+      // helpers this daemon adds to `taskMcpServers`, and the descriptor's
+      // own declaration that it generates a reserved approval MCP server
+      // (`RuntimeAdapterDescriptor.generatesApprovalMcpServer`) paired with
+      // the effective mode that makes it do so. A task that generates NO MCP
+      // server resolves no binding and is never declined for one.
+      const generatesApprovalMcp = decision.policy.mode === 'confirm'
+        && pick.descriptor.generatesApprovalMcpServer === true;
+      // `taskMcpServers` already carries the projected host toolsets and the
+      // agent-message helper; the agent-memory helper is added below, after
+      // the binding it needs has been resolved.
+      const generatesAnMcpServer = Object.keys(taskMcpServers ?? {}).length > 0
+        || requiresAgentMemoryMcp
+        || generatesApprovalMcp;
       const probesAnMcpServer = needsToolsetObservation
         || (messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined);
       let mcpLaunch: McpLaunchBinding | undefined;
-      if (probesAnMcpServer || projectsMcpServers) {
+      if (probesAnMcpServer || generatesAnMcpServer) {
         const trusted = await resolveTrustedLaunchCwd(this.deps.mcpLaunchCwd);
         if (trusted.kind === 'unavailable') {
           // Non-retryable: nothing about re-offering this task changes which

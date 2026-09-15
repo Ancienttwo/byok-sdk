@@ -283,11 +283,17 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     if (typeof mcpConfigPath !== 'string') throw new Error('unreachable');
     const mcpConfigRaw = await fs.readFile(mcpConfigPath, 'utf8');
     const mcpConfig = JSON.parse(mcpConfigRaw);
+    // The approval server is an MCP server child of this task like any other:
+    // claude spawns it from this file, `mcpServers` carries no cwd field, so
+    // it is reached through the SDK launcher that chdirs into the daemon's
+    // proven-non-writable directory first — even though this task projects no
+    // host toolset at all.
+    const approvalLaunch = await trustedLaunchBinding();
     expect(mcpConfig).toEqual({
       mcpServers: {
         byokapproval: {
-          command: 'fake-approval-mcp-command',
-          args: ['--fixture-arg'],
+          command: approvalLaunch.launcher!.interpreter,
+          args: [approvalLaunch.launcher!.script, approvalLaunch.cwd, 'fake-approval-mcp-command', '--fixture-arg'],
           env: {
             BYOK_STORE_DIR: '/fake/store-dir',
             BYOK_PRODUCT_ID: 'fake-product',
@@ -306,6 +312,34 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     await session.close();
     openSessions.pop();
     await expect(fs.access(mcpConfigPath)).rejects.toThrow();
+  });
+
+  it('refuses to start a confirm-mode task with no launch binding, even when it projects no host toolset — the approval server it generates itself is an MCP server child too', async () => {
+    const spawnFn = vi.fn();
+    const adapter = new ClaudeAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      spawnFn: spawnFn as unknown as SpawnFn,
+      resolveApprovalMcpBin: () => ({ command: 'fake-approval-mcp-command', args: [], source: 'env' }),
+    });
+    const ctx = await makeCtx();
+    ctx.policy = { mode: 'confirm' };
+    ctx.approvalChannel = {
+      taskId: 'task-confirm-no-launch',
+      storeDir: '/fake/store-dir',
+      productId: 'fake-product',
+      timeoutMs: 1000,
+      resolve: async () => {},
+    };
+    // What a daemon that failed to resolve a launcher would hand the adapter.
+    ctx.mcpLaunch = null;
+
+    const failure = await startAdapter(adapter, baseTask, ctx).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({ retry: 'non-retryable' });
+    expect((failure as RuntimeExecutionFailure).message)
+      .toMatch(/MCP servers without a trusted launch directory/u);
+    // Refused BEFORE the CLI is spawned, not after the config is on disk.
+    expect(spawnFn).not.toHaveBeenCalled();
   });
 
   it('surfaces task-scoped MCP cleanup failure as typed disposal evidence and permits a clean retry', async () => {
