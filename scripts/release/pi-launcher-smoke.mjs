@@ -155,6 +155,14 @@ export default function() {
   const sdkMcpExtension = path.join(clientRoot, 'dist/adapters/pi/mcp-extension.js');
   assert.ok(loadedExtensions.includes(sdkMcpExtension), `real MCP extension missing from ${loadedExtensions.join(', ')}`);
   assert.ok(!loadedExtensions.some(entry => entry.includes('pi-mcp-adapter')), 'pi-mcp-adapter is retired');
+  // The adapter creates its task-scoped MCP config, then removes it when the
+  // captured spawn throws. Re-create it at the exact path the captured
+  // environment names, so the observed invocation stays byte-identical while
+  // the real MCP extension has the task file it refuses to start without.
+  const capturedConfigPath = directInvocation.options.env.BYOK_PI_MCP_CONFIG_PATH;
+  assert.equal(typeof capturedConfigPath, 'string');
+  await mkdir(path.dirname(capturedConfigPath), { recursive: true });
+  await writeFile(capturedConfigPath, JSON.stringify(mcpTaskConfig));
   // Run that exact observed invocation with get_state only, no prompt/inference.
   child = spawn(directInvocation.command, directInvocation.args, { cwd: dir, env: directInvocation.options.env, stdio: ['pipe', 'pipe', 'pipe'] });
   const directClosed = once(child, 'close');
@@ -177,7 +185,8 @@ export default function() {
     const force = setTimeout(() => child.kill('SIGKILL'), 5_000);
     await directClosed; clearTimeout(force);
   }
-  console.log(`[release-pack] installed Pi${piManifest.version} detect/direct RPC passed; prompts=0`);
+  await rm(path.dirname(capturedConfigPath), { recursive: true, force: true });
+  console.log(`[release-pack] installed Pi${piManifest.version} detect/direct RPC with the real extension stack passed; prompts=0`);
 
   for (const [rejectedBinding, expected] of [
     [exactProviderProfileBinding(missingPi), /requires explicit pi_model/],
