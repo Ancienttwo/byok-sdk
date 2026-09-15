@@ -65,6 +65,21 @@ for (const phase of ['detect', 'prepare'] as const) {
       else {
         if (action === 'cancel') server.send(createEnvelope('task.cancel', { reason: 'cancel pre-claim' }, { taskId: 'blocked', seq: server.nextSeq() }));
         await server.waitFor(e => e.type === 'task.decline' && e.task_id === 'blocked', 1500);
+        if (action === 'deadline') {
+          // The blocked offer is withdrawn by the startup timer armed at
+          // `task-runner.ts:1970-1972`; `admissionWithdrawn` declines it with
+          // exactly this pair (`task-runner.ts:1976-1977`):
+          //   decline(cancelled ? 'cancelled before claim' : this.stoppingOffers ? 'daemon is shutting down' : 'runtime startup deadline exceeded', !cancelled)
+          // On this row nothing cancelled the offer and the daemon is not
+          // stopping, so `cancelled === false` selects the deadline reason and
+          // `!cancelled` makes it retryable. Pinned by exact equality, not by
+          // "some decline arrived" — the other two reasons are what the sibling
+          // cancel/shutdown rows own.
+          const blocked = server.received.flatMap(e => (e.type === 'task.decline' && e.task_id === 'blocked'
+            ? [{ reason: e.payload.reason, retryable: e.payload.retryable }] : []))[0]!;
+          expect(blocked.reason).toBe('runtime startup deadline exceeded');
+          expect(blocked.retryable).toBe(true);
+        }
       }
       expect(adapter.startCalls).toHaveLength(0);
       expect(server.received.some(e => e.type === 'task.claim' && e.task_id === 'blocked')).toBe(false);
