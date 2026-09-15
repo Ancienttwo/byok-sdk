@@ -423,7 +423,220 @@ jobs:
         run: bun ci
 
       - name: Check graph, pack exact tarballs, and import from an isolated npm install
+        if: matrix.os != 'windows-latest'
         run: bun run check:release-pack -- --out-dir .ci-artifacts/release-pack
+
+      # Windows fact (c) -- the win32 row in `docs/spec.md`: non-elevated admission
+      # of a real directory. The hosted windows-latest runner is an ADMINISTRATOR,
+      # and under that token the launch-cwd platform default (`%SystemRoot%`) is
+      # writable, so the daemon refuses with `platform_default_is_writable` and the
+      # packed-CLI smoke declines. That refusal is correct and is already pinned by
+      # a unit test; what it cannot produce is the positive half of the pair. This
+      # leg produces it by running the SAME driver, with the same arguments, as the
+      # other two legs -- but under a freshly created NON-administrator local
+      # account, whose own token is what makes `%SystemRoot%` unwritable. No ACL
+      # surgery on the default, no configured directory (the packed-CLI smoke
+      # hardcodes a DaemonConfig with no `mcpLaunchCwd` field), no product change.
+      #
+      # The single load-bearing assumption is that `C:\` is not file-writable by
+      # `BUILTIN\Users` on this image. It is measured, not assumed: if either
+      # negative control WRITES, the step fails and STOPS. There is deliberately no
+      # `icacls /deny` fallback and no rerun -- a deny ACE we install ourselves
+      # would prove our ACE, not the platform default.
+      #
+      # Everything this step creates (the account, one scratch root, one granted
+      # ACE on the checkout) lives on this ephemeral runner and is removed in
+      # `finally`. Evidence in the job log: the ASSERTED token membership and
+      # integrity label, two negative controls, `trusted-launch-cwd.test.ts`
+      # passing (its own negative control is what keeps that from being vacuous),
+      # `[release-pack] installed Pi...`/`[packed-cli-mcp] ... passed`, and the
+      # ABSENCE of `task.decline`, `asserted fail-closed refusal instead`, and
+      # `launch boundary unprovable`.
+      - name: Check graph, pack, and install as a freshly created NON-administrator local user
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          # This one script runs twice: once as the runner's administrator (parent),
+          # and once as the synthetic standard user, which re-invokes this same file
+          # with -LowPrivMode child. Same bytes, two tokens.
+          param(
+            [string]$LowPrivMode = '',
+            [string]$ScratchRoot = '',
+            [string]$Workspace = '',
+            [string]$NodeDir = ''
+          )
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+
+          function Fail([int]$code, [string]$message) {
+            Write-Host "[lowpriv] FAIL($code) $message"
+            exit $code
+          }
+
+          if ($LowPrivMode -eq 'child') {
+            # ---------------- standard-user half ----------------
+
+            # 1. The token is evidence INPUT, not decoration: assert it, do not just print it.
+            $me = (whoami).Trim()
+            Write-Host "[lowpriv] whoami: $me"
+            $names = @(whoami /groups /fo csv | ConvertFrom-Csv | ForEach-Object { $_.'Group Name' })
+            foreach ($n in $names) { Write-Host "[lowpriv] group: $n" }
+            if ($names -notcontains 'BUILTIN\Users') { Fail 80 'this token is NOT a member of BUILTIN\Users' }
+            if ($names -contains 'BUILTIN\Administrators') { Fail 81 'this token IS a member of BUILTIN\Administrators' }
+            $labels = @($names | Where-Object { $_ -like 'Mandatory Label\*' })
+            if ($labels.Count -ne 1) { Fail 82 "expected exactly one mandatory integrity label, saw $($labels.Count)" }
+            if ($labels[0] -match 'High Mandatory Level|System Mandatory Level') { Fail 83 "integrity label is $($labels[0])" }
+            Write-Host "[lowpriv] integrity label: $($labels[0])"
+
+            # 2. Negative controls. If either of these WRITES, the platform default is
+            #    writable for this token, every admission below would be vacuous, and
+            #    the step stops right here. No ACL fallback, no rerun.
+            function Assert-NotWritable([string]$dir, [int]$code) {
+              $probe = Join-Path $dir (".byok-lowpriv-negctl-{0}.tmp" -f [guid]::NewGuid().ToString('N'))
+              try {
+                [System.IO.File]::WriteAllText($probe, 'x')
+              } catch [System.UnauthorizedAccessException] {
+                Write-Host "[lowpriv] negative control OK: $dir is NOT writable by this token (access denied)"
+                return
+              } catch {
+                Fail ($code + 10) "negative control on $dir failed for an unexpected reason: $($_.Exception.GetType().FullName): $($_.Exception.Message)"
+              }
+              Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+              Fail $code "negative control WROTE $probe -- the launch-cwd platform default is writable by this token; stopping"
+            }
+            Assert-NotWritable $env:SystemRoot 90
+            Assert-NotWritable ([System.IO.Path]::GetPathRoot($env:SystemRoot)) 91
+
+            # 3. Every per-user path points under the scratch root -- nothing inherits
+            #    the administrator runner's home -- and each one is asserted to be
+            #    granted to THIS account before anything writes to it.
+            $userHome = Join-Path $ScratchRoot 'home'
+            $env:USERPROFILE = $userHome
+            $env:HOME = $userHome
+            $env:APPDATA = Join-Path $userHome 'AppData\Roaming'
+            $env:LOCALAPPDATA = Join-Path $userHome 'AppData\Local'
+            $env:TEMP = Join-Path $ScratchRoot 'tmp'
+            $env:TMP = $env:TEMP
+            $env:npm_config_cache = Join-Path $ScratchRoot 'npm-cache'
+            $env:BUN_INSTALL_CACHE_DIR = Join-Path $ScratchRoot 'bun-cache'
+            foreach ($d in @($userHome, $env:APPDATA, $env:LOCALAPPDATA, $env:TEMP, $env:npm_config_cache, $env:BUN_INSTALL_CACHE_DIR)) {
+              if (-not $d.StartsWith($ScratchRoot, [System.StringComparison]::OrdinalIgnoreCase)) { Fail 84 "$d is not under $ScratchRoot" }
+              New-Item -ItemType Directory -Force -Path $d | Out-Null
+              $acl = (icacls $d) -join "`n"
+              if ($acl -notmatch [regex]::Escape($me)) { Fail 85 "$d is not granted to ${me}:`n$acl" }
+              $probe = Join-Path $d '.byok-lowpriv-write.tmp'
+              [System.IO.File]::WriteAllText($probe, 'x')
+              Remove-Item -LiteralPath $probe -Force
+              Write-Host "[lowpriv] private dir OK: $d"
+            }
+
+            # git compares safe.directory against its own forward-slash spelling of
+            # this exact checkout. Never '*'.
+            $env:GIT_CONFIG_COUNT = '1'
+            $env:GIT_CONFIG_KEY_0 = 'safe.directory'
+            $env:GIT_CONFIG_VALUE_0 = $Workspace.Replace('\', '/')
+            $env:PATH = "$ScratchRoot\tools;$NodeDir;$env:PATH"
+
+            Set-Location -LiteralPath $Workspace
+            Write-Host "[lowpriv] node: $((Get-Command node).Source)"
+            Write-Host "[lowpriv] bun: $((Get-Command bun).Source)"
+
+            # 4. The real platform default must RESOLVE under this token. The negative
+            #    control inside that same test file (a directory this uid can write is
+            #    rejected) is what keeps a pass from being vacuous.
+            bun run --filter @byok-sdk/client test -- src/__tests__/trusted-launch-cwd.test.ts
+            if ($LASTEXITCODE -ne 0) { Fail $LASTEXITCODE 'trusted-launch-cwd.test.ts failed under the standard-user token' }
+
+            # 5. Same driver, same arguments as the non-Windows legs. A `task.decline`
+            #    or a fail-closed refusal already exits non-zero inside the smoke; this
+            #    step adds no acceptance of either.
+            node scripts/release/pack-and-smoke.mjs --out-dir .ci-artifacts/release-pack
+            if ($LASTEXITCODE -ne 0) { Fail $LASTEXITCODE 'pack-and-smoke.mjs failed under the standard-user token' }
+
+            Write-Host '[lowpriv] release pack and launch-cwd admission both completed under a non-administrator token'
+            exit 0
+          }
+
+          if ($LowPrivMode -ne '') { throw "unknown -LowPrivMode '$LowPrivMode'" }
+
+          # ---------------- administrator half ----------------
+          $selfScript = $PSCommandPath
+          if ([string]::IsNullOrWhiteSpace($selfScript) -or -not (Test-Path -LiteralPath $selfScript)) {
+            throw 'cannot locate this step script to re-invoke it as the standard user'
+          }
+
+          # Unique per run AND per attempt, and short enough for the 20-character
+          # local-account limit, so a re-run can never adopt a leftover account.
+          $runId = "$env:GITHUB_RUN_ID"
+          $runTag = '{0}a{1}' -f $runId.Substring([Math]::Max(0, $runId.Length - 8)), $env:GITHUB_RUN_ATTEMPT
+          $account = "byoklp$runTag"
+          if ($account.Length -gt 20) { throw "generated account name '$account' exceeds the 20-character local account limit" }
+          $scratch = "C:\byok-lowpriv-$runTag"
+          $checkout = "$env:GITHUB_WORKSPACE"
+          $nodeHome = Split-Path -Parent (Get-Command node).Source
+          $bunSrc = (Get-Command bun).Source
+          $pwshExe = (Get-Command pwsh).Source
+          Write-Host "[lowpriv] account=$account scratch=$scratch checkout=$checkout"
+          Write-Host "[lowpriv] node dir=$nodeHome bun=$bunSrc"
+
+          $created = $false
+          $childCode = $null
+          try {
+            # Password: generated in memory into a PSCredential. Never echoed, never on
+            # a command line, never in GITHUB_ENV, never in a step output.
+            $bytes = [byte[]]::new(32)
+            [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+            $secret = ConvertTo-SecureString ([Convert]::ToBase64String($bytes) + '!Aa1') -AsPlainText -Force
+            [System.Array]::Clear($bytes, 0, $bytes.Length)
+
+            New-LocalUser -Name $account -Password $secret -AccountNeverExpires -PasswordNeverExpires -UserMayNotChangePassword -Description 'ephemeral byok CI standard user' | Out-Null
+            $created = $true
+            Add-LocalGroupMember -Group 'Users' -Member $account
+            $cred = [System.Management.Automation.PSCredential]::new("$env:COMPUTERNAME\$account", $secret)
+
+            New-Item -ItemType Directory -Force -Path $scratch | Out-Null
+            # The only two grants this account ever gets: the scratch root and the checkout.
+            icacls $scratch /grant "${account}:(OI)(CI)(M)" /Q
+            if ($LASTEXITCODE -ne 0) { throw "icacls grant on $scratch failed ($LASTEXITCODE)" }
+            icacls $checkout /grant "${account}:(OI)(CI)(M)" /T /C /Q
+            if ($LASTEXITCODE -ne 0) { throw "icacls grant on $checkout failed ($LASTEXITCODE)" }
+
+            New-Item -ItemType Directory -Force -Path "$scratch\tools", "$scratch\logs" | Out-Null
+            # bun lives under the administrator's profile, which this account cannot execute.
+            Copy-Item -LiteralPath $bunSrc -Destination "$scratch\tools\bun.exe"
+            $childScript = Join-Path $scratch 'run-lowpriv.ps1'
+            Copy-Item -LiteralPath $selfScript -Destination $childScript
+
+            $stdoutLog = Join-Path $scratch 'logs\child-stdout.log'
+            $stderrLog = Join-Path $scratch 'logs\child-stderr.log'
+            $argLine = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -LowPrivMode child -ScratchRoot "{1}" -Workspace "{2}" -NodeDir "{3}"' -f $childScript, $scratch, $checkout, $nodeHome
+            $proc = Start-Process -FilePath $pwshExe -ArgumentList $argLine -Credential $cred -WorkingDirectory $scratch -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -Wait -PassThru
+            # An unreadable exit code must never read as success.
+            try { $childCode = $proc.ExitCode } catch { $childCode = $null }
+
+            foreach ($logFile in @($stdoutLog, $stderrLog)) {
+              Write-Host "===== $(Split-Path -Leaf $logFile) ====="
+              if (Test-Path -LiteralPath $logFile) {
+                Get-Content -LiteralPath $logFile | ForEach-Object { Write-Host $_ }
+              } else {
+                Write-Host '(no such file)'
+              }
+              Write-Host "===== end $(Split-Path -Leaf $logFile) ====="
+            }
+          } finally {
+            if ($created) {
+              try { Remove-LocalUser -Name $account } catch { Write-Host "[lowpriv] teardown: Remove-LocalUser failed: $($_.Exception.Message)" }
+              try { icacls $checkout /remove:g $account /T /C /Q | Out-Null } catch { Write-Host "[lowpriv] teardown: icacls /remove failed: $($_.Exception.Message)" }
+              Remove-Item -LiteralPath "C:\Users\$account" -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $scratch) { Write-Host "[lowpriv] teardown: $scratch is still present" }
+          }
+
+          # Never report success without a real exit code from the standard-user child.
+          if ($null -eq $childCode) { throw 'the standard-user child exit code could not be read; refusing to report success' }
+          Write-Host "[lowpriv] standard-user child exited with $childCode"
+          exit $childCode
 
       # The release driver's --artifacts mode publishes exactly the bytes this job
       # accepted, so one leg has to hand them out. Ubuntu only: three legs would be

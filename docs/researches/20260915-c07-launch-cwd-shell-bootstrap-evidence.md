@@ -223,3 +223,72 @@ termination), not something to patch inside this test.
   — `'flags' in fs.statSync('/bin/sh')` is `false` on darwin — so there is
   nothing to read without a native addon, and a check that could only ever pass
   was not written.
+
+## The non-elevated Windows leg: what fact (c) is measured by
+
+Fact (b) — a writable platform default is refused with
+`platform_default_is_writable` — was produced by the hosted windows-latest
+runner because that runner is an administrator, and under an administrator
+token `%SystemRoot%` is writable. That is the refusal half of the pair. The
+admission half cannot be produced by the same token, and it cannot be produced
+by editing the ACL on `%SystemRoot%` either: a boundary we install ourselves is
+a boundary we proved about our own ACE, not about the platform default a real
+deployment lands on.
+
+So the `npm-release-pack` windows-latest leg now runs its driver under a local
+account created for that one job: `New-LocalUser`, added to `BUILTIN\Users` and
+nothing else, launched through `Start-Process -Credential -Wait -PassThru`. The
+matrix and the job name are unchanged; the step body is split, with the
+non-Windows legs keeping the previous command verbatim. Nothing about the
+product changed for this — in particular `trusted-launch-cwd.ts` is untouched,
+and no smoke learned to accept a decline. On win32 there is no uid, so
+`owned_by_current_uid` is skipped and the write probe carries the boundary
+alone; the packed-CLI smoke hardcodes a `DaemonConfig` with no `mcpLaunchCwd`
+field, so there is no configured directory anywhere in this path to soften the
+result. What changes is only which token asks.
+
+What the run has to show, in the job log, for fact (c) to be satisfied:
+
+- `[lowpriv] whoami:` names the synthetic account, and the group list contains
+  `BUILTIN\Users`. These lines are evidence INPUT, not decoration: the step
+  asserts membership in `BUILTIN\Users`, asserts NO membership in
+  `BUILTIN\Administrators`, and asserts the single mandatory integrity label is
+  neither High nor System. A token that fails any of those fails the step, so a
+  green leg cannot have been produced by an elevated process.
+- Two negative controls, one against `%SystemRoot%` and one against the drive
+  root that is its ancestor, each of which must fail with an access-denied
+  write. Their failure is what makes the admission below non-vacuous.
+- `trusted-launch-cwd.test.ts` passes, which requires
+  `resolveTrustedLaunchCwd()` to RESOLVE the real platform default on this
+  host. The negative control inside that same file — a directory this same uid
+  can write is rejected — is what keeps the pass from being a resolver that
+  accepts anything.
+- No `task.decline`, and neither of the two refusal lines
+  (`asserted fail-closed refusal instead`, `launch boundary unprovable`).
+- `[release-pack] installed Pi...` from the launcher smoke, which is reachable
+  only after the reserved MCP child's self-reported cwd is compared against the
+  trusted directory, and `[packed-cli-mcp] ...: actual MCP tools/call passed`
+  from the packed-CLI smoke, whose stdout is now printed on success as well as
+  on failure.
+
+The single load-bearing assumption is that `C:\` is not file-writable by
+`BUILTIN\Users` on the windows-latest image. It is measured rather than
+assumed, and it is measured before anything expensive runs. If either negative
+control WRITES, the step prints which path it wrote and exits non-zero on the
+spot: no `icacls /deny` fallback, no rerun, no second strategy. That case is a
+finding to report — the platform default is writable even for a standard user
+on this image, and fact (c) would then have to be re-scoped to "a non-elevated
+token admits a real directory" rather than "a standard user admits
+`%SystemRoot%`" — not something for the step to paper over.
+
+The account, its profile, the scratch root, and the single `(OI)(CI)(M)` ACE
+granted on the checkout are removed in `finally`; they exist only on the
+ephemeral runner. The synthetic user's `USERPROFILE`, `HOME`, `APPDATA`,
+`LOCALAPPDATA`, `TEMP`, `TMP`, and npm/bun caches all point under that scratch
+root, each asserted to be granted to that account before use, so nothing is
+read out of or written into the administrator's home. `bun.exe` is copied out
+of the administrator profile into the scratch tree because the standard user
+cannot execute it where it lives.
+
+Until such a run exists, `docs/spec.md` keeps fact (c) as not verified. A
+configured CI step is scheduling, not a result.
