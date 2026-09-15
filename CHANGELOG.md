@@ -20,9 +20,8 @@ and the D2 version number belongs to a separate SDK release contract.
   spawn-only verdict `launch_env_drift`.
 
   The digests are taken over a projection that subtracts two NAMED sets: the
-  exact lifecycle names this SDK mints between resolve and spawn
-  (`TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES` —
-  `BYOK_PI_MCP_CONFIG_PATH`, `BYOK_PI_PERMISSION_MODE`,
+  exact lifecycle names this SDK mints onto a GATED CHILD between resolve and
+  spawn (`TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES` —
   `BYOK_HOST_TOOLSET_CONTEXT`, `BYOK_STORE_DIR`, `BYOK_PRODUCT_ID`), and
   `PROVIDER_CREDENTIAL_ENV_DENY_NAMES`, the credential surface the existing
   custody boundary strips. It is not a `BYOK_*` prefix exemption: the prefix is
@@ -30,7 +29,11 @@ and the D2 version number belongs to a separate SDK release contract.
   environment of a child about to start under an attested identity fails closed
   with a second spawn-only verdict, `launch_env_unexpected_control_name` —
   raised before the digests, so it refuses even when the same name was present
-  at resolve. The loader deny list is disjoint from both projections, so a
+  at resolve. The Pi adapter's own `BYOK_PI_MCP_CONFIG_PATH` and
+  `BYOK_PI_PERMISSION_MODE` are deliberately NOT on the list: they are set on
+  the Pi process and the server pool strips the whole `/^BYOK_PI_/` shape off
+  before it spawns anything, so neither reaches a gated child — one arriving at
+  the gate is precisely the unaccountable case, and is refused. The loader deny list is disjoint from both projections, so a
   `NODE_OPTIONS`, `DYLD_*` or `BASH_ENV` that reaches a child is still a
   refusal, as is a `PYTHONPATH` that appeared or a variable that was renamed.
   Neither verdict is a `ToolImplementationUnavailableReasonV1`: the resolver

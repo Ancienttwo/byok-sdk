@@ -1055,9 +1055,9 @@ The authority split is deliberate and total:
   `process.env`, and must not keep a copy of this SDK's loader deny list. Both
   digests are taken over a projection that excludes two NAMED sets THIS SDK
   itself adds or removes between measuring and spawning: an exact, enumerated
-  list of the SDK-minted lifecycle names (`BYOK_PI_MCP_CONFIG_PATH`,
-  `BYOK_PI_PERMISSION_MODE`, `BYOK_HOST_TOOLSET_CONTEXT`, `BYOK_STORE_DIR`,
-  `BYOK_PRODUCT_ID`), and the provider-credential names stripped at
+  list of the SDK-minted lifecycle names that actually reach a gated child
+  (`BYOK_HOST_TOOLSET_CONTEXT`, `BYOK_STORE_DIR`, `BYOK_PRODUCT_ID`), and the
+  provider-credential names stripped at
   subscription and BYOK-custody boundaries by the existing credential-custody
   authority. So one identity survives both spawn points without binding a
   difference the SDK made on purpose. It is NOT a `BYOK_*` prefix exemption:

@@ -366,13 +366,13 @@ const BYOK_CONTROL_ENV_PREFIX = 'BYOK_';
  * this SDK reads elsewhere, so "starts with BYOK_" is not a reason to project
  * a name away unnoticed.
  *
- * Every entry, with where it is minted:
+ * Every entry, with where it is minted — three names, and each one is here
+ * because this SDK itself puts it on a GATED CHILD's environment after the
+ * identity was measured. A name that never reaches a gated child does not
+ * belong on this list: projecting it away would blind the gate to a control
+ * variable that, arriving anyway, could only have come from somewhere this SDK
+ * does not mint.
  *
- * - `BYOK_PI_MCP_CONFIG_PATH` — `adapters/pi/mcp-config.ts:1`, set on the Pi
- *   process at `adapters/pi/pi-adapter.ts:490`. The pool strips it back off
- *   before it spawns a server (`adapters/pi/mcp-server-pool.ts:271`).
- * - `BYOK_PI_PERMISSION_MODE` — `adapters/pi/subagents-policy-config.ts:1`, set
- *   at `adapters/pi/pi-adapter.ts:491`, stripped by the same pool filter.
  * - `BYOK_HOST_TOOLSET_CONTEXT` — the per-server task-lane nonce minted at
  *   `daemon/task-runner.ts:3355` (name at `:1148`) into the server's own `env`
  *   block, which `mcp/client.ts:244` layers onto the child environment the
@@ -384,6 +384,15 @@ const BYOK_CONTROL_ENV_PREFIX = 'BYOK_';
  * OUT OF SCOPE, deliberately, and NOT exempt — a name below appearing on a
  * gated child environment is a refusal, not a projection:
  *
+ * - `BYOK_PI_MCP_CONFIG_PATH` (`adapters/pi/mcp-config.ts:1`) and
+ *   `BYOK_PI_PERMISSION_MODE` (`adapters/pi/subagents-policy-config.ts:1`) are
+ *   set on the PI PROCESS at `adapters/pi/pi-adapter.ts:491-492`, and the
+ *   server pool strips the whole `/^BYOK_PI_/` shape back off
+ *   (`adapters/pi/mcp-server-pool.ts:42,271`) before it spawns a server. They
+ *   address this SDK's own Pi entries, not a toolset server, so neither ever
+ *   reaches a gated child: the pool's children are spawned without them, and
+ *   the daemon's admission probe spawns off `buildRuntimeEnv`'s output, which
+ *   hard-denies the whole `BYOK_*` prefix (`daemon/environment.ts:202`).
  * - `adapters/claude/resolve-bin.ts:29` / `resolve-approval-mcp-bin.ts:49`'s
  *   `BYOK_*_BIN` overrides are daemon-pre-child inputs read out of the
  *   daemon's own `process.env`; they are never placed on a spawned child's
@@ -400,8 +409,6 @@ const BYOK_CONTROL_ENV_PREFIX = 'BYOK_';
  */
 export const TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES: readonly string[] = Object.freeze([
   'BYOK_HOST_TOOLSET_CONTEXT',
-  'BYOK_PI_MCP_CONFIG_PATH',
-  'BYOK_PI_PERMISSION_MODE',
   'BYOK_PRODUCT_ID',
   'BYOK_STORE_DIR',
 ]);

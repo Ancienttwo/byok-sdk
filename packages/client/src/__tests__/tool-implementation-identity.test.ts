@@ -417,12 +417,15 @@ describe('the launch environment is an SDK measurement, not a resolver input', (
   });
 
   it('excludes exactly the names this SDK itself adds or strips between resolve and spawn', () => {
-    // `withoutProviderCredentials` at a subscription boundary and the two Pi
-    // control variables are the SDK's own doing, so an identity resolved
-    // before them still matches the environment that reaches the child.
+    // `withoutProviderCredentials` at a subscription boundary and the per-server
+    // `env` block the task runner mints are the SDK's own doing, so an identity
+    // resolved before them still matches the environment that reaches the child.
     const baseline = toolImplementationLaunchEnvNamesDigest(ENV);
     expect(toolImplementationLaunchEnvNamesDigest({ ...ENV, ANTHROPIC_API_KEY: 'sk-x' })).toBe(baseline);
-    expect(toolImplementationLaunchEnvNamesDigest({ ...ENV, BYOK_PI_MCP_CONFIG_PATH: '/tmp/c' })).toBe(baseline);
+    expect(toolImplementationLaunchEnvNamesDigest({ ...ENV, BYOK_HOST_TOOLSET_CONTEXT: 'nonce' })).toBe(baseline);
+    // And the Pi control variables, which never reach a gated child, are NOT
+    // excluded: one arriving at the gate has to be visible to be refused.
+    expect(toolImplementationLaunchEnvNamesDigest({ ...ENV, BYOK_PI_MCP_CONFIG_PATH: '/tmp/c' })).not.toBe(baseline);
   });
 });
 
@@ -785,6 +788,15 @@ describe('the launch-env projection subtracts an enumerated set, never a prefix'
   }
 
   it('projects away exactly the lifecycle names this SDK mints between resolve and spawn', () => {
+    // Pinned as a list, not only as a loop: a name added here is a name the
+    // gate stops seeing, so it must be a deliberate edit rather than a
+    // side effect. Each of the three is minted into the per-server `env` block
+    // `mcp/client.ts:244` layers onto a GATED child (`task-runner.ts:3353-3355`).
+    expect([...TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES]).toEqual([
+      'BYOK_HOST_TOOLSET_CONTEXT',
+      'BYOK_PRODUCT_ID',
+      'BYOK_STORE_DIR',
+    ]);
     const baseline = toolImplementationLaunchEnvNamesDigest(ENV);
     for (const name of TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES) {
       expect(toolImplementationLaunchEnvNamesDigest({ ...ENV, [name]: 'x' })).toBe(baseline);
@@ -850,15 +862,32 @@ describe('the launch-env projection subtracts an enumerated set, never a prefix'
     )).toEqual({ reason: 'launch_env_unexpected_control_name', subject: 'launch-env' });
   });
 
-  it('still admits the real Pi, host-toolset and credential transformations', async () => {
+  it('refuses a Pi control variable that reached a gated child anyway', async () => {
+    // `BYOK_PI_*` is set on the Pi PROCESS (`adapters/pi/pi-adapter.ts:491-492`)
+    // and the server pool strips the whole `/^BYOK_PI_/` shape back off
+    // (`adapters/pi/mcp-server-pool.ts:42,271`) before it spawns a server; the
+    // daemon's own admission probe spawns off `buildRuntimeEnv`'s output, which
+    // hard-denies `BYOK_*` (`daemon/environment.ts:202`). So neither name ever
+    // reaches a gated child, and one that does is control-plane authority from
+    // somewhere this SDK does not mint — refused, not projected away.
     const attested = await attest();
-    // The pool's strip, the per-server nonce block `mcp/client.ts` layers on,
-    // and a hosted-manifest credential strip: all three are this SDK's own
-    // doing between resolve and spawn, and none of them is a refusal.
+    for (const name of ['BYOK_PI_MCP_CONFIG_PATH', 'BYOK_PI_PERMISSION_MODE']) {
+      expect(unexpectedLaunchEnvControlNames({ ...ENV, [name]: 'x' })).toEqual([name]);
+      expect(await reverifyToolImplementationIdentity(
+        attested,
+        { ...ENV, [name]: 'x' },
+        rootOwnedProbe(),
+      )).toEqual({ reason: 'launch_env_unexpected_control_name', subject: 'launch-env' });
+    }
+  });
+
+  it('still admits the real host-toolset and credential transformations', async () => {
+    const attested = await attest();
+    // The per-server nonce block `mcp/client.ts` layers on and a
+    // hosted-manifest credential strip are both this SDK's own doing between
+    // resolve and spawn, and neither is a refusal.
     expect(await reverifyToolImplementationIdentity(attested, {
       ...ENV,
-      BYOK_PI_MCP_CONFIG_PATH: '/tmp/c.json',
-      BYOK_PI_PERMISSION_MODE: 'auto',
       BYOK_HOST_TOOLSET_CONTEXT: 'nonce',
       BYOK_STORE_DIR: '/var/byok',
       BYOK_PRODUCT_ID: 'salesko',
