@@ -170,16 +170,20 @@ export const InputPreparationDocsPathsSchema = z
 /**
  * Explicit, already-authorized inputs for the native system prompt renderer.
  *
- * `selectedTools`/`toolSnippets` are PROMPT TEXT the Host authored — they are
- * not the model-visible tool schemas, which the device observes locally and
- * the Host never states (see this module's rule 1).
+ * `toolSnippets` is PROMPT TEXT the Host authored — it is not the
+ * model-visible tool schemas, which the device observes locally and the Host
+ * never states (see this module's rule 1).
+ *
+ * `selectedTools` is deliberately absent for the same reason one level up: the
+ * native contract requires that list to equal the model-visible manifest
+ * exactly, so a Host stating it would be stating the manifest. The device
+ * fills it from its own assembled tool surface.
  */
 export const InputPreparationPromptSnapshotSchema = z
   .object({
     customPrompt: z.string().optional(),
     appendSystemPrompt: z.string().optional(),
     cwd: CONTEXT_PATH,
-    selectedTools: z.array(z.string()).max(512),
     toolSnippets: z.record(z.string(), z.string()),
     promptGuidelines: z.array(z.string()).max(512),
     contextFiles: z.array(InputPreparationContextFileSchema).max(512),
@@ -440,5 +444,13 @@ export const InputPreparationRejectionReasonSchema = z.enum([
    * preparation instead of silently receiving one bound to stale evidence.
    */
   'observation_drift',
+  /**
+   * The declared `permissionMode` is not one this device admits: it exceeds
+   * the operator's configured ceiling. The requester's declaration is INTENT,
+   * not authorization — it goes through the same merge that admits a task
+   * offer's `policy.mode` — and an unadmitted mode refuses rather than being
+   * silently narrowed to one the device would allow.
+   */
+  'permission_mode_denied',
 ]);
 export type InputPreparationRejectionReason = z.infer<typeof InputPreparationRejectionReasonSchema>;

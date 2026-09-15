@@ -22,6 +22,7 @@ import type {
 } from '../input-preparation';
 import {
   INPUT_PREPARATION_REQUEST_FORMAT,
+  INPUT_PREPARATION_RETIRED_PROMPT_KEYS,
   INPUT_PREPARATION_RETIRED_REQUEST_KEYS,
   INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS,
   INPUT_PREPARATION_VERSION,
@@ -1009,7 +1010,6 @@ function parsePromptSnapshot(value: unknown): InputPreparationPromptSnapshotV1 |
       'customPrompt',
       'appendSystemPrompt',
       'cwd',
-      'selectedTools',
       'toolSnippets',
       'promptGuidelines',
       'contextFiles',
@@ -1022,7 +1022,6 @@ function parsePromptSnapshot(value: unknown): InputPreparationPromptSnapshotV1 |
   if (value.customPrompt !== undefined && typeof value.customPrompt !== 'string') return undefined;
   if (value.appendSystemPrompt !== undefined && typeof value.appendSystemPrompt !== 'string') return undefined;
   if (typeof value.cwd !== 'string' || value.cwd.length === 0) return undefined;
-  if (!stringArray(value.selectedTools)) return undefined;
   if (!stringMap(value.toolSnippets)) return undefined;
   if (!stringArray(value.promptGuidelines)) return undefined;
   if (!Array.isArray(value.contextFiles)) return undefined;
@@ -1040,7 +1039,6 @@ function parsePromptSnapshot(value: unknown): InputPreparationPromptSnapshotV1 |
     ...(value.customPrompt === undefined ? {} : { customPrompt: value.customPrompt }),
     ...(value.appendSystemPrompt === undefined ? {} : { appendSystemPrompt: value.appendSystemPrompt }),
     cwd: value.cwd,
-    selectedTools: [...value.selectedTools],
     toolSnippets: { ...value.toolSnippets },
     promptGuidelines: [...value.promptGuidelines],
     contextFiles,
@@ -1132,6 +1130,19 @@ export function parseInputPreparationRequestParams(value: unknown): InputPrepara
         detail: `this contract no longer accepts ${JSON.stringify(retired)}: tool executor identity is a local`
           + ' observation this daemon derives from `requiredToolsets`, never a value a caller may state',
       };
+    }
+  }
+  if (plainRecord(value.snapshot) && plainRecord(value.snapshot.prompt)) {
+    for (const retired of INPUT_PREPARATION_RETIRED_PROMPT_KEYS) {
+      if (retired in value.snapshot.prompt) {
+        return {
+          ok: false,
+          code: 'unsupported_input',
+          detail: `this contract no longer accepts ${JSON.stringify(`snapshot.prompt.${retired}`)}: the native contract`
+            + ' requires that list to equal the model-visible manifest exactly, and the manifest is a local'
+            + ' observation this daemon derives from `requiredToolsets`',
+        };
+      }
     }
   }
   if (plainRecord(value.snapshot)) {

@@ -524,7 +524,15 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     try {
       compiled = await options.compiler.compile({
         snapshot: {
-          prompt: request.snapshot.prompt,
+          prompt: {
+            ...request.snapshot.prompt,
+            // Daemon-derived, and it has to be: the native contract requires
+            // this list to equal the model-visible manifest exactly, and the
+            // manifest is this device's observation. A caller-stated list
+            // would be a second, unverified copy of the manifest arriving
+            // through the prompt.
+            selectedTools: surface.tools.map((tool) => tool.name),
+          },
           messages: request.snapshot.messages,
           // Daemon-derived, never caller-stated. The tools the model is shown
           // and the executors the manifest binds come from the same assembly.

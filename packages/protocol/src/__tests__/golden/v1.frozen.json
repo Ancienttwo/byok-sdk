@@ -23851,7 +23851,8 @@
                 "toolsets_unobservable",
                 "deadline_elapsed",
                 "launch_boundary_unavailable",
-                "observation_drift"
+                "observation_drift",
+                "permission_mode_denied"
               ]
             }
           },
@@ -24375,7 +24376,8 @@
             "toolsets_unobservable",
             "deadline_elapsed",
             "launch_boundary_unavailable",
-            "observation_drift"
+            "observation_drift",
+            "permission_mode_denied"
           ]
         },
         "completedAt": {

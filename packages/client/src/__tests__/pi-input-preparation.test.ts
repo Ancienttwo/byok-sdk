@@ -12,7 +12,7 @@ import {
   type CompilePreparedInputRequest,
 } from '../adapters/pi/input-preparation';
 import { PI_PACKAGE_NAME, resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
-import type { InputPreparationSnapshotV1 } from '../input-preparation';
+import type { InputPreparationCompiledSnapshotV1 } from '../input-preparation';
 
 /**
  * B-P2 §10.5 "Completeness/purity" for the ONE module that composes the native
@@ -34,7 +34,7 @@ import type { InputPreparationSnapshotV1 } from '../input-preparation';
  * creates a task, claim, Execution or nonce.
  */
 
-function snapshot(): InputPreparationSnapshotV1 {
+function snapshot(): InputPreparationCompiledSnapshotV1 {
   return {
     prompt: {
       cwd: '/workspace/project',

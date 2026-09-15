@@ -16,6 +16,11 @@ import {
 } from '../mcp';
 import { createPiMcpTools } from '../adapters/pi/mcp-tools';
 import { buildToolExecutorsFromObservation } from '../adapters/pi/input-preparation';
+import {
+  TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED,
+  toolImplementationUnavailable,
+  type ToolImplementationIdentityV1,
+} from '../daemon/tool-implementation-identity';
 import { resolveMcpToolsetGrants } from '../adapters/mcp-tool-grants';
 import { BYOK_PI_MCP_CONFIG_PATH } from '../adapters/pi/mcp-config';
 import { trustedCwd } from './fixtures/launch-cwd';
@@ -24,6 +29,17 @@ const LAUNCH = {
   launchCwd: '/',
   launcher: { kind: 'node', interpreter: '/usr/bin/node', script: '/pkg/bin/byok-launch-cwd.mjs' },
 } as const;
+
+/**
+ * What this SDK's DEFAULT produces for every server: no configured
+ * `toolImplementationAuthority`, so nothing is attested. It is a real value
+ * the fingerprint binds, not a placeholder — see the attested case below,
+ * which must fingerprint differently.
+ */
+const IMPLEMENTATIONS: Readonly<Record<string, ToolImplementationIdentityV1>> = Object.freeze({
+  salesko: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED,
+  salesko_proposals: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED,
+});
 
 /**
  * The single-projection property: the ordinary Pi extension and the core must
@@ -305,7 +321,7 @@ describe('MCP projection — executor fingerprints', () => {
       permissionMode: 'auto',
       toolsetDefinitionRevisions: REVISIONS,
       nativeTools: [{ name: 'read', parameters: { type: 'object' } }],
-      runtimeIdentity: RUNTIME, launch: LAUNCH,
+      runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
     });
     expect(Object.keys(toolExecutors)).toEqual([
       'read',
@@ -323,7 +339,7 @@ describe('MCP projection — executor fingerprints', () => {
       permissionMode: 'auto',
       toolsetDefinitionRevisions: REVISIONS,
       nativeTools: [],
-      runtimeIdentity: RUNTIME, launch: LAUNCH,
+      runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
     });
     expect((await build()).toolExecutors).toEqual((await build()).toolExecutors);
   });
@@ -353,10 +369,10 @@ describe('MCP projection — executor fingerprints', () => {
   ])('changes when %s changes', async (_label, mutate, revisions) => {
     const observation = await realObservation();
     const base = await buildToolExecutorsFromObservation({
-      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH,
+      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
     });
     const after = await buildToolExecutorsFromObservation({
-      observation: mutate(observation), permissionMode: 'auto', toolsetDefinitionRevisions: revisions, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH,
+      observation: mutate(observation), permissionMode: 'auto', toolsetDefinitionRevisions: revisions, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
     });
     expect(after.toolExecutors['mcp__salesko__find_leads'])
       .not.toBe(base.toolExecutors['mcp__salesko__find_leads']);
@@ -372,18 +388,18 @@ describe('MCP projection — executor fingerprints', () => {
     // device configuration's own digest.
     const observation = await realObservation();
     const base = await buildToolExecutorsFromObservation({
-      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH,
+      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
     });
     const movedCwd = await buildToolExecutorsFromObservation({
-      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
+      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
       launch: { ...LAUNCH, launchCwd: '/opt/byok/releases/1.2.3-abcdef' },
     });
     const newLauncher = await buildToolExecutorsFromObservation({
-      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
+      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
       launch: { ...LAUNCH, launcher: { kind: 'node', interpreter: '/usr/local/bin/node', script: LAUNCH.launcher.script } },
     });
     const noLauncher = await buildToolExecutorsFromObservation({
-      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
+      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
       launch: { launchCwd: LAUNCH.launchCwd, launcher: null },
     });
     const key = 'mcp__salesko__find_leads';
@@ -399,7 +415,7 @@ describe('MCP projection — executor fingerprints', () => {
   it('does NOT change when a schema is re-serialized with its keys in another order', async () => {
     const observation = await realObservation();
     const base = await buildToolExecutorsFromObservation({
-      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH,
+      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
     });
     const reordered = {
       ...observation,
@@ -419,22 +435,67 @@ describe('MCP projection — executor fingerprints', () => {
       },
     };
     const after = await buildToolExecutorsFromObservation({
-      observation: reordered, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH,
+      observation: reordered, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
     });
     expect(after.toolExecutors).toEqual(base.toolExecutors);
   });
 
-  it('always reports the implementation identity as unproven', async () => {
-    const { readinessReasons } = await buildToolExecutorsFromObservation({
+  it('fingerprints an attested implementation differently from an unattested one', async () => {
+    // The property: an implementation identity is a fingerprint INPUT, not a
+    // label beside it. A tool whose implementation is proven is not the same
+    // tool as one whose implementation was merely assumed, so nothing frozen
+    // under the weaker claim may validate under the stronger one.
+    const observation = await realObservation();
+    const build = async (implementations: Readonly<Record<string, ToolImplementationIdentityV1>>) =>
+      (await buildToolExecutorsFromObservation({
+        observation,
+        permissionMode: 'auto',
+        toolsetDefinitionRevisions: REVISIONS,
+        nativeTools: [],
+        runtimeIdentity: RUNTIME,
+        launch: LAUNCH,
+        implementations,
+      })).toolExecutors['mcp__salesko__find_leads'];
+
+    const unconfigured = await build(IMPLEMENTATIONS);
+    const unattested = await build({
+      ...IMPLEMENTATIONS,
+      salesko: toolImplementationUnavailable('implementation_identity_unattested'),
+    });
+    const attested = await build({
+      ...IMPLEMENTATIONS,
+      salesko: {
+        kind: 'attested',
+        authority: 'host-install-record',
+        manifestRevision: 'host-r1',
+        form: 'compiled-executable',
+        installPath: '/opt/byok/releases/1.2.3/salesko-agent',
+        closureDigest: 'a'.repeat(64),
+        closureKind: 'artifact',
+        launchArgv: ['mcp', 'serve'],
+        launchCwd: LAUNCH.launchCwd,
+        launchEnvNamesDigest: 'b'.repeat(64),
+        loaderEnvValuesDigest: 'c'.repeat(64),
+        installStat: { dev: 1, ino: 2, size: 3, mtimeMs: 4, mode: 0o100555, uid: 0, gid: 0 },
+      },
+    });
+
+    expect(new Set([unconfigured, unattested, attested]).size).toBe(3);
+  });
+
+  it('refuses to fingerprint a server whose implementation identity was never resolved', async () => {
+    // "Nobody resolved this" and "the resolver said unavailable" are different
+    // facts, and only the second one is a fingerprint input. An absent entry is
+    // therefore a refusal rather than an assumed absence.
+    await expect(buildToolExecutorsFromObservation({
       observation: await realObservation(),
       permissionMode: 'auto',
       toolsetDefinitionRevisions: REVISIONS,
       nativeTools: [],
-      runtimeIdentity: RUNTIME, launch: LAUNCH,
-    });
-    // A fingerprint binds what a server SAID, never which executable will run.
-    // The gap travels into the receipt instead of being quietly dropped.
-    expect(readinessReasons).toEqual(['executor_identity_unproven']);
+      runtimeIdentity: RUNTIME,
+      launch: LAUNCH,
+      implementations: { salesko: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
+    })).rejects.toThrow(/has no resolved implementation identity/u);
   });
 
   it('refuses to fingerprint a toolset with no definition revision', async () => {
@@ -443,7 +504,7 @@ describe('MCP projection — executor fingerprints', () => {
       permissionMode: 'auto',
       toolsetDefinitionRevisions: { 'salesko.read.v1': REVISIONS['salesko.read.v1'] },
       nativeTools: [],
-      runtimeIdentity: RUNTIME, launch: LAUNCH,
+      runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
     })).rejects.toThrow(/no definition revision/u);
   });
 });
@@ -579,7 +640,7 @@ describe('MCP projection — one policy filter, every consumer', () => {
       permissionMode: 'readonly',
       toolsetDefinitionRevisions: { 'salesko.read.v1': `sha256:${'1'.repeat(64)}` },
       nativeTools: [],
-      runtimeIdentity: '@byok-sdk/pi-coding-agent@0.85.1002+test', launch: LAUNCH,
+      runtimeIdentity: '@byok-sdk/pi-coding-agent@0.85.1002+test', launch: LAUNCH, implementations: IMPLEMENTATIONS,
     });
     expect(Object.keys(toolExecutors)).toEqual(names);
   });
@@ -590,7 +651,7 @@ describe('MCP projection — one policy filter, every consumer', () => {
       permissionMode: 'readonly',
       toolsetDefinitionRevisions: { 'salesko.read.v1': `sha256:${'1'.repeat(64)}` },
       nativeTools: [],
-      runtimeIdentity: '@byok-sdk/pi-coding-agent@0.85.1002+test', launch: LAUNCH,
+      runtimeIdentity: '@byok-sdk/pi-coding-agent@0.85.1002+test', launch: LAUNCH, implementations: IMPLEMENTATIONS,
     })).rejects.toThrow(/declares no McpToolsetConfig\.readOnlyTools/u);
   });
 

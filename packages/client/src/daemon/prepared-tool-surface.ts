@@ -1,4 +1,4 @@
-import type { PermissionMode } from '@byok-sdk/protocol';
+import type { PermissionMode, PermissionPolicy } from '@byok-sdk/protocol';
 import { inputPreparationDigest, type InputPreparationToolV1 } from '../input-preparation';
 import type { McpStdioServerConfig } from '../types';
 import type { McpToolsetServerObservation } from '../mcp/observation';
@@ -6,6 +6,7 @@ import { classifyMcpToolsetServerObservation } from '../mcp/observation';
 import { filterMcpObservationForPolicy, projectMcpTools, qualifiedMcpToolName } from '../mcp/projection';
 import { buildToolExecutorsFromObservation, InputPreparationCompileError } from '../adapters/pi/input-preparation';
 import { McpAuthorityError } from '../mcp/client';
+import { computeEffectivePolicy } from './policy';
 import { MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS, probeMcpServer } from './mcp-tools-probe';
 import type { McpToolsetRegistry } from './toolset-registry';
 import {
@@ -71,6 +72,8 @@ import {
 export type PreparedToolSurfaceRefusalCode =
   /** A named toolset is not configured here, or its servers collide. */
   | 'unsupported_input'
+  /** The declared permission mode exceeds this device's configured ceiling. */
+  | 'permission_mode_denied'
   /** No non-writable launch directory / trusted launcher could be proven. */
   | 'launch_boundary_unavailable'
   /** A required server could not be observed, or its answer is ungrantable. */
@@ -173,6 +176,14 @@ export interface PreparedToolSurfaceDeps {
    * construction.
    */
   readonly runtimeEnv: () => Readonly<Record<string, string>>;
+  /**
+   * `DaemonConfig.permissionDefaults` — the operator's policy ceiling, the
+   * SAME value `TaskRunner.handleOffer` merges a task offer's `policy` against
+   * (`task-runner.ts`'s `computeEffectivePolicy(payload.policy, ...)` call).
+   * Absent means no ceiling is configured and every mode is admissible, which
+   * is exactly what an offer means by it.
+   */
+  readonly permissionCeiling?: PermissionPolicy;
   /** `DaemonConfig.toolImplementationAuthority`. Absent means every identity is `resolver_unconfigured`. */
   readonly toolImplementationAuthority?: ToolImplementationAuthority;
   /** Test seam only; production passes nothing and the real `node:fs` probe is used. */
@@ -366,6 +377,36 @@ export async function assemblePreparedToolSurface(
   deps: PreparedToolSurfaceDeps,
   input: PreparedToolSurfaceInput,
 ): Promise<PreparedToolSurfaceResult> {
+  // ADMISSION, before anything else — before a directory is probed for
+  // writability and long before a server is started.
+  //
+  // The requester's `permissionMode` is INTENT. Turning it into an admitted
+  // mode is the same merge a task offer goes through (`./policy.ts`'s
+  // `computeEffectivePolicy`, which `TaskRunner.handleOffer` calls with the
+  // very same `permissionDefaults` ceiling), so a preparation cannot be
+  // counted for a mode this device would refuse to run. Parsing the enum is
+  // not admission; a device that accepted any well-formed mode would be
+  // counting manifests it has no authority to produce.
+  //
+  // A refused mode is REFUSED, never narrowed: a preparation counts one
+  // concrete manifest, and silently counting the ceiling's narrower one would
+  // answer a question nobody asked while looking like success.
+  const admitted = computeEffectivePolicy({ mode: input.permissionMode }, deps.permissionCeiling);
+  if (!admitted.ok) {
+    return refuse('permission_mode_denied', 'permission_mode_denied', admitted.reason ?? 'the declared permission mode is not admissible on this device');
+  }
+  if (admitted.policy.mode !== input.permissionMode) {
+    // `computeEffectivePolicy` does not lower a mode today; this is the guard
+    // that keeps a future merge from turning a refusal into a downgrade
+    // nobody notices.
+    return refuse(
+      'permission_mode_denied',
+      'permission_mode_downgrade_refused',
+      `this device admitted mode ${JSON.stringify(admitted.policy.mode)} for a preparation declared as`
+        + ` ${JSON.stringify(input.permissionMode)}; a preparation is never counted for a mode it did not declare`,
+    );
+  }
+
   const bound = await resolvePreparedToolBinding(deps, input);
   if (!bound.ok) return bound;
   const binding = bound.binding;

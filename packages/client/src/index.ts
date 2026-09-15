@@ -287,6 +287,7 @@ export {
   INPUT_PREPARATION_RECEIPT_FORMAT,
   INPUT_PREPARATION_RECORD_FORMAT,
   INPUT_PREPARATION_REQUEST_FORMAT,
+  INPUT_PREPARATION_RETIRED_PROMPT_KEYS,
   INPUT_PREPARATION_RETIRED_REQUEST_KEYS,
   INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS,
   INPUT_PREPARATION_VERSION,
@@ -296,6 +297,7 @@ export {
 export type {
   InputPreparationArtifactSummaryV1,
   InputPreparationAuthorityGrantV1,
+  InputPreparationCompiledPromptSnapshotV1,
   InputPreparationCompiledSnapshotV1,
   InputPreparationAuthorityOutcomeV1,
   InputPreparationAuthorityResolver,

@@ -1512,6 +1512,7 @@ export function buildDaemonWithAdapters(
           : { locallyAllowedNames: config.runtimeEnvironment.pi.allow }),
       });
     },
+    ...(config.permissionDefaults === undefined ? {} : { permissionCeiling: config.permissionDefaults }),
     ...(config.toolImplementationAuthority === undefined
       ? {}
       : { toolImplementationAuthority: config.toolImplementationAuthority }),

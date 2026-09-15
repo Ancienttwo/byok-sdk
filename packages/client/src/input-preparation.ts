@@ -170,18 +170,36 @@ export interface InputPreparationDocsPathsV1 {
   readonly examplesPath: string;
 }
 
-/** Explicit, already-authorized inputs for the native system prompt renderer. */
+/**
+ * Explicit, already-authorized inputs for the native system prompt renderer.
+ *
+ * `selectedTools` is deliberately NOT here. The native contract requires it to
+ * equal the model-visible manifest exactly, and this version moved that
+ * manifest onto the device — so a caller stating the list would be stating the
+ * manifest through the prompt. The daemon fills it from the assembled surface
+ * (see {@link InputPreparationCompiledPromptSnapshotV1}).
+ *
+ * `toolSnippets` stays caller-authored because it is prompt TEXT, but its keys
+ * must name tools the assembled manifest actually contains; the native
+ * compiler refuses a snippet for a tool that is not in the manifest, and
+ * nothing here papers over that.
+ */
 export interface InputPreparationPromptSnapshotV1 {
   readonly customPrompt?: string;
   readonly appendSystemPrompt?: string;
   readonly cwd: string;
-  readonly selectedTools: readonly string[];
   readonly toolSnippets: Readonly<Record<string, string>>;
   readonly promptGuidelines: readonly string[];
   readonly contextFiles: readonly InputPreparationContextFileV1[];
   /** Preformatted by the caller; empty means no skills. */
   readonly formattedSkills: string;
   readonly docsPaths: InputPreparationDocsPathsV1;
+}
+
+/** The caller's prompt snapshot plus the tool-name list the daemon derived. */
+export interface InputPreparationCompiledPromptSnapshotV1 extends InputPreparationPromptSnapshotV1 {
+  /** Exactly the assembled manifest's tool names, in its canonical order. */
+  readonly selectedTools: readonly string[];
 }
 
 /**
@@ -231,7 +249,8 @@ export interface InputPreparationSnapshotV1 {
  * daemon-derived tool manifest. Produced only inside the daemon, never parsed
  * off a wire.
  */
-export interface InputPreparationCompiledSnapshotV1 extends InputPreparationSnapshotV1 {
+export interface InputPreparationCompiledSnapshotV1 extends Omit<InputPreparationSnapshotV1, 'prompt'> {
+  readonly prompt: InputPreparationCompiledPromptSnapshotV1;
   readonly tools: readonly InputPreparationToolV1[];
 }
 
@@ -292,6 +311,13 @@ export const INPUT_PREPARATION_RETIRED_REQUEST_KEYS = ['toolExecutors'] as const
 
 /** The snapshot keys retired in version 2. Same rule, one level down. */
 export const INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS = ['tools'] as const;
+
+/**
+ * The prompt-snapshot keys retired in version 2. `selectedTools` must equal the
+ * model-visible manifest exactly by native contract, so stating it is stating
+ * the manifest through the prompt.
+ */
+export const INPUT_PREPARATION_RETIRED_PROMPT_KEYS = ['selectedTools'] as const;
 
 /** Params for `input_preparation.lookup` and `input_preparation.cancel`. */
 export interface InputPreparationLookupParamsV1 {
@@ -788,6 +814,13 @@ export const INPUT_PREPARATION_ERROR_CODES = [
    * not re-derived and no server is re-probed.
    */
   'observation_drift',
+  /**
+   * The declared `permissionMode` exceeds this device's configured ceiling.
+   * Never narrowed to an admissible mode: a preparation counts one concrete
+   * manifest, and quietly counting a smaller one answers a question nobody
+   * asked.
+   */
+  'permission_mode_denied',
 ] as const;
 
 export type InputPreparationErrorCodeV1 = (typeof INPUT_PREPARATION_ERROR_CODES)[number];

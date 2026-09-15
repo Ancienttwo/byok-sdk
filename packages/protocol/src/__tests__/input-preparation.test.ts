@@ -198,7 +198,6 @@ describe('input preparation context document', () => {
     const document = {
       prompt: {
         cwd: '/home/agent',
-        selectedTools: ['read'],
         toolSnippets: { read: 'reads a file' },
         promptGuidelines: [],
         contextFiles: [],
@@ -211,6 +210,14 @@ describe('input preparation context document', () => {
     // `tools` is a device observation. A Host that could send it could claim a
     // toolset the device does not have.
     expect(InputPreparationContextDocumentSchema.safeParse({ ...document, tools: [] }).success).toBe(false);
+    // `selectedTools` is the manifest's own name list by native contract, so a
+    // Host stating it would be stating the manifest through the prompt.
+    expect(
+      InputPreparationContextDocumentSchema.safeParse({
+        ...document,
+        prompt: { ...document.prompt, selectedTools: ['read'] },
+      }).success,
+    ).toBe(false);
     // Only `user` history is in the first support set; anything else rejects.
     expect(
       InputPreparationContextDocumentSchema.safeParse({

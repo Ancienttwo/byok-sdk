@@ -6,6 +6,7 @@ import {
   INPUT_PREPARATION_REQUEST_FORMAT,
   INPUT_PREPARATION_VERSION,
   InputPreparationPolicyError,
+  canonicalInputPreparationJson,
   validateInputPreparationLimits,
   type InputPreparationAuthorityResolver,
   type InputPreparationCounterAdapter,
@@ -17,9 +18,9 @@ import {
 import {
   createInputPreparationService,
   InputPreparationRequestError,
-  canonicalInputPreparationJson,
   type InputPreparationService,
 } from '../daemon/input-preparation-service';
+import { recordingToolSurface, type RecordingToolSurface } from './fixtures/prepared-tool-surface';
 import {
   InputPreparationCompileError,
   type CompilePreparedInputRequest,
@@ -88,17 +89,16 @@ function request(overrides: Partial<InputPreparationRequestV1> = {}): InputPrepa
     snapshot: {
       prompt: {
         cwd: '/workspace/project',
-        selectedTools: ['read'],
-        toolSnippets: { read: 'snippet' },
+        toolSnippets: {},
         promptGuidelines: [],
         contextFiles: [],
         formattedSkills: '',
         docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
       },
       messages: [{ role: 'user', content: 'hello', timestamp: 1_700_000_000_000 }],
-      tools: [{ name: 'read', description: 'read a file', parameters: { type: 'object', properties: {} } }],
     },
-    toolExecutors: { read: 'exec:read@1' },
+    permissionMode: 'auto',
+    requiredToolsets: ['team'],
     ...overrides,
   };
 }
@@ -178,6 +178,7 @@ async function makeService(overrides: {
   authorityResolver?: InputPreparationAuthorityResolver;
   counter?: InputPreparationCounterAdapter;
   compiler?: InputPreparationCompiler;
+  toolSurface?: RecordingToolSurface;
   now?: () => number;
 } = {}): Promise<InputPreparationService> {
   const service = createInputPreparationService({
@@ -186,6 +187,7 @@ async function makeService(overrides: {
     authorityResolver: overrides.authorityResolver ?? ALWAYS_AUTHORIZED,
     counter: overrides.counter ?? fixtureCounter(),
     compiler: overrides.compiler ?? stubCompiler(),
+    toolSurface: overrides.toolSurface ?? recordingToolSurface(),
     ...(overrides.now === undefined ? {} : { now: overrides.now }),
   });
   await service.open();

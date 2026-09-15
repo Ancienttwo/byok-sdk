@@ -56,6 +56,7 @@ function binding(overrides: Partial<InputPreparationBindingV1> = {}): InputPrepa
     source: { revision: 'src-rev-1', digest: 'src-digest-1' },
     target: { endpoint: 'https://api.z.ai/api/coding/paas/v4', modelId: 'glm-4.6' },
     policyRevision: 'policy-1',
+    permissionMode: 'auto',
     runtime: {
       packageName: '@byok-sdk/pi-coding-agent',
       packageVersion: '0.85.1001',
@@ -97,6 +98,9 @@ const SUMMARY: InputPreparationArtifactSummaryV1 = {
   requestBytes: Buffer.byteLength(REQUEST_BODY, 'utf8'),
   projectionBytes: 19,
   coverage: 'unknown',
+  observationDigest: 'observation-digest-1',
+  toolBindingDigest: 'tool-binding-digest-1',
+  toolImplementationKinds: { mcp__team__list: 'unavailable:resolver_unconfigured' },
 };
 
 /** A reservation with bounds far above anything these durability tests write. */
