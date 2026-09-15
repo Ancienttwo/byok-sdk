@@ -69,7 +69,7 @@ function binding(overrides: Partial<InputPreparationBindingV1> = {}): InputPrepa
       forkBuild: 1,
       envelopeFormat: 'pi.session.prepared-input',
       requestFormat: 'pi.openai-completions.prepared',
-      compilerVersion: 1,
+      compilerVersion: 2,
     },
     requestDigest: 'digest-1',
     ...overrides,

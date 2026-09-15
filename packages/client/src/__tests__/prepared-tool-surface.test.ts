@@ -181,7 +181,7 @@ function stubCompiler(): StubCompiler {
       forkBuild: 1,
       envelopeFormat: 'pi.session.prepared-input',
       requestFormat: 'pi.openai-completions.prepared',
-      compilerVersion: 1,
+      compilerVersion: 2,
     },
     async compile(request: CompilePreparedInputRequest): Promise<CompiledPreparedInput> {
       calls.push(structuredClone(request) as CompilePreparedInputRequest);

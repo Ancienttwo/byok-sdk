@@ -74,7 +74,7 @@ const RECEIPT: InputPreparationReceiptSummary = {
       forkBuild: 1,
       envelopeFormat: 'pi.prepared-session-input.v1',
       requestFormat: 'openai-completions.v1',
-      compilerVersion: 1,
+      compilerVersion: 2,
     },
     requestDigest: 'sha256:req',
   },

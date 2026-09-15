@@ -492,6 +492,16 @@ describe('B-P2 native composition: the envelope contract is verified, not assume
     expect(verified.projectionBytes).toBe(Buffer.byteLength(COUNTER_PROJECTION, 'utf8'));
   });
 
+  it('refuses an envelope whose format tags are not the ones the runtime identity promises', () => {
+    // Both tags, because the identity was derived from the installed manifest
+    // and only the envelope in hand proves what the code that actually ran
+    // produced.
+    expect(refusalOf({ ...envelope(), format: 'pi.session.other-input' }).detail).toBe('unsupported_envelope_format');
+    expect(refusalOf(envelope({ format: 'pi.anthropic-messages.prepared' })).detail).toBe(
+      'unsupported_envelope_format',
+    );
+  });
+
   it('refuses an envelope compiled to a prepared-request version this build does not consume', () => {
     expect(refusalOf(envelope({ compilerVersion: 1 })).detail).toBe('unsupported_compiler_version');
   });
