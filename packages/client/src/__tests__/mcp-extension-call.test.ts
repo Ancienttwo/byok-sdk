@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { observeMcpServer, type McpToolsetServerObservation } from '../mcp';
 import { BYOK_PI_MCP_CONFIG_PATH } from '../adapters/pi/mcp-config';
+import { BYOK_PI_PERMISSION_MODE } from '../adapters/pi/subagents-policy-config';
 
 /**
  * The Pi MCP extension's CALL path, end to end against a real stdio server.
@@ -22,14 +23,23 @@ const ENV = { PATH: process.env.PATH ?? '' } as const;
 
 const dirs: string[] = [];
 let configPathBefore: string | undefined;
+let permissionModeBefore: string | undefined;
 
 beforeEach(() => {
   configPathBefore = process.env[BYOK_PI_MCP_CONFIG_PATH];
+  permissionModeBefore = process.env[BYOK_PI_PERMISSION_MODE];
+  // The Pi child really carries this variable — `pi-adapter.ts` puts it in the
+  // runtime env next to the config path — so the assertion that a host toolset
+  // server never sees it is only worth anything with the variable actually
+  // present in the process the extension runs in.
+  process.env[BYOK_PI_PERMISSION_MODE] = 'auto';
 });
 
 afterEach(async () => {
   if (configPathBefore === undefined) delete process.env[BYOK_PI_MCP_CONFIG_PATH];
   else process.env[BYOK_PI_MCP_CONFIG_PATH] = configPathBefore;
+  if (permissionModeBefore === undefined) delete process.env[BYOK_PI_PERMISSION_MODE];
+  else process.env[BYOK_PI_PERMISSION_MODE] = permissionModeBefore;
   await Promise.all(dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
@@ -143,8 +153,9 @@ describe('Pi MCP extension — the call path', () => {
     // Non-vacuous: this process really does carry the variable the child must
     // not see, because that is how the extension found its own config.
     expect(process.env[BYOK_PI_MCP_CONFIG_PATH]).toBeTruthy();
+    expect(process.env[BYOK_PI_PERMISSION_MODE]).toBeTruthy();
     expect(start?.byokEnv).not.toContain(BYOK_PI_MCP_CONFIG_PATH);
-    expect(start?.byokEnv).not.toContain('BYOK_PI_PERMISSION_MODE');
+    expect(start?.byokEnv).not.toContain(BYOK_PI_PERMISSION_MODE);
 
     const pid = start?.pid as number;
     expect(alive(pid)).toBe(true);
@@ -210,7 +221,11 @@ describe('Pi MCP extension — the call path', () => {
     // one would be calling a tool nobody was admitted for.
     await expect(echo.execute('call-1', { text: 'hello' }, undefined))
       .rejects.toThrow(/no longer matches the tools this task was admitted with/u);
-    expect((await records(recordTo)).map((entry) => entry.method)).not.toContain('tools/call');
+    const methods = (await records(recordTo)).map((entry) => entry.method);
+    // Both halves matter: the refusal came from a real re-listing of the live
+    // server, and it landed before anything was called on it.
+    expect(methods).toContain('tools/list');
+    expect(methods).not.toContain('tools/call');
     shutdown();
   }, 30_000);
 
@@ -254,6 +269,48 @@ describe('Pi MCP extension — the call path', () => {
     await expect(echo.execute('call-1', { text: 'hello' }, undefined)).rejects.toThrow(/handler exploded/u);
     await new Promise((resolve) => { setTimeout(resolve, 250); });
     expect((await records(recordTo)).filter((entry) => entry.method === 'tools/call')).toHaveLength(1);
+    shutdown();
+  }, 30_000);
+
+  it.each([
+    [
+      'a resource link',
+      { content: [{ type: 'resource_link', uri: 'file:///leads.csv', name: 'leads.csv' }], isError: false },
+      [{ type: 'text', text: '[MCP returned a resource_link block for file:///leads.csv]' }],
+    ],
+    [
+      'an audio block',
+      { content: [{ type: 'audio', data: 'AAAA', mimeType: 'audio/wav' }], isError: false },
+      [{ type: 'text', text: '[MCP returned a audio block]' }],
+    ],
+    [
+      'structured content beside a text block',
+      {
+        content: [{ type: 'text', text: 'done' }],
+        structuredContent: { leads: 2 },
+        isError: false,
+      },
+      [
+        { type: 'text', text: 'done' },
+        { type: 'text', text: '{"leads":2}' },
+      ],
+    ],
+    [
+      'no content at all',
+      { content: [], isError: false },
+      [{ type: 'text', text: '[MCP returned no content]' }],
+    ],
+  ])('reports %s as the kind it is, without inventing a rendering', async (_label, callResult, expected) => {
+    // This SDK is not the authority on what a resource contains or what audio
+    // says. Anything it cannot cross verbatim is named as the block kind it
+    // was, carrying whatever identifier the server put on it — never fetched,
+    // never summarized, never materialized to disk.
+    const observation = { salesko: await frozenObservation() };
+    const { tools, shutdown } = await loadExtension(observation, { callResult });
+    const echo = tools.find((tool) => tool.name === 'mcp__salesko__echo')!;
+    const result = await echo.execute('call-1', { text: 'hello' }, undefined);
+    expect(result.content).toEqual(expected);
+    expect(result.details.isError).toBe(false);
     shutdown();
   }, 30_000);
 

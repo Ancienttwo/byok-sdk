@@ -16,7 +16,7 @@ import {
   type Session,
 } from '../../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
-import { resolveMcpToolsetGrants } from '../mcp-tool-grants';
+import { grantFingerprint, resolveMcpToolsetGrants } from '../mcp-tool-grants';
 import { BYOK_PI_MCP_CONFIG_PATH } from './mcp-config';
 import { resolvePiBin, type ResolvedBin } from './resolve-bin';
 import { resolvePiExtensions, type ResolvedPiExtensions } from './resolve-extensions';
@@ -368,6 +368,24 @@ export class PiAdapter implements RuntimeAdapter {
             throw new RuntimeExecutionFailure({
               phase: 'start', category: 'authority', retry: 'non-retryable',
               reason: 'prepared pi operation received a manifest without a sealed cwd',
+            });
+          }
+          // The toolset grant this operation was ADMITTED with was resolved
+          // from the prepare() input; the resources handed to start() are a
+          // separate object. pi does not bake the grant into a CLI argument —
+          // it writes the servers plus the daemon's observation into the
+          // task-scoped MCP config the extension registers from — so without
+          // this comparison a caller could swap in different MCP authority
+          // (or a different tool observation) between admission and start and
+          // the child would register the swapped set. Same fail-closed
+          // re-check `claude-adapter.ts` makes, on the same fingerprint, and
+          // it runs BEFORE the task config is written so nothing of the
+          // swapped authority ever reaches disk.
+          const startGrants = resolveMcpToolsetGrants(startInput.mcpServers, startInput.mcpToolsetTools);
+          if (!startGrants.ok || grantFingerprint(startGrants.grants) !== grantFingerprint(toolsetGrants.grants)) {
+            throw new RuntimeExecutionFailure({
+              phase: 'start', category: 'authority', retry: 'non-retryable',
+              reason: 'prepared pi operation received different MCP toolset tool authority than it was admitted with',
             });
           }
           let mcpConfigDir: string | undefined;

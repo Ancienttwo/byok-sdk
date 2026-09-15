@@ -80,14 +80,29 @@ const AUTHORITY_ERROR_CODES: ReadonlySet<string> = new Set([
  * JSON-RPC error codes a server returns that are statements about the REQUEST
  * this client sent, not about the server's condition: the method does not
  * exist, the request is not one this server accepts, the parameters are not
- * ones it accepts. The same command re-offered later sends the same request
- * and gets the same answer, so these are authority failures.
+ * ones it accepts, the protocol revision it was sent under is not one the
+ * server speaks, or it required a client capability this client does not
+ * declare. The same command re-offered later sends the same request — same
+ * method, same params, same protocol version, same fixed `CLIENT_INFO` and
+ * capability set — and gets the same answer, so these are authority failures.
  *
- * `INTERNAL_ERROR` and `PARSE_ERROR` are deliberately NOT here: they describe
- * a condition on the server's side — a handler that threw, a frame it could
- * not read — which a server still warming up may legitimately report once, so
- * they stay retryable. Every other JSON-RPC code stays retryable for the same
- * reason.
+ * The complete authority set, and nothing else:
+ *
+ * - `-32601` `MethodNotFound`
+ * - `-32600` `InvalidRequest`
+ * - `-32602` `InvalidParams`
+ * - `-32022` `UnsupportedProtocolVersion` — this client sends one fixed
+ *   protocol revision, so a server that rejects it rejects every later offer
+ *   identically.
+ * - `-32021` `MissingRequiredClientCapability` — the declared capability set
+ *   is fixed here too, so a request refused for lacking one stays refused.
+ *
+ * Every other code — `-32603` `InternalError`, `-32700` `ParseError`,
+ * `-32002` `ResourceNotFound`, `-32042` `UrlElicitationRequired`, and any
+ * unrecognised code — defaults to retryable. They describe a condition on the
+ * server's side, or in the resource it was asked about, rather than a verdict
+ * on the request's shape: a handler that threw, a frame it could not read, a
+ * server still warming up may legitimately report one once.
  *
  * Retryable here means only "the offer may be made again later". It never
  * means this client replays anything: a `tools/call` is issued exactly once
@@ -97,6 +112,8 @@ const AUTHORITY_PROTOCOL_ERROR_CODES: ReadonlySet<number> = new Set([
   ProtocolErrorCode.MethodNotFound,
   ProtocolErrorCode.InvalidRequest,
   ProtocolErrorCode.InvalidParams,
+  ProtocolErrorCode.UnsupportedProtocolVersion,
+  ProtocolErrorCode.MissingRequiredClientCapability,
 ]);
 
 /**

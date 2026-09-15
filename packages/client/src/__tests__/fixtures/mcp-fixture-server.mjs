@@ -21,6 +21,10 @@
  *   callDelayMs    delay every `tools/call` answer by this long
  *   callError      answer every `tools/call` with this JSON-RPC error instead of a
  *                  result: `{ code, message }` — for the client's error classification
+ *   callResult     answer every `tools/call` with this raw `result` object instead of
+ *                  the default echo — for exercising content block kinds
+ *                  (resource links, audio, `structuredContent`, empty content)
+ *                  that no correct echo server would ever return
  *   recordTo       append every received method (and cancellation) as JSONL here,
  *                  preceded by one `{ event: 'start', pid, byokEnv }` entry so a test
  *                  can prove the child is gone and see which BYOK_* variables reached it
@@ -142,6 +146,8 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       const args = params?.arguments ?? {};
       const answer = () => (config.callError
         ? send({ jsonrpc: '2.0', id, error: { code: config.callError.code, message: config.callError.message } })
+        : config.callResult
+        ? send({ jsonrpc: '2.0', id, result: config.callResult })
         : send({
           jsonrpc: '2.0',
           id,

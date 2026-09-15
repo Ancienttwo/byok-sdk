@@ -560,6 +560,35 @@ describe('PiAdapter against the fake-pi fixture', () => {
     await expect(fs.access(configPath as string)).rejects.toThrow();
   });
 
+  it('fails non-retryably when the tool observation drifts between prepare() and start()', async () => {
+    // pi bakes no grant into a CLI argument — the task-scoped MCP config the
+    // extension registers from IS the grant — so without a re-check at start()
+    // a caller could hand start() a widened observation and the child would
+    // register tools nobody admitted this task for. The refusal lands before
+    // the config is written and before anything is spawned.
+    const calls: string[][] = [];
+    const adapter = new PiAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
+      resolveExtensions: resolveFixtureExtensions,
+      spawnFn: ((_command: string, args: string[]) => {
+        calls.push([...args]);
+        throw new Error('spawn must not be reached');
+      }) as never,
+    });
+    const ctx = await makeCtx();
+    ctx.mcpServers = { docs: { command: '/opt/docs-mcp' } };
+    ctx.mcpToolsetTools = observationOf({ docs: ['search_docs'] });
+    ctx.startMcpToolsetTools = observationOf({ docs: ['search_docs', 'delete_everything'] });
+
+    await expect(startAdapter(adapter, baseTask, ctx)).rejects.toMatchObject({
+      category: 'authority',
+      retry: 'non-retryable',
+      message: expect.stringContaining('different MCP toolset tool authority'),
+    });
+    // The widened observation never reached a process.
+    expect(calls).toHaveLength(0);
+  });
+
   it('consumes the daemon observation, like every other toolset-capable adapter', () => {
     // Pi registers one tool per observed MCP tool with that tool's real
     // schema, so it needs the observation the daemon takes before admission.

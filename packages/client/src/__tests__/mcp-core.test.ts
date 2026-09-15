@@ -114,6 +114,35 @@ describe('MCP core — initialize, list, call, cancel, close', () => {
     }
   });
 
+  it.each([
+    [
+      -32022,
+      'UnsupportedProtocolVersion',
+      'protocol version 2026-07-28 is not supported',
+    ],
+    [
+      -32021,
+      'MissingRequiredClientCapability',
+      'this request requires the sampling capability',
+    ],
+  ])('classifies %d (%s) as a permanent authority failure', async (code, _name, message) => {
+    // Both are verdicts on THIS request's shape, and both of the facts they
+    // name are fixed in this client: it sends one protocol revision and one
+    // capability set, so a re-offered task sends the identical request and
+    // earns the identical refusal. Retrying could only repeat it.
+    const client = new McpStdioClient(server({ callError: { code, message } }), {
+      env: ENV,
+      label: 'fixture',
+    });
+    try {
+      await client.connect();
+      await expect(client.callTool('echo', { text: 'hi' })).rejects.toThrow(McpAuthorityError);
+      await expect(client.callTool('echo', { text: 'hi' })).rejects.toThrow(new RegExp(String(code), 'u'));
+    } finally {
+      await client.close();
+    }
+  });
+
   it('keeps a JSON-RPC report of the SERVER\'S OWN condition retryable', async () => {
     // -32603 is a handler that threw. That is a condition on the server's
     // side, which a server still warming up may legitimately report once.
