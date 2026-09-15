@@ -73,9 +73,14 @@ export const CLOUD_CAPABILITIES = {
    * mount unconditionally (`cloud.ts`) because the completion route is the
    * DEVICE's only way to discharge a mailbox row this same deployment handed
    * it — withholding it would strand the device's redelivery cursor rather
-   * than degrade a feature. What declaring it promises is that this
-   * deployment's host side actually drives the lane, which is what a Host
-   * reads before calling `enqueueInputPreparation` instead of probing.
+   * than degrade a feature. For the same reason the completion route asserts
+   * no DEVICE capability either: the device-level `agent-input-preparation`
+   * flag gates ADMISSION (`enqueueInputPreparation`) and nothing else, so an
+   * unconfigured device is refused a row instead of being handed one whose
+   * only honest answer — `input_preparation_unconfigured` — it could not then
+   * record. What declaring THIS capability promises is that this deployment's
+   * host side actually drives the lane, which is what a Host reads before
+   * calling `enqueueInputPreparation` instead of probing.
    */
   inputPreparation: 'agent.input.preparation',
   /**

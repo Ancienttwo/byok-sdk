@@ -112,16 +112,20 @@ describe('agent.input.preparation envelope', () => {
     expect(EnvelopeSchema.safeParse(withoutSeq).success).toBe(false);
   });
 
-  it('an old daemon SKIPS the unknown type rather than stripping it into a known one', () => {
-    // A daemon built before this contract has no 'agent.input.preparation'
-    // branch. `parseMessage` answers `UnknownMessageTypeError` — the distinctly
-    // skippable signal the long-poll transport freezes its cursor on — instead
-    // of matching some other branch with the payload silently stripped away.
-    const olderPeerView = {
+  it('an UNKNOWN envelope type raises UnknownMessageTypeError instead of matching a known branch', () => {
+    // This asserts `parseMessage`'s structure, not an older build's behaviour:
+    // a type string this build has no branch for answers
+    // `UnknownMessageTypeError` — the distinctly skippable signal the long-poll
+    // transport freezes its cursor on — rather than matching some other branch
+    // with the payload silently stripped away. The argument that an old daemon
+    // therefore skips `agent.input.preparation` follows from that structure,
+    // because to such a build this type is exactly as unknown as the mutated
+    // one below; no daemon predating the contract is executed here.
+    const unknownPeerView = {
       ...JSON.parse(encodeEnvelope(createEnvelope('agent.input.preparation', payload() as never, { seq: 4 }))),
       type: 'agent.input.preparation.v2',
     };
-    expect(() => parseMessage(olderPeerView)).toThrow(UnknownMessageTypeError);
+    expect(() => parseMessage(unknownPeerView)).toThrow(UnknownMessageTypeError);
 
     // And the reverse: this type's payload is `.strict()`, so a NEWER sender's
     // extra control field is rejected, never stripped and then acted on.

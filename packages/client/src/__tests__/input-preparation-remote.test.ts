@@ -401,8 +401,13 @@ describe('remote input preparation: in-process, never the control socket', () =>
     expect(completion.outcome).toBe('rejected');
     if (completion.outcome !== 'rejected') throw new Error('unreachable');
     expect(completion.reason).toBe('input_preparation_unconfigured');
-    // Reported, not thrown: throwing would freeze this device's redelivery
-    // cursor behind a row it can never discharge.
+    // What this stub CAN observe: the handler resolves instead of throwing, and
+    // hands the completion client exactly one terminal completion. It cannot
+    // observe whether cloud accepts that completion — this stub accepts
+    // everything — so the "the cursor is not frozen" claim is not made here.
+    // The real-route half lives in the cloud package's
+    // `input-preparations.test.ts` ("records an unconfigured device's rejection
+    // as a terminal fact, capability flag or not").
     expect(harness.completions).toHaveLength(1);
     expect(socketOpens).toBe(0);
   });

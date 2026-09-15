@@ -333,7 +333,73 @@ describe('remote input preparation', () => {
     expect(await terminal.json()).toMatchObject({ status: 'prepared', receipt: RECEIPT });
   });
 
-  it('refuses a completion from a device whose capability was revoked after enqueue', async () => {
+  /**
+   * The undischargeable-completion regression, driven through the REAL cloud
+   * HTTP handler rather than a stub completion client.
+   *
+   * A daemon whose `inputPreparation` section is gone (restarted without it, or
+   * with an unverifiable native closure) no longer advertises
+   * `agent-input-preparation`, and the only completion it can honestly produce
+   * is `input_preparation_unconfigured`. Cloud must RECORD that: the mailbox is
+   * strictly seq-ordered and the daemon advances its redelivery cursor only
+   * once the completion PUT succeeds, so refusing it would freeze the device
+   * behind a row with no terminal path — and every later envelope with it.
+   *
+   * Admission is unaffected: `enqueueInputPreparation` still refuses a device
+   * without the flag (first test in this file), and the completion is still
+   * bound to the exact authenticated device, `AgentRef` and `policyRevision`.
+   */
+  it('records an unconfigured device\'s rejection as a terminal fact, capability flag or not', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await admitPreparation(harness, device.deviceId);
+    await harness.cloud.enqueueInputPreparation(TENANT_A, device.deviceId, desired());
+
+    // The device is now exactly what `computeCapabilities` reports for a daemon
+    // with no `inputPreparation` section: no `agent-input-preparation`.
+    await harness.stores.devices.recordCapabilities(TENANT_A, {
+      deviceId: device.deviceId,
+      capabilities: ['agent-home-contract'],
+    });
+
+    // The device receives the envelope exactly as it would in production —
+    // reading is not acknowledging, so the cursor is still 0 here.
+    const delivered = await harness.request('/byok/events?cursor=0', { headers: device.authorization });
+    expect(delivered.status).toBe(200);
+    const deliveredBody = (await delivered.json()) as { readonly events: readonly { readonly seq: number }[] };
+    expect(deliveredBody.events).toHaveLength(1);
+    const seq = deliveredBody.events[0]!.seq;
+    expect((await harness.core.mailbox.readCursor(TENANT_A, device.deviceId)).ackedSeq).toBe(0);
+
+    const response = await harness.request(byokInputPreparationCompletionPath(REQUEST_A), {
+      method: 'PUT',
+      headers: { ...device.authorization, 'content-type': 'application/json' },
+      body: JSON.stringify(rejectedCompletion(REQUEST_A, 'input_preparation_unconfigured')),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      tenantId: TENANT_A,
+      deviceId: device.deviceId,
+      requestId: REQUEST_A,
+      agentRef: AGENT_A,
+      status: 'rejected',
+      reason: 'input_preparation_unconfigured',
+    });
+
+    // Durable, not just echoed back.
+    await expect(
+      harness.cloud.getInputPreparationStatus(TENANT_A, device.deviceId, { requestId: REQUEST_A, agentRef: AGENT_A }),
+    ).resolves.toMatchObject({ status: 'rejected', reason: 'input_preparation_unconfigured' });
+
+    // And the cursor actually moves: the device ACKs the envelope it just
+    // discharged, and the durable mailbox cursor is past it with nothing left.
+    const acked = await harness.request(`/byok/events?cursor=${seq}`, { headers: device.authorization });
+    expect(acked.status).toBe(200);
+    expect(await acked.json()).toMatchObject({ cursor: seq, events: [] });
+    expect((await harness.core.mailbox.readCursor(TENANT_A, device.deviceId)).ackedSeq).toBe(seq);
+  });
+
+  it('still binds a completion to the exact policy revision for a device without the flag', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await admitPreparation(harness, device.deviceId);
@@ -343,12 +409,17 @@ describe('remote input preparation', () => {
       capabilities: ['agent-home-contract'],
     });
 
+    // Dropping the capability assertion did not turn the completion route into
+    // an unauthenticated write: the row's own binding is still the authority.
     await expect(
       harness.request(byokInputPreparationCompletionPath(REQUEST_A), {
         method: 'PUT',
         headers: { ...device.authorization, 'content-type': 'application/json' },
-        body: JSON.stringify(preparedCompletion()),
+        body: JSON.stringify({ ...preparedCompletion(), policyRevision: 'limits-other' }),
       }),
-    ).resolves.toMatchObject({ status: 409 });
+    ).resolves.toMatchObject({ status: 422 });
+    await expect(
+      harness.cloud.getInputPreparationStatus(TENANT_A, device.deviceId, { requestId: REQUEST_A, agentRef: AGENT_A }),
+    ).resolves.toMatchObject({ status: 'pending' });
   });
 });

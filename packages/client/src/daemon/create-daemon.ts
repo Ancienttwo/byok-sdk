@@ -2022,6 +2022,12 @@ export function buildDaemonWithAdapters(
      * freeze this device's redelivery cursor behind a row it can never
      * discharge, which is a worse failure than reporting the truth.
      *
+     * That completion is ACCEPTED by cloud: the completion route asserts no
+     * device capability (`cloud.ts`'s `completeInputPreparationFromStores`),
+     * precisely so this rejection is recordable by a device that never
+     * advertised `agent-input-preparation`. The flag remains the admission
+     * gate on `enqueueInputPreparation`.
+     *
      * The handler takes the service directly, so a preparation runs IN-PROCESS.
      * Nothing here touches the local control socket — see
      * `input-preparation-remote.ts` for why that is the point.

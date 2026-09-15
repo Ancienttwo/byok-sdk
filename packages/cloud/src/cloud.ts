@@ -803,6 +803,12 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   // never complete, freezing its redelivery cursor behind an envelope with no
   // terminal path. `CLOUD_CAPABILITIES.inputPreparation` still declares the
   // lane so a Host reads what this deployment serves instead of probing it.
+  //
+  // The same reasoning runs one level deeper: `completeInputPreparationFromStores`
+  // asserts no DEVICE capability either, so a device that never advertised
+  // `agent-input-preparation` can still record the
+  // `input_preparation_unconfigured` rejection the row requires. The device
+  // capability stays the admission gate on `enqueueInputPreparation` alone.
   const inputPreparationRouteDeps = {
     ...deviceRouteDeps,
     complete: (stores: TenantStores, deviceId: string, receipt: InputPreparationCompletionRequest) =>
@@ -1557,16 +1563,29 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     );
   }
 
+  /**
+   * Deliberately NOT capability-gated, unlike `enqueueInputPreparation`.
+   *
+   * Admission is the enqueue's job: a device without
+   * `agent-input-preparation` is refused there, before any receipt or mailbox
+   * row exists. Once a row DOES exist, the completion is the device's only way
+   * to discharge it, and the daemon's redelivery cursor advances only when the
+   * completion PUT succeeds. Re-asserting the capability here would reject
+   * exactly the completion an unconfigured device must be able to record —
+   * `input_preparation_unconfigured` — and freeze that device's strictly
+   * seq-ordered cursor behind an envelope with no terminal path.
+   *
+   * Authority does not weaken: the row's own binding (authenticated device,
+   * exact `AgentRef`, `profileId`, `policyRevision`) is checked by
+   * `recordInputPreparationCompletion`, so a completion still cannot cross a
+   * device, an Agent, or a policy revision.
+   */
   async function completeInputPreparationFromStores(
     stores: TenantStores,
     deviceId: string,
     receiptInput: InputPreparationCompletionRequest,
   ): Promise<InputPreparationReadback> {
     const receipt = InputPreparationCompletionRequestSchema.parse(receiptInput);
-    await assertAgentCapabilities(stores.tenant, deviceId, [
-      AGENT_HOME_CONTRACT_CAPABILITY,
-      AGENT_INPUT_PREPARATION_CAPABILITY,
-    ]);
     return recordInputPreparationCompletion(stores.receipts, stores.tenant, deviceId, receipt);
   }
 
