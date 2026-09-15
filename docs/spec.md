@@ -737,6 +737,77 @@ mode: a toolset with no declaration at all cannot run under `readonly` or
 `plan` and is declined by name, and a projected server the mode leaves with no
 callable tool declines the whole admission rather than half-satisfying it.
 
+### The launch working directory
+
+Every MCP server child the daemon is responsible for — the admission probe, pi's
+own pool, and the servers claude and codex spawn from the configuration the SDK
+writes them — starts in a directory this daemon's uid has been PROVEN unable to
+write. The runtime CLI itself is unaffected and keeps its manifest cwd, because
+session resume and relative-path resolution depend on it.
+
+The reason is an interpreter fact, not a hypothetical: a `bun --compile`
+single-file binary reads `$cwd/bunfig.toml` and runs its `preload` entries
+before any of the program's own code, and `--config=/dev/null` does not suppress
+that for a compiled binary. Until this boundary existed, those children
+inherited the canonical Agent home — the directory the agent's own tools write
+by design — so an agent could hand arbitrary preload code to the very server it
+was being served by. Controlling the cwd is the only control point for it.
+
+The directory is resolved once per offer, and non-writability is proven rather
+than assumed: the daemon attempts to create a file in the candidate and requires
+the attempt to fail with `EACCES`, `EPERM` or `EROFS`. A candidate that accepts
+the write is rejected even if its mode bits looked right — mode bits do not
+account for ACLs, for the effective uid, or for a filesystem remounted
+read-write. The candidate is `TaskRunnerDeps.mcpLaunchCwd.dir` when the operator
+configured one (the intended value is an immutable, root-owned versioned release
+directory), otherwise the platform default: `/` on POSIX, `%SystemRoot%` on
+Windows. A directory this same uid can write — anything under `os.tmpdir()`
+included — is refused: the agent's tools run at that same uid, so a 0700 random
+directory isolates other users and nothing else. A symlink is refused rather
+than followed.
+
+Two conditions make the boundary unprovable, and both refuse the offer
+non-retryably instead of admitting an unprotected launch:
+
+- **Running as uid 0.** No directory on the machine is unwritable by root, so
+  the daemon reports `root_cannot_prove_write_boundary`. This is a documented
+  limitation of running the daemon as root, not a default that is quietly
+  filled in.
+- **No trusted launcher interpreter.** claude's `mcpServers` JSON and codex's
+  `-c mcp_servers.*` have no per-server cwd field, so each server there is
+  reached through this package's `bin/byok-launch-cwd.mjs`, which changes
+  directory and then execs the real command with its argv passed through
+  structurally — no shell, no quoting, so an argument containing a space, a
+  quote, `$(...)`, a `;` or a newline arrives byte-identical. That launcher must
+  run on a real Node: a daemon embedded in a `bun --compile` product executable
+  must not run it on `process.execPath`, because Bun would read `bunfig.toml`
+  and preload before the launcher's own first statement. The SDK uses
+  `process.execPath` only when this process is provably plain Node (not Bun, not
+  Deno, not a single-executable application); otherwise the operator must attest
+  one in `TaskRunnerDeps.mcpLaunchCwd.launcherInterpreter`, and without it those
+  runtimes are refused with `launch_cwd_launcher_interpreter_unconfigured`.
+
+`McpLaunchCwdConfig` reaches the daemon through `TaskRunnerDeps.mcpLaunchCwd`,
+which `createDaemonWithAdapters` embedders set directly. `createDaemon`'s own
+`DaemonConfig` does not yet forward it; until it does, a `createDaemon` host runs
+on the platform default and the provably-plain-Node launcher interpreter, and a
+host that needs either override composes its `TaskRunner` itself.
+
+Loader environment variables are denied absolutely, above every allowlist layer
+including the operator's own `runtimeEnvironment.<id>.allow`: `NODE_OPTIONS`,
+`NODE_REPL_EXTERNAL_MODULE`, `NODE_PATH`, `BUN_*`, `DYLD_*` and `LD_*` all
+change how an interpreter loads code before the launcher's first statement. The
+launcher re-asserts the same list on itself and refuses to start if it sees one,
+because it is also reached through a runtime CLI that composes its own child
+environment.
+
+The launch directory and the launcher's identity are bound into the prepared
+launch path's executor fingerprints as their own fact, beside the toolset's
+`definitionRevision` rather than inside it: an SDK launcher upgrade is drift a
+frozen manifest must refuse, but it is not a change to the operator's configured
+`command`/`args`, and folding it in would churn every stored revision on every
+SDK release.
+
 The authenticated local control socket accepts an expected-revision
 compare-and-swap reload of the complete registry. The CLI host reads
 `--config`; the daemon does not accept or read an arbitrary pathname. Identical

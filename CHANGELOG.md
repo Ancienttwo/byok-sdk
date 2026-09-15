@@ -5,6 +5,65 @@
 Deliberately not filed under 0.18.0: none of this is in a published artifact,
 and the D2 version number belongs to a separate SDK release contract.
 
+- **Breaking (security)** — every MCP server child the daemon is responsible
+  for now starts in a directory this daemon's uid has been PROVEN unable to
+  write, instead of inheriting the canonical Agent home. A `bun --compile`
+  single-file binary reads `$cwd/bunfig.toml` and runs its `preload` before any
+  of its own code, and `--config=/dev/null` does not suppress that for a
+  compiled binary (measured on Bun 1.4.2) — so the old inherited cwd let an
+  agent hand arbitrary preload code to the very MCP server it was being served
+  by. The runtime CLI itself is unchanged and keeps its manifest cwd.
+
+  Non-writability is proven by attempting a create and requiring
+  `EACCES`/`EPERM`/`EROFS`, never inferred from mode bits; a symlink is refused
+  rather than followed. The candidate is the new
+  `TaskRunnerDeps.mcpLaunchCwd.dir` when configured, otherwise `/` on POSIX and
+  `%SystemRoot%` on Windows. `os.tmpdir()` is deliberately not a candidate: the
+  agent runs at the daemon's own uid in the common deployment, so a 0700 random
+  directory isolates other users and nothing else.
+
+  Breaking in four places. `RuntimeOperationStartInput` carries
+  `mcpLaunch: {cwd, launcher?}`, resolved once per offer; an adapter handed MCP
+  servers without it now fails the start non-retryably. `RuntimeAdapterDescriptor`
+  carries `mcpServerLaunch: 'direct-cwd' | 'launcher-wrapped'`, which is how the
+  daemon knows whether that adapter needs a launcher. The pi task-scoped MCP
+  config file carries `launchCwd`, and the extension refuses to open a server
+  without it. claude's and codex's generated MCP configuration now reaches each
+  server through this package's new `bin/byok-launch-cwd.mjs` (shipped in the
+  published tarball), because neither configuration format has a per-server cwd
+  field; argv is forwarded structurally, so a server argument containing a
+  space, a quote, `$(...)`, a `;` or a newline is byte-identical on the other
+  side.
+
+  Two conditions refuse an offer non-retryably rather than admitting an
+  unprotected launch: running as uid 0 (`root_cannot_prove_write_boundary` — no
+  directory is unwritable by root, a documented limitation rather than a filled-in
+  default), and having no trusted launcher interpreter for claude/codex
+  (`launch_cwd_launcher_interpreter_unconfigured`). The launcher must run on a
+  real Node — a daemon embedded in a `bun --compile` product executable must not
+  run it on `process.execPath`, or Bun would preload before the launcher's first
+  statement — so `process.execPath` is used only when this process is provably
+  plain Node, and any other host attests one in
+  `TaskRunnerDeps.mcpLaunchCwd.launcherInterpreter`. `createDaemon`'s
+  `DaemonConfig` does not forward `mcpLaunchCwd` yet — that wiring belongs to
+  the `create-daemon.ts` work package — so a `createDaemon` host currently gets
+  the platform default and the provably-plain-Node interpreter, and a host that
+  needs either override composes its `TaskRunner` through
+  `createDaemonWithAdapters`.
+
+  `buildRuntimeEnv` additionally hard-denies `NODE_OPTIONS`,
+  `NODE_REPL_EXTERNAL_MODULE`, `NODE_PATH`, `BUN_*`, `DYLD_*` and `LD_*` above
+  every allowlist layer including the operator's own
+  `runtimeEnvironment.<id>.allow`: they change how an interpreter loads code
+  before the launcher's first statement. The launcher re-asserts the same list
+  on itself and exits 78 if it sees one. The launch directory and launcher
+  identity are bound into the prepared-launch executor fingerprints as their own
+  fact, beside the toolset's `definitionRevision` rather than inside it, so an
+  SDK launcher upgrade is drift without churning the operator's configured
+  revision. A pre-1.0 breaking cut is MINOR under `docs/spec.md`'s package
+  version policy; no version is bumped here, since a bump does not authorize
+  publish.
+
 - **Breaking** — `McpToolsetConfig` accepts `readOnlyTools`, an
   operator-owned read/mutation classification per `(server, tool)`, and a
   toolset task's permission mode is applied to it. `readonly` and `plan` are
