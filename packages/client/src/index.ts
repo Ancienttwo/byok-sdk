@@ -22,6 +22,7 @@ export type {
   McpToolsetRegistryStatus,
   McpToolsetReloadReceipt,
   AgentEgressPolicy,
+  LaunchCwdRejection,
   TrustedLaunchCwd,
   TrustedLaunchCwdUnavailableReason,
 } from './types';

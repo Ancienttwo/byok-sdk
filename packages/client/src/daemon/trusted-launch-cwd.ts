@@ -64,20 +64,21 @@ export interface McpLaunchCwdConfig {
   readonly launcherInterpreter?: string;
 }
 
-export type TrustedLaunchCwdUnavailableReason =
-  /** Running as uid 0: no directory on the machine is unwritable by this process, so the boundary cannot be proven. */
-  | 'root_cannot_prove_write_boundary'
-  | 'configured_dir_not_absolute'
-  | 'configured_dir_unreadable'
-  | 'configured_dir_is_a_symlink'
-  | 'configured_dir_not_a_directory'
-  | 'configured_dir_is_writable'
-  | 'no_platform_default_directory'
-  | 'platform_default_not_absolute'
-  | 'platform_default_unreadable'
-  | 'platform_default_is_a_symlink'
-  | 'platform_default_not_a_directory'
-  | 'platform_default_is_writable';
+/**
+ * Why one candidate directory failed, independent of where the candidate came
+ * from. `is_writable` is the one that matters most: it means the write probe
+ * SUCCEEDED, so this uid can create files there and the directory isolates
+ * nobody the agent is not already running as.
+ */
+export type LaunchCwdRejection = 'not_absolute' | 'unreadable' | 'is_a_symlink' | 'not_a_directory' | 'is_writable';
+
+/**
+ * `root_cannot_prove_write_boundary` is uid 0: no directory on the machine is
+ * unwritable by this process, so the boundary cannot be proven at all. The
+ * rest name which candidate was tried and how it failed.
+ */
+export type TrustedLaunchCwdUnavailableReason = 'root_cannot_prove_write_boundary'
+| 'no_platform_default_directory' | `configured_dir_${LaunchCwdRejection}` | `platform_default_${LaunchCwdRejection}`;
 
 export type TrustedLaunchCwd =
   | { readonly kind: 'resolved'; readonly dir: string }

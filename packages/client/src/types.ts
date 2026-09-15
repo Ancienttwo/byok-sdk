@@ -14,6 +14,7 @@ export type { AgentEgressPolicy } from '@byok-sdk/protocol';
 
 export type { RuntimeEnvironmentRequirements } from './daemon/environment';
 export type {
+  LaunchCwdRejection,
   McpLaunchBinding,
   McpLaunchCwdConfig,
   TrustedLaunchCwd,
