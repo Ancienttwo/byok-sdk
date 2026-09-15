@@ -18,7 +18,8 @@ const LAUNCHER = launchCwdScriptPath();
  *
  * The properties this file pins are the LAUNCHER's: that it chdirs before it
  * execs, that argv arrives byte-identical, that the target's exit code and
- * death-by-signal pass through, that a loader environment variable or a
+ * death-by-signal pass through, that the target does not outlive a terminated
+ * launcher, that a loader environment variable or a
  * non-empty interpreter argv is refused, and that a directory it cannot change
  * into is refused before the target ever runs. None of those depend on WHICH
  * directory it was handed — the launcher is given a directory and obeys it.
@@ -52,12 +53,22 @@ async function launchDir(): Promise<string> {
 
 /**
  * A target that reports EXACTLY what it was given: the argv it received after
- * its own script path, and the directory it started in. Everything this suite
- * asserts about the launcher is read back out of a real child process.
+ * its own script path, the directory it started in, and its own identity — its
+ * pid and the pid of the launcher that exec'd it (`ppid`). Everything this
+ * suite asserts about the launcher is read back out of a real child process.
+ *
+ * The identity fields exist for the signal case: the only way to say what
+ * happened to the TARGET when the launcher was terminated is to hold the
+ * target's pid before the kill and probe that pid afterwards.
  */
 const TARGET = `
 import fs from 'node:fs';
-fs.writeFileSync(process.argv[2], JSON.stringify({ argv: process.argv.slice(3), cwd: process.cwd() }));
+fs.writeFileSync(process.argv[2], JSON.stringify({
+  argv: process.argv.slice(3),
+  cwd: process.cwd(),
+  pid: process.pid,
+  ppid: process.ppid,
+}));
 if (process.argv.includes('--hang')) setInterval(() => {}, 1000);
 else process.exit(Number(process.env.TARGET_EXIT ?? '0'));
 `;
@@ -70,6 +81,62 @@ async function fixture(): Promise<{ dir: string; target: string; out: string }> 
 }
 
 interface Run { code: number | null; signal: NodeJS.Signals | null; stderr: string }
+
+/**
+ * Is this pid still a running process on THIS host?
+ *
+ * POSIX: signal 0 is the standard existence probe — `ESRCH` is the only answer
+ * that means "gone"; `EPERM` means it exists and is not ours, which is still
+ * alive. The target is a GRANDchild of this process (launcher in between), so
+ * it is never a zombie of ours: once the launcher dies the target is reparented
+ * and reaped by init, and `ESRCH` is an unambiguous terminal state.
+ *
+ * win32: there are no POSIX signals and no zombies; a terminated process leaves
+ * the table, so `tasklist` filtered on the pid is the terminal-state read. It
+ * must never answer "gone" for a reason other than the pid being absent, so a
+ * failure to run `tasklist` at all REJECTS rather than returning false — a
+ * broken probe fails the test instead of silently reporting a clean kill.
+ */
+function isRunning(pid: number): Promise<boolean> {
+  if (process.platform !== 'win32') {
+    try {
+      process.kill(pid, 0);
+      return Promise.resolve(true);
+    } catch (error) {
+      return Promise.resolve((error as NodeJS.ErrnoException).code !== 'ESRCH');
+    }
+  }
+  return new Promise((resolve, reject) => {
+    const probe = spawn('tasklist', ['/FI', `PID eq ${pid}`, '/NH', '/FO', 'CSV'], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+    });
+    let stdout = '';
+    probe.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8'); });
+    probe.once('error', (error) => reject(new Error(`tasklist probe for pid ${pid} could not run: ${error.message}`)));
+    probe.once('close', (code) => {
+      // tasklist exits 0 with an "INFO: No tasks..." line when the filter
+      // matches nothing; the CSV pid field is the positive match.
+      if (code !== 0 && stdout === '') {
+        reject(new Error(`tasklist probe for pid ${pid} exited ${code} with no output`));
+        return;
+      }
+      resolve(stdout.includes(`"${pid}"`));
+    });
+  });
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+/** Poll `isRunning` until it says gone, or the bounded window runs out. */
+async function stillRunningAfter(pid: number, windowMs: number): Promise<boolean> {
+  const deadline = Date.now() + windowMs;
+  for (;;) {
+    if (!(await isRunning(pid))) return false;
+    if (Date.now() >= deadline) return true;
+    await sleep(50);
+  }
+}
 
 function run(
   args: readonly string[],
@@ -124,7 +191,27 @@ describe('bin/byok-launch-cwd.mjs', () => {
     expect(result.code).toBe(37);
   });
 
-  it('forwards SIGTERM to the target and dies of the same signal', async () => {
+  /**
+   * What this case measures: the fate of BOTH processes when the launcher is
+   * terminated. The target's pid is captured from its own report BEFORE the
+   * kill, and its terminal state is read afterwards by probing that pid — not
+   * inferred from the launcher's exit.
+   *
+   * The launcher assertion differs by platform because the KILL differs, not
+   * because the requirement is softer. POSIX delivers SIGTERM, the launcher's
+   * handler forwards it and the launcher re-raises, so `signal === 'SIGTERM'`
+   * is the exact expected death. win32 has no POSIX signals:
+   * `process.kill(pid, 'SIGTERM')` is `TerminateProcess`, the JS handler at
+   * `bin/byok-launch-cwd.mjs:90-93` may never run, and the OS reports an exit
+   * code rather than a signal — so the launcher assertion there is that it was
+   * terminated at all.
+   *
+   * The TARGET assertion is identical on every platform and is never loosened:
+   * a target that outlives the launcher is a real orphan and this case fails
+   * naming the surviving pid and the platform. The cleanup kill below happens
+   * only after that verdict is decided; it is housekeeping, never evidence.
+   */
+  it('forwards SIGTERM to the target, and the target does not outlive the launcher', async () => {
     const { target, out } = await fixture();
     let pid: number | undefined;
     const finished = run([await launchDir(), process.execPath, target, out, '--hang'], {
@@ -138,8 +225,40 @@ describe('bin/byok-launch-cwd.mjs', () => {
         return false;
       }
     }, { timeout: 5_000 }).toBe(true);
-    process.kill(pid!, 'SIGTERM');
-    await expect(finished).resolves.toMatchObject({ signal: 'SIGTERM' });
+
+    const report = JSON.parse(await fs.readFile(out, 'utf8')) as { pid: number; ppid: number };
+    const targetPid = report.pid;
+    // Captured before the kill: after it, the target may be unidentifiable.
+    console.log(`platform=${process.platform} launcher pid=${pid} target pid=${targetPid} target ppid=${report.ppid}`);
+    expect(report.ppid, 'the target must be a direct child of the launcher').toBe(pid);
+
+    try {
+      process.kill(pid!, 'SIGTERM');
+      const result = await finished;
+      if (process.platform === 'win32') {
+        expect(
+          result.signal !== null || (result.code !== null && result.code !== 0),
+          `the launcher must have been terminated, saw ${JSON.stringify(result)}`,
+        ).toBe(true);
+      } else {
+        expect(result).toMatchObject({ signal: 'SIGTERM' });
+      }
+
+      const orphan = await stillRunningAfter(targetPid, 2_000);
+      expect(
+        orphan,
+        `target pid ${targetPid} was still running 2s after the launcher (pid ${pid}) died on ${process.platform}: the launcher leaked an orphan`,
+      ).toBe(false);
+    } finally {
+      // Runs only after the verdict above is decided. A cleanup kill is not
+      // termination evidence, and it announces itself when it had to happen.
+      if (await isRunning(targetPid).catch(() => false)) {
+        try {
+          process.kill(targetPid, 'SIGKILL');
+        } catch { /* already gone between the probe and the kill */ }
+            console.log(`cleanup: killed surviving target ${targetPid}`);
+      }
+    }
   });
 
   it('refuses to launch when a loader environment variable is set', async () => {

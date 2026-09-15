@@ -127,10 +127,63 @@ Two changes follow from it:
 What this run does and does not establish for win32, kept apart:
 
 - (a) the launcher executed for real on windows-latest — **pending re-run**; run
-  34960882911 failed in the fixture, not in the launcher.
+  34960882911 failed in the fixture, not in the launcher, and run 34965275367
+  reached the launcher but failed in the signal case's launcher-only assertion
+  (see the section above). The re-run also decides, for the first time, whether
+  the target survives a terminated launcher on win32.
 - (b) a writable platform default is refused with `platform_default_is_writable`
   — **verified** on run 34960882911, and pinned by a unit test.
 - (c) non-elevated admission of a real directory on Windows — **not verified**.
+
+## What the signal case measures from now on, and what the re-run will decide
+
+`launch-cwd-launcher.test.ts` previously killed the launcher, asserted the
+launcher died of `SIGTERM`, and said nothing at all about the target. On
+windows-latest that assertion failed with `{code: 1, signal: null}` (run
+34965275367, job 104368131299) — correctly, because Windows has no POSIX
+signals: `process.kill(pid, 'SIGTERM')` is `TerminateProcess` on the launcher,
+so the JS handler that forwards the signal to the child
+(`packages/client/bin/byok-launch-cwd.mjs:90-93`) may never run. The old shape
+measured the wrong process to answer the question that actually matters.
+
+The case now measures BOTH processes:
+
+- The target fixture reports its own pid and its ppid, which the test reads out
+  of the report file BEFORE any kill and prints as
+  `platform=<os> launcher pid=<n> target pid=<n> target ppid=<n>`. The ppid is
+  asserted to be the launcher, so the pid being probed is provably the process
+  the launcher exec'd.
+- After the launcher exits, the target's terminal state is READ, not inferred:
+  `process.kill(pid, 0)` with `ESRCH` as the only "gone" answer on POSIX, and
+  `tasklist /FI "PID eq <pid>"` on win32 (no zombies there, and a `tasklist`
+  that cannot run rejects rather than reporting a clean kill). Polled up to 2 s.
+- The launcher assertion is platform-shaped because the kill is: POSIX keeps
+  `signal === 'SIGTERM'`; win32 asserts the launcher was terminated at all
+  (non-zero exit or a signal). The TARGET assertion is identical everywhere and
+  is not loosened or skipped — a surviving target fails the case naming the pid
+  and the platform.
+- Cleanup of a survivor happens only after that verdict, in a `finally`, and
+  prints `cleanup: killed surviving target <pid>` when it had to. That line is
+  housekeeping, never termination evidence.
+
+On the darwin development host the case passes with the target proven gone:
+`platform=darwin launcher pid=19051 target pid=19052 target ppid=19051`, and no
+`cleanup:` line, i.e. the probe found the target already gone rather than the
+test having to kill it.
+
+**The win32 outcome is unknown until the windows-latest leg re-runs.** Both
+outcomes are real results, and neither is to be pre-empted here:
+
+- *Target gone* — launcher-level graceful stop holds on win32 for this shape:
+  terminating the launcher does not leave the MCP server behind, even though
+  the forwarding handler may never have run (the child dies with the launcher's
+  job/console teardown). Fact (a) below then also covers the orphan question.
+- *Target alive* — win32 leaks an orphan when the launcher is terminated: the
+  runtime CLI stops the launcher, the real server keeps running in the trusted
+  directory, and the next start has a stale process holding it. That is a REAL
+  FINDING to escalate as its own work package, not something to patch inside
+  this test. This note must then record it and the spec row must say so; the
+  test stays failing until the launcher is fixed.
 
 ## Limits of this evidence
 

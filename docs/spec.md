@@ -837,7 +837,7 @@ non-retryably instead of admitting an unprotected launch:
   |---|---|---|
   | darwin | trusted system `/bin/sh` bootstrap | verified on the development host |
   | linux | trusted system `/bin/sh` bootstrap (dash, bash-as-sh, busybox) | verified in containers |
-  | win32 | `bin/byok-launch-cwd.mjs` on a real Node host; a non-Node host without a trusted launcher is refused | three separate facts: (a) the launcher executed for real on windows-latest — pending re-run (run 34960882911 failed in the test fixture, not in the launcher); (b) a writable platform default refused with `platform_default_is_writable` — VERIFIED on run 34960882911, whose elevated runner produced exactly that refusal, and pinned by a unit test; (c) non-elevated admission of a real directory on Windows — not verified |
+  | win32 | `bin/byok-launch-cwd.mjs` on a real Node host; a non-Node host without a trusted launcher is refused | three separate facts: (a) the launcher executed for real on windows-latest — pending re-run (run 34960882911 failed in the test fixture, not in the launcher; run 34965275367 reached the launcher but failed the signal case's launcher-only assertion, which now also reads the target's terminal state — `docs/researches/20260915-c07-launch-cwd-shell-bootstrap-evidence.md`); (b) a writable platform default refused with `platform_default_is_writable` — VERIFIED on run 34960882911, whose elevated runner produced exactly that refusal, and pinned by a unit test; (c) non-elevated admission of a real directory on Windows — not verified |
 
   On POSIX the launcher is `sh -c 'cd -- "$0" && exec "$@"' <dir> <command>
   [...args]`: `$0` is the trusted directory and `"$@"` is the target's argv, so
