@@ -5,6 +5,31 @@
 Deliberately not filed under 0.18.0: none of this is in a published artifact,
 and the D2 version number belongs to a separate SDK release contract.
 
+- **Fixed (daemon, unreleased contract)** — an attested artifact's path
+  identity is now the INODE behind a symlink-free name, not the name
+  `realpath` returns for it. `resolveToolImplementationIdentity` and the
+  pre-spawn gate share one canonicalization: every directory component of the
+  install path must resolve to itself, the leaf must be a regular file and not
+  a symlink, and the file is bound by its `(dev, ino, size, mtime, mode, uid,
+  gid)` tuple and its content digest as before. The leaf's own `realpath` is no
+  longer compared against the recorded name.
+
+  It had to go. A release artifact that carries an in-release hardlink alias is
+  a file `realpath` does not describe stably: probed on Darwin under Bun 1.4.2,
+  `fs.realpath` on a hardlinked regular file returned a SIBLING link's name —
+  same device, same inode, neither entry a symlink — in 2 of 96 checks, while
+  Node 24 and Linux returned the queried name 96 times out of 96. A
+  Bun-compiled daemon therefore refused a legitimate artifact with
+  `install_record_mismatch`, at resolve and again at every spawn reverify.
+
+  Nothing is weaker for it, and no reason, subject or host-facing field
+  changed. A symlink leaf is still refused, a symlinked or `..`-bearing parent
+  chain is still refused, ownership, write-bit and digest checks are untouched,
+  and a different inode at the recorded name — hardlink to another file
+  included — still fails the stat tuple. A hardlink alias OF the recorded inode
+  is accepted, because it is the same file. The interpreter of an
+  `interpreter+bundle` goes through the identical canonicalization.
+
 - **Changed (daemon, unreleased contract)** — the tool implementation resolver
   is asked only for what a host knows. `ToolImplementationInstallRecordV1` no
   longer carries `launchEnvNamesDigest` or `loaderEnvValuesDigest`, and a

@@ -942,3 +942,177 @@ describe('the two projections are disjoint from the loader deny list', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Path identity: a symlink-free parent chain and a regular non-symlink leaf,
+// bound to an INODE rather than to the name `realpath` happens to return
+// ---------------------------------------------------------------------------
+
+/**
+ * The fact that forced this shape, recorded because it is not guessable from
+ * the code: on Darwin under Bun 1.4.2, `fs.realpath` on a HARDLINKED regular
+ * file returned a SIBLING link's name — same device, same inode, neither entry
+ * a symlink — in 2 of 96 probed checks, while Node 24 and Linux returned the
+ * queried name 96 times out of 96. (Independently probed by the Salesko team;
+ * the mechanism is not asserted here, only the observed variance.)
+ *
+ * A release artifact that carries an in-release hardlink alias is therefore a
+ * file whose own `realpath` is not a stable description of it, and the earlier
+ * `realpath(leaf) === leaf` rule refused a good artifact on a Bun-compiled
+ * daemon. The rule is now: the PARENT CHAIN must resolve to itself, the LEAF
+ * must be a regular non-symlink file, and identity is the `(dev, ino)` behind
+ * that name plus the stat tuple and the digest already bound.
+ *
+ * Nothing is weaker for it. Each of the four cases below is the check that
+ * would have to fail for a substitution to get through.
+ */
+describe('path identity is the inode behind a symlink-free name', () => {
+  /**
+   * The observed Bun/Darwin answer, made deterministic through the existing
+   * probe seam: `realpath` on the leaf returns the OTHER name for the same
+   * inode, while `lstat` still reports a regular, non-symlink file.
+   */
+  function siblingRealpathProbe(leaf: string, sibling: string): ToolImplementationFsProbe {
+    const base = rootOwnedProbe();
+    return {
+      lstat: (target) => base.lstat(target),
+      digest: (target) => base.digest(target),
+      realpath: async (target) => (target === leaf ? sibling : base.realpath(target)),
+    };
+  }
+
+  it('accepts a leaf whose own realpath answers with a sibling name, at resolve and at the gate', async () => {
+    const probe = siblingRealpathProbe(artifact, path.join(dir, 'salesko-agent-alias'));
+    // Non-vacuous: this probe really does break the old `realpath === target`
+    // rule, and `lstat` really does still call the leaf a regular file.
+    expect(await probe.realpath(artifact)).not.toBe(artifact);
+    expect((await probe.lstat(artifact)).isSymbolicLink).toBe(false);
+
+    const identity = await resolveToolImplementationIdentity(
+      authorityReturning(installRecord(artifact, artifactDigest)),
+      locator(artifact),
+      ENV,
+      probe,
+    );
+    expect(identity.kind).toBe('attested');
+    const attested = identity as ToolImplementationAttestedV1;
+    expect(attested.installStat.ino).toBe((await fs.stat(artifact)).ino);
+    expect(await reverifyToolImplementationIdentity(attested, ENV, probe)).toBe('ok');
+    await expect(assertToolImplementationBeforeSpawn('probe', attested, ENV, probe))
+      .resolves.toBeUndefined();
+  });
+
+  it('accepts a real hardlink alias of the attested artifact as the same file', async () => {
+    // Two names, one inode, on a real filesystem: the alias IS the artifact,
+    // and refusing it would refuse a legitimate release layout.
+    const alias = path.join(dir, 'salesko-agent-alias');
+    await fs.link(artifact, alias);
+    const [aliasStat, originalStat] = [await fs.lstat(alias), await fs.lstat(artifact)];
+    expect(aliasStat.ino).toBe(originalStat.ino);
+    expect(aliasStat.dev).toBe(originalStat.dev);
+    expect(aliasStat.isSymbolicLink()).toBe(false);
+
+    const identity = await resolveToolImplementationIdentity(
+      authorityReturning(installRecord(alias, artifactDigest)),
+      locator(alias),
+      ENV,
+      rootOwnedProbe(),
+    );
+    expect(identity.kind).toBe('attested');
+    const attested = identity as ToolImplementationAttestedV1;
+    expect(attested.installStat.ino).toBe(originalStat.ino);
+    expect(await reverifyToolImplementationIdentity(attested, ENV, rootOwnedProbe())).toBe('ok');
+    await expect(assertToolImplementationBeforeSpawn('probe', attested, ENV, rootOwnedProbe()))
+      .resolves.toBeUndefined();
+  });
+
+  it('still refuses a symlink leaf at the gate, not only at resolve', async () => {
+    const link = path.join(dir, 'current');
+    await fs.symlink(artifact, link);
+    const attested = await resolveToolImplementationIdentity(
+      authorityReturning(installRecord(artifact, artifactDigest)),
+      locator(artifact),
+      ENV,
+      rootOwnedProbe(),
+    ) as ToolImplementationAttestedV1;
+    // The same identity, asked about the link's name: a symlink is never the
+    // attested file, even when it points at it.
+    const throughLink = { ...attested, installPath: link };
+    expect(await reverifyToolImplementationIdentity(throughLink, ENV, rootOwnedProbe()))
+      .toEqual({ reason: 'install_record_mismatch', subject: 'artifact' });
+    await expect(assertToolImplementationBeforeSpawn('probe', throughLink, ENV, rootOwnedProbe()))
+      .rejects.toThrow(/install_record_mismatch \(artifact\)/u);
+  });
+
+  it('refuses a parent directory that resolves somewhere else', async () => {
+    // Where a path substitution actually lives once the leaf itself cannot be
+    // a link: swap a DIRECTORY component for one whoever owns the link picks.
+    const real = path.join(dir, 'release-2026.9.1');
+    await fs.mkdir(real);
+    const target = path.join(real, 'salesko-agent');
+    await fs.copyFile(artifact, target);
+    const linkedParent = path.join(dir, 'current');
+    await fs.symlink(real, linkedParent);
+    const throughLinkedParent = path.join(linkedParent, 'salesko-agent');
+    // Non-vacuous: the leaf itself is a perfectly ordinary regular file.
+    expect((await fs.lstat(throughLinkedParent)).isSymbolicLink()).toBe(false);
+
+    const identity = await resolveToolImplementationIdentity(
+      authorityReturning(installRecord(throughLinkedParent, artifactDigest)),
+      locator(throughLinkedParent),
+      ENV,
+      rootOwnedProbe(),
+    );
+    expect(identity).toEqual({ kind: 'unavailable', reason: 'install_record_mismatch' });
+
+    const attested = await resolveToolImplementationIdentity(
+      authorityReturning(installRecord(target, artifactDigest)),
+      locator(target),
+      ENV,
+      rootOwnedProbe(),
+    ) as ToolImplementationAttestedV1;
+    expect(await reverifyToolImplementationIdentity(
+      { ...attested, installPath: throughLinkedParent },
+      ENV,
+      rootOwnedProbe(),
+    )).toEqual({ reason: 'install_record_mismatch', subject: 'artifact' });
+  });
+
+  it('refuses a non-normalized path whose directory chain does not resolve to itself', async () => {
+    await fs.mkdir(path.join(dir, 'sibling'));
+    // Built by concatenation: `path.join` would normalize the `..` away, and
+    // the point is a record that arrives NOT normalized.
+    const viaDotDot = `${dir}/sibling/../salesko-agent`;
+    // Non-vacuous: the path names the artifact perfectly well.
+    expect((await fs.lstat(viaDotDot)).ino).toBe((await fs.lstat(artifact)).ino);
+    const identity = await resolveToolImplementationIdentity(
+      authorityReturning(installRecord(viaDotDot, artifactDigest)),
+      locator(viaDotDot),
+      ENV,
+      rootOwnedProbe(),
+    );
+    expect(identity).toEqual({ kind: 'unavailable', reason: 'install_record_mismatch' });
+  });
+
+  it('refuses a DIFFERENT inode at the recorded name, hardlink alias or not', async () => {
+    // The other half of "identity is the inode": a hardlink is accepted only
+    // when it is a link to the attested file. A link to some other file, at
+    // the attested name, is a replacement.
+    const attested = await resolveToolImplementationIdentity(
+      authorityReturning(installRecord(artifact, artifactDigest)),
+      locator(artifact),
+      ENV,
+      rootOwnedProbe(),
+    ) as ToolImplementationAttestedV1;
+    const other = path.join(dir, 'other-bytes');
+    await fs.writeFile(other, 'the attested bytes\n');
+    await fs.rm(artifact);
+    await fs.link(other, artifact);
+    // Non-vacuous: the bytes still hash to the attested digest, so only the
+    // inode can be what refuses this.
+    expect(await realToolImplementationFsProbe.digest(artifact)).toBe(attested.closureDigest);
+    expect((await fs.lstat(artifact)).ino).not.toBe(attested.installStat.ino);
+    expect(await reverifyToolImplementationIdentity(attested, ENV, rootOwnedProbe()))
+      .toEqual({ reason: 'install_record_mismatch', subject: 'artifact' });
+  });
+});

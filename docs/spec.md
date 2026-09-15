@@ -1036,10 +1036,18 @@ The authority split is deliberate and total:
   the launch argv and cwd. That is the whole of the host's authority.
 - **The SDK owns the assertion, and everything it can measure itself.** A
   record is never believed. Before it becomes an identity the daemon measures
-  the path itself: it must be its own `realpath`, a non-symlink regular file,
-  root-owned, carry no write bit for anyone, and hash to the `closureDigest`
-  the record claims — and, for an `interpreter+bundle`, the interpreter must
-  satisfy the same five facts against its own digest. Four fields are then
+  the path itself: path identity = symlink-free parent chain + regular
+  non-symlink leaf bound by `(dev, ino, tuple, digest)`; hardlink aliases of
+  the same inode are the same artifact. Concretely, every directory component
+  must resolve to itself, the leaf must be a regular file and not a symlink,
+  and the file must be root-owned, carry no write bit for anyone, and hash to
+  the `closureDigest` the record claims — and, for an `interpreter+bundle`, the
+  interpreter must satisfy the same facts against its own digest. The leaf's
+  own `realpath` is deliberately not compared against the recorded name: a
+  second name for the same inode is the same file, and `realpath` does not
+  answer a hardlinked file with a stable name on every runtime. Identity is
+  pinned by the inode and the bytes instead, so a replaced file at the recorded
+  name — hardlink, rename or overwrite — still fails. Four fields are then
   sealed onto the identity by the SDK and are **not** part of what a resolver
   may send; a record that carries one of them is not an install record:
   - `installStat` — the artifact's `(dev, ino, size, mtime, mode, uid, gid)`.

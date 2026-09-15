@@ -28,7 +28,7 @@ import type { McpLaunchAttestation } from './trusted-launch-cwd';
  * WHAT EACH SIDE SUPPLIES, exactly:
  *
  * - The resolver returns a {@link ToolImplementationInstallRecordV1} — the
- *   manifest revision, the form, the versioned realpath, the artifact digest,
+ *   manifest revision, the form, the versioned install path, the artifact digest,
  *   the interpreter triple for an `interpreter+bundle`, the entry, the launch
  *   argv and cwd — or an {@link ToolImplementationUnavailableV1} reason. That
  *   is the whole of the host's authority.
@@ -40,9 +40,10 @@ import type { McpLaunchAttestation } from './trusted-launch-cwd';
  *
  * What an `attested` identity proves is therefore exactly this: at the moment
  * it was resolved, and again at the moment the server was spawned, the file at
- * that versioned realpath — and, for an `interpreter+bundle`, the interpreter
- * beside it — was a root-owned, non-symlink, non-writable regular file whose
- * bytes hash to its attested digest and whose `(dev, ino, size, mtime, mode,
+ * that versioned install path — and, for an `interpreter+bundle`, the
+ * interpreter beside it — was a root-owned, non-symlink, non-writable regular
+ * file, reached through a symlink-free directory chain, whose bytes hash to its
+ * attested digest and whose `(dev, ino, size, mtime, mode,
  * uid, gid)` tuple is the one that was measured at resolve, and that the
  * environment handed to that spawn agrees with the environment measured at
  * resolve over the NAMES PROJECTION plus the CONTROLLED LOADER-VALUES SCOPE
@@ -84,9 +85,10 @@ import type { McpLaunchAttestation } from './trusted-launch-cwd';
  * - `interpreter_form_unsupported` — the record pairs `form` and `interpreter`
  *   in a way no attestation covers (an interpreter on a compiled executable, or
  *   a bundle with no interpreter).
- * - `install_record_mismatch` — the record does not describe the filesystem:
- *   wrong realpath, a symlink, not a regular file, not root-owned, writable, a
- *   stat tuple that moved, or — AT RESOLVE — bytes that do not hash to the
+ * - `install_record_mismatch` — the record does not describe the filesystem: a
+ *   directory chain that resolves elsewhere, a symlink leaf, not a regular
+ *   file, not root-owned, writable, a stat tuple that moved (a different inode
+ *   at the same name included), or — AT RESOLVE — bytes that do not hash to the
  *   `closureDigest` the record claims. A digest disagreement at resolve is the
  *   record being wrong about the filesystem, not a verification that decayed:
  *   nothing has been verified yet, so there is nothing to have changed.
@@ -132,6 +134,10 @@ export interface ToolImplementationUnavailableV1 {
  * interpreter's own load/link directives — the thing that decides what else
  * gets mapped in beside the bundle — and is carried because the interpreter's
  * file digest alone does not describe that.
+ *
+ * `path` goes through the same {@link measureCanonicalPathIdentity} as the
+ * artifact, at resolve and at every spawn, and is bound to its inode by
+ * `interpreterStat` for the same reason.
  */
 export interface ToolImplementationInterpreterV1 {
   readonly path: string;
@@ -187,7 +193,12 @@ export interface ToolImplementationAttestedV1 {
   readonly authority: 'host-install-record';
   readonly manifestRevision: string;
   readonly form: 'compiled-executable' | 'interpreter+bundle';
-  /** The versioned immutable realpath. Equal to its own `realpath`, or it is not one. */
+  /**
+   * The versioned immutable install path: an absolute path whose directory
+   * chain is symlink-free and whose leaf is a regular, non-symlink file. It is
+   * the NAME; the identity is the inode it named, carried in
+   * {@link installStat}. See {@link measureCanonicalPathIdentity}.
+   */
   readonly installPath: string;
   /** sha256 hex of the executable or bundle artifact's bytes. */
   readonly closureDigest: string;
@@ -732,33 +743,66 @@ function seal(
 /**
  * Why one measured path is not the artifact the record describes. Split by
  * WHICH fact failed, because the two mean different things operationally:
- * `install_record_mismatch` is "this is not the file that was attested" (wrong
- * path, replaced inode, wrong owner, writable, a symlink), and
+ * `install_record_mismatch` is "this is not the file that was attested" (a
+ * directory chain that resolves elsewhere, replaced inode, wrong owner,
+ * writable, a symlink leaf), and
  * `reverify_failed` is "this IS the file, and its bytes are no longer the bytes
  * that were attested" (or could not be read at all).
  */
 export type ToolImplementationMeasurementFailure = 'install_record_mismatch' | 'reverify_failed';
 
 /**
- * The shape facts every attested path has to satisfy, at resolve and at every
- * later spawn:
+ * The ONE canonicalization every attested path goes through — the artifact and
+ * the interpreter, at resolve and at every later spawn. Nothing else in this
+ * module decides whether a path names the file it claims to.
  *
- * 1. It is its own realpath. A path that resolves elsewhere is a path whoever
- *    owns the intervening link chooses.
- * 2. `lstat`, not `stat`: a symlink is rejected rather than followed, and the
- *    entry is a regular file.
+ * What it asserts:
+ *
+ * 1. THE PARENT CHAIN IS SYMLINK-FREE AND NOT REPLACEABLE: every directory
+ *    component resolves to itself, `realpath(dirname(p)) === dirname(p)`. That
+ *    is the property the check exists for — a path whose directories resolve
+ *    elsewhere is a path whoever owns the intervening link chooses, and it also
+ *    rejects a `..` or a non-normalized component before anything is measured.
+ * 2. THE LEAF IS A REGULAR FILE AND NOT A SYMLINK, by `lstat` rather than
+ *    `stat`, so a link is rejected rather than followed.
+ * 3. IDENTITY IS THE INODE, not the name. The caller binds the returned
+ *    `(dev, ino, size, mtimeMs, mode, uid, gid)` tuple and the content digest;
+ *    `sameStatTuple` then refuses anything that is not that exact inode with
+ *    those exact bits. Because (2) has already proven the leaf is not a
+ *    symlink, `lstat`'s `(dev, ino)` here ARE `stat`'s.
+ *
+ * What it deliberately does NOT assert, and why the leaf's own `realpath` is
+ * not compared against the target: a HARDLINK ALIAS of the attested artifact —
+ * a second name in the same release directory for the same inode — is the same
+ * file, not a different one, and refusing it would refuse a legitimate release
+ * layout. `realpath` cannot be used to tell the two apart in any case: probed
+ * on Darwin under Bun 1.4.2, `fs.realpath` on a hardlinked regular file
+ * returned a SIBLING link's name (same device, same inode, neither entry a
+ * symlink) in 2 of 96 checks, while Node 24 and Linux returned the queried name
+ * in 96 of 96. Binding the leaf name through `realpath` therefore bound a value
+ * that is not stable for the file it describes, and a Bun-compiled daemon would
+ * have refused a good artifact with `install_record_mismatch`.
+ *
+ * Nothing is weakened by dropping it. A SYMLINK leaf is still refused by (2). A
+ * symlinked or `..`-bearing PARENT is still refused by (1) — which is where a
+ * path substitution attack actually lives, since replacing the leaf's own name
+ * with a symlink is exactly what (2) catches. A DIFFERENT FILE at the same name
+ * is refused by the tuple and the digest: same name, new inode is a tuple
+ * mismatch, and a hardlink alias that is NOT the recorded inode fails the same
+ * way. Ownership, mode and digest checks are untouched.
  */
-async function measurePath(
+async function measureCanonicalPathIdentity(
   target: string,
   probe: ToolImplementationFsProbe,
 ): Promise<ToolImplementationStatEntry | ToolImplementationMeasurementFailure> {
-  let resolved: string;
+  const parent = path.dirname(target);
+  let resolvedParent: string;
   try {
-    resolved = await probe.realpath(target);
+    resolvedParent = await probe.realpath(parent);
   } catch {
     return 'install_record_mismatch';
   }
-  if (resolved !== target) return 'install_record_mismatch';
+  if (resolvedParent !== parent) return 'install_record_mismatch';
   let stats: ToolImplementationStatEntry;
   try {
     stats = await probe.lstat(target);
@@ -870,7 +914,7 @@ export async function resolveToolImplementationIdentity(
   const record = validateInstallRecord(answer);
   if (record === 'interpreter_form_unsupported') return toolImplementationUnavailable('interpreter_form_unsupported');
   if (record === 'not_a_record') return toolImplementationUnavailable('implementation_identity_unattested');
-  const measured = await measurePath(record.installPath, probe);
+  const measured = await measureCanonicalPathIdentity(record.installPath, probe);
   if (typeof measured === 'string') return toolImplementationUnavailable(measured);
   const ownership = measureOwnership(measured);
   if (ownership !== undefined) return toolImplementationUnavailable(ownership);
@@ -890,7 +934,7 @@ export async function resolveToolImplementationIdentity(
     loaderEnvValuesDigest: toolImplementationLoaderEnvValuesDigest(launchEnv),
   };
   if (record.interpreter === undefined) return seal(record, measurements);
-  const interpreter = await measurePath(record.interpreter.path, probe);
+  const interpreter = await measureCanonicalPathIdentity(record.interpreter.path, probe);
   if (typeof interpreter === 'string') return toolImplementationUnavailable(interpreter);
   const interpreterOwnership = measureOwnership(interpreter);
   if (interpreterOwnership !== undefined) return toolImplementationUnavailable(interpreterOwnership);
@@ -952,8 +996,9 @@ export type ToolImplementationReverifyResult =
  * Re-measure an attested identity immediately before the server it describes is
  * spawned.
  *
- * The path is measured again — own realpath, non-symlink, regular file — and
- * the artifact's bytes are hashed again. On top of that runs the check that
+ * The path is canonicalized again — symlink-free parent chain, regular
+ * non-symlink leaf ({@link measureCanonicalPathIdentity}) — and the artifact's
+ * bytes are hashed again. On top of that runs the check that
  * only exists once there is something to compare against: the stat tuple must
  * be the tuple that was measured at resolve, `uid`, `gid` and `mode` included.
  * That is what catches a replacement whose bytes happen to agree, a touch that
@@ -987,7 +1032,7 @@ export async function reverifyToolImplementationIdentity(
   launchEnv: Readonly<Record<string, string>>,
   probe: ToolImplementationFsProbe = realToolImplementationFsProbe,
 ): Promise<ToolImplementationReverifyResult> {
-  const measured = await measurePath(identity.installPath, probe);
+  const measured = await measureCanonicalPathIdentity(identity.installPath, probe);
   if (typeof measured === 'string') return { reason: measured, subject: 'artifact' };
   if (!sameStatTuple(measured, identity.installStat)) {
     return { reason: 'install_record_mismatch', subject: 'artifact' };
@@ -995,7 +1040,7 @@ export async function reverifyToolImplementationIdentity(
   const matches = await digestMatches(identity.installPath, identity.closureDigest, probe);
   if (matches !== true) return { reason: 'reverify_failed', subject: 'artifact' };
   if (identity.interpreter !== undefined) {
-    const interpreter = await measurePath(identity.interpreter.path, probe);
+    const interpreter = await measureCanonicalPathIdentity(identity.interpreter.path, probe);
     if (typeof interpreter === 'string') return { reason: interpreter, subject: 'interpreter' };
     // `interpreterStat` is present on every identity this module seals for an
     // `interpreter+bundle`, and `parseToolImplementationIdentity` refuses one

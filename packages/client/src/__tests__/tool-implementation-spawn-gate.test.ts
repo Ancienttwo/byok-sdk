@@ -370,6 +370,40 @@ describe('the admission probe re-measures an attested server before spawning it'
     expect(observation.tools.map((tool) => tool.name)).toContain('echo');
   }, 30_000);
 
+  it('observes the server through a real hardlink alias of the attested artifact', async () => {
+    // A release may hold two names for one inode, and `realpath` cannot be used
+    // to tell them apart: on Darwin under Bun 1.4.2 it has been observed to
+    // answer a hardlinked file with its SIBLING's name. The alias IS the
+    // attested file — same dev, same ino, same bytes — and the gate must spawn
+    // it rather than refuse a legitimate release layout.
+    const script = await artifactCopy();
+    const alias = path.join(path.dirname(script), 'fixture-server-alias.mjs');
+    await fs.link(script, alias);
+    const [aliasStat, scriptStat] = [await fs.lstat(alias), await fs.lstat(script)];
+    expect(aliasStat.ino).toBe(scriptStat.ino);
+    expect(aliasStat.dev).toBe(scriptStat.dev);
+    expect(aliasStat.isSymbolicLink()).toBe(false);
+    const observation = await probeMcpServer('salesko', spec(alias), {
+      env: ENV,
+      timeoutMs: 15_000,
+      implementation: await attestReal(alias),
+    });
+    expect(observation.tools.map((tool) => tool.name)).toContain('echo');
+  }, 30_000);
+
+  it('refuses the spawn through a symlink alias of the same artifact', async () => {
+    // The distinction the hardlink case must not blur: a symlink leaf is a name
+    // whoever owns the link controls, and is refused whatever it points at.
+    const script = await artifactCopy();
+    const link = path.join(path.dirname(script), 'fixture-server-link.mjs');
+    await fs.symlink(script, link);
+    await expect(probeMcpServer('salesko', spec(link), {
+      env: ENV,
+      timeoutMs: 15_000,
+      implementation: await attestReal(link),
+    })).rejects.toThrow(/install_record_mismatch \(artifact\)/u);
+  }, 30_000);
+
   it('refuses the spawn when the environment is not the one the identity was measured against', async () => {
     const script = await artifactCopy();
     const identity = await attestReal(script, ENV);

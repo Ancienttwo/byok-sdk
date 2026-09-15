@@ -8727,7 +8727,7 @@ import type { McpLaunchAttestation } from './trusted-launch-cwd';
  * WHAT EACH SIDE SUPPLIES, exactly:
  *
  * - The resolver returns a {@link ToolImplementationInstallRecordV1} — the
- *   manifest revision, the form, the versioned realpath, the artifact digest,
+ *   manifest revision, the form, the versioned install path, the artifact digest,
  *   the interpreter triple for an `interpreter+bundle`, the entry, the launch
  *   argv and cwd — or an {@link ToolImplementationUnavailableV1} reason. That
  *   is the whole of the host's authority.
@@ -8739,9 +8739,10 @@ import type { McpLaunchAttestation } from './trusted-launch-cwd';
  *
  * What an `attested` identity proves is therefore exactly this: at the moment
  * it was resolved, and again at the moment the server was spawned, the file at
- * that versioned realpath — and, for an `interpreter+bundle`, the interpreter
- * beside it — was a root-owned, non-symlink, non-writable regular file whose
- * bytes hash to its attested digest and whose `(dev, ino, size, mtime, mode,
+ * that versioned install path — and, for an `interpreter+bundle`, the
+ * interpreter beside it — was a root-owned, non-symlink, non-writable regular
+ * file, reached through a symlink-free directory chain, whose bytes hash to its
+ * attested digest and whose `(dev, ino, size, mtime, mode,
  * uid, gid)` tuple is the one that was measured at resolve, and that the
  * environment handed to that spawn agrees with the environment measured at
  * resolve over the NAMES PROJECTION plus the CONTROLLED LOADER-VALUES SCOPE
@@ -8778,9 +8779,10 @@ import type { McpLaunchAttestation } from './trusted-launch-cwd';
  * - `interpreter_form_unsupported` — the record pairs `form` and `interpreter`
  *   in a way no attestation covers (an interpreter on a compiled executable, or
  *   a bundle with no interpreter).
- * - `install_record_mismatch` — the record does not describe the filesystem:
- *   wrong realpath, a symlink, not a regular file, not root-owned, writable, a
- *   stat tuple that moved, or — AT RESOLVE — bytes that do not hash to the
+ * - `install_record_mismatch` — the record does not describe the filesystem: a
+ *   directory chain that resolves elsewhere, a symlink leaf, not a regular
+ *   file, not root-owned, writable, a stat tuple that moved (a different inode
+ *   at the same name included), or — AT RESOLVE — bytes that do not hash to the
  *   `closureDigest` the record claims. A digest disagreement at resolve is the
  *   record being wrong about the filesystem, not a verification that decayed:
  *   nothing has been verified yet, so there is nothing to have changed.
@@ -8807,6 +8809,10 @@ export interface ToolImplementationUnavailableV1 {
  * interpreter's own load/link directives — the thing that decides what else
  * gets mapped in beside the bundle — and is carried because the interpreter's
  * file digest alone does not describe that.
+ *
+ * `path` goes through the same {@link measureCanonicalPathIdentity} as the
+ * artifact, at resolve and at every spawn, and is bound to its inode by
+ * `interpreterStat` for the same reason.
  */
 export interface ToolImplementationInterpreterV1 {
     readonly path: string;
@@ -8860,7 +8866,12 @@ export interface ToolImplementationAttestedV1 {
     readonly authority: 'host-install-record';
     readonly manifestRevision: string;
     readonly form: 'compiled-executable' | 'interpreter+bundle';
-    /** The versioned immutable realpath. Equal to its own `realpath`, or it is not one. */
+    /**
+     * The versioned immutable install path: an absolute path whose directory
+     * chain is symlink-free and whose leaf is a regular, non-symlink file. It is
+     * the NAME; the identity is the inode it named, carried in
+     * {@link installStat}. See {@link measureCanonicalPathIdentity}.
+     */
     readonly installPath: string;
     /** sha256 hex of the executable or bundle artifact's bytes. */
     readonly closureDigest: string;
@@ -9066,8 +9077,9 @@ export declare function parseToolImplementationIdentity(value: unknown): ToolImp
 /**
  * Why one measured path is not the artifact the record describes. Split by
  * WHICH fact failed, because the two mean different things operationally:
- * `install_record_mismatch` is "this is not the file that was attested" (wrong
- * path, replaced inode, wrong owner, writable, a symlink), and
+ * `install_record_mismatch` is "this is not the file that was attested" (a
+ * directory chain that resolves elsewhere, replaced inode, wrong owner,
+ * writable, a symlink leaf), and
  * `reverify_failed` is "this IS the file, and its bytes are no longer the bytes
  * that were attested" (or could not be read at all).
  */
@@ -9119,8 +9131,9 @@ export type ToolImplementationReverifyResult = 'ok' | {
  * Re-measure an attested identity immediately before the server it describes is
  * spawned.
  *
- * The path is measured again — own realpath, non-symlink, regular file — and
- * the artifact's bytes are hashed again. On top of that runs the check that
+ * The path is canonicalized again — symlink-free parent chain, regular
+ * non-symlink leaf ({@link measureCanonicalPathIdentity}) — and the artifact's
+ * bytes are hashed again. On top of that runs the check that
  * only exists once there is something to compare against: the stat tuple must
  * be the tuple that was measured at resolve, `uid`, `gid` and `mode` included.
  * That is what catches a replacement whose bytes happen to agree, a touch that
