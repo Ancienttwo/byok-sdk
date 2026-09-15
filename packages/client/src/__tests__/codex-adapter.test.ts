@@ -10,6 +10,7 @@ import { SteerUnsupportedError, type Session } from '../types';
 import { CodexProcessRunner } from '../adapters/codex/process-runner';
 import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
+import { trustedLaunchBinding } from './fixtures/launch-cwd';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-codex.mjs', import.meta.url));
 
@@ -227,6 +228,19 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     expect(JSON.parse(envs[0]![key]!)).toEqual(ctx.mcpServers.byokagentmessage);
     expect(captured[0]).toContain(`mcp_servers.byokagentmessage.env_vars=${JSON.stringify([key])}`);
 
+    // Codex spawns the `mcp-env` helper itself and `mcp_servers.*` has no cwd
+    // field, so the helper is reached through the SDK's launcher, which chdirs
+    // into the daemon's proven-non-writable directory before exec'ing it. The
+    // real server inherits that directory from the helper, and the operator's
+    // own command/args never leave the sealed env payload.
+    const launch = await trustedLaunchBinding();
+    const commandArg = captured[0]!.find((arg) => arg.startsWith('mcp_servers.byokagentmessage.command='))!;
+    const argsArg = captured[0]!.find((arg) => arg.startsWith('mcp_servers.byokagentmessage.args='))!;
+    expect(JSON.parse(commandArg.slice('mcp_servers.byokagentmessage.command='.length)))
+      .toBe(launch.launcher!.interpreter);
+    const wrappedArgs = JSON.parse(argsArg.slice('mcp_servers.byokagentmessage.args='.length)) as string[];
+    expect(wrappedArgs.slice(0, 2)).toEqual([launch.launcher!.script, launch.cwd]);
+    expect(wrappedArgs.length).toBeGreaterThan(2);
   });
 
   it('replays the first turn\'s exact MCP config argv on a resumed turn, so the MCP tool still resolves', async () => {

@@ -187,6 +187,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
       env: NodeJS.ProcessEnv;
       mcpServers?: RuntimeOperationStartInput['mcpServers'];
       mcpToolsetTools?: RuntimeOperationStartInput['mcpToolsetTools'];
+      mcpLaunch?: RuntimeOperationStartInput['mcpLaunch'];
       gitWorkspace?: { workspaceId: string; baseline?: string };
       approvalChannel?: RuntimeOperationStartInput['approvalChannel'];
     };
@@ -272,6 +273,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
         env: startInput.env,
         ...(startInput.mcpServers === undefined ? {} : { mcpServers: startInput.mcpServers }),
         ...(startInput.mcpToolsetTools === undefined ? {} : { mcpToolsetTools: startInput.mcpToolsetTools }),
+        ...(startInput.mcpLaunch === undefined ? {} : { mcpLaunch: startInput.mcpLaunch }),
         ...(startInput.manifest.workspace.workspaceId === undefined
           ? {}
           : { gitWorkspace: { workspaceId: startInput.manifest.workspace.workspaceId, baseline: startInput.manifest.workspace.baseline } }),

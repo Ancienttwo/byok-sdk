@@ -21,6 +21,7 @@ import { McpToolsetRegistry, McpToolsetRevisionConflictError } from '../daemon/t
 import type { McpToolsetConfig, RuntimeCapabilities } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { observationOf } from './fixtures/mcp-observation';
+import { trustedCwd } from './fixtures/launch-cwd';
 
 const MCP_CAPABLE: RuntimeCapabilities = {
   steer: false,
@@ -315,6 +316,46 @@ describe('TaskRunner toolset tools/list probe — who pays for it, and for how l
     expect(adapter.startCalls[0]?.ctx.mcpToolsetTools).toBeUndefined();
 
     await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-pi-no-probe', seq: 2 }));
+  });
+
+  it('probes and starts every toolset server in the proven-non-writable launch directory', async () => {
+    // The admission probe and the adapter's own launch must agree on ONE
+    // directory, and it must not be the Agent home: that is the directory the
+    // agent writes, and a `bun --compile` server binary reads
+    // `$cwd/bunfig.toml` `preload` from its cwd before its own code runs.
+    const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const observed: Array<string | undefined> = [];
+    const runner = await makeRunner(
+      adapter,
+      sent,
+      new Map([['salesko', { mcpServers: { salesko: { command: '/opt/salesko/bin/mcp' } } }]]),
+      undefined,
+      async (serverName, _server, options) => {
+        observed.push(options.cwd);
+        return observationOf({ [serverName]: ['find_leads'] })[serverName]!;
+      },
+    );
+    await runner.handleEnvelope(
+      createEnvelope(
+        'task.offer_with_toolsets',
+        { instruction: 'x', policy: { mode: 'auto' }, runtime: 'claude', requiredToolsets: ['salesko'] },
+        { taskId: 'task-launch-cwd', seq: 1 },
+      ),
+    );
+
+    const trusted = await trustedCwd();
+    expect(observed).toEqual([trusted]);
+    // The stub declares no `mcpServerLaunch`, so it is treated as spawning
+    // its own servers: it gets the directory and no launcher. The launcher is
+    // resolved only for the adapters that declare they need one (claude,
+    // codex — see `claude-adapter.test.ts` and `codex-adapter.test.ts`).
+    expect(adapter.startCalls[0]?.ctx.mcpLaunch).toEqual({ cwd: trusted });
+    // The workspace the runtime CLI itself runs in is a different, writable
+    // directory — it is deliberately NOT moved.
+    expect(adapter.startCalls[0]?.ctx.workspaceDir).not.toBe(trusted);
+
+    await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-launch-cwd', seq: 2 }));
   });
 
   it('declines permanently when a server reports an ungrantable tool name', async () => {

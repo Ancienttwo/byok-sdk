@@ -17,6 +17,7 @@ import {
   qualifiedMcpToolName,
   type McpToolsetServerObservation,
 } from '../mcp';
+import { trustedCwd } from './fixtures/launch-cwd';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
 const FIXTURE_EXTENSIONS = Object.freeze({
@@ -515,6 +516,10 @@ describe('PiAdapter against the fake-pi fixture', () => {
       },
       observation: observationOf({ docs: ['search_docs'] }),
       permissionMode: 'auto',
+      // pi's own extension opens these servers, so the operator's
+      // command/args are untouched and the trusted directory travels beside
+      // them — it reaches `spawn` as `cwd`, not as a launcher wrapper.
+      launchCwd: await trustedCwd(),
     });
 
     await session.close();

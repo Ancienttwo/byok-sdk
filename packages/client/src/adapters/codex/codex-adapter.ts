@@ -16,6 +16,7 @@ import {
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types';
+import { wrapMcpServerWithLaunchCwd, type McpLaunchBinding } from '../../daemon/trusted-launch-cwd';
 import {
   RuntimeExecutionFailure,
   RuntimeStartupDisposalFailure,
@@ -101,6 +102,7 @@ export class CodexAdapter implements RuntimeAdapter {
     // admit a projected server without the daemon's own `tools/list`
     // observation of it.
     requiresMcpToolsetToolObservation: true,
+    mcpServerLaunch: 'launcher-wrapped',
     capabilities: {
       steer: false,
       resume: true,
@@ -298,7 +300,13 @@ export class CodexAdapter implements RuntimeAdapter {
     // recomputed later: `preparedMcpGrants` was probed at admission and
     // `startInput.mcpServers` is the sealed authority for this operation, so
     // a second computation could only widen or drift.
-    const mcpConfigArgs = codexMcpConfigArgs(startInput.mcpServers, runtimeEnv, this.options.sdkHelperHost, preparedMcpGrants);
+    const mcpConfigArgs = codexMcpConfigArgs(
+      startInput.mcpServers,
+      runtimeEnv,
+      this.options.sdkHelperHost,
+      preparedMcpGrants,
+      startInput.mcpLaunch,
+    );
     const { sessionRef, runner } = await runCodexTurn({
       command,
       resumeRef: startInput.manifest.sessionRef,
@@ -423,16 +431,33 @@ function codexMcpConfigArgs(
   env: NodeJS.ProcessEnv,
   helperHost: SdkHelperHostConfig | undefined,
   grants: readonly McpToolsetGrant[] = [],
+  launch?: McpLaunchBinding,
 ): string[] {
   if (servers === undefined || Object.keys(servers).length === 0) return [];
+  // Codex spawns every server itself from these `-c` overrides, and
+  // `mcp_servers.*` has no cwd field — the child would inherit the CLI's cwd,
+  // which for an Agent task is the Agent home the agent writes by design, and
+  // from which a `bun --compile` server binary runs `bunfig.toml` `preload`
+  // before its own code. The `mcp-env` helper that unseals each server's
+  // environment is therefore itself launched through this package's
+  // `bin/byok-launch-cwd.mjs`, which chdirs into the daemon's
+  // proven-non-writable directory before exec'ing it; the real server inherits
+  // that directory from the helper. The CLI's own cwd is unchanged.
+  if (launch?.launcher === undefined) {
+    throw new RuntimeExecutionFailure({
+      phase: 'start', category: 'authority', retry: 'non-retryable',
+      reason: 'prepared codex operation received MCP servers without a trusted launch directory',
+    });
+  }
+  const launchBinding = { cwd: launch.cwd, launcher: launch.launcher };
   const grantedTools = new Map(grants.map((grant) => [grant.server, grant.tools] as const));
   const args = ['--ignore-user-config'];
   for (const [name, server] of Object.entries(servers).sort(([left], [right]) => left.localeCompare(right))) {
     const key = `BYOK_MCP_PAYLOAD_${randomBytes(16).toString('hex').toUpperCase()}`;
     env[key] = JSON.stringify(server);
-    const helper = resolveSdkReservedHelperBin('mcp-env', helperHost);
+    const helper = wrapMcpServerWithLaunchCwd(resolveSdkReservedHelperBin('mcp-env', helperHost), launchBinding);
     args.push('-c', `mcp_servers.${name}.command=${JSON.stringify(helper.command)}`);
-    args.push('-c', `mcp_servers.${name}.args=${JSON.stringify([...helper.args])}`);
+    args.push('-c', `mcp_servers.${name}.args=${JSON.stringify([...(helper.args ?? [])])}`);
     args.push('-c', `mcp_servers.${name}.env.BYOK_MCP_ENV_KEY=${JSON.stringify(key)}`);
     args.push('-c', `mcp_servers.${name}.env_vars=${JSON.stringify([key])}`);
     const granted = grantedTools.get(name);

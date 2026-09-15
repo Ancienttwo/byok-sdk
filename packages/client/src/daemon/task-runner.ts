@@ -69,6 +69,12 @@ import type { TaskQueueWatermark } from './control-protocol';
 import { DEFAULT_MAX_INLINE_EVENT_BYTES, spillOversizedEvent } from './event-spill';
 import { buildRuntimeEnv } from './environment';
 import { computeEffectivePolicy } from './policy';
+import {
+  resolveMcpLaunchCwdLauncher,
+  resolveTrustedLaunchCwd,
+  type McpLaunchBinding,
+  type McpLaunchCwdConfig,
+} from './trusted-launch-cwd';
 import { toRuntimeInfoCapabilities } from './runtime-capabilities';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import {
@@ -343,6 +349,15 @@ export interface TaskRunnerDeps {
   runtimeEnvironment?: Record<string, { allow?: string[] }>;
   /** Reads the daemon's current validated device-local registry once per offer. */
   getMcpToolsets?: () => ReadonlyMap<string, McpToolsetConfig>;
+  /**
+   * Operator input to the MCP toolset launch boundary
+   * (`./trusted-launch-cwd.ts`). Unset means the platform default directory
+   * and — only when this process is provably plain Node — `process.execPath`
+   * as the launcher interpreter. Neither default is assumed: both are proven
+   * at admission, and an offer that needs a boundary this daemon cannot prove
+   * is declined non-retryably instead of being started without one.
+   */
+  mcpLaunchCwd?: McpLaunchCwdConfig;
   permissionDefaults?: PermissionPolicy;
   workspaceRoot: string;
   /** Strict Agent offer authority. Absent means legacy offers never resolve an Agent home. */
@@ -2063,24 +2078,55 @@ export class TaskRunner {
       // server on every offer.
       const needsToolsetObservation = resolvedMcp?.ok === true
         && pick.descriptor.requiresMcpToolsetToolObservation === true;
-      // Same cwd the runtime CLI itself is spawned in, so a probed server
-      // resolves relative paths exactly as it will at run time. Only the
-      // Agent-home case is knowable this early: a non-Agent task's workspace
-      // directory is created after admission, below.
-      let probeCwd: string | undefined;
+      // The one launch boundary for every MCP server child of this task —
+      // the admission probe here and, via `startInput.mcpLaunch`, every
+      // adapter spawn below. It is resolved ONCE, so the directory the daemon
+      // observed a server in is the directory the runtime runs it in.
+      //
+      // It is NOT the Agent home, which is what it used to be. A
+      // `bun --compile` server binary executes `$cwd/bunfig.toml` `preload`
+      // before its own code, and the Agent home is writable by the very agent
+      // the server is serving — see `./trusted-launch-cwd.ts`. The RUNTIME
+      // CLI keeps the manifest cwd; only its MCP server children move.
+      const projectsMcpServers = resolvedMcp?.ok === true && Object.keys(resolvedMcp.servers).length > 0;
       const probesAnMcpServer = needsToolsetObservation
         || (messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined);
-      if (probesAnMcpServer && agentRef !== undefined && this.deps.agentHome !== undefined) {
-        try {
-          probeCwd = (await this.deps.agentHome.layout.resolve(agentRef)).canonicalHome;
-        } catch (error) {
-          decline(
-            `Agent home admission failed: ${errorMessage(error)}`,
-            !(error instanceof AgentHomeResolutionError),
-          );
+      let mcpLaunch: McpLaunchBinding | undefined;
+      if (probesAnMcpServer || projectsMcpServers) {
+        const trusted = await resolveTrustedLaunchCwd(this.deps.mcpLaunchCwd);
+        if (trusted.kind === 'unavailable') {
+          // Non-retryable: nothing about re-offering this task changes which
+          // directories this uid can write. The reason names the exact
+          // condition so an operator can fix it (configure an immutable
+          // directory, or stop running the daemon as root) rather than
+          // discovering a silently unprotected launch later.
+          decline(`MCP toolset launch directory unavailable: ${trusted.reason}`, false);
           return;
         }
+        // Only the adapters that declare `launcher-wrapped` pay for a
+        // launcher. An adapter that spawns its own servers (pi) passes the
+        // directory to `spawn` and needs nothing else, and an adapter that
+        // declares nothing is treated the same way — the SDK cannot make a
+        // third-party adapter use a launcher by declining here, and the three
+        // bundled adapters all state their mode explicitly.
+        let launcher: McpLaunchBinding['launcher'];
+        if (pick.descriptor.mcpServerLaunch === 'launcher-wrapped') {
+          const resolvedLauncher = resolveMcpLaunchCwdLauncher(this.deps.mcpLaunchCwd);
+          if (resolvedLauncher.kind === 'unavailable') {
+            decline(
+              `MCP toolset launch directory unavailable: ${resolvedLauncher.reason}`,
+              false,
+            );
+            return;
+          }
+          launcher = { interpreter: resolvedLauncher.interpreter, script: resolvedLauncher.script };
+        }
+        mcpLaunch = Object.freeze({
+          cwd: trusted.dir,
+          ...(launcher === undefined ? {} : { launcher }),
+        });
       }
+      const probeCwd = mcpLaunch?.cwd;
       if (messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined) {
         try {
           await this.deps.agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, env, probeCwd);
@@ -2449,6 +2495,7 @@ export class TaskRunner {
         env,
         ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
         ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
+        ...(mcpLaunch === undefined ? {} : { mcpLaunch }),
         approvalChannel: {
           taskId,
           storeDir: this.deps.storeDir,

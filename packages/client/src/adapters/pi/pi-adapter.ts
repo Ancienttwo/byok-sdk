@@ -172,6 +172,7 @@ export class PiAdapter implements RuntimeAdapter {
     // the model's first request and left the extension, not the daemon, as the
     // authority on what a toolset contains.
     requiresMcpToolsetToolObservation: true,
+    mcpServerLaunch: 'direct-cwd',
     capabilities: {
       steer: true,
       resume: true,
@@ -376,6 +377,23 @@ export class PiAdapter implements RuntimeAdapter {
           let mcpConfigDir: string | undefined;
           let runtimeEnv = manifestSelection === undefined ? startInput.env : withoutProviderCredentials(startInput.env);
           const taskMcpServers = startInput.mcpServers ?? {};
+          // The daemon resolved ONE proven-non-writable launch directory for
+          // this task (`daemon/trusted-launch-cwd.ts`) and probed every server
+          // in it. pi's own extension opens the servers, so the directory
+          // travels in the task-scoped config and is passed straight to
+          // `spawn` — no launcher, because this adapter owns the spawn.
+          //
+          // Fail closed rather than omit it: an MCP server started without it
+          // would inherit the Pi child's cwd, which is the Agent home, which
+          // is exactly the writable directory a compiled server binary reads
+          // `bunfig.toml` `preload` from.
+          const mcpLaunchCwd = startInput.mcpLaunch?.cwd;
+          if (Object.keys(taskMcpServers).length > 0 && mcpLaunchCwd === undefined) {
+            throw new RuntimeExecutionFailure({
+              phase: 'start', category: 'authority', retry: 'non-retryable',
+              reason: 'prepared pi operation received MCP servers without a trusted launch directory',
+            });
+          }
           let mcpConfigPath: string;
           try {
             mcpConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-mcp-'));
@@ -408,6 +426,7 @@ export class PiAdapter implements RuntimeAdapter {
                 mcpServers: taskMcpServers,
                 observation: startInput.mcpToolsetTools ?? {},
                 permissionMode: input.policy.mode,
+                ...(mcpLaunchCwd === undefined ? {} : { launchCwd: mcpLaunchCwd }),
               }),
               { mode: 0o600 },
             );

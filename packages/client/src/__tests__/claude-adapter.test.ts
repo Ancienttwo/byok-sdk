@@ -11,6 +11,7 @@ import { SteerUnsupportedError, type Session } from '../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 import { observationOf } from './fixtures/mcp-observation';
+import { trustedLaunchBinding } from './fixtures/launch-cwd';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 
@@ -362,9 +363,19 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(args[args.indexOf('--allowedTools') + 1]).toBe('mcp__salesko__find_leads');
     const configPath = args[args.indexOf('--mcp-config') + 1];
     if (typeof configPath !== 'string') throw new Error('missing mcp config path');
+    // claude spawns this server itself and `mcpServers` has no cwd field, so
+    // the operator's command/args are reached through the SDK's launcher,
+    // which chdirs into the daemon's proven-non-writable directory first. The
+    // operator's own argv is preserved position-for-position after it, and the
+    // task-scoped env is untouched.
+    const launch = await trustedLaunchBinding();
     expect(JSON.parse(await fs.readFile(configPath, 'utf8'))).toEqual({
       mcpServers: {
-        salesko: { command: process.execPath, args: ['/opt/salesko/fake-mcp.mjs'], env: { BYOK_AGENT_MESSAGE_CONTEXT: 'sealed-context' } },
+        salesko: {
+          command: launch.launcher!.interpreter,
+          args: [launch.launcher!.script, launch.cwd, process.execPath, '/opt/salesko/fake-mcp.mjs'],
+          env: { BYOK_AGENT_MESSAGE_CONTEXT: 'sealed-context' },
+        },
       },
     });
 

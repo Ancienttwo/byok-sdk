@@ -14,9 +14,11 @@ import {
   type RuntimeDetectResult,
   type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult,
+  type McpStdioServerConfig,
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types';
+import { wrapMcpServerWithLaunchCwd } from '../../daemon/trusted-launch-cwd';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
 import { withoutProviderCredentials } from '../provider-credential-environment';
@@ -174,6 +176,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     // tool explicitly, so this adapter cannot admit a projected server
     // without the daemon's own `tools/list` observation of it.
     requiresMcpToolsetToolObservation: true,
+    mcpServerLaunch: 'launcher-wrapped',
     capabilities: {
       steer: false,
       resume: true,
@@ -343,6 +346,31 @@ export class ClaudeAdapter implements RuntimeAdapter {
             BYOK_APPROVAL_TIMEOUT_MS: String(approvalChannel.timeoutMs),
           },
         };
+      }
+      // The claude CLI spawns every server in this file itself, and
+      // `mcpServers` has no per-server cwd field — the child would inherit the
+      // CLI's cwd, which is the manifest cwd, which for an Agent task is the
+      // Agent home the agent writes by design. A `bun --compile` server binary
+      // runs `$cwd/bunfig.toml` `preload` before its own code, so every entry
+      // is rewritten through this package's `bin/byok-launch-cwd.mjs`, which
+      // chdirs into the daemon's proven-non-writable launch directory and
+      // execs the real command with its argv byte-identical.
+      //
+      // The CLI's OWN cwd is deliberately unchanged: session resume and
+      // relative path resolution depend on it (`agent-home-contract.test.ts`).
+      const launchBinding = startInput.mcpLaunch;
+      if (Object.keys(taskMcpServers).length > 0
+        && (launchBinding === undefined || launchBinding.launcher === undefined)) {
+        throw new RuntimeExecutionFailure({
+          phase: 'start', category: 'authority', retry: 'non-retryable',
+          reason: 'prepared claude operation received MCP servers without a trusted launch directory',
+        });
+      }
+      if (launchBinding?.launcher !== undefined) {
+        const wrapped = { cwd: launchBinding.cwd, launcher: launchBinding.launcher };
+        for (const [name, server] of Object.entries(mcpServers)) {
+          mcpServers[name] = wrapMcpServerWithLaunchCwd(server as McpStdioServerConfig, wrapped);
+        }
       }
       await fs.writeFile(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });
       mapping.args = [
