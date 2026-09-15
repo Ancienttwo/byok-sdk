@@ -1,22 +1,39 @@
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { execFile } from 'node:child_process';
-import { promises as fs } from 'node:fs';
+import { promises as fs, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path, { isAbsolute } from 'node:path';
 import { promisify } from 'node:util';
-import type { AgentEvent, ProviderProfileBinding, TaskOfferPayload } from '@byok-sdk/protocol';
+import type {
+  AgentEvent,
+  PermissionPolicy,
+  ProviderProfileBinding,
+  TaskOfferPayload,
+} from '@byok-sdk/protocol';
 import {
   PolicyUnsupportedError,
   freezeRuntimeAdapterDescriptor,
+  type McpStdioServerConfig,
+  type McpToolsetToolObservation,
   type RuntimeAdapter,
   type RuntimeDetectResult,
   type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult,
+  type RuntimeOperationManifest,
   type RuntimeOperationStartInput,
+  type RuntimePreparedLaunchV1,
   type Session,
 } from '../../types';
+import {
+  inputPreparationDigest,
+  INPUT_PREPARATION_ARTIFACT_FORMAT,
+  INPUT_PREPARATION_VERSION,
+} from '../../input-preparation';
+import { mcpLaunchAttestation, type McpLaunchBinding } from '../../daemon/trusted-launch-cwd';
+import type { ToolImplementationIdentityV1 } from '../../daemon/tool-implementation-identity';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
 import { grantFingerprint, resolveMcpToolsetGrants } from '../mcp-tool-grants';
+import { clientPackageRoot } from './client-manifest';
 import { BYOK_PI_MCP_CONFIG_PATH } from './mcp-config';
 import { resolvePiBin, type ResolvedBin } from './resolve-bin';
 import { resolvePiExtensions, type ResolvedPiExtensions } from './resolve-extensions';
@@ -342,13 +359,6 @@ export class PiAdapter implements RuntimeAdapter {
               reason: 'prepared pi operation received a manifest with different runtime selection',
             });
           }
-          if (typeof startInput.instruction !== 'string') {
-            throw new RuntimeExecutionFailure({
-              phase: 'start', category: 'authority', retry: 'non-retryable',
-              reason: 'prepared pi operation requires a resolved string instruction',
-            });
-          }
-          const resumeSessionId = startInput.manifest.sessionRef;
           const manifestCwd = startInput.manifest.cwd;
           if (manifestCwd === undefined) {
             throw new RuntimeExecutionFailure({
@@ -374,6 +384,36 @@ export class PiAdapter implements RuntimeAdapter {
               reason: 'prepared pi operation received different MCP toolset tool authority than it was admitted with',
             });
           }
+          // The prepared lane diverges here, AFTER every authority check both
+          // lanes share: the same sealed selection, the same sealed cwd and the
+          // same MCP grant fingerprint. What it does not share is the CLI —
+          // `pi --mode rpc` can never consume a prepared request, so this branch
+          // launches the SDK-owned in-process host instead
+          // (`../../bin/byok-pi-prepared.ts`).
+          if (startInput.kind === 'prepared') {
+            return await startPreparedPiOperation({
+              preparation: startInput.preparation,
+              policy: input.policy,
+              manifest: startInput.manifest,
+              manifestCwd,
+              manifestSelection,
+              env: startInput.env,
+              ...(startInput.mcpServers === undefined ? {} : { mcpServers: startInput.mcpServers }),
+              ...(startInput.mcpToolsetTools === undefined ? {} : { mcpToolsetTools: startInput.mcpToolsetTools }),
+              ...(startInput.mcpLaunch === undefined ? {} : { mcpLaunch: startInput.mcpLaunch }),
+              ...(startInput.mcpToolImplementations === undefined
+                ? {}
+                : { mcpToolImplementations: startInput.mcpToolImplementations }),
+              ...(this.options.spawnFn === undefined ? {} : { spawnFn: this.options.spawnFn }),
+            });
+          }
+          if (typeof startInput.instruction !== 'string') {
+            throw new RuntimeExecutionFailure({
+              phase: 'start', category: 'authority', retry: 'non-retryable',
+              reason: 'prepared pi operation requires a resolved string instruction',
+            });
+          }
+          const resumeSessionId = startInput.manifest.sessionRef;
           let mcpConfigDir: string | undefined;
           let runtimeEnv = manifestSelection === undefined ? startInput.env : withoutProviderCredentials(startInput.env);
           const taskMcpServers = startInput.mcpServers ?? {};
@@ -532,6 +572,265 @@ export class PiAdapter implements RuntimeAdapter {
   private resolveBin(): ResolvedBin {
     return (this.options.resolveBin ?? resolvePiBin)();
   }
+}
+
+/**
+ * Everything one prepared pi launch needs, after both lanes' shared authority
+ * checks have already passed.
+ */
+interface PreparedPiLaunchInput {
+  readonly preparation: RuntimePreparedLaunchV1;
+  /** The policy this operation was ADMITTED under, whole. */
+  readonly policy: PermissionPolicy;
+  readonly manifest: RuntimeOperationManifest;
+  readonly manifestCwd: string;
+  readonly manifestSelection: TaskOfferPayload['dispatchSelection'];
+  readonly env: NodeJS.ProcessEnv;
+  readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
+  readonly mcpToolsetTools?: McpToolsetToolObservation;
+  readonly mcpLaunch?: McpLaunchBinding;
+  readonly mcpToolImplementations?: Readonly<Record<string, ToolImplementationIdentityV1>>;
+  readonly spawnFn?: SpawnFn;
+}
+
+function authorityFailure(reason: string, cause?: unknown): RuntimeExecutionFailure {
+  return new RuntimeExecutionFailure(
+    { phase: 'start', category: 'authority', retry: 'non-retryable', reason },
+    ...(cause === undefined ? [] : [{ cause }]),
+  );
+}
+
+/**
+ * Read the retained artifact this operation was counted for.
+ *
+ * The record's own identity is re-checked against the file: an artifact is
+ * addressed by path here, and a path is not an identity. Nothing else about the
+ * file is interpreted — the envelope crosses to the native session verbatim,
+ * because the native compiler is the only authority on what those bytes mean.
+ */
+function readPreparedArtifact(preparation: RuntimePreparedLaunchV1): unknown {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(preparation.artifactPath, 'utf8'));
+  } catch (cause) {
+    throw authorityFailure('prepared pi operation could not read its counted artifact', cause);
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw authorityFailure('prepared pi operation read an artifact that is not an object');
+  }
+  const artifact = parsed as Record<string, unknown>;
+  if (artifact.format !== INPUT_PREPARATION_ARTIFACT_FORMAT || artifact.version !== INPUT_PREPARATION_VERSION) {
+    throw authorityFailure('prepared pi operation read an artifact of an unrecognized format');
+  }
+  if (artifact.recordId !== preparation.reference.recordId) {
+    throw authorityFailure('prepared pi operation read an artifact belonging to a different preparation record');
+  }
+  if (artifact.envelopeDigest !== preparation.expected.envelopeDigest) {
+    throw authorityFailure('prepared pi operation read an artifact whose envelope digest is not the recorded one');
+  }
+  if (artifact.toolManifestDigest !== preparation.expected.toolManifestDigest) {
+    throw authorityFailure('prepared pi operation read an artifact whose tool manifest digest is not the recorded one');
+  }
+  if (artifact.envelope === undefined) {
+    throw authorityFailure('prepared pi operation read an artifact that retains no native envelope');
+  }
+  return artifact.envelope;
+}
+
+/**
+ * Launch one prepared Execution.
+ *
+ * The shape of this lane, and what each step is FOR:
+ *
+ * 1. Q2 — a prepared Execution never resumes. A `sessionRef` and a prepared
+ *    reference together are refused here rather than reconciled: resuming binds
+ *    the frozen request to a history that was not part of what was counted, and
+ *    the native session would reject it as `prepared_context_drift` after the
+ *    process, the servers and the session file already existed.
+ * 2. The counted mode and the admitted mode must be the same mode, and the
+ *    launch boundary and implementation identities this task resolved must be
+ *    the ones the preparation attested. These are the adapter's own fail-closed
+ *    re-checks, on the same shape as the MCP grant fingerprint the shared path
+ *    already compares; the child re-derives the digests independently anyway,
+ *    so a divergence that slips past here still fails closed — just later and
+ *    with a less specific reason.
+ * 3. The task-scoped configuration is written, the in-process host is spawned,
+ *    and the frozen envelope is sent as ONE `prompt_prepared` command. The SDK
+ *    asserts equality on the response (`sessionId`, `preparedDigest`) and never
+ *    re-sends: no prepared failure code is retryable with different input, so
+ *    there is no second attempt to write.
+ */
+async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<Session> {
+  const { preparation } = input;
+  if (input.manifest.sessionRef !== undefined) {
+    throw authorityFailure(
+      'a prepared pi operation never resumes a session; a sealed sessionRef and a prepared reference are refused'
+      + ' together',
+    );
+  }
+  if (input.policy.mode !== preparation.permissionMode) {
+    throw authorityFailure(
+      'prepared pi operation was admitted under a permission mode its counted manifest was not filtered for',
+    );
+  }
+  const mcpLaunch = input.mcpLaunch;
+  if (mcpLaunch === undefined) {
+    throw authorityFailure('prepared pi operation received no trusted launch directory');
+  }
+  const launch = mcpLaunchAttestation(mcpLaunch);
+  const attested = mcpLaunchAttestation(preparation.launch);
+  if (inputPreparationDigest(launch) !== inputPreparationDigest(attested)) {
+    throw authorityFailure(
+      'prepared pi operation resolved a different MCP launch boundary than the one its preparation attested',
+    );
+  }
+  const toolImplementations = input.mcpToolImplementations ?? {};
+  if (inputPreparationDigest(toolImplementations) !== inputPreparationDigest(preparation.toolImplementations)) {
+    throw authorityFailure(
+      'prepared pi operation resolved different MCP implementation identities than the ones its preparation bound',
+    );
+  }
+
+  const envelope = readPreparedArtifact(preparation);
+
+  const bin = preparedPiLaunchBin();
+  let configDir: string | undefined;
+  let configPath: string;
+  try {
+    configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-prepared-'));
+    await fs.chmod(configDir, 0o700).catch(() => {});
+    configPath = path.join(configDir, 'prepared-launch.json');
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({
+        format: 'byok.pi.prepared-launch',
+        version: 1,
+        cwd: input.manifestCwd,
+        policy: input.policy,
+        countedPermissionMode: preparation.permissionMode,
+        expected: { model: preparation.expected.model },
+        toolBindingDigest: preparation.toolBindingDigest,
+        observationDigest: preparation.observationDigest,
+        toolsetDefinitionRevisions: preparation.toolsetDefinitionRevisions,
+        launch,
+        // The SAME task-scoped MCP shape the ordinary extension reads, written
+        // by the same adapter from the same resources. The prepared host parses
+        // it with the same parser and reaches the servers through the same pool.
+        mcp: {
+          mcpServers: input.mcpServers ?? {},
+          observation: input.mcpToolsetTools ?? {},
+          permissionMode: preparation.permissionMode,
+          launchCwd: mcpLaunch.cwd,
+          toolImplementations,
+        },
+      }),
+      { mode: 0o600 },
+    );
+  } catch (cause) {
+    await cleanupMcpConfigDir(configDir);
+    throw new RuntimeExecutionFailure({
+      phase: 'start', category: 'infrastructure', retry: 'retryable',
+      reason: 'pi prepared launch configuration could not be created',
+    }, { cause });
+  }
+
+  let rpc: PiRpcClient;
+  try {
+    rpc = new PiRpcClient({
+      command: process.execPath,
+      args: [bin, '--config', configPath],
+      cwd: input.manifestCwd,
+      // Provider credentials are stripped exactly as they are for a pinned
+      // selection on the ordinary lane: the prepared host resolves its own
+      // credential through pi's authenticated storage, never through an
+      // inherited environment value.
+      env: input.manifestSelection === undefined ? input.env : withoutProviderCredentials(input.env),
+      ...(input.spawnFn === undefined ? {} : { spawnFn: input.spawnFn }),
+    });
+  } catch (cause) {
+    await cleanupMcpConfigDir(configDir);
+    throw new RuntimeExecutionFailure({
+      phase: 'start', category: 'infrastructure', retry: 'retryable',
+      reason: 'pi prepared runtime process could not be spawned',
+    }, { cause });
+  }
+
+  let response: PiRpcMessage;
+  try {
+    response = await rpc.send({
+      type: 'prompt_prepared',
+      input: envelope,
+      expected: {
+        digest: preparation.expected.envelopeDigest,
+        model: preparation.expected.model,
+        binding: preparation.expected.binding,
+        toolManifestDigest: preparation.expected.toolManifestDigest,
+      },
+    });
+  } catch (cause) {
+    rpc.kill();
+    await cleanupMcpConfigDir(configDir);
+    throw new RuntimeExecutionFailure({
+      phase: 'start', category: 'infrastructure', retry: 'retryable',
+      reason: `pi prepared request transport failed: ${errorMessage(cause)}`,
+    }, { cause });
+  }
+  if (response.success === false) {
+    rpc.kill();
+    await cleanupMcpConfigDir(configDir);
+    // The native code is reported verbatim. Every one of them is terminal for
+    // this artifact — nothing here retries, and nothing here may re-send a
+    // DIFFERENT input under the same accounting.
+    throw new RuntimeExecutionFailure({
+      phase: 'start', category: 'semantic', retry: 'non-retryable',
+      reason: `pi refused the prepared request (${typeof response.code === 'string' ? response.code : 'prepared_failed'})`
+        + `: ${typeof response.error === 'string' ? response.error : 'no reason reported'}`,
+    });
+  }
+
+  const data = response.data as { sessionId?: unknown; preparedDigest?: unknown } | undefined;
+  if (typeof data?.sessionId !== 'string' || data.sessionId.length === 0) {
+    rpc.kill();
+    await cleanupMcpConfigDir(configDir);
+    throw authorityFailure('pi admitted the prepared request without reporting an authoritative session id');
+  }
+  if (data.preparedDigest !== preparation.expected.envelopeDigest) {
+    rpc.kill();
+    await cleanupMcpConfigDir(configDir);
+    throw authorityFailure('pi admitted a prepared request whose digest is not the one this operation counted');
+  }
+  const sessionRef = data.sessionId;
+
+  let state: PiRpcMessage;
+  try {
+    state = await rpc.send({ type: 'get_state' });
+  } catch (cause) {
+    rpc.kill();
+    await cleanupMcpConfigDir(configDir);
+    throw new RuntimeExecutionFailure({
+      phase: 'start', category: 'infrastructure', retry: 'retryable',
+      reason: `pi transport ended before confirming the prepared session id: ${errorMessage(cause)}`,
+    }, { cause });
+  }
+  const stateData = state.data as { sessionId?: unknown } | undefined;
+  if (state.success === false || stateData?.sessionId !== sessionRef) {
+    rpc.kill();
+    await cleanupMcpConfigDir(configDir);
+    throw authorityFailure('pi reported a different session id than the one that admitted the prepared request');
+  }
+
+  return new PiSession(sessionRef, rpc, input.manifestSelection, configDir);
+}
+
+/**
+ * The shipped prepared launch entry.
+ *
+ * Resolved from this package's own root, exactly as the Pi extensions are
+ * (`./resolve-extensions.ts`): the host that consumes a frozen request must be
+ * the one from THIS package graph, never whatever a PATH lookup finds.
+ */
+function preparedPiLaunchBin(): string {
+  return path.join(clientPackageRoot(), 'dist', 'bin', 'byok-pi-prepared.js');
 }
 
 async function validateProviderProfileBindingWithLauncher(
