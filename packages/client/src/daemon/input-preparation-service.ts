@@ -146,7 +146,9 @@ function sha256Hex(input: string): string {
  *
  * An empty list is the only thing that makes `ready` true, and today the list
  * can never be empty: the native compiler proves `coverage: "unknown"`, so
- * `compiler_coverage_unknown` is always present. That is the honest state of
+ * `compiler_coverage_unknown` is always present, and tool executor identity is
+ * an observation fingerprint rather than a proof, so
+ * `executor_identity_unproven` always joins it. That is the honest state of
  * §10.2's G4, not a placeholder — a fixture counter adds
  * `counter_authority_not_production` on top of it, so an offline suite cannot
  * even accidentally look like production accounting evidence.
@@ -177,6 +179,17 @@ export function inputPreparationReadinessReasons(
     if (!reasons.includes('not_counted')) reasons.push('not_counted');
   } else {
     if (record.artifact.coverage !== 'complete') reasons.push('compiler_coverage_unknown');
+    // Tool executor strings are OBSERVATION fingerprints: they bind what a
+    // server said about a tool — its toolset revision, its self-reported
+    // identity, its negotiated protocol version, its schema — and none of that
+    // proves which executable will actually serve the call. Observation and
+    // launch are two separate spawns of a command the daemon only knows as
+    // `command`/`args`, so even hashing the binary would be a TOCTOU claim.
+    // Until an implementation-identity proof exists, no receipt may be ready
+    // on the strength of a fingerprint, exactly as `compiler_coverage_unknown`
+    // keeps one from being ready on unproven token coverage. The condition
+    // changes when the proof does, not before.
+    reasons.push('executor_identity_unproven');
     if (record.artifactBytes === 0 || nowMs >= Date.parse(record.artifactExpiresAt)) reasons.push('artifact_expired');
   }
   if (record.counter !== undefined) {
