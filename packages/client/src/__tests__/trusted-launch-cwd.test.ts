@@ -130,6 +130,28 @@ describe('resolveTrustedLaunchCwd', () => {
     await expect(resolveTrustedLaunchCwd(undefined, { platform: 'win32', getuid: () => 501, env: {} }))
       .resolves.toEqual({ kind: 'unavailable', reason: 'no_platform_default_directory' });
   });
+
+  it('is unavailable on win32 when this account can write %SystemRoot% — an elevated daemon', async () => {
+    // The Windows counterpart of the uid-0 case above, and the one an operator
+    // actually hits: a daemon running as Administrator CAN create files in
+    // `%SystemRoot%`, so the write probe succeeds and no boundary is proven.
+    // The refusal is correct — every MCP launch is then refused with this
+    // reason, and the fix is to run the daemon non-elevated or to configure
+    // `DaemonConfig.mcpLaunchCwd.dir` at a directory that account cannot write.
+    //
+    // `%SystemRoot%` is stood in for by a directory this test really can write,
+    // so the probe that rejects is a real write and not an assumption. The uid
+    // is spoofed to one that owns nothing here because real win32 has no
+    // `getuid` at all: the ownership half of the check is skipped there and the
+    // write probe carries the rejection alone, which is what this pins.
+    const systemRoot = await tempRoot();
+    await expect(resolveTrustedLaunchCwd(undefined, {
+      platform: 'win32',
+      getuid: () => NOBODY_UID,
+      env: { SystemRoot: systemRoot },
+    })).resolves.toEqual({ kind: 'unavailable', reason: 'platform_default_is_writable' });
+    expect((await fs.readdir(systemRoot)).filter((n) => n.startsWith('.byok-launch-cwd-probe-'))).toEqual([]);
+  });
 });
 
 

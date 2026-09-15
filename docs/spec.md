@@ -815,6 +815,16 @@ non-retryably instead of admitting an unprotected launch:
   the daemon reports `root_cannot_prove_write_boundary`. This is a documented
   limitation of running the daemon as root, not a default that is quietly
   filled in.
+
+  Windows has the same posture under a different name. A daemon running
+  elevated (Administrator) can create files in `%SystemRoot%`, so the platform
+  default accepts the write probe and is refused with
+  `platform_default_is_writable`; every MCP toolset launch on that host is then
+  refused. The refusal is the boundary working, not a defect. To get a usable
+  launch cwd there, run the daemon non-elevated, and use a default or
+  explicitly configured directory that passes the same directory proof; an
+  explicit `mcpLaunchCwd.dir` is not an elevation bypass — whether it is usable
+  depends only on the proof result.
 - **No trusted launcher.** claude's `mcpServers` JSON and codex's
   `-c mcp_servers.*` have no per-server cwd field, so each server there is
   reached through a launcher that changes directory and then execs the real
@@ -827,7 +837,7 @@ non-retryably instead of admitting an unprotected launch:
   |---|---|---|
   | darwin | trusted system `/bin/sh` bootstrap | verified on the development host |
   | linux | trusted system `/bin/sh` bootstrap (dash, bash-as-sh, busybox) | verified in containers |
-  | win32 | `bin/byok-launch-cwd.mjs` on a real Node host; a non-Node host without a trusted launcher is refused | code path + unit tests only, not verified on Windows |
+  | win32 | `bin/byok-launch-cwd.mjs` on a real Node host; a non-Node host without a trusted launcher is refused | three separate facts: (a) the launcher executed for real on windows-latest — pending re-run (run 34960882911 failed in the test fixture, not in the launcher); (b) a writable platform default refused with `platform_default_is_writable` — VERIFIED on run 34960882911, whose elevated runner produced exactly that refusal, and pinned by a unit test; (c) non-elevated admission of a real directory on Windows — not verified |
 
   On POSIX the launcher is `sh -c 'cd -- "$0" && exec "$@"' <dir> <command>
   [...args]`: `$0` is the trusted directory and `"$@"` is the target's argv, so

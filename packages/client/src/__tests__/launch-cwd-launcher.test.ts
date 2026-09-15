@@ -6,13 +6,48 @@ import path from 'node:path';
 import {
   launchCwdScriptPath,
   resolveMcpLaunchCwdLauncher,
-  resolveTrustedLaunchCwd,
   wrapMcpServerWithLaunchCwd,
 } from '../daemon/trusted-launch-cwd';
 import { LOADER_ENV_DENY_PATTERNS } from '../daemon/environment';
 import type { McpStdioServerConfig } from '../types';
 
 const LAUNCHER = launchCwdScriptPath();
+
+/**
+ * WHY THE LAUNCH DIRECTORY HERE IS TEST-OWNED, AND NOT `resolveTrustedLaunchCwd()`.
+ *
+ * The properties this file pins are the LAUNCHER's: that it chdirs before it
+ * execs, that argv arrives byte-identical, that the target's exit code and
+ * death-by-signal pass through, that a loader environment variable or a
+ * non-empty interpreter argv is refused, and that a directory it cannot change
+ * into is refused before the target ever runs. None of those depend on WHICH
+ * directory it was handed — the launcher is given a directory and obeys it.
+ *
+ * Whether a given directory can be PROVEN non-writable is a separate,
+ * daemon-side authority decision with its own suite
+ * (`trusted-launch-cwd.test.ts`). Binding this file to that decision made the
+ * launcher untestable on a host where the proof legitimately fails: on
+ * windows-latest the CI runner executes as Administrator, so the platform
+ * default `%SystemRoot%` IS writable and `resolveTrustedLaunchCwd()` correctly
+ * returns `platform_default_is_writable` (the same posture as uid 0 on POSIX).
+ * That refusal is correct behaviour, not a launcher defect — but with the
+ * fixture resolving through it, 8 of these 10 cases died at the fixture and the
+ * launcher itself never executed (run 34960882911).
+ *
+ * So the launch cwd below is a directory this test owns. It is deliberately one
+ * the test process CAN write: that makes the point explicit — the launcher's
+ * behaviour is identical regardless of the directory's trust status, which is
+ * precisely why the trust decision belongs to the daemon and not here.
+ *
+ * SCOPE, stated plainly so no reader upgrades it: `launchDir()` is a LAUNCHER
+ * FIXTURE. It is not a trusted directory, nothing in the product accepts it as
+ * one, and a green run of this file is NOT an end-to-end trusted-launch PASS.
+ * What these cases prove is the launcher's argv, cwd and exit/signal semantics.
+ * They prove nothing about directory trust.
+ */
+async function launchDir(): Promise<string> {
+  return fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-launch-cwd-target-')));
+}
 
 /**
  * A target that reports EXACTLY what it was given: the argv it received after
@@ -31,12 +66,6 @@ async function fixture(): Promise<{ dir: string; target: string; out: string }> 
   const target = path.join(dir, 'target.mjs');
   await fs.writeFile(target, TARGET);
   return { dir, target, out: path.join(dir, 'report.json') };
-}
-
-async function trusted(): Promise<string> {
-  const resolved = await resolveTrustedLaunchCwd();
-  if (resolved.kind !== 'resolved') throw new Error(`no trusted directory here: ${resolved.reason}`);
-  return resolved.dir;
 }
 
 interface Run { code: number | null; signal: NodeJS.Signals | null; stderr: string }
@@ -67,9 +96,9 @@ function run(
 }
 
 describe('bin/byok-launch-cwd.mjs', () => {
-  it('execs the target in the trusted directory, never in its own', async () => {
+  it('execs the target in the launch directory it was given, never in its own', async () => {
     const { target, out } = await fixture();
-    const dir = await trusted();
+    const dir = await launchDir();
     const result = await run([dir, process.execPath, target, out]);
     expect(result).toMatchObject({ code: 0, signal: null });
     const report = JSON.parse(await fs.readFile(out, 'utf8')) as { cwd: string };
@@ -80,7 +109,7 @@ describe('bin/byok-launch-cwd.mjs', () => {
   it('forwards every argument byte-identically, shell metacharacters included', async () => {
     const { target, out } = await fixture();
     const argv = ['a b', '"double"', "'single'", '$(id)', '`id`', ';rm -rf /', 'new\nline', '-n', '--', '', 'tab\there'];
-    const result = await run([await trusted(), process.execPath, target, out, ...argv]);
+    const result = await run([await launchDir(), process.execPath, target, out, ...argv]);
     expect(result.code).toBe(0);
     const report = JSON.parse(await fs.readFile(out, 'utf8')) as { argv: string[] };
     expect(report.argv).toEqual(argv);
@@ -88,7 +117,7 @@ describe('bin/byok-launch-cwd.mjs', () => {
 
   it('forwards the target exit code', async () => {
     const { target, out } = await fixture();
-    const result = await run([await trusted(), process.execPath, target, out], {
+    const result = await run([await launchDir(), process.execPath, target, out], {
       env: { PATH: process.env.PATH ?? '', TARGET_EXIT: '37' },
     });
     expect(result.code).toBe(37);
@@ -97,7 +126,7 @@ describe('bin/byok-launch-cwd.mjs', () => {
   it('forwards SIGTERM to the target and dies of the same signal', async () => {
     const { target, out } = await fixture();
     let pid: number | undefined;
-    const finished = run([await trusted(), process.execPath, target, out, '--hang'], {
+    const finished = run([await launchDir(), process.execPath, target, out, '--hang'], {
       onSpawn: (spawned) => { pid = spawned; },
     });
     await expect.poll(async () => {
@@ -117,7 +146,7 @@ describe('bin/byok-launch-cwd.mjs', () => {
     // Benign VALUES on purpose: what is asserted is that the launcher refuses
     // on the NAME, before it can matter what the value would have done.
     for (const name of ['NODE_OPTIONS', 'NODE_PATH', 'BUN_CONFIG_PRELOAD', 'DYLD_FRAMEWORK_PATH', 'LD_LIBRARY_PATH']) {
-      const result = await run([await trusted(), process.execPath, target, out], {
+      const result = await run([await launchDir(), process.execPath, target, out], {
         env: { PATH: process.env.PATH ?? '', [name]: name === 'NODE_OPTIONS' ? '--title=x' : path.dirname(LAUNCHER) },
       });
       expect(result.code, name).toBe(78);
@@ -128,7 +157,7 @@ describe('bin/byok-launch-cwd.mjs', () => {
 
   it('refuses to launch when its own interpreter argv is not empty', async () => {
     const { target, out } = await fixture();
-    const result = await run([await trusted(), process.execPath, target, out], { execArgv: ['--title=injected'] });
+    const result = await run([await launchDir(), process.execPath, target, out], { execArgv: ['--title=injected'] });
     expect(result.code).toBe(78);
     expect(result.stderr).toMatch(/non-empty interpreter argv/u);
     await expect(fs.access(out)).rejects.toThrow();
@@ -209,23 +238,24 @@ function spawnWrapped(server: McpStdioServerConfig, cwd: string): Promise<Run> {
  * which is what `docs/spec.md` states. Deliberately NOT skipped anywhere: the
  * windows leg is the only real Windows host this boundary can ever be run on.
  *
- * The binding is constructed directly from this module's own resolved trusted
- * directory rather than through a daemon: what is under test here is the
- * launcher, and the directory proof has its own suite
- * (`trusted-launch-cwd.test.ts`).
+ * The binding is constructed directly, from this file's own `launchDir()` and
+ * `resolveMcpLaunchCwdLauncher()`, rather than through a daemon: what is under
+ * test here is the launcher, and the directory proof has its own suite
+ * (`trusted-launch-cwd.test.ts`) — see the note on `launchDir` above for why
+ * this file must not route its fixture through that proof.
  */
 describe('the launcher this host resolves, as a real process', () => {
-  it('starts the target in the trusted directory it was given, not in the directory it was spawned from', async () => {
+  it('starts the target in the launch directory it was given, not in the directory it was spawned from', async () => {
     const { dir, out } = await fixture();
     const target = path.join(dir, 'byte-target.mjs');
     await fs.writeFile(target, BYTE_TARGET);
-    const trustedDir = await trusted();
+    const launchCwd = await launchDir();
     const launcher = resolveMcpLaunchCwdLauncher();
     if (launcher.kind === 'unavailable') throw new Error(`no launcher on this host: ${launcher.reason}`);
 
     const wrapped = wrapMcpServerWithLaunchCwd(
       { command: process.execPath, args: [target, out] },
-      { cwd: trustedDir, launcher },
+      { cwd: launchCwd, launcher },
     );
     // Spawned from the fixture directory, which is exactly what the child must
     // NOT report: without the launcher it would inherit this cwd.
@@ -233,7 +263,7 @@ describe('the launcher this host resolves, as a real process', () => {
 
     expect(result.stderr).toBe('');
     const report = JSON.parse(await fs.readFile(out, 'utf8')) as { cwd: string };
-    expect(report.cwd).toBe(await fs.realpath(trustedDir));
+    expect(report.cwd).toBe(await fs.realpath(launchCwd));
     expect(report.cwd).not.toBe(dir);
   });
 
@@ -246,7 +276,7 @@ describe('the launcher this host resolves, as a real process', () => {
 
     const wrapped = wrapMcpServerWithLaunchCwd(
       { command: process.execPath, args: [target, out, ...ARGV_CLASSES] },
-      { cwd: await trusted(), launcher },
+      { cwd: await launchDir(), launcher },
     );
     const result = await spawnWrapped(wrapped, dir);
 

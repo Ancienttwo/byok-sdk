@@ -85,17 +85,62 @@ win32 keeps `bin/byok-launch-cwd.mjs` on a real Node host; a win32 host that is
 not provably plain Node and attests no interpreter is refused
 (`launch_cwd_launcher_unavailable`). There is deliberately no `cmd.exe` path.
 
+## The first Windows run: 34960882911
+
+Run `34960882911`, job `104353925819` ("Windows Git workspace, store, and
+security tests"), step "Run the MCP launch working-directory launcher test on
+Windows", running `packages/client/src/__tests__/launch-cwd-launcher.test.ts`:
+
+- **8 of 10 tests failed**, every one of them inside the test's own fixture
+  helper `trusted()`, with `no trusted directory here:
+  platform_default_is_writable`.
+- **2 tests passed** — the two that never asked for a directory (the loader
+  deny-list cross-check and the non-empty-interpreter-argv refusal).
+- The macOS step in the same run **passed**.
+
+The launcher never executed on Windows in this run. The cause is not a launcher
+defect and not a resolver defect: the windows-latest runner executes as
+Administrator, so the platform default `%SystemRoot%` really is writable by that
+account, the write probe succeeds, and `resolveTrustedLaunchCwd()` correctly
+returns `unavailable` / `platform_default_is_writable` — the Windows counterpart
+of `root_cannot_prove_write_boundary` on POSIX. The refusal is the boundary
+working.
+
+Two changes follow from it:
+
+- `launch-cwd-launcher.test.ts` no longer routes its fixture through
+  `resolveTrustedLaunchCwd()`. It mkdtemps its own directory and constructs the
+  binding directly through `resolveMcpLaunchCwdLauncher()`, so every case runs
+  for real on every platform and nothing skips. That directory is a LAUNCHER
+  FIXTURE, not a trusted directory: the file proves the launcher's argv, cwd and
+  exit/signal semantics and proves nothing about directory trust, and a green
+  run of it is not an end-to-end trusted-launch PASS. The directory proof keeps
+  its own suite, `trusted-launch-cwd.test.ts`.
+- That suite gained one case pinning the property this run exposed: on win32,
+  when the platform default is writable by the current account, resolution is
+  `unavailable` with `platform_default_is_writable`. It uses the existing
+  environment-injection seam and shells out to nothing.
+
+What this run does and does not establish for win32, kept apart:
+
+- (a) the launcher executed for real on windows-latest — **pending re-run**; run
+  34960882911 failed in the fixture, not in the launcher.
+- (b) a writable platform default is refused with `platform_default_is_writable`
+  — **verified** on run 34960882911, and pinned by a unit test.
+- (c) non-elevated admission of a real directory on Windows — **not verified**.
+
 ## Limits of this evidence
 
 - The linux legs ran under Colima docker (linux/aarch64) on `oven/bun:1.4.0` and
   `oven/bun:1.4.0-alpine`. Not x86_64, not a real distro install.
 - darwin was verified on the development host only.
-- win32 has no runtime evidence here at all. The Node launcher path is covered
-  by the code path and by unit tests; `launch-cwd-launcher.test.ts` is now
-  included in the windows-latest job configuration, which is scheduling and
-  not a result. Windows evidence exists only once that leg has run green on a
-  pushed candidate; until then this row stays code path + unit tests only
-  (`docs/spec.md`).
+- win32 has no runtime evidence for the LAUNCHER yet. The Node launcher path is
+  covered by the code path and by unit tests; `launch-cwd-launcher.test.ts` is
+  included in the windows-latest job configuration, which is scheduling and not
+  a result. The one Windows run so far (34960882911, above) stopped in the test
+  fixture before reaching the launcher, so fact (a) stays pending a re-run
+  (`docs/spec.md`). What that run did establish is fact (b), the
+  `platform_default_is_writable` refusal under an elevated account.
 - A launch-cwd PASS asserts WHERE the server starts. It asserts nothing about
   whether the launcher or the executor is the binary it claims to be — that is
   the separate attested-install work.
