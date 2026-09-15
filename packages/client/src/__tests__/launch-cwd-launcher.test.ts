@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,7 +19,8 @@ const LAUNCHER = launchCwdScriptPath();
  *
  * The properties this file pins are the LAUNCHER's: that it chdirs before it
  * execs, that argv arrives byte-identical, that the target's exit code and
- * death-by-signal pass through, that a loader environment variable or a
+ * death-by-signal pass through, that the target does not outlive a terminated
+ * launcher, that a loader environment variable or a
  * non-empty interpreter argv is refused, and that a directory it cannot change
  * into is refused before the target ever runs. None of those depend on WHICH
  * directory it was handed — the launcher is given a directory and obeys it.
@@ -52,12 +54,22 @@ async function launchDir(): Promise<string> {
 
 /**
  * A target that reports EXACTLY what it was given: the argv it received after
- * its own script path, and the directory it started in. Everything this suite
- * asserts about the launcher is read back out of a real child process.
+ * its own script path, the directory it started in, and its own identity — its
+ * pid and the pid of the launcher that exec'd it (`ppid`). Everything this
+ * suite asserts about the launcher is read back out of a real child process.
+ *
+ * The identity fields exist for the signal case: the only way to say what
+ * happened to the TARGET when the launcher was terminated is to hold the
+ * target's pid before the kill and probe that pid afterwards.
  */
 const TARGET = `
 import fs from 'node:fs';
-fs.writeFileSync(process.argv[2], JSON.stringify({ argv: process.argv.slice(3), cwd: process.cwd() }));
+fs.writeFileSync(process.argv[2], JSON.stringify({
+  argv: process.argv.slice(3),
+  cwd: process.cwd(),
+  pid: process.pid,
+  ppid: process.ppid,
+}));
 if (process.argv.includes('--hang')) setInterval(() => {}, 1000);
 else process.exit(Number(process.env.TARGET_EXIT ?? '0'));
 `;
@@ -70,6 +82,93 @@ async function fixture(): Promise<{ dir: string; target: string; out: string }> 
 }
 
 interface Run { code: number | null; signal: NodeJS.Signals | null; stderr: string }
+
+/**
+ * Is this pid still a running process on THIS host?
+ *
+ * POSIX: signal 0 is the standard existence probe — `ESRCH` is the only answer
+ * that means "gone"; `EPERM` means it exists and is not ours, which is still
+ * alive. The target is a GRANDchild of this process (launcher in between), so
+ * it is never a zombie of ours: once the launcher dies the target is reparented
+ * and reaped by init, and `ESRCH` is an unambiguous terminal state.
+ *
+ * win32: there are no POSIX signals and no zombies; a terminated process leaves
+ * the table, so `tasklist` filtered on the pid is the terminal-state read. It
+ * must never answer "gone" for a reason other than the pid being absent, so
+ * ONLY exit code 0 is allowed to produce a verdict: any non-zero code, and a
+ * `null` code (the probe itself was killed by a signal), REJECTS and carries a
+ * bounded slice of stdout and stderr so the failure names what the probe said.
+ * A probe that exited non-zero has not observed the process table, whatever it
+ * happened to print — resolving `false` from that output is a false "clean
+ * kill" verdict, which is exactly the answer this suite must never invent.
+ *
+ * `deps` exists so those refusals are testable on every host. Its default is
+ * the production shape — this process's real platform and the real `spawn` —
+ * so an uninjected call behaves exactly as it does on a Windows runner.
+ */
+interface ProbeChild {
+  stdout: { on(event: 'data', listener: (chunk: Buffer) => void): unknown };
+  stderr: { on(event: 'data', listener: (chunk: Buffer) => void): unknown };
+  once(event: 'error', listener: (error: Error) => void): unknown;
+  once(event: 'close', listener: (code: number | null) => void): unknown;
+}
+
+interface ProbeDeps {
+  platform: NodeJS.Platform | string;
+  spawnFn: typeof spawn;
+}
+
+/** First 200 chars, so a failure message carries evidence without carrying a dump. */
+const slice = (text: string): string => (text.length > 200 ? `${text.slice(0, 200)}…` : text);
+
+function isRunning(
+  pid: number,
+  deps: ProbeDeps = { platform: process.platform, spawnFn: spawn },
+): Promise<boolean> {
+  if (deps.platform !== 'win32') {
+    try {
+      process.kill(pid, 0);
+      return Promise.resolve(true);
+    } catch (error) {
+      return Promise.resolve((error as NodeJS.ErrnoException).code !== 'ESRCH');
+    }
+  }
+  return new Promise((resolve, reject) => {
+    const probe = deps.spawnFn('tasklist', ['/FI', `PID eq ${pid}`, '/NH', '/FO', 'CSV'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    }) as unknown as ProbeChild;
+    let stdout = '';
+    let stderr = '';
+    probe.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8'); });
+    probe.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
+    probe.once('error', (error) => reject(new Error(`tasklist probe for pid ${pid} could not run: ${error.message}`)));
+    probe.once('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(
+          `tasklist probe for pid ${pid} exited ${code} and did not observe the process table; `
+          + `stdout=${JSON.stringify(slice(stdout))} stderr=${JSON.stringify(slice(stderr))}`,
+        ));
+        return;
+      }
+      // Exit 0 only. tasklist exits 0 with an "INFO: No tasks..." line when the
+      // filter matches nothing; the quoted CSV pid field is the positive match.
+      resolve(stdout.includes(`"${pid}"`));
+    });
+  });
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+/** Poll `isRunning` until it says gone, or the bounded window runs out. */
+async function stillRunningAfter(pid: number, windowMs: number): Promise<boolean> {
+  const deadline = Date.now() + windowMs;
+  for (;;) {
+    if (!(await isRunning(pid))) return false;
+    if (Date.now() >= deadline) return true;
+    await sleep(50);
+  }
+}
 
 function run(
   args: readonly string[],
@@ -124,7 +223,27 @@ describe('bin/byok-launch-cwd.mjs', () => {
     expect(result.code).toBe(37);
   });
 
-  it('forwards SIGTERM to the target and dies of the same signal', async () => {
+  /**
+   * What this case measures: the fate of BOTH processes when the launcher is
+   * terminated. The target's pid is captured from its own report BEFORE the
+   * kill, and its terminal state is read afterwards by probing that pid — not
+   * inferred from the launcher's exit.
+   *
+   * The launcher assertion differs by platform because the KILL differs, not
+   * because the requirement is softer. POSIX delivers SIGTERM, the launcher's
+   * handler forwards it and the launcher re-raises, so `signal === 'SIGTERM'`
+   * is the exact expected death. win32 has no POSIX signals:
+   * `process.kill(pid, 'SIGTERM')` is `TerminateProcess`, the JS handler at
+   * `bin/byok-launch-cwd.mjs:90-93` may never run, and the OS reports an exit
+   * code rather than a signal — so the launcher assertion there is that it was
+   * terminated at all.
+   *
+   * The TARGET assertion is identical on every platform and is never loosened:
+   * a target that outlives the launcher is a real orphan and this case fails
+   * naming the surviving pid and the platform. The cleanup kill below happens
+   * only after that verdict is decided; it is housekeeping, never evidence.
+   */
+  it('forwards SIGTERM to the target, and the target does not outlive the launcher', async () => {
     const { target, out } = await fixture();
     let pid: number | undefined;
     const finished = run([await launchDir(), process.execPath, target, out, '--hang'], {
@@ -138,8 +257,48 @@ describe('bin/byok-launch-cwd.mjs', () => {
         return false;
       }
     }, { timeout: 5_000 }).toBe(true);
-    process.kill(pid!, 'SIGTERM');
-    await expect(finished).resolves.toMatchObject({ signal: 'SIGTERM' });
+
+    const report = JSON.parse(await fs.readFile(out, 'utf8')) as { pid: number; ppid: number };
+    const targetPid = report.pid;
+    // Captured before the kill: after it, the target may be unidentifiable.
+    console.log(`platform=${process.platform} launcher pid=${pid} target pid=${targetPid} target ppid=${report.ppid}`);
+    expect(report.ppid, 'the target must be a direct child of the launcher').toBe(pid);
+
+    // The "gone" verdict below is only worth anything against a pid the SAME
+    // probe first reported alive: if the probe cannot see a running target it
+    // would also report a dead one as gone, and the case would pass vacuously.
+    expect(
+      await isRunning(targetPid),
+      `target pid ${targetPid} was not reported alive by the probe before the kill on ${process.platform}`,
+    ).toBe(true);
+
+    try {
+      process.kill(pid!, 'SIGTERM');
+      const result = await finished;
+      if (process.platform === 'win32') {
+        expect(
+          result.signal !== null || (result.code !== null && result.code !== 0),
+          `the launcher must have been terminated, saw ${JSON.stringify(result)}`,
+        ).toBe(true);
+      } else {
+        expect(result).toMatchObject({ signal: 'SIGTERM' });
+      }
+
+      const orphan = await stillRunningAfter(targetPid, 2_000);
+      expect(
+        orphan,
+        `target pid ${targetPid} was still running 2s after the launcher (pid ${pid}) died on ${process.platform}: the launcher leaked an orphan`,
+      ).toBe(false);
+    } finally {
+      // Runs only after the verdict above is decided. A cleanup kill is not
+      // termination evidence, and it announces itself when it had to happen.
+      if (await isRunning(targetPid).catch(() => false)) {
+        try {
+          process.kill(targetPid, 'SIGKILL');
+        } catch { /* already gone between the probe and the kill */ }
+            console.log(`cleanup: killed surviving target ${targetPid}`);
+      }
+    }
   });
 
   it('refuses to launch when a loader environment variable is set', async () => {
@@ -301,5 +460,74 @@ describe('the loader deny list', () => {
     const launcherNames = [...block![1]!.matchAll(/\/\^([A-Z0-9_]+)(\$)?\//gu)]
       .map(([, name, anchored]) => (anchored === undefined ? `${name}*` : name));
     expect([...launcherNames].sort()).toEqual([...LOADER_ENV_DENY_PATTERNS].sort());
+  });
+});
+
+/**
+ * The win32 probe's refusals, exercised on EVERY platform by injecting the
+ * platform and a fake `spawn` — the real `tasklist` branch is otherwise
+ * unreachable off Windows, which is how a probe that resolves "gone" from a
+ * failed run reaches CI unnoticed.
+ */
+function fakeTasklist(
+  outcome: { stdout?: string; stderr?: string; code: number | null },
+): typeof spawn {
+  return (() => {
+    const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    // After the caller has attached its listeners on this same turn.
+    setTimeout(() => {
+      if (outcome.stdout !== undefined) child.stdout.emit('data', Buffer.from(outcome.stdout, 'utf8'));
+      if (outcome.stderr !== undefined) child.stderr.emit('data', Buffer.from(outcome.stderr, 'utf8'));
+      child.emit('close', outcome.code);
+    }, 0);
+    return child;
+  }) as unknown as typeof spawn;
+}
+
+const WIN32 = (spawnFn: typeof spawn): ProbeDeps => ({ platform: 'win32', spawnFn });
+
+describe('the win32 existence probe', () => {
+  it('a tasklist probe that exits non-zero cannot report the target as gone', async () => {
+    // Non-empty output that does not contain the pid: the exact shape the old
+    // `code !== 0 && stdout === ''` guard waved through as a clean kill.
+    await expect(isRunning(4242, WIN32(fakeTasklist({
+      stdout: 'ERROR: The search filter cannot be recognized.\r\n',
+      stderr: 'access denied\r\n',
+      code: 1,
+    })))).rejects.toThrow(/exited 1 and did not observe the process table/u);
+  });
+
+  it('a tasklist probe killed by a signal cannot report the target as gone', async () => {
+    await expect(isRunning(4242, WIN32(fakeTasklist({ stdout: 'partial', code: null }))))
+      .rejects.toThrow(/exited null and did not observe the process table/u);
+  });
+
+  it('carries a bounded slice of what the failed probe said', async () => {
+    await expect(isRunning(4242, WIN32(fakeTasklist({ stdout: 'x'.repeat(500), stderr: 'y'.repeat(500), code: 9 }))))
+      .rejects.toThrow(/stdout="x{200}…" stderr="y{200}…"/u);
+  });
+
+  it('reads the verdict out of a clean run: the quoted pid is alive, "no tasks" is gone', async () => {
+    await expect(isRunning(4242, WIN32(fakeTasklist({
+      stdout: '"node.exe","4242","Console","1","12,345 K"\r\n',
+      code: 0,
+    })))).resolves.toBe(true);
+    await expect(isRunning(4242, WIN32(fakeTasklist({
+      stdout: 'INFO: No tasks are running which match the specified criteria.\r\n',
+      code: 0,
+    })))).resolves.toBe(false);
+  });
+
+  it('rejects when the probe could not be run at all', async () => {
+    const spawnFn = (() => {
+      const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter };
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      setTimeout(() => { child.emit('error', new Error('spawn tasklist ENOENT')); }, 0);
+      return child;
+    }) as unknown as typeof spawn;
+    await expect(isRunning(4242, WIN32(spawnFn))).rejects.toThrow(/could not run: spawn tasklist ENOENT/u);
   });
 });

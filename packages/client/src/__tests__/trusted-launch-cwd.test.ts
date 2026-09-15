@@ -202,13 +202,26 @@ describe('resolveMcpLaunchCwdLauncher', () => {
     },
   );
 
-  it('refuses a shell this uid could have written, rather than bootstrapping through it', async () => {
-    const shell = path.join(await tempRoot(), 'sh');
-    await fs.writeFile(shell, '#!/bin/sh\n', { mode: 0o755 });
-    // Owned by the test uid, not root: a shell the agent can replace is a shell
-    // that would be running the agent's own program.
-    expect(resolveMcpLaunchCwdLauncher(undefined, { platform: 'linux', systemShell: shell }))
-      .toEqual({ kind: 'unavailable', reason: 'launch_cwd_shell_not_root_owned' });
+  it('refuses a shell this uid could have written, rather than bootstrapping through it', () => {
+    // Owned by an ordinary uid, not root: a shell the agent can replace is a
+    // shell that would be running the agent's own program.
+    //
+    // The ownership is INJECTED rather than read off a file this test creates.
+    // A real file carries whatever the host's filesystem reports, and on
+    // Windows that is uid 0 with mode 0o666 — which would land on the
+    // write-bit rejection instead, so the ownership rejection this case exists
+    // to pin would never run. The mode here keeps every write bit but the
+    // owner's clear, so ownership is the only thing left that can reject.
+    expect(resolveMcpLaunchCwdLauncher(undefined, {
+      platform: 'linux',
+      shellStat: fakeShellStat({ link: { uid: 501 }, target: { uid: 501, mode: 0o100755 } }),
+    })).toEqual({ kind: 'unavailable', reason: 'launch_cwd_shell_not_root_owned' });
+    // And the same non-root owner behind a root-owned link: the target's own
+    // ownership is checked too, not just the link's.
+    expect(resolveMcpLaunchCwdLauncher(undefined, {
+      platform: 'linux',
+      shellStat: fakeShellStat({ target: { uid: 501, mode: 0o100755 } }),
+    })).toEqual({ kind: 'unavailable', reason: 'launch_cwd_shell_not_root_owned' });
   });
 
   it('refuses a root-owned shell that anyone but root can write', () => {
