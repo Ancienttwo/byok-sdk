@@ -11,6 +11,12 @@ import type { Session } from '../types';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { observationOf } from './fixtures/mcp-observation';
+import {
+  filterMcpObservationForPolicy,
+  projectMcpTools,
+  qualifiedMcpToolName,
+  type McpToolsetServerObservation,
+} from '../mcp';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
 const FIXTURE_EXTENSIONS = Object.freeze({
@@ -508,6 +514,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
         docs: { command: '/opt/docs-mcp', args: ['--readonly'], env: { BYOK_AGENT_MESSAGE_CONTEXT: 'sealed-context' } },
       },
       observation: observationOf({ docs: ['search_docs'] }),
+      permissionMode: 'auto',
     });
 
     await session.close();
@@ -553,7 +560,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     expect(typeof configPath).toBe('string');
     expect(calls[0]?.env.BYOK_PI_PERMISSION_MODE).toBe('readonly');
     expect(JSON.parse(await fs.readFile(configPath as string, 'utf8')))
-      .toEqual({ mcpServers: {}, observation: {} });
+      .toEqual({ mcpServers: {}, observation: {}, permissionMode: 'readonly' });
 
     await session.close();
     openSessions.splice(openSessions.indexOf(session), 1);
@@ -578,7 +585,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     const ctx = await makeCtx();
     ctx.mcpServers = { docs: { command: '/opt/docs-mcp' } };
     ctx.mcpToolsetTools = observationOf({ docs: ['search_docs'] });
-    ctx.startMcpToolsetTools = observationOf({ docs: ['search_docs', 'delete_everything'] });
+    ctx.startMcpToolsetTools = observationOf({ docs: ['search_docs', 'peek_docs'] });
 
     await expect(startAdapter(adapter, baseTask, ctx)).rejects.toMatchObject({
       category: 'authority',
@@ -596,11 +603,12 @@ describe('PiAdapter against the fake-pi fixture', () => {
   });
 
   it('accepts a readonly toolset offer only when the device can say which tools mutate', async () => {
-    // Per-tool registration makes the distinction EXPRESSIBLE; it does not
-    // make it DECIDABLE. `McpToolsetConfig` carries `command`/`args` only, so
-    // nothing on this device classifies a toolset's tools, and inferring one
-    // from names or descriptions would be exactly the heuristic that makes a
-    // permission boundary meaningless. The refusal names the missing field.
+    // Per-tool registration makes the distinction EXPRESSIBLE; the operator's
+    // `McpToolsetConfig.readOnlyTools` makes it DECIDABLE. Without a
+    // declaration nothing on this device classifies a toolset's tools, and
+    // inferring one from names or descriptions would be exactly the heuristic
+    // that makes a permission boundary meaningless — so the refusal names the
+    // missing field rather than running with everything enabled.
     const adapter = fakePiAdapter();
     const offer: TaskOfferPayload = { ...baseTask, policy: { mode: 'readonly' } };
     const rejection = await adapter.prepare({
@@ -618,6 +626,99 @@ describe('PiAdapter against the fake-pi fixture', () => {
     });
     // Nothing about the old proxy reasoning survives in the refusal.
     expect((rejection as { reason: string }).reason).not.toMatch(/proxy/);
+
+    // The same offer, with the device's classification present, is admitted.
+    await expect(adapter.prepare({
+      offer,
+      policy: offer.policy,
+      descriptor: adapter.descriptor,
+      requiredToolsetIds: ['docs'],
+      mcpServers: { docs: { command: '/opt/docs-mcp' } },
+      mcpToolsetTools: observationOf(
+        { docs: ['search_docs', 'delete_docs'] },
+        { readOnlyTools: { docs: ['search_docs'] } },
+      ),
+    })).resolves.toMatchObject({ kind: 'prepared' });
+  });
+
+  it('runs a classified readonly toolset and hands the child only the read-only tools', async () => {
+    // The Owner-approved shape: the device declares which `(server, tool)`
+    // pairs read, the task-scoped config carries that classification with the
+    // task's mode, and the extension registers exactly the allowed subset —
+    // the mutation tool is never registered, so there is no call to refuse.
+    const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
+    const spawnFn = ((_command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
+      calls.push({ args: [...args], env: options?.env ?? {} });
+      return realSpawn(FIXTURE_PATH, args, options);
+    }) as never;
+    const adapter = new PiAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
+      resolveExtensions: resolveFixtureExtensions,
+      spawnFn,
+    });
+    const task: TaskOfferPayload = { ...baseTask, policy: { mode: 'readonly' } };
+    const ctx = await makeCtx();
+    ctx.policy = task.policy;
+    ctx.mcpServers = { docs: { command: '/opt/docs-mcp' } };
+    ctx.mcpToolsetTools = observationOf(
+      { docs: ['search_docs', 'delete_docs'] },
+      { readOnlyTools: { docs: ['search_docs'] } },
+    );
+
+    const session = await startAdapter(adapter, task, ctx);
+    openSessions.push(session);
+
+    const configPath = calls[0]?.env.BYOK_PI_MCP_CONFIG_PATH as string;
+    expect(calls[0]?.env.BYOK_PI_PERMISSION_MODE).toBe('readonly');
+    const written = JSON.parse(await fs.readFile(configPath, 'utf8')) as {
+      permissionMode: string;
+      observation: Record<string, McpToolsetServerObservation>;
+    };
+    // The mode travels with the observation, so the extension applies the SAME
+    // shared filter the adapter just admitted this task with.
+    expect(written.permissionMode).toBe('readonly');
+    expect(written.observation.docs!.tools.map((tool) => [tool.name, tool.readOnly])).toEqual([
+      ['search_docs', true],
+      ['delete_docs', false],
+    ]);
+    // What the child may actually register and call: only the read-only tool.
+    const allowed = filterMcpObservationForPolicy(written.observation, written.permissionMode);
+    expect(allowed.ok).toBe(true);
+    expect(projectMcpTools((allowed as { observation: typeof written.observation }).observation)
+      .map((tool) => qualifiedMcpToolName(tool.serverName, tool.toolName)))
+      .toEqual(['mcp__docs__search_docs']);
+
+    await session.close();
+    openSessions.splice(openSessions.indexOf(session), 1);
+  });
+
+  it('fails non-retryably when only the CLASSIFICATION changes between prepare() and start()', async () => {
+    // Same server, same tool names, same schemas — a start() observation that
+    // reclassifies a mutation tool as read-only would widen the task's grant
+    // without changing anything a name-only comparison could see.
+    const calls: string[][] = [];
+    const adapter = new PiAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
+      resolveExtensions: resolveFixtureExtensions,
+      spawnFn: ((_command: string, args: string[]) => {
+        calls.push([...args]);
+        throw new Error('spawn must not be reached');
+      }) as never,
+    });
+    const task: TaskOfferPayload = { ...baseTask, policy: { mode: 'readonly' } };
+    const ctx = await makeCtx();
+    ctx.policy = task.policy;
+    ctx.mcpServers = { docs: { command: '/opt/docs-mcp' } };
+    const tools = { docs: ['search_docs', 'delete_docs'] };
+    ctx.mcpToolsetTools = observationOf(tools, { readOnlyTools: { docs: ['search_docs'] } });
+    ctx.startMcpToolsetTools = observationOf(tools, { readOnlyTools: { docs: ['search_docs', 'delete_docs'] } });
+
+    await expect(startAdapter(adapter, task, ctx)).rejects.toMatchObject({
+      category: 'authority',
+      retry: 'non-retryable',
+      message: expect.stringContaining('different MCP toolset tool authority'),
+    });
+    expect(calls).toHaveLength(0);
   });
 
   it('rejects an ungrantable projected server name before anything is spawned', async () => {

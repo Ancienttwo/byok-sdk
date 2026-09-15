@@ -86,6 +86,7 @@ async function frozenObservation(): Promise<McpToolsetServerObservation> {
 async function loadExtension(
   observation: Readonly<Record<string, McpToolsetServerObservation>>,
   serverConfig: Record<string, unknown> = {},
+  permissionMode = 'auto',
 ): Promise<LoadedExtension> {
   const dir = await tempDir();
   const recordTo = path.join(dir, 'received.jsonl');
@@ -93,6 +94,7 @@ async function loadExtension(
   await fs.writeFile(configPath, JSON.stringify({
     mcpServers: { salesko: serverSpec({ ...serverConfig, recordTo }) },
     observation,
+    permissionMode,
   }));
   process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
 

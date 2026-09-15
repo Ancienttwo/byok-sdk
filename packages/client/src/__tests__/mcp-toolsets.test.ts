@@ -550,6 +550,150 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
  * the daemon's registry will recognize, that each `(task, server)` gets its
  * own, and that a host's registry still cannot supply one of its own.
  */
+/**
+ * Owner ruling (2026-09-15): `McpToolsetConfig.readOnlyTools` is the device
+ * configuration owner's own read/mutation classification, per
+ * `(server, tool)`. The registry validates it, the daemon cross-checks it
+ * against each server's `tools/list` answer, and it is part of the toolset's
+ * content identity.
+ */
+describe('DaemonConfig.mcpToolsets readOnlyTools classification', () => {
+  const servers = { mcpServers: { salesko: { command: '/opt/salesko/mcp' }, docs: { command: '/opt/docs/mcp' } } };
+
+  it('accepts a declaration naming configured servers and grantable tool names', () => {
+    expect(() => new McpToolsetRegistry({
+      salesko: { ...servers, readOnlyTools: { salesko: ['find_leads', 'get_lead'], docs: ['search_docs'] } },
+    })).not.toThrow();
+  });
+
+  it.each([
+    ['a server the toolset does not define', { crm: ['find_leads'] }, /names a server this toolset does not define/],
+    ['a tool name no runtime grant could carry', { salesko: ['find leads'] }, /invalid tool name/],
+    ['a duplicated tool name', { salesko: ['find_leads', 'find_leads'] }, /more than once/],
+    ['an empty tool list', { salesko: [] }, /must list 1-128 tool names/],
+    ['a non-array tool list', { salesko: 'find_leads' }, /must list 1-128 tool names/],
+    ['an empty declaration', {}, /must name at least one server/],
+  ])('rejects %s synchronously', (_label, readOnlyTools, message) => {
+    expect(() => new McpToolsetRegistry({
+      salesko: { ...servers, readOnlyTools } as never,
+    })).toThrow(message);
+  });
+
+  it('rejects an unknown toolset field, classification or not', () => {
+    expect(() => new McpToolsetRegistry({
+      salesko: { ...servers, mutationTools: { salesko: ['delete_lead'] } } as never,
+    })).toThrow(/accepts only the mcpServers and readOnlyTools fields/);
+  });
+
+  it('makes the classification part of the toolset revision', () => {
+    // A classification change grants a different tool set under a restricted
+    // policy, so it must move the definition revision — otherwise a stored
+    // lifecycle observation, and every executor fingerprint derived from the
+    // revision, would survive a permission change silently.
+    const unclassified = new McpToolsetRegistry({ salesko: servers });
+    const classified = new McpToolsetRegistry({
+      salesko: { ...servers, readOnlyTools: { salesko: ['find_leads'] } },
+    });
+    const widened = new McpToolsetRegistry({
+      salesko: { ...servers, readOnlyTools: { salesko: ['find_leads', 'get_lead'] } },
+    });
+    const revision = (registry: McpToolsetRegistry): string =>
+      registry.status().toolsets.find((row) => row.id === 'salesko')!.definitionRevision;
+
+    expect(revision(classified)).not.toBe(revision(unclassified));
+    expect(revision(widened)).not.toBe(revision(classified));
+    // Still content-addressed: the same declaration in another order is the
+    // same definition.
+    expect(revision(new McpToolsetRegistry({
+      salesko: { ...servers, readOnlyTools: { salesko: ['get_lead', 'find_leads'] } },
+    }))).toBe(revision(widened));
+  });
+
+  it('clears a lifecycle observation bound to a superseded classification', () => {
+    const registry = new McpToolsetRegistry({ salesko: { ...servers, readOnlyTools: { salesko: ['find_leads'] } } });
+    const before = registry.status();
+    registry.report('salesko', before.toolsets[0]!.definitionRevision, {
+      state: 'ready',
+      observedAt: '2026-09-15T10:00:00.000Z',
+    });
+    const receipt = registry.reload(
+      { salesko: { ...servers, readOnlyTools: { salesko: ['find_leads', 'get_lead'] } } },
+      before.revision,
+    );
+    expect(receipt.changed).toBe(true);
+    expect(receipt.toolsets.find((row) => row.id === 'salesko')?.observation).toBeUndefined();
+  });
+});
+
+describe('TaskRunner classification cross-check against tools/list', () => {
+  const classified = new Map<string, McpToolsetConfig>([[
+    'salesko',
+    {
+      mcpServers: { salesko: { command: '/opt/salesko/bin/mcp' } },
+      readOnlyTools: { salesko: ['find_leads'] },
+    },
+  ]]);
+
+  async function offer(
+    runner: TaskRunner,
+    taskId: string,
+  ): Promise<void> {
+    await runner.handleEnvelope(createEnvelope(
+      'task.offer_with_toolsets',
+      { instruction: 'x', policy: { mode: 'auto' }, runtime: 'claude', requiredToolsets: ['salesko'] },
+      { taskId, seq: 1 },
+    ));
+  }
+
+  it('stamps the operator classification onto every observed tool, mutation by default', async () => {
+    // The classification is joined on from CONFIGURATION, never read from the
+    // server: `delete_lead` is a mutation tool here because the device did not
+    // list it, not because of anything the server said about it.
+    const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(adapter, sent, classified, undefined,
+      async (serverName) => observationOf({ [serverName]: ['find_leads', 'delete_lead'] })[serverName]!);
+    await offer(runner, 'task-classified');
+
+    expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(true);
+    expect(adapter.startCalls[0]?.ctx.mcpToolsetTools?.salesko!.tools.map((tool) => [tool.name, tool.readOnly]))
+      .toEqual([['find_leads', true], ['delete_lead', false]]);
+
+    await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-classified', seq: 2 }));
+  });
+
+  it('leaves every tool unclassified when the toolset declares nothing', async () => {
+    const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(adapter, sent,
+      new Map([['salesko', { mcpServers: { salesko: { command: '/opt/salesko/bin/mcp' } } }]]));
+    await offer(runner, 'task-unclassified');
+
+    expect(adapter.startCalls[0]?.ctx.mcpToolsetTools?.salesko!.tools.every((tool) => tool.readOnly === undefined))
+      .toBe(true);
+
+    await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-unclassified', seq: 2 }));
+  });
+
+  it('declines permanently when the classification names a tool the server no longer exposes', async () => {
+    // Stale device configuration, not a smaller toolset. A retry starts the
+    // same command and gets the same answer, so it declines non-retryably —
+    // and the operator has to reconcile the declaration with the server.
+    const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(adapter, sent, classified, undefined,
+      async (serverName) => observationOf({ [serverName]: ['browse_leads'] })[serverName]!);
+    await offer(runner, 'task-stale-classification');
+
+    const decline = sent.find((envelope) => envelope.type === 'task.decline');
+    expect(decline?.payload).toMatchObject({ retryable: false });
+    expect(JSON.stringify(decline)).toMatch(/does not expose tool name\(s\)/);
+    expect(JSON.stringify(decline)).toMatch(/readOnlyTools/);
+    expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(false);
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+});
+
 describe('TaskRunner host toolset context nonce injection', () => {
   const itWithMemoryMcp = isAgentMemorySecureFilesystemAvailable(true) ? it : it.skip;
 
