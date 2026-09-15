@@ -211,7 +211,13 @@ export class PiAdapter implements RuntimeAdapter {
     // that inside the Pi child means a claimed task dying at session start
     // with a message only the child's stderr carries, so the check runs here
     // instead, and declines non-retryably like its siblings.
-    const toolsetGrants = resolveMcpToolsetGrants(input.mcpServers, input.mcpToolsetTools);
+    // Per-tool registration also makes the task's permission mode decidable
+    // per tool: the same resolution applies the operator's
+    // `McpToolsetConfig.readOnlyTools` classification, so a non-`auto` toolset
+    // task is admitted with exactly the read-only tools the device declared,
+    // and an unclassified toolset is refused by name here rather than running
+    // with everything enabled.
+    const toolsetGrants = resolveMcpToolsetGrants(input.mcpServers, input.mcpToolsetTools, input.policy.mode);
     if (!toolsetGrants.ok) {
       return {
         kind: 'reject',
@@ -222,30 +228,6 @@ export class PiAdapter implements RuntimeAdapter {
     const mapping = mapPermissionPolicyToPiArgs(input.policy);
     if (!mapping.ok) {
       return { kind: 'reject', reason: mapping.reason ?? 'policy rejected by pi adapter', retryable: false };
-    }
-    // Per-tool registration makes a per-tool permission decision expressible
-    // for the first time — but expressible is not the same as decidable. Under
-    // any mode other than `auto` the runtime must be told which of a toolset's
-    // tools merely read and which mutate, and nothing on this device can say:
-    // `McpToolsetConfig` carries `command`/`args` only, the wire carries a
-    // toolset id, and a server's own `annotations.readOnlyHint` is the
-    // server's self-assessment, explicitly not a security authority.
-    //
-    // Guessing from a name, a description or a schema would be exactly the
-    // heuristic that makes a permission boundary meaningless. So a non-`auto`
-    // toolset task is refused as an INEXPRESSIBLE policy, naming the operator
-    // configuration that would make it expressible, rather than quietly
-    // running with every tool enabled or with none.
-    if (input.requiredToolsetIds.length > 0 && input.policy.mode !== 'auto') {
-      return {
-        kind: 'reject',
-        reason: `pi cannot express permission mode "${input.policy.mode}" for an MCP toolset: the device's`
-          + ' mcpToolsets configuration declares no per-tool read/mutation classification'
-          + ' (McpToolsetConfig.readOnlyTools is the field that would carry one; it is not yet accepted'
-          + ' by the registry, so configuring it today is rejected), and this adapter will not infer one'
-          + ' from tool names, descriptions, schemas, or a server\'s own readOnlyHint',
-        retryable: false,
-      };
     }
 
     const bin = this.resolveBin();
@@ -381,7 +363,7 @@ export class PiAdapter implements RuntimeAdapter {
           // re-check `claude-adapter.ts` makes, on the same fingerprint, and
           // it runs BEFORE the task config is written so nothing of the
           // swapped authority ever reaches disk.
-          const startGrants = resolveMcpToolsetGrants(startInput.mcpServers, startInput.mcpToolsetTools);
+          const startGrants = resolveMcpToolsetGrants(startInput.mcpServers, startInput.mcpToolsetTools, input.policy.mode);
           if (!startGrants.ok || grantFingerprint(startGrants.grants) !== grantFingerprint(toolsetGrants.grants)) {
             throw new RuntimeExecutionFailure({
               phase: 'start', category: 'authority', retry: 'non-retryable',
@@ -400,9 +382,22 @@ export class PiAdapter implements RuntimeAdapter {
             // registers exactly the tools named here and discovers nothing of
             // its own, so the tools the model is shown are the tools this task
             // was admitted with.
+            //
+            // The FULL observation is written, classification included, and
+            // the task's permission mode alongside it. The extension needs
+            // both: it registers only the tools the mode allows (running the
+            // same `filterMcpObservationForPolicy` this adapter just ran), but
+            // it verifies a server against everything the daemon observed —
+            // a mutation tool that appeared since admission is still drift,
+            // and a frozen list already narrowed by policy would read every
+            // excluded tool back as a newly added one.
             await fs.writeFile(
               mcpConfigPath,
-              JSON.stringify({ mcpServers: taskMcpServers, observation: startInput.mcpToolsetTools ?? {} }),
+              JSON.stringify({
+                mcpServers: taskMcpServers,
+                observation: startInput.mcpToolsetTools ?? {},
+                permissionMode: input.policy.mode,
+              }),
               { mode: 0o600 },
             );
           } catch (cause) {

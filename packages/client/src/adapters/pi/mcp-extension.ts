@@ -5,11 +5,16 @@ import { McpAuthorityError, McpStdioClient, type McpStdioServerSpec } from '../.
 import {
   diffMcpObservation,
   GRANTABLE_TOOL_NAME,
+  type McpClassifiedToolDescriptor,
   type McpServerObservation,
   type McpToolDescriptor,
   type McpToolsetServerObservation,
 } from '../../mcp/observation';
-import { projectMcpTools, type McpToolProjection } from '../../mcp/projection';
+import {
+  filterMcpObservationForPolicy,
+  projectMcpTools,
+  type McpToolProjection,
+} from '../../mcp/projection';
 import { createPiMcpTools, type McpToolCallHost, type PiMcpToolNaming } from './mcp-tools';
 import { BYOK_PI_MCP_CONFIG_PATH } from './mcp-config';
 import { isReservedMcpServerName } from '../../sdk-reserved-mcp';
@@ -36,7 +41,15 @@ import { compareCodeUnits } from '../../util/compare-code-units';
 /** What the adapter writes for exactly one task. Strict: an unknown shape is refused, never repaired. */
 interface TaskScopedMcpConfig {
   readonly mcpServers: Readonly<Record<string, McpStdioServerSpec>>;
+  /**
+   * Everything the daemon observed, classification included — NOT the subset
+   * the policy allows. Registration narrows it; drift verification does not,
+   * because a server that grew a tool since admission has drifted whether or
+   * not the model would have been shown that tool.
+   */
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
+  /** This task's permission mode, applied to the observation by the shared core. */
+  readonly permissionMode: string;
 }
 
 /**
@@ -72,7 +85,7 @@ function parseServer(name: string, raw: unknown): McpStdioServerSpec {
   });
 }
 
-function parseTool(server: string, raw: unknown): McpToolDescriptor {
+function parseTool(server: string, raw: unknown): McpClassifiedToolDescriptor {
   if (!isPlainObject(raw) || typeof raw.name !== 'string' || !GRANTABLE_TOOL_NAME.test(raw.name)) {
     fail(`observation.${server} carries a tool without a grantable name`);
   }
@@ -81,10 +94,19 @@ function parseTool(server: string, raw: unknown): McpToolDescriptor {
     fail(`observation.${server}.${name} has a non-string description`);
   }
   if (!isPlainObject(raw.inputSchema)) fail(`observation.${server}.${name} has no object inputSchema`);
+  // Present on every tool of a classified toolset and on none of an
+  // unclassified one. A non-boolean is refused rather than coerced: this field
+  // decides what a restricted policy may call, and a truthy string would widen
+  // the very boundary it describes. Live `tools/list` answers carry no
+  // classification at all — the server is not the authority on it.
+  if (raw.readOnly !== undefined && typeof raw.readOnly !== 'boolean') {
+    fail(`observation.${server}.${name} has a non-boolean readOnly classification`);
+  }
   return Object.freeze({
     name,
     description: (raw.description as string | undefined) ?? '',
     inputSchema: raw.inputSchema,
+    ...(raw.readOnly === undefined ? {} : { readOnly: raw.readOnly as boolean }),
   });
 }
 
@@ -121,6 +143,9 @@ function loadTaskScopedConfig(): TaskScopedMcpConfig {
   if (!isPlainObject(parsed)) fail('the task-scoped configuration must be an object');
   if (!isPlainObject(parsed.mcpServers)) fail('the task-scoped configuration must contain an mcpServers object');
   if (!isPlainObject(parsed.observation)) fail('the task-scoped configuration must contain an observation object');
+  if (typeof parsed.permissionMode !== 'string' || parsed.permissionMode.length === 0) {
+    fail('the task-scoped configuration must contain a permissionMode string');
+  }
   const mcpServers: Record<string, McpStdioServerSpec> = {};
   for (const [name, raw] of Object.entries(parsed.mcpServers)) mcpServers[name] = parseServer(name, raw);
   const observation: Record<string, McpToolsetServerObservation> = {};
@@ -138,7 +163,11 @@ function loadTaskScopedConfig(): TaskScopedMcpConfig {
       fail(`mcpServers.${name} has no daemon observation; refusing to discover its tools here`);
     }
   }
-  return Object.freeze({ mcpServers: Object.freeze(mcpServers), observation: Object.freeze(observation) });
+  return Object.freeze({
+    mcpServers: Object.freeze(mcpServers),
+    observation: Object.freeze(observation),
+    permissionMode: parsed.permissionMode,
+  });
 }
 
 /**
@@ -331,9 +360,16 @@ export default function registerByokMcpTools(pi: ExtensionAPI): void {
       (pi.registerTool as (definition: unknown) => void)(tool);
     }
   };
-  // The daemon's observation is the single authority for host toolsets, and
-  // the order comes from the core rather than from this file.
-  register(projectMcpTools(config.observation), 'qualified');
+  // The daemon's observation is the single authority for host toolsets, the
+  // order comes from the core rather than from this file, and so does the
+  // policy filter: the adapter admitted this task on exactly this call, so
+  // running it again here registers the set the task was admitted with rather
+  // than a second opinion about it. A tool the mode excludes is never
+  // registered at all — the model does not see it, so there is no call to
+  // refuse and no tokens spent attempting one.
+  const allowed = filterMcpObservationForPolicy(config.observation, config.permissionMode);
+  if (!allowed.ok) fail(allowed.reason);
+  register(projectMcpTools(allowed.observation), 'qualified');
 
   const reserved = Object.keys(config.mcpServers).filter((name) => isReservedMcpServerName(name));
   if (reserved.length > 0) {

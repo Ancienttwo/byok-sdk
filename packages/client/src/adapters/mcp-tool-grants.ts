@@ -1,4 +1,5 @@
 import type { McpStdioServerConfig, McpToolsetToolObservation } from '../types';
+import type { McpToolsetServerObservation } from '../mcp/observation';
 import {
   AGENT_MEMORY_MCP_SERVER_NAME,
   AGENT_MESSAGE_MCP_SERVER_NAME,
@@ -10,7 +11,7 @@ import {
   AGENT_MEMORY_SAVE_TOOL_NAME,
 } from '../bin/agent-memory-mcp-server';
 import { GRANTABLE_MCP_SERVER_NAME, GRANTABLE_TOOL_NAME } from '../mcp/observation';
-import { mcpToolsetToolNames } from '../mcp/projection';
+import { filterMcpObservationForPolicy, mcpToolsetToolNames } from '../mcp/projection';
 
 /** One projected toolset server and the exact tool names observed on it. */
 export interface McpToolsetGrant {
@@ -44,7 +45,18 @@ export function resolveReservedMcpToolGrants(
 }
 
 export type McpToolsetGrantResolution =
-  | { ok: true; grants: readonly McpToolsetGrant[] }
+  | {
+      ok: true;
+      grants: readonly McpToolsetGrant[];
+      /**
+       * The observation the grants were resolved FROM, after the permission
+       * policy was applied. Returned rather than left to each caller to
+       * recompute: pi hands this exact object's tools to its extension, the
+       * prepared path fingerprints them, and claude and codex grant their
+       * names. One filtered object, one set of tools, every runtime.
+       */
+      observation: Readonly<Record<string, McpToolsetServerObservation>>;
+    }
   | { ok: false; reason: string };
 
 /**
@@ -64,10 +76,17 @@ export type McpToolsetGrantResolution =
  *
  * Reserved SDK servers are deliberately absent from the result: each carries
  * a fixed grant its own protocol defines, never an observed one.
+ *
+ * `permissionMode` is required, not defaulted: this is the single place a
+ * toolset's policy is applied for every runtime this SDK drives, and a caller
+ * that forgot to pass one would otherwise silently resolve to `auto` — the
+ * widest possible answer — which is the one mistake this resolver exists to
+ * make impossible.
  */
 export function resolveMcpToolsetGrants(
   servers: Readonly<Record<string, McpStdioServerConfig>> | undefined,
   observation: McpToolsetToolObservation | undefined,
+  permissionMode: string,
 ): McpToolsetGrantResolution {
   const projected = Object.keys(servers ?? {}).filter((name) => !isReservedMcpServerName(name)).sort();
   // The server half of `mcp__<server>__<tool>` / `mcp_servers.<server>
@@ -82,18 +101,29 @@ export function resolveMcpToolsetGrants(
       reason: `projected MCP toolset server name(s) [${ungrantableServers.join(', ')}] cannot be expressed as a runtime tool grant — refusing to start a task whose grants would be ambiguous`,
     };
   }
-  // The names come from the observation object itself, never from a
-  // separately supplied list: one authority for "which tools exist" means the
-  // grant a runtime is given and the schema the model is shown cannot describe
-  // different tool sets.
-  const observed = mcpToolsetToolNames(observation ?? {});
-  const unexpected = Object.keys(observed).filter((name) => !projected.includes(name)).sort();
+  // A server nobody projected is checked against the RAW observation, before
+  // any policy filtering: an observation naming a server this task was never
+  // given is a broken caller under every permission mode, and a filter that
+  // happened to drop all of that server's tools must not make it look fine.
+  const raw = observation ?? {};
+  const unexpected = Object.keys(raw).filter((name) => !projected.includes(name)).sort();
   if (unexpected.length > 0) {
     return {
       ok: false,
       reason: `observed MCP tool names for server(s) [${unexpected.join(', ')}] that are not projected for this task — refusing to grant tools for a server the task was never given`,
     };
   }
+  // The permission policy is applied ONCE, here, in the shared core: what a
+  // runtime is granted, what the Pi extension registers, and what a prepared
+  // manifest freezes are then the same set by construction rather than by
+  // three files agreeing.
+  const policy = filterMcpObservationForPolicy(raw, permissionMode);
+  if (!policy.ok) return { ok: false, reason: policy.reason };
+  // The names come from the filtered observation object itself, never from a
+  // separately supplied list: one authority for "which tools exist" means the
+  // grant a runtime is given and the schema the model is shown cannot describe
+  // different tool sets.
+  const observed = mcpToolsetToolNames(policy.observation);
   const grants: McpToolsetGrant[] = [];
   for (const server of projected) {
     const tools = observed[server];
@@ -117,7 +147,7 @@ export function resolveMcpToolsetGrants(
     }
     grants.push({ server, tools: Object.freeze([...tools].sort()) });
   }
-  return { ok: true, grants: Object.freeze(grants) };
+  return { ok: true, grants: Object.freeze(grants), observation: policy.observation };
 }
 
 /** Order-independent identity of one grant set, for adapters that must prove start() received the authority prepare() was admitted with. */

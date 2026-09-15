@@ -205,7 +205,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     // auto-denied by claude at call time (see permission-mapping.ts) — a
     // pre-claim rejection is strictly better than a claimed task that
     // discovers mid-turn that its only tools are unusable.
-    const toolsetGrants = resolveMcpToolsetGrants(input.mcpServers, input.mcpToolsetTools);
+    const toolsetGrants = resolveMcpToolsetGrants(input.mcpServers, input.mcpToolsetTools, input.policy.mode);
     if (!toolsetGrants.ok) return { kind: 'reject', reason: `claude adapter cannot grant projected MCP toolset tools: ${toolsetGrants.reason}`, retryable: false };
     const reservedMemoryGrants = resolveReservedMcpToolGrants(input.mcpServers)
       .filter((grant) => grant.server === AGENT_MEMORY_MCP_SERVER_NAME);
@@ -240,7 +240,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     return {
       kind: 'prepared',
       operation: {
-        start: (startInput) => this.startPrepared(startInput, mapping, modelId, bin, approvalMcpBin, toolsetGrants.grants),
+        start: (startInput) => this.startPrepared(startInput, mapping, modelId, bin, approvalMcpBin, toolsetGrants.grants, input.policy.mode),
       },
     };
   }
@@ -252,6 +252,8 @@ export class ClaudeAdapter implements RuntimeAdapter {
     bin: ResolvedBin,
     approvalMcpBin: ResolvedApprovalMcpBin | undefined,
     preparedGrants: readonly McpToolsetGrant[],
+    /** The mode the grants were resolved under; re-filtering with any other would compare two different policies. */
+    permissionMode: string,
   ): Promise<Session> {
     if (!initialMapping.ok) throw new RuntimeExecutionFailure({
       phase: 'start',
@@ -273,7 +275,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     // different MCP authority (or a different tool observation) after the
     // grant that names it was already frozen — the same fail-closed
     // re-check the model selection below gets.
-    const startGrants = resolveMcpToolsetGrants(startInput.mcpServers, startInput.mcpToolsetTools);
+    const startGrants = resolveMcpToolsetGrants(startInput.mcpServers, startInput.mcpToolsetTools, permissionMode);
     if (!startGrants.ok || grantFingerprint(startGrants.grants) !== grantFingerprint(preparedGrants)) {
       throw new RuntimeExecutionFailure({
         phase: 'start',

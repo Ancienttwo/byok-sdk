@@ -11,7 +11,7 @@ import type {
   InputPreparationSnapshotV1,
 } from '../../input-preparation';
 import type { McpToolsetServerObservation } from '../../mcp/observation';
-import { projectMcpTools, qualifiedMcpToolName } from '../../mcp/projection';
+import { filterMcpObservationForPolicy, projectMcpTools, qualifiedMcpToolName } from '../../mcp/projection';
 import { PI_PACKAGE_NAME, resolvePiRuntimeIdentity } from './resolve-bin';
 
 /**
@@ -458,8 +458,16 @@ export async function nativeToolObservationFingerprint(input: NativeToolFingerpr
 }
 
 export interface ToolExecutorsRequest {
-  /** The daemon's frozen observation, keyed by projected server name. */
+  /** The daemon's frozen observation, keyed by projected server name. Unfiltered: the policy is applied here. */
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
+  /**
+   * The task's permission mode. Required, and applied to the observation
+   * before anything is fingerprinted, so a frozen manifest cannot bind an
+   * executor for a tool the prepared session would never register. A caller
+   * that had to remember to filter first is a caller that eventually forgets,
+   * and the failure would be a manifest quietly wider than the session.
+   */
+  readonly permissionMode: string;
   /** `toolsetId` -> the registry's definition revision for it. Every observed toolset must appear. */
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
   /** Pi's own tools, already filtered by policy, in the order they are registered. */
@@ -499,8 +507,13 @@ export async function buildToolExecutorsFromObservation(
       runtimeIdentity: request.runtimeIdentity,
     });
   }
-  for (const tool of projectMcpTools(request.observation)) {
-    const server = request.observation[tool.serverName]!;
+  // Same filter, same core, same answer as the ordinary extension's
+  // registration and as every adapter's grant: the manifest is frozen over
+  // exactly the tools a prepared session will register.
+  const allowed = filterMcpObservationForPolicy(request.observation, request.permissionMode);
+  if (!allowed.ok) throw new InputPreparationCompileError(allowed.reason);
+  for (const tool of projectMcpTools(allowed.observation)) {
+    const server = allowed.observation[tool.serverName]!;
     const toolsetDefinitionRevision = request.toolsetDefinitionRevisions[tool.toolsetId];
     if (toolsetDefinitionRevision === undefined) {
       throw new InputPreparationCompileError(

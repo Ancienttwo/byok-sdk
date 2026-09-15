@@ -63,7 +63,7 @@ export async function runTeamPiRelayCommand(input: {
       // knobs were `pi-mcp-adapter`'s, and the SDK's own extension needs none
       // of them: it registers one Pi tool per tool the helper reports, under
       // the same `mcp__<server>__<tool>` name every runtime uses.
-      mcpConfig: { observation: {}, mcpServers: { [AGENT_TEAM_MCP_SERVER_NAME]: {
+      mcpConfig: { observation: {}, permissionMode: 'auto', mcpServers: { [AGENT_TEAM_MCP_SERVER_NAME]: {
         command: helper.command, args: helper.args,
         env: { BYOK_STORE_DIR: storeDir, BYOK_PRODUCT_ID: input.config.productId, BYOK_TEAM_MEMBER_CONTEXT: document.pi.context },
       } } },
