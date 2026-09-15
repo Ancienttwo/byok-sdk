@@ -355,6 +355,20 @@ export class InputPreparationStore {
     this.opened = true;
   }
 
+  /**
+   * Drop this instance's replayed state.
+   *
+   * Nothing on disk is touched: the log and the artifacts are the durable
+   * facts, and this only ends one process's view of them. After it, every read
+   * refuses instead of answering `undefined` — which is the whole point, since
+   * a closed store and an empty one would otherwise be indistinguishable to a
+   * caller. Re-opening replays from disk again.
+   */
+  close(): void {
+    this.opened = false;
+    this.records = new Map();
+  }
+
   private assertOpen(): void {
     if (!this.opened) throw new InputPreparationDurabilityError('the input-preparation store has not been opened');
   }
@@ -461,16 +475,28 @@ export class InputPreparationStore {
     });
   }
 
+  /**
+   * Every read asserts the store is open, for one reason: an unopened store
+   * and an empty store are indistinguishable from the in-memory map, and they
+   * mean opposite things. `undefined` from an unopened store would read as "no
+   * such record on this device" while the record sits durably on disk — which
+   * is exactly how a restart turns a counted preparation into
+   * `preparation_not_found`. Refusing is the only answer that cannot be
+   * mistaken for an answer about the durable state.
+   */
   get(recordId: string): InputPreparationRecord | undefined {
+    this.assertOpen();
     return this.records.get(recordId);
   }
 
   find(key: InputPreparationRecordKey): InputPreparationRecord | undefined {
+    this.assertOpen();
     return this.records.get(inputPreparationRecordId(key));
   }
 
   /** Every live record, for tests and for the aggregate below. */
   list(): readonly InputPreparationRecord[] {
+    this.assertOpen();
     return [...this.records.values()];
   }
 
@@ -482,6 +508,7 @@ export class InputPreparationStore {
    * fresh counter-call allowance.
    */
   scopeUsage(scopeId: string): ScopeUsage {
+    this.assertOpen();
     let artifactBytes = 0;
     let counterCalls = 0;
     let liveRecords = 0;
@@ -503,6 +530,7 @@ export class InputPreparationStore {
    * permanent hole in the in-flight allowance.
    */
   inFlightCount(nowMs = this.now()): number {
+    this.assertOpen();
     let count = 0;
     for (const record of this.records.values()) {
       if (isTerminalInputPreparationState(record.state)) continue;
@@ -675,6 +703,7 @@ export class InputPreparationStore {
    * already resolved before the caller reached this method.
    */
   async readArtifact(record: InputPreparationRecord): Promise<InputPreparationArtifact | undefined> {
+    this.assertOpen();
     let raw: string;
     try {
       raw = await fs.readFile(this.artifactPath(record.recordId), 'utf8');

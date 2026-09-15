@@ -2287,6 +2287,11 @@ export function buildDaemonWithAdapters(
         : {
           inputPreparationLane: {
             store: inputPreparationService.store,
+            // The service's own once-only open latch. The task runner awaits
+            // it before its first record read so a restarted daemon that has
+            // served no control call yet still sees its durable records; the
+            // replay behind it stays the service's single authority.
+            open: inputPreparationService.open,
             runtime: inputPreparationService.runtime,
             policyRevision: inputPreparationLimits.revision,
             toolsetDefinitionRevisions: () => new Map(

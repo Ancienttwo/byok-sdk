@@ -146,6 +146,8 @@ function rootOwnedProbe(): ToolImplementationFsProbe {
 
 interface Lane {
   readonly store: InputPreparationStore;
+  /** The daemon store directory the record log lives under, so a restart can be reconstructed over it. */
+  readonly storeDir: string;
   readonly recordId: string;
   readonly observation: ReturnType<typeof observationOf>;
   readonly implementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
@@ -278,8 +280,9 @@ async function lane(options: {
     ...options.summaryOverrides,
   };
 
+  const storeDir = await tempDir('byok-prepared-prep-store-');
   const store = new InputPreparationStore({
-    storeDir: await tempDir('byok-prepared-prep-store-'),
+    storeDir,
     retentionMs: 60 * 60 * 1000,
     retryHorizonMs: 60 * 60 * 1000,
   });
@@ -302,6 +305,7 @@ async function lane(options: {
 
   return {
     store,
+    storeDir,
     recordId: reserved.record.recordId,
     observation,
     implementations,
@@ -332,6 +336,7 @@ async function makeRunner(built: Lane, adapter: StubRuntimeAdapter, sent: Envelo
     mcpToolsetToolsProbe: async (serverName) => built.observation[serverName]!,
     inputPreparationLane: {
       store: built.store,
+      open: () => built.store.open(),
       runtime: RUNTIME,
       policyRevision: POLICY_REVISION,
       toolsetDefinitionRevisions: built.toolsetDefinitionRevisions,
@@ -426,7 +431,65 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-prepared-ok', seq: 2 }));
   });
 
-  it('releases the pin when the Execution reaches a terminal, and GC collects the record again', async () => {
+  it('admits a prepared offer against a record that only exists on disk, on a daemon that has opened nothing yet', async () => {
+    // PHASE 1 — one daemon lifetime writes the record, then ends. Its store
+    // instance is closed, so its replayed map is gone and every read through it
+    // refuses; nothing it held can be mistaken for a durable fact below.
+    const built = await lane();
+    const storeDir = built.storeDir;
+    const recordId = built.recordId;
+    const offered = reference(built);
+    built.store.close();
+    expect(() => built.store.get(recordId)).toThrow(/has not been opened/u);
+
+    // PHASE 2 — a brand-new daemon lifetime over the SAME directory. A fresh
+    // `InputPreparationStore`, a fresh once-only open latch standing in for the
+    // preparation service's `ensureOpen` (the only production path that used to
+    // open the store, reached only from prepare/lookup/cancel), a fresh lane
+    // and a fresh `TaskRunner`. Two plain strings crossed the boundary — the
+    // directory and the record id — and nothing else. Without the lane's own
+    // `open()` the record on disk is invisible to the offer path and the offer
+    // declines `preparation_not_found`, non-retryably.
+    const restarted = new InputPreparationStore({
+      storeDir,
+      retentionMs: 60 * 60 * 1000,
+      retryHorizonMs: 60 * 60 * 1000,
+    });
+    let opening: Promise<void> | undefined;
+    let openCalls = 0;
+    const ensureOpen = (): Promise<void> => (opening ??= (async () => {
+      openCalls += 1;
+      await restarted.open();
+    })());
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(built, adapter, sent, {
+      inputPreparationLane: {
+        store: restarted,
+        open: ensureOpen,
+        runtime: RUNTIME,
+        policyRevision: POLICY_REVISION,
+        toolsetDefinitionRevisions: built.toolsetDefinitionRevisions,
+      },
+    });
+
+    await runner.handleEnvelope(preparedOffer('task-prepared-restart', offered));
+
+    expect(sent.filter((envelope) => envelope.type === 'task.decline')).toHaveLength(0);
+    expect(sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(1);
+    expect(restarted.get(recordId)?.pin).toMatchObject({ taskId: 'task-prepared-restart' });
+    expect(adapter.preparedStartCalls).toHaveLength(1);
+    // The expectation the prepared launch carries is the model off the RECORD
+    // replayed from disk in phase 2 — equality, not mere presence, because a
+    // record that replayed a different model identity would still be present.
+    expect(adapter.preparedStartCalls[0]!.preparation.expected.model).toEqual(MODEL);
+    // One latch, not one replay per offer: the lane adds no second open authority.
+    expect(openCalls).toBe(1);
+
+    await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-prepared-restart', seq: 2 }));
+  });
+
+  it('releases the pin when the Execution reaches a terminal', async () => {
     const built = await lane();
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
     const sent: Envelope[] = [];

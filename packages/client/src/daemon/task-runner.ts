@@ -381,6 +381,18 @@ export interface TaskRunnerDeps {
    */
   inputPreparationLane?: {
     readonly store: InputPreparationStore;
+    /**
+     * Await the store's open before the first record read.
+     *
+     * The prepared offer path is reachable on a freshly restarted daemon that
+     * has served no prepare/lookup/cancel call yet, and a store that was never
+     * opened holds an EMPTY map — which would make a perfectly good durable
+     * record answer `preparation_not_found`. This is the preparation service's
+     * own once-only `ensureOpen` latch, passed in rather than re-implemented:
+     * the replay that recovers the log stays the service's, so this lane adds
+     * no second open authority and no second replay path.
+     */
+    readonly open: () => Promise<void>;
     /** The VERIFIED installed runtime/compiler identity every artifact is bound to. */
     readonly runtime: InputPreparationRuntimeIdentityV1;
     /** The operator's configured limits-policy revision currently in force. */
@@ -1907,6 +1919,21 @@ export class TaskRunner {
         // section holds no record this reference could mean, and running the
         // offer some other way would be running an Execution nobody counted.
         this.decline(taskId, 'preparation_lane_unconfigured: this daemon is not configured for input preparation', false, agentRef);
+        return;
+      }
+      // BEFORE the first read. A restarted daemon reaches this line with a
+      // store that nothing has opened yet, and an unopened store is not an
+      // empty one — `get` refuses rather than answering `undefined`, so this
+      // await is what turns a durable record back into a visible one.
+      try {
+        await preparationLane.open();
+      } catch (error) {
+        this.decline(
+          taskId,
+          `preparation_store_unavailable: the preparation store could not be opened: ${errorMessage(error)}`,
+          false,
+          agentRef,
+        );
         return;
       }
       if (preparationLane.store.get(preparation.reference) === undefined) {
