@@ -105,26 +105,29 @@ for (const phase of ['detect', 'prepare'] as const) {
         // deterministically, with no clock in the assertion at all, by
         // `admission-deadline-release-guard.test.ts` against one real
         // `TaskRunner`; here it is kept only as the negative below.
-        const replacementDeclineReasons = (): string[] => server.received
-          .flatMap(e => (e.type === 'task.decline' && e.task_id === 'replacement' ? [e.payload.reason] : []));
-        let outcome: { kind: 'started' } | { kind: 'declined'; reason: string } | undefined;
-        await vi.waitFor(() => {
-          const declined = replacementDeclineReasons()[0];
-          if (declined !== undefined) { outcome = { kind: 'declined', reason: declined }; return; }
-          if (server.received.some(e => e.type === 'task.started' && e.task_id === 'replacement')) { outcome = { kind: 'started' }; return; }
-          throw new Error(`replacement reached no terminal observation; last stage: ${stages.at(-1) ?? '(none)'} (stages: ${stages.join(' -> ') || 'none'})`);
-        }, { timeout: 2000 });
-        // (a) whatever the outcome, the released reservation is non-negotiable.
-        for (const reason of replacementDeclineReasons()) expect(reason.startsWith('agent home busy')).toBe(false);
-        // (b) exactly one of the two accepted terminal observations.
-        if (outcome!.kind === 'declined') expect(outcome!.reason).toBe('runtime startup deadline exceeded');
-        else {
-          expect(adapter.startCalls).toHaveLength(1);
-          expect(server.received.some(e => e.type === 'task.claim' && e.task_id === 'blocked')).toBe(false);
-          adapter.sessions[0]!.emit({ type: 'turn_end' });
-          await server.waitFor(e => e.type === 'task.complete' && e.task_id === 'replacement');
+        try {
+          const replacementDeclineReasons = (): string[] => server.received
+            .flatMap(e => (e.type === 'task.decline' && e.task_id === 'replacement' ? [e.payload.reason] : []));
+          let outcome: { kind: 'started' } | { kind: 'declined'; reason: string } | undefined;
+          await vi.waitFor(() => {
+            const declined = replacementDeclineReasons()[0];
+            if (declined !== undefined) { outcome = { kind: 'declined', reason: declined }; return; }
+            if (server.received.some(e => e.type === 'task.started' && e.task_id === 'replacement')) { outcome = { kind: 'started' }; return; }
+            throw new Error(`replacement reached no terminal observation; last stage: ${stages.at(-1) ?? '(none)'} (stages: ${stages.join(' -> ') || 'none'})`);
+          }, { timeout: 2000 });
+          // (a) whatever the outcome, the released reservation is non-negotiable.
+          for (const reason of replacementDeclineReasons()) expect(reason.startsWith('agent home busy')).toBe(false);
+          // (b) exactly one of the two accepted terminal observations.
+          if (outcome!.kind === 'declined') expect(outcome!.reason).toBe('runtime startup deadline exceeded');
+          else {
+            expect(adapter.startCalls).toHaveLength(1);
+            expect(server.received.some(e => e.type === 'task.claim' && e.task_id === 'blocked')).toBe(false);
+            adapter.sessions[0]!.emit({ type: 'turn_end' });
+            await server.waitFor(e => e.type === 'task.complete' && e.task_id === 'replacement');
+          }
+        } finally {
+          unsubscribe?.();
         }
-        unsubscribe?.();
       } else {
         await server.waitFor(e => e.type === 'task.started' && e.task_id === 'replacement', 2000);
         expect(adapter.startCalls).toHaveLength(1);

@@ -50,7 +50,7 @@ const DEADLINE_MS = 250;
  */
 const WIDE_STARTUP_TIMEOUT_MS = 5_000;
 
-/** Exact pre-claim decline reason set by `admissionWithdrawn` (`task-runner.ts:2831`). */
+/** Exact pre-claim decline reason set by `admissionWithdrawn` (`task-runner.ts:1977`). */
 const DEADLINE_DECLINE_REASON = 'runtime startup deadline exceeded';
 /** Exact prefix of the per-home busy decline (`task-runner.ts:2053`). */
 const AGENT_HOME_BUSY_PREFIX = 'agent home busy';
