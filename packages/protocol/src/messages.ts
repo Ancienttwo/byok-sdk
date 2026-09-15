@@ -22,6 +22,13 @@ import {
   AgentHomeProjectionProfileRevisionSchema,
   AgentHomeProjectionValueSchema,
 } from './agent-home-projection';
+import {
+  InputPreparationContentHashSchema,
+  InputPreparationPolicyRevisionSchema,
+  InputPreparationProfileIdSchema,
+  InputPreparationSelectionSchema,
+  InputPreparationSourceSchema,
+} from './input-preparation';
 import { ProviderProfileBindingSchema } from './provider-profile-binding';
 import { TerminalProjectionSelectionSchema } from './terminal-projection';
 
@@ -571,6 +578,76 @@ export const AgentHomeProjectionPayloadSchema = z
   })
   .strict();
 export type AgentHomeProjectionPayload = z.infer<typeof AgentHomeProjectionPayloadSchema>;
+
+/**
+ * The inlined form of `agent.input.preparation`'s authorized context document.
+ *
+ * Bounded by the SAME `MAX_INLINE_BYTES` (64 KiB) every other inlined artifact
+ * on this wire is bounded by — there is no preparation-specific enlargement.
+ * Anything larger uses the blob-ref form below, exactly the way a large task
+ * instruction does; it is never implicitly chunked.
+ */
+const InputPreparationInlineContextSchema = z
+  .object({
+    inline: z
+      .string()
+      .refine(isWithinInlineByteLimit, `inline context must not exceed ${MAX_INLINE_BYTES} UTF-8 bytes`),
+  })
+  .strict();
+
+/**
+ * The out-of-band form. `contentHash` is stated a second time next to the
+ * `BlobRef` on purpose and must equal it: the device verifies the DECODED
+ * bytes against this field, so a blob store that serves different bytes under
+ * the same id is caught locally rather than compiled.
+ */
+const InputPreparationBlobContextSchema = z
+  .object({ blobRef: BlobRefSchema, contentHash: InputPreparationContentHashSchema })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.blobRef.contentHash !== value.contentHash) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['blobRef', 'contentHash'],
+        message: 'blobRef contentHash must equal contentHash',
+      });
+    }
+  });
+
+/**
+ * Server -> daemon: one task-free, exact-device remote input preparation.
+ *
+ * Distinct message type rather than an optional field on an existing one, for
+ * the same N/N-1 reason `task.offer_with_toolsets` is: a daemon that predates
+ * this contract SKIPS an unknown type outright (`parseMessage` ->
+ * `UnknownMessageTypeError`), whereas it would legally STRIP an unknown
+ * optional field and then answer as though a preparation it never performed
+ * had somehow been handled.
+ *
+ * What is deliberately NOT here (§17 B): `tools`, `toolExecutors`, runtime or
+ * compiler identity, `tenantId` and `deviceId`. The first three are local
+ * observations; the last two come from the device's own authenticated record,
+ * never from the payload — a sender that could name them could redirect a
+ * preparation's binding to a device it does not own.
+ *
+ * `deadlineAt` may only ever be TIGHTENED locally: the device clamps to
+ * `min(deadlineAt - now, limits.preparationDeadlineMs)`, so a generous Host
+ * deadline cannot enlarge a configured local bound.
+ */
+export const AgentInputPreparationPayloadSchema = z
+  .object({
+    requestId: z.uuid(),
+    agentRef: AgentRefSchema,
+    profileId: InputPreparationProfileIdSchema,
+    policyRevision: InputPreparationPolicyRevisionSchema,
+    source: InputPreparationSourceSchema,
+    selection: InputPreparationSelectionSchema,
+    deadlineAt: z.iso.datetime({ offset: true }),
+    context: z.union([InputPreparationInlineContextSchema, InputPreparationBlobContextSchema]),
+    requiredToolsets: RequiredToolsetsSchema,
+  })
+  .strict();
+export type AgentInputPreparationPayload = z.infer<typeof AgentInputPreparationPayloadSchema>;
 
 /**
  * server -> daemon: approve a pending `task.await_approval` request.
@@ -1175,6 +1252,7 @@ export const MESSAGE_PAYLOAD_SCHEMAS = {
   'agent.content.read': AgentContentReadPayloadSchema,
   'agent.content.receipt': AgentContentReceiptPayloadSchema,
   'agent.home.projection': AgentHomeProjectionPayloadSchema,
+  'agent.input.preparation': AgentInputPreparationPayloadSchema,
   'task.approve': TaskApprovePayloadSchema,
   'task.reject': TaskRejectPayloadSchema,
   'task.cancel': TaskCancelPayloadSchema,
@@ -1211,6 +1289,7 @@ export const SERVER_TO_DAEMON_TYPES = [
   'agent.message.disposition',
   'agent.content.read',
   'agent.home.projection',
+  'agent.input.preparation',
   'task.approve',
   'task.reject',
   'task.cancel',
