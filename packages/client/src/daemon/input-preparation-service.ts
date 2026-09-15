@@ -176,9 +176,10 @@ export interface InputPreparationService {
  *
  * An empty list is the only thing that makes `ready` true, and today the list
  * can never be empty: the native compiler proves `coverage: "unknown"`, so
- * `compiler_coverage_unknown` is always present, and tool executor identity is
- * an observation fingerprint rather than a proof, so
- * `executor_identity_unproven` always joins it. That is the honest state of
+ * `compiler_coverage_unknown` is always present, and with no implementation
+ * authority configured every executor identity resolves `unavailable`, so
+ * `executor_identity_unproven` joins it (derived per record from
+ * `toolImplementationKinds` below, not added unconditionally). That is the honest state of
  * §10.2's G4, not a placeholder — a fixture counter adds
  * `counter_authority_not_production` on top of it, so an offline suite cannot
  * even accidentally look like production accounting evidence.

@@ -323,7 +323,7 @@ describe('one assembly entry, consumed by both preparation paths', () => {
     ]);
   });
 
-  it('fails if either path bypasses the entry: nothing else can answer for it', async () => {
+  it('routes both the local and the remote request through the one injected assembler, once each', async () => {
     // The structural half of the property above. Both paths reach the SAME
     // assembler object, so an observation produced anywhere else is an
     // observation this counter never saw.
