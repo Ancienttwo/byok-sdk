@@ -895,6 +895,71 @@ frozen manifest must refuse, but it is not a change to the operator's configured
 `command`/`args`, and folding it in would churn every stored revision on every
 SDK release.
 
+### Executor implementation identity
+
+A launch-cwd PASS says WHERE a server starts. It says nothing about WHAT
+starts, and an absolute path does not either: it records that the device named
+one file, not that the file is the product it claims to be. Executor
+implementation identity is that separate fact, and the SDK carries it as a
+typed value per projected toolset server rather than implying it.
+
+The authority split is deliberate and total:
+
+- **The host owns the install record.** Only the host knows where it put a
+  versioned immutable release, which manifest revision produced it, and which
+  interpreter (if any) is encapsulated with it. It supplies that record through
+  `DaemonConfig.toolImplementationAuthority`.
+- **The SDK owns the assertion.** A record is never believed. Before it becomes
+  an identity the daemon measures the path itself: it must be its own
+  `realpath`, a non-symlink regular file, root-owned, carry no write bit for
+  anyone, and hash to the `closureDigest` the record claims. The
+  `(dev, ino, size, mtime, mode, uid, gid)` tuple measured at that moment is
+  recorded ON the identity by the SDK, never supplied by the host.
+
+**This SDK ships no resolver and no default.** An absent
+`toolImplementationAuthority` is the supported state, and it means every
+identity is `unavailable: 'resolver_unconfigured'`. Nothing degrades and
+nothing is refused for a claim nobody made — the daemon simply proves nothing
+about its executors, and every receipt built on those identities carries
+`executor_identity_unproven`. The other unavailable reasons name who could not
+answer: `implementation_identity_unattested` (the resolver threw, or answered
+with something that is not an install record), `unencapsulated_source` and
+`interpreter_not_encapsulated` (the resolver's own verdicts about what backs
+the tool), `interpreter_form_unsupported` (a compiled executable that names an
+interpreter, or a bundle that names none), `install_record_mismatch` and
+`reverify_failed`.
+
+Where an identity IS attested, it is re-measured before EVERY spawn of that
+server — the daemon's admission probe and the pi extension's own server pool
+both go through the SDK's single MCP client, which runs the check before it
+spawns the child. The identity is resolved once per offer, beside the launch
+binding, and both spawn points consume that one value; a second resolve at
+launch would be a second opinion about the same install. Reverification
+requires the same realpath, the same non-symlink regular file, the same stat
+tuple — `uid`, `gid` and `mode` included, so an install that stopped being
+root-owned or grew a write bit fails it — and the same content digest. A
+failure REFUSES the spawn non-retryably with its reason; it is never downgraded
+to unavailable-and-continue, because a server that was attested and no longer
+measures the same is a server that changed under a claim somebody relied on.
+
+What an attested identity proves is exactly that: at resolve, and again at each
+spawn, the file at that versioned realpath was a root-owned, non-symlink,
+non-writable regular file whose bytes hash to the attested digest and whose
+stat tuple had not moved. What it does **not** prove, carried honestly rather
+than implied away:
+
+- post-hoc modification by root, which no measurement by a non-root daemon can
+  exclude;
+- the integrity of the kernel, `dyld`, SIP-owned system libraries, or anything
+  else the loader maps in beside the artifact;
+- injection into the live process after `exec`;
+- anything about the network peers the server talks to.
+
+Release signing is a separate authority and is not claimed here. An attested
+identity is not constructible by a caller: the control surface has no field
+anywhere in which an identity could be sent, and an identity nobody earned
+names a file that fails the measurement and refuses the spawn.
+
 The authenticated local control socket accepts an expected-revision
 compare-and-swap reload of the complete registry. The CLI host reads
 `--config`; the daemon does not accept or read an arbitrary pathname. Identical

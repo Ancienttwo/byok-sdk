@@ -5,6 +5,43 @@
 Deliberately not filed under 0.18.0: none of this is in a published artifact,
 and the D2 version number belongs to a separate SDK release contract.
 
+- **Breaking (adapter seam)** — an attested MCP toolset server is re-measured
+  before every spawn of it, and a mismatch refuses the spawn.
+
+  `DaemonConfig.toolImplementationAuthority` is the host's opt-in install-record
+  authority; this SDK ships no resolver and no default, so an absent section —
+  the supported state — resolves every implementation identity to
+  `resolver_unconfigured`, refuses nothing, and keeps
+  `executor_identity_unproven` on every receipt. An absolute path is not an
+  attestation, and the daemon now says so in a typed value instead of leaving
+  it implied.
+
+  A record the host supplies is measured, not believed: the SDK requires the
+  install path to be its own realpath, a non-symlink regular file, root-owned,
+  carrying no write bit for anyone, and hashing to the claimed digest, and it
+  records the `(dev, ino, size, mtime, mode, uid, gid)` tuple it measured onto
+  the identity itself rather than accepting one. `TaskRunner` resolves one
+  identity per projected server per offer, beside the launch binding, and both
+  spawn points consume that same value: the admission probe directly, and pi's
+  own server pool through the task-scoped MCP config. Reverification before each
+  spawn requires the same realpath, the same stat tuple and the same digest; a
+  failure is an `McpAuthorityError` that declines the task permanently and is
+  never downgraded to unavailable-and-continue.
+
+  Breaking in two places for adapter authors. `RuntimeOperationStartInput`
+  carries `mcpToolImplementations`, keyed by projected server name — an adapter
+  that spawns toolset servers itself must forward these to its spawn point
+  rather than resolving its own. The pi task-scoped MCP config file carries
+  `toolImplementations`, and the extension refuses the whole configuration
+  rather than dropping an entry it cannot read, so a spawn never quietly stops
+  being checked.
+
+  What an attested identity proves and what it deliberately does not — root
+  post-hoc modification, the kernel/dyld/SIP-owned libraries, live-process
+  injection, network peers — is written out in `docs/spec.md`, "Executor
+  implementation identity". Release signing is a separate authority and is not
+  claimed.
+
 - **Breaking (security)** — every MCP server child the daemon is responsible
   for now starts in a directory this daemon's uid has been PROVEN unable to
   write, instead of inheriting the canonical Agent home. A `bun --compile`
