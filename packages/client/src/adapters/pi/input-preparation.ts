@@ -13,6 +13,10 @@ import type {
 } from '../../input-preparation';
 import type { McpToolsetServerObservation } from '../../mcp/observation';
 import type { McpLaunchAttestation } from '../../daemon/trusted-launch-cwd';
+import {
+  toolImplementationUnavailable,
+  type ToolImplementationIdentityV1,
+} from '../../daemon/tool-implementation-identity';
 import { filterMcpObservationForPolicy, projectMcpTools, qualifiedMcpToolName } from '../../mcp/projection';
 import { PI_PACKAGE_NAME, resolvePiRuntimeIdentity } from './resolve-bin';
 
@@ -362,25 +366,20 @@ export function createPiInputPreparationCompiler(): InputPreparationCompiler {
  */
 
 /**
- * Proof of which implementation backs a tool. There is exactly one value
- * today, and it is the absence of proof.
+ * The identity a fingerprint binds when no host authority has attested one.
  *
- * A typed marker rather than an omitted field on purpose: it is part of what
- * every fingerprint hashes, so the day a real proof exists, every previously
- * issued fingerprint changes — which is correct. A tool whose implementation
- * is proven is not the same tool as one whose implementation was merely
- * assumed, and nothing frozen under the weaker claim should silently validate
- * under the stronger one.
+ * The TYPE and every rule about it live in
+ * `daemon/tool-implementation-identity.ts`, which is the single authority for
+ * what an implementation identity is and the only file that can produce an
+ * attested one. This file only names the value it hashes, because that value
+ * is part of what every fingerprint already commits to: the day a real proof
+ * reaches this call site, every previously issued fingerprint changes — which
+ * is correct. A tool whose implementation is proven is not the same tool as
+ * one whose implementation was merely assumed, and nothing frozen under the
+ * weaker claim should silently validate under the stronger one.
  */
-export type ToolImplementationIdentityV1 = {
-  readonly kind: 'unavailable';
-  readonly reason: 'implementation_identity_unattested';
-};
-
-export const TOOL_IMPLEMENTATION_IDENTITY_UNAVAILABLE: ToolImplementationIdentityV1 = Object.freeze({
-  kind: 'unavailable',
-  reason: 'implementation_identity_unattested',
-});
+const TOOL_IMPLEMENTATION_IDENTITY_UNAVAILABLE: ToolImplementationIdentityV1 =
+  toolImplementationUnavailable('implementation_identity_unattested');
 
 type CanonicalPreparedValue =
   typeof import('@earendil-works/pi-coding-agent/prepared-session-input').canonicalPreparedValue;

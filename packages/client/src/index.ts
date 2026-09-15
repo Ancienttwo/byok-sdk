@@ -27,6 +27,28 @@ export type {
   TrustedLaunchCwdUnavailableReason,
 } from './types';
 export { resolveMcpLaunchCwdLauncher, resolveTrustedLaunchCwd } from './daemon/trusted-launch-cwd';
+/**
+ * The host install-record authority this SDK declares and never implements
+ * (`daemon/tool-implementation-identity.ts`). A daemon constructed without one
+ * resolves every tool implementation identity to `resolver_unconfigured`.
+ *
+ * `parseToolImplementationIdentity` is deliberately NOT exported: it is the
+ * only function that turns a parsed value into an attested identity, and its
+ * one caller is this package's own task-scoped configuration reader.
+ */
+export type {
+  ToolImplementationAttestedV1,
+  ToolImplementationAuthority,
+  ToolImplementationIdentityV1,
+  ToolImplementationInstallRecordV1,
+  ToolImplementationInterpreterV1,
+  ToolImplementationLocatorV1,
+  ToolImplementationResolutionV1,
+  ToolImplementationStatTupleV1,
+  ToolImplementationUnavailableReasonV1,
+  ToolImplementationUnavailableV1,
+} from './daemon/tool-implementation-identity';
+export { ToolImplementationReverifyError } from './daemon/tool-implementation-identity';
 export type { AgentRef } from './agent-home';
 export {
   AgentHomeError,
