@@ -1,6 +1,6 @@
 // Installed composition: no prompt, provider request, real profile or OS key access.
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, writeFile, readFile, realpath, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -13,7 +13,7 @@ import { SqliteProviderProfileStore, parseModelProviderProfile, exactProviderPro
 import { parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER } from './pi-runtime-identity.mjs';
 
 import { PiAdapter } from '@byok-sdk/client/adapters';
-import { sealRuntimeOperationManifest } from '@byok-sdk/client';
+import { resolveTrustedLaunchCwd, sealRuntimeOperationManifest } from '@byok-sdk/client';
 
 const require = createRequire(import.meta.url);
 const keysRoot = path.dirname(require.resolve('@byok-sdk/keys/package.json'));
@@ -47,6 +47,10 @@ try {
   const mcpConfigPath = path.join(dir, 'mcp.json');
   const extension = path.join(dir, 'extension.mjs');
   const toolsObserver = path.join(dir, 'tools-observer.mjs');
+  const reservedServerCwdMarker = path.join(dir, 'reserved-server-cwd.txt');
+  const trustedLaunch = await resolveTrustedLaunchCwd();
+  assert.equal(trustedLaunch.kind, 'resolved', `no trusted MCP launch directory here: ${trustedLaunch.reason}`);
+  assert.notEqual(trustedLaunch.dir, dir);
   // A real stdio MCP server, so the installed package's own MCP extension is
   // run against a server that really has to start and really has to answer,
   // rather than stubbed away. Hand-rolled for the same reason the in-repo
@@ -64,6 +68,12 @@ try {
   // `packages/client/src/__tests__/mcp-extension-call.test.ts`.
   const fixtureServer = path.join(dir, 'fixture-mcp-server.mjs');
   await writeFile(fixtureServer, `import { createInterface } from 'node:readline';
+import { writeFileSync } from 'node:fs';
+// The directory this server was actually started in, read back out of the
+// child. It must be the daemon's proven-non-writable launch directory and NOT
+// the Pi child's own cwd — a compiled server binary reads \`$cwd/bunfig.toml\`
+// \`preload\` before its own code, and the Pi child's cwd is the Agent home.
+if (process.argv[3]) writeFileSync(process.argv[3], process.cwd());
 let initialized = false;
 const TOOL = { name: process.argv[2] ?? 'echo', description: 'Echo text back.', inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false } };
 const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n');
@@ -89,7 +99,7 @@ createInterface({ input: process.stdin }).on('line', line => {
       // `session_start` instead of from an observation. It is the one entry
       // that makes the installed `McpServerPool` open a real connection during
       // this smoke; a host toolset server stays unopened until it is called.
-      byokagentteam: { command: process.execPath, args: [fixtureServer, 'relay_probe'] },
+      byokagentteam: { command: process.execPath, args: [fixtureServer, 'relay_probe', reservedServerCwdMarker] },
     },
     observation: {
       fixture: {
@@ -100,10 +110,19 @@ createInterface({ input: process.stdin }).on('line', line => {
         tools: [{
           name: 'echo',
           description: 'Echo text back.',
+          // The operator's own read/mutation classification. Required under
+          // the `readonly` policy this smoke runs, which is what makes the
+          // tool registrable at all.
+          readOnly: true,
           inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false },
         }],
       },
     },
+    permissionMode: 'readonly',
+    // The daemon resolves this once per offer and the extension refuses to open
+    // any server without it; the installed package must therefore honour it out
+    // of the packed tarball, launcher script included.
+    launchCwd: trustedLaunch.dir,
   };
   await writeFile(mcpConfigPath, JSON.stringify(mcpTaskConfig));
   await writeFile(toolsObserver, `import {writeFileSync} from 'node:fs';
@@ -265,6 +284,14 @@ export default function() {
     // The reserved helper is read LIVE off a connected child, so its bare tool
     // name appearing here is proof the pool really handshook with a server.
     assert.ok(activeTools.includes('relay_probe'), `reserved helper tool missing from: ${activeTools.join(', ')}`);
+    // ...and that child is where the launch boundary is actually observable
+    // out of the packed tarball: it started in the proven-non-writable launch
+    // directory, not in the Pi process's own cwd.
+    const reservedServerCwd = (await readFile(reservedServerCwdMarker, 'utf8')).trim();
+    assert.equal(await realpath(reservedServerCwd), await realpath(trustedLaunch.dir));
+    assert.notEqual(reservedServerCwd, dir);
+    // The packed tarball really ships the launcher the claude/codex paths need.
+    await access(path.join(clientRoot, 'bin', 'byok-launch-cwd.mjs'));
     assert.ok(!activeTools.includes('mcp'), 'the retired MCP proxy tool must not be registered');
     assert.ok(!activeTools.includes('mcpScript'), 'the retired mcpScript tool must not be registered');
     assert.equal(requests, 0);
