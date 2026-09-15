@@ -5659,7 +5659,7 @@ export declare function probeMcpServer(serverName: string, server: Readonly<McpS
  * rather than deciding what a model may call: the Agent message helper
  * preflight (`./agent-message-mcp-preflight.ts`).
  */
-export declare function probeMcpServerTools(server: Readonly<McpStdioServerConfig>, options: McpToolsProbeOptions): Promise<readonly string[]>;
+export declare function probeMcpServerTools(serverName: string, server: Readonly<McpStdioServerConfig>, options: McpToolsProbeOptions): Promise<readonly string[]>;
 /**
  * A probe failure caused by the server's own ANSWER rather than by its
  * environment — an ungrantable tool name, a malformed tool entry, an oversized

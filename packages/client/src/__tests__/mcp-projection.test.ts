@@ -204,7 +204,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
     expect(names).not.toContain('mcp__byokagentteam__echo');
   });
 
-  it('refuses two MCP tools that claim the same registered name', async () => {
+  it('namespacing alone is not a clash: a reserved bare name may equal a host tool\'s bare name', async () => {
     const dir = await tempDir();
     const configPath = path.join(dir, 'mcp-config.json');
     const observation = await realObservation();
@@ -233,6 +233,30 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
     await expect(onSessionStart?.()).resolves.toBeUndefined();
     expect(names).toContain('mcp__salesko__echo');
     expect(names).toContain('echo');
+  });
+
+  it('refuses two MCP tools that claim the same registered name', async () => {
+    // A genuine clash: two RESERVED helpers registering bare names, both of
+    // which expose `echo`. Silently keeping the first would pick a winner on
+    // the model's behalf for a name it cannot then address unambiguously.
+    const dir = await tempDir();
+    const configPath = path.join(dir, 'mcp-config.json');
+    await fs.writeFile(configPath, JSON.stringify({
+      mcpServers: { byokagentteam: serverSpec(), byokagentmessage: serverSpec() },
+      observation: {},
+    }));
+    process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
+
+    let onSessionStart: (() => Promise<void>) | undefined;
+    const pi = {
+      registerTool: () => {},
+      on: (event: string, handler: () => Promise<void>) => {
+        if (event === 'session_start') onSessionStart = handler;
+      },
+    };
+    const extension = await import('../adapters/pi/mcp-extension');
+    extension.default(pi as never);
+    await expect(onSessionStart?.()).rejects.toThrow(/two MCP tools claim the name "echo"/u);
   });
 
   it('refuses to start when a projected server arrived without a daemon observation', async () => {

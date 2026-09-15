@@ -47,15 +47,25 @@ try {
   const mcpConfigPath = path.join(dir, 'mcp.json');
   const extension = path.join(dir, 'extension.mjs');
   const toolsObserver = path.join(dir, 'tools-observer.mjs');
-  // A real stdio MCP server, so the SDK's own MCP extension is exercised
-  // end to end in the installed package rather than stubbed away. Hand-rolled
-  // for the same reason the in-repo fixtures are: the SDK ships an MCP client,
-  // not a server, and the release smoke must not grow a dependency the
-  // published package does not have.
+  // A real stdio MCP server, so the installed package's own MCP extension is
+  // run against a server that really has to start and really has to answer,
+  // rather than stubbed away. Hand-rolled for the same reason the in-repo
+  // fixtures are: the SDK ships an MCP client, not a server, and the release
+  // smoke must not grow a dependency the published package does not have.
+  //
+  // What this proves and what it does not: the extension loads inside the
+  // installed Pi, registers one tool per OBSERVED tool for the host toolset
+  // server, and — for the SDK-reserved helper below — really connects,
+  // handshakes and reads `tools/list` off a live child through
+  // `McpServerPool`. It does NOT reach `tools/call`: only a model turn invokes
+  // a registered tool, and this smoke sends no prompt and allows no inference.
+  // The call path (lazy open, drift re-verification, the call itself, the
+  // close) is covered against the same shape of server by
+  // `packages/client/src/__tests__/mcp-extension-call.test.ts`.
   const fixtureServer = path.join(dir, 'fixture-mcp-server.mjs');
   await writeFile(fixtureServer, `import { createInterface } from 'node:readline';
 let initialized = false;
-const TOOL = { name: 'echo', description: 'Echo text back.', inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false } };
+const TOOL = { name: process.argv[2] ?? 'echo', description: 'Echo text back.', inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false } };
 const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n');
 createInterface({ input: process.stdin }).on('line', line => {
   if (!line.trim()) return;
@@ -73,7 +83,14 @@ createInterface({ input: process.stdin }).on('line', line => {
   // observation it took at admission. The extension registers from the
   // observation and discovers nothing of its own.
   const mcpTaskConfig = {
-    mcpServers: { fixture: { command: process.execPath, args: [fixtureServer] } },
+    mcpServers: {
+      fixture: { command: process.execPath, args: [fixtureServer] },
+      // An SDK-RESERVED helper, which the extension reads live at
+      // `session_start` instead of from an observation. It is the one entry
+      // that makes the installed `McpServerPool` open a real connection during
+      // this smoke; a host toolset server stays unopened until it is called.
+      byokagentteam: { command: process.execPath, args: [fixtureServer, 'relay_probe'] },
+    },
     observation: {
       fixture: {
         toolsetId: 'release.smoke.v1',
@@ -208,7 +225,8 @@ export default function() {
     '--required-capabilities', '[]', '--validate-only', 'false',
     '--', '--mode', 'rpc',
     '--extension', extension,
-    // The real SDK-owned MCP extension, against the real fixture server above.
+    // The real SDK-owned MCP extension, against the real stdio MCP servers
+    // configured above.
     '--extension', path.join(clientRoot, 'dist/adapters/pi/mcp-extension.js'),
     '--extension', toolsObserver,
   ], { cwd: dir, env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -236,9 +254,17 @@ export default function() {
     assert.equal(state.data.messageCount, 0);
     assert.equal(JSON.parse(await readFile(marker, 'utf8')).loaded, true);
     // One Pi tool per observed MCP tool, carrying the server's real schema —
-    // not a single `mcp` proxy, and not `mcpScript`.
+    // not a single `mcp` proxy, and not `mcpScript`. The name is spelled out
+    // rather than derived from the core's `projectMcpTools`: that helper is
+    // not part of the published surface, and re-deriving the qualified form
+    // here would make this file a second authority on the naming rule. That
+    // the registered set IS exactly the projection is asserted in-repo, in
+    // `packages/client/src/__tests__/mcp-projection.test.ts`.
     const activeTools = JSON.parse(await readFile(toolsMarker, 'utf8'));
     assert.ok(activeTools.includes('mcp__fixture__echo'), `registered tools: ${activeTools.join(', ')}`);
+    // The reserved helper is read LIVE off a connected child, so its bare tool
+    // name appearing here is proof the pool really handshook with a server.
+    assert.ok(activeTools.includes('relay_probe'), `reserved helper tool missing from: ${activeTools.join(', ')}`);
     assert.ok(!activeTools.includes('mcp'), 'the retired MCP proxy tool must not be registered');
     assert.ok(!activeTools.includes('mcpScript'), 'the retired mcpScript tool must not be registered');
     assert.equal(requests, 0);
