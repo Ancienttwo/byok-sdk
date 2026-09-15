@@ -446,10 +446,11 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     // `InputPreparationStore`, a fresh once-only open latch standing in for the
     // preparation service's `ensureOpen` (the only production path that used to
     // open the store, reached only from prepare/lookup/cancel), a fresh lane
-    // and a fresh `TaskRunner`. Two plain strings crossed the boundary — the
-    // directory and the record id — and nothing else. Without the lane's own
-    // `open()` the record on disk is invisible to the offer path and the offer
-    // declines `preparation_not_found`, non-retryably.
+    // and a fresh `TaskRunner`. No record state crosses the boundary — the
+    // phase-1 store is closed and the lane is rebuilt; the daemon-side probe
+    // results a real restart would re-derive are reused as inputs. Without the
+    // lane's own `open()` the record on disk is invisible to the offer path and
+    // the offer declines `preparation_not_found`, non-retryably.
     const restarted = new InputPreparationStore({
       storeDir,
       retentionMs: 60 * 60 * 1000,
@@ -737,6 +738,40 @@ describe('every compared item declines by its own name, with no claim and no pin
     expect(declineReason(sent)).toContain('preparation_lane_unconfigured');
     expect(sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(0);
     expect(built.store.get(built.recordId)?.pin).toBeUndefined();
+  });
+
+  it('declines a prepared offer when the preparation store cannot be opened at all', async () => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    // The lane is configured, the record is on disk and counted, and the
+    // reference names it. The ONLY thing that fails is the open the lane awaits
+    // before its first lookup — the failure a restarted daemon meets when the
+    // store directory is unreadable. It must not be reported as
+    // `preparation_not_found`: an unopened store and an empty one mean opposite
+    // things, and the offer would otherwise be refused for a record that exists.
+    const runner = await makeRunner(built, adapter, sent, {
+      inputPreparationLane: {
+        store: built.store,
+        open: () => Promise.reject(new Error('disk gone')),
+        runtime: RUNTIME,
+        policyRevision: POLICY_REVISION,
+        toolsetDefinitionRevisions: built.toolsetDefinitionRevisions,
+      },
+    });
+
+    await runner.handleEnvelope(preparedOffer('task-store-unavailable', reference(built)));
+
+    const declines = sent.filter((envelope) => envelope.type === 'task.decline');
+    expect(declines).toHaveLength(1);
+    expect(declineReason(sent).startsWith('preparation_store_unavailable')).toBe(true);
+    expect(declineReason(sent)).toContain('disk gone');
+    const declined = declines[0]!;
+    expect(declined.type === 'task.decline' ? declined.payload.retryable : undefined).toBe(false);
+    expect(sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(0);
+    expect(built.store.get(built.recordId)?.pin).toBeUndefined();
+    expect(adapter.preparedStartCalls).toHaveLength(0);
+    expect(adapter.startCalls).toHaveLength(0);
   });
 
   it('declines a prepared offer whose task resolved a launcher-wrapped MCP boundary', async () => {

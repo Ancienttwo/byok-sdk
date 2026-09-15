@@ -15,10 +15,12 @@ and the D2 version number belongs to a separate SDK release contract.
   declined `preparation_not_found` with `retryable: false` — permanently, for a
   record sitting durably on disk. The lane now carries that same once-only open
   latch and awaits it before its first lookup, so the open authority and the
-  log replay stay single. Every store read (`get`, `find`, `list`,
-  `scopeUsage`, `inFlightCount`, `readArtifact`) now refuses on an unopened
-  store instead of answering `undefined`: an unread store and an empty one are
-  indistinguishable from the map and mean opposite things.
+  log replay stay single; an open that fails declines
+  `preparation_store_unavailable` non-retryably rather than reading an unopened
+  store. Every store read (`get`, `find`, `list`, `scopeUsage`, `inFlightCount`,
+  `readArtifact`) now refuses on an unopened store instead of answering
+  `undefined`: an unread store and an empty one are indistinguishable from the
+  map and mean opposite things.
 
 - **Changed (daemon, unreleased contract)** — the durable preparation record
   has its own schema version, now `3`, separate from the wire version.
