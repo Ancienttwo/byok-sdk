@@ -313,6 +313,48 @@ from the whole admitted policy (`allowTools` and `denyTools`, not merely `mode`)
 so that the day the preparation side counts a native half, the policy that chose
 it is already what gets bound.
 
+### The prepared offer, and the moment a record is consumed
+
+A prepared Execution reaches a device as `task.offer_prepared`, its own message
+type. Not a `preparation` field on `task.offer_for_agent`: an older daemon skips
+an unknown message type whole, while it would legally strip an unknown optional
+field and run the task as an ordinary instruction offer — compiling a request of
+its own against tokens that were already counted for a different one. The
+payload carries no `instruction` and no `sessionRef`; both omissions are
+structural, not defaults.
+
+Nothing the offer states about the preparation is authority. `reference`,
+`requestDigest` and `artifactDigest` are the Host re-presenting what this
+device's own receipt told it, and the device compares each against its durable
+record.
+
+The lifecycle is prepare → offer_prepared → admit → compare → seal → pin → claim
+→ start. Admission is the SAME admission every other offer runs — the policy
+merge, the trusted launch boundary, one implementation identity per projected
+server, the `tools/list` probe through both. What is added is a comparison at
+the seal point, item by item, because a refused prepared Execution has to say
+WHAT differed rather than that a digest moved: the device row, the Agent, the
+profile revision, the limits-policy revision, the re-presented request and
+envelope digests, the admitted permission mode, the installed runtime identity,
+the launch attestation, the model-visible tool set by name, the
+implementation-identity kind behind each of those names, and finally the two
+surface digests — which are recomputed on the LIVE observation with the same
+functions the preparation computed the recorded ones with. Every difference
+declines non-retryably, with its own reason.
+
+Pin strictly precedes claim, and that ordering is the whole single-consumption
+guarantee. Two runners can both compare successfully; they then race one
+compare-and-set inside the store, and the loser sends no claim and dispatches
+nothing. The pin names the exact sealed Execution that took it, and is released
+at one moment — the Execution's terminal — because a record whose bytes a live
+process may still be sending must not be collected. A pinned record is never
+garbage-collected, whatever its retention horizon says.
+
+The prepared start input reaches the adapter only after all four of those steps.
+The expectations it carries come from the durable record, never from the
+envelope on disk: the native contract is explicit that a value read out of the
+envelope can never serve as its own expectation.
+
 ### Post-admission runtime failure authority
 
 After claim, every expected adapter failure crosses one of two boundaries as a

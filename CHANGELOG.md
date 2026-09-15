@@ -5,6 +5,73 @@
 Deliberately not filed under 0.18.0: none of this is in a published artifact,
 and the D2 version number belongs to a separate SDK release contract.
 
+- **Added (protocol, unreleased contract)** — `task.offer_prepared`, the strict
+  offer that dispatches an already-counted preparation back to the device that
+  counted it.
+
+  A distinct message type, not a `preparation` field on
+  `task.offer_for_agent`, and the freeze rule's own asymmetry is why: a daemon
+  that predates this type skips an unknown message type whole, whereas it would
+  legally STRIP an unknown optional field and run the task as an ordinary
+  instruction offer — compiling a request of its own against tokens already
+  counted for a different one. The payload is the strict Agent offer minus
+  `instruction` (the request is already inside the frozen envelope its record
+  retained) and minus `sessionRef` (a prepared Execution never resumes), plus a
+  required `preparation` naming the record. Nothing under `preparation` is
+  authority; every value is compared against the device's own durable record.
+
+  `PROTOCOL_VERSION` stays 1. No released shape changed: this is a new message
+  type plus two new leaf schemas, which the freeze guard's own diff message
+  names as the additive case. The frozen fingerprint and the envelope corpus
+  were regenerated with the documented gate and the result diffed key by key
+  against its predecessor — every pre-existing entry is identical.
+
+  `ByokCloud.enqueuePreparedOffer` is the hosted route. It requires the device
+  to durably advertise `agent-input-preparation` beside `agent-home-contract`,
+  because only a device that can prepare holds the record the offer names.
+
+- **Added (daemon, unreleased contract)** — a prepared offer is admitted by
+  item-by-item equality with its record, then sealed, pinned and claimed in that
+  order.
+
+  Admission is the same admission every other offer runs. What is added happens
+  at the seal point: the sealed Execution is compared against the record's
+  binding and artifact summary one fact at a time — device, Agent, profile
+  revision, limits-policy revision, re-presented request and envelope digests,
+  admitted permission mode, installed runtime identity, launch attestation, the
+  model-visible tool set by name, the implementation-identity kind behind each
+  name, `toolBindingDigest`, `observationDigest` — and each difference declines
+  non-retryably with its own reason. Item by item rather than one digest,
+  because "the observation digest differs" is equally true of a rotated policy
+  revision, a re-published toolset, a replaced binary and a schema change.
+
+  The live digests come from the same functions the preparation computed the
+  recorded ones with (`fingerprintPreparedToolSurface`, extracted from
+  `assemblePreparedToolSurface` for exactly this purpose, and
+  `preparedToolBindingDigest`), applied to this task's own already-resolved
+  launch binding, identities and probe observation.
+
+  Pinning strictly before the claim is what makes single consumption real:
+  `InputPreparationStore.pin` is a compare-and-set inside the store's serialized
+  closure, and the loser of a race sends no claim and dispatches nothing.
+  `InputPreparationPinV1` gains its single writer and its real shape,
+  `(taskId, manifestDigest, sealedAt)`. The pin is released at one moment — the
+  Execution's terminal — and a pinned record is never garbage-collected.
+
+  The durable preparation record gained `model`: a prepared launch must
+  re-present the exact model identity to the native verifier as an independent
+  expectation, and the only other copy of it lives inside the retained envelope,
+  which the native contract forbids using as its own expectation. A record log
+  written before this field refuses to replay rather than being read as a record
+  that can never be launched.
+
+  Note what this does NOT make possible yet: no record on a default install can
+  be READY (`coverage: unknown` from the native compiler, and
+  `executor_identity_unproven` with no configured implementation authority), so
+  a prepared offer to such a device declines `preparation_not_ready` and names
+  both reasons. The lane is complete and fail-closed; production counter and
+  identity authority are G4.
+
 - **Breaking (adapter seam)** — `RuntimeOperationStartInput` is a discriminated
   union. The ordinary start is `{ kind: 'instruction', instruction, ... }`; a
   prepared Execution is `{ kind: 'prepared', preparation, ... }` and carries no
