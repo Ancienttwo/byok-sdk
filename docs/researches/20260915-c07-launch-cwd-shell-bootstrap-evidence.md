@@ -292,3 +292,29 @@ cannot execute it where it lives.
 
 Until such a run exists, `docs/spec.md` keeps fact (c) as not verified. A
 configured CI step is scheduling, not a result.
+
+## The non-elevated Windows leg: the run that decided fact (c)
+
+Run 34984246100 (push, head 86675f4d), job 104432153979 "npm release pack/install
+(windows-latest, fixed Node)", step "Check graph, pack, and install as a freshly
+created NON-administrator local user": **success**, job success, run success.
+Raw lines, in order:
+
+- `[lowpriv] account=byoklp84246100a1 scratch=C:\byok-lowpriv-84246100a1 checkout=D:\a\byok-sdk\byok-sdk`, `account SID: S-1-5-21-…-1003`
+- `[lowpriv] whoami: runnervmvmocb\byoklp84246100a1`; groups include `BUILTIN\Users`, exclude `BUILTIN\Administrators`; `integrity label: Mandatory Label\Medium Mandatory Level`
+- `[lowpriv] negative control OK: C:\Windows is NOT writable by this token (access denied)`
+- `[lowpriv] negative control OK: C:\ is NOT writable by this token (access denied)` — the single load-bearing assumption held on the Server 2025 image
+- six `private dir OK` lines under the scratch root; `node` from the hosted toolcache, `bun` from the scratch copy
+- `trusted-launch-cwd.test.ts`: `22 passed | 3 skipped (25)` — the three skips are the POSIX-only cases (`it.skipIf(process.platform === 'win32' …)` at lines 54, 74, 190); the platform-default resolution case and its negative control are unconditional and passed
+- `[release-pack] installed Pi0.85.1002 detect/direct RPC with the real extension stack passed; prompts=0` — reachable only after `pi-launcher-smoke.mjs` asserted the reserved MCP server's own reported cwd equals the trusted directory; the `asserted fail-closed refusal instead` and `launch boundary unprovable` lines are absent
+- `[release-pack] keys -> Pi0.85.1002 RPC model/extension/custody passed; LLM requests=0`; `install tree closes to exact package versions (10 package(s))`
+- `[packed-cli-mcp] root: actual MCP tools/call passed`, `adapters: … passed`, `cli: … passed` — no `task.decline` receipt anywhere in the log
+- `[lowpriv] release pack and launch-cwd admission both completed under a non-administrator token`
+- teardown: `revoked *S-1-5-21-…-1003 on D:\a\byok-sdk\byok-sdk`, `revoked … on C:\byok-lowpriv-84246100a1`, `removed local account byoklp84246100a1`; `standard-user child exited with 0`
+
+What this proves: under a real non-elevated token on this runner, the default
+launch directory is admitted by the daemon's own proof and the whole packed
+forward chain runs to real `tools/call`. What it does not prove: anything about
+an elevated daemon (that path is the refusal documented above), the JS-handler
+or Job Object mechanics of the launcher (see the signal-case section), or hosts
+whose `C:\` ACL differs from the GitHub image.
