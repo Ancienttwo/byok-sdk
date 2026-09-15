@@ -31,6 +31,18 @@ for (const phase of ['detect', 'prepare'] as const) {
       let release!: () => void;
       const gate = new Promise<void>(resolve => { release = resolve; });
       cleanup.push(async () => { release(); await daemon.stop(); });
+      // Stage diagnostic for the deadline rows only (zero product change: a
+      // plain `daemon.subscribe` listener recording `observer.ts`'s own
+      // DaemonEvent kinds). If the replacement reaches no terminal
+      // observation, the failure names the last stage it did reach instead of
+      // reporting a bare "waitFor timed out".
+      const stages: string[] = [];
+      const unsubscribe = action === 'deadline'
+        ? daemon.subscribe(event => {
+            if ('taskId' in event && event.taskId === 'replacement'
+              && ['offered', 'claimed', 'started', 'failed'].includes(event.kind)) stages.push(event.kind);
+          })
+        : undefined;
       await daemon.pair('pairing-code'); await daemon.start();
       await server.waitFor(e => e.type === 'conn.hello');
       let entered = false;
@@ -62,11 +74,49 @@ for (const phase of ['detect', 'prepare'] as const) {
       detect.mockRestore(); prepare.mockRestore();
       if (action === 'shutdown') await daemon.start();
       server.send(offer('replacement'));
-      await server.waitFor(e => e.type === 'task.started' && e.task_id === 'replacement', 2000);
-      expect(adapter.startCalls).toHaveLength(1);
-      expect(server.received.some(e => e.type === 'task.claim' && e.task_id === 'blocked')).toBe(false);
-      adapter.sessions[0]!.emit({ type: 'turn_end' });
-      await server.waitFor(e => e.type === 'task.complete' && e.task_id === 'replacement');
+      if (action === 'deadline') {
+        // A' — the replacement is bounded by the SAME daemon-wide 250ms
+        // startup budget this row arms: `startupTimeoutMs` is read per offer
+        // off the runner's deps (`task-runner.ts:1970`) and the abort it
+        // schedules withdraws admission with the exact reason asserted below
+        // (`task-runner.ts:2831-2832`). How fast the replacement's own
+        // admission runs — canonical-home resolution, adapter preparation,
+        // `acquireExecution` — is not a product contract, so requiring
+        // `task.started` here asserted an unstated latency budget and failed
+        // in CI whenever a loaded runner spent that budget on real work. What
+        // this row actually owns is the deadline-RELEASE semantics: the
+        // blocked offer's reservation must come back, i.e. the replacement
+        // must never be declined `agent home busy`. That property is proven
+        // deterministically, with no clock in the assertion at all, by
+        // `admission-deadline-release-guard.test.ts` against one real
+        // `TaskRunner`; here it is kept only as the negative below.
+        const replacementDeclineReasons = (): string[] => server.received
+          .flatMap(e => (e.type === 'task.decline' && e.task_id === 'replacement' ? [e.payload.reason] : []));
+        let outcome: { kind: 'started' } | { kind: 'declined'; reason: string } | undefined;
+        await vi.waitFor(() => {
+          const declined = replacementDeclineReasons()[0];
+          if (declined !== undefined) { outcome = { kind: 'declined', reason: declined }; return; }
+          if (server.received.some(e => e.type === 'task.started' && e.task_id === 'replacement')) { outcome = { kind: 'started' }; return; }
+          throw new Error(`replacement reached no terminal observation; last stage: ${stages.at(-1) ?? '(none)'} (stages: ${stages.join(' -> ') || 'none'})`);
+        }, { timeout: 2000 });
+        // (a) whatever the outcome, the released reservation is non-negotiable.
+        for (const reason of replacementDeclineReasons()) expect(reason.startsWith('agent home busy')).toBe(false);
+        // (b) exactly one of the two accepted terminal observations.
+        if (outcome!.kind === 'declined') expect(outcome!.reason).toBe('runtime startup deadline exceeded');
+        else {
+          expect(adapter.startCalls).toHaveLength(1);
+          expect(server.received.some(e => e.type === 'task.claim' && e.task_id === 'blocked')).toBe(false);
+          adapter.sessions[0]!.emit({ type: 'turn_end' });
+          await server.waitFor(e => e.type === 'task.complete' && e.task_id === 'replacement');
+        }
+        unsubscribe?.();
+      } else {
+        await server.waitFor(e => e.type === 'task.started' && e.task_id === 'replacement', 2000);
+        expect(adapter.startCalls).toHaveLength(1);
+        expect(server.received.some(e => e.type === 'task.claim' && e.task_id === 'blocked')).toBe(false);
+        adapter.sessions[0]!.emit({ type: 'turn_end' });
+        await server.waitFor(e => e.type === 'task.complete' && e.task_id === 'replacement');
+      }
       await limit(daemon.stop());
     });
   }
