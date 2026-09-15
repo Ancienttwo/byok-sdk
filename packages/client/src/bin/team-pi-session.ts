@@ -20,6 +20,14 @@ export interface PiInteractionResponse { sessionId: string; requestId: string; r
 export interface TeamPiMcpConfig {
   mcpServers: Readonly<Record<string, { command: string; args?: readonly string[]; env?: Readonly<Record<string, string>> }>>;
   observation: Readonly<Record<string, never>>;
+  /**
+   * The extension applies this mode to `observation`, which a relay always
+   * leaves empty — so the value decides nothing here, and is fixed to `auto`
+   * rather than left to a caller. It is present because the task-scoped file
+   * has exactly one strict shape; a second shape for relays would be a second
+   * parser of the same file.
+   */
+  permissionMode: 'auto';
 }
 
 export interface PiTeamSessionOptions {

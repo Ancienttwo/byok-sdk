@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalPreparedValue } from '@earendil-works/pi-coding-agent/prepared-session-input';
 import {
+  classifyMcpToolsetServerObservation,
+  filterMcpObservationForPolicy,
   mcpToolsetToolNames,
   observeMcpServer,
   projectMcpTools,
@@ -111,33 +113,34 @@ describe('MCP projection — canonical ordering', () => {
   });
 });
 
+/**
+ * Load the REAL extension module against a real task-scoped config and
+ * capture what it registers, in order. Re-implementing the extension here
+ * would test this test, not the extension.
+ */
+async function registeredByRealExtension(
+  observation: Record<string, McpToolsetServerObservation>,
+  permissionMode = 'auto',
+): Promise<{ names: string[]; definitions: Array<{ name: string; description: string; parameters: unknown }> }> {
+  const dir = await tempDir();
+  const configPath = path.join(dir, 'mcp-config.json');
+  const mcpServers = Object.fromEntries(Object.keys(observation).map((name) => [name, serverSpec()]));
+  await fs.writeFile(configPath, JSON.stringify({ mcpServers, observation, permissionMode }));
+  process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
+
+  const definitions: Array<{ name: string; description: string; parameters: unknown }> = [];
+  const pi = {
+    registerTool: (tool: { name: string; description: string; parameters: unknown }) => {
+      definitions.push({ name: tool.name, description: tool.description, parameters: tool.parameters });
+    },
+    on: () => {},
+  };
+  const extension = await import('../adapters/pi/mcp-extension');
+  extension.default(pi as never);
+  return { names: definitions.map((tool) => tool.name), definitions };
+}
+
 describe('MCP projection — the ordinary extension and the core agree', () => {
-  /**
-   * Load the REAL extension module against a real task-scoped config and
-   * capture what it registers, in order. Re-implementing the extension here
-   * would test this test, not the extension.
-   */
-  async function registeredByRealExtension(
-    observation: Record<string, McpToolsetServerObservation>,
-  ): Promise<{ names: string[]; definitions: Array<{ name: string; description: string; parameters: unknown }> }> {
-    const dir = await tempDir();
-    const configPath = path.join(dir, 'mcp-config.json');
-    const mcpServers = Object.fromEntries(Object.keys(observation).map((name) => [name, serverSpec()]));
-    await fs.writeFile(configPath, JSON.stringify({ mcpServers, observation }));
-    process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
-
-    const definitions: Array<{ name: string; description: string; parameters: unknown }> = [];
-    const pi = {
-      registerTool: (tool: { name: string; description: string; parameters: unknown }) => {
-        definitions.push({ name: tool.name, description: tool.description, parameters: tool.parameters });
-      },
-      on: () => {},
-    };
-    const extension = await import('../adapters/pi/mcp-extension');
-    extension.default(pi as never);
-    return { names: definitions.map((tool) => tool.name), definitions };
-  }
-
   it('registers exactly the core projection, in the core\'s order', async () => {
     const observation = await realObservation();
     const projection = projectMcpTools(observation);
@@ -184,6 +187,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
     await fs.writeFile(configPath, JSON.stringify({
       mcpServers: { byokagentteam: serverSpec() },
       observation: {},
+      permissionMode: 'auto',
     }));
     process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
 
@@ -214,6 +218,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
         byokagentteam: serverSpec(),
       },
       observation,
+      permissionMode: 'auto',
     }));
     process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
 
@@ -244,6 +249,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
     await fs.writeFile(configPath, JSON.stringify({
       mcpServers: { byokagentteam: serverSpec(), byokagentmessage: serverSpec() },
       observation: {},
+      permissionMode: 'auto',
     }));
     process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
 
@@ -262,7 +268,11 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
   it('refuses to start when a projected server arrived without a daemon observation', async () => {
     const dir = await tempDir();
     const configPath = path.join(dir, 'mcp-config.json');
-    await fs.writeFile(configPath, JSON.stringify({ mcpServers: { salesko: serverSpec() }, observation: {} }));
+    await fs.writeFile(configPath, JSON.stringify({
+      mcpServers: { salesko: serverSpec() },
+      observation: {},
+      permissionMode: 'auto',
+    }));
     process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
     const extension = await import('../adapters/pi/mcp-extension');
     // Discovering the tools here would make the extension the authority.
@@ -282,6 +292,7 @@ describe('MCP projection — executor fingerprints', () => {
     const observation = await realObservation();
     const { toolExecutors } = await buildToolExecutorsFromObservation({
       observation,
+      permissionMode: 'auto',
       toolsetDefinitionRevisions: REVISIONS,
       nativeTools: [{ name: 'read', parameters: { type: 'object' } }],
       runtimeIdentity: RUNTIME,
@@ -299,6 +310,7 @@ describe('MCP projection — executor fingerprints', () => {
     const observation = await realObservation();
     const build = async () => buildToolExecutorsFromObservation({
       observation,
+      permissionMode: 'auto',
       toolsetDefinitionRevisions: REVISIONS,
       nativeTools: [],
       runtimeIdentity: RUNTIME,
@@ -331,10 +343,10 @@ describe('MCP projection — executor fingerprints', () => {
   ])('changes when %s changes', async (_label, mutate, revisions) => {
     const observation = await realObservation();
     const base = await buildToolExecutorsFromObservation({
-      observation, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
+      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
     });
     const after = await buildToolExecutorsFromObservation({
-      observation: mutate(observation), toolsetDefinitionRevisions: revisions, nativeTools: [], runtimeIdentity: RUNTIME,
+      observation: mutate(observation), permissionMode: 'auto', toolsetDefinitionRevisions: revisions, nativeTools: [], runtimeIdentity: RUNTIME,
     });
     expect(after.toolExecutors['mcp__salesko__find_leads'])
       .not.toBe(base.toolExecutors['mcp__salesko__find_leads']);
@@ -343,7 +355,7 @@ describe('MCP projection — executor fingerprints', () => {
   it('does NOT change when a schema is re-serialized with its keys in another order', async () => {
     const observation = await realObservation();
     const base = await buildToolExecutorsFromObservation({
-      observation, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
+      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
     });
     const reordered = {
       ...observation,
@@ -363,7 +375,7 @@ describe('MCP projection — executor fingerprints', () => {
       },
     };
     const after = await buildToolExecutorsFromObservation({
-      observation: reordered, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
+      observation: reordered, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
     });
     expect(after.toolExecutors).toEqual(base.toolExecutors);
   });
@@ -371,6 +383,7 @@ describe('MCP projection — executor fingerprints', () => {
   it('always reports the implementation identity as unproven', async () => {
     const { readinessReasons } = await buildToolExecutorsFromObservation({
       observation: await realObservation(),
+      permissionMode: 'auto',
       toolsetDefinitionRevisions: REVISIONS,
       nativeTools: [],
       runtimeIdentity: RUNTIME,
@@ -383,6 +396,7 @@ describe('MCP projection — executor fingerprints', () => {
   it('refuses to fingerprint a toolset with no definition revision', async () => {
     await expect(buildToolExecutorsFromObservation({
       observation: await realObservation(),
+      permissionMode: 'auto',
       toolsetDefinitionRevisions: { 'salesko.read.v1': REVISIONS['salesko.read.v1'] },
       nativeTools: [],
       runtimeIdentity: RUNTIME,
@@ -394,8 +408,8 @@ describe('MCP projection — grants derive from the same observation', () => {
   it('resolves grant names out of the observation object itself', async () => {
     const observation = await realObservation();
     const servers = Object.fromEntries(Object.keys(observation).map((name) => [name, serverSpec()]));
-    const resolution = resolveMcpToolsetGrants(servers, observation);
-    expect(resolution).toEqual({
+    const resolution = resolveMcpToolsetGrants(servers, observation, 'auto');
+    expect(resolution).toMatchObject({
       ok: true,
       grants: [
         { server: 'salesko', tools: ['echo', 'find_leads'] },
@@ -416,7 +430,166 @@ describe('MCP projection — grants derive from the same observation', () => {
       ...Object.fromEntries(Object.keys(observation).map((name) => [name, serverSpec()])),
       unobserved: serverSpec(),
     };
-    const resolution = resolveMcpToolsetGrants(servers, observation);
+    const resolution = resolveMcpToolsetGrants(servers, observation, 'auto');
     expect(resolution.ok).toBe(false);
+  });
+});
+
+/**
+ * One real server shaped like `salesko.read.v1` plus the propose tool that
+ * must never survive a restricted policy, classified through the SAME join the
+ * daemon performs (`classifyMcpToolsetServerObservation`) rather than by
+ * hand-writing `readOnly` flags a real device could never produce.
+ */
+const READ_TOOLS = [
+  'get_account', 'get_contact', 'get_lead', 'list_accounts',
+  'list_contacts', 'search_leads', 'summarize_pipeline',
+] as const;
+
+function saleskoShapedSpec() {
+  return serverSpec({
+    serverInfo: { name: 'byok-mcp-fixture-salesko', version: '1.0.0' },
+    tools: [
+      ...READ_TOOLS.map((name) => ({
+        name,
+        description: `${name} reads.`,
+        inputSchema: { type: 'object', properties: { id: { type: 'string' } } },
+      })),
+      {
+        name: 'propose_graph_change_set',
+        description: 'Propose a change set for human review.',
+        inputSchema: { type: 'object', properties: { body: { type: 'string' } }, required: ['body'] },
+      },
+    ],
+  });
+}
+
+async function classifiedObservation(
+  readOnlyTools: readonly string[] | null = [...READ_TOOLS],
+): Promise<Record<string, McpToolsetServerObservation>> {
+  const observed = await observeMcpServer('salesko', saleskoShapedSpec(), { env: ENV, timeoutMs: 15_000 });
+  return {
+    salesko: classifyMcpToolsetServerObservation(observed, {
+      toolsetId: 'salesko.read.v1',
+      readOnlyTools,
+    }),
+  };
+}
+
+describe('MCP projection — one policy filter, every consumer', () => {
+  it('classifies exactly the declared tools and nothing else', async () => {
+    const observation = await classifiedObservation();
+    expect(observation.salesko!.tools.map((tool) => [tool.name, tool.readOnly])).toEqual([
+      ['get_account', true],
+      ['get_contact', true],
+      ['get_lead', true],
+      ['list_accounts', true],
+      ['list_contacts', true],
+      ['propose_graph_change_set', false],
+      ['search_leads', true],
+      ['summarize_pipeline', true],
+    ]);
+  });
+
+  it('rejects a classification naming a tool the server does not expose', async () => {
+    // The declaration is stale configuration, not a smaller toolset: the
+    // operator classified something that no longer exists, so nothing else
+    // they said about this server can be trusted either.
+    await expect(classifiedObservation([...READ_TOOLS, 'get_invoice']))
+      .rejects.toThrow(/does not expose tool name\(s\) \["get_invoice"\]/u);
+  });
+
+  it('leaves every tool unclassified when the toolset declares nothing', async () => {
+    const observation = await classifiedObservation(null);
+    expect(observation.salesko!.tools.every((tool) => tool.readOnly === undefined)).toBe(true);
+  });
+
+  it('under readonly the extension registers exactly the classified read tools', async () => {
+    const observation = await classifiedObservation();
+    const allowed = filterMcpObservationForPolicy(observation, 'readonly');
+    expect(allowed.ok).toBe(true);
+    const expected = projectMcpTools((allowed as { observation: typeof observation }).observation)
+      .map((tool) => qualifiedMcpToolName(tool.serverName, tool.toolName));
+
+    const { names } = await registeredByRealExtension(observation, 'readonly');
+    expect(names).toEqual(expected);
+    expect(names).toEqual(READ_TOOLS.map((tool) => `mcp__salesko__${tool}`));
+    // Not registered, not merely refused at call time: the model never sees it.
+    expect(names).not.toContain('mcp__salesko__propose_graph_change_set');
+  });
+
+  it('under auto the same observation registers the propose tool too', async () => {
+    const { names } = await registeredByRealExtension(await classifiedObservation(), 'auto');
+    expect(names).toContain('mcp__salesko__propose_graph_change_set');
+    expect(names).toHaveLength(READ_TOOLS.length + 1);
+  });
+
+  it('freezes the SAME filtered set the ordinary extension registers', async () => {
+    // The single-projection property, extended to the policy: the prepared
+    // manifest and the ordinary session must not be able to disagree about
+    // which tools a mode allows.
+    const observation = await classifiedObservation();
+    const { names } = await registeredByRealExtension(observation, 'readonly');
+    const { toolExecutors } = await buildToolExecutorsFromObservation({
+      observation,
+      permissionMode: 'readonly',
+      toolsetDefinitionRevisions: { 'salesko.read.v1': `sha256:${'1'.repeat(64)}` },
+      nativeTools: [],
+      runtimeIdentity: '@byok-sdk/pi-coding-agent@0.85.1002+test',
+    });
+    expect(Object.keys(toolExecutors)).toEqual(names);
+  });
+
+  it('refuses to freeze a manifest for a mode the toolset carries no classification for', async () => {
+    await expect(buildToolExecutorsFromObservation({
+      observation: await classifiedObservation(null),
+      permissionMode: 'readonly',
+      toolsetDefinitionRevisions: { 'salesko.read.v1': `sha256:${'1'.repeat(64)}` },
+      nativeTools: [],
+      runtimeIdentity: '@byok-sdk/pi-coding-agent@0.85.1002+test',
+    })).rejects.toThrow(/declares no McpToolsetConfig\.readOnlyTools/u);
+  });
+
+  it('refuses a server the policy leaves with nothing callable', async () => {
+    const observation = await classifiedObservation([]);
+    expect(observation.salesko!.tools.every((tool) => tool.readOnly === false)).toBe(true);
+    expect(filterMcpObservationForPolicy(observation, 'readonly')).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('exposes no tool classified read-only'),
+    });
+  });
+
+  it('auto is every observed tool, classified or not', async () => {
+    const unclassified = await classifiedObservation(null);
+    expect(filterMcpObservationForPolicy(unclassified, 'auto')).toEqual({ ok: true, observation: unclassified });
+  });
+
+  it('confirm is every observed tool and needs no classification at all', async () => {
+    // Confirm gates each call on a human rather than on a tool set, so it is
+    // NOT a narrowing mode: an unclassified toolset must pass through it
+    // unchanged instead of being refused for a missing `readOnlyTools`.
+    const unclassified = await classifiedObservation(null);
+    expect(filterMcpObservationForPolicy(unclassified, 'confirm'))
+      .toEqual({ ok: true, observation: unclassified });
+    const classified = await classifiedObservation();
+    expect(filterMcpObservationForPolicy(classified, 'confirm'))
+      .toEqual({ ok: true, observation: classified });
+  });
+
+  it('plan narrows exactly like readonly', async () => {
+    // `daemon/policy.ts` ranks plan as the mode that produces NO side effects,
+    // so it may never be wider than readonly.
+    const observation = await classifiedObservation();
+    const plan = filterMcpObservationForPolicy(observation, 'plan');
+    const readonly = filterMcpObservationForPolicy(observation, 'readonly');
+    expect(plan).toEqual(readonly);
+    expect(projectMcpTools((plan as { observation: typeof observation }).observation)
+      .map((tool) => qualifiedMcpToolName(tool.serverName, tool.toolName)))
+      .toEqual(READ_TOOLS.map((tool) => `mcp__salesko__${tool}`));
+    // And it inherits readonly's fail-closed refusal, not auto's pass-through.
+    expect(filterMcpObservationForPolicy(await classifiedObservation(null), 'plan')).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('declares no McpToolsetConfig.readOnlyTools'),
+    });
   });
 });

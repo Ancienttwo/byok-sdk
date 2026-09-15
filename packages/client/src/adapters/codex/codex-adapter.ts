@@ -4,7 +4,7 @@ import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { promisify } from 'node:util';
-import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent, PermissionMode, TaskOfferPayload } from '@byok-sdk/protocol';
 import {
   PolicyUnsupportedError,
   SteerUnsupportedError,
@@ -181,7 +181,7 @@ export class CodexAdapter implements RuntimeAdapter {
     // per-tool approval contract: SDK-reserved helpers use their static
     // protocol tool list; host toolsets use exactly the daemon observation.
     // One version gate, then one exact read-back per server.
-    const toolsetGrants = resolveMcpToolsetGrants(input.mcpServers, input.mcpToolsetTools);
+    const toolsetGrants = resolveMcpToolsetGrants(input.mcpServers, input.mcpToolsetTools, input.policy.mode);
     if (!toolsetGrants.ok) {
       return { kind: 'reject', reason: `codex adapter cannot grant projected MCP toolset tools: ${toolsetGrants.reason}`, retryable: false };
     }
@@ -204,7 +204,7 @@ export class CodexAdapter implements RuntimeAdapter {
     return {
       kind: 'prepared',
       operation: {
-        start: (startInput) => this.startPrepared(startInput, mapping.args, modelId, command, toolsetGrants.grants, allGrants),
+        start: (startInput) => this.startPrepared(startInput, mapping.args, modelId, command, toolsetGrants.grants, allGrants, input.policy.mode),
       },
     };
   }
@@ -216,11 +216,13 @@ export class CodexAdapter implements RuntimeAdapter {
     command: string,
     preparedToolsetGrants: readonly McpToolsetGrant[],
     preparedMcpGrants: readonly McpToolsetGrant[],
+    /** The mode the grants were resolved under; re-filtering with any other would compare two different policies. */
+    permissionMode: PermissionMode,
   ): Promise<Session> {
     // Same fail-closed re-check the model selection below gets: the grants
     // were probed against the ADMISSION input, so start() may not arrive with
     // different MCP authority or a different tool observation.
-    const startGrants = resolveMcpToolsetGrants(startInput.mcpServers, startInput.mcpToolsetTools);
+    const startGrants = resolveMcpToolsetGrants(startInput.mcpServers, startInput.mcpToolsetTools, permissionMode);
     if (!startGrants.ok || grantFingerprint(startGrants.grants) !== grantFingerprint(preparedToolsetGrants)) {
       throw new RuntimeExecutionFailure({
         phase: 'start',
