@@ -22,6 +22,12 @@ export interface McpToolProjection {
   readonly toolName: string;
   readonly description: string;
   readonly inputSchema: unknown;
+  /**
+   * The operator's classification, carried through verbatim from the
+   * observation. Absent when the toolset declares none — see
+   * `McpClassifiedToolDescriptor`.
+   */
+  readonly readOnly?: boolean;
 }
 
 /**
@@ -65,6 +71,7 @@ export function projectMcpTools(
         toolName: tool.name,
         description: tool.description,
         inputSchema: tool.inputSchema,
+        ...(tool.readOnly === undefined ? {} : { readOnly: tool.readOnly }),
       }));
     }
   }
@@ -90,6 +97,70 @@ export function mcpToolsetToolNames(
     names[serverName] = Object.freeze(server.tools.map((tool) => tool.name).sort(compareCodeUnits));
   }
   return Object.freeze(names);
+}
+
+/** A policy-filtered observation, or the one reason the policy is inexpressible. */
+export type McpObservationPolicyResolution =
+  | { readonly ok: true; readonly observation: Readonly<Record<string, McpToolsetServerObservation>> }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * Reduce one observation to exactly the tools a permission mode allows — the
+ * ONE place any runtime's toolset policy is decided.
+ *
+ * `auto` is every observed tool. Any other mode keeps only the tools the
+ * device's operator classified read-only
+ * (`McpToolsetConfig.readOnlyTools`), and the excluded tools are excluded
+ * everywhere at once: they are not granted to claude or codex, not registered
+ * with pi, and not fingerprinted into a prepared manifest. There is no
+ * "register it and refuse the call" state, because a tool the model can see is
+ * a tool the model will spend tokens attempting.
+ *
+ * Two refusals, both fail-closed:
+ *
+ * - A tool with no classification at all means the toolset carries no
+ *   declaration. That is an INEXPRESSIBLE policy, not a small one, so it is
+ *   refused by name instead of resolving to an empty toolset — an operator who
+ *   has not classified a toolset should hear about the missing field, not
+ *   watch the task run with nothing.
+ * - A server left with no read-only tool would hand the task a server it may
+ *   not call at all. It was offered authority it cannot use, so the whole
+ *   admission is refused rather than half-satisfied.
+ *
+ * Applied to servers, not to reserved SDK helpers: those never enter an
+ * observation, and each carries the fixed grant its own protocol defines.
+ */
+export function filterMcpObservationForPolicy(
+  observation: Readonly<Record<string, McpToolsetServerObservation>>,
+  permissionMode: string,
+): McpObservationPolicyResolution {
+  if (permissionMode === 'auto') return { ok: true, observation };
+  const filtered: Record<string, McpToolsetServerObservation> = {};
+  for (const serverName of Object.keys(observation).sort(compareCodeUnits)) {
+    const server = observation[serverName]!;
+    const unclassified = server.tools.filter((tool) => tool.readOnly === undefined);
+    if (unclassified.length > 0) {
+      return {
+        ok: false,
+        reason: `permission mode ${JSON.stringify(permissionMode)} needs a per-tool read/mutation classification`
+          + ` for MCP toolset ${JSON.stringify(server.toolsetId)}, and this device's mcpToolsets configuration`
+          + ` declares no McpToolsetConfig.readOnlyTools for it`
+          + ` (server ${JSON.stringify(serverName)} tool(s) [${unclassified.map((tool) => JSON.stringify(tool.name)).join(', ')}]);`
+          + ` a classification is never inferred from tool names, descriptions, schemas,`
+          + ` or a server's own readOnlyHint`,
+      };
+    }
+    const tools = server.tools.filter((tool) => tool.readOnly === true);
+    if (tools.length === 0) {
+      return {
+        ok: false,
+        reason: `MCP toolset server ${JSON.stringify(serverName)} exposes no tool classified read-only,`
+          + ` so permission mode ${JSON.stringify(permissionMode)} leaves this task nothing it may call on it`,
+      };
+    }
+    filtered[serverName] = Object.freeze({ ...server, tools: Object.freeze(tools) });
+  }
+  return { ok: true, observation: Object.freeze(filtered) };
 }
 
 /** The task-scoped authority one Pi launch is handed: what to run, and exactly which tools exist. */

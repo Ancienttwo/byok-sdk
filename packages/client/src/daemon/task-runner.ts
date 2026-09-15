@@ -89,7 +89,11 @@ import {
   probeMcpServer,
   type McpToolsProbeOptions,
 } from './mcp-tools-probe';
-import type { McpServerObservation, McpToolsetServerObservation } from '../mcp/observation';
+import {
+  classifyMcpToolsetServerObservation,
+  type McpServerObservation,
+  type McpToolsetServerObservation,
+} from '../mcp/observation';
 import type { ResolvedAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
 import { prependAgentMemoryGuidance } from './memory-guidance';
 import type { ResolvedAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
@@ -2126,14 +2130,19 @@ export class TaskRunner {
             ...(probeCwd === undefined ? {} : { cwd: probeCwd }),
           });
           if (observation.tools.length === 0) throw new Error('tools/list reported no tools');
-          // The toolset id is the registry's fact about this server, joined on
-          // here so the adapter receives one self-describing record instead of
-          // an observation plus a parallel map that could disagree with it.
+          // The toolset id and the operator's read/mutation classification are
+          // the registry's facts about this server, joined on here so the
+          // adapter receives one self-describing record instead of an
+          // observation plus parallel maps that could disagree with it. The
+          // join is also where a STALE classification is caught: the config
+          // names the tools, the server says which exist, and a declared tool
+          // this server does not expose declines the task permanently.
           const toolsetId = resolvedMcp!.toolsetIdByServer.get(serverName);
-          if (toolsetId === undefined) {
+          const readOnlyTools = resolvedMcp!.readOnlyToolsByServer.get(serverName);
+          if (toolsetId === undefined || readOnlyTools === undefined) {
             throw new Error('observed a server that belongs to no projected toolset');
           }
-          return Object.freeze({ ...observation, toolsetId });
+          return classifyMcpToolsetServerObservation(observation, { toolsetId, readOnlyTools });
         }));
         const observed: Record<string, McpToolsetServerObservation> = {};
         let failure: { serverName: string; error: unknown } | undefined;
@@ -3069,6 +3078,14 @@ export class TaskRunner {
         ok: true;
         servers: Readonly<Record<string, McpStdioServerConfig>>;
         toolsetIdByServer: ReadonlyMap<string, string>;
+        /**
+         * Per server: the tool names its toolset declared read-only, or `null`
+         * when that toolset declares no classification at all. A server whose
+         * toolset classifies OTHER servers gets an empty list, not `null` —
+         * the declaration exists, it simply grants this server nothing, which
+         * is a different fact from "nobody classified this toolset".
+         */
+        readOnlyToolsByServer: ReadonlyMap<string, readonly string[] | null>;
       }
     | { ok: false; reason: string } {
     const registry = this.deps.getMcpToolsets?.();
@@ -3077,6 +3094,7 @@ export class TaskRunner {
     }
     const servers = Object.create(null) as Record<string, McpStdioServerConfig>;
     const toolsetIdByServer = new Map<string, string>();
+    const readOnlyToolsByServer = new Map<string, readonly string[] | null>();
     for (const toolsetId of requiredToolsets) {
       const toolset = registry.get(toolsetId);
       if (!toolset) {
@@ -3094,12 +3112,16 @@ export class TaskRunner {
           ...(server.args ? { args: Object.freeze([...server.args]) } : {}),
         });
         toolsetIdByServer.set(serverName, toolsetId);
+        readOnlyToolsByServer.set(
+          serverName,
+          toolset.readOnlyTools === undefined ? null : toolset.readOnlyTools[serverName] ?? [],
+        );
       }
     }
     if (Object.keys(servers).length === 0) {
       return { ok: false, reason: 'required MCP toolsets resolved to no servers; refusing to run without tools' };
     }
-    return { ok: true, servers: Object.freeze(servers), toolsetIdByServer };
+    return { ok: true, servers: Object.freeze(servers), toolsetIdByServer, readOnlyToolsByServer };
   }
 
   private async pump(active: ActiveTask): Promise<void> {

@@ -18,6 +18,7 @@ export {
 export type { McpStdioClientOptions, McpStdioServerSpec } from './client';
 
 export {
+  classifyMcpToolsetServerObservation,
   diffMcpObservation,
   jsonEquals,
   observeMcpServer,
@@ -25,6 +26,7 @@ export {
   GRANTABLE_TOOL_NAME,
 } from './observation';
 export type {
+  McpClassifiedToolDescriptor,
   McpObservationDrift,
   McpObservationDriftReason,
   McpServerObservation,
@@ -34,8 +36,13 @@ export type {
 } from './observation';
 
 export {
+  filterMcpObservationForPolicy,
   mcpToolsetToolNames,
   projectMcpTools,
   qualifiedMcpToolName,
 } from './projection';
-export type { McpLaunchProjection, McpToolProjection } from './projection';
+export type {
+  McpLaunchProjection,
+  McpObservationPolicyResolution,
+  McpToolProjection,
+} from './projection';
