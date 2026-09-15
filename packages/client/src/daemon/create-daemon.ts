@@ -107,6 +107,27 @@ import {
   type ShutdownReason,
   type TaskAssertionIssueResult,
 } from './control-protocol';
+import {
+  INPUT_PREPARATION_CANCEL_METHOD,
+  INPUT_PREPARATION_LOOKUP_METHOD,
+  INPUT_PREPARATION_PREPARE_METHOD,
+  parseInputPreparationCancelParams,
+  parseInputPreparationLookupParams,
+  parseInputPreparationRequestParams,
+  type InputPreparationResult,
+} from './control-protocol';
+import {
+  validateInputPreparationLimits,
+  type InputPreparationAuthorityResolver,
+  type InputPreparationCounterAdapter,
+  type InputPreparationLimitsPolicyV1,
+} from '../input-preparation';
+import {
+  createInputPreparationService,
+  InputPreparationRequestError,
+  type InputPreparationService,
+} from './input-preparation-service';
+import { createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
 import { decodeTeamMemberContext, encodeTeamMemberContext, LocalTeamWorkspace } from './team-workspace';
 import { McpToolsetRegistry, McpToolsetRevisionConflictError } from './toolset-registry';
 import { ConnectionManager } from './connection-manager';
@@ -599,6 +620,34 @@ export interface DaemonConfig {
    * someone left a config key behind.
    */
   deviceAssertion?: DeviceAssertionConfig;
+  /**
+   * B-P2 local primitive: the task-free `input_preparation.*` control surface
+   * (`docs/researches/runtime-input-preparation-contract.md` §10.3).
+   *
+   * OFF by default. An absent section keeps the whole feature disabled and
+   * makes all three methods answer `input_preparation_unconfigured` — there is
+   * no default limits policy, no default authority and no default counter, by
+   * the Owner-approved limits boundary of 2026-09-14. A PRESENT section with an
+   * invalid policy is a construction error, the same discipline
+   * `deviceAssertion` and the presence cadence already follow: a daemon that
+   * starts with an allowance nobody validated is a daemon whose operator
+   * believes a limit is in force.
+   */
+  inputPreparation?: InputPreparationDaemonConfig;
+}
+
+/**
+ * Every part of the local preparation surface is required together. There is no
+ * partial enablement: a policy without a counter, or a counter without an
+ * authority, would each be a surface that answers questions it cannot back.
+ */
+export interface InputPreparationDaemonConfig {
+  /** Required explicit byte / call / deadline / retention policy. No field has a default. */
+  limits: InputPreparationLimitsPolicyV1;
+  /** The trusted local device/Agent/Profile authority. Unavailable authority rejects. */
+  authorityResolver: InputPreparationAuthorityResolver;
+  /** The separately authorized counter. This package ships no fallback counting of any kind. */
+  counter: InputPreparationCounterAdapter;
 }
 
 export interface AgentEgressConfig {
@@ -1318,6 +1367,64 @@ export function buildDaemonWithAdapters(
   let shuttingDown = false;
 
   const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
+
+  /**
+   * B-P2 local primitive. Three facts are resolved here, once, at construction:
+   *
+   * 1. The limits policy is VALIDATED now, not on the first call. A present but
+   *    malformed policy is a construction error (same rule as the presence
+   *    cadence and the assertion allowlist); an ABSENT section leaves the whole
+   *    surface off, and all three methods answer `input_preparation_unconfigured`.
+   * 2. The native compiler binds to the verified installed artifact closure. If
+   *    that closure cannot be verified the feature does not silently degrade to
+   *    a caller-supplied identity — it answers `runtime_identity_unavailable`
+   *    and compiles nothing.
+   * 3. The service itself, which owns the durable record log under `storeDir`.
+   */
+  const inputPreparationLimits =
+    config.inputPreparation === undefined ? undefined : validateInputPreparationLimits(config.inputPreparation.limits);
+  let inputPreparationService: InputPreparationService | undefined;
+  let inputPreparationRuntimeError: unknown;
+  if (config.inputPreparation !== undefined && inputPreparationLimits !== undefined) {
+    try {
+      inputPreparationService = createInputPreparationService({
+        storeDir,
+        limits: inputPreparationLimits,
+        authorityResolver: config.inputPreparation.authorityResolver,
+        counter: config.inputPreparation.counter,
+        compiler: createPiInputPreparationCompiler(),
+      });
+    } catch (error) {
+      inputPreparationRuntimeError = error;
+    }
+  }
+
+  /** Maps this service's typed refusals onto the wire. No refusal is ever widened into a result. */
+  async function runInputPreparation(
+    call: (service: InputPreparationService) => Promise<InputPreparationResult['receipt']>,
+  ): Promise<InputPreparationResult> {
+    if (config.inputPreparation === undefined) {
+      throw new ControlError(
+        'input_preparation_unconfigured',
+        'this daemon is not configured for input preparation (DaemonConfig.inputPreparation is absent)',
+      );
+    }
+    if (inputPreparationService === undefined) {
+      throw new ControlError(
+        'runtime_identity_unavailable',
+        `the installed pi runtime closure could not be verified: ${inputPreparationRuntimeError instanceof Error ? inputPreparationRuntimeError.message : String(inputPreparationRuntimeError)}`,
+      );
+    }
+    if (shuttingDown) {
+      throw new ControlError('shutting_down', 'this daemon is shutting down and will not prepare new input');
+    }
+    try {
+      return { receipt: await call(inputPreparationService) };
+    } catch (error) {
+      if (error instanceof InputPreparationRequestError) throw new ControlError(error.code, error.message);
+      throw error;
+    }
+  }
   const teamWorkspaces = new LocalTeamWorkspace(storeDir);
   const store = new DeviceStore(storeDir, undefined, config.productId);
   const operationalHealth = new OperationalHealthTracker(storeDir);
@@ -2690,6 +2797,11 @@ export function buildDaemonWithAdapters(
     presenceDiscoveryPass = undefined;
     presencePublisher?.stop();
     presencePublisher = undefined;
+    // B-P2: abort every counter call this daemon owns. Their outcomes stay
+    // observable in the durable record — an aborted call becomes
+    // `counter_interrupted`, never a silent cancellation and never an automatic
+    // second call on restart (§10.3.5).
+    await attempt(() => inputPreparationService?.stop(), false);
     const stoppingOwnedPressureEngine = ownedPressureEngine;
     const stoppingOwnedJournal = ownedJournal;
     const maintenanceStopped = stoppingOwnedPressureEngine?.stop() ?? Promise.resolve();
@@ -3132,6 +3244,41 @@ export function buildDaemonWithAdapters(
         });
         return { deviceId: record.deviceId };
       },
+      /**
+       * B-P2 local primitive (§10.3.1). Task-free: no task, claim, Execution,
+       * nonce or tool grant is created by any of the three methods below, and
+       * the service they call holds no reference to `TaskRunner`.
+       *
+       * The HMAC handshake has already completed by the time dispatch reaches
+       * here — that proves a local device operator, and nothing more. Every
+       * claimed device / Agent / profile value in the params is re-validated
+       * against the configured authority inside the service, on EVERY call
+       * including `lookup` and `cancel`, which is what stops one local scope
+       * from reading or cancelling another's preparation.
+       */
+      [INPUT_PREPARATION_PREPARE_METHOD]: (params) =>
+        runInputPreparation((service) => {
+          const parsed = parseInputPreparationRequestParams(params);
+          if (!parsed) {
+            throw new ControlError(
+              'bad_request',
+              `${INPUT_PREPARATION_PREPARE_METHOD} requires exactly the one strict request shape; unknown fields are rejected`,
+            );
+          }
+          return service.prepare(parsed);
+        }),
+      [INPUT_PREPARATION_LOOKUP_METHOD]: (params) =>
+        runInputPreparation((service) => {
+          const parsed = parseInputPreparationLookupParams(params);
+          if (!parsed) throw new ControlError('bad_request', `${INPUT_PREPARATION_LOOKUP_METHOD} requires exactly {requestId, scope}`);
+          return service.lookup(parsed);
+        }),
+      [INPUT_PREPARATION_CANCEL_METHOD]: (params) =>
+        runInputPreparation((service) => {
+          const parsed = parseInputPreparationCancelParams(params);
+          if (!parsed) throw new ControlError('bad_request', `${INPUT_PREPARATION_CANCEL_METHOD} requires exactly {requestId, scope}`);
+          return service.cancel(parsed);
+        }),
       'toolsets.reload': (params) => {
         const parsed = parseToolsetsReloadParams(params);
         if (!parsed) {

@@ -20,6 +20,15 @@ import {
   randomNonceHex,
   timingSafeEqualHex,
 } from '../daemon/control-protocol';
+import {
+  INPUT_PREPARATION_CANCEL_METHOD,
+  INPUT_PREPARATION_LOOKUP_METHOD,
+  INPUT_PREPARATION_PREPARE_METHOD,
+  parseInputPreparationCancelParams,
+  parseInputPreparationLookupParams,
+  parseInputPreparationRequestParams,
+} from '../daemon/control-protocol';
+import { INPUT_PREPARATION_REQUEST_FORMAT, INPUT_PREPARATION_VERSION } from '../input-preparation';
 
 describe('control-protocol: endpoint path derivation', () => {
   it('controlSocketPath uses <storeDir>/control.sock when comfortably short', () => {
@@ -221,5 +230,107 @@ describe('control-protocol: NdjsonLineReader', () => {
   it('returns no lines when given no newline at all', () => {
     const reader = new NdjsonLineReader();
     expect(reader.push(Buffer.from('partial-no-newline'))).toEqual([]);
+  });
+});
+
+/**
+ * B-P2 local primitive: the three `input_preparation.*` param gates
+ * (`docs/researches/runtime-input-preparation-contract.md` §10.3.1).
+ *
+ * These parsers are the definition of what the daemon accepts, and they are
+ * exported for a host building its own caller — so an accidental relaxation
+ * here silently widens the public contract, not just the daemon's.
+ */
+describe('control-protocol: input_preparation param gates', () => {
+  const scope = { deviceId: 'device-1', agentRef: 'agent-1', profileId: 'profile-1', profileRevision: 'profile-rev-1' };
+
+  function validRequest(): Record<string, unknown> {
+    return {
+      format: INPUT_PREPARATION_REQUEST_FORMAT,
+      version: INPUT_PREPARATION_VERSION,
+      requestId: 'prep-1',
+      policyRevision: 'limits-rev-1',
+      scope: { ...scope },
+      source: { revision: 'src-rev-1', digest: 'src-digest-1' },
+      selection: {
+        model: {
+          id: 'glm-4.6',
+          name: 'GLM 4.6',
+          api: 'openai-completions',
+          provider: 'zai',
+          baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+          reasoning: false,
+          input: ['text'],
+          cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 200_000,
+          maxTokens: 8_192,
+        },
+        options: { cacheRetention: 'none', maxTokens: 4_096 },
+      },
+      snapshot: {
+        prompt: {
+          cwd: '/workspace',
+          selectedTools: ['read'],
+          toolSnippets: { read: 'snippet' },
+          promptGuidelines: [],
+          contextFiles: [{ path: 'AGENTS.md', content: 'x' }],
+          formattedSkills: '',
+          docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
+        },
+        messages: [{ role: 'user', content: 'hello', timestamp: 1 }],
+        tools: [{ name: 'read', description: 'read a file', parameters: { type: 'object', properties: {} } }],
+      },
+      toolExecutors: { read: 'exec:read@1' },
+    };
+  }
+
+  it('accepts exactly the one strict request shape and returns a private copy', () => {
+    const raw = validRequest();
+    const parsed = parseInputPreparationRequestParams(raw);
+    expect(parsed).toBeDefined();
+    expect(parsed?.requestId).toBe('prep-1');
+    expect(parsed?.snapshot.tools[0]?.name).toBe('read');
+    // A copy, not the caller's own arrays/objects.
+    expect(parsed?.snapshot.prompt.selectedTools).not.toBe((raw.snapshot as { prompt: { selectedTools: unknown } }).prompt.selectedTools);
+    expect(parsed?.toolExecutors).not.toBe(raw.toolExecutors);
+  });
+
+  it.each([
+    ['an unknown top-level field', (r: Record<string, unknown>) => ({ ...r, runtimeIdentity: 'forged' })],
+    ['a wrong format tag', (r: Record<string, unknown>) => ({ ...r, format: 'byok.input-preparation.request.v2' })],
+    ['a wrong version', (r: Record<string, unknown>) => ({ ...r, version: 2 })],
+    ['an unknown scope field', (r: Record<string, unknown>) => ({ ...r, scope: { ...scope, tenantId: 't' } })],
+    ['a non-openai-completions api', (r: Record<string, unknown>) => ({ ...r, selection: { ...(r.selection as object), model: { ...((r.selection as { model: object }).model), api: 'anthropic-messages' } } })],
+    ['an unsupported model field', (r: Record<string, unknown>) => ({ ...r, selection: { ...(r.selection as object), model: { ...((r.selection as { model: object }).model), compat: {} } } })],
+    ['an object tool choice', (r: Record<string, unknown>) => ({ ...r, selection: { ...(r.selection as object), options: { cacheRetention: 'none', maxTokens: 1, toolChoice: { type: 'function' } } } })],
+    ['an assistant message', (r: Record<string, unknown>) => ({ ...r, snapshot: { ...(r.snapshot as object), messages: [{ role: 'assistant', content: 'hi', timestamp: 1 }] } })],
+    ['multimodal message content', (r: Record<string, unknown>) => ({ ...r, snapshot: { ...(r.snapshot as object), messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }], timestamp: 1 }] } })],
+    ['no messages at all', (r: Record<string, unknown>) => ({ ...r, snapshot: { ...(r.snapshot as object), messages: [] } })],
+    ['a tool schema that is not an object', (r: Record<string, unknown>) => ({ ...r, snapshot: { ...(r.snapshot as object), tools: [{ name: 'read', description: 'd', parameters: 'schema' }] } })],
+    ['a duplicate tool name', (r: Record<string, unknown>) => ({ ...r, snapshot: { ...(r.snapshot as object), tools: [{ name: 'read', description: 'd', parameters: { type: 'object' } }, { name: 'read', description: 'd', parameters: { type: 'object' } }] }, toolExecutors: { read: 'e' } })],
+    ['executor identities that do not cover the tools', (r: Record<string, unknown>) => ({ ...r, toolExecutors: {} })],
+    ['an executor for a tool that is not present', (r: Record<string, unknown>) => ({ ...r, toolExecutors: { read: 'e', bash: 'e' } })],
+    ['an empty requestId', (r: Record<string, unknown>) => ({ ...r, requestId: '' })],
+    ['a null params value', () => null],
+    ['an array params value', () => []],
+  ])('rejects %s', (_label, mutate) => {
+    expect(parseInputPreparationRequestParams(mutate(validRequest()))).toBeUndefined();
+  });
+
+  it('gates lookup and cancel on exactly {requestId, scope}', () => {
+    expect(parseInputPreparationLookupParams({ requestId: 'prep-1', scope })).toEqual({ requestId: 'prep-1', scope });
+    expect(parseInputPreparationCancelParams({ requestId: 'prep-1', scope })).toEqual({ requestId: 'prep-1', scope });
+    for (const parse of [parseInputPreparationLookupParams, parseInputPreparationCancelParams]) {
+      expect(parse({ requestId: 'prep-1' })).toBeUndefined();
+      expect(parse({ scope })).toBeUndefined();
+      expect(parse({ requestId: 'prep-1', scope, reference: 'ref' })).toBeUndefined();
+      expect(parse({ requestId: 'prep-1', scope: { ...scope, deviceId: '' } })).toBeUndefined();
+    }
+  });
+
+  it('names the three methods the way every other unary method on this socket is named', () => {
+    expect(INPUT_PREPARATION_PREPARE_METHOD).toBe('input_preparation.prepare');
+    expect(INPUT_PREPARATION_LOOKUP_METHOD).toBe('input_preparation.lookup');
+    expect(INPUT_PREPARATION_CANCEL_METHOD).toBe('input_preparation.cancel');
   });
 });
