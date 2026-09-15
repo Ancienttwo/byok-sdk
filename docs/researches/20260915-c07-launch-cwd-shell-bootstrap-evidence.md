@@ -90,8 +90,12 @@ not provably plain Node and attests no interpreter is refused
 - The linux legs ran under Colima docker (linux/aarch64) on `oven/bun:1.4.0` and
   `oven/bun:1.4.0-alpine`. Not x86_64, not a real distro install.
 - darwin was verified on the development host only.
-- win32 has no runtime evidence here at all: the Node launcher path is covered by
-  unit tests and by the real-process test that the windows-latest CI leg runs.
+- win32 has no runtime evidence here at all. The Node launcher path is covered
+  by the code path and by unit tests; `launch-cwd-launcher.test.ts` is now
+  included in the windows-latest job configuration, which is scheduling and
+  not a result. Windows evidence exists only once that leg has run green on a
+  pushed candidate; until then this row stays code path + unit tests only
+  (`docs/spec.md`).
 - A launch-cwd PASS asserts WHERE the server starts. It asserts nothing about
   whether the launcher or the executor is the binary it claims to be — that is
   the separate attested-install work.

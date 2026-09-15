@@ -111,6 +111,17 @@ jobs:
           BYOK_TEST_AGENT_MEMORY_FS_BIN="$RUNNER_TEMP/byok-agent-memory-fs" \
             bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-fs-helper.test.ts
 
+      # The MCP launch working-directory launcher is the POSIX `/bin/sh`
+      # bootstrap on darwin, and this is the only macOS leg that runs a named
+      # client test file (`build-test`'s full `bun run test` is ubuntu-only).
+      # It is its own step, not another path appended to the whitelist above:
+      # a `vitest run` given several path filters exits 0 when one of them
+      # matches nothing, so a renamed or deleted file would silently stop
+      # being covered. A single filter makes that case `No test files found,
+      # exiting with code 1`.
+      - name: Run the MCP launch working-directory launcher test on macOS
+        run: bun run --filter @byok-sdk/client test -- src/__tests__/launch-cwd-launcher.test.ts
+
   execution-recovery-native:
     name: compiled execution recovery (macOS, Node 22.22, Bun 1.4)
     runs-on: macos-latest
@@ -313,6 +324,16 @@ jobs:
             src/__tests__/support-bundle.test.ts `
             src/__tests__/daemon-auth.test.ts `
             src/__tests__/daemon-stop-shutdown-parity.test.ts
+
+      # On win32 the launcher is `bin/byok-launch-cwd.mjs` on a plain Node
+      # host, and this leg is the only real Windows host that runs it. Its own
+      # step rather than another path in a whitelist above: `vitest run` with
+      # several path filters exits 0 when one of them matches nothing, so a
+      # rename would turn this into a green leg that covered nothing. With a
+      # single filter a missing file is `No test files found, exiting with
+      # code 1`.
+      - name: Run the MCP launch working-directory launcher test on Windows
+        run: bun run --filter @byok-sdk/client test -- src/__tests__/launch-cwd-launcher.test.ts
 
   # M3-K packageability guarantee smoke: proves the daemon CAN be compiled
   # into a single-file executable (bun build --compile / Node SEA) while

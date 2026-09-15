@@ -380,7 +380,20 @@ export class ClaudeAdapter implements RuntimeAdapter {
       if (launchBinding?.launcher !== undefined) {
         const wrapped = { cwd: launchBinding.cwd, launcher: launchBinding.launcher };
         for (const [name, server] of Object.entries(mcpServers)) {
-          mcpServers[name] = wrapMcpServerWithLaunchCwd(server as McpStdioServerConfig, wrapped);
+          try {
+            mcpServers[name] = wrapMcpServerWithLaunchCwd(server as McpStdioServerConfig, wrapped);
+          } catch (cause) {
+            // A refusal from the launcher wrapper is this adapter's own
+            // pre-spawn refusal, exactly like the ones above, and must reach
+            // TaskRunner as one: an untyped throw is projected as a generic
+            // `runtime adapter contract violation during start`, which hides
+            // the `launch_cwd_*` reason the operator needs to fix their MCP
+            // server configuration.
+            throw new RuntimeExecutionFailure({
+              phase: 'start', category: 'authority', retry: 'non-retryable',
+              reason: `prepared claude operation cannot launch an MCP server in the trusted launch directory: ${cause instanceof Error ? cause.message : 'launch_cwd_target_refused'}`,
+            }, { cause });
+          }
         }
       }
       await fs.writeFile(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });

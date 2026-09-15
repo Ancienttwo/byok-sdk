@@ -200,10 +200,14 @@ function spawnWrapped(server: McpStdioServerConfig, cwd: string): Promise<Run> {
 
 /**
  * The launcher this machine would really be handed, exercised end to end as a
- * real process pair on every CI leg: the POSIX `/bin/sh` bootstrap on
- * ubuntu-latest and macos-latest, `bin/byok-launch-cwd.mjs` on windows-latest.
- * Deliberately NOT skipped anywhere — the windows leg is the only real Windows
- * host evidence this boundary has.
+ * real process pair: the POSIX `/bin/sh` bootstrap on ubuntu-latest and
+ * macos-latest, `bin/byok-launch-cwd.mjs` on windows-latest. This file is
+ * included in the macos-latest and windows-latest job configuration
+ * (`.github/workflows/ci.yml`) — that is scheduling, not a result. Windows
+ * evidence exists only once the windows-latest leg has run green on a pushed
+ * candidate; until then the win32 launcher is code path + unit tests only,
+ * which is what `docs/spec.md` states. Deliberately NOT skipped anywhere: the
+ * windows leg is the only real Windows host this boundary can ever be run on.
  *
  * The binding is constructed directly from this module's own resolved trusted
  * directory rather than through a daemon: what is under test here is the

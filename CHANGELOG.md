@@ -64,8 +64,15 @@ and the D2 version number belongs to a separate SDK release contract.
   `CDPATH`), a server `command` starting with `-` (`launch_cwd_target_command_option_like`,
   which `exec` would read as one of its own options), and a relative server
   `command` (`launch_cwd_target_command_not_absolute`, a PATH lookup performed
-  after the chdir rather than the identity the binding attested). Hosts whose
-  configured MCP server `command` is a bare name must give an absolute path.
+  after the chdir rather than the identity the binding attested). Those
+  refusals apply to the claude `launcher-wrapped` path, which is the one
+  that rewrites an operator's own toolset `command`: a host configuring a
+  claude toolset server whose `command` is a bare name must give it an
+  absolute path. The pi (`direct-cwd`) and codex paths pass the operator's
+  `command` through unchanged — pi spawns the server itself with the
+  directory, and codex wraps the SDK's own `mcp-env` helper rather than the
+  configured command. Whether the absolute-path rule should be global is an
+  open question, tracked outside this entry.
 
 - The launch working-directory boundary now covers every MCP server a task
   GENERATES, not only the host toolsets the device projects. `TaskRunner` used

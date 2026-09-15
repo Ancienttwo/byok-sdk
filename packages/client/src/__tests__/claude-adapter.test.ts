@@ -418,6 +418,28 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     await expect(fs.access(configPath)).rejects.toThrow();
   });
 
+  it('refuses a toolset server whose command is a bare name with the launcher rule that rejected it, before any spawn', async () => {
+    const spawnFn = vi.fn();
+    const adapter = new ClaudeAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      spawnFn: spawnFn as unknown as SpawnFn,
+    });
+    const ctx = await makeCtx();
+    // A PATH lookup performed after the chdir is not the identity the binding
+    // attested, so the launcher wrapper refuses it. The refusal must reach
+    // TaskRunner as this adapter's own typed start failure: an untyped throw
+    // is projected as a generic adapter contract violation, which hides the
+    // rule that refused and leaves the operator with nothing to fix.
+    ctx.mcpServers = { salesko: { command: 'npx', args: ['@salesko/mcp'] } };
+    ctx.mcpToolsetTools = observationOf({ salesko: ['find_leads'] });
+
+    const failure = await startAdapter(adapter, baseTask, ctx).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({ phase: 'start', retry: 'non-retryable' });
+    expect((failure as RuntimeExecutionFailure).message).toMatch(/launch_cwd_target_command_not_absolute/u);
+    expect(spawnFn).not.toHaveBeenCalled();
+  });
+
   it('prepares a valid blob-ref without fetching it; TaskRunner resolves its string after claim', async () => {
     const adapter = fakeClaudeAdapter();
     const task: TaskOfferPayload = {

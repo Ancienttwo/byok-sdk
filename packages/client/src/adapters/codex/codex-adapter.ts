@@ -455,7 +455,19 @@ function codexMcpConfigArgs(
   for (const [name, server] of Object.entries(servers).sort(([left], [right]) => left.localeCompare(right))) {
     const key = `BYOK_MCP_PAYLOAD_${randomBytes(16).toString('hex').toUpperCase()}`;
     env[key] = JSON.stringify(server);
-    const helper = wrapMcpServerWithLaunchCwd(resolveSdkReservedHelperBin('mcp-env', helperHost), launchBinding);
+    let helper;
+    try {
+      helper = wrapMcpServerWithLaunchCwd(resolveSdkReservedHelperBin('mcp-env', helperHost), launchBinding);
+    } catch (cause) {
+      // Same reason as the claude adapter: a `launch_cwd_*` refusal is this
+      // adapter's own pre-spawn refusal and must arrive typed, or TaskRunner
+      // projects it as a generic `runtime adapter contract violation during
+      // start` and the operator never sees which rule refused.
+      throw new RuntimeExecutionFailure({
+        phase: 'start', category: 'authority', retry: 'non-retryable',
+        reason: `prepared codex operation cannot launch an MCP server in the trusted launch directory: ${cause instanceof Error ? cause.message : 'launch_cwd_target_refused'}`,
+      }, { cause });
+    }
     args.push('-c', `mcp_servers.${name}.command=${JSON.stringify(helper.command)}`);
     args.push('-c', `mcp_servers.${name}.args=${JSON.stringify([...(helper.args ?? [])])}`);
     args.push('-c', `mcp_servers.${name}.env.BYOK_MCP_ENV_KEY=${JSON.stringify(key)}`);

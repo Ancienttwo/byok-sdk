@@ -272,10 +272,16 @@ export interface RuntimeAdapterDescriptor {
    * server's `command`/`args` through this package's
    * `bin/byok-launch-cwd.mjs`.
    *
-   * Required of any adapter declaring `capabilities.mcpToolsets`: without it
-   * the daemon cannot know whether the boundary was established, and
-   * `TaskRunner` declines the offer non-retryably rather than admitting a
-   * toolset task whose servers might start in the Agent's own writable home.
+   * Optional, including for an adapter declaring `capabilities.mcpToolsets`.
+   * `TaskRunner` resolves the trusted directory for every such task and hands
+   * it to the adapter, but it resolves a LAUNCHER only for
+   * `'launcher-wrapped'`; a host platform where no launcher is available then
+   * declines the offer non-retryably. An adapter that declares nothing is
+   * admitted with no launcher, exactly like `'direct-cwd'`, and is itself
+   * responsible for starting its MCP server children in the trusted
+   * directory it was handed: the SDK cannot make a third-party adapter launch
+   * through a launcher by declining here. The three bundled adapters all
+   * declare their mode explicitly.
    */
   readonly mcpServerLaunch?: 'direct-cwd' | 'launcher-wrapped';
   /**
