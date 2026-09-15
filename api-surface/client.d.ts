@@ -8470,6 +8470,14 @@ export interface McpLaunchBinding {
  *   not the identity the binding attested. It is not resolved here — this
  *   module does not own a PATH lookup and is not the place to invent one — so
  *   it is refused.
+ *
+ * The last two are this wrapper's OWN boundary assertion, standing behind the
+ * registry rule rather than substituting for it: `./toolset-registry.ts` already
+ * refuses a non-absolute or option-like `command` at load, so an operator's
+ * configuration can never reach here carrying one. These stay because this
+ * function also wraps commands the registry never saw — the SDK's reserved
+ * helpers — and because a wrapper that quietly launched whatever it was handed
+ * would make the earlier rule the only thing holding the boundary up.
  */
 export declare function wrapMcpServerWithLaunchCwd(server: Readonly<McpStdioServerConfig>, binding: McpLaunchBinding & {
     readonly launcher: ResolvedMcpLaunchCwdLauncher;

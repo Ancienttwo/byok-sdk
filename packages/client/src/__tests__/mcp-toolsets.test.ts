@@ -579,6 +579,102 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
       ),
     ).toThrow(/accepts only command and args/);
   });
+
+  /**
+   * Owner ruling (2026-09-15): every configured MCP server `command` is an
+   * absolute path, refused at the registry rather than at one runtime's
+   * launcher. An absolute path is not executor attestation — it only means the
+   * device named a file instead of a PATH lookup performed in the child's
+   * environment after the launch-directory chdir.
+   */
+  it('refuses a non-absolute or option-like server command on every path that admits a definition', () => {
+    const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
+    const bare = { salesko: { mcpServers: { salesko: { command: 'salesko-agent' } } } };
+    const relative = { salesko: { mcpServers: { salesko: { command: './bin/salesko-agent' } } } };
+    const optionLike = { salesko: { mcpServers: { salesko: { command: '-n' } } } };
+
+    // Writer 1: daemon construction, which is the only place `DaemonConfig`
+    // reaches the registry.
+    expect(() => createDaemonWithAdapters({ ...baseConfig, mcpToolsets: bare }, [adapter]))
+      .toThrow(/mcp_toolset_command_not_absolute/);
+    expect(() => createDaemonWithAdapters({ ...baseConfig, mcpToolsets: relative }, [adapter]))
+      .toThrow(/mcp_toolset_command_not_absolute/);
+    expect(() => createDaemonWithAdapters({ ...baseConfig, mcpToolsets: optionLike }, [adapter]))
+      .toThrow(/mcp_toolset_command_option_like/);
+
+    // Writer 2: the registry's own constructor, reached directly by hosts that
+    // build one themselves.
+    expect(() => new McpToolsetRegistry(bare)).toThrow(/mcp_toolset_command_not_absolute/);
+    expect(() => new McpToolsetRegistry(optionLike)).toThrow(/mcp_toolset_command_option_like/);
+
+    // Writer 3: `reload`, the runtime update path — and it stays fail-closed,
+    // leaving the previously admitted state untouched.
+    const registry = new McpToolsetRegistry({
+      salesko: { mcpServers: { salesko: { command: '/opt/salesko/mcp' } } },
+    });
+    const before = registry.status();
+    expect(() => registry.reload(bare, before.revision)).toThrow(/mcp_toolset_command_not_absolute/);
+    expect(() => registry.reload(optionLike, before.revision)).toThrow(/mcp_toolset_command_option_like/);
+    expect(registry.status()).toEqual(before);
+    expect(registry.snapshot().toolsets.get('salesko')?.mcpServers.salesko?.command).toBe('/opt/salesko/mcp');
+  });
+
+  it('rejects rather than resolves, so no PATH lookup or normalization is attempted', () => {
+    // `env` is on PATH on every box this suite runs on; a registry that
+    // resolved would admit it by finding it, and the case would pass for the
+    // wrong reason. It must be refused on shape alone.
+    expect(() => new McpToolsetRegistry({ salesko: { mcpServers: { salesko: { command: 'env' } } } }))
+      .toThrow(/mcp_toolset_command_not_absolute/);
+    // A non-absolute spelling that WOULD normalize to an absolute path is
+    // refused too: normalizing here would be this module inventing a second
+    // authority over what the operator wrote.
+    expect(() => new McpToolsetRegistry({
+      salesko: { mcpServers: { salesko: { command: 'opt/../opt/salesko/mcp' } } },
+    })).toThrow(/mcp_toolset_command_not_absolute/);
+  });
+});
+
+/**
+ * The rule is one rule for all three runtimes: a refused definition is refused
+ * before anything downstream of the registry — the admission `tools/list` probe,
+ * the claim, and every adapter's `start()` — can act on it, so no adapter's
+ * launch shape (`direct-cwd` for pi, launcher-wrapped for codex/claude) decides
+ * whether the operator's command was acceptable.
+ */
+describe('absolute toolset command, consistently across every runtime', () => {
+  const baseConfig: DaemonConfig = {
+    localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
+    productId: 'test-product',
+    serverUrl: 'http://localhost:3000',
+    workspaceRoot: '/tmp/byok-test-workspace',
+  };
+  const configured = { salesko: { mcpServers: { salesko: { command: 'salesko-agent' } } } };
+
+  it('never probes, claims or starts a toolset whose command the registry refused, on pi, codex or claude', async () => {
+    for (const runtime of ['pi', 'codex', 'claude'] as const) {
+      const adapter = new StubRuntimeAdapter(runtime, { kind: 'available' }, MCP_CAPABLE);
+      expect(() => createDaemonWithAdapters({ ...baseConfig, mcpToolsets: configured }, [adapter]))
+        .toThrow(/mcp_toolset_command_not_absolute/);
+
+      // A daemon that refused the definition holds no snapshot carrying it, so
+      // an offer requiring it reaches the runner as an unconfigured id.
+      const sent: Envelope[] = [];
+      const probe = vi.fn(stubToolsProbe);
+      const runner = await makeRunner(adapter, sent, new Map<string, McpToolsetConfig>(), undefined, probe);
+      await runner.handleEnvelope(
+        createEnvelope(
+          'task.offer_with_toolsets',
+          { instruction: 'x', policy: { mode: 'auto' }, runtime, requiredToolsets: ['salesko'] },
+          { taskId: `task-refused-${runtime}`, seq: 1 },
+        ),
+      );
+
+      expect(probe).not.toHaveBeenCalled();
+      expect(adapter.startCalls).toHaveLength(0);
+      expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(false);
+      expect(sent.some((envelope) => envelope.type === 'task.decline')).toBe(true);
+    }
+  });
 });
 
 /**

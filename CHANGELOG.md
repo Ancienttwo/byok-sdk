@@ -64,15 +64,25 @@ and the D2 version number belongs to a separate SDK release contract.
   `CDPATH`), a server `command` starting with `-` (`launch_cwd_target_command_option_like`,
   which `exec` would read as one of its own options), and a relative server
   `command` (`launch_cwd_target_command_not_absolute`, a PATH lookup performed
-  after the chdir rather than the identity the binding attested). Those
-  refusals apply to the claude `launcher-wrapped` path, which is the one
-  that rewrites an operator's own toolset `command`: a host configuring a
-  claude toolset server whose `command` is a bare name must give it an
-  absolute path. The pi (`direct-cwd`) and codex paths pass the operator's
-  `command` through unchanged — pi spawns the server itself with the
-  directory, and codex wraps the SDK's own `mcp-env` helper rather than the
-  configured command. Whether the absolute-path rule should be global is an
-  open question, tracked outside this entry.
+  after the chdir rather than the identity the binding attested).
+
+  **Breaking (configuration)** — per the Owner ruling 2026-09-15, every
+  `DaemonConfig.mcpToolsets`
+  server `command` must be an absolute path, and the rule is global rather than
+  per-runtime. `McpToolsetRegistry` refuses a bare-name or relative command
+  (`mcp_toolset_command_not_absolute`) and one starting with `-`
+  (`mcp_toolset_command_option_like`) when the definition enters the registry —
+  at construction and at every `reload` — so the rejection happens before any
+  admission probe, claim or adapter `start()`, and pi, codex and claude all
+  receive only validated servers. Nothing is resolved, normalized or looked up
+  on PATH; the command is rejected, and an operator whose configuration carries
+  a bare `salesko-agent` must give it an absolute path. An absolute path is not
+  executor attestation: it says the device named one file, not that the file is
+  the product it claims to be. The SDK's own reserved helpers (agent-message,
+  agent-memory, approval, mcp-env) are unaffected — they are built from
+  `process.execPath` or an asserted-absolute host executable. The
+  `wrapMcpServerWithLaunchCwd` refusals above remain as a second, independent
+  fail-closed layer behind that rule.
 
 - The launch working-directory boundary now covers every MCP server a task
   GENERATES, not only the host toolsets the device projects. `TaskRunner` used

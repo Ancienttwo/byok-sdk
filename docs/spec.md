@@ -691,6 +691,20 @@ snapshot before claim, and rejects missing ids or colliding server names.
 Runtime selection also requires an adapter that advertises `mcpToolsets`; no
 semantic fallback to a tool-less runtime exists.
 
+`command` must be an absolute path. A definition carrying a bare name, a
+relative path (`mcp_toolset_command_not_absolute`) or a command starting with
+`-` (`mcp_toolset_command_option_like`) is rejected when it enters the registry
+— at daemon construction and at every reload — so it never reaches an admission
+probe, a claim, or a runtime `start()`. Nothing is resolved, normalized or
+looked up on PATH: a bare name is a lookup performed in the child's environment
+at spawn time, which would make the registry's content revision identify a
+string rather than a program, and the launch-directory boundary chdirs before
+that lookup would happen. The rule is global across pi, codex and claude. An
+absolute path is not executor attestation — it says the device named one file,
+not that the file is the product it claims to be. SDK-reserved helper servers
+are unaffected: they are built from `process.execPath` or an asserted-absolute
+host executable, never from operator configuration.
+
 Before admitting a toolset task the daemon starts each projected server and
 reads its own `initialize` + `tools/list` answer. That observation — full tool
 descriptors, the server's self-reported identity and the negotiated protocol
