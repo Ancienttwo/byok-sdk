@@ -149,6 +149,24 @@ const WINDOWS_BASE_ALLOWLIST: readonly string[] = [
 ];
 
 /**
+ * Environment variable names that change how an interpreter LOADS code, and
+ * which therefore take effect before the first statement of whatever it was
+ * asked to run — including this package's own `bin/byok-launch-cwd.mjs`,
+ * whose entire job is to establish a trusted working directory before an MCP
+ * server binary starts (`./trusted-launch-cwd.ts`). The launcher re-asserts
+ * this same list on itself, because it is also reached through a runtime CLI
+ * that composes its own child environment.
+ */
+export const LOADER_ENV_DENY_PATTERNS: readonly string[] = Object.freeze([
+  'NODE_OPTIONS',
+  'NODE_REPL_EXTERNAL_MODULE',
+  'NODE_PATH',
+  'BUN_*',
+  'DYLD_*',
+  'LD_*',
+]);
+
+/**
  * Hard deny — wins unconditionally over every allowlist layer above (the
  * platform baseline, an adapter's own declared requirements, AND the
  * operator's own local override): this SDK's own control-plane variables
@@ -159,7 +177,17 @@ const WINDOWS_BASE_ALLOWLIST: readonly string[] = [
  * the final word on every single variable, never short-circuited past by an
  * earlier allow match.
  */
-const HARD_DENY_PATTERNS: readonly string[] = ['BYOK_*'];
+const HARD_DENY_PATTERNS: readonly string[] = [
+  'BYOK_*',
+  // Loader injection. These change how an interpreter LOADS code, before the
+  // first statement of whatever it was asked to run — including this SDK's own
+  // `bin/byok-launch-cwd.mjs`, whose entire job is to establish a trusted cwd
+  // before a server binary starts. An operator `runtimeEnvironment.<id>.allow`
+  // entry naming one of them would hand the agent a way in ahead of every
+  // check the launcher makes, so the deny is absolute here exactly as
+  // `BYOK_*` is. See `./trusted-launch-cwd.ts`.
+  ...LOADER_ENV_DENY_PATTERNS,
+];
 
 /**
  * F1: `caseInsensitive` is `true` only on win32 (see {@link buildRuntimeEnv}).

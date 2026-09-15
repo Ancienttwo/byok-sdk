@@ -12,6 +12,8 @@ export type {
   RuntimeDetectResult,
   Session,
   GitWorkspaceConfig,
+  McpLaunchBinding,
+  McpLaunchCwdConfig,
   McpStdioServerConfig,
   McpToolsetConfig,
   McpToolsetLifecycleState,
@@ -20,7 +22,10 @@ export type {
   McpToolsetRegistryStatus,
   McpToolsetReloadReceipt,
   AgentEgressPolicy,
+  TrustedLaunchCwd,
+  TrustedLaunchCwdUnavailableReason,
 } from './types';
+export { resolveMcpLaunchCwdLauncher, resolveTrustedLaunchCwd } from './daemon/trusted-launch-cwd';
 export type { AgentRef } from './agent-home';
 export {
   AgentHomeError,
