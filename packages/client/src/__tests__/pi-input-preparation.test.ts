@@ -1,5 +1,5 @@
 import childProcess from 'node:child_process';
-import fsModule, { readFileSync } from 'node:fs';
+import fsModule, { existsSync, readFileSync, realpathSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -81,6 +81,107 @@ function compileRequest(overrides: Partial<CompilePreparedInputRequest> = {}): C
     toolExecutors: { read: 'exec:read@1', bash: 'exec:bash@1' },
     ...overrides,
   };
+}
+
+/**
+ * The static import closure of the native compile path, walked transitively.
+ *
+ * Only the two fork packages are DESCENDED into; anything else is recorded as
+ * an edge and left alone, because what matters about a third-party package here
+ * is that the pure path reaches it at all. Resolution mirrors Node's own: the
+ * nearest `node_modules/<name>` above the importer, then that package's
+ * `exports` map under the `import` condition, patterns included.
+ */
+const IMPORT_SPECIFIER =
+  /(?:\bfrom\s*|\bimport\s*|\bexport\s*)["']([^"']+)["']|\b(?:import|require)\s*\(\s*["']([^"']+)["']\s*\)/gu;
+
+const FORK_PACKAGES = new Set(['@earendil-works/pi-coding-agent', '@earendil-works/pi-ai']);
+
+function importSpecifiers(source: string): string[] {
+  return [...source.matchAll(IMPORT_SPECIFIER)].map((match) => match[1] ?? match[2]!);
+}
+
+function packageRootOf(name: string, fromDir: string): string | undefined {
+  let dir = fromDir;
+  for (;;) {
+    const candidate = path.join(dir, 'node_modules', name);
+    if (existsSync(path.join(candidate, 'package.json'))) return realpathSync(candidate);
+    const parent = path.dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+}
+
+function conditionTarget(target: unknown): string | undefined {
+  if (typeof target === 'string') return target;
+  if (typeof target !== 'object' || target === null) return undefined;
+  for (const condition of ['import', 'module', 'default']) {
+    if (condition in target) {
+      const resolved = conditionTarget((target as Record<string, unknown>)[condition]);
+      if (resolved !== undefined) return resolved;
+    }
+  }
+  return undefined;
+}
+
+function resolveSubpath(packageRoot: string, subpath: string): string | undefined {
+  const manifest = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8')) as {
+    main?: string;
+    exports?: unknown;
+  };
+  const key = subpath === '' ? '.' : `./${subpath}`;
+  const exports = manifest.exports;
+  if (exports === undefined) {
+    return key === '.' && manifest.main !== undefined ? path.join(packageRoot, manifest.main) : undefined;
+  }
+  if (typeof exports === 'string') return key === '.' ? path.join(packageRoot, exports) : undefined;
+  const map = exports as Record<string, unknown>;
+  if (map[key] !== undefined) {
+    const target = conditionTarget(map[key]);
+    return target === undefined ? undefined : path.join(packageRoot, target);
+  }
+  for (const [pattern, target] of Object.entries(map)) {
+    if (!pattern.includes('*')) continue;
+    const [prefix, suffix = ''] = pattern.split('*');
+    if (!key.startsWith(prefix!) || !key.endsWith(suffix)) continue;
+    const star = key.slice(prefix!.length, key.length - suffix.length);
+    const resolved = conditionTarget(target);
+    if (resolved !== undefined) return path.join(packageRoot, resolved.replace('*', star));
+  }
+  return undefined;
+}
+
+function walkNativeClosure(entry: string): { files: Set<string>; thirdParty: Set<string>; builtins: Set<string> } {
+  const files = new Set<string>();
+  const thirdParty = new Set<string>();
+  const builtins = new Set<string>();
+  const queue = [realpathSync(entry)];
+  while (queue.length > 0) {
+    const file = queue.pop()!;
+    if (files.has(file)) continue;
+    files.add(file);
+    for (const specifier of importSpecifiers(readFileSync(file, 'utf8'))) {
+      if (specifier.startsWith('node:')) {
+        builtins.add(specifier);
+        continue;
+      }
+      if (specifier.startsWith('.')) {
+        queue.push(realpathSync(path.resolve(path.dirname(file), specifier)));
+        continue;
+      }
+      const name = specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0]!;
+      if (!FORK_PACKAGES.has(name)) {
+        thirdParty.add(name);
+        continue;
+      }
+      const packageRoot = packageRootOf(name, path.dirname(file));
+      expect({ specifier, resolved: packageRoot !== undefined }).toEqual({ specifier, resolved: true });
+      const resolved = resolveSubpath(packageRoot!, specifier.slice(name.length).replace(/^\//u, ''));
+      expect({ specifier, exported: resolved !== undefined }).toEqual({ specifier, exported: true });
+      queue.push(realpathSync(resolved!));
+    }
+  }
+  return { files, thirdParty, builtins };
 }
 
 /** Restores every runtime trap this file installs, whether or not its test failed. */
@@ -205,15 +306,34 @@ describe('B-P2 native composition: pure compile', () => {
     expect(compiled.requestBody.length).toBeGreaterThan(0);
   });
 
-  it('the native compile closure imports no I/O builtin and reads no environment', () => {
-    // The binding-proof half of the purity claim: a named import a monkeypatch
-    // would miss is still visible as an import specifier here.
+  it('the native compile closure is transitive, and reaches exactly the declared third-party packages', () => {
+    // Derived, not listed. The hazard a hardcoded file list misses is an EDGE:
+    // `prepared-session-input.js` reaches the fork's provider layer, which
+    // reaches `openai`, and a fork bump can add another such edge without
+    // touching any file this test used to name. So the closure is walked from
+    // the one entry the compiler actually imports, through the two fork
+    // packages, and what it reaches outside them is pinned.
     const nativeRoot = path.join(path.dirname(fileURLToPath(import.meta.resolve(PI_PACKAGE_NAME))), '..');
-    const closure = [
-      path.join(nativeRoot, 'dist/core/prepared-session-input.js'),
-      path.join(nativeRoot, 'dist/core/input-preparation.js'),
-      path.join(nativeRoot, 'dist/core/system-prompt-renderer.js'),
-    ];
+    const walked = walkNativeClosure(path.join(nativeRoot, 'dist/core/prepared-session-input.js'));
+
+    // The third-party edges of the pure compile path, exactly. A fork bump that
+    // adds one fails HERE, where the addition is still a reviewable fact,
+    // rather than at some later runtime.
+    expect([...walked.thirdParty].sort()).toEqual(['openai', 'partial-json']);
+    // `node:fs` is reachable: `@byok-sdk/pi-ai`'s provider-env module lazily
+    // `require`s it on a Bun-binary-only branch. Nothing on this path calls it,
+    // which is what the runtime traps above prove — but pinning the reachable
+    // set keeps "reachable" from quietly growing into "called".
+    expect([...walked.builtins].sort()).toEqual(['node:fs']);
+
+    // The coding-agent half of the closure is still bound by the stricter rule:
+    // no I/O builtin and no environment read, in any file the entry reaches.
+    const codingAgentFiles = [...walked.files].filter((file) => file.startsWith(path.join(nativeRoot, 'dist')));
+    expect(codingAgentFiles.map((file) => path.basename(file)).sort()).toEqual([
+      'input-preparation.js',
+      'prepared-session-input.js',
+      'system-prompt-renderer.js',
+    ]);
     const forbidden = [
       'node:fs',
       'node:net',
@@ -225,7 +345,7 @@ describe('B-P2 native composition: pure compile', () => {
       'node:tls',
       'process.env',
     ];
-    for (const file of closure) {
+    for (const file of codingAgentFiles) {
       const source = readFileSync(file, 'utf8');
       for (const specifier of forbidden) {
         expect({ file: path.basename(file), specifier, present: source.includes(specifier) }).toEqual({

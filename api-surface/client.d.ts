@@ -9083,6 +9083,12 @@ export interface InputPreparationReceiptV1 {
  * - `durable_write_failed` — a durable write was uncertain. The record is
  *   quarantined and revalidated before anything else is written.
  * - `cancelled` — the record was cancelled, or its deadline elapsed.
+ *
+ * These are the codes this surface OWNS, not every code its three verbs can
+ * answer with. The control frame layer refuses first where it must, and the
+ * shared `shutting_down` (`daemon/control-protocol.ts`) is the one that reaches
+ * a well-formed, authorized call: a daemon that has begun shutting down answers
+ * it before the service is consulted at all.
  */
 export declare const INPUT_PREPARATION_ERROR_CODES: readonly ['input_preparation_unconfigured', 'bad_request', 'authority_unavailable', 'scope_denied', 'policy_revision_mismatch', 'runtime_identity_unavailable', 'unsupported_input', 'limit_exceeded', 'request_conflict', 'not_found', 'counter_unavailable', 'counter_interrupted', 'durable_write_failed', 'cancelled'];
 export type InputPreparationErrorCodeV1 = (typeof INPUT_PREPARATION_ERROR_CODES)[number];

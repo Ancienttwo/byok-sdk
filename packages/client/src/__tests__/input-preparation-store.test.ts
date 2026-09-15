@@ -6,14 +6,18 @@ import {
   InputPreparationConflictError,
   InputPreparationDurabilityError,
   InputPreparationIntegrityError,
+  InputPreparationLimitError,
   InputPreparationStore,
   inputPreparationRecordId,
+  type CounterReservationInput,
   type InputPreparationArtifact,
   type InputPreparationRecordKey,
+  type ReserveInput,
 } from '../daemon/input-preparation-store';
 import {
   INPUT_PREPARATION_ARTIFACT_FORMAT,
   INPUT_PREPARATION_VERSION,
+  type InputPreparationArtifactSummaryV1,
   type InputPreparationBindingV1,
 } from '../input-preparation';
 
@@ -86,6 +90,31 @@ function artifact(recordId: string, overrides: Partial<InputPreparationArtifact>
   };
 }
 
+const SUMMARY: InputPreparationArtifactSummaryV1 = {
+  requestDigest: 'artifact-digest-1',
+  envelopeDigest: 'envelope-digest-1',
+  toolManifestDigest: 'manifest-digest-1',
+  requestBytes: Buffer.byteLength(REQUEST_BODY, 'utf8'),
+  projectionBytes: 19,
+  coverage: 'unknown',
+};
+
+/** A reservation with bounds far above anything these durability tests write. */
+function reserve(overrides: Partial<ReserveInput> = {}): ReserveInput {
+  return { key: key(), requestDigest: 'digest-1', binding: binding(), maxInFlight: 100, ...overrides };
+}
+
+/** One counter reservation: the artifact write and the charge, as the store fuses them. */
+function commit(recordId: string, overrides: Partial<CounterReservationInput> = {}): CounterReservationInput {
+  return {
+    recordId,
+    artifact: artifact(recordId),
+    summary: SUMMARY,
+    bounds: { maxScopeAggregateBytes: 10_000_000, maxCounterCallsPerScope: 100 },
+    ...overrides,
+  };
+}
+
 async function openStore(storeDir: string, options: { retentionMs?: number; retryHorizonMs?: number; now?: () => number } = {}): Promise<InputPreparationStore> {
   const store = new InputPreparationStore({
     storeDir,
@@ -102,16 +131,16 @@ describe('B-P2 store: idempotency namespace', () => {
     const storeDir = await tmpStoreDir();
     const store = await openStore(storeDir);
 
-    const created = await store.reserve({ key: key(), requestDigest: 'digest-1', binding: binding() });
+    const created = await store.reserve(reserve());
     expect(created.kind).toBe('created');
     expect(created.record.state).toBe('reserved');
     expect(created.record.counterCalls).toBe(0);
 
-    const again = await store.reserve({ key: key(), requestDigest: 'digest-1', binding: binding() });
+    const again = await store.reserve(reserve());
     expect(again.kind).toBe('existing');
     expect(again.record.recordId).toBe(created.record.recordId);
 
-    await expect(store.reserve({ key: key(), requestDigest: 'digest-2', binding: binding() })).rejects.toBeInstanceOf(
+    await expect(store.reserve(reserve({ requestDigest: 'digest-2' }))).rejects.toBeInstanceOf(
       InputPreparationConflictError,
     );
   });
@@ -120,12 +149,10 @@ describe('B-P2 store: idempotency namespace', () => {
     const storeDir = await tmpStoreDir();
     const store = await openStore(storeDir);
 
-    const a = await store.reserve({ key: key(), requestDigest: 'digest-a', binding: binding() });
-    const b = await store.reserve({
-      key: key({ scopeId: 'scope-b' }),
-      requestDigest: 'digest-b',
-      binding: binding({ scopeId: 'scope-b' }),
-    });
+    const a = await store.reserve(reserve({ requestDigest: 'digest-a' }));
+    const b = await store.reserve(
+      reserve({ key: key({ scopeId: 'scope-b' }), requestDigest: 'digest-b', binding: binding({ scopeId: 'scope-b' }) }),
+    );
     expect(a.record.recordId).not.toBe(b.record.recordId);
     // And one scope's key never resolves in the other scope.
     expect(store.find(key({ scopeId: 'scope-c' }))).toBeUndefined();
@@ -134,7 +161,7 @@ describe('B-P2 store: idempotency namespace', () => {
   it('refuses to transition a terminal record', async () => {
     const storeDir = await tmpStoreDir();
     const store = await openStore(storeDir);
-    const created = await store.reserve({ key: key(), requestDigest: 'digest-1', binding: binding() });
+    const created = await store.reserve(reserve());
     await store.update(created.record.recordId, { state: 'counter_interrupted', detail: 'counter_outcome_unknown' });
     await expect(store.update(created.record.recordId, { state: 'counted' })).rejects.toBeInstanceOf(
       InputPreparationIntegrityError,
@@ -146,21 +173,8 @@ describe('B-P2 store: restart roundtrip', () => {
   it('preserves D byte-for-byte and every persisted fact across a fresh store instance', async () => {
     const storeDir = await tmpStoreDir();
     const first = await openStore(storeDir);
-    const created = await first.reserve({ key: key(), requestDigest: 'digest-1', binding: binding() });
-    const bytes = await first.putArtifact(artifact(created.record.recordId));
-    await first.update(created.record.recordId, {
-      state: 'counting',
-      artifact: {
-        requestDigest: 'artifact-digest-1',
-        envelopeDigest: 'envelope-digest-1',
-        toolManifestDigest: 'manifest-digest-1',
-        requestBytes: Buffer.byteLength(REQUEST_BODY, 'utf8'),
-        projectionBytes: 19,
-        coverage: 'unknown',
-      },
-      artifactBytes: bytes,
-      counterCalls: 1,
-    });
+    const created = await first.reserve(reserve());
+    const bytes = (await first.commitCounterReservation(commit(created.record.recordId))).artifactBytes;
 
     // A genuinely separate instance: nothing in memory carries over.
     const restarted = await openStore(storeDir);
@@ -179,21 +193,8 @@ describe('B-P2 store: restart roundtrip', () => {
   it('rejects an artifact whose stored identity drifted from its record binding', async () => {
     const storeDir = await tmpStoreDir();
     const store = await openStore(storeDir);
-    const created = await store.reserve({ key: key(), requestDigest: 'digest-1', binding: binding() });
-    const bytes = await store.putArtifact(artifact(created.record.recordId));
-    const record = await store.update(created.record.recordId, {
-      state: 'counting',
-      artifact: {
-        requestDigest: 'artifact-digest-1',
-        envelopeDigest: 'envelope-digest-1',
-        toolManifestDigest: 'manifest-digest-1',
-        requestBytes: 10,
-        projectionBytes: 5,
-        coverage: 'unknown',
-      },
-      artifactBytes: bytes,
-      counterCalls: 1,
-    });
+    const created = await store.reserve(reserve());
+    const record = await store.commitCounterReservation(commit(created.record.recordId));
 
     // Mutate the retained bytes behind the store's back. An artifact that no
     // longer proves the identity its receipt published is not usable evidence.
@@ -207,7 +208,7 @@ describe('B-P2 store: restart roundtrip', () => {
   it('refuses to replay a record log that is not intact', async () => {
     const storeDir = await tmpStoreDir();
     const store = await openStore(storeDir);
-    await store.reserve({ key: key(), requestDigest: 'digest-1', binding: binding() });
+    await store.reserve(reserve());
 
     const logPath = path.join(storeDir, 'input-preparation', 'records.jsonl');
     await fs.appendFile(logPath, '{"format":"byok.input-preparation.record"\n', 'utf8');
@@ -221,7 +222,7 @@ describe('B-P2 store: durable-write ambiguity', () => {
   it('surfaces a real append failure as a durability error, quarantines the log, and recovers only on explicit revalidation', async () => {
     const storeDir = await tmpStoreDir();
     const store = await openStore(storeDir);
-    const created = await store.reserve({ key: key(), requestDigest: 'digest-1', binding: binding() });
+    const created = await store.reserve(reserve());
 
     // A real I/O fault, not a stubbed throw: the append opens the log
     // O_APPEND|O_WRONLY, so a read-only log makes the write genuinely fail and
@@ -252,18 +253,22 @@ describe('B-P2 store: durable-write ambiguity', () => {
   it('surfaces a real artifact write failure as a durability error and retains no partial artifact', async () => {
     const storeDir = await tmpStoreDir();
     const store = await openStore(storeDir);
-    const created = await store.reserve({ key: key(), requestDigest: 'digest-1', binding: binding() });
+    const created = await store.reserve(reserve());
 
     const artifactDir = path.join(storeDir, 'input-preparation', 'artifacts');
     await fs.chmod(artifactDir, 0o500);
     try {
-      await expect(store.putArtifact(artifact(created.record.recordId))).rejects.toBeInstanceOf(
+      await expect(store.commitCounterReservation(commit(created.record.recordId))).rejects.toBeInstanceOf(
         InputPreparationDurabilityError,
       );
     } finally {
       await fs.chmod(artifactDir, 0o700);
     }
     expect(await fs.readdir(artifactDir)).toEqual([]);
+    // The charge belongs to the artifact: an artifact that was not retained
+    // must not have spent the scope's bytes or its counter-call allowance.
+    expect(store.get(created.record.recordId)?.state).toBe('reserved');
+    expect(store.scopeUsage('scope-a')).toEqual({ artifactBytes: 0, counterCalls: 0, liveRecords: 1 });
   });
 });
 
@@ -272,14 +277,16 @@ describe('B-P2 store: policy accounting and retention', () => {
     const storeDir = await tmpStoreDir();
     const store = await openStore(storeDir);
     for (const requestId of ['req-1', 'req-2']) {
-      const created = await store.reserve({ key: key({ requestId }), requestDigest: `digest-${requestId}`, binding: binding() });
+      const created = await store.reserve(reserve({ key: key({ requestId }), requestDigest: `digest-${requestId}` }));
       await store.update(created.record.recordId, { state: 'counting', artifactBytes: 100, counterCalls: 1 });
     }
-    const other = await store.reserve({
-      key: key({ scopeId: 'scope-b', requestId: 'req-3' }),
-      requestDigest: 'digest-other',
-      binding: binding({ scopeId: 'scope-b' }),
-    });
+    const other = await store.reserve(
+      reserve({
+        key: key({ scopeId: 'scope-b', requestId: 'req-3' }),
+        requestDigest: 'digest-other',
+        binding: binding({ scopeId: 'scope-b' }),
+      }),
+    );
     await store.update(other.record.recordId, { state: 'counting', artifactBytes: 5_000, counterCalls: 1 });
 
     const restarted = await openStore(storeDir);
@@ -293,9 +300,9 @@ describe('B-P2 store: policy accounting and retention', () => {
     const storeDir = await tmpStoreDir();
     let clock = 1_000_000;
     const store = await openStore(storeDir, { retentionMs: 10_000, retryHorizonMs: 20_000, now: () => clock });
-    const created = await store.reserve({ key: key(), requestDigest: 'digest-1', binding: binding() });
-    const bytes = await store.putArtifact(artifact(created.record.recordId));
-    await store.update(created.record.recordId, { state: 'counted', artifactBytes: bytes, counterCalls: 1 });
+    const created = await store.reserve(reserve());
+    await store.commitCounterReservation(commit(created.record.recordId));
+    await store.update(created.record.recordId, { state: 'counted' });
 
     const artifactPath = path.join(storeDir, 'input-preparation', 'artifacts', `${created.record.recordId}.json`);
     await expect(fs.stat(artifactPath)).resolves.toBeTruthy();
@@ -325,11 +332,68 @@ describe('B-P2 store: policy accounting and retention', () => {
     expect(restarted.list()).toEqual([]);
   });
 
+  it('stops counting an abandoned reservation against the in-flight budget once its record horizon passes', async () => {
+    const storeDir = await tmpStoreDir();
+    let clock = 1_000_000;
+    const store = await openStore(storeDir, { retentionMs: 10_000, retryHorizonMs: 20_000, now: () => clock });
+    await store.reserve(reserve());
+    expect(store.inFlightCount()).toBe(1);
+
+    // Still inside the horizon: the abandoned `reserved` record is real work as
+    // far as anyone knows.
+    clock += 29_000;
+    expect(store.inFlightCount()).toBe(1);
+
+    // Past its own record horizon: nothing can resume it, so it holds no slot.
+    clock += 2_000;
+    expect(store.inFlightCount()).toBe(0);
+    // And the record itself is still there until GC runs — expiry is the
+    // question the budget asks, not a thing GC has to have done first.
+    expect(store.find(key())).toBeDefined();
+  });
+
+  it('admits at most the in-flight bound, even for reservations raced against each other', async () => {
+    const storeDir = await tmpStoreDir();
+    const store = await openStore(storeDir);
+    const outcomes = await Promise.allSettled([
+      store.reserve(reserve({ key: key({ requestId: 'req-a' }), requestDigest: 'digest-a', maxInFlight: 1 })),
+      store.reserve(reserve({ key: key({ requestId: 'req-b' }), requestDigest: 'digest-b', maxInFlight: 1 })),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    const rejected = outcomes.find((outcome) => outcome.status === 'rejected');
+    expect((rejected as PromiseRejectedResult).reason).toBeInstanceOf(InputPreparationLimitError);
+    expect(((rejected as PromiseRejectedResult).reason as InputPreparationLimitError).detail).toBe(
+      'in_flight_limit_exceeded',
+    );
+    expect(store.inFlightCount()).toBe(1);
+  });
+
+  it('charges at most the counter-call bound, even for reservations raced against each other', async () => {
+    const storeDir = await tmpStoreDir();
+    const store = await openStore(storeDir);
+    const a = await store.reserve(reserve({ key: key({ requestId: 'req-a' }), requestDigest: 'digest-a' }));
+    const b = await store.reserve(reserve({ key: key({ requestId: 'req-b' }), requestDigest: 'digest-b' }));
+    const bounds = { maxScopeAggregateBytes: 10_000_000, maxCounterCallsPerScope: 1 } as const;
+
+    const outcomes = await Promise.allSettled([
+      store.commitCounterReservation(commit(a.record.recordId, { bounds })),
+      store.commitCounterReservation(commit(b.record.recordId, { bounds })),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    const rejected = outcomes.find((outcome) => outcome.status === 'rejected');
+    expect(((rejected as PromiseRejectedResult).reason as InputPreparationLimitError).detail).toBe(
+      'counter_call_limit_exceeded',
+    );
+    expect(store.scopeUsage('scope-a').counterCalls).toBe(1);
+  });
+
   it('never collects a pinned record, so a later G3b pin cannot race GC', async () => {
     const storeDir = await tmpStoreDir();
     let clock = 1_000_000;
     const store = await openStore(storeDir, { retentionMs: 10_000, retryHorizonMs: 1_000, now: () => clock });
-    const created = await store.reserve({ key: key(), requestDigest: 'digest-1', binding: binding() });
+    const created = await store.reserve(reserve());
     await store.update(created.record.recordId, { state: 'counted', counterCalls: 1 });
 
     // This package never writes `pin`; reaching in here proves the GC guard

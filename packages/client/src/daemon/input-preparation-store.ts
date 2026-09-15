@@ -21,9 +21,13 @@ import {
  *
  * One durable namespace, `(authenticated scope, Agent, preparation requestId)`,
  * bound to the entire normalized request digest. This file owns exactly that
- * namespace plus the retained artifact bytes; it owns no policy decision, no
- * authority resolution and no counter call. Everything above it is
+ * namespace plus the retained artifact bytes; it chooses no policy number,
+ * resolves no authority and places no counter call. Everything above it is
  * `input-preparation-service.ts`.
+ *
+ * It does enforce the bounds that service hands it, because a bound is only
+ * real where the write is: admission is decided inside the same serialized
+ * closure that appends the record, never on a value someone read first.
  *
  * Durability comes from the package's existing primitives, not from `rename`
  * alone: the record log is a `DurableJsonlFile` (append + fsync + directory
@@ -129,6 +133,32 @@ export class InputPreparationDurabilityError extends Error {
   }
 }
 
+/**
+ * A bound the caller passed in was already spent when the write was about to
+ * happen.
+ *
+ * The store owns no policy: every number it compares against arrives on the
+ * call that asks for the write. What it does own is the only moment at which
+ * that comparison is meaningful — inside the serialized tail, in the same
+ * closure as the append. A caller that read an aggregate and then asked for a
+ * write would be deciding on a snapshot another caller can invalidate before
+ * the write lands (§10.3.7).
+ */
+export type InputPreparationLimitDetail =
+  | 'in_flight_limit_exceeded'
+  | 'scope_aggregate_bytes_exceeded'
+  | 'counter_call_limit_exceeded';
+
+export class InputPreparationLimitError extends Error {
+  constructor(
+    readonly detail: InputPreparationLimitDetail,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'InputPreparationLimitError';
+  }
+}
+
 /** The stored record or artifact does not match what was persisted. */
 export class InputPreparationIntegrityError extends Error {
   constructor(message: string) {
@@ -153,6 +183,27 @@ export interface ReserveInput {
   readonly key: InputPreparationRecordKey;
   readonly requestDigest: string;
   readonly binding: InputPreparationBindingV1;
+  /**
+   * The caller's in-flight bound, enforced in the same closure that appends the
+   * new record. Never consulted for a key that already exists: reading back an
+   * existing durable fact is not a new admission.
+   */
+  readonly maxInFlight: number;
+}
+
+/** The bounds one counter reservation is admitted against. Supplied by the caller, compared here. */
+export interface CounterReservationBounds {
+  readonly maxScopeAggregateBytes: number;
+  readonly maxCounterCallsPerScope: number;
+}
+
+export interface CounterReservationInput {
+  readonly recordId: string;
+  /** The immutable artifact, written inside the same closure that charges its bytes. */
+  readonly artifact: InputPreparationArtifact;
+  /** The identities and sizes the receipt publishes. */
+  readonly summary: InputPreparationArtifactSummaryV1;
+  readonly bounds: CounterReservationBounds;
 }
 
 export type ReserveOutcome =
@@ -302,6 +353,10 @@ export class InputPreparationStore {
    * overwritten, because one of the two callers is wrong about what it asked
    * for and guessing which is how a counted artifact gets swapped underneath a
    * receipt.
+   *
+   * The in-flight admission is decided HERE, in the same closure as the append,
+   * because two different requestIds share no caller-side lock: a bound checked
+   * before this closure is a bound two concurrent admissions can both pass.
    */
   reserve(input: ReserveInput): Promise<ReserveOutcome> {
     return this.enqueue(async () => {
@@ -313,6 +368,12 @@ export class InputPreparationStore {
         return { kind: 'existing', record: existing } as const;
       }
       const createdAtMs = this.now();
+      if (this.inFlightCount(createdAtMs) >= input.maxInFlight) {
+        throw new InputPreparationLimitError(
+          'in_flight_limit_exceeded',
+          'this daemon has no remaining in-flight preparation allowance',
+        );
+      }
       const artifactExpiresAtMs = createdAtMs + this.options.retentionMs;
       const record: InputPreparationRecord = {
         format: INPUT_PREPARATION_RECORD_FORMAT,
@@ -393,11 +454,20 @@ export class InputPreparationStore {
     return { artifactBytes, counterCalls, liveRecords };
   }
 
-  /** Records that are neither terminal nor expired, across every scope. */
-  inFlightCount(): number {
+  /**
+   * Records that are neither terminal nor expired, across every scope.
+   *
+   * Expiry is part of the question, not a detail GC will get to eventually: a
+   * `reserved` record whose owning run died holds no work, and letting it keep
+   * a slot past its own record horizon would turn an abandoned key into a
+   * permanent hole in the in-flight allowance.
+   */
+  inFlightCount(nowMs = this.now()): number {
     let count = 0;
     for (const record of this.records.values()) {
-      if (!isTerminalInputPreparationState(record.state)) count += 1;
+      if (isTerminalInputPreparationState(record.state)) continue;
+      if (nowMs >= Date.parse(record.recordExpiresAt)) continue;
+      count += 1;
     }
     return count;
   }
@@ -406,17 +476,67 @@ export class InputPreparationStore {
     return path.join(this.artifactDir, `${recordId}.json`);
   }
 
-  /** Persist the immutable artifact, fsynced, 0600. D is stored verbatim. */
-  putArtifact(artifact: InputPreparationArtifact): Promise<number> {
+  /**
+   * Admit one counter call: check the caller's bounds, persist the immutable
+   * artifact (fsynced, 0600, D verbatim) and durably reserve the call — all in
+   * ONE serialized closure.
+   *
+   * Fusing the three is the point. Retained bytes and consumed counter calls
+   * are per-SCOPE aggregates, so they are shared by requests that share nothing
+   * else: different requestIds are different records, different keys and
+   * different caller-side locks. Checking the aggregate anywhere but here would
+   * be a read another admission can invalidate before the write lands, which is
+   * exactly how two concurrent requests both pass a bound of one.
+   *
+   * The artifact is written after the bounds pass and before the record is
+   * charged, so a refused admission leaves no retained bytes behind and a
+   * charged record always has its artifact on disk.
+   */
+  commitCounterReservation(input: CounterReservationInput): Promise<InputPreparationRecord> {
     return this.enqueue(async () => {
       this.assertOpen();
-      const serialized = JSON.stringify(artifact);
+      const current = this.records.get(input.recordId);
+      if (!current) throw new InputPreparationIntegrityError(`no input-preparation record ${input.recordId}`);
+      if (input.artifact.recordId !== input.recordId) {
+        throw new InputPreparationIntegrityError(
+          `prepared artifact ${input.artifact.recordId} does not belong to record ${input.recordId}`,
+        );
+      }
+      if (isTerminalInputPreparationState(current.state)) {
+        throw new InputPreparationIntegrityError(
+          `input-preparation record ${input.recordId} is terminal in state ${current.state} and cannot reserve a counter call`,
+        );
+      }
+      const serialized = JSON.stringify(input.artifact);
+      const artifactBytes = Buffer.byteLength(serialized, 'utf8');
+      const usage = this.scopeUsage(current.key.scopeId);
+      if (usage.artifactBytes + artifactBytes > input.bounds.maxScopeAggregateBytes) {
+        throw new InputPreparationLimitError(
+          'scope_aggregate_bytes_exceeded',
+          'this scope has no remaining prepared-artifact byte allowance',
+        );
+      }
+      if (usage.counterCalls + 1 > input.bounds.maxCounterCallsPerScope) {
+        throw new InputPreparationLimitError(
+          'counter_call_limit_exceeded',
+          'this scope has no remaining counter-call allowance',
+        );
+      }
       try {
-        await atomicWriteFile(this.artifactPath(artifact.recordId), serialized, { mode: 0o600, fsync: true });
+        await atomicWriteFile(this.artifactPath(input.artifact.recordId), serialized, { mode: 0o600, fsync: true });
       } catch (cause) {
         throw new InputPreparationDurabilityError('the prepared artifact could not be durably written', { cause });
       }
-      return Buffer.byteLength(serialized, 'utf8');
+      const next: InputPreparationRecord = {
+        ...current,
+        state: 'counting',
+        artifact: input.summary,
+        artifactBytes,
+        counterCalls: 1,
+        updatedAt: new Date(this.now()).toISOString(),
+      };
+      await this.append(next);
+      return next;
     });
   }
 

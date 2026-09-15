@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  INPUT_PREPARATION_ARTIFACT_FORMAT,
   INPUT_PREPARATION_RECEIPT_FORMAT,
   INPUT_PREPARATION_VERSION,
   type InputPreparationAuthorityGrantV1,
@@ -25,6 +26,7 @@ import {
 import {
   InputPreparationConflictError,
   InputPreparationDurabilityError,
+  InputPreparationLimitError,
   InputPreparationStore,
   inputPreparationRecordId,
   isTerminalInputPreparationState,
@@ -60,9 +62,12 @@ import {
  *     installed closure. Caller text contributes nothing to that identity.
  *  5. Durable reserve, before the counter is ever invoked. Same key and digest
  *     returns the existing fact; a different digest conflicts (§10.3.5).
- *  6. Pure compile, then durable artifact, then the durably reserved counter
- *     call, then the durably persisted result — in that order, so no success is
- *     ever reported that is not already on disk (§10.3.5, §10.3.8).
+ *  6. Pure compile, then ONE serialized closure that admits the call against the
+ *     per-scope bounds, retains the artifact and durably reserves the counter
+ *     call, then the counter, then the durably persisted result — in that
+ *     order, so no success is ever reported that is not already on disk, and no
+ *     bound is ever decided on a value another request can invalidate before
+ *     the write lands (§10.3.5, §10.3.7, §10.3.8).
  */
 
 // ---------------------------------------------------------------------------
@@ -284,6 +289,24 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     return next;
   }
 
+  /**
+   * Mark a preparation failed, and let a durable fault out.
+   *
+   * The refusal that led here is a fact about the request; whether it was
+   * RECORDED is a fact about this daemon's storage, and §10.3.8 says an
+   * uncertain durable write is never masked by the error that occasioned it. So
+   * a failed failure-marking replaces the refusal with `durable_write_failed`:
+   * the caller is told the record log is quarantined, which is the more
+   * dangerous of the two truths and the one that governs what may be retried.
+   */
+  async function markFailed(recordId: string, detail: string): Promise<void> {
+    try {
+      await store.update(recordId, { state: 'failed', detail });
+    } catch (cause) {
+      rethrowDurable(cause);
+    }
+  }
+
   function rethrowDurable(error: unknown): never {
     if (error instanceof InputPreparationDurabilityError) {
       throw new InputPreparationRequestError(
@@ -431,7 +454,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
         toolExecutors: request.toolExecutors,
       });
     } catch (cause) {
-      await store.update(record.recordId, { state: 'failed', detail: 'compile_rejected' }).catch(() => undefined);
+      await markFailed(record.recordId, 'compile_rejected');
       if (cause instanceof InputPreparationCompileError) {
         throw new InputPreparationRequestError('unsupported_input', cause.message, { cause });
       }
@@ -440,7 +463,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
 
     // --- retention budget -------------------------------------------------
     const artifact = {
-      format: 'byok.input-preparation.artifact',
+      format: INPUT_PREPARATION_ARTIFACT_FORMAT,
       version: INPUT_PREPARATION_VERSION,
       recordId: record.recordId,
       requestDigest: compiled.requestDigest,
@@ -451,26 +474,13 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       coverage: compiled.coverage,
       envelope: compiled.envelope,
     } as const;
-    const artifactBytes = Buffer.byteLength(JSON.stringify(artifact), 'utf8');
-    if (artifactBytes > limits.maxArtifactBytes) {
-      await store.update(record.recordId, { state: 'failed', detail: 'artifact_bytes_exceeded' }).catch(() => undefined);
+    // The per-ARTIFACT bound is a property of this one artifact, so it is
+    // decided here. The per-SCOPE aggregates are not: they are shared with
+    // every other request in the scope, so they are decided where they are
+    // written — inside the store's serialized tail, below.
+    if (Buffer.byteLength(JSON.stringify(artifact), 'utf8') > limits.maxArtifactBytes) {
+      await markFailed(record.recordId, 'artifact_bytes_exceeded');
       throw new InputPreparationRequestError('limit_exceeded', 'the prepared artifact exceeds the configured per-artifact byte policy');
-    }
-    const usage = store.scopeUsage(grant.scopeId);
-    if (usage.artifactBytes + artifactBytes > limits.maxScopeAggregateBytes) {
-      await store.update(record.recordId, { state: 'failed', detail: 'scope_aggregate_bytes_exceeded' }).catch(() => undefined);
-      throw new InputPreparationRequestError('limit_exceeded', 'this scope has no remaining prepared-artifact byte allowance');
-    }
-    if (usage.counterCalls + 1 > limits.maxCounterCallsPerScope) {
-      await store.update(record.recordId, { state: 'failed', detail: 'counter_call_limit_exceeded' }).catch(() => undefined);
-      throw new InputPreparationRequestError('limit_exceeded', 'this scope has no remaining counter-call allowance');
-    }
-
-    try {
-      await store.putArtifact(artifact);
-    } catch (cause) {
-      await store.update(record.recordId, { state: 'failed', detail: 'artifact_write_failed' }).catch(() => undefined);
-      rethrowDurable(cause);
     }
 
     // Nothing has been called yet, so an abort that has already landed is a
@@ -487,13 +497,16 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     }
 
     // --- reserve the counter call, durably, BEFORE invoking it -------------
-    // If this daemon dies after this write and before the result is persisted,
-    // restart finds `counting` and reports an interrupted outcome rather than
-    // silently placing a second call.
+    // One serialized closure retains the artifact and charges both per-scope
+    // aggregates against the policy this daemon enforces. If this daemon dies
+    // after that write and before the result is persisted, restart finds
+    // `counting` and reports an interrupted outcome rather than silently
+    // placing a second call.
     try {
-      await store.update(record.recordId, {
-        state: 'counting',
-        artifact: {
+      await store.commitCounterReservation({
+        recordId: record.recordId,
+        artifact,
+        summary: {
           requestDigest: compiled.requestDigest,
           envelopeDigest: compiled.envelopeDigest,
           toolManifestDigest: compiled.toolManifestDigest,
@@ -501,10 +514,17 @@ export function createInputPreparationService(options: InputPreparationServiceOp
           projectionBytes: compiled.projectionBytes,
           coverage: compiled.coverage,
         },
-        artifactBytes,
-        counterCalls: 1,
+        bounds: {
+          maxScopeAggregateBytes: limits.maxScopeAggregateBytes,
+          maxCounterCallsPerScope: limits.maxCounterCallsPerScope,
+        },
       });
     } catch (cause) {
+      if (cause instanceof InputPreparationLimitError) {
+        await markFailed(record.recordId, cause.detail);
+        throw new InputPreparationRequestError('limit_exceeded', cause.message, { cause });
+      }
+      await markFailed(record.recordId, 'artifact_write_failed');
       rethrowDurable(cause);
     }
 
@@ -620,17 +640,21 @@ export function createInputPreparationService(options: InputPreparationServiceOp
 
     return withRecordLock(recordId, async () => {
       await store.gc(now()).catch(rethrowDurable);
-      if (store.inFlightCount() >= limits.maxInFlight) {
-        throw new InputPreparationRequestError('limit_exceeded', 'this daemon has no remaining in-flight preparation allowance');
-      }
       let outcome;
       try {
+        // The in-flight bound travels WITH the reservation: two different
+        // requestIds take two different record locks, so the only place the
+        // admission and the append cannot be pulled apart is inside the store.
         outcome = await store.reserve({
           key,
           requestDigest,
           binding: buildBinding(request, grant, target, requestDigest),
+          maxInFlight: limits.maxInFlight,
         });
       } catch (cause) {
+        if (cause instanceof InputPreparationLimitError) {
+          throw new InputPreparationRequestError('limit_exceeded', cause.message, { cause });
+        }
         if (cause instanceof InputPreparationConflictError) {
           throw new InputPreparationRequestError(
             'request_conflict',

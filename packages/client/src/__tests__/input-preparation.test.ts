@@ -614,6 +614,114 @@ describe('B-P2 service: byte, call and in-flight policy', () => {
   });
 });
 
+describe('B-P2 service: bounds hold under concurrent distinct requests', () => {
+  /**
+   * Two different requestIds are two different records, two different keys and
+   * two different caller-side locks: nothing in this service serializes them.
+   * A bound that is read and then acted on is therefore a bound both of them
+   * pass, which is why each of these three is decided inside the store's
+   * serialized tail, in the same closure as its write.
+   */
+  async function raced(
+    service: InputPreparationService,
+    policyRevision: string,
+  ): Promise<{ counted: number; refusals: InputPreparationRequestError[] }> {
+    const outcomes = await Promise.allSettled([
+      service.prepare(request({ requestId: 'prep-a', policyRevision })),
+      service.prepare(request({ requestId: 'prep-b', policyRevision })),
+    ]);
+    const counted = outcomes.filter(
+      (outcome) => outcome.status === 'fulfilled' && outcome.value.state === 'counted',
+    ).length;
+    const refusals = outcomes
+      .filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected')
+      .map((outcome) => outcome.reason as InputPreparationRequestError);
+    for (const refusal of refusals) expect(refusal).toBeInstanceOf(InputPreparationRequestError);
+    return { counted, refusals };
+  }
+
+  it('admits exactly one concurrent request under an in-flight bound of one', async () => {
+    const limits = validateInputPreparationLimits({ ...LIMITS, revision: 'limits-rev-race-inflight', maxInFlight: 1 });
+    const counter = fixtureCounter();
+    const service = await makeService({ limits, counter });
+
+    const { counted, refusals } = await raced(service, limits.revision);
+    expect(counted).toBe(1);
+    expect(refusals.map((refusal) => refusal.code)).toEqual(['limit_exceeded']);
+    expect(counter.calls).toHaveLength(1);
+  });
+
+  it('places exactly one counter call under a per-scope allowance of one', async () => {
+    const limits = validateInputPreparationLimits({
+      ...LIMITS,
+      revision: 'limits-rev-race-calls',
+      maxCounterCallsPerScope: 1,
+    });
+    const counter = fixtureCounter();
+    const service = await makeService({ limits, counter });
+
+    const { counted, refusals } = await raced(service, limits.revision);
+    expect(counted).toBe(1);
+    expect(refusals.map((refusal) => refusal.code)).toEqual(['limit_exceeded']);
+    expect(counter.calls).toHaveLength(1);
+    expect(service.store.scopeUsage('scope:device-1').counterCalls).toBe(1);
+    expect(service.store.list().filter((record) => record.state === 'failed').map((record) => record.detail)).toEqual([
+      'counter_call_limit_exceeded',
+    ]);
+  });
+
+  it('retains exactly one artifact when the second concurrent request would exceed the scope aggregate', async () => {
+    const limits = validateInputPreparationLimits({
+      ...LIMITS,
+      revision: 'limits-rev-race-bytes',
+      maxArtifactBytes: 3_000,
+      maxScopeAggregateBytes: 3_000,
+    });
+    const counter = fixtureCounter();
+    const service = await makeService({ limits, counter, compiler: stubCompiler({ body: () => 'x'.repeat(1_500) }) });
+
+    const { counted, refusals } = await raced(service, limits.revision);
+    expect(counted).toBe(1);
+    expect(refusals.map((refusal) => refusal.code)).toEqual(['limit_exceeded']);
+    expect(counter.calls).toHaveLength(1);
+    expect(service.store.scopeUsage('scope:device-1').artifactBytes).toBeLessThanOrEqual(3_000);
+    expect(service.store.list().filter((record) => record.state === 'failed').map((record) => record.detail)).toEqual([
+      'scope_aggregate_bytes_exceeded',
+    ]);
+  });
+});
+
+describe('B-P2 service: durable-write ambiguity is never masked', () => {
+  it('answers durable_write_failed when the failure marking cannot be written, and stays latched', async () => {
+    const storeDir = await tmpStoreDir();
+    const logPath = path.join(storeDir, 'input-preparation', 'records.jsonl');
+    const counter = fixtureCounter();
+    const service = await makeService({
+      storeDir,
+      counter,
+      compiler: {
+        ...stubCompiler(),
+        async compile(): Promise<CompiledPreparedInput> {
+          // A real I/O fault, landing between the reservation and the refusal:
+          // the compile refusal below has to be RECORDED, and the log cannot
+          // take the write.
+          await fs.chmod(logPath, 0o400);
+          throw new InputPreparationCompileError('stub refuses this input');
+        },
+      },
+    });
+
+    // The refusal the caller is told about is the DANGEROUS one: the record log
+    // is quarantined, which governs what may be retried — not `unsupported_input`.
+    expect(await codeOf(service.prepare(request()))).toBe('durable_write_failed');
+
+    await fs.chmod(logPath, 0o600);
+    // The latch outlives the fault, exactly as it does for any other durable write.
+    expect(await codeOf(service.prepare(request({ requestId: 'prep-2' })))).toBe('durable_write_failed');
+    expect(counter.calls).toEqual([]);
+  });
+});
+
 describe('B-P2 service: restart reconciliation', () => {
   it('turns a crashed counting record into an observable interruption, never a resumed call', async () => {
     const storeDir = await tmpStoreDir();

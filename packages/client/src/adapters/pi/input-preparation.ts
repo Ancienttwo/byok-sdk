@@ -1,10 +1,7 @@
 import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import {
-  prepareCodingAgentSessionInput,
-  type PreparedSessionInputV1,
-} from '@earendil-works/pi-coding-agent/prepared-session-input';
+import type { PreparedSessionInputV1 } from '@earendil-works/pi-coding-agent/prepared-session-input';
 import type {
   InputPreparationModelV1,
   InputPreparationOptionsV1,
@@ -33,7 +30,28 @@ import { PI_PACKAGE_NAME, resolvePiRuntimeIdentity } from './resolve-bin';
  * no network. Step 1 reads the installed manifest exactly once per compiler
  * instance, at construction — outside the pure stage — so a compile call
  * performs no filesystem work at all.
+ *
+ * The native subpath is loaded with a DYNAMIC import, once, on the first
+ * compile. Its own module graph reaches the fork's provider layer and the
+ * `openai` client, and this module is reachable from the SDK root through the
+ * daemon; a static import would therefore evaluate that whole graph for every
+ * consumer of `@byok-sdk/client`, including the ones that never prepare input.
+ * Identity verification stays at construction, because it reads the installed
+ * MANIFEST rather than the module.
  */
+
+type PrepareCodingAgentSessionInput =
+  typeof import('@earendil-works/pi-coding-agent/prepared-session-input').prepareCodingAgentSessionInput;
+
+/** Memoized so the native graph is evaluated at most once per process. */
+let nativePrepare: Promise<PrepareCodingAgentSessionInput> | undefined;
+
+function loadNativePrepare(): Promise<PrepareCodingAgentSessionInput> {
+  nativePrepare ??= import('@earendil-works/pi-coding-agent/prepared-session-input').then(
+    (module) => module.prepareCodingAgentSessionInput,
+  );
+  return nativePrepare;
+}
 
 /** The immutable compile output, in this package's own vocabulary. */
 export interface CompiledPreparedInput {
@@ -212,9 +230,20 @@ export function createPiInputPreparationCompiler(): InputPreparationCompiler {
   return {
     runtime,
     async compile(request: CompilePreparedInputRequest): Promise<CompiledPreparedInput> {
+      // Outside the try below on purpose: a native package that cannot be
+      // LOADED is a closure fault, not an input this compiler refused.
+      let prepare: PrepareCodingAgentSessionInput;
+      try {
+        prepare = await loadNativePrepare();
+      } catch (cause) {
+        throw new InputPreparationRuntimeIdentityError(
+          `${PI_PACKAGE_NAME}/prepared-session-input could not be loaded; no input can be prepared`,
+          { cause },
+        );
+      }
       let envelope: PreparedSessionInputV1;
       try {
-        envelope = await prepareCodingAgentSessionInput({
+        envelope = await prepare({
           // Structurally the native `CodingAgentInputSnapshot`. The wire cannot
           // carry a typebox `TSchema` brand or a `Tool`'s executable fields, so
           // the already key-exact validated JSON schema crosses here as the
