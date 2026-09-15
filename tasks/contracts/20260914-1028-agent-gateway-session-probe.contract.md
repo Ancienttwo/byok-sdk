@@ -21,7 +21,7 @@ Stop on mismatched native identity, unsupported native endpoint, credential disc
 Wrong target delivery, uncorrelated outcome, session replacement or duplicate durable messages during recovery disproves the claimed boundary.
 ## Change Assessment
 ```json
-{"protocol":1,"oracles":[]}
+{"protocol":1,"oracles":[{"id":"gateway-deterministic-verification","kind":"deterministic_test","paths":["*"]},{"id":"gateway-native-result-readback","kind":"runtime_readback","paths":["*"]}]}
 ```
 ## Acceptance Policy
 ```json
@@ -41,6 +41,7 @@ allowed_paths:
   - scripts/experiments/agent-gateway/probe.py
   - scripts/experiments/agent-gateway/verify.py
   - tasks/current.md
+  - .ai/harness/policy.json
   - docs/architecture/.projection-manifest.json
   - docs/architecture/modules/sdk/sdk-root.md
   - plans/plan-20260906-0450-release-014-prep.md
@@ -69,7 +70,7 @@ exit_criteria:
 ```
 ## Verification Plan
 ```json
-{"protocol":1,"checks":[{"id":"syntax","kind":"command","command":"python3 -m py_compile scripts/experiments/agent-gateway/probe.py scripts/experiments/agent-gateway/verify.py","cwd":".","phase":"verification","cost":"normal","evidence_policy":"current_exact","necessity":"Probe driver syntax only; no model rerun.","inputs":{"env":[]}},{"id":"result","kind":"command","command":"python3 scripts/experiments/agent-gateway/verify.py _ops/agent-gateway/result.json","cwd":".","phase":"verification","cost":"normal","evidence_policy":"current_exact","necessity":"Native source-bound result and cleanup checks without repeating provider calls.","inputs":{"env":[]}},{"id":"whitespace","kind":"command","command":"git diff --check","cwd":".","phase":"verification","cost":"normal","evidence_policy":"current_exact","necessity":"Owned artifact formatting.","inputs":{"env":[]}},{"id":"workflow","kind":"command","command":"repo-harness run check-task-workflow --strict","cwd":".","phase":"verification","cost":"normal","evidence_policy":"current_exact","necessity":"Verify the owner-approved historical archival clears the terminal-plan gate without changing its limit.","inputs":{"env":[]}}]}
+{"protocol":1,"checks":[{"id":"syntax","kind":"command","command":"python3 -m py_compile scripts/experiments/agent-gateway/probe.py scripts/experiments/agent-gateway/verify.py","cwd":".","phase":"verification","cost":"normal","evidence_policy":"current_exact","necessity":"Probe driver syntax only; no model rerun.","inputs":{"env":[]}},{"id":"result","kind":"command","command":"python3 scripts/experiments/agent-gateway/verify.py _ops/agent-gateway/result.json","cwd":".","phase":"verification","cost":"normal","evidence_policy":"current_exact","necessity":"Native source-bound result and cleanup checks without repeating provider calls.","inputs":{"env":[]}},{"id":"whitespace","kind":"command","command":"git diff --check","cwd":".","phase":"verification","cost":"normal","evidence_policy":"current_exact","necessity":"Owned artifact formatting.","inputs":{"env":[]}},{"id":"workflow","kind":"command","command":"repo-harness run check-task-workflow --strict","cwd":".","phase":"verification","cost":"normal","evidence_policy":"current_exact","necessity":"Verify the owner-approved historical archival clears the terminal-plan gate without changing its limit.","inputs":{"env":[]}},{"id":"review-base","kind":"command","command":"python3 -c 'import json,subprocess; from pathlib import Path; baseline=json.loads(subprocess.check_output([\"git\",\"show\",\"main:.ai/harness/policy.json\"])); actual=json.loads(Path(\".ai/harness/policy.json\").read_text()); baseline[\"worktree_strategy\"][\"review_base\"]=\"main\"; assert actual==baseline' ","cwd":".","phase":"verification","cost":"normal","evidence_policy":"current_exact","necessity":"Assert the sole policy delta restores main review-base authority; all thresholds and acceptance rules equal main.","inputs":{"env":[]}}]}
 ```
 
 ## Acceptance boundary
@@ -79,3 +80,7 @@ PASS applies only to the actual observed native sessions, synthetic content and 
 The target architecture is an SDK Agent Gateway with native harness adapters. SDK member authorization and durable message/read/ack facts retain their existing authority; Pi `control.ts` and Codex queue provide native input delivery, while each harness owns its session and execution lifecycle. Discovery is not authorization. The probe's explicit owned-session binding does not prove general enrollment or an authenticated native-session handshake.
 
 Evidence must distinguish durable message acceptance, native input acceptance, read/delivery, ACK, native turn completion and exact request-correlated reply. Neither queued input nor a turn-end event alone satisfies the synthetic outcome. Reconnect preserves the original native identities and durable facts, with no input resubmission or newly induced model turn. Production Gateway APIs, storage and scheduling are not authorized by this eval-only contract.
+
+## Final verification coverage
+
+The deterministic oracle is the declared syntax, whitespace, strict workflow and exact policy-delta checks; the runtime-readback oracle is the offline verifier of the retained real native result with 403 current source hashes and native bytes. It does not run inference. The inherited review_base pointed at a pre-merged C07 commit; restoring main excludes already merged unrelated work from this probe subject. No acceptance gate or threshold is weakened. No SDK runtime/dependency changes; the original approved eval-only plan excludes a full SDK suite.
