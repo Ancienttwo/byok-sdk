@@ -815,6 +815,20 @@ export declare const CLOUD_CAPABILITIES: {
     /** Optional, one-way redacted Agent-memory snapshot mutation route. */
     readonly agentMemoryProjection: 'agent.memory.projection';
     /**
+     * Remote authenticated runtime input preparation (C07 G4): the host control
+     * plane enqueues `agent.input.preparation` and the device discharges it
+     * through the completion/status pair.
+     *
+     * Informational like `host-mcp-task-context`, not route-gating. Both routes
+     * mount unconditionally (`cloud.ts`) because the completion route is the
+     * DEVICE's only way to discharge a mailbox row this same deployment handed
+     * it — withholding it would strand the device's redelivery cursor rather
+     * than degrade a feature. What declaring it promises is that this
+     * deployment's host side actually drives the lane, which is what a Host
+     * reads before calling `enqueueInputPreparation` instead of probing.
+     */
+    readonly inputPreparation: 'agent.input.preparation';
+    /**
      * Contract §8.1's capability gate for task-scoped tool authority
      * (`byok-task-assertion-v1`), deployment-level channel.
      *
@@ -892,12 +906,13 @@ import { type RecurringExecutionInput } from './recurring';
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
+import { type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
 import { type ByokCloudObserver } from './inbound';
 import { type AgentHomeProjectionReceiptInput } from './agent-home-projections';
+import { type InputPreparationReceiptInput } from './input-preparations';
 import type { AgentMemoryProjectionAuthorizer, AgentMemoryProjectionStore } from './agent-memory-projection';
 import type { BlobContentProxy, CloudStores, DeviceRecord, AgentEgressRecord, PairingCodeInfo, RequestReceipt, TaskAttempt, TaskAttemptListQuery, TaskAttemptPage } from './stores/ports';
 import { type DeviceTerminal, type TerminalResult } from './terminal-result';
@@ -1053,6 +1068,10 @@ export interface AgentContentReadInput {
 export type AgentHomeProjectionInput = AgentHomeProjectionPayload;
 /** Exact request identity a host must echo to read back durable projection status. */
 export type AgentHomeProjectionStatusInput = AgentHomeProjectionReceiptInput;
+/** Task-free exact-device remote preparation request, intentionally unrelated to TaskAttempt. */
+export type InputPreparationInput = AgentInputPreparationPayload;
+/** Exact request identity a host must echo to read back durable preparation status. */
+export type InputPreparationStatusInput = InputPreparationReceiptInput;
 /** Optional targeting for {@link ByokCloud.approveTask}. */
 export interface ApproveTaskOptions {
     /**
@@ -1073,6 +1092,9 @@ export interface EnqueuedAgentControl {
 }
 export interface EnqueuedAgentHomeProjection extends EnqueuedAgentControl {
     readonly status: AgentHomeProjectionReadback;
+}
+export interface EnqueuedInputPreparation extends EnqueuedAgentControl {
+    readonly status: InputPreparationReadback;
 }
 /** Immutable executable offer authority, independent of mailbox retention. */
 export type TaskOfferReadback = {
@@ -1149,6 +1171,17 @@ export interface ByokCloud {
     getAgentHomeProjectionStatus(tenant: TenantId, deviceId: string, input: AgentHomeProjectionStatusInput): Promise<AgentHomeProjectionReadback | undefined>;
     /** Direct device completion endpoint authority; first exact terminal receipt wins. */
     completeAgentHomeProjection(tenant: TenantId, deviceId: string, receipt: AgentHomeProjectionCompletionRequest): Promise<AgentHomeProjectionReadback>;
+    /**
+     * Durable, task-free remote input preparation for precisely one admitted
+     * device. Capability admission, the immutable desired receipt and the
+     * mailbox append happen in that order, so a refused call leaves NO receipt
+     * and NO delivery row behind.
+     */
+    enqueueInputPreparation(tenant: TenantId, deviceId: string, input: InputPreparationInput): Promise<EnqueuedInputPreparation>;
+    /** Tenant/device/request-bound durable desired-state and terminal-outcome readback. */
+    getInputPreparationStatus(tenant: TenantId, deviceId: string, input: InputPreparationStatusInput): Promise<InputPreparationReadback | undefined>;
+    /** Direct device completion endpoint authority; first exact terminal receipt wins. */
+    completeInputPreparation(tenant: TenantId, deviceId: string, receipt: InputPreparationCompletionRequest): Promise<InputPreparationReadback>;
     /**
      * Server-side consent revocation and hosted projection erasure. It does not
      * depend on a device being online and never imports anything back locally.
@@ -1620,6 +1653,16 @@ export declare const CLOUD_ERROR_CODES: {
     readonly agent_home_projection_receipt_mismatch: 'agent_home_projection_receipt_mismatch';
     /** A receipt-store row at the projection namespace violated the frozen projection schema. */
     readonly agent_home_projection_receipt_invalid: 'agent_home_projection_receipt_invalid';
+    /** A remote input-preparation request id already names a different immutable desired request. */
+    readonly input_preparation_request_conflict: 'input_preparation_request_conflict';
+    /** A device completion did not identify a stored desired request for this exact device. */
+    readonly input_preparation_request_not_found: 'input_preparation_request_not_found';
+    /** A device completion changed the first durable terminal outcome. */
+    readonly input_preparation_completion_conflict: 'input_preparation_completion_conflict';
+    /** A completion did not exactly echo its immutable desired request/Agent/policy binding. */
+    readonly input_preparation_receipt_mismatch: 'input_preparation_receipt_mismatch';
+    /** A receipt-store row at the preparation namespace violated the frozen schema. */
+    readonly input_preparation_receipt_invalid: 'input_preparation_receipt_invalid';
     /** A hosted Agent-memory mutation did not match the durable task/device/AgentRef binding. */
     readonly agent_memory_projection_task_mismatch: 'agent_memory_projection_task_mismatch';
     /** The embedder-owned grant/consent authority denied a hosted memory mutation. */
@@ -1868,9 +1911,11 @@ export { isTenantId, tenantId } from '@byok-sdk/core';
 export type { TenantId } from '@byok-sdk/core';
 export { createByokCloud } from './cloud';
 export type { TaskAgentMessage } from './task-agent-message';
-export type { ByokCloud, ByokCloudOptions, AgentDispatchInput, AgentEgressDispatchInput, AgentEgressFreshSessionDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, AgentHomeProjectionStatusInput, ApproveTaskOptions, EnqueueOfferInput, EnqueueToolsetOfferInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedOffer, TaskOfferReadback, } from './cloud';
+export type { ByokCloud, ByokCloudOptions, AgentDispatchInput, AgentEgressDispatchInput, AgentEgressFreshSessionDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, AgentHomeProjectionStatusInput, InputPreparationInput, InputPreparationStatusInput, ApproveTaskOptions, EnqueueOfferInput, EnqueueToolsetOfferInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedInputPreparation, EnqueuedOffer, TaskOfferReadback, } from './cloud';
 export { agentHomeProjectionCompletionKey, agentHomeProjectionRequestKey, readAgentHomeProjectionStatus, recordAgentHomeProjectionCompletion, } from './agent-home-projections';
 export type { AgentHomeProjectionReceiptInput } from './agent-home-projections';
+export { inputPreparationCompletionKey, inputPreparationRequestKey, readInputPreparationStatus, recordInputPreparationCompletion, sameInputPreparationRequest, } from './input-preparations';
+export type { InputPreparationReceiptInput } from './input-preparations';
 export { AGENT_HOME_CONTRACT_CAPABILITY, DEFAULT_EVENTS_PAGE_LIMIT, DEFAULT_LONG_POLL_HOLD_MS, DEFAULT_LONG_POLL_INTERVAL_MS, DEFAULT_MAX_BLOB_SIZE_BYTES, } from './cloud';
 export { DEFAULT_BOARD_PAGE_LIMIT, DEFAULT_BOARD_STREAM_HEARTBEAT_INTERVAL_MS, DEFAULT_BOARD_STREAM_QUERY_INTERVAL_MS, DEFAULT_BOARD_STREAM_RECONCILIATION_INTERVAL_MS, } from './handlers/board';
 export { DEFAULT_SKILL_PACK_PAGE_LIMIT } from './handlers/skill-packs';
@@ -1927,6 +1972,49 @@ export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlob
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index';
 export type { DeviceTerminal } from './terminal-result';
 export { RecurringExecutionInputSchema, type RecurringExecutionInput } from './recurring';
+// ==== @byok-sdk/cloud dist/input-preparations.d.ts ====
+/**
+ * Durable remote input-preparation facts.
+ *
+ * Exactly the composition `agent-home-projections.ts` uses, for exactly the
+ * same reason: the desired request and the terminal completion are two
+ * IMMUTABLE first-write-wins receipts in the tenant-scoped receipt store, so
+ * this module needs no second mutable authority merely to survive a restart,
+ * and a replayed write is decided by comparing bodies rather than by trusting
+ * whichever writer arrived last.
+ *
+ * The one idempotency key is `(deviceId, agentRef, requestId)`, minted by the
+ * Host and carried unchanged through the cloud receipt, the device's durable
+ * namespace and the completion. A Host that times out therefore RE-READS
+ * status; it never mints a second requestId for the same turn, which is what
+ * keeps a duplicate from becoming a second counter call downstream.
+ */
+import { type AgentInputPreparationPayload, type InputPreparationCompletionRequest, type InputPreparationReadback } from '@byok-sdk/protocol';
+import type { TenantId } from '@byok-sdk/core';
+import type { TenantBoundReceipts } from './tenant-stores';
+/** Exact request identity a host must echo to read back durable preparation status. */
+export interface InputPreparationReceiptInput {
+    readonly requestId: string;
+    readonly agentRef: AgentInputPreparationPayload['agentRef'];
+}
+export declare function inputPreparationRequestKey(deviceId: string, agentRef: AgentInputPreparationPayload['agentRef'], requestId: string): string;
+export declare function inputPreparationCompletionKey(deviceId: string, agentRef: AgentInputPreparationPayload['agentRef'], requestId: string): string;
+/**
+ * Whole-body equality, not a field subset.
+ *
+ * The desired fact is the ENTIRE authorized request — source digest, model
+ * selection, deadline, context and required toolsets alike. Comparing only the
+ * identity fields would let the same requestId silently re-bind to a different
+ * model, a different context or a looser deadline, which is precisely the
+ * substitution the immutable receipt exists to prevent. Both sides are already
+ * schema-parsed, so key order is the only degree of freedom left, and the
+ * stored body is re-serialized from a parse for that reason.
+ */
+export declare function sameInputPreparationRequest(expected: AgentInputPreparationPayload, actual: AgentInputPreparationPayload): boolean;
+export declare function receiptMatchesInputPreparation(request: AgentInputPreparationPayload, receipt: InputPreparationCompletionRequest): boolean;
+export declare function statusInputMatchesInputPreparation(request: AgentInputPreparationPayload, input: InputPreparationReceiptInput): boolean;
+export declare function readInputPreparationStatus(receipts: TenantBoundReceipts, tenant: TenantId, deviceId: string, input: InputPreparationReceiptInput): Promise<InputPreparationReadback | undefined>;
+export declare function recordInputPreparationCompletion(receipts: TenantBoundReceipts, tenant: TenantId, deviceId: string, receiptInput: InputPreparationCompletionRequest): Promise<InputPreparationReadback>;
 // ==== @byok-sdk/cloud dist/recurring.d.ts ====
 import { z } from 'zod';
 /** Persist this validated input before dispatch; the Host owns Turn/generation and outbox. */

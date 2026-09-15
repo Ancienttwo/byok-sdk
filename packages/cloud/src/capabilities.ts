@@ -65,6 +65,20 @@ export const CLOUD_CAPABILITIES = {
   /** Optional, one-way redacted Agent-memory snapshot mutation route. */
   agentMemoryProjection: 'agent.memory.projection',
   /**
+   * Remote authenticated runtime input preparation (C07 G4): the host control
+   * plane enqueues `agent.input.preparation` and the device discharges it
+   * through the completion/status pair.
+   *
+   * Informational like `host-mcp-task-context`, not route-gating. Both routes
+   * mount unconditionally (`cloud.ts`) because the completion route is the
+   * DEVICE's only way to discharge a mailbox row this same deployment handed
+   * it — withholding it would strand the device's redelivery cursor rather
+   * than degrade a feature. What declaring it promises is that this
+   * deployment's host side actually drives the lane, which is what a Host
+   * reads before calling `enqueueInputPreparation` instead of probing.
+   */
+  inputPreparation: 'agent.input.preparation',
+  /**
    * Contract §8.1's capability gate for task-scoped tool authority
    * (`byok-task-assertion-v1`), deployment-level channel.
    *
