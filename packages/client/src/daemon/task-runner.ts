@@ -31,7 +31,9 @@ import {
   type TaskOfferForAgentPayload,
   type TaskOfferForAgentWithEgressPayload,
   type TaskOfferForAgentWithEgressFreshPayload,
+  type TaskOfferPreparedPayload,
   type TaskOfferWithToolsetsPayload,
+  type InputPreparationOfferBinding,
 } from '@byok-sdk/protocol';
 import {
   SteerUnsupportedError,
@@ -42,8 +44,18 @@ import {
   type RuntimeAdapter,
   type RuntimeAdapterDescriptor,
   type RuntimeOperationStartInput,
+  type RuntimePreparedLaunchV1,
   type Session,
 } from '../types';
+import {
+  admitPreparedOffer,
+  type PreparedOfferServerProjection,
+} from './prepared-offer-admission';
+import type { InputPreparationStore } from './input-preparation-store';
+import {
+  inputPreparationDigest,
+  type InputPreparationRuntimeIdentityV1,
+} from '../input-preparation';
 import {
   AgentHomeBusyError,
   AgentHomeResolutionError,
@@ -356,6 +368,26 @@ export interface TaskRunnerDeps {
   runtimeEnvironment?: Record<string, { allow?: string[] }>;
   /** Reads the daemon's current validated device-local registry once per offer. */
   getMcpToolsets?: () => ReadonlyMap<string, McpToolsetConfig>;
+  /**
+   * The prepared-Execution lane. Absent on a daemon with no `inputPreparation`
+   * section, and a `task.offer_prepared` arriving there is declined by name
+   * rather than reinterpreted as an ordinary offer.
+   *
+   * It carries the durable store plus the three device facts a prepared
+   * admission compares against, resolved by the daemon that already owns them —
+   * never re-derived here, because a second derivation of the installed runtime
+   * identity or the operator's policy revision is a second opinion about the
+   * same configuration.
+   */
+  inputPreparationLane?: {
+    readonly store: InputPreparationStore;
+    /** The VERIFIED installed runtime/compiler identity every artifact is bound to. */
+    readonly runtime: InputPreparationRuntimeIdentityV1;
+    /** The operator's configured limits-policy revision currently in force. */
+    readonly policyRevision: string;
+    /** `toolsetId` -> definition revision, from one registry read per call. */
+    readonly toolsetDefinitionRevisions: () => ReadonlyMap<string, string>;
+  };
   /**
    * Operator input to the MCP toolset launch boundary
    * (`./trusted-launch-cwd.ts`). Unset means the platform default directory
@@ -836,16 +868,45 @@ type AcceptedOfferPayload =
   | TaskOfferWithToolsetsPayload
   | TaskOfferForAgentPayload
   | TaskOfferForAgentWithEgressPayload
-  | TaskOfferForAgentWithEgressFreshPayload;
+  | TaskOfferForAgentWithEgressFreshPayload
+  | TaskOfferPreparedPayload;
 
 function withoutRequiredToolsets(payload: AcceptedOfferPayload): TaskOfferPayload {
-  const { requiredToolsets, egressPolicy, messageEgress, ...offer } = payload as TaskOfferWithToolsetsPayload
+  const { requiredToolsets, egressPolicy, messageEgress, preparation, ...offer } = payload as TaskOfferWithToolsetsPayload
     & Partial<TaskOfferForAgentWithEgressPayload>
-    & Partial<TaskOfferForAgentWithEgressFreshPayload>;
+    & Partial<TaskOfferForAgentWithEgressFreshPayload>
+    & Partial<TaskOfferPreparedPayload>;
   void requiredToolsets;
   void egressPolicy;
   void messageEgress;
+  // Deliberately stripped before the adapter sees the offer: `prepare()`
+  // admits a RUNTIME, and a preparation reference is not a runtime input. The
+  // prepared lane carries it to `start()` as its own start variant instead.
+  void preparation;
   return offer as TaskOfferPayload;
+}
+
+/**
+ * The preparation this offer names, or `undefined` for every ordinary offer.
+ *
+ * The presence of this value is what selects the prepared lane. It is read from
+ * the parsed payload rather than from the envelope type so one branch reads one
+ * fact: `task.offer_prepared` is the only message whose schema carries it.
+ */
+function offeredPreparation(payload: AcceptedOfferPayload): InputPreparationOfferBinding | undefined {
+  return 'preparation' in payload ? payload.preparation : undefined;
+}
+
+/**
+ * The instruction an ordinary offer carries.
+ *
+ * A prepared offer has none, and that is not an omission to default around: the
+ * user request is already inside the frozen envelope its record retained, and a
+ * prepared run that resolved a separate instruction would have two answers to
+ * what it is about to send.
+ */
+function offeredInstruction(payload: AcceptedOfferPayload): TaskOfferPayload['instruction'] | undefined {
+  return 'instruction' in payload ? payload.instruction : undefined;
 }
 
 function sameEgressPolicy(left: Readonly<AgentEgressPolicy>, right: Readonly<AgentEgressPolicy>): boolean {
@@ -1206,6 +1267,16 @@ export class TaskRunner {
    * `MAX_TRACKED_TASK_IDS`), so scanning past it to find an evictable entry
    * costs nothing.
    */
+  /**
+   * `taskId` -> the preparation record this Execution pinned.
+   *
+   * The pin is a durable single-consumer claim on already-counted tokens, so it
+   * is held for exactly as long as the Execution that took it can still be
+   * running — and released at ONE moment, the Execution's terminal. Not at
+   * claim, not at start, not when the session closes: GC must not collect a
+   * record whose bytes a live process may still be sending.
+   */
+  private readonly preparationPinsByTask = new Map<string, string>();
   private readonly inFlightOffers = new Set<string>();
   /** Blob I/O before an offer becomes an active task still belongs to that offer's cancellation authority. */
   private readonly inFlightBlobAborts = new Map<string, AbortController>();
@@ -1762,6 +1833,9 @@ export class TaskRunner {
       case 'task.offer_for_agent_with_egress_fresh':
         await this.handleOffer(envelope.task_id, envelope.payload, true);
         return;
+      case 'task.offer_prepared':
+        await this.handleOffer(envelope.task_id, envelope.payload, true);
+        return;
       case 'task.cancel':
         await this.handleCancel(envelope.task_id, envelope.payload.reason);
         return;
@@ -1822,6 +1896,24 @@ export class TaskRunner {
       this.decline(taskId, reason, retryable, agentRef);
     };
     const sessionRef = offeredSessionRef(payload);
+    // The prepared lane is selected by the presence of this value and nothing
+    // else. Absent for every ordinary offer, so every branch below that does
+    // not mention it behaves exactly as it did before this lane existed.
+    const preparation = offeredPreparation(payload);
+    const preparationLane = this.deps.inputPreparationLane;
+    if (preparation !== undefined) {
+      if (preparationLane === undefined) {
+        // By name, not by reinterpretation. A daemon with no input-preparation
+        // section holds no record this reference could mean, and running the
+        // offer some other way would be running an Execution nobody counted.
+        this.decline(taskId, 'preparation_lane_unconfigured: this daemon is not configured for input preparation', false, agentRef);
+        return;
+      }
+      if (preparationLane.store.get(preparation.reference) === undefined) {
+        this.decline(taskId, 'preparation_not_found: no preparation record under this reference on this device', false, agentRef);
+        return;
+      }
+    }
     const messageRequirement = 'messageEgress' in payload ? payload.messageEgress : undefined;
     const terminalProjection = 'terminalProjection' in payload ? payload.terminalProjection : undefined;
     if ('egressPolicy' in payload) {
@@ -2448,6 +2540,86 @@ export class TaskRunner {
         forwardedEnvironmentNames: Object.freeze(Object.keys(env).sort()),
       });
 
+      // The prepared lane's whole admission, in the one order it is allowed to
+      // happen: COMPARE the sealed Execution against the record item by item,
+      // then PIN, then claim. Pinning strictly before the claim is what makes
+      // single consumption real — two runners that both compared successfully
+      // race the store's compare-and-set, and the loser returns here having
+      // sent no claim and dispatched nothing.
+      let preparedLaunch: RuntimePreparedLaunchV1 | undefined;
+      if (preparation !== undefined) {
+        const lane = preparationLane!;
+        const record = lane.store.get(preparation.reference);
+        if (record === undefined) {
+          gitLease?.release();
+          decline('preparation_not_found: no preparation record under this reference on this device', false);
+          return;
+        }
+        const revisions: Record<string, string> = {};
+        for (const [toolsetId, revision] of lane.toolsetDefinitionRevisions()) revisions[toolsetId] = revision;
+        const servers: PreparedOfferServerProjection[] = [];
+        for (const [serverName, server] of Object.entries(resolvedMcp?.ok ? resolvedMcp.servers : {})) {
+          const toolsetId = resolvedMcp!.toolsetIdByServer.get(serverName);
+          if (toolsetId === undefined) continue;
+          servers.push({
+            serverName,
+            toolsetId,
+            command: server.command,
+            args: Object.freeze([...(server.args ?? [])]),
+          });
+        }
+        const admitted = await admitPreparedOffer({
+          record,
+          artifactPath: lane.store.artifactPathOf(record),
+          offered: preparation,
+          agentRef: agentRef!,
+          deviceId: this.deps.deviceId,
+          policyRevision: lane.policyRevision,
+          runtime: lane.runtime,
+          // The ADMITTED mode, not the offered one: a manifest is the
+          // policy-filtered set for exactly one mode, and the mode this device
+          // merged the offer down to is the mode it will actually run.
+          admittedMode: decision.policy.mode,
+          launch: mcpLaunch,
+          observation: mcpToolsetTools,
+          implementations: mcpToolImplementations,
+          servers,
+          toolsetDefinitionRevisions: Object.freeze(revisions),
+          nowMs: Date.now(),
+        });
+        if (!admitted.ok) {
+          gitLease?.release();
+          // Non-retryable, every one of them: re-offering the same reference
+          // against the same device state reaches the same answer, and a
+          // prepared failure never permits sending a DIFFERENT input under the
+          // same accounting.
+          decline(`${admitted.reason}: ${admitted.detail}`, false);
+          return;
+        }
+        let pinned: Awaited<ReturnType<InputPreparationStore['pin']>>;
+        try {
+          pinned = await lane.store.pin(record.recordId, {
+            taskId,
+            manifestDigest: inputPreparationDigest(manifest),
+            sealedAt: new Date().toISOString(),
+          });
+        } catch (error) {
+          gitLease?.release();
+          decline(`preparation_not_ready: the preparation pin could not be written: ${errorMessage(error)}`, false);
+          return;
+        }
+        if (pinned.kind === 'occupied') {
+          gitLease?.release();
+          decline(
+            `preparation_already_pinned: task ${JSON.stringify(pinned.record.pin!.taskId)} already consumed this preparation`,
+            false,
+          );
+          return;
+        }
+        this.preparationPinsByTask.set(taskId, record.recordId);
+        preparedLaunch = admitted.launch;
+      }
+
       // All semantic admission is now in `prepare()` and the frozen manifest.
       // Claim is the first externally visible commitment; instruction bytes,
       // workspace preparation, and process creation remain after it.
@@ -2495,9 +2667,15 @@ export class TaskRunner {
       );
 
       // Resolve the instruction blob after claim; workspace preparation follows.
+      // A prepared Execution resolves nothing here — it carries no instruction,
+      // and the empty string below is never read: the prepared start variant has
+      // no `instruction` field for it to reach.
+      const offeredInstructionValue = offeredInstruction(payload);
       let resolvedInstruction: string;
       try {
-        resolvedInstruction = await this.resolveInstruction(payload.instruction, blobAbort.signal);
+        resolvedInstruction = offeredInstructionValue === undefined
+          ? ''
+          : await this.resolveInstruction(offeredInstructionValue, blobAbort.signal);
         if (plainWorkspaceNeedsResolve) workspaceDir = await this.resolveWorkspaceDir(taskId, known?.workspaceDir);
       } catch (err) {
         gitLease?.release();
@@ -2572,14 +2750,22 @@ export class TaskRunner {
       }
 
       const startInput: RuntimeOperationStartInput = {
-        // The ordinary lane. A prepared Execution carries no instruction at
-        // all and reaches an adapter through its own admission path, so
-        // nothing here has to choose between the two.
-        kind: 'instruction',
+        // The two lanes are mutually exclusive authority over the same bytes,
+        // so they are two variants rather than one shape with an optional
+        // field: the prepared Execution's request was compiled, counted and
+        // frozen before this offer existed, and the ordinary one's is the
+        // instruction resolved above. `preparedLaunch` is set ONLY after the
+        // item-by-item comparison passed, the manifest was sealed, the record
+        // was pinned and the claim went out.
+        ...(preparedLaunch === undefined
+          ? {
+            kind: 'instruction' as const,
+            instruction: agentBinding === undefined
+              ? (gitWorkspaceId ? prependGitWorkspaceGuidance(resolvedInstruction) : resolvedInstruction)
+              : prependAgentMemoryGuidance(resolvedInstruction),
+          }
+          : { kind: 'prepared' as const, preparation: preparedLaunch }),
         manifest,
-        instruction: agentBinding === undefined
-          ? (gitWorkspaceId ? prependGitWorkspaceGuidance(resolvedInstruction) : resolvedInstruction)
-          : prependAgentMemoryGuidance(resolvedInstruction),
         env,
         ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
         ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
@@ -2882,6 +3068,11 @@ export class TaskRunner {
       if (agentBinding !== undefined && !agentLeaseTransferred) {
         await agentBinding.lease.release().catch(() => {});
       }
+      // An offer that never became an Execution is already terminal here: it
+      // declined, failed, or was cancelled before `start()` published a
+      // session. A task that DID start is in `this.tasks`, and its pin is
+      // released at its own terminal instead (`finishOnce`).
+      if (!this.tasks.has(taskId)) await this.releasePreparationPin(taskId);
       this.inFlightBlobAborts.delete(taskId);
       this.inFlightOffers.delete(taskId);
       this.claimedHarnesses.delete(taskId);
@@ -4812,6 +5003,7 @@ export class TaskRunner {
         leaseReleased = false;
       }
       active.gitLease?.release();
+      await this.releasePreparationPin(taskId);
       this.tasks.delete(taskId);
       this.revokeAgentMessageContext(taskId);
       this.revokeAgentMemoryContext(taskId);
@@ -4820,6 +5012,7 @@ export class TaskRunner {
       return leaseReleased;
     }
     active.gitLease?.release();
+    await this.releasePreparationPin(taskId);
     this.tasks.delete(taskId);
     this.revokeAgentMessageContext(taskId);
     this.revokeAgentMemoryContext(taskId);
@@ -4841,6 +5034,28 @@ export class TaskRunner {
       active.resolveSemanticTerminalSettled = resolve;
     });
     return true;
+  }
+
+  /**
+   * Release the preparation pin this Execution holds, if it took one.
+   *
+   * Best effort by design, and loudly: a pin that cannot be released costs
+   * retention, not correctness — the record stays uncollectable until an
+   * operator intervenes — whereas turning a release failure into a task-terminal
+   * would rewrite an already-established result for a reason the task itself had
+   * nothing to do with.
+   */
+  private async releasePreparationPin(taskId: string): Promise<void> {
+    const recordId = this.preparationPinsByTask.get(taskId);
+    if (recordId === undefined) return;
+    this.preparationPinsByTask.delete(taskId);
+    try {
+      await this.deps.inputPreparationLane?.store.unpin(recordId, taskId);
+    } catch (error) {
+      console.error(
+        `[byok/client] preparation pin for task ${taskId} could not be released: ${errorMessage(error)}`,
+      );
+    }
   }
 
   /** M3-B: bounded insert for `finishedTaskIds` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest (first-inserted) entry once over cap, same idiom as `ConnectionHub.checkAndRecordDuplicate` (packages/server/src/hub.ts). */

@@ -10,6 +10,7 @@ import {
   type InputPreparationBindingV1,
   type InputPreparationArtifactSummaryV1,
   type InputPreparationCounterEvidenceV1,
+  type InputPreparationModelV1,
   type InputPreparationPinV1,
   type InputPreparationStateV1,
 } from '../input-preparation';
@@ -68,6 +69,18 @@ export interface InputPreparationRecord {
   readonly requestDigest: string;
   readonly state: InputPreparationStateV1;
   readonly binding: InputPreparationBindingV1;
+  /**
+   * The exact model identity the request was compiled for.
+   *
+   * Durable, and BESIDE the binding rather than inside it. Beside, because the
+   * binding is the wire projection a receipt discloses and a model identity
+   * carries a base URL and a cost table a receipt has no business publishing.
+   * Durable, because a prepared launch must re-present it to the native
+   * verifier as an INDEPENDENT expectation — the only other copy of it lives
+   * inside the retained envelope, and the native contract is explicit that a
+   * value read out of the envelope can never serve as its own expectation.
+   */
+  readonly model: InputPreparationModelV1;
   readonly artifact?: InputPreparationArtifactSummaryV1;
   readonly counter?: InputPreparationCounterEvidenceV1;
   /** Retained bytes attributable to this record, counted against the per-scope aggregate. */
@@ -183,6 +196,8 @@ export interface ReserveInput {
   readonly key: InputPreparationRecordKey;
   readonly requestDigest: string;
   readonly binding: InputPreparationBindingV1;
+  /** See {@link InputPreparationRecord.model}. */
+  readonly model: InputPreparationModelV1;
   /**
    * The caller's in-flight bound, enforced in the same closure that appends the
    * new record. Never consulted for a key that already exists: reading back an
@@ -306,6 +321,19 @@ export class InputPreparationStore {
       if (record.format !== INPUT_PREPARATION_RECORD_FORMAT || record.version !== INPUT_PREPARATION_VERSION) {
         throw new InputPreparationIntegrityError('the input-preparation record log contains an unknown record format or version');
       }
+      // Fail closed rather than replaying a record a prepared Execution could
+      // never be launched from. `model` became a required durable fact when the
+      // prepared offer lane gained the right to consume a record; a log written
+      // before that carries counted artifacts whose model identity now exists
+      // only inside the envelope, which the native contract forbids using as
+      // its own expectation. Refusing the whole log is the honest answer: the
+      // alternative is a store that silently holds records it cannot honor.
+      if (record.model === undefined) {
+        throw new InputPreparationIntegrityError(
+          `the input-preparation record log contains record ${record.recordId} with no counted model identity;`
+          + ' it predates the prepared-offer lane and cannot be consumed — remove the store directory to start clean',
+        );
+      }
       // Last write wins per record id: the log is an append-only history of
       // one record's transitions, replayed in order.
       replayed.set(record.recordId, record);
@@ -394,6 +422,7 @@ export class InputPreparationStore {
         requestDigest: input.requestDigest,
         state: 'reserved',
         binding: input.binding,
+        model: input.model,
         artifactBytes: 0,
         counterCalls: 0,
         createdAt: new Date(createdAtMs).toISOString(),

@@ -2275,6 +2275,25 @@ export function buildDaemonWithAdapters(
       // M5: see `DaemonConfig.runtimeEnvironment`'s own doc comment above.
       runtimeEnvironment: config.runtimeEnvironment,
       getMcpToolsets: () => toolsetRegistry.snapshot().toolsets,
+      // The prepared-Execution lane, present only on a daemon whose input
+      // preparation service actually constructed — which is also the only
+      // daemon that advertises `agent-input-preparation` and can hold a record
+      // a `task.offer_prepared` could name. The three device facts travel with
+      // the store because this file already owns them: re-deriving the
+      // installed runtime identity or the operator's policy revision inside the
+      // task runner would be a second opinion about the same configuration.
+      ...(inputPreparationService === undefined || inputPreparationLimits === undefined
+        ? {}
+        : {
+          inputPreparationLane: {
+            store: inputPreparationService.store,
+            runtime: inputPreparationService.runtime,
+            policyRevision: inputPreparationLimits.revision,
+            toolsetDefinitionRevisions: () => new Map(
+              toolsetRegistry.status().toolsets.map((row) => [row.id as string, row.definitionRevision]),
+            ),
+          },
+        }),
       // The operator's launch-boundary input, already validated above. Passed
       // through unchanged: the daemon holds no second opinion about which
       // directory is trusted — `resolveTrustedLaunchCwd` proves it per offer.

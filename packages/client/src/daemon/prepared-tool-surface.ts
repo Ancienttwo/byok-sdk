@@ -462,8 +462,86 @@ export async function assemblePreparedToolSurface(
   }
   const observation = Object.freeze(observed);
 
-  // One policy resolution, reused for both halves below.
-  const allowed = filterMcpObservationForPolicy(observation, input.permissionMode);
+  const implementations: Record<string, ToolImplementationIdentityV1> = {};
+  for (const entry of binding.servers) implementations[entry.serverName] = entry.implementation;
+
+  const fingerprinted = await fingerprintPreparedToolSurface({
+    observation,
+    permissionMode: input.permissionMode,
+    runtimeIdentity: input.runtimeIdentity,
+    launch: binding.launch,
+    toolsetDefinitionRevisions: binding.toolsetDefinitionRevisions,
+    implementations: Object.freeze(implementations),
+  });
+  if (!fingerprinted.ok) return fingerprinted;
+
+  return Object.freeze({
+    ok: true as const,
+    surface: Object.freeze({
+      tools: fingerprinted.fingerprint.tools,
+      toolExecutors: fingerprinted.fingerprint.toolExecutors,
+      observationDigest: fingerprinted.fingerprint.observationDigest,
+      toolBindingDigest: binding.toolBindingDigest,
+      launch: binding.launch,
+      toolImplementationKinds: fingerprinted.fingerprint.toolImplementationKinds,
+      toolsetDefinitionRevisions: binding.toolsetDefinitionRevisions,
+    }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Stage 2a — the fingerprint, over an observation somebody else already made
+// ---------------------------------------------------------------------------
+
+/** Everything the fingerprint binds, for one already-probed observation. */
+export interface PreparedToolSurfaceFingerprintInput {
+  /** The live, already-classified `tools/list` answer for exactly the projected servers. */
+  readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
+  readonly permissionMode: PermissionMode;
+  /** The resolved native runtime identity string every fingerprint binds. */
+  readonly runtimeIdentity: string;
+  readonly launch: McpLaunchAttestation;
+  readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
+  readonly implementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
+}
+
+/** The policy-filtered projection of one observation, plus the digest over it. */
+export interface PreparedToolSurfaceFingerprint {
+  readonly tools: readonly InputPreparationToolV1[];
+  readonly toolExecutors: Readonly<Record<string, string>>;
+  readonly observationDigest: string;
+  /** Model-visible tool name -> `attested` | `unavailable:<reason>`. */
+  readonly toolImplementationKinds: Readonly<Record<string, string>>;
+}
+
+export type PreparedToolSurfaceFingerprintResult =
+  | { readonly ok: true; readonly fingerprint: PreparedToolSurfaceFingerprint }
+  | PreparedToolSurfaceRefusal;
+
+/**
+ * Project and fingerprint one observation — the half of the assembly above that
+ * does not probe.
+ *
+ * Split out because a prepared LAUNCH has to answer the same question the
+ * preparation did ("what tools, what executors, what digest") about a DIFFERENT
+ * observation: the live one the task's own admission probe just made
+ * (`TaskRunner.handleOffer`). Both sides must reach the same answer for the same
+ * facts, and the only way to guarantee that is for both to run this code. A
+ * launch-side reimplementation would be a second definition of the counted
+ * manifest, and the two could drift for a whole release without anything
+ * noticing — which is precisely the class of bug the digests exist to catch.
+ *
+ * The policy filter runs BEFORE the projection, not only before the
+ * fingerprints: the tools the model is shown and the executors the manifest
+ * binds must be the same set, and projecting the unfiltered observation while
+ * fingerprinting the filtered one is how a manifest ends up narrower than the
+ * schemas that were counted.
+ */
+export async function fingerprintPreparedToolSurface(
+  input: PreparedToolSurfaceFingerprintInput,
+): Promise<PreparedToolSurfaceFingerprintResult> {
+  // One policy resolution, reused for every half below.
+  const allowed = filterMcpObservationForPolicy(input.observation, input.permissionMode);
   if (!allowed.ok) {
     return refuse('unsupported_input', 'permission_mode_policy_inexpressible', allowed.reason);
   }
@@ -477,17 +555,14 @@ export async function assemblePreparedToolSurface(
     parameters: tool.inputSchema as Readonly<Record<string, unknown>>,
   }));
 
-  const implementations: Record<string, ToolImplementationIdentityV1> = {};
-  for (const entry of binding.servers) implementations[entry.serverName] = entry.implementation;
-
   let toolExecutors: Readonly<Record<string, string>>;
   try {
     ({ toolExecutors } = await buildToolExecutorsFromObservation({
-      observation,
+      observation: input.observation,
       permissionMode: input.permissionMode,
-      toolsetDefinitionRevisions: binding.toolsetDefinitionRevisions,
-      launch: binding.launch,
-      implementations: Object.freeze(implementations),
+      toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
+      launch: input.launch,
+      implementations: input.implementations,
       // PARTIAL — the prepared NATIVE tool set is not connected to preparation
       // yet. Pi's own tools are selected by a runtime policy that is resolved
       // from a task's workspace and descriptor, and a task-free preparation has
@@ -509,19 +584,19 @@ export async function assemblePreparedToolSurface(
 
   const toolImplementationKinds: Record<string, string> = {};
   for (const tool of projectMcpTools(allowed.observation)) {
-    const identity = implementations[tool.serverName];
+    const identity = input.implementations[tool.serverName];
     toolImplementationKinds[qualifiedMcpToolName(tool.serverName, tool.toolName)] =
       identity === undefined ? 'unavailable:implementation_identity_unattested' : implementationKind(identity);
   }
 
   const observationDigest = preparedToolSurfaceObservationDigest({
-    launch: binding.launch,
+    launch: input.launch,
     permissionMode: input.permissionMode,
     runtimeIdentity: input.runtimeIdentity,
-    toolsetDefinitionRevisions: binding.toolsetDefinitionRevisions,
+    toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     tools,
     toolExecutors,
-    implementations,
+    implementations: input.implementations,
     // PARTIAL, for the same reason `nativeTools: []` above is: this entry
     // assembles no native half, so there is no admitted policy selection to
     // bind. The day the native half becomes countable here, the selection and
@@ -530,14 +605,11 @@ export async function assemblePreparedToolSurface(
 
   return Object.freeze({
     ok: true as const,
-    surface: Object.freeze({
+    fingerprint: Object.freeze({
       tools: Object.freeze(tools),
       toolExecutors,
       observationDigest,
-      toolBindingDigest: binding.toolBindingDigest,
-      launch: binding.launch,
       toolImplementationKinds: Object.freeze(toolImplementationKinds),
-      toolsetDefinitionRevisions: binding.toolsetDefinitionRevisions,
     }),
   });
 }

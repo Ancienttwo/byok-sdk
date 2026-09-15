@@ -19,6 +19,7 @@ import {
   INPUT_PREPARATION_VERSION,
   type InputPreparationArtifactSummaryV1,
   type InputPreparationBindingV1,
+  type InputPreparationModelV1,
 } from '../input-preparation';
 
 /**
@@ -72,6 +73,19 @@ function binding(overrides: Partial<InputPreparationBindingV1> = {}): InputPrepa
   };
 }
 
+const MODEL: InputPreparationModelV1 = {
+  id: 'glm-4.6',
+  name: 'GLM 4.6',
+  api: 'openai-completions',
+  provider: 'zai',
+  baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+  reasoning: false,
+  input: ['text'],
+  cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+  contextWindow: 200_000,
+  maxTokens: 8_192,
+};
+
 /** D is deliberately awkward: multi-byte, embedded quotes and a lone newline. */
 const REQUEST_BODY = '{"model":"glm-4.6","messages":[{"role":"user","content":"héllo \\"world\\"\\nsecond line — ✅"}]}';
 
@@ -105,7 +119,7 @@ const SUMMARY: InputPreparationArtifactSummaryV1 = {
 
 /** A reservation with bounds far above anything these durability tests write. */
 function reserve(overrides: Partial<ReserveInput> = {}): ReserveInput {
-  return { key: key(), requestDigest: 'digest-1', binding: binding(), maxInFlight: 100, ...overrides };
+  return { key: key(), requestDigest: 'digest-1', binding: binding(), model: MODEL, maxInFlight: 100, ...overrides };
 }
 
 /** One counter reservation: the artifact write and the charge, as the store fuses them. */

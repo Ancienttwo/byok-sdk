@@ -737,6 +737,11 @@ export function createInputPreparationService(options: InputPreparationServiceOp
           key,
           requestDigest,
           binding: buildBinding(request, grant, target, requestDigest),
+          // Recorded with the reservation, before anything is compiled: a
+          // prepared launch must re-present this exact identity to the native
+          // verifier, and the only other copy of it is inside the envelope the
+          // native contract forbids reading expectations out of.
+          model: request.selection.model,
           maxInFlight: limits.maxInFlight,
         });
       } catch (cause) {
