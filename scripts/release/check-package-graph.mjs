@@ -315,6 +315,12 @@ if (
 ) {
   errors.push('packages/client/package.json: embedded agent-memory import/types exports are incomplete');
 }
+if (
+  clientManifest?.exports?.['./assertion-client']?.import !== './dist/assertion-client/index.js' ||
+  clientManifest?.exports?.['./assertion-client']?.types !== './dist/assertion-client/index.d.ts'
+) {
+  errors.push('packages/client/package.json: daemon-free assertion-client import/types exports are incomplete');
+}
 
 const cloudDataplaneManifest = manifests.get('@byok-sdk/cloud-dataplane');
 if (

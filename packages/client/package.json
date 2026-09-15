@@ -41,6 +41,10 @@
       "types": "./dist/agent-memory/index.d.ts",
       "import": "./dist/agent-memory/index.js"
     },
+    "./assertion-client": {
+      "types": "./dist/assertion-client/index.d.ts",
+      "import": "./dist/assertion-client/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

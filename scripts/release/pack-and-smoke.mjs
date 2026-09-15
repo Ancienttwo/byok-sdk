@@ -398,7 +398,7 @@ try {
     writeFileSync(
       path.join(smokeDir, 'smoke.mjs'),
       `import assert from 'node:assert/strict';\n` +
-        `import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';\n` +
+        `import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';\n` +
         `import { createRequire } from 'node:module';\n` +
         `import { tmpdir } from 'node:os';\n` +
         `import path from 'node:path';\n` +
@@ -407,7 +407,7 @@ try {
         `const sdk = await import('byok-sdk');\n` +
         `assert.deepEqual(Object.keys(sdk).sort(), expected);\n` +
         `assert.equal('keys' in sdk, false);\n` +
-        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/client/agent-memory','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/cloud-dataplane/runtime','@byok-sdk/ui-runtime','@byok-sdk/testkit','@byok-sdk/keys']) await import(name);\n` +
+        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/client/agent-memory','@byok-sdk/client/assertion-client','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/cloud-dataplane/runtime','@byok-sdk/ui-runtime','@byok-sdk/testkit','@byok-sdk/keys']) await import(name);\n` +
         `const { AgentHomeBusyError, AgentHomeManager } = await import('@byok-sdk/client');\n` +
         `const parallelRoot = mkdtempSync(path.join(tmpdir(), 'byok-packed-agent-session-'));\n` +
         `try {\n` +
@@ -445,6 +445,18 @@ try {
         `assert.equal(typeof agentMemory.serveAgentMemoryMcpOverStdio, 'function');\n` +
         `assert.equal('connectControlClient' in agentMemory, false);\n` +
         `assert.equal('createDaemon' in agentMemory, false);\n` +
+        // Same argument for the assertion sub-path, and its value is likewise
+        // what it does NOT carry: a Host toolset server imports it precisely to
+        // request an assertion without the daemon graph — which drags
+        // `@modelcontextprotocol/client` and, through pi, `ajv`'s `new Function`
+        // provider in. Only the installed tarball proves that for a consumer.
+        `const assertionClient = await import('@byok-sdk/client/assertion-client');\n` +
+        `assert.deepEqual(Object.keys(assertionClient).sort(), ['requestDeviceAssertion','requestTaskAssertion']);\n` +
+        `const assertionEntry = path.join('node_modules','@byok-sdk','client','dist','assertion-client','index.js');\n` +
+        `const assertionSource = readFileSync(assertionEntry, 'utf8');\n` +
+        `for (const needle of ['ajv','pi-coding-agent','@earendil-works','@modelcontextprotocol/client','new Function']) {\n` +
+        `  assert.equal(assertionSource.includes(needle), false, assertionEntry + ' carries ' + needle);\n` +
+        `}\n` +
         `for (const [name, version] of [['byok-sdk','${releaseVersion}'],['@byok-sdk/core','${releaseVersion}'],['@byok-sdk/protocol','${releaseVersion}'],['@byok-sdk/client','${releaseVersion}'],['@byok-sdk/server','${releaseVersion}'],['@byok-sdk/cloud','${releaseVersion}'],['@byok-sdk/cloud-dataplane','${releaseVersion}'],['@byok-sdk/ui-runtime','${releaseVersion}'],['@byok-sdk/testkit','${releaseVersion}'],['@byok-sdk/keys','${keysVersion}']]) {\n` +
         `  const manifest = require(name + '/package.json');\n` +
         `  assert.equal(manifest.version, version, name);\n` +

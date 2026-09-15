@@ -5,6 +5,29 @@
 Deliberately not filed under 0.18.0: none of this is in a published artifact,
 and the D2 version number belongs to a separate SDK release contract.
 
+- **Added (client, unreleased contract)** — `@byok-sdk/client/assertion-client`,
+  a sub-path that exports exactly `requestTaskAssertion`,
+  `requestDeviceAssertion` and their option/result types.
+
+  A Host toolset server needs one call and nothing else, but the package root
+  composes `createDaemon`: it reaches `@earendil-works/pi-coding-agent` and
+  through it `@modelcontextprotocol/sdk` and `ajv`, and it statically imports
+  `@modelcontextprotocol/client`, whose published dist embeds an `ajv` provider
+  built on `new Function`. A host running its toolset servers under a
+  Content-Security-Policy could not call the function it needed because of code
+  it never invoked. The new entry's emitted bundle imports only node builtins
+  and `@byok-sdk/core`.
+
+  Nothing is removed: the root entry still exports both functions, and
+  `connectControlClient` remains unreachable from every entry. The new
+  `src/__tests__/dist-subpath-closure.test.ts` scans this entry, the adapters
+  and agent-memory entries, and the four MCP bins for runtime code generation,
+  non-literal `import(`/`require(`, the refused dependency names, and any static
+  import that is not a builtin, `@byok-sdk/core`, `@byok-sdk/protocol`, or
+  relative — with `dist/index.js` as the control that must fail. The release
+  pack smoke imports the sub-path from the installed tarball and re-checks the
+  same substrings there.
+
 - **Fixed (daemon, unreleased contract)** — an attested artifact's path
   identity is now the INODE behind a symlink-free name, not the name
   `realpath` returns for it. `resolveToolImplementationIdentity` and the

@@ -280,6 +280,43 @@ Because each entry is bundled separately, `AgentMemoryError` imported from
 constructors. Discriminate on `error.name`, not `instanceof`, if a host mixes
 both entries.
 
+## Daemon-free assertion requests
+
+A Host toolset server is a short-lived stdio process the daemon spawns for one
+task. Its whole job is to trade the `BYOK_HOST_TOOLSET_CONTEXT` nonce it was
+started with for one short-lived task assertion and present it to the product's
+cloud; it runs no daemon, drives no runtime, and touches no transport. Importing
+`requestTaskAssertion` from the package root handed it all three anyway — the
+root entry composes `createDaemon`, which reaches
+`@earendil-works/pi-coding-agent` and through it `@modelcontextprotocol/sdk` and
+`ajv`, and the root graph statically imports `@modelcontextprotocol/client`,
+whose published dist embeds an `ajv` provider built on `new Function`. Under a
+Content-Security-Policy or any runtime that refuses code generation, the call a
+toolset server needed was unreachable because of code it never ran.
+`@byok-sdk/client/assertion-client` is the same two functions without that
+graph.
+
+```ts
+import { requestTaskAssertion } from '@byok-sdk/client/assertion-client';
+
+const result = await requestTaskAssertion({
+  productId, contextToken, audience: 'https://api.example.com',
+});
+if (!result.ok) return refuse(result.code, result.reason);
+presentToCloud(result.assertion, result.expiresAt);
+```
+
+The entry exports exactly `requestTaskAssertion`, `requestDeviceAssertion` and
+their option/result types. `connectControlClient` stays unreachable here for the
+same reason it is unreachable everywhere else in this package: that socket also
+carries `shutdown`, approval resolution, and the raw task-event stream. The root
+entry keeps exporting both functions; this is a narrower door to the same
+authority, not a replacement. `src/__tests__/dist-subpath-closure.test.ts` walks
+the emitted bundle for runtime code generation and for any import specifier that
+is not a node builtin, `@byok-sdk/core`, `@byok-sdk/protocol`, or a relative
+path, and runs the same checker against `dist/index.js` as a control that must
+report hits.
+
 ## Agent egress and explicit content reads
 
 `agentEgress` is consumed policy configuration, not a profile or tenant
