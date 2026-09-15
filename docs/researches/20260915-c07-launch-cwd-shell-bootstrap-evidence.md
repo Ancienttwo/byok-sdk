@@ -181,19 +181,27 @@ On the darwin development host the case passes with the target proven gone:
 `cleanup:` line, i.e. the probe found the target already gone rather than the
 test having to kill it.
 
-**The win32 outcome is unknown until the windows-latest leg re-runs.** Both
-outcomes are real results, and neither is to be pre-empted here:
+**The win32 outcome (run 34975103065, job 104400732107 "Windows Git workspace,
+store, and security tests (fixed Node)", step "Run the MCP launch
+working-directory launcher test on Windows", head c7861181):** the step passed.
+Raw lines: `platform=win32 launcher pid=5588 target pid=6852 target ppid=5588`,
+`✓ forwards SIGTERM to the target, and the target does not outlive the launcher
+308ms`, `Tests 15 passed (15)`, and zero `cleanup: killed surviving target`
+lines — the probe found the target gone within the window; the test did not
+kill it.
 
-- *Target gone* — launcher-level graceful stop holds on win32 for this shape:
-  terminating the launcher does not leave the MCP server behind, even though
-  the forwarding handler may never have run (the child dies with the launcher's
-  job/console teardown). Fact (a) below then also covers the orphan question.
-- *Target alive* — win32 leaks an orphan when the launcher is terminated: the
-  runtime CLI stops the launcher, the real server keeps running in the trusted
-  directory, and the next start has a stale process holding it. That is a REAL
-  FINDING to escalate as its own work package, not something to patch inside
-  this test. This note must then record it and the spec row must say so; the
-  test stays failing until the launcher is fixed.
+What that proves, stated exactly: **the termination behaviour of launcher and
+target is verified for this runner and this process shape** (a Node launcher
+spawned by the test harness, terminated with `kill('SIGTERM')` =
+`TerminateProcess`, target a Node script on inherited stdio). What it does NOT
+prove: the mechanism. The test observes neither whether the JS forwarding
+handler ran nor any Job Object membership, so *why* the target died is unknown,
+not inferred. "Graceful forwarding" is therefore not a claim this evidence
+supports.
+
+The alternative outcome, had the target survived, would have been a real
+finding to escalate as its own work package (win32 orphan on launcher
+termination), not something to patch inside this test.
 
 ## Limits of this evidence
 
