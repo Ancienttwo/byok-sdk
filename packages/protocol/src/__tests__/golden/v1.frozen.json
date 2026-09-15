@@ -20,6 +20,7 @@
     "agent-content-transcript-read",
     "agent-content-artifact-read",
     "agent-home-projection",
+    "agent-input-preparation",
     "terminal-projection-selection",
     "host-mcp-task-context",
     "custom-harness",
@@ -81,6 +82,7 @@
     "agent.content.read",
     "agent.content.receipt",
     "agent.home.projection",
+    "agent.input.preparation",
     "task.approve",
     "task.reject",
     "task.cancel",
@@ -107,6 +109,7 @@
     "agent.message.disposition",
     "agent.content.read",
     "agent.home.projection",
+    "agent.input.preparation",
     "task.approve",
     "task.reject",
     "task.cancel",
@@ -191,6 +194,10 @@
       "seq": "optional"
     },
     "agent.home.projection": {
+      "taskId": "optional",
+      "seq": "required"
+    },
+    "agent.input.preparation": {
       "taskId": "optional",
       "seq": "required"
     },
@@ -3446,6 +3453,318 @@
           ]
         }
       }
+    },
+    "agent.input.preparation": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "agentRef": {
+          "type": "object",
+          "properties": {
+            "agentId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "allOf": [
+                {
+                  "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
+                },
+                {
+                  "pattern": "^[^\\\\/:<>\"|?*]+$"
+                }
+              ]
+            },
+            "profileRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
+            }
+          },
+          "required": [
+            "agentId",
+            "profileRevision"
+          ],
+          "additionalProperties": false
+        },
+        "profileId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "policyRevision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            },
+            "digest": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            }
+          },
+          "required": [
+            "revision",
+            "digest"
+          ],
+          "additionalProperties": false
+        },
+        "selection": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "api": {
+                  "type": "string",
+                  "const": "openai-completions"
+                },
+                "provider": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "baseUrl": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "reasoning": {
+                  "type": "boolean"
+                },
+                "input": {
+                  "minItems": 1,
+                  "maxItems": 8,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "text",
+                      "image"
+                    ]
+                  }
+                },
+                "cost": {
+                  "type": "object",
+                  "properties": {
+                    "input": {
+                      "type": "number"
+                    },
+                    "output": {
+                      "type": "number"
+                    },
+                    "cacheRead": {
+                      "type": "number"
+                    },
+                    "cacheWrite": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "input",
+                    "output",
+                    "cacheRead",
+                    "cacheWrite"
+                  ],
+                  "additionalProperties": false
+                },
+                "contextWindow": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "maxTokens": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "api",
+                "provider",
+                "baseUrl",
+                "reasoning",
+                "input",
+                "cost",
+                "contextWindow",
+                "maxTokens"
+              ],
+              "additionalProperties": false
+            },
+            "options": {
+              "type": "object",
+              "properties": {
+                "cacheRetention": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "short",
+                    "long"
+                  ]
+                },
+                "maxTokens": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "temperature": {
+                  "type": "number"
+                },
+                "toolChoice": {
+                  "type": "string",
+                  "enum": [
+                    "auto",
+                    "none",
+                    "required"
+                  ]
+                },
+                "reasoningEffort": {
+                  "type": "string",
+                  "enum": [
+                    "minimal",
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                }
+              },
+              "required": [
+                "cacheRetention",
+                "maxTokens"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "model",
+            "options"
+          ],
+          "additionalProperties": false
+        },
+        "deadlineAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "context": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "inline": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "inline"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "blobRef": {
+                  "type": "object",
+                  "properties": {
+                    "blobId": {
+                      "type": "string"
+                    },
+                    "contentHash": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "size": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "contentType": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "blobId",
+                    "contentHash",
+                    "size",
+                    "contentType"
+                  ],
+                  "additionalProperties": false
+                },
+                "contentHash": {
+                  "type": "string",
+                  "pattern": "^sha256:[a-f0-9]{64}$"
+                }
+              },
+              "required": [
+                "blobRef",
+                "contentHash"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "requiredToolsets": {
+          "minItems": 1,
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+          }
+        }
+      },
+      "required": [
+        "requestId",
+        "agentRef",
+        "profileId",
+        "policyRevision",
+        "source",
+        "selection",
+        "deadlineAt",
+        "context",
+        "requiredToolsets"
+      ],
+      "additionalProperties": false
     },
     "task.approve": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -7490,6 +7809,361 @@
               "agentRef",
               "projectionHash",
               "projection"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "v",
+          "id",
+          "ts",
+          "type",
+          "seq",
+          "payload"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "v": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "type": {
+            "type": "string",
+            "const": "agent.input.preparation"
+          },
+          "task_id": {
+            "not": {}
+          },
+          "session_ref": {
+            "type": "string"
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "payload": {
+            "type": "object",
+            "properties": {
+              "requestId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "agentRef": {
+                "type": "object",
+                "properties": {
+                  "agentId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160,
+                    "allOf": [
+                      {
+                        "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
+                      },
+                      {
+                        "pattern": "^[^\\\\/:<>\"|?*]+$"
+                      }
+                    ]
+                  },
+                  "profileRevision": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
+                  }
+                },
+                "required": [
+                  "agentId",
+                  "profileRevision"
+                ],
+                "additionalProperties": false
+              },
+              "profileId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512,
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+              },
+              "policyRevision": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512,
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+              },
+              "source": {
+                "type": "object",
+                "properties": {
+                  "revision": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                  },
+                  "digest": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                  }
+                },
+                "required": [
+                  "revision",
+                  "digest"
+                ],
+                "additionalProperties": false
+              },
+              "selection": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                      },
+                      "api": {
+                        "type": "string",
+                        "const": "openai-completions"
+                      },
+                      "provider": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                      },
+                      "baseUrl": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2048,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                      },
+                      "reasoning": {
+                        "type": "boolean"
+                      },
+                      "input": {
+                        "minItems": 1,
+                        "maxItems": 8,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "text",
+                            "image"
+                          ]
+                        }
+                      },
+                      "cost": {
+                        "type": "object",
+                        "properties": {
+                          "input": {
+                            "type": "number"
+                          },
+                          "output": {
+                            "type": "number"
+                          },
+                          "cacheRead": {
+                            "type": "number"
+                          },
+                          "cacheWrite": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "input",
+                          "output",
+                          "cacheRead",
+                          "cacheWrite"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "contextWindow": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "maxTokens": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "api",
+                      "provider",
+                      "baseUrl",
+                      "reasoning",
+                      "input",
+                      "cost",
+                      "contextWindow",
+                      "maxTokens"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "options": {
+                    "type": "object",
+                    "properties": {
+                      "cacheRetention": {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "short",
+                          "long"
+                        ]
+                      },
+                      "maxTokens": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "temperature": {
+                        "type": "number"
+                      },
+                      "toolChoice": {
+                        "type": "string",
+                        "enum": [
+                          "auto",
+                          "none",
+                          "required"
+                        ]
+                      },
+                      "reasoningEffort": {
+                        "type": "string",
+                        "enum": [
+                          "minimal",
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh",
+                          "max"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "cacheRetention",
+                      "maxTokens"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "model",
+                  "options"
+                ],
+                "additionalProperties": false
+              },
+              "deadlineAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "context": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "inline": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "inline"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "blobRef": {
+                        "type": "object",
+                        "properties": {
+                          "blobId": {
+                            "type": "string"
+                          },
+                          "contentHash": {
+                            "type": "string",
+                            "pattern": "^sha256:[0-9a-f]{64}$"
+                          },
+                          "size": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "contentType": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "blobId",
+                          "contentHash",
+                          "size",
+                          "contentType"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "contentHash": {
+                        "type": "string",
+                        "pattern": "^sha256:[a-f0-9]{64}$"
+                      }
+                    },
+                    "required": [
+                      "blobRef",
+                      "contentHash"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "requiredToolsets": {
+                "minItems": 1,
+                "maxItems": 16,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+                }
+              }
+            },
+            "required": [
+              "requestId",
+              "agentRef",
+              "profileId",
+              "policyRevision",
+              "source",
+              "selection",
+              "deadlineAt",
+              "context",
+              "requiredToolsets"
             ],
             "additionalProperties": false
           }
@@ -13923,6 +14597,361 @@
                   },
                   "type": {
                     "type": "string",
+                    "const": "agent.input.preparation"
+                  },
+                  "task_id": {
+                    "not": {}
+                  },
+                  "session_ref": {
+                    "type": "string"
+                  },
+                  "seq": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "payload": {
+                    "type": "object",
+                    "properties": {
+                      "requestId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "agentRef": {
+                        "type": "object",
+                        "properties": {
+                          "agentId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160,
+                            "allOf": [
+                              {
+                                "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
+                              },
+                              {
+                                "pattern": "^[^\\\\/:<>\"|?*]+$"
+                              }
+                            ]
+                          },
+                          "profileRevision": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
+                          }
+                        },
+                        "required": [
+                          "agentId",
+                          "profileRevision"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "profileId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                      },
+                      "policyRevision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                      },
+                      "source": {
+                        "type": "object",
+                        "properties": {
+                          "revision": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          },
+                          "digest": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          }
+                        },
+                        "required": [
+                          "revision",
+                          "digest"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "selection": {
+                        "type": "object",
+                        "properties": {
+                          "model": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 512,
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 512,
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                              },
+                              "api": {
+                                "type": "string",
+                                "const": "openai-completions"
+                              },
+                              "provider": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 512,
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                              },
+                              "baseUrl": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 2048,
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                              },
+                              "reasoning": {
+                                "type": "boolean"
+                              },
+                              "input": {
+                                "minItems": 1,
+                                "maxItems": 8,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "text",
+                                    "image"
+                                  ]
+                                }
+                              },
+                              "cost": {
+                                "type": "object",
+                                "properties": {
+                                  "input": {
+                                    "type": "number"
+                                  },
+                                  "output": {
+                                    "type": "number"
+                                  },
+                                  "cacheRead": {
+                                    "type": "number"
+                                  },
+                                  "cacheWrite": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "input",
+                                  "output",
+                                  "cacheRead",
+                                  "cacheWrite"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "contextWindow": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "maxTokens": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "name",
+                              "api",
+                              "provider",
+                              "baseUrl",
+                              "reasoning",
+                              "input",
+                              "cost",
+                              "contextWindow",
+                              "maxTokens"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "options": {
+                            "type": "object",
+                            "properties": {
+                              "cacheRetention": {
+                                "type": "string",
+                                "enum": [
+                                  "none",
+                                  "short",
+                                  "long"
+                                ]
+                              },
+                              "maxTokens": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "temperature": {
+                                "type": "number"
+                              },
+                              "toolChoice": {
+                                "type": "string",
+                                "enum": [
+                                  "auto",
+                                  "none",
+                                  "required"
+                                ]
+                              },
+                              "reasoningEffort": {
+                                "type": "string",
+                                "enum": [
+                                  "minimal",
+                                  "low",
+                                  "medium",
+                                  "high",
+                                  "xhigh",
+                                  "max"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "cacheRetention",
+                              "maxTokens"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "model",
+                          "options"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "deadlineAt": {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                      },
+                      "context": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "inline": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "inline"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "blobRef": {
+                                "type": "object",
+                                "properties": {
+                                  "blobId": {
+                                    "type": "string"
+                                  },
+                                  "contentHash": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[0-9a-f]{64}$"
+                                  },
+                                  "size": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "contentType": {
+                                    "type": "string"
+                                  },
+                                  "url": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "blobId",
+                                  "contentHash",
+                                  "size",
+                                  "contentType"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "contentHash": {
+                                "type": "string",
+                                "pattern": "^sha256:[a-f0-9]{64}$"
+                              }
+                            },
+                            "required": [
+                              "blobRef",
+                              "contentHash"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "requiredToolsets": {
+                        "minItems": 1,
+                        "maxItems": 16,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+                        }
+                      }
+                    },
+                    "required": [
+                      "requestId",
+                      "agentRef",
+                      "profileId",
+                      "policyRevision",
+                      "source",
+                      "selection",
+                      "deadlineAt",
+                      "context",
+                      "requiredToolsets"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "v",
+                  "id",
+                  "ts",
+                  "type",
+                  "seq",
+                  "payload"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "v": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "ts": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  "type": {
+                    "type": "string",
                     "const": "task.approve"
                   },
                   "task_id": {
@@ -19370,6 +20399,361 @@
                   },
                   "type": {
                     "type": "string",
+                    "const": "agent.input.preparation"
+                  },
+                  "task_id": {
+                    "not": {}
+                  },
+                  "session_ref": {
+                    "type": "string"
+                  },
+                  "seq": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "payload": {
+                    "type": "object",
+                    "properties": {
+                      "requestId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "agentRef": {
+                        "type": "object",
+                        "properties": {
+                          "agentId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160,
+                            "allOf": [
+                              {
+                                "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
+                              },
+                              {
+                                "pattern": "^[^\\\\/:<>\"|?*]+$"
+                              }
+                            ]
+                          },
+                          "profileRevision": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
+                          }
+                        },
+                        "required": [
+                          "agentId",
+                          "profileRevision"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "profileId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                      },
+                      "policyRevision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                      },
+                      "source": {
+                        "type": "object",
+                        "properties": {
+                          "revision": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          },
+                          "digest": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          }
+                        },
+                        "required": [
+                          "revision",
+                          "digest"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "selection": {
+                        "type": "object",
+                        "properties": {
+                          "model": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 512,
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 512,
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                              },
+                              "api": {
+                                "type": "string",
+                                "const": "openai-completions"
+                              },
+                              "provider": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 512,
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                              },
+                              "baseUrl": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 2048,
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                              },
+                              "reasoning": {
+                                "type": "boolean"
+                              },
+                              "input": {
+                                "minItems": 1,
+                                "maxItems": 8,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "text",
+                                    "image"
+                                  ]
+                                }
+                              },
+                              "cost": {
+                                "type": "object",
+                                "properties": {
+                                  "input": {
+                                    "type": "number"
+                                  },
+                                  "output": {
+                                    "type": "number"
+                                  },
+                                  "cacheRead": {
+                                    "type": "number"
+                                  },
+                                  "cacheWrite": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "input",
+                                  "output",
+                                  "cacheRead",
+                                  "cacheWrite"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "contextWindow": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "maxTokens": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "name",
+                              "api",
+                              "provider",
+                              "baseUrl",
+                              "reasoning",
+                              "input",
+                              "cost",
+                              "contextWindow",
+                              "maxTokens"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "options": {
+                            "type": "object",
+                            "properties": {
+                              "cacheRetention": {
+                                "type": "string",
+                                "enum": [
+                                  "none",
+                                  "short",
+                                  "long"
+                                ]
+                              },
+                              "maxTokens": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "temperature": {
+                                "type": "number"
+                              },
+                              "toolChoice": {
+                                "type": "string",
+                                "enum": [
+                                  "auto",
+                                  "none",
+                                  "required"
+                                ]
+                              },
+                              "reasoningEffort": {
+                                "type": "string",
+                                "enum": [
+                                  "minimal",
+                                  "low",
+                                  "medium",
+                                  "high",
+                                  "xhigh",
+                                  "max"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "cacheRetention",
+                              "maxTokens"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "model",
+                          "options"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "deadlineAt": {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                      },
+                      "context": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "inline": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "inline"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "blobRef": {
+                                "type": "object",
+                                "properties": {
+                                  "blobId": {
+                                    "type": "string"
+                                  },
+                                  "contentHash": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[0-9a-f]{64}$"
+                                  },
+                                  "size": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "contentType": {
+                                    "type": "string"
+                                  },
+                                  "url": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "blobId",
+                                  "contentHash",
+                                  "size",
+                                  "contentType"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "contentHash": {
+                                "type": "string",
+                                "pattern": "^sha256:[a-f0-9]{64}$"
+                              }
+                            },
+                            "required": [
+                              "blobRef",
+                              "contentHash"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "requiredToolsets": {
+                        "minItems": 1,
+                        "maxItems": 16,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+                        }
+                      }
+                    },
+                    "required": [
+                      "requestId",
+                      "agentRef",
+                      "profileId",
+                      "policyRevision",
+                      "source",
+                      "selection",
+                      "deadlineAt",
+                      "context",
+                      "requiredToolsets"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "v",
+                  "id",
+                  "ts",
+                  "type",
+                  "seq",
+                  "payload"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "v": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "ts": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  "type": {
+                    "type": "string",
                     "const": "task.approve"
                   },
                   "task_id": {
@@ -21871,6 +23255,1042 @@
         "agentRef",
         "projectionHash",
         "status"
+      ],
+      "additionalProperties": false
+    },
+    "inputPreparationCompletionRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "const": "prepared"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "agentRef": {
+              "type": "object",
+              "properties": {
+                "agentId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160,
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
+                    },
+                    {
+                      "pattern": "^[^\\\\/:<>\"|?*]+$"
+                    }
+                  ]
+                },
+                "profileRevision": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
+                }
+              },
+              "required": [
+                "agentId",
+                "profileRevision"
+              ],
+              "additionalProperties": false
+            },
+            "profileId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            },
+            "policyRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            },
+            "receipt": {
+              "type": "object",
+              "properties": {
+                "reference": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "reserved",
+                    "counting",
+                    "counted",
+                    "cancelled",
+                    "failed",
+                    "counter_interrupted"
+                  ]
+                },
+                "binding": {
+                  "type": "object",
+                  "properties": {
+                    "scopeId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "deviceId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "agentRef": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "profileId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "profileRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "source": {
+                      "type": "object",
+                      "properties": {
+                        "revision": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                        },
+                        "digest": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                        }
+                      },
+                      "required": [
+                        "revision",
+                        "digest"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "endpoint": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2048,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                        },
+                        "modelId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                        }
+                      },
+                      "required": [
+                        "endpoint",
+                        "modelId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "policyRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "runtime": {
+                      "type": "object",
+                      "properties": {
+                        "packageName": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                        },
+                        "packageVersion": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                        },
+                        "upstreamBase": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                        },
+                        "upstreamCommit": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                        },
+                        "forkBuild": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "envelopeFormat": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                        },
+                        "requestFormat": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                        },
+                        "compilerVersion": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "packageName",
+                        "packageVersion",
+                        "upstreamBase",
+                        "upstreamCommit",
+                        "forkBuild",
+                        "envelopeFormat",
+                        "requestFormat",
+                        "compilerVersion"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "requestDigest": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    }
+                  },
+                  "required": [
+                    "scopeId",
+                    "deviceId",
+                    "agentRef",
+                    "profileId",
+                    "profileRevision",
+                    "source",
+                    "target",
+                    "policyRevision",
+                    "runtime",
+                    "requestDigest"
+                  ],
+                  "additionalProperties": false
+                },
+                "artifact": {
+                  "type": "object",
+                  "properties": {
+                    "requestDigest": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "envelopeDigest": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "toolManifestDigest": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "requestBytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "projectionBytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "coverage": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    }
+                  },
+                  "required": [
+                    "requestDigest",
+                    "envelopeDigest",
+                    "toolManifestDigest",
+                    "requestBytes",
+                    "projectionBytes",
+                    "coverage"
+                  ],
+                  "additionalProperties": false
+                },
+                "counter": {
+                  "type": "object",
+                  "properties": {
+                    "method": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "methodVersion": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "authority": {
+                      "type": "string",
+                      "enum": [
+                        "provider",
+                        "test_fixture"
+                      ]
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "count",
+                        "bound"
+                      ]
+                    },
+                    "value": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "coverage": {
+                      "type": "object",
+                      "properties": {
+                        "covered": {
+                          "type": "boolean"
+                        },
+                        "reason": {
+                          "type": "string",
+                          "maxLength": 512
+                        }
+                      },
+                      "required": [
+                        "covered"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "endpoint": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2048,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                        },
+                        "modelId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                        }
+                      },
+                      "required": [
+                        "endpoint",
+                        "modelId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "calledAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "completedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    }
+                  },
+                  "required": [
+                    "method",
+                    "methodVersion",
+                    "authority",
+                    "kind",
+                    "value",
+                    "coverage",
+                    "target",
+                    "calledAt",
+                    "completedAt"
+                  ],
+                  "additionalProperties": false
+                },
+                "ready": {
+                  "type": "boolean"
+                },
+                "readinessReasons": {
+                  "maxItems": 16,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "not_counted",
+                      "counter_interrupted",
+                      "cancelled",
+                      "failed",
+                      "artifact_expired",
+                      "counter_authority_not_production",
+                      "counter_coverage_incomplete",
+                      "compiler_coverage_unknown",
+                      "executor_identity_unproven"
+                    ]
+                  }
+                },
+                "detail": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "artifactExpiresAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                }
+              },
+              "required": [
+                "reference",
+                "state",
+                "binding",
+                "ready",
+                "readinessReasons",
+                "artifactExpiresAt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "outcome",
+            "requestId",
+            "agentRef",
+            "profileId",
+            "policyRevision",
+            "receipt"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "const": "rejected"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "agentRef": {
+              "type": "object",
+              "properties": {
+                "agentId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160,
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
+                    },
+                    {
+                      "pattern": "^[^\\\\/:<>\"|?*]+$"
+                    }
+                  ]
+                },
+                "profileRevision": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
+                }
+              },
+              "required": [
+                "agentId",
+                "profileRevision"
+              ],
+              "additionalProperties": false
+            },
+            "profileId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            },
+            "policyRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "input_preparation_unconfigured",
+                "bad_request",
+                "authority_unavailable",
+                "scope_denied",
+                "policy_revision_mismatch",
+                "runtime_identity_unavailable",
+                "unsupported_input",
+                "limit_exceeded",
+                "request_conflict",
+                "not_found",
+                "counter_unavailable",
+                "counter_interrupted",
+                "durable_write_failed",
+                "cancelled",
+                "context_unresolvable",
+                "context_hash_mismatch",
+                "toolsets_unobservable",
+                "deadline_elapsed"
+              ]
+            }
+          },
+          "required": [
+            "outcome",
+            "requestId",
+            "agentRef",
+            "profileId",
+            "policyRevision",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "inputPreparationStatus": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "pending",
+        "prepared",
+        "rejected"
+      ]
+    },
+    "inputPreparationReadback": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "tenantId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deviceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "agentRef": {
+          "type": "object",
+          "properties": {
+            "agentId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "allOf": [
+                {
+                  "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
+                },
+                {
+                  "pattern": "^[^\\\\/:<>\"|?*]+$"
+                }
+              ]
+            },
+            "profileRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
+            }
+          },
+          "required": [
+            "agentId",
+            "profileRevision"
+          ],
+          "additionalProperties": false
+        },
+        "profileId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "policyRevision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "prepared",
+            "rejected"
+          ]
+        },
+        "receipt": {
+          "type": "object",
+          "properties": {
+            "reference": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "reserved",
+                "counting",
+                "counted",
+                "cancelled",
+                "failed",
+                "counter_interrupted"
+              ]
+            },
+            "binding": {
+              "type": "object",
+              "properties": {
+                "scopeId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "deviceId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "agentRef": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "profileId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "profileRevision": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "source": {
+                  "type": "object",
+                  "properties": {
+                    "revision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "digest": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    }
+                  },
+                  "required": [
+                    "revision",
+                    "digest"
+                  ],
+                  "additionalProperties": false
+                },
+                "target": {
+                  "type": "object",
+                  "properties": {
+                    "endpoint": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "modelId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    }
+                  },
+                  "required": [
+                    "endpoint",
+                    "modelId"
+                  ],
+                  "additionalProperties": false
+                },
+                "policyRevision": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "runtime": {
+                  "type": "object",
+                  "properties": {
+                    "packageName": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "packageVersion": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "upstreamBase": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "upstreamCommit": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "forkBuild": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "envelopeFormat": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "requestFormat": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "compilerVersion": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "packageName",
+                    "packageVersion",
+                    "upstreamBase",
+                    "upstreamCommit",
+                    "forkBuild",
+                    "envelopeFormat",
+                    "requestFormat",
+                    "compilerVersion"
+                  ],
+                  "additionalProperties": false
+                },
+                "requestDigest": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                }
+              },
+              "required": [
+                "scopeId",
+                "deviceId",
+                "agentRef",
+                "profileId",
+                "profileRevision",
+                "source",
+                "target",
+                "policyRevision",
+                "runtime",
+                "requestDigest"
+              ],
+              "additionalProperties": false
+            },
+            "artifact": {
+              "type": "object",
+              "properties": {
+                "requestDigest": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "envelopeDigest": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "toolManifestDigest": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "requestBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "projectionBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "coverage": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                }
+              },
+              "required": [
+                "requestDigest",
+                "envelopeDigest",
+                "toolManifestDigest",
+                "requestBytes",
+                "projectionBytes",
+                "coverage"
+              ],
+              "additionalProperties": false
+            },
+            "counter": {
+              "type": "object",
+              "properties": {
+                "method": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "methodVersion": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "authority": {
+                  "type": "string",
+                  "enum": [
+                    "provider",
+                    "test_fixture"
+                  ]
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "count",
+                    "bound"
+                  ]
+                },
+                "value": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "covered": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "maxLength": 512
+                    }
+                  },
+                  "required": [
+                    "covered"
+                  ],
+                  "additionalProperties": false
+                },
+                "target": {
+                  "type": "object",
+                  "properties": {
+                    "endpoint": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "modelId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    }
+                  },
+                  "required": [
+                    "endpoint",
+                    "modelId"
+                  ],
+                  "additionalProperties": false
+                },
+                "calledAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "completedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                }
+              },
+              "required": [
+                "method",
+                "methodVersion",
+                "authority",
+                "kind",
+                "value",
+                "coverage",
+                "target",
+                "calledAt",
+                "completedAt"
+              ],
+              "additionalProperties": false
+            },
+            "ready": {
+              "type": "boolean"
+            },
+            "readinessReasons": {
+              "maxItems": 16,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "not_counted",
+                  "counter_interrupted",
+                  "cancelled",
+                  "failed",
+                  "artifact_expired",
+                  "counter_authority_not_production",
+                  "counter_coverage_incomplete",
+                  "compiler_coverage_unknown",
+                  "executor_identity_unproven"
+                ]
+              }
+            },
+            "detail": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            },
+            "artifactExpiresAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            }
+          },
+          "required": [
+            "reference",
+            "state",
+            "binding",
+            "ready",
+            "readinessReasons",
+            "artifactExpiresAt"
+          ],
+          "additionalProperties": false
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "input_preparation_unconfigured",
+            "bad_request",
+            "authority_unavailable",
+            "scope_denied",
+            "policy_revision_mismatch",
+            "runtime_identity_unavailable",
+            "unsupported_input",
+            "limit_exceeded",
+            "request_conflict",
+            "not_found",
+            "counter_unavailable",
+            "counter_interrupted",
+            "durable_write_failed",
+            "cancelled",
+            "context_unresolvable",
+            "context_hash_mismatch",
+            "toolsets_unobservable",
+            "deadline_elapsed"
+          ]
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        }
+      },
+      "required": [
+        "tenantId",
+        "deviceId",
+        "requestId",
+        "agentRef",
+        "profileId",
+        "policyRevision",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "inputPreparationStatusQuery": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "agentId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "profileRevision": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "agentId",
+        "profileRevision"
       ],
       "additionalProperties": false
     }
