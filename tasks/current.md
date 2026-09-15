@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-09-13T12:54:25+0800 -->
+<!-- updated_at: 2026-09-15T12:50:56+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-09-13T12:54:25+0800
-> **Source Branch**: codex/byok-018-d2-task-assertion
-> **Source Commit**: 6e4f6e2f
+> **Updated At**: 2026-09-15T12:50:56+0800
+> **Source Branch**: codex/agent-gateway-probe
+> **Source Commit**: d4fd5938
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -18,13 +18,15 @@ This file is an ignored local read model derived from this worktree's artifacts.
 ## Current Focus
 
 - Status: ManualClearedWithActiveWork
-- Active Plan: (none)
-- Plan Status: (none)
-- Next Task: inspect active worktree marker(s)
+- Active Plan: plans/plan-20260914-1028-agent-gateway-session-probe.md
+- Plan Status: Executing
+- Next Task: G4 Finish formal closeout. Source-bound research and scoped review are recorded; native probe PASS and contract verification 8/8 PASS. `check-task-workflow --strict` exits 1 because the inherited root has 26 terminal Plans (limit 25). Historical archival is outside this contract; do not mark the work-package Complete or rerun provider calls to address that blocker.
 - Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
 
 ## Active Work
 
+- .: plans/plan-20260914-1028-agent-gateway-session-probe.md
+- .: active-worktree owner -> self
 - linked-worktree-ce21c0c05deb: plans/plan-20260910-0214-downstream-issue-intake.md
 - linked-worktree-ce21c0c05deb: active-worktree owner -> self
 ## Active Sprint
@@ -40,23 +42,29 @@ This file is an ignored local read model derived from this worktree's artifacts.
 
 ## Checks
 
-- status=pass, source=verify-sprint, exit_code=0, file=.ai/harness/checks/latest.json
+- status=(none), source=(none), exit_code=(none), file=.ai/harness/checks/latest.json
 
 ## Git Status
 
-- Summary: 10 changed/untracked path(s)
+- Summary: 16 changed/untracked path(s)
 
 ```
- D plans/plan-20260912-1540-byok-018-d2-task-assertion.md
- D tasks/contracts/20260912-1540-byok-018-d2-task-assertion.contract.md
- D tasks/notes/20260912-1540-byok-018-d2-task-assertion.notes.md
- D tasks/reviews/20260912-1540-byok-018-d2-task-assertion.review.md
+ D plans/plan-20260906-0450-release-014-prep.md
+ D tasks/contracts/20260906-0450-release-014-prep.contract.md
+ D tasks/notes/20260906-0450-release-014-prep.notes.md
+ D tasks/reviews/20260906-0450-release-014-prep.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260912-1540-byok-018-d2-task-assertion.md
-?? tasks/archive/contract-20260913-1254-byok-018-d2-task-assertion.md
-?? tasks/archive/notes-20260913-1254-byok-018-d2-task-assertion.md
-?? tasks/archive/review-20260913-1254-byok-018-d2-task-assertion.md
-?? tasks/archive/todo-20260913-1254-byok-018-d2-task-assertion.md
+?? docs/researches/agent-gateway-session-probe.md
+?? plans/archive/plan-20260906-0450-release-014-prep.md
+?? plans/plan-20260914-1028-agent-gateway-session-probe.md
+?? scripts/experiments/agent-gateway/
+?? tasks/archive/contract-20260915-1800-release-014-prep.md
+?? tasks/archive/notes-20260915-1800-release-014-prep.md
+?? tasks/archive/review-20260915-1800-release-014-prep.md
+?? tasks/archive/todo-20260915-1800-release-014-prep.md
+?? tasks/contracts/20260914-1028-agent-gateway-session-probe.contract.md
+?? tasks/notes/20260914-1028-agent-gateway-session-probe.notes.md
+?? tasks/reviews/20260914-1028-agent-gateway-session-probe.review.md
 ```
 
 ## Source Artifacts
