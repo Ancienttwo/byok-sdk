@@ -41,6 +41,8 @@ import {
   BYOK_ACTIVITY_PATH,
   BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE,
   BYOK_AGENT_MEMORY_PROJECTIONS_PATH,
+  BYOK_INPUT_PREPARATION_COMPLETION_ROUTE,
+  BYOK_INPUT_PREPARATION_STATUS_ROUTE,
   BYOK_BLOB_CONTENT_ROUTE,
   BYOK_BLOB_FINALIZE_ROUTE,
   BYOK_BLOB_URL_ROUTE,
@@ -65,6 +67,7 @@ import {
   AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY,
   AGENT_CONTENT_WORKSPACE_READ_CAPABILITY,
   AGENT_HOME_PROJECTION_CAPABILITY,
+  AGENT_INPUT_PREPARATION_CAPABILITY,
   AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
@@ -82,6 +85,8 @@ import {
   AgentContentReceiptPayloadSchema,
   AgentHomeProjectionCompletionRequestSchema,
   AgentHomeProjectionPayloadSchema,
+  AgentInputPreparationPayloadSchema,
+  InputPreparationCompletionRequestSchema,
   AgentMemoryProjectionCommitRequestSchema,
   AgentEgressAckPayloadSchema,
   AgentMessageServerContextSchema,
@@ -89,6 +94,7 @@ import {
   TaskOfferForAgentWithEgressPayloadSchema,
   TaskOfferForAgentWithEgressFreshPayloadSchema,
   TaskOfferForAgentPayloadSchema,
+  TaskOfferPreparedPayloadSchema,
   type AgentRef,
   type AgentContentReceiptPayload,
   type AgentContentReadPayload,
@@ -100,12 +106,16 @@ import {
   type AgentHomeProjectionCompletionRequest,
   type AgentHomeProjectionPayload,
   type AgentHomeProjectionReadback,
+  type AgentInputPreparationPayload,
+  type InputPreparationCompletionRequest,
+  type InputPreparationReadback,
   type AgentMemoryProjectionCommitRequest,
   type AgentMemoryProjectionCommitResponse,
   type AgentMemoryProjectionEraseResult,
   type TaskOfferPayload,
   type TaskSteerPayload,
   type TaskOfferForAgentPayload,
+  type TaskOfferPreparedPayload,
   type TaskOfferForAgentWithEgressPayload,
   type TaskOfferForAgentWithEgressFreshPayload,
   type TaskOfferWithToolsetsPayload,
@@ -141,6 +151,10 @@ import { challengeHandler, pairHandler, tokenHandler } from './handlers/auth';
 import { eventsHandler } from './handlers/events';
 import { messagesHandler } from './handlers/messages';
 import { agentHomeProjectionCompletionHandler } from './handlers/agent-home-projections';
+import {
+  inputPreparationCompletionHandler,
+  inputPreparationStatusHandler,
+} from './handlers/input-preparations';
 import { agentMemoryProjectionHandler } from './handlers/agent-memory-projections';
 import {
   boardClaimHandler,
@@ -174,6 +188,13 @@ import {
   sameAgentHomeProjectionRequest,
   type AgentHomeProjectionReceiptInput,
 } from './agent-home-projections';
+import {
+  inputPreparationRequestKey,
+  readInputPreparationStatus,
+  recordInputPreparationCompletion,
+  sameInputPreparationRequest,
+  type InputPreparationReceiptInput,
+} from './input-preparations';
 import { agentReliabilityKey } from './agent-reliability';
 import type {
   AgentMemoryProjectionAuthorizer,
@@ -353,6 +374,23 @@ export interface AgentDispatchInput {
   readonly payload: TaskOfferForAgentPayload;
 }
 
+/**
+ * Strict dispatch of an already-counted preparation back to the device that
+ * counted it.
+ *
+ * Deliberately NOT an optional field on {@link AgentDispatchInput}: the wire
+ * message is distinct for the freeze-rule reason documented on
+ * `TaskOfferPreparedPayloadSchema`, and a host API that could express both
+ * through one input would let a caller reach the ordinary lane by omitting one
+ * property.
+ */
+export interface PreparedDispatchInput {
+  /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+  readonly taskId?: string;
+  /** Instruction-free strict payload naming the preparation this Execution consumes. */
+  readonly payload: TaskOfferPreparedPayload;
+}
+
 /** Strict Agent dispatch that supplies the policy consumed by the typed egress lanes. */
 export interface AgentEgressDispatchInput {
   /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
@@ -383,6 +421,12 @@ export type AgentHomeProjectionInput = AgentHomeProjectionPayload;
 /** Exact request identity a host must echo to read back durable projection status. */
 export type AgentHomeProjectionStatusInput = AgentHomeProjectionReceiptInput;
 
+/** Task-free exact-device remote preparation request, intentionally unrelated to TaskAttempt. */
+export type InputPreparationInput = AgentInputPreparationPayload;
+
+/** Exact request identity a host must echo to read back durable preparation status. */
+export type InputPreparationStatusInput = InputPreparationReceiptInput;
+
 /** Optional targeting for {@link ByokCloud.approveTask}. */
 export interface ApproveTaskOptions {
   /**
@@ -406,6 +450,10 @@ export interface EnqueuedAgentControl {
 
 export interface EnqueuedAgentHomeProjection extends EnqueuedAgentControl {
   readonly status: AgentHomeProjectionReadback;
+}
+
+export interface EnqueuedInputPreparation extends EnqueuedAgentControl {
+  readonly status: InputPreparationReadback;
 }
 
 /** Immutable executable offer authority, independent of mailbox retention. */
@@ -457,6 +505,21 @@ export interface ByokCloud {
    */
   enqueueAgentOffer(tenant: TenantId, deviceId: string, input: AgentDispatchInput): Promise<EnqueuedOffer>;
   /**
+   * Host control plane: enqueue an offer for an already-counted preparation.
+   *
+   * Admission requires the device to durably advertise both the Agent-home
+   * contract and `agent-input-preparation` — the second because only a device
+   * that can prepare holds the durable record this offer names. A device that
+   * advertises neither never receives the message, and a device whose protocol
+   * build predates the type skips it whole rather than running it as an
+   * ordinary instruction offer.
+   */
+  enqueuePreparedOffer(
+    tenant: TenantId,
+    deviceId: string,
+    input: PreparedDispatchInput,
+  ): Promise<EnqueuedOffer>;
+  /**
    * Host control plane: enqueue the typed egress-policy Agent offer. Missing
    * egress/reliable-ack capabilities reject before a mailbox row is allocated.
    */
@@ -501,6 +564,29 @@ export interface ByokCloud {
     deviceId: string,
     receipt: AgentHomeProjectionCompletionRequest,
   ): Promise<AgentHomeProjectionReadback>;
+  /**
+   * Durable, task-free remote input preparation for precisely one admitted
+   * device. Capability admission, the immutable desired receipt and the
+   * mailbox append happen in that order, so a refused call leaves NO receipt
+   * and NO delivery row behind.
+   */
+  enqueueInputPreparation(
+    tenant: TenantId,
+    deviceId: string,
+    input: InputPreparationInput,
+  ): Promise<EnqueuedInputPreparation>;
+  /** Tenant/device/request-bound durable desired-state and terminal-outcome readback. */
+  getInputPreparationStatus(
+    tenant: TenantId,
+    deviceId: string,
+    input: InputPreparationStatusInput,
+  ): Promise<InputPreparationReadback | undefined>;
+  /** Direct device completion endpoint authority; first exact terminal receipt wins. */
+  completeInputPreparation(
+    tenant: TenantId,
+    deviceId: string,
+    receipt: InputPreparationCompletionRequest,
+  ): Promise<InputPreparationReadback>;
   /**
    * Server-side consent revocation and hosted projection erasure. It does not
    * depend on a device being online and never imports anything back locally.
@@ -742,6 +828,35 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       ...deviceRouteDeps,
       complete: (stores, deviceId, receipt) => completeAgentHomeProjectionFromStores(stores, deviceId, receipt),
     }),
+  );
+
+  // Unconditional, exactly like the Agent-home completion route above and for
+  // the same reason: this is the DEVICE's only way to discharge a mailbox row
+  // the same deployment already handed it. Gating it on the declaration would
+  // let an under-declared deployment enqueue a preparation the device can then
+  // never complete, freezing its redelivery cursor behind an envelope with no
+  // terminal path. `CLOUD_CAPABILITIES.inputPreparation` still declares the
+  // lane so a Host reads what this deployment serves instead of probing it.
+  //
+  // The same reasoning runs one level deeper: `completeInputPreparationFromStores`
+  // asserts no DEVICE capability either, so a device that never advertised
+  // `agent-input-preparation` can still record the
+  // `input_preparation_unconfigured` rejection the row requires. The device
+  // capability stays the admission gate on `enqueueInputPreparation` alone.
+  const inputPreparationRouteDeps = {
+    ...deviceRouteDeps,
+    complete: (stores: TenantStores, deviceId: string, receipt: InputPreparationCompletionRequest) =>
+      completeInputPreparationFromStores(stores, deviceId, receipt),
+    status: (stores: TenantStores, deviceId: string, input: InputPreparationStatusInput) =>
+      readInputPreparationStatus(stores.receipts, stores.tenant, deviceId, input),
+  };
+  registry.register(
+    { method: 'PUT', path: BYOK_INPUT_PREPARATION_COMPLETION_ROUTE, class: 'device' },
+    inputPreparationCompletionHandler(inputPreparationRouteDeps),
+  );
+  registry.register(
+    { method: 'GET', path: BYOK_INPUT_PREPARATION_STATUS_ROUTE, class: 'device' },
+    inputPreparationStatusHandler(inputPreparationRouteDeps),
   );
 
   if (declares(declaration, CLOUD_CAPABILITIES.boardCoordination)) {
@@ -1457,6 +1572,61 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     );
   }
 
+  async function getInputPreparationStatus(
+    tenant: TenantId,
+    deviceId: string,
+    input: InputPreparationStatusInput,
+  ): Promise<InputPreparationReadback | undefined> {
+    return readInputPreparationStatus(
+      tenantStoresFor(controlPlane(tenant), root).receipts,
+      tenant,
+      deviceId,
+      input,
+    );
+  }
+
+  async function completeInputPreparation(
+    tenant: TenantId,
+    deviceId: string,
+    receiptInput: InputPreparationCompletionRequest,
+  ): Promise<InputPreparationReadback> {
+    return completeInputPreparationFromStores(
+      tenantStoresFor(controlPlane(tenant), root),
+      deviceId,
+      receiptInput,
+    );
+  }
+
+  /**
+   * Deliberately NOT capability-gated, unlike `enqueueInputPreparation`.
+   *
+   * Admission is the enqueue's job: a device without
+   * `agent-input-preparation` is refused there, before any receipt or mailbox
+   * row exists. Once a row DOES exist, the completion is the device's only way
+   * to discharge it, and the daemon's redelivery cursor advances only when the
+   * completion PUT succeeds. Re-asserting the capability here would reject
+   * exactly the completion an unconfigured device must be able to record —
+   * `input_preparation_unconfigured` — and freeze that device's strictly
+   * seq-ordered cursor behind an envelope with no terminal path.
+   *
+   * Authority does not weaken: the row's own binding (authenticated device,
+   * exact `AgentRef`, `profileId`, `policyRevision`) is checked by
+   * `recordInputPreparationCompletion`, so a completion still cannot cross a
+   * device, an Agent, or a policy revision. The one authority reduction this
+   * does accept, stated plainly: revoking `agent-input-preparation` after a row
+   * is enqueued no longer refuses the in-flight completion — that row was
+   * legitimately admitted, its receipt stays not-ready and G4 is closed to
+   * activation — so revocation stops NEW admissions only.
+   */
+  async function completeInputPreparationFromStores(
+    stores: TenantStores,
+    deviceId: string,
+    receiptInput: InputPreparationCompletionRequest,
+  ): Promise<InputPreparationReadback> {
+    const receipt = InputPreparationCompletionRequestSchema.parse(receiptInput);
+    return recordInputPreparationCompletion(stores.receipts, stores.tenant, deviceId, receipt);
+  }
+
   async function commitAgentMemoryProjectionFromStores(
     stores: TenantStores,
     deviceId: string,
@@ -1698,6 +1868,23 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       );
     },
 
+    async enqueuePreparedOffer(tenant, deviceId, input) {
+      await assertAgentCapabilities(tenant, deviceId, [
+        AGENT_HOME_CONTRACT_CAPABILITY,
+        AGENT_INPUT_PREPARATION_CAPABILITY,
+        ...(input.payload.terminalProjection === undefined ? [] : [TERMINAL_PROJECTION_SELECTION_CAPABILITY]),
+      ]);
+      // Parsed before a mailbox sequence is reserved, exactly as the strict
+      // Agent offer above is: a malformed preparation reference must not leave
+      // a durable delivery row behind. `.strict()` also means a caller that
+      // tried to smuggle an `instruction` or a `sessionRef` onto this lane is
+      // rejected here rather than silently stripped.
+      const payload = TaskOfferPreparedPayloadSchema.parse(input.payload);
+      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, payload.agentRef, (taskId, seq, messageId) =>
+        createEnvelope('task.offer_prepared', payload, { id: messageId, taskId, seq }),
+      );
+    },
+
     async enqueueAgentEgressOffer(tenant, deviceId, input) {
       await assertAgentCapabilities(tenant, deviceId, [
         AGENT_HOME_CONTRACT_CAPABILITY,
@@ -1837,6 +2024,67 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     getAgentHomeProjectionStatus,
 
     completeAgentHomeProjection,
+
+    async enqueueInputPreparation(tenant, deviceId, input) {
+      // Validate the strict control body BEFORE durable capability admission or
+      // any receipt/mailbox allocation, so a malformed request can never leave
+      // an immutable desired fact or a delivery row behind.
+      const payload = AgentInputPreparationPayloadSchema.parse(input);
+      await assertAgentCapabilities(tenant, deviceId, [
+        AGENT_HOME_CONTRACT_CAPABILITY,
+        AGENT_INPUT_PREPARATION_CAPABILITY,
+      ]);
+      const stores = tenantStoresFor(controlPlane(tenant), root);
+      const requestBody = JSON.stringify(payload);
+      const persisted = await stores.receipts.record({
+        key: inputPreparationRequestKey(deviceId, payload.agentRef, payload.requestId),
+        body: requestBody,
+      });
+      const persistedPayload = AgentInputPreparationPayloadSchema.parse(JSON.parse(persisted.receipt.body));
+      if (!sameInputPreparationRequest(payload, persistedPayload)) {
+        throw new ByokCloudError(
+          'input_preparation_request_conflict',
+          `Input-preparation request ${payload.requestId} already exists with a different immutable desired body.`,
+        );
+      }
+      // The mailbox message id is DERIVED from the logical request identity, so
+      // a retried enqueue under the same requestId reuses the existing row
+      // instead of appending a second delivery of the same desired fact.
+      const messageId = await agentControlEnvelopeId(
+        'byok:agent-input-preparation',
+        tenant,
+        deviceId,
+        payload.agentRef,
+        payload.requestId,
+      );
+      const control = await enqueueAgentControlEnvelope(tenant, deviceId, messageId, (seq) =>
+        createEnvelope('agent.input.preparation', payload, { id: messageId, seq }),
+      );
+      if (
+        control.envelope.type !== 'agent.input.preparation' ||
+        !sameInputPreparationRequest(payload, control.envelope.payload)
+      ) {
+        throw new ByokCloudError(
+          'input_preparation_request_conflict',
+          `Mailbox request ${payload.requestId} does not match its immutable input-preparation fact.`,
+        );
+      }
+      const status = await getInputPreparationStatus(tenant, deviceId, {
+        requestId: payload.requestId,
+        agentRef: payload.agentRef,
+      });
+      if (status === undefined) {
+        throw new ByokCloudError(
+          'input_preparation_receipt_invalid',
+          `Input-preparation request ${payload.requestId} disappeared after durable allocation.`,
+        );
+      }
+      return { ...control, status };
+    },
+
+    getInputPreparationStatus,
+
+    completeInputPreparation,
     eraseAgentMemoryProjection,
 
     approveTask(tenant, taskId, opts) {

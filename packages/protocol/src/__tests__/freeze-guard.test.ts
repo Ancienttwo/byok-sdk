@@ -36,6 +36,10 @@ import {
   AgentHomeProjectionCompletionRequestSchema,
   AgentHomeProjectionStatusSchema,
   AgentHomeProjectionReadbackSchema,
+  InputPreparationCompletionRequestSchema,
+  InputPreparationStatusSchema,
+  InputPreparationReadbackSchema,
+  InputPreparationStatusQuerySchema,
   MAX_MESSAGES_PER_BATCH,
   createEnvelope,
   encodeEnvelope,
@@ -119,6 +123,7 @@ function codecRequirednessMatrix(): CodecRequirednessMatrix {
     'task.offer_for_agent': { taskId: 'required', seq: 'required' },
     'task.offer_for_agent_with_egress': { taskId: 'required', seq: 'required' },
     'task.offer_for_agent_with_egress_fresh': { taskId: 'required', seq: 'required' },
+    'task.offer_prepared': { taskId: 'required', seq: 'required' },
     'agent.egress.reliable': { taskId: 'optional', seq: 'optional' },
     'agent.egress.ack': { taskId: 'optional', seq: 'required' },
     'agent.message.publish': { taskId: 'required', seq: 'optional' },
@@ -126,6 +131,7 @@ function codecRequirednessMatrix(): CodecRequirednessMatrix {
     'agent.content.read': { taskId: 'optional', seq: 'required' },
     'agent.content.receipt': { taskId: 'optional', seq: 'optional' },
     'agent.home.projection': { taskId: 'optional', seq: 'required' },
+    'agent.input.preparation': { taskId: 'optional', seq: 'required' },
     'task.approve': { taskId: 'required', seq: 'required' },
     'task.reject': { taskId: 'required', seq: 'required' },
     'task.cancel': { taskId: 'required', seq: 'required' },
@@ -183,6 +189,10 @@ type CodecRequirednessMatrix = {
     taskId: FieldRequiredness<'task.offer_for_agent_with_egress_fresh', 'taskId'>;
     seq: FieldRequiredness<'task.offer_for_agent_with_egress_fresh', 'seq'>;
   };
+  'task.offer_prepared': {
+    taskId: FieldRequiredness<'task.offer_prepared', 'taskId'>;
+    seq: FieldRequiredness<'task.offer_prepared', 'seq'>;
+  };
   'agent.egress.reliable': {
     taskId: FieldRequiredness<'agent.egress.reliable', 'taskId'>;
     seq: FieldRequiredness<'agent.egress.reliable', 'seq'>;
@@ -210,6 +220,10 @@ type CodecRequirednessMatrix = {
   'agent.home.projection': {
     taskId: FieldRequiredness<'agent.home.projection', 'taskId'>;
     seq: FieldRequiredness<'agent.home.projection', 'seq'>;
+  };
+  'agent.input.preparation': {
+    taskId: FieldRequiredness<'agent.input.preparation', 'taskId'>;
+    seq: FieldRequiredness<'agent.input.preparation', 'seq'>;
   };
   'task.approve': { taskId: FieldRequiredness<'task.approve', 'taskId'>; seq: FieldRequiredness<'task.approve', 'seq'> };
   'task.reject': { taskId: FieldRequiredness<'task.reject', 'taskId'>; seq: FieldRequiredness<'task.reject', 'seq'> };
@@ -290,6 +304,10 @@ function buildFrozenSnapshot() {
       agentHomeProjectionCompletionRequest: z.toJSONSchema(AgentHomeProjectionCompletionRequestSchema),
       agentHomeProjectionStatus: z.toJSONSchema(AgentHomeProjectionStatusSchema),
       agentHomeProjectionReadback: z.toJSONSchema(AgentHomeProjectionReadbackSchema),
+      inputPreparationCompletionRequest: z.toJSONSchema(InputPreparationCompletionRequestSchema),
+      inputPreparationStatus: z.toJSONSchema(InputPreparationStatusSchema),
+      inputPreparationReadback: z.toJSONSchema(InputPreparationReadbackSchema),
+      inputPreparationStatusQuery: z.toJSONSchema(InputPreparationStatusQuerySchema),
     },
   };
 }
@@ -533,6 +551,15 @@ function minimalPayloadForProbe(type: MessageType): unknown {
           transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
         },
       };
+    case 'task.offer_prepared':
+      return {
+        policy: { mode: 'auto' },
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+        preparation: {
+          reference: 'prep-record-1',
+          requestDigest: 'request-digest-1',
+        },
+      };
     case 'agent.egress.reliable':
       return {
         agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
@@ -617,6 +644,33 @@ function minimalPayloadForProbe(type: MessageType): unknown {
         projectionHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
         projection: { schemaVersion: 'opaque.v1', name: 'Agent' },
       };
+    case 'agent.input.preparation':
+      return {
+        requestId: '00000000-0000-4000-8000-000000000025',
+        agentRef: { agentId: 'agent-1', profileRevision: '1' },
+        profileId: 'profile-1',
+        policyRevision: 'limits-r1',
+        source: { revision: 'src-r1', digest: 'sha256:src' },
+        selection: {
+          model: {
+            id: 'model-1',
+            name: 'Model One',
+            api: 'openai-completions',
+            provider: 'provider-1',
+            baseUrl: 'https://provider.example/v1',
+            reasoning: false,
+            input: ['text'],
+            cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 128000,
+            maxTokens: 4096,
+          },
+          options: { cacheRetention: 'none', maxTokens: 1024 },
+        },
+        deadlineAt: '2026-01-01T00:00:30.000Z',
+        context: { inline: '{"prompt":{},"messages":[]}' },
+        requiredToolsets: ['team'],
+        permissionMode: 'auto',
+      };
     case 'task.approve':
       return {};
     case 'task.reject':
@@ -662,7 +716,7 @@ function fullEnvelopeFor(type: MessageType): Record<string, unknown> {
     seq: 1,
     payload: minimalPayloadForProbe(type),
   };
-  if (type !== 'agent.home.projection') envelope.task_id = 'task-1';
+  if (type !== 'agent.home.projection' && type !== 'agent.input.preparation') envelope.task_id = 'task-1';
   return envelope;
 }
 

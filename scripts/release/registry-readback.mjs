@@ -3,26 +3,26 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { assertInstalledPiRuntime, parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER } from './pi-runtime-identity.mjs';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 // Version authority: the manifests, never a constant here. The expected
 // registry train is whatever packages/core ships, keys versions independently,
-// and the pi pin comes from packages/client.
-const exactStableVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+// and the pi pin comes from packages/client, parsed by the one shared
+// fork-alias reader.
 const exactReleaseVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const npmSafeDistTag = /^(?=.{1,214}$)[a-z][a-z0-9._-]*$/;
 const expectedVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/core/package.json'), 'utf8')).version;
 const keysVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/keys/package.json'), 'utf8')).version;
-const piVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/client/package.json'), 'utf8')).dependencies?.['@earendil-works/pi-coding-agent'];
+const piRuntime = parsePiRuntimeIdentity(
+  JSON.parse(readFileSync(path.join(repoRoot, 'packages/client/package.json'), 'utf8')),
+);
 if (typeof expectedVersion !== 'string' || !exactReleaseVersion.test(expectedVersion)) {
   throw new Error('packages/core/package.json: version must be an exact SemVer release train version');
 }
 if (typeof keysVersion !== 'string' || !exactReleaseVersion.test(keysVersion)) {
   throw new Error('packages/keys/package.json: version must be an exact SemVer independent version');
-}
-if (typeof piVersion !== 'string' || !exactStableVersion.test(piVersion)) {
-  throw new Error('packages/client/package.json: @earendil-works/pi-coding-agent must be pinned to an exact x.y.z version');
 }
 const packages = [
   '@byok-sdk/core',
@@ -278,16 +278,22 @@ try {
   assertSingleVersionSet(smokeDir, expectedPackageVersions);
   assertNpmCoreClosure(smokeDir);
   const clientManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'package.json'), 'utf8'));
-  if (clientManifest.dependencies?.['@earendil-works/pi-coding-agent'] !== piVersion) {
-    throw new Error(`registry client manifest must require pi ${piVersion}`);
+  if (clientManifest.dependencies?.[PI_DEPENDENCY_SPECIFIER] !== piRuntime.spec) {
+    throw new Error(`registry client manifest must require pi ${piRuntime.spec}`);
   }
-  if (clientManifest.optionalDependencies?.['@earendil-works/pi-coding-agent']) {
+  if (clientManifest.optionalDependencies?.[PI_DEPENDENCY_SPECIFIER]) {
     throw new Error('registry client manifest must not make pi optional');
   }
+  // The alias keeps the on-disk path on the upstream specifier while the
+  // manifest inside carries the fork identity; prove both, and prove the whole
+  // registry-installed tree holds exactly one coding-agent runtime.
   const piManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@earendil-works', 'pi-coding-agent', 'package.json'), 'utf8'));
-  if (piManifest.version !== piVersion) {
-    throw new Error(`registry install resolved pi ${piManifest.version}, expected ${piVersion}`);
+  if (piManifest.name !== piRuntime.packageName || piManifest.version !== piRuntime.version) {
+    throw new Error(
+      `registry install resolved pi ${piManifest.name}@${piManifest.version}, expected ${piRuntime.packageName}@${piRuntime.version}`,
+    );
   }
+  assertInstalledPiRuntime(smokeDir, piRuntime, 'registry-readback');
   const keysManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'keys', 'package.json'), 'utf8'));
   if (keysManifest.dependencies?.['@byok-sdk/core'] !== expectedVersion || keysManifest.dependencies?.['@byok-sdk/core'] === 'workspace:*') {
     throw new Error(`registry keys manifest must declare core ${expectedVersion} directly`);

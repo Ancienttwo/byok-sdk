@@ -63,7 +63,7 @@ test('publish and readback reject a missing or latest prerelease tag before regi
       const fixturePackage = path.join(fixtureRoot, 'packages', name);
       mkdirSync(fixturePackage, { recursive: true });
       const manifest = { name: `@byok-sdk/${name}`, version };
-      if (name === 'client') manifest.dependencies = { '@earendil-works/pi-coding-agent': '0.84.2' };
+      if (name === 'client') manifest.dependencies = { '@earendil-works/pi-coding-agent': 'npm:@byok-sdk/pi-coding-agent@0.85.1002' };
       writeFileSync(path.join(fixturePackage, 'package.json'), `${JSON.stringify(manifest)}\n`);
     }
 
@@ -106,7 +106,7 @@ test('graph and readback use the same prerelease gate and readback checks a requ
   const graphSource = readFileSync(path.join(releaseDirectory, 'check-package-graph.mjs'), 'utf8');
   const readbackSource = readFileSync(path.join(releaseDirectory, 'registry-readback.mjs'), 'utf8');
   assert.match(graphSource, /exactReleaseVersion\.test\(releaseVersion\)/);
-  assert.match(graphSource, /exactStableVersion\.test\(piVersion\)/);
+  assert.match(graphSource, /parsePiRuntimeIdentity\(readJson\('packages\/client\/package\.json'\)\)/);
   assert.match(graphSource, /const testkit = \['packages\/testkit', '@byok-sdk\/testkit'\]/);
   assert.match(readbackSource, /const distTag = resolveReleaseDistTag\(expectedVersion, requestedTag\)/);
   assert.match(readbackSource, /'dist-tags', '--json'/);

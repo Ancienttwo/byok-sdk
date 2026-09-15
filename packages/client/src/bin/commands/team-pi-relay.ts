@@ -11,6 +11,7 @@ import { loadPrivateTeamDocument, parseCodexTeamBinding, preflightCodexRelay, qu
 import { TeamNotificationRelay, type TeamRelayBinding } from '../team-notification-relay';
 import { PiTeamSession, type PiInteractionResponse } from '../team-pi-session';
 import { acquireTeamRelayLock } from './team-relay';
+import { AGENT_TEAM_MCP_SERVER_NAME } from '../../sdk-reserved-mcp';
 
 const record = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 const exact = (v: Record<string, unknown>, keys: string[]) => Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v, k));
@@ -58,9 +59,13 @@ export async function runTeamPiRelayCommand(input: {
     const helper = input.config.sdkHelperHost ? resolveSdkReservedHelperBin('agent-team-mcp', input.config.sdkHelperHost)
       : { command: process.execPath, args: [path.resolve(path.dirname(manifestPath), manifest.bin['byok-agent-team-mcp']!)] };
     pi = await PiTeamSession.start({ ...document.pi, workspaceId: input.workspaceId, onEvent: emit,
-      mcpConfig: { settings: { hostConfigDiscovery: 'off', scriptMode: false, disableProxyTool: true }, mcpServers: { byokagentteam: {
-        command: helper.command, args: helper.args, env: { BYOK_STORE_DIR: storeDir, BYOK_PRODUCT_ID: input.config.productId, BYOK_TEAM_MEMBER_CONTEXT: document.pi.context },
-        lifecycle: 'eager', directTools: true, toolPrefix: 'none', includeTools: ['post_team_message', 'read_team_messages', 'ack_team_messages'], exposeResources: false,
+      // Command, args and env only — the per-server lifecycle/prefix/include
+      // knobs were `pi-mcp-adapter`'s, and the SDK's own extension needs none
+      // of them: it registers one Pi tool per tool the helper reports, under
+      // the same `mcp__<server>__<tool>` name every runtime uses.
+      mcpConfig: { observation: {}, permissionMode: 'auto', mcpServers: { [AGENT_TEAM_MCP_SERVER_NAME]: {
+        command: helper.command, args: helper.args,
+        env: { BYOK_STORE_DIR: storeDir, BYOK_PRODUCT_ID: input.config.productId, BYOK_TEAM_MEMBER_CONTEXT: document.pi.context },
       } } },
     });
     const host = pi;

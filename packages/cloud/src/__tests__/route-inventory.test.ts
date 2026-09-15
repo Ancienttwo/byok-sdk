@@ -28,6 +28,8 @@ const EXPECTED_INVENTORY: Record<string, RouteClass> = {
   'GET /byok/events': 'device',
   'POST /byok/messages': 'device',
   'PUT /byok/agent-home-projections/:requestId/completion': 'device',
+  'PUT /byok/input-preparations/:requestId/completion': 'device',
+  'GET /byok/input-preparations/:requestId': 'device',
   'GET /byok/board': 'device',
   'POST /byok/board/:id/claim': 'device',
   'POST /byok/board/:id/unclaim': 'device',
@@ -251,6 +253,11 @@ const ALWAYS_MOUNTED = [
   'POST /byok/token',
   'GET /byok/capabilities',
   'PUT /byok/agent-home-projections/:requestId/completion',
+  // Same decision as the Agent-home completion above: the device's only way to
+  // discharge a mailbox row this deployment already handed it must not depend
+  // on a declaration, or an under-declared deployment strands its cursor.
+  'PUT /byok/input-preparations/:requestId/completion',
+  'GET /byok/input-preparations/:requestId',
 ] as const;
 
 const GRANT_ROUTES = [

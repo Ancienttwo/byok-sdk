@@ -496,6 +496,40 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     await downFollow; // must complete via the audit-tail fallback, not hang
   });
 
+  /**
+   * B-P2 local primitive: an ordinary daemon — the exact one every other case
+   * in this file builds — has no `inputPreparation` section, so the whole
+   * surface stays off. Registering three new methods on this socket must not
+   * turn preparation on for a deployment that never asked for it, and a
+   * disabled daemon must not answer differently for different request shapes.
+   */
+  it('keeps input preparation off, and creates no durable preparation state, on a daemon that does not configure it', async () => {
+    const adapter = new StubRuntimeAdapter('pi');
+    const built = await pairedAndStarted('acme-ctl-input-prep-off', adapter);
+    daemon = built.daemon;
+
+    const connected = await connectControlClient({ storeDir: built.storeDir, productId: built.config.productId });
+    if (!connected.ok) throw new Error('expected a control endpoint');
+    try {
+      for (const method of ['input_preparation.prepare', 'input_preparation.lookup', 'input_preparation.cancel']) {
+        for (const params of [undefined, {}, { requestId: 'prep-1' }]) {
+          await expect(connected.client.request(method, params)).rejects.toMatchObject({
+            name: 'ControlError',
+            code: 'input_preparation_unconfigured',
+          });
+        }
+      }
+      // Still a normal daemon otherwise, and nothing was written for a feature
+      // that is not enabled.
+      const status = await connected.client.request<ControlStatusResult>('status');
+      expect(status.paired).toBe(true);
+      expect(status.activeTasks).toEqual([]);
+      expect(await fileGone(path.join(built.storeDir, 'input-preparation'))).toBe(true);
+    } finally {
+      connected.client.close();
+    }
+  });
+
   it('runUnpairCommand performs a real live unpair over the control socket: shuts the daemon down, confirms exit, and clears the store', async () => {
     const adapter = new StubRuntimeAdapter('pi');
     const built = await pairedAndStarted('acme-ctl-unpair-cli', adapter);

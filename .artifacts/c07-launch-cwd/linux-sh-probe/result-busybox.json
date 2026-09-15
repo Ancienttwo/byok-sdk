@@ -1,0 +1,75 @@
+lrwxrwxrwx    1 root     root            12 Jun 21 18:55 /bin/sh -> /bin/busybox
+SH_IDENTITY /bin/busybox root:root 755 nobash --version: applet not found
+{
+  "sh": "/bin/sh",
+  "spawnerPid": 26,
+  "baseline": {
+    "injected": true,
+    "cwd": "/tmp/probe-busybox/agenthome",
+    "code": 0
+  },
+  "bootstrap_S1": {
+    "injected": false,
+    "cwd": "/tmp/probe-busybox/trusted",
+    "cwdOk": true,
+    "argvIdentical": true,
+    "pidIsSpawned": true,
+    "ppidIsSpawner": true,
+    "code": 0
+  },
+  "bootstrap_S2": {
+    "injected": false,
+    "cwd": "/tmp/probe-busybox/trusted",
+    "cwdOk": true,
+    "argvIdentical": true,
+    "pidIsSpawned": true,
+    "ppidIsSpawner": true,
+    "code": 0
+  },
+  "bootstrap_S3": {
+    "injected": false,
+    "cwd": "/tmp/probe-busybox/trusted",
+    "cwdOk": true,
+    "argvIdentical": true,
+    "pidIsSpawned": true,
+    "ppidIsSpawner": true,
+    "code": 0
+  },
+  "weirdcwd_S1": {
+    "cwd": "/tmp/probe-busybox/-weird dir",
+    "cwdOk": true,
+    "code": 0
+  },
+  "weirdcwd_S3": {
+    "cwd": "/tmp/probe-busybox/-weird dir",
+    "cwdOk": true,
+    "code": 0
+  },
+  "negative_control": {
+    "injected": true,
+    "cwd": "/tmp/probe-busybox/agenthome"
+  },
+  "exit_code": {
+    "code": 42,
+    "signal": null
+  },
+  "signal": {
+    "code": null,
+    "signal": "SIGTERM",
+    "targetPidIsSpawned": true
+  },
+  "env_traps": {
+    "injected": false,
+    "trapSourced": false,
+    "cwdOk": true,
+    "argvIdentical": true,
+    "markPassed": true,
+    "lines": []
+  },
+  "cdpath_relative_negative": {
+    "code": 2,
+    "lines": [
+      "STDERR trusted: cd: line 0: can't cd to trusted: No such file or directory"
+    ]
+  }
+}

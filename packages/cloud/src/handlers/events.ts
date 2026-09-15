@@ -1,4 +1,4 @@
-import { MAILBOX_READ_AHEAD_CAPABILITY, MAILBOX_READ_AHEAD_MAX_SEQS } from '@byok-sdk/protocol';
+import { isTaskOfferType, MAILBOX_READ_AHEAD_CAPABILITY, MAILBOX_READ_AHEAD_MAX_SEQS } from '@byok-sdk/protocol';
 /**
  * `GET /byok/events?cursor=N` — the long-poll receive half (§8).
  *
@@ -155,29 +155,18 @@ export function eventsHandler(deps: EventsRouteDeps) {
         }
         if (page.messages.length === 0) break;
         const decoded: Envelope[] = page.messages.map((message) => decodeEnvelope(message.body));
+        // The protocol's own classifier, not a list restated here: a
+        // hand-maintained copy silently stops filtering the day a new
+        // task-opening type is registered, and the symptom is a CANCELLED offer
+        // still being delivered.
         const offeredTaskIds = decoded.flatMap((event) =>
-          (event.type === 'task.offer' ||
-            event.type === 'task.offer_with_toolsets' ||
-            event.type === 'task.offer_for_agent' ||
-            event.type === 'task.offer_for_agent_with_egress' ||
-            event.type === 'task.offer_for_agent_with_egress_fresh') &&
-          event.task_id !== undefined
-            ? [event.task_id]
-            : [],
+          isTaskOfferType(event.type) && event.task_id !== undefined ? [event.task_id] : [],
         );
         const attemptsByTaskId = Object.fromEntries(
           (await stores.tasks.getMany(offeredTaskIds)).map((attempt) => [attempt.taskId, attempt]),
         );
         const events = decoded.filter((event) => {
-          if (
-            event.type !== 'task.offer' &&
-            event.type !== 'task.offer_with_toolsets' &&
-            event.type !== 'task.offer_for_agent' &&
-            event.type !== 'task.offer_for_agent_with_egress' &&
-            event.type !== 'task.offer_for_agent_with_egress_fresh'
-          ) {
-            return true;
-          }
+          if (!isTaskOfferType(event.type)) return true;
           return event.task_id === undefined || attemptsByTaskId[event.task_id]?.cancellation === undefined;
         });
         if (events.length === 0 && page.hasMore) {

@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
-import type { TaskState } from '@byok-sdk/protocol';
+import { PERMISSION_MODES, type PermissionMode, type TaskState } from '@byok-sdk/protocol';
 import type { ApprovalDecision, PendingApproval } from './approvals';
 import type { StorageCategory } from './journal/journal';
 import type { StoragePressureState } from './journal/storage-policy';
@@ -8,6 +8,26 @@ import type { OperationalHealthSnapshot } from './operational-health';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types';
 import type { AgentHomeExecutionStatus } from '../agent-home';
+import type {
+  InputPreparationCancelParamsV1,
+  InputPreparationLookupParamsV1,
+  InputPreparationModelV1,
+  InputPreparationOptionsV1,
+  InputPreparationPromptSnapshotV1,
+  InputPreparationReceiptV1,
+  InputPreparationRequestV1,
+  InputPreparationScopeClaimV1,
+  InputPreparationSnapshotV1,
+  InputPreparationUserMessageV1,
+} from '../input-preparation';
+import {
+  INPUT_PREPARATION_REQUEST_FORMAT,
+  INPUT_PREPARATION_RETIRED_PROMPT_KEYS,
+  INPUT_PREPARATION_RETIRED_REQUEST_KEYS,
+  INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS,
+  INPUT_PREPARATION_VERSION,
+} from '../input-preparation';
+
 
 /**
  * M4 Phase 2: shared local-IPC contract between the daemon's control server
@@ -856,4 +876,366 @@ export function parseTeamMessageAckParams(value: unknown): TeamMessageAckParams 
 export function parseTeamMessageInspectParams(value: unknown): TeamMessageInspectParams | undefined {
   if (!isRecord(value) || !exactKeys(value, ['workspaceId', 'afterSeq']) || typeof value.workspaceId !== 'string' || (value.afterSeq !== undefined && !safeInteger(value.afterSeq))) return undefined;
   return { workspaceId: value.workspaceId, ...(value.afterSeq === undefined ? {} : { afterSeq: value.afterSeq }) };
+}
+
+// ---------------------------------------------------------------------------
+// `input_preparation.prepare` / `.lookup` / `.cancel` (B-P2 local primitive)
+// ---------------------------------------------------------------------------
+
+/**
+ * The three wire methods of the B-P2 local primitive, named the way every other
+ * unary method on this socket is named (`<snake_case noun>.<verb>`, e.g.
+ * `toolsets.reload`, `task_assertion.issue`).
+ *
+ * `prepare` is the closest task-free precedent to `toolsets.reload`: it mutates
+ * only daemon-local durable state behind the existing HMAC handshake, creates
+ * no task, claim, Execution or nonce, and returns a receipt rather than a
+ * capability.
+ */
+export const INPUT_PREPARATION_PREPARE_METHOD = 'input_preparation.prepare';
+export const INPUT_PREPARATION_LOOKUP_METHOD = 'input_preparation.lookup';
+export const INPUT_PREPARATION_CANCEL_METHOD = 'input_preparation.cancel';
+
+/** Result of all three methods: exactly one receipt, never a bare digest or a raw artifact. */
+export interface InputPreparationResult {
+  receipt: InputPreparationReceiptV1;
+}
+
+/**
+ * Bound on one identifier-shaped wire string (`requestId`, `deviceId`,
+ * `agentRef`, `profileId`, revisions, digests). Frame-level only: the values
+ * themselves are authority-owned and are never parsed or normalized here.
+ */
+export const INPUT_PREPARATION_IDENTIFIER_MAX_BYTES = 512;
+
+function boundedString(value: unknown, maxBytes: number): value is string {
+  return typeof value === 'string' && value.length > 0 && Buffer.byteLength(value, 'utf8') <= maxBytes;
+}
+
+function identifier(value: unknown): value is string {
+  return boundedString(value, INPUT_PREPARATION_IDENTIFIER_MAX_BYTES);
+}
+
+/** `typeof null === 'object'`, and an array is an object too — both must fail a record gate. */
+function plainRecord(value: unknown): value is Record<string, unknown> {
+  return isRecord(value) && !Array.isArray(value);
+}
+
+function stringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
+}
+
+/** A flat `Record<string, string>` with no prototype-polluting keys. */
+function stringMap(value: unknown): value is Record<string, string> {
+  if (!plainRecord(value)) return false;
+  return Object.keys(value).every((key) => key !== '__proto__' && typeof value[key] === 'string');
+}
+
+function finiteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function parseScopeClaim(value: unknown): InputPreparationScopeClaimV1 | undefined {
+  if (!plainRecord(value) || !exactKeys(value, ['deviceId', 'agentRef', 'profileId', 'profileRevision'])) return undefined;
+  if (!identifier(value.deviceId) || !identifier(value.agentRef) || !identifier(value.profileId) || !identifier(value.profileRevision)) {
+    return undefined;
+  }
+  return {
+    deviceId: value.deviceId,
+    agentRef: value.agentRef,
+    profileId: value.profileId,
+    profileRevision: value.profileRevision,
+  };
+}
+
+function parseModel(value: unknown): InputPreparationModelV1 | undefined {
+  if (
+    !plainRecord(value) ||
+    !exactKeys(value, ['id', 'name', 'api', 'provider', 'baseUrl', 'reasoning', 'input', 'cost', 'contextWindow', 'maxTokens'])
+  ) {
+    return undefined;
+  }
+  if (!identifier(value.id) || !identifier(value.name) || !identifier(value.provider) || !identifier(value.baseUrl)) return undefined;
+  // One API, checked here and not translated anywhere: the native first
+  // support set compiles openai-completions only.
+  if (value.api !== 'openai-completions') return undefined;
+  if (typeof value.reasoning !== 'boolean') return undefined;
+  if (!Array.isArray(value.input) || value.input.length === 0 || !value.input.every((entry) => entry === 'text' || entry === 'image')) return undefined;
+  if (!plainRecord(value.cost) || !exactKeys(value.cost, ['input', 'output', 'cacheRead', 'cacheWrite'])) return undefined;
+  const cost = value.cost;
+  if (!finiteNumber(cost.input) || !finiteNumber(cost.output) || !finiteNumber(cost.cacheRead) || !finiteNumber(cost.cacheWrite)) return undefined;
+  if (!Number.isSafeInteger(value.contextWindow) || (value.contextWindow as number) <= 0) return undefined;
+  if (!Number.isSafeInteger(value.maxTokens) || (value.maxTokens as number) <= 0) return undefined;
+  return {
+    id: value.id,
+    name: value.name,
+    api: 'openai-completions',
+    provider: value.provider,
+    baseUrl: value.baseUrl,
+    reasoning: value.reasoning,
+    input: [...(value.input as ('text' | 'image')[])],
+    cost: { input: cost.input, output: cost.output, cacheRead: cost.cacheRead, cacheWrite: cost.cacheWrite },
+    contextWindow: value.contextWindow as number,
+    maxTokens: value.maxTokens as number,
+  };
+}
+
+function parseOptions(value: unknown): InputPreparationOptionsV1 | undefined {
+  if (!plainRecord(value) || !exactKeys(value, ['cacheRetention', 'maxTokens', 'temperature', 'toolChoice', 'reasoningEffort'])) return undefined;
+  if (value.cacheRetention !== 'none' && value.cacheRetention !== 'short' && value.cacheRetention !== 'long') return undefined;
+  if (!Number.isSafeInteger(value.maxTokens) || (value.maxTokens as number) <= 0) return undefined;
+  if (value.temperature !== undefined && !finiteNumber(value.temperature)) return undefined;
+  if (value.toolChoice !== undefined && value.toolChoice !== 'auto' && value.toolChoice !== 'none' && value.toolChoice !== 'required') return undefined;
+  if (
+    value.reasoningEffort !== undefined &&
+    !['minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(value.reasoningEffort as string)
+  ) {
+    return undefined;
+  }
+  return {
+    cacheRetention: value.cacheRetention,
+    maxTokens: value.maxTokens as number,
+    ...(value.temperature === undefined ? {} : { temperature: value.temperature as number }),
+    ...(value.toolChoice === undefined ? {} : { toolChoice: value.toolChoice as 'auto' | 'none' | 'required' }),
+    ...(value.reasoningEffort === undefined
+      ? {}
+      : { reasoningEffort: value.reasoningEffort as InputPreparationOptionsV1['reasoningEffort'] }),
+  };
+}
+
+function parsePromptSnapshot(value: unknown): InputPreparationPromptSnapshotV1 | undefined {
+  if (
+    !plainRecord(value) ||
+    !exactKeys(value, [
+      'customPrompt',
+      'appendSystemPrompt',
+      'cwd',
+      'toolSnippets',
+      'promptGuidelines',
+      'contextFiles',
+      'formattedSkills',
+      'docsPaths',
+    ])
+  ) {
+    return undefined;
+  }
+  if (value.customPrompt !== undefined && typeof value.customPrompt !== 'string') return undefined;
+  if (value.appendSystemPrompt !== undefined && typeof value.appendSystemPrompt !== 'string') return undefined;
+  if (typeof value.cwd !== 'string' || value.cwd.length === 0) return undefined;
+  if (!stringMap(value.toolSnippets)) return undefined;
+  if (!stringArray(value.promptGuidelines)) return undefined;
+  if (!Array.isArray(value.contextFiles)) return undefined;
+  const contextFiles: { path: string; content: string }[] = [];
+  for (const entry of value.contextFiles) {
+    if (!plainRecord(entry) || !exactKeys(entry, ['path', 'content'])) return undefined;
+    if (typeof entry.path !== 'string' || typeof entry.content !== 'string') return undefined;
+    contextFiles.push({ path: entry.path, content: entry.content });
+  }
+  if (typeof value.formattedSkills !== 'string') return undefined;
+  if (!plainRecord(value.docsPaths) || !exactKeys(value.docsPaths, ['readmePath', 'docsPath', 'examplesPath'])) return undefined;
+  const docs = value.docsPaths;
+  if (typeof docs.readmePath !== 'string' || typeof docs.docsPath !== 'string' || typeof docs.examplesPath !== 'string') return undefined;
+  return {
+    ...(value.customPrompt === undefined ? {} : { customPrompt: value.customPrompt }),
+    ...(value.appendSystemPrompt === undefined ? {} : { appendSystemPrompt: value.appendSystemPrompt }),
+    cwd: value.cwd,
+    toolSnippets: { ...value.toolSnippets },
+    promptGuidelines: [...value.promptGuidelines],
+    contextFiles,
+    formattedSkills: value.formattedSkills,
+    docsPaths: { readmePath: docs.readmePath, docsPath: docs.docsPath, examplesPath: docs.examplesPath },
+  };
+}
+
+/**
+ * First support set: text-only user messages. An assistant/toolResult message,
+ * array (multimodal) content or any extra field is rejected outright rather
+ * than coerced — a silently downgraded message would change what is counted.
+ */
+function parseMessages(value: unknown): InputPreparationUserMessageV1[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const messages: InputPreparationUserMessageV1[] = [];
+  for (const entry of value) {
+    if (!plainRecord(entry) || !exactKeys(entry, ['role', 'content', 'timestamp'])) return undefined;
+    if (entry.role !== 'user' || typeof entry.content !== 'string') return undefined;
+    if (!Number.isSafeInteger(entry.timestamp) || (entry.timestamp as number) < 0) return undefined;
+    messages.push({ role: 'user', content: entry.content, timestamp: entry.timestamp as number });
+  }
+  return messages;
+}
+
+function parseSnapshot(value: unknown): InputPreparationSnapshotV1 | undefined {
+  // `tools` is NOT parsed here and is not accepted: the model-visible schemas
+  // are a local observation assembled by `./prepared-tool-surface.ts`. The
+  // retired key is caught by name above this function so the caller hears
+  // which authority it tried to assert, rather than a generic shape error.
+  if (!plainRecord(value) || !exactKeys(value, ['prompt', 'messages'])) return undefined;
+  const prompt = parsePromptSnapshot(value.prompt);
+  const messages = parseMessages(value.messages);
+  if (!prompt || !messages) return undefined;
+  return { prompt, messages };
+}
+
+/** Configured MCP toolset ids: non-empty, deduplicated, and each a usable identifier. */
+function parseRequiredToolsets(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (!identifier(entry) || seen.has(entry)) return undefined;
+    seen.add(entry as string);
+  }
+  return [...seen];
+}
+
+/**
+ * Why `input_preparation.prepare` params were refused.
+ *
+ * Two distinct codes, because they are two distinct facts. `bad_request` is
+ * "this is not the shape" — a wrong type, a missing field, an unknown extra.
+ * `unsupported_input` is "this is the OLD shape": the caller sent a key this
+ * contract retired, which means it is asserting authority over the tool
+ * manifest that version 2 moved onto the device. Answering that with a generic
+ * shape error would leave the caller adjusting field types forever.
+ */
+export type InputPreparationRequestParseResult =
+  | { readonly ok: true; readonly request: InputPreparationRequestV1 }
+  | { readonly ok: false; readonly code: 'bad_request' | 'unsupported_input'; readonly detail: string };
+
+function badRequest(detail: string): InputPreparationRequestParseResult {
+  return { ok: false, code: 'bad_request', detail };
+}
+
+/**
+ * Strict shape gate for `input_preparation.prepare`.
+ *
+ * Every object is key-exact: an unknown field anywhere in the request is a
+ * rejection, never an ignored extra — a tolerated field is how a caller comes
+ * to believe it can influence the compiled body, the runtime identity or the
+ * policy this daemon enforces.
+ *
+ * This gate validates SHAPE only. Scope authority, policy revision, runtime
+ * identity, the tool manifest and every limit are resolved by
+ * `input-preparation-service.ts`; none of them can be asserted here by a
+ * caller.
+ */
+export function parseInputPreparationRequestParams(value: unknown): InputPreparationRequestParseResult {
+  if (!plainRecord(value)) return badRequest('the params must be an object');
+  // Named first, and by name: a caller still sending either key is not sending
+  // a slightly wrong request, it is claiming an authority this contract moved.
+  for (const retired of INPUT_PREPARATION_RETIRED_REQUEST_KEYS) {
+    if (retired in value) {
+      return {
+        ok: false,
+        code: 'unsupported_input',
+        detail: `this contract no longer accepts ${JSON.stringify(retired)}: tool executor identity is a local`
+          + ' observation this daemon derives from `requiredToolsets`, never a value a caller may state',
+      };
+    }
+  }
+  if (plainRecord(value.snapshot) && plainRecord(value.snapshot.prompt)) {
+    for (const retired of INPUT_PREPARATION_RETIRED_PROMPT_KEYS) {
+      if (retired in value.snapshot.prompt) {
+        return {
+          ok: false,
+          code: 'unsupported_input',
+          detail: `this contract no longer accepts ${JSON.stringify(`snapshot.prompt.${retired}`)}: the native contract`
+            + ' requires that list to equal the model-visible manifest exactly, and the manifest is a local'
+            + ' observation this daemon derives from `requiredToolsets`',
+        };
+      }
+    }
+  }
+  if (plainRecord(value.snapshot)) {
+    for (const retired of INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS) {
+      if (retired in value.snapshot) {
+        return {
+          ok: false,
+          code: 'unsupported_input',
+          detail: `this contract no longer accepts ${JSON.stringify(`snapshot.${retired}`)}: the model-visible tool`
+            + ' schemas are a local observation this daemon derives from `requiredToolsets`',
+        };
+      }
+    }
+  }
+  if (
+    !exactKeys(value, [
+      'format',
+      'version',
+      'requestId',
+      'policyRevision',
+      'scope',
+      'source',
+      'selection',
+      'permissionMode',
+      'requiredToolsets',
+      'snapshot',
+    ])
+  ) {
+    return badRequest('the params carry a field this request shape does not define');
+  }
+  if (value.format !== INPUT_PREPARATION_REQUEST_FORMAT || value.version !== INPUT_PREPARATION_VERSION) {
+    return badRequest(
+      `the request must carry format ${JSON.stringify(INPUT_PREPARATION_REQUEST_FORMAT)}`
+      + ` and version ${String(INPUT_PREPARATION_VERSION)}`,
+    );
+  }
+  if (!identifier(value.requestId) || !identifier(value.policyRevision)) {
+    return badRequest('requestId and policyRevision must be non-empty single-line identifiers');
+  }
+  const scope = parseScopeClaim(value.scope);
+  if (!scope) return badRequest('scope must be exactly {deviceId, agentRef, profileId, profileRevision}');
+  if (!plainRecord(value.source) || !exactKeys(value.source, ['revision', 'digest'])) {
+    return badRequest('source must be exactly {revision, digest}');
+  }
+  if (!identifier(value.source.revision) || !identifier(value.source.digest)) {
+    return badRequest('source.revision and source.digest must be non-empty single-line identifiers');
+  }
+  if (!plainRecord(value.selection) || !exactKeys(value.selection, ['model', 'options'])) {
+    return badRequest('selection must be exactly {model, options}');
+  }
+  const model = parseModel(value.selection.model);
+  const options = parseOptions(value.selection.options);
+  if (!model || !options) return badRequest('selection.model / selection.options are outside the accepted shape');
+  if (typeof value.permissionMode !== 'string' || !(PERMISSION_MODES as readonly string[]).includes(value.permissionMode)) {
+    return badRequest(`permissionMode must be one of ${PERMISSION_MODES.map((mode) => JSON.stringify(mode)).join(', ')}`);
+  }
+  const requiredToolsets = parseRequiredToolsets(value.requiredToolsets);
+  if (!requiredToolsets) {
+    return badRequest('requiredToolsets must be a non-empty array of distinct configured toolset ids');
+  }
+  const snapshot = parseSnapshot(value.snapshot);
+  if (!snapshot) return badRequest('snapshot must be exactly {prompt, messages}');
+  return {
+    ok: true,
+    request: {
+      format: INPUT_PREPARATION_REQUEST_FORMAT,
+      version: INPUT_PREPARATION_VERSION,
+      requestId: value.requestId,
+      policyRevision: value.policyRevision,
+      scope,
+      source: { revision: value.source.revision, digest: value.source.digest },
+      selection: { model, options },
+      permissionMode: value.permissionMode as PermissionMode,
+      requiredToolsets: Object.freeze(requiredToolsets),
+      snapshot,
+    },
+  };
+}
+
+/** Strict shape gate for `input_preparation.lookup`. */
+export function parseInputPreparationLookupParams(value: unknown): InputPreparationLookupParamsV1 | undefined {
+  if (!plainRecord(value) || !exactKeys(value, ['requestId', 'scope'])) return undefined;
+  if (!identifier(value.requestId)) return undefined;
+  const scope = parseScopeClaim(value.scope);
+  if (!scope) return undefined;
+  return { requestId: value.requestId, scope };
+}
+
+/** Strict shape gate for `input_preparation.cancel`. Same two fields as lookup, and no third. */
+export function parseInputPreparationCancelParams(value: unknown): InputPreparationCancelParamsV1 | undefined {
+  if (!plainRecord(value) || !exactKeys(value, ['requestId', 'scope'])) return undefined;
+  if (!identifier(value.requestId)) return undefined;
+  const scope = parseScopeClaim(value.scope);
+  if (!scope) return undefined;
+  return { requestId: value.requestId, scope };
 }

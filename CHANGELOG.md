@@ -5,6 +5,573 @@
 Deliberately not filed under 0.18.0: none of this is in a published artifact,
 and the D2 version number belongs to a separate SDK release contract.
 
+- **Fixed (daemon, unreleased contract)** — an attested artifact's path
+  identity is now the INODE behind a symlink-free name, not the name
+  `realpath` returns for it. `resolveToolImplementationIdentity` and the
+  pre-spawn gate share one canonicalization: every directory component of the
+  install path must resolve to itself, the leaf must be a regular file and not
+  a symlink, and the file is bound by its `(dev, ino, size, mtime, mode, uid,
+  gid)` tuple and its content digest as before. The leaf's own `realpath` is no
+  longer compared against the recorded name.
+
+  It had to go. A release artifact that carries an in-release hardlink alias is
+  a file `realpath` does not describe stably: probed on Darwin under Bun 1.4.2,
+  `fs.realpath` on a hardlinked regular file returned a SIBLING link's name —
+  same device, same inode, neither entry a symlink — in 2 of 96 checks, while
+  Node 24 and Linux returned the queried name 96 times out of 96. A
+  Bun-compiled daemon therefore refused a legitimate artifact with
+  `install_record_mismatch`, at resolve and again at every spawn reverify.
+
+  Nothing is weaker for it, and no reason, subject or host-facing field
+  changed. A symlink leaf is still refused, a symlinked or `..`-bearing parent
+  chain is still refused, ownership, write-bit and digest checks are untouched,
+  and a different inode at the recorded name — hardlink to another file
+  included — still fails the stat tuple. A hardlink alias OF the recorded inode
+  is accepted, because it is the same file. The interpreter of an
+  `interpreter+bundle` goes through the identical canonicalization.
+
+- **Changed (daemon, unreleased contract)** — the tool implementation resolver
+  is asked only for what a host knows. `ToolImplementationInstallRecordV1` no
+  longer carries `launchEnvNamesDigest` or `loaderEnvValuesDigest`, and a
+  record that sends either is rejected as not an install record.
+
+  A host cannot know the environment object this SDK hands to `spawn` — it is
+  `buildRuntimeEnv`'s output for one task on one device, not the host's own
+  `process.env` — so asking it to digest one made every resolver either guess
+  or keep a copy of this package's loader deny list. The SDK now measures both
+  digests itself, at resolve, off the exact environment its caller will spawn
+  with, and re-measures them at the spawn gate against the environment actually
+  being handed to the child; a mismatch refuses the spawn with the new
+  spawn-only verdict `launch_env_drift`.
+
+  The digests are taken over a projection that subtracts two NAMED sets: the
+  exact lifecycle names this SDK mints onto a GATED CHILD between resolve and
+  spawn (`TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES` —
+  `BYOK_HOST_TOOLSET_CONTEXT`, `BYOK_STORE_DIR`, `BYOK_PRODUCT_ID`), and
+  `PROVIDER_CREDENTIAL_ENV_DENY_NAMES`, the credential surface the existing
+  custody boundary strips. It is not a `BYOK_*` prefix exemption: the prefix is
+  a live knob elsewhere in this SDK, so any other `BYOK_*` name on the
+  environment of a child about to start under an attested identity fails closed
+  with a second spawn-only verdict, `launch_env_unexpected_control_name` —
+  raised before the digests, so it refuses even when the same name was present
+  at resolve. The Pi adapter's own `BYOK_PI_MCP_CONFIG_PATH` and
+  `BYOK_PI_PERMISSION_MODE` are deliberately NOT on the list: they are set on
+  the Pi process and the server pool strips the whole `/^BYOK_PI_/` shape off
+  before it spawns anything, so neither reaches a gated child — one arriving at
+  the gate is precisely the unaccountable case, and is refused. The loader deny
+  list is disjoint from both projections, so a
+  `NODE_OPTIONS`, `DYLD_*` or `BASH_ENV` that reaches a child is still a
+  refusal, as is a `PYTHONPATH` that appeared or a variable that was renamed.
+  Neither verdict is a `ToolImplementationUnavailableReasonV1`: the resolver
+  contract a host implements is unchanged.
+
+  A prepared record's `toolBindingDigest` now commits to that projection, so a
+  daemon whose runtime environment gains or loses a bound name between prepare
+  and admission declines the prepared offer. The bound set includes
+  session-dependent platform names (`TERM`, `SHELL`, `USER`, `LC_*`, `XDG_*`),
+  so a daemon restarted under a different launch context invalidates earlier
+  prepared records with `preparation_tool_binding_digest_mismatch` — intended,
+  and something a host must expect and re-prepare for.
+
+- **Fixed (daemon, unreleased contract)** — a preparation spawns its probe
+  children with the environment it measured its identities against.
+
+  `assemblePreparedToolSurface` called `deps.runtimeEnv()` a second time for
+  the probe spawn, while the stage-1 comment claimed the environment was taken
+  once. `runtimeEnv` resolves per call so an operator reload is never shadowed,
+  so a reload landing between the two stages would have spawned under an
+  environment the identities were never measured against — `launch_env_drift`
+  at the gate for a difference the preparation itself introduced. The measured
+  object is now carried on `PreparedToolBinding.launchEnv` and stage 2 spawns
+  with exactly it.
+
+- **Fixed (daemon, unreleased contract)** — an `interpreter+bundle` identity
+  re-measures its interpreter at every spawn as strictly as its artifact.
+
+  Resolve checked the interpreter's realpath, ownership, write bits and digest;
+  the spawn gate re-hashed its bytes alone. A replaced interpreter inode, an
+  mtime-only touch, or an interpreter that stopped being root-owned passed a
+  gate the artifact half would have refused. The identity now carries an
+  SDK-measured `interpreterStat`, present iff the record names an interpreter
+  and required in both directions when an identity is parsed back, and the gate
+  compares the interpreter's live stat tuple and digest exactly as the
+  artifact's. Every reverification verdict now names its subject — `artifact`,
+  `interpreter` or `launch-env` — in the reason and in the refusal message.
+
+- **Fixed (daemon, unreleased contract)** — a prepared offer no longer declines
+  a durable record that a restart left unread.
+
+  `task.offer_prepared` reached the record lookup with a store that only the
+  preparation service's `ensureOpen` had ever opened, and that path is reached
+  only from prepare/lookup/cancel. A daemon that restarted and then received an
+  offer before any control call therefore read an EMPTY in-memory map and
+  declined `preparation_not_found` with `retryable: false` — permanently, for a
+  record sitting durably on disk. The lane now carries that same once-only open
+  latch and awaits it before its first lookup, so the open authority and the
+  log replay stay single; an open that fails declines
+  `preparation_store_unavailable` non-retryably rather than reading an unopened
+  store. Every store read (`get`, `find`, `list`, `scopeUsage`, `inFlightCount`,
+  `readArtifact`) now refuses on an unopened store instead of answering
+  `undefined`: an unread store and an empty one are indistinguishable from the
+  map and mean opposite things.
+
+- **Changed (daemon, unreleased contract)** — the durable preparation record
+  has its own schema version, now `3`, separate from the wire version.
+
+  `INPUT_PREPARATION_VERSION` (2) versions what two parties agree on — the
+  control request, the receipt, the retained artifact — and did not move.
+  `INPUT_PREPARATION_RECORD_VERSION` (3) versions what one daemon's own on-disk
+  log is written in. Version 3 is the first in which `model` is a required
+  durable fact, and the version check is now the ONLY thing that discriminates
+  a supported record from an older one; the ad-hoc "does this record carry a
+  `model`?" probe that stood in for it is gone, because a field probe is a
+  second, weaker authority over the same question.
+
+  An unsupported older record is refused as
+  `InputPreparationUnsupportedRecordVersionError` /
+  `unsupported_record_version` during replay, before the store is open — zero
+  writes, zero cleanup, the log and every artifact beside it left exactly as
+  found. There is no compatibility read and no migration. The refusal text says
+  the record is an unsupported older version left untouched pending explicit
+  operator disposition; it no longer advises removing the store directory,
+  because the record may be the only surviving evidence of a counter call that
+  already happened.
+
+- **Added (protocol, unreleased contract)** — `task.offer_prepared`, the strict
+  offer that dispatches an already-counted preparation back to the device that
+  counted it.
+
+  A distinct message type, not a `preparation` field on
+  `task.offer_for_agent`, and the freeze rule's own asymmetry is why: a daemon
+  that predates this type skips an unknown message type whole, whereas it would
+  legally STRIP an unknown optional field and run the task as an ordinary
+  instruction offer — compiling a request of its own against tokens already
+  counted for a different one. The payload is the strict Agent offer minus
+  `instruction` (the request is already inside the frozen envelope its record
+  retained) and minus `sessionRef` (a prepared Execution never resumes), plus a
+  required `preparation` naming the record. Nothing under `preparation` is
+  authority; every value is compared against the device's own durable record.
+
+  `PROTOCOL_VERSION` stays 1. No released shape changed: this is a new message
+  type plus two new leaf schemas, which the freeze guard's own diff message
+  names as the additive case. The frozen fingerprint and the envelope corpus
+  were regenerated with the documented gate and the result diffed key by key
+  against its predecessor — every pre-existing entry is identical.
+
+  `ByokCloud.enqueuePreparedOffer` is the hosted route. It requires the device
+  to durably advertise `agent-input-preparation` beside `agent-home-contract`,
+  because only a device that can prepare holds the record the offer names.
+
+- **Added (daemon, unreleased contract)** — a prepared offer is admitted by
+  item-by-item equality with its record, then sealed, pinned and claimed in that
+  order.
+
+  Admission is the same admission every other offer runs. What is added happens
+  at the seal point: the sealed Execution is compared against the record's
+  binding and artifact summary one fact at a time — device, Agent, profile
+  revision, limits-policy revision, re-presented request and envelope digests,
+  admitted permission mode, installed runtime identity, launch attestation, the
+  model-visible tool set by name, the implementation-identity kind behind each
+  name, `toolBindingDigest`, `observationDigest` — and each difference declines
+  non-retryably with its own reason. Item by item rather than one digest,
+  because "the observation digest differs" is equally true of a rotated policy
+  revision, a re-published toolset, a replaced binary and a schema change.
+
+  The live digests come from the same functions the preparation computed the
+  recorded ones with (`fingerprintPreparedToolSurface`, extracted from
+  `assemblePreparedToolSurface` for exactly this purpose, and
+  `preparedToolBindingDigest`), applied to this task's own already-resolved
+  launch binding, identities and probe observation.
+
+  Pinning strictly before the claim is what makes single consumption real:
+  `InputPreparationStore.pin` is a compare-and-set inside the store's serialized
+  closure, and the loser of a race sends no claim and dispatches nothing.
+  `InputPreparationPinV1` gains its single writer and its real shape,
+  `(taskId, manifestDigest, sealedAt)`. The pin is released at one moment — the
+  Execution's terminal — and a pinned record is never garbage-collected.
+
+  The durable preparation record gained `model`: a prepared launch must
+  re-present the exact model identity to the native verifier as an independent
+  expectation, and the only other copy of it lives inside the retained envelope,
+  which the native contract forbids using as its own expectation. A record log
+  written before this field refuses to replay rather than being read as a record
+  that can never be launched.
+
+  Note what this does NOT make possible yet: no record on a default install can
+  be READY (`coverage: unknown` from the native compiler, and
+  `executor_identity_unproven` with no configured implementation authority), so
+  a prepared offer to such a device declines `preparation_not_ready` and names
+  both reasons. The lane is complete and fail-closed; production counter and
+  identity authority are G4.
+
+- **Breaking (adapter seam)** — `RuntimeOperationStartInput` is a discriminated
+  union. The ordinary start is `{ kind: 'instruction', instruction, ... }`; a
+  prepared Execution is `{ kind: 'prepared', preparation, ... }` and carries no
+  instruction at all.
+
+  A union rather than an optional field beside `instruction`, because the two
+  are mutually exclusive authority over the same request bytes: on one shape
+  every adapter would have to decide which wins, and the answer would be
+  written three times. claude and codex refuse the prepared variant by name;
+  only the pi lane can consume one, because the artifact is compiled against
+  the verified installed pi closure.
+
+- **Added** — `byok-pi-prepared`, the SDK-owned prepared launch host for the pi
+  runtime.
+
+  `pi --mode rpc` can never consume a prepared request: only a session built by
+  the fork's `createPreparedAgentSession` carries the authorized binding, so the
+  ordinary CLI answers `prompt_prepared` with `prepared_session_unsupported`.
+  The new bin is that session — a zero-extension, zero-resource in-process host
+  that hands the native factory an explicit tool closure and then runs the same
+  `runRpcMode` loop, so the adapter speaks one RPC protocol either way. Its MCP
+  toolset tools come from the same task-scoped pool the ordinary Pi extension
+  uses (extracted to `adapters/pi/mcp-server-pool.ts`), so a tool call has
+  exactly one executor, and every server it starts goes through the same
+  trusted launch directory and the same implementation identity gate.
+
+  It compiles nothing. The native compiler remains the only authority on the
+  request bytes: the artifact's envelope crosses verbatim, the native session
+  verifies it against expectations taken from the durable record rather than
+  from the envelope, and every prepared failure code is raised before any
+  provider transport and is terminal — none of them permits re-sending a
+  different input under the same accounting. A prepared Execution never resumes,
+  and one admitted under a permission mode its manifest was not counted for is
+  refused rather than reconciled.
+
+  PARTIAL, unchanged from the preparation side and now stated on both: the
+  prepared Main tool set is policy-filtered native tools plus MCP toolset tools,
+  and only the MCP half is counted. The fork's API is not the limit — its
+  `tools` option would take Pi's built-ins unchanged — so the launch entry
+  resolves the native selection for real from the whole admitted policy
+  (`allowTools`/`denyTools`, not just `mode`) and refuses a non-empty result by
+  name instead of registering a tool the frozen manifest does not contain.
+
+- **Breaking (control contract)** — a preparation request no longer carries a
+  tool manifest. This changes the UNRELEASED candidate contract relative to
+  0.18; no published artifact speaks the old shape.
+
+  `InputPreparationRequestV1` loses `toolExecutors`, `snapshot.tools` and
+  `snapshot.prompt.selectedTools`, and gains `requiredToolsets` and
+  `permissionMode`. `INPUT_PREPARATION_VERSION` is `2`, so a durable record
+  written under the old shape is refused on replay rather than read through a
+  compatibility branch — its artifact was frozen over a manifest a caller
+  stated, and this version's rule is that no caller may state one. A request
+  still carrying a retired key is refused as `unsupported_input` naming that
+  key, not as a generic shape error: a caller sending one is asserting an
+  authority that moved to the device, and it should hear which.
+
+  `agent.input.preparation` gains the same required `permissionMode`, and the
+  receipt's artifact summary gains `observationDigest`, `toolBindingDigest` and
+  `toolImplementationKinds`. The binding records the admitted mode. Two
+  rejection reasons join the closed set — `launch_boundary_unavailable` and
+  `observation_drift` — plus `permission_mode_denied` for a mode above the
+  device's ceiling.
+
+- **Breaking (daemon seam)** — `daemon/prepared-tool-surface.ts` is the one
+  entry that assembles a preparation's tool manifest, and
+  `InputPreparationServiceOptions.toolSurface` is required with no default.
+
+  Both preparation paths — the local `input_preparation.prepare` control call
+  and the remote `agent.input.preparation` envelope — reach it through
+  `InputPreparationService.prepare`, and `create-daemon.ts`'s former
+  `observeRequiredToolsets` is deleted rather than kept beside it. The entry
+  resolves the trusted launch directory with the same functions
+  `TaskRunner.handleOffer` uses, resolves one implementation identity per
+  projected server, probes each server through that binding with its identity
+  (so the shared pre-spawn gate re-measures an attested one), applies the
+  admitted permission mode ONCE, and projects the model-visible schemas and the
+  executor fingerprints from that same filtered observation.
+
+  The declared mode is the requester's INTENT. It is admitted through the same
+  `computeEffectivePolicy` merge that admits a task offer's `policy.mode`
+  against `DaemonConfig.permissionDefaults`; a mode above the ceiling refuses
+  before any spawn and is never narrowed to one the device would allow.
+  `ToolExecutorsRequest` now requires `implementations`, so an MCP fingerprint
+  binds the resolved identity whole instead of a hard-coded unavailable
+  constant, and `executor_identity_unproven` is emitted from the recorded
+  per-tool kinds instead of asserted unconditionally.
+
+  Assembly runs after the durable reserve, so a re-delivery answers from the
+  record without a second probe. A repeat whose recorded artifact exists is
+  checked against the spawn-free half of its evidence and refused with
+  `observation_drift` if the launch attestation, the toolset definition
+  revisions or an implementation identity moved.
+
+  **PARTIAL** — the prepared NATIVE tool set is not connected to preparation.
+  Pi's own tools are selected by a runtime policy a task-free preparation never
+  resolves, so the entry passes `nativeTools: []` and a preparation counts the
+  MCP half only; the final Main set (Q1 = policy-filtered native + MCP) remains
+  the runtime's decision. This is pinned by a test, so removing the limit must
+  change one.
+
+- **Breaking (adapter seam)** — an attested MCP toolset server is re-measured
+  before every spawn of it, and a mismatch refuses the spawn.
+
+  `DaemonConfig.toolImplementationAuthority` is the host's opt-in install-record
+  authority; this SDK ships no resolver and no default, so an absent section —
+  the supported state — resolves every implementation identity to
+  `resolver_unconfigured`, refuses nothing, and keeps
+  `executor_identity_unproven` on every receipt. An absolute path is not an
+  attestation, and the daemon now says so in a typed value instead of leaving
+  it implied.
+
+  A record the host supplies is measured, not believed: the SDK requires the
+  install path to be its own realpath, a non-symlink regular file, root-owned,
+  carrying no write bit for anyone, and hashing to the claimed digest, and it
+  records the `(dev, ino, size, mtime, mode, uid, gid)` tuple it measured onto
+  the identity itself rather than accepting one. `TaskRunner` resolves one
+  identity per projected server per offer, beside the launch binding, and both
+  spawn points consume that same value: the admission probe directly, and pi's
+  own server pool through the task-scoped MCP config. Reverification before each
+  spawn requires the same realpath, the same stat tuple and the same digest; a
+  failure is an `McpAuthorityError` that declines the task permanently and is
+  never downgraded to unavailable-and-continue.
+
+  Breaking in two places for adapter authors. `RuntimeOperationStartInput`
+  carries `mcpToolImplementations`, keyed by projected server name — an adapter
+  that spawns toolset servers itself must forward these to its spawn point
+  rather than resolving its own. The pi task-scoped MCP config file carries
+  `toolImplementations`, and the extension refuses the whole configuration
+  rather than dropping an entry it cannot read, so a spawn never quietly stops
+  being checked.
+
+  What an attested identity proves and what it deliberately does not — root
+  post-hoc modification, the kernel/dyld/SIP-owned libraries, live-process
+  injection, network peers — is written out in `docs/spec.md`, "Executor
+  implementation identity". Release signing is a separate authority and is not
+  claimed.
+
+- **Breaking (security)** — every MCP server child the daemon is responsible
+  for now starts in a directory this daemon's uid has been PROVEN unable to
+  write, instead of inheriting the canonical Agent home. A `bun --compile`
+  single-file binary reads `$cwd/bunfig.toml` and runs its `preload` before any
+  of its own code, and `--config=/dev/null` does not suppress that for a
+  compiled binary (measured on Bun 1.4.2) — so the old inherited cwd let an
+  agent hand arbitrary preload code to the very MCP server it was being served
+  by. The runtime CLI itself is unchanged and keeps its manifest cwd.
+
+  Non-writability is proven by attempting a create and requiring
+  `EACCES`/`EPERM`/`EROFS`, never inferred from mode bits; a symlink is refused
+  rather than followed. The probe alone is not the boundary: a directory owned
+  by this uid answers it with `EACCES` while its owner can `chmod` the write bit
+  back, and `rename(2)` replaces a directory using write permission on its
+  PARENT — so the candidate and every ancestor up to the volume root must each
+  be a real directory, owned by another uid, and refuse the same probe
+  (`..._owned_by_current_uid`, `..._ancestor_writable` and the rest of the
+  `..._ancestor_*` reasons). The candidate is the new
+  `DaemonConfig.mcpLaunchCwd.dir` when configured, otherwise `/` on POSIX and
+  `%SystemRoot%` on Windows. `os.tmpdir()` is deliberately not a candidate: the
+  agent runs at the daemon's own uid in the common deployment, so a 0700 random
+  directory isolates other users and nothing else.
+
+  Breaking in four places. `RuntimeOperationStartInput` carries
+  `mcpLaunch: {cwd, launcher?}`, resolved once per offer; an adapter handed MCP
+  servers without it now fails the start non-retryably. `RuntimeAdapterDescriptor`
+  carries `mcpServerLaunch: 'direct-cwd' | 'launcher-wrapped'`, which is how the
+  daemon knows whether that adapter needs a launcher. The pi task-scoped MCP
+  config file carries `launchCwd`, and the extension refuses to open a server
+  without it. claude's and codex's generated MCP configuration now reaches each
+  server through a launcher, because neither configuration format has a
+  per-server cwd field; argv is forwarded structurally, so a server argument
+  containing a space, a quote, `$(...)`, a `;` or a newline is byte-identical on
+  the other side. On POSIX the launcher is the trusted system `/bin/sh`, run as
+  `sh -c 'cd -- "$0" && exec "$@"' <dir> <command> [...args]` — verified
+  byte-identical over 17 argument classes on dash 0.5.12, bash 5.2.37 invoked as
+  `sh`, busybox ash and macOS `/bin/sh`. On win32 it is this package's new
+  `bin/byok-launch-cwd.mjs` (shipped in the published tarball), which needs a
+  real Node host.
+
+  Two conditions refuse an offer non-retryably rather than admitting an
+  unprotected launch: running as uid 0 (`root_cannot_prove_write_boundary` — no
+  directory is unwritable by root, a documented limitation rather than a filled-in
+  default), and having no trusted launcher for claude/codex. On POSIX that means
+  a `/bin/sh` that is not a root-owned, non-group/other-writable regular file
+  (`launch_cwd_shell_not_root_owned`, `launch_cwd_shell_writable`,
+  `launch_cwd_shell_not_a_regular_file`, `launch_cwd_shell_unreadable`); on win32
+  it means a host that is not provably plain Node, since Bun would preload before
+  the launcher's first statement (`launch_cwd_launcher_unavailable`). A POSIX
+  host needs no Node and no configuration at all;
+  `DaemonConfig.mcpLaunchCwd.launcherInterpreter` remains as an escape hatch, not
+  a supported path.
+
+  `wrapMcpServerWithLaunchCwd` now refuses, rather than repairs, a binding it
+  cannot address unambiguously: a relative launch directory
+  (`launch_cwd_binding_cwd_not_absolute`, which `cd` would resolve through
+  `CDPATH`), a server `command` starting with `-` (`launch_cwd_target_command_option_like`,
+  which `exec` would read as one of its own options), and a relative server
+  `command` (`launch_cwd_target_command_not_absolute`, a PATH lookup performed
+  after the chdir rather than the identity the binding attested).
+
+  **Breaking (configuration)** — per the Owner ruling 2026-09-15, every
+  `DaemonConfig.mcpToolsets`
+  server `command` must be an absolute path, and the rule is global rather than
+  per-runtime. `McpToolsetRegistry` refuses a bare-name or relative command
+  (`mcp_toolset_command_not_absolute`) and one starting with `-`
+  (`mcp_toolset_command_option_like`) when the definition enters the registry —
+  at construction and at every `reload` — so the rejection happens before any
+  admission probe, claim or adapter `start()`, and pi, codex and claude all
+  receive only validated servers. Nothing is resolved, normalized or looked up
+  on PATH; the command is rejected, and an operator whose configuration carries
+  a bare `salesko-agent` must give it an absolute path. An absolute path is not
+  executor attestation: it says the device named one file, not that the file is
+  the product it claims to be. The SDK's own reserved helpers (agent-message,
+  agent-memory, approval, mcp-env) are unaffected — they are built from
+  `process.execPath` or an asserted-absolute host executable. The
+  `wrapMcpServerWithLaunchCwd` refusals above remain as a second, independent
+  fail-closed layer behind that rule.
+
+- The launch working-directory boundary now covers every MCP server a task
+  GENERATES, not only the host toolsets the device projects. `TaskRunner` used
+  to resolve the binding only for a task that probed or projected a toolset
+  server, so a task whose only MCP server came later — the reserved
+  agent-memory helper, or the approval server claude generates for itself under
+  `policy.mode: 'confirm'` — reached `start()` with no binding and had those
+  servers written unwrapped, inheriting the CLI's manifest cwd (the
+  Agent-writable home). The predicate now asks whether the task will generate
+  at least one server of any origin, and claude's fail-closed guard counts the
+  configuration it generated rather than the daemon's projected map.
+  `RuntimeAdapterDescriptor` carries the new optional
+  `generatesApprovalMcpServer`, which is how the daemon knows a `confirm`-mode
+  task on that adapter will produce a server the daemon never sees; omitting it
+  means "generates none". A task that generates no MCP server is still admitted
+  with no binding, and a `confirm`-mode task on a launcher-wrapped adapter with
+  no trusted launcher is now declined non-retryably before
+  any spawn.
+
+- `DaemonConfig.mcpLaunchCwd` (`{dir?, launcherInterpreter?}`) now carries the
+  operator's launch-boundary input through `createDaemon`, forwarded verbatim to
+  `TaskRunnerDeps.mcpLaunchCwd`; a host no longer has to compose its own
+  `TaskRunner` to configure either override. A present section is validated at
+  construction — `dir` absolute, `launcherInterpreter` an absolute path to an
+  existing regular file — so a host that configured a boundary it cannot have
+  fails to start instead of failing a spawn inside the first task that needed
+  one. Whether the directory is still outside this uid's control stays a
+  per-offer proof, never a cached construction-time answer.
+
+  `buildRuntimeEnv` additionally hard-denies `NODE_OPTIONS`,
+  `NODE_REPL_EXTERNAL_MODULE`, `NODE_PATH`, `BUN_*`, `DYLD_*`, `LD_*`, and — for
+  the shell bootstrap — `ENV`, `BASH_ENV`, `SHELLOPTS`, `BASHOPTS`, `CDPATH` and
+  `PS4`, above every allowlist layer including the operator's own
+  `runtimeEnvironment.<id>.allow`: they change how an interpreter loads code
+  before the launcher's first statement. The launcher re-asserts the same list
+  on itself and exits 78 if it sees one. The launch directory and launcher
+  identity are bound into the prepared-launch executor fingerprints as their own
+  fact, beside the toolset's `definitionRevision` rather than inside it, so an
+  SDK launcher upgrade is drift without churning the operator's configured
+  revision. A pre-1.0 breaking cut is MINOR under `docs/spec.md`'s package
+  version policy; no version is bumped here, since a bump does not authorize
+  publish.
+
+- **Breaking** — `McpToolsetConfig` accepts `readOnlyTools`, an
+  operator-owned read/mutation classification per `(server, tool)`, and a
+  toolset task's permission mode is applied to it. `readonly` and `plan` are
+  now expressible for an MCP toolset: the task gets exactly the tools the
+  device declared read-only, on every runtime. The rest are not granted to
+  claude or codex, not registered with pi, and not fingerprinted into a
+  prepared manifest — never registered-then-refused. `auto` still gets every
+  observed tool, and `confirm` is unaffected — a human answers each call, so
+  it narrows nothing and needs no classification. Three fail-closed rules come
+  with it: an observed tool the declaration omits is a mutation tool, a
+  declared tool the server does not expose is stale configuration and declines
+  the task permanently, and a toolset with no declaration at all cannot run
+  under `readonly` or `plan` (the refusal names the missing field). A
+  classification is never inferred from tool names, descriptions, schemas, or
+  a server's own `readOnlyHint`.
+
+  Breaking in three places: `resolveMcpToolsetGrants` takes the permission
+  mode as a required third argument; `McpToolsetServerObservation.tools`
+  carries the per-tool `readOnly` classification; and the pi task-scoped MCP
+  config file carries the task's `permissionMode` beside the observation. The
+  classification is part of a toolset's `definitionRevision`, so changing one
+  changes the toolset revision and every executor fingerprint derived from it.
+  A toolset task that ran under `readonly` before this change was declined
+  outright; the same task now runs once the device declares its read-only
+  tools. A pre-1.0 breaking cut is MINOR under `docs/spec.md`'s package
+  version policy; no version is bumped here, since a bump does not authorize
+  publish.
+- **Breaking** — `McpToolsetToolObservation` now carries full tool
+  descriptors. It was `Record<serverName, toolName[]>`; it is now
+  `Record<serverName, {toolsetId, serverName, serverInfo{name,version},
+  protocolVersion, tools: {name, description, inputSchema}[]}>`. The three
+  runtimes need different parts of the same fact and only one of them can be
+  authoritative: claude and codex pre-grant by name, pi now registers one tool
+  per MCP tool with the server's real schema, and the prepared-input path binds
+  the schema digest. The names-only view every grant resolver uses is derived
+  from this object (`mcpToolsetToolNames`) rather than transported beside it,
+  so a grant and a registered schema can no longer describe different tool
+  sets. `TaskRunnerDeps.mcpToolsetToolsProbe` changes shape with it and takes
+  the server name as its first argument. A pre-1.0 breaking cut is MINOR under
+  `docs/spec.md`'s package version policy; no version is bumped here, since a
+  bump does not authorize publish.
+- Add the SDK's own MCP core at `packages/client/src/mcp/`, built on
+  `@modelcontextprotocol/client@2.0.0`, stdio only, declaring no `sampling`,
+  `elicitation` or `roots` client capability. It owns connect/initialize,
+  `tools/list`, `tools/call`, in-band cancellation and close; a bounded
+  transport that caps both a single JSON-RPC frame and, for an observation, the
+  server's total stdout; the `GRANTABLE_TOOL_NAME` rule under which one bad
+  name fails the whole observation; set-equality drift detection with distinct
+  reasons for an added tool, a removed tool, a changed description, a changed
+  schema, changed server identity and a changed protocol version; and the
+  canonical `(toolsetId, serverName, toolName)` projection every consumer
+  orders by. Schema comparison is structural, so re-serializing a schema with
+  its keys in another order is not drift.
+- Retire `pi-mcp-adapter`. The Pi MCP extension is now SDK-owned and registers
+  one Pi tool per observed MCP tool, carrying that tool's real schema, instead
+  of a single `mcp` proxy plus `mcpScript`. Two consequences the proxy caused
+  are gone: a toolset's schemas now reach the model's first request rather than
+  arriving only after a discovery call, and a toolset is no longer indivisible
+  for permission purposes. The extension discovers nothing of its own — it
+  registers from the daemon's observation and, on the first call to a server,
+  opens that server and re-verifies it against the frozen observation before
+  the call is sent, refusing on any drift. Servers open lazily and one at a
+  time, so a session that calls nothing starts nothing. Dropped from the install
+  graph with it: `@napi-rs/keyring` (and its twelve platform binaries),
+  `@modelcontextprotocol/ext-apps`, `recheck` (and its four platform
+  binaries), `smol-toml`, `open`, `strip-json-comments`, and their transitive
+  closure — 36 packages for one added. `ResolvedPiExtensions.mcpAdapter` is
+  renamed `mcpExtension` with it: the field named a proxy adapter that no
+  longer exists, and the value it carries is the SDK's own extension.
+- The pi adapter re-checks the MCP toolset grant fingerprint at `start()`
+  against the one it was admitted with in `prepare()`, refusing non-retryably
+  on any difference before the task-scoped MCP config is written and before
+  anything is spawned. claude already made this comparison; pi bakes no grant
+  into a CLI argument — the config the extension registers from is the grant —
+  so a swapped observation would otherwise have reached the child.
+- `-32022` (`UnsupportedProtocolVersion`) and `-32021`
+  (`MissingRequiredClientCapability`) join the MCP client's authority error
+  codes. This client sends one fixed protocol revision and one fixed capability
+  set, so a request refused for either reason is refused identically every time
+  it is re-offered. Every other JSON-RPC code still defaults to retryable.
+- Pin the Pi fork runtime to `@byok-sdk/pi-coding-agent@0.85.1002` (fork build
+  2 over the same upstream base `d981de1`): a pure
+  `projectSystemPromptSnapshot`, `RPC_MAX_FRAME_BYTES` with
+  `rpcFrameByteLength`/`fitsRpcFrame`, and depth-1 id recovery. The pre-count
+  RPC frame check that would consume those symbols is NOT shipped: `0.85.1002`
+  exposes no `exports` subpath reaching `rpc-types` and the root entry does not
+  re-export it, so the cap has no importable authority yet and no local copy of
+  it was made. See `docs/researches/runtime-input-preparation-contract.md` §18.
+- The pi adapter now declares `requiresMcpToolsetToolObservation: true`, so a
+  pi-routed toolset offer is admitted on the same observation claude and codex
+  already require.
+- Replace the pi adapter's `auto`-only toolset refusal. Per-tool registration
+  makes a per-tool permission decision expressible, but nothing on the device
+  makes it decidable: `McpToolsetConfig` carries `command`/`args` only, and a
+  server's own `annotations.readOnlyHint` is its self-assessment, not a
+  security authority. A non-`auto` toolset task is therefore still refused, but
+  as an inexpressible policy naming the operator configuration that would make
+  it expressible (`McpToolsetConfig.readOnlyTools`), rather than on the retired
+  proxy's behalf.
+- Add `executor_identity_unproven` to `InputPreparationReadinessReasonV1`, and
+  always report it once an artifact exists. Tool executor strings are
+  observation FINGERPRINTS — they bind a toolset definition revision, a
+  server's self-reported identity, a negotiated protocol version and a schema
+  digest — and none of that proves which executable serves a call. Observation
+  and launch are separate spawns of a command the daemon knows only as
+  `command`/`args`, so the fingerprint carries an explicit
+  `implementationIdentity` marker whose only value today is "unattested", and
+  no receipt can be `ready` on the strength of one.
+
 - Add the `byok-task-assertion-v1` envelope to `@byok-sdk/core` — a separate
   Ed25519 envelope binding `taskId`, the frozen `agentRef` and `toolsetId`
   alongside the device claims, under its own non-prefix signing domain. It
@@ -95,6 +662,27 @@ and the D2 version number belongs to a separate SDK release contract.
   `context_token_invalid` rather than `context_revoked` when the post-signing
   registry re-read finds no registry at all — a context that never existed is
   not a context whose authority ended.
+- Add the remote input-preparation lane: `agent.input.preparation`, a strict
+  server→device message (`task_id` FORBIDDEN, `seq` REQUIRED) gated by the new
+  `agent-input-preparation` capability, plus the cloud routes that carry it —
+  enqueue, the device-authenticated
+  `PUT /byok/input-preparations/:requestId/completion` and
+  `GET /byok/input-preparations/:requestId` — and a daemon handler that calls
+  the B-P2 preparation service in process rather than over the 64 KiB control
+  channel. Idempotency is one Host-minted key,
+  `(deviceId, agentRef, requestId)`, carried unchanged through the request
+  receipt, the device's durable namespace and the completion; a whole-body
+  conflict rejects re-binding one requestId to different inputs. The
+  capability is the ADMISSION gate and lives on enqueue alone — the completion
+  route asserts none, so an unconfigured device can discharge its row with a
+  terminal rejection instead of stalling its strictly seq-ordered cursor.
+  Declared limits: this lane compiles observed MCP toolset tools only (Pi's
+  own native tools are selected by a runtime policy the task-free path never
+  resolves), there is no remote cancel, and receipts are never ready —
+  `coverage: unknown`, a fixture counter authority and
+  `executor_identity_unproven` each keep G4 closed to activation. Additive, so
+  a pre-1.0 MINOR under `docs/spec.md`'s package version policy; no version is
+  bumped here.
 
 ## 0.18.0 / @byok-sdk/keys 0.5.0 — unpublished release candidate
 

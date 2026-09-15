@@ -71,3 +71,52 @@ export function mapPermissionPolicyToPiArgs(policy: PermissionPolicy): PiPermiss
 
   return { ok: true, args };
 }
+
+/**
+ * The SAME policy decision as {@link mapPermissionPolicyToPiArgs}, resolved to
+ * concrete tool NAMES instead of CLI flags.
+ *
+ * The prepared launch entry (`./prepared-tools.ts`) runs pi in-process and must
+ * hand `createPreparedAgentSession` an explicit, complete tool array: there is
+ * no `--tools` flag for pi to interpret and no default registry for it to fall
+ * back to. Resolving the same allow/deny arithmetic a second time inside that
+ * entry would be a second opinion about one policy, so it is resolved here,
+ * beside the flag mapping it must agree with.
+ *
+ * The ONE case that cannot be resolved to names is `auto` with no `allowTools`:
+ * on the CLI path that deliberately emits no `--tools` flag so PI stays the
+ * authority on its own default set. Naming that set here would copy pi's
+ * default registry into this package, where it would silently rot against the
+ * next fork bump — so it is refused instead, by name.
+ */
+export type PiNativeToolSelection =
+  | {
+    readonly ok: true;
+    /** Model-visible native tool names, deduplicated, in the policy's own order. */
+    readonly names: readonly string[];
+  }
+  | {
+    readonly ok: false;
+    /** Why the policy has no nameable native tool set. */
+    readonly reason: string;
+  };
+
+export function resolvePiNativeToolSelection(policy: PermissionPolicy): PiNativeToolSelection {
+  const mapping = mapPermissionPolicyToPiArgs(policy);
+  if (!mapping.ok) return { ok: false, reason: mapping.reason ?? 'policy rejected by pi adapter' };
+  const denied = new Set(policy.denyTools ?? []);
+  if (policy.mode === 'readonly') {
+    const base = policy.allowTools
+      ? policy.allowTools.filter((tool) => READONLY_TOOLS.includes(tool))
+      : [...READONLY_TOOLS];
+    return { ok: true, names: Object.freeze([...new Set(base)].filter((tool) => !denied.has(tool))) };
+  }
+  if (policy.allowTools === undefined || policy.allowTools.length === 0) {
+    return {
+      ok: false,
+      reason: 'permission mode "auto" without an explicit allowTools list leaves the tool set to pi\'s own'
+        + ' default registry, which an in-process prepared session cannot enumerate without copying it',
+    };
+  }
+  return { ok: true, names: Object.freeze([...new Set(policy.allowTools)].filter((tool) => !denied.has(tool))) };
+}

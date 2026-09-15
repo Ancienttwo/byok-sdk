@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import path from 'node:path';
 import {
   CONFIGURED_TOOLSETS_MAX_ITEMS,
   ToolsetIdSchema,
@@ -14,8 +15,11 @@ import type {
   McpToolsetStatus,
 } from '../types';
 import { isReservedMcpServerName } from '../sdk-reserved-mcp';
+import { GRANTABLE_MCP_SERVER_NAME, GRANTABLE_TOOL_NAME } from '../mcp/observation';
+import { compareCodeUnits } from '../util/compare-code-units';
 
 const MAX_LOCAL_MCP_SERVERS_PER_TOOLSET = 16;
+const MAX_READ_ONLY_TOOLS_PER_SERVER = 128;
 const MAX_LOCAL_MCP_ARGS = 64;
 const MAX_LOCAL_MCP_TOKEN_CHARS = 4096;
 const MAX_TOOLSET_VERSION_CHARS = 128;
@@ -73,18 +77,67 @@ function isNonEmptySingleLine(value: unknown, maxChars = MAX_LOCAL_MCP_TOKEN_CHA
   return typeof value === 'string' && value.trim().length > 0 && value.length <= maxChars && !/[\u0000\r\n]/u.test(value);
 }
 
-function digest(value: unknown): string {
-  return `sha256:${createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex')}`;
+/**
+ * Every configured MCP server `command` must be an absolute path, checked here
+ * — at the single gate through which a toolset definition enters the registry —
+ * so no probe, claim, projection or adapter `start()` ever sees a command this
+ * device cannot name.
+ *
+ * A bare name is a PATH lookup resolved in the child's environment at spawn
+ * time, which means the registry's content revision would identify a string
+ * rather than a program: the same configuration could run two different
+ * executables on two days, and the launch-directory boundary would chdir before
+ * the lookup happened. A `command` starting with `-` is refused separately
+ * because `exec`/`spawn` argument vectors read a leading dash as an option of
+ * their own rather than as a program.
+ *
+ * Nothing is resolved, normalized or looked up here. This module does not own a
+ * PATH search and does not invent one; an operator whose configuration carries a
+ * bare `salesko-agent` changes their configuration.
+ *
+ * An absolute path is NOT an attestation of WHICH executor runs: it says the
+ * device named one file, not that the file is the product it claims to be.
+ */
+function assertAbsoluteServerCommand(label: string, command: string): void {
+  if (command.startsWith('-')) {
+    throw new Error(`${label} must not start with "-": mcp_toolset_command_option_like ${JSON.stringify(command)}`);
+  }
+  if (!path.isAbsolute(command)) {
+    throw new Error(`${label} must be an absolute path: mcp_toolset_command_not_absolute ${JSON.stringify(command)}`);
+  }
 }
 
-function compareCodeUnits(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
+function digest(value: unknown): string {
+  return `sha256:${createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex')}`;
 }
 
 function canonicalServers(toolset: McpToolsetConfig): readonly unknown[] {
   return Object.entries(toolset.mcpServers)
     .sort(([left], [right]) => compareCodeUnits(left, right))
     .map(([name, server]) => [name, server.command, [...(server.args ?? [])]] as const);
+}
+
+/**
+ * The full content identity of one toolset definition: what it runs AND how
+ * its tools are classified.
+ *
+ * The classification is part of the definition, not metadata about it. A
+ * toolset whose `readOnlyTools` changed grants a different tool set under a
+ * restricted policy, so it must get a different `definitionRevision` —
+ * otherwise a stored lifecycle observation, and every executor fingerprint
+ * derived from the revision, would survive a permission change silently.
+ * `null` rather than `{}` for an undeclared classification keeps "nobody
+ * classified this" distinct from any declaration an operator could write.
+ */
+function canonicalToolset(toolset: McpToolsetConfig): unknown {
+  return {
+    servers: canonicalServers(toolset),
+    readOnlyTools: toolset.readOnlyTools === undefined
+      ? null
+      : Object.entries(toolset.readOnlyTools)
+        .sort(([left], [right]) => compareCodeUnits(left, right))
+        .map(([name, tools]) => [name, [...tools]] as const),
+  };
 }
 
 function buildState(configured: McpToolsetConfigInput): RegistryState {
@@ -106,8 +159,8 @@ function buildState(configured: McpToolsetConfigInput): RegistryState {
       throw new Error(`DaemonConfig.mcpToolsets.${toolsetId} must be an object`);
     }
     const toolsetKeys = Object.keys(rawToolset);
-    if (toolsetKeys.some((key) => key !== 'mcpServers')) {
-      throw new Error(`DaemonConfig.mcpToolsets.${toolsetId} accepts only the mcpServers field`);
+    if (toolsetKeys.some((key) => key !== 'mcpServers' && key !== 'readOnlyTools')) {
+      throw new Error(`DaemonConfig.mcpToolsets.${toolsetId} accepts only the mcpServers and readOnlyTools fields`);
     }
     const rawServers = (rawToolset as { mcpServers?: unknown }).mcpServers;
     if (rawServers === null || typeof rawServers !== 'object' || Array.isArray(rawServers)) {
@@ -147,6 +200,10 @@ function buildState(configured: McpToolsetConfigInput): RegistryState {
           `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName}.command must be a non-empty single-line string no longer than ${MAX_LOCAL_MCP_TOKEN_CHARS} characters`,
         );
       }
+      assertAbsoluteServerCommand(
+        `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName}.command`,
+        server.command,
+      );
       if (server.args !== undefined && !Array.isArray(server.args)) {
         throw new Error(`DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName}.args must be an array`);
       }
@@ -161,19 +218,84 @@ function buildState(configured: McpToolsetConfigInput): RegistryState {
         ...(args.length > 0 ? { args: Object.freeze([...args]) as readonly string[] } : {}),
       });
     }
-    const toolset = Object.freeze({ mcpServers: Object.freeze(servers) });
+    const readOnlyTools = validateReadOnlyTools(
+      toolsetId,
+      (rawToolset as { readOnlyTools?: unknown }).readOnlyTools,
+      servers,
+    );
+    const toolset = Object.freeze({
+      mcpServers: Object.freeze(servers),
+      ...(readOnlyTools === undefined ? {} : { readOnlyTools }),
+    });
     resolved.set(toolsetId, toolset);
-    definitionRevisions.set(toolsetId, digest(canonicalServers(toolset)));
+    definitionRevisions.set(toolsetId, digest(canonicalToolset(toolset)));
   }
 
   const configuredToolsets = Object.freeze([...resolved.keys()]) as readonly ToolsetId[];
-  const canonical = configuredToolsets.map((toolsetId) => [toolsetId, canonicalServers(resolved.get(toolsetId)!)] as const);
+  const canonical = configuredToolsets.map((toolsetId) => [toolsetId, canonicalToolset(resolved.get(toolsetId)!)] as const);
   return Object.freeze({
     revision: digest(canonical),
     toolsets: resolved,
     configuredToolsets,
     definitionRevisions,
   });
+}
+
+/**
+ * Validate the operator's read/mutation classification against the toolset it
+ * belongs to, strictly and synchronously.
+ *
+ * This is device configuration that decides what a restricted policy may call,
+ * so every part of it is checked here rather than anywhere later: a server it
+ * names must be one this toolset defines (a typo would otherwise classify
+ * nothing at all while looking like it classified something), a tool name must
+ * be shaped like a name a runtime grant can carry, and a repeated name is
+ * refused rather than de-duplicated. An empty declaration is refused too —
+ * omitting the field is how a device says "this toolset is unclassified", and
+ * a second spelling of that would only be ambiguous.
+ *
+ * What CANNOT be checked here is whether the named tools exist: the servers
+ * have not been started. That cross-check is the daemon's, against each
+ * server's own `tools/list` answer, in `classifyMcpToolsetServerObservation`.
+ */
+function validateReadOnlyTools(
+  toolsetId: string,
+  raw: unknown,
+  servers: Readonly<Record<string, McpStdioServerConfig>>,
+): Readonly<Record<string, readonly string[]>> | undefined {
+  if (raw === undefined) return undefined;
+  const label = `DaemonConfig.mcpToolsets.${toolsetId}.readOnlyTools`;
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`${label} must be an object keyed by configured server name`);
+  }
+  const entries = Object.entries(raw);
+  if (entries.length === 0) {
+    throw new Error(`${label} must name at least one server; omit the field entirely for an unclassified toolset`);
+  }
+  const classification: Record<string, readonly string[]> = {};
+  for (const [serverName, rawTools] of entries.sort(([left], [right]) => compareCodeUnits(left, right))) {
+    if (!Object.prototype.hasOwnProperty.call(servers, serverName)) {
+      throw new Error(`${label}.${serverName} names a server this toolset does not define`);
+    }
+    if (!GRANTABLE_MCP_SERVER_NAME.test(serverName)) {
+      throw new Error(`${label}.${serverName} cannot be expressed as a runtime tool grant`);
+    }
+    if (!Array.isArray(rawTools) || rawTools.length === 0 || rawTools.length > MAX_READ_ONLY_TOOLS_PER_SERVER) {
+      throw new Error(`${label}.${serverName} must list 1-${MAX_READ_ONLY_TOOLS_PER_SERVER} tool names`);
+    }
+    const seen = new Set<string>();
+    for (const tool of rawTools) {
+      if (typeof tool !== 'string' || !GRANTABLE_TOOL_NAME.test(tool)) {
+        throw new Error(`${label}.${serverName} contains invalid tool name ${JSON.stringify(tool)}`);
+      }
+      if (seen.has(tool)) {
+        throw new Error(`${label}.${serverName} lists tool name ${JSON.stringify(tool)} more than once`);
+      }
+      seen.add(tool);
+    }
+    classification[serverName] = Object.freeze([...(rawTools as string[])].sort(compareCodeUnits));
+  }
+  return Object.freeze(classification);
 }
 
 function validateObservation(input: McpToolsetObservation): Readonly<McpToolsetObservation> {

@@ -1,5 +1,5 @@
 import type { McpStdioServerConfig } from '../types';
-import { AGENT_MESSAGE_TOOL_NAME } from '../sdk-reserved-mcp';
+import { AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_MESSAGE_TOOL_NAME } from '../sdk-reserved-mcp';
 import { probeMcpServerTools } from './mcp-tools-probe';
 
 export const AGENT_MESSAGE_MCP_PREFLIGHT_TIMEOUT_MS = 10_000;
@@ -24,7 +24,7 @@ export async function preflightAgentMessageMcp(
   cwd?: string,
   timeoutMs = AGENT_MESSAGE_MCP_PREFLIGHT_TIMEOUT_MS,
 ): Promise<void> {
-  const tools = await probeMcpServerTools(server, {
+  const tools = await probeMcpServerTools(AGENT_MESSAGE_MCP_SERVER_NAME, server, {
     label: 'helper',
     timeoutMs,
     env,

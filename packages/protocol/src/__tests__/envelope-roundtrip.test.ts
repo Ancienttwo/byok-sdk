@@ -222,6 +222,29 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     );
   });
 
+  it('task.offer_prepared', () => {
+    const type = 'task.offer_prepared' as const;
+    testedTypes.push(type);
+    roundTrip(
+      type,
+      createEnvelope(
+        type,
+        {
+          policy: { mode: 'auto' },
+          runtime: 'pi',
+          agentRef: { agentId: 'agent-prepared', profileRevision: 'profile-prepared-r1' },
+          requiredToolsets: ['team'],
+          preparation: {
+            reference: 'prep-record-1',
+            requestDigest: 'request-digest-1',
+            artifactDigest: 'envelope-digest-1',
+          },
+        },
+        { taskId: 'task-agent-prepared-1', seq: 7 },
+      ),
+    );
+  });
+
   it('agent.egress.reliable', () => {
     const type = 'agent.egress.reliable' as const;
     testedTypes.push(type);
@@ -332,6 +355,44 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
           projection: { schemaVersion: 'opaque.product.projection.v1', name: 'Research Agent' },
         },
         { seq: 8 },
+      ),
+    );
+  });
+
+  it('agent.input.preparation', () => {
+    const type = 'agent.input.preparation' as const;
+    testedTypes.push(type);
+    roundTrip(
+      type,
+      createEnvelope(
+        type,
+        {
+          requestId: '10000000-0000-4000-8000-000000000063',
+          agentRef: { agentId: 'agent-input-preparation', profileRevision: '7' },
+          profileId: 'profile-1',
+          policyRevision: 'limits-r1',
+          source: { revision: 'source-r42', digest: `sha256:${'c'.repeat(64)}` },
+          selection: {
+            model: {
+              id: 'golden-model',
+              name: 'Golden Model',
+              api: 'openai-completions',
+              provider: 'golden-provider',
+              baseUrl: 'https://provider.example/v1',
+              reasoning: true,
+              input: ['text'],
+              cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+              contextWindow: 200000,
+              maxTokens: 8192,
+            },
+            options: { cacheRetention: 'short', maxTokens: 4096 },
+          },
+          deadlineAt: '2026-01-01T00:01:00.000Z',
+          context: { inline: '{"prompt":{},"messages":[]}' },
+          requiredToolsets: ['team'],
+          permissionMode: 'readonly',
+        },
+        { seq: 9 },
       ),
     );
   });

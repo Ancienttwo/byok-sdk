@@ -409,8 +409,8 @@ both the session MCP grant and binding file. tmux remains an optional view.
 
 ### Codex + Pi through a GUI host
 
-`team pi-relay` owns a fresh Pi **0.85.1** RPC child alongside your existing Codex
-session. Prepare a private `0600` absolute-path binding document:
+`team pi-relay` owns a fresh RPC child on the **pinned Pi fork runtime** (see the
+Core pi runtime contract) alongside your existing Codex session. Prepare a private `0600` absolute-path binding document:
 
 ```json
 {"version":1,"codex":{"context":"<codex-grant>","threadId":"<uuid>","endpoint":"ws://127.0.0.1:9101","afterSeq":0},"pi":{"context":"<pi-grant>","afterSeq":0,"cwd":"/absolute/workspace","sessionDir":"/absolute/new-session-dir","provider":"<provider>","model":"<model>","systemPrompt":"<explicit instructions>","extensionPaths":[]}}

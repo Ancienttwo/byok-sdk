@@ -12,6 +12,8 @@ export type {
   RuntimeDetectResult,
   Session,
   GitWorkspaceConfig,
+  McpLaunchBinding,
+  McpLaunchCwdConfig,
   McpStdioServerConfig,
   McpToolsetConfig,
   McpToolsetLifecycleState,
@@ -20,7 +22,33 @@ export type {
   McpToolsetRegistryStatus,
   McpToolsetReloadReceipt,
   AgentEgressPolicy,
+  LaunchCwdRejection,
+  TrustedLaunchCwd,
+  TrustedLaunchCwdUnavailableReason,
 } from './types';
+export { resolveMcpLaunchCwdLauncher, resolveTrustedLaunchCwd } from './daemon/trusted-launch-cwd';
+/**
+ * The host install-record authority this SDK declares and never implements
+ * (`daemon/tool-implementation-identity.ts`). A daemon constructed without one
+ * resolves every tool implementation identity to `resolver_unconfigured`.
+ *
+ * `parseToolImplementationIdentity` is deliberately NOT exported: it is the
+ * only function that turns a parsed value into an attested identity, and its
+ * one caller is this package's own task-scoped configuration reader.
+ */
+export type {
+  ToolImplementationAttestedV1,
+  ToolImplementationAuthority,
+  ToolImplementationIdentityV1,
+  ToolImplementationInstallRecordV1,
+  ToolImplementationInterpreterV1,
+  ToolImplementationLocatorV1,
+  ToolImplementationResolutionV1,
+  ToolImplementationStatTupleV1,
+  ToolImplementationUnavailableReasonV1,
+  ToolImplementationUnavailableV1,
+} from './daemon/tool-implementation-identity';
+export { ToolImplementationReverifyError } from './daemon/tool-implementation-identity';
 export type { AgentRef } from './agent-home';
 export {
   AgentHomeError,
@@ -144,6 +172,7 @@ export type {
   DaemonBranding,
   HostedJournalConfig,
   DeviceAssertionConfig,
+  InputPreparationDaemonConfig,
   AgentEgressConfig,
   AgentContentReadConfig,
   AgentContentReadSurfaceConfig,
@@ -235,6 +264,85 @@ export type {
   TaskAssertionIssueErrorCode,
 } from './daemon/control-protocol';
 export type { OperationalHealthSnapshot, OperationalHealthState } from './daemon/operational-health';
+/**
+ * B-P2 local primitive (`docs/researches/runtime-input-preparation-contract.md`
+ * §10.3 / §10.4): the task-free `input_preparation.*` control surface's public
+ * contract.
+ *
+ * What becomes public here is the CONTRACT, not a way to reach the daemon:
+ * the wire shapes a host must produce, the two seams it must supply (its local
+ * device/Agent/Profile authority and its separately authorized counter), and
+ * the required limits policy plus its validator. `connectControlClient` stays
+ * unexported for the same reason it always has — see the assertion-client note
+ * above.
+ *
+ * The three strict param parsers are exported alongside them because they ARE
+ * the definition of what each method accepts. A host building its own caller
+ * needs the same gate the daemon enforces; a hand-rolled copy is how the two
+ * drift apart.
+ */
+export {
+  INPUT_PREPARATION_ARTIFACT_FORMAT,
+  INPUT_PREPARATION_ERROR_CODES,
+  INPUT_PREPARATION_RECEIPT_FORMAT,
+  INPUT_PREPARATION_RECORD_FORMAT,
+  INPUT_PREPARATION_REQUEST_FORMAT,
+  INPUT_PREPARATION_RETIRED_PROMPT_KEYS,
+  INPUT_PREPARATION_RETIRED_REQUEST_KEYS,
+  INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS,
+  INPUT_PREPARATION_VERSION,
+  InputPreparationPolicyError,
+  validateInputPreparationLimits,
+} from './input-preparation';
+export type {
+  InputPreparationArtifactSummaryV1,
+  InputPreparationAuthorityGrantV1,
+  InputPreparationCompiledPromptSnapshotV1,
+  InputPreparationCompiledSnapshotV1,
+  InputPreparationAuthorityOutcomeV1,
+  InputPreparationAuthorityResolver,
+  InputPreparationBindingV1,
+  InputPreparationCancelParamsV1,
+  InputPreparationContextFileV1,
+  InputPreparationCounterAdapter,
+  InputPreparationCounterAuthorityV1,
+  InputPreparationCounterEvidenceV1,
+  InputPreparationCounterRequestV1,
+  InputPreparationCounterResultV1,
+  InputPreparationCounterTargetV1,
+  InputPreparationCoverageProofV1,
+  InputPreparationDenialReasonV1,
+  InputPreparationDocsPathsV1,
+  InputPreparationErrorCodeV1,
+  InputPreparationLimitsPolicyV1,
+  InputPreparationLookupParamsV1,
+  InputPreparationModelCostV1,
+  InputPreparationModelV1,
+  InputPreparationOptionsV1,
+  InputPreparationPinV1,
+  InputPreparationPromptSnapshotV1,
+  InputPreparationReadinessReasonV1,
+  InputPreparationReceiptV1,
+  InputPreparationRequestV1,
+  InputPreparationRuntimeIdentityV1,
+  InputPreparationScopeClaimV1,
+  InputPreparationSelectionV1,
+  InputPreparationSnapshotV1,
+  InputPreparationSourceV1,
+  InputPreparationStateV1,
+  InputPreparationToolV1,
+  InputPreparationUserMessageV1,
+} from './input-preparation';
+export {
+  INPUT_PREPARATION_CANCEL_METHOD,
+  INPUT_PREPARATION_IDENTIFIER_MAX_BYTES,
+  INPUT_PREPARATION_LOOKUP_METHOD,
+  INPUT_PREPARATION_PREPARE_METHOD,
+  parseInputPreparationCancelParams,
+  parseInputPreparationLookupParams,
+  parseInputPreparationRequestParams,
+} from './daemon/control-protocol';
+export type { InputPreparationResult } from './daemon/control-protocol';
 
 // S3b (L-001/L-002): the durable local journal (architecture §12.7.2). The
 // PORT is exported, not just the SQLite implementation, because §12.7.2 lets a

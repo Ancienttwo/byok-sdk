@@ -1,18 +1,38 @@
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import { PiRpcClient, type PiRpcMessage } from '../adapters/pi/rpc-client';
-import { resolvePiBin } from '../adapters/pi/resolve-bin';
+import { resolvePiBin, resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
+import { clientPackageRoot } from '../adapters/pi/client-manifest';
 import { codexTeamNotification } from './team-codex-relay';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const DIALOGS = new Set(['confirm', 'select', 'input', 'editor']);
 export interface PiInteractionResponse { sessionId: string; requestId: string; response: { cancelled: true } | { confirmed: boolean } | { value: string }; }
+/**
+ * The task-scoped file the SDK's own MCP extension reads
+ * (`../adapters/pi/mcp-extension.ts`). A relay projects only SDK-reserved
+ * helpers, whose tools the extension reads live from the helper itself, so
+ * `observation` — the daemon's frozen view of HOST toolset servers — is
+ * always empty here.
+ */
+export interface TeamPiMcpConfig {
+  mcpServers: Readonly<Record<string, { command: string; args?: readonly string[]; env?: Readonly<Record<string, string>> }>>;
+  observation: Readonly<Record<string, never>>;
+  /**
+   * The extension applies this mode to `observation`, which a relay always
+   * leaves empty — so the value decides nothing here, and is fixed to `auto`
+   * rather than left to a caller. It is present because the task-scoped file
+   * has exactly one strict shape; a second shape for relays would be a second
+   * parser of the same file.
+   */
+  permissionMode: 'auto';
+}
+
 export interface PiTeamSessionOptions {
   workspaceId: string; cwd: string; sessionDir: string; provider: string; model: string;
-  systemPrompt: string; mcpConfig: Record<string, unknown>; extensionPaths?: readonly string[];
+  systemPrompt: string; mcpConfig: TeamPiMcpConfig; extensionPaths?: readonly string[];
   onEvent: (event: Record<string, unknown>) => void;
 }
 
@@ -34,7 +54,10 @@ export class PiTeamSession {
     if (!options.provider || !options.model || !options.systemPrompt) throw new Error('Pi relay requires explicit provider, model and system prompt');
     const bin = resolvePiBin();
     const version = await new Promise<string>((resolve, reject) => execFile(bin.command, ['--version'], { timeout: 10_000, maxBuffer: 1024 }, (error, stdout) => error ? reject(new Error('Pi version preflight failed')) : resolve(stdout.trim())));
-    if (version !== '0.85.1') throw new Error('Pi relay requires exactly 0.85.1');
+    // The pinned runtime is the only authority for this gate; `@byok-sdk/client`'s
+    // own manifest declares which exact Pi build the relay contract was written against.
+    const pinned = resolvePiRuntimeIdentity().version;
+    if (version !== pinned) throw new Error(`Pi relay requires exactly ${pinned}`);
     const host = new PiTeamSession(options);
     await fs.mkdir(options.sessionDir, { mode: 0o700 }); // Explicit fresh session; never adopt.
     const mcpPath = path.join(options.sessionDir, 'team-mcp.json');
@@ -43,9 +66,9 @@ export class PiTeamSession {
       for (const [file, text] of [[mcpPath, JSON.stringify(options.mcpConfig)], [promptPath, options.systemPrompt]] as const) {
         host.privateFiles.push(file); await fs.writeFile(file, text, { flag: 'wx', mode: 0o600 });
       }
-      const packageDir = path.dirname(fileURLToPath(import.meta.resolve('@byok-sdk/client/package.json')));
+      const packageDir = clientPackageRoot();
       const args = ['--mode', 'rpc', '--session-dir', options.sessionDir, '--provider', options.provider, '--model', options.model,
-        '--system-prompt', promptPath, '--no-extensions', '--no-context-files', '--no-skills', '--no-prompt-templates', '--no-themes', '--no-builtin-tools', '--exclude-tools', 'mcp,mcpScript',
+        '--system-prompt', promptPath, '--no-extensions', '--no-context-files', '--no-skills', '--no-prompt-templates', '--no-themes', '--no-builtin-tools',
         '--extension', path.join(packageDir, 'dist/adapters/pi/team-interaction-extension.js'),
         '--extension', path.join(packageDir, 'dist/adapters/pi/mcp-extension.js')];
       for (const extension of options.extensionPaths ?? []) args.push('--extension', extension);

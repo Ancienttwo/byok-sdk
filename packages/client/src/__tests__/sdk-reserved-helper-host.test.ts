@@ -43,14 +43,68 @@ describe('SDK-reserved helper host composition', () => {
     })).toThrow(/absolute executable path/);
   });
 
+  /**
+   * The registry refuses a non-absolute MCP server `command` for operator
+   * configuration (`toolset-registry.ts`), but the reserved helpers never pass
+   * through it — they are built here. Pinning the same property at the source
+   * keeps the two from drifting apart silently: a helper resolved to a bare
+   * name would reach a launcher-wrapped runtime as a PATH lookup performed
+   * after the chdir, which is exactly what the registry rule exists to prevent.
+   */
+  it('builds every reserved helper command absolute by construction, in both host modes', () => {
+    for (const kind of ['agent-message-mcp', 'agent-memory-mcp', 'approval-mcp', 'agent-team-mcp', 'mcp-env'] as const) {
+      const distScript = resolveSdkReservedHelperBin(kind);
+      expect(distScript.source).toBe('dist-script');
+      // `process.execPath` is the absolute path of the running executable,
+      // unlike a bare `node` that a PATH lookup would have to resolve.
+      expect(distScript.command).toBe(process.execPath);
+      expect(path.isAbsolute(distScript.command)).toBe(true);
+      expect(distScript.command.startsWith('-')).toBe(false);
+      expect(distScript.args.every((arg) => path.isAbsolute(arg))).toBe(true);
+
+      const selfExecutable = resolveSdkReservedHelperBin(kind, { mode: 'self-executable' });
+      expect(selfExecutable.command).toBe(process.execPath);
+      expect(path.isAbsolute(selfExecutable.command)).toBe(true);
+
+      const hosted = resolveSdkReservedHelperBin(kind, {
+        mode: 'self-executable', executable: '/product/salesko-agent',
+      });
+      expect(path.isAbsolute(hosted.command)).toBe(true);
+      expect(hosted.command.startsWith('-')).toBe(false);
+      // The only way an operator-supplied executable enters this shape is
+      // through the assertion, so a relative one can never become a command.
+      expect(() => resolveSdkReservedHelperBin(kind, { mode: 'self-executable', executable: './salesko-agent' }))
+        .toThrow(/absolute executable path/);
+      expect(() => resolveSdkReservedHelperBin(kind, { mode: 'self-executable', executable: 'salesko-agent' }))
+        .toThrow(/absolute executable path/);
+    }
+  });
+
   it('handshakes the exact message helper command before runtime admission', async () => {
     const helper = await fixture('helper.mjs', `
       import { createInterface } from 'node:readline';
       const reader = createInterface({ input: process.stdin, terminal: false });
+      let initialized = false;
+      const reply = (id, result) => console.log(JSON.stringify({ jsonrpc: '2.0', id, result }));
       reader.on('line', (line) => {
         const request = JSON.parse(line);
-        if (request.id === 1) console.log(JSON.stringify({ jsonrpc: '2.0', id: 1, result: {} }));
-        if (request.id === 2) console.log(JSON.stringify({ jsonrpc: '2.0', id: 2, result: { tools: [{ name: 'send_agent_message' }] } }));
+        if (request.id === undefined || request.id === null) {
+          if (request.method === 'notifications/initialized') initialized = true;
+          return;
+        }
+        if (request.method === 'initialize') {
+          reply(request.id, {
+            protocolVersion: request.params.protocolVersion,
+            capabilities: { tools: {} },
+            serverInfo: { name: 'byok-message-helper', version: '0.0.0' },
+          });
+          return;
+        }
+        if (request.method === 'tools/list' && initialized) {
+          reply(request.id, {
+            tools: [{ name: 'send_agent_message', description: '', inputSchema: { type: 'object' } }],
+          });
+        }
       });
     `);
     await expect(preflightAgentMessageMcp({
@@ -61,17 +115,35 @@ describe('SDK-reserved helper host composition', () => {
 
     const broken = await fixture('broken.mjs', `process.stderr.write('unknown command\\n'); process.exit(2);`);
     await expect(preflightAgentMessageMcp({ command: process.execPath, args: [broken] }, PROBE_BASE_ENV))
-      .rejects.toThrow(/exited before handshake.*unknown command/);
+      .rejects.toThrow(/exited before.*unknown command/s);
   });
 
   it('admits an exact helper whose single-file startup exceeds the former three-second bound', async () => {
     const delayedHelper = await fixture('delayed-helper.mjs', `
       import { createInterface } from 'node:readline';
       const reader = createInterface({ input: process.stdin, terminal: false });
+      let initialized = false;
+      const reply = (id, result) => console.log(JSON.stringify({ jsonrpc: '2.0', id, result }));
       reader.on('line', (line) => {
         const request = JSON.parse(line);
-        if (request.id === 1) setTimeout(() => console.log(JSON.stringify({ jsonrpc: '2.0', id: 1, result: {} })), 3250);
-        if (request.id === 2) setTimeout(() => console.log(JSON.stringify({ jsonrpc: '2.0', id: 2, result: { tools: [{ name: 'send_agent_message' }] } })), 3250);
+        if (request.id === undefined || request.id === null) {
+          if (request.method === 'notifications/initialized') initialized = true;
+          return;
+        }
+        if (request.method === 'initialize') {
+          reply(request.id, {
+            protocolVersion: request.params.protocolVersion,
+            capabilities: { tools: {} },
+            serverInfo: { name: 'byok-message-helper', version: '0.0.0' },
+          });
+          return;
+        }
+        if (request.method === 'tools/list' && initialized) {
+          // Slower than the former three-second bound, on purpose.
+          setTimeout(() => reply(request.id, {
+            tools: [{ name: 'send_agent_message', description: '', inputSchema: { type: 'object' } }],
+          }), 3250);
+        }
       });
     `);
 

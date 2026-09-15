@@ -4,7 +4,7 @@ import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { promisify } from 'node:util';
-import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent, PermissionMode, TaskOfferPayload } from '@byok-sdk/protocol';
 import {
   PolicyUnsupportedError,
   SteerUnsupportedError,
@@ -16,6 +16,7 @@ import {
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types';
+import { wrapMcpServerWithLaunchCwd, type McpLaunchBinding } from '../../daemon/trusted-launch-cwd';
 import {
   RuntimeExecutionFailure,
   RuntimeStartupDisposalFailure,
@@ -101,6 +102,7 @@ export class CodexAdapter implements RuntimeAdapter {
     // admit a projected server without the daemon's own `tools/list`
     // observation of it.
     requiresMcpToolsetToolObservation: true,
+    mcpServerLaunch: 'launcher-wrapped',
     capabilities: {
       steer: false,
       resume: true,
@@ -181,7 +183,7 @@ export class CodexAdapter implements RuntimeAdapter {
     // per-tool approval contract: SDK-reserved helpers use their static
     // protocol tool list; host toolsets use exactly the daemon observation.
     // One version gate, then one exact read-back per server.
-    const toolsetGrants = resolveMcpToolsetGrants(input.mcpServers, input.mcpToolsetTools);
+    const toolsetGrants = resolveMcpToolsetGrants(input.mcpServers, input.mcpToolsetTools, input.policy.mode);
     if (!toolsetGrants.ok) {
       return { kind: 'reject', reason: `codex adapter cannot grant projected MCP toolset tools: ${toolsetGrants.reason}`, retryable: false };
     }
@@ -204,7 +206,7 @@ export class CodexAdapter implements RuntimeAdapter {
     return {
       kind: 'prepared',
       operation: {
-        start: (startInput) => this.startPrepared(startInput, mapping.args, modelId, command, toolsetGrants.grants, allGrants),
+        start: (startInput) => this.startPrepared(startInput, mapping.args, modelId, command, toolsetGrants.grants, allGrants, input.policy.mode),
       },
     };
   }
@@ -216,17 +218,30 @@ export class CodexAdapter implements RuntimeAdapter {
     command: string,
     preparedToolsetGrants: readonly McpToolsetGrant[],
     preparedMcpGrants: readonly McpToolsetGrant[],
+    /** The mode the grants were resolved under; re-filtering with any other would compare two different policies. */
+    permissionMode: PermissionMode,
   ): Promise<Session> {
     // Same fail-closed re-check the model selection below gets: the grants
     // were probed against the ADMISSION input, so start() may not arrive with
     // different MCP authority or a different tool observation.
-    const startGrants = resolveMcpToolsetGrants(startInput.mcpServers, startInput.mcpToolsetTools);
+    const startGrants = resolveMcpToolsetGrants(startInput.mcpServers, startInput.mcpToolsetTools, permissionMode);
     if (!startGrants.ok || grantFingerprint(startGrants.grants) !== grantFingerprint(preparedToolsetGrants)) {
       throw new RuntimeExecutionFailure({
         phase: 'start',
         category: 'authority',
         retry: 'non-retryable',
         reason: 'prepared codex operation received different MCP toolset tool authority than it was admitted with',
+      });
+    }
+    // No prepared-input lane here either: a frozen provider request is compiled
+    // against the pi runtime's own verified closure. Refused by name so a
+    // prepared Execution routed to codex fails visibly.
+    if (startInput.kind !== 'instruction') {
+      throw new RuntimeExecutionFailure({
+        phase: 'start',
+        category: 'authority',
+        retry: 'non-retryable',
+        reason: 'the codex adapter has no prepared-input lane',
       });
     }
     if (typeof startInput.instruction !== 'string') {
@@ -296,7 +311,13 @@ export class CodexAdapter implements RuntimeAdapter {
     // recomputed later: `preparedMcpGrants` was probed at admission and
     // `startInput.mcpServers` is the sealed authority for this operation, so
     // a second computation could only widen or drift.
-    const mcpConfigArgs = codexMcpConfigArgs(startInput.mcpServers, runtimeEnv, this.options.sdkHelperHost, preparedMcpGrants);
+    const mcpConfigArgs = codexMcpConfigArgs(
+      startInput.mcpServers,
+      runtimeEnv,
+      this.options.sdkHelperHost,
+      preparedMcpGrants,
+      startInput.mcpLaunch,
+    );
     const { sessionRef, runner } = await runCodexTurn({
       command,
       resumeRef: startInput.manifest.sessionRef,
@@ -421,16 +442,45 @@ function codexMcpConfigArgs(
   env: NodeJS.ProcessEnv,
   helperHost: SdkHelperHostConfig | undefined,
   grants: readonly McpToolsetGrant[] = [],
+  launch?: McpLaunchBinding,
 ): string[] {
   if (servers === undefined || Object.keys(servers).length === 0) return [];
+  // Codex spawns every server itself from these `-c` overrides, and
+  // `mcp_servers.*` has no cwd field — the child would inherit the CLI's cwd,
+  // which for an Agent task is the Agent home the agent writes by design, and
+  // from which a `bun --compile` server binary runs `bunfig.toml` `preload`
+  // before its own code. The `mcp-env` helper that unseals each server's
+  // environment is therefore itself launched through this package's
+  // `bin/byok-launch-cwd.mjs`, which chdirs into the daemon's
+  // proven-non-writable directory before exec'ing it; the real server inherits
+  // that directory from the helper. The CLI's own cwd is unchanged.
+  if (launch?.launcher === undefined) {
+    throw new RuntimeExecutionFailure({
+      phase: 'start', category: 'authority', retry: 'non-retryable',
+      reason: 'prepared codex operation received MCP servers without a trusted launch directory',
+    });
+  }
+  const launchBinding = { cwd: launch.cwd, launcher: launch.launcher };
   const grantedTools = new Map(grants.map((grant) => [grant.server, grant.tools] as const));
   const args = ['--ignore-user-config'];
   for (const [name, server] of Object.entries(servers).sort(([left], [right]) => left.localeCompare(right))) {
     const key = `BYOK_MCP_PAYLOAD_${randomBytes(16).toString('hex').toUpperCase()}`;
     env[key] = JSON.stringify(server);
-    const helper = resolveSdkReservedHelperBin('mcp-env', helperHost);
+    let helper;
+    try {
+      helper = wrapMcpServerWithLaunchCwd(resolveSdkReservedHelperBin('mcp-env', helperHost), launchBinding);
+    } catch (cause) {
+      // Same reason as the claude adapter: a `launch_cwd_*` refusal is this
+      // adapter's own pre-spawn refusal and must arrive typed, or TaskRunner
+      // projects it as a generic `runtime adapter contract violation during
+      // start` and the operator never sees which rule refused.
+      throw new RuntimeExecutionFailure({
+        phase: 'start', category: 'authority', retry: 'non-retryable',
+        reason: `prepared codex operation cannot launch an MCP server in the trusted launch directory: ${cause instanceof Error ? cause.message : 'launch_cwd_target_refused'}`,
+      }, { cause });
+    }
     args.push('-c', `mcp_servers.${name}.command=${JSON.stringify(helper.command)}`);
-    args.push('-c', `mcp_servers.${name}.args=${JSON.stringify([...helper.args])}`);
+    args.push('-c', `mcp_servers.${name}.args=${JSON.stringify([...(helper.args ?? [])])}`);
     args.push('-c', `mcp_servers.${name}.env.BYOK_MCP_ENV_KEY=${JSON.stringify(key)}`);
     args.push('-c', `mcp_servers.${name}.env_vars=${JSON.stringify([key])}`);
     const granted = grantedTools.get(name);

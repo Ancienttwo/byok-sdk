@@ -25,7 +25,8 @@
     "byok-approval-mcp": "./dist/bin/byok-approval-mcp.js",
     "byok-agent-message-mcp": "./dist/bin/byok-agent-message-mcp.js",
     "byok-agent-memory-mcp": "./dist/bin/byok-agent-memory-mcp.js",
-    "byok-agent-team-mcp": "./dist/bin/byok-agent-team-mcp.js"
+    "byok-agent-team-mcp": "./dist/bin/byok-agent-team-mcp.js",
+    "byok-pi-prepared": "./dist/bin/byok-pi-prepared.js"
   },
   "exports": {
     ".": {
@@ -43,6 +44,7 @@
     "./package.json": "./package.json"
   },
   "files": [
+    "bin",
     "dist",
     "README.md",
     "LICENSE"
@@ -69,9 +71,9 @@
   "dependencies": {
     "@byok-sdk/core": "workspace:*",
     "@byok-sdk/protocol": "workspace:*",
-    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-coding-agent": "npm:@byok-sdk/pi-coding-agent@0.85.1002",
     "@juicesharp/rpiv-todo": "2.8.0",
-    "pi-mcp-adapter": "2.27.0",
+    "@modelcontextprotocol/client": "2.0.0",
     "pi-subagents": "0.60.0",
     "pi-web-access": "0.24.1"
   },

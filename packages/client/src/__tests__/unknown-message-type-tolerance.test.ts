@@ -137,6 +137,53 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     expect(received).toHaveLength(2);
   });
 
+  it('long-poll (a2): a REAL task.offer_prepared is skipped whole by a daemon whose protocol build predates it, and never becomes an ordinary offer', async () => {
+    // The N/N-1 property `task.offer_prepared` exists for, exercised against
+    // the transport rather than argued about. This is the byte-for-byte shape a
+    // current cloud puts on the wire; the "older daemon" is simulated by
+    // pushing it raw, the way `pushRawLongPollEvent` simulates any type this
+    // build's `MESSAGE_TYPES` does not contain — with ONE field renamed so the
+    // current parser cannot recognize it either.
+    //
+    // What must NOT happen is the thing an optional FIELD would have caused:
+    // the payload reaching `onEnvelope` with the preparation stripped, i.e. an
+    // instruction-shaped offer running against tokens counted for a different
+    // request. A skipped entry is a skipped entry: no handler, no side effect,
+    // and the cursor moves past it so the mailbox does not stall.
+    const { received } = await startLongPollOnly('byok-unknown-type-prepared-store-');
+
+    const before = createEnvelope('task.offer', { instruction: 'before', policy: { mode: 'auto' } }, { taskId: 'prepared-before', seq: 1 });
+    const after = createEnvelope('task.offer', { instruction: 'after', policy: { mode: 'auto' } }, { taskId: 'prepared-after', seq: 3 });
+
+    server.pushLongPollEvent(before);
+    server.pushRawLongPollEvent({
+      v: 1,
+      id: 'ffffffff-ffff-4fff-8fff-ffffffffff10',
+      ts: new Date().toISOString(),
+      // The one edit that makes this build's registry answer the way an older
+      // build would for the real name.
+      type: 'task.offer_prepared_from_a_newer_minor',
+      task_id: 'prepared-task-from-the-future',
+      seq: 2,
+      payload: {
+        policy: { mode: 'auto' },
+        agentRef: { agentId: 'agent-1', profileRevision: 'profile-r1' },
+        requiredToolsets: ['team'],
+        preparation: { reference: 'prep-record-1', requestDigest: 'request-digest-1' },
+      },
+    });
+
+    server.pushLongPollEvent(after);
+
+    // Both known entries are processed, in order, and the prepared offer is
+    // neither delivered nor allowed to fail the batch around it.
+    await vi.waitFor(() => {
+      expect(received.map((envelope) => envelope.task_id)).toEqual(['prepared-before', 'prepared-after']);
+    });
+    expect(received).toHaveLength(2);
+    expect(received.every((envelope) => envelope.task_id !== 'prepared-task-from-the-future')).toBe(true);
+  });
+
   it('long-poll (b, finding F1 fix): a genuinely malformed KNOWN-type entry (recognized type, invalid/missing payload fields) is skipped for its batch but must NOT advance the cursor — unlike an unrecognized type, this is not forward-compat tolerance, so the server must keep redelivering it until a corrected version is processed', async () => {
     // F1: the ORIGINAL bug forwarded EVERY parseMessage failure (regardless
     // of class) to `onSkippedSeq`, which permanently advanced the cursor

@@ -1,9 +1,10 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { clientPackageRoot } from './client-manifest';
 
 export interface ResolvedPiExtensions {
   readonly webAccess: string;
-  readonly mcpAdapter: string;
+  readonly mcpExtension: string;
   readonly subagentsPolicy: string;
   readonly subagents: string;
   readonly todo: string;
@@ -16,11 +17,11 @@ export interface ResolvedPiExtensions {
  * settings.
  */
 export function resolvePiExtensions(): ResolvedPiExtensions {
-  const clientManifest = fileURLToPath(import.meta.resolve('@byok-sdk/client/package.json'));
+  const packageRoot = clientPackageRoot();
   return {
     webAccess: fileURLToPath(import.meta.resolve('pi-web-access/index.ts')),
-    mcpAdapter: path.join(path.dirname(clientManifest), 'dist', 'adapters', 'pi', 'mcp-extension.js'),
-    subagentsPolicy: path.join(path.dirname(clientManifest), 'dist', 'adapters', 'pi', 'subagents-policy-extension.js'),
+    mcpExtension: path.join(packageRoot, 'dist', 'adapters', 'pi', 'mcp-extension.js'),
+    subagentsPolicy: path.join(packageRoot, 'dist', 'adapters', 'pi', 'subagents-policy-extension.js'),
     subagents: fileURLToPath(import.meta.resolve('pi-subagents')),
     // rpiv-todo publishes TypeScript source without a JavaScript `main`, so
     // select the single authoritative Pi entry declared by its package metadata.

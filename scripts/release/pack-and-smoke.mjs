@@ -5,26 +5,25 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
+import { assertInstalledPiRuntime, parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER } from './pi-runtime-identity.mjs';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 // Version authority: the manifests, never a constant here. The release train
 // version is whatever packages/core ships, keys versions independently, and
-// the pi pin comes from packages/client. Every assertion below compares
-// against these derived values.
-const exactStableVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+// the pi pin comes from packages/client, parsed by the one shared fork-alias
+// reader. Every assertion below compares against these derived values.
 const exactReleaseVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const releaseVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/core/package.json'), 'utf8')).version;
 const keysVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/keys/package.json'), 'utf8')).version;
-const piVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/client/package.json'), 'utf8')).dependencies?.['@earendil-works/pi-coding-agent'];
+const piRuntime = parsePiRuntimeIdentity(
+  JSON.parse(readFileSync(path.join(repoRoot, 'packages/client/package.json'), 'utf8')),
+);
 if (typeof releaseVersion !== 'string' || !exactReleaseVersion.test(releaseVersion)) {
   throw new Error('packages/core/package.json: version must be an exact SemVer release train version');
 }
 if (typeof keysVersion !== 'string' || !exactReleaseVersion.test(keysVersion)) {
   throw new Error('packages/keys/package.json: version must be an exact SemVer independent version');
-}
-if (typeof piVersion !== 'string' || !exactStableVersion.test(piVersion)) {
-  throw new Error('packages/client/package.json: @earendil-works/pi-coding-agent must be pinned to an exact x.y.z version');
 }
 const packages = [
   { name: '@byok-sdk/core', directory: 'packages/core' },
@@ -465,8 +464,11 @@ try {
     run(nodeBin, ['smoke.mjs'], smokeDir);
     copyFileSync(path.join(repoRoot, 'scripts/release/recurring-smoke.mjs'), path.join(smokeDir, 'recurring-smoke.mjs'));
     run(nodeBin, ['recurring-smoke.mjs'], smokeDir);
+    copyFileSync(path.join(repoRoot, 'scripts/release/pi-runtime-identity.mjs'), path.join(smokeDir, 'pi-runtime-identity.mjs'));
     copyFileSync(path.join(repoRoot, 'scripts/release/pi-launcher-smoke.mjs'), path.join(smokeDir, 'pi-launcher-smoke.mjs'));
-    run(nodeBin, ['pi-launcher-smoke.mjs'], smokeDir);
+    // This is the decisive installed-runtime proof (real RPC get_state against
+    // the pinned Pi with extensions loaded); echo it instead of swallowing it.
+    console.log(run(nodeBin, ['pi-launcher-smoke.mjs'], smokeDir));
     assertSingleVersionSet(smokeDir, expectedPackageVersions);
     assertNpmCoreClosure(smokeDir);
     // The worker runtime subpath must stay deployable outside Node: the smoke
@@ -507,7 +509,7 @@ try {
           `${installedAgentVersion.stdout}${installedAgentVersion.stderr}`,
       );
     }
-    run(nodeBin, [path.join(repoRoot, 'packages/client/scripts/packed-cli-mcp-smoke.mjs'), '--install-root', smokeDir]);
+    console.log(run(nodeBin, [path.join(repoRoot, 'packages/client/scripts/packed-cli-mcp-smoke.mjs'), '--install-root', smokeDir]));
     const expectedAgentVersionOutput = `${clientManifest.version}\n`;
     if (installedAgentVersion.stdout !== expectedAgentVersionOutput || installedAgentVersion.stderr !== '') {
       throw new Error(
@@ -519,16 +521,22 @@ try {
     if (readdirSync(emptyAgentHome).length !== 0) {
       throw new Error('installed byok-agent --version touched the empty HOME despite being a zero-state command');
     }
-    if (clientManifest.dependencies?.['@earendil-works/pi-coding-agent'] !== piVersion) {
-      throw new Error(`isolated client manifest must require pi ${piVersion}`);
+    if (clientManifest.dependencies?.[PI_DEPENDENCY_SPECIFIER] !== piRuntime.spec) {
+      throw new Error(`isolated client manifest must require pi ${piRuntime.spec}`);
     }
-    if (clientManifest.optionalDependencies?.['@earendil-works/pi-coding-agent']) {
+    if (clientManifest.optionalDependencies?.[PI_DEPENDENCY_SPECIFIER]) {
       throw new Error('isolated client manifest must not make pi optional');
     }
+    // The alias keeps the on-disk path on the upstream specifier while the
+    // manifest inside carries the fork identity; prove both, and prove the
+    // whole isolated tree holds exactly one coding-agent runtime.
     const piManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@earendil-works', 'pi-coding-agent', 'package.json'), 'utf8'));
-    if (piManifest.version !== piVersion) {
-      throw new Error(`isolated client install resolved pi ${piManifest.version}, expected ${piVersion}`);
+    if (piManifest.name !== piRuntime.packageName || piManifest.version !== piRuntime.version) {
+      throw new Error(
+        `isolated client install resolved pi ${piManifest.name}@${piManifest.version}, expected ${piRuntime.packageName}@${piRuntime.version}`,
+      );
     }
+    assertInstalledPiRuntime(smokeDir, piRuntime, 'release-pack');
   } finally {
     rmSync(smokeDir, { recursive: true, force: true });
   }

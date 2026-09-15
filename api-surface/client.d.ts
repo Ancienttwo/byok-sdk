@@ -769,22 +769,43 @@ export declare class PiAdapter implements RuntimeAdapter {
 }
 // ==== @byok-sdk/client dist/adapters/pi/resolve-bin.d.ts ====
 /**
- * The pi coding-agent CLI's real npm package name.
+ * The module specifier every Pi import and resolution in this package uses.
  *
  * IMPORTANT (empirically verified 2026-07-16, see the M0-3 report): the name
  * `@mariozechner/pi` — the identifier this task was originally briefed with —
  * is NOT the coding agent. On npm it resolves to an unrelated "CLI tool for
  * managing vLLM deployments on GPU pods" (bin: `pi-pods`). The real coding
  * agent was `@mariozechner/pi-coding-agent`, which is now deprecated in
- * favor of this package. `package.json` carries the exact supported version
- * as a required dependency; pi is a core BYOK capability, not an optional
+ * favor of this package. pi is a core BYOK capability, not an optional
  * enhancement or an unversioned global executable.
+ *
+ * This constant is the *resolution specifier* only. The *installed identity*
+ * behind it is a separate fact: `packages/client/package.json` pins this
+ * specifier to an exact npm alias (`npm:<name>@<x.y.z>`), because the SDK ships
+ * a fork of the upstream runtime. The specifier and the on-disk path stay
+ * `@earendil-works/pi-coding-agent`, so every import site and every extension
+ * path is unchanged; only the manifest inside that directory carries the fork's
+ * own name and version. `resolvePiRuntimeIdentity()` derives that identity from
+ * the same manifest entry, so there is exactly one authority for both.
  */
 export declare const PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 export interface ResolvedBin {
     command: string;
     source: 'package' | 'env';
 }
+/** The exact package `PI_PACKAGE_NAME` must resolve to on disk. */
+export interface PiRuntimeIdentity {
+    /** Manifest `name` of the installed runtime (the fork's own scope). */
+    readonly name: string;
+    /** Manifest `version` of the installed runtime. */
+    readonly version: string;
+}
+/**
+ * Read the exact Pi runtime identity this build of `@byok-sdk/client` pins,
+ * from the one place that declares it: the client's own manifest dependency on
+ * `PI_PACKAGE_NAME`.
+ */
+export declare function resolvePiRuntimeIdentity(): PiRuntimeIdentity;
 /**
  * Resolve the pi CLI executable from the required package installed alongside
  * `@byok-sdk/client`. There is intentionally no automatic PATH fallback: a
@@ -803,13 +824,18 @@ export interface ResolvedBin {
  * `ERR_PACKAGE_PATH_NOT_EXPORTED`. It also does NOT resolve the
  * `./package.json` subpath directly (also not exported); instead it resolves
  * the package's main entry via `import.meta.resolve` and walks upward to the
- * package root identified by its manifest name.
+ * enclosing package root.
+ *
+ * That root's manifest name is NOT `PI_PACKAGE_NAME`: the specifier is an npm
+ * alias for the SDK's fork, so the installed manifest carries the fork's own
+ * name and version. Both are compared against the pin, and a mismatch fails
+ * closed instead of launching an unverified runtime.
  */
 export declare function resolvePiBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/pi/resolve-extensions.d.ts ====
 export interface ResolvedPiExtensions {
     readonly webAccess: string;
-    readonly mcpAdapter: string;
+    readonly mcpExtension: string;
     readonly subagentsPolicy: string;
     readonly subagents: string;
     readonly todo: string;
@@ -2818,7 +2844,7 @@ export declare class ConnectionManager {
     private enterRevoked;
 }
 // ==== @byok-sdk/client dist/daemon/control-protocol.d.ts ====
-import type { TaskState } from '@byok-sdk/protocol';
+import { type TaskState } from '@byok-sdk/protocol';
 import type { ApprovalDecision, PendingApproval } from './approvals';
 import type { StorageCategory } from './journal/journal';
 import type { StoragePressureState } from './journal/storage-policy';
@@ -2826,6 +2852,7 @@ import type { OperationalHealthSnapshot } from './operational-health';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types';
 import type { AgentHomeExecutionStatus } from '../agent-home';
+import type { InputPreparationCancelParamsV1, InputPreparationLookupParamsV1, InputPreparationReceiptV1, InputPreparationRequestV1 } from '../input-preparation';
 /**
  * M4 Phase 2: shared local-IPC contract between the daemon's control server
  * (`control-server.ts`) and the CLI's control client (`bin/control-client.ts`)
@@ -3365,6 +3392,65 @@ export declare function parseTeamMessageReadParams(value: unknown): TeamMessageR
 export declare function parseTeamNotificationSnapshotParams(value: unknown): TeamMessageReadParams | undefined;
 export declare function parseTeamMessageAckParams(value: unknown): TeamMessageAckParams | undefined;
 export declare function parseTeamMessageInspectParams(value: unknown): TeamMessageInspectParams | undefined;
+/**
+ * The three wire methods of the B-P2 local primitive, named the way every other
+ * unary method on this socket is named (`<snake_case noun>.<verb>`, e.g.
+ * `toolsets.reload`, `task_assertion.issue`).
+ *
+ * `prepare` is the closest task-free precedent to `toolsets.reload`: it mutates
+ * only daemon-local durable state behind the existing HMAC handshake, creates
+ * no task, claim, Execution or nonce, and returns a receipt rather than a
+ * capability.
+ */
+export declare const INPUT_PREPARATION_PREPARE_METHOD = "input_preparation.prepare";
+export declare const INPUT_PREPARATION_LOOKUP_METHOD = "input_preparation.lookup";
+export declare const INPUT_PREPARATION_CANCEL_METHOD = "input_preparation.cancel";
+/** Result of all three methods: exactly one receipt, never a bare digest or a raw artifact. */
+export interface InputPreparationResult {
+    receipt: InputPreparationReceiptV1;
+}
+/**
+ * Bound on one identifier-shaped wire string (`requestId`, `deviceId`,
+ * `agentRef`, `profileId`, revisions, digests). Frame-level only: the values
+ * themselves are authority-owned and are never parsed or normalized here.
+ */
+export declare const INPUT_PREPARATION_IDENTIFIER_MAX_BYTES = 512;
+/**
+ * Why `input_preparation.prepare` params were refused.
+ *
+ * Two distinct codes, because they are two distinct facts. `bad_request` is
+ * "this is not the shape" — a wrong type, a missing field, an unknown extra.
+ * `unsupported_input` is "this is the OLD shape": the caller sent a key this
+ * contract retired, which means it is asserting authority over the tool
+ * manifest that version 2 moved onto the device. Answering that with a generic
+ * shape error would leave the caller adjusting field types forever.
+ */
+export type InputPreparationRequestParseResult = {
+    readonly ok: true;
+    readonly request: InputPreparationRequestV1;
+} | {
+    readonly ok: false;
+    readonly code: 'bad_request' | 'unsupported_input';
+    readonly detail: string;
+};
+/**
+ * Strict shape gate for `input_preparation.prepare`.
+ *
+ * Every object is key-exact: an unknown field anywhere in the request is a
+ * rejection, never an ignored extra — a tolerated field is how a caller comes
+ * to believe it can influence the compiled body, the runtime identity or the
+ * policy this daemon enforces.
+ *
+ * This gate validates SHAPE only. Scope authority, policy revision, runtime
+ * identity, the tool manifest and every limit are resolved by
+ * `input-preparation-service.ts`; none of them can be asserted here by a
+ * caller.
+ */
+export declare function parseInputPreparationRequestParams(value: unknown): InputPreparationRequestParseResult;
+/** Strict shape gate for `input_preparation.lookup`. */
+export declare function parseInputPreparationLookupParams(value: unknown): InputPreparationLookupParamsV1 | undefined;
+/** Strict shape gate for `input_preparation.cancel`. Same two fields as lookup, and no third. */
+export declare function parseInputPreparationCancelParams(value: unknown): InputPreparationCancelParamsV1 | undefined;
 // ==== @byok-sdk/client dist/daemon/create-daemon.d.ts ====
 import type { AgentEgressPolicy, RuntimeId } from '@byok-sdk/protocol';
 import type { PermissionPolicy } from '@byok-sdk/protocol';
@@ -3372,6 +3458,8 @@ import type { RuntimeAdapter, GitWorkspaceConfig, McpToolsetConfig, McpToolsetOb
 import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agent-home';
 import type { AgentRef } from '../agent-home';
 import { type LocalAgentReleaseIdentity } from '../release-identity';
+import { type InputPreparationAuthorityResolver, type InputPreparationCounterAdapter, type InputPreparationLimitsPolicyV1 } from '../input-preparation';
+import type { ToolImplementationAuthority } from './tool-implementation-identity';
 import { type OperationalHealthSnapshot } from './operational-health';
 import { type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
 import { GitWorkspaceManager } from './git-workspace';
@@ -3385,6 +3473,7 @@ import { type ProgressBatcherOptions } from './progress-batcher';
 import { type AgentEgressReliableAppendResult } from './agent-egress-controller';
 import { type AgentEgressStatus } from './agent-egress-policy';
 import { type AgentEgressSanitizer } from './agent-egress-sanitizer';
+import type { McpLaunchCwdConfig } from './trusted-launch-cwd';
 import { type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
 import { type AgentMemoryHostedProjection } from './agent-memory';
 import type { AgentMemoryFilesystemHelperConfig } from './agent-memory-filesystem';
@@ -3805,6 +3894,70 @@ export interface DaemonConfig {
      * someone left a config key behind.
      */
     deviceAssertion?: DeviceAssertionConfig;
+    /**
+     * B-P2 local primitive: the task-free `input_preparation.*` control surface
+     * (`docs/researches/runtime-input-preparation-contract.md` §10.3).
+     *
+     * OFF by default. An absent section keeps the whole feature disabled and
+     * makes all three methods answer `input_preparation_unconfigured` — there is
+     * no default limits policy, no default authority and no default counter, by
+     * the Owner-approved limits boundary of 2026-09-14. A PRESENT section with an
+     * invalid policy is a construction error, the same discipline
+     * `deviceAssertion` and the presence cadence already follow: a daemon that
+     * starts with an allowance nobody validated is a daemon whose operator
+     * believes a limit is in force.
+     */
+    inputPreparation?: InputPreparationDaemonConfig;
+    /**
+     * Operator input to the MCP toolset launch boundary
+     * (`./trusted-launch-cwd.ts`), forwarded verbatim to
+     * `TaskRunnerDeps.mcpLaunchCwd`.
+     *
+     * Absent means the platform default directory and — only when this process
+     * is provably plain Node — `process.execPath` as the launcher interpreter.
+     * Neither default is assumed: both are proven per offer, and an offer whose
+     * boundary this daemon cannot prove is declined non-retryably rather than
+     * started without one.
+     *
+     * A PRESENT section is validated here, at construction, the same discipline
+     * `deviceAssertion` and `inputPreparation` follow: a non-absolute `dir`, or a
+     * `launcherInterpreter` that is not an existing regular file, is a
+     * construction error rather than a per-offer decline nobody reads. What
+     * cannot be decided here is deliberately left to the resolver: whether the
+     * directory is still non-writable is a fact about the filesystem NOW, so it
+     * is proven once per offer and never cached.
+     */
+    mcpLaunchCwd?: McpLaunchCwdConfig;
+    /**
+     * The host's install-record authority for MCP toolset server
+     * implementations (`./tool-implementation-identity.ts`), forwarded verbatim
+     * to `TaskRunnerDeps.toolImplementationAuthority`.
+     *
+     * This SDK ships NO resolver and NO default, and there is nothing to
+     * validate here: an absent section is the supported state, and it means
+     * every implementation identity this daemon resolves is
+     * `resolver_unconfigured`. An absolute path is not an attestation, so a
+     * daemon without this section proves nothing about which executable serves a
+     * tool call and says so rather than implying otherwise.
+     *
+     * What a PRESENT authority buys is the refusal: an install it attested is
+     * re-measured before every spawn of that server, and a spawn whose artifact
+     * no longer measures the same is declined non-retryably.
+     */
+    toolImplementationAuthority?: ToolImplementationAuthority;
+}
+/**
+ * Every part of the local preparation surface is required together. There is no
+ * partial enablement: a policy without a counter, or a counter without an
+ * authority, would each be a surface that answers questions it cannot back.
+ */
+export interface InputPreparationDaemonConfig {
+    /** Required explicit byte / call / deadline / retention policy. No field has a default. */
+    limits: InputPreparationLimitsPolicyV1;
+    /** The trusted local device/Agent/Profile authority. Unavailable authority rejects. */
+    authorityResolver: InputPreparationAuthorityResolver;
+    /** The separately authorized counter. This package ships no fallback counting of any kind. */
+    counter: InputPreparationCounterAdapter;
 }
 export interface AgentEgressConfig {
     /** Exact policy the daemon is willing to consume from an Agent offer. */
@@ -4339,6 +4492,28 @@ export interface BuildRuntimeEnvOptions {
     platform?: NodeJS.Platform;
 }
 /**
+ * Environment variable names that change how an interpreter LOADS code, and
+ * which therefore take effect before the first statement of whatever it was
+ * asked to run — including the two launch-cwd launchers, whose entire job is to
+ * establish a trusted working directory before an MCP server binary starts
+ * (`./trusted-launch-cwd.ts`): the POSIX `/bin/sh -c` bootstrap, and this
+ * package's own `bin/byok-launch-cwd.mjs` on win32. The Node launcher
+ * re-asserts this same list on itself, because it is also reached through a
+ * runtime CLI that composes its own child environment.
+ */
+export declare const LOADER_ENV_DENY_PATTERNS: readonly string[];
+/**
+ * The loader-injection variables present in one environment.
+ *
+ * Exported so a process that ESTABLISHES a boundary can re-assert the same list
+ * on ITSELF: `bin/byok-launch-cwd.mjs` does it with its own inlined copy (it
+ * ships as source and must run with nothing of this package installed), and the
+ * prepared launch entry (`bin/byok-pi-prepared.ts`) does it by calling this.
+ * Neither can sanitize these for itself — they took effect before its first
+ * statement — so the only correct answer is to refuse to continue.
+ */
+export declare function loaderEnvInjections(env: Readonly<Record<string, string | undefined>>, platform?: NodeJS.Platform): readonly string[];
+/**
  * Build the environment one specific runtime's spawned child process should
  * actually receive — a fresh object, never `options.ambient` itself and
  * never mutated in place. See this module's own doc comment for the full
@@ -4497,6 +4672,415 @@ export declare function prependGitWorkspaceGuidance(instruction: string): string
 export declare function isGitWorkspaceConfig(value: unknown): value is GitWorkspaceConfig;
 export declare function canonicalWorkspaceRoot(value: string): Promise<string>;
 export { DEFAULT_MAX_OUTPUT_BYTES as GIT_WORKSPACE_MAX_OUTPUT_BYTES, DEFAULT_TIMEOUT_MS as GIT_WORKSPACE_TIMEOUT_MS };
+// ==== @byok-sdk/client dist/daemon/input-preparation-store.d.ts ====
+import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INPUT_PREPARATION_VERSION, type InputPreparationBindingV1, type InputPreparationArtifactSummaryV1, type InputPreparationCounterEvidenceV1, type InputPreparationModelV1, type InputPreparationPinV1, type InputPreparationStateV1 } from '../input-preparation';
+/**
+ * Durable request / receipt / artifact persistence for the B-P2 local
+ * primitive (`docs/researches/runtime-input-preparation-contract.md` §10.3.5,
+ * §10.3.6, §10.3.8).
+ *
+ * One durable namespace, `(authenticated scope, Agent, preparation requestId)`,
+ * bound to the entire normalized request digest. This file owns exactly that
+ * namespace plus the retained artifact bytes; it chooses no policy number,
+ * resolves no authority and places no counter call. Everything above it is
+ * `input-preparation-service.ts`.
+ *
+ * It does enforce the bounds that service hands it, because a bound is only
+ * real where the write is: admission is decided inside the same serialized
+ * closure that appends the record, never on a value someone read first.
+ *
+ * Durability comes from the package's existing primitives, not from `rename`
+ * alone: the record log is a `DurableJsonlFile` (append + fsync + directory
+ * fsync, and QUARANTINED after any uncertain write until the log is
+ * revalidated), and each artifact is an `atomicWriteFile` with `fsync`. An
+ * uncertain write is therefore an error the caller sees, never a silent
+ * success — §10.3.8.
+ *
+ * Two horizons, deliberately separate:
+ *
+ * - `artifactExpiresAt = createdAt + retentionMs` — after this the retained
+ *   bytes are removed and the receipt reports `artifact_expired`.
+ * - `recordExpiresAt = artifactExpiresAt + retryHorizonMs` — the TOMBSTONE
+ *   outlives its own artifact by the whole advertised retry horizon, which is
+ *   what makes "an expired key cannot silently become a fresh call inside that
+ *   horizon" true rather than aspirational: a duplicate `requestId` inside the
+ *   horizon still finds a record, and a found record never triggers a second
+ *   counter call.
+ */
+/**
+ * The durable RECORD schema version, and nothing else.
+ *
+ * Deliberately separate from `INPUT_PREPARATION_VERSION`, which versions the
+ * wire shapes — the control request, the receipt, the retained artifact. Those
+ * are what two parties agree on; this one is what one daemon's own on-disk log
+ * is written in, and the two move for different reasons. Bumping the wire
+ * version because a private durable field became required would make every
+ * peer re-negotiate a contract that did not change; reusing the wire version
+ * for the log would make the log's meaning depend on an agreement it is not a
+ * party to.
+ *
+ * 3 is the first version in which `model` is a required durable fact (a
+ * prepared launch must re-present the counted model identity as an INDEPENDENT
+ * expectation, and the only other copy of it lives inside the retained
+ * envelope, which the native contract forbids using as its own expectation).
+ * A record at any other version is refused — see
+ * {@link InputPreparationUnsupportedRecordVersionError}. There is no
+ * compatibility read.
+ */
+export declare const INPUT_PREPARATION_RECORD_VERSION = 3;
+/** The durable idempotency key. Never a task id, and never caller-asserted: `scopeId` comes from the trusted authority grant. */
+export interface InputPreparationRecordKey {
+    readonly scopeId: string;
+    readonly agentRef: string;
+    readonly requestId: string;
+}
+export interface InputPreparationRecord {
+    readonly format: typeof INPUT_PREPARATION_RECORD_FORMAT;
+    /** The RECORD schema version — see {@link INPUT_PREPARATION_RECORD_VERSION}. Not the wire version. */
+    readonly version: typeof INPUT_PREPARATION_RECORD_VERSION;
+    readonly recordId: string;
+    readonly key: InputPreparationRecordKey;
+    /** Digest over the whole normalized request, scope and runtime identity. */
+    readonly requestDigest: string;
+    readonly state: InputPreparationStateV1;
+    readonly binding: InputPreparationBindingV1;
+    /**
+     * The exact model identity the request was compiled for.
+     *
+     * Durable, and BESIDE the binding rather than inside it. Beside, because the
+     * binding is the wire projection a receipt discloses and a model identity
+     * carries a base URL and a cost table a receipt has no business publishing.
+     * Durable, because a prepared launch must re-present it to the native
+     * verifier as an INDEPENDENT expectation — the only other copy of it lives
+     * inside the retained envelope, and the native contract is explicit that a
+     * value read out of the envelope can never serve as its own expectation.
+     */
+    readonly model: InputPreparationModelV1;
+    readonly artifact?: InputPreparationArtifactSummaryV1;
+    readonly counter?: InputPreparationCounterEvidenceV1;
+    /** Retained bytes attributable to this record, counted against the per-scope aggregate. */
+    readonly artifactBytes: number;
+    /** Counter invocations this record has consumed. Never decremented. */
+    readonly counterCalls: number;
+    /** Stable code on a terminal non-`counted` state; never provider or stack text. */
+    readonly detail?: string;
+    readonly createdAt: string;
+    readonly updatedAt: string;
+    readonly artifactExpiresAt: string;
+    readonly recordExpiresAt: string;
+    /** The committed Execution that consumed this record, written once by {@link InputPreparationStore.pin}. */
+    readonly pin?: InputPreparationPinV1;
+}
+/** The retained immutable artifact. `requestBody` is D verbatim. */
+export interface InputPreparationArtifact {
+    readonly format: typeof INPUT_PREPARATION_ARTIFACT_FORMAT;
+    readonly version: typeof INPUT_PREPARATION_VERSION;
+    readonly recordId: string;
+    readonly requestDigest: string;
+    readonly envelopeDigest: string;
+    readonly toolManifestDigest: string;
+    /** D — the exact provider request body bytes, unchanged. */
+    readonly requestBody: string;
+    /** P(D) — the counted projection, unchanged. */
+    readonly counterProjection: string;
+    readonly coverage: string;
+    /** The native envelope, retained verbatim so a later consumer re-verifies rather than recompiles. */
+    readonly envelope: unknown;
+}
+export declare function isTerminalInputPreparationState(state: InputPreparationStateV1): boolean;
+/** Same key, different normalized request digest. Never resolved by overwriting either side. */
+export declare class InputPreparationConflictError extends Error {
+    readonly recordId: string;
+    constructor(recordId: string);
+}
+/** A durable write was uncertain, or the log is quarantined pending revalidation. */
+export declare class InputPreparationDurabilityError extends Error {
+    constructor(message: string, options?: {
+        cause?: unknown;
+    });
+}
+/**
+ * A bound the caller passed in was already spent when the write was about to
+ * happen.
+ *
+ * The store owns no policy: every number it compares against arrives on the
+ * call that asks for the write. What it does own is the only moment at which
+ * that comparison is meaningful — inside the serialized tail, in the same
+ * closure as the append. A caller that read an aggregate and then asked for a
+ * write would be deciding on a snapshot another caller can invalidate before
+ * the write lands (§10.3.7).
+ */
+export type InputPreparationLimitDetail = 'in_flight_limit_exceeded' | 'scope_aggregate_bytes_exceeded' | 'counter_call_limit_exceeded';
+export declare class InputPreparationLimitError extends Error {
+    readonly detail: InputPreparationLimitDetail;
+    constructor(detail: InputPreparationLimitDetail, message: string);
+}
+/** The stored record or artifact does not match what was persisted. */
+export declare class InputPreparationIntegrityError extends Error {
+    constructor(message: string);
+}
+/**
+ * The log holds a record written in a schema version this build does not
+ * support.
+ *
+ * A refusal, never a migration and never a compatibility read: the older shape
+ * is missing facts a prepared Execution cannot be launched without, and a store
+ * that silently held records it could not honor would be worse than one that
+ * says so. The refusal happens during replay, BEFORE the store is open, so it
+ * performs zero writes and zero cleanup — the log and every artifact beside it
+ * are left exactly as found for an operator to dispose of explicitly.
+ */
+export declare class InputPreparationUnsupportedRecordVersionError extends InputPreparationIntegrityError {
+    readonly recordId: string;
+    readonly recordVersion: unknown;
+    readonly reason = "unsupported_record_version";
+    constructor(recordId: string, recordVersion: unknown);
+}
+export interface InputPreparationStoreOptions {
+    /** The daemon's store directory. The subtree below it is created 0700 on open. */
+    readonly storeDir: string;
+    readonly retentionMs: number;
+    readonly retryHorizonMs: number;
+    readonly now?: () => number;
+}
+export interface ReserveInput {
+    readonly key: InputPreparationRecordKey;
+    readonly requestDigest: string;
+    readonly binding: InputPreparationBindingV1;
+    /** See {@link InputPreparationRecord.model}. */
+    readonly model: InputPreparationModelV1;
+    /**
+     * The caller's in-flight bound, enforced in the same closure that appends the
+     * new record. Never consulted for a key that already exists: reading back an
+     * existing durable fact is not a new admission.
+     */
+    readonly maxInFlight: number;
+}
+/** The bounds one counter reservation is admitted against. Supplied by the caller, compared here. */
+export interface CounterReservationBounds {
+    readonly maxScopeAggregateBytes: number;
+    readonly maxCounterCallsPerScope: number;
+}
+export interface CounterReservationInput {
+    readonly recordId: string;
+    /** The immutable artifact, written inside the same closure that charges its bytes. */
+    readonly artifact: InputPreparationArtifact;
+    /** The identities and sizes the receipt publishes. */
+    readonly summary: InputPreparationArtifactSummaryV1;
+    readonly bounds: CounterReservationBounds;
+}
+export type ReserveOutcome = {
+    readonly kind: 'created';
+    readonly record: InputPreparationRecord;
+} | {
+    readonly kind: 'existing';
+    readonly record: InputPreparationRecord;
+};
+/**
+ * The result of one compare-and-set against a record's single pin slot.
+ *
+ * `occupied` is not an error: it is the answer the losing runner of a race is
+ * supposed to get, and it carries the record so the caller can report WHICH
+ * Execution holds it.
+ */
+export type PinOutcome = {
+    readonly kind: 'pinned';
+    readonly record: InputPreparationRecord;
+} | {
+    readonly kind: 'occupied';
+    readonly record: InputPreparationRecord;
+};
+/** The mutable fields one durable transition may set. Identity and key are immutable. */
+export interface RecordPatch {
+    readonly state?: InputPreparationStateV1;
+    readonly artifact?: InputPreparationArtifactSummaryV1;
+    readonly counter?: InputPreparationCounterEvidenceV1;
+    readonly artifactBytes?: number;
+    readonly counterCalls?: number;
+    readonly detail?: string;
+}
+export interface ScopeUsage {
+    readonly artifactBytes: number;
+    readonly counterCalls: number;
+    readonly liveRecords: number;
+}
+/** `recordId` is a digest of the key, so two scopes can never collide and no key value ever becomes a filename. */
+export declare function inputPreparationRecordId(key: InputPreparationRecordKey): string;
+export declare class InputPreparationStore {
+    private readonly options;
+    private readonly root;
+    private readonly artifactDir;
+    private readonly now;
+    private log;
+    private records;
+    /** Serializes every mutation so two callers never interleave a read-modify-append. */
+    private tail;
+    private opened;
+    constructor(options: InputPreparationStoreOptions);
+    /**
+     * Create the subtree, replay the log and confirm the recovered bytes.
+     *
+     * Replay alone is not a durability receipt — `confirmRecovered()` fsyncs what
+     * was read back before any of it is treated as fact, which is the same rule
+     * `DurableJsonlFile` documents for its own consumers.
+     */
+    open(): Promise<void>;
+    private replay;
+    /**
+     * Re-open and revalidate a quarantined log.
+     *
+     * `DurableJsonlFile` latches after an uncertain write and refuses every later
+     * append. That latch is the contract, so recovery is explicit: read the log
+     * back, confirm the recovered bytes, and only then accept writes again.
+     */
+    revalidate(): Promise<void>;
+    /**
+     * Drop this instance's replayed state.
+     *
+     * Nothing on disk is touched: the log and the artifacts are the durable
+     * facts, and this only ends one process's view of them. After it, every read
+     * refuses instead of answering `undefined` — which is the whole point, since
+     * a closed store and an empty one would otherwise be indistinguishable to a
+     * caller. Re-opening replays from disk again.
+     */
+    close(): void;
+    private assertOpen;
+    /** Serialize a mutation behind every mutation already queued. */
+    private enqueue;
+    private append;
+    /**
+     * Durably reserve the key BEFORE anything is compiled or counted.
+     *
+     * Same key and same digest returns the existing record — the caller decides
+     * whether that is a completed receipt, a pending fact or a terminal
+     * interruption. Same key and a DIFFERENT digest conflicts: neither side is
+     * overwritten, because one of the two callers is wrong about what it asked
+     * for and guessing which is how a counted artifact gets swapped underneath a
+     * receipt.
+     *
+     * The in-flight admission is decided HERE, in the same closure as the append,
+     * because two different requestIds share no caller-side lock: a bound checked
+     * before this closure is a bound two concurrent admissions can both pass.
+     */
+    reserve(input: ReserveInput): Promise<ReserveOutcome>;
+    /** Append one durable transition. Terminal records never transition again. */
+    update(recordId: string, patch: RecordPatch): Promise<InputPreparationRecord>;
+    /**
+     * Every read asserts the store is open, for one reason: an unopened store
+     * and an empty store are indistinguishable from the in-memory map, and they
+     * mean opposite things. `undefined` from an unopened store would read as "no
+     * such record on this device" while the record sits durably on disk — which
+     * is exactly how a restart turns a counted preparation into
+     * `preparation_not_found`. Refusing is the only answer that cannot be
+     * mistaken for an answer about the durable state.
+     */
+    get(recordId: string): InputPreparationRecord | undefined;
+    find(key: InputPreparationRecordKey): InputPreparationRecord | undefined;
+    /** Every live record, for tests and for the aggregate below. */
+    list(): readonly InputPreparationRecord[];
+    /**
+     * Retained bytes and consumed counter calls for one authenticated scope.
+     *
+     * Both survive restart because both are fields of the durable record, not
+     * in-memory counters — which is exactly what stops a restart from becoming a
+     * fresh counter-call allowance.
+     */
+    scopeUsage(scopeId: string): ScopeUsage;
+    /**
+     * Records that are neither terminal nor expired, across every scope.
+     *
+     * Expiry is part of the question, not a detail GC will get to eventually: a
+     * `reserved` record whose owning run died holds no work, and letting it keep
+     * a slot past its own record horizon would turn an abandoned key into a
+     * permanent hole in the in-flight allowance.
+     */
+    inFlightCount(nowMs?: number): number;
+    private artifactPath;
+    /**
+     * Admit one counter call: check the caller's bounds, persist the immutable
+     * artifact (fsynced, 0600, D verbatim) and durably reserve the call — all in
+     * ONE serialized closure.
+     *
+     * Fusing the three is the point. Retained bytes and consumed counter calls
+     * are per-SCOPE aggregates, so they are shared by requests that share nothing
+     * else: different requestIds are different records, different keys and
+     * different caller-side locks. Checking the aggregate anywhere but here would
+     * be a read another admission can invalidate before the write lands, which is
+     * exactly how two concurrent requests both pass a bound of one.
+     *
+     * The artifact is written after the bounds pass and before the record is
+     * charged, so a refused admission leaves no retained bytes behind and a
+     * charged record always has its artifact on disk.
+     */
+    commitCounterReservation(input: CounterReservationInput): Promise<InputPreparationRecord>;
+    /**
+     * The absolute path of one record's retained artifact.
+     *
+     * Exposed because a prepared Execution is handed a PATH, not bytes: the
+     * artifact carries D, P(D) and the whole native envelope, and there is
+     * exactly one retained copy of it. A second inline representation crossing to
+     * the adapter would be a second authority over the same bytes. Deriving the
+     * path anywhere else would be a second authority over the layout instead.
+     */
+    artifactPathOf(record: InputPreparationRecord): string;
+    /**
+     * Bind one committed Execution to this record, or report that another one
+     * already did.
+     *
+     * A compare-and-set, inside the same serialized closure as the append, for
+     * the same reason every other admission in this file is: two runners racing
+     * the same reference share no caller-side lock, so a `pin === undefined`
+     * check made before this closure is a check both of them pass. The loser gets
+     * `occupied` with the pin that won, and its caller sends zero claim and
+     * dispatches nothing.
+     *
+     * Idempotent for the SAME Execution: a replay that re-presents the identical
+     * taskId and manifest digest reads back `pinned` with the record it already
+     * has, because re-deriving the same seal is not a second consumer. A
+     * different taskId, or the same taskId with a different sealed manifest, is
+     * `occupied` — it is a different Execution.
+     *
+     * Only a `counted` record with a retained artifact may be pinned: a pin on a
+     * record that has no artifact would keep a tombstone alive forever without
+     * ever being launchable.
+     */
+    pin(recordId: string, pin: InputPreparationPinV1): Promise<PinOutcome>;
+    /**
+     * Release the pin this Execution holds.
+     *
+     * Scoped to the holder on purpose: `taskId` must match, so a task cannot
+     * release a record another Execution consumed. Releasing a record that is
+     * already unpinned is not an error — the pin's job is done either way, and a
+     * terminal path that had to know whether it ever pinned would grow a second
+     * answer to a question the record already holds.
+     *
+     * WHEN a pin is released is a single rule: the Execution reached a terminal.
+     * Not at claim, not at start, not when the session closes — a record stays
+     * pinned for exactly as long as the Execution that consumed it can still be
+     * running, which is also exactly as long as GC must not collect it.
+     */
+    unpin(recordId: string, taskId: string): Promise<InputPreparationRecord>;
+    /**
+     * Read the artifact back and re-check the identity it claims.
+     *
+     * The digest comparison is integrity, not authorization: authority was
+     * already resolved before the caller reached this method.
+     */
+    readArtifact(record: InputPreparationRecord): Promise<InputPreparationArtifact | undefined>;
+    /**
+     * Drop expired artifacts and, one retry horizon later, expired records.
+     *
+     * A pinned record is never collected — not its artifact and not its
+     * tombstone. That is what makes a pin meaningful: the Execution holding it
+     * has not reached a terminal yet, so the bytes it is about to send (or is
+     * sending) must still be on disk, whatever the retention horizon says. The
+     * horizon resumes the moment `unpin` lands.
+     */
+    gc(nowMs?: number): Promise<{
+        artifactsRemoved: number;
+        recordsRemoved: number;
+    }>;
+}
 // ==== @byok-sdk/client dist/daemon/journal/journal.d.ts ====
 /**
  * The daemon's durable local journal port (sprint S3.3 / architecture
@@ -5499,77 +6083,34 @@ export declare class LocalStoragePressureEngine {
 export declare function createStatfsFreeBytesProvider(dir: string): () => Promise<number>;
 // ==== @byok-sdk/client dist/daemon/mcp-tools-probe.d.ts ====
 import type { McpStdioServerConfig } from '../types';
-export declare const MCP_TOOLS_PROBE_TIMEOUT_MS = 10000;
+import { McpAuthorityError } from '../mcp/client';
+import { type McpServerObservation } from '../mcp/observation';
+import type { ToolImplementationIdentityV1 } from './tool-implementation-identity';
 /**
- * Hard cap on the bytes one probed server may write to stdout before its
- * `tools/list` answer is complete. The probe reads a fixed two-message
- * handshake, so a server still streaming past this is either broken or
- * hostile; either way it must not be able to grow the daemon's heap while an
- * offer waits on admission. Exceeding it is a probe failure, never a partial
- * observation.
+ * The daemon's admission-time use of the shared MCP core (`../mcp/`).
+ *
+ * This file owns the admission POLICY — the deadlines an offer may wait on and
+ * what the runner does with a failure — and nothing else. The connection, the
+ * byte bounds, the name rules and the descriptor shape all belong to the core,
+ * so the observation the daemon admits on and the one the Pi extension
+ * projects its tools from are the same code reading the same server.
  */
-export declare const MCP_TOOLS_PROBE_MAX_STDOUT_BYTES = 1048576;
+export declare const MCP_TOOLS_PROBE_TIMEOUT_MS = 10000;
 /**
  * The single admission budget for observing ALL of one task's projected
  * toolset servers, however many there are.
  *
  * `handleOffer` runs inside its connection's FIFO, so anything it awaits also
  * delays the `task.cancel` / `task.approve` / next-offer envelopes queued
- * behind it. Probing a toolset's servers one after another would multiply the
- * per-server timeout by the server count — a device configured to the current
- * ceiling (16 toolsets × 16 servers) could hold the control channel for
- * minutes on a single unresponsive command. The runner therefore starts every
- * probe at once and gives each one this same deadline, so total admission
- * latency is bounded by one timeout regardless of server count, and each probe
- * still kills its own child when the deadline expires.
+ * behind it. Observing a toolset's servers one after another would multiply
+ * the per-server timeout by the server count — a device configured to the
+ * current ceiling (16 toolsets × 16 servers) could hold the control channel
+ * for minutes on a single unresponsive command. The runner therefore starts
+ * every observation at once and gives each one this same deadline, so total
+ * admission latency is bounded by one timeout regardless of server count, and
+ * each one still kills its own child when the deadline expires.
  */
 export declare const MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS = 10000;
-/**
- * Tool names an adapter is allowed to pre-grant must be OBSERVED, never
- * configured: the daemon's own `mcpToolsets` config carries `command`/`args`
- * only (see `toolset-registry.ts`), so the single authority for "which tools
- * does this server actually expose" is the server's own `tools/list` answer.
- *
- * A name that survives this filter is about to be interpolated into runtime
- * CLI authority — `--allowedTools mcp__<server>__<tool>` for claude, and
- * `mcp_servers.<server>.tools.<tool>.approval_mode` for codex. A comma, a
- * dot, a quote, or whitespace in a tool name would forge additional grants or
- * a different config key out of one legitimate one.
- *
- * A server that reports ANY name outside this shape fails the whole probe —
- * the observation is rejected, and the task is declined permanently rather
- * than partially granted. Granting the well-formed subset and silently
- * dropping the rest would hand the model a toolset it can only half call, and
- * would let one bad name ride along with good ones; only observed, validated
- * names are ever granted, and a list that cannot be validated in full yields
- * no grant at all. The shape is deliberately narrower than MCP's own
- * (unbounded) name rule: the two real servers this SDK ships and every toolset
- * server observed so far satisfy it, and a legitimate server that does not can
- * still be listed and called by a runtime that grants tools itself — it simply
- * cannot be pre-granted here, and this SDK will not admit a task for it.
- */
-export declare const GRANTABLE_TOOL_NAME: RegExp;
-/**
- * The same rule for the SERVER half of the identifier, enforced at grant
- * resolution (`../adapters/mcp-tool-grants.ts`). A projected server name is
- * interpolated into `mcp__<server>__<tool>` for claude and into the flat TOML
- * key `mcp_servers.<server>.tools.<tool>.approval_mode` for codex: a `.` would
- * split that key into a different table, and a quote, comma, or space would
- * forge a second grant out of one. `toolset-registry.ts` already validates
- * configured server names, so this is the second, local gate that keeps the
- * grant surface honest for a server that reached an adapter some other way.
- */
-export declare const GRANTABLE_MCP_SERVER_NAME: RegExp;
-/**
- * A probe failure caused by the server's own ANSWER rather than by its
- * environment — an ungrantable tool name, a malformed tool entry, or an
- * oversized stream. Retrying cannot change it: the same configured command
- * reports the same names next time. Callers use this to decline the task
- * permanently instead of re-offering it forever (see `task-runner.ts`).
- */
-export declare class McpToolsProbeAuthorityError extends Error {
-    constructor(message: string);
-}
 export interface McpToolsProbeOptions {
     /** Prefix used in every error message, so a failure names the thing that failed. */
     label?: string;
@@ -5592,17 +6133,45 @@ export interface McpToolsProbeOptions {
      * admission.
      */
     cwd?: string;
+    /**
+     * What this daemon established about the implementation behind this server
+     * (`./tool-implementation-identity.ts`), forwarded to the shared MCP core so
+     * the probe spawn re-measures an attested one before starting it.
+     *
+     * Absent means nothing was claimed. The core refuses the spawn rather than
+     * demoting the claim, so a probe of an attested server that no longer
+     * measures the same fails with an {@link McpAuthorityError} and the task
+     * declines permanently.
+     */
+    implementation?: ToolImplementationIdentityV1;
 }
 /**
- * Start the exact configured stdio MCP server, complete an
- * `initialize` + `tools/list` handshake, and return the reported tool names.
- * No `tools/call` is ever sent, so an authenticated task binding stays unused
- * until the real runtime invokes it.
+ * Observe one projected toolset server: start it, complete `initialize` +
+ * `tools/list`, and return everything it reported about itself.
  *
- * The child is always killed before this resolves — the probe proves the
- * server can start and enumerate its tools; the runtime spawns its own copy.
+ * No `tools/call` is ever sent, so an authenticated task binding stays unused
+ * until the real runtime invokes it. The child is always killed before this
+ * resolves — the observation proves the server can start and enumerate its
+ * tools; the runtime spawns its own copy.
  */
-export declare function probeMcpServerTools(server: Readonly<McpStdioServerConfig>, options: McpToolsProbeOptions): Promise<readonly string[]>;
+export declare function probeMcpServer(serverName: string, server: Readonly<McpStdioServerConfig>, options: McpToolsProbeOptions): Promise<McpServerObservation>;
+/**
+ * The names-only form, for the one caller that proves a helper can START
+ * rather than deciding what a model may call: the Agent message helper
+ * preflight (`./agent-message-mcp-preflight.ts`).
+ */
+export declare function probeMcpServerTools(serverName: string, server: Readonly<McpStdioServerConfig>, options: McpToolsProbeOptions): Promise<readonly string[]>;
+/**
+ * A probe failure caused by the server's own ANSWER rather than by its
+ * environment — an ungrantable tool name, a malformed tool entry, an oversized
+ * stream. Retrying cannot change it: the same configured command reports the
+ * same thing next time. Callers use this to decline the task permanently
+ * instead of re-offering it forever (see `task-runner.ts`).
+ *
+ * The classification is the core's; the retry decision it drives is the
+ * daemon's.
+ */
+export { McpAuthorityError };
 // ==== @byok-sdk/client dist/daemon/memory-guidance.d.ts ====
 /**
  * Runtime-neutral instructions for an Agent's model-authored local memory.
@@ -6503,14 +7072,18 @@ export declare class DeviceStore {
  */
 export declare function readDeviceEnrollmentStatus(options: DeviceEnrollmentStatusOptions): Promise<DeviceEnrollmentStatus>;
 // ==== @byok-sdk/client dist/daemon/task-runner.d.ts ====
-import { type AgentMessageContentType, type AgentEgressPolicy, type Envelope, type PermissionPolicy, type RuntimeId, type TerminalProjectionSelection, type TaskOfferPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
+import { type AgentMessageContentType, type AgentEgressPolicy, type Envelope, type PermissionPolicy, type RuntimeId, type TerminalProjectionSelection, type TaskOfferPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferPreparedPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import { type McpStdioServerConfig, type McpToolsetConfig, type RuntimeAdapter } from '../types';
+import type { InputPreparationStore } from './input-preparation-store';
+import { type InputPreparationRuntimeIdentityV1 } from '../input-preparation';
 import { AgentHomeManager, type AgentRef } from '../agent-home';
 import { AgentSessionHandoffStore, type AgentTerminalCause } from './agent-session-handoff-store';
 import { type RuntimeDisposalStage } from '../runtime-failure';
 import { type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { TaskQueueWatermark } from './control-protocol';
+import { type McpLaunchCwdConfig } from './trusted-launch-cwd';
+import { type ToolImplementationAuthority, type ToolImplementationFsProbe } from './tool-implementation-identity';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import { type ProgressBatcherOptions } from './progress-batcher';
 import type { SessionWorkspaceStore } from './session-workspace-store';
@@ -6518,6 +7091,7 @@ import type { GitWorkspaceManager, GitWorkspaceObservation } from './git-workspa
 import type { GitWorkspaceStore, GitWorkspacePhase } from './git-workspace-store';
 import type { AgentEgressController } from './agent-egress-controller';
 import { type McpToolsProbeOptions } from './mcp-tools-probe';
+import { type McpServerObservation } from '../mcp/observation';
 import type { ResolvedAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
 import type { ResolvedAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
 import { type AgentMemoryAuditWarning, type AgentMemoryHostedProjection } from './agent-memory';
@@ -6712,6 +7286,59 @@ export interface TaskRunnerDeps {
     }>;
     /** Reads the daemon's current validated device-local registry once per offer. */
     getMcpToolsets?: () => ReadonlyMap<string, McpToolsetConfig>;
+    /**
+     * The prepared-Execution lane. Absent on a daemon with no `inputPreparation`
+     * section, and a `task.offer_prepared` arriving there is declined by name
+     * rather than reinterpreted as an ordinary offer.
+     *
+     * It carries the durable store plus the three device facts a prepared
+     * admission compares against, resolved by the daemon that already owns them —
+     * never re-derived here, because a second derivation of the installed runtime
+     * identity or the operator's policy revision is a second opinion about the
+     * same configuration.
+     */
+    inputPreparationLane?: {
+        readonly store: InputPreparationStore;
+        /**
+         * Await the store's open before the first record read.
+         *
+         * The prepared offer path is reachable on a freshly restarted daemon that
+         * has served no prepare/lookup/cancel call yet, and a store that was never
+         * opened holds an EMPTY map — which would make a perfectly good durable
+         * record answer `preparation_not_found`. This is the preparation service's
+         * own once-only `ensureOpen` latch, passed in rather than re-implemented:
+         * the replay that recovers the log stays the service's, so this lane adds
+         * no second open authority and no second replay path.
+         */
+        readonly open: () => Promise<void>;
+        /** The VERIFIED installed runtime/compiler identity every artifact is bound to. */
+        readonly runtime: InputPreparationRuntimeIdentityV1;
+        /** The operator's configured limits-policy revision currently in force. */
+        readonly policyRevision: string;
+        /** `toolsetId` -> definition revision, from one registry read per call. */
+        readonly toolsetDefinitionRevisions: () => ReadonlyMap<string, string>;
+    };
+    /**
+     * Operator input to the MCP toolset launch boundary
+     * (`./trusted-launch-cwd.ts`). Unset means the platform default directory
+     * and — only when this process is provably plain Node — `process.execPath`
+     * as the launcher interpreter. Neither default is assumed: both are proven
+     * at admission, and an offer that needs a boundary this daemon cannot prove
+     * is declined non-retryably instead of being started without one.
+     */
+    mcpLaunchCwd?: McpLaunchCwdConfig;
+    /**
+     * The host's install-record authority for MCP toolset server
+     * implementations (`./tool-implementation-identity.ts`).
+     *
+     * Unset means EVERY implementation identity resolves to
+     * `resolver_unconfigured` — this SDK ships no resolver and no default. It is
+     * not a degradation: an unconfigured daemon simply proves nothing about its
+     * executors and says so, and no spawn is refused for a claim nobody made.
+     */
+    toolImplementationAuthority?: ToolImplementationAuthority;
+    /** Test seam for the implementation measurement; see {@link ToolImplementationFsProbe}. */
+    toolImplementationFsProbe?: ToolImplementationFsProbe;
     permissionDefaults?: PermissionPolicy;
     workspaceRoot: string;
     /** Strict Agent offer authority. Absent means legacy offers never resolve an Agent home. */
@@ -6933,14 +7560,14 @@ export interface TaskRunnerDeps {
      */
     agentMessageMcpPreflight?: (server: Readonly<McpStdioServerConfig>, env: Readonly<Record<string, string>>, cwd?: string) => Promise<void>;
     /**
-     * Override the `tools/list` observation of a projected toolset MCP server.
-     * Defaults to the real handshake (`mcp-tools-probe.ts`); tests substitute a
-     * stub. It is deliberately NOT optional-with-no-default the way
-     * `agentMessageMcpPreflight` is: an adapter may only grant tool names that
-     * were observed, so a runner with no observation at all would silently
-     * project toolsets the model can list and never call.
+     * Override the `initialize` + `tools/list` observation of a projected
+     * toolset MCP server. Defaults to the real handshake
+     * (`mcp-tools-probe.ts`); tests substitute a stub. It is deliberately NOT
+     * optional-with-no-default the way `agentMessageMcpPreflight` is: an adapter
+     * may only bind tools that were observed, so a runner with no observation at
+     * all would silently project toolsets the model can list and never call.
      */
-    mcpToolsetToolsProbe?: (server: Readonly<McpStdioServerConfig>, options: McpToolsProbeOptions) => Promise<readonly string[]>;
+    mcpToolsetToolsProbe?: (serverName: string, server: Readonly<McpStdioServerConfig>, options: McpToolsProbeOptions) => Promise<McpServerObservation>;
     /** SDK-owned MCP helper injected only into strict Agent tasks. */
     agentMemoryMcpBin?: Readonly<ResolvedAgentMemoryMcpBin>;
     /** Explicit external secure-fs helper. No PATH discovery or bundled native addon exists. */
@@ -6956,7 +7583,7 @@ export type AdmissionGuardDecision = {
     readonly reason: string;
     readonly retryable: boolean;
 };
-type AcceptedOfferPayload = TaskOfferPayload | TaskOfferWithToolsetsPayload | TaskOfferForAgentPayload | TaskOfferForAgentWithEgressPayload | TaskOfferForAgentWithEgressFreshPayload;
+type AcceptedOfferPayload = TaskOfferPayload | TaskOfferWithToolsetsPayload | TaskOfferForAgentPayload | TaskOfferForAgentWithEgressPayload | TaskOfferForAgentWithEgressFreshPayload | TaskOfferPreparedPayload;
 /**
  * The SDK-owned environment variable that carries one host toolset server's
  * `BYOK_HOST_TOOLSET_CONTEXT` nonce (contract §8.1).
@@ -7089,6 +7716,16 @@ export declare class TaskRunner {
      * `MAX_TRACKED_TASK_IDS`), so scanning past it to find an evictable entry
      * costs nothing.
      */
+    /**
+     * `taskId` -> the preparation record this Execution pinned.
+     *
+     * The pin is a durable single-consumer claim on already-counted tokens, so it
+     * is held for exactly as long as the Execution that took it can still be
+     * running — and released at ONE moment, the Execution's terminal. Not at
+     * claim, not at start, not when the session closes: GC must not collect a
+     * record whose bytes a live process may still be sending.
+     */
+    private readonly preparationPinsByTask;
     private readonly inFlightOffers;
     /** Blob I/O before an offer becomes an active task still belongs to that offer's cancellation authority. */
     private readonly inFlightBlobAborts;
@@ -7809,6 +8446,16 @@ export declare class TaskRunner {
     private finish;
     private finishOnce;
     private reserveSemanticTerminal;
+    /**
+     * Release the preparation pin this Execution holds, if it took one.
+     *
+     * Best effort by design, and loudly: a pin that cannot be released costs
+     * retention, not correctness — the record stays uncollectable until an
+     * operator intervenes — whereas turning a release failure into a task-terminal
+     * would rewrite an already-established result for a reason the task itself had
+     * nothing to do with.
+     */
+    private releasePreparationPin;
     /** M3-B: bounded insert for `finishedTaskIds` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest (first-inserted) entry once over cap, same idiom as `ConnectionHub.checkAndRecordDuplicate` (packages/server/src/hub.ts). */
     private addFinishedTaskId;
     private addStrictDeclinedTaskId;
@@ -8056,6 +8703,492 @@ export declare class LocalTeamWorkspace {
 }
 /** The longer name is useful at composition sites; both names denote one authority. */
 export { LocalTeamWorkspace as LocalTeamWorkspaceService };
+// ==== @byok-sdk/client dist/daemon/tool-implementation-identity.d.ts ====
+import type { McpLaunchAttestation } from './trusted-launch-cwd';
+/**
+ * The ONE authority for "which implementation backs this tool", and the only
+ * file in this package that may produce an `attested` identity
+ * (`docs/researches/runtime-input-preparation-contract.md` §17/§19/§22/§26).
+ *
+ * The split this module encodes:
+ *
+ * - The HOST owns the install record. It knows where it put a versioned
+ *   immutable release, what manifest revision it came from, and which
+ *   interpreter (if any) is encapsulated with it. That knowledge arrives
+ *   through {@link ToolImplementationAuthority}, which this SDK declares and
+ *   never implements: there is NO default resolver. An unconfigured daemon
+ *   resolves every identity to `unavailable: 'resolver_unconfigured'`.
+ * - The SDK owns the ASSERTION. A record the resolver hands over is not
+ *   believed; it is measured — realpath, lstat, ownership, mode, content
+ *   digest — here, before it becomes an identity, and measured again before
+ *   every spawn. An absolute path is not an attestation, and a resolver that
+ *   reports one is answered with a refusal rather than a promotion.
+ *
+ * WHAT EACH SIDE SUPPLIES, exactly:
+ *
+ * - The resolver returns a {@link ToolImplementationInstallRecordV1} — the
+ *   manifest revision, the form, the versioned install path, the artifact digest,
+ *   the interpreter triple for an `interpreter+bundle`, the entry, the launch
+ *   argv and cwd — or an {@link ToolImplementationUnavailableV1} reason. That
+ *   is the whole of the host's authority.
+ * - The SDK measures everything else and seals it on: `installStat`,
+ *   `interpreterStat`, `launchEnvNamesDigest` and `loaderEnvValuesDigest`.
+ *   None of the four is a resolver input, and a record that carries one is not
+ *   an install record. A host cannot know the environment object this SDK will
+ *   hand to `spawn`, and must never guess it from its own `process.env`.
+ *
+ * What an `attested` identity proves is therefore exactly this: at the moment
+ * it was resolved, and again at the moment the server was spawned, the file at
+ * that versioned install path — and, for an `interpreter+bundle`, the
+ * interpreter beside it — was a root-owned, non-symlink, non-writable regular
+ * file, reached through a symlink-free directory chain, whose bytes hash to its
+ * attested digest and whose `(dev, ino, size, mtime, mode,
+ * uid, gid)` tuple is the one that was measured at resolve, and that the
+ * environment handed to that spawn agrees with the environment measured at
+ * resolve over the NAMES PROJECTION plus the CONTROLLED LOADER-VALUES SCOPE
+ * defined by {@link toolImplementationLaunchEnvNamesDigest} and
+ * {@link toolImplementationLoaderEnvValuesDigest}. It is not a claim that the
+ * two environments are identical: the projection subtracts an exact,
+ * enumerated set of names this SDK itself mints or strips between the two
+ * moments ({@link TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES} and
+ * {@link PROVIDER_CREDENTIAL_ENV_DENY_NAMES}), and every other name — this
+ * SDK's `BYOK_*` control prefix included — is either bound by the names digest
+ * or refused outright at the spawn gate.
+ *
+ * What it does NOT prove (§26, carried honestly rather than implied away):
+ * post-hoc modification by root, the integrity of the kernel, dyld, SIP-owned
+ * system libraries or anything the loader maps in beside the artifact,
+ * injection into the live process after exec, and anything about the network
+ * peers the server talks to. Release signing is a separate authority and is
+ * not claimed here.
+ */
+/**
+ * Every way an implementation identity can be absent. Absence is always
+ * REPORTED, never defaulted away: each reason names who could not answer and
+ * why, so a receipt that carries one says something an operator can act on.
+ *
+ * - `resolver_unconfigured` — no {@link ToolImplementationAuthority} is wired
+ *   into this daemon. The SDK ships none, so this is the unconfigured state.
+ * - `implementation_identity_unattested` — a resolver answered, but not with a
+ *   record this SDK can measure (it threw, or returned a shape that is not an
+ *   install record).
+ * - `unencapsulated_source` — the resolver's own verdict: what backs this tool
+ *   is a source tree or a directory the host cannot freeze, not an artifact.
+ * - `interpreter_not_encapsulated` — the resolver's own verdict: the bundle
+ *   runs under an interpreter that is not part of the frozen install.
+ * - `interpreter_form_unsupported` — the record pairs `form` and `interpreter`
+ *   in a way no attestation covers (an interpreter on a compiled executable, or
+ *   a bundle with no interpreter).
+ * - `install_record_mismatch` — the record does not describe the filesystem: a
+ *   directory chain that resolves elsewhere, a symlink leaf, not a regular
+ *   file, not root-owned, writable, a stat tuple that moved (a different inode
+ *   at the same name included), or — AT RESOLVE — bytes that do not hash to the
+ *   `closureDigest` the record claims. A digest disagreement at resolve is the
+ *   record being wrong about the filesystem, not a verification that decayed:
+ *   nothing has been verified yet, so there is nothing to have changed.
+ * - `reverify_failed` — a file that could not be READ at all, at either layer;
+ *   and, at the spawn gate only, bytes that no longer hash to the digest this
+ *   SDK itself measured at resolve. That is the one digest disagreement that
+ *   means "it changed since we checked", and the reverify verdict carries the
+ *   `subject` (`artifact` or `interpreter`) saying which file it was.
+ *
+ * The rule across the two layers, stated once: a digest disagreement is
+ * `install_record_mismatch` at resolve and `reverify_failed` at reverify,
+ * because at resolve the digest is the HOST's claim and at reverify it is this
+ * SDK's own prior measurement.
+ */
+export type ToolImplementationUnavailableReasonV1 = 'implementation_identity_unattested' | 'resolver_unconfigured' | 'unencapsulated_source' | 'interpreter_not_encapsulated' | 'interpreter_form_unsupported' | 'install_record_mismatch' | 'reverify_failed';
+export declare const TOOL_IMPLEMENTATION_UNAVAILABLE_REASONS: readonly ToolImplementationUnavailableReasonV1[];
+export interface ToolImplementationUnavailableV1 {
+    readonly kind: 'unavailable';
+    readonly reason: ToolImplementationUnavailableReasonV1;
+}
+/**
+ * The interpreter half of an `interpreter+bundle` install, present if and only
+ * if the form says so. `loadCommandsDigest` is the host's digest of the
+ * interpreter's own load/link directives — the thing that decides what else
+ * gets mapped in beside the bundle — and is carried because the interpreter's
+ * file digest alone does not describe that.
+ *
+ * `path` goes through the same canonical path identity rule as the
+ * artifact (symlink-free parent chain, regular non-symlink leaf), at resolve and at every spawn, and is bound to its inode by
+ * `interpreterStat` for the same reason.
+ */
+export interface ToolImplementationInterpreterV1 {
+    readonly path: string;
+    readonly digest: string;
+    readonly loadCommandsDigest: string;
+}
+/**
+ * The filesystem tuple measured at resolve and required to be unchanged at
+ * every later spawn. One is measured for the artifact (`installStat`) and, for
+ * an `interpreter+bundle`, one for the interpreter (`interpreterStat`).
+ *
+ * SDK-measured, never resolver-supplied: it is the one field of an attested
+ * identity whose value a host cannot choose. A record whose digest still
+ * matches but whose inode moved is a replaced file, and a replaced file is not
+ * the file that was attested even when its bytes agree today.
+ */
+export interface ToolImplementationStatTupleV1 {
+    readonly dev: number;
+    readonly ino: number;
+    readonly size: number;
+    readonly mtimeMs: number;
+    readonly mode: number;
+    readonly uid: number;
+    readonly gid: number;
+}
+/**
+ * An attested identity, and what makes one unconstructible by a caller.
+ *
+ * Not a type-level brand. A `unique symbol` brand is nominal per DECLARATION
+ * site, so the one emitted into this package's `.d.ts` is a different type from
+ * the one in its source — the brand would make the package incompatible with
+ * itself rather than protect anything. Two structural facts carry the
+ * guarantee instead, and both are tested:
+ *
+ * 1. NOTHING ON THE WIRE CAN CARRY ONE. `daemon/control-protocol.ts` is
+ *    key-exact everywhere and has no field, anywhere, in which a control
+ *    client could put an implementation identity. There is no shape to reject
+ *    because there is no slot to fill.
+ * 2. A FORGED ONE BUYS NOTHING. The only two producers are
+ *    {@link resolveToolImplementationIdentity}, which measures the filesystem
+ *    before it returns, and {@link parseToolImplementationIdentity}, which
+ *    reads a daemon-authored task-scoped file and is deliberately not part of
+ *    this package's public surface. Whatever either returns is measured AGAIN
+ *    before every spawn, so an identity nobody earned names a file that is not
+ *    a root-owned, non-writable artifact hashing to its own claimed digest, and
+ *    the spawn is refused.
+ */
+export interface ToolImplementationAttestedV1 {
+    readonly kind: 'attested';
+    /** The only authority this SDK recognises. A resolver cannot name another. */
+    readonly authority: 'host-install-record';
+    readonly manifestRevision: string;
+    readonly form: 'compiled-executable' | 'interpreter+bundle';
+    /**
+     * The versioned immutable install path: an absolute path whose directory
+     * chain is symlink-free and whose leaf is a regular, non-symlink file. It is
+     * the NAME; the identity is the inode it named, carried in
+     * {@link installStat}. The rule: symlink-free parent chain, regular
+     * non-symlink leaf, identity bound by the inode.
+     */
+    readonly installPath: string;
+    /** sha256 hex of the executable or bundle artifact's bytes. */
+    readonly closureDigest: string;
+    readonly closureKind: 'artifact';
+    /** Required iff `form === 'interpreter+bundle'`, forbidden otherwise. */
+    readonly interpreter?: ToolImplementationInterpreterV1;
+    readonly entry?: string;
+    readonly launchArgv: readonly string[];
+    readonly launchCwd: string;
+    /**
+     * SDK-measured at resolve: the digest of the NAMES the child's environment
+     * carries, never their values. See
+     * {@link toolImplementationLaunchEnvNamesDigest} for the projection it is
+     * taken over and why that projection exists.
+     */
+    readonly launchEnvNamesDigest: string;
+    /**
+     * SDK-measured at resolve. §27.2: digest of the sanitized loader-affecting
+     * env VALUES as they would reach the child — the values of the names
+     * `daemon/environment.ts` already denies, which is expected to be the empty
+     * canonical map. Never the full task environment: the probe carries no
+     * execution nonce, and binding a task or server nonce into an identity would
+     * make every task's identity different for reasons that have nothing to do
+     * with the implementation.
+     */
+    readonly loaderEnvValuesDigest: string;
+    /** SDK-measured at resolve. See {@link ToolImplementationStatTupleV1}. */
+    readonly installStat: ToolImplementationStatTupleV1;
+    /**
+     * SDK-measured at resolve, present iff {@link interpreter} is. The
+     * interpreter half of an `interpreter+bundle` is re-measured at every spawn
+     * exactly as the artifact is, and a tuple it cannot be compared against
+     * would make that half a digest check alone — blind to a replaced inode, a
+     * touched mtime, and an interpreter that stopped being root-owned.
+     */
+    readonly interpreterStat?: ToolImplementationStatTupleV1;
+}
+export type ToolImplementationIdentityV1 = ToolImplementationUnavailableV1 | ToolImplementationAttestedV1;
+export declare function toolImplementationUnavailable(reason: ToolImplementationUnavailableReasonV1): ToolImplementationUnavailableV1;
+/** The unconfigured state, which is this SDK's default for every tool. */
+export declare const TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED: ToolImplementationUnavailableV1;
+/** What the resolver is asked about: one configured server, and where it launches. */
+export interface ToolImplementationLocatorV1 {
+    readonly toolsetId: string;
+    readonly serverName: string;
+    readonly command: string;
+    readonly args: readonly string[];
+    readonly launch: McpLaunchAttestation;
+}
+/**
+ * The install record a resolver returns, which is an attested identity MINUS
+ * everything a host does not get to assert:
+ *
+ * - `installStat` / `interpreterStat` — the filesystem tuples this SDK
+ *   measures itself. A host that could choose them would be the authority on
+ *   whether its own install moved.
+ * - `launchEnvNamesDigest` / `loaderEnvValuesDigest` — facts about the exact
+ *   environment object THIS SDK will hand to `spawn`. A host does not have
+ *   that object: it is `daemon/environment.ts`'s `buildRuntimeEnv` output for
+ *   one task on one device, not the host's `process.env`, and a resolver that
+ *   reconstructed it from its own environment (or from a copy of this
+ *   package's deny list) would be attesting a guess.
+ */
+export type ToolImplementationInstallRecordV1 = Omit<ToolImplementationAttestedV1, 'installStat' | 'interpreterStat' | 'launchEnvNamesDigest' | 'loaderEnvValuesDigest'>;
+export type ToolImplementationResolutionV1 = ToolImplementationUnavailableV1 | ToolImplementationInstallRecordV1;
+/**
+ * The host's install-record authority.
+ *
+ * This package declares it and ships NO implementation and NO default. A
+ * daemon constructed without one resolves every identity to
+ * `unavailable: 'resolver_unconfigured'` and every receipt built on those
+ * identities carries `executor_identity_unproven`.
+ *
+ * There is deliberately no `reverify` method here. Reverification is the SDK's
+ * assertion, not the resolver's report — see
+ * {@link reverifyToolImplementationIdentity}. A resolver that could answer
+ * "still fine" would be the authority on its own record, which is the exact
+ * thing this boundary exists to prevent.
+ */
+export interface ToolImplementationAuthority {
+    resolve(input: ToolImplementationLocatorV1): Promise<ToolImplementationResolutionV1>;
+}
+export interface ToolImplementationStatEntry extends ToolImplementationStatTupleV1 {
+    readonly isFile: boolean;
+    readonly isSymbolicLink: boolean;
+}
+/**
+ * The `node:fs` reads this module makes, as one injectable triple — the same
+ * seam, for the same reason, as `LaunchCwdShellStat` in
+ * `./trusted-launch-cwd.ts`: the checks below require a ROOT-OWNED file, and a
+ * non-root test process cannot create one. Tests wrap the real implementation
+ * and override ownership alone, so the digest, the size and the mtime under
+ * test are still read off a real file on disk.
+ *
+ * Production never passes one.
+ */
+export interface ToolImplementationFsProbe {
+    lstat(target: string): Promise<ToolImplementationStatEntry>;
+    realpath(target: string): Promise<string>;
+    /** sha256 hex of the file's bytes, streamed. */
+    digest(target: string): Promise<string>;
+}
+export declare const realToolImplementationFsProbe: ToolImplementationFsProbe;
+/**
+ * The EXACT names this SDK itself mints into a gated child's environment
+ * between the moment an identity is resolved and the moment the server it
+ * describes is spawned.
+ *
+ * An identity is resolved ONCE, by the daemon, off the environment
+ * `buildRuntimeEnv` produced — which hard-denies the whole `BYOK_*` prefix, so
+ * it contains none of these. It then travels to two spawns in two processes:
+ * the daemon's own admission probe, and the Pi extension's server pool inside
+ * the runtime child. Each of those layers a per-task or per-server control
+ * value on top, and the list is enumerated here rather than matched by prefix
+ * because the prefix is not intrinsically inert — a `BYOK_*` name is a knob
+ * this SDK reads elsewhere, so "starts with BYOK_" is not a reason to project
+ * a name away unnoticed.
+ *
+ * Every entry, with where it is minted — three names, and each one is here
+ * because this SDK itself puts it on a GATED CHILD's environment after the
+ * identity was measured. A name that never reaches a gated child does not
+ * belong on this list: projecting it away would blind the gate to a control
+ * variable that, arriving anyway, could only have come from somewhere this SDK
+ * does not mint.
+ *
+ * - `BYOK_HOST_TOOLSET_CONTEXT` — the per-server task-lane nonce minted at
+ *   `daemon/task-runner.ts:3355` (name at `:1148`) into the server's own `env`
+ *   block, which `mcp/client.ts:244` layers onto the child environment the
+ *   gate below measures.
+ * - `BYOK_STORE_DIR` / `BYOK_PRODUCT_ID` — minted into the same per-server
+ *   `env` block at `daemon/task-runner.ts:3353-3354`, and reaching the gated
+ *   child by the same path.
+ *
+ * OUT OF SCOPE, deliberately, and NOT exempt — a name below appearing on a
+ * gated child environment is a refusal, not a projection:
+ *
+ * - `BYOK_PI_MCP_CONFIG_PATH` (`adapters/pi/mcp-config.ts:1`) and
+ *   `BYOK_PI_PERMISSION_MODE` (`adapters/pi/subagents-policy-config.ts:1`) are
+ *   set on the PI PROCESS at `adapters/pi/pi-adapter.ts:491-492`, and the
+ *   server pool strips the whole `/^BYOK_PI_/` shape back off
+ *   (`adapters/pi/mcp-server-pool.ts:42,271`) before it spawns a server. They
+ *   address this SDK's own Pi entries, not a toolset server, so neither ever
+ *   reaches a gated child: the pool's children are spawned without them, and
+ *   the daemon's admission probe spawns off `buildRuntimeEnv`'s output, which
+ *   hard-denies the whole `BYOK_*` prefix (`daemon/environment.ts:202`).
+ * - `adapters/claude/resolve-bin.ts:29` / `resolve-approval-mcp-bin.ts:49`'s
+ *   `BYOK_*_BIN` overrides are daemon-pre-child inputs read out of the
+ *   daemon's own `process.env`; they are never placed on a spawned child's
+ *   environment.
+ * - `BYOK_MCP_ENV_KEY` / `BYOK_MCP_PAYLOAD_*` (`adapters/codex/codex-adapter
+ *   .ts:467,484`, `bin/mcp-env-launcher.ts:8-26`) are the Codex CLI's own
+ *   launcher knobs. The Codex lane's MCP children are spawned by the CLI, not
+ *   through this package's gate, so they are not names an attested spawn here
+ *   may carry.
+ * - The SDK-reserved helper servers' `BYOK_STORE_DIR`/`BYOK_TASK_ID`/
+ *   `BYOK_*_CONTEXT` blocks (`bin/sdk-reserved-helper-runners.ts`) back this
+ *   package's own bins, which carry no host install record and therefore never
+ *   reach an attested gate.
+ */
+export declare const TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES: readonly string[];
+/**
+ * Every `BYOK_*` name on a child environment that this SDK cannot account for.
+ *
+ * `buildRuntimeEnv` hard-denies the whole prefix, and the only names that may
+ * legitimately be layered back on afterwards are the enumerated lifecycle ones
+ * above. Anything else wearing this SDK's control prefix on the environment of
+ * a child about to be started under an attested identity is a control-plane
+ * name from somewhere this SDK does not mint — so the gate refuses rather than
+ * projecting it away or letting it pass as an ordinary bound name.
+ */
+export declare function unexpectedLaunchEnvControlNames(env: Readonly<Record<string, string>>): readonly string[];
+/**
+ * The NAMES the child's environment carries, digested. Never their values:
+ * this is the fact that catches a variable appearing, disappearing or being
+ * renamed between resolve and spawn, and a value digest of the whole
+ * environment would bind every task-scoped secret and nonce in it.
+ *
+ * Taken over {@link launchEnvUnderIdentity}, for the reasons documented there.
+ */
+export declare function toolImplementationLaunchEnvNamesDigest(env: Readonly<Record<string, string>>): string;
+/**
+ * §27.2: the loader-affecting VALUES as they would reach the child, digested.
+ *
+ * The names are `daemon/environment.ts`'s own {@link loaderEnvInjections} —
+ * this module keeps no second copy of that list, and neither may a host. In
+ * every environment `buildRuntimeEnv` produces the set is empty, so the
+ * expected value is the digest of the empty canonical map; a non-empty one is
+ * loader injection that reached the child, and at spawn it is a refusal.
+ */
+export declare function toolImplementationLoaderEnvValuesDigest(env: Readonly<Record<string, string>>, platform?: NodeJS.Platform): string;
+/**
+ * Read one identity back out of a daemon-authored task-scoped file.
+ *
+ * Deliberately NOT exported from this package's index: it is the one function
+ * that turns a parsed value into an `attested` identity, and the only caller is
+ * `adapters/pi/mcp-extension.ts`, reading the file the pi adapter wrote for
+ * exactly one task. Nothing a control client sends reaches it — the control
+ * surface carries no identity field at all — and the value it produces is
+ * re-measured against the filesystem before any server is spawned, so a forged
+ * file buys an immediate refusal rather than a trusted identity.
+ */
+export declare function parseToolImplementationIdentity(value: unknown): ToolImplementationIdentityV1 | undefined;
+/**
+ * Why one measured path is not the artifact the record describes. Split by
+ * WHICH fact failed, because the two mean different things operationally:
+ * `install_record_mismatch` is "this is not the file that was attested" (a
+ * directory chain that resolves elsewhere, replaced inode, wrong owner,
+ * writable, a symlink leaf), and
+ * `reverify_failed` is "this IS the file, and its bytes are no longer the bytes
+ * that were attested" (or could not be read at all).
+ */
+export type ToolImplementationMeasurementFailure = 'install_record_mismatch' | 'reverify_failed';
+/**
+ * Turn one locator into the identity this daemon will carry for it.
+ *
+ * Every failure path lands on a REASON rather than a throw: a tool whose
+ * implementation cannot be proven is not an error, it is a tool whose identity
+ * is `unavailable`, and the receipt says so. The one thing that never happens
+ * is an identity being promoted past a check — the measurement below runs on
+ * every record the resolver returns, including the ones it is most confident
+ * about.
+ */
+export declare function resolveToolImplementationIdentity(authority: ToolImplementationAuthority | undefined, locator: ToolImplementationLocatorV1, launchEnv: Readonly<Record<string, string>>, probe?: ToolImplementationFsProbe): Promise<ToolImplementationIdentityV1>;
+/**
+ * The one failure that exists only at spawn.
+ *
+ * `launch_env_drift` is not a {@link ToolImplementationUnavailableReasonV1}
+ * and never will be: at resolve there is nothing to disagree with, because
+ * that is the moment the environment is MEASURED. It can only be reached by a
+ * later spawn whose environment is not the one that was measured, and a
+ * resolver cannot claim it because a resolver never sees an environment.
+ *
+ * `launch_env_unexpected_control_name` is the second, and exists for the same
+ * reason: a child about to be started under an attested identity carries a
+ * `BYOK_*` control name this SDK does not mint on any gated path
+ * ({@link TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES}). It is a distinct
+ * reason rather than drift because drift is "the environment moved" and this
+ * is "the environment carries control-plane authority from nowhere" — and
+ * because it must fail closed even when the same name was already present at
+ * resolve, which drift alone would not catch.
+ *
+ * Neither is a {@link ToolImplementationUnavailableReasonV1}: the host-facing
+ * resolution contract is unchanged, and a resolver can claim neither.
+ */
+export type ToolImplementationReverifyFailure = ToolImplementationMeasurementFailure | 'launch_env_drift' | 'launch_env_unexpected_control_name';
+/**
+ * WHICH of the things an identity binds moved. Carried beside the reason
+ * because `reverify_failed` on the artifact and `reverify_failed` on the
+ * interpreter send an operator to two different files.
+ */
+export type ToolImplementationReverifySubject = 'artifact' | 'interpreter' | 'launch-env';
+export type ToolImplementationReverifyResult = 'ok' | {
+    readonly reason: ToolImplementationReverifyFailure;
+    readonly subject: ToolImplementationReverifySubject;
+};
+/**
+ * Re-measure an attested identity immediately before the server it describes is
+ * spawned.
+ *
+ * The path is canonicalized again — symlink-free parent chain, regular
+ * non-symlink leaf — and the artifact's
+ * bytes are hashed again. On top of that runs the check that
+ * only exists once there is something to compare against: the stat tuple must
+ * be the tuple that was measured at resolve, `uid`, `gid` and `mode` included.
+ * That is what catches a replacement whose bytes happen to agree, a touch that
+ * changed nothing but the mtime, and an install that stopped being root-owned
+ * or grew a write bit since it was attested.
+ *
+ * The interpreter of an `interpreter+bundle` runs the SAME two checks against
+ * the SAME two recorded facts. It is the thing that maps the bundle in and
+ * decides what else gets mapped beside it, so an identity that re-hashed the
+ * artifact byte for byte while accepting any interpreter that still hashed
+ * right — replaced inode, cleared ownership, new mtime — would be strictly
+ * weaker at spawn than it was at resolve.
+ *
+ * `launchEnv` is the exact environment object the caller is about to hand to
+ * `spawn`. It is checked twice, and the check is over the names projection
+ * plus the controlled loader-values scope, never over the whole environment.
+ * A `BYOK_*` name this SDK does not mint on a gated path is
+ * `launch_env_unexpected_control_name` — control-plane authority from nowhere,
+ * refused whether or not it was there at resolve. Otherwise the two digests
+ * are recomputed: a name that appeared, vanished or was renamed, or a
+ * loader-affecting value that reached the child, is `launch_env_drift`, the
+ * identity having been measured against one environment while the child would
+ * be started in another.
+ *
+ * Not memoized and not cached. The whole point is that resolve and spawn are
+ * two different moments, and a cached answer would assert the first moment's
+ * facts about the second one.
+ */
+export declare function reverifyToolImplementationIdentity(identity: ToolImplementationAttestedV1, launchEnv: Readonly<Record<string, string>>, probe?: ToolImplementationFsProbe): Promise<ToolImplementationReverifyResult>;
+/**
+ * The shared pre-spawn gate, so both spawn points refuse on the same evidence
+ * with the same words.
+ *
+ * `launchEnv` must be the env the CALLER is about to spawn with, not the one
+ * it resolved with — that is the whole comparison.
+ *
+ * An identity that is `unavailable` carries no claim to break, so there is
+ * nothing to re-measure and the spawn proceeds — the receipt already says the
+ * implementation is unproven. An `attested` identity is re-measured on EVERY
+ * spawn, and a failure is a refusal: it is never downgraded to
+ * unavailable-and-continue, because a server that was attested and no longer
+ * measures the same is a server that changed under a claim somebody relied on.
+ */
+export declare function assertToolImplementationBeforeSpawn(label: string, identity: ToolImplementationIdentityV1 | undefined, launchEnv: Readonly<Record<string, string>>, probe?: ToolImplementationFsProbe): Promise<void>;
+/**
+ * Raised when an attested server no longer measures the way it was attested.
+ * Carries the reason rather than only a message, so a caller refuses on the
+ * fact instead of on a substring.
+ */
+export declare class ToolImplementationReverifyError extends Error {
+    readonly reason: ToolImplementationReverifyFailure;
+    readonly subject: ToolImplementationReverifySubject;
+    constructor(message: string, reason: ToolImplementationReverifyFailure, subject: ToolImplementationReverifySubject);
+}
 // ==== @byok-sdk/client dist/daemon/toolset-registry.d.ts ====
 import { type ToolsetId } from '@byok-sdk/protocol';
 import type { McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types';
@@ -8087,6 +9220,309 @@ export declare class McpToolsetRegistry {
     report(toolsetId: string, expectedDefinitionRevision: string, observation: McpToolsetObservation): void;
     private statusRows;
 }
+// ==== @byok-sdk/client dist/daemon/trusted-launch-cwd.d.ts ====
+import type { McpStdioServerConfig } from '../types';
+/**
+ * The working directory an MCP toolset SERVER child is launched in, and why it
+ * is not the Agent home.
+ *
+ * A `bun --compile` single-file binary reads `$cwd/bunfig.toml` and runs its
+ * `preload` entries BEFORE any of the program's own code — verified on
+ * Bun 1.4.2, and `--config=/dev/null` does not suppress it for a compiled
+ * binary (it suppresses it only for the bare interpreter, because the flag
+ * reaches the program's argv rather than the runtime). The only control point
+ * is therefore the child's cwd.
+ *
+ * Until this module existed, every MCP toolset server child inherited the
+ * canonical Agent home as its cwd — a directory the agent's own tools write to
+ * by design. Any compiled server binary (Salesko's `salesko-agent mcp serve`
+ * is one) could be handed arbitrary preload code by the agent it is supposed
+ * to be serving.
+ *
+ * The RUNTIME process (the pi/claude/codex CLI itself) keeps the manifest cwd:
+ * session resume and relative-path resolution depend on it, and it is not the
+ * thing this boundary is about.
+ *
+ * Non-writability is PROVEN, never assumed from a mode bit: `resolve` attempts
+ * to create a file in the candidate and requires the attempt to fail with
+ * `EACCES`/`EPERM`/`EROFS`. A candidate that accepts the write is rejected
+ * (and the probe file removed) even if its permissions looked right — mode
+ * bits do not account for ACLs, for the effective uid, or for a filesystem
+ * that was remounted read-write.
+ *
+ * The probe alone is not the boundary, because both of its premises are things
+ * this uid can change:
+ *
+ * - A directory OWNED by this uid answers the probe with `EACCES` while its
+ *   owner remains free to `chmod` it writable first. Ownership by another uid
+ *   (root, for the intended immutable versioned release directory) is therefore
+ *   required, not just a cleared write bit.
+ * - `rename(2)` replaces a directory using write permission on its PARENT.
+ *   A root-owned 0555 directory sitting inside a directory this uid can write
+ *   is a directory this uid can swap out wholesale. So every ancestor up to the
+ *   volume root is put through the identical check.
+ *
+ * WHAT DOES THE CHDIR, on each platform:
+ *
+ * - POSIX (darwin, linux): the trusted system `/bin/sh`, run as
+ *   `sh -c 'cd -- "$0" && exec "$@"' <dir> <command> [...args]`. The shell is
+ *   already on the machine, is root-owned and not group/other-writable (both
+ *   proven here, not assumed), reads no rc file for `-c`, and `exec`s so the
+ *   runtime CLI's child IS the server. No Node host is required, which is the
+ *   point: a daemon embedded in a `bun --compile` product executable has a
+ *   trusted launcher without attesting anything.
+ * - win32: this package's `bin/byok-launch-cwd.mjs`, which needs a real Node
+ *   host. A host that is not plain Node (Bun, Deno, a single-executable
+ *   application) and attests no interpreter is REFUSED, fail-closed. There is
+ *   deliberately no Windows shell path: `cmd.exe` has no `exec`, and its
+ *   quoting rules are not something a boundary should be built on.
+ *
+ * A launch-cwd PASS asserts WHERE the server starts. It does not assert that
+ * the launcher or the executor is the binary it claims to be — that is the
+ * separate attested-install work.
+ */
+/** Operator-supplied inputs to {@link resolveTrustedLaunchCwd}. Both fields are optional and both are validated. */
+export interface McpLaunchCwdConfig {
+    /**
+     * An absolute directory to launch MCP toolset servers in, in preference to
+     * the platform default. It must still pass every check below — a configured
+     * directory is a preference, never an exemption.
+     *
+     * The intended value is an immutable, root-owned versioned release
+     * directory. `os.tmpdir()` and anything else this daemon's own uid can write
+     * is rejected by the write probe: the agent runs at that same uid in the
+     * common deployment, so such a directory isolates other users and nothing
+     * else.
+     */
+    readonly dir?: string;
+    /**
+     * ESCAPE HATCH, not a supported path. An absolute path to a Node executable
+     * used to run this package's `bin/byok-launch-cwd.mjs` for the runtimes whose
+     * MCP configuration cannot express a per-server cwd (claude, codex).
+     *
+     * The supported launchers need no configuration: POSIX bootstraps through the
+     * trusted system `/bin/sh`, and win32 runs the shipped launcher script on a
+     * real Node host. This field exists for the deployment that has neither and
+     * can attest a Node binary of its own. A host that sets it takes on proving
+     * the binary it names is one the agent's uid cannot replace — nothing here
+     * can prove that for an arbitrary path.
+     */
+    readonly launcherInterpreter?: string;
+}
+/**
+ * Why one candidate directory failed, independent of where the candidate came
+ * from. `is_writable` is the one that matters most: it means the write probe
+ * SUCCEEDED, so this uid can create files there and the directory isolates
+ * nobody the agent is not already running as.
+ */
+export type LaunchCwdRejection = 'not_absolute' | 'unreadable' | 'is_a_symlink' | 'not_a_directory' | 'is_writable'
+/**
+ * The candidate is owned by the uid this daemon runs as. A mode bit is not a
+ * boundary against its own owner: the agent, running at that same uid, can
+ * `chmod` the directory writable and then plant `bunfig.toml` in it. Only an
+ * owner OUTSIDE this uid (root, in the intended immutable-release shape) puts
+ * the directory beyond the agent's reach.
+ */
+ | 'owned_by_current_uid'
+/**
+ * An ancestor could not be inspected, is a symlink, is not a directory, is
+ * owned by this uid, or accepted the write probe. Any of those lets this uid
+ * `rename` the candidate out of the way and put its own directory at the same
+ * path — the leaf's own mode never comes into it.
+ */
+ | 'ancestor_unreadable' | 'ancestor_is_a_symlink' | 'ancestor_not_a_directory' | 'ancestor_owned_by_current_uid' | 'ancestor_writable';
+/**
+ * `root_cannot_prove_write_boundary` is uid 0: no directory on the machine is
+ * unwritable by this process, so the boundary cannot be proven at all. The
+ * rest name which candidate was tried and how it failed.
+ */
+export type TrustedLaunchCwdUnavailableReason = 'root_cannot_prove_write_boundary' | 'no_platform_default_directory' | `configured_dir_${LaunchCwdRejection}` | `platform_default_${LaunchCwdRejection}`;
+export type TrustedLaunchCwd = {
+    readonly kind: 'resolved';
+    readonly dir: string;
+} | {
+    readonly kind: 'unavailable';
+    readonly reason: TrustedLaunchCwdUnavailableReason;
+};
+/** The three facts the POSIX launcher check reads off one path. */
+export interface LaunchCwdShellStatEntry {
+    readonly uid: number;
+    /** The permission bits, as `st_mode` carries them. */
+    readonly mode: number;
+    readonly isFile: boolean;
+}
+/**
+ * The `node:fs` calls {@link resolveMcpLaunchCwdLauncher} makes on the system
+ * shell, as one injectable triple. Each call throws exactly as `fs` does when
+ * the path cannot be inspected.
+ */
+export interface LaunchCwdShellStat {
+    readonly lstat: (target: string) => LaunchCwdShellStatEntry;
+    readonly stat: (target: string) => LaunchCwdShellStatEntry;
+    readonly realpath: (target: string) => string;
+}
+/** Seam for the tests that must run the uid-0 and filesystem branches without being root. */
+export interface TrustedLaunchCwdEnvironment {
+    readonly platform?: NodeJS.Platform;
+    readonly getuid?: () => number;
+    readonly env?: Readonly<Record<string, string | undefined>>;
+    /**
+     * The system shell the POSIX launcher bootstraps through. Defaults to
+     * `/bin/sh` and is overridden only by tests, which point it at a shell built
+     * to fail one specific trust check.
+     */
+    readonly systemShell?: string;
+    /**
+     * How the shell's ownership and mode are read. Defaults to real `node:fs`.
+     * Injected by the tests that must exercise a root-owned-but-group-writable
+     * shell, which a non-root test process cannot create on disk.
+     */
+    readonly shellStat?: LaunchCwdShellStat;
+}
+/**
+ * Resolve the directory every MCP toolset server child of this daemon is
+ * launched in, or state why no such directory could be proven.
+ *
+ * Not memoized: the whole result is one `lstat` plus one failed `open`, and a
+ * cached "resolved" would keep asserting a boundary after the directory it
+ * names was remounted, replaced, or chmodded.
+ */
+export declare function resolveTrustedLaunchCwd(config?: McpLaunchCwdConfig, environment?: TrustedLaunchCwdEnvironment): Promise<TrustedLaunchCwd>;
+/**
+ * The POSIX bootstrap program, run as `sh -c <SCRIPT> <trustedCwd> <command>
+ * [...args]`.
+ *
+ * `sh -c` assigns the first word after the program text to `$0` and the rest
+ * to `$1...`, so `$0` is the trusted directory and `"$@"` is the target's argv
+ * with no shell word splitting, no globbing and no quoting round trip: an
+ * argument containing a space, a tab, a newline, a quote, `$(...)`, a backtick,
+ * `*`, `;`, `&&`, `~` or non-ASCII bytes arrives byte-identical.
+ *
+ * `cd --` (rather than a bare `cd`) is what keeps a directory named `-L` or
+ * `-P` from being read as an option. The target is reached through `exec`, so
+ * the shell replaces itself and the runtime CLI's child IS the server: one
+ * pid, signals and exit status pass through with nothing in between.
+ *
+ * `exec -- "$@"` is NOT used, and must not be: dash rejects it outright
+ * (`exec: --: not found`, exit 127). The form below is the one verified on
+ * dash 0.5.12, bash 5.2.37 invoked as `sh`, busybox ash, and macOS `/bin/sh`.
+ *
+ * `cd` is given an ABSOLUTE realpath by {@link wrapMcpServerWithLaunchCwd},
+ * because a relative argument to `cd` is resolved through `CDPATH` — which is
+ * why `CDPATH` (along with `ENV`, `BASH_ENV`, `SHELLOPTS`, `BASHOPTS` and
+ * `PS4`) is in the loader deny list `daemon/environment.ts` enforces.
+ */
+export declare const MCP_LAUNCH_CWD_SHELL_SCRIPT = "cd -- \"$0\" && exec \"$@\"";
+/**
+ * Why no trusted launcher could be produced for this host. Every one of these
+ * refuses the offer: there is no fallback launcher, because every fallback
+ * available here is one the agent's own uid could have written.
+ */
+export type McpLaunchCwdLauncherUnavailableReason = 
+/**
+ * win32 only: this process is not a plain Node that would run the launcher
+ * script it is handed (Bun, Deno, or a single-executable application), and
+ * the operator attested no interpreter. A compiled Bun host is the case that
+ * matters — it would read `$cwd/bunfig.toml` and run its `preload` before the
+ * launcher's own first statement, which is the exact vector this boundary
+ * closes.
+ */
+'launch_cwd_launcher_unavailable'
+/** POSIX: `/bin/sh` could not be inspected at all. */
+ | 'launch_cwd_shell_unreadable'
+/** POSIX: `/bin/sh` resolves to something that is not a regular file. */
+ | 'launch_cwd_shell_not_a_regular_file'
+/**
+ * POSIX: `/bin/sh`, or the symlink standing at that path, is not owned by
+ * root. A shell this uid owns is a shell the agent can replace, and the
+ * bootstrap would then be running the agent's own program.
+ */
+ | 'launch_cwd_shell_not_root_owned'
+/** POSIX: `/bin/sh` is group- or world-writable, so its owner is not the only writer. */
+ | 'launch_cwd_shell_writable';
+/** A launcher that was resolved: which mechanism, what runs it, and what it runs. */
+export type ResolvedMcpLaunchCwdLauncher = 
+/** POSIX: `interpreter` is the realpath of the system shell, `script` is {@link MCP_LAUNCH_CWD_SHELL_SCRIPT}. */
+{
+    readonly kind: 'shell';
+    readonly interpreter: string;
+    readonly script: string;
+}
+/** win32: `interpreter` is a plain-Node executable, `script` is this package's `bin/byok-launch-cwd.mjs`. */
+ | {
+    readonly kind: 'node';
+    readonly interpreter: string;
+    readonly script: string;
+};
+export type McpLaunchCwdLauncher = ResolvedMcpLaunchCwdLauncher | {
+    readonly kind: 'unavailable';
+    readonly reason: McpLaunchCwdLauncherUnavailableReason;
+};
+/** The shipped launcher script, resolved from this package's own root so it works from `dist/` and from source. */
+export declare function launchCwdScriptPath(): string;
+export declare function resolveMcpLaunchCwdLauncher(config?: McpLaunchCwdConfig, environment?: TrustedLaunchCwdEnvironment): McpLaunchCwdLauncher;
+/** What the daemon resolved once per offer and every adapter of that offer launches through. */
+export interface McpLaunchBinding {
+    /** The proven non-writable directory every MCP toolset server child starts in. */
+    readonly cwd: string;
+    /** Present only for adapters whose MCP configuration cannot carry a cwd. */
+    readonly launcher?: ResolvedMcpLaunchCwdLauncher;
+}
+/**
+ * Rewrite one server's `command`/`args` so the child reaches its real
+ * executable already chdir'd into the trusted directory.
+ *
+ * argv is passed through structurally — no shell word splitting, no quoting,
+ * no concatenation — so a server argument containing a space, a quote,
+ * `$(...)`, a semicolon or a newline arrives byte-identical. The `shell`
+ * launcher runs a fixed program text that never interpolates an argument into
+ * itself; the arguments reach it as positional parameters.
+ *
+ * `env` is carried through untouched: it is the server's own task-scoped
+ * authority and the launcher is not a place to edit it.
+ *
+ * Three refusals, all fail-closed, all specific to the fact that a shell now
+ * stands between the runtime and the server:
+ *
+ * - A relative `cwd` would be resolved by `cd` through `CDPATH`, so the
+ *   directory the boundary names must be absolute.
+ * - A `command` starting with `-` would be read by `exec` as one of ITS own
+ *   options rather than as the program to run.
+ * - A relative `command` is a PATH lookup performed after the chdir, which is
+ *   not the identity the binding attested. It is not resolved here — this
+ *   module does not own a PATH lookup and is not the place to invent one — so
+ *   it is refused.
+ *
+ * The last two are this wrapper's OWN boundary assertion, standing behind the
+ * registry rule rather than substituting for it: `./toolset-registry.ts` already
+ * refuses a non-absolute or option-like `command` at load, so an operator's
+ * configuration can never reach here carrying one. These stay because this
+ * function also wraps commands the registry never saw — the SDK's reserved
+ * helpers — and because a wrapper that quietly launched whatever it was handed
+ * would make the earlier rule the only thing holding the boundary up.
+ */
+export declare function wrapMcpServerWithLaunchCwd(server: Readonly<McpStdioServerConfig>, binding: McpLaunchBinding & {
+    readonly launcher: ResolvedMcpLaunchCwdLauncher;
+}): McpStdioServerConfig;
+/**
+ * The identity of the launch path, as a value a fingerprint can bind.
+ *
+ * Deliberately NOT folded into the toolset's `definitionRevision`
+ * (`./toolset-registry.ts`): that digest is the operator's configured intent —
+ * the `command`/`args` they wrote and the read/mutation classification they
+ * declared. An SDK launcher upgrade is not a change to their configuration,
+ * and making it one would churn every stored revision on every SDK release.
+ * It is drift of a different fact, so it is bound as a different fact.
+ *
+ * `kind` is part of the bound value: a shell bootstrap and a Node launcher are
+ * different launch mechanisms and must never fingerprint equal, even in the
+ * degenerate case where they were handed the same two strings.
+ */
+export interface McpLaunchAttestation {
+    readonly launchCwd: string;
+    readonly launcher: ResolvedMcpLaunchCwdLauncher | null;
+}
+export declare function mcpLaunchAttestation(binding: McpLaunchBinding): McpLaunchAttestation;
 // ==== @byok-sdk/client dist/daemon/truth-memory-client.d.ts ====
 import { type ContentHash, type TruthRecordKind, type TruthRecordSelector } from '@byok-sdk/core';
 import type { DeviceProofSigner } from './device-proof-signer';
@@ -8387,7 +9823,19 @@ export type OperationalHealthFixResult = {
     sizeBytes: number;
 };
 // ==== @byok-sdk/client dist/index.d.ts ====
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, Session, GitWorkspaceConfig, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, Session, GitWorkspaceConfig, McpLaunchBinding, McpLaunchCwdConfig, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, LaunchCwdRejection, TrustedLaunchCwd, TrustedLaunchCwdUnavailableReason, } from './types';
+export { resolveMcpLaunchCwdLauncher, resolveTrustedLaunchCwd } from './daemon/trusted-launch-cwd';
+/**
+ * The host install-record authority this SDK declares and never implements
+ * (`daemon/tool-implementation-identity.ts`). A daemon constructed without one
+ * resolves every tool implementation identity to `resolver_unconfigured`.
+ *
+ * `parseToolImplementationIdentity` is deliberately NOT exported: it is the
+ * only function that turns a parsed value into an attested identity, and its
+ * one caller is this package's own task-scoped configuration reader.
+ */
+export type { ToolImplementationAttestedV1, ToolImplementationAuthority, ToolImplementationIdentityV1, ToolImplementationInstallRecordV1, ToolImplementationInterpreterV1, ToolImplementationLocatorV1, ToolImplementationResolutionV1, ToolImplementationStatTupleV1, ToolImplementationUnavailableReasonV1, ToolImplementationUnavailableV1, } from './daemon/tool-implementation-identity';
+export { ToolImplementationReverifyError } from './daemon/tool-implementation-identity';
 export type { AgentRef } from './agent-home';
 export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjection, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home';
 export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store';
@@ -8410,7 +9858,7 @@ export type { GitWorkspaceLedger, GitWorkspaceLedgerRecord, GitWorkspacePhase } 
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
 export { LocalTeamWorkspace, LocalTeamWorkspaceService, TeamWorkspaceError, TeamWorkspaceValidationError, TeamWorkspaceNotFoundError, TeamWorkspaceConflictError, TeamWorkspaceQuotaError, TeamWorkspaceLeaseError, TeamWorkspaceReceiptError, TeamWorkspaceCorruptError, encodeTeamMemberContext, decodeTeamMemberContext, type TeamWorkspaceDefinition, type TeamWorkspaceLimits, type TeamMessage, type TeamMemberLease, type TeamWorkspaceMemberReceipt, } from './daemon/team-workspace';
 export { openTeamTmuxView, TeamTmuxViewError, type OpenTeamTmuxViewInput } from './bin/team-tmux-view';
-export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, HostedJournalConfig, DeviceAssertionConfig, AgentEgressConfig, AgentContentReadConfig, AgentContentReadSurfaceConfig, AgentReliableEgressInput, } from './daemon/create-daemon';
+export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, HostedJournalConfig, DeviceAssertionConfig, InputPreparationDaemonConfig, AgentEgressConfig, AgentContentReadConfig, AgentContentReadSurfaceConfig, AgentReliableEgressInput, } from './daemon/create-daemon';
 export { AgentMemoryError, AgentMemoryRevisionConflictError, isAgentMemorySecureFilesystemAvailable, AGENT_MEMORY_AUDIT_FILENAME, AGENT_MEMORY_OUTBOX_FILENAME, } from './daemon/agent-memory';
 export type { AgentMemoryFilesystemHelperConfig } from './daemon/agent-memory-filesystem';
 export type { AgentMemoryFile, AgentMemorySnapshot, AgentMemoryRedactor, AgentMemoryProjectionGrant, AgentMemoryProjectionPort, AgentMemoryHostedProjection, } from './daemon/agent-memory';
@@ -8443,6 +9891,27 @@ export type { RequestDeviceAssertionOptions, RequestDeviceAssertionResult, Reque
 export { parseTaskAssertionIssueParams, TASK_ASSERTION_ISSUE_ERROR_CODES, TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES, } from './daemon/control-protocol';
 export type { TaskAssertionIssueParams, TaskAssertionIssueResult, TaskAssertionIssueErrorCode, } from './daemon/control-protocol';
 export type { OperationalHealthSnapshot, OperationalHealthState } from './daemon/operational-health';
+/**
+ * B-P2 local primitive (`docs/researches/runtime-input-preparation-contract.md`
+ * §10.3 / §10.4): the task-free `input_preparation.*` control surface's public
+ * contract.
+ *
+ * What becomes public here is the CONTRACT, not a way to reach the daemon:
+ * the wire shapes a host must produce, the two seams it must supply (its local
+ * device/Agent/Profile authority and its separately authorized counter), and
+ * the required limits policy plus its validator. `connectControlClient` stays
+ * unexported for the same reason it always has — see the assertion-client note
+ * above.
+ *
+ * The three strict param parsers are exported alongside them because they ARE
+ * the definition of what each method accepts. A host building its own caller
+ * needs the same gate the daemon enforces; a hand-rolled copy is how the two
+ * drift apart.
+ */
+export { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_ERROR_CODES, INPUT_PREPARATION_RECEIPT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INPUT_PREPARATION_REQUEST_FORMAT, INPUT_PREPARATION_RETIRED_PROMPT_KEYS, INPUT_PREPARATION_RETIRED_REQUEST_KEYS, INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS, INPUT_PREPARATION_VERSION, InputPreparationPolicyError, validateInputPreparationLimits, } from './input-preparation';
+export type { InputPreparationArtifactSummaryV1, InputPreparationAuthorityGrantV1, InputPreparationCompiledPromptSnapshotV1, InputPreparationCompiledSnapshotV1, InputPreparationAuthorityOutcomeV1, InputPreparationAuthorityResolver, InputPreparationBindingV1, InputPreparationCancelParamsV1, InputPreparationContextFileV1, InputPreparationCounterAdapter, InputPreparationCounterAuthorityV1, InputPreparationCounterEvidenceV1, InputPreparationCounterRequestV1, InputPreparationCounterResultV1, InputPreparationCounterTargetV1, InputPreparationCoverageProofV1, InputPreparationDenialReasonV1, InputPreparationDocsPathsV1, InputPreparationErrorCodeV1, InputPreparationLimitsPolicyV1, InputPreparationLookupParamsV1, InputPreparationModelCostV1, InputPreparationModelV1, InputPreparationOptionsV1, InputPreparationPinV1, InputPreparationPromptSnapshotV1, InputPreparationReadinessReasonV1, InputPreparationReceiptV1, InputPreparationRequestV1, InputPreparationRuntimeIdentityV1, InputPreparationScopeClaimV1, InputPreparationSelectionV1, InputPreparationSnapshotV1, InputPreparationSourceV1, InputPreparationStateV1, InputPreparationToolV1, InputPreparationUserMessageV1, } from './input-preparation';
+export { INPUT_PREPARATION_CANCEL_METHOD, INPUT_PREPARATION_IDENTIFIER_MAX_BYTES, INPUT_PREPARATION_LOOKUP_METHOD, INPUT_PREPARATION_PREPARE_METHOD, parseInputPreparationCancelParams, parseInputPreparationLookupParams, parseInputPreparationRequestParams, } from './daemon/control-protocol';
+export type { InputPreparationResult } from './daemon/control-protocol';
 export { journalHash, JournalUnavailableError, JournalCorruptError, JournalRecordTooLargeError, JournalUnknownTaskError, JournalClosedError, } from './daemon/journal/journal';
 export type { LocalTaskJournal, JournalIdentity, JournalReceipt, ReceivedEnvelopeRecord, AdmissionRecord, LocalTransitionRecord, LocalTerminalRecord, TerminalTruthState, RecoverableTask, RecoveryOutcome, RecoveryDisposition, LocalStorageUsage, StorageCategory, CategoryUsage, CleanableCategory, CleanupCandidate, CleanupResult, CompactOptions, CompactResult, } from './daemon/journal/journal';
 export { SqliteLocalTaskJournal, JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from './daemon/journal/sqlite-journal';
@@ -8487,6 +9956,731 @@ export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairErr
 export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, } from './diagnostics/device-doctor';
 export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions';
 export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, ExportDeviceSupportBundleInput, DeviceSupportBundleExportResult, ArchiveAgentTerminalMessagesInput, AgentTerminalMessagesArchiveResult, DeviceOperatorErrorCode } from './diagnostics/operator-actions';
+// ==== @byok-sdk/client dist/input-preparation.d.ts ====
+/**
+ * B-P2 local primitive — public types for the task-free runtime input
+ * preparation surface (`docs/researches/runtime-input-preparation-contract.md`
+ * §10.3).
+ *
+ * This module is the ONE authority for the wire/receipt shapes the daemon's
+ * `input_preparation.*` control methods speak. It deliberately imports nothing
+ * from the native coding-agent package: the native envelope
+ * (`PreparedSessionInputV1`) is an implementation fact owned by
+ * `adapters/pi/input-preparation.ts`, and the only native-derived values that
+ * ever cross this boundary are opaque digests, byte counts and the coverage
+ * label. A host integrating against this surface therefore never has to
+ * resolve, or pin, the native runtime's own type closure.
+ *
+ * What this surface is NOT, and must never quietly become:
+ *
+ * - It creates no task, claim, Execution, nonce or tool grant. Preparation is
+ *   evidence about an input, not permission to run one (§10.3.1).
+ * - A receipt reference and a digest prove CONTENT IDENTITY only. Neither is a
+ *   bearer token: lookup and cancel are authorized by the same authenticated
+ *   local scope that created the record, re-resolved on every call (§10.3.4).
+ * - Pinning an artifact to a committed Execution is G3b. {@link
+ *   InputPreparationPinV1} exists here only so that later binding is a field
+ *   that was always reserved rather than a schema break; nothing in this
+ *   package ever writes it.
+ * - Coverage is whatever the native compiler proved, and it currently proves
+ *   `"unknown"`. A receipt therefore cannot be `ready` today, and a fixture
+ *   counter can never make one ready (§10.2's G4 stays closed).
+ */
+import type { PermissionMode } from '@byok-sdk/protocol';
+import type { McpLaunchAttestation } from './daemon/trusted-launch-cwd';
+import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
+/** Wire format tag for a preparation request. One strict shape, one version. */
+export declare const INPUT_PREPARATION_REQUEST_FORMAT = "byok.input-preparation.request";
+/** Wire format tag for a preparation receipt. */
+export declare const INPUT_PREPARATION_RECEIPT_FORMAT = "byok.input-preparation.receipt";
+/** Durable record format tag — see `daemon/input-preparation-store.ts`. */
+export declare const INPUT_PREPARATION_RECORD_FORMAT = "byok.input-preparation.record";
+/** Durable artifact format tag — see `daemon/input-preparation-store.ts`. */
+export declare const INPUT_PREPARATION_ARTIFACT_FORMAT = "byok.input-preparation.artifact";
+/**
+ * The single supported version of every shape in this module.
+ *
+ * Bumped to 2 by the phase-2 executor-identity slice, which REMOVED
+ * caller-supplied `toolExecutors` and `snapshot.tools` from the request and
+ * added `requiredToolsets` + `permissionMode`. The request, the receipt, the
+ * durable record and the retained artifact all carry this number, so a record
+ * written under version 1 is refused on replay rather than read through a
+ * compatibility branch: its artifact was frozen over a tool manifest a caller
+ * stated, and this version's rule is that no caller may state one.
+ */
+export declare const INPUT_PREPARATION_VERSION = 2;
+/**
+ * Key-sorted JSON, so two structurally equal values always produce the same
+ * bytes and therefore the same digest. Field ORDER must never be able to turn
+ * one request into two idempotency keys, or one observed tool surface into two
+ * observation digests.
+ *
+ * It lives beside the shapes it serializes rather than beside either of its
+ * callers: `daemon/input-preparation-service.ts` digests the request with it
+ * and `daemon/prepared-tool-surface.ts` digests the observed surface with it,
+ * and two copies of a canonicalization are two canonicalizations.
+ */
+export declare function canonicalInputPreparationJson(value: unknown): string;
+/** sha256 hex of one canonicalized value. The one digest spelling this surface uses. */
+export declare function inputPreparationDigest(value: unknown): string;
+/**
+ * The scope values a caller CLAIMS. Every one of them is validated against the
+ * configured {@link InputPreparationAuthorityResolver}'s trusted local records
+ * before anything is compiled, stored or counted — HMAC possession proves only
+ * that the caller is a local device operator, never that it owns this device
+ * row, this Agent or this profile (§10.1's P1).
+ */
+export interface InputPreparationScopeClaimV1 {
+    readonly deviceId: string;
+    readonly agentRef: string;
+    readonly profileId: string;
+    readonly profileRevision: string;
+}
+/**
+ * The canonical source snapshot this input was assembled from. The SDK does not
+ * interpret either value: they are Host authority, carried so the receipt binds
+ * the exact revision/digest a later consumer must re-present.
+ */
+export interface InputPreparationSourceV1 {
+    readonly revision: string;
+    readonly digest: string;
+}
+/** The exact model identity the request is compiled for. */
+export interface InputPreparationModelV1 {
+    readonly id: string;
+    readonly name: string;
+    /** The only API this first support set compiles. Anything else rejects. */
+    readonly api: 'openai-completions';
+    readonly provider: string;
+    readonly baseUrl: string;
+    readonly reasoning: boolean;
+    readonly input: readonly ('text' | 'image')[];
+    readonly cost: InputPreparationModelCostV1;
+    readonly contextWindow: number;
+    readonly maxTokens: number;
+}
+export interface InputPreparationModelCostV1 {
+    readonly input: number;
+    readonly output: number;
+    readonly cacheRead: number;
+    readonly cacheWrite: number;
+}
+/** Body-affecting options, frozen into D. Transport options are not on this wire. */
+export interface InputPreparationOptionsV1 {
+    readonly cacheRetention: 'none' | 'short' | 'long';
+    readonly maxTokens: number;
+    readonly temperature?: number;
+    /** Only the three plain string forms; an object tool choice is unsupported. */
+    readonly toolChoice?: 'auto' | 'none' | 'required';
+    readonly reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+}
+export interface InputPreparationSelectionV1 {
+    readonly model: InputPreparationModelV1;
+    readonly options: InputPreparationOptionsV1;
+}
+/** One authorized context file, exactly as the caller resolved it. Never read from disk here. */
+export interface InputPreparationContextFileV1 {
+    readonly path: string;
+    readonly content: string;
+}
+export interface InputPreparationDocsPathsV1 {
+    readonly readmePath: string;
+    readonly docsPath: string;
+    readonly examplesPath: string;
+}
+/**
+ * Explicit, already-authorized inputs for the native system prompt renderer.
+ *
+ * `selectedTools` is deliberately NOT here. The native contract requires it to
+ * equal the model-visible manifest exactly, and this version moved that
+ * manifest onto the device — so a caller stating the list would be stating the
+ * manifest through the prompt. The daemon fills it from the assembled surface
+ * (see {@link InputPreparationCompiledPromptSnapshotV1}).
+ *
+ * `toolSnippets` stays caller-authored because it is prompt TEXT, but its keys
+ * must name tools the assembled manifest actually contains; the native
+ * compiler refuses a snippet for a tool that is not in the manifest, and
+ * nothing here papers over that.
+ */
+export interface InputPreparationPromptSnapshotV1 {
+    readonly customPrompt?: string;
+    readonly appendSystemPrompt?: string;
+    readonly cwd: string;
+    readonly toolSnippets: Readonly<Record<string, string>>;
+    readonly promptGuidelines: readonly string[];
+    readonly contextFiles: readonly InputPreparationContextFileV1[];
+    /** Preformatted by the caller; empty means no skills. */
+    readonly formattedSkills: string;
+    readonly docsPaths: InputPreparationDocsPathsV1;
+}
+/** The caller's prompt snapshot plus the tool-name list the daemon derived. */
+export interface InputPreparationCompiledPromptSnapshotV1 extends InputPreparationPromptSnapshotV1 {
+    /** Exactly the assembled manifest's tool names, in its canonical order. */
+    readonly selectedTools: readonly string[];
+}
+/**
+ * One model-visible user message.
+ *
+ * The first support set is text-only user history plus the explicit current
+ * user message. Multimodal content, assistant/tool-result history and custom
+ * message kinds are NOT accepted and are NOT inferred: they reject as
+ * `unsupported_input` (§10.3.2 — unknown input rejects rather than filling
+ * gaps). Extending the set is a registration, not a parser relaxation.
+ */
+export interface InputPreparationUserMessageV1 {
+    readonly role: 'user';
+    readonly content: string;
+    readonly timestamp: number;
+}
+/**
+ * One complete model-visible tool schema. `parameters` is the full JSON schema
+ * the model sees; a partial or elided schema is not accepted, because the whole
+ * point of this surface is counting what the provider will actually be sent.
+ */
+export interface InputPreparationToolV1 {
+    readonly name: string;
+    readonly description: string;
+    readonly parameters: Readonly<Record<string, unknown>>;
+}
+/**
+ * The authorized input snapshot a CALLER states: prompt text and user history,
+ * and nothing else.
+ *
+ * `tools` is deliberately absent. The model-visible tool schemas are a LOCAL
+ * observation — only this device can say which MCP toolset servers it has and
+ * what they publish — so they are assembled by
+ * `daemon/prepared-tool-surface.ts` from the request's `requiredToolsets` and
+ * joined onto this snapshot inside the daemon. A caller that could state a
+ * tool schema could have tokens counted for a tool no server offers.
+ */
+export interface InputPreparationSnapshotV1 {
+    readonly prompt: InputPreparationPromptSnapshotV1;
+    readonly messages: readonly InputPreparationUserMessageV1[];
+}
+/**
+ * What the native compiler is actually handed: the caller's snapshot plus the
+ * daemon-derived tool manifest. Produced only inside the daemon, never parsed
+ * off a wire.
+ */
+export interface InputPreparationCompiledSnapshotV1 extends Omit<InputPreparationSnapshotV1, 'prompt'> {
+    readonly prompt: InputPreparationCompiledPromptSnapshotV1;
+    readonly tools: readonly InputPreparationToolV1[];
+}
+/**
+ * One preparation request (§10.3.1).
+ *
+ * `requestId` is the caller's own preparation identity and is deliberately NOT
+ * a task id: it namespaces idempotency together with the AUTHENTICATED scope
+ * and Agent, so a caller cannot reach another scope's record by guessing one.
+ *
+ * `requiredToolsets` is the ONLY thing a caller says about tools: which of
+ * this device's configured MCP toolsets the preparation needs, by id. The
+ * daemon resolves them against its own registry, observes the servers itself,
+ * and derives both the model-visible schemas and the executor fingerprints
+ * from what those servers reported. There is no `toolExecutors` field and no
+ * `snapshot.tools` field, and their absence is the contract: a caller that
+ * could state either could have tokens counted against a manifest this device
+ * never observed.
+ *
+ * `permissionMode` is DECLARED, never inferred. A preparation counts one
+ * concrete manifest, and the manifest is the policy-filtered set for exactly
+ * one mode (`mcp/projection.ts`'s `filterMcpObservationForPolicy`). The daemon
+ * validates the value and pins it onto the binding; it grants nothing.
+ *
+ * There is no `runtimeIdentity`, `compilerVersion` or `policyIdentity` field:
+ * those are derived from the verified installed artifact closure and the
+ * daemon's own configured policy, never from caller text.
+ */
+export interface InputPreparationRequestV1 {
+    readonly format: typeof INPUT_PREPARATION_REQUEST_FORMAT;
+    readonly version: typeof INPUT_PREPARATION_VERSION;
+    readonly requestId: string;
+    /** Must equal the daemon's configured {@link InputPreparationLimitsPolicyV1.revision} exactly. */
+    readonly policyRevision: string;
+    readonly scope: InputPreparationScopeClaimV1;
+    readonly source: InputPreparationSourceV1;
+    readonly selection: InputPreparationSelectionV1;
+    /** The mode the counted manifest is filtered for. */
+    readonly permissionMode: PermissionMode;
+    /** Configured MCP toolset ids. The locator is the toolset id; MCP only. */
+    readonly requiredToolsets: readonly string[];
+    readonly snapshot: InputPreparationSnapshotV1;
+}
+/**
+ * The request keys this contract RETIRED in version 2, named so a daemon can
+ * refuse them by name instead of answering a generic shape error.
+ *
+ * A caller still sending either is not sending a slightly wrong request — it
+ * is asserting authority over the tool manifest that this version moved to the
+ * device, so it is refused as `unsupported_input` and told which key.
+ */
+export declare const INPUT_PREPARATION_RETIRED_REQUEST_KEYS: readonly ['toolExecutors'];
+/** The snapshot keys retired in version 2. Same rule, one level down. */
+export declare const INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS: readonly ['tools'];
+/**
+ * The prompt-snapshot keys retired in version 2. `selectedTools` must equal the
+ * model-visible manifest exactly by native contract, so stating it is stating
+ * the manifest through the prompt.
+ */
+export declare const INPUT_PREPARATION_RETIRED_PROMPT_KEYS: readonly ['selectedTools'];
+/** Params for `input_preparation.lookup` and `input_preparation.cancel`. */
+export interface InputPreparationLookupParamsV1 {
+    readonly requestId: string;
+    readonly scope: InputPreparationScopeClaimV1;
+}
+/**
+ * Cancel takes no free-text reason on purpose: the durable record answers with
+ * a stable code, and an accepted-but-unused field is how a caller comes to
+ * believe it can annotate authority-owned state.
+ */
+export interface InputPreparationCancelParamsV1 {
+    readonly requestId: string;
+    readonly scope: InputPreparationScopeClaimV1;
+}
+/**
+ * Required byte / call / deadline / retention policy (§10.3.6 and the
+ * Owner-approved limits boundary of 2026-09-14).
+ *
+ * Every field is REQUIRED and this package supplies no default for any of them.
+ * No numeric value here is an S0 value; a fixture number in a test is a fixture
+ * number. A daemon with no `inputPreparation` section keeps the whole feature
+ * disabled and answers `input_preparation_unconfigured`; a daemon configured
+ * with an INVALID policy fails at construction rather than starting with an
+ * allowance nobody validated.
+ */
+export interface InputPreparationLimitsPolicyV1 {
+    /** Opaque operator-assigned revision. A request must present this exact string. */
+    readonly revision: string;
+    /** Maximum normalized request bytes accepted from one caller. */
+    readonly maxRequestBytes: number;
+    /** Maximum bytes of one retained artifact (D plus P(D) plus envelope). */
+    readonly maxArtifactBytes: number;
+    /** Maximum retained artifact bytes summed across one authenticated scope. */
+    readonly maxScopeAggregateBytes: number;
+    /** Maximum preparations in flight across the daemon at one instant. */
+    readonly maxInFlight: number;
+    /** Maximum counter invocations one authenticated scope may consume, ever, within retention. */
+    readonly maxCounterCallsPerScope: number;
+    /** Bound on one counter invocation. */
+    readonly counterTimeoutMs: number;
+    /** Bound on one whole preparation, counter included. */
+    readonly preparationDeadlineMs: number;
+    /** How long a prepared artifact stays readable. */
+    readonly retentionMs: number;
+    /** How long the record tombstone outlives its artifact, so an expired key never reads as fresh. */
+    readonly retryHorizonMs: number;
+}
+/** Thrown by {@link validateInputPreparationLimits} — a configuration fault, never a request fault. */
+export declare class InputPreparationPolicyError extends Error {
+    constructor(message: string);
+}
+/**
+ * Validate a limits policy and return a frozen private copy.
+ *
+ * Fails closed on anything that is not a finite positive safe integer, on a
+ * missing or empty revision, on an unknown field, and on the three relations
+ * that would otherwise let one bound silently defeat another:
+ *
+ * - `counterTimeoutMs <= preparationDeadlineMs` — a counter bound larger than
+ *   the whole preparation's bound is not a bound.
+ * - `preparationDeadlineMs <= retentionMs` — an artifact that expires before
+ *   its own preparation can finish is a guaranteed false negative.
+ * - `maxArtifactBytes <= maxScopeAggregateBytes` — a per-artifact allowance
+ *   above the per-scope total makes the aggregate unreachable.
+ */
+export declare function validateInputPreparationLimits(value: unknown): InputPreparationLimitsPolicyV1;
+/** Why a resolver refused. Never echoed back with the trusted values it compared against. */
+export type InputPreparationDenialReasonV1 = 'unknown_device' | 'unknown_agent' | 'unknown_profile' | 'profile_revision_drift' | 'disclosure_denied';
+/** The trusted local record a resolver answers with. */
+export interface InputPreparationAuthorityGrantV1 {
+    /**
+     * Stable identifier for the authenticated local scope this grant belongs to.
+     * It is the first component of the durable idempotency namespace, so two
+     * different scopes can never collide on one `requestId`.
+     */
+    readonly scopeId: string;
+    readonly deviceId: string;
+    readonly agentRef: string;
+    readonly profileId: string;
+    readonly profileRevision: string;
+}
+export type InputPreparationAuthorityOutcomeV1 = {
+    readonly authorized: true;
+    readonly grant: InputPreparationAuthorityGrantV1;
+} | {
+    readonly authorized: false;
+    readonly reason: InputPreparationDenialReasonV1;
+};
+/**
+ * The configured local authority. It owns the device/Agent/Profile records this
+ * daemon trusts and decides whether the claimed scope may be disclosed at all.
+ *
+ * A REJECTED promise means the authority is unavailable, which is a refusal —
+ * never a reason to proceed on the caller's claim (§10.3.1). The service also
+ * re-checks that the returned grant actually matches the claim, so a resolver
+ * that answers with a different device/Agent/profile than the one asked about
+ * cannot launder an identity through this seam.
+ */
+export interface InputPreparationAuthorityResolver {
+    resolveScope(claim: InputPreparationScopeClaimV1): Promise<InputPreparationAuthorityOutcomeV1>;
+}
+/** The exact endpoint and model one counter call is bound to. */
+export interface InputPreparationCounterTargetV1 {
+    readonly endpoint: string;
+    readonly modelId: string;
+}
+/**
+ * Everything a counter adapter is given, and nothing else: the bound counted
+ * projection P(D), the exact target, and an explicit call policy. No D, no
+ * credentials, no scope identity, no request body, no filesystem handle.
+ */
+export interface InputPreparationCounterRequestV1 {
+    readonly counterProjection: string;
+    readonly target: InputPreparationCounterTargetV1;
+    readonly timeoutMs: number;
+    readonly signal: AbortSignal;
+}
+/**
+ * Whether the counted projection covered the whole request.
+ *
+ * `covered: false` with a `reason` is a legitimate, useful answer — it is what
+ * keeps a receipt honestly not-ready instead of admitting an Execution on a
+ * partial count.
+ */
+export interface InputPreparationCoverageProofV1 {
+    readonly covered: boolean;
+    readonly reason?: string;
+}
+/**
+ * The authority behind a count.
+ *
+ * `test_fixture` is a first-class value, not a debug flag: a fixture result can
+ * never produce a `ready` receipt, which is what stops an offline suite from
+ * ever looking like production accounting evidence (§10.3.3).
+ */
+export type InputPreparationCounterAuthorityV1 = 'provider' | 'test_fixture';
+export interface InputPreparationCounterResultV1 {
+    /** Counting method identity, e.g. the provider tokenizer route. */
+    readonly method: string;
+    readonly methodVersion: string;
+    readonly authority: InputPreparationCounterAuthorityV1;
+    /** `count` is authoritative; `bound` is a proved upper bound. Nothing else is accepted. */
+    readonly kind: 'count' | 'bound';
+    readonly value: number;
+    readonly coverage: InputPreparationCoverageProofV1;
+}
+/**
+ * The separately authorized counter. Exactly one method, and it performs no
+ * live call in B-P2 tests.
+ *
+ * There is deliberately no fallback implementation anywhere in this package: no
+ * `chars/4`, no heuristic padding, no reuse of a count taken from a different
+ * projection. A daemon with no counter has no `inputPreparation` section and
+ * the feature is off.
+ */
+export interface InputPreparationCounterAdapter {
+    count(request: InputPreparationCounterRequestV1): Promise<InputPreparationCounterResultV1>;
+}
+/** Persisted counter evidence, exactly as the adapter reported it. */
+export interface InputPreparationCounterEvidenceV1 extends InputPreparationCounterResultV1 {
+    readonly target: InputPreparationCounterTargetV1;
+    readonly calledAt: string;
+    readonly completedAt: string;
+}
+/**
+ * The runtime and compiler identity behind one artifact, derived from the
+ * VERIFIED installed package closure — the manifest name/version actually on
+ * disk plus the fork provenance it records — and never from a caller-supplied
+ * label (§10.3.1).
+ */
+export interface InputPreparationRuntimeIdentityV1 {
+    readonly packageName: string;
+    readonly packageVersion: string;
+    readonly upstreamBase: string;
+    readonly upstreamCommit: string;
+    readonly forkBuild: number;
+    /** The native envelope format tag this compiler produced. */
+    readonly envelopeFormat: string;
+    /** The native provider-request format tag this compiler produced. */
+    readonly requestFormat: string;
+    readonly compilerVersion: number;
+}
+/**
+ * The ONE spelling of a runtime identity string.
+ *
+ * It binds every artifact through `CompilePreparedInputRequest.binding` and it
+ * binds every tool-executor fingerprint. Those two must agree exactly, so the
+ * formula lives here rather than being written out at each site — beside the
+ * identity shape itself, so the prepared LAUNCH entry can re-derive the same
+ * string without importing the preparation service.
+ */
+export declare function inputPreparationRuntimeIdentityString(runtime: InputPreparationRuntimeIdentityV1): string;
+/**
+ * Everything a receipt discloses about the stored artifact: identities, sizes
+ * and coverage. Never D itself, never P(D), never the snapshot — a scoped
+ * reference plus a digest is content identity, not a disclosure channel.
+ */
+export interface InputPreparationArtifactSummaryV1 {
+    /** Digest of the low-level provider request D. */
+    readonly requestDigest: string;
+    /** Digest of the whole native envelope (snapshot, context, request, manifest). */
+    readonly envelopeDigest: string;
+    readonly toolManifestDigest: string;
+    readonly requestBytes: number;
+    readonly projectionBytes: number;
+    /** Whatever the native compiler proved. It currently proves `"unknown"`. */
+    readonly coverage: string;
+    /**
+     * Digest of everything the device OBSERVED for this preparation — the
+     * projected tools, their executor fingerprints, the launch attestation and
+     * the implementation identities. A later consumer re-observes and compares
+     * this one value rather than re-deriving a manifest.
+     */
+    readonly observationDigest: string;
+    /**
+     * Digest of the subset of those facts that can be re-derived WITHOUT
+     * spawning a server: the launch attestation, the toolset definition
+     * revisions, the configured argv and the implementation identities. This is
+     * what a replay of an already-recorded `requestId` compares against, because
+     * re-probing to detect drift would create the second executor fact the
+     * idempotency key exists to prevent.
+     */
+    readonly toolBindingDigest: string;
+    /**
+     * Per model-visible tool name: `attested`, or `unavailable:<reason>`. The
+     * evidence behind `executor_identity_unproven`, so a reader is not asked to
+     * take that readiness reason on trust.
+     */
+    readonly toolImplementationKinds: Readonly<Record<string, string>>;
+}
+/** The immutable binding a receipt carries and a later consumer must re-present. */
+export interface InputPreparationBindingV1 {
+    readonly scopeId: string;
+    readonly deviceId: string;
+    readonly agentRef: string;
+    readonly profileId: string;
+    readonly profileRevision: string;
+    readonly source: InputPreparationSourceV1;
+    readonly target: InputPreparationCounterTargetV1;
+    readonly policyRevision: string;
+    /**
+     * The mode the counted manifest was filtered for, recorded so a consumer can
+     * COMPARE it without re-deriving the request digest: an Execution offered
+     * under a different mode registers a different tool set than the one these
+     * tokens were counted for.
+     */
+    readonly permissionMode: PermissionMode;
+    readonly runtime: InputPreparationRuntimeIdentityV1;
+    /** Digest over the whole normalized request, scope and runtime identity. */
+    readonly requestDigest: string;
+}
+/**
+ * The committed Execution one counted preparation is bound to (§10.3.7).
+ *
+ * Written exactly once per record, by `InputPreparationStore.pin`, through a
+ * compare-and-set inside the store's own serialized closure. It is the record's
+ * single-consumer proof: a preparation counts ONE request, so a second runner
+ * that reaches the same reference finds the pin occupied and declines with zero
+ * claim and zero dispatch.
+ *
+ * A control client cannot set it. The only writer is the daemon's offer
+ * admission, after it has sealed a manifest it already proved equal to this
+ * record's binding and artifact summary — which is why `manifestDigest` is
+ * here: the pin names the exact sealed Execution that consumed the record, so a
+ * later reader does not have to take "some task claimed it" on trust.
+ *
+ * `sealedAt` is the moment the manifest was sealed, not the moment the append
+ * landed: the seal is the fact being recorded.
+ */
+export interface InputPreparationPinV1 {
+    /** The protocol task id of the Execution that consumed this preparation. */
+    readonly taskId: string;
+    /** `inputPreparationDigest` over the sealed `RuntimeOperationManifest`. */
+    readonly manifestDigest: string;
+    readonly sealedAt: string;
+}
+/**
+ * Durable lifecycle state of one preparation record.
+ *
+ * - `reserved` — reserved durably; nothing compiled or counted yet.
+ * - `counting` — artifact persisted, and a counter call was durably reserved
+ *   and dispatched.
+ * - `counted` — the counter answered; the receipt carries its evidence.
+ * - `cancelled` — explicitly cancelled, or its deadline elapsed, with the call
+ *   provably never placed. Terminal.
+ * - `failed` — compilation, a policy bound or a durable write refused it.
+ *   Terminal.
+ * - `counter_interrupted` — the counter call started and its outcome is
+ *   unknown (timeout, abort, or a thrown adapter). Terminal and OBSERVABLE: it
+ *   is never automatically retried under the same request, because a repeat
+ *   could be a second billed call against an outcome that may already have
+ *   happened (§10.3.5).
+ *
+ * The last four are terminal and never transition again.
+ */
+export type InputPreparationStateV1 = 'reserved' | 'counting' | 'counted' | 'cancelled' | 'failed' | 'counter_interrupted';
+/** Why a receipt is not ready. An empty list is the only thing that makes `ready` true. */
+export type InputPreparationReadinessReasonV1 = 'not_counted' | 'counter_interrupted' | 'cancelled' | 'failed' | 'artifact_expired' | 'counter_authority_not_production' | 'counter_coverage_incomplete' | 'compiler_coverage_unknown' | 'executor_identity_unproven';
+/**
+ * The scoped reference plus readiness evidence one preparation answers with.
+ *
+ * `reference` identifies the record inside the authenticated scope that created
+ * it. It is not a capability: `lookup`/`cancel` re-resolve authority on every
+ * call and derive the record key from the TRUSTED grant, so presenting another
+ * scope's reference finds nothing.
+ */
+export interface InputPreparationReceiptV1 {
+    readonly format: typeof INPUT_PREPARATION_RECEIPT_FORMAT;
+    readonly version: typeof INPUT_PREPARATION_VERSION;
+    readonly reference: string;
+    readonly requestId: string;
+    readonly state: InputPreparationStateV1;
+    readonly binding: InputPreparationBindingV1;
+    readonly artifact?: InputPreparationArtifactSummaryV1;
+    readonly counter?: InputPreparationCounterEvidenceV1;
+    /** True only when {@link readinessReasons} is empty. */
+    readonly ready: boolean;
+    readonly readinessReasons: readonly InputPreparationReadinessReasonV1[];
+    /** Present on `failed`/`cancelled`/`counter_interrupted`; a stable code, not provider text. */
+    readonly detail?: string;
+    readonly createdAt: string;
+    readonly updatedAt: string;
+    readonly artifactExpiresAt: string;
+    readonly recordExpiresAt: string;
+    /** Present once a committed Execution consumed this record. See {@link InputPreparationPinV1}. */
+    readonly pin?: InputPreparationPinV1;
+}
+/**
+ * Every typed rejection the three control methods can answer with. Each is a
+ * distinct fact; none of them ever returns a partial or synthesized result.
+ *
+ * - `input_preparation_unconfigured` — this daemon has no `inputPreparation`
+ *   section, so the whole surface is off. Checked first, before params are
+ *   parsed, so a disabled daemon reveals nothing about request shapes.
+ * - `bad_request` — the params are not the one strict shape (unknown field,
+ *   wrong type, wrong version/format tag).
+ * - `authority_unavailable` — the configured resolver could not answer. A
+ *   refusal, never a reason to trust the claim.
+ * - `scope_denied` — the resolver refused the claim, or answered with a grant
+ *   that does not match what was asked about.
+ * - `policy_revision_mismatch` — the request's `policyRevision` is not this
+ *   daemon's configured revision.
+ * - `runtime_identity_unavailable` — the installed native closure could not be
+ *   verified, so no artifact can carry a runtime identity.
+ * - `unsupported_input` — the input is outside the declared first support set,
+ *   or the native compiler refused it. Nothing is filled in.
+ * - `limit_exceeded` — a configured byte / in-flight / counter-call bound.
+ * - `request_conflict` — the same `(scope, Agent, requestId)` key already exists
+ *   bound to a DIFFERENT normalized request digest.
+ * - `not_found` — no record for this key in this scope.
+ * - `counter_unavailable` — the counter adapter refused before doing work.
+ * - `counter_interrupted` — the counter's outcome is unknown; the record says so
+ *   and is not retried.
+ * - `durable_write_failed` — a durable write was uncertain. The record is
+ *   quarantined and revalidated before anything else is written.
+ * - `cancelled` — the record was cancelled, or its deadline elapsed.
+ *
+ * These are the codes this surface OWNS, not every code its three verbs can
+ * answer with. The control frame layer refuses first where it must, and the
+ * shared `shutting_down` (`daemon/control-protocol.ts`) is the one that reaches
+ * a well-formed, authorized call: a daemon that has begun shutting down answers
+ * it before the service is consulted at all.
+ */
+export declare const INPUT_PREPARATION_ERROR_CODES: readonly ['input_preparation_unconfigured', 'bad_request', 'authority_unavailable', 'scope_denied', 'policy_revision_mismatch', 'runtime_identity_unavailable', 'unsupported_input', 'limit_exceeded', 'request_conflict', 'not_found', 'counter_unavailable', 'counter_interrupted', 'durable_write_failed', 'cancelled', 
+/**
+ * A required MCP toolset server could not be observed on this device. A
+ * partial tool set is not a smaller preparation, it is a different one.
+ */
+'toolsets_unobservable', 
+/**
+ * No non-writable launch directory (or no trusted launcher) could be proven
+ * for this preparation's servers, so nothing was spawned. The specific
+ * `TrustedLaunchCwdUnavailableReason` travels in the record's `detail`.
+ */
+'launch_boundary_unavailable', 
+/**
+ * A repeat of an already-recorded `requestId` arrived after the facts its
+ * executor fingerprints were frozen against changed. The recorded receipt is
+ * not re-derived and no server is re-probed.
+ */
+'observation_drift', 
+/**
+ * The declared `permissionMode` exceeds this device's configured ceiling.
+ * Never narrowed to an admissible mode: a preparation counts one concrete
+ * manifest, and quietly counting a smaller one answers a question nobody
+ * asked.
+ */
+'permission_mode_denied'];
+export type InputPreparationErrorCodeV1 = (typeof INPUT_PREPARATION_ERROR_CODES)[number];
+/**
+ * The two digests that bind one prepared tool surface, written ONCE here.
+ *
+ * `daemon/prepared-tool-surface.ts` computes them while it assembles a
+ * preparation, and `adapters/pi/prepared-tools.ts` recomputes them at launch
+ * to decide whether the device still matches the artifact it is about to send.
+ * Two copies of either formula would make "the launch matches the preparation"
+ * an agreement between two serializers rather than a property of one.
+ *
+ * They live beside {@link inputPreparationDigest} rather than in the daemon
+ * module, so the in-process prepared launch entry can reach them without
+ * pulling the registry, the probe and the policy resolver into a subprocess
+ * that uses none of them.
+ */
+/** One projected server, reduced to exactly what a binding digest commits to. */
+export interface PreparedToolBindingServerDigestInputV1 {
+    readonly serverName: string;
+    readonly toolsetId: string;
+    readonly command: string;
+    readonly args: readonly string[];
+    readonly implementation: ToolImplementationIdentityV1;
+}
+export interface PreparedToolBindingDigestInputV1 {
+    readonly launch: McpLaunchAttestation;
+    readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
+    /** Canonically ordered by server name; the canonical JSON preserves array order. */
+    readonly servers: readonly PreparedToolBindingServerDigestInputV1[];
+}
+/**
+ * The spawn-free half: the launch attestation, the definition revisions, the
+ * configured argv and the implementation identities.
+ */
+export declare function preparedToolBindingDigest(input: PreparedToolBindingDigestInputV1): string;
+/**
+ * The Pi-native half of a prepared Main tool set, bound to the ADMITTED policy
+ * that selected it — not merely to the mode.
+ *
+ * `allowTools`/`denyTools` are what actually decide which built-ins a task gets
+ * (`adapters/pi/permission-mapping.ts`), so a digest that bound only `mode`
+ * would validate a launch whose native half is a different set from the one
+ * that was counted.
+ *
+ * Absent while the native half is not countable: `daemon/prepared-tool-surface.ts`
+ * assembles a preparation with no native tools at all, so there is no selection
+ * to bind and the key is omitted rather than written as an empty one.
+ */
+export interface PreparedNativeToolSelectionV1 {
+    /** Model-visible native tool names, in registration order. Never empty. */
+    readonly names: readonly string[];
+    /** The admitted policy that produced `names`, whole. */
+    readonly policy: {
+        readonly mode: PermissionMode;
+        readonly allowTools?: readonly string[];
+        readonly denyTools?: readonly string[];
+    };
+}
+export interface PreparedToolSurfaceDigestInputV1 {
+    readonly launch: McpLaunchAttestation;
+    readonly permissionMode: PermissionMode;
+    readonly runtimeIdentity: string;
+    readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
+    readonly tools: readonly InputPreparationToolV1[];
+    readonly toolExecutors: Readonly<Record<string, string>>;
+    readonly implementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
+    /** Omitted while the prepared native half stays empty; see the type above. */
+    readonly nativeSelection?: PreparedNativeToolSelectionV1;
+}
+/** The whole observed surface: the schemas, the executors, the launch and the identities. */
+export declare function preparedToolSurfaceObservationDigest(input: PreparedToolSurfaceDigestInputV1): string;
 // ==== @byok-sdk/client dist/lifecycle/create-service-lifecycle.d.ts ====
 import { type LaunchdDeps } from './launchd';
 import { type SystemdDeps } from './systemd';
@@ -9060,6 +11254,350 @@ export declare const localStateRelocation: Readonly<{
     acquire: typeof acquire;
 }>;
 export {};
+// ==== @byok-sdk/client dist/mcp/client.d.ts ====
+import { type ToolImplementationFsProbe, type ToolImplementationIdentityV1 } from '../daemon/tool-implementation-identity';
+import { type CallToolResult, type Tool } from '@modelcontextprotocol/client';
+/**
+ * The SDK's single MCP client authority.
+ *
+ * Every place this package talks MCP goes through here: the daemon's
+ * admission observation (`../daemon/mcp-tools-probe.ts`), the Pi ordinary
+ * extension (`../adapters/pi/mcp-extension.ts`), and the frozen projection the
+ * prepared launch entry consumes. One authority is the point — a second
+ * hand-rolled JSON-RPC dialect (or a third-party adapter's) would be a second
+ * place for the framing, the bounds and the name rules to diverge.
+ *
+ * Protocol, framing and request correlation come from
+ * `@modelcontextprotocol/client@2.0.0`. Only the process layer is ours, and
+ * only because the bounds below cannot be expressed through the package's own
+ * `StdioClientTransport`: it exposes a per-frame `maxBufferSize` and the
+ * child's stderr, but no hook on stdout, so the total-stdout cap that
+ * `mcp-tools-probe.ts` has always enforced would be silently lost. Spawning
+ * ourselves also keeps the environment explicit — `StdioClientTransport`
+ * falls back to `getDefaultEnvironment()` when `env` is omitted, and this SDK
+ * never lets an MCP child inherit the daemon's ambient environment.
+ *
+ * stdio only. No HTTP, no SSE, no OAuth, no unix socket.
+ */
+/**
+ * Hard cap on the bytes one server may write to stdout across the whole
+ * lifetime of an OBSERVATION client, carried over verbatim from the probe this
+ * replaces. The observation reads a fixed handshake, so a server still
+ * streaming past this is either broken or hostile; either way it must not grow
+ * the daemon's heap while an offer waits on admission.
+ *
+ * Deliberately NOT a default: a long-lived call client legitimately receives
+ * more than this across many `tools/call` answers, and a lifetime cap there
+ * would fail a healthy session at an arbitrary point. Callers that have a
+ * bounded lifecycle opt in; everyone else is bounded per frame instead.
+ */
+export declare const MCP_OBSERVATION_MAX_STDOUT_BYTES = 1048576;
+/**
+ * Hard cap on a single JSON-RPC frame, always applied. A server that never
+ * emits a newline cannot make the client accumulate without limit: the read
+ * buffer rejects at this size and the connection fails closed.
+ */
+export declare const MCP_MAX_FRAME_BYTES = 1048576;
+/** Default ceiling for one request/response round trip. */
+export declare const MCP_DEFAULT_REQUEST_TIMEOUT_MS = 10000;
+/**
+ * A failure caused by the server's own ANSWER rather than by its environment:
+ * an ungrantable tool name, a malformed tool entry, an oversized stream, a
+ * refused handshake. Retrying cannot change it — the same configured command
+ * reports the same thing next time — so callers decline permanently rather
+ * than re-offering forever.
+ */
+export declare class McpAuthorityError extends Error {
+    constructor(message: string, options?: {
+        cause?: unknown;
+    });
+}
+/**
+ * A failure of the server's ENVIRONMENT rather than its answer: it could not
+ * be spawned, it exited before answering, the deadline expired, the pipe
+ * broke. These may well succeed later and stay retryable.
+ */
+export declare class McpTransportError extends Error {
+    constructor(message: string, options?: {
+        cause?: unknown;
+    });
+}
+/** The exact stdio server this client drives. Command and args only, like the registry. */
+export interface McpStdioServerSpec {
+    readonly command: string;
+    readonly args?: readonly string[];
+    /**
+     * Layered on top of `env` exactly as the runtime path layers it. Only
+     * SDK-reserved servers ever carry one; host toolset configuration rejects
+     * the field outright (`../daemon/toolset-registry.ts`).
+     */
+    readonly env?: Readonly<Record<string, string>>;
+}
+export interface McpStdioClientOptions {
+    /** Prefix on every error message, so a failure names the thing that failed. */
+    readonly label?: string;
+    /**
+     * The exact base environment the RUNTIME child of this task receives
+     * (`buildRuntimeEnv`) — never `process.env`. Required, deliberately: a
+     * caller that forgets it fails to compile rather than silently reinstating
+     * a blanket passthrough of the daemon's own credentials.
+     */
+    readonly env: Readonly<Record<string, string>>;
+    /** Working directory for the child — the same one the runtime CLI is spawned in. */
+    readonly cwd?: string;
+    /** Per-request deadline. */
+    readonly timeoutMs?: number;
+    /** Opt-in lifetime stdout cap; see {@link MCP_OBSERVATION_MAX_STDOUT_BYTES}. */
+    readonly maxStdoutBytes?: number;
+    /**
+     * What this SDK has established about the implementation behind the command
+     * below (`../daemon/tool-implementation-identity.ts`).
+     *
+     * Every spawn of an ATTESTED server re-measures it first — see
+     * {@link McpStdioClient.connect}. This is the one choke point both spawn
+     * points share: the daemon's admission probe and the Pi extension's pool
+     * both build their child through this class, so neither can start an
+     * attested server that no longer measures the way it was attested.
+     *
+     * Absent, or `unavailable`, means no claim was made about this server and
+     * there is nothing to re-measure. It never means "assume it is fine": the
+     * receipt that carried such an identity already says the implementation is
+     * unproven.
+     */
+    readonly implementation?: ToolImplementationIdentityV1;
+    /** Test seam, forwarded verbatim; see {@link ToolImplementationFsProbe}. */
+    readonly implementationFsProbe?: ToolImplementationFsProbe;
+}
+/**
+ * One connected stdio MCP server.
+ *
+ * The lifecycle is explicit and total: `connect()` starts the child and
+ * completes `initialize`, `close()` always ends the child. There is no lazy
+ * reconnect and no keep-alive hook — a caller that needs the server holds the
+ * client, and a caller that is finished closes it.
+ */
+export declare class McpStdioClient {
+    private readonly server;
+    private readonly options;
+    private readonly client;
+    private readonly transport;
+    private readonly label;
+    private readonly timeoutMs;
+    private connected;
+    constructor(server: McpStdioServerSpec, options: McpStdioClientOptions);
+    /**
+     * Start the child and complete `initialize`.
+     *
+     * An attested implementation is re-measured BEFORE the spawn, every time:
+     * the artifact, the interpreter of an `interpreter+bundle`, and the
+     * environment this child is about to be handed. Resolve and launch are two
+     * different moments, and an identity established at the first one asserts
+     * nothing about the second — so the check runs here rather than being cached
+     * with the identity.
+     *
+     * A failure is a refusal, not a downgrade: the connection is never opened
+     * with the identity quietly demoted to `unavailable`, because a server that
+     * was attested and no longer measures the same is a server that changed
+     * under a claim somebody relied on. It surfaces as {@link McpAuthorityError}
+     * so the daemon declines the offer permanently — re-offering spawns the same
+     * changed file and reaches the same verdict.
+     */
+    connect(signal?: AbortSignal): Promise<void>;
+    /** The server's self-reported identity, as returned by `initialize`. */
+    serverInfo(): {
+        readonly name: string;
+        readonly version: string;
+    };
+    /** The protocol version this connection negotiated. */
+    protocolVersion(): string;
+    /** Every tool the server reports, across every page. */
+    listTools(signal?: AbortSignal): Promise<readonly Tool[]>;
+    /**
+     * Invoke one tool. An aborted `signal` cancels in band — the protocol layer
+     * sends `notifications/cancelled` for the in-flight request — so a cancelled
+     * call does not orphan work on the server.
+     */
+    callTool(name: string, args: Readonly<Record<string, unknown>> | undefined, options?: {
+        readonly signal?: AbortSignal;
+        readonly timeoutMs?: number;
+    }): Promise<CallToolResult>;
+    /** Always safe to call, including before `connect()` and more than once. */
+    close(): Promise<void>;
+    /**
+     * Map one thrown value onto the two-way split callers act on.
+     *
+     * The split is retryability, and it follows WHO is at fault. A server that
+     * answered — with a result that is not a valid `tools/list`, with a result
+     * type nothing can read, with more pages than the client will walk, or for a
+     * capability it never advertised — has stated a permanent fact about itself;
+     * re-offering the task would ask the same command and get the same answer
+     * forever. A server that timed out, closed, or could not be written to may
+     * well succeed later.
+     *
+     * A JSON-RPC error response the server sent is split the same way, by
+     * {@link AUTHORITY_PROTOCOL_ERROR_CODES}: a rejection of the REQUEST is
+     * permanent, a report of the server's own condition is not.
+     *
+     * An {@link McpAuthorityError} raised inside the transport (an oversized
+     * stream, a refused frame) surfaces through the client's `onerror` funnel
+     * and arrives here unchanged.
+     */
+    private classify;
+}
+// ==== @byok-sdk/client dist/mcp/observation.d.ts ====
+import { type McpStdioClientOptions, type McpStdioServerSpec } from './client';
+/**
+ * Tool names an adapter is allowed to pre-grant must be OBSERVED, never
+ * configured: the daemon's own `mcpToolsets` config carries `command`/`args`
+ * only (see `../daemon/toolset-registry.ts`), so the single authority for
+ * "which tools does this server actually expose" is the server's own
+ * `tools/list` answer.
+ *
+ * A name that survives this filter is about to be interpolated into runtime
+ * CLI authority — `--allowedTools mcp__<server>__<tool>` for claude,
+ * `mcp_servers.<server>.tools.<tool>.approval_mode` for codex, and the
+ * registered Pi tool name for pi. A comma, a dot, a quote, or whitespace in a
+ * tool name would forge additional grants or a different config key out of one
+ * legitimate one.
+ *
+ * A server that reports ANY name outside this shape fails the whole
+ * observation — it is rejected, and the task is declined permanently rather
+ * than partially granted. Granting the well-formed subset and silently
+ * dropping the rest would hand the model a toolset it can only half call, and
+ * would let one bad name ride along with good ones. The shape is deliberately
+ * narrower than MCP's own (unbounded) name rule.
+ */
+export declare const GRANTABLE_TOOL_NAME: RegExp;
+/**
+ * The same rule for the SERVER half of the identifier, enforced at grant
+ * resolution (`../adapters/mcp-tool-grants.ts`). A projected server name is
+ * interpolated into `mcp__<server>__<tool>` for claude and into the flat TOML
+ * key `mcp_servers.<server>.tools.<tool>.approval_mode` for codex: a `.` would
+ * split that key into a different table, and a quote, comma, or space would
+ * forge a second grant out of one.
+ */
+export declare const GRANTABLE_MCP_SERVER_NAME: RegExp;
+/** One tool exactly as its server described it. The model-visible truth, unedited. */
+export interface McpToolDescriptor {
+    readonly name: string;
+    /** Empty string when the server supplied none; never inferred. */
+    readonly description: string;
+    /** The server's own JSON Schema, passed through verbatim. */
+    readonly inputSchema: unknown;
+}
+/** Everything one `initialize` + `tools/list` exchange established about a server. */
+export interface McpServerObservation {
+    readonly serverName: string;
+    readonly serverInfo: {
+        readonly name: string;
+        readonly version: string;
+    };
+    readonly protocolVersion: string;
+    /** Ordered by tool name, code unit. */
+    readonly tools: readonly McpToolDescriptor[];
+}
+/**
+ * One observed tool plus the operator's classification of it.
+ *
+ * `readOnly` comes from device toolset configuration
+ * (`McpToolsetConfig.readOnlyTools`) and from nowhere else — never from the
+ * tool's name, its description, its schema, or the server's own
+ * `annotations.readOnlyHint`, which is a self-assessment rather than a
+ * security authority. The field is deliberately three-state:
+ *
+ * - `true`  — the device config lists this `(server, tool)` as read-only.
+ * - `false` — the config classifies this tool's TOOLSET but not this tool, so
+ *             it counts as a mutation tool. That is the fail-closed default: a
+ *             tool an operator forgot to classify is never granted under a
+ *             restricted policy.
+ * - absent  — the toolset carries no classification at all. Not "it mutates"
+ *             but "nobody said", which is why it stays distinguishable: a
+ *             non-`auto` policy is then refused outright instead of silently
+ *             resolving to an empty toolset.
+ */
+export interface McpClassifiedToolDescriptor extends McpToolDescriptor {
+    readonly readOnly?: boolean;
+}
+/**
+ * One observed server together with the toolset it was projected from and the
+ * operator classification of each of its tools.
+ *
+ * Both additions are the daemon's facts, not the server's, so they are
+ * attached here rather than inside {@link McpServerObservation}: the core
+ * observes servers and knows nothing about the registry. Carrying them ON the
+ * entry instead of in parallel `serverName -> …` maps is deliberate — two
+ * structures that must agree are two structures that can disagree, and both
+ * the projection's ordering and its policy filter are derived from these.
+ */
+export interface McpToolsetServerObservation extends Omit<McpServerObservation, 'tools'> {
+    readonly toolsetId: string;
+    /** Ordered by tool name, code unit. */
+    readonly tools: readonly McpClassifiedToolDescriptor[];
+}
+/**
+ * Join one raw server observation to the daemon facts about it: which toolset
+ * projected it, and which of its tools the device's operator declared
+ * read-only.
+ *
+ * `readOnlyTools` is `null` when the toolset declares no classification at
+ * all — every tool then comes back unclassified, and a non-`auto` policy fails
+ * later rather than being resolved into "nothing is read-only" here. A
+ * declared name the server does not expose is a STALE configuration and is
+ * rejected: the operator classified a tool that no longer exists, so the rest
+ * of the declaration cannot be trusted to describe this server either. It
+ * throws {@link McpAuthorityError} for the same reason an ungrantable tool
+ * name does — the answer will not change on a retry.
+ */
+export declare function classifyMcpToolsetServerObservation(observation: McpServerObservation, binding: {
+    readonly toolsetId: string;
+    readonly readOnlyTools: readonly string[] | null;
+}): McpToolsetServerObservation;
+export interface ObserveMcpServerOptions extends Omit<McpStdioClientOptions, 'maxStdoutBytes'> {
+    readonly signal?: AbortSignal;
+}
+/**
+ * Structural JSON equality: same keys, same values, arrays positionally.
+ *
+ * Object key ORDER is not part of a JSON value, so a server that re-emits the
+ * same schema with its keys in another order has not changed anything and must
+ * not read as drift. This is deliberately a comparison rather than a canonical
+ * serialization: introducing a second canonical form here would make this
+ * module a rival authority to the native `canonicalPreparedValue` that every
+ * digest in this package is computed with.
+ */
+export declare function jsonEquals(left: unknown, right: unknown): boolean;
+/**
+ * Start the exact configured stdio server, complete `initialize` +
+ * `tools/list`, and return everything it said about itself.
+ *
+ * No `tools/call` is ever sent, so an authenticated task binding stays unused
+ * until the real runtime invokes it. The child is always gone before this
+ * resolves — the observation proves the server can start and enumerate its
+ * tools; whoever runs it spawns their own copy.
+ */
+export declare function observeMcpServer(serverName: string, server: McpStdioServerSpec, options: ObserveMcpServerOptions): Promise<McpServerObservation>;
+/** Why a re-observation is not the observation that was frozen. */
+export type McpObservationDriftReason = 'tool_added' | 'tool_removed' | 'tool_description_changed' | 'tool_schema_changed' | 'server_info_changed' | 'protocol_version_changed';
+export interface McpObservationDrift {
+    readonly reason: McpObservationDriftReason;
+    /** Absent for the two server-level reasons. */
+    readonly toolName?: string;
+    readonly detail: string;
+}
+/**
+ * Compare a fresh observation against a frozen one and report EVERY way they
+ * differ.
+ *
+ * Set equality, not containment: a tool that appeared is as much a drift as
+ * one that vanished. A server that grew a tool between preparation and launch
+ * is offering the model authority nobody froze, priced or disclosed — so an
+ * extra tool is rejected rather than skipped, exactly like a missing one.
+ *
+ * The reasons are distinct on purpose. "The schema changed" and "a tool
+ * disappeared" are different operational events with different fixes, and
+ * collapsing them into one "drift" would hide which one happened.
+ */
+export declare function diffMcpObservation(frozen: McpServerObservation, observed: McpServerObservation): readonly McpObservationDrift[];
 // ==== @byok-sdk/client dist/release-identity.d.ts ====
 /** Local Agent application-release identity. It is observability data, never a protocol or capability gate. */
 export interface LocalAgentReleaseIdentity {
@@ -9198,12 +11736,18 @@ export declare const RESERVED_MCP_SERVER_NAMES: readonly ["byokagentmessage", "b
 /** Whether `name` is one of the SDK-owned MCP server names above. */
 export declare function isReservedMcpServerName(name: string): boolean;
 // ==== @byok-sdk/client dist/types.d.ts ====
-import type { AgentEvent, PermissionPolicy, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent, PermissionMode, PermissionPolicy, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { InputPreparationModelV1 } from './input-preparation';
 import type { RuntimeEnvironmentRequirements } from './daemon/environment';
+import type { McpLaunchBinding } from './daemon/trusted-launch-cwd';
+import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
 import type { AgentRef } from './agent-home';
+import type { McpToolsetServerObservation } from './mcp/observation';
 export type { AgentRef } from './agent-home';
+export type { McpServerObservation, McpToolDescriptor, McpToolsetServerObservation, } from './mcp/observation';
 export type { AgentEgressPolicy } from '@byok-sdk/protocol';
 export type { RuntimeEnvironmentRequirements } from './daemon/environment';
+export type { LaunchCwdRejection, McpLaunchBinding, McpLaunchCwdConfig, TrustedLaunchCwd, TrustedLaunchCwdUnavailableReason, } from './daemon/trusted-launch-cwd';
 export interface GitWorkspaceConfig {
     mode: 'local-checkpoints';
 }
@@ -9260,6 +11804,34 @@ export interface McpStdioServerConfig {
 /** A logical group of local MCP servers selectable by a wire-level toolset id. */
 export interface McpToolsetConfig {
     mcpServers: Readonly<Record<string, McpStdioServerConfig>>;
+    /**
+     * The operator's own read/mutation classification of this toolset's tools,
+     * per `(server, tool)`. It is what makes a permission mode other than `auto`
+     * expressible for a toolset task at all.
+     *
+     * The device configuration owner declares it and nothing else may. A
+     * server's own `annotations.readOnlyHint` is that server's self-assessment
+     * rather than a security authority, and a tool's name, description or schema
+     * is not evidence of anything — inferring the classification from any of
+     * them would be exactly the heuristic that makes a permission boundary
+     * meaningless.
+     *
+     * Two fail-closed defaults follow, both enforced by
+     * `filterMcpObservationForPolicy` (`mcp/projection.ts`): a tool the server
+     * exposes that this declaration omits is treated as a MUTATION tool, and a
+     * toolset carrying no declaration at all cannot run under a non-`auto`
+     * policy — the refusal names the missing classification rather than quietly
+     * running with every tool enabled.
+     *
+     * The registry validates it strictly (every server named here must be
+     * defined in `mcpServers`, every tool name must be grantable, no
+     * duplicates), the daemon cross-checks it against each server's own
+     * `tools/list` answer before admission (a classified tool the server does not
+     * expose is a stale config and is rejected), and it is folded into the
+     * toolset's `definitionRevision` — so changing a classification changes the
+     * toolset revision and therefore every executor fingerprint derived from it.
+     */
+    readOnlyTools?: Readonly<Record<string, readonly string[]>>;
 }
 /** Lifecycle facts a device host may explicitly report for one configured toolset. */
 export type McpToolsetLifecycleState = 'installed' | 'unauthorized' | 'starting' | 'ready' | 'degraded' | 'crashed' | 'incompatible';
@@ -9380,23 +11952,67 @@ export interface RuntimeAdapterDescriptor {
     /**
      * Whether this adapter actually CONSUMES
      * {@link RuntimeAdapterPrepareInput.mcpToolsetTools} — i.e. whether it
-     * pre-grants each projected toolset server's tools in the runtime's own
-     * grant surface (claude's `--allowedTools`, codex's `enabled_tools` +
-     * per-tool `approval_mode`) and therefore needs the daemon to observe
-     * them first.
+     * needs the daemon to observe each projected toolset server before
+     * admission, because it binds those tools into the runtime's own surface:
+     * claude's `--allowedTools`, codex's `enabled_tools` + per-tool
+     * `approval_mode`, and pi's per-tool registration of the observed schemas.
      *
      * The daemon uses this, and only this, to decide whether to pay for the
-     * pre-admission `tools/list` probe of every projected server
-     * (`daemon/mcp-tools-probe.ts`). An adapter that projects toolsets through
-     * its own proxy and grants them itself (the pi adapter) declares nothing
-     * here and never makes an offer wait on a probe it has no use for.
+     * pre-admission `tools/list` observation of every projected server
+     * (`daemon/mcp-tools-probe.ts`). An adapter that consumes no observation
+     * never makes an offer wait on one it has no use for.
      *
-     * Omission is fail-closed in the direction that matters: no probe means no
-     * observation, and an adapter that does consume the observation rejects a
-     * projected server it has no tool names for (`adapters/mcp-tool-grants.ts`).
-     * A grant is never widened by a missing declaration.
+     * Omission is fail-closed in the direction that matters: no observation
+     * means no names and no schemas, and an adapter that does consume the
+     * observation rejects a projected server it has neither for
+     * (`adapters/mcp-tool-grants.ts`). A grant is never widened by a missing
+     * declaration.
      */
     readonly requiresMcpToolsetToolObservation?: boolean;
+    /**
+     * HOW this adapter's MCP toolset server children get the trusted launch
+     * working directory (`daemon/trusted-launch-cwd.ts`).
+     *
+     * `'direct-cwd'` — the adapter spawns the servers itself and passes the
+     * directory to `spawn` (pi: its SDK-owned extension opens each server from
+     * the task-scoped config the adapter writes).
+     *
+     * `'launcher-wrapped'` — an external CLI spawns the servers from a
+     * configuration format with no per-server cwd field (claude's `mcpServers`
+     * JSON, codex's `-c mcp_servers.*`), so the adapter must rewrite each
+     * server's `command`/`args` through this package's
+     * `bin/byok-launch-cwd.mjs`.
+     *
+     * Optional, including for an adapter declaring `capabilities.mcpToolsets`.
+     * `TaskRunner` resolves the trusted directory for every such task and hands
+     * it to the adapter, but it resolves a LAUNCHER only for
+     * `'launcher-wrapped'`; a host platform where no launcher is available then
+     * declines the offer non-retryably. An adapter that declares nothing is
+     * admitted with no launcher, exactly like `'direct-cwd'`, and is itself
+     * responsible for starting its MCP server children in the trusted
+     * directory it was handed: the SDK cannot make a third-party adapter launch
+     * through a launcher by declining here. The three bundled adapters all
+     * declare their mode explicitly.
+     */
+    readonly mcpServerLaunch?: 'direct-cwd' | 'launcher-wrapped';
+    /**
+     * Whether this adapter GENERATES a reserved approval MCP server of its own
+     * when it is started under `policy.mode: 'confirm'` (claude's
+     * `--permission-prompt-tool` server, `adapters/claude/claude-adapter.ts`).
+     *
+     * Such a server exists nowhere in the daemon's projected `mcpServers` map,
+     * so the daemon cannot see it by counting that map — but it is an MCP
+     * server child of the task like any other, and it must start in the same
+     * proven-non-writable launch directory (`daemon/trusted-launch-cwd.ts`).
+     * `TaskRunner` therefore resolves the launch binding for a `confirm`-mode
+     * task on an adapter that declares this, even when the task projects no
+     * host toolset and needs no reserved helper at all.
+     *
+     * Omission means "generates none": an adapter that generates one and does
+     * not declare it would receive no binding and its own fail-closed guard
+     * refuses the start rather than launching the server unwrapped.
+     */
+    readonly generatesApprovalMcpServer?: boolean;
 }
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
 export interface RuntimeAdapterPrepareInput {
@@ -9412,17 +12028,29 @@ export interface RuntimeAdapterPrepareInput {
     mcpToolsetTools?: McpToolsetToolObservation;
 }
 /**
- * Tool names observed by starting each projected toolset MCP server and
- * reading its own `tools/list` answer (`daemon/mcp-tools-probe.ts`), keyed by
- * the projected server name. SDK-reserved servers are never keyed here — they
- * carry their own fixed, single-tool grants inside the adapters.
+ * What each projected toolset MCP server said about itself when the daemon
+ * started it and read its own `initialize` + `tools/list` answer
+ * (`daemon/mcp-tools-probe.ts`), keyed by the projected server name.
+ * SDK-reserved servers are never keyed here — they carry their own fixed,
+ * single-tool grants inside the adapters.
  *
- * This is the ONLY set of names an adapter may pre-grant to a runtime. Device
- * toolset configuration carries `command`/`args` only, so a configured value
- * could never be an authority on what a server exposes; a name absent from
- * this observation is a name the runtime is never told to allow.
+ * This is the ONLY authority an adapter may bind a runtime to. Device toolset
+ * configuration carries `command`/`args` only, so a configured value could
+ * never say what a server exposes; a tool absent from this observation is a
+ * tool no runtime is ever told about.
+ *
+ * It carries FULL descriptors — name, description and the server's own
+ * `inputSchema` — plus the server identity and negotiated protocol version,
+ * because the three runtimes need different parts of the same fact and only
+ * one of them can be authoritative. claude and codex pre-grant by name; pi
+ * registers one tool per MCP tool with the real schema; the prepared launch
+ * path binds the schema digest into a frozen tool manifest. The names-only
+ * view every grant resolver uses is DERIVED from this
+ * (`mcp/projection.ts`'s `mcpToolsetToolNames`), never carried alongside it —
+ * a separately transported name list would be a second authority free to
+ * disagree with the schemas the model was actually shown.
  */
-export type McpToolsetToolObservation = Readonly<Record<string, readonly string[]>>;
+export type McpToolsetToolObservation = Readonly<Record<string, McpToolsetServerObservation>>;
 /** A permanent or currently-unavailable pre-claim admission rejection. */
 export interface RuntimeAdapterRejectedOperation {
     kind: 'reject';
@@ -9467,20 +12095,144 @@ export interface RuntimeOperationManifest {
     /** Names are audit-safe; credential values intentionally never enter the manifest. */
     readonly forwardedEnvironmentNames: readonly string[];
 }
-/** Runtime resources only available after TaskRunner has sealed the manifest and claimed the task. */
-export interface RuntimeOperationStartInput {
+/**
+ * The durable identity of one already-counted preparation record
+ * (`daemon/input-preparation-store.ts`'s {@link InputPreparationRecordKey} plus
+ * its derived `recordId`).
+ *
+ * Carried so a prepared launch names the record it consumes rather than being
+ * handed anonymous bytes: the launch is refused if the artifact on disk does
+ * not carry this `recordId`.
+ */
+export interface RuntimePreparedLaunchReferenceV1 {
+    readonly scopeId: string;
+    readonly agentRef: string;
+    readonly requestId: string;
+    readonly recordId: string;
+}
+/**
+ * The independently trusted expectations the native prepared-input verifier
+ * requires (`@earendil-works/pi-coding-agent/prepared-session-input`'s
+ * `PreparedSessionExpectedV1`).
+ *
+ * They come from the DURABLE record — its artifact summary and its binding —
+ * never from the artifact file itself. The native contract is explicit that a
+ * value read out of the envelope can never serve as its own expectation, so
+ * carrying them here is what makes the envelope on disk checkable at all.
+ */
+export interface RuntimePreparedLaunchExpectationV1 {
+    /** `InputPreparationArtifactSummaryV1.envelopeDigest`. */
+    readonly envelopeDigest: string;
+    /** `InputPreparationArtifactSummaryV1.toolManifestDigest`. */
+    readonly toolManifestDigest: string;
+    /** The exact model identity the record's binding pinned. */
+    readonly model: InputPreparationModelV1;
+    /** The compiler binding the record's request was compiled under. */
+    readonly binding: {
+        readonly inputIdentity: string;
+        readonly runtimeIdentity: string;
+        readonly policyIdentity: string;
+        readonly profileRevision: string;
+    };
+}
+/**
+ * Everything one prepared Execution needs to launch the frozen request it was
+ * counted for.
+ *
+ * There is no `instruction` here and no way to supply one: the user request is
+ * already inside the frozen envelope, and a prepared run that accepted a
+ * separate instruction would have two answers to what it is about to send.
+ *
+ * The admitted permission POLICY is not repeated — it is
+ * `RuntimeOperationManifest.policy`, already sealed. Only the mode the manifest
+ * was COUNTED for is carried, so the adapter can refuse a manifest admitted
+ * under a different mode instead of discovering the divergence as tool drift.
+ */
+export interface RuntimePreparedLaunchV1 {
+    readonly reference: RuntimePreparedLaunchReferenceV1;
+    /**
+     * Absolute path of the retained `InputPreparationArtifact` JSON.
+     *
+     * A path rather than inline bytes on purpose: the artifact carries D, P(D)
+     * and the whole native envelope, and there is exactly one retained copy of
+     * it. A second inline representation would be a second authority over the
+     * same bytes.
+     */
+    readonly artifactPath: string;
+    readonly expected: RuntimePreparedLaunchExpectationV1;
+    /** The mode `daemon/prepared-tool-surface.ts` filtered the counted manifest for. */
+    readonly permissionMode: PermissionMode;
+    readonly toolBindingDigest: string;
+    readonly observationDigest: string;
+    /** The same trusted launch boundary the preparation observed every server under. */
+    readonly launch: McpLaunchBinding;
+    /** The implementation identity the preparation resolved per projected server. */
+    readonly toolImplementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
+    /** `toolsetId` -> the registry definition revision the preparation bound. */
+    readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
+}
+/** Runtime resources shared by every start variant. */
+interface RuntimeOperationStartBase {
     /** Startup cancellation only; rejection must preserve unresolved process ownership. */
     readonly signal?: AbortSignal;
     readonly manifest: RuntimeOperationManifest;
-    readonly instruction: string;
     readonly env: NodeJS.ProcessEnv;
     /** Local MCP authority resolved from logical wire ids. */
     readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
     /** {@link McpToolsetToolObservation} for exactly the projected toolset servers in `mcpServers`. */
     readonly mcpToolsetTools?: McpToolsetToolObservation;
+    /**
+     * The proven-non-writable directory every MCP toolset server child of this
+     * task is launched in, plus the launcher an external CLI needs to reach it.
+     *
+     * Resolved ONCE per offer by `TaskRunner` (`daemon/trusted-launch-cwd.ts`)
+     * and carried here so every spawn site of one task agrees on one directory.
+     * Present whenever `mcpServers` is; an adapter that finds MCP servers
+     * without it must refuse rather than fall back to its own cwd.
+     */
+    readonly mcpLaunch?: McpLaunchBinding;
+    /**
+     * What this daemon established about the implementation behind each
+     * projected toolset server, keyed by projected server name
+     * (`daemon/tool-implementation-identity.ts`).
+     *
+     * Resolved ONCE per offer by `TaskRunner`, alongside the launch binding
+     * above and for the same reason: the admission probe and every adapter spawn
+     * of one task must be talking about the same install. An adapter that spawns
+     * toolset servers itself carries these values to its spawn point unchanged;
+     * it never resolves its own.
+     */
+    readonly mcpToolImplementations?: Readonly<Record<string, ToolImplementationIdentityV1>>;
     /** Optional, adapter-agnostic out-of-band approval channel. */
     readonly approvalChannel?: ApprovalChannel;
 }
+/** The ordinary start: a resolved instruction the runtime turns into its own first request. */
+export interface RuntimeOperationInstructionStartInput extends RuntimeOperationStartBase {
+    readonly kind: 'instruction';
+    readonly instruction: string;
+}
+/**
+ * The prepared start: an already-compiled, already-counted provider request the
+ * runtime must send verbatim.
+ *
+ * A separate variant rather than an optional field beside `instruction`,
+ * because the two are mutually exclusive authority over the same bytes: with
+ * both reachable on one shape every adapter would have to decide which one
+ * wins, and the answer would be written three times.
+ */
+export interface RuntimeOperationPreparedStartInput extends RuntimeOperationStartBase {
+    readonly kind: 'prepared';
+    readonly preparation: RuntimePreparedLaunchV1;
+}
+/**
+ * Runtime resources only available after TaskRunner has sealed the manifest and
+ * claimed the task.
+ *
+ * Discriminated, not an optional bag: an adapter that does not implement the
+ * prepared lane must refuse it by name, and a union is what makes forgetting to
+ * a compile error rather than a silently ignored field.
+ */
+export type RuntimeOperationStartInput = RuntimeOperationInstructionStartInput | RuntimeOperationPreparedStartInput;
 /** A pinned provider/runtime decision. `start()` receives resources only, never a raw offer. */
 export interface PreparedRuntimeOperation {
     start(input: RuntimeOperationStartInput): Promise<Session>;

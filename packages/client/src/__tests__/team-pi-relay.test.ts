@@ -61,7 +61,7 @@ describe('Pi native interaction admission', () => {
   it('owned GUI host keeps expired request IDs until explicit response and rejects stale replies', async () => {
     const { dir, extension } = await fixture(); const events: Record<string,unknown>[] = [];
     const host = await PiTeamSession.start({workspaceId:'room',cwd:dir,sessionDir:path.join(dir,'session'),provider:'zai',model:'glm-5.3',systemPrompt:'Synthetic no-model probe.',extensionPaths:[extension],
-      mcpConfig:{settings:{hostConfigDiscovery:'off',scriptMode:false,disableProxyTool:true},mcpServers:{}},onEvent:e=>events.push(e)}); children.push(host);
+      mcpConfig:{mcpServers:{},observation:{},permissionMode:'auto'},onEvent:e=>events.push(e)}); children.push(host);
     await host.sendInput('/probe-timeout'); await until(() => host.status().phase === 'open' && host.status().pendingUi.length === 1);
     expect(await host.ready()).toBe(false);
     const requestId=host.status().pendingUi[0]!.id!; const sessionId=host.status().sessionId!;

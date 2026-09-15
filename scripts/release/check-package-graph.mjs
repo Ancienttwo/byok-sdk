@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER } from './pi-runtime-identity.mjs';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 const dispatchPackages = [
@@ -125,12 +126,17 @@ function readJson(relativePath) {
 // cannot desync the gate from the manifests it guards.
 // Release packages may use an exact SemVer prerelease (for example
 // 0.8.0-beta.0). The Pi runtime remains a stable, exact pin because it is not
-// part of the SDK release channel.
+// part of the SDK release channel; it is declared as an exact npm fork alias
+// and read through the one shared `parsePiRuntimeIdentity` authority.
 const exactStableVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const exactReleaseVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const releaseVersion = readJson('packages/core/package.json').version;
 const keysVersion = readJson('packages/keys/package.json').version;
-const piVersion = readJson('packages/client/package.json').dependencies?.['@earendil-works/pi-coding-agent'];
+try {
+  parsePiRuntimeIdentity(readJson('packages/client/package.json'));
+} catch (error) {
+  errors.push(error.message);
+}
 if (typeof releaseVersion !== 'string' || !exactReleaseVersion.test(releaseVersion)) {
   errors.push('packages/core/package.json: version must be an exact SemVer release train version');
 }
@@ -139,9 +145,6 @@ if (typeof keysVersion !== 'string' || !exactReleaseVersion.test(keysVersion)) {
 }
 if (keysVersion === releaseVersion) {
   errors.push(`packages/keys/package.json: keys must remain independently versioned from the ${releaseVersion} dispatch train`);
-}
-if (typeof piVersion !== 'string' || !exactStableVersion.test(piVersion)) {
-  errors.push('packages/client/package.json: @earendil-works/pi-coding-agent must be pinned to an exact x.y.z version');
 }
 
 const manifests = new Map();
@@ -297,7 +300,7 @@ if (runtimeEdges(keysManifest ?? {}).includes('@byok-sdk/protocol')) {
 }
 
 const clientManifest = manifests.get('@byok-sdk/client');
-if (clientManifest?.optionalDependencies?.['@earendil-works/pi-coding-agent']) {
+if (clientManifest?.optionalDependencies?.[PI_DEPENDENCY_SPECIFIER]) {
   errors.push('packages/client/package.json: pi must be required, not optional');
 }
 if (

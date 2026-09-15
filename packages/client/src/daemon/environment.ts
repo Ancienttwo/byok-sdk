@@ -149,6 +149,45 @@ const WINDOWS_BASE_ALLOWLIST: readonly string[] = [
 ];
 
 /**
+ * Environment variable names that change how an interpreter LOADS code, and
+ * which therefore take effect before the first statement of whatever it was
+ * asked to run — including the two launch-cwd launchers, whose entire job is to
+ * establish a trusted working directory before an MCP server binary starts
+ * (`./trusted-launch-cwd.ts`): the POSIX `/bin/sh -c` bootstrap, and this
+ * package's own `bin/byok-launch-cwd.mjs` on win32. The Node launcher
+ * re-asserts this same list on itself, because it is also reached through a
+ * runtime CLI that composes its own child environment.
+ */
+export const LOADER_ENV_DENY_PATTERNS: readonly string[] = Object.freeze([
+  'NODE_OPTIONS',
+  'NODE_REPL_EXTERNAL_MODULE',
+  'NODE_PATH',
+  'BUN_*',
+  'DYLD_*',
+  'LD_*',
+  // The shell half of the same problem. A variable that makes a shell run
+  // code, trace itself, or resolve `cd` somewhere else is loader injection
+  // against the POSIX bootstrap exactly as NODE_OPTIONS is against a Node one:
+  //
+  // - ENV / BASH_ENV: a file the shell sources before the `-c` program text.
+  // - SHELLOPTS / BASHOPTS: bash invoked as `sh` imports these from the
+  //   environment and applies them before the script — `SHELLOPTS=xtrace`
+  //   alone writes `+ cd ...` trace lines onto the server's stderr, observed
+  //   on bash 5.2.37.
+  // - CDPATH: makes a RELATIVE `cd` argument land somewhere else entirely. The
+  //   launcher passes an absolute realpath, so this is the second line of the
+  //   same defence.
+  // - PS4: the trace prefix, which is expanded — command substitution
+  //   included — whenever tracing is on.
+  'ENV',
+  'BASH_ENV',
+  'SHELLOPTS',
+  'BASHOPTS',
+  'CDPATH',
+  'PS4',
+]);
+
+/**
  * Hard deny — wins unconditionally over every allowlist layer above (the
  * platform baseline, an adapter's own declared requirements, AND the
  * operator's own local override): this SDK's own control-plane variables
@@ -159,7 +198,17 @@ const WINDOWS_BASE_ALLOWLIST: readonly string[] = [
  * the final word on every single variable, never short-circuited past by an
  * earlier allow match.
  */
-const HARD_DENY_PATTERNS: readonly string[] = ['BYOK_*'];
+const HARD_DENY_PATTERNS: readonly string[] = [
+  'BYOK_*',
+  // Loader injection. These change how an interpreter LOADS code, before the
+  // first statement of whatever it was asked to run — including this SDK's own
+  // `bin/byok-launch-cwd.mjs`, whose entire job is to establish a trusted cwd
+  // before a server binary starts. An operator `runtimeEnvironment.<id>.allow`
+  // entry naming one of them would hand the agent a way in ahead of every
+  // check the launcher makes, so the deny is absolute here exactly as
+  // `BYOK_*` is. See `./trusted-launch-cwd.ts`.
+  ...LOADER_ENV_DENY_PATTERNS,
+];
 
 /**
  * F1: `caseInsensitive` is `true` only on win32 (see {@link buildRuntimeEnv}).
@@ -183,6 +232,27 @@ function matchesPattern(name: string, pattern: string, caseInsensitive: boolean)
 
 function matchesAny(name: string, patterns: readonly string[], caseInsensitive: boolean): boolean {
   return patterns.some((pattern) => matchesPattern(name, pattern, caseInsensitive));
+}
+
+/**
+ * The loader-injection variables present in one environment.
+ *
+ * Exported so a process that ESTABLISHES a boundary can re-assert the same list
+ * on ITSELF: `bin/byok-launch-cwd.mjs` does it with its own inlined copy (it
+ * ships as source and must run with nothing of this package installed), and the
+ * prepared launch entry (`bin/byok-pi-prepared.ts`) does it by calling this.
+ * Neither can sanitize these for itself — they took effect before its first
+ * statement — so the only correct answer is to refuse to continue.
+ */
+export function loaderEnvInjections(
+  env: Readonly<Record<string, string | undefined>>,
+  platform: NodeJS.Platform = process.platform,
+): readonly string[] {
+  const caseInsensitive = platform === 'win32';
+  return Object.keys(env)
+    .filter((name) => env[name] !== undefined
+      && matchesAny(name, LOADER_ENV_DENY_PATTERNS, caseInsensitive))
+    .sort();
 }
 
 /**
