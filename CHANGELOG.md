@@ -154,6 +154,27 @@ and the D2 version number belongs to a separate SDK release contract.
   `context_token_invalid` rather than `context_revoked` when the post-signing
   registry re-read finds no registry at all — a context that never existed is
   not a context whose authority ended.
+- Add the remote input-preparation lane: `agent.input.preparation`, a strict
+  server→device message (`task_id` FORBIDDEN, `seq` REQUIRED) gated by the new
+  `agent-input-preparation` capability, plus the cloud routes that carry it —
+  enqueue, the device-authenticated
+  `PUT /byok/input-preparations/:requestId/completion` and
+  `GET /byok/input-preparations/:requestId` — and a daemon handler that calls
+  the B-P2 preparation service in process rather than over the 64 KiB control
+  channel. Idempotency is one Host-minted key,
+  `(deviceId, agentRef, requestId)`, carried unchanged through the request
+  receipt, the device's durable namespace and the completion; a whole-body
+  conflict rejects re-binding one requestId to different inputs. The
+  capability is the ADMISSION gate and lives on enqueue alone — the completion
+  route asserts none, so an unconfigured device can discharge its row with a
+  terminal rejection instead of stalling its strictly seq-ordered cursor.
+  Declared limits: this lane compiles observed MCP toolset tools only (Pi's
+  own native tools are selected by a runtime policy the task-free path never
+  resolves), there is no remote cancel, and receipts are never ready —
+  `coverage: unknown`, a fixture counter authority and
+  `executor_identity_unproven` each keep G4 closed to activation. Additive, so
+  a pre-1.0 MINOR under `docs/spec.md`'s package version policy; no version is
+  bumped here.
 
 ## 0.18.0 / @byok-sdk/keys 0.5.0 — unpublished release candidate
 

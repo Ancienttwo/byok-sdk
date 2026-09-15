@@ -25,10 +25,11 @@ export interface InputPreparationRouteDeps extends DeviceRouteDeps {
 
 /**
  * Both handlers map this surface's codes onto HTTP with the same table the
- * Agent-home pair uses. `agent_capability_missing` is 409 rather than 403 for
- * the same reason it is there: a device whose durable capability row no longer
- * admits this lane is a state conflict against the desired fact, not an
- * authentication failure the caller could fix by presenting a better token.
+ * Agent-home pair uses, minus `agent_capability_missing`: neither route here
+ * can raise it. Admission is `enqueueInputPreparation`'s job, the completion
+ * deliberately asserts no capability (see `completeInputPreparationFromStores`)
+ * and the status readback never asserted one, so the code is unreachable on
+ * this surface rather than merely unused.
  */
 function mapCloudError(c: Context, error: unknown): Response {
   if (isCloudError(error, 'input_preparation_request_not_found')) {
@@ -42,8 +43,7 @@ function mapCloudError(c: Context, error: unknown): Response {
   }
   if (
     isCloudError(error, 'input_preparation_request_conflict') ||
-    isCloudError(error, 'input_preparation_completion_conflict') ||
-    isCloudError(error, 'agent_capability_missing')
+    isCloudError(error, 'input_preparation_completion_conflict')
   ) {
     return c.json({ error: error.code }, 409);
   }

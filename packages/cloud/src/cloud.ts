@@ -1578,7 +1578,11 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
    * Authority does not weaken: the row's own binding (authenticated device,
    * exact `AgentRef`, `profileId`, `policyRevision`) is checked by
    * `recordInputPreparationCompletion`, so a completion still cannot cross a
-   * device, an Agent, or a policy revision.
+   * device, an Agent, or a policy revision. The one authority reduction this
+   * does accept, stated plainly: revoking `agent-input-preparation` after a row
+   * is enqueued no longer refuses the in-flight completion — that row was
+   * legitimately admitted, its receipt stays not-ready and G4 is closed to
+   * activation — so revocation stops NEW admissions only.
    */
   async function completeInputPreparationFromStores(
     stores: TenantStores,
