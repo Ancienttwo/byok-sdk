@@ -3496,13 +3496,13 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 512,
-          "pattern": "^[^\u0000-\u001f]+$"
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
         },
         "policyRevision": {
           "type": "string",
           "minLength": 1,
           "maxLength": 512,
-          "pattern": "^[^\u0000-\u001f]+$"
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
         },
         "source": {
           "type": "object",
@@ -3511,13 +3511,13 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 512,
-              "pattern": "^[^\u0000-\u001f]+$"
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
             },
             "digest": {
               "type": "string",
               "minLength": 1,
               "maxLength": 512,
-              "pattern": "^[^\u0000-\u001f]+$"
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
             }
           },
           "required": [
@@ -3536,13 +3536,13 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 512,
-                  "pattern": "^[^\u0000-\u001f]+$"
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 },
                 "name": {
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 512,
-                  "pattern": "^[^\u0000-\u001f]+$"
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 },
                 "api": {
                   "type": "string",
@@ -3552,13 +3552,13 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 512,
-                  "pattern": "^[^\u0000-\u001f]+$"
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 },
                 "baseUrl": {
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 2048,
-                  "pattern": "^[^\u0000-\u001f]+$"
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 },
                 "reasoning": {
                   "type": "boolean"
@@ -7897,13 +7897,13 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 512,
-                "pattern": "^[^\u0000-\u001f]+$"
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
               },
               "policyRevision": {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 512,
-                "pattern": "^[^\u0000-\u001f]+$"
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
               },
               "source": {
                 "type": "object",
@@ -7912,13 +7912,13 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 512,
-                    "pattern": "^[^\u0000-\u001f]+$"
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                   },
                   "digest": {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 512,
-                    "pattern": "^[^\u0000-\u001f]+$"
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                   }
                 },
                 "required": [
@@ -7937,13 +7937,13 @@
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 512,
-                        "pattern": "^[^\u0000-\u001f]+$"
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                       },
                       "name": {
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 512,
-                        "pattern": "^[^\u0000-\u001f]+$"
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                       },
                       "api": {
                         "type": "string",
@@ -7953,13 +7953,13 @@
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 512,
-                        "pattern": "^[^\u0000-\u001f]+$"
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                       },
                       "baseUrl": {
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 2048,
-                        "pattern": "^[^\u0000-\u001f]+$"
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                       },
                       "reasoning": {
                         "type": "boolean"
@@ -14651,13 +14651,13 @@
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 512,
-                        "pattern": "^[^\u0000-\u001f]+$"
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                       },
                       "policyRevision": {
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 512,
-                        "pattern": "^[^\u0000-\u001f]+$"
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                       },
                       "source": {
                         "type": "object",
@@ -14666,13 +14666,13 @@
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 512,
-                            "pattern": "^[^\u0000-\u001f]+$"
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                           },
                           "digest": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 512,
-                            "pattern": "^[^\u0000-\u001f]+$"
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                           }
                         },
                         "required": [
@@ -14691,13 +14691,13 @@
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 512,
-                                "pattern": "^[^\u0000-\u001f]+$"
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                               },
                               "name": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 512,
-                                "pattern": "^[^\u0000-\u001f]+$"
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                               },
                               "api": {
                                 "type": "string",
@@ -14707,13 +14707,13 @@
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 512,
-                                "pattern": "^[^\u0000-\u001f]+$"
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                               },
                               "baseUrl": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 2048,
-                                "pattern": "^[^\u0000-\u001f]+$"
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                               },
                               "reasoning": {
                                 "type": "boolean"
@@ -20453,13 +20453,13 @@
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 512,
-                        "pattern": "^[^\u0000-\u001f]+$"
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                       },
                       "policyRevision": {
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 512,
-                        "pattern": "^[^\u0000-\u001f]+$"
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                       },
                       "source": {
                         "type": "object",
@@ -20468,13 +20468,13 @@
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 512,
-                            "pattern": "^[^\u0000-\u001f]+$"
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                           },
                           "digest": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 512,
-                            "pattern": "^[^\u0000-\u001f]+$"
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                           }
                         },
                         "required": [
@@ -20493,13 +20493,13 @@
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 512,
-                                "pattern": "^[^\u0000-\u001f]+$"
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                               },
                               "name": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 512,
-                                "pattern": "^[^\u0000-\u001f]+$"
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                               },
                               "api": {
                                 "type": "string",
@@ -20509,13 +20509,13 @@
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 512,
-                                "pattern": "^[^\u0000-\u001f]+$"
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                               },
                               "baseUrl": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 2048,
-                                "pattern": "^[^\u0000-\u001f]+$"
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                               },
                               "reasoning": {
                                 "type": "boolean"
@@ -23306,13 +23306,13 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 512,
-              "pattern": "^[^\u0000-\u001f]+$"
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
             },
             "policyRevision": {
               "type": "string",
               "minLength": 1,
               "maxLength": 512,
-              "pattern": "^[^\u0000-\u001f]+$"
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
             },
             "receipt": {
               "type": "object",
@@ -23321,7 +23321,7 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 512,
-                  "pattern": "^[^\u0000-\u001f]+$"
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 },
                 "state": {
                   "type": "string",
@@ -23341,31 +23341,31 @@
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
                     "deviceId": {
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
                     "agentRef": {
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
                     "profileId": {
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
                     "profileRevision": {
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
                     "source": {
                       "type": "object",
@@ -23374,13 +23374,13 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 512,
-                          "pattern": "^[^\u0000-\u001f]+$"
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                         },
                         "digest": {
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 512,
-                          "pattern": "^[^\u0000-\u001f]+$"
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                         }
                       },
                       "required": [
@@ -23396,13 +23396,13 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 2048,
-                          "pattern": "^[^\u0000-\u001f]+$"
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                         },
                         "modelId": {
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 512,
-                          "pattern": "^[^\u0000-\u001f]+$"
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                         }
                       },
                       "required": [
@@ -23415,7 +23415,7 @@
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
                     "runtime": {
                       "type": "object",
@@ -23424,25 +23424,25 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 512,
-                          "pattern": "^[^\u0000-\u001f]+$"
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                         },
                         "packageVersion": {
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 512,
-                          "pattern": "^[^\u0000-\u001f]+$"
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                         },
                         "upstreamBase": {
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 512,
-                          "pattern": "^[^\u0000-\u001f]+$"
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                         },
                         "upstreamCommit": {
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 512,
-                          "pattern": "^[^\u0000-\u001f]+$"
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                         },
                         "forkBuild": {
                           "type": "integer",
@@ -23453,13 +23453,13 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 512,
-                          "pattern": "^[^\u0000-\u001f]+$"
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                         },
                         "requestFormat": {
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 512,
-                          "pattern": "^[^\u0000-\u001f]+$"
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                         },
                         "compilerVersion": {
                           "type": "integer",
@@ -23483,7 +23483,7 @@
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     }
                   },
                   "required": [
@@ -23507,19 +23507,19 @@
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
                     "envelopeDigest": {
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
                     "toolManifestDigest": {
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
                     "requestBytes": {
                       "type": "integer",
@@ -23535,7 +23535,7 @@
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     }
                   },
                   "required": [
@@ -23555,13 +23555,13 @@
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
                     "methodVersion": {
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
                     "authority": {
                       "type": "string",
@@ -23605,13 +23605,13 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 2048,
-                          "pattern": "^[^\u0000-\u001f]+$"
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                         },
                         "modelId": {
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 512,
-                          "pattern": "^[^\u0000-\u001f]+$"
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                         }
                       },
                       "required": [
@@ -23669,7 +23669,7 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 512,
-                  "pattern": "^[^\u0000-\u001f]+$"
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 },
                 "artifactExpiresAt": {
                   "type": "string",
@@ -23743,13 +23743,13 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 512,
-              "pattern": "^[^\u0000-\u001f]+$"
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
             },
             "policyRevision": {
               "type": "string",
               "minLength": 1,
               "maxLength": 512,
-              "pattern": "^[^\u0000-\u001f]+$"
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
             },
             "reason": {
               "type": "string",
@@ -23846,13 +23846,13 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 512,
-          "pattern": "^[^\u0000-\u001f]+$"
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
         },
         "policyRevision": {
           "type": "string",
           "minLength": 1,
           "maxLength": 512,
-          "pattern": "^[^\u0000-\u001f]+$"
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
         },
         "status": {
           "type": "string",
@@ -23869,7 +23869,7 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 512,
-              "pattern": "^[^\u0000-\u001f]+$"
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
             },
             "state": {
               "type": "string",
@@ -23889,31 +23889,31 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 512,
-                  "pattern": "^[^\u0000-\u001f]+$"
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 },
                 "deviceId": {
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 512,
-                  "pattern": "^[^\u0000-\u001f]+$"
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 },
                 "agentRef": {
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 512,
-                  "pattern": "^[^\u0000-\u001f]+$"
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 },
                 "profileId": {
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 512,
-                  "pattern": "^[^\u0000-\u001f]+$"
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 },
                 "profileRevision": {
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 512,
-                  "pattern": "^[^\u0000-\u001f]+$"
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 },
                 "source": {
                   "type": "object",
@@ -23922,13 +23922,13 @@
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
                     "digest": {
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     }
                   },
                   "required": [
@@ -23944,13 +23944,13 @@
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 2048,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
                     "modelId": {
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     }
                   },
                   "required": [
@@ -23963,7 +23963,7 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 512,
-                  "pattern": "^[^\u0000-\u001f]+$"
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 },
                 "runtime": {
                   "type": "object",
@@ -23972,25 +23972,25 @@
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
                     "packageVersion": {
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
                     "upstreamBase": {
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
                     "upstreamCommit": {
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
                     "forkBuild": {
                       "type": "integer",
@@ -24001,13 +24001,13 @@
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
                     "requestFormat": {
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
                     "compilerVersion": {
                       "type": "integer",
@@ -24031,7 +24031,7 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 512,
-                  "pattern": "^[^\u0000-\u001f]+$"
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 }
               },
               "required": [
@@ -24055,19 +24055,19 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 512,
-                  "pattern": "^[^\u0000-\u001f]+$"
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 },
                 "envelopeDigest": {
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 512,
-                  "pattern": "^[^\u0000-\u001f]+$"
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 },
                 "toolManifestDigest": {
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 512,
-                  "pattern": "^[^\u0000-\u001f]+$"
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 },
                 "requestBytes": {
                   "type": "integer",
@@ -24083,7 +24083,7 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 512,
-                  "pattern": "^[^\u0000-\u001f]+$"
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 }
               },
               "required": [
@@ -24103,13 +24103,13 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 512,
-                  "pattern": "^[^\u0000-\u001f]+$"
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 },
                 "methodVersion": {
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 512,
-                  "pattern": "^[^\u0000-\u001f]+$"
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 },
                 "authority": {
                   "type": "string",
@@ -24153,13 +24153,13 @@
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 2048,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
                     "modelId": {
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
-                      "pattern": "^[^\u0000-\u001f]+$"
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     }
                   },
                   "required": [
@@ -24217,7 +24217,7 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 512,
-              "pattern": "^[^\u0000-\u001f]+$"
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
             },
             "artifactExpiresAt": {
               "type": "string",
