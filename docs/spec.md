@@ -370,13 +370,63 @@ cannot be launched without. The refusal lands before the store opens, so it
 writes nothing and collects nothing — the log and its artifacts stay exactly as
 found, pending explicit operator disposition.
 
-On a default install, meanwhile, no record can reach READY at all. The native
-compiler reports `coverage: unknown`, and with no `toolImplementationAuthority`
-configured every implementation identity resolves to
-`executor_identity_unproven`. A real prepared offer against such a record
-declines `preparation_not_ready` — and will keep doing so until G4-count and a
-Salesko resolver land. That is the SDK's shipped default, not a
-misconfiguration.
+`ready` answers exactly one question: CAN THIS PREPARATION BE CONSUMED. It is
+not Host budget admission. The device performs no budget arithmetic anywhere on
+this surface, so a ready receipt states that the evidence holds — never that
+the spend is allowed.
+
+The evidence has three parts, and each is read off a recorded fact rather than
+asserted.
+
+**The native projection contract.** The artifact carries the compiler's own
+`projection` (`{version: 2, kind, digest}`) and its classified `residual` list
+(`{key, valueClass}` per top-level key of D outside P(D)), copied verbatim off
+the envelope. `kind: content_complete` means every context-derived byte of D is
+byte-identically inside P(D) and every remaining key was classified; anything
+else is `projection_unknown`. The SDK re-derives no part of that — the
+classification table belongs to the compiler, and a local copy would be a
+shadow parser for the same semantic fact. The one value it does recompute is
+`projection.digest`, over the envelope's own counted-projection bytes; a
+mismatch refuses the artifact outright (`projection_digest_mismatch`) rather
+than storing a digest that describes bytes nobody has. A value class outside
+the compiler's closed set, or a prepared-request `compilerVersion` other than
+the one this build consumes, is refused the same way
+(`unsupported_compiler_version`). The observed compiler version — never a
+literal this SDK chose — is what the runtime identity binds.
+
+**The Host's accounting ruling.** No residual `valueClass` states, implies or
+denies that a key costs tokens; that is an external accounting fact the
+compiler cannot prove. So the ruling is Host-authored and travels on the
+request as `accountingPolicyRef {revision, ruledRuntime, ruledTarget,
+ruledResidualKeys}`, recorded verbatim on the binding. The SDK checks
+APPLICABILITY and nothing else: every residual key must appear in
+`ruledResidualKeys` (`residual_not_ruled` otherwise), and the ruling must name
+this preparation's own runtime identity and endpoint/model
+(`accounting_policy_inapplicable` otherwise). A request that names no ruling
+carries `accounting_policy_missing`; there is no default, because "nobody
+ruled" and "everything is ruled" are different facts.
+
+**The count.** Counter evidence is required on a counted record
+(`counter_missing` otherwise) and carries `providerEvidence {projectionDigest,
+endpoint, modelId, asserted {httpStatus, usageFields, responseDigest}}`. The
+service compares `projectionDigest` against the artifact's own projection
+digest and the endpoint/model against the counted target; a missing or
+mismatched one refuses the count as `counter_unavailable` rather than
+persisting a number bound to a projection nobody can name. What the provider
+asserted is stored and never second-guessed — re-deriving a usage number
+locally is exactly the shadow accounting this surface exists to avoid. The
+receipt carries no output or whole-request field: the Host holds its own
+request, and `binding.requestDigest` ties the two. A `test_fixture` authority
+keeps `counter_authority_not_production` on the receipt forever, so an offline
+suite can never look like production accounting evidence.
+
+On a default install, meanwhile, no record can reach READY at all: with no
+`toolImplementationAuthority` configured every implementation identity resolves
+to `executor_identity_unproven`, and an SDK with no Host accounting ruling adds
+`accounting_policy_missing`. A real prepared offer against such a record
+declines `preparation_not_ready` — and will keep doing so until a production
+counter, a Host ruling and a Salesko resolver land. That is the SDK's shipped
+default, not a misconfiguration.
 
 ### Post-admission runtime failure authority
 

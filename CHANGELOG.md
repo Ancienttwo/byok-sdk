@@ -106,6 +106,82 @@ and the D2 version number belongs to a separate SDK release contract.
   pack smoke imports the sub-path from the installed tarball and re-checks the
   same substrings there.
 
+- **Changed (client, protocol, unreleased contract)** — a prepared input now
+  carries the native compiler's structural projection contract instead of an
+  opaque coverage label. `InputPreparationArtifactSummaryV1.coverage` is gone,
+  replaced by `projection` (`{version: 2, kind: 'content_complete' |
+  'unknown', digest}`) and `residual` (per remaining top-level key of D, its
+  `{key, valueClass}` classification), both copied verbatim off the envelope.
+
+  A single string could not be checked. `coverage: "unknown"` was the only
+  value the fork ever produced, so `compiler_coverage_unknown` sat on every
+  receipt forever and said nothing about WHICH part of D was uncounted. The
+  structural contract says exactly that, per key, and the SDK re-derives none
+  of it: the classification table belongs to the compiler, and a second local
+  copy would be a shadow parser for the same semantic fact. The one value this
+  SDK recomputes is `projection.digest`, over the envelope's own
+  counted-projection bytes — a digest that only ever travels beside the bytes
+  it describes is not a check — and a mismatch refuses the artifact
+  (`projection_digest_mismatch`), as does a value class outside the compiler's
+  closed set.
+
+  `compilerVersion` is no longer a literal claim about the native. The SDK
+  states a supported constant (`SUPPORTED_PREPARED_COMPILER_VERSION = 2`),
+  binds that observed value into the runtime identity where `1` was hardcoded,
+  and refuses any envelope compiled to another contract with
+  `unsupported_compiler_version`. `verifyCompiledPreparedInput` is exported so
+  those refusals are reachable without an installed fork — a boundary you can
+  only cross by compiling against one particular install is a boundary whose
+  refusals are untestable on the day they matter.
+
+- **Added (client, protocol, unreleased contract)** — Host-authored accounting
+  applicability, and readiness reasons that name what is actually missing.
+
+  No residual `valueClass` states, implies or denies that a key costs tokens;
+  that is an external accounting fact the compiler cannot prove and this SDK
+  must not invent. The ruling therefore arrives from the Host as
+  `accountingPolicyRef {revision, ruledRuntime, ruledTarget,
+  ruledResidualKeys}` on the request and the `agent.input.preparation` payload,
+  and is recorded verbatim on the receipt's binding. The device checks
+  APPLICABILITY only — every residual key named, and the ruling made for this
+  runtime and this endpoint/model — and never performs budget arithmetic.
+
+  `compiler_coverage_unknown` is replaced by `projection_unknown`, and
+  `residual_not_ruled`, `accounting_policy_missing`,
+  `accounting_policy_inapplicable` and `counter_missing` join the closed set.
+  There is no default ruling: a request that names none stays unready, because
+  "nobody ruled" and "everything is ruled" are different facts. `ready` is
+  documented as "the preparation can be consumed", explicitly separate from
+  Host budget admission.
+
+  Counter evidence gains a required `providerEvidence {projectionDigest,
+  endpoint, modelId, asserted {httpStatus, usageFields, responseDigest}}`. The
+  service compares the projection digest and the endpoint/model against the
+  compiled artifact and refuses a mismatch as `counter_unavailable`: a number
+  whose projection nobody can name is not evidence about this preparation. What
+  the provider asserted is stored and never second-guessed, and no output or
+  whole-request field joins the receipt — the Host holds its own request and
+  `binding.requestDigest` is the check.
+
+  Two validators move together, because there is no single schema authority for
+  this surface: the hand-written local parse in `daemon/control-protocol.ts`
+  and the zod wire schemas in `@byok-sdk/protocol`. The existing type-level
+  assignability assertion in `daemon/input-preparation-remote.ts` is extended
+  to readiness reasons, so adding one to a single side is a compile error
+  rather than a receipt the cloud rejects at parse time.
+
+  `INPUT_PREPARATION_VERSION` 2 -> 3 and `INPUT_PREPARATION_RECORD_VERSION`
+  3 -> 4. This is a REMOVAL, so a record at an older version is refused on
+  replay and left untouched pending explicit operator disposition, exactly as
+  before: nothing can honestly decide whether a record frozen under an opaque
+  label had a content-complete projection, and inventing an answer is the
+  shadow accounting the whole contract forbids.
+
+  Golden regenerated deliberately: the input-preparation wire surface is an
+  unreleased candidate contract added after the freeze (no released version
+  carries it — see 0.18.0, itself an unpublished release candidate), so this
+  changes no shape a released peer speaks. `PROTOCOL_VERSION` stays 1.
+
 - **Fixed (daemon, unreleased contract)** — an attested artifact's path
   identity is now the INODE behind a symlink-free name, not the name
   `realpath` returns for it. `resolveToolImplementationIdentity` and the
