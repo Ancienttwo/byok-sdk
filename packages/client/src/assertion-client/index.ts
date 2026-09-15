@@ -20,9 +20,9 @@
  *
  * So this entry re-exports exactly the two request functions and their public
  * option/result types from `../daemon/assertion-client`, whose own transitive
- * imports are only `@byok-sdk/core`, `../bin/control-client`,
- * `../daemon/control-protocol` and `../daemon/store` (plus `zod` through core's
- * protocol types). Nothing else may be added here.
+ * imports are only `@byok-sdk/core`, `@byok-sdk/protocol`,
+ * `../bin/control-client`, `../daemon/control-protocol` and `../daemon/store`
+ * (plus `zod` through core's protocol types). Nothing else may be added here.
  *
  * Two things are deliberately absent, and this file is the record of why.
  *

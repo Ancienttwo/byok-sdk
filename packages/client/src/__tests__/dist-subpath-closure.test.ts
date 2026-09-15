@@ -23,6 +23,13 @@
  * 4. Every static import specifier is a node builtin, `@byok-sdk/core`,
  *    `@byok-sdk/protocol`, or a relative path.
  *
+ * Rules 1-4 are applied to the guarded entry AND to every file it reaches by a
+ * relative import that resolves inside `dist/`, each visited once, so a shared
+ * chunk cannot launder a forbidden edge past the "or a relative path" clause.
+ * Today that closure is one file per entry, because `tsup.config.ts` sets
+ * `splitting: false` — which `the build configuration the scan depends on`
+ * asserts by name, so a future chunk split is caught by either half.
+ *
  * KNOWN LIMITATION, stated rather than hidden: this is a regex scan over the
  * emitted text, not a parse. It cannot see a call assembled at runtime
  * (`globalThis['ev' + 'al']`), an indirect alias (`const f = Function; f(...)`),
@@ -30,6 +37,13 @@
  * realistic failure — an ordinary import landing in a guarded entry's graph and
  * silently dragging a code-generating dependency in — not a sandbox. The string
  * checks are correspondingly substring checks, deliberately blunt.
+ *
+ * The other half of that limitation is the workspace boundary: `@byok-sdk/core`
+ * and `@byok-sdk/protocol` are ALLOWLISTED as specifiers, not scanned. Their
+ * own dists are never read here, so a code-generating dependency landing inside
+ * either of them is invisible to this suite. They are in-repo packages with
+ * their own build and their own tests; the guard is scoped to this package's
+ * emitted graph.
  *
  * NON-VACUITY: the same checker is run against `dist/index.js` at the bottom of
  * this file and MUST report hits. A checker that passes everything is worse
@@ -166,6 +180,56 @@ function describeHits(hits: readonly Hit[]): string {
   return hits.map((hit) => `  ${hit.rule} @ line ${hit.line}: ${hit.excerpt}`).join('\n');
 }
 
+/**
+ * Resolve a relative specifier declared inside `fromRelPath` to a path under
+ * `dist/`, or `undefined` if it escapes `dist/` or does not exist on disk.
+ *
+ * `splitting: false` (asserted below) means a guarded entry is a single
+ * self-contained file today, so this normally finds nothing. It exists so that
+ * the day a chunk split lands, the chunk is scanned instead of silently
+ * admitted by the "or a relative path" clause of rule 4.
+ */
+function resolveInsideDist(fromRelPath: string, specifier: string): string | undefined {
+  const base = path.resolve(path.dirname(path.join(DIST, fromRelPath)), specifier);
+  for (const candidate of [base, `${base}.js`, `${base}.mjs`, path.join(base, 'index.js')]) {
+    const relative = path.relative(DIST, candidate);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) continue;
+    if (existsSync(candidate) && !candidate.endsWith(path.sep)) {
+      try {
+        readFileSync(candidate, 'utf8');
+      } catch {
+        continue;
+      }
+      return relative;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Every file reachable from a guarded entry by relative static imports that
+ * stay inside `dist/`, entry first, each visited exactly once.
+ */
+function distClosure(entryRelPath: string): { readonly file: string; readonly source: string }[] {
+  const visited = new Set<string>();
+  const queue = [entryRelPath];
+  const files: { file: string; source: string }[] = [];
+  while (queue.length > 0) {
+    const relative = queue.shift() as string;
+    const key = relative.split(path.sep).join('/');
+    if (visited.has(key)) continue;
+    visited.add(key);
+    const source = readFileSync(path.join(DIST, relative), 'utf8');
+    files.push({ file: key, source });
+    for (const specifier of staticImportSpecifiers(source)) {
+      if (!specifier.startsWith('.')) continue;
+      const next = resolveInsideDist(relative, specifier);
+      if (next !== undefined) queue.push(next);
+    }
+  }
+  return files;
+}
+
 const DIST_PRESENT = existsSync(path.join(DIST, 'index.js'));
 if (!DIST_PRESENT) {
   // Loud on purpose. A closure guard that silently passes on a missing build is
@@ -177,18 +241,44 @@ if (!DIST_PRESENT) {
   );
 }
 
+// Not gated on the build: this reads the build CONFIG, and it is the first
+// half of the chunk-split defence. `splitting: false` is what makes each
+// guarded entry a single self-contained file, so the scan below sees the whole
+// graph. The second half is `distClosure`, which follows a relative import
+// into dist/ if one ever appears anyway. Either alone would be enough; both
+// are here so a future `splitting: true` is caught by a named assertion rather
+// than by inference from a passing scan.
+describe('the build configuration the scan depends on', () => {
+  it('keeps tsup `splitting: false`, so each guarded entry is one self-contained file', () => {
+    const config = readFileSync(path.join(PACKAGE_ROOT, 'tsup.config.ts'), 'utf8');
+    expect(config).toMatch(/\bsplitting\s*:\s*false\b/);
+    expect(config).not.toMatch(/\bsplitting\s*:\s*true\b/);
+  });
+});
+
 describe.skipIf(!DIST_PRESENT)('the daemon-free dist sub-path closures', () => {
   for (const { file, allowedSubstrings } of GUARDED) {
     describe(`dist/${file}`, () => {
-      const source = DIST_PRESENT ? readFileSync(path.join(DIST, file), 'utf8') : '';
+      // The entry plus every dist-internal file it reaches by a relative
+      // import. Both assertions below apply the same rules to the whole
+      // closure, so a shared chunk cannot launder a forbidden edge.
+      const closure = DIST_PRESENT ? distClosure(file) : [];
 
       it('generates no code at runtime and carries no trace of the refused graph', () => {
-        const hits = scanBundle(source, allowedSubstrings);
-        expect(hits.length === 0 ? '' : `dist/${file}:\n${describeHits(hits)}`).toBe('');
+        const report = closure
+          .map(({ file: member, source }) => ({ member, hits: scanBundle(source, allowedSubstrings) }))
+          .filter(({ hits }) => hits.length > 0)
+          .map(({ member, hits }) => `dist/${member}:\n${describeHits(hits)}`)
+          .join('\n');
+        expect(report).toBe('');
       });
 
       it('statically imports only node builtins, @byok-sdk/core, @byok-sdk/protocol, or relative paths', () => {
-        expect(disallowedSpecifiers(source)).toEqual([]);
+        const report = closure
+          .map(({ file: member, source }) => ({ member, bad: disallowedSpecifiers(source) }))
+          .filter(({ bad }) => bad.length > 0)
+          .map(({ member, bad }) => `dist/${member}: ${bad.join(', ')}`);
+        expect(report).toEqual([]);
       });
     });
   }
@@ -212,10 +302,18 @@ describe.skipIf(!DIST_PRESENT)('the daemon-free dist sub-path closures', () => {
   it('reports hits on dist/index.js, proving the checker is not vacuous', () => {
     const rootSource = readFileSync(path.join(DIST, 'index.js'), 'utf8');
     const hits = scanBundle(rootSource);
-    const decisive = hits.filter(
-      (hit) => hit.rule.includes('@modelcontextprotocol/client') || hit.rule.includes('pi-coding-agent'),
-    );
-    expect(decisive.length).toBeGreaterThan(0);
+    // Per family, not an OR: an OR passes while one family's detector rots.
+    // The non-literal-`import(`/`require(` family is deliberately absent —
+    // dist/index.js has no computed import today, so asserting it here would
+    // assert a fact about the root bundle rather than about the checker. The
+    // two substring families below are the ones that exist.
+    const mcpClientHits = hits.filter((hit) => hit.rule.includes('@modelcontextprotocol/client'));
+    const piHits = hits.filter((hit) => hit.rule.includes('pi-coding-agent'));
+    expect({
+      '@modelcontextprotocol/client': mcpClientHits.length > 0,
+      'pi-coding-agent': piHits.length > 0,
+    }).toEqual({ '@modelcontextprotocol/client': true, 'pi-coding-agent': true });
+    const decisive = [...mcpClientHits, ...piHits];
     expect(disallowedSpecifiers(rootSource)).toContain('@modelcontextprotocol/client');
     console.log(
       `[dist-subpath-closure] negative control: dist/index.js reports ${hits.length} hit(s); ` +

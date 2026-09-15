@@ -15,8 +15,8 @@ and the D2 version number belongs to a separate SDK release contract.
   `@modelcontextprotocol/client`, whose published dist embeds an `ajv` provider
   built on `new Function`. A host running its toolset servers under a
   Content-Security-Policy could not call the function it needed because of code
-  it never invoked. The new entry's emitted bundle imports only node builtins
-  and `@byok-sdk/core`.
+  it never invoked. The new entry's emitted bundle imports only node builtins,
+  `@byok-sdk/core` and `@byok-sdk/protocol`.
 
   Nothing is removed: the root entry still exports both functions, and
   `connectControlClient` remains unreachable from every entry. The new
