@@ -1,22 +1,22 @@
 # Task Review: agent-gateway-session-probe
 
-> **Status**: Pending
+> **Status**: Accepted
 > **Plan**: plans/plan-20260914-1028-agent-gateway-session-probe.md
 > **Contract**: tasks/contracts/20260914-1028-agent-gateway-session-probe.contract.md
 > **Notes File**: tasks/notes/20260914-1028-agent-gateway-session-probe.notes.md
-> **Checks File**: _ops/agent-gateway/checks.json
-> **Recommendation**: fail
+> **Checks File**: .ai/harness/checks/latest.json
+> **Recommendation**: pass
 > **Review Rubric Version**: 2
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:2f75264d50fc063ce50cb7dc29c628b2c178d9afdb3d480cd5e162b78fb44185
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
+> **Reviewed Target Revision**: d4fd593869ba9f624a0d71999923185aa6080d22
 
 ## Human Review Card
 
-- Verdict: native experiment PASS; historical terminal-plan and local architecture-proof blockers are cleared; formal acceptance pending.
+- Verdict: native experiment PASS; historical terminal-plan and local architecture-proof blockers are cleared; Codex semantic acceptance PASS for the frozen subject.
 - Change type: eval-only.
 - Intended/actual scope: one Plan/contract/notes/review set, research findings, four probe scripts and the existing activation change to tasks/todos.md. No product source/dependency changes.
-- Commands passed: preflight; native exchange; offline result verifier; Python syntax; whitespace; contract verification 8/8.
+- Commands passed: preflight; native exchange; offline result verifier; Python syntax; whitespace; contract verification 10/10.
 - Residual risk: own-process session binding is not general enrollment/authentication. Settled reconnect is not lost-response or native-process-restart recovery. No product or release acceptance claim.
 - Rollback: the isolated probe worktree contains only local, uncommitted task artifacts. No external release actions occurred.
 
@@ -36,23 +36,24 @@
 - Process readback found no remaining processes associated with `/tmp/byok-gateway-probe-15wbgwsz`. Raw logs and member leases remain private; owned Codex thread deleted and Pi socket removed.
 - Initial startup failure was probe-only MCP override quoting, before any native input. Recorded separately; final native run used corrected frozen source. No unknown-delivery resend.
 
-## Closure checks pending
+## Closure checks
 
-Historical terminal-plan limit was cleared by owner-approved sealed-terminal archival. Architecture proof-only drift was caused by absent worktree-local CodeGraph; local indexing and public reconciliation restored the existing proof and returned noop without source/model/document changes. Final canonical verification and semantic acceptance remain pending.
+Historical terminal-plan limit was cleared by owner-approved sealed-terminal archival. Architecture proof-only drift was caused by absent worktree-local CodeGraph; local indexing and public reconciliation restored the existing proof and returned noop without source/model/document changes. Canonical verify-sprint prepare-acceptance PASS, contract 10/10; gatekeeper gateway_acceptance returned PASS for dcba770b / subject 2f75264d50fc063ce50cb7dc29c628b2c178d9afdb3d480cd5e162b78fb44185 against main d4fd5938.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Codex
+> **Source**: codex-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:2f75264d50fc063ce50cb7dc29c628b2c178d9afdb3d480cd5e162b78fb44185
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: d4fd593869ba9f624a0d71999923185aa6080d22
+> **Verification Evidence SHA256**: sha256:b578560e0bcb1d59caa914060ccde8aab54b5b478ad7330f0d0dfbeb8826d4f7
+> **Issued At**: 2026-09-15T05:13:51.408Z
 
-This review records scoped observed evidence and an explicit closure blocker; it does not impersonate canonical semantic acceptance.
+- Summary: PASS by gateway_acceptance: frozen dcba770b probe closeout against main d4fd5938. All 18 files within scope; current canonical verification passes, original native evidence is source-bound, archival preserves historical limits, and no production or general session-authentication claims.
+- Findings: none
 
 ## Retest Steps
 
