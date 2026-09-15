@@ -5,6 +5,64 @@
 Deliberately not filed under 0.18.0: none of this is in a published artifact,
 and the D2 version number belongs to a separate SDK release contract.
 
+- **Breaking (control contract)** — a preparation request no longer carries a
+  tool manifest. This changes the UNRELEASED candidate contract relative to
+  0.18; no published artifact speaks the old shape.
+
+  `InputPreparationRequestV1` loses `toolExecutors`, `snapshot.tools` and
+  `snapshot.prompt.selectedTools`, and gains `requiredToolsets` and
+  `permissionMode`. `INPUT_PREPARATION_VERSION` is `2`, so a durable record
+  written under the old shape is refused on replay rather than read through a
+  compatibility branch — its artifact was frozen over a manifest a caller
+  stated, and this version's rule is that no caller may state one. A request
+  still carrying a retired key is refused as `unsupported_input` naming that
+  key, not as a generic shape error: a caller sending one is asserting an
+  authority that moved to the device, and it should hear which.
+
+  `agent.input.preparation` gains the same required `permissionMode`, and the
+  receipt's artifact summary gains `observationDigest`, `toolBindingDigest` and
+  `toolImplementationKinds`. The binding records the admitted mode. Two
+  rejection reasons join the closed set — `launch_boundary_unavailable` and
+  `observation_drift` — plus `permission_mode_denied` for a mode above the
+  device's ceiling.
+
+- **Breaking (daemon seam)** — `daemon/prepared-tool-surface.ts` is the one
+  entry that assembles a preparation's tool manifest, and
+  `InputPreparationServiceOptions.toolSurface` is required with no default.
+
+  Both preparation paths — the local `input_preparation.prepare` control call
+  and the remote `agent.input.preparation` envelope — reach it through
+  `InputPreparationService.prepare`, and `create-daemon.ts`'s former
+  `observeRequiredToolsets` is deleted rather than kept beside it. The entry
+  resolves the trusted launch directory with the same functions
+  `TaskRunner.handleOffer` uses, resolves one implementation identity per
+  projected server, probes each server through that binding with its identity
+  (so the shared pre-spawn gate re-measures an attested one), applies the
+  admitted permission mode ONCE, and projects the model-visible schemas and the
+  executor fingerprints from that same filtered observation.
+
+  The declared mode is the requester's INTENT. It is admitted through the same
+  `computeEffectivePolicy` merge that admits a task offer's `policy.mode`
+  against `DaemonConfig.permissionDefaults`; a mode above the ceiling refuses
+  before any spawn and is never narrowed to one the device would allow.
+  `ToolExecutorsRequest` now requires `implementations`, so an MCP fingerprint
+  binds the resolved identity whole instead of a hard-coded unavailable
+  constant, and `executor_identity_unproven` is emitted from the recorded
+  per-tool kinds instead of asserted unconditionally.
+
+  Assembly runs after the durable reserve, so a re-delivery answers from the
+  record without a second probe. A repeat whose recorded artifact exists is
+  checked against the spawn-free half of its evidence and refused with
+  `observation_drift` if the launch attestation, the toolset definition
+  revisions or an implementation identity moved.
+
+  **PARTIAL** — the prepared NATIVE tool set is not connected to preparation.
+  Pi's own tools are selected by a runtime policy a task-free preparation never
+  resolves, so the entry passes `nativeTools: []` and a preparation counts the
+  MCP half only; the final Main set (Q1 = policy-filtered native + MCP) remains
+  the runtime's decision. This is pinned by a test, so removing the limit must
+  change one.
+
 - **Breaking (adapter seam)** — an attested MCP toolset server is re-measured
   before every spawn of it, and a mismatch refuses the spawn.
 

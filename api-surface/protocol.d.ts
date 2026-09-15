@@ -1508,6 +1508,12 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             contentHash: z.ZodString;
         }, z.core.$strict>]>;
         requiredToolsets: z.ZodArray<z.ZodString>;
+        permissionMode: z.ZodEnum<{
+            auto: "auto";
+            confirm: "confirm";
+            plan: "plan";
+            readonly: "readonly";
+        }>;
     }, z.core.$strict>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -2843,6 +2849,12 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 contentHash: z.ZodString;
             }, z.core.$strict>]>;
             requiredToolsets: z.ZodArray<z.ZodString>;
+            permissionMode: z.ZodEnum<{
+                auto: "auto";
+                confirm: "confirm";
+                plan: "plan";
+                readonly: "readonly";
+            }>;
         }, z.core.$strict>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -4050,6 +4062,12 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 contentHash: z.ZodString;
             }, z.core.$strict>]>;
             requiredToolsets: z.ZodArray<z.ZodString>;
+            permissionMode: z.ZodEnum<{
+                auto: "auto";
+                confirm: "confirm";
+                plan: "plan";
+                readonly: "readonly";
+            }>;
         }, z.core.$strict>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -4635,6 +4653,12 @@ export declare const InputPreparationCompletionRequestSchema: z.ZodDiscriminated
                 modelId: z.ZodString;
             }, z.core.$strict>;
             policyRevision: z.ZodString;
+            permissionMode: z.ZodEnum<{
+                auto: "auto";
+                confirm: "confirm";
+                plan: "plan";
+                readonly: "readonly";
+            }>;
             runtime: z.ZodObject<{
                 packageName: z.ZodString;
                 packageVersion: z.ZodString;
@@ -4654,6 +4678,9 @@ export declare const InputPreparationCompletionRequestSchema: z.ZodDiscriminated
             requestBytes: z.ZodNumber;
             projectionBytes: z.ZodNumber;
             coverage: z.ZodString;
+            observationDigest: z.ZodString;
+            toolBindingDigest: z.ZodString;
+            toolImplementationKinds: z.ZodRecord<z.ZodString, z.ZodString>;
         }, z.core.$strict>>;
         counter: z.ZodOptional<z.ZodObject<{
             method: z.ZodString;
@@ -4713,8 +4740,11 @@ export declare const InputPreparationCompletionRequestSchema: z.ZodDiscriminated
         deadline_elapsed: "deadline_elapsed";
         durable_write_failed: "durable_write_failed";
         input_preparation_unconfigured: "input_preparation_unconfigured";
+        launch_boundary_unavailable: "launch_boundary_unavailable";
         limit_exceeded: "limit_exceeded";
         not_found: "not_found";
+        observation_drift: "observation_drift";
+        permission_mode_denied: "permission_mode_denied";
         policy_revision_mismatch: "policy_revision_mismatch";
         request_conflict: "request_conflict";
         runtime_identity_unavailable: "runtime_identity_unavailable";
@@ -4776,6 +4806,12 @@ export declare const InputPreparationReadbackSchema: z.ZodObject<{
                 modelId: z.ZodString;
             }, z.core.$strict>;
             policyRevision: z.ZodString;
+            permissionMode: z.ZodEnum<{
+                auto: "auto";
+                confirm: "confirm";
+                plan: "plan";
+                readonly: "readonly";
+            }>;
             runtime: z.ZodObject<{
                 packageName: z.ZodString;
                 packageVersion: z.ZodString;
@@ -4795,6 +4831,9 @@ export declare const InputPreparationReadbackSchema: z.ZodObject<{
             requestBytes: z.ZodNumber;
             projectionBytes: z.ZodNumber;
             coverage: z.ZodString;
+            observationDigest: z.ZodString;
+            toolBindingDigest: z.ZodString;
+            toolImplementationKinds: z.ZodRecord<z.ZodString, z.ZodString>;
         }, z.core.$strict>>;
         counter: z.ZodOptional<z.ZodObject<{
             method: z.ZodString;
@@ -4845,8 +4884,11 @@ export declare const InputPreparationReadbackSchema: z.ZodObject<{
         deadline_elapsed: "deadline_elapsed";
         durable_write_failed: "durable_write_failed";
         input_preparation_unconfigured: "input_preparation_unconfigured";
+        launch_boundary_unavailable: "launch_boundary_unavailable";
         limit_exceeded: "limit_exceeded";
         not_found: "not_found";
+        observation_drift: "observation_drift";
+        permission_mode_denied: "permission_mode_denied";
         policy_revision_mismatch: "policy_revision_mismatch";
         request_conflict: "request_conflict";
         runtime_identity_unavailable: "runtime_identity_unavailable";
@@ -5008,8 +5050,8 @@ export { AgentEgressPolicySchema, AgentEgressActivityPolicySchema, AgentReliable
 export type { AgentEgressPolicy, AgentEgressActivityPolicy, AgentReliableQuotaPolicy, ContentReadPolicy, AgentEgressLane, AgentEgressDropReason, AgentMessageContentType, AgentMessageEgressRequirement, AgentMessageServerContext, AgentContentReadSurface, AgentContentActorKind, AgentContentActor, AgentContentDecodeAs, AgentContentReadDecision, AgentContentReadDenialReason, } from './agent-egress';
 export { AGENT_HOME_PROJECTION_CAPABILITY, AGENT_HOME_PROJECTION_MAX_BYTES, AGENT_HOME_PROJECTION_PROFILE_REVISION_MAXIMUM, AgentHomeProjectionProfileRevisionSchema, AgentHomeProjectionHashSchema, AgentHomeProjectionOutcomeSchema, AgentHomeProjectionValueSchema, } from './agent-home-projection';
 export type { AgentHomeProjectionProfileRevision, AgentHomeProjectionHash, AgentHomeProjectionOutcome, AgentHomeProjectionValue, } from './agent-home-projection';
-export { AGENT_INPUT_PREPARATION_CAPABILITY, InputPreparationContentHashSchema, InputPreparationPolicyRevisionSchema, InputPreparationProfileIdSchema, InputPreparationSourceSchema, InputPreparationModelCostSchema, InputPreparationModelSchema, InputPreparationOptionsSchema, InputPreparationSelectionSchema, InputPreparationContextFileSchema, InputPreparationDocsPathsSchema, InputPreparationPromptSnapshotSchema, InputPreparationUserMessageSchema, InputPreparationContextDocumentSchema, InputPreparationStateSchema, InputPreparationReadinessReasonSchema, InputPreparationRuntimeIdentitySchema, InputPreparationCounterTargetSchema, InputPreparationCounterEvidenceSchema, InputPreparationArtifactSummarySchema, InputPreparationBindingSchema, InputPreparationReceiptSummarySchema, InputPreparationRejectionReasonSchema, } from './input-preparation';
-export type { InputPreparationSource, InputPreparationModel, InputPreparationOptions, InputPreparationSelection, InputPreparationContextDocument, InputPreparationState, InputPreparationReadinessReason, InputPreparationRuntimeIdentity, InputPreparationReceiptSummary, InputPreparationRejectionReason, } from './input-preparation';
+export { AGENT_INPUT_PREPARATION_CAPABILITY, InputPreparationContentHashSchema, InputPreparationPermissionModeSchema, InputPreparationPolicyRevisionSchema, InputPreparationProfileIdSchema, InputPreparationSourceSchema, InputPreparationModelCostSchema, InputPreparationModelSchema, InputPreparationOptionsSchema, InputPreparationSelectionSchema, InputPreparationContextFileSchema, InputPreparationDocsPathsSchema, InputPreparationPromptSnapshotSchema, InputPreparationUserMessageSchema, InputPreparationContextDocumentSchema, InputPreparationStateSchema, InputPreparationReadinessReasonSchema, InputPreparationRuntimeIdentitySchema, InputPreparationCounterTargetSchema, InputPreparationCounterEvidenceSchema, InputPreparationToolImplementationKindSchema, InputPreparationArtifactSummarySchema, InputPreparationBindingSchema, InputPreparationReceiptSummarySchema, InputPreparationRejectionReasonSchema, } from './input-preparation';
+export type { InputPreparationPermissionMode, InputPreparationSource, InputPreparationModel, InputPreparationOptions, InputPreparationSelection, InputPreparationContextDocument, InputPreparationState, InputPreparationReadinessReason, InputPreparationRuntimeIdentity, InputPreparationReceiptSummary, InputPreparationRejectionReason, } from './input-preparation';
 export { AGENT_MEMORY_PROJECTION_CAPABILITY, AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES, AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE, AgentMemoryProjectionGrantRefSchema, AgentMemoryProjectionSessionRefSchema, AgentMemoryProjectionWriterEpochSchema, AgentMemoryProjectionSourceSeqSchema, AgentMemoryProjectionSnapshotSchema, AgentMemoryProjectionMeteringReceiptSchema, AgentMemoryProjectionMutationSchema, AgentMemoryProjectionReceiptSchema, AgentMemoryProjectionEraseResultSchema, agentMemoryProjectionBase64UrlByteLength, } from './agent-memory-projection';
 export type { AgentMemoryProjectionGrantRef, AgentMemoryProjectionSessionRef, AgentMemoryProjectionWriterEpoch, AgentMemoryProjectionSourceSeq, AgentMemoryProjectionSnapshot, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionEraseResult, } from './agent-memory-projection';
 export { HOST_MCP_TASK_CONTEXT_CAPABILITY } from './task-assertion';
@@ -5077,6 +5119,26 @@ export declare const InputPreparationPolicyRevisionSchema: z.ZodString;
  * anything is compiled.
  */
 export declare const InputPreparationProfileIdSchema: z.ZodString;
+/**
+ * The permission mode a preparation is compiled FOR.
+ *
+ * It is the same closed set every task policy uses (`permission.ts`'s
+ * `PERMISSION_MODES`), spelled here as its own schema because a preparation
+ * carries a mode without carrying a policy: there is no task, no grant and no
+ * approval seam on this wire. The mode selects which tools the device's own
+ * observation projects into the counted manifest, and nothing else.
+ *
+ * Declared by the requester rather than inferred by the device: a device that
+ * guessed would be counting a manifest the requester never asked for, and a
+ * device that defaulted would silently count the widest one.
+ */
+export declare const InputPreparationPermissionModeSchema: z.ZodEnum<{
+    auto: "auto";
+    confirm: "confirm";
+    plan: "plan";
+    readonly: "readonly";
+}>;
+export type InputPreparationPermissionMode = z.infer<typeof InputPreparationPermissionModeSchema>;
 /**
  * The canonical Host source snapshot this input was assembled from. Both
  * values are Host authority carried verbatim so the receipt binds the exact
@@ -5203,15 +5265,19 @@ export declare const InputPreparationDocsPathsSchema: z.ZodObject<{
 /**
  * Explicit, already-authorized inputs for the native system prompt renderer.
  *
- * `selectedTools`/`toolSnippets` are PROMPT TEXT the Host authored — they are
- * not the model-visible tool schemas, which the device observes locally and
- * the Host never states (see this module's rule 1).
+ * `toolSnippets` is PROMPT TEXT the Host authored — it is not the
+ * model-visible tool schemas, which the device observes locally and the Host
+ * never states (see this module's rule 1).
+ *
+ * `selectedTools` is deliberately absent for the same reason one level up: the
+ * native contract requires that list to equal the model-visible manifest
+ * exactly, so a Host stating it would be stating the manifest. The device
+ * fills it from its own assembled tool surface.
  */
 export declare const InputPreparationPromptSnapshotSchema: z.ZodObject<{
     customPrompt: z.ZodOptional<z.ZodString>;
     appendSystemPrompt: z.ZodOptional<z.ZodString>;
     cwd: z.ZodString;
-    selectedTools: z.ZodArray<z.ZodString>;
     toolSnippets: z.ZodRecord<z.ZodString, z.ZodString>;
     promptGuidelines: z.ZodArray<z.ZodString>;
     contextFiles: z.ZodArray<z.ZodObject<{
@@ -5247,7 +5313,6 @@ export declare const InputPreparationContextDocumentSchema: z.ZodObject<{
         customPrompt: z.ZodOptional<z.ZodString>;
         appendSystemPrompt: z.ZodOptional<z.ZodString>;
         cwd: z.ZodString;
-        selectedTools: z.ZodArray<z.ZodString>;
         toolSnippets: z.ZodRecord<z.ZodString, z.ZodString>;
         promptGuidelines: z.ZodArray<z.ZodString>;
         contextFiles: z.ZodArray<z.ZodObject<{
@@ -5340,7 +5405,37 @@ export declare const InputPreparationCounterEvidenceSchema: z.ZodObject<{
     calledAt: z.ZodISODateTime;
     completedAt: z.ZodISODateTime;
 }, z.core.$strict>;
-/** Identities and sizes only. Never D, never P(D), never the snapshot. */
+/**
+ * What the device established about the implementation behind ONE
+ * model-visible tool: `attested`, or `unavailable:<reason>` naming which of
+ * the SDK's closed unavailable reasons applies.
+ *
+ * A kind, never the identity itself: an install path, a closure digest or a
+ * stat tuple is device-local filesystem detail, and a receipt discloses
+ * identity facts, not the machine's layout.
+ */
+export declare const InputPreparationToolImplementationKindSchema: z.ZodString;
+/**
+ * Identities and sizes only. Never D, never P(D), never the snapshot.
+ *
+ * The three tool-surface fields are what make drift between preparation and
+ * launch checkable rather than assumed:
+ *
+ * - `observationDigest` binds everything the device OBSERVED — the projected
+ *   tools, their executor fingerprints, the launch attestation and the
+ *   implementation identities — so a launch whose live observation differs is
+ *   a different manifest, whatever the schemas say.
+ * - `toolBindingDigest` binds only the facts that can be re-derived WITHOUT
+ *   spawning a server: the launch attestation, the toolset definition
+ *   revisions and the implementation identities. It is what a replay of an
+ *   already-recorded requestId compares against, because re-probing to detect
+ *   drift would be the second executor fact the idempotency key exists to
+ *   prevent.
+ * - `toolImplementationKinds` states, per model-visible tool name, whether the
+ *   implementation behind it was attested. It is the evidence behind
+ *   `executor_identity_unproven`, so a reader does not have to take that
+ *   readiness reason on trust.
+ */
 export declare const InputPreparationArtifactSummarySchema: z.ZodObject<{
     requestDigest: z.ZodString;
     envelopeDigest: z.ZodString;
@@ -5348,6 +5443,9 @@ export declare const InputPreparationArtifactSummarySchema: z.ZodObject<{
     requestBytes: z.ZodNumber;
     projectionBytes: z.ZodNumber;
     coverage: z.ZodString;
+    observationDigest: z.ZodString;
+    toolBindingDigest: z.ZodString;
+    toolImplementationKinds: z.ZodRecord<z.ZodString, z.ZodString>;
 }, z.core.$strict>;
 /** The immutable binding a receipt carries and a later consumer must re-present. */
 export declare const InputPreparationBindingSchema: z.ZodObject<{
@@ -5365,6 +5463,12 @@ export declare const InputPreparationBindingSchema: z.ZodObject<{
         modelId: z.ZodString;
     }, z.core.$strict>;
     policyRevision: z.ZodString;
+    permissionMode: z.ZodEnum<{
+        auto: "auto";
+        confirm: "confirm";
+        plan: "plan";
+        readonly: "readonly";
+    }>;
     runtime: z.ZodObject<{
         packageName: z.ZodString;
         packageVersion: z.ZodString;
@@ -5409,6 +5513,12 @@ export declare const InputPreparationReceiptSummarySchema: z.ZodObject<{
             modelId: z.ZodString;
         }, z.core.$strict>;
         policyRevision: z.ZodString;
+        permissionMode: z.ZodEnum<{
+            auto: "auto";
+            confirm: "confirm";
+            plan: "plan";
+            readonly: "readonly";
+        }>;
         runtime: z.ZodObject<{
             packageName: z.ZodString;
             packageVersion: z.ZodString;
@@ -5428,6 +5538,9 @@ export declare const InputPreparationReceiptSummarySchema: z.ZodObject<{
         requestBytes: z.ZodNumber;
         projectionBytes: z.ZodNumber;
         coverage: z.ZodString;
+        observationDigest: z.ZodString;
+        toolBindingDigest: z.ZodString;
+        toolImplementationKinds: z.ZodRecord<z.ZodString, z.ZodString>;
     }, z.core.$strict>>;
     counter: z.ZodOptional<z.ZodObject<{
         method: z.ZodString;
@@ -5487,8 +5600,11 @@ export declare const InputPreparationRejectionReasonSchema: z.ZodEnum<{
     deadline_elapsed: "deadline_elapsed";
     durable_write_failed: "durable_write_failed";
     input_preparation_unconfigured: "input_preparation_unconfigured";
+    launch_boundary_unavailable: "launch_boundary_unavailable";
     limit_exceeded: "limit_exceeded";
     not_found: "not_found";
+    observation_drift: "observation_drift";
+    permission_mode_denied: "permission_mode_denied";
     policy_revision_mismatch: "policy_revision_mismatch";
     request_conflict: "request_conflict";
     runtime_identity_unavailable: "runtime_identity_unavailable";
@@ -6399,6 +6515,14 @@ export type AgentHomeProjectionPayload = z.infer<typeof AgentHomeProjectionPaylo
  * `deadlineAt` may only ever be TIGHTENED locally: the device clamps to
  * `min(deadlineAt - now, limits.preparationDeadlineMs)`, so a generous Host
  * deadline cannot enlarge a configured local bound.
+ *
+ * `permissionMode` is DECLARED by the requester and validated by the device;
+ * the device never infers it. A preparation counts tokens for one concrete
+ * tool manifest, and that manifest is the policy-filtered set for exactly one
+ * mode (`mcp/projection.ts`'s `filterMcpObservationForPolicy`) — so a
+ * preparation whose mode is unstated is a count of a manifest nobody named.
+ * The device applies the declared mode to its own observation and records it
+ * in the artifact binding; it is not a grant, and it authorizes nothing.
  */
 export declare const AgentInputPreparationPayloadSchema: z.ZodObject<{
     requestId: z.ZodUUID;
@@ -6470,6 +6594,12 @@ export declare const AgentInputPreparationPayloadSchema: z.ZodObject<{
         contentHash: z.ZodString;
     }, z.core.$strict>]>;
     requiredToolsets: z.ZodArray<z.ZodString>;
+    permissionMode: z.ZodEnum<{
+        auto: "auto";
+        confirm: "confirm";
+        plan: "plan";
+        readonly: "readonly";
+    }>;
 }, z.core.$strict>;
 export type AgentInputPreparationPayload = z.infer<typeof AgentInputPreparationPayloadSchema>;
 /**
@@ -8202,6 +8332,12 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             contentHash: z.ZodString;
         }, z.core.$strict>]>;
         requiredToolsets: z.ZodArray<z.ZodString>;
+        permissionMode: z.ZodEnum<{
+            auto: "auto";
+            confirm: "confirm";
+            plan: "plan";
+            readonly: "readonly";
+        }>;
     }, z.core.$strict>;
     readonly 'task.approve': z.ZodObject<{
         approvalId: z.ZodOptional<z.ZodString>;

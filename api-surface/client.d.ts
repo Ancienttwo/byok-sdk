@@ -2844,7 +2844,7 @@ export declare class ConnectionManager {
     private enterRevoked;
 }
 // ==== @byok-sdk/client dist/daemon/control-protocol.d.ts ====
-import type { TaskState } from '@byok-sdk/protocol';
+import { type TaskState } from '@byok-sdk/protocol';
 import type { ApprovalDecision, PendingApproval } from './approvals';
 import type { StorageCategory } from './journal/journal';
 import type { StoragePressureState } from './journal/storage-policy';
@@ -3416,18 +3416,37 @@ export interface InputPreparationResult {
  */
 export declare const INPUT_PREPARATION_IDENTIFIER_MAX_BYTES = 512;
 /**
+ * Why `input_preparation.prepare` params were refused.
+ *
+ * Two distinct codes, because they are two distinct facts. `bad_request` is
+ * "this is not the shape" — a wrong type, a missing field, an unknown extra.
+ * `unsupported_input` is "this is the OLD shape": the caller sent a key this
+ * contract retired, which means it is asserting authority over the tool
+ * manifest that version 2 moved onto the device. Answering that with a generic
+ * shape error would leave the caller adjusting field types forever.
+ */
+export type InputPreparationRequestParseResult = {
+    readonly ok: true;
+    readonly request: InputPreparationRequestV1;
+} | {
+    readonly ok: false;
+    readonly code: 'bad_request' | 'unsupported_input';
+    readonly detail: string;
+};
+/**
  * Strict shape gate for `input_preparation.prepare`.
  *
- * `undefined` means `bad_request`. Every object is key-exact: an unknown field
- * anywhere in the request is a rejection, never an ignored extra — a tolerated
- * field is how a caller comes to believe it can influence the compiled body,
- * the runtime identity or the policy this daemon enforces.
+ * Every object is key-exact: an unknown field anywhere in the request is a
+ * rejection, never an ignored extra — a tolerated field is how a caller comes
+ * to believe it can influence the compiled body, the runtime identity or the
+ * policy this daemon enforces.
  *
  * This gate validates SHAPE only. Scope authority, policy revision, runtime
- * identity and every limit are resolved by `input-preparation-service.ts`; none
- * of them can be asserted here by a caller.
+ * identity, the tool manifest and every limit are resolved by
+ * `input-preparation-service.ts`; none of them can be asserted here by a
+ * caller.
  */
-export declare function parseInputPreparationRequestParams(value: unknown): InputPreparationRequestV1 | undefined;
+export declare function parseInputPreparationRequestParams(value: unknown): InputPreparationRequestParseResult;
 /** Strict shape gate for `input_preparation.lookup`. */
 export declare function parseInputPreparationLookupParams(value: unknown): InputPreparationLookupParamsV1 | undefined;
 /** Strict shape gate for `input_preparation.cancel`. Same two fields as lookup, and no third. */
@@ -9204,8 +9223,8 @@ export type { OperationalHealthSnapshot, OperationalHealthState } from './daemon
  * needs the same gate the daemon enforces; a hand-rolled copy is how the two
  * drift apart.
  */
-export { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_ERROR_CODES, INPUT_PREPARATION_RECEIPT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INPUT_PREPARATION_REQUEST_FORMAT, INPUT_PREPARATION_VERSION, InputPreparationPolicyError, validateInputPreparationLimits, } from './input-preparation';
-export type { InputPreparationArtifactSummaryV1, InputPreparationAuthorityGrantV1, InputPreparationAuthorityOutcomeV1, InputPreparationAuthorityResolver, InputPreparationBindingV1, InputPreparationCancelParamsV1, InputPreparationContextFileV1, InputPreparationCounterAdapter, InputPreparationCounterAuthorityV1, InputPreparationCounterEvidenceV1, InputPreparationCounterRequestV1, InputPreparationCounterResultV1, InputPreparationCounterTargetV1, InputPreparationCoverageProofV1, InputPreparationDenialReasonV1, InputPreparationDocsPathsV1, InputPreparationErrorCodeV1, InputPreparationLimitsPolicyV1, InputPreparationLookupParamsV1, InputPreparationModelCostV1, InputPreparationModelV1, InputPreparationOptionsV1, InputPreparationPinV1, InputPreparationPromptSnapshotV1, InputPreparationReadinessReasonV1, InputPreparationReceiptV1, InputPreparationRequestV1, InputPreparationRuntimeIdentityV1, InputPreparationScopeClaimV1, InputPreparationSelectionV1, InputPreparationSnapshotV1, InputPreparationSourceV1, InputPreparationStateV1, InputPreparationToolV1, InputPreparationUserMessageV1, } from './input-preparation';
+export { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_ERROR_CODES, INPUT_PREPARATION_RECEIPT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INPUT_PREPARATION_REQUEST_FORMAT, INPUT_PREPARATION_RETIRED_PROMPT_KEYS, INPUT_PREPARATION_RETIRED_REQUEST_KEYS, INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS, INPUT_PREPARATION_VERSION, InputPreparationPolicyError, validateInputPreparationLimits, } from './input-preparation';
+export type { InputPreparationArtifactSummaryV1, InputPreparationAuthorityGrantV1, InputPreparationCompiledPromptSnapshotV1, InputPreparationCompiledSnapshotV1, InputPreparationAuthorityOutcomeV1, InputPreparationAuthorityResolver, InputPreparationBindingV1, InputPreparationCancelParamsV1, InputPreparationContextFileV1, InputPreparationCounterAdapter, InputPreparationCounterAuthorityV1, InputPreparationCounterEvidenceV1, InputPreparationCounterRequestV1, InputPreparationCounterResultV1, InputPreparationCounterTargetV1, InputPreparationCoverageProofV1, InputPreparationDenialReasonV1, InputPreparationDocsPathsV1, InputPreparationErrorCodeV1, InputPreparationLimitsPolicyV1, InputPreparationLookupParamsV1, InputPreparationModelCostV1, InputPreparationModelV1, InputPreparationOptionsV1, InputPreparationPinV1, InputPreparationPromptSnapshotV1, InputPreparationReadinessReasonV1, InputPreparationReceiptV1, InputPreparationRequestV1, InputPreparationRuntimeIdentityV1, InputPreparationScopeClaimV1, InputPreparationSelectionV1, InputPreparationSnapshotV1, InputPreparationSourceV1, InputPreparationStateV1, InputPreparationToolV1, InputPreparationUserMessageV1, } from './input-preparation';
 export { INPUT_PREPARATION_CANCEL_METHOD, INPUT_PREPARATION_IDENTIFIER_MAX_BYTES, INPUT_PREPARATION_LOOKUP_METHOD, INPUT_PREPARATION_PREPARE_METHOD, parseInputPreparationCancelParams, parseInputPreparationLookupParams, parseInputPreparationRequestParams, } from './daemon/control-protocol';
 export type { InputPreparationResult } from './daemon/control-protocol';
 export { journalHash, JournalUnavailableError, JournalCorruptError, JournalRecordTooLargeError, JournalUnknownTaskError, JournalClosedError, } from './daemon/journal/journal';
@@ -9282,6 +9301,7 @@ export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, Expor
  *   `"unknown"`. A receipt therefore cannot be `ready` today, and a fixture
  *   counter can never make one ready (§10.2's G4 stays closed).
  */
+import type { PermissionMode } from '@byok-sdk/protocol';
 /** Wire format tag for a preparation request. One strict shape, one version. */
 export declare const INPUT_PREPARATION_REQUEST_FORMAT = "byok.input-preparation.request";
 /** Wire format tag for a preparation receipt. */
@@ -9290,8 +9310,32 @@ export declare const INPUT_PREPARATION_RECEIPT_FORMAT = "byok.input-preparation.
 export declare const INPUT_PREPARATION_RECORD_FORMAT = "byok.input-preparation.record";
 /** Durable artifact format tag — see `daemon/input-preparation-store.ts`. */
 export declare const INPUT_PREPARATION_ARTIFACT_FORMAT = "byok.input-preparation.artifact";
-/** The single supported version of every shape in this module. */
-export declare const INPUT_PREPARATION_VERSION = 1;
+/**
+ * The single supported version of every shape in this module.
+ *
+ * Bumped to 2 by the phase-2 executor-identity slice, which REMOVED
+ * caller-supplied `toolExecutors` and `snapshot.tools` from the request and
+ * added `requiredToolsets` + `permissionMode`. The request, the receipt, the
+ * durable record and the retained artifact all carry this number, so a record
+ * written under version 1 is refused on replay rather than read through a
+ * compatibility branch: its artifact was frozen over a tool manifest a caller
+ * stated, and this version's rule is that no caller may state one.
+ */
+export declare const INPUT_PREPARATION_VERSION = 2;
+/**
+ * Key-sorted JSON, so two structurally equal values always produce the same
+ * bytes and therefore the same digest. Field ORDER must never be able to turn
+ * one request into two idempotency keys, or one observed tool surface into two
+ * observation digests.
+ *
+ * It lives beside the shapes it serializes rather than beside either of its
+ * callers: `daemon/input-preparation-service.ts` digests the request with it
+ * and `daemon/prepared-tool-surface.ts` digests the observed surface with it,
+ * and two copies of a canonicalization are two canonicalizations.
+ */
+export declare function canonicalInputPreparationJson(value: unknown): string;
+/** sha256 hex of one canonicalized value. The one digest spelling this surface uses. */
+export declare function inputPreparationDigest(value: unknown): string;
 /**
  * The scope values a caller CLAIMS. Every one of them is validated against the
  * configured {@link InputPreparationAuthorityResolver}'s trusted local records
@@ -9357,18 +9401,35 @@ export interface InputPreparationDocsPathsV1 {
     readonly docsPath: string;
     readonly examplesPath: string;
 }
-/** Explicit, already-authorized inputs for the native system prompt renderer. */
+/**
+ * Explicit, already-authorized inputs for the native system prompt renderer.
+ *
+ * `selectedTools` is deliberately NOT here. The native contract requires it to
+ * equal the model-visible manifest exactly, and this version moved that
+ * manifest onto the device — so a caller stating the list would be stating the
+ * manifest through the prompt. The daemon fills it from the assembled surface
+ * (see {@link InputPreparationCompiledPromptSnapshotV1}).
+ *
+ * `toolSnippets` stays caller-authored because it is prompt TEXT, but its keys
+ * must name tools the assembled manifest actually contains; the native
+ * compiler refuses a snippet for a tool that is not in the manifest, and
+ * nothing here papers over that.
+ */
 export interface InputPreparationPromptSnapshotV1 {
     readonly customPrompt?: string;
     readonly appendSystemPrompt?: string;
     readonly cwd: string;
-    readonly selectedTools: readonly string[];
     readonly toolSnippets: Readonly<Record<string, string>>;
     readonly promptGuidelines: readonly string[];
     readonly contextFiles: readonly InputPreparationContextFileV1[];
     /** Preformatted by the caller; empty means no skills. */
     readonly formattedSkills: string;
     readonly docsPaths: InputPreparationDocsPathsV1;
+}
+/** The caller's prompt snapshot plus the tool-name list the daemon derived. */
+export interface InputPreparationCompiledPromptSnapshotV1 extends InputPreparationPromptSnapshotV1 {
+    /** Exactly the assembled manifest's tool names, in its canonical order. */
+    readonly selectedTools: readonly string[];
 }
 /**
  * One model-visible user message.
@@ -9394,9 +9455,28 @@ export interface InputPreparationToolV1 {
     readonly description: string;
     readonly parameters: Readonly<Record<string, unknown>>;
 }
+/**
+ * The authorized input snapshot a CALLER states: prompt text and user history,
+ * and nothing else.
+ *
+ * `tools` is deliberately absent. The model-visible tool schemas are a LOCAL
+ * observation — only this device can say which MCP toolset servers it has and
+ * what they publish — so they are assembled by
+ * `daemon/prepared-tool-surface.ts` from the request's `requiredToolsets` and
+ * joined onto this snapshot inside the daemon. A caller that could state a
+ * tool schema could have tokens counted for a tool no server offers.
+ */
 export interface InputPreparationSnapshotV1 {
     readonly prompt: InputPreparationPromptSnapshotV1;
     readonly messages: readonly InputPreparationUserMessageV1[];
+}
+/**
+ * What the native compiler is actually handed: the caller's snapshot plus the
+ * daemon-derived tool manifest. Produced only inside the daemon, never parsed
+ * off a wire.
+ */
+export interface InputPreparationCompiledSnapshotV1 extends Omit<InputPreparationSnapshotV1, 'prompt'> {
+    readonly prompt: InputPreparationCompiledPromptSnapshotV1;
     readonly tools: readonly InputPreparationToolV1[];
 }
 /**
@@ -9406,10 +9486,19 @@ export interface InputPreparationSnapshotV1 {
  * a task id: it namespaces idempotency together with the AUTHENTICATED scope
  * and Agent, so a caller cannot reach another scope's record by guessing one.
  *
- * `toolExecutors` carries caller-authorized executable identity per
- * model-visible tool name. Schema equality alone does not prove the same
- * executable closure, so the identities are bound and digested separately
- * (§11.2's ToolManifest rule). It must cover exactly the snapshot's tool names.
+ * `requiredToolsets` is the ONLY thing a caller says about tools: which of
+ * this device's configured MCP toolsets the preparation needs, by id. The
+ * daemon resolves them against its own registry, observes the servers itself,
+ * and derives both the model-visible schemas and the executor fingerprints
+ * from what those servers reported. There is no `toolExecutors` field and no
+ * `snapshot.tools` field, and their absence is the contract: a caller that
+ * could state either could have tokens counted against a manifest this device
+ * never observed.
+ *
+ * `permissionMode` is DECLARED, never inferred. A preparation counts one
+ * concrete manifest, and the manifest is the policy-filtered set for exactly
+ * one mode (`mcp/projection.ts`'s `filterMcpObservationForPolicy`). The daemon
+ * validates the value and pins it onto the binding; it grants nothing.
  *
  * There is no `runtimeIdentity`, `compilerVersion` or `policyIdentity` field:
  * those are derived from the verified installed artifact closure and the
@@ -9424,9 +9513,29 @@ export interface InputPreparationRequestV1 {
     readonly scope: InputPreparationScopeClaimV1;
     readonly source: InputPreparationSourceV1;
     readonly selection: InputPreparationSelectionV1;
+    /** The mode the counted manifest is filtered for. */
+    readonly permissionMode: PermissionMode;
+    /** Configured MCP toolset ids. The locator is the toolset id; MCP only. */
+    readonly requiredToolsets: readonly string[];
     readonly snapshot: InputPreparationSnapshotV1;
-    readonly toolExecutors: Readonly<Record<string, string>>;
 }
+/**
+ * The request keys this contract RETIRED in version 2, named so a daemon can
+ * refuse them by name instead of answering a generic shape error.
+ *
+ * A caller still sending either is not sending a slightly wrong request — it
+ * is asserting authority over the tool manifest that this version moved to the
+ * device, so it is refused as `unsupported_input` and told which key.
+ */
+export declare const INPUT_PREPARATION_RETIRED_REQUEST_KEYS: readonly ['toolExecutors'];
+/** The snapshot keys retired in version 2. Same rule, one level down. */
+export declare const INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS: readonly ['tools'];
+/**
+ * The prompt-snapshot keys retired in version 2. `selectedTools` must equal the
+ * model-visible manifest exactly by native contract, so stating it is stating
+ * the manifest through the prompt.
+ */
+export declare const INPUT_PREPARATION_RETIRED_PROMPT_KEYS: readonly ['selectedTools'];
 /** Params for `input_preparation.lookup` and `input_preparation.cancel`. */
 export interface InputPreparationLookupParamsV1 {
     readonly requestId: string;
@@ -9624,6 +9733,28 @@ export interface InputPreparationArtifactSummaryV1 {
     readonly projectionBytes: number;
     /** Whatever the native compiler proved. It currently proves `"unknown"`. */
     readonly coverage: string;
+    /**
+     * Digest of everything the device OBSERVED for this preparation — the
+     * projected tools, their executor fingerprints, the launch attestation and
+     * the implementation identities. A later consumer re-observes and compares
+     * this one value rather than re-deriving a manifest.
+     */
+    readonly observationDigest: string;
+    /**
+     * Digest of the subset of those facts that can be re-derived WITHOUT
+     * spawning a server: the launch attestation, the toolset definition
+     * revisions, the configured argv and the implementation identities. This is
+     * what a replay of an already-recorded `requestId` compares against, because
+     * re-probing to detect drift would create the second executor fact the
+     * idempotency key exists to prevent.
+     */
+    readonly toolBindingDigest: string;
+    /**
+     * Per model-visible tool name: `attested`, or `unavailable:<reason>`. The
+     * evidence behind `executor_identity_unproven`, so a reader is not asked to
+     * take that readiness reason on trust.
+     */
+    readonly toolImplementationKinds: Readonly<Record<string, string>>;
 }
 /** The immutable binding a receipt carries and a later consumer must re-present. */
 export interface InputPreparationBindingV1 {
@@ -9635,6 +9766,13 @@ export interface InputPreparationBindingV1 {
     readonly source: InputPreparationSourceV1;
     readonly target: InputPreparationCounterTargetV1;
     readonly policyRevision: string;
+    /**
+     * The mode the counted manifest was filtered for, recorded so a consumer can
+     * COMPARE it without re-deriving the request digest: an Execution offered
+     * under a different mode registers a different tool set than the one these
+     * tokens were counted for.
+     */
+    readonly permissionMode: PermissionMode;
     readonly runtime: InputPreparationRuntimeIdentityV1;
     /** Digest over the whole normalized request, scope and runtime identity. */
     readonly requestDigest: string;
@@ -9739,7 +9877,31 @@ export interface InputPreparationReceiptV1 {
  * a well-formed, authorized call: a daemon that has begun shutting down answers
  * it before the service is consulted at all.
  */
-export declare const INPUT_PREPARATION_ERROR_CODES: readonly ['input_preparation_unconfigured', 'bad_request', 'authority_unavailable', 'scope_denied', 'policy_revision_mismatch', 'runtime_identity_unavailable', 'unsupported_input', 'limit_exceeded', 'request_conflict', 'not_found', 'counter_unavailable', 'counter_interrupted', 'durable_write_failed', 'cancelled'];
+export declare const INPUT_PREPARATION_ERROR_CODES: readonly ['input_preparation_unconfigured', 'bad_request', 'authority_unavailable', 'scope_denied', 'policy_revision_mismatch', 'runtime_identity_unavailable', 'unsupported_input', 'limit_exceeded', 'request_conflict', 'not_found', 'counter_unavailable', 'counter_interrupted', 'durable_write_failed', 'cancelled', 
+/**
+ * A required MCP toolset server could not be observed on this device. A
+ * partial tool set is not a smaller preparation, it is a different one.
+ */
+'toolsets_unobservable', 
+/**
+ * No non-writable launch directory (or no trusted launcher) could be proven
+ * for this preparation's servers, so nothing was spawned. The specific
+ * `TrustedLaunchCwdUnavailableReason` travels in the record's `detail`.
+ */
+'launch_boundary_unavailable', 
+/**
+ * A repeat of an already-recorded `requestId` arrived after the facts its
+ * executor fingerprints were frozen against changed. The recorded receipt is
+ * not re-derived and no server is re-probed.
+ */
+'observation_drift', 
+/**
+ * The declared `permissionMode` exceeds this device's configured ceiling.
+ * Never narrowed to an admissible mode: a preparation counts one concrete
+ * manifest, and quietly counting a smaller one answers a question nobody
+ * asked.
+ */
+'permission_mode_denied'];
 export type InputPreparationErrorCodeV1 = (typeof INPUT_PREPARATION_ERROR_CODES)[number];
 // ==== @byok-sdk/client dist/lifecycle/create-service-lifecycle.d.ts ====
 import { type LaunchdDeps } from './launchd';
