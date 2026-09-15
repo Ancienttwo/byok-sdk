@@ -835,7 +835,7 @@ export declare function resolvePiBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/pi/resolve-extensions.d.ts ====
 export interface ResolvedPiExtensions {
     readonly webAccess: string;
-    readonly mcpAdapter: string;
+    readonly mcpExtension: string;
     readonly subagentsPolicy: string;
     readonly subagents: string;
     readonly todo: string;
@@ -9783,6 +9783,10 @@ export declare class McpStdioClient {
      * re-offering the task would ask the same command and get the same answer
      * forever. A server that timed out, closed, or could not be written to may
      * well succeed later.
+     *
+     * A JSON-RPC error response the server sent is split the same way, by
+     * {@link AUTHORITY_PROTOCOL_ERROR_CODES}: a rejection of the REQUEST is
+     * permanent, a report of the server's own condition is not.
      *
      * An {@link McpAuthorityError} raised inside the transport (an oversized
      * stream, a refused frame) surfaces through the client's `onerror` funnel

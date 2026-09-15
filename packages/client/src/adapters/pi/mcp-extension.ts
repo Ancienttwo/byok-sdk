@@ -39,6 +39,14 @@ interface TaskScopedMcpConfig {
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
 }
 
+/**
+ * The SDK's own Pi control variables, by name shape. Every variable the
+ * adapter sets on the Pi child to address this SDK's extensions
+ * (`BYOK_PI_MCP_CONFIG_PATH`, `BYOK_PI_PERMISSION_MODE`) matches it, so a new
+ * one is stripped from MCP server children by existing.
+ */
+const BYOK_PI_CONTROL_ENV_PREFIX = /^BYOK_PI_/u;
+
 function fail(message: string): never {
   throw new Error(`BYOK Pi MCP extension: ${message}`);
 }
@@ -154,6 +162,28 @@ class McpServerPool implements McpToolCallHost {
 
   constructor(private readonly config: TaskScopedMcpConfig) {}
 
+  /**
+   * The environment an MCP server child is spawned with.
+   *
+   * This process's own environment minus the SDK's own Pi control variables.
+   * They address THIS extension and the sibling policy extension — the path to
+   * the task-scoped config file, the task's permission mode — and a host
+   * toolset server has no business reading either: the config file names every
+   * server this task projects and the exact observation it was admitted with,
+   * which is a different toolset's configuration from the point of view of any
+   * one server. Nothing else is filtered: the Pi child was already spawned
+   * with a filtered environment by the adapter, so PATH, HOME and the rest are
+   * the task's, not the daemon's.
+   */
+  private childEnv(): Record<string, string> {
+    const env: Record<string, string> = {};
+    for (const [name, value] of Object.entries(process.env)) {
+      if (value === undefined || BYOK_PI_CONTROL_ENV_PREFIX.test(name)) continue;
+      env[name] = value;
+    }
+    return env;
+  }
+
   private async open(serverName: string): Promise<McpStdioClient> {
     const server = this.config.mcpServers[serverName];
     if (server === undefined) {
@@ -164,8 +194,9 @@ class McpServerPool implements McpToolCallHost {
       label: `MCP toolset server "${serverName}"`,
       // The extension runs INSIDE the Pi child the adapter already spawned
       // with a filtered environment, so this process's own environment is the
-      // task's environment — it is not the daemon's.
-      env: process.env as Record<string, string>,
+      // task's environment — it is not the daemon's. The SDK's own Pi control
+      // variables are still stripped; see `childEnv`.
+      env: this.childEnv(),
     });
     try {
       await client.connect();
@@ -291,6 +322,12 @@ export default function registerByokMcpTools(pi: ExtensionAPI): void {
         throw new Error(`BYOK Pi MCP extension: two MCP tools claim the name ${JSON.stringify(tool.name)}`);
       }
       registered.add(tool.name);
+      // Pi types `ToolDefinition.parameters` as a TypeBox schema object; an
+      // MCP tool's `inputSchema` is a plain runtime JSON Schema that no
+      // compile-time type can describe, and rebuilding it as TypeBox would
+      // make this file the authority on a schema the server owns. Pi treats
+      // the value as JSON Schema at runtime — empirically honoured by
+      // 0.85.1001, whose registered tools carry these schemas verbatim.
       (pi.registerTool as (definition: unknown) => void)(tool);
     }
   };

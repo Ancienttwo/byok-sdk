@@ -9,6 +9,7 @@ import {
   observeMcpServer,
   McpAuthorityError,
   McpStdioClient,
+  McpTransportError,
   MCP_OBSERVATION_MAX_STDOUT_BYTES,
   MCP_MAX_FRAME_BYTES,
   type McpServerObservation,
@@ -91,6 +92,58 @@ describe('MCP core — initialize, list, call, cancel, close', () => {
         const raw = await fs.readFile(recordTo, 'utf8').catch(() => '');
         return raw.split('\n').some((line) => line && JSON.parse(line).method === 'notifications/cancelled');
       }, { timeout: 5_000 }).toBe(true);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('classifies a JSON-RPC rejection of the REQUEST as a permanent authority failure', async () => {
+    // -32601 is the server saying this method does not exist. Re-offering the
+    // task sends the same request to the same command and gets the same
+    // answer, so it must not come back as a retryable transport fault.
+    const client = new McpStdioClient(server({ callError: { code: -32601, message: 'no such tool' } }), {
+      env: ENV,
+      label: 'fixture',
+    });
+    try {
+      await client.connect();
+      await expect(client.callTool('echo', { text: 'hi' })).rejects.toThrow(McpAuthorityError);
+      await expect(client.callTool('echo', { text: 'hi' })).rejects.toThrow(/-32601/u);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('keeps a JSON-RPC report of the SERVER\'S OWN condition retryable', async () => {
+    // -32603 is a handler that threw. That is a condition on the server's
+    // side, which a server still warming up may legitimately report once.
+    const client = new McpStdioClient(server({ callError: { code: -32603, message: 'handler exploded' } }), {
+      env: ENV,
+      label: 'fixture',
+    });
+    try {
+      await client.connect();
+      await expect(client.callTool('echo', { text: 'hi' })).rejects.toThrow(McpTransportError);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('issues a timed-out tools/call exactly once and never replays it', async () => {
+    // "Retryable" is a decision about re-OFFERING a task, never a licence to
+    // replay a call whose outcome is unknown: a second `tools/call` could run
+    // a mutation the first one already performed.
+    const dir = await tempDir();
+    const recordTo = path.join(dir, 'received.jsonl');
+    const client = new McpStdioClient(server({ callDelayMs: 30_000, recordTo }), { env: ENV, label: 'fixture' });
+    try {
+      await client.connect();
+      await expect(client.callTool('echo', { text: 'slow' }, { timeoutMs: 500 })).rejects.toThrow();
+      // Give any hypothetical replay more time than the deadline it would
+      // have to fire after.
+      await new Promise((resolve) => { setTimeout(resolve, 750); });
+      const lines = (await fs.readFile(recordTo, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+      expect(lines.filter((entry) => entry.method === 'tools/call')).toHaveLength(1);
     } finally {
       await client.close();
     }

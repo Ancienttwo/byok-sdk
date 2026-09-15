@@ -44,7 +44,7 @@ describe('Agent provider profile binding admission', () => {
       resolveBin: () => ({ command: '/tmp/pi', source: 'env' }),
       resolveExtensions: () => ({
         webAccess: '/tmp/web-access.mjs',
-        mcpAdapter: '/tmp/mcp-adapter.mjs',
+        mcpExtension: '/tmp/mcp-adapter.mjs',
         subagentsPolicy: '/tmp/subagents-policy.mjs',
         subagents: '/tmp/subagents.mjs',
         todo: '/tmp/todo.mjs',
@@ -69,7 +69,7 @@ describe('Agent provider profile binding admission', () => {
       resolveBin: () => ({ command: '/tmp/pi', source: 'env' }),
       resolveExtensions: () => ({
         webAccess: '/tmp/web-access.mjs',
-        mcpAdapter: '/tmp/mcp-adapter.mjs',
+        mcpExtension: '/tmp/mcp-adapter.mjs',
         subagentsPolicy: '/tmp/subagents-policy.mjs',
         subagents: '/tmp/subagents.mjs',
         todo: '/tmp/todo.mjs',
@@ -102,7 +102,7 @@ describe('Agent provider profile binding admission', () => {
       resolveBin: () => ({ command: PI_FIXTURE_PATH, source: 'env' }),
       resolveExtensions: () => ({
         webAccess: '/tmp/web-access.mjs',
-        mcpAdapter: '/tmp/mcp-adapter.mjs',
+        mcpExtension: '/tmp/mcp-adapter.mjs',
         subagentsPolicy: '/tmp/subagents-policy.mjs',
         subagents: '/tmp/subagents.mjs',
         todo: '/tmp/todo.mjs',

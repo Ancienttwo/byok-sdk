@@ -16,6 +16,7 @@ import {
   type Session,
 } from '../../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
+import { resolveMcpToolsetGrants } from '../mcp-tool-grants';
 import { BYOK_PI_MCP_CONFIG_PATH } from './mcp-config';
 import { resolvePiBin, type ResolvedBin } from './resolve-bin';
 import { resolvePiExtensions, type ResolvedPiExtensions } from './resolve-extensions';
@@ -201,6 +202,23 @@ export class PiAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    // Fail closed BEFORE anything is spawned, on the same resolution claude
+    // and codex use. pi does not interpolate these names into a CLI grant —
+    // it registers one tool per observed tool — but it reads exactly the same
+    // authority: `./mcp-extension.ts` refuses at extension load when a
+    // projected server has no daemon observation, and `../../mcp/projection.ts`
+    // refuses a server name outside `GRANTABLE_MCP_SERVER_NAME`. Discovering
+    // that inside the Pi child means a claimed task dying at session start
+    // with a message only the child's stderr carries, so the check runs here
+    // instead, and declines non-retryably like its siblings.
+    const toolsetGrants = resolveMcpToolsetGrants(input.mcpServers, input.mcpToolsetTools);
+    if (!toolsetGrants.ok) {
+      return {
+        kind: 'reject',
+        reason: `pi adapter cannot register projected MCP toolset tools: ${toolsetGrants.reason}`,
+        retryable: false,
+      };
+    }
     const mapping = mapPermissionPolicyToPiArgs(input.policy);
     if (!mapping.ok) {
       return { kind: 'reject', reason: mapping.reason ?? 'policy rejected by pi adapter', retryable: false };
@@ -223,8 +241,9 @@ export class PiAdapter implements RuntimeAdapter {
         kind: 'reject',
         reason: `pi cannot express permission mode "${input.policy.mode}" for an MCP toolset: the device's`
           + ' mcpToolsets configuration declares no per-tool read/mutation classification'
-          + ' (McpToolsetConfig.readOnlyTools), and this adapter will not infer one from tool names,'
-          + ' descriptions, schemas, or a server\'s own readOnlyHint',
+          + ' (McpToolsetConfig.readOnlyTools is the field that would carry one; it is not yet accepted'
+          + ' by the registry, so configuring it today is rejected), and this adapter will not infer one'
+          + ' from tool names, descriptions, schemas, or a server\'s own readOnlyHint',
         retryable: false,
       };
     }
@@ -386,7 +405,7 @@ export class PiAdapter implements RuntimeAdapter {
             '--extension',
             extensions.webAccess,
             '--extension',
-            extensions.mcpAdapter,
+            extensions.mcpExtension,
             '--extension',
             extensions.subagentsPolicy,
             '--extension',
@@ -590,7 +609,7 @@ class PiSession implements Session {
     public readonly sessionRef: string,
     private readonly rpc: PiRpcClient,
     private readonly selection: TaskOfferPayload['dispatchSelection'],
-    /** Task-scoped isolated pi-mcp-adapter configuration, removed in close(). */
+    /** Task-scoped isolated MCP extension configuration, removed in close(). */
     private readonly mcpConfigDir?: string,
   ) {}
 

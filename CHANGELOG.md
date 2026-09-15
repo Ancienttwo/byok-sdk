@@ -37,8 +37,10 @@ and the D2 version number belongs to a separate SDK release contract.
   are gone: a toolset's schemas now reach the model's first request rather than
   arriving only after a discovery call, and a toolset is no longer indivisible
   for permission purposes. The extension discovers nothing of its own — it
-  registers from the daemon's observation and re-verifies each server against
-  it before the first call, refusing on any drift. Dropped from the install
+  registers from the daemon's observation and, on the first call to a server,
+  opens that server and re-verifies it against the frozen observation before
+  the call is sent, refusing on any drift. Servers open lazily and one at a
+  time, so a session that calls nothing starts nothing. Dropped from the install
   graph with it: `@napi-rs/keyring` (and its twelve platform binaries),
   `@modelcontextprotocol/ext-apps`, `recheck` (and its four platform
   binaries), `smol-toml`, `open`, `strip-json-comments`, and their transitive

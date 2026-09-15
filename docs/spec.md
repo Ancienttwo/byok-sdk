@@ -705,10 +705,12 @@ The registry still carries no per-tool read/mutation classification, so a
 toolset task under any permission mode other than `auto` is declined as an
 inexpressible policy. Making `readonly` usable for a read-only toolset
 requires an operator-owned classification in `DaemonConfig.mcpToolsets`
-(`readOnlyTools`, validated against the observed names); it is deliberately
-not inferred from tool names, descriptions, schemas, or a server's own
-`readOnlyHint` annotation, which is the server's self-assessment rather than a
-security authority.
+(`readOnlyTools`, validated against the observed names). That field is named
+here as the shape such a classification would take; it is **not yet accepted
+by the registry**, and a `McpToolsetConfig` that carries it today is rejected
+as unknown configuration. It is deliberately not inferred from tool names,
+descriptions, schemas, or a server's own `readOnlyHint` annotation, which is
+the server's self-assessment rather than a security authority.
 
 The authenticated local control socket accepts an expected-revision
 compare-and-swap reload of the complete registry. The CLI host reads

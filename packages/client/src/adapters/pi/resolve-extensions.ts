@@ -4,7 +4,7 @@ import { clientPackageRoot } from './client-manifest';
 
 export interface ResolvedPiExtensions {
   readonly webAccess: string;
-  readonly mcpAdapter: string;
+  readonly mcpExtension: string;
   readonly subagentsPolicy: string;
   readonly subagents: string;
   readonly todo: string;
@@ -20,7 +20,7 @@ export function resolvePiExtensions(): ResolvedPiExtensions {
   const packageRoot = clientPackageRoot();
   return {
     webAccess: fileURLToPath(import.meta.resolve('pi-web-access/index.ts')),
-    mcpAdapter: path.join(packageRoot, 'dist', 'adapters', 'pi', 'mcp-extension.js'),
+    mcpExtension: path.join(packageRoot, 'dist', 'adapters', 'pi', 'mcp-extension.js'),
     subagentsPolicy: path.join(packageRoot, 'dist', 'adapters', 'pi', 'subagents-policy-extension.js'),
     subagents: fileURLToPath(import.meta.resolve('pi-subagents')),
     // rpiv-todo publishes TypeScript source without a JavaScript `main`, so
