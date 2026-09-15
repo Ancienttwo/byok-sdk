@@ -31,8 +31,9 @@ const LAUNCHER = launchCwdScriptPath();
  * default `%SystemRoot%` IS writable and `resolveTrustedLaunchCwd()` correctly
  * returns `platform_default_is_writable` (the same posture as uid 0 on POSIX).
  * That refusal is correct behaviour, not a launcher defect — but with the
- * fixture resolving through it, 8 of these 10 cases died at the fixture and the
- * launcher itself never executed (run 34960882911).
+ * fixture resolving through it, 8 of these 10 cases died at the fixture; the
+ * launcher's only Windows execution in that run was the chdir-refusal case, and
+ * it never reached a successful exec of a target (run 34960882911).
  *
  * So the launch cwd below is a directory this test owns. It is deliberately one
  * the test process CAN write: that makes the point explicit — the launcher's

@@ -88,17 +88,20 @@ not provably plain Node and attests no interpreter is refused
 ## The first Windows run: 34960882911
 
 Run `34960882911`, job `104353925819` ("Windows Git workspace, store, and
-security tests"), step "Run the MCP launch working-directory launcher test on
+security tests (fixed Node)"), step "Run the MCP launch working-directory launcher test on
 Windows", running `packages/client/src/__tests__/launch-cwd-launcher.test.ts`:
 
 - **8 of 10 tests failed**, every one of them inside the test's own fixture
   helper `trusted()`, with `no trusted directory here:
   platform_default_is_writable`.
 - **2 tests passed** — the two that never asked for a directory (the loader
-  deny-list cross-check and the non-empty-interpreter-argv refusal).
+  deny-list cross-check and the refusal of a directory the launcher cannot
+  change into).
 - The macOS step in the same run **passed**.
 
-The launcher never executed on Windows in this run. The cause is not a launcher
+The launcher never reached a successful exec of a target on Windows in this
+run; its only Windows execution was the chdir-refusal case (spawned
+`bin/byok-launch-cwd.mjs`, exit 78, `could not change directory`). The cause is not a launcher
 defect and not a resolver defect: the windows-latest runner executes as
 Administrator, so the platform default `%SystemRoot%` really is writable by that
 account, the write probe succeeds, and `resolveTrustedLaunchCwd()` correctly
