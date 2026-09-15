@@ -17,12 +17,12 @@ and the D2 version number belongs to a separate SDK release contract.
   with it: an observed tool the declaration omits is a mutation tool, a
   declared tool the server does not expose is stale configuration and declines
   the task permanently, and a toolset with no declaration at all cannot run
-  under `readonly` or `plan` (the refusal names the missing field). A classification is never inferred from tool names,
-  descriptions, schemas, or a server's own `readOnlyHint`.
+  under `readonly` or `plan` (the refusal names the missing field). A
+  classification is never inferred from tool names, descriptions, schemas, or
+  a server's own `readOnlyHint`.
 
   Breaking in three places: `resolveMcpToolsetGrants` takes the permission mode
-  as a required third argument and returns the policy-filtered observation
-  beside the grants; `McpToolsetServerObservation.tools` carries the per-tool
+  as a required third argument; `McpToolsetServerObservation.tools` carries the per-tool
   `readOnly` classification; and the pi task-scoped MCP config file carries the
   task's `permissionMode` beside the observation. The classification is part of
   a toolset's `definitionRevision`, so changing one changes the toolset
