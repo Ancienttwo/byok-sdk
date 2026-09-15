@@ -65,11 +65,21 @@ import { trustedCwd } from './launch-cwd';
  *   digest, size and mtime are still measured off the real file on disk, so
  *   both processes measure the same thing.
  * - the lane's `open` latch — a once-only `store.open()`, which is the shape
- *   `create-daemon.ts` wires from `InputPreparationService.open` (replay, then
- *   a reconcile that is a no-op for a `counted` record). Building the whole
- *   service here would drag in the native compiler and the toolset registry
- *   without changing what this file measures: whether the FIRST read on a
- *   brand-new process finds the record a killed process pinned.
+ *   `create-daemon.ts:2288` wires from `InputPreparationService.open` (replay,
+ *   then a reconcile that is a no-op for a `counted` record). The real blocker
+ *   to building the whole service through `createDaemonWithAdapters` is the
+ *   seam above, not convenience: `DaemonConfig` exposes
+ *   `toolImplementationAuthority` (`create-daemon.ts:684`) and NO
+ *   `toolImplementationFsProbe` — that override exists only on
+ *   `TaskRunnerDeps` (`task-runner.ts:423`) — so `rootOwnedProbe` could not be
+ *   injected, and `input-preparation-service.ts:214`
+ *   (`.some((kind) => kind !== 'attested')`) would then hold every record this
+ *   non-root process can produce unready. Constructing `TaskRunner` directly is
+ *   what makes an `attested` record reachable at all, and it does not change
+ *   what this file measures: whether the FIRST read on a brand-new process
+ *   finds the record a killed process pinned. The cost is that
+ *   `create-daemon.ts:2288` and `InputPreparationService.open` are NOT
+ *   exercised by this fixture.
  */
 
 interface Config {

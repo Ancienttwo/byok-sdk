@@ -19,9 +19,19 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
  *
  * G3b-C closed a CRITICAL of exactly that shape: the prepared-offer path never
  * opened the store, so a restarted daemon answered `preparation_not_found` for
- * a record sitting on its own disk. The fix is `inputPreparationLane.open`
- * (`create-daemon.ts`) plus the service's own once-only open latch. This file
- * is the process-level guard for it.
+ * a record sitting on its own disk.
+ *
+ * What this file guards, precisely: the `await preparationLane.open()` at
+ * `task-runner.ts:1929`, which the offer path runs BEFORE its first
+ * `preparationLane.store.get`. That single await is the production line a
+ * failure here can come from.
+ *
+ * What this file does NOT exercise: the lane wiring at `create-daemon.ts:2288`
+ * and the `InputPreparationService.open` latch it passes as that lane's `open`.
+ * The fixture constructs `TaskRunner` directly and supplies its own once-only
+ * `store.open()` latch, so neither `create-daemon.ts` nor the service is
+ * loaded. A lane that stops being wired, or a service `open` that stops
+ * replaying, is invisible here and needs its own coverage.
  *
  * Lifetime A seeds two counted records and is offered both. One Execution
  * reaches its terminal, which releases that record's pin; the other is still
@@ -46,6 +56,15 @@ const FIXTURE = fileURLToPath(new URL('./fixtures/prepared-offer-restart-daemon.
  * been rushed.
  */
 const CHILD_RESPONSE_TIMEOUT_MS = 30_000;
+
+/**
+ * Whole-case budget, derived from the per-event budget above so the two cannot
+ * drift apart: the case spawns two lifetimes and can legitimately spend up to
+ * four full child waits across them (the seeds and offers of A, the kill, and
+ * the offers of B). Like that budget it widens the test's observation window
+ * only — nothing under test reads it, and it changes no production default.
+ */
+const RESTART_CASE_TIMEOUT_MS = CHILD_RESPONSE_TIMEOUT_MS * 4;
 
 const HELD_AGENT = 'agent-prepared-held';
 const RELEASED_AGENT = 'agent-prepared-released';
@@ -89,6 +108,8 @@ class DaemonProcess {
   stderr = '';
 
   constructor(configPath: string) {
+    // `bun`, not `process.execPath`: the fixture entry is a `.ts` file, and the
+    // vitest worker this runs in may be node, which cannot execute it directly.
     this.child = spawn('bun', [FIXTURE, configPath], { stdio: ['pipe', 'pipe', 'pipe'] });
     this.child.stdout.setEncoding('utf8');
     this.child.stderr.setEncoding('utf8');
@@ -340,5 +361,5 @@ describe('a prepared preparation survives a real daemon process restart', () => 
     // prepared Execution.
     expect(unknown.preparedStarts).toBe(1);
     expect(unknown.instructionStarts).toBe(0);
-  }, 120_000);
+  }, RESTART_CASE_TIMEOUT_MS);
 });
