@@ -485,7 +485,7 @@ export function resolveMcpLaunchCwdLauncher(
   const platform = environment.platform ?? process.platform;
   const configured = config?.launcherInterpreter;
   if (configured !== undefined) {
-    if (!path.isAbsolute(configured) || /[ \r\n]/u.test(configured)) {
+    if (!path.isAbsolute(configured) || /[\u0000\r\n]/u.test(configured)) {
       throw new Error('McpLaunchCwdConfig.launcherInterpreter must be an absolute executable path');
     }
     // The operator's escape hatch, and the one input this module does not
