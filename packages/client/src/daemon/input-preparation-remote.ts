@@ -64,6 +64,13 @@ import type { InputPreparationCompletionClient } from './input-preparation-compl
  * Every local refusal code is a legal wire rejection reason. Stated as a type
  * constraint so adding a local code without adding it to the protocol enum is
  * a compile error rather than an `unknown_reason` at runtime.
+ *
+ * ONE-DIRECTIONAL on purpose, and the mirror is NOT asserted: the wire
+ * rejection enum is deliberately a strict SUPERSET of the local codes. It also
+ * carries the reasons this remote lane itself owns and the service never
+ * answers with — `context_unresolvable`, `context_hash_mismatch` and
+ * `deadline_elapsed` — so a `Wire extends Local` assertion would fail on
+ * reasons that are correct by design.
  */
 type _LocalCodesAreWireReasons = InputPreparationErrorCodeV1 extends InputPreparationRejectionReason
   ? true
@@ -83,6 +90,18 @@ type _LocalReadinessReasonsAreWireReasons =
   InputPreparationReadinessReasonV1 extends InputPreparationReadinessReason ? true : never;
 const _localReadinessReasonsAreWireReasons: _LocalReadinessReasonsAreWireReasons = true;
 void _localReadinessReasonsAreWireReasons;
+
+/**
+ * And the mirror, because unlike the refusal codes above the two readiness sets
+ * are meant to be EQUAL, not nested: every readiness reason the cloud can parse
+ * must be one this device can actually produce. Without this direction, a
+ * reason added to the zod enum alone would compile forever as a value the wire
+ * admits and no device ever emits.
+ */
+type _WireReadinessReasonsAreLocalReasons =
+  InputPreparationReadinessReason extends InputPreparationReadinessReasonV1 ? true : never;
+const _wireReadinessReasonsAreLocalReasons: _WireReadinessReasonsAreLocalReasons = true;
+void _wireReadinessReasonsAreLocalReasons;
 
 export interface RemoteInputPreparationDeps {
   /** The authenticated local device record. Never the payload's word for it. */

@@ -412,7 +412,15 @@ endpoint, modelId, asserted {httpStatus, usageFields, responseDigest}}`. The
 service compares `projectionDigest` against the artifact's own projection
 digest and the endpoint/model against the counted target; a missing or
 mismatched one refuses the count as `counter_unavailable` rather than
-persisting a number bound to a projection nobody can name. What the provider
+persisting a number bound to a projection nobody can name. `endpoint` is the
+INFERENCE target identity (`selection.model.baseUrl`) the count is bound to,
+never the URL of the counting/tokenizer HTTP call the adapter placed; nothing
+here proves the counting route and the inference route are equivalent, and
+establishing that equivalence is external evidence work. `method` and
+`methodVersion` are co-recorded siblings on the counter evidence, deliberately
+NOT bound into `providerEvidence` — the digest/target comparison covers
+`projectionDigest` and `endpoint`/`modelId` only, and binding the counting-method
+identity in would be a wire-shape change requiring an Owner ruling. What the provider
 asserted is stored and never second-guessed — re-deriving a usage number
 locally is exactly the shadow accounting this surface exists to avoid. The
 receipt carries no output or whole-request field: the Host holds its own

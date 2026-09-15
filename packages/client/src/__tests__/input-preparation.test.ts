@@ -27,6 +27,7 @@ import {
 import { recordingToolSurface, type RecordingToolSurface } from './fixtures/prepared-tool-surface';
 import {
   InputPreparationCompileError,
+  verifyCompiledPreparedInput,
   type CompilePreparedInputRequest,
   type CompiledPreparedInput,
   type InputPreparationCompiler,
@@ -190,6 +191,45 @@ function stubCompiler(
         residual: options.residual ?? [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
         envelope: { format: 'pi.session.prepared-input', version: 2 } as never,
       };
+    },
+  };
+}
+
+/**
+ * A compiler that hands the REAL envelope verifier an envelope whose declared
+ * projection digest does not describe its own counted bytes.
+ *
+ * It states the envelope literally and calls `verifyCompiledPreparedInput`
+ * itself, so the refusal under test is the product verifier's, not a stub's
+ * imitation of one — and no product seam had to be added to reach it.
+ */
+function tamperedProjectionDigestCompiler(): InputPreparationCompiler {
+  const runtime = stubCompiler().runtime;
+  const counterProjection = '{"model":"glm-4.6","messages":[],"tools":[]}';
+  return {
+    runtime,
+    async compile(): Promise<CompiledPreparedInput> {
+      return verifyCompiledPreparedInput(
+        {
+          format: runtime.envelopeFormat,
+          version: 2,
+          snapshot: {},
+          context: {},
+          providerRequest: {
+            format: runtime.requestFormat,
+            compilerVersion: runtime.compilerVersion,
+            body: '{"model":"glm-4.6","messages":[],"max_tokens":4096}',
+            counterProjection,
+            // The digest of DIFFERENT bytes than the ones it travels with.
+            projection: { version: 2, kind: 'content_complete', digest: sha256Hex(`${counterProjection} `) },
+            residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
+            digest: 'a'.repeat(64),
+          },
+          toolManifest: { order: [], executors: [], digest: 'c'.repeat(64) },
+          digest: 'b'.repeat(64),
+        } as never,
+        runtime,
+      );
     },
   };
 }
@@ -704,6 +744,25 @@ describe('B-P2 service: compile refusal', () => {
     expect(receipt.state).toBe('failed');
     expect(receipt.detail).toBe('compile_rejected');
     expect(receipt.artifact).toBeUndefined();
+  });
+
+  it('pairs the wire code and the recorded detail on a tampered projection digest', async () => {
+    // The pairing, end to end, rather than the two halves separately: the REAL
+    // envelope verifier refuses a projection digest that does not describe the
+    // bytes it travels with, the caller is told `unsupported_input`, and the
+    // durable record keeps the specific `projection_digest_mismatch` a later
+    // `lookup` can answer with. A generic `compile_rejected` here would lose
+    // exactly which contract broke.
+    const counter = fixtureCounter();
+    const service = await makeService({ compiler: tamperedProjectionDigestCompiler(), counter });
+
+    expect(await codeOf(service.prepare(request()))).toBe('unsupported_input');
+
+    const receipt = await service.lookup({ requestId: 'prep-1', scope: request().scope });
+    expect(receipt.state).toBe('failed');
+    expect(receipt.detail).toBe('projection_digest_mismatch');
+    expect(receipt.artifact).toBeUndefined();
+    expect(counter.calls).toEqual([]);
   });
 });
 

@@ -163,6 +163,16 @@ and the D2 version number belongs to a separate SDK release contract.
   whole-request field joins the receipt — the Host holds its own request and
   `binding.requestDigest` is the check.
 
+  `endpoint` in both the counted target and `providerEvidence` is the INFERENCE
+  target identity (`selection.model.baseUrl`) the count is bound to, not the URL
+  of the counting/tokenizer HTTP call: whether the counting route and the
+  inference route are equivalent is unproven here and is external evidence work.
+  `method` and `methodVersion` stay co-recorded siblings on the counter evidence
+  and are deliberately NOT bound into `providerEvidence`; the comparison covers
+  `projectionDigest` and `endpoint`/`modelId` only, and binding the
+  counting-method identity in would be a wire-shape change requiring an Owner
+  ruling.
+
   Two validators move together, because there is no single schema authority for
   this surface: the hand-written local parse in `daemon/control-protocol.ts`
   and the zod wire schemas in `@byok-sdk/protocol`. The existing type-level

@@ -284,10 +284,21 @@ const ACCOUNTING_POLICY_REF: InputPreparationAccountingPolicyRefV1 = {
   ruledResidualKeys: ['max_tokens'],
 };
 
+/**
+ * A SYNTHETIC production-authority marker, written directly into the store.
+ *
+ * It exists only to move this lane past the readiness gate for these tests: the
+ * record is authored into the durable store, so it never travels through
+ * `validateProviderEvidence` and never faces the digest/target comparison a
+ * real count is checked by. It is NOT evidence that any HTTP observation ever
+ * happened, and nothing in this file places a counter call.
+ */
+const SYNTHETIC_PROVIDER_COUNT_FOR_LANE_TESTS = 'provider' as const;
+
 const COUNTER_EVIDENCE: InputPreparationCounterEvidenceV1 = {
   method: 'fixture.tokenizer',
   methodVersion: '0',
-  authority: 'provider',
+  authority: SYNTHETIC_PROVIDER_COUNT_FOR_LANE_TESTS,
   kind: 'count',
   value: 128,
   coverage: { covered: true },
