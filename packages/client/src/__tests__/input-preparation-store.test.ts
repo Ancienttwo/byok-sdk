@@ -8,6 +8,8 @@ import {
   InputPreparationIntegrityError,
   InputPreparationLimitError,
   InputPreparationStore,
+  InputPreparationUnsupportedRecordVersionError,
+  INPUT_PREPARATION_RECORD_VERSION,
   inputPreparationRecordId,
   type CounterReservationInput,
   type InputPreparationArtifact,
@@ -16,6 +18,7 @@ import {
 } from '../daemon/input-preparation-store';
 import {
   INPUT_PREPARATION_ARTIFACT_FORMAT,
+  INPUT_PREPARATION_RECORD_FORMAT,
   INPUT_PREPARATION_VERSION,
   type InputPreparationArtifactSummaryV1,
   type InputPreparationBindingV1,
@@ -133,6 +136,21 @@ function commit(recordId: string, overrides: Partial<CounterReservationInput> = 
   };
 }
 
+/** Every file under the store subtree with its size, so "no other files touched" is checkable. */
+async function inventory(storeDir: string): Promise<Record<string, number>> {
+  const root = path.join(storeDir, 'input-preparation');
+  const out: Record<string, number> = {};
+  const walk = async (dir: string): Promise<void> => {
+    for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) await walk(full);
+      else out[path.relative(root, full)] = (await fs.stat(full)).size;
+    }
+  };
+  await walk(root);
+  return out;
+}
+
 async function openStore(storeDir: string, options: { retentionMs?: number; retryHorizonMs?: number; now?: () => number } = {}): Promise<InputPreparationStore> {
   const store = new InputPreparationStore({
     storeDir,
@@ -233,6 +251,52 @@ describe('B-P2 store: restart roundtrip', () => {
 
     const restarted = new InputPreparationStore({ storeDir, retentionMs: 60_000, retryHorizonMs: 30_000 });
     await expect(restarted.open()).rejects.toBeInstanceOf(InputPreparationIntegrityError);
+  });
+
+  it('refuses a record written at an older record schema version, and leaves every byte of the store where it found it', async () => {
+    const storeDir = await tmpStoreDir();
+    const store = await openStore(storeDir);
+    const created = await store.reserve(reserve());
+    await store.commitCounterReservation(commit(created.record.recordId));
+
+    // A record exactly as version 2 wrote it: no `model`, because `model`
+    // became a required durable fact only at version 3.
+    const logPath = path.join(storeDir, 'input-preparation', 'records.jsonl');
+    const { model: _dropped, ...withoutModel } = store.get(created.record.recordId)!;
+    await fs.writeFile(logPath, `${JSON.stringify({ ...withoutModel, format: INPUT_PREPARATION_RECORD_FORMAT, version: 2 })}\n`, 'utf8');
+    const before = await fs.readFile(logPath);
+    const treeBefore = await inventory(storeDir);
+
+    const restarted = new InputPreparationStore({ storeDir, retentionMs: 60_000, retryHorizonMs: 30_000 });
+    const refusal = await restarted.open().then(() => undefined, (error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(InputPreparationUnsupportedRecordVersionError);
+    expect((refusal as InputPreparationUnsupportedRecordVersionError).reason).toBe('unsupported_record_version');
+    const message = (refusal as Error).message;
+    expect(message).toContain('unsupported older version');
+    expect(message).toContain('pending explicit operator disposition');
+    // The refusal must never advise an operator to destroy durable evidence:
+    // the record may be the only proof of a counter call that already happened.
+    expect(message).not.toMatch(/remove|delete|start clean|wipe/iu);
+
+    // Zero writes and zero cleanup: the log is byte-identical and no file in
+    // the subtree was added, dropped or resized.
+    expect(await fs.readFile(logPath)).toEqual(before);
+    expect(await inventory(storeDir)).toEqual(treeBefore);
+    // And the store stayed closed, so nothing can mistake it for an empty one.
+    expect(() => restarted.list()).toThrow(InputPreparationDurabilityError);
+  });
+
+  it('stamps the record schema version, which is independent of the wire version', async () => {
+    const storeDir = await tmpStoreDir();
+    const store = await openStore(storeDir);
+    const created = await store.reserve(reserve());
+
+    expect(created.record.version).toBe(INPUT_PREPARATION_RECORD_VERSION);
+    expect(INPUT_PREPARATION_RECORD_VERSION).toBe(3);
+    // The wire version is a different agreement and did not move with it.
+    expect(INPUT_PREPARATION_VERSION).toBe(2);
+    expect((await openStore(storeDir)).get(created.record.recordId)?.version).toBe(INPUT_PREPARATION_RECORD_VERSION);
   });
 });
 

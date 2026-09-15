@@ -53,6 +53,28 @@ import {
 // Record shape
 // ---------------------------------------------------------------------------
 
+/**
+ * The durable RECORD schema version, and nothing else.
+ *
+ * Deliberately separate from `INPUT_PREPARATION_VERSION`, which versions the
+ * wire shapes — the control request, the receipt, the retained artifact. Those
+ * are what two parties agree on; this one is what one daemon's own on-disk log
+ * is written in, and the two move for different reasons. Bumping the wire
+ * version because a private durable field became required would make every
+ * peer re-negotiate a contract that did not change; reusing the wire version
+ * for the log would make the log's meaning depend on an agreement it is not a
+ * party to.
+ *
+ * 3 is the first version in which `model` is a required durable fact (a
+ * prepared launch must re-present the counted model identity as an INDEPENDENT
+ * expectation, and the only other copy of it lives inside the retained
+ * envelope, which the native contract forbids using as its own expectation).
+ * A record at any other version is refused — see
+ * {@link InputPreparationUnsupportedRecordVersionError}. There is no
+ * compatibility read.
+ */
+export const INPUT_PREPARATION_RECORD_VERSION = 3;
+
 /** The durable idempotency key. Never a task id, and never caller-asserted: `scopeId` comes from the trusted authority grant. */
 export interface InputPreparationRecordKey {
   readonly scopeId: string;
@@ -62,7 +84,8 @@ export interface InputPreparationRecordKey {
 
 export interface InputPreparationRecord {
   readonly format: typeof INPUT_PREPARATION_RECORD_FORMAT;
-  readonly version: typeof INPUT_PREPARATION_VERSION;
+  /** The RECORD schema version — see {@link INPUT_PREPARATION_RECORD_VERSION}. Not the wire version. */
+  readonly version: typeof INPUT_PREPARATION_RECORD_VERSION;
   readonly recordId: string;
   readonly key: InputPreparationRecordKey;
   /** Digest over the whole normalized request, scope and runtime identity. */
@@ -177,6 +200,30 @@ export class InputPreparationIntegrityError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'InputPreparationIntegrityError';
+  }
+}
+
+/**
+ * The log holds a record written in a schema version this build does not
+ * support.
+ *
+ * A refusal, never a migration and never a compatibility read: the older shape
+ * is missing facts a prepared Execution cannot be launched without, and a store
+ * that silently held records it could not honor would be worse than one that
+ * says so. The refusal happens during replay, BEFORE the store is open, so it
+ * performs zero writes and zero cleanup — the log and every artifact beside it
+ * are left exactly as found for an operator to dispose of explicitly.
+ */
+export class InputPreparationUnsupportedRecordVersionError extends InputPreparationIntegrityError {
+  readonly reason = 'unsupported_record_version';
+
+  constructor(readonly recordId: string, readonly recordVersion: unknown) {
+    super(
+      `the input-preparation record log contains record ${recordId} at record schema version ${JSON.stringify(recordVersion)},`
+      + ` which this build does not support (it supports record schema version ${INPUT_PREPARATION_RECORD_VERSION} only);`
+      + ' the record is an unsupported older version and has been left untouched pending explicit operator disposition',
+    );
+    this.name = 'InputPreparationUnsupportedRecordVersionError';
   }
 }
 
@@ -318,21 +365,16 @@ export class InputPreparationStore {
         );
       }
       const record = parsed as InputPreparationRecord;
-      if (record.format !== INPUT_PREPARATION_RECORD_FORMAT || record.version !== INPUT_PREPARATION_VERSION) {
-        throw new InputPreparationIntegrityError('the input-preparation record log contains an unknown record format or version');
+      if (record.format !== INPUT_PREPARATION_RECORD_FORMAT) {
+        throw new InputPreparationIntegrityError('the input-preparation record log contains an unknown record format');
       }
-      // Fail closed rather than replaying a record a prepared Execution could
-      // never be launched from. `model` became a required durable fact when the
-      // prepared offer lane gained the right to consume a record; a log written
-      // before that carries counted artifacts whose model identity now exists
-      // only inside the envelope, which the native contract forbids using as
-      // its own expectation. Refusing the whole log is the honest answer: the
-      // alternative is a store that silently holds records it cannot honor.
-      if (record.model === undefined) {
-        throw new InputPreparationIntegrityError(
-          `the input-preparation record log contains record ${record.recordId} with no counted model identity;`
-          + ' it predates the prepared-offer lane and cannot be consumed — remove the store directory to start clean',
-        );
+      // The version is the ONLY thing that discriminates a supported record
+      // from an older one. Probing for an individual field instead (does it
+      // carry `model`?) would be a second, weaker authority over the same
+      // question, and would quietly accept any future shape that happens to
+      // have the field the probe knows to look for.
+      if (record.version !== INPUT_PREPARATION_RECORD_VERSION) {
+        throw new InputPreparationUnsupportedRecordVersionError(record.recordId, record.version);
       }
       // Last write wins per record id: the log is an append-only history of
       // one record's transitions, replayed in order.
@@ -430,7 +472,7 @@ export class InputPreparationStore {
       const artifactExpiresAtMs = createdAtMs + this.options.retentionMs;
       const record: InputPreparationRecord = {
         format: INPUT_PREPARATION_RECORD_FORMAT,
-        version: INPUT_PREPARATION_VERSION,
+        version: INPUT_PREPARATION_RECORD_VERSION,
         recordId,
         key: { ...input.key },
         requestDigest: input.requestDigest,

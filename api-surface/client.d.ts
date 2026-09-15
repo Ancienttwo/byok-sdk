@@ -4707,6 +4707,27 @@ import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INP
  *   horizon still finds a record, and a found record never triggers a second
  *   counter call.
  */
+/**
+ * The durable RECORD schema version, and nothing else.
+ *
+ * Deliberately separate from `INPUT_PREPARATION_VERSION`, which versions the
+ * wire shapes — the control request, the receipt, the retained artifact. Those
+ * are what two parties agree on; this one is what one daemon's own on-disk log
+ * is written in, and the two move for different reasons. Bumping the wire
+ * version because a private durable field became required would make every
+ * peer re-negotiate a contract that did not change; reusing the wire version
+ * for the log would make the log's meaning depend on an agreement it is not a
+ * party to.
+ *
+ * 3 is the first version in which `model` is a required durable fact (a
+ * prepared launch must re-present the counted model identity as an INDEPENDENT
+ * expectation, and the only other copy of it lives inside the retained
+ * envelope, which the native contract forbids using as its own expectation).
+ * A record at any other version is refused — see
+ * {@link InputPreparationUnsupportedRecordVersionError}. There is no
+ * compatibility read.
+ */
+export declare const INPUT_PREPARATION_RECORD_VERSION = 3;
 /** The durable idempotency key. Never a task id, and never caller-asserted: `scopeId` comes from the trusted authority grant. */
 export interface InputPreparationRecordKey {
     readonly scopeId: string;
@@ -4715,7 +4736,8 @@ export interface InputPreparationRecordKey {
 }
 export interface InputPreparationRecord {
     readonly format: typeof INPUT_PREPARATION_RECORD_FORMAT;
-    readonly version: typeof INPUT_PREPARATION_VERSION;
+    /** The RECORD schema version — see {@link INPUT_PREPARATION_RECORD_VERSION}. Not the wire version. */
+    readonly version: typeof INPUT_PREPARATION_RECORD_VERSION;
     readonly recordId: string;
     readonly key: InputPreparationRecordKey;
     /** Digest over the whole normalized request, scope and runtime identity. */
@@ -4796,6 +4818,23 @@ export declare class InputPreparationLimitError extends Error {
 /** The stored record or artifact does not match what was persisted. */
 export declare class InputPreparationIntegrityError extends Error {
     constructor(message: string);
+}
+/**
+ * The log holds a record written in a schema version this build does not
+ * support.
+ *
+ * A refusal, never a migration and never a compatibility read: the older shape
+ * is missing facts a prepared Execution cannot be launched without, and a store
+ * that silently held records it could not honor would be worse than one that
+ * says so. The refusal happens during replay, BEFORE the store is open, so it
+ * performs zero writes and zero cleanup — the log and every artifact beside it
+ * are left exactly as found for an operator to dispose of explicitly.
+ */
+export declare class InputPreparationUnsupportedRecordVersionError extends InputPreparationIntegrityError {
+    readonly recordId: string;
+    readonly recordVersion: unknown;
+    readonly reason = "unsupported_record_version";
+    constructor(recordId: string, recordVersion: unknown);
 }
 export interface InputPreparationStoreOptions {
     /** The daemon's store directory. The subtree below it is created 0700 on open. */
@@ -4895,6 +4934,16 @@ export declare class InputPreparationStore {
      * back, confirm the recovered bytes, and only then accept writes again.
      */
     revalidate(): Promise<void>;
+    /**
+     * Drop this instance's replayed state.
+     *
+     * Nothing on disk is touched: the log and the artifacts are the durable
+     * facts, and this only ends one process's view of them. After it, every read
+     * refuses instead of answering `undefined` — which is the whole point, since
+     * a closed store and an empty one would otherwise be indistinguishable to a
+     * caller. Re-opening replays from disk again.
+     */
+    close(): void;
     private assertOpen;
     /** Serialize a mutation behind every mutation already queued. */
     private enqueue;
@@ -4916,6 +4965,15 @@ export declare class InputPreparationStore {
     reserve(input: ReserveInput): Promise<ReserveOutcome>;
     /** Append one durable transition. Terminal records never transition again. */
     update(recordId: string, patch: RecordPatch): Promise<InputPreparationRecord>;
+    /**
+     * Every read asserts the store is open, for one reason: an unopened store
+     * and an empty store are indistinguishable from the in-memory map, and they
+     * mean opposite things. `undefined` from an unopened store would read as "no
+     * such record on this device" while the record sits durably on disk — which
+     * is exactly how a restart turns a counted preparation into
+     * `preparation_not_found`. Refusing is the only answer that cannot be
+     * mistaken for an answer about the durable state.
+     */
     get(recordId: string): InputPreparationRecord | undefined;
     find(key: InputPreparationRecordKey): InputPreparationRecord | undefined;
     /** Every live record, for tests and for the aggregate below. */
@@ -7241,6 +7299,18 @@ export interface TaskRunnerDeps {
      */
     inputPreparationLane?: {
         readonly store: InputPreparationStore;
+        /**
+         * Await the store's open before the first record read.
+         *
+         * The prepared offer path is reachable on a freshly restarted daemon that
+         * has served no prepare/lookup/cancel call yet, and a store that was never
+         * opened holds an EMPTY map — which would make a perfectly good durable
+         * record answer `preparation_not_found`. This is the preparation service's
+         * own once-only `ensureOpen` latch, passed in rather than re-implemented:
+         * the replay that recovers the log stays the service's, so this lane adds
+         * no second open authority and no second replay path.
+         */
+        readonly open: () => Promise<void>;
         /** The VERIFIED installed runtime/compiler identity every artifact is bound to. */
         readonly runtime: InputPreparationRuntimeIdentityV1;
         /** The operator's configured limits-policy revision currently in force. */
