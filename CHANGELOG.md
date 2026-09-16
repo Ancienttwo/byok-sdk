@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Changed (unreleased Pi startup)** — the SDK-owned RPC host resolves its initial
+  model during session creation and rejects `modelFallbackMessage` immediately.
+  The prior Pi binary RPC could stay model-less until the first prompt. Direct
+  default-model startup requires matching environment or Pi auth-store credentials;
+  keys' explicit model selection retains its auth-free profile behavior. Packed
+  smoke covers a credential-free refusal and a synthetic auth-store positive,
+  both with zero provider requests.
+
 - **Changed (unreleased Pi launch contract)** — ordinary and prepared Pi use SDK-owned
   session entries with explicit session cwd and a separately verified process cwd.
   Keys checks the declared launch and its client-owned empty projection directory
@@ -13,7 +21,9 @@
   entry, so their source is bundled while nine existing transitive dependencies
   become explicit client dependencies and stay external: `@mozilla/readability`,
   `jiti`, `linkedom`, `p-limit`, `promise.try`, `turndown`, `undici`, `unpdf`, `yaml`.
-  Their locked versions and integrity values do not change. The private
+  Each existing consumer retains its resolved version and integrity; hoist
+  locations change (including root YAML 2.9.0 to 2.8.3, with existing 2.9.0
+  consumers receiving nested entries). The private
   `#byok-pi-runtime-host` import points to shipped dist JS/declarations and keeps
   the Pi runtime out of SDK root initialization; it is not a public export.
 

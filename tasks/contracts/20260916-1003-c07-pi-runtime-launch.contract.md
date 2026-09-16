@@ -297,3 +297,8 @@ Scope first: move measurement/parser/reverify/assert and pure types, fixed crede
 Independent migration acceptance: P1 three known failing guards retain exact ownership, their control stays green; client existing public identity names/shapes unchanged (re-export source changes only), new package golden added; actual dist-subpath-closure passes with shared external; fixed digest vectors preserve bytes; imports only node fs (including promises)/crypto/path; shared shipped code zero scanner-semantics findings under existing a1–a18 rules; packed client/keys exact-edge assertion and mismatched-version negative. Required checks retain known guard failures explicitly. P2 final spawn wiring is a separate subsequent slice.
 
 Publication order: the shared package must be available before dependent client/keys in the aligned train; keys next publication couples once to this train, as with its core edge. Source workspace:* follows current convention; published ranges are disallowed. Total graph becomes ten aligned manifests and eleven public packages.
+
+
+## P2 API and evidence boundary (distinct from accepted P1-M migration)
+
+P2 deliberately adds the client runtime-launch resource module/types and callable Pi helper kinds, plus shared physical spawn binding and controlled-directory environment definitions. API acceptance covers those reviewed additions; the P1-M restriction to type re-export source changes applied only to the completed migration, not to P2. The Windows projection validation test belongs to packages/keys/src/pi-projection-windows.test.ts and the existing lowpriv CI step selects keys. Its physical test fixture uses the approved ACL shape without importing client internals and does not itself prove the client allocator.
