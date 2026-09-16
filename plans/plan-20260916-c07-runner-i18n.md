@@ -73,4 +73,5 @@ M2b-1 exact9-file scope registered before product edits. Native1005 lacks public
 
 - [x] Alpha raw baseline8995a4b1 with9 refusal RED/12controls GREEN; product107f4fb2 explicit refusal + dedicated private sealed artifact,51 focused/typecheck passed.
 - [x] Alpha first complete supervisor gate onad6b2fe5: FAIL;8 host driver regressions plus sealed smoke interpreter-argv fixture failure independently diagnosed.
-- [ ] Apply registered three-file test/script correction with unchanged assertions, freeze and obtain one supervisor re-gate; S2 residual24 remains explicit.
+- [x] Apply three-file driver correctiona9730e43;25/25 affected tests, client/vendor typecheck and assertion byte equality pass.
+- [ ] Obtain one supervisor complete re-gate plus real pack on the correction freeze; include other13 packages skipped after first client failure. S2 residual24 remains explicit.
