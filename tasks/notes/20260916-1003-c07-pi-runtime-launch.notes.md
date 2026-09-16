@@ -243,3 +243,26 @@ Decision Packet complete in handoff§96, local identical `_ops/c07-identity-work
 Actual rpiv-i18n2.8.0 metadata+tarball inspected read-only under_ops (no install/lock change; registry integrity matches). Nine upstream todo locale JSONs must enter sealed data assets and be preverified; upstream catch stays unchanged but missing/mutated assets reject before normal sealed entry. Adding the real dependency is distribution change for Owner notice; no sixth UI factory or language-picker capability is assumed.
 
 Remaining paths are NOT dev-only by name: official team CLI native/extension resolution, configured Windows/interpreter MCP launcher, configured preparation compiler constructor. Existing helper dispatcher can replace team command's duplicate client manifest lookup alone; it does not close team Pi launch, launcher identity or compiler lifetime. Exact file/line map in§96. Current complete S2 stillRED36requests; clipboard12 belongs1006. New record/distribution design awaits supervisor/Owner routing, not implemented.
+
+## P3d helper-lookup implementation boundary
+
+P1: compiler runtime currently discovered synchronously at construction; all service captures occur in startUnderLease after its existing asynchronous boundary. Team CLI currently uses native binary and path extensions, an operator ambient lane.
+P2: initialize preparation before replaceControlServer, then capability/remote/TaskRunner consume that one service; CLI operator child instead uses private same-bundle host sharing strict host session assembly.
+P3: preserve exact authority selection and environment; configured refusal never enters dev discovery. Operator retains user-supplied extensions/UI and is not declared attested or sealed. At10x fanout runtime hash/initialization cost stays one per daemon instance, final-spawn reverify remains separate.
+Supervisor approved once-Promise + private operator entry conditions in Codex thread; handoff §98. P4 docs accepted acb29c9, still no implementation authorization.
+
+### Helper-lookup product freeze f73431cf
+
+- Compiler/service: once-Promise before every control exposure including enrollment; configured authority measured through runtime pi-prepared locator and static pin/provenance; all unavailable values reject, including a configured resolver returning resolver_unconfigured. Standalone unconfigured compiler factory retains its existing explicit development default. Synchronous daemon construction does not resolve runtime.
+- Operator: official CLI private token `__byok_pi_team_operator`, literal lazy #byok-pi-runtime-host import, no new RuntimeLaunchKind/reserved helper kind. CLI supplies its actual executable/entry; no package-root/version-binary lookup in team session. Native exported VERSION compares to static SDK pin inside the host. Product sdkHelperHost rejects before file/network/spawn actions, per supervisor decision; this is not a Salesko product defect. Interpreted same-CLI bundle route is structural here, not a new S2 runtime evidence claim.
+- Shared pi-session-runtime owns session/model/resource assembly. Strict daemon requires initial model; operator preserves prior native RPC on-prompt model refusal. Operator enables only its prior guard/MCP factories plus explicit file extensions, no additional web/subagent/todo factories. Native appends inline factories after path extensions, so public extensionsOverride restores the named guard/MCP pair first and refuses missing/duplicate owned entries. Real operator RPC input-hold test preserves original assertions alongside native control.
+- Remaining trusted-launch-cwd clientPackageRoot call is real Node-bootstrap code lookup, not data. POSIX default shell avoids it; explicit Node interpreter / Windows path remains package-based. Moving byok-launch-cwd.mjs into assets would violate code/data contract; no new record/helper semantics authorized here. This residual remains open with P4/launch-code design, not mislabeled dev-only or closed by a relative path guess.
+- No runner/i18n implementation or fork change. Historical S2 36 requests remains RED pending new frozen gate; no assertion changed.
+
+Targeted WIP evidence `_ops/c07-identity-workspace/helper-lookup/`:
+- build-r1/build-r2 exit0, typecheck-r1/typecheck-r2 exit0.
+- compiler-tests-r1:15/15; focused-r1:58 passed/1 failed. Failed added fixture had empty assets (invalid record) and root-writable system executable, not a product failure.
+- compiler-tests-r2:12/12 across compiler selection and strict RPC. Fixed fixture uses actual temp bytes/hashes and existing stat seam restricted to own subtree; removing the seam restores precise install_record_mismatch. No privileged-install claim. Configured branches count zero calls to dev installed resolver.
+- team-tests-r2:7/7, includes official CLI private entry, real GUI hold/response, unchanged native control, daemon/helper refusal and product-helper unsupported gate.
+- Initial focused run also passed control, reserved-helper and closure files. Final combined subject full/pack remains supervisor gate, not claimed from these WIP checks.
+- Product15files +415/-138, no manifest/lock/golden change; local freeze attribution0. Registration/docs separate.

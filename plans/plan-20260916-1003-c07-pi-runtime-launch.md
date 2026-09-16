@@ -177,3 +177,10 @@ A Pi child starts whose interpreter, entry, argv, cwd or env differ from the att
 Handoff §88 / supervisor review: client allocates a fresh 0700 empty projection directory outside agent/session directories before resolving the keys child identity; keys checks the exact path, symlink status, owner, mode and emptiness before credential access, then injects only its credential and reverifies immediately before spawn. No allocation handshake process. Fixed env-name inventory is shared measurement data; construction stays in the consumer. Existing credential name/value digest exclusions remain unchanged. 0700 is a check-time ownership/layout fact, not same-uid OS isolation.
 
 Prepared keeps its existing native auth.json credential source during P2, explicitly labelled in the description. Unifying prepared credentials and the counted model with ordinary keys projection is an Owner product decision, not silently included in P2. No keys profile-derived record or mutable argv0 fallback is introduced.
+
+### P3d bounded helper-lookup checkpoint
+
+- [x] Preparation compiler configured/unconfigured selection, once-init before control exposure; product f73431cf.
+- [x] Official CLI private operator token + shared session assembly, preserving GUI/ambient semantics; product f73431cf.
+- [x] Node MCP bootstrap lookup design classified as unresolved code-authority edge; no asset shortcut or dev-only relabeling.
+- [ ] Supervisor frozen combined gate (includes21ab3c86 renderer). Full containment still pending runner/i18n implementation authority and native1006; P4 acb29c9 design accepted only.

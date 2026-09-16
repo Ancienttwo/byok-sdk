@@ -1198,6 +1198,14 @@ interpreter, or a bundle that names none), `install_record_mismatch` and
 
 ### Runtime launch descriptions and the sealed asset set
 
+When input preparation is enabled, daemon startup awaits one compiler/service
+initialization before exposing even the enrollment control endpoint. A configured
+implementation authority must resolve an attested `pi-prepared` record whose
+prefix and native provenance match this SDK's static pin/compiler contract;
+refusal fails startup without package discovery. Only an absent authority uses
+the installed development package resolver. The synchronous daemon factory stays
+synchronous; the resolved compiler identity is fixed for that daemon instance.
+
 Pi runtime launch (unreleased P2) resolves `{subject: {kind: "runtime", runtimeId: "pi"},
 runtimeEntry: "pi-rpc" | "pi-prepared"}`. The caller supplies no guessed executable.
 The host selects one install record; the SDK derives and measures the command,
@@ -1657,6 +1665,15 @@ remain covered by the local gate.
 
 
 ### Owned Pi RPC team member and GUI interaction
+
+The official CLI owns the private `__byok_pi_team_operator` dispatch token. It is
+operator-only and **not attested**: it preserves the CLI ambient environment,
+explicit extension paths and GUI capabilities. It is absent from daemon runtime
+kinds and SDK reserved-helper dispatch. Packaged Node uses the shipped
+`byok-agent.js`; an interpreted bundle can re-enter this token only when it
+contains that official CLI. A product `sdkHelperHost` does not establish this
+operator entry and is rejected as unsupported. No Salesko runtime capability is
+inferred from its MCP/helper host configuration.
 
 `byok-agent team pi-relay` binds one exact existing Codex thread and one newly
 owned RPC session on the pinned Pi fork runtime (see the Core pi runtime

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Changed (unreleased preparation startup)** — enabled preparation resolves its
+  compiler/service once before any control endpoint opens. Configured runtime
+  authority must attest the prepared entry and match the static native pin;
+  initialization refusal fails startup. Only unconfigured development uses
+  installed-package discovery; the public daemon factory remains synchronous.
+- **Changed (Pi operator relay)** — the official CLI uses a private operator-only
+  entry with the same session assembly as the strict RPC host, preserving explicit
+  extensions, interaction-guard order and ambient environment. It does not claim
+  attestation and is not a daemon/reserved-helper kind. Product sdkHelperHost
+  configurations are explicitly unsupported for this CLI entry. Pack smoke now
+  checks the installed private dispatch reaches the exact EX_CONFIG usage refusal.
+
 - **Fixed (unreleased Pi helper usage)** — ordinary RPC argument validation,
   interpreter/loader rejection and the policy argument recheck use the same
   EX_CONFIG renderer. Pure parser callers still receive exceptions; model and

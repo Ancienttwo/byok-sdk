@@ -61,3 +61,7 @@ P3d activated by supervisor: static/build-time closure of SDK extension jiti/rpi
 ## P3d partial progress / design hold
 
 35f04583 registers P3d;21ab3c86 usage renderer has build/typecheck/23targeted pass and supervisor bounded diff acceptance. Overall P3d pending, no terminal gate. §96 Decision Packet awaits review; supervisor explicitly holds runner implementation until Salesko P4 multi-kind record shape is defined. Existing S2 RED36 remains intact; no dependency/extension/record edits or functionality removal. No full/pack rerun or external action.
+
+## P3d helper-lookup candidate
+
+Product f73431cf, registration separate. Author targeted build/typecheck pass; compiler+strict RPC12/12 and team7/7; earlier focus reserved-helper/control/closure files passed with one new malformed fixture failure subsequently corrected. No timeout/closure assertion relaxed. Evidence `_ops/c07-identity-workspace/helper-lookup/`; complete frozen gate pending supervisor, includes prior renderer21ab3c86. No new full/pack claim. Node MCP launcher lookup, runner/i18n and native closure remain open as recorded in notes.
