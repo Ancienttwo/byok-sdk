@@ -1,0 +1,7 @@
+# Provenance hashes bind original bytes, including line endings.
+packages/client/vendor/** -text
+
+# Tracked layout/source metadata used by the asset build steps.
+packages/client/src/adapters/pi/pi-export-asset-layout.json -text
+packages/client/src/adapters/pi/pi-export-assets.source.json -text
+packages/client/src/adapters/pi/todo-locale-layout.json -text
