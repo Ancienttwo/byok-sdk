@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
@@ -26,6 +26,10 @@ const piEntry = fileURLToPath(import.meta.resolve(PI_DEPENDENCY_SPECIFIER));
 const piRoot = path.dirname(path.dirname(piEntry));
 const piManifest = JSON.parse(await readFile(path.join(piRoot, 'package.json'), 'utf8'));
 const clientManifest = JSON.parse(await readFile(path.join(clientRoot, 'package.json'), 'utf8'));
+assert.equal(clientManifest.dependencies['@juicesharp/rpiv-todo'], undefined);
+const clientRequire = createRequire(path.join(clientRoot, 'package.json'));
+assert.throws(() => clientRequire.resolve('@juicesharp/rpiv-todo/package.json'), {code:'MODULE_NOT_FOUND'});
+
 const piRuntime = parsePiRuntimeIdentity(clientManifest, '@byok-sdk/client package.json');
 assert.equal(piManifest.name, piRuntime.packageName);
 assert.equal(piManifest.version, piRuntime.version);
@@ -262,6 +266,17 @@ await runtime.dispose();
   assert.match(startup.stderr, /^byok-pi-rpc: exactly one --config-digest=<sha256> is required\n$/);
   assert.doesNotMatch(startup.stderr, /ERR_MODULE_NOT_FOUND|ERR_PACKAGE_PATH_NOT_EXPORTED|Cannot find (?:module|package)|Unknown file extension/);
   console.log('[release-pack] installed Node byok-pi-rpc imports reached the exact missing-config-digest refusal; sessions=0');
+  const todoEntry = pathToFileURL(path.join(clientRoot, 'dist/bin/pi-todo-runtime.js')).href;
+  const todoAnchor = pathToFileURL(path.join(clientRoot, 'dist/assets/extensions/rpiv-todo/2.8.0') + path.sep).href;
+  const todoStartup = spawnSync(process.execPath, ['--input-type=module', '-e',
+    `import {createTodoExtension} from ${JSON.stringify(todoEntry)}; console.log(typeof createTodoExtension(${JSON.stringify(todoAnchor)}));`],
+    {cwd:dir,env:startupEnv,encoding:'utf8',timeout:15_000});
+  assert.equal(todoStartup.status, 0, todoStartup.stderr || String(todoStartup.error));
+  assert.equal(todoStartup.stdout, 'function\n');
+  assert.equal(todoStartup.stderr, '');
+  assert.equal(requests, 0);
+  console.log('[release-pack] installed Node private todo bundle and nine locale assets loaded; warnings=0; requests=0');
+
   const operatorStartup = spawnSync(process.execPath, [path.join(clientRoot, 'dist/bin/byok-agent.js'), '__byok_pi_team_operator'],
     {cwd:dir,env:startupEnv,encoding:'utf8',timeout:15_000});
   assert.equal(operatorStartup.status, 78, operatorStartup.stderr || String(operatorStartup.error));

@@ -1,0 +1,44 @@
+{
+  "format": "byok.vendor-source",
+  "version": 1,
+  "package": "@earendil-works/pi-tui",
+  "packageVersion": "0.85.1",
+  "files": [
+    {
+      "path": "LICENSE",
+      "vendoredSha256": "0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48",
+      "delta": "Retained upstream MIT license; pi-tui license from pi repository d981de1."
+    },
+    {
+      "path": "components/text.d.ts",
+      "vendoredSha256": "e2b05bceb9bb0ddde9b972b528d7f54c46b0c2071f23a7732a2c126da9ea81ff",
+      "delta": "Declaration-only: remove terminal Component implementation/import; keep Text public signatures.",
+      "upstreamSha256": "fc0566f2753fd99417dd0eab72d7b4cde8d51b9c3430c709e5864dd60f0d2238",
+      "upstreamPath": "dist/components/text.d.ts"
+    },
+    {
+      "path": "components/text.js",
+      "upstreamPath": "dist/components/text.js",
+      "upstreamSha256": "5399879280c62878370ade1ec33f8e8dc8ce61166217f8c6f08058c942f608b8",
+      "vendoredSha256": "5399879280c62878370ade1ec33f8e8dc8ce61166217f8c6f08058c942f608b8"
+    },
+    {
+      "path": "ports.d.ts",
+      "vendoredSha256": "092301a4dafbcdd947b6a2e10d64929c1b19db3cdc0b7e2c3f4935eb185ec695",
+      "delta": "SDK declaration projected from upstream signatures or native ExtensionAPI port; no runtime code."
+    },
+    {
+      "path": "utils.d.ts",
+      "vendoredSha256": "e3b9f524b1cc695aa41a70e02b216073184b6ebbcaef9977d21cb18105fcf762",
+      "delta": "No change",
+      "upstreamSha256": "e3b9f524b1cc695aa41a70e02b216073184b6ebbcaef9977d21cb18105fcf762",
+      "upstreamPath": "dist/utils.d.ts"
+    },
+    {
+      "path": "utils.js",
+      "upstreamPath": "dist/utils.js",
+      "upstreamSha256": "5616d6b136e7ebbdae5a0626e586a1edafb21c3b5ed8dc1ce5108f26444a1f5c",
+      "vendoredSha256": "5616d6b136e7ebbdae5a0626e586a1edafb21c3b5ed8dc1ce5108f26444a1f5c"
+    }
+  ]
+}

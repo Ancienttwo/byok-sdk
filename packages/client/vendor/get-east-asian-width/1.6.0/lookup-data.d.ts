@@ -1,0 +1,15 @@
+export declare const ambiguousMinimalCodePoint: number;
+export declare const ambiguousMaximumCodePoint: number;
+export declare const ambiguousRanges: number[];
+export declare const fullwidthMinimalCodePoint: number;
+export declare const fullwidthMaximumCodePoint: number;
+export declare const fullwidthRanges: number[];
+export declare const halfwidthMinimalCodePoint: number;
+export declare const halfwidthMaximumCodePoint: number;
+export declare const halfwidthRanges: number[];
+export declare const narrowMinimalCodePoint: number;
+export declare const narrowMaximumCodePoint: number;
+export declare const narrowRanges: number[];
+export declare const wideMinimalCodePoint: number;
+export declare const wideMaximumCodePoint: number;
+export declare const wideRanges: number[];

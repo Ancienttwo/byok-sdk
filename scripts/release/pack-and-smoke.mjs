@@ -552,6 +552,10 @@ try {
       throw new Error('@byok-sdk/cloud-dataplane/dist/runtime.js must not reference node: builtins (worker runtime)');
     }
     const clientManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'package.json'), 'utf8'));
+    if (clientManifest.dependencies['@juicesharp/rpiv-todo'] !== undefined) throw new Error('packed client retained a second npm todo authority');
+    console.log('[release-pack] client dependencies=' + Object.keys(clientManifest.dependencies).length +
+      '; delta from M1a: -rpiv-todo +rpiv-i18n +rpiv-config +typebox +pi-ai(fork) (pi-tui/width: vendored build inputs only)');
+
     const installedAgentBin = path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'dist', 'bin', 'byok-agent.js');
     const emptyAgentHome = path.join(smokeDir, 'empty-agent-home');
     mkdirSync(emptyAgentHome);

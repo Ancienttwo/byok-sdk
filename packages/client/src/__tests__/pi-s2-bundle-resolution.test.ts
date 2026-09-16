@@ -229,6 +229,14 @@ describe('Pi launch path — S2 release containment', () => {
           await fs.copyFile(path.join(nativeRoot, relative), target); await fs.chmod(target, 0o444);
           assets.push({ path: relative, digest: await digest(target) });
         }
+        // Same shipped locale layout; record digests come from actual copied bytes.
+        const localeManifest = JSON.parse(await fs.readFile(new URL('../../dist/assets/extensions/rpiv-todo/2.8.0/manifest.json', import.meta.url), 'utf8'));
+        for (const row of localeManifest.assets as Array<{ path: string; digest: string }>) {
+          const target = path.join(assetRoot, row.path); await fs.mkdir(path.dirname(target), { recursive: true });
+          await fs.copyFile(fileURLToPath(new URL(`../../dist/assets/${row.path}`, import.meta.url)), target);
+          await fs.chmod(target, 0o444);
+          assets.push({ path: row.path, digest: await digest(target) });
+        }
         const nativeRequire = createRequire(path.join(nativeRoot, 'package.json'));
         const photonSource = path.join(path.dirname(nativeRequire.resolve('@silvia-odwyer/photon-node')), 'photon_rs_bg.wasm');
         const photonTarget = path.join(assetRoot, 'photon_rs_bg.wasm');

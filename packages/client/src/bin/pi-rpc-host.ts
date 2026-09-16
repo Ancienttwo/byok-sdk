@@ -5,7 +5,8 @@ import { PermissionPolicySchema, type PermissionPolicy } from '@byok-sdk/protoco
 import type { CreateAgentSessionOptions } from '@earendil-works/pi-coding-agent';
 import { runPiSessionRuntime } from './pi-session-runtime';
 export { openPiRpcSession } from './pi-session-runtime';
-import { webExtension, subagentsExtension, todoExtension } from './pi-extension-factories.js';
+import { webExtension, subagentsExtension } from './pi-extension-factories.js';
+import { verifyTodoLocaleAssets } from '../adapters/pi/todo-locale-assets';
 import { createByokMcpExtension } from '../adapters/pi/mcp-extension';
 import { createByokSubagentsPolicyExtension } from '../adapters/pi/subagents-policy-extension';
 import { parseTaskScopedMcpConfig, type TaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
@@ -123,6 +124,9 @@ export async function runPiRpcHost(argv: readonly string[]): Promise<void> {
   }
   const mode = config.policy.mode;
   if (mode !== 'auto' && mode !== 'readonly') fail('unsupported permission mode');
+  const localeAnchor = verifyTodoLocaleAssets(config.binding);
+  const { createTodoExtension } = await import('#byok-pi-todo-runtime');
+  const todoExtension = createTodoExtension(localeAnchor);
   await runPiSessionRuntime({
     cwd: config.cwd, session: args.session,
     provider: args.provider, model: args.model, thinking: args.thinking,

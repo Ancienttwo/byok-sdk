@@ -89,6 +89,7 @@ const DIST = path.join(PACKAGE_ROOT, 'dist');
  * into a real import.
  */
 const GUARDED: readonly { readonly file: string; readonly allowedSubstrings: readonly string[] }[] = [
+  { file: 'bin/pi-todo-runtime.js', allowedSubstrings: [] },
   { file: 'assertion-client/index.js', allowedSubstrings: [] },
   { file: 'mcp-server/index.js', allowedSubstrings: [] },
   { file: 'adapters/index.js', allowedSubstrings: ['pi-coding-agent', '@earendil-works'] },
@@ -339,6 +340,25 @@ describe.skipIf(!DIST_PRESENT)('the daemon-free dist sub-path closures', () => {
     expect(
       staticImportSpecifiers(source).filter((specifier) => specifier.includes('pi-coding-agent')),
     ).toEqual([]);
+  });
+
+  it('keeps todo initialization behind its sole private literal lazy entry', () => {
+    const manifest = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8'));
+    expect(manifest.imports['#byok-pi-todo-runtime']).toEqual({
+      types: './dist/bin/pi-todo-runtime.d.ts', default: './dist/bin/pi-todo-runtime.js',
+    });
+    expect(manifest.files).toContain('dist');
+    expect(existsSync(path.join(DIST, 'bin/pi-todo-runtime.d.ts'))).toBe(true);
+    const host = readFileSync(path.join(DIST, 'bin/pi-runtime-host.js'), 'utf8');
+    const root = readFileSync(path.join(DIST, 'index.js'), 'utf8');
+    for (const source of [host, root]) {
+      expect(staticImportSpecifiers(source).filter(name => /pi-todo-runtime|rpiv-todo|rpiv-i18n/.test(name))).toEqual([]);
+      expect(source).not.toContain('rpiv-i18n.runtime');
+    }
+    expect(host.match(/import\(["']#byok-pi-todo-runtime["']\)/g)).toHaveLength(1);
+    expect(readFileSync(path.join(DIST, 'bin/pi-todo-runtime.js'), 'utf8')).toContain('rpiv-i18n.runtime');
+    expect(readFileSync(path.join(DIST, 'bin/pi-todo-runtime.js'), 'utf8')).not.toMatch(/native-modifiers|createRequire|\.node|TypeCompiler|codegen/);
+    expect(manifest.dependencies['@juicesharp/rpiv-todo']).toBeUndefined();
   });
 
   // The control. If this ever passes, every assertion above is worthless.

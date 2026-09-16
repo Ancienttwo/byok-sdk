@@ -32,13 +32,13 @@ export default defineConfig({
   clean: true,
   splitting: false,
   treeshake: true,
-  noExternal: ['pi-subagents', 'pi-web-access', '@juicesharp/rpiv-todo'],
+  noExternal: ['pi-subagents', 'pi-web-access'],
   // koffi is the win32 job-object backstop's native binding layer and an
   // `optionalDependencies` entry: it must stay a runtime resolution so a
   // non-win32 install (where the addon may be absent) never has it inlined,
   // and so the win32 branch loads the host's own prebuilt addon.
   external: [
-    'koffi', '#byok-pi-runtime-host',
+    'koffi', '#byok-pi-runtime-host', '#byok-pi-todo-runtime',
     '@mozilla/readability', 'linkedom', 'p-limit', 'promise.try',
     'turndown', 'unpdf', 'undici', 'jiti', 'yaml',
   ],

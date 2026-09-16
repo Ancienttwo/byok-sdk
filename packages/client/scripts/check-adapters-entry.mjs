@@ -1,9 +1,39 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
 const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+if (process.argv.includes('--build-todo')) {
+  const dist = path.join(packageRoot, 'dist');
+  const before = new Map(readdirSync(dist, { recursive: true, withFileTypes: true })
+    .filter(entry => entry.isFile()).map(entry => {
+      const file = path.join(entry.parentPath, entry.name);
+      return [file, createHash('sha256').update(readFileSync(file)).digest('hex')];
+    }));
+  assert.ok(before.size > 0, 'main tsup must run before the private todo build');
+  const { spawnSync } = await import('node:child_process');
+  const result = spawnSync('bun', ['run', 'tsup', '--config', 'tsup.todo.config.ts'], {
+    cwd: packageRoot, stdio: 'inherit',
+  });
+  assert.equal(result.status, 0, 'private todo build failed');
+  const meta = JSON.parse(readFileSync(path.join(dist, 'bin/metafile-esm.json'), 'utf8'));
+  const inputs = Object.keys(meta.inputs).map(file => path.relative(packageRoot, path.resolve(packageRoot, file)).split(path.sep).join('/'));
+  assert.deepEqual(inputs.filter(file => /vendor\/(pi-tui|get-east-asian-width)\//.test(file)).sort(), [
+    'vendor/pi-tui/0.85.1/components/text.js', 'vendor/pi-tui/0.85.1/utils.js',
+    ...['index.js', 'lookup.js', 'lookup-data.js', 'utilities.js'].map(file => `vendor/get-east-asian-width/1.6.0/${file}`),
+  ].sort());
+  assert.equal(inputs.some(file => /node_modules\/(?:@earendil-works\/pi-tui|get-east-asian-width)\//.test(file)), false,
+    'private UI subtree must not resolve an npm copy');
+  for (const [file, digest] of before) {
+    assert.equal(createHash('sha256').update(readFileSync(file)).digest('hex'), digest,
+      `private todo build overwrote main dist: ${path.relative(dist, file)}`);
+  }
+  console.log(`private todo build preserved all ${before.size} main dist file digests`);
+  process.exit(0);
+}
 const adaptersExport = manifest.exports?.['./adapters'];
 
 assert.deepEqual(adaptersExport, {
@@ -23,7 +53,12 @@ assert.equal(manifest.dependencies?.['pi-subagents'], '0.60.0');
 // (`src/mcp/`), so there is no second MCP authority in the graph to pin.
 assert.equal(manifest.dependencies?.['@modelcontextprotocol/client'], '2.0.0');
 assert.equal(manifest.dependencies?.['pi-mcp-adapter'], undefined);
-assert.equal(manifest.dependencies?.['@juicesharp/rpiv-todo'], '2.8.0');
+assert.equal(manifest.dependencies?.['@juicesharp/rpiv-todo'], undefined);
+assert.equal(manifest.dependencies?.['@juicesharp/rpiv-i18n'], '2.8.0');
+assert.equal(manifest.dependencies?.['@earendil-works/pi-tui'], undefined);
+assert.equal(manifest.devDependencies?.['@earendil-works/pi-tui'], undefined);
+assert.equal(manifest.dependencies?.['@earendil-works/pi-ai'],
+  manifest.byok.piRuntimePin.replace('pi-coding-agent@', 'pi-ai@'), 'Pi AI and coding-agent fork pins must match');
 assert.equal(existsSync(new URL('../dist/adapters/pi/team-interaction-extension.js', import.meta.url)), true);
 assert.equal(existsSync(new URL('../dist/adapters/pi/mcp-extension.js', import.meta.url)), true);
 assert.equal(existsSync(new URL('../dist/adapters/pi/subagents-policy-extension.js', import.meta.url)), true);

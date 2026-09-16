@@ -1,0 +1,61 @@
+{
+  "format": "byok.vendor-source",
+  "version": 1,
+  "package": "get-east-asian-width",
+  "packageVersion": "1.6.0",
+  "files": [
+    {
+      "path": "LICENSE",
+      "vendoredSha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3",
+      "delta": "No change",
+      "upstreamSha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3",
+      "upstreamPath": "LICENSE"
+    },
+    {
+      "path": "index.d.ts",
+      "vendoredSha256": "228354b26813689534d5ecf1e2d1948795fe31bb7fa274b28fbc4056c1ea6ac3",
+      "delta": "No change",
+      "upstreamSha256": "228354b26813689534d5ecf1e2d1948795fe31bb7fa274b28fbc4056c1ea6ac3",
+      "upstreamPath": "index.d.ts"
+    },
+    {
+      "path": "index.js",
+      "upstreamPath": "index.js",
+      "upstreamSha256": "d7b1ba05914c0fc311c20e5618bf8d0893c9c74078a07975e2df981445e64887",
+      "vendoredSha256": "d7b1ba05914c0fc311c20e5618bf8d0893c9c74078a07975e2df981445e64887"
+    },
+    {
+      "path": "lookup-data.d.ts",
+      "vendoredSha256": "e2c8f13c1eeb82602902c3119c0ced27693dbbe59bc34a69ee597187ad94434f",
+      "delta": "SDK declaration projected from upstream signatures or native ExtensionAPI port; no runtime code."
+    },
+    {
+      "path": "lookup-data.js",
+      "upstreamPath": "lookup-data.js",
+      "upstreamSha256": "f6b40f86c9a2a6808ec808fa8ddcb8da261254cc6121d37ffaeb2bf35dad1d5b",
+      "vendoredSha256": "f6b40f86c9a2a6808ec808fa8ddcb8da261254cc6121d37ffaeb2bf35dad1d5b"
+    },
+    {
+      "path": "lookup.d.ts",
+      "vendoredSha256": "b54848abb31a5df2d600da888f3f1740f689d7a363b3099c757d590d7e8e8151",
+      "delta": "SDK declaration projected from upstream signatures or native ExtensionAPI port; no runtime code."
+    },
+    {
+      "path": "lookup.js",
+      "upstreamPath": "lookup.js",
+      "upstreamSha256": "c80ecc22b120b27ef5ea9facb7000b8fd4ec037a84d9231d215f1c44bc9c21d0",
+      "vendoredSha256": "c80ecc22b120b27ef5ea9facb7000b8fd4ec037a84d9231d215f1c44bc9c21d0"
+    },
+    {
+      "path": "utilities.d.ts",
+      "vendoredSha256": "6284c794b9a52bf258b988a5fe1464c8faf6307268d510bdf352212369159b28",
+      "delta": "SDK declaration projected from upstream signatures or native ExtensionAPI port; no runtime code."
+    },
+    {
+      "path": "utilities.js",
+      "upstreamPath": "utilities.js",
+      "upstreamSha256": "4b08a7e9e3ffacbcf198a6abceb2338d52ac671899e52ccc2851c898bfccac42",
+      "vendoredSha256": "4b08a7e9e3ffacbcf198a6abceb2338d52ac671899e52ccc2851c898bfccac42"
+    }
+  ]
+}
