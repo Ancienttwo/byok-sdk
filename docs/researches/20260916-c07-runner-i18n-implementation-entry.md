@@ -453,3 +453,12 @@ The bounded read-only review accepted the draft as M2b-3 design final, with thre
 3. At cutover, put the downstream notice in docs/spec.md and the maxDepth>0 complete-plan refusal rule in the Salesko P4 contract. These are future registered writes, not activated product/spec/P4 changes in this docs-only freeze.
 
 PerLaunch comes from independently verified parent state, never env; a single written config byte sequence is covered by config-digest. Design phase is complete. No new work is dispatched: Owner structured-output α/β/γ, scripted-workflow scope, E-chain disposition and native1006 scope/publication boundaries remain external inputs. No choice or product activation is inferred from approval of the bounded review.
+
+
+## Owner alpha activation — precise scope
+
+Owner answered “approve” to the explicit question choosing alpha: sealed mode refuses structured-output requests while retaining ordinary text subagents. The question retained scripted-workflow/native1006 prerequisites for recursion and E-chain for P4. Thus alpha implementation is authorized, not beta preparation or gamma waiting; publication and other feature decisions remain separate.
+
+Initial architecture trace: pi-rpc-host.ts imports the same pi-extension-factories.js subagents factory in attested and unconfigured lanes; tsup inlines pi-subagents, while final Salesko-style Bun build follows its reachable graph. A runtime policy guard alone does not remove typebox/compile from the sealed graph. Existing capability-ceiling only controls tools/agents/extensions, not output schemas. Foreground subagent-executor.ts:1985 can recover schema from persisted contract/descriptor, async-execution.ts:1000–1001 creates structured-output artifacts, and extension delegation bypasses model tool_call. A new SDK top-level outputSchema hook cannot be claimed complete. Exact path activation waits for this bounded feature-input/build-authority trace; no product code changed by this registration.
+
+Use verified binding/plan or a fixed sealed build entry as the mode authority, not an environment flag or caller assertion. Alpha must refuse effective structured output before subagent spawn/artifact creation and must not report unvalidated output as valid. Preserve unconfigured/operator behavior. Any build-authority split or mechanical vendor import requires explicit scope/provenance registration and supervisor boundary review; no whole234-source activation inferred from the alpha feature approval.

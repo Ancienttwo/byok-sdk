@@ -45,7 +45,8 @@ Prepare the bounded implementation contract in [docs/researches/20260916-c07-run
 - [x] M2b-1 frozen targeted supervisor gate PASS7d56a6fb (assets/preverify only);83 targeted tests, S2 still24. Native public export/path-policy remain1006 item11.
 - [x] M2b-2 read-only15-row equivalence probe and actual upstream consumer reproduction; four regex counterexamples documented, no product writes.
 - [x] M2b-2 supervisor accepted runtime-guard attribution and escalated to Owner: one widening, three classification/timing differences.
-- [ ] Owner select structured-output sealed scope: α explicit feature exclusion (Fable recommendation), β maintained construction-phase no-codegen preparation, or γ upstream API. Product and dispatch remain blocked.
+- [x] Owner selected α explicitly: sealed structured-output feature requests refuse; ordinary text subagents retained. No scripted-workflow/native/P4 approval inferred.
+- [ ] M2b-2α trace all effective request/recovery/delegation consumers and sealed build graph, then register exact implementation paths. Runtime refusal and codegen graph exclusion require separate evidence; dispatch stays gated.
 - [x] Draft M2b-3 execution/test matrix, helper activation order and downstream complete-plan notice (docs only).
 - [x] Supervisor accepted M2b-3 design5e7c3ba7 with print-specific startup probe, full recursive/jiti-zero gate, and spec/P4 notice conditions. Root/session ownership and atomic transaction/crash proofs remain implementation stop conditions; no product work until external inputs.
 - [ ] M2b-3: prove all five custody execution points and consume accepted M2b-1/2 prerequisites; obtain scripted-workflow Owner disposition before recursive dispatch. This is the only dispatch-enabling slice; full gate.
