@@ -4,8 +4,8 @@ import {
   parseImplementationSpawnBinding,
   projectKeysPiInheritedEnvironment,
   type ImplementationSpawnBindingV1,
-} from './spawn-binding';
-import { toolImplementationLaunchEnvNamesDigest, toolImplementationLoaderEnvValuesDigest } from './identity';
+} from '../spawn-binding';
+import { toolImplementationLaunchEnvNamesDigest, toolImplementationLoaderEnvValuesDigest } from '../identity';
 
 function binding(): ImplementationSpawnBindingV1 {
   return {

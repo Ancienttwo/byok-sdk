@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
@@ -43,23 +43,6 @@ import { trustedCwd } from './fixtures/launch-cwd';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/mcp-fixture-server.mjs', import.meta.url));
 const ENV = { PATH: process.env.PATH ?? '' } as const;
-
-/**
- * The environment `McpServerPool` spawns a server with, recomputed here from
- * the same rule the pool applies (`adapters/pi/mcp-server-pool.ts`): this
- * process's own environment, minus the SDK's Pi control variables.
- *
- * The pool runs inside the Pi child, so this is the second of the two
- * environments one identity has to survive.
- */
-function poolChildEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [name, value] of Object.entries(process.env)) {
-    if (value === undefined || name.startsWith('BYOK_PI_')) continue;
-    env[name] = value;
-  }
-  return env;
-}
 
 const MCP_CAPABLE: RuntimeCapabilities = {
   steer: false,
@@ -496,9 +479,10 @@ interface RegisteredTool {
 async function loadExtension(
   script: string,
   toolImplementations: Record<string, unknown> | undefined,
+  mcpEnv: Readonly<Record<string, string>> = ENV,
 ): Promise<RegisteredTool[]> {
   const observed = await observeMcpServer('salesko', { command: process.execPath, args: [script, '{}'] }, {
-    env: ENV,
+    env: mcpEnv,
     timeoutMs: 15_000,
   });
   const observation: Record<string, McpToolsetServerObservation> = {
@@ -506,6 +490,7 @@ async function loadExtension(
   };
   const configPath = path.join(await tempDir(), 'mcp-config.json');
   await fs.writeFile(configPath, JSON.stringify({
+    mcpEnv,
     mcpServers: { salesko: { command: process.execPath, args: [script, '{}'] } },
     observation,
     permissionMode: 'auto',
@@ -525,28 +510,10 @@ async function loadExtension(
 describe('the Pi extension re-measures an attested server before opening it', () => {
   const configPathBefore = process.env[BYOK_PI_MCP_CONFIG_PATH];
 
-  /**
-   * `vitest.config.ts` injects `BYOK_TEST_DEVICE_CREDENTIAL_STORE` into THIS
-   * process, and the pool's child environment is this process's own
-   * (`adapters/pi/mcp-server-pool.ts`). In production no such name can be
-   * there: `buildRuntimeEnv` hard-denies the whole `BYOK_*` prefix, so the Pi
-   * child carries only the two control variables the adapter adds and the
-   * per-server block the core layers on. Left in place it is an unaccountable
-   * control name on a gated child environment, which the spawn gate refuses by
-   * design — so the harness's own flag is removed for the duration of these
-   * cases rather than being enumerated into the projection.
-   */
-  const credentialStoreFlag = process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE;
-
-  beforeEach(() => {
-    delete process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE;
-  });
-
   afterEach(() => {
+    vi.unstubAllEnvs();
     if (configPathBefore === undefined) delete process.env[BYOK_PI_MCP_CONFIG_PATH];
     else process.env[BYOK_PI_MCP_CONFIG_PATH] = configPathBefore;
-    if (credentialStoreFlag === undefined) delete process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE;
-    else process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE = credentialStoreFlag;
   });
 
   async function artifactCopy(): Promise<string> {
@@ -557,7 +524,7 @@ describe('the Pi extension re-measures an attested server before opening it', ()
 
   it('calls the tool when the artifact still measures the way the daemon attested it', async () => {
     const script = await artifactCopy();
-    const tools = await loadExtension(script, { salesko: await attestReal(script, poolChildEnv()) });
+    const tools = await loadExtension(script, { salesko: await attestReal(script, ENV) });
     const echo = tools.find((tool) => tool.name === 'mcp__salesko__echo')!;
     const result = await echo.execute('call-1', { text: 'hello' }, undefined);
     expect(result.content).toEqual([{ type: 'text', text: 'byok-fixture:echo:{"text":"hello"}' }]);
@@ -575,36 +542,36 @@ describe('the Pi extension re-measures an attested server before opening it', ()
       .rejects.toThrow(/install_record_mismatch/u);
   }, 30_000);
 
-  it('refuses to open the server when this process gained a variable after the daemon measured it', async () => {
+  it('refuses to open the server when explicit MCP config gained a variable after admission', async () => {
     const script = await artifactCopy();
-    // Attested against the environment the pool WOULD have spawned with, then
-    // a name appears in it — the pool's child env is this process's own.
-    const identity = await attestReal(script, poolChildEnv());
-    process.env.PYTHONPATH = '/tmp/injected';
-    try {
-      const tools = await loadExtension(script, { salesko: identity });
-      const echo = tools.find((tool) => tool.name === 'mcp__salesko__echo')!;
-      await expect(echo.execute('call-1', { text: 'hello' }, undefined))
-        .rejects.toThrow(/launch_env_drift \(launch-env\)/u);
-    } finally {
-      delete process.env.PYTHONPATH;
-    }
+    const identity = await attestReal(script, ENV);
+    const tools = await loadExtension(script, { salesko: identity }, { ...ENV, PYTHONPATH: '/tmp/injected' });
+    const echo = tools.find((tool) => tool.name === 'mcp__salesko__echo')!;
+    await expect(echo.execute('call-1', { text: 'hello' }, undefined))
+      .rejects.toThrow(/launch_env_drift \(launch-env\)/u);
   }, 30_000);
 
-  it('refuses to open the server when an unaccountable control name reached this process', async () => {
+  it('refuses to open the server when explicit MCP config carries an unaccountable control name', async () => {
     const script = await artifactCopy();
-    const identity = await attestReal(script, poolChildEnv());
-    // Not a name this SDK mints on any gated path, and not one the projection
-    // subtracts: the prefix alone is not a reason to let it through.
-    process.env.BYOK_LOADER_PATH = '/tmp/injected';
-    try {
-      const tools = await loadExtension(script, { salesko: identity });
-      const echo = tools.find((tool) => tool.name === 'mcp__salesko__echo')!;
-      await expect(echo.execute('call-1', { text: 'hello' }, undefined))
-        .rejects.toThrow(/launch_env_unexpected_control_name \(launch-env\)/u);
-    } finally {
-      delete process.env.BYOK_LOADER_PATH;
-    }
+    const identity = await attestReal(script, ENV);
+    // Not a name this SDK mints: the prefix alone cannot authorize it.
+    const tools = await loadExtension(script, { salesko: identity }, { ...ENV, BYOK_LOADER_PATH: '/tmp/injected' });
+    const echo = tools.find((tool) => tool.name === 'mcp__salesko__echo')!;
+    await expect(echo.execute('call-1', { text: 'hello' }, undefined))
+      .rejects.toThrow(/launch_env_unexpected_control_name \(launch-env\)/u);
+  }, 30_000);
+
+  it('keeps the attested explicit MCP environment when the Pi parent ambient changes', async () => {
+    const script = await artifactCopy();
+    const identity = await attestReal(script, ENV);
+    vi.stubEnv('PYTHONPATH', '/tmp/parent-only');
+    vi.stubEnv('BYOK_LOADER_PATH', '/tmp/parent-only');
+    vi.stubEnv('PI_PROVIDER_API_KEY', 'synthetic-parent-only');
+    vi.stubEnv('PI_CODING_AGENT_DIR', '/tmp/parent-only');
+    const tools = await loadExtension(script, { salesko: identity }, ENV);
+    const echo = tools.find((tool) => tool.name === 'mcp__salesko__echo')!;
+    const result = await echo.execute('call-1', { text: 'hello' }, undefined);
+    expect(result.content).toEqual([{ type: 'text', text: 'byok-fixture:echo:{"text":"hello"}' }]);
   }, 30_000);
 
   it('opens the server normally when the daemon attested nothing about it', async () => {

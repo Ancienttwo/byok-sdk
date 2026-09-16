@@ -147,7 +147,7 @@ async function registeredByRealExtension(
   const dir = await tempDir();
   const configPath = path.join(dir, 'mcp-config.json');
   const mcpServers = Object.fromEntries(Object.keys(observation).map((name) => [name, serverSpec()]));
-  await fs.writeFile(configPath, JSON.stringify({ mcpServers, observation, permissionMode, launchCwd: await trustedCwd() }));
+  await fs.writeFile(configPath, JSON.stringify({ mcpEnv: ENV, mcpServers, observation, permissionMode, launchCwd: await trustedCwd() }));
   process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
 
   const definitions: Array<{ name: string; description: string; parameters: unknown }> = [];
@@ -207,6 +207,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
     const dir = await tempDir();
     const configPath = path.join(dir, 'mcp-config.json');
     await fs.writeFile(configPath, JSON.stringify({
+      mcpEnv: ENV,
       mcpServers: { byokagentteam: serverSpec() },
       observation: {},
       permissionMode: 'auto',
@@ -236,6 +237,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
     const configPath = path.join(dir, 'mcp-config.json');
     const observation = await realObservation();
     await fs.writeFile(configPath, JSON.stringify({
+      mcpEnv: ENV,
       mcpServers: {
         ...Object.fromEntries(Object.keys(observation).map((name) => [name, serverSpec()])),
         byokagentteam: serverSpec(),
@@ -271,6 +273,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
     const dir = await tempDir();
     const configPath = path.join(dir, 'mcp-config.json');
     await fs.writeFile(configPath, JSON.stringify({
+      mcpEnv: ENV,
       mcpServers: { byokagentteam: serverSpec(), byokagentmessage: serverSpec() },
       observation: {},
       permissionMode: 'auto',
@@ -294,6 +297,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
     const dir = await tempDir();
     const configPath = path.join(dir, 'mcp-config.json');
     await fs.writeFile(configPath, JSON.stringify({
+      mcpEnv: ENV,
       mcpServers: { salesko: serverSpec() },
       observation: {},
       permissionMode: 'auto',
