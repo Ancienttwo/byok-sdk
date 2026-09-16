@@ -1119,8 +1119,10 @@ The authority split is deliberate and total:
   two things: an install record, or an unavailable reason. The record is the
   manifest revision, the form, the versioned install path, the artifact's
   closure digest, the interpreter triple (`path`, `digest`,
-  `loadCommandsDigest`) for an `interpreter+bundle`, the optional entry, and
-  the launch argv and cwd. That is the whole of the host's authority.
+  `loadCommandsDigest`) for an `interpreter+bundle`, the optional entry, the
+  launch argv and cwd, and — for a release that carries them — the sealed asset
+  root and asset list, plus the native fork provenance. That is the whole of
+  the host's authority.
 - **The SDK owns the assertion, and everything it can measure itself.** A
   record is never believed. Before it becomes an identity the daemon measures
   the path itself: path identity = symlink-free parent chain + regular
@@ -1140,6 +1142,8 @@ The authority split is deliberate and total:
   - `installStat` — the artifact's `(dev, ino, size, mtime, mode, uid, gid)`.
   - `interpreterStat` — the same tuple for the interpreter, present iff the
     record names one.
+  - `assetStats` — the same tuple per sealed asset, in the record's order,
+    present iff the record declares assets.
   - `launchEnvNamesDigest` — the names the spawned child's environment carries.
   - `loaderEnvValuesDigest` — §27.2, the loader-affecting values as they would
     reach that child, expected to be the empty canonical map.
@@ -1174,6 +1178,63 @@ with something that is not an install record), `unencapsulated_source` and
 the tool), `interpreter_form_unsupported` (a compiled executable that names an
 interpreter, or a bundle that names none), `install_record_mismatch` and
 `reverify_failed`.
+
+### Runtime launch descriptions and the sealed asset set
+
+An install record can be asked about two different subjects, and the SDK makes
+that explicit rather than leaving it to shape inference. A locator carries a
+`subject`: `{ kind: 'mcp-server', toolsetId, serverName }` names one configured
+server inside one toolset, and `{ kind: 'runtime', runtimeId }` names the
+coding-agent runtime the task itself executes in. An MCP locator cannot stand
+in for a runtime locator, because the two carry different contracts.
+
+A runtime record additionally declares two components:
+
+- **The sealed asset set** — `assetRoot`, an absolute symlink-free directory,
+  and `assets`, a sorted duplicate-free list of `{ path, digest }` whose paths
+  are relative to that root. A release is not one file: its theme JSON is a
+  hard startup dependency, and its lazily-read templates and WebAssembly are
+  reachable from ordinary tools. Static data is not covered by the artifact's
+  own closure digest, so each asset is measured at resolve exactly as the
+  artifact is — canonical path identity, root-owned, no write bit, declared
+  digest — and re-measured before every spawn. The refusal names `asset` as its
+  subject. A path that is absolute, non-normalized or climbing, and a root that
+  does not resolve to itself, are refused as records rather than repaired.
+- **`nativeProvenance`** — the package name and version, upstream base and
+  commit, fork build and compiler-contract revision, declared by the host from
+  the single exact pin it built the release from. It is what input preparation
+  counts against. A `package.json` reached by resolving a package specifier is
+  never a source for it: under a single-artifact release that resolution runs
+  through a user-writable install cache, and a manifest the agent can rewrite
+  would be an execution-identity authority the agent controls. Where a record
+  exists, the record is the only source, and a record whose package identity is
+  not exactly the SDK's own pin fails closed with nothing to degrade to.
+
+From an attested runtime identity plus that pin the SDK derives ONE immutable
+**runtime launch description**: the interpreter (or compiled artifact) and the
+sealed bundle taken from the identity itself, the fixed reserved-helper argv
+prefix for the launch kind — bound separately from every task flag — the
+**sealed process cwd**, the **session cwd** passed to the runtime explicitly,
+the asset root, and the environment names the description commits a value for.
+Nothing in it is discovered at launch time from a package shape, a resolved bin
+or a module-resolution call. The process cwd is deliberately not the Agent
+home: a writable process cwd executes interpreter preload and dotenv files
+before any check inside the entry can run, and a WebAssembly module planted
+there is loaded for real. A record whose declared launch argv is not the fixed
+prefix, whose sealed cwd is the session cwd, or which names a second entry, is
+refused. The description has a canonical digest, which is what a consumer
+carries from the moment a launch is decided to the moment the child starts.
+
+The runtime subject is stricter than the MCP subject, and deliberately so. An
+MCP server whose implementation is unproven still runs, and the receipt says it
+is unproven. A runtime whose implementation is unproven does not run at all: it
+is the process the whole task executes inside, so an unattested one makes every
+downstream attestation decorative. The decision therefore has three cases that
+cannot be collapsed into one another — `attested` (spawn exactly this, after
+re-measuring), `declined` (an authority is configured and the runtime is not
+attested: refuse the task), and `unconfigured` (no authority is wired in, which
+is this SDK's shipped default and keeps the development path unattested exactly
+as it is today).
 
 Where an identity IS attested, it is re-measured before EVERY spawn of that
 server — the daemon's admission probe and the pi extension's own server pool

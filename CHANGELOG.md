@@ -5,6 +5,49 @@
 Deliberately not filed under 0.18.0: none of this is in a published artifact,
 and the D2 version number belongs to a separate SDK release contract.
 
+- **Added (client, unreleased contract)** — the Pi runtime is now a first-class
+  attestation subject, with one immutable launch description derived from the
+  host install record.
+
+  Three things land together, all inside
+  `src/daemon/tool-implementation-identity.ts`:
+
+  - `ToolImplementationLocatorV1` now carries an explicit `subject`:
+    `{ kind: 'mcp-server', toolsetId, serverName }` or
+    `{ kind: 'runtime', runtimeId }`. **Breaking for anyone constructing a
+    locator directly**: the flat `toolsetId`/`serverName` pair moved inside the
+    `mcp-server` subject. The measurement core is unchanged in semantics, and a
+    `ToolImplementationAuthority` that ignores the locator's shape needs no
+    change.
+  - The install record gains three optional host-declared components:
+    `assetRoot` + `assets` (a sorted, duplicate-free `{ path, digest }` list,
+    paths relative to the root) and `nativeProvenance` (package name/version,
+    upstream base/commit, fork build, compiler-contract revision). Assets are
+    measured per file at resolve exactly as the artifact is, and re-measured
+    before every spawn; the reverify subject `asset` joins `artifact`,
+    `interpreter` and `launch-env`, and the SDK seals an `assetStats` tuple per
+    asset. A record with no asset set and no provenance measures and reverifies
+    byte-for-byte as it did before.
+  - `deriveRuntimeLaunchDescription` / `runtimeLaunchDescriptionDigest` /
+    `decideRuntimeLaunch` produce the runtime launch description — interpreter
+    and sealed bundle from the attested identity, fixed reserved-helper argv
+    prefix bound separately from task flags, sealed process cwd, explicit
+    session cwd, asset root, and the env names the description commits
+    (`PI_PACKAGE_DIR`). A runtime subject that is not attested while an
+    authority is configured DECLINES, which is stricter than the MCP subject;
+    `resolver_unconfigured` remains a separate case and keeps the unattested
+    development path.
+
+  `adapters/pi/input-preparation.ts` gains
+  `piRuntimeIdentityFromAttestedRecord`, which derives the runtime/compiler
+  identity from the record's declared provenance and fails closed when it is
+  absent, disagrees with the client's exact pin, or names another compiler
+  contract revision. The existing manifest-resolution path is untouched and
+  stays the unencapsulated development form.
+
+  No spawn site consumes any of this yet: the three Pi spawn consumers and the
+  in-process entries are separate slices of the same contract.
+
 - **Fixed (client, unreleased contract)** — the SDK's MCP client now names the
   eval-free JSON Schema provider instead of inheriting whichever one the
   consumer's bundler resolves.
