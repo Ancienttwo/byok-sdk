@@ -1,3 +1,4 @@
+import { assertImplementationIdentityDependency } from './implementation-identity-edges.mjs';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -27,6 +28,7 @@ if (typeof keysVersion !== 'string' || !exactReleaseVersion.test(keysVersion)) {
 }
 const packages = [
   { name: '@byok-sdk/core', directory: 'packages/core' },
+  { name: '@byok-sdk/implementation-identity', directory: 'packages/implementation-identity' },
   { name: '@byok-sdk/protocol', directory: 'packages/protocol' },
   { name: '@byok-sdk/server', directory: 'packages/server' },
   { name: '@byok-sdk/cloud', directory: 'packages/cloud' },
@@ -186,6 +188,9 @@ function assertTarballInternalEdges(tarballPath, packageName, expectedPackageVer
         'the artifact must carry a published core version, not a workspace override',
     );
   }
+  if (packageName === '@byok-sdk/client' || packageName === '@byok-sdk/keys') {
+    assertImplementationIdentityDependency(packed, releaseVersion);
+  }
   for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
     for (const [dependency, range] of Object.entries(packed[field] ?? {})) {
       if (dependency === 'byok-sdk' || dependency.startsWith('@byok-sdk/')) {
@@ -330,6 +335,42 @@ function runStaleKeysEdgeNegativeControl() {
   }
 }
 
+function runStaleImplementationIdentityNegativeControl() {
+  const dependency = '@byok-sdk/implementation-identity';
+  const stale = releaseVersion === '0.0.0' ? '0.0.1' : '0.0.0';
+  for (const name of ['@byok-sdk/client', '@byok-sdk/keys']) {
+    const fixtureRoot = mkdtempSync(path.join(os.tmpdir(), 'byok-stale-identity-edge-'));
+    try {
+      const version = expectedPackageVersions[name];
+      const tarballDirectory = path.join(fixtureRoot, 'tarballs');
+      mkdirSync(tarballDirectory);
+      writeFileSync(path.join(fixtureRoot, 'package.json'), JSON.stringify({
+        name, version, dependencies: { '@byok-sdk/core': releaseVersion, [dependency]: stale },
+      }));
+      run(npmInvocation.command, [...npmInvocation.prefix, 'pack', '--pack-destination', tarballDirectory], fixtureRoot);
+      const tarballs = readdirSync(tarballDirectory).filter((entry) => entry.endsWith('.tgz'));
+      if (tarballs.length !== 1) throw new Error(`${name}: negative control must produce one tarball`);
+      let rejection;
+      try {
+        assertTarballInternalEdges(path.join(tarballDirectory, tarballs[0]), name, version);
+      } catch (error) {
+        rejection = error instanceof Error ? error.message : String(error);
+      }
+      if (!rejection?.includes(`dependency ${dependency} is ${stale}, expected ${releaseVersion}`)) {
+        throw new Error(`${name}: stale shared identity edge was not rejected: ${rejection ?? '(no rejection)'}`);
+      }
+      console.log(`[release-pack] negative control rejected ${name} packed identity edge ${stale}`);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  }
+}
+
+if (process.argv.includes('--self-test-stale-identity-edge')) {
+  runStaleImplementationIdentityNegativeControl();
+  process.exit(0);
+}
+
 if (process.argv.includes('--self-test-stale-keys-edge')) {
   runStaleKeysEdgeNegativeControl();
   process.exit(0);
@@ -355,6 +396,7 @@ try {
   }
   mkdirSync(outDir, { recursive: true });
   run(nodeBin, ['scripts/release/check-package-graph.mjs']);
+  runStaleImplementationIdentityNegativeControl();
   run(bunBin, ['run', 'build']);
 
   const tarballs = [];
@@ -471,10 +513,12 @@ try {
         `for (const needle of ['ajv','pi-coding-agent','@earendil-works','@modelcontextprotocol/client','@modelcontextprotocol/sdk','new Function']) {\n` +
         `  assert.equal(mcpServerSource.includes(needle), false, mcpServerEntry + ' carries ' + needle);\n` +
         `}\n` +
-        `for (const [name, version] of [['byok-sdk','${releaseVersion}'],['@byok-sdk/core','${releaseVersion}'],['@byok-sdk/protocol','${releaseVersion}'],['@byok-sdk/client','${releaseVersion}'],['@byok-sdk/server','${releaseVersion}'],['@byok-sdk/cloud','${releaseVersion}'],['@byok-sdk/cloud-dataplane','${releaseVersion}'],['@byok-sdk/ui-runtime','${releaseVersion}'],['@byok-sdk/testkit','${releaseVersion}'],['@byok-sdk/keys','${keysVersion}']]) {\n` +
+        `for (const [name, version] of [['byok-sdk','${releaseVersion}'],['@byok-sdk/core','${releaseVersion}'],['@byok-sdk/implementation-identity','${releaseVersion}'],['@byok-sdk/protocol','${releaseVersion}'],['@byok-sdk/client','${releaseVersion}'],['@byok-sdk/server','${releaseVersion}'],['@byok-sdk/cloud','${releaseVersion}'],['@byok-sdk/cloud-dataplane','${releaseVersion}'],['@byok-sdk/ui-runtime','${releaseVersion}'],['@byok-sdk/testkit','${releaseVersion}'],['@byok-sdk/keys','${keysVersion}']]) {\n` +
         `  const manifest = require(name + '/package.json');\n` +
         `  assert.equal(manifest.version, version, name);\n` +
         `}\n` +
+        `await import('@byok-sdk/implementation-identity');\n` +
+        `for (const consumer of ['client', 'keys']) assert.equal(require('@byok-sdk/' + consumer + '/package.json').dependencies['@byok-sdk/implementation-identity'], '${releaseVersion}');\n` +
         `const keysManifest = require('@byok-sdk/keys/package.json');\n` +
         `assert.equal(keysManifest.dependencies?.['@byok-sdk/core'], '${releaseVersion}');\n` +
         `assert.notEqual(keysManifest.dependencies?.['@byok-sdk/core'], 'workspace:*');\n` +

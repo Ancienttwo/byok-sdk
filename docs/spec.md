@@ -552,6 +552,23 @@ is a hosted attempt-delivery state, while the existing client owns
 `Session.interrupt()` and the existing `task.cancel` / `task.cancelled` messages
 remain the only device protocol.
 
+## Shared implementation identity measurement
+
+The Node-only `@byok-sdk/implementation-identity` support package is the single
+source for install-record validation, physical implementation measurement and
+pre-spawn revalidation. Client retains runtime policy and re-exports its existing
+identity types; keys retains credential custody and must perform the eventual
+final-spawn measurement in its own process. Moving this authority does not by
+itself complete the Pi runtime/keys spawn wiring.
+
+Client and keys consume the same exact packed support-package version. Source
+`workspace:*` edges follow the existing core convention; packed-edge and release
+graph checks reject version divergence. The new support package follows the
+aligned train and publishes before its consumers. Keys remains independently
+versioned but its next artifact must bind that train. The umbrella retains seven
+namespaces (ten aligned manifests, eleven public packages). No registry release
+is implied by this source change.
+
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. `@byok-sdk/client` depends on the exact npm

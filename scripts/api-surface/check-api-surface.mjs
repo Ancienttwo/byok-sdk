@@ -21,6 +21,7 @@ const PACKAGES = [
   'cloud',
   'cloud-dataplane',
   'core',
+  'implementation-identity',
   'protocol',
   'server',
   'ui-runtime',

@@ -5,12 +5,20 @@
 Deliberately not filed under 0.18.0: none of this is in a published artifact,
 and the D2 version number belongs to a separate SDK release contract.
 
+- **Added (unreleased distribution)** — `@byok-sdk/implementation-identity`, a
+  Node-only support package shared by client and keys, now owns the existing
+  implementation measurement and revalidation code. Client retains its public
+  identity names through re-exports and keeps runtime policy. Record and digest
+  semantics are unchanged. The package follows the aligned SDK train; packed
+  client/keys dependencies must use the same exact version. No umbrella namespace
+  is added. Keys final-spawn wiring remains a separate implementation slice.
+
 - **Added (client, unreleased contract)** — the Pi runtime is now a first-class
   attestation subject, with one immutable launch description derived from the
   host install record.
 
-  Three things land together, all inside
-  `src/daemon/tool-implementation-identity.ts`:
+  Three things land together through the client identity surface (measurement
+  now comes from `@byok-sdk/implementation-identity`):
 
   - `ToolImplementationLocatorV1` now carries an explicit `subject`:
     `{ kind: 'mcp-server', toolsetId, serverName }` or

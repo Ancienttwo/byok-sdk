@@ -39,7 +39,7 @@
  * checks are correspondingly substring checks, deliberately blunt.
  *
  * The other half of that limitation is the workspace boundary: `@byok-sdk/core`
- * and `@byok-sdk/protocol` are ALLOWLISTED as specifiers, not scanned. Their
+ * and `@byok-sdk/protocol`, plus `@byok-sdk/implementation-identity`, are ALLOWLISTED as specifiers, not scanned. Their
  * own dists are never read here, so a code-generating dependency landing inside
  * either of them is invisible to this suite. They are in-repo packages with
  * their own build and their own tests; the guard is scoped to this package's
@@ -100,7 +100,7 @@ const GUARDED: readonly { readonly file: string; readonly allowedSubstrings: rea
 ];
 
 /** The only bare specifiers a guarded entry may statically import. */
-const ALLOWED_BARE_IMPORTS = new Set(['@byok-sdk/core', '@byok-sdk/protocol']);
+const ALLOWED_BARE_IMPORTS = new Set(['@byok-sdk/core', '@byok-sdk/protocol', '@byok-sdk/implementation-identity']);
 
 const FORBIDDEN_SUBSTRINGS = [
   'ajv',

@@ -47,8 +47,8 @@ export type {
   ToolImplementationStatTupleV1,
   ToolImplementationUnavailableReasonV1,
   ToolImplementationUnavailableV1,
-} from './daemon/tool-implementation-identity';
-export { ToolImplementationReverifyError } from './daemon/tool-implementation-identity';
+} from '@byok-sdk/implementation-identity';
+export { ToolImplementationReverifyError } from '@byok-sdk/implementation-identity';
 export type { AgentRef } from './agent-home';
 export {
   AgentHomeError,

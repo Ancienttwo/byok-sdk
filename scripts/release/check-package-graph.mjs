@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertImplementationIdentityDependency } from './implementation-identity-edges.mjs';
 import { parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER } from './pi-runtime-identity.mjs';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
@@ -18,7 +19,8 @@ const umbrella = ['packages/sdk', 'byok-sdk'];
 const keys = ['packages/keys', '@byok-sdk/keys'];
 // testkit ships independently of the umbrella's public namespaces, but it is
 // still part of the aligned release graph and must not escape the train check.
-const alignedPackages = [...dispatchPackages, testkit];
+const implementationIdentity = ['packages/implementation-identity', '@byok-sdk/implementation-identity'];
+const alignedPackages = [...dispatchPackages, testkit, implementationIdentity];
 const publicPackages = [...alignedPackages, umbrella, keys];
 const expectedUmbrellaDependencies = dispatchPackages.map(([, name]) => name).sort();
 const errors = [];
@@ -239,7 +241,7 @@ for (const [directory, record] of Object.entries(workspaceRecords)) {
     );
   }
 }
-for (const directory of [...dispatchPackages.map(([dir]) => dir), 'packages/sdk', 'packages/testkit', keys[0]]) {
+for (const directory of publicPackages.map(([directory]) => directory)) {
   if (!workspaceRecords[directory]) {
     errors.push(`bun.lock: missing workspace record for ${directory} — bun pm pack cannot resolve its workspace edges without it`);
   }
@@ -283,7 +285,8 @@ for (const field of [...runtimeFields, 'devDependencies']) {
     if (
       dependency.startsWith('@byok-sdk/') &&
       dependency !== keys[1] &&
-      dependency !== '@byok-sdk/core'
+      dependency !== '@byok-sdk/core' &&
+      dependency !== implementationIdentity[1]
     ) {
       errors.push(`packages/keys/package.json: ${field} crosses into dispatch package ${dependency}`);
     }
@@ -297,6 +300,20 @@ if (Object.keys(keysManifest?.dependencies ?? {}).includes('@byok-sdk/core') ===
 }
 if (runtimeEdges(keysManifest ?? {}).includes('@byok-sdk/protocol')) {
   errors.push('packages/keys/package.json: keys must not depend on @byok-sdk/protocol');
+}
+
+// These consumers must resolve the same measurement semantics. Packed edges
+// are checked from the tarballs by the same guard, not inferred from workspace syntax.
+for (const consumer of ['@byok-sdk/client', '@byok-sdk/keys']) {
+  try {
+    assertImplementationIdentityDependency(manifests.get(consumer), 'workspace:*');
+  } catch (error) {
+    errors.push(error.message);
+  }
+}
+const identityManifest = manifests.get(implementationIdentity[1]);
+for (const dependency of runtimeEdges(identityManifest ?? {})) {
+  errors.push(`${implementationIdentity[1]}: measurement package must have no runtime dependency (${dependency})`);
 }
 
 const clientManifest = manifests.get('@byok-sdk/client');

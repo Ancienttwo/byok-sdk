@@ -1,3 +1,5 @@
+import type { McpLaunchAttestation, ResolvedMcpLaunchCwdLauncher } from '@byok-sdk/implementation-identity';
+export type { McpLaunchAttestation, ResolvedMcpLaunchCwdLauncher } from '@byok-sdk/implementation-identity';
 import { randomBytes } from 'node:crypto';
 import { lstatSync, realpathSync, statSync, type Stats } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -396,13 +398,6 @@ export type McpLaunchCwdLauncherUnavailableReason =
   /** POSIX: `/bin/sh` is group- or world-writable, so its owner is not the only writer. */
   | 'launch_cwd_shell_writable';
 
-/** A launcher that was resolved: which mechanism, what runs it, and what it runs. */
-export type ResolvedMcpLaunchCwdLauncher =
-  /** POSIX: `interpreter` is the realpath of the system shell, `script` is {@link MCP_LAUNCH_CWD_SHELL_SCRIPT}. */
-  | { readonly kind: 'shell'; readonly interpreter: string; readonly script: string }
-  /** win32: `interpreter` is a plain-Node executable, `script` is this package's `bin/byok-launch-cwd.mjs`. */
-  | { readonly kind: 'node'; readonly interpreter: string; readonly script: string };
-
 export type McpLaunchCwdLauncher =
   | ResolvedMcpLaunchCwdLauncher
   | { readonly kind: 'unavailable'; readonly reason: McpLaunchCwdLauncherUnavailableReason };
@@ -587,10 +582,6 @@ export function wrapMcpServerWithLaunchCwd(
  * different launch mechanisms and must never fingerprint equal, even in the
  * degenerate case where they were handed the same two strings.
  */
-export interface McpLaunchAttestation {
-  readonly launchCwd: string;
-  readonly launcher: ResolvedMcpLaunchCwdLauncher | null;
-}
 
 export function mcpLaunchAttestation(binding: McpLaunchBinding): McpLaunchAttestation {
   const launcher = binding.launcher;
