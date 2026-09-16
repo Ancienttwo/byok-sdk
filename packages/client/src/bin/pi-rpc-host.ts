@@ -2,18 +2,9 @@ import { extractPiConfigDigest, readPiHostConfig, requirePiHostBinding, verifyPi
 import type { ImplementationSpawnBindingV1 } from '@byok-sdk/implementation-identity';
 import { isAbsolute, resolve } from 'node:path';
 import { PermissionPolicySchema, type PermissionPolicy } from '@byok-sdk/protocol';
-import {
-  createAgentSession,
-  createAgentSessionRuntime,
-  createAgentSessionServices,
-  getAgentDir,
-  resolveCliModel,
-  runRpcMode,
-  SessionManager,
-  SettingsManager,
-  type CreateAgentSessionOptions,
-  type CreateAgentSessionRuntimeFactory,
-} from '@earendil-works/pi-coding-agent';
+import type { CreateAgentSessionOptions } from '@earendil-works/pi-coding-agent';
+import { runPiSessionRuntime } from './pi-session-runtime';
+export { openPiRpcSession } from './pi-session-runtime';
 import { webExtension, subagentsExtension, todoExtension } from './pi-extension-factories.js';
 import { createByokMcpExtension } from '../adapters/pi/mcp-extension';
 import { createByokSubagentsPolicyExtension } from '../adapters/pi/subagents-policy-extension';
@@ -116,22 +107,6 @@ export function parsePiRpcHostArgs(
   };
 }
 
-/** Session ids are native minted references, never fuzzy search terms. */
-export async function openPiRpcSession(cwd: string, session: string | undefined, sessionDir?: string): Promise<SessionManager> {
-  if (session === undefined) return SessionManager.create(cwd, sessionDir);
-  let path: string;
-  if (isAbsolute(session)) {
-    path = session;
-  } else {
-    const matches = (await SessionManager.list(cwd, sessionDir)).filter((candidate) => candidate.id === session);
-    if (matches.length !== 1) fail('--session must identify exactly one existing session');
-    path = matches[0]!.path;
-  }
-  const manager = SessionManager.open(path, sessionDir);
-  if (manager.getCwd() !== cwd) fail('session header cwd differs from config.cwd');
-  return manager;
-}
-
 export async function runPiRpcHost(argv: readonly string[]): Promise<void> {
   if (process.execArgv.length > 0) failUsage('refusing non-empty interpreter argv');
   const injected = loaderEnvInjections(process.env);
@@ -148,53 +123,15 @@ export async function runPiRpcHost(argv: readonly string[]): Promise<void> {
   }
   const mode = config.policy.mode;
   if (mode !== 'auto' && mode !== 'readonly') fail('unsupported permission mode');
-  const agentDir = getAgentDir();
-  const initialSettings = SettingsManager.create(config.cwd, agentDir);
-  const sessionManager = await openPiRpcSession(config.cwd, args.session, initialSettings.getSessionDir());
-  const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
-    if (cwd !== config.cwd || sessionManager.getCwd() !== config.cwd) fail('session replacement cannot change authorized cwd');
-    const services = await createAgentSessionServices({
-      cwd: config.cwd,
-      agentDir,
-      modelRuntimeSignal: AbortSignal.timeout(15_000),
-      resourceLoaderOptions: {
-        noExtensions: true,
-        noSkills: true,
-        extensionFactories: [
-          webExtension,
-          createByokMcpExtension(config.mcp),
-          createByokSubagentsPolicyExtension(mode),
-          subagentsExtension,
-          todoExtension,
-        ],
-      },
-    });
-    const errors = [
-      ...services.diagnostics.filter((diagnostic) => diagnostic.type === 'error').map((diagnostic) => diagnostic.message),
-      ...services.resourceLoader.getExtensions().errors.map(({ path, error }) => `${path}: ${error}`),
-    ];
-    if (errors.length > 0) fail(errors.join('\n'));
-    const resolved = args.model === undefined ? undefined : resolveCliModel({
-      cliProvider: args.provider, cliModel: args.model, cliThinking: args.thinking, modelRuntime: services.modelRuntime,
-    });
-    if (resolved?.error) fail(resolved.error);
-    if (args.model !== undefined && !resolved?.model) fail('requested model could not be resolved');
-    if (resolved?.warning) process.stderr.write(`byok-pi-rpc: ${resolved.warning}\n`);
-    const created = await createAgentSession({
-      cwd: config.cwd, agentDir, sessionManager, sessionStartEvent,
-      modelRuntime: services.modelRuntime, settingsManager: services.settingsManager, resourceLoader: services.resourceLoader,
-      model: resolved?.model, thinkingLevel: args.thinking ?? resolved?.thinkingLevel,
-      tools: args.tools, excludeTools: args.excludeTools, noTools: args.noTools,
-    });
-    if (created.modelFallbackMessage) {
-      await created.session.dispose();
-      fail(created.modelFallbackMessage);
-    }
-    if (created.session.model && (args.thinking !== undefined || resolved?.thinkingLevel !== undefined)) {
-      created.session.setThinkingLevel(created.session.thinkingLevel);
-    }
-    return { ...created, services, diagnostics: services.diagnostics };
-  };
-  const runtime = await createAgentSessionRuntime(createRuntime, { cwd: config.cwd, agentDir, sessionManager });
-  await runRpcMode(runtime);
+  await runPiSessionRuntime({
+    cwd: config.cwd, session: args.session,
+    provider: args.provider, model: args.model, thinking: args.thinking,
+    tools: args.tools, excludeTools: args.excludeTools, noTools: args.noTools,
+    resourceLoaderOptions: {
+      noExtensions: true, noSkills: true,
+      extensionFactories: [webExtension, createByokMcpExtension(config.mcp),
+        createByokSubagentsPolicyExtension(mode), subagentsExtension, todoExtension],
+    },
+    initialModel: 'required', label: 'byok-pi-rpc', reject: fail,
+  });
 }

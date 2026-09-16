@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { fileURLToPath } from 'node:url';
+import { PI_TEAM_OPERATOR_TOKEN } from './team-pi-operator-entry';
 import { runTeamPiRelayCommand } from './commands/team-pi-relay';
 import { runTeamRelayCommand } from './commands/team-relay';
 import { createDaemon, createServiceLifecycle, type ServiceLifecycle } from '../index';
@@ -133,6 +135,7 @@ function usage(): never {
       '  byok-agent team list --config <path>',
       '  byok-agent team create <workspace> --members <id,id> --config <path>',
       '  byok-agent team join <workspace> --member <id> --config <path>   (prints MCP config)',
+      '  Private __byok_pi_team_operator dispatch is operator-only, non-attested; not a daemon/helper command.',
       '  byok-agent team pi-relay <workspace> --bindings <private-absolute.json> --codex-bin <absolute> --max-notifications <1..100> --config <path>',
       '  byok-agent team relay <workspace> --bindings <private-absolute.json> --codex-bin <absolute> --max-notifications <1..100> --config <path>',
       '  byok-agent team watch <workspace> --config <path>',
@@ -169,6 +172,11 @@ function abortOnSignal(): AbortController {
 
 async function main(): Promise<void> {
   const [, , command, ...rest] = process.argv;
+
+  if (command === PI_TEAM_OPERATOR_TOKEN) {
+    await (await import('#byok-pi-runtime-host')).runPiTeamOperatorHost(rest);
+    return;
+  }
 
   if (command === '--version') {
     runVersionCommand();
@@ -266,7 +274,10 @@ async function main(): Promise<void> {
       const budget = argValue(rest, '--max-notifications');
       if (!bindingsFile || !codexBin || !budget || !/^[1-9][0-9]*$/u.test(budget)) usage();
       const controller = abortOnSignal();
-      return (action === 'pi-relay' ? runTeamPiRelayCommand : runTeamRelayCommand)({ config, workspaceId, bindingsFile, codexBin, maxNotifications: Number(budget), signal: controller.signal });
+      const relayInput = { config, workspaceId, bindingsFile, codexBin, maxNotifications: Number(budget), signal: controller.signal };
+      return action === 'pi-relay'
+        ? runTeamPiRelayCommand({ ...relayInput, operatorInvocation: { command: process.execPath, args: [fileURLToPath(import.meta.url), PI_TEAM_OPERATOR_TOKEN] } })
+        : runTeamRelayCommand(relayInput);
     }
     if (action === 'watch') { const controller = abortOnSignal(); return runTeamWatchCommand(config, workspaceId, controller.signal); }
     if (action === 'open') {

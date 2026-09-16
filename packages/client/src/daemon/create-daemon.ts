@@ -130,7 +130,7 @@ import {
   InputPreparationRequestError,
   type InputPreparationService,
 } from './input-preparation-service';
-import { createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
+import { resolvePiInputPreparationCompiler } from '../adapters/pi/input-preparation-runtime';
 import { decodeTeamMemberContext, encodeTeamMemberContext, LocalTeamWorkspace } from './team-workspace';
 import { McpToolsetRegistry, McpToolsetRevisionConflictError } from './toolset-registry';
 import type { ToolImplementationAuthority } from './tool-implementation-identity';
@@ -1497,41 +1497,43 @@ export function buildDaemonWithAdapters(
    * `config.runtimeEnvironment`, exactly as the offer path builds it — a value
    * captured at construction would shadow a later configuration reload.
    */
+  const preparationRuntimeEnv = () => {
+    const piDescriptor = adapters.find((adapter) => adapter.descriptor.id === 'pi')?.descriptor;
+    return buildRuntimeEnv({
+      ambient: process.env,
+      ...(piDescriptor?.environmentRequirements === undefined
+        ? {}
+        : { requirements: piDescriptor.environmentRequirements }),
+      ...(config.runtimeEnvironment?.pi?.allow === undefined
+        ? {}
+        : { locallyAllowedNames: config.runtimeEnvironment.pi.allow }),
+    });
+  };
   const preparedToolSurface = createPreparedToolSurfaceAssembler({
     toolsetRegistry,
     ...(mcpLaunchCwd === undefined ? {} : { mcpLaunchCwd }),
-    runtimeEnv: () => {
-      const piDescriptor = adapters.find((adapter) => adapter.descriptor.id === 'pi')?.descriptor;
-      return buildRuntimeEnv({
-        ambient: process.env,
-        ...(piDescriptor?.environmentRequirements === undefined
-          ? {}
-          : { requirements: piDescriptor.environmentRequirements }),
-        ...(config.runtimeEnvironment?.pi?.allow === undefined
-          ? {}
-          : { locallyAllowedNames: config.runtimeEnvironment.pi.allow }),
-      });
-    },
+    runtimeEnv: preparationRuntimeEnv,
     ...(config.permissionDefaults === undefined ? {} : { permissionCeiling: config.permissionDefaults }),
     ...(config.toolImplementationAuthority === undefined
       ? {}
       : { toolImplementationAuthority: config.toolImplementationAuthority }),
   });
   let inputPreparationService: InputPreparationService | undefined;
-  let inputPreparationRuntimeError: unknown;
-  if (config.inputPreparation !== undefined && inputPreparationLimits !== undefined) {
-    try {
+  let inputPreparationInitialization: Promise<void> | undefined;
+  function initializeInputPreparation(): Promise<void> {
+    return inputPreparationInitialization ??= (async () => {
+      if (config.inputPreparation === undefined || inputPreparationLimits === undefined) return;
+      const compiler = await resolvePiInputPreparationCompiler({
+        authority: config.toolImplementationAuthority,
+        env: preparationRuntimeEnv(), sessionCwd: config.workspaceRoot,
+      });
       inputPreparationService = createInputPreparationService({
-        storeDir,
-        limits: inputPreparationLimits,
+        storeDir, limits: inputPreparationLimits,
         authorityResolver: config.inputPreparation.authorityResolver,
         counter: config.inputPreparation.counter,
-        compiler: createPiInputPreparationCompiler(),
-        toolSurface: preparedToolSurface,
+        compiler, toolSurface: preparedToolSurface,
       });
-    } catch (error) {
-      inputPreparationRuntimeError = error;
-    }
+    })();
   }
 
   /** Maps this service's typed refusals onto the wire. No refusal is ever widened into a result. */
@@ -1544,12 +1546,8 @@ export function buildDaemonWithAdapters(
         'this daemon is not configured for input preparation (DaemonConfig.inputPreparation is absent)',
       );
     }
-    if (inputPreparationService === undefined) {
-      throw new ControlError(
-        'runtime_identity_unavailable',
-        `the installed pi runtime closure could not be verified: ${inputPreparationRuntimeError instanceof Error ? inputPreparationRuntimeError.message : String(inputPreparationRuntimeError)}`,
-      );
-    }
+    await initializeInputPreparation();
+    if (inputPreparationService === undefined) throw new ControlError('runtime_identity_unavailable', 'input preparation initialization did not produce a service');
     if (shuttingDown) {
       throw new ControlError('shutting_down', 'this daemon is shutting down and will not prepare new input');
     }
@@ -1972,6 +1970,9 @@ export function buildDaemonWithAdapters(
     terminalCommits.resume();
     if (!daemonOwnerLease) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
     try {
+    // Initialization is one instance promise, including refusal. Even the
+    // enrollment-only control endpoint must not expose a half-initialized service.
+    await initializeInputPreparation();
     // Only the explicitly enabled service-enrollment path resolves credential
     // custody before hosted storage. A WinSW service has a different Windows
     // logon token from the operator CLI, so an unpaired service must be able to

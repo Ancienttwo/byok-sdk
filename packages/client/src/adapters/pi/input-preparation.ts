@@ -388,13 +388,16 @@ export function projectPreparedInputMessage(message: InputPreparationMessageV1):
 /**
  * Build the compiler bound to the installed native closure.
  *
- * The identity is resolved ONCE, here, and frozen onto the instance: a compile
+ * The daemon supplies its once-resolved identity; standalone unconfigured
+ * package consumers use installed discovery. The identity is fixed on the
+ * instance: a compile
  * call must not re-read the filesystem, both because §10.3.2 forbids I/O in the
  * pure portion and because an identity that can change between two compiles is
  * not an identity.
  */
-export function createPiInputPreparationCompiler(): InputPreparationCompiler {
-  const runtime = resolveInstalledPiRuntimeIdentity();
+export function createPiInputPreparationCompiler(
+  runtime: InputPreparationRuntimeIdentityV1 = resolveInstalledPiRuntimeIdentity(),
+): InputPreparationCompiler {
   return {
     runtime,
     async compile(request: CompilePreparedInputRequest): Promise<CompiledPreparedInput> {

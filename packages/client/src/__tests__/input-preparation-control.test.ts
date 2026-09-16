@@ -4,7 +4,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import {
   ControlError,
@@ -226,6 +226,34 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     client = connected.client;
     return { storeDir, config };
   }
+
+  it('awaits once-only configured runtime identity before exposing any control endpoint', async () => {
+    const storeDir = await tmpDir('byok-prep-init-store-');
+    const workspaceRoot = await tmpDir('byok-prep-init-ws-');
+    let entered!: () => void;
+    const resolving = new Promise<void>(resolve => { entered = resolve; });
+    let decline!: () => void;
+    const blocked = new Promise<void>(resolve => { decline = resolve; });
+    const resolve = vi.fn(async () => { entered(); await blocked; return { kind: 'unavailable', reason: 'implementation_identity_unattested' } as const; });
+    daemon = createDaemonWithAdapters({
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-prep-init',
+      serverUrl: server.url, workspaceRoot, storeDir,
+      inputPreparation: { limits: LIMITS, authorityResolver, counter },
+      toolImplementationAuthority: { resolve }, serviceEnrollment: { enabled: true },
+    }, [new StubRuntimeAdapter('pi')]);
+    expect(resolve).not.toHaveBeenCalled(); // The public factory remains synchronous and side-effect free here.
+    const starting = daemon.start();
+    const rejected = expect(starting).rejects.toThrow('configured pi-prepared implementation unavailable');
+    await resolving;
+    const endpoint = await connectControlClient({ storeDir, productId: 'acme-prep-init' });
+    expect(endpoint.ok).toBe(false);
+    decline(); await rejected;
+    await expect(daemon.start()).rejects.toThrow('configured pi-prepared implementation unavailable');
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(resolve).toHaveBeenCalledWith({ subject: { kind: 'runtime', runtimeId: 'pi' }, runtimeEntry: 'pi-prepared' });
+    expect((await connectControlClient({ storeDir, productId: 'acme-prep-init' })).ok).toBe(false);
+    expect(counter.calls).toEqual([]);
+  });
 
   it('keeps the whole surface off when no inputPreparation section is configured', async () => {
     await start({ enabled: false, productId: 'acme-prep-off' });
