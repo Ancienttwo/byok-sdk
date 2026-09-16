@@ -112,3 +112,14 @@ Supervisor Fable: **PASS**. This supersedes the earlier pending/FAIL migration s
 Evidence: `_ops/c07-identity-workspace/frozen-client-e1cc484c.log`, `frozen-client-summary.json`, `release-pack-e1cc484c.log`, `pack-e1cc484c/release-manifest.json`, `frozen-packed-edges.json`. Actual pack exits 0, manifest sourceGitSha is e1cc484c9d1cdb328751d0b4b9a226008b17e1e2, all 11 package hashes verified. Packed client and keys both depend exactly on implementation-identity 0.18.0; physical wrong-version tarballs are rejected. Packed implementation bundle is the scanned 24472-byte object (0 hits), not a re-export barrel. Remaining 13 package suites passed. Client root identity export names remain unchanged; attribution matches 0. No push or publication.
 
 P2 is now released by the supervisor. Before product edits, handoff §88 records Owner notice for same-train piEntrypoint/argv0 retirement and contract:729 supersession; Salesko authoring/removal remains P4. Keys final-environment handoff and the minimal executable entry prerequisite are being traced before interface selection.
+
+
+## P2 guard wiring before product changes (2026-09-16)
+
+Supervisor approved replacing the handwritten adapterProcessCwd mirror with the real PiAdapter prepare/start path. Ordinary uses the existing resolveBin seam; prepared reaches the real startPreparedPiOperation and substitutes only interpreter/entry through existing spawnFn. Adapter argv tail, cwd and env are forwarded unchanged. Native execution is a real Bun marker process with minimal RPC responses, so this evidence proves the pre-entry cwd boundary, not native session semantics. Prepared input is compiled by the actual pinned native compiler. Product source is unchanged from e1cc484c.
+
+- r1 raw log: `_ops/c07-identity-workspace/p2-guard-fixture-r1.log`. Ordinary emitted injection; prepared stopped at an unsupported fixture model before spawn. This is fixture-error evidence, not a prepared guard result.
+- r2 raw log: `_ops/c07-identity-workspace/p2-guard-red.log`. Both real adapter lanes emitted `preloaded=true` and `dotenv=DOTENV_LOADED`; both failed the unchanged safety assertion. 2 failed / 1 passed, control passes.
+- `_ops/c07-identity-workspace/p2-guard-evidence.json` records byte-for-byte unchanged control and all six safety assertions, checked against e1cc484c. Only subsequent TS annotations/cast were needed for overloaded spawn typing; client typecheck passes (`p2-guard-typecheck-r2.log`).
+
+The test now fails on actual adapter-derived cwd. No timeout, safety assertion or control was weakened. No product fix is included in this commit.

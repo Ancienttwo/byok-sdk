@@ -1,11 +1,16 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn, type SpawnOptions } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
-import { PiRpcClient } from '../adapters/pi/rpc-client';
+import { PiRpcClient, type SpawnFn } from '../adapters/pi/rpc-client';
+import { PiAdapter } from '../adapters/pi/pi-adapter';
+import { createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
+import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_VERSION } from '../input-preparation';
+import { sealRuntimeOperationManifest, type RuntimePreparedLaunchV1 } from '../types';
+import { trustedCwd } from './fixtures/launch-cwd';
 
 const execFileAsync = promisify(execFile);
 
@@ -32,12 +37,14 @@ const execFileAsync = promisify(execFile);
  * observed `INJECTED=PRELOAD_EXECUTED` and `DOTENV=DOTENV_LOADED` out of the
  * child.
  *
- * The full adapter path cannot be driven here without a live daemon, a paired
- * cloud and a real Pi runtime, so each lane drives `PiRpcClient` with the SAME
- * `{ command, args, cwd, env }` derivation the adapter performs at the cited
- * line, and asserts the property on the real child that derivation produces.
- * When P2 replaces the derivation with the sealed launch description,
- * `adapterProcessCwd` below is what changes — the assertions do not.
+ * Both lanes now call the real PiAdapter prepare -> operation.start path.
+ * The ordinary target is supplied through resolveBin. The prepared target is
+ * substituted at the existing spawnFn seam because that lane selects the SDK
+ * bin internally; its interpreter/script are replaced by the Bun marker host,
+ * while every remaining argv token, the cwd and the env are passed unchanged.
+ * This proves the actual adapter-derived pre-entry boundary, not native session
+ * correctness (covered by pi-prepared-launcher.test.ts). The marker implements
+ * the minimal RPC replies needed to complete the real adapter start.
  */
 
 const PRELOAD_GLOBAL = '__BYOK_LAUNCH_CWD_PRELOADED__';
@@ -84,6 +91,20 @@ const PI_ENTRY_SOURCE = [
   `  preloaded: globalThis.${PRELOAD_GLOBAL} === true,`,
   `  dotenv: process.env.${DOTENV_VAR} ?? 'absent',`,
   '}));',
+  'if (process.argv.includes("--mode") || process.argv.includes("--config")) {',
+  '  let buffer = "";',
+  '  process.stdin.setEncoding("utf8");',
+  '  process.stdin.on("data", (chunk) => {',
+  '    buffer += chunk;',
+  '    let end;',
+  '    while ((end = buffer.indexOf("\\n")) >= 0) {',
+  '      const command = JSON.parse(buffer.slice(0, end)); buffer = buffer.slice(end + 1);',
+  '      const data = command.type === "get_state" ? { sessionId: "cwd-marker-session" }',
+  '        : command.type === "prompt_prepared" ? { sessionId: "cwd-marker-session", preparedDigest: command.expected.digest } : {};',
+  '      process.stdout.write(JSON.stringify({ type: "response", command: command.type, id: command.id, success: true, data }) + "\\n");',
+  '    }',
+  '  });',
+  '}',
   '',
 ].join('\n');
 
@@ -120,19 +141,6 @@ function piRelease(): Promise<{ compiledBin: string; preparedEntry: string }> {
   return releaseOnce;
 }
 
-/**
- * The process cwd both final spawn sites derive today: the task manifest
- * directory, which for a Pi task is the canonical Agent home.
- *
- * `pi-adapter.ts:518` (ordinary) and `pi-adapter.ts:747` (prepared) pass
- * exactly this value to `PiRpcClient`. C07 P2/P3 replaces it with the sealed
- * launch cwd carried by the launch description; this function is the single
- * place these cases follow that move.
- */
-function adapterProcessCwd(manifestCwd: string): string {
-  return manifestCwd;
-}
-
 /** The env shape the adapter builds for the child, plus this test's report channel. */
 function runtimeEnv(recordTo: string): NodeJS.ProcessEnv {
   return {
@@ -158,6 +166,87 @@ async function launch(options: { command: string; args: string[]; cwd: string })
   return JSON.parse(raw) as ChildReport;
 }
 
+/** Compile a real retained envelope; the marker only substitutes its runtime consumer. */
+async function prepareArtifact(home: string, artifactPath: string, launchCwd: string): Promise<RuntimePreparedLaunchV1> {
+  const model = {
+    id: 'glm-4.6', name: 'GLM 4.6', api: 'openai-completions' as const,
+    provider: 'zai', baseUrl: 'http://127.0.0.1:1/v1', reasoning: false,
+    input: ['text' as const], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 8192, maxTokens: 1024,
+  };
+  const binding = { inputIdentity: 'cwd-input', runtimeIdentity: 'cwd-runtime', policyIdentity: 'cwd-policy', profileRevision: 'cwd-profile' };
+  const compiled = await createPiInputPreparationCompiler().compile({
+    snapshot: {
+      prompt: { cwd: home, selectedTools: [], toolSnippets: {}, promptGuidelines: [], contextFiles: [], formattedSkills: '',
+        docsPaths: { readmePath: '/sealed/README.md', docsPath: '/sealed/docs', examplesPath: '/sealed/examples' } },
+      messages: [{ role: 'user', content: 'report cwd', timestamp: 1700000000000 }], tools: [],
+    },
+    model, options: { cacheRetention: 'none', maxTokens: 256 }, binding, toolExecutors: {},
+  });
+  const recordId = 'cwd-marker-record';
+  await fs.writeFile(artifactPath, JSON.stringify({
+    format: INPUT_PREPARATION_ARTIFACT_FORMAT, version: INPUT_PREPARATION_VERSION, recordId,
+    ...compiled,
+  }), { mode: 0o600 });
+  return {
+    reference: { scopeId: 'cwd-scope', agentRef: 'cwd-agent', requestId: 'cwd-preparation', recordId },
+    artifactPath,
+    expected: { envelopeDigest: compiled.envelopeDigest, toolManifestDigest: compiled.toolManifestDigest, model, binding },
+    permissionMode: 'auto', toolBindingDigest: 'cwd-marker-tool-binding', observationDigest: 'cwd-marker-observation',
+    launch: { cwd: launchCwd }, toolImplementations: {}, toolsetDefinitionRevisions: {},
+  };
+}
+
+/** The actual adapter owns cwd/env; the test substitutes only the native runtime. */
+async function launchThroughAdapter(lane: 'ordinary' | 'prepared', home: string): Promise<ChildReport> {
+  const { compiledBin, preparedEntry } = await piRelease();
+  const recordDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-adapter-record-'));
+  const recordTo = path.join(recordDir, 'record.json');
+  const env = runtimeEnv(recordTo);
+  let spawnCount = 0;
+  const adapter = new PiAdapter({
+    resolveBin: () => ({ command: compiledBin, source: 'env' }),
+    resolveExtensions: () => ({ webAccess: '/fixture/web.ts', mcpExtension: '/fixture/mcp.ts',
+      subagentsPolicy: '/fixture/policy.ts', subagents: '/fixture/subagents.ts', todo: '/fixture/todo.ts' }),
+    spawnFn: ((command: string, args: readonly string[], options: SpawnOptions) => {
+      spawnCount++;
+      // Do not reconstruct options: the real adapter's cwd/env flow directly to Bun.
+      if (lane === 'prepared') {
+        if (!args[0]?.endsWith('byok-pi-prepared.js') || args[1] !== '--config') {
+          throw new Error('prepared marker must replace the actual SDK prepared entry');
+        }
+        return spawn(BUN_BIN!, [preparedEntry, ...args.slice(1)], options);
+      }
+      return spawn(command, args, options);
+    }) as unknown as SpawnFn,
+  });
+  const policy = { mode: 'auto' as const };
+  const offer = { instruction: 'report cwd', policy };
+  const prepared = await adapter.prepare({ offer, policy, descriptor: adapter.descriptor, requiredToolsetIds: [] });
+  if (prepared.kind === 'reject') throw new Error(prepared.reason);
+  const manifest = sealRuntimeOperationManifest({
+    taskId: 'cwd-marker-task', runtimeId: 'pi', descriptor: adapter.descriptor, policy,
+    requiredToolsetIds: [], workspace: { workspaceDir: home }, forwardedEnvironmentNames: Object.keys(env).sort(),
+  });
+  const cwd = await trustedCwd();
+  const preparation = lane === 'prepared'
+    ? await prepareArtifact(home, path.join(recordDir, 'artifact.json'), cwd) : undefined;
+  const session = await prepared.operation.start({
+    ...(preparation === undefined ? { kind: 'instruction' as const, instruction: offer.instruction }
+      : { kind: 'prepared' as const, preparation }),
+    manifest, env, mcpLaunch: { cwd },
+  });
+  try {
+    if (spawnCount !== 1) throw new Error(`expected exactly one actual adapter spawn, got ${spawnCount}`);
+    const report = JSON.parse(await fs.readFile(recordTo, 'utf8')) as ChildReport;
+    console.log(`[pi-runtime-launch-cwd] ${lane} ${JSON.stringify(report)}`);
+    return report;
+  } finally {
+    await session.close();
+    await fs.rm(recordDir, { recursive: true, force: true });
+  }
+}
+
 describe('Pi runtime child — launch cwd', () => {
   // The vector needs a real bun-family interpreter; without one there is
   // nothing to observe, so the case is visibly skipped rather than passed.
@@ -165,13 +254,7 @@ describe('Pi runtime child — launch cwd', () => {
     'ordinary lane (pi-adapter.ts:518) leaves the Agent home bunfig preload and .env unreachable',
     async () => {
       const home = await plantedAgentHome();
-      const { compiledBin } = await piRelease();
-
-      const report = await launch({
-        command: compiledBin,
-        args: ['--mode', 'rpc'],
-        cwd: adapterProcessCwd(home),
-      });
+      const report = await launchThroughAdapter('ordinary', home);
 
       expect(report.preloaded).toBe(false);
       expect(report.dotenv).toBe('absent');
@@ -184,18 +267,7 @@ describe('Pi runtime child — launch cwd', () => {
     'prepared lane (pi-adapter.ts:747) leaves the Agent home bunfig preload and .env unreachable',
     async () => {
       const home = await plantedAgentHome();
-      const { preparedEntry } = await piRelease();
-      const configPath = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-prepared-')), 'config.json');
-      await fs.writeFile(configPath, JSON.stringify({ launch: {}, mcp: {} }), { mode: 0o600 });
-
-      // The prepared lane hands the interpreter the sealed entry; under S2 the
-      // interpreter IS the bun-family runtime, which is why `process.execPath`
-      // is stood in for by bun here.
-      const report = await launch({
-        command: BUN_BIN!,
-        args: [preparedEntry, '--config', configPath],
-        cwd: adapterProcessCwd(home),
-      });
+      const report = await launchThroughAdapter('prepared', home);
 
       expect(report.preloaded).toBe(false);
       expect(report.dotenv).toBe('absent');
