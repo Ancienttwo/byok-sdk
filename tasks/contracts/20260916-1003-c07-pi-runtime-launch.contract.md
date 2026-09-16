@@ -84,6 +84,11 @@ allowed_paths:
   - tasks/reviews/20260916-1003-c07-pi-runtime-launch.review.md
   - tasks/todos.md
   - docs/researches/20260916-c07-pi-under-s2-track-b.md
+  - docs/researches/20260916-c07-runner-i18n-implementation-entry.md
+  - plans/plan-20260916-c07-runner-i18n.md
+  - tasks/contracts/20260916-c07-runner-i18n.contract.md
+  - tasks/notes/20260916-c07-runner-i18n.notes.md
+  - tasks/reviews/20260916-c07-runner-i18n.review.md
   - docs/spec.md
   - CHANGELOG.md
   - packages/implementation-identity/
@@ -170,6 +175,11 @@ delegation:
 exit_criteria:
   files_exist:
     - docs/researches/20260916-c07-pi-under-s2-track-b.md
+  - docs/researches/20260916-c07-runner-i18n-implementation-entry.md
+  - plans/plan-20260916-c07-runner-i18n.md
+  - tasks/contracts/20260916-c07-runner-i18n.contract.md
+  - tasks/notes/20260916-c07-runner-i18n.notes.md
+  - tasks/reviews/20260916-c07-runner-i18n.review.md
     - tasks/notes/20260916-1003-c07-pi-runtime-launch.notes.md
     - plans/plan-20260916-1003-c07-pi-runtime-launch.md
   artifacts_exist: []
@@ -324,3 +334,7 @@ Pi RPC CLI argument failures use the existing failUsage renderer including the e
 - Team operator uses a private entry and shared RPC session assembly, static pin/private import, preserving ambient env, explicit extensions, GUI and system prompt. It is not a runtime/record/helper kind admitted by daemon dispatch. Extend the existing bin scope to `pi-session-runtime.ts`, `pi-team-operator-host.ts`, `team-pi-operator-entry.ts` and the official `byok-agent.ts` private dispatch (no independent operator bin); package imports/build registration remains parent-owned. No runner/i18n implementation.
 - trusted-launch-cwd launcher is executable code, not an asset. No new locator or unsupported release lookup is invented; design residual is recorded if existing authority cannot cover it.
 - Test actual configured resolver selection/count and startup refusal before socket exposure; team real GUI behavior; daemon rejects operator dispatch; no S2 assertion relaxation. Product and registration commits separate.
+
+## Runner/i18n design-only successor registration
+
+Supervisor accepted helper-lookup freeze6696c211. The five added successor documentation paths prepare an implementation contract only. They do not activate runner/i18n, manifests/lock, new runtime schemas, fork1006 or Salesko product writes. The successor contract remains docs-only until Owner explicitly approves its implementation scope. Existing broader product paths do not override this narrower stop boundary.

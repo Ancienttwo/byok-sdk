@@ -67,3 +67,9 @@ P3d activated by supervisor: static/build-time closure of SDK extension jiti/rpi
 Product f73431cf, registration separate. Author targeted build/typecheck pass; compiler+strict RPC12/12 and team7/7; earlier focus reserved-helper/control/closure files passed with one new malformed fixture failure subsequently corrected. No timeout/closure assertion relaxed. Evidence `_ops/c07-identity-workspace/helper-lookup/`; complete frozen gate pending supervisor, includes prior renderer21ab3c86. No new full/pack claim. Node MCP launcher lookup, runner/i18n and native closure remain open as recorded in notes.
 
 Supervisor requested author first frozen client full run before independent re-gate; both will be sequential. Shared client-manifest is not globally dev-only because trusted-launch-cwd remains a production caller. Final full evidence will bind the post-registration head recorded in handoff.
+
+## P3d helper-lookup terminal acceptance (supersedes pending checkpoint)
+
+Supervisor unique gate PASS6696c211; original copied to `_ops/c07-identity-workspace/runner-i18n-entry/p3d-terminal-gate.md`. Client2673pass/11skip/one known S2 :305 failure36; both lanes get_state. Build/typecheck/targeted69/API10/version/graph/strict/diff and real release-pack pass; operator packed entry exit78, API golden unchanged, attribution0. Keys evidence reused unchanged from P3c, not rerun. Author full was interrupted on supervisor instruction and is not terminal evidence.
+
+Non-blocking default compiler discovery398–400 only used by tests is registered for runner/record M1 removal (required argument, dev/tests explicitly pass runtime), no change to frozen product. New successor design-only contract20260916-c07-runner-i18n prepares M0 schema/recursive-custody proof and implementation activation. Full containment/C07 not accepted; no external action.
