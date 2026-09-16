@@ -90,7 +90,9 @@ export function parseDescendantLaunch(value: unknown): DescendantLaunchV1 {
     || descendantTemplateDigest(value.template as ImplementationSpawnBindingV1) !== value.templateDigest) fail('descendant_template_digest_mismatch');
   if (!parseRuntimeDescendantPolicy(value.policy)) fail('descendant_policy_field_required');
   const c = value.perLaunch;
-  if (!exact(c, ['format','version','templateKind','edge','rootTaskId','parentInstancePath','instancePath','depth','remainingDepth','effectiveLimits','task','modelCandidates','attempt','session','mcp','exactNames','envValues','controlledDirValues'])
+  const contextKeys = ['format','version','templateKind','edge','rootTaskId','parentInstancePath','instancePath','depth','remainingDepth','effectiveLimits','task','modelCandidates','attempt','session','mcp','exactNames','envValues','controlledDirValues'];
+  if (object(c) && Object.keys(c).some(k => !contextKeys.includes(k))) fail('descendant_context_unknown_key');
+  if (!exact(c, contextKeys)
     || c.format !== 'byok.runtime-descendant-context' || c.version !== 1 || !kind(c.templateKind)
     || !exact(c.edge,['parent','child']) || !kind(c.edge.parent) || !kind(c.edge.child) || c.edge.child !== c.templateKind
     || template.fixedArgv.at(-1) !== c.templateKind || !nonempty(c.rootTaskId)
@@ -98,16 +100,20 @@ export function parseDescendantLaunch(value: unknown): DescendantLaunchV1 {
     || !uint(c.depth) || !uint(c.remainingDepth) || !limits(c.effectiveLimits) || typeof c.task !== 'string'
     || !Array.isArray(c.modelCandidates) || c.modelCandidates.length === 0
     || !Array.from(c.modelCandidates).every(m => exact(m,['provider','model']) && nonempty(m.provider) && nonempty(m.model))
-    || !uint(c.attempt) || c.attempt >= c.modelCandidates.length
+    || !uint(c.attempt)
     || !exact(c.session,['cwd','root','file']) || !absolute(c.session.cwd) || !absolute(c.session.root)
     || !(c.session.file === null || absolute(c.session.file))
     || !exact(c.mcp,['env','metadata']) || !stringMap(c.mcp.env) || !object(c.mcp.metadata) || !jsonValue(c.mcp.metadata)
     || !names(c.exactNames) || !object(c.envValues) || !stringMap(c.controlledDirValues)) fail('descendant_invalid_context');
-  if (!Object.entries(c.envValues).every(([n,v]) => (DESCENDANT_PER_LAUNCH_ENV_NAMES as readonly string[]).includes(n)
-    && (v === null || (typeof v === 'string' && !v.includes('\0'))))) fail('descendant_invalid_context');
+  if (c.attempt >= c.modelCandidates.length) fail('descendant_model_attempt_invalid');
+  for (const [name,value] of Object.entries(c.envValues)) {
+    if ((PROVIDER_CREDENTIAL_ENV_DENY_NAMES as readonly string[]).includes(name.toUpperCase())) fail('descendant_credential_in_config');
+    if (!(DESCENDANT_PER_LAUNCH_ENV_NAMES as readonly string[]).includes(name)) fail('descendant_env_name_unknown');
+    if (!(value === null || (typeof value === 'string' && !value.includes('\0')))) fail('descendant_invalid_context');
+  }
   if (Object.entries(c.controlledDirValues).some(([n,v]) => !(CONTROLLED_PI_DIRECTORY_ENV_NAMES as readonly string[]).includes(n) || !absolute(v))) fail('descendant_controlled_directory_mismatch');
-  if (Object.keys(c.mcp.env).some(n => (PROVIDER_CREDENTIAL_ENV_DENY_NAMES as readonly string[]).includes(n.toUpperCase())
-    || (CONTROLLED_PI_DIRECTORY_ENV_NAMES as readonly string[]).includes(n.toUpperCase())) || loaderEnvInjections(c.mcp.env).length > 0) fail('descendant_mcp_env_forbidden');
+  if (Object.keys(c.mcp.env).some(n => (PROVIDER_CREDENTIAL_ENV_DENY_NAMES as readonly string[]).includes(n.toUpperCase()))) fail('mcp_credential_env_forbidden');
+  if (Object.keys(c.mcp.env).some(n => (CONTROLLED_PI_DIRECTORY_ENV_NAMES as readonly string[]).includes(n.toUpperCase())) || loaderEnvInjections(c.mcp.env).length > 0) fail('descendant_mcp_env_forbidden');
   // Keep original template key order: parsing must not silently change its checksum preimage.
   return frozenJson(JSON.parse(JSON.stringify(value)) as DescendantLaunchV1);
 }
@@ -122,7 +128,6 @@ export function validateDescendantSpawn(
   if (descendantTemplateDigest(expected.template) !== launch.templateDigest || !equal(t, expected.template)) fail('descendant_template_changed');
   if (!sameMap(c.controlledDirValues, t.envCommitments)
     || CONTROLLED_PI_DIRECTORY_ENV_NAMES.some(n => actual.env[n] !== t.envCommitments[n])) fail('descendant_controlled_directory_mismatch');
-  if (c.depth > launch.policy.maxDepth || c.depth > c.effectiveLimits.maxDepth) fail('descendant_depth_exceeded');
   for (const key of ['maxDepth','fanout','parallel','sessionCap'] as const) {
     if (c.effectiveLimits[key] > launch.policy[key]) fail('descendant_limit_exceeded');
     if (c.effectiveLimits[key] > expected.parent.effectiveLimits[key]) fail('descendant_parent_limit_exceeded');
@@ -132,11 +137,20 @@ export function validateDescendantSpawn(
     || c.edge.parent !== expected.parent.kind || c.rootTaskId !== expected.parent.rootTaskId
     || !equal(c.parentInstancePath, expected.parent.instancePath)) fail('descendant_parent_transition_mismatch');
   const bootstrap = c.edge.parent === 'pi-subagent-runner' && c.edge.child === 'pi-subagent-print';
+  // Check the independently verified parent's remaining charge before judging
+  // the candidate declaration. The zero-charge runner bootstrap is legal at cap.
+  if (!bootstrap && expected.parent.depth >= c.effectiveLimits.maxDepth) fail('descendant_depth_exhausted');
+  if (c.depth > launch.policy.maxDepth || c.depth > c.effectiveLimits.maxDepth) fail('descendant_depth_exceeded');
   const expectedDepth = expected.parent.depth + (bootstrap ? 0 : 1);
-  if (!Number.isSafeInteger(expectedDepth) || c.depth !== expectedDepth || c.remainingDepth !== c.effectiveLimits.maxDepth - c.depth
+  if (!Number.isSafeInteger(expectedDepth) || c.depth !== expectedDepth
     || (bootstrap ? !equal(c.instancePath, expected.parent.instancePath)
       : c.instancePath.length !== expected.parent.instancePath.length + 1 || !expected.parent.instancePath.every((v,i) => c.instancePath[i] === v))) fail('descendant_parent_transition_mismatch');
-  if (c.session.root !== t.envCommitments.PI_CODING_AGENT_SESSION_DIR) fail('descendant_controlled_directory_mismatch');
+  if (c.remainingDepth !== c.effectiveLimits.maxDepth - c.depth) fail('descendant_depth_mismatch');
+  for (const [name,value] of [['PI_SUBAGENT_DEPTH',c.depth],['PI_SUBAGENT_MAX_DEPTH',c.effectiveLimits.maxDepth]] as const) {
+    const supplied = c.envValues[name];
+    if (supplied !== undefined && supplied !== null && supplied !== String(value)) fail('descendant_depth_projection_mismatch');
+  }
+  if (c.session.root !== t.envCommitments.PI_CODING_AGENT_SESSION_DIR) fail('descendant_session_root_mismatch');
   if (c.session.file !== null) {
     const relative = path.relative(c.session.root, c.session.file);
     if (relative === '' || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) fail('descendant_session_path_outside_root');
