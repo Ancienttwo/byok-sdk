@@ -99,7 +99,7 @@ export default function registerByokMcpTools(pi: ExtensionAPI): void {
       // compile-time type can describe, and rebuilding it as TypeBox would
       // make this file the authority on a schema the server owns. Pi treats
       // the value as JSON Schema at runtime — empirically honoured by
-      // 0.85.1002, whose registered tools carry these schemas verbatim.
+      // 0.85.1005, whose registered tools carry these schemas verbatim.
       (pi.registerTool as (definition: unknown) => void)(tool);
     }
   };

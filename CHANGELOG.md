@@ -777,14 +777,14 @@ and the D2 version number belongs to a separate SDK release contract.
   codes. This client sends one fixed protocol revision and one fixed capability
   set, so a request refused for either reason is refused identically every time
   it is re-offered. Every other JSON-RPC code still defaults to retryable.
-- Pin the Pi fork runtime to `@byok-sdk/pi-coding-agent@0.85.1002` (fork build
-  2 over the same upstream base `d981de1`): a pure
+- Pin the Pi fork runtime to `@byok-sdk/pi-coding-agent@0.85.1005` (fork build
+  5 over the same upstream base `d981de1`): a pure
   `projectSystemPromptSnapshot`, `RPC_MAX_FRAME_BYTES` with
-  `rpcFrameByteLength`/`fitsRpcFrame`, and depth-1 id recovery. The pre-count
-  RPC frame check that would consume those symbols is NOT shipped: `0.85.1002`
-  exposes no `exports` subpath reaching `rpc-types` and the root entry does not
-  re-export it, so the cap has no importable authority yet and no local copy of
-  it was made. See `docs/researches/runtime-input-preparation-contract.md` §18.
+  `rpcFrameByteLength`/`fitsRpcFrame`, and depth-1 id recovery. `0.85.1005`
+  adds `./rpc-types` to the package `exports` map, so the frame cap has an
+  importable authority and the pre-count RPC frame check above consumes it
+  instead of a local copy. See
+  `docs/researches/runtime-input-preparation-contract.md` §18.
 - The pi adapter now declares `requiresMcpToolsetToolObservation: true`, so a
   pi-routed toolset offer is admitted on the same observation claude and codex
   already require.

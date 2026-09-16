@@ -11,8 +11,8 @@ assert.deepEqual(adaptersExport, {
   import: './dist/adapters/index.js',
 });
 // Exact npm alias onto the SDK's Pi fork: the specifier and the installed path
-// stay upstream, the resolved manifest is @byok-sdk/pi-coding-agent@0.85.1002.
-assert.equal(manifest.dependencies?.['@earendil-works/pi-coding-agent'], 'npm:@byok-sdk/pi-coding-agent@0.85.1002');
+// stay upstream, the resolved manifest is @byok-sdk/pi-coding-agent@0.85.1005.
+assert.equal(manifest.dependencies?.['@earendil-works/pi-coding-agent'], 'npm:@byok-sdk/pi-coding-agent@0.85.1005');
 assert.equal(manifest.optionalDependencies?.['@earendil-works/pi-coding-agent'], undefined);
 assert.equal(manifest.dependencies?.['pi-web-access'], '0.24.1');
 assert.equal(manifest.dependencies?.['pi-subagents'], '0.60.0');
