@@ -46,7 +46,7 @@ Prepare the bounded implementation contract in [docs/researches/20260916-c07-run
 - [x] M2b-2 read-only15-row equivalence probe and actual upstream consumer reproduction; four regex counterexamples documented, no product writes.
 - [x] M2b-2 supervisor accepted runtime-guard attribution and escalated to Owner: one widening, three classification/timing differences.
 - [x] Owner selected α explicitly: sealed structured-output feature requests refuse; ordinary text subagents retained. No scripted-workflow/native/P4 approval inferred.
-- [ ] M2b-2α trace all effective request/recovery/delegation consumers and sealed build graph, then register exact implementation paths. Runtime refusal and codegen graph exclusion require separate evidence; dispatch stays gated.
+- [x] M2b-2α trace all effective request/recovery/delegation consumers and sealed build graph, then register exact implementation paths. Runtime refusal and codegen graph exclusion require separate evidence; dispatch stays gated.
 - [x] Draft M2b-3 execution/test matrix, helper activation order and downstream complete-plan notice (docs only).
 - [x] Supervisor accepted M2b-3 design5e7c3ba7 with print-specific startup probe, full recursive/jiti-zero gate, and spec/P4 notice conditions. Root/session ownership and atomic transaction/crash proofs remain implementation stop conditions; no product work until external inputs.
 - [ ] M2b-3: prove all five custody execution points and consume accepted M2b-1/2 prerequisites; obtain scripted-workflow Owner disposition before recursive dispatch. This is the only dispatch-enabling slice; full gate.
@@ -70,3 +70,6 @@ M2b-1 exact9-file scope registered before product edits. Native1005 lacks public
 - [ ] Real per-entry pre-fix RED with text controls, then sealed refusal implementation.
 - [ ] Dedicated sealed host build/private mapping; one vendor author, unsealed compiler retained, main dist unchanged.
 - [ ] Freeze product/docs and hand to supervisor for unique full gate/real release-pack; carry RPC codegen/S2 tripwire24 residuals.
+
+- [x] Alpha raw baseline8995a4b1 with9 refusal RED/12controls GREEN; product107f4fb2 explicit refusal + dedicated private sealed artifact,51 focused/typecheck passed.
+- [ ] Alpha frozen complete supervisor gate + real installed release-pack; S2 residual24 remains explicit.

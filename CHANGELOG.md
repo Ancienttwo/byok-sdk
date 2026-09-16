@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Changed (sealed Pi structured output)** — the private sealed runtime host
+  explicitly refuses structured-output subagent requests, including inherited
+  workflow schemas, delegation, recovery and refinement proposals. Its build
+  excludes the user-schema compiler backend; ordinary hosts retain validation.
+  Both hosts use one provenance-tracked vendored pi-subagents 0.60.0 source;
+  the npm source is now development-only (runtime dependencies 20 to 19), with
+  unchanged locked package tuples and shipped TypeBox 1.3.7 resolution. A new
+  private dist mapping supports product-owned build selection without changing
+  public exports. Fixed RPC schema codegen, scripted workflow closure and the
+  S2 tripwire24 (clipboard12+jiti12) remain unresolved; recursive dispatch stays
+  disabled.
+
 - **Changed (attested Pi assets)** — attested host startup now requires all five
   export HTML resources in the measured record assets, with matching bytes and
   PI_PACKAGE_DIR. Interpreted releases reject a `src` directory that would redirect
