@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Fixed (Windows provenance checks)** — preserve original Git checkout bytes
+  for vendored sources and three tracked asset layout/source metadata files.
+  Git newline conversion no longer changes these hash-bound inputs; provenance
+  hashes and runtime verification remain unchanged.
+
 - **Changed (sealed Pi structured output)** — the private sealed runtime host
   explicitly refuses structured-output subagent requests, including inherited
   workflow schemas, delegation, recovery and refinement proposals. Its build

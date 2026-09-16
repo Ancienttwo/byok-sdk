@@ -19,7 +19,7 @@ Prepare the bounded implementation contract in [docs/researches/20260916-c07-run
 
 ## Task Breakdown
 
-- [ ] WIN-CRLF independent slice: preserve tracked vendor/source-metadata bytes with Git attributes; prove an isolated autocrlf checkout negative/control pair and raw manifest parity. Scope and validation are registered in the contract; no SEA-TLA, source/manifest/lock change or PR update.
+- [x] WIN-CRLF local implementation/verification: attributes frozen at c46cd4b9; all285 checkout/add targets and272 manifest hashes preserve original bytes, negative checkout reproduces drift, vendor tests4/4 pass. Independent bounded gate pending; Windows CI unverified. No SEA-TLA, source/manifest/lock change or PR update.
 
 - [x] Correct confirmed alpha r2 TestServer read-ahead filtering loss at7357ebb4; deterministic HTTP2RED→7targetedPASS, original assertions/timeouts unchanged; one frozen client full2763pass/11skip/soleS2RED24. Supervisor round3 pending.
 
