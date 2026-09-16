@@ -105,6 +105,27 @@ describe('SDK-reserved helper host composition', () => {
     expect(thin.stderr).toBe('byok-pi-prepared: --config must be an absolute path\n');
   });
 
+  it.each([
+    { argv: ['--config', 'relative', '--mode', 'rpc'], reason: '--config must be an absolute path' },
+    { argv: ['--config', '/config', '--mode', 'rpc', '--mode', 'rpc'], reason: 'duplicate argument --mode' },
+    { argv: ['--unknown'], reason: 'unsupported argument --unknown' },
+  ])('ordinary host renders non-digest usage: $reason', async ({ argv, reason }) => {
+    const hostPath = path.resolve(import.meta.dirname, '../bin/pi-rpc-host.ts');
+    const binPath = path.resolve(import.meta.dirname, '../bin/byok-pi-rpc.ts');
+    const caller = await fixture('rpc-usage-caller.ts', `
+      import { runPiRpcHost } from ${JSON.stringify(hostPath)};
+      try { await runPiRpcHost(process.argv.slice(2)); }
+      catch (error) { console.error(error.stack); process.exitCode = 1; }
+    `);
+    const env = { PATH: process.env.PATH!, HOME: process.env.HOME! };
+    for (const entry of [caller, binPath]) {
+      const result = spawnSync('bun', [entry, `--config-digest=${'a'.repeat(64)}`, ...argv], { env, encoding: 'utf8', timeout: 15_000 });
+      expect(result.status).toBe(78);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toBe(`byok-pi-rpc: ${reason}\n`);
+    }
+  });
+
   it.each((['pi-rpc', 'pi-prepared'] as const).flatMap(kind => [
     { kind, label: 'missing', argv: [], reason: 'exactly one --config-digest=<sha256> is required' },
     { kind, label: 'duplicate', argv: [`--config-digest=${'a'.repeat(64)}`, `--config-digest=${'a'.repeat(64)}`], reason: 'exactly one --config-digest=<sha256> is required' },

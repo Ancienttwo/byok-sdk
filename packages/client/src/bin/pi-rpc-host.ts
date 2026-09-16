@@ -75,9 +75,9 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
 }
 
 export function parsePiRpcHostArgs(
-  argv: readonly string[], failDigest?: (message: string) => never,
+  argv: readonly string[], reject: (message: string) => never = fail,
 ): PiRpcHostArgs {
-  const owned = extractPiConfigDigest(argv, failDigest);
+  const owned = extractPiConfigDigest(argv, reject);
   argv = owned.args;
   const values = new Map<string, string>();
   const flags = new Set<string>();
@@ -85,26 +85,26 @@ export function parsePiRpcHostArgs(
   const boolean = new Set(['--no-tools', '--no-skills', '--no-extensions']);
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i]!;
-    if (values.has(flag) || flags.has(flag)) fail(`duplicate argument ${flag}`);
+    if (values.has(flag) || flags.has(flag)) reject(`duplicate argument ${flag}`);
     if (boolean.has(flag)) { flags.add(flag); continue; }
-    if (!valued.has(flag)) fail(`unsupported argument ${flag}`);
+    if (!valued.has(flag)) reject(`unsupported argument ${flag}`);
     const value = argv[++i];
-    if (!value || value.startsWith('--')) fail(`${flag} requires a value`);
+    if (!value || value.startsWith('--')) reject(`${flag} requires a value`);
     values.set(flag, value);
   }
   const configPath = values.get('--config');
-  if (!configPath || !isAbsolute(configPath)) fail('--config must be an absolute path');
-  if (values.get('--mode') !== 'rpc') fail('--mode rpc is required');
+  if (!configPath || !isAbsolute(configPath)) reject('--config must be an absolute path');
+  if (values.get('--mode') !== 'rpc') reject('--mode rpc is required');
   const thinking = values.get('--thinking');
   if (thinking !== undefined && !['off', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(thinking)) {
-    fail('invalid --thinking level');
+    reject('invalid --thinking level');
   }
-  if (values.has('--provider') && !values.has('--model')) fail('--provider requires --model');
+  if (values.has('--provider') && !values.has('--model')) reject('--provider requires --model');
   const list = (flag: string): string[] | undefined => {
     const value = values.get(flag);
     if (value === undefined) return undefined;
     const tools = value.split(',').map((tool) => tool.trim());
-    if (tools.some((tool) => tool.length === 0)) fail(`${flag} contains an empty tool name`);
+    if (tools.some((tool) => tool.length === 0)) reject(`${flag} contains an empty tool name`);
     return tools;
   };
   return {
@@ -133,16 +133,16 @@ export async function openPiRpcSession(cwd: string, session: string | undefined,
 }
 
 export async function runPiRpcHost(argv: readonly string[]): Promise<void> {
-  if (process.execArgv.length > 0) fail('refusing non-empty interpreter argv');
+  if (process.execArgv.length > 0) failUsage('refusing non-empty interpreter argv');
   const injected = loaderEnvInjections(process.env);
-  if (injected.length > 0) fail(`refusing loader environment variables: ${injected.join(', ')}`);
+  if (injected.length > 0) failUsage(`refusing loader environment variables: ${injected.join(', ')}`);
   const args = parsePiRpcHostArgs(argv, failUsage);
   const config = parsePiRpcHostConfig(readPiHostConfig(args.configPath, args.configDigest));
   await verifyPiHostBinding(config.binding, 'pi-rpc', failUsage);
   // The policy is the single authority. Delegated tool flags must be its exact
   // projection, including absence; a stale or widened projection is refused.
   const mapping = mapPermissionPolicyToPiArgs(config.policy);
-  const expected = parsePiRpcHostArgs([`--config-digest=${args.configDigest}`, '--config', args.configPath, '--mode', 'rpc', ...mapping.args]);
+  const expected = parsePiRpcHostArgs([`--config-digest=${args.configDigest}`, '--config', args.configPath, '--mode', 'rpc', ...mapping.args], failUsage);
   if (JSON.stringify([args.tools, args.excludeTools, args.noTools]) !== JSON.stringify([expected.tools, expected.excludeTools, expected.noTools])) {
     fail('delegated tool flags differ from policy');
   }
