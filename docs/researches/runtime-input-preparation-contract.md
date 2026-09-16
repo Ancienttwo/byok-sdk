@@ -2,7 +2,7 @@
 
 Status: proposed SDK contract with provider-free feasibility evidence. This document adds no public SDK API and does not replace accepted C05.
 
-Current checkpoint: G2 native Session/RPC prepared consume PASS on the artifact-bound local evidence in §17 (`.artifacts/c07-native-input/g2-bridge-r3/`), building on the §16 G1 package declaration closure. The native bridge now admits a prepared first request through the real Session/RPC lifecycle with body equality, pre-transport drift rejection and a held reservation, verified against newly repacked local archives. Native package distribution is resolved per §18: the SDK pins the published fork `@byok-sdk/pi-coding-agent@0.85.1002` through an exact npm alias, so the §17 seam is reachable from an ordinary install. What remains unresolved is G3 trusted Execution/artifact binding (task-runner, pi-adapter, protocol), the B-P2 local primitive (frozen, §10), and G4 accounting/Host CAS/S0 activation; coverage remains `unknown`. Local package acceptance does not make first-batch token admission production-ready.
+Current checkpoint: G2 native Session/RPC prepared consume PASS on the artifact-bound local evidence in §17 (`.artifacts/c07-native-input/g2-bridge-r3/`), building on the §16 G1 package declaration closure. The native bridge admits a prepared first request through the real Session/RPC lifecycle with body equality, pre-transport drift rejection and a held reservation. Native package distribution is resolved per §18 and now per §18b: the SDK pins the published fork `@byok-sdk/pi-coding-agent@0.85.1005` (fork build 5) through an exact npm alias, so the §17 seam is reachable from an ordinary install. Readiness is no longer stated as a coverage label — that field is retired: a record is ready when the compiler's projection proof covers the compiled input and every residual key is one the Host ruling declares applicable, and it is unready by named reason otherwise. What remains unresolved is G3 trusted Execution/artifact binding (task-runner, pi-adapter, protocol), the B-P2 local primitive (frozen, §10), and G4 accounting/Host CAS/S0 activation. Local package acceptance does not make first-batch token admission production-ready.
 
 Owner authorized an independent contract and minimal offline spike on 2026-09-14. Source base: f811634c8c9ac6a16891c354eaf0adcb869004a2. Downstream authority remains Salesko frozen draft-3 §4.2/§7.3/§7.4, SHA256 c7288bdbf399d71af6ec131fc86047ced363fb7541af5493c74cf990ae5c6678. Production numbers remain governed by S0.
 
@@ -660,3 +660,19 @@ Nothing is weakened, and each weakening is a test: a symlink leaf is refused (re
 
 **Unchanged on purpose.** No default authority and no shipped resolver; `attested` is still unconstructible from anything on the wire; one identity file; both spawn points and the preparation-time probe still share the single gate in `McpStdioClient.connect`. Pin stays 0.85.1002.
 
+### 18b. Fork build 5 — 0.85.1005 — 2026-09-16
+
+`@byok-sdk/pi-ai`, `@byok-sdk/pi-agent-core` and `@byok-sdk/pi-coding-agent` were published at `0.85.1005` on 2026-09-16. Each published package's registry `dist.integrity` equals the `tarballs[].integrity` the `fork-stage-1005` staging manifest (sha256 `4872fdb3…`) recorded for the same artifact at fork HEAD `49593de3`, so the bytes on the registry are the staged bytes rather than a rebuild that happens to carry the version. The installed manifest reports `byokFork {upstreamBase: "0.85.1", upstreamCommit: "d981de1229ef899957bbe968bc8dcda02a21f477", forkBuild: 5}`; the upstream base commit is unchanged from fork build 2, only `forkBuild` moved. `packages/client/package.json` declares `"@earendil-works/pi-coding-agent": "npm:@byok-sdk/pi-coding-agent@0.85.1005"`.
+
+**Contents over `0.85.1002`.**
+- Projection contract v2: `compilerVersion` is `2`, the opaque `coverage` label is removed in favour of a projection proof plus an explicit residual key set, and `PreparedSessionInputV1` becomes `PreparedSessionInputV2`.
+- `host_canonical` assistant-text origin in the input-preparation message support set.
+- A `./rpc-types` entry in the package `exports` map, reaching `RPC_MAX_FRAME_BYTES`, `rpcFrameByteLength` and `fitsRpcFrame`.
+- `providerCatalog` provenance on the fork side.
+
+**What this supersedes in §18 and later sections.** Those statements are historical and are left in place; this section is the current fact.
+- §18 declared limit (line ~526): `0.85.1002` shipped the frame-cap symbols but its `exports` map had no subpath reaching `rpc-types`, so the pre-count frame check stayed unimplemented "until the fork exports the subpath". `0.85.1005` exports `./rpc-types`.
+- §22 (line ~605): "NOT importable from 0.85.1002 … the package `exports` map has no `./rpc-types` entry." Importable as of `0.85.1005`; the SDK imports the frame authority from that subpath rather than re-declaring it.
+- §22 (line ~613), §23 (line ~631), §24 (line ~661): "Pin stays 0.85.1002, so `fitsRpcFrame` is not wired." The pin is `0.85.1005` and `fitsRpcFrame` is wired — `packages/client/src/daemon/input-preparation-service.ts:39,699` pre-checks the `prompt_prepared` command against the frame cap before transport, so an oversized prepared envelope is refused by the sender by name instead of arriving as an unparsed frame at the native reader.
+
+This slice moves the pin and the frame admission only. The prepared native tool half remains uncounted and G4 accounting/Host CAS/S0 activation is unchanged.
