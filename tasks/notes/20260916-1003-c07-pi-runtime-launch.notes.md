@@ -223,3 +223,10 @@ Product87d9b5f9 modifies exactly the five supervisor-approved files. Tests cover
 Current subject8b016495 S2 evidence: **36** registry requests (clipboard/jiti/rpiv-i18n12each), native alias0; ordinary AND prepared reach get_state; tier1/nativeBlockers/escaped empty and caches empty. Thus P3c resolved the prepared installed-identity lookup failure. S2 remains RED on unchanged attempts===0; the P3b42-request/prepared-failure evidence remains historical and valid for that earlier subject. Client has17direct dependencies; nine is the previously promoted subset. This correction changes no dependencies.
 
 Evidence copied unchanged to `_ops/c07-identity-workspace/p3c-r1/independent-gate.md`. Report-only create-daemon unconditional native lookup is outside r1 and remains P3d/e scope; Windows actual execution remains unverified locally. No push/merge/publish or full-C07 acceptance.
+
+
+## P3c terminal partial acceptance; P3d entry
+
+Supervisor PASS89e323b4, copied original `_ops/c07-identity-workspace/p3d/p3c-terminal-gate.md`. HIGH digest usage closed; build/typecheck/71targeted/API10/version/graph/strict and real release-pack pass (sourceGitSha89e323b4). Fullclient2660passed/11skipped/one knownS2 tripwire36failure; bothlanes get_state; not complete containment. Keys494/4skipped andidentity13 reused on unchanged surfaces.
+
+P3d activated by supervisor: static/build-time closure of SDK extension jiti/rpiv-i18n, remaining launcher/team/daemon discovery, and existing RPC non-digest CLI renderer inconsistency/recomputation. Three report-only entries now tracked in this bounded scope: pi-rpc-host fail/expected parse and create-daemon constructor native lookup. Clipboard12 belongs to1006 and hard tripwire zero assertion stays unchanged. Read-only two-part trace is in progress; design decisions must preserve async subagent/i18n functionality and runtime authority, not merely remove startup attempts. No product edit yet; no external action. `.ai/context/capabilities.json` absent in this worktree; existing context-map loaded, no scoped context added.

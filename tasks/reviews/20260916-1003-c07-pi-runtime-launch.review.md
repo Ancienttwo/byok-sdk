@@ -49,3 +49,10 @@ Product00c5529a is pending independent frozen gate. Local scoped checks recorded
 ## P3c independent gate and r1 candidate
 
 8b016495 FAIL, only blocker helper config-digest usage returns1/stack instead of78/prefixed single line; known S2 guard separately remains RED36registry attempts. Both actual Pi lanes now reach get_state, prepared lookup failure closed. Product87d9b5f9 is the bounded five-file correction; pre-fix red and post-fix40targeted passes plus build/typecheck are recorded in notes. Final frozen client full and independent re-gate (including real pack with stricter smoke) remain pending. Keys/identity/API/graph unaffected, prior subject evidence reusable per supervisor. No terminal PASS yet.
+
+
+## P3c terminal partial acceptance; P3d entry
+
+Supervisor PASS89e323b4, copied original `_ops/c07-identity-workspace/p3d/p3c-terminal-gate.md`. HIGH digest usage closed; build/typecheck/71targeted/API10/version/graph/strict and real release-pack pass (sourceGitSha89e323b4). Fullclient2660passed/11skipped/one knownS2 tripwire36failure; bothlanes get_state; not complete containment. Keys494/4skipped andidentity13 reused on unchanged surfaces.
+
+P3d activated by supervisor: static/build-time closure of SDK extension jiti/rpiv-i18n, remaining launcher/team/daemon discovery, and existing RPC non-digest CLI renderer inconsistency/recomputation. Three report-only entries now tracked in this bounded scope: pi-rpc-host fail/expected parse and create-daemon constructor native lookup. Clipboard12 belongs to1006 and hard tripwire zero assertion stays unchanged. Read-only two-part trace is in progress; design decisions must preserve async subagent/i18n functionality and runtime authority, not merely remove startup attempts. No product edit yet; no external action. `.ai/context/capabilities.json` absent in this worktree; existing context-map loaded, no scoped context added.
