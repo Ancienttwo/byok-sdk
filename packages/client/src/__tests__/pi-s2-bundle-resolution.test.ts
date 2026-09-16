@@ -1,3 +1,4 @@
+import { piExportAssetPaths } from '../adapters/pi/pi-export-assets';
 import { runtimeRecordFixture } from './fixtures/runtime-resolution';
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -221,8 +222,7 @@ describe('Pi launch path — S2 release containment', () => {
         const nativeRoot = path.dirname(path.dirname(fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'))));
         const assetRoot = path.join(release, 'assets');
         const assetPaths = ['package.json', 'dist/modes/interactive/theme/dark.json', 'dist/modes/interactive/theme/light.json',
-          'dist/core/export-html/template.html', 'dist/core/export-html/template.css', 'dist/core/export-html/template.js',
-          'dist/core/export-html/vendor/marked.min.js', 'dist/core/export-html/vendor/highlight.min.js'];
+          ...piExportAssetPaths('interpreter+bundle')];
         const assets: Array<{ path: string; digest: string }> = [];
         for (const relative of assetPaths) {
           const target = path.join(assetRoot, relative); await fs.mkdir(path.dirname(target), { recursive: true });

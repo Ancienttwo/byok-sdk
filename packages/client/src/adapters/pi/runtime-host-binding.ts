@@ -8,6 +8,7 @@ import {
 import type { RuntimeLaunchKindV1 } from '../../daemon/tool-implementation-identity';
 import { piRuntimeIdentityFromAttestedRecord, resolveInstalledPiRuntimeIdentity } from './input-preparation';
 import { resolvePiRuntimeIdentity } from './resolve-bin';
+import { verifyPiExportAssets } from './pi-export-assets';
 
 const DIGEST_FLAG = '--config-digest=';
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -87,5 +88,7 @@ export async function verifyPiHostBinding(
   for (const field of ['upstreamBase', 'upstreamCommit', 'forkBuild'] as const) {
     if (!fork || fork[field] !== provenance[field]) throw new Error(`Pi native byokFork.${field} differs from record`);
   }
-  return piRuntimeIdentityFromAttestedRecord(identity);
+  const runtimeIdentity = piRuntimeIdentityFromAttestedRecord(identity);
+  verifyPiExportAssets(binding);
+  return runtimeIdentity;
 }

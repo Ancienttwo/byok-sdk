@@ -65,7 +65,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsup && node scripts/check-adapters-entry.mjs --build-todo && node scripts/build-todo-assets.mjs && tsc -p tsconfig.build.json && node scripts/check-adapters-entry.mjs && node scripts/check-agent-memory-entry.mjs",
+    "build": "tsup && node scripts/check-adapters-entry.mjs --build-todo && node scripts/build-todo-assets.mjs && node scripts/build-pi-export-assets.mjs && tsc -p tsconfig.build.json && node scripts/check-adapters-entry.mjs && node scripts/check-agent-memory-entry.mjs",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
