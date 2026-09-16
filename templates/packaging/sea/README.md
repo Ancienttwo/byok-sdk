@@ -13,9 +13,8 @@ repo and adapt it to your own entry point, signing, and release pipeline.
 ## Prerequisites
 
 - Node.js >= 22.22.0 (this repo and the required pi runtime share this floor).
-- [`esbuild`](https://esbuild.github.io) to flatten the launcher + its
-  dependency graph into a single file first (see "Why bundle to CommonJS
-  first" below) — any bundler that can produce a single CJS file works.
+- [`esbuild`](https://esbuild.github.io) to bundle the launcher as ESM, then
+  convert that single intermediate to CJS (see "Why ESM then CommonJS" below).
   `examples/packaging` lists `esbuild` as a direct devDependency for exactly
   this reason: a *transitive* dependency (this repo also pulls esbuild in
   via `tsup`) is not reliably reachable through a fixed `node_modules/.bin`
@@ -41,17 +40,20 @@ Under the hood, it runs the same steps
 [Node's own docs](https://nodejs.org/api/single-executable-applications.html)
 describe:
 
-1. `esbuild <entry> --bundle --platform=node --format=cjs --outfile=bundled.cjs`
-2. Write a `sea-config.json` pointing `main` at that bundle, then
+1. `esbuild <entry> --bundle --platform=node --format=esm --outfile=launcher-bundled.mjs --metafile=launcher-esm.meta.json --sourcemap`
+2. `esbuild launcher-bundled.mjs --bundle --platform=node --format=cjs --outfile=launcher-bundled.cjs --metafile=launcher-cjs.meta.json --sourcemap`
+3. `node --check launcher-bundled.cjs` checks the exact main script before injection.
+4. Write a `sea-config.json` pointing `main` at that CJS bundle, then
    `node --experimental-sea-config sea-config.json` to produce the blob.
-3. Copy the running `node` executable to your output name.
-4. Make the output copy owner-writable (`chmod u+w`); package-manager-owned
+5. Copy the running `node` executable to your output name.
+6. Make the output copy owner-writable (`chmod u+w`); package-manager-owned
    Node binaries may be installed as read-only, but `postject` must modify it.
-5. **macOS only:** `codesign --remove-signature` the copy.
-6. `npx postject <bin> NODE_SEA_BLOB <blob> --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2`
+7. **macOS only:** `codesign --remove-signature` the copy.
+8. Invoke the installed `postject` binary (or explicit `POSTJECT_BIN`):
+   `postject <bin> NODE_SEA_BLOB <blob> --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2`
    — **on macOS, this needs one more flag: `--macho-segment-name NODE_SEA`.**
-7. **macOS only:** `codesign --sign - <bin>` (ad-hoc re-sign).
-8. **Windows only (optional):** `signtool sign /fd SHA256 <bin>.exe` if you
+9. **macOS only:** `codesign --sign - <bin>` (ad-hoc re-sign).
+10. **Windows only (optional):** `signtool sign /fd SHA256 <bin>.exe` if you
    have a real certificate — Node's docs note the unsigned binary still
    runs fine without one.
 
@@ -68,7 +70,7 @@ Confirmed this is macOS/Mach-O-specific (not needed on Linux or Windows) and
 matches Node's own documented macOS injection command exactly —
 `build.sh` in this folder already applies it correctly per-OS.
 
-### Why bundle to CommonJS first, not ESM
+### Why ESM then CommonJS
 
 `@byok-sdk/client` ships ESM (`"type": "module"`), and its pi adapter's
 `resolve-bin.ts` calls `import.meta.resolve(...)` at runtime — see "What
@@ -77,6 +79,19 @@ single, fully self-contained file (module loading does not read from the
 filesystem at SEA runtime — only Node builtins resolve), so bundling is
 required regardless of format.
 
+Direct CJS bundling rejects top-level await in an SDK helper graph before
+unused launcher branches are removed. The first ESM pass performs standard
+tree-shaking; the second pass converts the surviving launcher to CJS.
+It does not remove capabilities from the independently built Pi host.
+Required top-level await still fails: this recipe does not wrap the entry
+in an async function, externalize dependencies or insert stubs.
+
+Unused-export elimination relies on dependency `sideEffects` declarations
+and ordinary esbuild semantics. A version or side-effect declaration change
+requires a new recipe gate, including both real SEA smoke scenarios. Input
+reachability alone is not proof that a module contributes executable bytes;
+metafiles and source maps are retained for this audit, not needed at runtime.
+
 Node also documents a native `"mainFormat": "module"` SEA config to keep
 the main script as real ESM instead of converting to CJS. We tried it while
 building this recipe: on Node v22.22.3, the SEA loader ignored `mainFormat`
@@ -84,10 +99,11 @@ and still parsed the script as CommonJS, producing a hard
 `SyntaxError: Cannot use import statement outside a module` (exit 1,
 crashes before any application code — including our own try/catch —
 ever runs). That's a Node-version/tooling gap in the ESM path specifically,
-not a defect in pi's resolve-bin.ts. This recipe uses the CJS path instead,
-because it actually works on the Node versions this SDK targets
-(`engines.node >= 22.22.0`); revisit `mainFormat: "module"` once it's reliably
-supported on your floor.
+not a defect in pi's resolve-bin.ts. This recipe keeps the CJS main and the
+existing Node floor (`engines.node >= 22.22.0`). The two-stage repair must be
+verified on each supported Node/OS target; a Node24 Darwin run does not prove
+Node22, Linux or Windows support. Revisit `mainFormat: "module"` only with
+separate evidence on the product's floor.
 
 ### A Windows note: `BYOK_PI_BIN` and `.cmd`/`.bat` don't mix with `execFile`
 
@@ -162,3 +178,23 @@ the missing-sidecar and pickup-works cases. This is exactly what CI runs on
 every push (`.github/workflows/ci.yml`, `packageability-smoke` job) on
 Linux and macOS; see that workflow's comments for the current Windows-SEA
 status.
+
+Both scenarios also require `daemonStatus.paired === false` and
+`daemonStatus.connected === false`, preserving real daemon construction and
+status coverage alongside runtime detection. The absent-sidecar scenario
+requires that the invoking environment has no `BYOK_PI_BIN` set.
+
+To retain the exact intermediate bundles, metafiles, source maps, SEA binary
+and scenario logs from one run, supply a new directory whose parent exists:
+
+```bash
+SEA_SMOKE_EVIDENCE_DIR=/absolute/path/outside-the-checkout/new-sea-evidence \
+  templates/packaging/sea/smoke-test.sh
+```
+
+Use a location with no `node_modules` in its ancestor chain so the isolated
+run remains representative. Existing paths (including symlinks) are refused;
+the supplied directory is never removed by the script, even after failure.
+Without this variable the original temporary-directory cleanup remains.
+Each scenario records its output and exit code. Retain the build command's
+own log as well when collecting gate evidence.

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Fixed (SEA recipe)** — bundle the unchanged launcher through an ESM
+  intermediate before producing the CJS SEA main, avoiding an unused helper's
+  top-level-await parse failure. Preserve daemon construction/status and both
+  sidecar detection scenarios; check final CJS parsing and optionally retain
+  one run's artifacts. Node22 and cross-OS verification remain separate from
+  local Node24 Darwin evidence; SDK/vendor sources and dependencies are unchanged.
+
 - **Fixed (Windows provenance checks)** — preserve original Git checkout bytes
   for vendored sources and three tracked asset layout/source metadata files.
   Git newline conversion no longer changes these hash-bound inputs; provenance

@@ -1,10 +1,10 @@
 # SEA two-stage recipe registration
 
-Status: registration for supervisor review; no recipe implementation yet.
+Status: registration accepted; recipe product frozen at `21de7650`, real SEA verification pending.
 Base: `87ebe865f771fa15bc8f4ae3a5febe20a0dc5519`.
 Authority: supervisor accepted category ① on 2026-09-17, limited to the
-existing launcher entry. Acceptance authorizes registration; implementation
-follows review of this registration. Root is the single writer.
+existing launcher entry, then accepted registration `aa6e2afa` for local
+implementation. Root is the single writer.
 
 ## P1: scope and invariants
 
