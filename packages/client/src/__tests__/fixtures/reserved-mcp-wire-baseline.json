@@ -1,0 +1,86 @@
+{
+  "capturedAt": "5fd5e503",
+  "note": "Emitted wire bytes of the four SDK-reserved MCP stdio helpers, captured from 5fd5e503 on codex/c07-g4b-merge (the migration base, NOT main) before the shared MCP server core landed. Regenerate only against that base.",
+  "servers": {
+    "byok-approval-mcp": {
+      "steps": [
+        "initialize",
+        "notifications/initialized",
+        "tools/list",
+        "ping",
+        "tools/call happy",
+        "tools/call fault",
+        "unknown method"
+      ],
+      "responses": [
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"byok-approval-mcp\",\"version\":\"0.0.1\"}}}",
+        null,
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"approval_prompt\",\"description\":\"Requests operator approval for a pending tool call. Blocks until a human (or this device's daemon) decides, or the configured timeout elapses (fail-closed deny on timeout).\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"tool_name\":{\"type\":\"string\"},\"input\":{\"type\":\"object\"}}}}]}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"error\":{\"code\":-32601,\"message\":\"unknown method: ping\"}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"behavior\\\":\\\"allow\\\",\\\"updatedInput\\\":{\\\"command\\\":\\\"echo hi\\\"}}\"}]}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":5,\"error\":{\"code\":-32602,\"message\":\"unknown tool \\\"some_other_tool\\\"\"}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":6,\"error\":{\"code\":-32601,\"message\":\"unknown method: totally/unknown\"}}"
+      ]
+    },
+    "byok-agent-message-mcp": {
+      "steps": [
+        "initialize",
+        "notifications/initialized",
+        "tools/list",
+        "ping",
+        "tools/call happy",
+        "tools/call fault",
+        "unknown method"
+      ],
+      "responses": [
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"byok-agent-message-mcp\",\"version\":\"0.0.1\"}}}",
+        null,
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"send_agent_message\",\"description\":\"Send the single user-visible Agent reply for this exact task. Routing identity is supplied by the authenticated task context.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"body\"],\"properties\":{\"body\":{\"type\":\"string\",\"minLength\":1},\"contentType\":{\"type\":\"string\",\"enum\":[\"text/plain\",\"text/markdown\"]}}}}]}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"error\":{\"code\":-32601,\"message\":\"unknown method: ping\"}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"messageId\\\":\\\"msg-1\\\",\\\"state\\\":\\\"queued\\\"}\"}]}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":5,\"error\":{\"code\":-32602,\"message\":\"unknown Agent message tool\"}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":6,\"error\":{\"code\":-32601,\"message\":\"unknown method: totally/unknown\"}}"
+      ]
+    },
+    "byok-agent-memory-mcp": {
+      "steps": [
+        "initialize",
+        "notifications/initialized",
+        "tools/list",
+        "ping",
+        "tools/call happy",
+        "tools/call fault",
+        "unknown method"
+      ],
+      "responses": [
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"byok-agent-memory-mcp\",\"version\":\"0.0.1\"}}}",
+        null,
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"memory_recall\",\"description\":\"Recall one SDK-owned memory file for this exact active Agent task. Identity and memory root are never model parameters.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"path\"],\"properties\":{\"path\":{\"type\":\"string\"},\"ifRevision\":{\"type\":\"string\",\"pattern\":\"^sha256:[a-f0-9]{64}$\"}}}},{\"name\":\"memory_save\",\"description\":\"Atomically replace or delete one SDK-owned memory file with exact sha256 compare-and-swap.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"op\",\"path\",\"expectedRevision\"],\"properties\":{\"op\":{\"type\":\"string\",\"enum\":[\"replace\",\"delete\"]},\"path\":{\"type\":\"string\"},\"expectedRevision\":{\"type\":\"string\",\"pattern\":\"^sha256:[a-f0-9]{64}$\"},\"content\":{\"type\":\"string\"}}}}]}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"error\":{\"code\":-32601,\"message\":\"unknown method: ping\"}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"path\\\":\\\"MEMORY.md\\\",\\\"revision\\\":\\\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\\",\\\"content\\\":\\\"# index\\\\n\\\"}\"}]}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":5,\"error\":{\"code\":-32602,\"message\":\"unknown Agent memory tool\"}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":6,\"error\":{\"code\":-32601,\"message\":\"unknown method: totally/unknown\"}}"
+      ]
+    },
+    "byok-agent-team-mcp": {
+      "steps": [
+        "initialize",
+        "notifications/initialized",
+        "tools/list",
+        "ping",
+        "tools/call happy",
+        "tools/call fault",
+        "unknown method"
+      ],
+      "responses": [
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"byok-agent-team-mcp\",\"version\":\"0.0.1\"}}}",
+        null,
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"post_team_message\",\"description\":\"Post one broadcast message as this exact leased team member. Sender and workspace are daemon-owned.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"body\"],\"properties\":{\"body\":{\"type\":\"string\"},\"contentType\":{\"type\":\"string\"}}}},{\"name\":\"read_team_messages\",\"description\":\"Read ordered team messages visible to this exact leased member.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"afterSeq\":{\"type\":\"integer\",\"minimum\":0}}}},{\"name\":\"ack_team_messages\",\"description\":\"Durably acknowledge messages through an already delivered sequence for this exact leased member.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"throughSeq\"],\"properties\":{\"throughSeq\":{\"type\":\"integer\",\"minimum\":0}}}}]}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"error\":{\"code\":-32601,\"message\":\"unknown method: ping\"}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"seq\\\":1}\"}]}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":5,\"error\":{\"code\":-32602,\"message\":\"unknown team tool\"}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":6,\"error\":{\"code\":-32601,\"message\":\"unknown method: totally/unknown\"}}"
+      ]
+    }
+  }
+}
