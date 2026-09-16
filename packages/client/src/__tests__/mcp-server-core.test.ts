@@ -45,6 +45,12 @@ interface Harness {
   readonly lines: string[];
   readonly closes: McpServerCloseReason[];
   readonly stdin: PassThrough;
+  /**
+   * Total bytes written to stdout, counted per chunk as it arrives — including
+   * bytes of a frame that was never newline-terminated. `lines` cannot see
+   * those, so only this can prove a partial frame never reached the peer.
+   */
+  rawBytes(): number;
   send(message: unknown): void;
   sendRaw(raw: string): void;
   handle: { close(): void };
@@ -63,7 +69,9 @@ function start(
   const lines: string[] = [];
   const closes: McpServerCloseReason[] = [];
   let buffer = '';
+  let rawBytes = 0;
   stdout.on('data', (chunk: Buffer) => {
+    rawBytes += chunk.length;
     buffer += chunk.toString('utf8');
     for (;;) {
       const index = buffer.indexOf('\n');
@@ -85,6 +93,7 @@ function start(
     lines,
     closes,
     stdin,
+    rawBytes: () => rawBytes,
     handle,
     send: (message) => stdin.write(`${JSON.stringify(message)}\n`),
     sendRaw: (raw) => stdin.write(raw),
@@ -250,23 +259,6 @@ describe('T6: parsing, id validation and the handler spy', () => {
     harness.handle.close();
   });
 
-  it('rejects a duplicate id even after the first request has completed', async () => {
-    const callTool = vi.fn(async () => ({ ok: true }));
-    const harness = start({ callTool });
-    harness.send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'echo', arguments: {} } });
-    await harness.expectLines(1);
-    expect(harness.parsed(0).result).toEqual({ ok: true });
-    harness.send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'echo', arguments: {} } });
-    await harness.expectLines(2);
-    expect(harness.parsed(1)).toEqual({
-      jsonrpc: '2.0',
-      id: 4,
-      error: { code: -32600, message: 'request id already used in this session' },
-    });
-    expect(callTool).toHaveBeenCalledTimes(1);
-    harness.handle.close();
-  });
-
   it('treats a string id and the same-looking number id as different ids', async () => {
     const harness = start();
     harness.send({ jsonrpc: '2.0', id: 7, method: 'ping' });
@@ -276,6 +268,26 @@ describe('T6: parsing, id validation and the handler spy', () => {
     expect(harness.parsed(1)).toEqual({ jsonrpc: '2.0', id: '7', result: {} });
     harness.handle.close();
   });
+
+  for (const version of MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS) {
+    it(`under ${version}, rejects a duplicate id even after the first request has completed`, async () => {
+      const callTool = vi.fn(async () => ({ ok: true }));
+      const harness = start({ callTool });
+      await initialize(harness, version);
+      harness.send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'echo', arguments: {} } });
+      await harness.expectLines(2);
+      expect(harness.parsed(1).result).toEqual({ ok: true });
+      harness.send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'echo', arguments: {} } });
+      await harness.expectLines(3);
+      expect(harness.parsed(2)).toEqual({
+        jsonrpc: '2.0',
+        id: 4,
+        error: { code: -32600, message: 'request id already used in this session' },
+      });
+      expect(callTool).toHaveBeenCalledTimes(1);
+      harness.handle.close();
+    });
+  }
 
   for (const version of MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS) {
     it(`under ${version}, notifications are never answered and unreadable-id errors follow that revision's rule`, async () => {
@@ -411,7 +423,10 @@ describe('T3: bounded frames, both directions', () => {
     await waitUntil(() => harness.closes.length > 0);
 
     // Not a truncated prefix, not a partial JSON line: nothing at all.
+    // `lines` only sees newline-terminated frames, so the raw byte count is
+    // what proves no partial prefix was written and left unterminated.
     expect(harness.lines).toEqual([]);
+    expect(harness.rawBytes()).toBe(0);
     const reason = harness.closes[0];
     expect(reason?.kind).toBe('outbound-frame-limit');
     if (reason?.kind !== 'outbound-frame-limit') throw new Error('expected an outbound-frame-limit close');
@@ -426,6 +441,21 @@ describe('T3: bounded frames, both directions', () => {
     harness.send({ jsonrpc: '2.0', id: 2, method: 'ping' });
     await harness.expectSilence();
     expect(harness.closes).toHaveLength(1);
+  });
+
+  it('(d) never emits an unterminated trailing line: a partial line at EOF is dropped whole', async () => {
+    const callTool = vi.fn(async () => ({ never: true }));
+    const harness = start({ callTool });
+    // A complete, well-formed request — but the peer ends the stream before
+    // writing the newline that would make it a frame.
+    harness.sendRaw(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }));
+    harness.stdin.end();
+    await waitUntil(() => harness.closes.length > 0);
+
+    expect(harness.closes).toEqual([{ kind: 'eof' }]);
+    expect(harness.lines).toEqual([]);
+    expect(harness.rawBytes()).toBe(0);
+    expect(callTool).not.toHaveBeenCalled();
   });
 
   it('(c) honours backpressure: no frame is written while the pipe is full, and order is preserved', async () => {

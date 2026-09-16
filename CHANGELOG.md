@@ -37,6 +37,16 @@ and the D2 version number belongs to a separate SDK release contract.
     top-level batch array are now rejected with `-32600` before any handler
     runs. A repeated id within one session is rejected the same way. These used
     to be echoed back inside whatever the method arm produced.
+  - An unparseable line is now answered with a `-32700` frame. All four helpers
+    used to drop it silently, so a peer that wrote a malformed line got no
+    reply at all and waited for one.
+  - A `tools/call` whose `params.name` is not a string is now rejected with
+    `-32600` and the message `tools/call requires a string params.name`,
+    before any handler runs. It used to reach the helper, which answered
+    `-32602` with its own unknown-tool message.
+  - A tool handler that throws something other than an `McpServerToolError` is
+    answered `-32603`; a handler that throws untyped leaves the core nothing to
+    forward, so it maps the one code with no server-authored mapping.
   - Frames are bounded in BOTH directions at 1 MiB, matching the client-side
     ceiling. An over-limit inbound line fails closed without parsing or
     answering; an over-limit outbound frame is dropped whole — never truncated —

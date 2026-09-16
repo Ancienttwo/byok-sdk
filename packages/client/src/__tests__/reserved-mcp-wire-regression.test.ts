@@ -227,11 +227,17 @@ async function captureAll(): Promise<WireBaseline> {
  * what the line must now be — rather than relaxing the comparison, so a second
  * unintended change on the same step cannot hide behind the first.
  *
- * The other documented baseline changes (`notifications/cancelled` now aborts
- * instead of answering, an unusable or duplicate id is now rejected, and both
- * frame directions are now bounded) do not appear here because no step of this
- * script exercises them; `mcp-server-core.test.ts` asserts each of them
- * directly.
+ * The other documented baseline changes do not appear here because no step of
+ * this script exercises them; `mcp-server-core.test.ts` asserts each of them
+ * directly:
+ *
+ * - `notifications/cancelled` now aborts instead of answering.
+ * - An unusable or duplicate id is now rejected.
+ * - Both frame directions are now bounded.
+ * - An unparseable line, silently dropped at base, now draws a `-32700` frame.
+ * - A `tools/call` with a non-string `params.name` returned `-32602` with the
+ *   helper's own message at base; the core now rejects it with `-32600` and
+ *   `tools/call requires a string params.name`, before any handler runs.
  */
 const MIGRATION_DELTAS: Readonly<Record<string, (frozen: string) => { readonly before: string; readonly after: string }>> = {
   // `initialize.result.protocolVersion`: echoed verbatim -> selected from the
