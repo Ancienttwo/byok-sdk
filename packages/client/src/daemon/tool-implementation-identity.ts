@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { runtimeEntryFixedArgv } from '@byok-sdk/implementation-identity';
 import type { RuntimeIdV1, ToolImplementationAttestedV1, ToolImplementationIdentityV1, ToolImplementationUnavailableReasonV1 } from '@byok-sdk/implementation-identity';
 
 export * from '@byok-sdk/implementation-identity';
@@ -26,28 +27,6 @@ export const RUNTIME_LAUNCH_KINDS: readonly RuntimeLaunchKindV1[] = Object.freez
   'pi-rpc',
   'pi-prepared',
 ]);
-
-/** The SDK-reserved helper dispatch token, as `sdk-reserved-helper-host.ts` reads it. */
-const SDK_RESERVED_HELPER_TOKEN = '__byok_sdk_helper';
-
-/**
- * The FIXED argv prefix for each kind, bound here and nowhere else.
- *
- * It is a constant of this SDK rather than a record field the host chooses,
- * and it is separate from every task flag on purpose: the prefix says which
- * entry inside the sealed bundle runs, and task flags say what that entry is
- * asked to do. A host that could choose the prefix could point an attested
- * interpreter at a different entry of the same attested bundle; a consumer that
- * could fold task flags into it could smuggle a flag past the binding. The
- * record must DECLARE the same prefix as its `launchArgv` — that is how the
- * prefix becomes part of what the artifact was attested with — and
- * {@link deriveRuntimeLaunchDescription} refuses a record that declares
- * anything else.
- */
-const RUNTIME_LAUNCH_FIXED_ARGV: Readonly<Record<RuntimeLaunchKindV1, readonly string[]>> = Object.freeze({
-  'pi-rpc': Object.freeze([SDK_RESERVED_HELPER_TOKEN, 'pi-rpc']),
-  'pi-prepared': Object.freeze([SDK_RESERVED_HELPER_TOKEN, 'pi-prepared']),
-});
 
 /**
  * The environment NAMES a runtime launch description commits a value for.
@@ -181,6 +160,8 @@ export function deriveRuntimeLaunchDescription(
   identity: ToolImplementationAttestedV1,
   input: RuntimeLaunchInputV1,
 ): RuntimeLaunchDescriptionV1 | 'install_record_mismatch' {
+  // Four locator kinds are declared, but descendant dispatch stays disabled until custody gates pass.
+  if (!RUNTIME_LAUNCH_KINDS.includes(input.kind)) return 'install_record_mismatch';
   if (!path.isAbsolute(input.sessionCwd)) return 'install_record_mismatch';
   if (path.normalize(input.sessionCwd) !== input.sessionCwd) return 'install_record_mismatch';
   // The defect this whole contract exists to close: a process cwd that IS the
@@ -196,7 +177,7 @@ export function deriveRuntimeLaunchDescription(
   if (provenance.packageName !== input.pin.name || provenance.packageVersion !== input.pin.version) {
     return 'install_record_mismatch';
   }
-  const fixedArgv = RUNTIME_LAUNCH_FIXED_ARGV[input.kind];
+  const fixedArgv = runtimeEntryFixedArgv(input.kind);
   if (identity.launchArgv.length !== fixedArgv.length) return 'install_record_mismatch';
   if (identity.launchArgv.some((arg, index) => arg !== fixedArgv[index])) return 'install_record_mismatch';
   let command: string;

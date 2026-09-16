@@ -3,10 +3,10 @@ import path from 'node:path';
 import { ensureSecureDir } from '../../util/secure-dir';
 import {
   CONTROLLED_PI_DIRECTORY_ENV_NAMES, projectKeysPiInheritedEnvironment,
-  type ImplementationSpawnBindingV1, type ToolImplementationAuthority,
+  type ImplementationSpawnBindingV1, type ToolImplementationAuthority, type ResolvedRuntimeImplementationV1,
 } from '@byok-sdk/implementation-identity';
 import {
-  decideRuntimeLaunch, resolveToolImplementationIdentity, type RuntimeLaunchDecisionV1, type RuntimeLaunchKindV1,
+  decideRuntimeLaunch, resolveRuntimeImplementation, type RuntimeLaunchDecisionV1, type RuntimeLaunchKindV1,
 } from '../../daemon/tool-implementation-identity';
 import { resolveTrustedLaunchCwd } from '../../daemon/trusted-launch-cwd';
 import { RuntimeExecutionFailure } from '../../runtime-failure';
@@ -14,6 +14,7 @@ import { resolvePiRuntimeIdentity } from './resolve-bin';
 
 export interface PiRuntimeLaunchResources {
   readonly kind: RuntimeLaunchKindV1;
+  readonly declaration: ResolvedRuntimeImplementationV1;
   readonly decision: RuntimeLaunchDecisionV1;
   readonly binding: ImplementationSpawnBindingV1;
   readonly env: Readonly<Record<string, string>>;
@@ -66,12 +67,13 @@ export async function resolvePiRuntimeLaunch(options: {
       env.PI_CODING_AGENT_DIR = projectionDir;
       env.PI_CODING_AGENT_SESSION_DIR = options.keysSessionDir;
     }
-    const identity = await resolveToolImplementationIdentity(options.authority,
+    const declaration = await resolveRuntimeImplementation(options.authority,
       { subject: { kind: 'runtime', runtimeId: 'pi' }, runtimeEntry: options.kind },
       (record) => {
         if (record.assetRoot !== undefined) env = { ...env, PI_PACKAGE_DIR: record.assetRoot };
         return env;
       });
+    const identity = declaration.kind === 'attested' ? declaration.identity : declaration;
     if (options.authority !== undefined && identity.kind === 'unavailable' && identity.reason === 'resolver_unconfigured') {
       throw failure('configured runtime authority returned resolver_unconfigured');
     }
@@ -95,7 +97,7 @@ export async function resolvePiRuntimeLaunch(options: {
         command: dev.command, ...(dev.entry === undefined ? {} : { entry: dev.entry }),
         fixedArgv: Object.freeze([]), cwd: cwd.dir, envCommitments: Object.freeze(directoryValues) });
     }
-    return Object.freeze({ kind: options.kind, decision, binding, env: Object.freeze(env), sessionCwd: options.sessionCwd,
+    return Object.freeze({ kind: options.kind, declaration, decision, binding, env: Object.freeze(env), sessionCwd: options.sessionCwd,
       credentialSource: source, release });
   } catch (error) {
     await release();

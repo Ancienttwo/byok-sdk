@@ -1,5 +1,5 @@
 import type { ToolImplementationAuthority } from '@byok-sdk/implementation-identity';
-import { decideRuntimeLaunch, resolveToolImplementationIdentity } from '../../daemon/tool-implementation-identity';
+import { decideRuntimeLaunch, resolveRuntimeImplementation } from '../../daemon/tool-implementation-identity';
 import { resolvePiRuntimeIdentity } from './resolve-bin';
 import {
   createPiInputPreparationCompiler, InputPreparationRuntimeIdentityError,
@@ -16,9 +16,10 @@ export async function resolvePiInputPreparationCompiler(options: {
   if (options.authority === undefined) {
     return createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
   }
-  const identity = await resolveToolImplementationIdentity(options.authority,
+  const declaration = await resolveRuntimeImplementation(options.authority,
     { subject: { kind: 'runtime', runtimeId: 'pi' }, runtimeEntry: 'pi-prepared' },
     record => ({ ...options.env, ...(record.assetRoot === undefined ? {} : { PI_PACKAGE_DIR: record.assetRoot }) }));
+  const identity = declaration.kind === 'attested' ? declaration.identity : declaration;
   if (identity.kind !== 'attested') {
     throw new InputPreparationRuntimeIdentityError(`configured pi-prepared implementation unavailable: ${identity.reason}`);
   }

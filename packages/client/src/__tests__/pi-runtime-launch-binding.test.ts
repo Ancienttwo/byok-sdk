@@ -1,3 +1,4 @@
+import { runtimeRecordFixture } from './fixtures/runtime-resolution';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -147,15 +148,19 @@ describe('client runtime launch admission and resource binding', () => {
       assetRoot:path.dirname(executable),assets:[{path:path.basename(executable),digest}],
       nativeProvenance:{packageName:pin.name,packageVersion:pin.version,upstreamBase:'0.85.0',upstreamCommit:'c'.repeat(40),forkBuild:1005,compilerVersion:1},
     };
-    const authority: ToolImplementationAuthority = {resolve:async () => record};
+    const authority: ToolImplementationAuthority = {resolve:async () => runtimeRecordFixture(record)};
     f.options.resolveDevInvocation.mockImplementation(() => { throw new Error('dev resolver must not run'); });
     const wrongPin = { ...record, nativeProvenance: { ...record.nativeProvenance!, packageVersion:'9.9.9' } };
-    await expect(resolvePiRuntimeLaunch({...f.options,authority:{resolve:async () => wrongPin}}))
+    await expect(resolvePiRuntimeLaunch({...f.options,authority:{resolve:async () => runtimeRecordFixture(wrongPin)}}))
       .rejects.toThrow(/runtime implementation unavailable: install_record_mismatch/);
     const resources = await resolvePiRuntimeLaunch({...f.options,authority});
     try {
       expect(f.options.resolveDevInvocation).not.toHaveBeenCalled();
       expect(resources.decision.kind).toBe('attested');
+      expect(resources.declaration.kind).toBe('attested');
+      if (resources.declaration.kind !== 'attested') throw new Error('declaration missing');
+      expect(resources.declaration.descendantPolicy.maxDepth).toBe(0);
+      expect(Object.isFrozen(resources.declaration.descendantPolicy)).toBe(true);
       expect(resources.binding.envCommitments.PI_PACKAGE_DIR).toBe(record.assetRoot);
       expect(resources.env.PI_PACKAGE_DIR).toBe(record.assetRoot);
       expect(resources.binding.command).toBe(executable);

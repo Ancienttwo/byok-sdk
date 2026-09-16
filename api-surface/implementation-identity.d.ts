@@ -5,6 +5,9 @@ export declare const LOADER_ENV_DENY_PATTERNS: readonly string[];
 export declare function loaderEnvInjections(env: Readonly<Record<string, string | undefined>>, platform?: NodeJS.Platform): readonly string[];
 /** Directory selectors whose trusted values must be explicitly committed by a runtime launch. */
 export declare const CONTROLLED_PI_DIRECTORY_ENV_NAMES: readonly ["PI_PACKAGE_DIR", "PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR"];
+/** Fixed names of the credential launcher's inherited environment, shared with admission measurement. */
+export declare const KEYS_PI_INHERITED_ENV_NAMES: readonly ["PATH", "HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP", "LANG", "TZ", "TERM", "SHELL", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy"];
+export declare const KEYS_PI_WINDOWS_ENV_NAMES: readonly ["SystemRoot", "COMSPEC", "PATHEXT", "windir", "SYSTEMDRIVE", "PROGRAMFILES", "APPDATA", "LOCALAPPDATA"];
 // ==== @byok-sdk/implementation-identity dist/identity.d.ts ====
 import type { McpLaunchAttestation } from './launch-attestation';
 /**
@@ -28,7 +31,9 @@ import type { McpLaunchAttestation } from './launch-attestation';
  *
  * WHAT EACH SIDE SUPPLIES, exactly:
  *
- * - The resolver returns a {@link ToolImplementationInstallRecordV1} — the
+ * - For MCP the resolver returns a {@link ToolImplementationInstallRecordV1};
+ *   runtime subjects return {@link RuntimeImplementationRecordV1}, retaining
+ *   the unchanged record plus the Host descendant policy and edges. The record carries the
  *   manifest revision, the form, the versioned install path, the artifact digest,
  *   the interpreter triple for an `interpreter+bundle`, the entry, the launch
  *   argv and cwd — or an {@link ToolImplementationUnavailableV1} reason. That
@@ -303,7 +308,8 @@ export declare const RUNTIME_IDS: readonly RuntimeIdV1[];
  * the daemon already uses everywhere else, and what it attests is the binary
  * behind a tool. A `runtime` subject names the coding-agent runtime the task
  * itself executes in: it is addressed by the runtime id alone, because there is
- * exactly one runtime per task and no toolset owns it.
+ * one selected runtime per task and no toolset owns it; runtimeEntry chooses
+ * one of the four exact logical entries without granting execution by itself.
  *
  * The union exists so an MCP locator can never stand in for a runtime locator.
  * The two carry different contracts — a runtime record additionally declares
@@ -332,7 +338,7 @@ export type ToolImplementationLocatorV1 = {
     readonly subject: Extract<ToolImplementationSubjectV1, {
         kind: 'runtime';
     }>;
-    readonly runtimeEntry: 'pi-rpc' | 'pi-prepared';
+    readonly runtimeEntry: RuntimeEntryV1;
     readonly command?: never;
     readonly args?: never;
     readonly launch?: never;
@@ -352,7 +358,51 @@ export type ToolImplementationLocatorV1 = {
  *   package's deny list) would be attesting a guess.
  */
 export type ToolImplementationInstallRecordV1 = Omit<ToolImplementationAttestedV1, 'installStat' | 'interpreterStat' | 'assetStats' | 'launchEnvNamesDigest' | 'loaderEnvValuesDigest'>;
-export type ToolImplementationResolutionV1 = ToolImplementationUnavailableV1 | ToolImplementationInstallRecordV1;
+/** Frozen M0 runtime vocabulary; declaration does not enable a dispatcher. */
+export type RuntimeEntryV1 = 'pi-prepared' | 'pi-rpc' | 'pi-subagent-print' | 'pi-subagent-runner';
+export declare const RUNTIME_ENTRIES: readonly RuntimeEntryV1[];
+/** Canonical runtime prefix. Host declares it; the SDK checks exact equality. */
+export declare function runtimeEntryFixedArgv(kind: RuntimeEntryV1): readonly string[];
+export type McpImplementationLocatorV1 = Extract<ToolImplementationLocatorV1, {
+    subject: {
+        kind: 'mcp-server';
+    };
+}>;
+export type RuntimeImplementationLocatorV1 = Extract<ToolImplementationLocatorV1, {
+    subject: {
+        kind: 'runtime';
+    };
+}>;
+/** Finite M0 vocabulary, from pi-subagents0.60.0 producer inventory. No wildcards. */
+export declare const DESCENDANT_PER_LAUNCH_ENV_NAMES: readonly string[];
+export interface RuntimeDescendantPolicyV1 {
+    readonly envNameAllowlist: readonly string[];
+    readonly maxDepth: number;
+    readonly fanout: number;
+    readonly parallel: number;
+    readonly sessionCap: number;
+}
+export interface RuntimeDescendantEdgeV1 {
+    readonly parent: RuntimeEntryV1;
+    readonly child: RuntimeEntryV1;
+    readonly inheritsCredential: true;
+}
+/** Type edges only. Instance/budget custody must be enforced before any spawn. */
+export declare const RUNTIME_DESCENDANT_EDGES: readonly RuntimeDescendantEdgeV1[];
+export interface RuntimeImplementationRecordV1 {
+    readonly record: ToolImplementationInstallRecordV1;
+    readonly descendantPolicy: RuntimeDescendantPolicyV1;
+    readonly edges: readonly RuntimeDescendantEdgeV1[];
+}
+export type RuntimeImplementationResolutionV1 = ToolImplementationUnavailableV1 | RuntimeImplementationRecordV1;
+/** Measured identity and immutable Host declaration stay together in the daemon. */
+export type ResolvedRuntimeImplementationV1 = ToolImplementationUnavailableV1 | {
+    readonly kind: 'attested';
+    readonly identity: ToolImplementationAttestedV1;
+    readonly descendantPolicy: RuntimeDescendantPolicyV1;
+    readonly edges: readonly RuntimeDescendantEdgeV1[];
+};
+export type ToolImplementationResolutionV1 = ToolImplementationUnavailableV1 | ToolImplementationInstallRecordV1 | RuntimeImplementationRecordV1;
 /**
  * The host's install-record authority.
  *
@@ -510,7 +560,12 @@ export type ToolImplementationMeasurementFailure = 'install_record_mismatch' | '
  * every record the resolver returns, including the ones it is most confident
  * about.
  */
-export declare function resolveToolImplementationIdentity(authority: ToolImplementationAuthority | undefined, locator: ToolImplementationLocatorV1, launchEnv: Readonly<Record<string, string>> | ((record: ToolImplementationInstallRecordV1) => Readonly<Record<string, string>>), probe?: ToolImplementationFsProbe): Promise<ToolImplementationIdentityV1>;
+type LaunchEnvironment = Readonly<Record<string, string>> | ((record: ToolImplementationInstallRecordV1) => Readonly<Record<string, string>>);
+/** MCP-only entry; runtime declarations cannot be silently reduced to identity. */
+export declare function resolveToolImplementationIdentity(authority: ToolImplementationAuthority | undefined, locator: McpImplementationLocatorV1, launchEnv: LaunchEnvironment, probe?: ToolImplementationFsProbe): Promise<ToolImplementationIdentityV1>;
+/** Strict runtime wrapper cutover. No bare record, defaults or shape guessing. */
+export declare function parseRuntimeImplementationRecord(value: unknown): RuntimeImplementationRecordV1 | undefined;
+export declare function resolveRuntimeImplementation(authority: ToolImplementationAuthority | undefined, locator: RuntimeImplementationLocatorV1, launchEnv: LaunchEnvironment, probe?: ToolImplementationFsProbe): Promise<ResolvedRuntimeImplementationV1>;
 /**
  * The one failure that exists only at spawn.
  *
@@ -604,6 +659,7 @@ export declare class ToolImplementationReverifyError extends Error {
     readonly subject: ToolImplementationReverifySubject;
     constructor(message: string, reason: ToolImplementationReverifyFailure, subject: ToolImplementationReverifySubject);
 }
+export {};
 // ==== @byok-sdk/implementation-identity dist/index.d.ts ====
 export * from './identity';
 export * from './environment';
@@ -629,9 +685,7 @@ export interface McpLaunchAttestation {
 }
 // ==== @byok-sdk/implementation-identity dist/spawn-binding.d.ts ====
 import { type ToolImplementationIdentityV1 } from './identity';
-/** Fixed names of the credential launcher's inherited environment, shared with admission measurement. */
-export declare const KEYS_PI_INHERITED_ENV_NAMES: readonly ["PATH", "HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP", "LANG", "TZ", "TERM", "SHELL", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy"];
-export declare const KEYS_PI_WINDOWS_ENV_NAMES: readonly ["SystemRoot", "COMSPEC", "PATHEXT", "windir", "SYSTEMDRIVE", "PROGRAMFILES", "APPDATA", "LOCALAPPDATA"];
+export { KEYS_PI_INHERITED_ENV_NAMES, KEYS_PI_WINDOWS_ENV_NAMES } from './environment';
 export declare function projectKeysPiInheritedEnvironment(ambient: Readonly<Record<string, string | undefined>>, platform?: NodeJS.Platform): Record<string, string>;
 /** Physical projection of a client-decided launch; contains no runtime selection or credential policy. */
 export interface ImplementationSpawnBindingV1 {

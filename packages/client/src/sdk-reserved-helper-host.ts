@@ -88,6 +88,9 @@ export async function runSdkReservedHelperCommand(
   argv: readonly string[] = process.argv.slice(2),
 ): Promise<boolean> {
   if (argv[0] !== BYOK_SDK_HELPER_SUBCOMMAND) return false;
+  if (argv[1] === 'pi-subagent-runner' || argv[1] === 'pi-subagent-print') {
+    throw new Error('SDK descendant runtime dispatch is not enabled: custody execution gates pending');
+  }
   if (!isHelperKind(argv[1]) || (argv[1] !== 'pi-rpc' && argv[1] !== 'pi-prepared' && argv.length !== 2)) {
     throw new Error('invalid SDK-reserved helper command');
   }

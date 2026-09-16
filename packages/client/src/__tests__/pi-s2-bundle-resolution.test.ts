@@ -1,3 +1,4 @@
+import { runtimeRecordFixture } from './fixtures/runtime-resolution';
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -12,7 +13,7 @@ import type { PermissionPolicy } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { getDocsPath, getExamplesPath, getReadmePath, projectSystemPromptSnapshot } from '@earendil-works/pi-coding-agent';
 import { assemblePreparedPiToolSurface } from '../adapters/pi/prepared-tools';
-import { createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
+import { resolveInstalledPiRuntimeIdentity, createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
 import { createPreparedToolSurfaceAssembler } from '../daemon/prepared-tool-surface';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { classifyMcpToolsetServerObservation, observeMcpServer } from '../mcp/observation';
@@ -141,7 +142,7 @@ async function preparedFixture(root: string, cwd: string, env: Record<string, st
   await fs.copyFile(fileURLToPath(new URL('./fixtures/mcp-fixture-server.mjs', import.meta.url)), script);
   const server = { command: process.execPath, args: [script, '{}'] };
   const registry = new McpToolsetRegistry({ 's2.echo.v1': { mcpServers: { fixture: server }, readOnlyTools: { fixture: ['echo'] } } });
-  const compiler = createPiInputPreparationCompiler();
+  const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
   const runtimeIdentity = `${compiler.runtime.packageName}@${compiler.runtime.packageVersion}+${compiler.runtime.upstreamCommit}.${compiler.runtime.forkBuild}`;
   const assembled = await createPreparedToolSurfaceAssembler({ toolsetRegistry: registry, runtimeEnv: () => env })
     .assemble({ requiredToolsets: ['s2.echo.v1'], permissionMode: POLICY.mode, runtimeIdentity });
@@ -248,7 +249,7 @@ describe('Pi launch path — S2 release containment', () => {
               upstreamBase: fixture.runtime.upstreamBase, upstreamCommit: fixture.runtime.upstreamCommit,
               forkBuild: fixture.runtime.forkBuild, compilerVersion: fixture.runtime.compilerVersion } };
           await fs.writeFile(inputPath, JSON.stringify({ ...fixture, release, policy: POLICY, kind, env, mcpEnv: { PATH: env.PATH },
-            record, projectionRoot: path.join(runDir, 'projections'), report: reportPath }));
+            record: runtimeRecordFixture(record as never), projectionRoot: path.join(runDir, 'projections'), report: reportPath }));
           // With the fixture ownership seam OFF, the real product must reject
           // this non-root-owned artifact before final spawn. Not an installer test.
           if (kind === 'instruction' && process.getuid !== undefined && process.getuid() !== 0) {

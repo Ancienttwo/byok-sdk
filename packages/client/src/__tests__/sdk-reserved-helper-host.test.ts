@@ -259,3 +259,8 @@ describe('SDK-reserved helper host composition', () => {
     }, PROBE_BASE_ENV)).resolves.toBeUndefined();
   });
 });
+
+it.each(['pi-subagent-runner', 'pi-subagent-print'])('explicitly refuses declared but inactive %s dispatch', async kind => {
+  await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, kind])).rejects.toThrow(
+    'SDK descendant runtime dispatch is not enabled: custody execution gates pending');
+});

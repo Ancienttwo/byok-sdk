@@ -37,6 +37,11 @@ export { resolveMcpLaunchCwdLauncher, resolveTrustedLaunchCwd } from './daemon/t
  * one caller is this package's own task-scoped configuration reader.
  */
 export type {
+  RuntimeEntryV1,
+  RuntimeDescendantPolicyV1,
+  RuntimeDescendantEdgeV1,
+  RuntimeImplementationRecordV1,
+  RuntimeImplementationResolutionV1,
   ToolImplementationAttestedV1,
   ToolImplementationAuthority,
   ToolImplementationIdentityV1,

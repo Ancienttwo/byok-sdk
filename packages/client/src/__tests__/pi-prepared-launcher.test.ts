@@ -30,7 +30,7 @@ import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { createPreparedToolSurfaceAssembler } from '../daemon/prepared-tool-surface';
 import { TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED } from '../daemon/tool-implementation-identity';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
-import { createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
+import { resolveInstalledPiRuntimeIdentity, createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
 import { trustedLaunchBinding } from './fixtures/launch-cwd';
 
 /**
@@ -226,7 +226,7 @@ async function prepareOnThisDevice(
     },
   });
   const launchBinding = await trustedLaunchBinding();
-  const compiler = createPiInputPreparationCompiler();
+  const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
   const runtimeIdentity =
     `${compiler.runtime.packageName}@${compiler.runtime.packageVersion}`
     + `+${compiler.runtime.upstreamCommit}.${String(compiler.runtime.forkBuild)}`;

@@ -1,3 +1,4 @@
+import { runtimeRecordFixture } from './fixtures/runtime-resolution';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,6 +9,9 @@ import {
   parseToolImplementationIdentity,
   realToolImplementationFsProbe,
   resolveToolImplementationIdentity,
+  resolveRuntimeImplementation,
+  type McpImplementationLocatorV1,
+  type RuntimeImplementationLocatorV1,
   reverifyToolImplementationIdentity,
   TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES,
   toolImplementationLaunchEnvNamesDigest,
@@ -55,7 +59,7 @@ const LAUNCH = Object.freeze({
   launcher: null,
 });
 
-function locator(command: string): ToolImplementationLocatorV1 {
+function locator(command: string): McpImplementationLocatorV1 {
   return {
     subject: { kind: 'mcp-server', toolsetId: 'salesko', serverName: 'salesko' },
     command,
@@ -65,7 +69,7 @@ function locator(command: string): ToolImplementationLocatorV1 {
 }
 
 /** The runtime subject's locator, for the same resolver seam. */
-function runtimeLocator(command: string): ToolImplementationLocatorV1 {
+function runtimeLocator(command: string): RuntimeImplementationLocatorV1 {
   return { subject: { kind: 'runtime', runtimeId: 'pi' }, runtimeEntry: 'pi-rpc' };
 }
 
@@ -1168,6 +1172,7 @@ describe('the sealed asset set is measured like the artifact, per file', () => {
   ): ToolImplementationInstallRecordV1 {
     return {
       ...installRecord(artifact, artifactDigest),
+      launchArgv: ['__byok_sdk_helper', 'pi-rpc'],
       assetRoot: overrides.assetRoot ?? assetRoot,
       assets: overrides.assets ?? assets,
     };
@@ -1176,12 +1181,13 @@ describe('the sealed asset set is measured like the artifact, per file', () => {
   async function resolveWithAssets(
     record: ToolImplementationInstallRecordV1,
   ): Promise<ToolImplementationIdentityV1> {
-    return resolveToolImplementationIdentity(
-      authorityReturning(record),
+    const declaration = await resolveRuntimeImplementation(
+      authorityReturning(runtimeRecordFixture(record)),
       runtimeLocator(artifact),
       ENV,
       rootOwnedProbe(),
     );
+    return declaration.kind === 'attested' ? declaration.identity : declaration;
   }
 
   it('seals one stat tuple per declared asset, in the record order', async () => {

@@ -5,6 +5,7 @@ import {
   deriveRuntimeLaunchDescription,
   parseToolImplementationIdentity,
   resolveToolImplementationIdentity,
+  resolveRuntimeImplementation,
   RUNTIME_LAUNCH_ENV_COMMITMENT_NAMES,
   runtimeLaunchDescriptionDigest,
   toolImplementationUnavailable,
@@ -340,7 +341,7 @@ describe('the attestation subject is explicit, and the two are not interchangeab
 
   it('hands the resolver the runtime subject verbatim', async () => {
     const { authority, seen } = capturingAuthority();
-    await resolveToolImplementationIdentity(
+    await resolveRuntimeImplementation(
       authority,
       { subject: { kind: 'runtime', runtimeId: 'pi' }, runtimeEntry: 'pi-rpc' },
       ENV,
@@ -395,4 +396,9 @@ describe('native provenance for the encapsulated form comes from the record and 
       attested({ nativeProvenance: { ...NATIVE_PROVENANCE, compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION + 1 } }),
     )).toThrow(new RegExp(`prepares input against version ${String(SUPPORTED_PREPARED_COMPILER_VERSION)}$`, 'u'));
   });
+});
+
+it.each(['pi-subagent-runner', 'pi-subagent-print'])('does not turn declared %s into an enabled self launch', kind => {
+  const identity = attested({ launchArgv: ['__byok_sdk_helper', kind] });
+  expect(deriveRuntimeLaunchDescription(identity, { ...INPUT, kind } as RuntimeLaunchInputV1)).toBe('install_record_mismatch');
 });

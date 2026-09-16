@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { PiRpcClient, type SpawnFn } from '../adapters/pi/rpc-client';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
-import { createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
+import { resolveInstalledPiRuntimeIdentity, createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
 import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_VERSION } from '../input-preparation';
 import { sealRuntimeOperationManifest, type RuntimePreparedLaunchV1 } from '../types';
 import { trustedCwd } from './fixtures/launch-cwd';
@@ -176,7 +176,7 @@ async function prepareArtifact(home: string, artifactPath: string, launchCwd: st
     contextWindow: 8192, maxTokens: 1024,
   };
   const binding = { inputIdentity: 'cwd-input', runtimeIdentity: 'cwd-runtime', policyIdentity: 'cwd-policy', profileRevision: 'cwd-profile' };
-  const compiled = await createPiInputPreparationCompiler().compile({
+  const compiled = await createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity()).compile({
     snapshot: {
       prompt: { cwd: home, selectedTools: [], toolSnippets: {}, promptGuidelines: [], contextFiles: [], formattedSkills: '',
         docsPaths: { readmePath: '/sealed/README.md', docsPath: '/sealed/docs', examplesPath: '/sealed/examples' } },

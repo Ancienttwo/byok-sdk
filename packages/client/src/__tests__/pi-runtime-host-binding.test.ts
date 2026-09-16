@@ -1,9 +1,10 @@
+import { runtimeRecordFixture } from './fixtures/runtime-resolution';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { resolveToolImplementationIdentity, type ImplementationSpawnBindingV1, type ToolImplementationInstallRecordV1 } from '@byok-sdk/implementation-identity';
+import { resolveRuntimeImplementation, type ImplementationSpawnBindingV1, type ToolImplementationInstallRecordV1 } from '@byok-sdk/implementation-identity';
 import { resolveInstalledPiRuntimeIdentity } from '../adapters/pi/input-preparation';
 import { extractPiConfigDigest, readPiHostConfig, requirePiHostBinding, serializePiHostConfig, verifyPiHostBinding } from '../adapters/pi/runtime-host-binding';
 
@@ -42,8 +43,9 @@ async function fixture(mutate: (record: ToolImplementationInstallRecordV1) => To
     launchArgv:['__byok_sdk_helper','pi-prepared'],launchCwd:root,assetRoot:root,assets:[{path:'package.json',digest:sha(manifestBytes)}],
     nativeProvenance:{packageName:native.packageName,packageVersion:native.packageVersion,upstreamBase:native.upstreamBase,
       upstreamCommit:native.upstreamCommit,forkBuild:native.forkBuild,compilerVersion:native.compilerVersion}});
-  const identity = await resolveToolImplementationIdentity({resolve:async()=>record},{subject:{kind:'runtime',runtimeId:'pi'},runtimeEntry:'pi-prepared'},env);
-  expect(identity.kind).toBe('attested');
+  const declaration = await resolveRuntimeImplementation({resolve:async()=>runtimeRecordFixture(record)},{subject:{kind:'runtime',runtimeId:'pi'},runtimeEntry:'pi-prepared'},env);
+  expect(declaration.kind).toBe('attested');
+  const identity = declaration.kind === 'attested' ? declaration.identity : declaration;
   const binding: ImplementationSpawnBindingV1 = {format:'byok.implementation-spawn',version:1,identity,command:interpreter,entry,
     fixedArgv:record.launchArgv,cwd:root,envCommitments:{PI_PACKAGE_DIR:root}};
   const configPath = path.join(root,'config.json');

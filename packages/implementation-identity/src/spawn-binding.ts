@@ -1,14 +1,8 @@
 import path from 'node:path';
 import { assertToolImplementationBeforeSpawn, parseToolImplementationIdentity, type ToolImplementationIdentityV1 } from './identity';
 
-/** Fixed names of the credential launcher's inherited environment, shared with admission measurement. */
-export const KEYS_PI_INHERITED_ENV_NAMES = Object.freeze([
-  'PATH', 'HOME', 'USERPROFILE', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'TZ', 'TERM', 'SHELL',
-  'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy',
-] as const);
-export const KEYS_PI_WINDOWS_ENV_NAMES = Object.freeze([
-  'SystemRoot', 'COMSPEC', 'PATHEXT', 'windir', 'SYSTEMDRIVE', 'PROGRAMFILES', 'APPDATA', 'LOCALAPPDATA',
-] as const);
+import { KEYS_PI_INHERITED_ENV_NAMES, KEYS_PI_WINDOWS_ENV_NAMES } from './environment';
+export { KEYS_PI_INHERITED_ENV_NAMES, KEYS_PI_WINDOWS_ENV_NAMES } from './environment';
 import { CONTROLLED_PI_DIRECTORY_ENV_NAMES } from './environment';
 
 export function projectKeysPiInheritedEnvironment(

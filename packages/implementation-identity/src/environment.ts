@@ -99,3 +99,12 @@ export function loaderEnvInjections(
 export const CONTROLLED_PI_DIRECTORY_ENV_NAMES = Object.freeze([
   'PI_PACKAGE_DIR', 'PI_CODING_AGENT_DIR', 'PI_CODING_AGENT_SESSION_DIR',
 ] as const);
+
+/** Fixed names of the credential launcher's inherited environment, shared with admission measurement. */
+export const KEYS_PI_INHERITED_ENV_NAMES = Object.freeze([
+  'PATH', 'HOME', 'USERPROFILE', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'TZ', 'TERM', 'SHELL',
+  'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy',
+] as const);
+export const KEYS_PI_WINDOWS_ENV_NAMES = Object.freeze([
+  'SystemRoot', 'COMSPEC', 'PATHEXT', 'windir', 'SYSTEMDRIVE', 'PROGRAMFILES', 'APPDATA', 'LOCALAPPDATA',
+] as const);

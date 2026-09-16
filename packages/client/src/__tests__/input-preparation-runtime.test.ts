@@ -1,3 +1,4 @@
+import { runtimeRecordFixture } from './fixtures/runtime-resolution';
 import { createHash } from 'node:crypto';
 import { mkdtemp, writeFile, realpath, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -15,7 +16,7 @@ afterEach(() => vi.restoreAllMocks());
 describe('preparation compiler authority selection', () => {
   it('uses installed discovery once only for an unconfigured authority', async () => {
     const dev = vi.spyOn(native, 'resolveInstalledPiRuntimeIdentity');
-    const measured = vi.spyOn(identity, 'resolveToolImplementationIdentity');
+    const measured = vi.spyOn(identity, 'resolveRuntimeImplementation');
     const compiler = await resolvePiInputPreparationCompiler({ env, sessionCwd: '/workspace/session' });
     expect(dev).toHaveBeenCalledTimes(1);
     expect(measured).not.toHaveBeenCalled();
@@ -40,20 +41,20 @@ describe('preparation compiler authority selection', () => {
     await writeFile(installPath, bytes, { mode: 0o644 });
     await writeFile(path.join(root, 'package.json'), data, { mode: 0o644 });
     const hash = (text: string) => createHash('sha256').update(text).digest('hex');
-    const resolve = vi.fn(async () => ({
+    const resolve = vi.fn(async () => runtimeRecordFixture({
       kind: 'attested', authority: 'host-install-record', closureKind: 'artifact',
       manifestRevision: 'test-fixture', form: 'compiled-executable', installPath, closureDigest: hash(bytes),
       launchCwd: root, launchArgv: ['__byok_sdk_helper', 'pi-prepared'],
       assetRoot: root, assets: [{ path: 'package.json', digest: hash(data) }],
       nativeProvenance: { packageName: pin.name, packageVersion: pin.version, upstreamBase: '0.85.1',
         upstreamCommit: 'a'.repeat(40), forkBuild: 5, compilerVersion: native.SUPPORTED_PREPARED_COMPILER_VERSION },
-    }) as const);
+    }));
     const dev = vi.spyOn(native, 'resolveInstalledPiRuntimeIdentity');
-    const actualResolve = identity.resolveToolImplementationIdentity;
+    const actualResolve = identity.resolveRuntimeImplementation;
     const probe = identity.realToolImplementationFsProbe;
     // Only this test's files simulate an immutable privileged installation.
     // Path resolution and streamed hashes remain real. Not installer evidence.
-    const measured = vi.spyOn(identity, 'resolveToolImplementationIdentity').mockImplementation((authority, locator, environment) =>
+    const measured = vi.spyOn(identity, 'resolveRuntimeImplementation').mockImplementation((authority, locator, environment) =>
       actualResolve(authority, locator, environment, { ...probe, lstat: async target => {
         const stat = await probe.lstat(target);
         return target.startsWith(root + path.sep) ? { ...stat, uid: 0, mode: stat.mode & ~0o222 } : stat;
@@ -81,14 +82,14 @@ describe('preparation compiler authority selection', () => {
       nativeProvenance: { packageName: pin.name, packageVersion: pin.version, upstreamBase: '0.85.1',
         upstreamCommit: 'a'.repeat(40), forkBuild: 5, compilerVersion: native.SUPPORTED_PREPARED_COMPILER_VERSION },
     } as unknown as identity.ToolImplementationAttestedV1;
-    const measured = vi.spyOn(identity, 'resolveToolImplementationIdentity').mockResolvedValue(record);
+    const measured = vi.spyOn(identity, 'resolveRuntimeImplementation').mockResolvedValue({ kind: 'attested', identity: record, descendantPolicy: runtimeRecordFixture(record).descendantPolicy, edges: runtimeRecordFixture(record).edges });
     const dev = vi.spyOn(native, 'resolveInstalledPiRuntimeIdentity');
     const authority = { resolve: vi.fn() };
     const compiler = await resolvePiInputPreparationCompiler({ authority, env, sessionCwd: '/workspace/session' });
     expect(measured).toHaveBeenCalledTimes(1);
     expect(dev).not.toHaveBeenCalled();
     expect(compiler.runtime.upstreamCommit).toBe('a'.repeat(40));
-    measured.mockResolvedValue({ ...record, nativeProvenance: { ...record.nativeProvenance!, packageVersion: '0.0.0' } });
+    measured.mockResolvedValue({ kind: 'attested', identity: { ...record, nativeProvenance: { ...record.nativeProvenance!, packageVersion: '0.0.0' } }, descendantPolicy: runtimeRecordFixture(record).descendantPolicy, edges: runtimeRecordFixture(record).edges });
     await expect(resolvePiInputPreparationCompiler({ authority, env, sessionCwd: '/workspace/session' })).rejects.toThrow('install_record_mismatch');
     expect(dev).not.toHaveBeenCalled();
   });

@@ -989,10 +989,11 @@ export declare class PiRpcClient {
     private onClosed;
 }
 // ==== @byok-sdk/client dist/adapters/pi/runtime-launch.d.ts ====
-import { type ImplementationSpawnBindingV1, type ToolImplementationAuthority } from '@byok-sdk/implementation-identity';
+import { type ImplementationSpawnBindingV1, type ToolImplementationAuthority, type ResolvedRuntimeImplementationV1 } from '@byok-sdk/implementation-identity';
 import { type RuntimeLaunchDecisionV1, type RuntimeLaunchKindV1 } from '../../daemon/tool-implementation-identity';
 export interface PiRuntimeLaunchResources {
     readonly kind: RuntimeLaunchKindV1;
+    readonly declaration: ResolvedRuntimeImplementationV1;
     readonly decision: RuntimeLaunchDecisionV1;
     readonly binding: ImplementationSpawnBindingV1;
     readonly env: Readonly<Record<string, string>>;
@@ -9570,7 +9571,7 @@ export { resolveMcpLaunchCwdLauncher, resolveTrustedLaunchCwd } from './daemon/t
  * only function that turns a parsed value into an attested identity, and its
  * one caller is this package's own task-scoped configuration reader.
  */
-export type { ToolImplementationAttestedV1, ToolImplementationAuthority, ToolImplementationIdentityV1, ToolImplementationInstallRecordV1, ToolImplementationInterpreterV1, ToolImplementationLocatorV1, ToolImplementationResolutionV1, ToolImplementationStatTupleV1, ToolImplementationUnavailableReasonV1, ToolImplementationUnavailableV1, } from '@byok-sdk/implementation-identity';
+export type { RuntimeEntryV1, RuntimeDescendantPolicyV1, RuntimeDescendantEdgeV1, RuntimeImplementationRecordV1, RuntimeImplementationResolutionV1, ToolImplementationAttestedV1, ToolImplementationAuthority, ToolImplementationIdentityV1, ToolImplementationInstallRecordV1, ToolImplementationInterpreterV1, ToolImplementationLocatorV1, ToolImplementationResolutionV1, ToolImplementationStatTupleV1, ToolImplementationUnavailableReasonV1, ToolImplementationUnavailableV1, } from '@byok-sdk/implementation-identity';
 export { ToolImplementationReverifyError } from '@byok-sdk/implementation-identity';
 export type { AgentRef } from './agent-home';
 export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjection, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home';

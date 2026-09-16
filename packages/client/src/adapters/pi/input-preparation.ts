@@ -396,8 +396,9 @@ export function projectPreparedInputMessage(message: InputPreparationMessageV1):
  * not an identity.
  */
 export function createPiInputPreparationCompiler(
-  runtime: InputPreparationRuntimeIdentityV1 = resolveInstalledPiRuntimeIdentity(),
+  runtime: InputPreparationRuntimeIdentityV1,
 ): InputPreparationCompiler {
+  if (runtime === undefined) throw new InputPreparationRuntimeIdentityError('explicit runtime identity required');
   return {
     runtime,
     async compile(request: CompilePreparedInputRequest): Promise<CompiledPreparedInput> {

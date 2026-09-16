@@ -1,4 +1,4 @@
-import { CONTROLLED_PI_DIRECTORY_ENV_NAMES } from './environment';
+import { CONTROLLED_PI_DIRECTORY_ENV_NAMES, KEYS_PI_INHERITED_ENV_NAMES, KEYS_PI_WINDOWS_ENV_NAMES } from './environment';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -27,7 +27,9 @@ import type { McpLaunchAttestation } from './launch-attestation';
  *
  * WHAT EACH SIDE SUPPLIES, exactly:
  *
- * - The resolver returns a {@link ToolImplementationInstallRecordV1} — the
+ * - For MCP the resolver returns a {@link ToolImplementationInstallRecordV1};
+ *   runtime subjects return {@link RuntimeImplementationRecordV1}, retaining
+ *   the unchanged record plus the Host descendant policy and edges. The record carries the
  *   manifest revision, the form, the versioned install path, the artifact digest,
  *   the interpreter triple for an `interpreter+bundle`, the entry, the launch
  *   argv and cwd — or an {@link ToolImplementationUnavailableV1} reason. That
@@ -345,7 +347,8 @@ export const RUNTIME_IDS: readonly RuntimeIdV1[] = Object.freeze(['pi']);
  * the daemon already uses everywhere else, and what it attests is the binary
  * behind a tool. A `runtime` subject names the coding-agent runtime the task
  * itself executes in: it is addressed by the runtime id alone, because there is
- * exactly one runtime per task and no toolset owns it.
+ * one selected runtime per task and no toolset owns it; runtimeEntry chooses
+ * one of the four exact logical entries without granting execution by itself.
  *
  * The union exists so an MCP locator can never stand in for a runtime locator.
  * The two carry different contracts — a runtime record additionally declares
@@ -373,7 +376,7 @@ export type ToolImplementationLocatorV1 = {
   readonly launch: McpLaunchAttestation;
 } | {
   readonly subject: Extract<ToolImplementationSubjectV1, { kind: 'runtime' }>;
-  readonly runtimeEntry: 'pi-rpc' | 'pi-prepared';
+  readonly runtimeEntry: RuntimeEntryV1;
   readonly command?: never;
   readonly args?: never;
   readonly launch?: never;
@@ -398,9 +401,112 @@ export type ToolImplementationInstallRecordV1 = Omit<
   'installStat' | 'interpreterStat' | 'assetStats' | 'launchEnvNamesDigest' | 'loaderEnvValuesDigest'
 >;
 
+/** Frozen M0 runtime vocabulary; declaration does not enable a dispatcher. */
+export type RuntimeEntryV1 = 'pi-prepared' | 'pi-rpc' | 'pi-subagent-print' | 'pi-subagent-runner';
+export const RUNTIME_ENTRIES: readonly RuntimeEntryV1[] = Object.freeze([
+  'pi-prepared', 'pi-rpc', 'pi-subagent-print', 'pi-subagent-runner',
+]);
+/** Canonical runtime prefix. Host declares it; the SDK checks exact equality. */
+export function runtimeEntryFixedArgv(kind: RuntimeEntryV1): readonly string[] {
+  return Object.freeze(['__byok_sdk_helper', kind]);
+}
+export type McpImplementationLocatorV1 = Extract<ToolImplementationLocatorV1, { subject: { kind: 'mcp-server' } }>;
+export type RuntimeImplementationLocatorV1 = Extract<ToolImplementationLocatorV1, { subject: { kind: 'runtime' } }>;
+
+/** Finite M0 vocabulary, from pi-subagents0.60.0 producer inventory. No wildcards. */
+export const DESCENDANT_PER_LAUNCH_ENV_NAMES: readonly string[] = Object.freeze([
+  'MCP_DIRECT_TOOLS',
+  'PI_INTERCOM_SESSION_ID',
+  'PI_INTERCOM_STABLE_ID',
+  'PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT',
+  'PI_SUBAGENT_CAPABILITY_CEILING_V1',
+  'PI_SUBAGENT_CHILD',
+  'PI_SUBAGENT_CHILD_AGENT',
+  'PI_SUBAGENT_CHILD_INDEX',
+  'PI_SUBAGENT_DEPTH',
+  'PI_SUBAGENT_EXTENSION_BINDINGS',
+  'PI_SUBAGENT_FANOUT_CHILD',
+  'PI_SUBAGENT_FORK_CACHE_KEY',
+  'PI_SUBAGENT_INHERIT_GLOBAL_CONTEXT',
+  'PI_SUBAGENT_INHERIT_PROJECT_CONTEXT',
+  'PI_SUBAGENT_INHERIT_SKILLS',
+  'PI_SUBAGENT_INTERCOM_SESSION_NAME',
+  'PI_SUBAGENT_MAX_DEPTH',
+  'PI_SUBAGENT_MAX_SPAWNS_PER_RUN',
+  'PI_SUBAGENT_MAX_SPAWNS_PER_SESSION',
+  'PI_SUBAGENT_MCP_DIRECT_TOOLS',
+  'PI_SUBAGENT_ORCHESTRATOR_SESSION_ID',
+  'PI_SUBAGENT_ORCHESTRATOR_TARGET',
+  'PI_SUBAGENT_PARENT_CAPABILITY_TOKEN',
+  'PI_SUBAGENT_PARENT_CHILD_INDEX',
+  'PI_SUBAGENT_PARENT_CONTROL_INBOX',
+  'PI_SUBAGENT_PARENT_DEPTH',
+  'PI_SUBAGENT_PARENT_EVENT_SINK',
+  'PI_SUBAGENT_PARENT_PATH',
+  'PI_SUBAGENT_PARENT_ROOT_RUN_ID',
+  'PI_SUBAGENT_PARENT_RUN_ID',
+  'PI_SUBAGENT_PARENT_SESSION',
+  'PI_SUBAGENT_PERMISSION_AUDIT_PATH',
+  'PI_SUBAGENT_PERMISSION_POLICY',
+  'PI_SUBAGENT_REQUIRED_TOOLS',
+  'PI_SUBAGENT_RUNTIME_ACKNOWLEDGED_EXTENSIONS',
+  'PI_SUBAGENT_RUN_FANOUT_BUDGET',
+  'PI_SUBAGENT_RUN_ID',
+  'PI_SUBAGENT_SESSION_NAME',
+  'PI_SUBAGENT_STEER_ACK_DIR',
+  'PI_SUBAGENT_STEER_CAPABILITY',
+  'PI_SUBAGENT_STEER_INBOX',
+  'PI_SUBAGENT_STRUCTURED_OUTPUT_ACCEPTANCE_CAPTURE',
+  'PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE',
+  'PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA',
+  'PI_SUBAGENT_SUPERVISOR_CHANNEL_DIR',
+  'PI_SUBAGENT_THINKING_CEILING',
+  'PI_SUBAGENT_TOOL_BUDGET',
+  'PI_SUBAGENT_TOOL_BUDGET_ZERO_AUTH',
+  'PI_SUBAGENT_TOOL_DIAGNOSTIC_PATH',
+  'PI_SUBAGENT_WAIT_TOOL_DEFAULT_TIMEOUT_MS',
+  'PI_SUBAGENT_WAIT_TOOL_ENABLED',
+  'PI_SUBAGENT_WATCHDOG_CHILD_CONFIG',
+]);
+
+export interface RuntimeDescendantPolicyV1 {
+  readonly envNameAllowlist: readonly string[];
+  readonly maxDepth: number;
+  readonly fanout: number;
+  readonly parallel: number;
+  readonly sessionCap: number;
+}
+export interface RuntimeDescendantEdgeV1 {
+  readonly parent: RuntimeEntryV1;
+  readonly child: RuntimeEntryV1;
+  readonly inheritsCredential: true;
+}
+/** Type edges only. Instance/budget custody must be enforced before any spawn. */
+export const RUNTIME_DESCENDANT_EDGES: readonly RuntimeDescendantEdgeV1[] = Object.freeze([
+  Object.freeze({ parent: 'pi-rpc', child: 'pi-subagent-print', inheritsCredential: true }),
+  Object.freeze({ parent: 'pi-rpc', child: 'pi-subagent-runner', inheritsCredential: true }),
+  Object.freeze({ parent: 'pi-subagent-print', child: 'pi-subagent-print', inheritsCredential: true }),
+  Object.freeze({ parent: 'pi-subagent-print', child: 'pi-subagent-runner', inheritsCredential: true }),
+  Object.freeze({ parent: 'pi-subagent-runner', child: 'pi-subagent-print', inheritsCredential: true }),
+]);
+export interface RuntimeImplementationRecordV1 {
+  readonly record: ToolImplementationInstallRecordV1;
+  readonly descendantPolicy: RuntimeDescendantPolicyV1;
+  readonly edges: readonly RuntimeDescendantEdgeV1[];
+}
+export type RuntimeImplementationResolutionV1 = ToolImplementationUnavailableV1 | RuntimeImplementationRecordV1;
+/** Measured identity and immutable Host declaration stay together in the daemon. */
+export type ResolvedRuntimeImplementationV1 = ToolImplementationUnavailableV1 | {
+  readonly kind: 'attested';
+  readonly identity: ToolImplementationAttestedV1;
+  readonly descendantPolicy: RuntimeDescendantPolicyV1;
+  readonly edges: readonly RuntimeDescendantEdgeV1[];
+};
+
 export type ToolImplementationResolutionV1 =
   | ToolImplementationUnavailableV1
-  | ToolImplementationInstallRecordV1;
+  | ToolImplementationInstallRecordV1
+  | RuntimeImplementationRecordV1;
 
 /**
  * The host's install-record authority.
@@ -1212,12 +1318,12 @@ async function reverifyDeclaredAssets(
  * every record the resolver returns, including the ones it is most confident
  * about.
  */
-export async function resolveToolImplementationIdentity(
+type LaunchEnvironment = Readonly<Record<string, string>> | ((record: ToolImplementationInstallRecordV1) => Readonly<Record<string, string>>);
+
+async function readResolution(
   authority: ToolImplementationAuthority | undefined,
   locator: ToolImplementationLocatorV1,
-  launchEnv: Readonly<Record<string, string>> | ((record: ToolImplementationInstallRecordV1) => Readonly<Record<string, string>>),
-  probe: ToolImplementationFsProbe = realToolImplementationFsProbe,
-): Promise<ToolImplementationIdentityV1> {
+): Promise<unknown> {
   if (authority === undefined) return TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED;
   let answer: unknown;
   try {
@@ -1236,9 +1342,83 @@ export async function resolveToolImplementationIdentity(
     }
     return toolImplementationUnavailable(answer.reason as ToolImplementationUnavailableReasonV1);
   }
+  return answer;
+}
+
+/** MCP-only entry; runtime declarations cannot be silently reduced to identity. */
+export async function resolveToolImplementationIdentity(
+  authority: ToolImplementationAuthority | undefined,
+  locator: McpImplementationLocatorV1,
+  launchEnv: LaunchEnvironment,
+  probe: ToolImplementationFsProbe = realToolImplementationFsProbe,
+): Promise<ToolImplementationIdentityV1> {
+  if (locator.subject.kind !== 'mcp-server') return toolImplementationUnavailable('implementation_identity_unattested');
+  const answer = await readResolution(authority, locator);
+  if (plainRecord(answer) && answer.kind === 'unavailable') return answer as unknown as ToolImplementationUnavailableV1;
   const record = validateInstallRecord(answer);
   if (record === 'interpreter_form_unsupported') return toolImplementationUnavailable('interpreter_form_unsupported');
   if (record === 'not_a_record') return toolImplementationUnavailable('implementation_identity_unattested');
+  return measureInstallRecord(record, launchEnv, probe);
+}
+
+/** Strict runtime wrapper cutover. No bare record, defaults or shape guessing. */
+export function parseRuntimeImplementationRecord(value: unknown): RuntimeImplementationRecordV1 | undefined {
+  if (!plainRecord(value) || !exactKeys(value, ['record', 'descendantPolicy', 'edges'])) return undefined;
+  const record = validateInstallRecord(value.record);
+  if (typeof record === 'string') return undefined;
+  const policy = value.descendantPolicy;
+  if (!plainRecord(policy) || !exactKeys(policy, ['envNameAllowlist', 'maxDepth', 'fanout', 'parallel', 'sessionCap'])) return undefined;
+  // Base names frozen by M0; additional per-launch names come only from the producer inventory.
+  const vocabulary = new Set<string>([...KEYS_PI_INHERITED_ENV_NAMES, ...KEYS_PI_WINDOWS_ENV_NAMES, ...CONTROLLED_PI_DIRECTORY_ENV_NAMES, ...DESCENDANT_PER_LAUNCH_ENV_NAMES]);
+  if (!Array.isArray(policy.envNameAllowlist)) return undefined;
+  for (const [index, name] of policy.envNameAllowlist.entries()) {
+    if (typeof name !== 'string' || !vocabulary.has(name) || (index > 0 && policy.envNameAllowlist[index - 1] >= name)) return undefined;
+  }
+  for (const key of ['maxDepth', 'fanout', 'parallel', 'sessionCap'] as const) {
+    const count = policy[key];
+    if (typeof count !== 'number' || !Number.isSafeInteger(count) || Object.is(count, -0) || count < (key === 'maxDepth' ? 0 : 1)) return undefined;
+  }
+  if (!Array.isArray(value.edges) || value.edges.length !== RUNTIME_DESCENDANT_EDGES.length) return undefined;
+  for (const [index, edge] of value.edges.entries()) {
+    const expected = RUNTIME_DESCENDANT_EDGES[index]!;
+    if (!plainRecord(edge) || !exactKeys(edge, ['parent', 'child', 'inheritsCredential']) ||
+      edge.parent !== expected.parent || edge.child !== expected.child || edge.inheritsCredential !== true) return undefined;
+  }
+  return Object.freeze({ record, descendantPolicy: Object.freeze({
+    envNameAllowlist: Object.freeze([...policy.envNameAllowlist]) as readonly string[],
+    maxDepth: policy.maxDepth as number, fanout: policy.fanout as number,
+    parallel: policy.parallel as number, sessionCap: policy.sessionCap as number,
+  }), edges: RUNTIME_DESCENDANT_EDGES });
+}
+
+export async function resolveRuntimeImplementation(
+  authority: ToolImplementationAuthority | undefined,
+  locator: RuntimeImplementationLocatorV1,
+  launchEnv: LaunchEnvironment,
+  probe: ToolImplementationFsProbe = realToolImplementationFsProbe,
+): Promise<ResolvedRuntimeImplementationV1> {
+  if (locator.subject.kind !== 'runtime' || locator.subject.runtimeId !== 'pi' || !RUNTIME_ENTRIES.includes(locator.runtimeEntry)) {
+    return toolImplementationUnavailable('implementation_identity_unattested');
+  }
+  const answer = await readResolution(authority, locator);
+  if (plainRecord(answer) && answer.kind === 'unavailable') return answer as unknown as ToolImplementationUnavailableV1;
+  const declaration = parseRuntimeImplementationRecord(answer);
+  if (declaration === undefined) return toolImplementationUnavailable('implementation_identity_unattested');
+  const fixedArgv = runtimeEntryFixedArgv(locator.runtimeEntry);
+  if (declaration.record.launchArgv.length !== fixedArgv.length || declaration.record.launchArgv.some((arg, i) => arg !== fixedArgv[i])) {
+    return toolImplementationUnavailable('install_record_mismatch');
+  }
+  const identity = await measureInstallRecord(declaration.record, launchEnv, probe);
+  if (identity.kind === 'unavailable') return identity;
+  return Object.freeze({ kind: 'attested', identity, descendantPolicy: declaration.descendantPolicy, edges: declaration.edges });
+}
+
+/** Single physical measurement authority, shared by the two subject-specific consumers. */
+async function measureInstallRecord(
+  record: ToolImplementationInstallRecordV1,
+  launchEnv: LaunchEnvironment,
+  probe: ToolImplementationFsProbe,
+): Promise<ToolImplementationIdentityV1> {
   const measured = await measureCanonicalPathIdentity(record.installPath, probe);
   if (typeof measured === 'string') return toolImplementationUnavailable(measured);
   const ownership = measureOwnership(measured);

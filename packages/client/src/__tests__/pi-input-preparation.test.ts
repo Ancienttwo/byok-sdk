@@ -240,7 +240,7 @@ describe('B-P2 native composition: runtime identity', () => {
 
 describe('B-P2 native composition: pure compile', () => {
   it('compiles the authorized full schemas and text into D, P(D) and the structural projection contract', async () => {
-    const compiler = createPiInputPreparationCompiler();
+    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
     const compiled = await compiler.compile(compileRequest());
 
     const body = JSON.parse(compiled.requestBody) as {
@@ -281,7 +281,7 @@ describe('B-P2 native composition: pure compile', () => {
   });
 
   it('is deterministic: the same authorized input always yields the same D and digest', async () => {
-    const compiler = createPiInputPreparationCompiler();
+    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
     const first = await compiler.compile(compileRequest());
     const second = await compiler.compile(compileRequest());
     expect(second.requestBody).toBe(first.requestBody);
@@ -293,7 +293,7 @@ describe('B-P2 native composition: pure compile', () => {
   it('touches no filesystem, process, child-process, socket or network surface while compiling', async () => {
     // Construct FIRST: the compiler reads the installed manifest exactly once,
     // at construction, which is outside the pure stage by design.
-    const compiler = createPiInputPreparationCompiler();
+    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
 
     const hits: string[] = [];
     trap(fsModule, 'readFileSync', hits, 'fs.readFileSync');
@@ -416,7 +416,7 @@ describe('B-P2 native composition: unsupported input rejects rather than filling
       },
     ],
   ])('rejects %s', async (_label, build) => {
-    const compiler = createPiInputPreparationCompiler();
+    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
     await expect(compiler.compile(build())).rejects.toBeInstanceOf(InputPreparationCompileError);
   });
 });
@@ -525,4 +525,8 @@ describe('B-P2 native composition: the envelope contract is verified, not assume
       refusalOf(envelope({ projection: { version: 1, kind: 'content_complete', digest: 'd'.repeat(64) } })).detail,
     ).toBe('unsupported_projection_shape');
   });
+});
+
+it('requires explicit compiler identity instead of performing default discovery', () => {
+  expect(() => createPiInputPreparationCompiler(undefined as never)).toThrow('explicit runtime identity required');
 });
