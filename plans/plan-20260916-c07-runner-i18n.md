@@ -52,3 +52,6 @@ Only the five contract docs plus the two explicitly approved inert JSON vectors 
 
 ## Active implementation boundary
 The M1a contract activation supersedes historical M0-only Stop/verification text above. Only its enumerated paths are active; no runner/print dispatch or unproved recursive budget path is enabled. Root owns all edits including manifests/lock/goldens; read-only explorer maps impact.
+
+
+M2b-1 exact9-file scope registered before product edits. Native1005 lacks public export-html; supervisor narrowed to required asset declaration/preverify and single layout/source inventory. Native1006 item11 public subpath is now a prerequisite for M2b-3; no partial runner vendoring or private native inlining. Resource originals remain the exact pinned native package's assets; SDK build ships verified layout/inventory only. P4 installation and computed share import remain open. Evidence readback _ops/c07-identity-workspace/m2b-1/native1005-resource-inventory.json.
