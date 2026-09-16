@@ -11109,6 +11109,2016 @@
       "expectedReason": "descendant_loader_env_forbidden",
       "stage": "hard loader deny remains stronger than policy; independent changed-policy refusal also applies",
       "expectedDeclarationRef": "pi-rpc->pi-subagent-print"
+    },
+    {
+      "launch": {
+        "format": "byok.descendant-launch",
+        "version": 1,
+        "template": {
+          "format": "byok.implementation-spawn",
+          "version": 1,
+          "identity": {
+            "kind": "attested",
+            "authority": "host-install-record",
+            "manifestRevision": "fbace72fcda2c44d7b5137ea6ed8e35c5bef21c1fcb96694c4669bbe0f2ee47d",
+            "form": "interpreter+bundle",
+            "installPath": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/salesko-agent.mjs",
+            "closureDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "closureKind": "artifact",
+            "interpreter": {
+              "path": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/bun",
+              "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "loadCommandsDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            },
+            "launchArgv": [
+              "__byok_sdk_helper",
+              "pi-subagent-print"
+            ],
+            "launchCwd": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/launch-cwd",
+            "assetRoot": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi",
+            "assets": [
+              {
+                "path": "dist/modes/interactive/theme/dark.json",
+                "digest": "2222222222222222222222222222222222222222222222222222222222222222"
+              },
+              {
+                "path": "dist/modes/interactive/theme/light.json",
+                "digest": "3333333333333333333333333333333333333333333333333333333333333333"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/de.json",
+                "digest": "e8f731c54137afc56932f6da4c7741babe578100204e957ed3dfce42ba94e435"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/en.json",
+                "digest": "80dbb4f2212c0100c4efe4a234fbe12fd9e43d605f5daf8316573fc30cc3dfea"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/es.json",
+                "digest": "c847cf6b1987711019fe0e84532303506cf0f620153594fa1ca85bce8c4a2571"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/fr.json",
+                "digest": "f38f34d6f52a46ae7833e020dc0d8c5fc0ffcbf397360312511c5c71192c347b"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/pt-BR.json",
+                "digest": "4c1d980cb7cb21e540231b0c36981407238185faabebe92cc34434253c214b5b"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/pt.json",
+                "digest": "63e831baa6eba70ca5509b703cf877160f0edaeff11d1e649fe53a0e6ae10d17"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/ru.json",
+                "digest": "21f3771d1067787e8c3a8075141b1fe40fb930d5777da0840fe9f65e1f0e3dca"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/uk.json",
+                "digest": "0b636854a436383d2be1ec9268cf6da5b26e5a86bb2e49eb20df43b35cd6323c"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/zh.json",
+                "digest": "0e9598f80fd800bdd9d689979c1f13c8054c175cf9e5b29e93273bee85704f87"
+              },
+              {
+                "path": "package.json",
+                "digest": "1111111111111111111111111111111111111111111111111111111111111111"
+              }
+            ],
+            "nativeProvenance": {
+              "packageName": "@byok-sdk/pi-coding-agent",
+              "packageVersion": "0.85.1005",
+              "upstreamBase": "0.85.1",
+              "upstreamCommit": "dddddddddddddddddddddddddddddddddddddddd",
+              "forkBuild": 5,
+              "compilerVersion": 2
+            },
+            "launchEnvNamesDigest": "9adfee7b39e32fab90b13aec6b2c9fa31852a69b170f488368c45a310c70611d",
+            "loaderEnvValuesDigest": "3d17eefc2a5bb43f9fa201677534de043c9c0a010cd2c6005fe4fe6e28031587",
+            "installStat": {
+              "dev": 1,
+              "ino": 10,
+              "size": 100,
+              "mtimeMs": 1000.5,
+              "mode": 33133,
+              "uid": 0,
+              "gid": 0
+            },
+            "interpreterStat": {
+              "dev": 1,
+              "ino": 11,
+              "size": 100,
+              "mtimeMs": 1000.5,
+              "mode": 33133,
+              "uid": 0,
+              "gid": 0
+            },
+            "assetStats": [
+              {
+                "dev": 1,
+                "ino": 12,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 13,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 14,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 15,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 16,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 17,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 18,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 19,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 20,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 21,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 22,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 23,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              }
+            ]
+          },
+          "command": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/bun",
+          "entry": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/salesko-agent.mjs",
+          "fixedArgv": [
+            "__byok_sdk_helper",
+            "pi-subagent-print"
+          ],
+          "cwd": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/launch-cwd",
+          "envCommitments": {
+            "PI_PACKAGE_DIR": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi",
+            "PI_CODING_AGENT_DIR": "/synthetic/daemon/projection",
+            "PI_CODING_AGENT_SESSION_DIR": "/synthetic/daemon/sessions"
+          }
+        },
+        "templateDigest": "70ebe2ccafa965fe0dc80162d6416042fa9b4adac59a9093c0a38a69f6c47561",
+        "policy": {
+          "envNameAllowlist": [
+            "HOME",
+            "MCP_DIRECT_TOOLS",
+            "PATH",
+            "PI_CODING_AGENT_DIR",
+            "PI_CODING_AGENT_SESSION_DIR",
+            "PI_INTERCOM_SESSION_ID",
+            "PI_INTERCOM_STABLE_ID",
+            "PI_PACKAGE_DIR",
+            "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT",
+            "PI_SUBAGENT_CAPABILITY_CEILING_V1",
+            "PI_SUBAGENT_CHILD",
+            "PI_SUBAGENT_CHILD_AGENT",
+            "PI_SUBAGENT_CHILD_INDEX",
+            "PI_SUBAGENT_DEPTH",
+            "PI_SUBAGENT_EXTENSION_BINDINGS",
+            "PI_SUBAGENT_FANOUT_CHILD",
+            "PI_SUBAGENT_FORK_CACHE_KEY",
+            "PI_SUBAGENT_INHERIT_GLOBAL_CONTEXT",
+            "PI_SUBAGENT_INHERIT_PROJECT_CONTEXT",
+            "PI_SUBAGENT_INHERIT_SKILLS",
+            "PI_SUBAGENT_INTERCOM_SESSION_NAME",
+            "PI_SUBAGENT_MAX_DEPTH",
+            "PI_SUBAGENT_MAX_SPAWNS_PER_RUN",
+            "PI_SUBAGENT_MAX_SPAWNS_PER_SESSION",
+            "PI_SUBAGENT_MCP_DIRECT_TOOLS",
+            "PI_SUBAGENT_ORCHESTRATOR_SESSION_ID",
+            "PI_SUBAGENT_ORCHESTRATOR_TARGET",
+            "PI_SUBAGENT_PARENT_CAPABILITY_TOKEN",
+            "PI_SUBAGENT_PARENT_CHILD_INDEX",
+            "PI_SUBAGENT_PARENT_CONTROL_INBOX",
+            "PI_SUBAGENT_PARENT_DEPTH",
+            "PI_SUBAGENT_PARENT_EVENT_SINK",
+            "PI_SUBAGENT_PARENT_PATH",
+            "PI_SUBAGENT_PARENT_ROOT_RUN_ID",
+            "PI_SUBAGENT_PARENT_RUN_ID",
+            "PI_SUBAGENT_PARENT_SESSION",
+            "PI_SUBAGENT_PERMISSION_AUDIT_PATH",
+            "PI_SUBAGENT_PERMISSION_POLICY",
+            "PI_SUBAGENT_REQUIRED_TOOLS",
+            "PI_SUBAGENT_RUNTIME_ACKNOWLEDGED_EXTENSIONS",
+            "PI_SUBAGENT_RUN_FANOUT_BUDGET",
+            "PI_SUBAGENT_RUN_ID",
+            "PI_SUBAGENT_SESSION_NAME",
+            "PI_SUBAGENT_STEER_ACK_DIR",
+            "PI_SUBAGENT_STEER_CAPABILITY",
+            "PI_SUBAGENT_STEER_INBOX",
+            "PI_SUBAGENT_STRUCTURED_OUTPUT_ACCEPTANCE_CAPTURE",
+            "PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE",
+            "PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA",
+            "PI_SUBAGENT_SUPERVISOR_CHANNEL_DIR",
+            "PI_SUBAGENT_THINKING_CEILING",
+            "PI_SUBAGENT_TOOL_BUDGET",
+            "PI_SUBAGENT_TOOL_BUDGET_ZERO_AUTH",
+            "PI_SUBAGENT_TOOL_DIAGNOSTIC_PATH",
+            "PI_SUBAGENT_WAIT_TOOL_DEFAULT_TIMEOUT_MS",
+            "PI_SUBAGENT_WAIT_TOOL_ENABLED",
+            "PI_SUBAGENT_WATCHDOG_CHILD_CONFIG"
+          ],
+          "maxDepth": 3,
+          "fanout": 7,
+          "parallel": 2,
+          "sessionCap": 11
+        },
+        "perLaunch": {
+          "format": "byok.runtime-descendant-context",
+          "version": 1,
+          "templateKind": "pi-subagent-print",
+          "edge": {
+            "parent": "pi-rpc",
+            "child": "pi-subagent-print"
+          },
+          "rootTaskId": "synthetic-root-task",
+          "parentInstancePath": [],
+          "instancePath": [
+            0
+          ],
+          "depth": 1,
+          "remainingDepth": 2,
+          "effectiveLimits": {
+            "maxDepth": 3,
+            "fanout": 5,
+            "parallel": 2,
+            "sessionCap": 8
+          },
+          "task": "Synthetic task; no provider call",
+          "modelCandidates": [
+            {
+              "provider": "synthetic",
+              "model": "fixture-model"
+            }
+          ],
+          "attempt": 0,
+          "session": {
+            "cwd": "/synthetic/tasks/task-1",
+            "root": "/synthetic/daemon/sessions",
+            "file": "/synthetic/daemon/sessions/child.jsonl"
+          },
+          "mcp": {
+            "env": {},
+            "metadata": {}
+          },
+          "envValues": {
+            "PI_SUBAGENT_DEPTH": "1",
+            "PI_SUBAGENT_MAX_DEPTH": "3"
+          },
+          "exactNames": [
+            "HOME",
+            "PATH",
+            "PI_CODING_AGENT_DIR",
+            "PI_CODING_AGENT_SESSION_DIR",
+            "PI_PACKAGE_DIR",
+            "PI_SUBAGENT_DEPTH",
+            "PI_SUBAGENT_MAX_DEPTH"
+          ],
+          "controlledDirValues": {
+            "PI_PACKAGE_DIR": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi",
+            "PI_CODING_AGENT_DIR": "/synthetic/daemon/projection",
+            "PI_CODING_AGENT_SESSION_DIR": "/synthetic/daemon/sessions"
+          }
+        }
+      },
+      "actualEnv": {
+        "HOME": "/synthetic/home",
+        "PATH": "/synthetic/bin",
+        "PI_PACKAGE_DIR": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi",
+        "PI_CODING_AGENT_DIR": "/synthetic/daemon/projection",
+        "PI_CODING_AGENT_SESSION_DIR": "/synthetic/daemon/sessions",
+        "PI_SUBAGENT_DEPTH": "1",
+        "PI_SUBAGENT_MAX_DEPTH": "3"
+      },
+      "launchUtf8": "{\"format\":\"byok.descendant-launch\",\"version\":1,\"template\":{\"format\":\"byok.implementation-spawn\",\"version\":1,\"identity\":{\"kind\":\"attested\",\"authority\":\"host-install-record\",\"manifestRevision\":\"fbace72fcda2c44d7b5137ea6ed8e35c5bef21c1fcb96694c4669bbe0f2ee47d\",\"form\":\"interpreter+bundle\",\"installPath\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/salesko-agent.mjs\",\"closureDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"closureKind\":\"artifact\",\"interpreter\":{\"path\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/bun\",\"digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"loadCommandsDigest\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"},\"launchArgv\":[\"__byok_sdk_helper\",\"pi-subagent-print\"],\"launchCwd\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/launch-cwd\",\"assetRoot\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi\",\"assets\":[{\"path\":\"dist/modes/interactive/theme/dark.json\",\"digest\":\"2222222222222222222222222222222222222222222222222222222222222222\"},{\"path\":\"dist/modes/interactive/theme/light.json\",\"digest\":\"3333333333333333333333333333333333333333333333333333333333333333\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/de.json\",\"digest\":\"e8f731c54137afc56932f6da4c7741babe578100204e957ed3dfce42ba94e435\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/en.json\",\"digest\":\"80dbb4f2212c0100c4efe4a234fbe12fd9e43d605f5daf8316573fc30cc3dfea\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/es.json\",\"digest\":\"c847cf6b1987711019fe0e84532303506cf0f620153594fa1ca85bce8c4a2571\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/fr.json\",\"digest\":\"f38f34d6f52a46ae7833e020dc0d8c5fc0ffcbf397360312511c5c71192c347b\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/pt-BR.json\",\"digest\":\"4c1d980cb7cb21e540231b0c36981407238185faabebe92cc34434253c214b5b\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/pt.json\",\"digest\":\"63e831baa6eba70ca5509b703cf877160f0edaeff11d1e649fe53a0e6ae10d17\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/ru.json\",\"digest\":\"21f3771d1067787e8c3a8075141b1fe40fb930d5777da0840fe9f65e1f0e3dca\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/uk.json\",\"digest\":\"0b636854a436383d2be1ec9268cf6da5b26e5a86bb2e49eb20df43b35cd6323c\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/zh.json\",\"digest\":\"0e9598f80fd800bdd9d689979c1f13c8054c175cf9e5b29e93273bee85704f87\"},{\"path\":\"package.json\",\"digest\":\"1111111111111111111111111111111111111111111111111111111111111111\"}],\"nativeProvenance\":{\"packageName\":\"@byok-sdk/pi-coding-agent\",\"packageVersion\":\"0.85.1005\",\"upstreamBase\":\"0.85.1\",\"upstreamCommit\":\"dddddddddddddddddddddddddddddddddddddddd\",\"forkBuild\":5,\"compilerVersion\":2},\"launchEnvNamesDigest\":\"9adfee7b39e32fab90b13aec6b2c9fa31852a69b170f488368c45a310c70611d\",\"loaderEnvValuesDigest\":\"3d17eefc2a5bb43f9fa201677534de043c9c0a010cd2c6005fe4fe6e28031587\",\"installStat\":{\"dev\":1,\"ino\":10,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33133,\"uid\":0,\"gid\":0},\"interpreterStat\":{\"dev\":1,\"ino\":11,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33133,\"uid\":0,\"gid\":0},\"assetStats\":[{\"dev\":1,\"ino\":12,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":13,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":14,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":15,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":16,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":17,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":18,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":19,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":20,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":21,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":22,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":23,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0}]},\"command\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/bun\",\"entry\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/salesko-agent.mjs\",\"fixedArgv\":[\"__byok_sdk_helper\",\"pi-subagent-print\"],\"cwd\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/launch-cwd\",\"envCommitments\":{\"PI_PACKAGE_DIR\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi\",\"PI_CODING_AGENT_DIR\":\"/synthetic/daemon/projection\",\"PI_CODING_AGENT_SESSION_DIR\":\"/synthetic/daemon/sessions\"}},\"templateDigest\":\"70ebe2ccafa965fe0dc80162d6416042fa9b4adac59a9093c0a38a69f6c47561\",\"policy\":{\"envNameAllowlist\":[\"HOME\",\"MCP_DIRECT_TOOLS\",\"PATH\",\"PI_CODING_AGENT_DIR\",\"PI_CODING_AGENT_SESSION_DIR\",\"PI_INTERCOM_SESSION_ID\",\"PI_INTERCOM_STABLE_ID\",\"PI_PACKAGE_DIR\",\"PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT\",\"PI_SUBAGENT_CAPABILITY_CEILING_V1\",\"PI_SUBAGENT_CHILD\",\"PI_SUBAGENT_CHILD_AGENT\",\"PI_SUBAGENT_CHILD_INDEX\",\"PI_SUBAGENT_DEPTH\",\"PI_SUBAGENT_EXTENSION_BINDINGS\",\"PI_SUBAGENT_FANOUT_CHILD\",\"PI_SUBAGENT_FORK_CACHE_KEY\",\"PI_SUBAGENT_INHERIT_GLOBAL_CONTEXT\",\"PI_SUBAGENT_INHERIT_PROJECT_CONTEXT\",\"PI_SUBAGENT_INHERIT_SKILLS\",\"PI_SUBAGENT_INTERCOM_SESSION_NAME\",\"PI_SUBAGENT_MAX_DEPTH\",\"PI_SUBAGENT_MAX_SPAWNS_PER_RUN\",\"PI_SUBAGENT_MAX_SPAWNS_PER_SESSION\",\"PI_SUBAGENT_MCP_DIRECT_TOOLS\",\"PI_SUBAGENT_ORCHESTRATOR_SESSION_ID\",\"PI_SUBAGENT_ORCHESTRATOR_TARGET\",\"PI_SUBAGENT_PARENT_CAPABILITY_TOKEN\",\"PI_SUBAGENT_PARENT_CHILD_INDEX\",\"PI_SUBAGENT_PARENT_CONTROL_INBOX\",\"PI_SUBAGENT_PARENT_DEPTH\",\"PI_SUBAGENT_PARENT_EVENT_SINK\",\"PI_SUBAGENT_PARENT_PATH\",\"PI_SUBAGENT_PARENT_ROOT_RUN_ID\",\"PI_SUBAGENT_PARENT_RUN_ID\",\"PI_SUBAGENT_PARENT_SESSION\",\"PI_SUBAGENT_PERMISSION_AUDIT_PATH\",\"PI_SUBAGENT_PERMISSION_POLICY\",\"PI_SUBAGENT_REQUIRED_TOOLS\",\"PI_SUBAGENT_RUNTIME_ACKNOWLEDGED_EXTENSIONS\",\"PI_SUBAGENT_RUN_FANOUT_BUDGET\",\"PI_SUBAGENT_RUN_ID\",\"PI_SUBAGENT_SESSION_NAME\",\"PI_SUBAGENT_STEER_ACK_DIR\",\"PI_SUBAGENT_STEER_CAPABILITY\",\"PI_SUBAGENT_STEER_INBOX\",\"PI_SUBAGENT_STRUCTURED_OUTPUT_ACCEPTANCE_CAPTURE\",\"PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE\",\"PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA\",\"PI_SUBAGENT_SUPERVISOR_CHANNEL_DIR\",\"PI_SUBAGENT_THINKING_CEILING\",\"PI_SUBAGENT_TOOL_BUDGET\",\"PI_SUBAGENT_TOOL_BUDGET_ZERO_AUTH\",\"PI_SUBAGENT_TOOL_DIAGNOSTIC_PATH\",\"PI_SUBAGENT_WAIT_TOOL_DEFAULT_TIMEOUT_MS\",\"PI_SUBAGENT_WAIT_TOOL_ENABLED\",\"PI_SUBAGENT_WATCHDOG_CHILD_CONFIG\"],\"maxDepth\":3,\"fanout\":7,\"parallel\":2,\"sessionCap\":11},\"perLaunch\":{\"format\":\"byok.runtime-descendant-context\",\"version\":1,\"templateKind\":\"pi-subagent-print\",\"edge\":{\"parent\":\"pi-rpc\",\"child\":\"pi-subagent-print\"},\"rootTaskId\":\"synthetic-root-task\",\"parentInstancePath\":[],\"instancePath\":[0],\"depth\":1,\"remainingDepth\":2,\"effectiveLimits\":{\"maxDepth\":3,\"fanout\":5,\"parallel\":2,\"sessionCap\":8},\"task\":\"Synthetic task; no provider call\",\"modelCandidates\":[{\"provider\":\"synthetic\",\"model\":\"fixture-model\"}],\"attempt\":0,\"session\":{\"cwd\":\"/synthetic/tasks/task-1\",\"root\":\"/synthetic/daemon/sessions\",\"file\":\"/synthetic/daemon/sessions/child.jsonl\"},\"mcp\":{\"env\":{},\"metadata\":{}},\"envValues\":{\"PI_SUBAGENT_DEPTH\":\"1\",\"PI_SUBAGENT_MAX_DEPTH\":\"3\"},\"exactNames\":[\"HOME\",\"PATH\",\"PI_CODING_AGENT_DIR\",\"PI_CODING_AGENT_SESSION_DIR\",\"PI_PACKAGE_DIR\",\"PI_SUBAGENT_DEPTH\",\"PI_SUBAGENT_MAX_DEPTH\"],\"controlledDirValues\":{\"PI_PACKAGE_DIR\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi\",\"PI_CODING_AGENT_DIR\":\"/synthetic/daemon/projection\",\"PI_CODING_AGENT_SESSION_DIR\":\"/synthetic/daemon/sessions\"}}}",
+      "configDigest": "a6d32dfc6095ba1d4b1283fae98ea18a38dc698d3e5a63560099f2f7f1c188f5",
+      "id": "descendant-config-digest-missing",
+      "expectedReason": "exactly one --config-digest=<sha256> is required",
+      "expectedExitCode": 78,
+      "stage": "digest extraction and host usage renderer before config read; vector not a spawned-host result",
+      "argvCases": [
+        {
+          "id": "pi-subagent-runner-missing",
+          "hostKind": "pi-subagent-runner",
+          "argv": [
+            "__byok_sdk_helper",
+            "pi-subagent-runner",
+            "--config",
+            "/synthetic/config.json"
+          ],
+          "expectedExitCode": 78,
+          "expectedStderr": "byok-pi-subagent-runner: exactly one --config-digest=<sha256> is required\n",
+          "expectedReason": "exactly one --config-digest=<sha256> is required",
+          "oneLine": true,
+          "noStack": true
+        },
+        {
+          "id": "pi-subagent-print-missing",
+          "hostKind": "pi-subagent-print",
+          "argv": [
+            "__byok_sdk_helper",
+            "pi-subagent-print",
+            "--config",
+            "/synthetic/config.json"
+          ],
+          "expectedExitCode": 78,
+          "expectedStderr": "byok-pi-subagent-print: exactly one --config-digest=<sha256> is required\n",
+          "expectedReason": "exactly one --config-digest=<sha256> is required",
+          "oneLine": true,
+          "noStack": true
+        }
+      ]
+    },
+    {
+      "launch": {
+        "format": "byok.descendant-launch",
+        "version": 1,
+        "template": {
+          "format": "byok.implementation-spawn",
+          "version": 1,
+          "identity": {
+            "kind": "attested",
+            "authority": "host-install-record",
+            "manifestRevision": "fbace72fcda2c44d7b5137ea6ed8e35c5bef21c1fcb96694c4669bbe0f2ee47d",
+            "form": "interpreter+bundle",
+            "installPath": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/salesko-agent.mjs",
+            "closureDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "closureKind": "artifact",
+            "interpreter": {
+              "path": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/bun",
+              "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "loadCommandsDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            },
+            "launchArgv": [
+              "__byok_sdk_helper",
+              "pi-subagent-print"
+            ],
+            "launchCwd": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/launch-cwd",
+            "assetRoot": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi",
+            "assets": [
+              {
+                "path": "dist/modes/interactive/theme/dark.json",
+                "digest": "2222222222222222222222222222222222222222222222222222222222222222"
+              },
+              {
+                "path": "dist/modes/interactive/theme/light.json",
+                "digest": "3333333333333333333333333333333333333333333333333333333333333333"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/de.json",
+                "digest": "e8f731c54137afc56932f6da4c7741babe578100204e957ed3dfce42ba94e435"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/en.json",
+                "digest": "80dbb4f2212c0100c4efe4a234fbe12fd9e43d605f5daf8316573fc30cc3dfea"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/es.json",
+                "digest": "c847cf6b1987711019fe0e84532303506cf0f620153594fa1ca85bce8c4a2571"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/fr.json",
+                "digest": "f38f34d6f52a46ae7833e020dc0d8c5fc0ffcbf397360312511c5c71192c347b"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/pt-BR.json",
+                "digest": "4c1d980cb7cb21e540231b0c36981407238185faabebe92cc34434253c214b5b"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/pt.json",
+                "digest": "63e831baa6eba70ca5509b703cf877160f0edaeff11d1e649fe53a0e6ae10d17"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/ru.json",
+                "digest": "21f3771d1067787e8c3a8075141b1fe40fb930d5777da0840fe9f65e1f0e3dca"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/uk.json",
+                "digest": "0b636854a436383d2be1ec9268cf6da5b26e5a86bb2e49eb20df43b35cd6323c"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/zh.json",
+                "digest": "0e9598f80fd800bdd9d689979c1f13c8054c175cf9e5b29e93273bee85704f87"
+              },
+              {
+                "path": "package.json",
+                "digest": "1111111111111111111111111111111111111111111111111111111111111111"
+              }
+            ],
+            "nativeProvenance": {
+              "packageName": "@byok-sdk/pi-coding-agent",
+              "packageVersion": "0.85.1005",
+              "upstreamBase": "0.85.1",
+              "upstreamCommit": "dddddddddddddddddddddddddddddddddddddddd",
+              "forkBuild": 5,
+              "compilerVersion": 2
+            },
+            "launchEnvNamesDigest": "9adfee7b39e32fab90b13aec6b2c9fa31852a69b170f488368c45a310c70611d",
+            "loaderEnvValuesDigest": "3d17eefc2a5bb43f9fa201677534de043c9c0a010cd2c6005fe4fe6e28031587",
+            "installStat": {
+              "dev": 1,
+              "ino": 10,
+              "size": 100,
+              "mtimeMs": 1000.5,
+              "mode": 33133,
+              "uid": 0,
+              "gid": 0
+            },
+            "interpreterStat": {
+              "dev": 1,
+              "ino": 11,
+              "size": 100,
+              "mtimeMs": 1000.5,
+              "mode": 33133,
+              "uid": 0,
+              "gid": 0
+            },
+            "assetStats": [
+              {
+                "dev": 1,
+                "ino": 12,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 13,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 14,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 15,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 16,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 17,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 18,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 19,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 20,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 21,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 22,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 23,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              }
+            ]
+          },
+          "command": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/bun",
+          "entry": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/salesko-agent.mjs",
+          "fixedArgv": [
+            "__byok_sdk_helper",
+            "pi-subagent-print"
+          ],
+          "cwd": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/launch-cwd",
+          "envCommitments": {
+            "PI_PACKAGE_DIR": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi",
+            "PI_CODING_AGENT_DIR": "/synthetic/daemon/projection",
+            "PI_CODING_AGENT_SESSION_DIR": "/synthetic/daemon/sessions"
+          }
+        },
+        "templateDigest": "70ebe2ccafa965fe0dc80162d6416042fa9b4adac59a9093c0a38a69f6c47561",
+        "policy": {
+          "envNameAllowlist": [
+            "HOME",
+            "MCP_DIRECT_TOOLS",
+            "PATH",
+            "PI_CODING_AGENT_DIR",
+            "PI_CODING_AGENT_SESSION_DIR",
+            "PI_INTERCOM_SESSION_ID",
+            "PI_INTERCOM_STABLE_ID",
+            "PI_PACKAGE_DIR",
+            "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT",
+            "PI_SUBAGENT_CAPABILITY_CEILING_V1",
+            "PI_SUBAGENT_CHILD",
+            "PI_SUBAGENT_CHILD_AGENT",
+            "PI_SUBAGENT_CHILD_INDEX",
+            "PI_SUBAGENT_DEPTH",
+            "PI_SUBAGENT_EXTENSION_BINDINGS",
+            "PI_SUBAGENT_FANOUT_CHILD",
+            "PI_SUBAGENT_FORK_CACHE_KEY",
+            "PI_SUBAGENT_INHERIT_GLOBAL_CONTEXT",
+            "PI_SUBAGENT_INHERIT_PROJECT_CONTEXT",
+            "PI_SUBAGENT_INHERIT_SKILLS",
+            "PI_SUBAGENT_INTERCOM_SESSION_NAME",
+            "PI_SUBAGENT_MAX_DEPTH",
+            "PI_SUBAGENT_MAX_SPAWNS_PER_RUN",
+            "PI_SUBAGENT_MAX_SPAWNS_PER_SESSION",
+            "PI_SUBAGENT_MCP_DIRECT_TOOLS",
+            "PI_SUBAGENT_ORCHESTRATOR_SESSION_ID",
+            "PI_SUBAGENT_ORCHESTRATOR_TARGET",
+            "PI_SUBAGENT_PARENT_CAPABILITY_TOKEN",
+            "PI_SUBAGENT_PARENT_CHILD_INDEX",
+            "PI_SUBAGENT_PARENT_CONTROL_INBOX",
+            "PI_SUBAGENT_PARENT_DEPTH",
+            "PI_SUBAGENT_PARENT_EVENT_SINK",
+            "PI_SUBAGENT_PARENT_PATH",
+            "PI_SUBAGENT_PARENT_ROOT_RUN_ID",
+            "PI_SUBAGENT_PARENT_RUN_ID",
+            "PI_SUBAGENT_PARENT_SESSION",
+            "PI_SUBAGENT_PERMISSION_AUDIT_PATH",
+            "PI_SUBAGENT_PERMISSION_POLICY",
+            "PI_SUBAGENT_REQUIRED_TOOLS",
+            "PI_SUBAGENT_RUNTIME_ACKNOWLEDGED_EXTENSIONS",
+            "PI_SUBAGENT_RUN_FANOUT_BUDGET",
+            "PI_SUBAGENT_RUN_ID",
+            "PI_SUBAGENT_SESSION_NAME",
+            "PI_SUBAGENT_STEER_ACK_DIR",
+            "PI_SUBAGENT_STEER_CAPABILITY",
+            "PI_SUBAGENT_STEER_INBOX",
+            "PI_SUBAGENT_STRUCTURED_OUTPUT_ACCEPTANCE_CAPTURE",
+            "PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE",
+            "PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA",
+            "PI_SUBAGENT_SUPERVISOR_CHANNEL_DIR",
+            "PI_SUBAGENT_THINKING_CEILING",
+            "PI_SUBAGENT_TOOL_BUDGET",
+            "PI_SUBAGENT_TOOL_BUDGET_ZERO_AUTH",
+            "PI_SUBAGENT_TOOL_DIAGNOSTIC_PATH",
+            "PI_SUBAGENT_WAIT_TOOL_DEFAULT_TIMEOUT_MS",
+            "PI_SUBAGENT_WAIT_TOOL_ENABLED",
+            "PI_SUBAGENT_WATCHDOG_CHILD_CONFIG"
+          ],
+          "maxDepth": 3,
+          "fanout": 7,
+          "parallel": 2,
+          "sessionCap": 11
+        },
+        "perLaunch": {
+          "format": "byok.runtime-descendant-context",
+          "version": 1,
+          "templateKind": "pi-subagent-print",
+          "edge": {
+            "parent": "pi-rpc",
+            "child": "pi-subagent-print"
+          },
+          "rootTaskId": "synthetic-root-task",
+          "parentInstancePath": [],
+          "instancePath": [
+            0
+          ],
+          "depth": 1,
+          "remainingDepth": 2,
+          "effectiveLimits": {
+            "maxDepth": 3,
+            "fanout": 5,
+            "parallel": 2,
+            "sessionCap": 8
+          },
+          "task": "Synthetic task; no provider call",
+          "modelCandidates": [
+            {
+              "provider": "synthetic",
+              "model": "fixture-model"
+            }
+          ],
+          "attempt": 0,
+          "session": {
+            "cwd": "/synthetic/tasks/task-1",
+            "root": "/synthetic/daemon/sessions",
+            "file": "/synthetic/daemon/sessions/child.jsonl"
+          },
+          "mcp": {
+            "env": {},
+            "metadata": {}
+          },
+          "envValues": {
+            "PI_SUBAGENT_DEPTH": "1",
+            "PI_SUBAGENT_MAX_DEPTH": "3"
+          },
+          "exactNames": [
+            "HOME",
+            "PATH",
+            "PI_CODING_AGENT_DIR",
+            "PI_CODING_AGENT_SESSION_DIR",
+            "PI_PACKAGE_DIR",
+            "PI_SUBAGENT_DEPTH",
+            "PI_SUBAGENT_MAX_DEPTH"
+          ],
+          "controlledDirValues": {
+            "PI_PACKAGE_DIR": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi",
+            "PI_CODING_AGENT_DIR": "/synthetic/daemon/projection",
+            "PI_CODING_AGENT_SESSION_DIR": "/synthetic/daemon/sessions"
+          }
+        }
+      },
+      "actualEnv": {
+        "HOME": "/synthetic/home",
+        "PATH": "/synthetic/bin",
+        "PI_PACKAGE_DIR": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi",
+        "PI_CODING_AGENT_DIR": "/synthetic/daemon/projection",
+        "PI_CODING_AGENT_SESSION_DIR": "/synthetic/daemon/sessions",
+        "PI_SUBAGENT_DEPTH": "1",
+        "PI_SUBAGENT_MAX_DEPTH": "3"
+      },
+      "launchUtf8": "{\"format\":\"byok.descendant-launch\",\"version\":1,\"template\":{\"format\":\"byok.implementation-spawn\",\"version\":1,\"identity\":{\"kind\":\"attested\",\"authority\":\"host-install-record\",\"manifestRevision\":\"fbace72fcda2c44d7b5137ea6ed8e35c5bef21c1fcb96694c4669bbe0f2ee47d\",\"form\":\"interpreter+bundle\",\"installPath\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/salesko-agent.mjs\",\"closureDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"closureKind\":\"artifact\",\"interpreter\":{\"path\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/bun\",\"digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"loadCommandsDigest\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"},\"launchArgv\":[\"__byok_sdk_helper\",\"pi-subagent-print\"],\"launchCwd\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/launch-cwd\",\"assetRoot\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi\",\"assets\":[{\"path\":\"dist/modes/interactive/theme/dark.json\",\"digest\":\"2222222222222222222222222222222222222222222222222222222222222222\"},{\"path\":\"dist/modes/interactive/theme/light.json\",\"digest\":\"3333333333333333333333333333333333333333333333333333333333333333\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/de.json\",\"digest\":\"e8f731c54137afc56932f6da4c7741babe578100204e957ed3dfce42ba94e435\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/en.json\",\"digest\":\"80dbb4f2212c0100c4efe4a234fbe12fd9e43d605f5daf8316573fc30cc3dfea\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/es.json\",\"digest\":\"c847cf6b1987711019fe0e84532303506cf0f620153594fa1ca85bce8c4a2571\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/fr.json\",\"digest\":\"f38f34d6f52a46ae7833e020dc0d8c5fc0ffcbf397360312511c5c71192c347b\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/pt-BR.json\",\"digest\":\"4c1d980cb7cb21e540231b0c36981407238185faabebe92cc34434253c214b5b\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/pt.json\",\"digest\":\"63e831baa6eba70ca5509b703cf877160f0edaeff11d1e649fe53a0e6ae10d17\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/ru.json\",\"digest\":\"21f3771d1067787e8c3a8075141b1fe40fb930d5777da0840fe9f65e1f0e3dca\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/uk.json\",\"digest\":\"0b636854a436383d2be1ec9268cf6da5b26e5a86bb2e49eb20df43b35cd6323c\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/zh.json\",\"digest\":\"0e9598f80fd800bdd9d689979c1f13c8054c175cf9e5b29e93273bee85704f87\"},{\"path\":\"package.json\",\"digest\":\"1111111111111111111111111111111111111111111111111111111111111111\"}],\"nativeProvenance\":{\"packageName\":\"@byok-sdk/pi-coding-agent\",\"packageVersion\":\"0.85.1005\",\"upstreamBase\":\"0.85.1\",\"upstreamCommit\":\"dddddddddddddddddddddddddddddddddddddddd\",\"forkBuild\":5,\"compilerVersion\":2},\"launchEnvNamesDigest\":\"9adfee7b39e32fab90b13aec6b2c9fa31852a69b170f488368c45a310c70611d\",\"loaderEnvValuesDigest\":\"3d17eefc2a5bb43f9fa201677534de043c9c0a010cd2c6005fe4fe6e28031587\",\"installStat\":{\"dev\":1,\"ino\":10,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33133,\"uid\":0,\"gid\":0},\"interpreterStat\":{\"dev\":1,\"ino\":11,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33133,\"uid\":0,\"gid\":0},\"assetStats\":[{\"dev\":1,\"ino\":12,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":13,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":14,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":15,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":16,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":17,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":18,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":19,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":20,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":21,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":22,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":23,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0}]},\"command\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/bun\",\"entry\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/salesko-agent.mjs\",\"fixedArgv\":[\"__byok_sdk_helper\",\"pi-subagent-print\"],\"cwd\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/launch-cwd\",\"envCommitments\":{\"PI_PACKAGE_DIR\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi\",\"PI_CODING_AGENT_DIR\":\"/synthetic/daemon/projection\",\"PI_CODING_AGENT_SESSION_DIR\":\"/synthetic/daemon/sessions\"}},\"templateDigest\":\"70ebe2ccafa965fe0dc80162d6416042fa9b4adac59a9093c0a38a69f6c47561\",\"policy\":{\"envNameAllowlist\":[\"HOME\",\"MCP_DIRECT_TOOLS\",\"PATH\",\"PI_CODING_AGENT_DIR\",\"PI_CODING_AGENT_SESSION_DIR\",\"PI_INTERCOM_SESSION_ID\",\"PI_INTERCOM_STABLE_ID\",\"PI_PACKAGE_DIR\",\"PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT\",\"PI_SUBAGENT_CAPABILITY_CEILING_V1\",\"PI_SUBAGENT_CHILD\",\"PI_SUBAGENT_CHILD_AGENT\",\"PI_SUBAGENT_CHILD_INDEX\",\"PI_SUBAGENT_DEPTH\",\"PI_SUBAGENT_EXTENSION_BINDINGS\",\"PI_SUBAGENT_FANOUT_CHILD\",\"PI_SUBAGENT_FORK_CACHE_KEY\",\"PI_SUBAGENT_INHERIT_GLOBAL_CONTEXT\",\"PI_SUBAGENT_INHERIT_PROJECT_CONTEXT\",\"PI_SUBAGENT_INHERIT_SKILLS\",\"PI_SUBAGENT_INTERCOM_SESSION_NAME\",\"PI_SUBAGENT_MAX_DEPTH\",\"PI_SUBAGENT_MAX_SPAWNS_PER_RUN\",\"PI_SUBAGENT_MAX_SPAWNS_PER_SESSION\",\"PI_SUBAGENT_MCP_DIRECT_TOOLS\",\"PI_SUBAGENT_ORCHESTRATOR_SESSION_ID\",\"PI_SUBAGENT_ORCHESTRATOR_TARGET\",\"PI_SUBAGENT_PARENT_CAPABILITY_TOKEN\",\"PI_SUBAGENT_PARENT_CHILD_INDEX\",\"PI_SUBAGENT_PARENT_CONTROL_INBOX\",\"PI_SUBAGENT_PARENT_DEPTH\",\"PI_SUBAGENT_PARENT_EVENT_SINK\",\"PI_SUBAGENT_PARENT_PATH\",\"PI_SUBAGENT_PARENT_ROOT_RUN_ID\",\"PI_SUBAGENT_PARENT_RUN_ID\",\"PI_SUBAGENT_PARENT_SESSION\",\"PI_SUBAGENT_PERMISSION_AUDIT_PATH\",\"PI_SUBAGENT_PERMISSION_POLICY\",\"PI_SUBAGENT_REQUIRED_TOOLS\",\"PI_SUBAGENT_RUNTIME_ACKNOWLEDGED_EXTENSIONS\",\"PI_SUBAGENT_RUN_FANOUT_BUDGET\",\"PI_SUBAGENT_RUN_ID\",\"PI_SUBAGENT_SESSION_NAME\",\"PI_SUBAGENT_STEER_ACK_DIR\",\"PI_SUBAGENT_STEER_CAPABILITY\",\"PI_SUBAGENT_STEER_INBOX\",\"PI_SUBAGENT_STRUCTURED_OUTPUT_ACCEPTANCE_CAPTURE\",\"PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE\",\"PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA\",\"PI_SUBAGENT_SUPERVISOR_CHANNEL_DIR\",\"PI_SUBAGENT_THINKING_CEILING\",\"PI_SUBAGENT_TOOL_BUDGET\",\"PI_SUBAGENT_TOOL_BUDGET_ZERO_AUTH\",\"PI_SUBAGENT_TOOL_DIAGNOSTIC_PATH\",\"PI_SUBAGENT_WAIT_TOOL_DEFAULT_TIMEOUT_MS\",\"PI_SUBAGENT_WAIT_TOOL_ENABLED\",\"PI_SUBAGENT_WATCHDOG_CHILD_CONFIG\"],\"maxDepth\":3,\"fanout\":7,\"parallel\":2,\"sessionCap\":11},\"perLaunch\":{\"format\":\"byok.runtime-descendant-context\",\"version\":1,\"templateKind\":\"pi-subagent-print\",\"edge\":{\"parent\":\"pi-rpc\",\"child\":\"pi-subagent-print\"},\"rootTaskId\":\"synthetic-root-task\",\"parentInstancePath\":[],\"instancePath\":[0],\"depth\":1,\"remainingDepth\":2,\"effectiveLimits\":{\"maxDepth\":3,\"fanout\":5,\"parallel\":2,\"sessionCap\":8},\"task\":\"Synthetic task; no provider call\",\"modelCandidates\":[{\"provider\":\"synthetic\",\"model\":\"fixture-model\"}],\"attempt\":0,\"session\":{\"cwd\":\"/synthetic/tasks/task-1\",\"root\":\"/synthetic/daemon/sessions\",\"file\":\"/synthetic/daemon/sessions/child.jsonl\"},\"mcp\":{\"env\":{},\"metadata\":{}},\"envValues\":{\"PI_SUBAGENT_DEPTH\":\"1\",\"PI_SUBAGENT_MAX_DEPTH\":\"3\"},\"exactNames\":[\"HOME\",\"PATH\",\"PI_CODING_AGENT_DIR\",\"PI_CODING_AGENT_SESSION_DIR\",\"PI_PACKAGE_DIR\",\"PI_SUBAGENT_DEPTH\",\"PI_SUBAGENT_MAX_DEPTH\"],\"controlledDirValues\":{\"PI_PACKAGE_DIR\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi\",\"PI_CODING_AGENT_DIR\":\"/synthetic/daemon/projection\",\"PI_CODING_AGENT_SESSION_DIR\":\"/synthetic/daemon/sessions\"}}}",
+      "configDigest": "a6d32dfc6095ba1d4b1283fae98ea18a38dc698d3e5a63560099f2f7f1c188f5",
+      "id": "descendant-config-digest-duplicate",
+      "expectedReason": "exactly one --config-digest=<sha256> is required",
+      "expectedExitCode": 78,
+      "stage": "digest extraction and host usage renderer before config read; vector not a spawned-host result",
+      "argvCases": [
+        {
+          "id": "pi-subagent-runner-duplicate",
+          "hostKind": "pi-subagent-runner",
+          "argv": [
+            "__byok_sdk_helper",
+            "pi-subagent-runner",
+            "--config-digest=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--config-digest=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--config",
+            "/synthetic/config.json"
+          ],
+          "expectedExitCode": 78,
+          "expectedStderr": "byok-pi-subagent-runner: exactly one --config-digest=<sha256> is required\n",
+          "expectedReason": "exactly one --config-digest=<sha256> is required",
+          "oneLine": true,
+          "noStack": true
+        },
+        {
+          "id": "pi-subagent-print-duplicate",
+          "hostKind": "pi-subagent-print",
+          "argv": [
+            "__byok_sdk_helper",
+            "pi-subagent-print",
+            "--config-digest=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--config-digest=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--config",
+            "/synthetic/config.json"
+          ],
+          "expectedExitCode": 78,
+          "expectedStderr": "byok-pi-subagent-print: exactly one --config-digest=<sha256> is required\n",
+          "expectedReason": "exactly one --config-digest=<sha256> is required",
+          "oneLine": true,
+          "noStack": true
+        }
+      ]
+    },
+    {
+      "launch": {
+        "format": "byok.descendant-launch",
+        "version": 1,
+        "template": {
+          "format": "byok.implementation-spawn",
+          "version": 1,
+          "identity": {
+            "kind": "attested",
+            "authority": "host-install-record",
+            "manifestRevision": "fbace72fcda2c44d7b5137ea6ed8e35c5bef21c1fcb96694c4669bbe0f2ee47d",
+            "form": "interpreter+bundle",
+            "installPath": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/salesko-agent.mjs",
+            "closureDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "closureKind": "artifact",
+            "interpreter": {
+              "path": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/bun",
+              "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "loadCommandsDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            },
+            "launchArgv": [
+              "__byok_sdk_helper",
+              "pi-subagent-print"
+            ],
+            "launchCwd": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/launch-cwd",
+            "assetRoot": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi",
+            "assets": [
+              {
+                "path": "dist/modes/interactive/theme/dark.json",
+                "digest": "2222222222222222222222222222222222222222222222222222222222222222"
+              },
+              {
+                "path": "dist/modes/interactive/theme/light.json",
+                "digest": "3333333333333333333333333333333333333333333333333333333333333333"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/de.json",
+                "digest": "e8f731c54137afc56932f6da4c7741babe578100204e957ed3dfce42ba94e435"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/en.json",
+                "digest": "80dbb4f2212c0100c4efe4a234fbe12fd9e43d605f5daf8316573fc30cc3dfea"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/es.json",
+                "digest": "c847cf6b1987711019fe0e84532303506cf0f620153594fa1ca85bce8c4a2571"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/fr.json",
+                "digest": "f38f34d6f52a46ae7833e020dc0d8c5fc0ffcbf397360312511c5c71192c347b"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/pt-BR.json",
+                "digest": "4c1d980cb7cb21e540231b0c36981407238185faabebe92cc34434253c214b5b"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/pt.json",
+                "digest": "63e831baa6eba70ca5509b703cf877160f0edaeff11d1e649fe53a0e6ae10d17"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/ru.json",
+                "digest": "21f3771d1067787e8c3a8075141b1fe40fb930d5777da0840fe9f65e1f0e3dca"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/uk.json",
+                "digest": "0b636854a436383d2be1ec9268cf6da5b26e5a86bb2e49eb20df43b35cd6323c"
+              },
+              {
+                "path": "extensions/rpiv-todo/2.8.0/locales/zh.json",
+                "digest": "0e9598f80fd800bdd9d689979c1f13c8054c175cf9e5b29e93273bee85704f87"
+              },
+              {
+                "path": "package.json",
+                "digest": "1111111111111111111111111111111111111111111111111111111111111111"
+              }
+            ],
+            "nativeProvenance": {
+              "packageName": "@byok-sdk/pi-coding-agent",
+              "packageVersion": "0.85.1005",
+              "upstreamBase": "0.85.1",
+              "upstreamCommit": "dddddddddddddddddddddddddddddddddddddddd",
+              "forkBuild": 5,
+              "compilerVersion": 2
+            },
+            "launchEnvNamesDigest": "9adfee7b39e32fab90b13aec6b2c9fa31852a69b170f488368c45a310c70611d",
+            "loaderEnvValuesDigest": "3d17eefc2a5bb43f9fa201677534de043c9c0a010cd2c6005fe4fe6e28031587",
+            "installStat": {
+              "dev": 1,
+              "ino": 10,
+              "size": 100,
+              "mtimeMs": 1000.5,
+              "mode": 33133,
+              "uid": 0,
+              "gid": 0
+            },
+            "interpreterStat": {
+              "dev": 1,
+              "ino": 11,
+              "size": 100,
+              "mtimeMs": 1000.5,
+              "mode": 33133,
+              "uid": 0,
+              "gid": 0
+            },
+            "assetStats": [
+              {
+                "dev": 1,
+                "ino": 12,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 13,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 14,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 15,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 16,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 17,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 18,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 19,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 20,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 21,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 22,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              },
+              {
+                "dev": 1,
+                "ino": 23,
+                "size": 100,
+                "mtimeMs": 1000.5,
+                "mode": 33060,
+                "uid": 0,
+                "gid": 0
+              }
+            ]
+          },
+          "command": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/bun",
+          "entry": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/salesko-agent.mjs",
+          "fixedArgv": [
+            "__byok_sdk_helper",
+            "pi-subagent-print"
+          ],
+          "cwd": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/launch-cwd",
+          "envCommitments": {
+            "PI_PACKAGE_DIR": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi",
+            "PI_CODING_AGENT_DIR": "/synthetic/daemon/projection",
+            "PI_CODING_AGENT_SESSION_DIR": "/synthetic/daemon/sessions"
+          }
+        },
+        "templateDigest": "70ebe2ccafa965fe0dc80162d6416042fa9b4adac59a9093c0a38a69f6c47561",
+        "policy": {
+          "envNameAllowlist": [
+            "HOME",
+            "MCP_DIRECT_TOOLS",
+            "PATH",
+            "PI_CODING_AGENT_DIR",
+            "PI_CODING_AGENT_SESSION_DIR",
+            "PI_INTERCOM_SESSION_ID",
+            "PI_INTERCOM_STABLE_ID",
+            "PI_PACKAGE_DIR",
+            "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT",
+            "PI_SUBAGENT_CAPABILITY_CEILING_V1",
+            "PI_SUBAGENT_CHILD",
+            "PI_SUBAGENT_CHILD_AGENT",
+            "PI_SUBAGENT_CHILD_INDEX",
+            "PI_SUBAGENT_DEPTH",
+            "PI_SUBAGENT_EXTENSION_BINDINGS",
+            "PI_SUBAGENT_FANOUT_CHILD",
+            "PI_SUBAGENT_FORK_CACHE_KEY",
+            "PI_SUBAGENT_INHERIT_GLOBAL_CONTEXT",
+            "PI_SUBAGENT_INHERIT_PROJECT_CONTEXT",
+            "PI_SUBAGENT_INHERIT_SKILLS",
+            "PI_SUBAGENT_INTERCOM_SESSION_NAME",
+            "PI_SUBAGENT_MAX_DEPTH",
+            "PI_SUBAGENT_MAX_SPAWNS_PER_RUN",
+            "PI_SUBAGENT_MAX_SPAWNS_PER_SESSION",
+            "PI_SUBAGENT_MCP_DIRECT_TOOLS",
+            "PI_SUBAGENT_ORCHESTRATOR_SESSION_ID",
+            "PI_SUBAGENT_ORCHESTRATOR_TARGET",
+            "PI_SUBAGENT_PARENT_CAPABILITY_TOKEN",
+            "PI_SUBAGENT_PARENT_CHILD_INDEX",
+            "PI_SUBAGENT_PARENT_CONTROL_INBOX",
+            "PI_SUBAGENT_PARENT_DEPTH",
+            "PI_SUBAGENT_PARENT_EVENT_SINK",
+            "PI_SUBAGENT_PARENT_PATH",
+            "PI_SUBAGENT_PARENT_ROOT_RUN_ID",
+            "PI_SUBAGENT_PARENT_RUN_ID",
+            "PI_SUBAGENT_PARENT_SESSION",
+            "PI_SUBAGENT_PERMISSION_AUDIT_PATH",
+            "PI_SUBAGENT_PERMISSION_POLICY",
+            "PI_SUBAGENT_REQUIRED_TOOLS",
+            "PI_SUBAGENT_RUNTIME_ACKNOWLEDGED_EXTENSIONS",
+            "PI_SUBAGENT_RUN_FANOUT_BUDGET",
+            "PI_SUBAGENT_RUN_ID",
+            "PI_SUBAGENT_SESSION_NAME",
+            "PI_SUBAGENT_STEER_ACK_DIR",
+            "PI_SUBAGENT_STEER_CAPABILITY",
+            "PI_SUBAGENT_STEER_INBOX",
+            "PI_SUBAGENT_STRUCTURED_OUTPUT_ACCEPTANCE_CAPTURE",
+            "PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE",
+            "PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA",
+            "PI_SUBAGENT_SUPERVISOR_CHANNEL_DIR",
+            "PI_SUBAGENT_THINKING_CEILING",
+            "PI_SUBAGENT_TOOL_BUDGET",
+            "PI_SUBAGENT_TOOL_BUDGET_ZERO_AUTH",
+            "PI_SUBAGENT_TOOL_DIAGNOSTIC_PATH",
+            "PI_SUBAGENT_WAIT_TOOL_DEFAULT_TIMEOUT_MS",
+            "PI_SUBAGENT_WAIT_TOOL_ENABLED",
+            "PI_SUBAGENT_WATCHDOG_CHILD_CONFIG"
+          ],
+          "maxDepth": 3,
+          "fanout": 7,
+          "parallel": 2,
+          "sessionCap": 11
+        },
+        "perLaunch": {
+          "format": "byok.runtime-descendant-context",
+          "version": 1,
+          "templateKind": "pi-subagent-print",
+          "edge": {
+            "parent": "pi-rpc",
+            "child": "pi-subagent-print"
+          },
+          "rootTaskId": "synthetic-root-task",
+          "parentInstancePath": [],
+          "instancePath": [
+            0
+          ],
+          "depth": 1,
+          "remainingDepth": 2,
+          "effectiveLimits": {
+            "maxDepth": 3,
+            "fanout": 5,
+            "parallel": 2,
+            "sessionCap": 8
+          },
+          "task": "Synthetic task; no provider call",
+          "modelCandidates": [
+            {
+              "provider": "synthetic",
+              "model": "fixture-model"
+            }
+          ],
+          "attempt": 0,
+          "session": {
+            "cwd": "/synthetic/tasks/task-1",
+            "root": "/synthetic/daemon/sessions",
+            "file": "/synthetic/daemon/sessions/child.jsonl"
+          },
+          "mcp": {
+            "env": {},
+            "metadata": {}
+          },
+          "envValues": {
+            "PI_SUBAGENT_DEPTH": "1",
+            "PI_SUBAGENT_MAX_DEPTH": "3"
+          },
+          "exactNames": [
+            "HOME",
+            "PATH",
+            "PI_CODING_AGENT_DIR",
+            "PI_CODING_AGENT_SESSION_DIR",
+            "PI_PACKAGE_DIR",
+            "PI_SUBAGENT_DEPTH",
+            "PI_SUBAGENT_MAX_DEPTH"
+          ],
+          "controlledDirValues": {
+            "PI_PACKAGE_DIR": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi",
+            "PI_CODING_AGENT_DIR": "/synthetic/daemon/projection",
+            "PI_CODING_AGENT_SESSION_DIR": "/synthetic/daemon/sessions"
+          }
+        }
+      },
+      "actualEnv": {
+        "HOME": "/synthetic/home",
+        "PATH": "/synthetic/bin",
+        "PI_PACKAGE_DIR": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi",
+        "PI_CODING_AGENT_DIR": "/synthetic/daemon/projection",
+        "PI_CODING_AGENT_SESSION_DIR": "/synthetic/daemon/sessions",
+        "PI_SUBAGENT_DEPTH": "1",
+        "PI_SUBAGENT_MAX_DEPTH": "3"
+      },
+      "launchUtf8": "{\"format\":\"byok.descendant-launch\",\"version\":1,\"template\":{\"format\":\"byok.implementation-spawn\",\"version\":1,\"identity\":{\"kind\":\"attested\",\"authority\":\"host-install-record\",\"manifestRevision\":\"fbace72fcda2c44d7b5137ea6ed8e35c5bef21c1fcb96694c4669bbe0f2ee47d\",\"form\":\"interpreter+bundle\",\"installPath\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/salesko-agent.mjs\",\"closureDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"closureKind\":\"artifact\",\"interpreter\":{\"path\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/bun\",\"digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"loadCommandsDigest\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"},\"launchArgv\":[\"__byok_sdk_helper\",\"pi-subagent-print\"],\"launchCwd\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/launch-cwd\",\"assetRoot\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi\",\"assets\":[{\"path\":\"dist/modes/interactive/theme/dark.json\",\"digest\":\"2222222222222222222222222222222222222222222222222222222222222222\"},{\"path\":\"dist/modes/interactive/theme/light.json\",\"digest\":\"3333333333333333333333333333333333333333333333333333333333333333\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/de.json\",\"digest\":\"e8f731c54137afc56932f6da4c7741babe578100204e957ed3dfce42ba94e435\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/en.json\",\"digest\":\"80dbb4f2212c0100c4efe4a234fbe12fd9e43d605f5daf8316573fc30cc3dfea\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/es.json\",\"digest\":\"c847cf6b1987711019fe0e84532303506cf0f620153594fa1ca85bce8c4a2571\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/fr.json\",\"digest\":\"f38f34d6f52a46ae7833e020dc0d8c5fc0ffcbf397360312511c5c71192c347b\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/pt-BR.json\",\"digest\":\"4c1d980cb7cb21e540231b0c36981407238185faabebe92cc34434253c214b5b\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/pt.json\",\"digest\":\"63e831baa6eba70ca5509b703cf877160f0edaeff11d1e649fe53a0e6ae10d17\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/ru.json\",\"digest\":\"21f3771d1067787e8c3a8075141b1fe40fb930d5777da0840fe9f65e1f0e3dca\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/uk.json\",\"digest\":\"0b636854a436383d2be1ec9268cf6da5b26e5a86bb2e49eb20df43b35cd6323c\"},{\"path\":\"extensions/rpiv-todo/2.8.0/locales/zh.json\",\"digest\":\"0e9598f80fd800bdd9d689979c1f13c8054c175cf9e5b29e93273bee85704f87\"},{\"path\":\"package.json\",\"digest\":\"1111111111111111111111111111111111111111111111111111111111111111\"}],\"nativeProvenance\":{\"packageName\":\"@byok-sdk/pi-coding-agent\",\"packageVersion\":\"0.85.1005\",\"upstreamBase\":\"0.85.1\",\"upstreamCommit\":\"dddddddddddddddddddddddddddddddddddddddd\",\"forkBuild\":5,\"compilerVersion\":2},\"launchEnvNamesDigest\":\"9adfee7b39e32fab90b13aec6b2c9fa31852a69b170f488368c45a310c70611d\",\"loaderEnvValuesDigest\":\"3d17eefc2a5bb43f9fa201677534de043c9c0a010cd2c6005fe4fe6e28031587\",\"installStat\":{\"dev\":1,\"ino\":10,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33133,\"uid\":0,\"gid\":0},\"interpreterStat\":{\"dev\":1,\"ino\":11,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33133,\"uid\":0,\"gid\":0},\"assetStats\":[{\"dev\":1,\"ino\":12,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":13,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":14,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":15,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":16,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":17,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":18,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":19,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":20,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":21,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":22,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0},{\"dev\":1,\"ino\":23,\"size\":100,\"mtimeMs\":1000.5,\"mode\":33060,\"uid\":0,\"gid\":0}]},\"command\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/bun\",\"entry\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/salesko-agent.mjs\",\"fixedArgv\":[\"__byok_sdk_helper\",\"pi-subagent-print\"],\"cwd\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/launch-cwd\",\"envCommitments\":{\"PI_PACKAGE_DIR\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi\",\"PI_CODING_AGENT_DIR\":\"/synthetic/daemon/projection\",\"PI_CODING_AGENT_SESSION_DIR\":\"/synthetic/daemon/sessions\"}},\"templateDigest\":\"70ebe2ccafa965fe0dc80162d6416042fa9b4adac59a9093c0a38a69f6c47561\",\"policy\":{\"envNameAllowlist\":[\"HOME\",\"MCP_DIRECT_TOOLS\",\"PATH\",\"PI_CODING_AGENT_DIR\",\"PI_CODING_AGENT_SESSION_DIR\",\"PI_INTERCOM_SESSION_ID\",\"PI_INTERCOM_STABLE_ID\",\"PI_PACKAGE_DIR\",\"PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT\",\"PI_SUBAGENT_CAPABILITY_CEILING_V1\",\"PI_SUBAGENT_CHILD\",\"PI_SUBAGENT_CHILD_AGENT\",\"PI_SUBAGENT_CHILD_INDEX\",\"PI_SUBAGENT_DEPTH\",\"PI_SUBAGENT_EXTENSION_BINDINGS\",\"PI_SUBAGENT_FANOUT_CHILD\",\"PI_SUBAGENT_FORK_CACHE_KEY\",\"PI_SUBAGENT_INHERIT_GLOBAL_CONTEXT\",\"PI_SUBAGENT_INHERIT_PROJECT_CONTEXT\",\"PI_SUBAGENT_INHERIT_SKILLS\",\"PI_SUBAGENT_INTERCOM_SESSION_NAME\",\"PI_SUBAGENT_MAX_DEPTH\",\"PI_SUBAGENT_MAX_SPAWNS_PER_RUN\",\"PI_SUBAGENT_MAX_SPAWNS_PER_SESSION\",\"PI_SUBAGENT_MCP_DIRECT_TOOLS\",\"PI_SUBAGENT_ORCHESTRATOR_SESSION_ID\",\"PI_SUBAGENT_ORCHESTRATOR_TARGET\",\"PI_SUBAGENT_PARENT_CAPABILITY_TOKEN\",\"PI_SUBAGENT_PARENT_CHILD_INDEX\",\"PI_SUBAGENT_PARENT_CONTROL_INBOX\",\"PI_SUBAGENT_PARENT_DEPTH\",\"PI_SUBAGENT_PARENT_EVENT_SINK\",\"PI_SUBAGENT_PARENT_PATH\",\"PI_SUBAGENT_PARENT_ROOT_RUN_ID\",\"PI_SUBAGENT_PARENT_RUN_ID\",\"PI_SUBAGENT_PARENT_SESSION\",\"PI_SUBAGENT_PERMISSION_AUDIT_PATH\",\"PI_SUBAGENT_PERMISSION_POLICY\",\"PI_SUBAGENT_REQUIRED_TOOLS\",\"PI_SUBAGENT_RUNTIME_ACKNOWLEDGED_EXTENSIONS\",\"PI_SUBAGENT_RUN_FANOUT_BUDGET\",\"PI_SUBAGENT_RUN_ID\",\"PI_SUBAGENT_SESSION_NAME\",\"PI_SUBAGENT_STEER_ACK_DIR\",\"PI_SUBAGENT_STEER_CAPABILITY\",\"PI_SUBAGENT_STEER_INBOX\",\"PI_SUBAGENT_STRUCTURED_OUTPUT_ACCEPTANCE_CAPTURE\",\"PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE\",\"PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA\",\"PI_SUBAGENT_SUPERVISOR_CHANNEL_DIR\",\"PI_SUBAGENT_THINKING_CEILING\",\"PI_SUBAGENT_TOOL_BUDGET\",\"PI_SUBAGENT_TOOL_BUDGET_ZERO_AUTH\",\"PI_SUBAGENT_TOOL_DIAGNOSTIC_PATH\",\"PI_SUBAGENT_WAIT_TOOL_DEFAULT_TIMEOUT_MS\",\"PI_SUBAGENT_WAIT_TOOL_ENABLED\",\"PI_SUBAGENT_WATCHDOG_CHILD_CONFIG\"],\"maxDepth\":3,\"fanout\":7,\"parallel\":2,\"sessionCap\":11},\"perLaunch\":{\"format\":\"byok.runtime-descendant-context\",\"version\":1,\"templateKind\":\"pi-subagent-print\",\"edge\":{\"parent\":\"pi-rpc\",\"child\":\"pi-subagent-print\"},\"rootTaskId\":\"synthetic-root-task\",\"parentInstancePath\":[],\"instancePath\":[0],\"depth\":1,\"remainingDepth\":2,\"effectiveLimits\":{\"maxDepth\":3,\"fanout\":5,\"parallel\":2,\"sessionCap\":8},\"task\":\"Synthetic task; no provider call\",\"modelCandidates\":[{\"provider\":\"synthetic\",\"model\":\"fixture-model\"}],\"attempt\":0,\"session\":{\"cwd\":\"/synthetic/tasks/task-1\",\"root\":\"/synthetic/daemon/sessions\",\"file\":\"/synthetic/daemon/sessions/child.jsonl\"},\"mcp\":{\"env\":{},\"metadata\":{}},\"envValues\":{\"PI_SUBAGENT_DEPTH\":\"1\",\"PI_SUBAGENT_MAX_DEPTH\":\"3\"},\"exactNames\":[\"HOME\",\"PATH\",\"PI_CODING_AGENT_DIR\",\"PI_CODING_AGENT_SESSION_DIR\",\"PI_PACKAGE_DIR\",\"PI_SUBAGENT_DEPTH\",\"PI_SUBAGENT_MAX_DEPTH\"],\"controlledDirValues\":{\"PI_PACKAGE_DIR\":\"/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi\",\"PI_CODING_AGENT_DIR\":\"/synthetic/daemon/projection\",\"PI_CODING_AGENT_SESSION_DIR\":\"/synthetic/daemon/sessions\"}}}",
+      "configDigest": "a6d32dfc6095ba1d4b1283fae98ea18a38dc698d3e5a63560099f2f7f1c188f5",
+      "id": "descendant-config-digest-malformed",
+      "expectedReason": "--config-digest must contain 64 lowercase hexadecimal characters",
+      "expectedExitCode": 78,
+      "stage": "digest extraction and host usage renderer before config read; vector not a spawned-host result",
+      "argvCases": [
+        {
+          "id": "pi-subagent-runner-non-hex",
+          "hostKind": "pi-subagent-runner",
+          "argv": [
+            "__byok_sdk_helper",
+            "pi-subagent-runner",
+            "--config-digest=gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+            "--config",
+            "/synthetic/config.json"
+          ],
+          "expectedExitCode": 78,
+          "expectedStderr": "byok-pi-subagent-runner: --config-digest must contain 64 lowercase hexadecimal characters\n",
+          "expectedReason": "--config-digest must contain 64 lowercase hexadecimal characters",
+          "oneLine": true,
+          "noStack": true
+        },
+        {
+          "id": "pi-subagent-runner-wrong-length",
+          "hostKind": "pi-subagent-runner",
+          "argv": [
+            "__byok_sdk_helper",
+            "pi-subagent-runner",
+            "--config-digest=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--config",
+            "/synthetic/config.json"
+          ],
+          "expectedExitCode": 78,
+          "expectedStderr": "byok-pi-subagent-runner: --config-digest must contain 64 lowercase hexadecimal characters\n",
+          "expectedReason": "--config-digest must contain 64 lowercase hexadecimal characters",
+          "oneLine": true,
+          "noStack": true
+        },
+        {
+          "id": "pi-subagent-runner-uppercase",
+          "hostKind": "pi-subagent-runner",
+          "argv": [
+            "__byok_sdk_helper",
+            "pi-subagent-runner",
+            "--config-digest=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "--config",
+            "/synthetic/config.json"
+          ],
+          "expectedExitCode": 78,
+          "expectedStderr": "byok-pi-subagent-runner: --config-digest must contain 64 lowercase hexadecimal characters\n",
+          "expectedReason": "--config-digest must contain 64 lowercase hexadecimal characters",
+          "oneLine": true,
+          "noStack": true
+        },
+        {
+          "id": "pi-subagent-print-non-hex",
+          "hostKind": "pi-subagent-print",
+          "argv": [
+            "__byok_sdk_helper",
+            "pi-subagent-print",
+            "--config-digest=gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+            "--config",
+            "/synthetic/config.json"
+          ],
+          "expectedExitCode": 78,
+          "expectedStderr": "byok-pi-subagent-print: --config-digest must contain 64 lowercase hexadecimal characters\n",
+          "expectedReason": "--config-digest must contain 64 lowercase hexadecimal characters",
+          "oneLine": true,
+          "noStack": true
+        },
+        {
+          "id": "pi-subagent-print-wrong-length",
+          "hostKind": "pi-subagent-print",
+          "argv": [
+            "__byok_sdk_helper",
+            "pi-subagent-print",
+            "--config-digest=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--config",
+            "/synthetic/config.json"
+          ],
+          "expectedExitCode": 78,
+          "expectedStderr": "byok-pi-subagent-print: --config-digest must contain 64 lowercase hexadecimal characters\n",
+          "expectedReason": "--config-digest must contain 64 lowercase hexadecimal characters",
+          "oneLine": true,
+          "noStack": true
+        },
+        {
+          "id": "pi-subagent-print-uppercase",
+          "hostKind": "pi-subagent-print",
+          "argv": [
+            "__byok_sdk_helper",
+            "pi-subagent-print",
+            "--config-digest=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "--config",
+            "/synthetic/config.json"
+          ],
+          "expectedExitCode": 78,
+          "expectedStderr": "byok-pi-subagent-print: --config-digest must contain 64 lowercase hexadecimal characters\n",
+          "expectedReason": "--config-digest must contain 64 lowercase hexadecimal characters",
+          "oneLine": true,
+          "noStack": true
+        }
+      ]
+    }
+  ],
+  "resolutionCases": [
+    {
+      "id": "runtime-wrapper-policy-missing",
+      "request": {
+        "subject": {
+          "kind": "runtime",
+          "runtimeId": "pi"
+        },
+        "runtimeEntry": "pi-prepared"
+      },
+      "response": {
+        "record": {
+          "kind": "attested",
+          "authority": "host-install-record",
+          "manifestRevision": "fbace72fcda2c44d7b5137ea6ed8e35c5bef21c1fcb96694c4669bbe0f2ee47d",
+          "form": "interpreter+bundle",
+          "installPath": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/salesko-agent.mjs",
+          "closureDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "closureKind": "artifact",
+          "interpreter": {
+            "path": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/bun",
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "loadCommandsDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "launchArgv": [
+            "__byok_sdk_helper",
+            "pi-prepared"
+          ],
+          "launchCwd": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/launch-cwd",
+          "assetRoot": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi",
+          "assets": [
+            {
+              "path": "dist/modes/interactive/theme/dark.json",
+              "digest": "2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            {
+              "path": "dist/modes/interactive/theme/light.json",
+              "digest": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/de.json",
+              "digest": "e8f731c54137afc56932f6da4c7741babe578100204e957ed3dfce42ba94e435"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/en.json",
+              "digest": "80dbb4f2212c0100c4efe4a234fbe12fd9e43d605f5daf8316573fc30cc3dfea"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/es.json",
+              "digest": "c847cf6b1987711019fe0e84532303506cf0f620153594fa1ca85bce8c4a2571"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/fr.json",
+              "digest": "f38f34d6f52a46ae7833e020dc0d8c5fc0ffcbf397360312511c5c71192c347b"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/pt-BR.json",
+              "digest": "4c1d980cb7cb21e540231b0c36981407238185faabebe92cc34434253c214b5b"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/pt.json",
+              "digest": "63e831baa6eba70ca5509b703cf877160f0edaeff11d1e649fe53a0e6ae10d17"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/ru.json",
+              "digest": "21f3771d1067787e8c3a8075141b1fe40fb930d5777da0840fe9f65e1f0e3dca"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/uk.json",
+              "digest": "0b636854a436383d2be1ec9268cf6da5b26e5a86bb2e49eb20df43b35cd6323c"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/zh.json",
+              "digest": "0e9598f80fd800bdd9d689979c1f13c8054c175cf9e5b29e93273bee85704f87"
+            },
+            {
+              "path": "package.json",
+              "digest": "1111111111111111111111111111111111111111111111111111111111111111"
+            }
+          ],
+          "nativeProvenance": {
+            "packageName": "@byok-sdk/pi-coding-agent",
+            "packageVersion": "0.85.1005",
+            "upstreamBase": "0.85.1",
+            "upstreamCommit": "dddddddddddddddddddddddddddddddddddddddd",
+            "forkBuild": 5,
+            "compilerVersion": 2
+          }
+        },
+        "edges": [
+          {
+            "parent": "pi-rpc",
+            "child": "pi-subagent-print",
+            "inheritsCredential": true
+          },
+          {
+            "parent": "pi-rpc",
+            "child": "pi-subagent-runner",
+            "inheritsCredential": true
+          },
+          {
+            "parent": "pi-subagent-print",
+            "child": "pi-subagent-print",
+            "inheritsCredential": true
+          },
+          {
+            "parent": "pi-subagent-print",
+            "child": "pi-subagent-runner",
+            "inheritsCredential": true
+          },
+          {
+            "parent": "pi-subagent-runner",
+            "child": "pi-subagent-print",
+            "inheritsCredential": true
+          }
+        ]
+      },
+      "expectedReason": "runtime_resolution_policy_required",
+      "stage": "future subject-discriminated resolution parser; not implemented"
+    },
+    {
+      "id": "mcp-bare-record-with-policy",
+      "request": {
+        "subject": {
+          "kind": "mcp-server",
+          "toolsetId": "synthetic",
+          "serverName": "synthetic"
+        }
+      },
+      "response": {
+        "kind": "attested",
+        "authority": "host-install-record",
+        "manifestRevision": "fbace72fcda2c44d7b5137ea6ed8e35c5bef21c1fcb96694c4669bbe0f2ee47d",
+        "form": "interpreter+bundle",
+        "installPath": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/salesko-agent.mjs",
+        "closureDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "closureKind": "artifact",
+        "interpreter": {
+          "path": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/bun",
+          "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "loadCommandsDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "launchArgv": [
+          "mcp",
+          "serve"
+        ],
+        "launchCwd": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/launch-cwd",
+        "descendantPolicy": {
+          "envNameAllowlist": [
+            "HOME",
+            "MCP_DIRECT_TOOLS",
+            "PATH",
+            "PI_CODING_AGENT_DIR",
+            "PI_CODING_AGENT_SESSION_DIR",
+            "PI_INTERCOM_SESSION_ID",
+            "PI_INTERCOM_STABLE_ID",
+            "PI_PACKAGE_DIR",
+            "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT",
+            "PI_SUBAGENT_CAPABILITY_CEILING_V1",
+            "PI_SUBAGENT_CHILD",
+            "PI_SUBAGENT_CHILD_AGENT",
+            "PI_SUBAGENT_CHILD_INDEX",
+            "PI_SUBAGENT_DEPTH",
+            "PI_SUBAGENT_EXTENSION_BINDINGS",
+            "PI_SUBAGENT_FANOUT_CHILD",
+            "PI_SUBAGENT_FORK_CACHE_KEY",
+            "PI_SUBAGENT_INHERIT_GLOBAL_CONTEXT",
+            "PI_SUBAGENT_INHERIT_PROJECT_CONTEXT",
+            "PI_SUBAGENT_INHERIT_SKILLS",
+            "PI_SUBAGENT_INTERCOM_SESSION_NAME",
+            "PI_SUBAGENT_MAX_DEPTH",
+            "PI_SUBAGENT_MAX_SPAWNS_PER_RUN",
+            "PI_SUBAGENT_MAX_SPAWNS_PER_SESSION",
+            "PI_SUBAGENT_MCP_DIRECT_TOOLS",
+            "PI_SUBAGENT_ORCHESTRATOR_SESSION_ID",
+            "PI_SUBAGENT_ORCHESTRATOR_TARGET",
+            "PI_SUBAGENT_PARENT_CAPABILITY_TOKEN",
+            "PI_SUBAGENT_PARENT_CHILD_INDEX",
+            "PI_SUBAGENT_PARENT_CONTROL_INBOX",
+            "PI_SUBAGENT_PARENT_DEPTH",
+            "PI_SUBAGENT_PARENT_EVENT_SINK",
+            "PI_SUBAGENT_PARENT_PATH",
+            "PI_SUBAGENT_PARENT_ROOT_RUN_ID",
+            "PI_SUBAGENT_PARENT_RUN_ID",
+            "PI_SUBAGENT_PARENT_SESSION",
+            "PI_SUBAGENT_PERMISSION_AUDIT_PATH",
+            "PI_SUBAGENT_PERMISSION_POLICY",
+            "PI_SUBAGENT_REQUIRED_TOOLS",
+            "PI_SUBAGENT_RUNTIME_ACKNOWLEDGED_EXTENSIONS",
+            "PI_SUBAGENT_RUN_FANOUT_BUDGET",
+            "PI_SUBAGENT_RUN_ID",
+            "PI_SUBAGENT_SESSION_NAME",
+            "PI_SUBAGENT_STEER_ACK_DIR",
+            "PI_SUBAGENT_STEER_CAPABILITY",
+            "PI_SUBAGENT_STEER_INBOX",
+            "PI_SUBAGENT_STRUCTURED_OUTPUT_ACCEPTANCE_CAPTURE",
+            "PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE",
+            "PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA",
+            "PI_SUBAGENT_SUPERVISOR_CHANNEL_DIR",
+            "PI_SUBAGENT_THINKING_CEILING",
+            "PI_SUBAGENT_TOOL_BUDGET",
+            "PI_SUBAGENT_TOOL_BUDGET_ZERO_AUTH",
+            "PI_SUBAGENT_TOOL_DIAGNOSTIC_PATH",
+            "PI_SUBAGENT_WAIT_TOOL_DEFAULT_TIMEOUT_MS",
+            "PI_SUBAGENT_WAIT_TOOL_ENABLED",
+            "PI_SUBAGENT_WATCHDOG_CHILD_CONFIG"
+          ],
+          "maxDepth": 3,
+          "fanout": 7,
+          "parallel": 2,
+          "sessionCap": 11
+        }
+      },
+      "expectedReason": "mcp_resolution_unknown_key",
+      "stage": "future subject-discriminated resolution parser; not implemented"
+    },
+    {
+      "id": "runtime-legacy-bare-record",
+      "request": {
+        "subject": {
+          "kind": "runtime",
+          "runtimeId": "pi"
+        },
+        "runtimeEntry": "pi-prepared"
+      },
+      "response": {
+        "kind": "attested",
+        "authority": "host-install-record",
+        "manifestRevision": "fbace72fcda2c44d7b5137ea6ed8e35c5bef21c1fcb96694c4669bbe0f2ee47d",
+        "form": "interpreter+bundle",
+        "installPath": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/salesko-agent.mjs",
+        "closureDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "closureKind": "artifact",
+        "interpreter": {
+          "path": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/bun",
+          "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "loadCommandsDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "launchArgv": [
+          "__byok_sdk_helper",
+          "pi-prepared"
+        ],
+        "launchCwd": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/launch-cwd",
+        "assetRoot": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi",
+        "assets": [
+          {
+            "path": "dist/modes/interactive/theme/dark.json",
+            "digest": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          {
+            "path": "dist/modes/interactive/theme/light.json",
+            "digest": "3333333333333333333333333333333333333333333333333333333333333333"
+          },
+          {
+            "path": "extensions/rpiv-todo/2.8.0/locales/de.json",
+            "digest": "e8f731c54137afc56932f6da4c7741babe578100204e957ed3dfce42ba94e435"
+          },
+          {
+            "path": "extensions/rpiv-todo/2.8.0/locales/en.json",
+            "digest": "80dbb4f2212c0100c4efe4a234fbe12fd9e43d605f5daf8316573fc30cc3dfea"
+          },
+          {
+            "path": "extensions/rpiv-todo/2.8.0/locales/es.json",
+            "digest": "c847cf6b1987711019fe0e84532303506cf0f620153594fa1ca85bce8c4a2571"
+          },
+          {
+            "path": "extensions/rpiv-todo/2.8.0/locales/fr.json",
+            "digest": "f38f34d6f52a46ae7833e020dc0d8c5fc0ffcbf397360312511c5c71192c347b"
+          },
+          {
+            "path": "extensions/rpiv-todo/2.8.0/locales/pt-BR.json",
+            "digest": "4c1d980cb7cb21e540231b0c36981407238185faabebe92cc34434253c214b5b"
+          },
+          {
+            "path": "extensions/rpiv-todo/2.8.0/locales/pt.json",
+            "digest": "63e831baa6eba70ca5509b703cf877160f0edaeff11d1e649fe53a0e6ae10d17"
+          },
+          {
+            "path": "extensions/rpiv-todo/2.8.0/locales/ru.json",
+            "digest": "21f3771d1067787e8c3a8075141b1fe40fb930d5777da0840fe9f65e1f0e3dca"
+          },
+          {
+            "path": "extensions/rpiv-todo/2.8.0/locales/uk.json",
+            "digest": "0b636854a436383d2be1ec9268cf6da5b26e5a86bb2e49eb20df43b35cd6323c"
+          },
+          {
+            "path": "extensions/rpiv-todo/2.8.0/locales/zh.json",
+            "digest": "0e9598f80fd800bdd9d689979c1f13c8054c175cf9e5b29e93273bee85704f87"
+          },
+          {
+            "path": "package.json",
+            "digest": "1111111111111111111111111111111111111111111111111111111111111111"
+          }
+        ],
+        "nativeProvenance": {
+          "packageName": "@byok-sdk/pi-coding-agent",
+          "packageVersion": "0.85.1005",
+          "upstreamBase": "0.85.1",
+          "upstreamCommit": "dddddddddddddddddddddddddddddddddddddddd",
+          "forkBuild": 5,
+          "compilerVersion": 2
+        }
+      },
+      "expectedReason": "runtime_resolution_wrapper_required",
+      "stage": "future subject-discriminated resolution parser; not implemented"
+    },
+    {
+      "id": "mcp-receives-runtime-wrapper",
+      "request": {
+        "subject": {
+          "kind": "mcp-server",
+          "toolsetId": "synthetic",
+          "serverName": "synthetic"
+        }
+      },
+      "response": {
+        "record": {
+          "kind": "attested",
+          "authority": "host-install-record",
+          "manifestRevision": "fbace72fcda2c44d7b5137ea6ed8e35c5bef21c1fcb96694c4669bbe0f2ee47d",
+          "form": "interpreter+bundle",
+          "installPath": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/salesko-agent.mjs",
+          "closureDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "closureKind": "artifact",
+          "interpreter": {
+            "path": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/bun",
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "loadCommandsDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "launchArgv": [
+            "__byok_sdk_helper",
+            "pi-prepared"
+          ],
+          "launchCwd": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/launch-cwd",
+          "assetRoot": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi",
+          "assets": [
+            {
+              "path": "dist/modes/interactive/theme/dark.json",
+              "digest": "2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            {
+              "path": "dist/modes/interactive/theme/light.json",
+              "digest": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/de.json",
+              "digest": "e8f731c54137afc56932f6da4c7741babe578100204e957ed3dfce42ba94e435"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/en.json",
+              "digest": "80dbb4f2212c0100c4efe4a234fbe12fd9e43d605f5daf8316573fc30cc3dfea"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/es.json",
+              "digest": "c847cf6b1987711019fe0e84532303506cf0f620153594fa1ca85bce8c4a2571"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/fr.json",
+              "digest": "f38f34d6f52a46ae7833e020dc0d8c5fc0ffcbf397360312511c5c71192c347b"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/pt-BR.json",
+              "digest": "4c1d980cb7cb21e540231b0c36981407238185faabebe92cc34434253c214b5b"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/pt.json",
+              "digest": "63e831baa6eba70ca5509b703cf877160f0edaeff11d1e649fe53a0e6ae10d17"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/ru.json",
+              "digest": "21f3771d1067787e8c3a8075141b1fe40fb930d5777da0840fe9f65e1f0e3dca"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/uk.json",
+              "digest": "0b636854a436383d2be1ec9268cf6da5b26e5a86bb2e49eb20df43b35cd6323c"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/zh.json",
+              "digest": "0e9598f80fd800bdd9d689979c1f13c8054c175cf9e5b29e93273bee85704f87"
+            },
+            {
+              "path": "package.json",
+              "digest": "1111111111111111111111111111111111111111111111111111111111111111"
+            }
+          ],
+          "nativeProvenance": {
+            "packageName": "@byok-sdk/pi-coding-agent",
+            "packageVersion": "0.85.1005",
+            "upstreamBase": "0.85.1",
+            "upstreamCommit": "dddddddddddddddddddddddddddddddddddddddd",
+            "forkBuild": 5,
+            "compilerVersion": 2
+          }
+        },
+        "descendantPolicy": {
+          "envNameAllowlist": [
+            "HOME",
+            "MCP_DIRECT_TOOLS",
+            "PATH",
+            "PI_CODING_AGENT_DIR",
+            "PI_CODING_AGENT_SESSION_DIR",
+            "PI_INTERCOM_SESSION_ID",
+            "PI_INTERCOM_STABLE_ID",
+            "PI_PACKAGE_DIR",
+            "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT",
+            "PI_SUBAGENT_CAPABILITY_CEILING_V1",
+            "PI_SUBAGENT_CHILD",
+            "PI_SUBAGENT_CHILD_AGENT",
+            "PI_SUBAGENT_CHILD_INDEX",
+            "PI_SUBAGENT_DEPTH",
+            "PI_SUBAGENT_EXTENSION_BINDINGS",
+            "PI_SUBAGENT_FANOUT_CHILD",
+            "PI_SUBAGENT_FORK_CACHE_KEY",
+            "PI_SUBAGENT_INHERIT_GLOBAL_CONTEXT",
+            "PI_SUBAGENT_INHERIT_PROJECT_CONTEXT",
+            "PI_SUBAGENT_INHERIT_SKILLS",
+            "PI_SUBAGENT_INTERCOM_SESSION_NAME",
+            "PI_SUBAGENT_MAX_DEPTH",
+            "PI_SUBAGENT_MAX_SPAWNS_PER_RUN",
+            "PI_SUBAGENT_MAX_SPAWNS_PER_SESSION",
+            "PI_SUBAGENT_MCP_DIRECT_TOOLS",
+            "PI_SUBAGENT_ORCHESTRATOR_SESSION_ID",
+            "PI_SUBAGENT_ORCHESTRATOR_TARGET",
+            "PI_SUBAGENT_PARENT_CAPABILITY_TOKEN",
+            "PI_SUBAGENT_PARENT_CHILD_INDEX",
+            "PI_SUBAGENT_PARENT_CONTROL_INBOX",
+            "PI_SUBAGENT_PARENT_DEPTH",
+            "PI_SUBAGENT_PARENT_EVENT_SINK",
+            "PI_SUBAGENT_PARENT_PATH",
+            "PI_SUBAGENT_PARENT_ROOT_RUN_ID",
+            "PI_SUBAGENT_PARENT_RUN_ID",
+            "PI_SUBAGENT_PARENT_SESSION",
+            "PI_SUBAGENT_PERMISSION_AUDIT_PATH",
+            "PI_SUBAGENT_PERMISSION_POLICY",
+            "PI_SUBAGENT_REQUIRED_TOOLS",
+            "PI_SUBAGENT_RUNTIME_ACKNOWLEDGED_EXTENSIONS",
+            "PI_SUBAGENT_RUN_FANOUT_BUDGET",
+            "PI_SUBAGENT_RUN_ID",
+            "PI_SUBAGENT_SESSION_NAME",
+            "PI_SUBAGENT_STEER_ACK_DIR",
+            "PI_SUBAGENT_STEER_CAPABILITY",
+            "PI_SUBAGENT_STEER_INBOX",
+            "PI_SUBAGENT_STRUCTURED_OUTPUT_ACCEPTANCE_CAPTURE",
+            "PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE",
+            "PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA",
+            "PI_SUBAGENT_SUPERVISOR_CHANNEL_DIR",
+            "PI_SUBAGENT_THINKING_CEILING",
+            "PI_SUBAGENT_TOOL_BUDGET",
+            "PI_SUBAGENT_TOOL_BUDGET_ZERO_AUTH",
+            "PI_SUBAGENT_TOOL_DIAGNOSTIC_PATH",
+            "PI_SUBAGENT_WAIT_TOOL_DEFAULT_TIMEOUT_MS",
+            "PI_SUBAGENT_WAIT_TOOL_ENABLED",
+            "PI_SUBAGENT_WATCHDOG_CHILD_CONFIG"
+          ],
+          "maxDepth": 3,
+          "fanout": 7,
+          "parallel": 2,
+          "sessionCap": 11
+        },
+        "edges": [
+          {
+            "parent": "pi-rpc",
+            "child": "pi-subagent-print",
+            "inheritsCredential": true
+          },
+          {
+            "parent": "pi-rpc",
+            "child": "pi-subagent-runner",
+            "inheritsCredential": true
+          },
+          {
+            "parent": "pi-subagent-print",
+            "child": "pi-subagent-print",
+            "inheritsCredential": true
+          },
+          {
+            "parent": "pi-subagent-print",
+            "child": "pi-subagent-runner",
+            "inheritsCredential": true
+          },
+          {
+            "parent": "pi-subagent-runner",
+            "child": "pi-subagent-print",
+            "inheritsCredential": true
+          }
+        ]
+      },
+      "expectedReason": "mcp_resolution_unknown_key",
+      "stage": "future subject-discriminated resolution parser; not implemented"
+    },
+    {
+      "id": "runtime-policy-in-inner-v1-record",
+      "request": {
+        "subject": {
+          "kind": "runtime",
+          "runtimeId": "pi"
+        },
+        "runtimeEntry": "pi-prepared"
+      },
+      "response": {
+        "record": {
+          "kind": "attested",
+          "authority": "host-install-record",
+          "manifestRevision": "fbace72fcda2c44d7b5137ea6ed8e35c5bef21c1fcb96694c4669bbe0f2ee47d",
+          "form": "interpreter+bundle",
+          "installPath": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/salesko-agent.mjs",
+          "closureDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "closureKind": "artifact",
+          "interpreter": {
+            "path": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/bun",
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "loadCommandsDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "launchArgv": [
+            "__byok_sdk_helper",
+            "pi-prepared"
+          ],
+          "launchCwd": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/launch-cwd",
+          "assetRoot": "/Library/Application Support/Salesko/releases/1.2.3-aaaaaaaaaaaa/pi",
+          "assets": [
+            {
+              "path": "dist/modes/interactive/theme/dark.json",
+              "digest": "2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            {
+              "path": "dist/modes/interactive/theme/light.json",
+              "digest": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/de.json",
+              "digest": "e8f731c54137afc56932f6da4c7741babe578100204e957ed3dfce42ba94e435"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/en.json",
+              "digest": "80dbb4f2212c0100c4efe4a234fbe12fd9e43d605f5daf8316573fc30cc3dfea"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/es.json",
+              "digest": "c847cf6b1987711019fe0e84532303506cf0f620153594fa1ca85bce8c4a2571"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/fr.json",
+              "digest": "f38f34d6f52a46ae7833e020dc0d8c5fc0ffcbf397360312511c5c71192c347b"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/pt-BR.json",
+              "digest": "4c1d980cb7cb21e540231b0c36981407238185faabebe92cc34434253c214b5b"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/pt.json",
+              "digest": "63e831baa6eba70ca5509b703cf877160f0edaeff11d1e649fe53a0e6ae10d17"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/ru.json",
+              "digest": "21f3771d1067787e8c3a8075141b1fe40fb930d5777da0840fe9f65e1f0e3dca"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/uk.json",
+              "digest": "0b636854a436383d2be1ec9268cf6da5b26e5a86bb2e49eb20df43b35cd6323c"
+            },
+            {
+              "path": "extensions/rpiv-todo/2.8.0/locales/zh.json",
+              "digest": "0e9598f80fd800bdd9d689979c1f13c8054c175cf9e5b29e93273bee85704f87"
+            },
+            {
+              "path": "package.json",
+              "digest": "1111111111111111111111111111111111111111111111111111111111111111"
+            }
+          ],
+          "nativeProvenance": {
+            "packageName": "@byok-sdk/pi-coding-agent",
+            "packageVersion": "0.85.1005",
+            "upstreamBase": "0.85.1",
+            "upstreamCommit": "dddddddddddddddddddddddddddddddddddddddd",
+            "forkBuild": 5,
+            "compilerVersion": 2
+          },
+          "descendantPolicy": {
+            "envNameAllowlist": [
+              "HOME",
+              "MCP_DIRECT_TOOLS",
+              "PATH",
+              "PI_CODING_AGENT_DIR",
+              "PI_CODING_AGENT_SESSION_DIR",
+              "PI_INTERCOM_SESSION_ID",
+              "PI_INTERCOM_STABLE_ID",
+              "PI_PACKAGE_DIR",
+              "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT",
+              "PI_SUBAGENT_CAPABILITY_CEILING_V1",
+              "PI_SUBAGENT_CHILD",
+              "PI_SUBAGENT_CHILD_AGENT",
+              "PI_SUBAGENT_CHILD_INDEX",
+              "PI_SUBAGENT_DEPTH",
+              "PI_SUBAGENT_EXTENSION_BINDINGS",
+              "PI_SUBAGENT_FANOUT_CHILD",
+              "PI_SUBAGENT_FORK_CACHE_KEY",
+              "PI_SUBAGENT_INHERIT_GLOBAL_CONTEXT",
+              "PI_SUBAGENT_INHERIT_PROJECT_CONTEXT",
+              "PI_SUBAGENT_INHERIT_SKILLS",
+              "PI_SUBAGENT_INTERCOM_SESSION_NAME",
+              "PI_SUBAGENT_MAX_DEPTH",
+              "PI_SUBAGENT_MAX_SPAWNS_PER_RUN",
+              "PI_SUBAGENT_MAX_SPAWNS_PER_SESSION",
+              "PI_SUBAGENT_MCP_DIRECT_TOOLS",
+              "PI_SUBAGENT_ORCHESTRATOR_SESSION_ID",
+              "PI_SUBAGENT_ORCHESTRATOR_TARGET",
+              "PI_SUBAGENT_PARENT_CAPABILITY_TOKEN",
+              "PI_SUBAGENT_PARENT_CHILD_INDEX",
+              "PI_SUBAGENT_PARENT_CONTROL_INBOX",
+              "PI_SUBAGENT_PARENT_DEPTH",
+              "PI_SUBAGENT_PARENT_EVENT_SINK",
+              "PI_SUBAGENT_PARENT_PATH",
+              "PI_SUBAGENT_PARENT_ROOT_RUN_ID",
+              "PI_SUBAGENT_PARENT_RUN_ID",
+              "PI_SUBAGENT_PARENT_SESSION",
+              "PI_SUBAGENT_PERMISSION_AUDIT_PATH",
+              "PI_SUBAGENT_PERMISSION_POLICY",
+              "PI_SUBAGENT_REQUIRED_TOOLS",
+              "PI_SUBAGENT_RUNTIME_ACKNOWLEDGED_EXTENSIONS",
+              "PI_SUBAGENT_RUN_FANOUT_BUDGET",
+              "PI_SUBAGENT_RUN_ID",
+              "PI_SUBAGENT_SESSION_NAME",
+              "PI_SUBAGENT_STEER_ACK_DIR",
+              "PI_SUBAGENT_STEER_CAPABILITY",
+              "PI_SUBAGENT_STEER_INBOX",
+              "PI_SUBAGENT_STRUCTURED_OUTPUT_ACCEPTANCE_CAPTURE",
+              "PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE",
+              "PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA",
+              "PI_SUBAGENT_SUPERVISOR_CHANNEL_DIR",
+              "PI_SUBAGENT_THINKING_CEILING",
+              "PI_SUBAGENT_TOOL_BUDGET",
+              "PI_SUBAGENT_TOOL_BUDGET_ZERO_AUTH",
+              "PI_SUBAGENT_TOOL_DIAGNOSTIC_PATH",
+              "PI_SUBAGENT_WAIT_TOOL_DEFAULT_TIMEOUT_MS",
+              "PI_SUBAGENT_WAIT_TOOL_ENABLED",
+              "PI_SUBAGENT_WATCHDOG_CHILD_CONFIG"
+            ],
+            "maxDepth": 3,
+            "fanout": 7,
+            "parallel": 2,
+            "sessionCap": 11
+          }
+        },
+        "descendantPolicy": {
+          "envNameAllowlist": [
+            "HOME",
+            "MCP_DIRECT_TOOLS",
+            "PATH",
+            "PI_CODING_AGENT_DIR",
+            "PI_CODING_AGENT_SESSION_DIR",
+            "PI_INTERCOM_SESSION_ID",
+            "PI_INTERCOM_STABLE_ID",
+            "PI_PACKAGE_DIR",
+            "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT",
+            "PI_SUBAGENT_CAPABILITY_CEILING_V1",
+            "PI_SUBAGENT_CHILD",
+            "PI_SUBAGENT_CHILD_AGENT",
+            "PI_SUBAGENT_CHILD_INDEX",
+            "PI_SUBAGENT_DEPTH",
+            "PI_SUBAGENT_EXTENSION_BINDINGS",
+            "PI_SUBAGENT_FANOUT_CHILD",
+            "PI_SUBAGENT_FORK_CACHE_KEY",
+            "PI_SUBAGENT_INHERIT_GLOBAL_CONTEXT",
+            "PI_SUBAGENT_INHERIT_PROJECT_CONTEXT",
+            "PI_SUBAGENT_INHERIT_SKILLS",
+            "PI_SUBAGENT_INTERCOM_SESSION_NAME",
+            "PI_SUBAGENT_MAX_DEPTH",
+            "PI_SUBAGENT_MAX_SPAWNS_PER_RUN",
+            "PI_SUBAGENT_MAX_SPAWNS_PER_SESSION",
+            "PI_SUBAGENT_MCP_DIRECT_TOOLS",
+            "PI_SUBAGENT_ORCHESTRATOR_SESSION_ID",
+            "PI_SUBAGENT_ORCHESTRATOR_TARGET",
+            "PI_SUBAGENT_PARENT_CAPABILITY_TOKEN",
+            "PI_SUBAGENT_PARENT_CHILD_INDEX",
+            "PI_SUBAGENT_PARENT_CONTROL_INBOX",
+            "PI_SUBAGENT_PARENT_DEPTH",
+            "PI_SUBAGENT_PARENT_EVENT_SINK",
+            "PI_SUBAGENT_PARENT_PATH",
+            "PI_SUBAGENT_PARENT_ROOT_RUN_ID",
+            "PI_SUBAGENT_PARENT_RUN_ID",
+            "PI_SUBAGENT_PARENT_SESSION",
+            "PI_SUBAGENT_PERMISSION_AUDIT_PATH",
+            "PI_SUBAGENT_PERMISSION_POLICY",
+            "PI_SUBAGENT_REQUIRED_TOOLS",
+            "PI_SUBAGENT_RUNTIME_ACKNOWLEDGED_EXTENSIONS",
+            "PI_SUBAGENT_RUN_FANOUT_BUDGET",
+            "PI_SUBAGENT_RUN_ID",
+            "PI_SUBAGENT_SESSION_NAME",
+            "PI_SUBAGENT_STEER_ACK_DIR",
+            "PI_SUBAGENT_STEER_CAPABILITY",
+            "PI_SUBAGENT_STEER_INBOX",
+            "PI_SUBAGENT_STRUCTURED_OUTPUT_ACCEPTANCE_CAPTURE",
+            "PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE",
+            "PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA",
+            "PI_SUBAGENT_SUPERVISOR_CHANNEL_DIR",
+            "PI_SUBAGENT_THINKING_CEILING",
+            "PI_SUBAGENT_TOOL_BUDGET",
+            "PI_SUBAGENT_TOOL_BUDGET_ZERO_AUTH",
+            "PI_SUBAGENT_TOOL_DIAGNOSTIC_PATH",
+            "PI_SUBAGENT_WAIT_TOOL_DEFAULT_TIMEOUT_MS",
+            "PI_SUBAGENT_WAIT_TOOL_ENABLED",
+            "PI_SUBAGENT_WATCHDOG_CHILD_CONFIG"
+          ],
+          "maxDepth": 3,
+          "fanout": 7,
+          "parallel": 2,
+          "sessionCap": 11
+        },
+        "edges": [
+          {
+            "parent": "pi-rpc",
+            "child": "pi-subagent-print",
+            "inheritsCredential": true
+          },
+          {
+            "parent": "pi-rpc",
+            "child": "pi-subagent-runner",
+            "inheritsCredential": true
+          },
+          {
+            "parent": "pi-subagent-print",
+            "child": "pi-subagent-print",
+            "inheritsCredential": true
+          },
+          {
+            "parent": "pi-subagent-print",
+            "child": "pi-subagent-runner",
+            "inheritsCredential": true
+          },
+          {
+            "parent": "pi-subagent-runner",
+            "child": "pi-subagent-print",
+            "inheritsCredential": true
+          }
+        ]
+      },
+      "expectedReason": "install_record_unknown_key",
+      "stage": "future subject-discriminated resolution parser; not implemented"
     }
   ]
 }

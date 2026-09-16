@@ -175,11 +175,11 @@ delegation:
 exit_criteria:
   files_exist:
     - docs/researches/20260916-c07-pi-under-s2-track-b.md
-  - docs/researches/20260916-c07-runner-i18n-implementation-entry.md
-  - plans/plan-20260916-c07-runner-i18n.md
-  - tasks/contracts/20260916-c07-runner-i18n.contract.md
-  - tasks/notes/20260916-c07-runner-i18n.notes.md
-  - tasks/reviews/20260916-c07-runner-i18n.review.md
+    - docs/researches/20260916-c07-runner-i18n-implementation-entry.md
+    - plans/plan-20260916-c07-runner-i18n.md
+    - tasks/contracts/20260916-c07-runner-i18n.contract.md
+    - tasks/notes/20260916-c07-runner-i18n.notes.md
+    - tasks/reviews/20260916-c07-runner-i18n.review.md
     - tasks/notes/20260916-1003-c07-pi-runtime-launch.notes.md
     - plans/plan-20260916-1003-c07-pi-runtime-launch.md
   artifacts_exist: []
