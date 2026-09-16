@@ -19,7 +19,11 @@ Prepare the bounded implementation contract in [docs/researches/20260916-c07-run
 
 ## Task Breakdown
 
-- [x] WIN-CRLF local implementation/verification: attributes frozen at c46cd4b9; all285 checkout/add targets and272 manifest hashes preserve original bytes, negative checkout reproduces drift, vendor tests4/4 pass. Independent bounded gate pending; Windows CI unverified. No SEA-TLA, source/manifest/lock change or PR update.
+- [x] SEA frozen-artifact analysis accepted as category①, limited to unchanged launcher; full authority bodies and dynamic namespace keys checked, actual SEA execution still unverified.
+- [ ] Supervisor review exact SEA recipe registration in `docs/researches/20260917-sea-two-stage-recipe.md` before recipe writes.
+- [ ] Implement only registered two-stage recipe/verification/docs, freeze separately, then bounded gate including real SEA two-scenario execution; Node22/OS matrix remains explicit until measured.
+
+- [x] WIN-CRLF accepted/pushed at87ebe865 after independent bounded gate. Run35157463643 has four existing failures (SEA three OS and Windows lifecycle); Windows Git job does not exercise vendor raw-hash tests, so windowsRunnerVerified=false remains. No workflow/lifecycle/conflict repair in this slice.
 
 - [x] Correct confirmed alpha r2 TestServer read-ahead filtering loss at7357ebb4; deterministic HTTP2RED→7targetedPASS, original assertions/timeouts unchanged; one frozen client full2763pass/11skip/soleS2RED24. Supervisor round3 pending.
 
