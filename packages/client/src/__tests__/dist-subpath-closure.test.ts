@@ -48,6 +48,24 @@
  * NON-VACUITY: the same checker is run against `dist/index.js` at the bottom of
  * this file and MUST report hits. A checker that passes everything is worse
  * than no checker, so the root entry is the control that proves it can fail.
+ *
+ * WHAT THE ROOT ENTRY IS AND IS NOT, stated because the two are easy to
+ * conflate. `dist/index.js` EXTERNALISES `@modelcontextprotocol/client`: the
+ * specifier is emitted, the package's own bytes are not, so nothing in this
+ * file can see which provider that package will resolve to. The package picks
+ * its JSON Schema provider through the `./_shims` conditional export, and the
+ * `node`/`default` branch is the ajv-backed one built on `new Function`.
+ * Whether a consumer's FINAL bundle is codegen-free therefore depends on how
+ * the consumer's bundler resolves `_shims` — a fact about their build, not
+ * about this dist, and not something this scan asserts either way.
+ *
+ * `src/mcp/client.ts` names `CfWorkerJsonSchemaValidator` explicitly for the
+ * SDK's own MCP client, which settles the RUNTIME choice — the provider that
+ * actually validates a tool result's `structuredContent` is the eval-free one
+ * on every host. It does not remove ajv from a bundle that resolved `_shims`
+ * to the node branch, and no assertion here pretends otherwise; the injection
+ * is covered by `mcp-output-schema-validator.test.ts`. The root entry stays
+ * exactly what it has always been in this file: the negative control.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { isBuiltin } from 'node:module';

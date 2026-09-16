@@ -5,6 +5,46 @@
 Deliberately not filed under 0.18.0: none of this is in a published artifact,
 and the D2 version number belongs to a separate SDK release contract.
 
+- **Fixed (client, unreleased contract)** — the SDK's MCP client now names the
+  eval-free JSON Schema provider instead of inheriting whichever one the
+  consumer's bundler resolves.
+
+  `@modelcontextprotocol/client` selects its default provider through the
+  `./_shims` conditional export, and the `node`/`default` branch is ajv-backed,
+  which compiles every schema with `new Function`. That made the provider a
+  property of the HOST'S BUILD rather than of this SDK: a host bundling for a
+  runtime that refuses runtime code generation could end up carrying a codegen
+  provider it never asked for. `src/mcp/client.ts` now passes
+  `jsonSchemaValidator: new CfWorkerJsonSchemaValidator()`, imported statically
+  from the package's public `@modelcontextprotocol/client/validators/cf-worker`
+  subpath.
+
+  Scope: that validator is consulted in exactly one place — validating a tool
+  result's `structuredContent` against the tool's declared `outputSchema`. Tool
+  `inputSchema`, protocol message validation and everything outside
+  `tools/call` are untouched, and a tool without an `outputSchema` never
+  reaches it.
+
+  Observable difference, measured against the same fixture server rather than
+  assumed: both providers accept the same valid instance and reject the same
+  invalid one, under the 2020-12 default dialect and under an explicit
+  draft-07 `$schema` alike. The ERROR TEXT differs, and it is not identical:
+
+  ```
+  ajv (previous default on Node)
+    Structured content does not match the tool's output schema: data/count must be number
+  cf-worker (now)
+    Structured content does not match the tool's output schema: #: Property "count" does not match schema.; #/count: Instance type "string" is invalid. Expected "number".
+  ```
+
+  A caller that was matching on the ajv wording must update. Covered by
+  `packages/client/src/__tests__/mcp-output-schema-validator.test.ts`.
+
+  This settles the RUNTIME choice only. `dist/index.js` still externalises
+  `@modelcontextprotocol/client`, so whether a consumer's final bundle is
+  codegen-free still depends on how their bundler resolves `_shims`; that
+  boundary is now stated in `dist-subpath-closure.test.ts`.
+
 - **Added (client, unreleased contract)** — `@byok-sdk/client/mcp-server`, a
   tools-only stdio MCP **server** core, and the four SDK-reserved MCP helpers
   now serve through it.

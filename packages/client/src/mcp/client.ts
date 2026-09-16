@@ -19,6 +19,7 @@ import {
   type Tool,
   type Transport,
 } from '@modelcontextprotocol/client';
+import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/client/validators/cf-worker';
 
 /**
  * The SDK's single MCP client authority.
@@ -414,6 +415,31 @@ export class McpStdioClient {
       // answering for authority it does not have. Fail closed rather than
       // silently returning an empty list.
       enforceStrictCapabilities: true,
+      // The validator choice is named here rather than inherited, because the
+      // package's default is resolved by the BUNDLER, not by us:
+      // `@modelcontextprotocol/client` picks its provider through the
+      // `./_shims` conditional export, and the `node`/`default` branch is the
+      // ajv-backed one, which compiles every schema with `new Function`. A
+      // host that bundles this SDK for a runtime that refuses runtime code
+      // generation (a CSP-locked page, workerd, any `--disallow-code-generation`
+      // policy) would then carry a codegen provider it never asked for, decided
+      // by its bundler's resolution conditions rather than by this package.
+      // `CfWorkerJsonSchemaValidator` is the published, codegen-free provider
+      // (`@cfworker/json-schema`, an interpreter over the schema), so naming it
+      // makes the runtime choice ours and identical on every host.
+      //
+      // Scope, exactly: this validator is consulted in one place — the
+      // package's `_compileOutputValidator`, which validates a tool result's
+      // `structuredContent` against that tool's declared `outputSchema`. It is
+      // not used for `inputSchema`, for protocol message validation, or for
+      // anything this SDK does outside `tools/call`. A tool without an
+      // `outputSchema` never reaches it at all.
+      //
+      // This covers the RUNTIME choice only. `dist/index.js` still externalises
+      // `@modelcontextprotocol/client`, so whether the consumer's final bundle
+      // is codegen-free also depends on how their bundler resolves `_shims`;
+      // see `../__tests__/dist-subpath-closure.test.ts`.
+      jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
     });
   }
 
