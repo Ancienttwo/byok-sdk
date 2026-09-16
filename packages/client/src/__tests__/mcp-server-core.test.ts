@@ -348,17 +348,17 @@ describe('T6: parsing, id validation and the handler spy', () => {
    * `name` or `arguments` inside it is a PARAMETER fault. Every row below is
    * refused before the handler runs, with the offending field named.
    */
-  const MALFORMED_TOOLS_CALL_PARAMS: readonly { readonly label: string; readonly params: unknown; readonly field: string }[] = [
-    { label: 'params absent', params: undefined, field: 'params' },
-    { label: 'params is an array', params: [], field: 'params' },
-    { label: 'name absent', params: {}, field: 'params.name' },
-    { label: 'name is a number', params: { name: 42 }, field: 'params.name' },
-    { label: 'name is the empty string', params: { name: '' }, field: 'params.name' },
-    { label: 'arguments is null', params: { name: 'echo', arguments: null }, field: 'params.arguments' },
-    { label: 'arguments is an array', params: { name: 'echo', arguments: [] }, field: 'params.arguments' },
-    { label: 'arguments is a number', params: { name: 'echo', arguments: 3 }, field: 'params.arguments' },
-    { label: 'arguments is a string', params: { name: 'echo', arguments: 'nope' }, field: 'params.arguments' },
-    { label: 'arguments is true', params: { name: 'echo', arguments: true }, field: 'params.arguments' },
+  const MALFORMED_TOOLS_CALL_PARAMS: readonly { readonly label: string; readonly params: unknown; readonly expectedMessage: string }[] = [
+    { label: 'params absent', params: undefined, expectedMessage: 'requires an object params' },
+    { label: 'params is an array', params: [], expectedMessage: 'requires an object params' },
+    { label: 'name absent', params: {}, expectedMessage: 'params.name' },
+    { label: 'name is a number', params: { name: 42 }, expectedMessage: 'params.name' },
+    { label: 'name is the empty string', params: { name: '' }, expectedMessage: 'params.name' },
+    { label: 'arguments is null', params: { name: 'echo', arguments: null }, expectedMessage: 'params.arguments' },
+    { label: 'arguments is an array', params: { name: 'echo', arguments: [] }, expectedMessage: 'params.arguments' },
+    { label: 'arguments is a number', params: { name: 'echo', arguments: 3 }, expectedMessage: 'params.arguments' },
+    { label: 'arguments is a string', params: { name: 'echo', arguments: 'nope' }, expectedMessage: 'params.arguments' },
+    { label: 'arguments is true', params: { name: 'echo', arguments: true }, expectedMessage: 'params.arguments' },
   ];
 
   for (const [index, malformed] of MALFORMED_TOOLS_CALL_PARAMS.entries()) {
@@ -377,7 +377,7 @@ describe('T6: parsing, id validation and the handler spy', () => {
       expect(response.result).toBeUndefined();
       const error = response.error as { code: number; message: string };
       expect(error.code).toBe(-32602);
-      expect(error.message).toContain(malformed.field);
+      expect(error.message).toContain(malformed.expectedMessage);
       expect(callTool).not.toHaveBeenCalled();
       harness.handle.close();
     });

@@ -14,6 +14,10 @@
  * It maps PROTOCOL faults only: `-32700` parse, `-32600` invalid request (a
  * message that is not a valid Request object: a missing or non-`"2.0"`
  * `jsonrpc`, a non-string `method`, an unusable id, a duplicate id, a
+ * `params` that is neither an object nor an array — `params` that is `null`,
+ * a number, a string or a boolean draws `-32600` with `params must be an
+ * object or an array` (`dispatch.ts` `classifyJsonRpcMessage`, line 61-62),
+ * before any method arm runs — a
  * top-level batch array), `-32602` invalid params (a `tools/call` whose
  * `params` is not an object, whose `params.name` is not a non-empty string, or
  * which carries an `arguments` key holding anything but a plain object),
@@ -121,7 +125,11 @@ export interface McpServerToolDefinition {
 
 export interface McpServerToolCall {
   readonly name: string;
-  /** The peer's `params.arguments` when it is a JSON object; `undefined` otherwise. */
+  /**
+   * The peer's `params.arguments` when the key was present; it is always a plain
+   * object because any present non-object (null, array, scalar) is refused at the
+   * protocol layer with -32602 before dispatch. `undefined` means the key was absent.
+   */
   readonly arguments: Readonly<Record<string, unknown>> | undefined;
   /** Aborted when the peer sends `notifications/cancelled` for this request id. */
   readonly signal: AbortSignal;

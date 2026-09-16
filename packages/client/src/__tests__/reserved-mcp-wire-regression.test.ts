@@ -243,16 +243,22 @@ async function captureAll(): Promise<WireBaseline> {
  *   runs. The CODE is unchanged from base; only the message text moved from
  *   the helper's wording to the core's.
  * - A `tools/call` carrying an explicit `params.arguments` that is `null`, an
- *   array or a scalar reached the helper as `arguments: undefined` at base,
- *   where each of the four helpers' own manual check answered `-32602` with
- *   its own wording (`message input must be an object`, `memory tool input
- *   must be an object`, `team tool input must be an object`; the approval
- *   helper coerced it to `{}` and ran the call). The core now refuses it with
- *   `-32602` and `tools/call params.arguments must be an object when present`
- *   before any handler runs — so the code is unchanged for three helpers, the
- *   message text differs for all of them, and the approval helper no longer
- *   executes a call the peer never made. An ABSENT `arguments` key is
- *   unchanged: it still reaches the handler as `undefined`.
+ *   array or a scalar had NO core to normalise it at base: each helper decided
+ *   the shape itself. The agent-message helper tested the raw value and
+ *   refused `null`, an array and a scalar alike with `-32602` `message input
+ *   must be an object`; the memory and team helpers ran it through `record()`,
+ *   which yields `undefined` for all three, and answered `invalid()` with
+ *   `memory tool input must be an object` / `team tool input must be an
+ *   object`; the approval helper read `params.arguments ?? {}`, so `null`
+ *   became `{}` while an array or a scalar passed through as-is, and in every
+ *   one of those cases it EXECUTED the call. (The "reached the helper as
+ *   `arguments: undefined`" wording describes the pre-fix CORE at `8b03014e`,
+ *   not base.) The core now refuses the value with `-32602` and `tools/call
+ *   params.arguments must be an object when present` before any handler runs —
+ *   so the code is unchanged for three helpers, the message text differs for
+ *   all of them, and the approval helper no longer executes a call the peer
+ *   never made. An ABSENT `arguments` key is unchanged: it still reaches the
+ *   handler as `undefined`.
  *
  * No step of the script below exercises either: every `tools/call` step sends
  * a string `name` and a plain-object `arguments`, so the frozen bytes are

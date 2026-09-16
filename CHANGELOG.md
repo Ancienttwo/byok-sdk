@@ -51,11 +51,18 @@ and the D2 version number belongs to a separate SDK release contract.
   - A `tools/call` carrying an explicit `params.arguments` that is `null`, an
     array or a scalar is now rejected with `-32602` and the message
     `tools/call params.arguments must be an object when present`, before any
-    handler runs. It used to be silently rewritten to `undefined`, which three
-    helpers then refused with their own `-32602` input-shape message and the
-    approval helper coerced to `{}` and executed. An ABSENT `arguments` key is
-    unchanged and still reaches the handler as `undefined`, which the MCP
-    `tools/call` schema allows.
+    handler runs. At base there was no core, so each helper decided the shape
+    for itself: the agent-message helper refused `null`, an array and a scalar
+    alike with its own `-32602` `message input must be an object`; the memory
+    and team helpers normalised through `record()` and refused via `invalid()`
+    with `memory tool input must be an object` / `team tool input must be an
+    object`; and the approval helper read `params.arguments ?? {}`, so `null`
+    became `{}` while an array or a scalar passed through unchanged — and in
+    every one of those cases the approval helper still EXECUTED the call. (The
+    "reached the helper as `arguments: undefined`" wording describes the
+    pre-fix core at `8b03014e`, not base.)
+    An ABSENT `arguments` key is unchanged and still reaches the handler as
+    `undefined`, which the MCP `tools/call` schema allows.
   - A tool handler that throws something other than an `McpServerToolError` is
     answered `-32603`; a handler that throws untyped leaves the core nothing to
     forward, so it maps the one code with no server-authored mapping.

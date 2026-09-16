@@ -11405,7 +11405,11 @@ export interface McpServerToolDefinition {
 }
 export interface McpServerToolCall {
     readonly name: string;
-    /** The peer's `params.arguments` when it is a JSON object; `undefined` otherwise. */
+    /**
+     * The peer's `params.arguments` when the key was present; it is always a plain
+     * object because any present non-object (null, array, scalar) is refused at the
+     * protocol layer with -32602 before dispatch. `undefined` means the key was absent.
+     */
     readonly arguments: Readonly<Record<string, unknown>> | undefined;
     /** Aborted when the peer sends `notifications/cancelled` for this request id. */
     readonly signal: AbortSignal;
