@@ -266,3 +266,16 @@ Targeted WIP evidence `_ops/c07-identity-workspace/helper-lookup/`:
 - team-tests-r2:7/7, includes official CLI private entry, real GUI hold/response, unchanged native control, daemon/helper refusal and product-helper unsupported gate.
 - Initial focused run also passed control, reserved-helper and closure files. Final combined subject full/pack remains supervisor gate, not claimed from these WIP checks.
 - Product15files +415/-138, no manifest/lock/golden change; local freeze attribution0. Registration/docs separate.
+
+### Frozen helper lookup path map / launcher design alternatives
+
+| Caller / lane | Authority route | Remaining lookup classification |
+| --- | --- | --- |
+| pi-adapter ordinary :362 and prepared :860 | Configured attested binding selects command/entry; callback evaluated only for unconfigured decision | clientPackageRoot call is dev-only on these two call paths |
+| resolve-bin :133 / input-preparation :239 | Installed package manifest discovery; configured runtime routes avoid it | Explicit unconfigured development branch |
+| client-manifest :6 | Shared implementation for clientPackageRoot | Not globally dev-only: Pi callers above are dev-only, MCP launcher caller below remains production-reachable |
+| trusted-launch-cwd :407 | Node bootstrap script locator; explicit launcherInterpreter or Windows plain Node | Production package lookup remains; POSIX default shell does not call it |
+| team CLI/session | Private official CLI token / actual CLI executable+entry / literal # import | CLI operator ambient, §83 II class; not attested or contained |
+| create-daemon preparation | Await once-init before any control endpoint; configured authority measured pi-prepared/static pin | No configured dev discovery; resolver-count guards prove selection |
+
+For trusted-launch-cwd :407, route A would locate byok-launch-cwd.mjs relative to an explicitly declared release directory/import.meta.url. A path being release-contained is insufficient: this standalone file is executable code, the current single-bundle artifact digest does not cover its bytes, and assets are non-code data. Therefore a relative-path-only patch would falsely claim closure and is not implemented. Route B would precompile the bootstrap inside an admitted artifact/helper entry with an exact declared launch prefix, or introduce an explicit measured code component. Either changes the launch/record author boundary and must join the Q3/P4 follow-on design with a specifically registered bootstrap scope; current runtime-runner approval does not silently authorize a new MCP bootstrap kind. Until that contract exists, retain and report the real package route rather than guess/fallback.

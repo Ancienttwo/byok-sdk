@@ -65,3 +65,5 @@ P3d activated by supervisor: static/build-time closure of SDK extension jiti/rpi
 ## P3d helper-lookup candidate
 
 Product f73431cf, registration separate. Author targeted build/typecheck pass; compiler+strict RPC12/12 and team7/7; earlier focus reserved-helper/control/closure files passed with one new malformed fixture failure subsequently corrected. No timeout/closure assertion relaxed. Evidence `_ops/c07-identity-workspace/helper-lookup/`; complete frozen gate pending supervisor, includes prior renderer21ab3c86. No new full/pack claim. Node MCP launcher lookup, runner/i18n and native closure remain open as recorded in notes.
+
+Supervisor requested author first frozen client full run before independent re-gate; both will be sequential. Shared client-manifest is not globally dev-only because trusted-launch-cwd remains a production caller. Final full evidence will bind the post-registration head recorded in handoff.
