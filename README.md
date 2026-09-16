@@ -19,8 +19,10 @@ Publication, exact-source CI and registry verification are complete. See
 [0.17.0 publication record](docs/releases/v0.17.0-publication.md).
 The previous verified release is [0.16.0](docs/releases/v0.16.0-publication.md).
 
-The bundled Pi runtime is pinned to
-`@earendil-works/pi-coding-agent@0.85.1`. Release SemVer is observability only;
+The bundled Pi runtime is pinned to the SDK's own fork,
+`@byok-sdk/pi-coding-agent@0.85.1001` (upstream base 0.85.1 at `d981de1`),
+installed through an npm alias so the import specifier and the installed path
+stay `@earendil-works/pi-coding-agent`. Release SemVer is observability only;
 protocol intersection and advertised capabilities remain the execution gates.
 Publishing an SDK release does not perform a host's production migration or
 deployment.
