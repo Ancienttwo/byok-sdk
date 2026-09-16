@@ -89,6 +89,7 @@ allowed_paths:
   - packages/implementation-identity/
   - packages/client/tsup.config.ts
   - packages/client/package.json
+  - packages/client/scripts/check-adapters-entry.mjs
   - packages/keys/package.json
   - packages/client/src/index.ts
   - packages/client/src/types.ts
@@ -306,3 +307,5 @@ P2 deliberately adds the client runtime-launch resource module/types and callabl
 ## P3c approved process-bound config verification
 
 Host config carries strict ImplementationSpawnBinding and launch-owned `--config-digest=<64 lowercase hex>` commits its exact complete bytes. Exclude this per-launch flag from sealed fixedArgv/description/identity; keys owns forwarding and rejects delegated override. Child reads once for checksum and parse, verifies actual command/entry/prefix/cwd, remeasures artifact/interpreter/assets, hashes declared PI_PACKAGE_DIR/package.json bytes before parsing and compares every provenance field against record plus static SDK pin, then derives native expectation. Missing/duplicate flags and mismatches fail closed. Register tests for changed upstreamCommit, forkBuild, manifest bytes, config binding bytes, config non-binding session cwd bytes and static pin mismatch. No Host reader/privilege expansion. Native module self-identity and closure remain 1006. Parent owns golden/docs/manifests/lock; worker owns only sequentially assigned product/test files.
+
+P3b pin projection follow-up (supervisor approved): dependencies alias remains author; client/package.json byok.piRuntimePin is an exact guarded projection consumed via JSON named import. Build script and closure test both compare to dependency. Only closure pin-data assertion changes from one specifier line to two exact data lines; scanner rules/control/static import limits unchanged. packages/client/scripts/check-adapters-entry.mjs is added solely for this drift guard.

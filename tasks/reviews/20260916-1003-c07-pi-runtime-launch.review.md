@@ -40,3 +40,7 @@ Supervisor independent gate **PASS**, frozen source eff16ae45943a9d2d741396b8ecc
 Evidence: `_ops/c07-identity-workspace/independent-eff16ae4/` and `p2b-eff16ae4-gate.md` (unaltered supervisor report). No duplicate full/pack run. Earlier timeout remains unproven load/timing report-only; SystemRoot input hardening and sourcemap warnings remain unchanged.
 
 P3 begins with the actual remaining resolution path and immutable native 1005 boundary. SDK-side containment, release asset selection, export_html path validation and closure prerequisites are in scope. Fork 1006 implementation/publication, scanner-boundary changes, photon feature reduction and Salesko P4 edits are not authorized by this entry. No push/merge/publish.
+
+## P3c frozen candidate
+
+Product00c5529a is pending independent frozen gate. Local scoped checks recorded in notes; no full C07/P3 containment PASS. Registry attempt guard remains a hard failure, not waived. Supervisor owns the sole full/pack run after registration freeze.

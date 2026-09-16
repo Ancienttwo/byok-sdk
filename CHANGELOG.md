@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Changed (unreleased Pi child contract)** — both SDK Pi hosts require a
+  launcher-owned checksum of the complete config bytes and a strict spawn
+  binding. The child verifies its actual launch, sealed files and native manifest
+  before deriving prepared identity. Keys owns checksum forwarding and refuses
+  delegated overrides. This changes internal launch inputs without providing a
+  legacy config path.
+- **Changed (build metadata)** — `client.byok.piRuntimePin` projects the exact
+  manifest dependency alias for a narrow JSON named import. Build and closure
+  checks reject drift; the dependency remains its only author. This avoids
+  embedding unrelated dependency metadata into the lightweight adapter entry.
+
 - **Changed (unreleased Pi configuration)** — removed the unused
   `PiAdapterOptions.resolveExtensions` option and its resolver. Inline extension
   factories already own that surface. Attested launch admission uses the SDK
