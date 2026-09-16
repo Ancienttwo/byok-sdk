@@ -1,8 +1,14 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
+import { spawn, type ChildProcess } from 'node:child_process';
+import {
+  assertImplementationSpawnBinding, parseImplementationSpawnBinding, projectKeysPiInheritedEnvironment,
+  type ImplementationSpawnBindingV1,
+} from '@byok-sdk/implementation-identity';
 
+import { runCommand, type CommandRunner } from './command-runner';
 import { ByokKeysError } from './errors';
-import { PI_PROJECTED_KEY_ENV } from './pi-provider-projection';
+import { PI_PROJECTED_KEY_ENV, buildPiProviderArgs, buildPiProviderProjection } from './pi-provider-projection';
 import {
   ProviderModelCapabilitySchema,
   ProviderProfileRefSchema,
@@ -12,42 +18,13 @@ import {
 } from './provider-profile';
 import { type SecretStore, modelProviderSecretName } from './secret-store';
 
-const PI_CHILD_BASE_ENV_NAMES = [
-  'PATH',
-  'HOME',
-  'USERPROFILE',
-  'TMPDIR',
-  'TEMP',
-  'TMP',
-  'LANG',
-  'TZ',
-  'TERM',
-  'SHELL',
-  'HTTP_PROXY',
-  'HTTPS_PROXY',
-  'NO_PROXY',
-  'ALL_PROXY',
-  'http_proxy',
-  'https_proxy',
-  'no_proxy',
-  'all_proxy',
-] as const;
-
-const PI_CHILD_WINDOWS_ENV_NAMES = [
-  'SystemRoot',
-  'COMSPEC',
-  'PATHEXT',
-  'windir',
-  'SYSTEMDRIVE',
-  'PROGRAMFILES',
-  'APPDATA',
-  'LOCALAPPDATA',
-] as const;
-
 export interface PiProviderLauncherOptions {
   piBin: string;
   /** Explicit script entry for the selected interpreter; never inferred from a filename. */
   piEntry?: string;
+  launchBinding?: ImplementationSpawnBindingV1;
+  piCwd?: string;
+  piFixedArgs?: readonly string[];
   profileDbPath: string;
   /** Carried by the `--provider` flag: the exact local profile to launch. */
   profileRef: ProviderProfileRef;
@@ -70,6 +47,9 @@ export function parsePiProviderLauncherOptions(
   const allowedFlags = new Set([
     '--pi-bin',
     '--pi-entry',
+    '--launch-binding',
+    '--pi-cwd',
+    '--pi-fixed-args',
     '--profile-db',
     '--provider',
     '--model',
@@ -167,9 +147,36 @@ export function parsePiProviderLauncherOptions(
   if (piEntry !== undefined && (!path.isAbsolute(piEntry) || /[\u0000\r\n]/u.test(piEntry))) {
     throw new Error('--pi-entry requires an absolute single-line path');
   }
+  let launchBinding: ImplementationSpawnBindingV1 | undefined;
+  let piCwd: string | undefined;
+  let piFixedArgs: readonly string[] | undefined;
+  if (!validateOnly || ['--launch-binding', '--pi-cwd', '--pi-fixed-args'].some((flag) => values.has(flag))) {
+    let rawBinding: unknown;
+    let rawFixedArgs: unknown;
+    try { rawBinding = JSON.parse(required('--launch-binding')); }
+    catch { throw new Error('--launch-binding requires a valid JSON binding'); }
+    launchBinding = parseImplementationSpawnBinding(rawBinding);
+    if (launchBinding === undefined) throw new Error('invalid implementation spawn binding');
+    piCwd = required('--pi-cwd');
+    try { rawFixedArgs = JSON.parse(required('--pi-fixed-args')); }
+    catch { throw new Error('--pi-fixed-args requires a JSON array'); }
+    if (!Array.isArray(rawFixedArgs) || rawFixedArgs.some((arg) => typeof arg !== 'string')) {
+      throw new Error('--pi-fixed-args requires a JSON array of strings');
+    }
+    piFixedArgs = rawFixedArgs as string[];
+    if (launchBinding.command !== required('--pi-bin') || launchBinding.entry !== piEntry
+      || launchBinding.cwd !== piCwd || JSON.stringify(launchBinding.fixedArgv) !== JSON.stringify(piFixedArgs)) {
+      throw new Error('launcher arguments differ from implementation spawn binding');
+    }
+    if (launchBinding.envCommitments.PI_CODING_AGENT_SESSION_DIR !== sessionDir
+      || launchBinding.envCommitments.PI_CODING_AGENT_DIR === undefined) {
+      throw new Error('launcher session/projection directories must match binding commitments');
+    }
+  }
   return {
     ...(piEntry === undefined ? {} : { piEntry }),
     piBin: required('--pi-bin'),
+    ...(launchBinding === undefined ? {} : { launchBinding, piCwd, piFixedArgs }),
     profileDbPath,
     profileRef: profileRef.data,
     modelId,
@@ -211,45 +218,169 @@ export async function resolvePiProviderSecret(
   return secret;
 }
 
-/** Build Pi's child environment from a closed platform baseline plus one exact key. */
+/** The inherited inventory is shared with admission; controlled values come only from the binding. */
 export function buildPiProviderChildEnvironment(options: {
   ambient: NodeJS.ProcessEnv;
-  projectionDir: string;
+  binding: ImplementationSpawnBindingV1;
   sessionDir: string;
   secret: string | undefined;
   platform?: NodeJS.Platform;
 }): Record<string, string> {
-  const platform = options.platform ?? process.platform;
-  const exactNames = new Set<string>([
-    ...PI_CHILD_BASE_ENV_NAMES,
-    ...(platform === 'win32' ? PI_CHILD_WINDOWS_ENV_NAMES : []),
-  ].map((name) => platform === 'win32' ? name.toUpperCase() : name));
-  const result: Record<string, string> = {};
-  for (const [name, value] of Object.entries(options.ambient)) {
-    if (value === undefined) continue;
-    const platformName = platform === 'win32' ? name.toUpperCase() : name;
-    const isExact = exactNames.has(platformName);
-    const isPrefixed = platform === 'win32'
-      ? platformName.startsWith('LC_') || platformName.startsWith('XDG_')
-      : name.startsWith('LC_') || name.startsWith('XDG_');
-    if (isExact || isPrefixed) result[name] = value;
+  const binding = parseImplementationSpawnBinding(options.binding);
+  if (binding === undefined) throw new Error('invalid implementation spawn binding');
+  if (binding.envCommitments.PI_CODING_AGENT_SESSION_DIR !== options.sessionDir
+    || binding.envCommitments.PI_CODING_AGENT_DIR === undefined) {
+    throw new Error('launcher session/projection directories must match binding commitments');
   }
-  const mcpPath = options.ambient.BYOK_PI_MCP_CONFIG_PATH;
-  if (mcpPath !== undefined) {
-    if (!path.isAbsolute(mcpPath) || /[\u0000\r\n]/u.test(mcpPath)) throw new Error('BYOK_PI_MCP_CONFIG_PATH must be an absolute single-line path');
-    result.BYOK_PI_MCP_CONFIG_PATH = mcpPath;
-  }
-  const permissionMode = options.ambient.BYOK_PI_PERMISSION_MODE;
-  if (permissionMode !== undefined) {
-    if (permissionMode !== 'auto' && permissionMode !== 'readonly') throw new Error('BYOK_PI_PERMISSION_MODE must be auto or readonly');
-    result.BYOK_PI_PERMISSION_MODE = permissionMode;
-  }
-  result.PI_CODING_AGENT_DIR = options.projectionDir;
-  result.PI_CODING_AGENT_SESSION_DIR = options.sessionDir;
-  if (options.secret !== undefined) {
-    result[PI_PROJECTED_KEY_ENV] = options.secret;
-  }
+  const result = {
+    ...projectKeysPiInheritedEnvironment(options.ambient, options.platform),
+    ...binding.envCommitments,
+  };
+  if (options.secret !== undefined) result[PI_PROJECTED_KEY_ENV] = options.secret;
   return result;
+}
+
+const WINDOWS_PROJECTION_ACL_SCRIPT = String.raw`
+$ErrorActionPreference = 'Stop'
+try {
+  $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
+  $acl = Get-Acl -LiteralPath ([string]$request.path)
+  $sidType = [System.Security.Principal.SecurityIdentifier]
+  $rules = @($acl.Access | ForEach-Object {
+    [ordered]@{
+      sid = $_.IdentityReference.Translate($sidType).Value
+      allow = $_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow
+      fullControl = ($_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -eq [System.Security.AccessControl.FileSystemRights]::FullControl
+      inherits = ($_.InheritanceFlags -band 3) -eq 3 -and $_.PropagationFlags -eq [System.Security.AccessControl.PropagationFlags]::None
+    }
+  })
+  [ordered]@{
+    reparsePoint = ((Get-Item -LiteralPath ([string]$request.path) -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
+    owner = $acl.GetOwner($sidType).Value
+    currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    protected = $acl.AreAccessRulesProtected
+    rules = $rules
+  } | ConvertTo-Json -Depth 4 -Compress
+} catch {
+  [Console]::Error.WriteLine('Pi projection ACL query failed')
+  exit 1
+}
+`;
+
+/** Read-only Windows equivalent of uid + 0700; never repairs host ACLs. */
+export async function assertWindowsPiProjectionAcl(
+  directory: string,
+  options: { systemRoot?: string; run?: CommandRunner } = {},
+): Promise<void> {
+  const systemRoot = options.systemRoot ?? process.env.SystemRoot;
+  if (systemRoot === undefined || !path.win32.isAbsolute(systemRoot) || /[\u0000\r\n]/u.test(systemRoot)) {
+    throw new Error('Windows SystemRoot must be an absolute path');
+  }
+  const result = await (options.run ?? runCommand)(
+    path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(WINDOWS_PROJECTION_ACL_SCRIPT, 'utf16le').toString('base64')],
+    JSON.stringify({ path: directory }),
+  );
+  if (result.exitCode !== 0) throw new Error('Pi projection ACL query failed');
+  let acl: unknown;
+  try { acl = JSON.parse(result.stdout); }
+  catch { throw new Error('pi_projection_acl_invalid_json'); }
+  const recordObject = (value: unknown): value is Record<string, unknown> =>
+    value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (!recordObject(acl) || Object.keys(acl).sort().join(',') !== 'currentUser,owner,protected,reparsePoint,rules'
+    || typeof acl.owner !== 'string' || !/^S-1-[0-9-]+$/u.test(acl.owner)
+    || typeof acl.currentUser !== 'string' || !/^S-1-[0-9-]+$/u.test(acl.currentUser)
+    || typeof acl.protected !== 'boolean' || typeof acl.reparsePoint !== 'boolean' || !Array.isArray(acl.rules)) {
+    throw new Error('pi_projection_acl_invalid_shape');
+  }
+  if (acl.reparsePoint) throw new Error('pi_projection_reparse_point: Pi projection path must be a non-symlink directory');
+  if (acl.owner !== acl.currentUser) throw new Error('pi_projection_owner_mismatch: Pi projection directory must be owned by the current user');
+  if (!acl.protected) throw new Error('pi_projection_acl_unprotected');
+  const principals = new Set([acl.owner, 'S-1-5-18', 'S-1-5-32-544']);
+  let ownerControl = false;
+  for (const rule of acl.rules) {
+    if (!recordObject(rule) || Object.keys(rule).sort().join(',') !== 'allow,fullControl,inherits,sid'
+      || typeof rule.sid !== 'string' || !/^S-1-[0-9-]+$/u.test(rule.sid)
+      || typeof rule.allow !== 'boolean' || typeof rule.fullControl !== 'boolean' || typeof rule.inherits !== 'boolean') {
+      throw new Error('pi_projection_acl_invalid_ace');
+    }
+    if (!principals.has(rule.sid) || !rule.allow) throw new Error('pi_projection_acl_unauthorized_ace');
+    if (rule.sid === acl.owner && rule.fullControl && rule.inherits) ownerControl = true;
+  }
+  if (!ownerControl) throw new Error('pi_projection_acl_owner_access_missing');
+}
+
+/** Validate the client-owned empty directory before any credential access. */
+export async function assertPiProjectionDirectory(projectionDir: string, expectedDir: string): Promise<void> {
+  if (projectionDir !== expectedDir || !path.isAbsolute(projectionDir) || path.normalize(projectionDir) !== projectionDir) {
+    throw new Error('pi_projection_path_mismatch: Pi projection directory differs from committed path');
+  }
+  const stat = await fs.lstat(projectionDir);
+  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('pi_projection_not_directory_or_symlink: Pi projection path must be a non-symlink directory');
+  if (await fs.realpath(projectionDir) !== projectionDir) throw new Error('pi_projection_path_not_canonical: Pi projection directory parents must be canonical, without symlinks');
+  if (process.platform === 'win32') {
+    await assertWindowsPiProjectionAcl(projectionDir);
+  } else {
+    if (stat.uid !== process.getuid!()) throw new Error('pi_projection_owner_mismatch: Pi projection directory must be owned by the current uid');
+    if ((stat.mode & 0o7777) !== 0o700) throw new Error('pi_projection_mode_mismatch: Pi projection directory must have mode 0700');
+  }
+  if ((await fs.readdir(projectionDir)).length !== 0) throw new Error('pi_projection_not_empty: Pi projection directory must be empty');
+}
+
+export interface PiProviderLaunchDependencies {
+  ambient: NodeJS.ProcessEnv;
+  createSecretStore: () => SecretStore;
+  spawn?: (command: string, args: string[], options: {
+    cwd: string; env: Record<string, string>; stdio: 'inherit';
+  }) => ChildProcess;
+}
+
+/** Owns the credential-to-spawn sequence; the client retains directory ownership. */
+export async function startPiProvider(
+  profile: ModelProviderProfile,
+  options: PiProviderLauncherOptions,
+  dependencies: PiProviderLaunchDependencies,
+): Promise<{ child: ChildProcess; cleanup: () => Promise<void> }> {
+  const binding = options.launchBinding;
+  if (options.validateOnly || binding === undefined || options.piCwd === undefined || options.piFixedArgs === undefined) {
+    throw new Error('Pi launch requires an explicit spawn binding, cwd and fixed args');
+  }
+  const projection = buildPiProviderProjection(profile);
+  const delegated = buildPiProviderArgs(profile, options.piArgs);
+  const env = buildPiProviderChildEnvironment({
+    ambient: dependencies.ambient, binding, sessionDir: options.sessionDir, secret: undefined,
+  });
+  const actual = { command: options.piBin, entry: options.piEntry, fixedArgv: [...options.piFixedArgs], cwd: options.piCwd, env };
+  // Reject drift and invalid layout before opening custody. A second assertion
+  // below remeasures the actual credential-bearing env at the final boundary.
+  await assertImplementationSpawnBinding(binding, actual);
+  const projectionDir = binding.envCommitments.PI_CODING_AGENT_DIR!;
+  await assertPiProjectionDirectory(projectionDir, binding.envCommitments.PI_CODING_AGENT_DIR!);
+  await ensurePiSessionDirectory(options.sessionDir);
+  const modelsPath = path.join(projectionDir, 'models.json');
+  let created = false;
+  const cleanup = async (): Promise<void> => {
+    if (created) {
+      await fs.unlink(modelsPath);
+      created = false;
+    }
+  };
+  try {
+    const file = await fs.open(modelsPath, 'wx', 0o600);
+    created = true;
+    try { await file.writeFile(`${JSON.stringify(projection)}\n`); }
+    finally { await file.close(); }
+    const secret = await resolvePiProviderSecret(profile, dependencies.createSecretStore);
+    if (secret !== undefined) env[PI_PROJECTED_KEY_ENV] = secret;
+    const childArgs = [...(actual.entry === undefined ? [] : [actual.entry]), ...actual.fixedArgv, ...delegated];
+    const spawnChild = dependencies.spawn ?? spawn;
+    await assertImplementationSpawnBinding(binding, actual);
+    const child = spawnChild(actual.command, childArgs, { env, cwd: actual.cwd, stdio: 'inherit' });
+    return { child, cleanup };
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
 }
 
 /**

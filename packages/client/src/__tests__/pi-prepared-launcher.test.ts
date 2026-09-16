@@ -1,3 +1,4 @@
+import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { promises as fs } from 'node:fs';
@@ -365,8 +366,14 @@ async function startPrepared(
     workspace: { workspaceDir: prepared.workspaceDir },
     forwardedEnvironmentNames: Object.keys(prepared.childEnv).sort(),
   });
+  const runtimeLaunch = await result.operation.resolveRuntimeLaunch!({
+    kind: 'prepared', cwd: prepared.workspaceDir, env: prepared.childEnv,
+    projectionRoot: path.join(prepared.workspaceDir, '.unused-projections'),
+  });
   const session = await result.operation.start({
+    runtimeLaunch,
     kind: 'prepared',
+    mcpEnv: projectPiMcpEnvironment(prepared.childEnv),
     manifest,
     env: prepared.childEnv,
     mcpServers: prepared.mcpServers,

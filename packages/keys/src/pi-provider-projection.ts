@@ -70,7 +70,14 @@ export function buildPiProviderArgs(
       if (singleFlags.has(flag)) throw new Error(`Pi launcher duplicate argument ${flag}`);
       singleFlags.add(flag);
     }
-    if (flag === '--no-tools') continue;
+    if (flag === '--no-tools' || flag === '--no-skills' || flag === '--no-extensions') continue;
+    if (flag === '--config') {
+      const value = delegatedArgs[++index];
+      if (typeof value !== 'string' || !isAbsolute(value) || /[\u0000\r\n]/u.test(value)) {
+        throw new Error('Pi launcher --config requires an absolute single-line path');
+      }
+      continue;
+    }
     if (flag === '--extension') {
       const value = delegatedArgs[++index];
       if (typeof value !== 'string' || !isAbsolute(value) || /[\u0000\r\n]/u.test(value)) {

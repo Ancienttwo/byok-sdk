@@ -71,6 +71,7 @@ async function callThroughExtension(
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-config-'));
   const configPath = path.join(dir, 'mcp-config.json');
   await fs.writeFile(configPath, JSON.stringify({
+    mcpEnv: ENV,
     mcpServers: { salesko: server },
     observation: { salesko: { ...observed, toolsetId: 'salesko.read.v1' } },
     permissionMode: 'auto',

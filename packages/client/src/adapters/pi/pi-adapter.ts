@@ -1,3 +1,6 @@
+import { parsePiMcpEnvironment } from './mcp-environment';
+import { assertImplementationSpawnBinding } from '@byok-sdk/implementation-identity';
+import { resolvePiRuntimeLaunch, type PiRuntimeLaunchResources } from './runtime-launch';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -34,11 +37,9 @@ import type { ToolImplementationIdentityV1 } from '../../daemon/tool-implementat
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
 import { grantFingerprint, resolveMcpToolsetGrants } from '../mcp-tool-grants';
 import { clientPackageRoot } from './client-manifest';
-import { BYOK_PI_MCP_CONFIG_PATH } from './mcp-config';
 import { resolvePiBin, type ResolvedBin } from './resolve-bin';
-import { resolvePiExtensions, type ResolvedPiExtensions } from './resolve-extensions';
+import type { ResolvedPiExtensions } from './resolve-extensions';
 import { mapPermissionPolicyToPiArgs } from './permission-mapping';
-import { BYOK_PI_PERMISSION_MODE } from './subagents-policy-config';
 import { mapPiMessageToAgentEvent, ROUTINE_PI_EVENT_TYPES } from './events';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client';
 import { buildPreparedPromptCommand, PREPARED_PROMPT_COMMAND_ID } from './prepared-prompt-frame';
@@ -155,6 +156,9 @@ export function validatePiByokLauncherConfig(
     '--',
     '--pi-bin',
     '--pi-entry',
+    '--pi-cwd',
+    '--pi-fixed-args',
+    '--launch-binding',
     '--profile-db',
     '--session-dir',
     '--macos-keychain-path',
@@ -253,7 +257,7 @@ export class PiAdapter implements RuntimeAdapter {
     }
 
     const bin = this.resolveBin();
-    const extensions = (this.options.resolveExtensions ?? resolvePiExtensions)();
+    // Inline factories are owned by the SDK entry; no runtime extension path resolution here.
     // Session/workspace continuity:
     // `task.sessionRef` is only ever non-empty here when `task-runner.ts`
     // has (a) found a recorded workspace for this exact sessionRef in its
@@ -349,10 +353,35 @@ export class PiAdapter implements RuntimeAdapter {
       ];
     }
 
+    let boundRuntime: PiRuntimeLaunchResources | undefined;
     return {
       kind: 'prepared',
       operation: {
+        resolveRuntimeLaunch: async (resources) => {
+          if (boundRuntime !== undefined) throw authorityFailure('runtime launch resources were already resolved');
+          const kind = resources.kind === 'prepared' ? 'pi-prepared' : 'pi-rpc';
+          // Explicit resolver overrides remain the dev/test target seam. A normal
+          // installed SDK runs its own host, rather than native main's cwd-bound CLI.
+          const dev = kind === 'pi-prepared' ? { command: process.execPath, entry: preparedPiLaunchBin() }
+            : this.options.resolveBin === undefined
+              ? { command: process.execPath, entry: path.join(clientPackageRoot(), 'dist', 'bin', 'byok-pi-rpc.js') }
+              : invocation;
+          boundRuntime = await resolvePiRuntimeLaunch({
+            ...resources, sessionCwd: resources.cwd, kind,
+            env: pinnedSelection === undefined ? resources.env : withoutProviderCredentials(resources.env),
+            devCommand: dev.command, ...(dev.entry === undefined ? {} : { devEntry: dev.entry }),
+            ...(kind === 'pi-rpc' && pinnedSelection !== undefined
+              ? { keysSessionDir: this.options.byokLauncher!.sessionDir } : {}),
+          });
+          return boundRuntime;
+        },
         start: async (startInput: RuntimeOperationStartInput): Promise<Session> => {
+          const runtimeLaunch = startInput.runtimeLaunch;
+          if (runtimeLaunch === undefined || runtimeLaunch !== boundRuntime) throw authorityFailure('Pi start requires its resolved runtime launch binding');
+          if (runtimeLaunch.kind !== (startInput.kind === 'prepared' ? 'pi-prepared' : 'pi-rpc')) throw authorityFailure('Pi start lane differs from runtime launch binding');
+          if (runtimeLaunch.sessionCwd !== startInput.manifest.cwd) throw authorityFailure('Pi runtime session cwd differs from manifest');
+          parsePiMcpEnvironment(startInput.mcpEnv);
+          const mcpEnv = startInput.mcpEnv!; // Preserve the daemon admission object through serialization.
           const manifestSelection = startInput.manifest.dispatchSelection;
           if (!sameDispatchSelection(manifestSelection, pinnedSelection)) {
             throw new RuntimeExecutionFailure({
@@ -393,6 +422,8 @@ export class PiAdapter implements RuntimeAdapter {
           // (`../../bin/byok-pi-prepared.ts`).
           if (startInput.kind === 'prepared') {
             return await startPreparedPiOperation({
+              runtimeLaunch,
+              mcpEnv,
               preparation: startInput.preparation,
               policy: input.policy,
               manifest: startInput.manifest,
@@ -416,7 +447,7 @@ export class PiAdapter implements RuntimeAdapter {
           }
           const resumeSessionId = startInput.manifest.sessionRef;
           let mcpConfigDir: string | undefined;
-          let runtimeEnv = manifestSelection === undefined ? startInput.env : withoutProviderCredentials(startInput.env);
+          let runtimeEnv = { ...runtimeLaunch.env };
           const taskMcpServers = startInput.mcpServers ?? {};
           // The daemon resolved ONE proven-non-writable launch directory for
           // this task (`daemon/trusted-launch-cwd.ts`) and probed every server
@@ -425,9 +456,8 @@ export class PiAdapter implements RuntimeAdapter {
           // `spawn` — no launcher, because this adapter owns the spawn.
           //
           // Fail closed rather than omit it: an MCP server started without it
-          // would inherit the Pi child's cwd, which is the Agent home, which
-          // is exactly the writable directory a compiled server binary reads
-          // `bunfig.toml` `preload` from.
+          // would inherit the Pi process directory instead of consuming the
+          // independently admitted MCP launch binding.
           const mcpLaunchCwd = startInput.mcpLaunch?.cwd;
           if (Object.keys(taskMcpServers).length > 0 && mcpLaunchCwd === undefined) {
             throw new RuntimeExecutionFailure({
@@ -436,6 +466,7 @@ export class PiAdapter implements RuntimeAdapter {
             });
           }
           let mcpConfigPath: string;
+          let hostConfigPath: string;
           try {
             mcpConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-mcp-'));
             await fs.chmod(mcpConfigDir, 0o700).catch(() => {});
@@ -464,6 +495,7 @@ export class PiAdapter implements RuntimeAdapter {
             await fs.writeFile(
               mcpConfigPath,
               JSON.stringify({
+                mcpEnv,
                 mcpServers: taskMcpServers,
                 observation: startInput.mcpToolsetTools ?? {},
                 permissionMode: input.policy.mode,
@@ -480,6 +512,11 @@ export class PiAdapter implements RuntimeAdapter {
               }),
               { mode: 0o600 },
             );
+            hostConfigPath = path.join(mcpConfigDir!, 'rpc-launch.json');
+            await fs.writeFile(hostConfigPath, JSON.stringify({
+              format: 'byok.pi.rpc-launch', version: 1, cwd: runtimeLaunch.sessionCwd,
+              mcp: JSON.parse(await fs.readFile(mcpConfigPath, 'utf8')), policy: input.policy,
+            }), { mode: 0o600 });
           } catch (cause) {
             await cleanupMcpConfigDir(mcpConfigDir);
             throw new RuntimeExecutionFailure({
@@ -487,41 +524,37 @@ export class PiAdapter implements RuntimeAdapter {
               reason: 'pi task-scoped MCP configuration could not be created',
             }, { cause });
           }
-          runtimeEnv = {
-            ...runtimeEnv,
-            [BYOK_PI_MCP_CONFIG_PATH]: mcpConfigPath,
-            [BYOK_PI_PERMISSION_MODE]: input.policy.mode,
-          };
-          const piArgs = [
-            '--mode',
-            'rpc',
-            '--extension',
-            extensions.webAccess,
-            '--extension',
-            extensions.mcpExtension,
-            '--extension',
-            extensions.subagentsPolicy,
-            '--extension',
-            extensions.subagents,
-            '--extension',
-            extensions.todo,
-            ...(resumeSessionId ? ['--session', resumeSessionId] : []),
-            ...mapping.args,
-          ];
-          const args = launcherArgs === undefined
-            ? [...(invocation.entry === undefined ? [] : [invocation.entry]), ...piArgs]
-            : [...launcherArgs, '--', ...piArgs];
+          const piArgs = ['--config', hostConfigPath, '--mode', 'rpc', '--no-skills',
+            ...(resumeSessionId === undefined ? [] : ['--session', resumeSessionId]), ...mapping.args];
+          const launch = runtimeLaunch.binding;
+          const targetArgs = [...(launch.entry === undefined ? [] : [launch.entry]), ...launch.fixedArgv, ...piArgs];
+          let launchCommand = launch.command;
+          let launchArgs = targetArgs;
+          if (launcherArgs !== undefined) {
+            const updated = [...launcherArgs];
+            const binIndex = updated.indexOf('--pi-bin');
+            updated[binIndex + 1] = launch.command;
+            const entryIndex = updated.indexOf('--pi-entry');
+            if (entryIndex >= 0) updated.splice(entryIndex, 2);
+            if (launch.entry !== undefined) updated.push('--pi-entry', launch.entry);
+            updated.push('--pi-cwd', launch.cwd, '--pi-fixed-args', JSON.stringify(launch.fixedArgv),
+              '--launch-binding', JSON.stringify(launch));
+            launchCommand = command;
+            launchArgs = [...updated, '--', ...piArgs];
+          }
           let rpc: PiRpcClient;
           try {
+            await reverifyPiRuntimeLaunch(runtimeLaunch);
             rpc = new PiRpcClient({
-              command,
-              args,
-              cwd: manifestCwd,
+              command: launchCommand,
+              args: launchArgs,
+              cwd: launch.cwd,
               env: runtimeEnv,
               spawnFn: this.options.spawnFn,
             });
           } catch (cause) {
             await cleanupMcpConfigDir(mcpConfigDir);
+            if (cause instanceof RuntimeExecutionFailure) throw cause;
             throw new RuntimeExecutionFailure({
               phase: 'start', category: 'infrastructure', retry: 'retryable',
               reason: 'pi runtime process could not be spawned',
@@ -564,7 +597,7 @@ export class PiAdapter implements RuntimeAdapter {
               reason: 'pi resumed a different authoritative session than requested',
             });
           }
-          return new PiSession(sessionRef, rpc, manifestSelection, mcpConfigDir);
+          return new PiSession(sessionRef, rpc, manifestSelection, mcpConfigDir, runtimeLaunch.release);
         },
       },
     };
@@ -580,6 +613,8 @@ export class PiAdapter implements RuntimeAdapter {
  * checks have already passed.
  */
 interface PreparedPiLaunchInput {
+  readonly mcpEnv: Readonly<Record<string, string>>;
+  readonly runtimeLaunch: PiRuntimeLaunchResources;
   readonly preparation: RuntimePreparedLaunchV1;
   /** The policy this operation was ADMITTED under, whole. */
   readonly policy: PermissionPolicy;
@@ -699,7 +734,6 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
 
   const envelope = await readPreparedArtifact(preparation);
 
-  const bin = preparedPiLaunchBin();
   let configDir: string | undefined;
   let configPath: string;
   try {
@@ -723,6 +757,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
         // by the same adapter from the same resources. The prepared host parses
         // it with the same parser and reaches the servers through the same pool.
         mcp: {
+          mcpEnv: input.mcpEnv,
           mcpServers: input.mcpServers ?? {},
           observation: input.mcpToolsetTools ?? {},
           permissionMode: preparation.permissionMode,
@@ -742,19 +777,20 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
 
   let rpc: PiRpcClient;
   try {
+    const binding = input.runtimeLaunch.binding;
+    const env = input.runtimeLaunch.env;
+    await reverifyPiRuntimeLaunch(input.runtimeLaunch);
     rpc = new PiRpcClient({
-      command: process.execPath,
-      args: [bin, '--config', configPath],
-      cwd: input.manifestCwd,
-      // Provider credentials are stripped exactly as they are for a pinned
-      // selection on the ordinary lane: the prepared host resolves its own
-      // credential through pi's authenticated storage, never through an
-      // inherited environment value.
-      env: input.manifestSelection === undefined ? input.env : withoutProviderCredentials(input.env),
+      command: binding.command,
+      args: [...(binding.entry === undefined ? [] : [binding.entry]), ...binding.fixedArgv, '--config', configPath],
+      cwd: binding.cwd,
+      // Prepared retains its existing Pi auth-store credential source.
+      env,
       ...(input.spawnFn === undefined ? {} : { spawnFn: input.spawnFn }),
     });
   } catch (cause) {
     await cleanupMcpConfigDir(configDir);
+    if (cause instanceof RuntimeExecutionFailure) throw cause;
     throw new RuntimeExecutionFailure({
       phase: 'start', category: 'infrastructure', retry: 'retryable',
       reason: 'pi prepared runtime process could not be spawned',
@@ -820,7 +856,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     throw authorityFailure('pi reported a different session id than the one that admitted the prepared request');
   }
 
-  return new PiSession(sessionRef, rpc, input.manifestSelection, configDir);
+  return new PiSession(sessionRef, rpc, input.manifestSelection, configDir, input.runtimeLaunch.release);
 }
 
 /**
@@ -963,6 +999,7 @@ class PiSession implements Session {
     private readonly selection: TaskOfferPayload['dispatchSelection'],
     /** Task-scoped isolated MCP extension configuration, removed in close(). */
     private readonly mcpConfigDir?: string,
+    private readonly releaseRuntime?: () => Promise<void>,
   ) {}
 
   get events(): AsyncIterable<AgentEvent> {
@@ -1052,6 +1089,7 @@ class PiSession implements Session {
       const attempt = (async () => {
         await this.rpc.dispose();
         await cleanupMcpConfigDir(this.mcpConfigDir);
+        await this.releaseRuntime?.();
       })();
       this.closeAttempt = attempt.catch((error: unknown) => {
         this.closeAttempt = undefined;
@@ -1068,5 +1106,21 @@ class PiSession implements Session {
     // rather than a silent no-op so a future caller (or a misbehaving
     // server) gets a clear error instead of a hang.
     throw new Error('pi adapter does not support approval resume: pi never emits needs_approval in M0/M1');
+  }
+}
+
+/** The two client-owned final spawn sites share the same authority failure mapping. */
+async function reverifyPiRuntimeLaunch(resources: PiRuntimeLaunchResources): Promise<void> {
+  const binding = resources.binding;
+  try {
+    await assertImplementationSpawnBinding(binding, {
+      command: binding.command, entry: binding.entry, fixedArgv: binding.fixedArgv,
+      cwd: binding.cwd, env: resources.env,
+    });
+  } catch (cause) {
+    throw new RuntimeExecutionFailure({
+      phase: 'start', category: 'authority', retry: 'non-retryable',
+      reason: `Pi runtime launch reverify failed: ${errorMessage(cause)}`,
+    }, { cause });
   }
 }

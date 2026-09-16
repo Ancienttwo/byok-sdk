@@ -1,7 +1,11 @@
+import { spawnSync } from 'node:child_process';
+import * as rpcHost from '#byok-pi-runtime-host';
+import * as preparedHost from '#byok-pi-runtime-host';
+import { runSdkReservedHelper } from '../bin/sdk-reserved-helper-runners';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   BYOK_SDK_HELPER_SUBCOMMAND,
   resolveSdkReservedHelperBin,
@@ -10,7 +14,10 @@ import {
 import { preflightAgentMessageMcp } from '../daemon/agent-message-mcp-preflight';
 
 const roots: string[] = [];
-afterEach(async () => Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true }))));
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+});
 
 /**
  * Stands in for the allowlisted child environment `buildRuntimeEnv` produces
@@ -41,6 +48,61 @@ describe('SDK-reserved helper host composition', () => {
     expect(() => resolveSdkReservedHelperBin('agent-message-mcp', {
       mode: 'self-executable', executable: 'relative-product',
     })).toThrow(/absolute executable path/);
+  });
+
+  it('inserts an explicit interpreter entry before the same fixed helper prefix', () => {
+    for (const kind of ['agent-message-mcp', 'agent-memory-mcp', 'approval-mcp', 'agent-team-mcp', 'mcp-env', 'pi-rpc', 'pi-prepared'] as const) {
+      expect(resolveSdkReservedHelperBin(kind, {
+        mode: 'self-executable', executable: '/runtime/bun', entry: '/release with spaces/sdk.js',
+      })).toEqual({command:'/runtime/bun', args:['/release with spaces/sdk.js', BYOK_SDK_HELPER_SUBCOMMAND, kind], source:'self-executable'});
+    }
+    for (const entry of ['relative.js', '/bad\nentry.js', '/bad\u0000entry.js']) {
+      expect(() => resolveSdkReservedHelperBin('pi-rpc', {mode:'self-executable', entry})).toThrow(/absolute single-line/);
+    }
+    expect(resolveSdkReservedHelperBin('pi-rpc').args[0]).toMatch(/bin[/\\]byok-pi-rpc\.js$/u);
+    expect(resolveSdkReservedHelperBin('pi-prepared').args[0]).toMatch(/bin[/\\]byok-pi-prepared\.js$/u);
+  });
+
+  it('forwards variable Pi argv to the corresponding callable entry without invoking another kind', async () => {
+    const rpc = vi.spyOn(rpcHost, 'runPiRpcHost').mockResolvedValue();
+    const prepared = vi.spyOn(preparedHost, 'runPiPreparedHost').mockResolvedValue();
+    const argv = ['--config', '/session with spaces/config.json', '--mode', 'rpc', '--no-skills'];
+    await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-rpc', ...argv])).resolves.toBe(true);
+    expect(rpc).toHaveBeenCalledExactlyOnceWith(argv);
+    expect(prepared).not.toHaveBeenCalled();
+    const preparedArgs = ['--config', '/session/prepared.json'];
+    await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-prepared', ...preparedArgs])).resolves.toBe(true);
+    expect(prepared).toHaveBeenCalledExactlyOnceWith(preparedArgs);
+    // The callable entry owns its usage check, including a missing config.
+    await runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-prepared']);
+    expect(prepared).toHaveBeenLastCalledWith([]);
+  });
+
+  it('retains exact MCP arity at both dispatch boundaries', async () => {
+    for (const kind of ['agent-message-mcp', 'agent-memory-mcp', 'approval-mcp', 'agent-team-mcp', 'mcp-env'] as const) {
+      await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, kind, '--config', '/x'])).rejects.toThrow(/invalid/);
+      await expect(runSdkReservedHelper(kind, ['extra'])).rejects.toThrow(/do not accept arguments/);
+    }
+    await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND])).rejects.toThrow(/invalid/);
+  });
+
+  it('keeps prepared import side-effect free and gives callable and thin bin the same usage validation', async () => {
+    const hostPath = path.resolve(import.meta.dirname, '../bin/pi-prepared-host.ts');
+    const binPath = path.resolve(import.meta.dirname, '../bin/byok-pi-prepared.ts');
+    const caller = await fixture('prepared-caller.ts', `
+      import { runPiPreparedHost } from ${JSON.stringify(hostPath)};
+      console.log('imported');
+      try { await runPiPreparedHost(['--config', 'relative']); }
+      catch (error) { console.error(error.message); process.exitCode = 1; }
+    `);
+    const env = {PATH:process.env.PATH!, HOME:process.env.HOME!};
+    const callable = spawnSync('bun', [caller], {env,encoding:'utf8',timeout:15_000});
+    const thin = spawnSync('bun', [binPath, '--config', 'relative'], {env,encoding:'utf8',timeout:15_000});
+    expect(callable.status).toBe(78);
+    expect(callable.stdout.trim()).toBe('imported');
+    expect(callable.stderr).toContain('--config must be an absolute path');
+    expect(thin.status).toBe(78);
+    expect(thin.stderr).toContain('--config must be an absolute path');
   });
 
   /**

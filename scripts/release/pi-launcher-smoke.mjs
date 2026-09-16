@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { access, mkdtemp, mkdir, writeFile, readFile, realpath, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +10,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
 import { createServer } from 'node:http';
-import { SqliteProviderProfileStore, parseModelProviderProfile, exactProviderProfileBinding } from '@byok-sdk/keys';
+import { SqliteProviderProfileStore, parseModelProviderProfile, exactProviderProfileBinding, buildPiProviderProjection } from '@byok-sdk/keys';
 import { parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER } from './pi-runtime-identity.mjs';
 
 import { PiAdapter } from '@byok-sdk/client/adapters';
@@ -28,7 +29,9 @@ const clientManifest = JSON.parse(await readFile(path.join(clientRoot, 'package.
 const piRuntime = parsePiRuntimeIdentity(clientManifest, '@byok-sdk/client package.json');
 assert.equal(piManifest.name, piRuntime.packageName);
 assert.equal(piManifest.version, piRuntime.version);
-const dir = await mkdtemp(path.join(tmpdir(), 'packed-pi-launcher-'));
+const dir = await realpath(await mkdtemp(path.join(tmpdir(), 'packed-pi-launcher-')));
+const projectionRoot = await realpath(await mkdtemp(path.join(tmpdir(), 'packed-pi-projections-')));
+const sdkPiEntry = path.join(clientRoot, 'dist/bin/byok-pi-rpc.js');
 let requests = 0;
 const server = createServer((_req, res) => { requests++; res.writeHead(500); res.end('No inference allowed'); });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -39,14 +42,59 @@ const modelConfig = {
     supportsUsageInStreaming: true, maxTokensField: 'max_tokens', thinkingFormat: 'zai', zaiToolStream: true },
 };
 let child;
+async function rpcState(command,args,options,custodyProbe) {
+  child=spawn(command,args,{...options,stdio:['pipe','pipe','pipe']});
+  const closed=once(child,'close');
+  let stderr=''; child.stderr.on('data',bytes=>{stderr+=bytes.toString();});
+  const lines=createInterface({input:child.stdout});
+  const timer=setTimeout(()=>child.kill('SIGTERM'),30_000);
+  try {
+    const iterator = lines[Symbol.asyncIterator]();
+    const request = async (frame) => {
+      child.stdin.write(`${JSON.stringify(frame)}\n`);
+      for (;;) {
+        const line = await iterator.next();
+        if (line.done) throw new Error(stderr || `SDK Pi closed before ${frame.type}`);
+        const event = JSON.parse(line.value);
+        if (event.type === 'response' && event.id === frame.id) {
+          assert.equal(event.success, true, event.error || stderr);
+          return event.data;
+        }
+      }
+    };
+    const state = await request({type:'get_state',id:'packed-state'});
+    if (custodyProbe !== undefined) {
+      // Native RPC has a command string, so serialize these two fixed absolute
+      // argv elements with POSIX shell quoting. No task text or secrets enter it.
+      const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
+      const argv = [process.execPath, custodyProbe];
+      assert.ok(argv.every(value => path.isAbsolute(value)));
+      const result = await request({type:'bash',id:'custody-probe',command:argv.map(quote).join(' '),excludeFromContext:true});
+      assert.equal(result.exitCode,0,JSON.stringify(result));
+      const observed = JSON.parse(result.output.trim());
+      assert.equal(await realpath(observed.cwd),dir);
+      assert.deepEqual(observed.present,[],'ambient canary/control names reached the keys-launched runtime');
+      const after = await request({type:'get_messages',id:'after-probe'});
+      assert.equal(after.messages.length,1,'custody probe must be the only session message');
+      assert.equal(after.messages[0].role,'bashExecution');
+      assert.equal(after.messages[0].excludeFromContext,true,'custody probe entered model context');
+    }
+    return state;
+  } finally {
+    clearTimeout(timer);lines.close();child.stdin.end();child.kill('SIGTERM');
+    const force=setTimeout(()=>child.kill('SIGKILL'),5_000);
+    await closed;clearTimeout(force);
+  }
+}
 try {
   const sessionDir = path.join(dir, 'sessions');
   const profileDbPath = path.join(dir, 'profiles.db');
-  const marker = path.join(dir, 'extension-observed.json');
   const toolsMarker = path.join(dir, 'active-tools.json');
   const mcpConfigPath = path.join(dir, 'mcp.json');
-  const extension = path.join(dir, 'extension.mjs');
+  const custodyProbe = path.join(dir, 'custody-probe.mjs');
+  await writeFile(custodyProbe, `const names=['ZAI_API_KEY','UNRELATED_CANARY','BYOK_PI_MCP_CONFIG_PATH','BYOK_PI_PERMISSION_MODE']; process.stdout.write(JSON.stringify({cwd:process.cwd(),present:names.filter(name=>process.env[name]!==undefined)})+'\\n');`);
   const toolsObserver = path.join(dir, 'tools-observer.mjs');
+  const sdkMcpExtension = path.join(clientRoot, 'dist/adapters/pi/mcp-extension.js');
   const reservedServerCwdMarker = path.join(dir, 'reserved-server-cwd.txt');
   // The directory proof is a property of the HOST, not of the packed tarball,
   // and a host that cannot prove it is not a packaging failure. An elevated
@@ -97,10 +145,8 @@ try {
   await writeFile(fixtureServer, `import { createInterface } from 'node:readline';
 import { writeFileSync } from 'node:fs';
 // The directory this server was actually started in, read back out of the
-// child. It must be the daemon's proven-non-writable launch directory and NOT
-// the Pi child's own cwd — a compiled server binary reads \`$cwd/bunfig.toml\`
-// \`preload\` before its own code, and the Pi child's cwd is the Agent home.
-if (process.argv[3]) writeFileSync(process.argv[3], process.cwd());
+// child. Both runtime and MCP process cwd must use the proven sealed directory;
+// the writable session cwd is transported separately in the SDK host config.
 let initialized = false;
 const TOOL = { name: process.argv[2] ?? 'echo', description: 'Echo text back.', inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false } };
 const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n');
@@ -112,7 +158,10 @@ createInterface({ input: process.stdin }).on('line', line => {
     return;
   }
   if (request.method === 'initialize') return reply(request.id, { protocolVersion: request.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'byok-release-fixture', version: '1.0.0' } });
-  if (request.method === 'tools/list' && initialized) return reply(request.id, { tools: [TOOL] });
+  if (request.method === 'tools/list' && initialized) {
+    if (process.argv[3]) writeFileSync(process.argv[3], process.cwd());
+    return reply(request.id, { tools: [TOOL] });
+  }
   if (request.method === 'tools/call') return reply(request.id, { content: [{ type: 'text', text: 'ok' }], isError: false });
 });
 `);
@@ -120,6 +169,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   // observation it took at admission. The extension registers from the
   // observation and discovers nothing of its own.
   const mcpTaskConfig = {
+    mcpEnv: { PATH: process.env.PATH ?? '', HOME: dir },
     mcpServers: {
       fixture: { command: process.execPath, args: [fixtureServer] },
       // An SDK-RESERVED helper, which the extension reads live at
@@ -146,6 +196,7 @@ createInterface({ input: process.stdin }).on('line', line => {
       },
     },
     permissionMode: 'readonly',
+    toolImplementations: {},
     // The daemon resolves this once per offer and the extension refuses to open
     // any server without it; the installed package must therefore honour it out
     // of the packed tarball, launcher script included. Absent on a host where
@@ -154,16 +205,29 @@ createInterface({ input: process.stdin }).on('line', line => {
     ...(launchUnprovable ? {} : { launchCwd: trustedLaunch.dir }),
   };
   await writeFile(mcpConfigPath, JSON.stringify(mcpTaskConfig));
-  await writeFile(toolsObserver, `import {writeFileSync} from 'node:fs';
-export default function (pi) {
- pi.on('session_start', () => { writeFileSync(${JSON.stringify(toolsMarker)}, JSON.stringify(pi.getActiveTools())); });
-}`);
-  await writeFile(extension, `import {writeFileSync} from 'node:fs';
-export default function() {
- if (process.env.BYOK_PI_MCP_CONFIG_PATH !== ${JSON.stringify(mcpConfigPath)} || process.env.BYOK_PI_PERMISSION_MODE !== 'readonly') throw new Error('Missing task context');
- if (process.env.ZAI_API_KEY || process.env.UNRELATED_CANARY) throw new Error('Ambient credential escaped');
- writeFileSync(${JSON.stringify(marker)}, JSON.stringify({loaded:true}));
-}`);
+  // Separate installed MCP registry proof. The SDK host intentionally accepts
+  // no caller extensions and native RPC has no tool-registry inspection. This
+  // no-prompt native session uses the same installed SDK MCP factory with one
+  // inline test observer; it is NOT registry evidence inside the keys child.
+  await writeFile(toolsObserver, `import assert from 'node:assert/strict';
+import {readFileSync,writeFileSync} from 'node:fs';
+import {createAgentSessionServices,createAgentSession,AgentSessionRuntime} from ${JSON.stringify(piEntry)};
+import {createByokMcpExtension} from ${JSON.stringify(sdkMcpExtension)};
+const config=JSON.parse(readFileSync(${JSON.stringify(mcpConfigPath)},'utf8'));
+const services=await createAgentSessionServices({
+ cwd:${JSON.stringify(dir)},agentDir:${JSON.stringify(path.join(dir,'observer-agent'))},
+ resourceLoaderOptions:{noExtensions:true,noSkills:true,extensionFactories:[
+  createByokMcpExtension(config),
+  pi=>pi.on('session_start',()=>writeFileSync(${JSON.stringify(toolsMarker)},JSON.stringify(pi.getActiveTools())))
+ ]}
+});
+assert.deepEqual(services.resourceLoader.getExtensions().errors,[]);
+const created=await createAgentSession({cwd:services.cwd,agentDir:services.agentDir,modelRuntime:services.modelRuntime,settingsManager:services.settingsManager,resourceLoader:services.resourceLoader});
+await created.session.bindExtensions({mode:'rpc'});
+assert.equal(created.session.messages.length,0);
+const runtime=new AgentSessionRuntime(created.session,services,async()=>{throw new Error('observer never replaces sessions');});
+await runtime.dispose();
+`);
   const profile = parseModelProviderProfile({
     adapter: 'openai_compatible', auth_mode: 'none', base_url: `http://127.0.0.1:${server.address().port}/v1`,
     capabilities: [], created_at: '2026-09-10T00:00:00.000Z', updated_at: '2026-09-10T00:00:00.000Z',
@@ -188,93 +252,85 @@ export default function() {
     BYOK_PI_MCP_CONFIG_PATH: mcpConfigPath, BYOK_PI_PERMISSION_MODE: 'readonly',
     ZAI_API_KEY: 'synthetic-must-not-forward', UNRELATED_CANARY: 'synthetic-must-not-forward',
   };
-  // Observe the actual installed adapter's direct command without ever sending its prompt.
-  const directExtension = path.join(dir, 'direct extension.mjs');
-  await writeFile(directExtension, `export default function() { if (process.env.BYOK_PI_PERMISSION_MODE !== 'readonly') throw new Error('Missing direct permission context'); }`);
+  // A missing-config refusal proves Node loaded the installed SDK entry graph
+  // before any native session, provider request or credential lookup can begin.
+  const startupEnv = { ...env };
+  delete startupEnv.BYOK_PI_MCP_CONFIG_PATH;
+  delete startupEnv.BYOK_PI_PERMISSION_MODE;
+  const startup = spawnSync(process.execPath, [sdkPiEntry], {cwd:dir,env:startupEnv,encoding:'utf8',timeout:15_000});
+  assert.ok(startup.status === 1 || startup.status === 78, startup.stderr || String(startup.error));
+  assert.match(startup.stderr, /byok-pi-rpc: --config must be an absolute path/);
+  assert.doesNotMatch(startup.stderr, /ERR_MODULE_NOT_FOUND|ERR_PACKAGE_PATH_NOT_EXPORTED|Cannot find (?:module|package)|Unknown file extension/);
+  console.log('[release-pack] installed Node byok-pi-rpc imports reached the exact missing-config refusal; sessions=0');
+
+  // Capture the actual installed adapter after the explicit resource phase.
   let directInvocation;
-  // No `resolveExtensions` stub: the installed adapter resolves its REAL
-  // extension stack, so the invocation captured below is the one a task would
-  // actually run — the SDK's own MCP extension included.
+  let directConfig;
   const adapter = new PiAdapter({
-    spawnFn: (command, args, options) => { directInvocation = { command, args, options }; throw new Error('capture before prompt'); },
+    spawnFn: (command,args,options) => {
+      directInvocation={command,args,options};
+      directConfig=JSON.parse(readFileSync(args[args.indexOf('--config')+1],'utf8'));
+      throw new Error('capture before prompt');
+    },
   });
   const detected = await adapter.detect();
-  assert.equal(detected.kind, 'available');
-  assert.equal(detected.version, piManifest.version);
-  const policy = { mode: 'readonly' };
-  const directEnv = { ...env, PI_CODING_AGENT_DIR: path.join(dir, 'direct-agent') };
-  delete directEnv.ZAI_API_KEY;
-  delete directEnv.UNRELATED_CANARY;
-  const prepared = await adapter.prepare({ offer: { instruction: 'Never sent', policy }, policy, descriptor: adapter.descriptor, requiredToolsetIds: [] });
-  assert.equal(prepared.kind, 'prepared');
-  const manifest = sealRuntimeOperationManifest({ taskId: 'packed-direct-capture', runtimeId: 'pi', descriptor: adapter.descriptor,
-    policy, requiredToolsetIds: [], workspace: { workspaceDir: dir }, forwardedEnvironmentNames: Object.keys(directEnv).sort() });
-  await assert.rejects(prepared.operation.start({ manifest, instruction: 'Never sent', env: directEnv }));
-  assert.equal(directInvocation.command, process.execPath);
-  assert.equal(directInvocation.args[0], path.join(piRoot, piManifest.bin.pi));
-  assert.equal(directInvocation.options.shell, undefined);
-  // The real, installed extension stack — and the MCP extension is the SDK's
-  // own dist file, not a third-party package.
-  const loadedExtensions = directInvocation.args.filter((arg, index) => directInvocation.args[index - 1] === '--extension');
-  assert.equal(loadedExtensions.length, 5);
-  const sdkMcpExtension = path.join(clientRoot, 'dist/adapters/pi/mcp-extension.js');
-  assert.ok(loadedExtensions.includes(sdkMcpExtension), `real MCP extension missing from ${loadedExtensions.join(', ')}`);
-  assert.ok(!loadedExtensions.some(entry => entry.includes('pi-mcp-adapter')), 'pi-mcp-adapter is retired');
-  // The adapter creates its task-scoped MCP config, then removes it when the
-  // captured spawn throws. Re-create it at the exact path the captured
-  // environment names, so the observed invocation stays byte-identical while
-  // the real MCP extension has the task file it refuses to start without.
-  const capturedConfigPath = directInvocation.options.env.BYOK_PI_MCP_CONFIG_PATH;
-  assert.equal(typeof capturedConfigPath, 'string');
-  await mkdir(path.dirname(capturedConfigPath), { recursive: true });
-  await writeFile(capturedConfigPath, JSON.stringify(mcpTaskConfig));
-  // Run that exact observed invocation with get_state only, no prompt/inference.
-  child = spawn(directInvocation.command, directInvocation.args, { cwd: dir, env: directInvocation.options.env, stdio: ['pipe', 'pipe', 'pipe'] });
-  const directClosed = once(child, 'close');
-  let directStderr = '';
-  child.stderr.on('data', bytes => { directStderr += bytes.toString(); });
-  const directLines = createInterface({ input: child.stdout });
-  const directTimer = setTimeout(() => child.kill('SIGTERM'), 30_000);
+  assert.equal(detected.kind,'available');
+  assert.equal(detected.version,piManifest.version);
+  const policy = {mode:'readonly'};
+  const directEnv = {...startupEnv,PI_CODING_AGENT_DIR:path.join(dir,'direct-agent')};
+  delete directEnv.ZAI_API_KEY; delete directEnv.UNRELATED_CANARY;
+  await mkdir(directEnv.PI_CODING_AGENT_DIR,{recursive:true});
+  await writeFile(path.join(directEnv.PI_CODING_AGENT_DIR,'models.json'),JSON.stringify(buildPiProviderProjection(profile)));
+  await writeFile(path.join(directEnv.PI_CODING_AGENT_DIR,'settings.json'),JSON.stringify({defaultProvider:'byok-sdk-packed-zai',defaultModel:profile.model}));
+  const prepared = await adapter.prepare({offer:{instruction:'Never sent',policy},policy,descriptor:adapter.descriptor,requiredToolsetIds:[],
+    mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation});
+  assert.equal(prepared.kind,'prepared');
+  assert.equal(typeof prepared.operation.resolveRuntimeLaunch,'function');
+  let directRuntime;
+  const captureDirect = async () => {
+    directRuntime=await prepared.operation.resolveRuntimeLaunch({kind:'instruction',cwd:dir,env:directEnv,projectionRoot:path.join(dir,'direct-projections')});
+    const manifest=sealRuntimeOperationManifest({taskId:'packed-direct-capture',runtimeId:'pi',descriptor:adapter.descriptor,
+      policy,requiredToolsetIds:[],workspace:{workspaceDir:dir},forwardedEnvironmentNames:Object.keys(directRuntime.env).sort()});
+    await prepared.operation.start({kind:'instruction',mcpEnv:mcpTaskConfig.mcpEnv,manifest,instruction:'Never sent',env:directRuntime.env,runtimeLaunch:directRuntime,
+      mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation,
+      ...(launchUnprovable?{}:{mcpLaunch:{cwd:trustedLaunch.dir}})});
+  };
   try {
     if (launchUnprovable) {
-      // THE FAIL-CLOSED ASSERTION. No `get_state` is sent: the SDK's own MCP
-      // extension throws while it loads, so this child must die instead of
-      // answering, and the reason must reach stderr. A packed adapter that
-      // started this task anyway would have launched every server in the Pi
-      // child's own cwd — the Agent home — which is the whole vector.
-      directLines.close();
-      child.stdin.end();
-      const [code] = await directClosed;
-      assert.notEqual(code, 0, `the packed Pi started a non-empty mcpServers task with no launch binding: ${directStderr}`);
-      assert.match(directStderr, /absolute launchCwd whenever it projects any server/, directStderr);
-      assert.equal(requests, 0);
+      await assert.rejects(captureDirect,/MCP servers without a trusted launch directory|Pi process cwd unavailable/);
+      assert.equal(directInvocation,undefined,'unprovable launch reached spawn');
+      assert.equal(requests,0);
+      console.log(`[release-pack] installed Pi${piManifest.version} detect passed; explicit admission refused unprovable launch (${trustedLaunch.reason}); spawns=0 prompts=0`);
     } else {
-      child.stdin.write(`${JSON.stringify({ type: 'get_state', id: 'direct-state' })}\n`);
-      let state;
-      for await (const line of directLines) {
-        const event = JSON.parse(line);
-        if (event.type === 'response' && event.id === 'direct-state') { state = event; break; }
-      }
-      assert.equal(state?.success, true, directStderr || 'Direct Pi did not return RPC state');
-      assert.equal(state.data.messageCount, 0);
-      assert.equal(requests, 0);
+      await assert.rejects(captureDirect,/pi runtime process could not be spawned/);
+      assert.equal(directInvocation.command,directRuntime.binding.command);
+      assert.deepEqual(directInvocation.args.slice(0,1),[sdkPiEntry]);
+      assert.equal(directInvocation.options.cwd,trustedLaunch.dir);
+      assert.equal(directInvocation.options.shell,undefined);
+      assert.ok(!directInvocation.args.includes('--extension'),'ordinary entry must own its factories');
+      assert.ok(directInvocation.args.includes('--no-skills'));
+      assert.equal(directConfig.format,'byok.pi.rpc-launch');
+      assert.equal(directConfig.cwd,dir);
+      assert.deepEqual(directConfig.mcp.observation,mcpTaskConfig.observation);
+      assert.equal(directConfig.mcp.launchCwd,trustedLaunch.dir);
+      const configPath=directInvocation.args[directInvocation.args.indexOf('--config')+1];
+      await mkdir(path.dirname(configPath),{recursive:true});
+      await writeFile(configPath,JSON.stringify(directConfig));
+      try {
+        const state=await rpcState(directInvocation.command,directInvocation.args,directInvocation.options);
+        assert.equal(state.messageCount,0);
+        assert.equal(await realpath((await readFile(reservedServerCwdMarker,'utf8')).trim()),await realpath(trustedLaunch.dir));
+      } finally {await rm(path.dirname(configPath),{recursive:true,force:true});}
+      console.log(`[release-pack] installed Pi${piManifest.version} explicit resolve/start capture and SDK host RPC passed; session/process cwd split and real reserved MCP handshake observed; prompts=0`);
     }
-  } finally {
-    clearTimeout(directTimer); directLines.close(); child.stdin.end(); child.kill('SIGTERM');
-    const force = setTimeout(() => child.kill('SIGKILL'), 5_000);
-    await directClosed; clearTimeout(force);
-  }
-  await rm(path.dirname(capturedConfigPath), { recursive: true, force: true });
-  console.log(launchUnprovable
-    ? `[release-pack] installed Pi${piManifest.version} detect/direct capture passed, and the real extension stack REFUSED the unbound MCP task (${trustedLaunch.reason}); prompts=0`
-    : `[release-pack] installed Pi${piManifest.version} detect/direct RPC with the real extension stack passed; prompts=0`);
+  } finally {await directRuntime?.release();}
 
   for (const [rejectedBinding, expected] of [
     [exactProviderProfileBinding(missingPi), /requires explicit pi_model/],
     [staleBinding, /hash mismatch/],
   ]) {
     const check = spawnSync(process.execPath, [path.join(keysRoot, 'dist/bin/pi-provider-launcher.js'),
-      '--pi-bin', process.execPath, '--pi-entry', path.join(piRoot, piManifest.bin.pi), '--profile-db', profileDbPath, '--session-dir', sessionDir,
+      '--pi-bin', process.execPath, '--pi-entry', sdkPiEntry, '--profile-db', profileDbPath, '--session-dir', sessionDir,
       '--provider', rejectedBinding.profileRef, '--model', rejectedBinding.modelId,
       '--profile-revision', rejectedBinding.profileRevision, '--profile-hash', rejectedBinding.profileHash,
       '--required-capabilities', '[]', '--validate-only', 'true',
@@ -290,73 +346,82 @@ export default function() {
     await access(path.join(clientRoot, 'bin', 'byok-launch-cwd.mjs'));
     console.log(`[release-pack] launch boundary unprovable on this host (${trustedLaunch.reason}); the packed tarball's fail-closed refusal was asserted instead of the launch smoke`);
   } else {
-    child = spawn(process.execPath, [path.join(keysRoot, 'dist/bin/pi-provider-launcher.js'),
-      '--pi-bin', process.execPath, '--pi-entry', path.join(piRoot, piManifest.bin.pi), '--profile-db', profileDbPath, '--session-dir', sessionDir,
-      '--provider', binding.profileRef, '--model', binding.modelId,
-      '--profile-revision', binding.profileRevision, '--profile-hash', binding.profileHash,
-      '--required-capabilities', '[]', '--validate-only', 'false',
-      '--', '--mode', 'rpc',
-      '--extension', extension,
-      // The real SDK-owned MCP extension, against the real stdio MCP servers
-      // configured above.
-      '--extension', path.join(clientRoot, 'dist/adapters/pi/mcp-extension.js'),
-      '--extension', toolsObserver,
-    ], { cwd: dir, env, stdio: ['pipe', 'pipe', 'pipe'] });
-    const closed = once(child, 'close');
-    let stderr = '';
-    child.stderr.on('data', bytes => { stderr += bytes.toString(); });
-    const lines = createInterface({ input: child.stdout });
-    const timer = setTimeout(() => child.kill('SIGTERM'), 30_000);
-    let state;
+    // Obtain keys projection directory and commitments through the installed
+    // adapter's resource phase, exactly as a real operation does. No credential
+    // is read: this profile declares auth_mode:none and start is intercepted.
+    let keysInvocation;
+    let keysConfig;
+    const keysAdapter=new PiAdapter({
+      byokLauncher:{command:process.execPath,args:[path.join(keysRoot,'dist/bin/pi-provider-launcher.js')],profileDbPath,sessionDir},
+      spawnFn:(command,args,options)=>{
+        keysInvocation={command,args,options};
+        keysConfig=JSON.parse(readFileSync(args[args.indexOf('--config')+1],'utf8'));
+        throw new Error('capture before prompt');
+      },
+    });
+    const keysPolicy={mode:'auto'}; // RPC custody probe is outside readonly-policy evidence.
+    const selection={lane:'byok-profile',runtimeId:'pi',providerProfile:binding};
+    const keysPrepared=await keysAdapter.prepare({offer:{instruction:'Never sent',policy:keysPolicy,dispatchSelection:selection},policy:keysPolicy,
+      descriptor:keysAdapter.descriptor,requiredToolsetIds:[],mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation});
+    assert.equal(keysPrepared.kind,'prepared');
+    const keysRuntime=await keysPrepared.operation.resolveRuntimeLaunch({kind:'instruction',cwd:dir,env,projectionRoot});
     try {
-      child.stdin.write(`${JSON.stringify({ type: 'get_state', id: 'packed-state' })}\n`);
-      for await (const line of lines) {
-        const event = JSON.parse(line);
-        if (event.type === 'response' && event.id === 'packed-state') { state = event; break; }
-      }
-      assert.equal(state?.success, true, stderr || 'Pi did not return RPC state');
-      assert.equal(state.data.model.provider, 'byok-sdk-packed-zai');
-      assert.equal(state.data.model.id, profile.model);
-      assert.equal(state.data.model.contextWindow, modelConfig.contextWindow);
-      assert.equal(state.data.model.maxTokens, modelConfig.maxTokens);
-      assert.equal(state.data.model.reasoning, true);
-      assert.deepEqual(state.data.model.thinkingLevelMap, modelConfig.thinkingLevelMap);
-      for (const [key, value] of Object.entries(modelConfig.compat)) assert.equal(state.data.model.compat[key], value);
-      assert.equal(state.data.thinkingLevel, modelConfig.thinkingLevel);
-      assert.equal(state.data.messageCount, 0);
-      assert.equal(JSON.parse(await readFile(marker, 'utf8')).loaded, true);
-      // One Pi tool per observed MCP tool, carrying the server's real schema —
-      // not a single `mcp` proxy, and not `mcpScript`. The name is spelled out
-      // rather than derived from the core's `projectMcpTools`: that helper is
-      // not part of the published surface, and re-deriving the qualified form
-      // here would make this file a second authority on the naming rule. That
-      // the registered set IS exactly the projection is asserted in-repo, in
-      // `packages/client/src/__tests__/mcp-projection.test.ts`.
-      const activeTools = JSON.parse(await readFile(toolsMarker, 'utf8'));
-      assert.ok(activeTools.includes('mcp__fixture__echo'), `registered tools: ${activeTools.join(', ')}`);
-      // The reserved helper is read LIVE off a connected child, so its bare tool
-      // name appearing here is proof the pool really handshook with a server.
-      assert.ok(activeTools.includes('relay_probe'), `reserved helper tool missing from: ${activeTools.join(', ')}`);
-      // ...and that child is where the launch boundary is actually observable
-      // out of the packed tarball: it started in the proven-non-writable launch
-      // directory, not in the Pi process's own cwd.
-      const reservedServerCwd = (await readFile(reservedServerCwdMarker, 'utf8')).trim();
-      assert.equal(await realpath(reservedServerCwd), await realpath(trustedLaunch.dir));
-      assert.notEqual(reservedServerCwd, dir);
-      // The packed tarball really ships the launcher the claude/codex paths need.
-      await access(path.join(clientRoot, 'bin', 'byok-launch-cwd.mjs'));
-      assert.ok(!activeTools.includes('mcp'), 'the retired MCP proxy tool must not be registered');
-      assert.ok(!activeTools.includes('mcpScript'), 'the retired mcpScript tool must not be registered');
-      assert.equal(requests, 0);
-    } finally {
-      clearTimeout(timer); lines.close(); child.stdin.end(); child.kill('SIGTERM');
-      const force = setTimeout(() => child.kill('SIGKILL'), 5_000);
-      await closed; clearTimeout(force);
-    }
-    console.log(`[release-pack] keys -> Pi${piManifest.version} RPC model/extension/custody passed; LLM requests=0`);
+      const manifest=sealRuntimeOperationManifest({taskId:'packed-keys-capture',runtimeId:'pi',descriptor:keysAdapter.descriptor,
+        policy:keysPolicy,dispatchSelection:selection,requiredToolsetIds:[],workspace:{workspaceDir:dir},forwardedEnvironmentNames:Object.keys(keysRuntime.env).sort()});
+      await assert.rejects(keysPrepared.operation.start({kind:'instruction',mcpEnv:mcpTaskConfig.mcpEnv,manifest,instruction:'Never sent',env:keysRuntime.env,runtimeLaunch:keysRuntime,
+        mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation,mcpLaunch:{cwd:trustedLaunch.dir}}),/pi runtime process could not be spawned/);
+      const option=(name)=>keysInvocation.args[keysInvocation.args.indexOf(name)+1];
+      assert.deepEqual(JSON.parse(option('--launch-binding')),keysRuntime.binding);
+      assert.equal(option('--pi-cwd'),trustedLaunch.dir);
+      assert.deepEqual(JSON.parse(option('--pi-fixed-args')),keysRuntime.binding.fixedArgv);
+      assert.equal(option('--pi-entry'),sdkPiEntry);
+      assert.equal(keysInvocation.options.cwd,trustedLaunch.dir);
+      assert.equal(keysInvocation.options.env.ZAI_API_KEY,undefined);
+      assert.equal(keysInvocation.options.env.UNRELATED_CANARY,undefined);
+      assert.equal(keysInvocation.options.env.BYOK_PI_MCP_CONFIG_PATH,undefined);
+      const configPath=option('--config');
+      await mkdir(path.dirname(configPath),{recursive:true}); await writeFile(configPath,JSON.stringify(keysConfig));
+      await rm(reservedServerCwdMarker,{force:true});
+      try {
+        const state=await rpcState(keysInvocation.command,keysInvocation.args,{...keysInvocation.options,env:{
+          ...keysInvocation.options.env,
+          // Deliberately challenge the real keys projection with extra ambient
+          // names after the captured client boundary, without changing argv.
+          ZAI_API_KEY:env.ZAI_API_KEY,UNRELATED_CANARY:env.UNRELATED_CANARY,
+          BYOK_PI_MCP_CONFIG_PATH:env.BYOK_PI_MCP_CONFIG_PATH,BYOK_PI_PERMISSION_MODE:env.BYOK_PI_PERMISSION_MODE,
+        }},custodyProbe);
+        assert.equal(state.model.provider,'byok-sdk-packed-zai');
+        assert.equal(state.model.id,profile.model);
+        assert.equal(state.model.contextWindow,modelConfig.contextWindow);
+        assert.equal(state.model.maxTokens,modelConfig.maxTokens);
+        assert.equal(state.model.reasoning,true);
+        assert.deepEqual(state.model.thinkingLevelMap,modelConfig.thinkingLevelMap);
+        for (const [key,value] of Object.entries(modelConfig.compat)) assert.equal(state.model.compat[key],value);
+        assert.equal(state.thinkingLevel,modelConfig.thinkingLevel);
+        assert.equal(state.messageCount,0);
+        const reservedCwd=(await readFile(reservedServerCwdMarker,'utf8')).trim();
+        assert.equal(await realpath(reservedCwd),await realpath(trustedLaunch.dir));
+        assert.notEqual(reservedCwd,dir);
+      } finally {await rm(path.dirname(configPath),{recursive:true,force:true});}
+    } finally {await keysRuntime.release();}
+
+    // Preserve the original active MCP registry checks as explicitly separate
+    // native-session evidence; no custom extension is injected into the SDK host.
+    const observed=spawnSync(process.execPath,[toolsObserver],{cwd:trustedLaunch.dir,env:startupEnv,encoding:'utf8',timeout:30_000});
+    assert.equal(observed.status,0,observed.stderr||String(observed.error));
+    const activeTools=JSON.parse(await readFile(toolsMarker,'utf8'));
+    assert.ok(activeTools.includes('mcp__fixture__echo'),`registered tools: ${activeTools.join(', ')}`);
+    assert.ok(activeTools.includes('relay_probe'),`reserved helper tool missing: ${activeTools.join(', ')}`);
+    assert.ok(!activeTools.includes('mcp'),'the retired MCP proxy tool must not be registered');
+    assert.ok(!activeTools.includes('mcpScript'),'the retired mcpScript tool must not be registered');
+    await access(path.join(clientRoot,'bin','byok-launch-cwd.mjs'));
+    assert.equal(requests,0);
+    console.log(`[release-pack] keys -> installed SDK Pi${piManifest.version} host model/start, actual inherited-subprocess custody/session-cwd probe (auto policy), and real MCP handshake/cwd passed; sealed process cwd is the captured spawn input; LLM requests=0`);
+    console.log('[release-pack] separate installed native MCP session active-tool assertions passed; active registry inside the keys-launched child is NOT observed');
   }
 } finally {
   if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
   await new Promise(resolve => server.close(resolve));
   await rm(dir, { recursive: true, force: true });
+  await rm(projectionRoot, { recursive: true, force: true });
 }

@@ -1,3 +1,4 @@
+import { CONTROLLED_PI_DIRECTORY_ENV_NAMES } from './environment';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -365,12 +366,18 @@ export type ToolImplementationSubjectV1 =
   };
 
 /** What the resolver is asked about: one subject, and where it launches. */
-export interface ToolImplementationLocatorV1 {
-  readonly subject: ToolImplementationSubjectV1;
+export type ToolImplementationLocatorV1 = {
+  readonly subject: Extract<ToolImplementationSubjectV1, { kind: 'mcp-server' }>;
   readonly command: string;
   readonly args: readonly string[];
   readonly launch: McpLaunchAttestation;
-}
+} | {
+  readonly subject: Extract<ToolImplementationSubjectV1, { kind: 'runtime' }>;
+  readonly runtimeEntry: 'pi-rpc' | 'pi-prepared';
+  readonly command?: never;
+  readonly args?: never;
+  readonly launch?: never;
+};
 
 /**
  * The install record a resolver returns, which is an attested identity MINUS
@@ -630,7 +637,9 @@ export function toolImplementationLoaderEnvValuesDigest(
   const bound = launchEnvUnderIdentity(env);
   const values: Record<string, string> = {};
   // `loaderEnvInjections` returns the present names already sorted.
-  for (const name of loaderEnvInjections(bound, platform)) values[name] = bound[name]!;
+  const controlled = Object.keys(bound).filter((name) => (CONTROLLED_PI_DIRECTORY_ENV_NAMES as readonly string[])
+    .includes(platform === 'win32' ? name.toUpperCase() : name));
+  for (const name of [...new Set([...loaderEnvInjections(bound, platform), ...controlled])].sort()) values[name] = bound[name]!;
   return canonicalDigest(values);
 }
 
@@ -1206,7 +1215,7 @@ async function reverifyDeclaredAssets(
 export async function resolveToolImplementationIdentity(
   authority: ToolImplementationAuthority | undefined,
   locator: ToolImplementationLocatorV1,
-  launchEnv: Readonly<Record<string, string>>,
+  launchEnv: Readonly<Record<string, string>> | ((record: ToolImplementationInstallRecordV1) => Readonly<Record<string, string>>),
   probe: ToolImplementationFsProbe = realToolImplementationFsProbe,
 ): Promise<ToolImplementationIdentityV1> {
   if (authority === undefined) return TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED;
@@ -1253,11 +1262,12 @@ export async function resolveToolImplementationIdentity(
     if (typeof measuredAssets === 'string') return toolImplementationUnavailable(measuredAssets);
     assetStats = measuredAssets;
   }
+  const resolvedLaunchEnv = typeof launchEnv === 'function' ? launchEnv(record) : launchEnv;
   const measurements: ToolImplementationSealedMeasurements = {
     installStat: statTupleOf(measured),
     ...(assetStats === undefined ? {} : { assetStats }),
-    launchEnvNamesDigest: toolImplementationLaunchEnvNamesDigest(launchEnv),
-    loaderEnvValuesDigest: toolImplementationLoaderEnvValuesDigest(launchEnv),
+    launchEnvNamesDigest: toolImplementationLaunchEnvNamesDigest(resolvedLaunchEnv),
+    loaderEnvValuesDigest: toolImplementationLoaderEnvValuesDigest(resolvedLaunchEnv),
   };
   if (record.interpreter === undefined) return seal(record, measurements);
   const interpreter = await measureCanonicalPathIdentity(record.interpreter.path, probe);

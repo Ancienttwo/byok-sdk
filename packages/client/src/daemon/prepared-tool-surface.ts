@@ -1,3 +1,4 @@
+import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import type { PermissionMode, PermissionPolicy } from '@byok-sdk/protocol';
 import {
   preparedToolBindingDigest,
@@ -320,7 +321,7 @@ export async function resolvePreparedToolBinding(
   // ONCE and carried on the binding as `launchEnv`: the identity binds the
   // environment this SDK hands to `spawn`, so a second `deps.runtimeEnv()`
   // call could measure one value and spawn with another.
-  const launchEnv = deps.runtimeEnv();
+  const launchEnv = projectPiMcpEnvironment(deps.runtimeEnv());
   for (const serverName of [...servers.keys()].sort(compareServerNames)) {
     const entry = servers.get(serverName)!;
     const implementation = await resolveToolImplementationIdentity(

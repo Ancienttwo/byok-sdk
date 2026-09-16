@@ -559,6 +559,10 @@ jobs:
             bun run --filter @byok-sdk/client test -- src/__tests__/trusted-launch-cwd.test.ts
             if ($LASTEXITCODE -ne 0) { Fail $LASTEXITCODE 'trusted-launch-cwd.test.ts failed under the standard-user token' }
 
+            # Real credential-projection directory validation under this same token.
+            bun run --filter @byok-sdk/client test -- src/__tests__/pi-projection-windows.test.ts
+            if ($LASTEXITCODE -ne 0) { Fail $LASTEXITCODE 'Pi projection ACL positive/negative tests failed under the standard-user token' }
+
             # 5. Same driver, same arguments as the non-Windows legs. A `task.decline`
             #    or a fail-closed refusal already exits non-zero inside the smoke; this
             #    step adds no acceptance of either.

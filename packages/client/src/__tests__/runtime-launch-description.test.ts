@@ -124,6 +124,8 @@ describe('a runtime launch description is derived from the record, never discove
       sessionCwd: SESSION_CWD,
       assetRoot: ASSET_ROOT,
       envCommitments: ['PI_PACKAGE_DIR'],
+      credentialSource: 'pi-auth-store',
+      directoryValues: { PI_PACKAGE_DIR: ASSET_ROOT },
     });
   });
 
@@ -222,11 +224,13 @@ describe('the description digest is a function of the description alone', () => 
    * spelling changes, and either of those is a launch contract change that a
    * consumer carrying the digest from decision to spawn must see.
    */
-  const RPC_GOLDEN = '1c9f52f9025c98284ddfa2caa5a8fc731fbdef965725d36d820b5b4eee7eb117';
+  const RPC_GOLDEN = 'd45a6968b61d73490461e289007754d313c84116e42639e732b4860be70a2ca2';
 
   /** The exact bytes the golden hashes, written out so it is not a magic value. */
   const RPC_CANONICAL = '{"assetRoot":"/opt/byok/releases/pi-release-1/assets",'
     + '"command":"/opt/byok/releases/pi-release-1/bun",'
+    + '"credentialSource":"pi-auth-store",'
+    + '"directoryValues":{"PI_PACKAGE_DIR":"/opt/byok/releases/pi-release-1/assets"},'
     + '"entry":"/opt/byok/releases/pi-release-1/pi-bundle.js",'
     + '"envCommitments":["PI_PACKAGE_DIR"],'
     + '"fixedArgv":["__byok_sdk_helper","pi-rpc"],'
@@ -338,7 +342,7 @@ describe('the attestation subject is explicit, and the two are not interchangeab
     const { authority, seen } = capturingAuthority();
     await resolveToolImplementationIdentity(
       authority,
-      { subject: { kind: 'runtime', runtimeId: 'pi' }, command: '/opt/byok/bun', args: [], launch: LAUNCH },
+      { subject: { kind: 'runtime', runtimeId: 'pi' }, runtimeEntry: 'pi-rpc' },
       ENV,
     );
     expect(seen).toHaveLength(1);

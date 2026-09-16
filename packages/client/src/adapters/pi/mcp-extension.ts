@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import type { ExtensionAPI, ExtensionFactory } from '@earendil-works/pi-coding-agent';
 import {
   filterMcpObservationForPolicy,
   projectMcpTools,
@@ -82,8 +82,16 @@ async function reservedServerTools(
   return Object.freeze(projections);
 }
 
+/** Explicit task authority for the SDK-owned inline entry. */
+export function createByokMcpExtension(config: TaskScopedMcpConfig): ExtensionFactory {
+  return (pi) => registerByokMcpToolsWithConfig(pi, config);
+}
+
 export default function registerByokMcpTools(pi: ExtensionAPI): void {
-  const config = loadTaskScopedConfig();
+  registerByokMcpToolsWithConfig(pi, loadTaskScopedConfig());
+}
+
+function registerByokMcpToolsWithConfig(pi: ExtensionAPI, config: TaskScopedMcpConfig): void {
   const pool = new McpServerPool(config, fail);
   const registered = new Set<string>();
   const register = (tools: readonly McpToolProjection[], naming: PiMcpToolNaming): void => {

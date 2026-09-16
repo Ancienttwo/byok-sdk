@@ -1,3 +1,4 @@
+import { parsePiMcpEnvironment } from './mcp-environment';
 import { isAbsolute } from 'node:path';
 import { PERMISSION_MODES, type PermissionMode } from '@byok-sdk/protocol';
 import type { CallToolResult } from '@modelcontextprotocol/client';
@@ -60,6 +61,8 @@ export type McpConfigFailure = (message: string) => never;
 
 /** What the adapter writes for exactly one task. Strict: an unknown shape is refused, never repaired. */
 export interface TaskScopedMcpConfig {
+  /** Credential-free environment measured by daemon admission, never Pi process.env. */
+  readonly mcpEnv: Readonly<Record<string, string>>;
   readonly mcpServers: Readonly<Record<string, McpStdioServerSpec>>;
   /**
    * Everything the daemon observed, classification included — NOT the subset
@@ -171,6 +174,9 @@ export function parseMcpObservation(
 /** Validate one already-parsed JSON value as the task-scoped configuration. */
 export function parseTaskScopedMcpConfig(parsed: unknown, fail: McpConfigFailure): TaskScopedMcpConfig {
   if (!isPlainObject(parsed)) fail('the task-scoped configuration must be an object');
+  let mcpEnv: Readonly<Record<string, string>>;
+  try { mcpEnv = parsePiMcpEnvironment(parsed.mcpEnv); }
+  catch (error) { fail(error instanceof Error ? error.message : String(error)); }
   if (!isPlainObject(parsed.mcpServers)) fail('the task-scoped configuration must contain an mcpServers object');
   if (!isPlainObject(parsed.observation)) fail('the task-scoped configuration must contain an observation object');
   // Validated against the protocol's own enumeration, not merely "a non-empty
@@ -223,6 +229,7 @@ export function parseTaskScopedMcpConfig(parsed: unknown, fail: McpConfigFailure
     fail('the task-scoped configuration launchCwd must be a string');
   }
   return Object.freeze({
+    mcpEnv,
     mcpServers: Object.freeze(mcpServers),
     observation: Object.freeze(observation),
     permissionMode: parsed.permissionMode as PermissionMode,
@@ -250,24 +257,23 @@ export class McpServerPool implements McpToolCallHost {
   private readonly clients = new Map<string, Promise<McpStdioClient>>();
   private closed = false;
 
-  constructor(private readonly config: TaskScopedMcpConfig, private readonly fail: McpConfigFailure) {}
+  constructor(private readonly config: TaskScopedMcpConfig, private readonly fail: McpConfigFailure) {
+    // Direct callers cannot bypass the same strict admission shape.
+    parsePiMcpEnvironment(config.mcpEnv);
+  }
 
   /**
    * The environment an MCP server child is spawned with.
    *
-   * This process's own environment minus the SDK's own Pi control variables.
-   * They address this SDK's Pi entries — the path to the task-scoped config
-   * file, the task's permission mode — and a host toolset server has no
-   * business reading either: the config file names every server this task
-   * projects and the exact observation it was admitted with, which is a
-   * different toolset's configuration from the point of view of any one server.
-   * Nothing else is filtered: this process was already spawned with a filtered
-   * environment by the adapter, so PATH, HOME and the rest are the task's, not
-   * the daemon's.
+   * The daemon's one admitted MCP environment. Pi's runtime env contains
+   * credential-custody and resource directories which are not MCP authority.
+   * The task config must carry the measured environment explicitly; there is
+   * no process.env fallback. The existing BYOK_PI_* filter remains as defence
+   * in depth after the strict parser has already refused such names.
    */
   private childEnv(): Record<string, string> {
     const env: Record<string, string> = {};
-    for (const [name, value] of Object.entries(process.env)) {
+    for (const [name, value] of Object.entries(this.config.mcpEnv)) {
       if (value === undefined || BYOK_PI_CONTROL_ENV_PREFIX.test(name)) continue;
       env[name] = value;
     }

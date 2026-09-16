@@ -276,6 +276,24 @@ describe('the build configuration the scan depends on', () => {
 });
 
 describe.skipIf(!DIST_PRESENT)('the daemon-free dist sub-path closures', () => {
+  it('resolves the private Pi host only to shipped dist artifacts while root retains lazy loading', () => {
+    const manifest = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8'));
+    expect(manifest.imports['#byok-pi-runtime-host']).toEqual({
+      types: './dist/bin/pi-runtime-host.d.ts', default: './dist/bin/pi-runtime-host.js',
+    });
+    expect(manifest.files).toContain('dist');
+    for (const target of Object.values(manifest.imports['#byok-pi-runtime-host']) as string[]) {
+      const resolved = path.resolve(PACKAGE_ROOT, target);
+      expect(resolved.startsWith(DIST + path.sep)).toBe(true);
+      expect(existsSync(resolved)).toBe(true);
+    }
+    const root = readFileSync(path.join(DIST, 'index.js'), 'utf8');
+    // Existing light protocol constants stay static; only the runtime graph is lazy.
+    expect(staticImportSpecifiers(root).filter((name) => name.includes('pi-coding-agent')))
+      .toEqual(['@earendil-works/pi-coding-agent/rpc-types']);
+    expect(root).toMatch(/import\(["']#byok-pi-runtime-host["']\)/);
+  });
+
   for (const { file, allowedSubstrings } of GUARDED) {
     describe(`dist/${file}`, () => {
       // The entry plus every dist-internal file it reaches by a relative

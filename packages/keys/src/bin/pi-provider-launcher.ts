@@ -1,23 +1,15 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
-import { promises as fs } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 
 import { ByokKeysError } from '../errors';
 import { MacOsKeychainSecretStore } from '../macos-keychain';
 import {
   type PiProviderLauncherOptions,
-  buildPiProviderChildEnvironment,
-  ensurePiSessionDirectory,
   parsePiProviderLauncherOptions,
-  resolvePiProviderSecret,
+  startPiProvider,
 } from '../pi-provider-launcher-core';
 import { assertExactProviderProfileBinding } from '../provider-profile';
 import {
-  buildPiProviderArgs,
   buildPiProviderProjection,
-  PI_PROJECTED_KEY_ENV,
 } from '../pi-provider-projection';
 import { type SecretStore } from '../secret-store';
 import { SqliteProviderProfileStore } from '../sqlite-profile-store';
@@ -60,7 +52,7 @@ async function run(options: PiProviderLauncherOptions): Promise<number> {
     path: options.profileDbPath,
     readOnly: true,
   });
-  let projectionDir: string | undefined;
+  let cleanup: (() => Promise<void>) | undefined;
   try {
     const profile = await profiles.get(options.profileRef);
     if (profile === undefined) {
@@ -74,29 +66,14 @@ async function run(options: PiProviderLauncherOptions): Promise<number> {
     if (options.expectedBinding !== undefined) {
       assertExactProviderProfileBinding(profile, options.expectedBinding);
     }
-    const projection = buildPiProviderProjection(profile);
+    buildPiProviderProjection(profile);
     if (options.validateOnly) return 0;
-    const childArgs = buildPiProviderArgs(profile, options.piArgs);
-
-    projectionDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-provider-'));
-    await fs.chmod(projectionDir, 0o700).catch(() => {});
-    await ensurePiSessionDirectory(options.sessionDir);
-    const childEnv = buildPiProviderChildEnvironment({
-      ambient: process.env, projectionDir, sessionDir: options.sessionDir, secret: undefined,
+    const launched = await startPiProvider(profile, options, {
+      ambient: process.env,
+      createSecretStore: () => createSecretStore(options.secretServicePrefix, options.macosKeychainPath),
     });
-    const secret = await resolvePiProviderSecret(profile,
-      () => createSecretStore(options.secretServicePrefix, options.macosKeychainPath));
-    if (secret !== undefined) childEnv[PI_PROJECTED_KEY_ENV] = secret;
-    await fs.writeFile(
-      path.join(projectionDir, 'models.json'),
-      `${JSON.stringify(projection)}\n`,
-      { mode: 0o600 },
-    );
-
-    const child = spawn(options.piBin, [...(options.piEntry === undefined ? [] : [options.piEntry]), ...childArgs], {
-      env: childEnv,
-      stdio: 'inherit',
-    });
+    cleanup = launched.cleanup;
+    const child = launched.child;
 
     const forward = (signal: NodeJS.Signals): void => {
       if (!child.killed) child.kill(signal);
@@ -118,9 +95,7 @@ async function run(options: PiProviderLauncherOptions): Promise<number> {
     }
   } finally {
     await profiles.close();
-    if (projectionDir) {
-      await fs.rm(projectionDir, { recursive: true, force: true });
-    }
+    await cleanup?.();
   }
 }
 

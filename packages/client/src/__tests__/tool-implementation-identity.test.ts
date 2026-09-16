@@ -66,7 +66,7 @@ function locator(command: string): ToolImplementationLocatorV1 {
 
 /** The runtime subject's locator, for the same resolver seam. */
 function runtimeLocator(command: string): ToolImplementationLocatorV1 {
-  return { subject: { kind: 'runtime', runtimeId: 'pi' }, command, args: [], launch: LAUNCH };
+  return { subject: { kind: 'runtime', runtimeId: 'pi' }, runtimeEntry: 'pi-rpc' };
 }
 
 const EMPTY_MAP_DIGEST = createHash('sha256').update('{}', 'utf8').digest('hex');

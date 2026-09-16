@@ -3,6 +3,8 @@
 export declare const PROVIDER_CREDENTIAL_ENV_DENY_NAMES: readonly ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "AZURE_OPENAI_API_KEY", "DEEPSEEK_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY", "OPENROUTER_API_KEY", "XAI_API_KEY", "ZAI_API_KEY", "ANT_LING_API_KEY", "NVIDIA_API_KEY", "CEREBRAS_API_KEY", "CLOUDFLARE_API_KEY", "AI_GATEWAY_API_KEY", "ZAI_CODING_CN_API_KEY", "OPENCODE_API_KEY", "RADIUS_API_KEY", "FIREWORKS_API_KEY", "TOGETHER_API_KEY", "BASETEN_API_KEY", "KIMI_API_KEY", "HF_TOKEN", "MOONSHOT_API_KEY", "MINIMAX_API_KEY", "MINIMAX_CN_API_KEY", "QWEN_TOKEN_PLAN_API_KEY", "QWEN_TOKEN_PLAN_CN_API_KEY", "XIAOMI_API_KEY", "XIAOMI_TOKEN_PLAN_CN_API_KEY", "XIAOMI_TOKEN_PLAN_AMS_API_KEY", "XIAOMI_TOKEN_PLAN_SGP_API_KEY", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS", "PI_PROVIDER_API_KEY"];
 export declare const LOADER_ENV_DENY_PATTERNS: readonly string[];
 export declare function loaderEnvInjections(env: Readonly<Record<string, string | undefined>>, platform?: NodeJS.Platform): readonly string[];
+/** Directory selectors whose trusted values must be explicitly committed by a runtime launch. */
+export declare const CONTROLLED_PI_DIRECTORY_ENV_NAMES: readonly ["PI_PACKAGE_DIR", "PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR"];
 // ==== @byok-sdk/implementation-identity dist/identity.d.ts ====
 import type { McpLaunchAttestation } from './launch-attestation';
 /**
@@ -319,12 +321,22 @@ export type ToolImplementationSubjectV1 = {
     readonly runtimeId: RuntimeIdV1;
 };
 /** What the resolver is asked about: one subject, and where it launches. */
-export interface ToolImplementationLocatorV1 {
-    readonly subject: ToolImplementationSubjectV1;
+export type ToolImplementationLocatorV1 = {
+    readonly subject: Extract<ToolImplementationSubjectV1, {
+        kind: 'mcp-server';
+    }>;
     readonly command: string;
     readonly args: readonly string[];
     readonly launch: McpLaunchAttestation;
-}
+} | {
+    readonly subject: Extract<ToolImplementationSubjectV1, {
+        kind: 'runtime';
+    }>;
+    readonly runtimeEntry: 'pi-rpc' | 'pi-prepared';
+    readonly command?: never;
+    readonly args?: never;
+    readonly launch?: never;
+};
 /**
  * The install record a resolver returns, which is an attested identity MINUS
  * everything a host does not get to assert:
@@ -498,7 +510,7 @@ export type ToolImplementationMeasurementFailure = 'install_record_mismatch' | '
  * every record the resolver returns, including the ones it is most confident
  * about.
  */
-export declare function resolveToolImplementationIdentity(authority: ToolImplementationAuthority | undefined, locator: ToolImplementationLocatorV1, launchEnv: Readonly<Record<string, string>>, probe?: ToolImplementationFsProbe): Promise<ToolImplementationIdentityV1>;
+export declare function resolveToolImplementationIdentity(authority: ToolImplementationAuthority | undefined, locator: ToolImplementationLocatorV1, launchEnv: Readonly<Record<string, string>> | ((record: ToolImplementationInstallRecordV1) => Readonly<Record<string, string>>), probe?: ToolImplementationFsProbe): Promise<ToolImplementationIdentityV1>;
 /**
  * The one failure that exists only at spawn.
  *
@@ -596,6 +608,7 @@ export declare class ToolImplementationReverifyError extends Error {
 export * from './identity';
 export * from './environment';
 export type { McpLaunchAttestation, ResolvedMcpLaunchCwdLauncher } from './launch-attestation';
+export * from './spawn-binding';
 // ==== @byok-sdk/implementation-identity dist/launch-attestation.d.ts ====
 export type ResolvedMcpLaunchCwdLauncher = 
 /** POSIX: `interpreter` is the realpath of the system shell, `script` is the client-owned shell bootstrap. */
@@ -614,3 +627,29 @@ export interface McpLaunchAttestation {
     readonly launchCwd: string;
     readonly launcher: ResolvedMcpLaunchCwdLauncher | null;
 }
+// ==== @byok-sdk/implementation-identity dist/spawn-binding.d.ts ====
+import { type ToolImplementationIdentityV1 } from './identity';
+/** Fixed names of the credential launcher's inherited environment, shared with admission measurement. */
+export declare const KEYS_PI_INHERITED_ENV_NAMES: readonly ["PATH", "HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP", "LANG", "TZ", "TERM", "SHELL", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy"];
+export declare const KEYS_PI_WINDOWS_ENV_NAMES: readonly ["SystemRoot", "COMSPEC", "PATHEXT", "windir", "SYSTEMDRIVE", "PROGRAMFILES", "APPDATA", "LOCALAPPDATA"];
+export declare function projectKeysPiInheritedEnvironment(ambient: Readonly<Record<string, string | undefined>>, platform?: NodeJS.Platform): Record<string, string>;
+/** Physical projection of a client-decided launch; contains no runtime selection or credential policy. */
+export interface ImplementationSpawnBindingV1 {
+    readonly format: 'byok.implementation-spawn';
+    readonly version: 1;
+    readonly identity: ToolImplementationIdentityV1;
+    readonly command: string;
+    readonly entry?: string;
+    readonly fixedArgv: readonly string[];
+    readonly cwd: string;
+    readonly envCommitments: Readonly<Record<string, string>>;
+}
+export declare function parseImplementationSpawnBinding(value: unknown): ImplementationSpawnBindingV1 | undefined;
+/** Validate exact physical inputs, then remeasure immediately before the caller's spawn. */
+export declare function assertImplementationSpawnBinding(binding: ImplementationSpawnBindingV1, actual: {
+    readonly command: string;
+    readonly entry?: string;
+    readonly fixedArgv: readonly string[];
+    readonly cwd: string;
+    readonly env: Readonly<Record<string, string>>;
+}): Promise<void>;

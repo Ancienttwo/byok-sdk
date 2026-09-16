@@ -26,7 +26,8 @@
     "byok-agent-message-mcp": "./dist/bin/byok-agent-message-mcp.js",
     "byok-agent-memory-mcp": "./dist/bin/byok-agent-memory-mcp.js",
     "byok-agent-team-mcp": "./dist/bin/byok-agent-team-mcp.js",
-    "byok-pi-prepared": "./dist/bin/byok-pi-prepared.js"
+    "byok-pi-prepared": "./dist/bin/byok-pi-prepared.js",
+    "byok-pi-rpc": "./dist/bin/byok-pi-rpc.js"
   },
   "exports": {
     ".": {
@@ -84,10 +85,25 @@
     "@modelcontextprotocol/client": "2.0.0",
     "pi-subagents": "0.60.0",
     "pi-web-access": "0.24.1",
-    "@byok-sdk/implementation-identity": "workspace:*"
+    "@byok-sdk/implementation-identity": "workspace:*",
+    "@mozilla/readability": "0.6.0",
+    "linkedom": "0.16.11",
+    "p-limit": "6.2.0",
+    "promise.try": "2.0.1",
+    "turndown": "7.2.4",
+    "unpdf": "1.8.1",
+    "undici": "8.9.0",
+    "jiti": "2.7.0",
+    "yaml": "2.8.3"
   },
   "devDependencies": {
     "@byok-sdk/server": "workspace:*",
     "@hono/node-server": "^2.0.10"
+  },
+  "imports": {
+    "#byok-pi-runtime-host": {
+      "types": "./dist/bin/pi-runtime-host.d.ts",
+      "default": "./dist/bin/pi-runtime-host.js"
+    }
   }
 }

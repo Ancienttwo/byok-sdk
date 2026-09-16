@@ -1,3 +1,5 @@
+import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
+import type { PiRuntimeLaunchResources } from '../adapters/pi/runtime-launch';
 import { awaitAdmission } from './admission-wait';
 import { terminalIdentity } from './terminal-identity';
 import { startOwnedRuntime } from './runtime-start';
@@ -1980,6 +1982,7 @@ export class TaskRunner {
     this.inFlightBlobAborts.set(taskId, blobAbort);
     let agentBinding: AgentHomeExecutionBinding | undefined;
     let agentLeaseTransferred = false;
+    let runtimeLaunch: PiRuntimeLaunchResources | undefined;
     let reservedHome: string | undefined;
     const releaseReservation = (): void => {
       if (reservedHome === undefined) return;
@@ -2193,6 +2196,7 @@ export class TaskRunner {
         requirements: pick.descriptor.environmentRequirements,
         locallyAllowedNames: this.deps.runtimeEnvironment?.[pick.descriptor.id]?.allow,
       });
+      const mcpEnv = pick.descriptor.id === 'pi' ? projectPiMcpEnvironment(env) : env;
       if (resolvedMcp?.ok && agentRef !== undefined && this.deps.prepareHostTaskContext) {
         await this.deps.prepareHostTaskContext(taskId, blobAbort.signal);
         if (admissionWithdrawn()) return;
@@ -2321,9 +2325,9 @@ export class TaskRunner {
             },
             // The environment fact is the SDK's, never the resolver's: this is
             // the exact object the admission probe below spawns with and the
-            // one the runtime child is started with, so it is the one the
-            // identity binds. The locator carries no environment at all.
-            env,
+            // one serialized for the MCP pool. Pi runtime custody has its
+            // own environment; the locator carries no environment at all.
+            mcpEnv,
             this.deps.toolImplementationFsProbe,
           );
         }
@@ -2331,7 +2335,7 @@ export class TaskRunner {
       }
       if (messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined) {
         try {
-          await this.deps.agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, env, probeCwd);
+          await this.deps.agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, mcpEnv, probeCwd);
         } catch (error) {
           decline(`required Agent message helper preflight failed: ${errorMessage(error)}`, false);
           return;
@@ -2375,7 +2379,7 @@ export class TaskRunner {
           const observation = await probe(serverName, server, {
             label: `MCP toolset server "${serverName}"`,
             timeoutMs: MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
-            env,
+            env: mcpEnv,
             ...(probeCwd === undefined ? {} : { cwd: probeCwd }),
             // Spawn point one. An attested server is re-measured before this
             // child starts; a failure raises `McpAuthorityError`, which the
@@ -2539,6 +2543,20 @@ export class TaskRunner {
       } else {
         decline('workspace mode is unavailable', true);
         return;
+      }
+
+      if (prepared.operation.resolveRuntimeLaunch !== undefined) {
+        try {
+          runtimeLaunch = await prepared.operation.resolveRuntimeLaunch({
+            kind: preparation === undefined ? 'instruction' : 'prepared', cwd: workspaceDir, env,
+            projectionRoot: path.join(this.deps.storeDir, 'runtime-projections'),
+            authority: this.deps.toolImplementationAuthority,
+          });
+        } catch (error) {
+          if (!admissionWithdrawn()) decline(`runtime launch admission failed: ${errorMessage(error)}`, false);
+          return;
+        }
+        if (admissionWithdrawn()) return;
       }
 
       // `env` was built before admission (see its declaration above) so the
@@ -2781,6 +2799,8 @@ export class TaskRunner {
       }
 
       const startInput: RuntimeOperationStartInput = {
+        mcpEnv,
+        ...(runtimeLaunch === undefined ? {} : { runtimeLaunch }),
         // The two lanes are mutually exclusive authority over the same bytes,
         // so they are two variants rather than one shape with an optional
         // field: the prepared Execution's request was compiled, counted and
@@ -3103,7 +3123,10 @@ export class TaskRunner {
       // declined, failed, or was cancelled before `start()` published a
       // session. A task that DID start is in `this.tasks`, and its pin is
       // released at its own terminal instead (`finishOnce`).
-      if (!this.tasks.has(taskId)) await this.releasePreparationPin(taskId);
+      if (!this.tasks.has(taskId)) {
+        await this.releasePreparationPin(taskId);
+        await runtimeLaunch?.release();
+      }
       this.inFlightBlobAborts.delete(taskId);
       this.inFlightOffers.delete(taskId);
       this.claimedHarnesses.delete(taskId);

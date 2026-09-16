@@ -724,7 +724,7 @@ export type { CodexAdapterOptions } from './codex/codex-adapter';
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type ResolvedBin } from './resolve-bin';
-import { type ResolvedPiExtensions } from './resolve-extensions';
+import type { ResolvedPiExtensions } from './resolve-extensions';
 import { type SpawnFn } from './rpc-client';
 /**
  * Known provider credential env var *names* (never values) — see the
@@ -1006,6 +1006,29 @@ export declare class PiRpcClient {
     private buildExitError;
     private onClosed;
 }
+// ==== @byok-sdk/client dist/adapters/pi/runtime-launch.d.ts ====
+import { type ImplementationSpawnBindingV1, type ToolImplementationAuthority } from '@byok-sdk/implementation-identity';
+import { type RuntimeLaunchDecisionV1, type RuntimeLaunchKindV1 } from '../../daemon/tool-implementation-identity';
+export interface PiRuntimeLaunchResources {
+    readonly kind: RuntimeLaunchKindV1;
+    readonly decision: RuntimeLaunchDecisionV1;
+    readonly binding: ImplementationSpawnBindingV1;
+    readonly env: Readonly<Record<string, string>>;
+    readonly sessionCwd: string;
+    readonly credentialSource: 'pi-auth-store' | 'keys-profile';
+    /** A single client-owned cleanup authority, idempotent across declined/start/terminal paths. */
+    release(): Promise<void>;
+}
+export declare function resolvePiRuntimeLaunch(options: {
+    authority?: ToolImplementationAuthority;
+    kind: RuntimeLaunchKindV1;
+    sessionCwd: string;
+    env: Readonly<Record<string, string | undefined>>;
+    projectionRoot: string;
+    keysSessionDir?: string;
+    devCommand: string;
+    devEntry?: string;
+}): Promise<PiRuntimeLaunchResources>;
 // ==== @byok-sdk/client dist/agent-home.d.ts ====
 import { type AgentHomeProjectionOutcome, type AgentHomeProjectionPayload, type AgentRef } from '@byok-sdk/protocol';
 export type { AgentRef } from '@byok-sdk/protocol';
@@ -8813,14 +8836,17 @@ export declare const RUNTIME_LAUNCH_ENV_COMMITMENT_NAMES: readonly string[];
  *   commits `PI_PACKAGE_DIR` to.
  * - `envCommitments` — see {@link RUNTIME_LAUNCH_ENV_COMMITMENT_NAMES}.
  *
+ * This description includes the session cwd and explicitly bound per-launch directory values.
  * What it deliberately does NOT carry: task flags, model selection, session ids,
- * credentials, or anything else that differs per task. Those are the consumer's
- * to append after the fixed prefix, and folding them in here would make the
- * description — and its digest — a per-task value that binds nothing.
+ * or credential values. Task arguments remain the consumer's responsibility
+ * after the fixed prefix. The description digest binds this launch, including
+ * its explicit session cwd and controlled directory values.
  */
 export interface RuntimeLaunchDescriptionV1 {
     readonly runtimeId: RuntimeIdV1;
     readonly kind: RuntimeLaunchKindV1;
+    readonly credentialSource: 'pi-auth-store' | 'keys-profile';
+    readonly directoryValues: Readonly<Record<string, string>>;
     /** The interpreter's path, or the compiled artifact's. */
     readonly command: string;
     /** The sealed bundle the interpreter runs. Present iff the form is `interpreter+bundle`. */
@@ -8835,6 +8861,8 @@ export interface RuntimeLaunchDescriptionV1 {
 export interface RuntimeLaunchInputV1 {
     readonly runtimeId: RuntimeIdV1;
     readonly kind: RuntimeLaunchKindV1;
+    readonly credentialSource?: 'pi-auth-store' | 'keys-profile';
+    readonly directoryValues?: Readonly<Record<string, string>>;
     /**
      * The Agent home this task runs in, passed to the runtime explicitly. It is
      * NOT the process cwd and must not be: that is the whole split.
@@ -11836,7 +11864,7 @@ export declare class RuntimeStartupDisposalFailure extends Error {
 export declare function isRuntimeStartupDisposalFailure(value: unknown): value is RuntimeStartupDisposalFailure;
 // ==== @byok-sdk/client dist/sdk-reserved-helper-host.d.ts ====
 export declare const BYOK_SDK_HELPER_SUBCOMMAND = "__byok_sdk_helper";
-export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'approval-mcp' | 'agent-team-mcp' | 'mcp-env';
+export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'approval-mcp' | 'agent-team-mcp' | 'mcp-env' | 'pi-rpc' | 'pi-prepared';
 export interface SdkHelperHostConfig {
     /**
      * Run SDK-reserved helpers by re-entering the product's single-file/SEA
@@ -11846,6 +11874,8 @@ export interface SdkHelperHostConfig {
     readonly mode: 'self-executable';
     /** Absolute product executable path. Defaults to this process's executable. */
     readonly executable?: string;
+    /** Absolute SDK-bearing entry script when executable is an interpreter. */
+    readonly entry?: string;
 }
 export interface ResolvedSdkReservedHelperBin {
     readonly command: string;
@@ -11885,6 +11915,8 @@ export declare const RESERVED_MCP_SERVER_NAMES: readonly ["byokagentmessage", "b
 /** Whether `name` is one of the SDK-owned MCP server names above. */
 export declare function isReservedMcpServerName(name: string): boolean;
 // ==== @byok-sdk/client dist/types.d.ts ====
+import type { ToolImplementationAuthority } from '@byok-sdk/implementation-identity';
+import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
 import type { AgentEvent, PermissionMode, PermissionPolicy, TaskOfferPayload } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation';
 import type { RuntimeEnvironmentRequirements } from './daemon/environment';
@@ -12322,6 +12354,9 @@ export interface RuntimePreparedLaunchV1 {
 }
 /** Runtime resources shared by every start variant. */
 interface RuntimeOperationStartBase {
+    readonly runtimeLaunch?: PiRuntimeLaunchResources;
+    /** Exact daemon MCP admission environment; Pi requires it and never inherits runtime credentials. */
+    readonly mcpEnv?: Readonly<Record<string, string>>;
     /** Startup cancellation only; rejection must preserve unresolved process ownership. */
     readonly signal?: AbortSignal;
     readonly manifest: RuntimeOperationManifest;
@@ -12384,6 +12419,14 @@ export interface RuntimeOperationPreparedStartInput extends RuntimeOperationStar
 export type RuntimeOperationStartInput = RuntimeOperationInstructionStartInput | RuntimeOperationPreparedStartInput;
 /** A pinned provider/runtime decision. `start()` receives resources only, never a raw offer. */
 export interface PreparedRuntimeOperation {
+    /** Resource phase after workspace resolution and before claim; never reads a credential. */
+    resolveRuntimeLaunch?(input: {
+        kind: 'instruction' | 'prepared';
+        cwd: string;
+        env: Readonly<Record<string, string | undefined>>;
+        projectionRoot: string;
+        authority?: ToolImplementationAuthority;
+    }): Promise<PiRuntimeLaunchResources>;
     start(input: RuntimeOperationStartInput): Promise<Session>;
 }
 /**

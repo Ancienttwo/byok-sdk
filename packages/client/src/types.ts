@@ -1,3 +1,5 @@
+import type { ToolImplementationAuthority } from '@byok-sdk/implementation-identity';
+import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
 import type {
   AgentEgressPolicy,
   AgentEvent,
@@ -480,6 +482,9 @@ export interface RuntimePreparedLaunchV1 {
 
 /** Runtime resources shared by every start variant. */
 interface RuntimeOperationStartBase {
+  readonly runtimeLaunch?: PiRuntimeLaunchResources;
+  /** Exact daemon MCP admission environment; Pi requires it and never inherits runtime credentials. */
+  readonly mcpEnv?: Readonly<Record<string, string>>;
   /** Startup cancellation only; rejection must preserve unresolved process ownership. */
   readonly signal?: AbortSignal;
   readonly manifest: RuntimeOperationManifest;
@@ -548,6 +553,11 @@ export type RuntimeOperationStartInput =
 
 /** A pinned provider/runtime decision. `start()` receives resources only, never a raw offer. */
 export interface PreparedRuntimeOperation {
+  /** Resource phase after workspace resolution and before claim; never reads a credential. */
+  resolveRuntimeLaunch?(input: {
+    kind: 'instruction' | 'prepared'; cwd: string; env: Readonly<Record<string, string | undefined>>;
+    projectionRoot: string; authority?: ToolImplementationAuthority;
+  }): Promise<PiRuntimeLaunchResources>;
   start(input: RuntimeOperationStartInput): Promise<Session>;
 }
 

@@ -95,14 +95,17 @@ export const RUNTIME_LAUNCH_ENV_COMMITMENT_NAMES: readonly string[] = Object.fre
  *   commits `PI_PACKAGE_DIR` to.
  * - `envCommitments` — see {@link RUNTIME_LAUNCH_ENV_COMMITMENT_NAMES}.
  *
+ * This description includes the session cwd and explicitly bound per-launch directory values.
  * What it deliberately does NOT carry: task flags, model selection, session ids,
- * credentials, or anything else that differs per task. Those are the consumer's
- * to append after the fixed prefix, and folding them in here would make the
- * description — and its digest — a per-task value that binds nothing.
+ * or credential values. Task arguments remain the consumer's responsibility
+ * after the fixed prefix. The description digest binds this launch, including
+ * its explicit session cwd and controlled directory values.
  */
 export interface RuntimeLaunchDescriptionV1 {
   readonly runtimeId: RuntimeIdV1;
   readonly kind: RuntimeLaunchKindV1;
+  readonly credentialSource: 'pi-auth-store' | 'keys-profile';
+  readonly directoryValues: Readonly<Record<string, string>>;
   /** The interpreter's path, or the compiled artifact's. */
   readonly command: string;
   /** The sealed bundle the interpreter runs. Present iff the form is `interpreter+bundle`. */
@@ -118,6 +121,8 @@ export interface RuntimeLaunchDescriptionV1 {
 export interface RuntimeLaunchInputV1 {
   readonly runtimeId: RuntimeIdV1;
   readonly kind: RuntimeLaunchKindV1;
+  readonly credentialSource?: 'pi-auth-store' | 'keys-profile';
+  readonly directoryValues?: Readonly<Record<string, string>>;
   /**
    * The Agent home this task runs in, passed to the runtime explicitly. It is
    * NOT the process cwd and must not be: that is the whole split.
@@ -148,6 +153,8 @@ export function runtimeLaunchDescriptionDigest(description: RuntimeLaunchDescrip
   return canonicalDigest({
     assetRoot: description.assetRoot,
     command: description.command,
+    credentialSource: description.credentialSource,
+    directoryValues: Object.fromEntries(Object.entries(description.directoryValues).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)),
     ...(description.entry === undefined ? {} : { entry: description.entry }),
     envCommitments: [...description.envCommitments],
     fixedArgv: [...description.fixedArgv],
@@ -206,13 +213,15 @@ export function deriveRuntimeLaunchDescription(
   return Object.freeze({
     runtimeId: input.runtimeId,
     kind: input.kind,
+    credentialSource: input.credentialSource ?? 'pi-auth-store',
+    directoryValues: Object.freeze({ ...input.directoryValues, PI_PACKAGE_DIR: identity.assetRoot }),
     command,
     ...(entry === undefined ? {} : { entry }),
     fixedArgv,
     processCwd: identity.launchCwd,
     sessionCwd: input.sessionCwd,
     assetRoot: identity.assetRoot,
-    envCommitments: RUNTIME_LAUNCH_ENV_COMMITMENT_NAMES,
+    envCommitments: Object.freeze([...new Set([...RUNTIME_LAUNCH_ENV_COMMITMENT_NAMES, ...Object.keys(input.directoryValues ?? {})])].sort()),
   });
 }
 

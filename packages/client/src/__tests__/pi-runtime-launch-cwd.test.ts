@@ -1,3 +1,4 @@
+import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { execFile, spawn, type SpawnOptions } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -231,10 +232,15 @@ async function launchThroughAdapter(lane: 'ordinary' | 'prepared', home: string)
   const cwd = await trustedCwd();
   const preparation = lane === 'prepared'
     ? await prepareArtifact(home, path.join(recordDir, 'artifact.json'), cwd) : undefined;
+  const runtimeLaunch = await prepared.operation.resolveRuntimeLaunch!({
+    kind: preparation === undefined ? 'instruction' : 'prepared', cwd: home, env,
+    projectionRoot: path.join(recordDir, 'projections'),
+  });
   const session = await prepared.operation.start({
+    runtimeLaunch,
     ...(preparation === undefined ? { kind: 'instruction' as const, instruction: offer.instruction }
       : { kind: 'prepared' as const, preparation }),
-    manifest, env, mcpLaunch: { cwd },
+    manifest, env, mcpEnv: projectPiMcpEnvironment(env), mcpLaunch: { cwd },
   });
   try {
     if (spawnCount !== 1) throw new Error(`expected exactly one actual adapter spawn, got ${spawnCount}`);

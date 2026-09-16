@@ -1,3 +1,6 @@
+import { projectPiMcpEnvironment } from '../../adapters/pi/mcp-environment';
+import os from 'node:os';
+import path from 'node:path';
 import type { TaskOfferPayload } from '@byok-sdk/protocol';
 import {
   sealRuntimeOperationManifest,
@@ -79,16 +82,27 @@ export async function startPreparedOperation(
     ? undefined
     : resources.mcpLaunch
       ?? (resources.mcpServers === undefined && !generatesApprovalMcp ? undefined : await trustedLaunchBinding());
-  return prepared.operation.start({
-    kind: 'instruction',
-    manifest,
-    instruction: offer.instruction,
-    env: resources.env,
-    ...(mcpLaunch === undefined ? {} : { mcpLaunch }),
-    ...(resources.mcpServers === undefined ? {} : { mcpServers: resources.mcpServers }),
-    ...(resources.startMcpToolsetTools !== undefined
-      ? { mcpToolsetTools: resources.startMcpToolsetTools }
-      : resources.mcpToolsetTools === undefined ? {} : { mcpToolsetTools: resources.mcpToolsetTools }),
-    ...(resources.approvalChannel === undefined ? {} : { approvalChannel: resources.approvalChannel }),
+  const runtimeLaunch = await prepared.operation.resolveRuntimeLaunch?.({
+    kind: 'instruction', cwd: resources.workspaceDir, env: resources.env,
+    projectionRoot: path.join(os.tmpdir(), 'byok-adapter-test-runtime-projections'),
   });
+  try {
+    return await prepared.operation.start({
+      ...(runtimeLaunch === undefined ? {} : { runtimeLaunch }),
+      kind: 'instruction',
+      mcpEnv: projectPiMcpEnvironment(resources.env),
+      manifest,
+      instruction: offer.instruction,
+      env: resources.env,
+      ...(mcpLaunch === undefined ? {} : { mcpLaunch }),
+      ...(resources.mcpServers === undefined ? {} : { mcpServers: resources.mcpServers }),
+      ...(resources.startMcpToolsetTools !== undefined
+        ? { mcpToolsetTools: resources.startMcpToolsetTools }
+        : resources.mcpToolsetTools === undefined ? {} : { mcpToolsetTools: resources.mcpToolsetTools }),
+      ...(resources.approvalChannel === undefined ? {} : { approvalChannel: resources.approvalChannel }),
+    });
+  } catch (error) {
+    await runtimeLaunch?.release();
+    throw error;
+  }
 }

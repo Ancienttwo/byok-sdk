@@ -1,3 +1,4 @@
+import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -93,6 +94,7 @@ async function loadExtension(
   const recordTo = path.join(dir, 'received.jsonl');
   const configPath = path.join(dir, 'mcp-config.json');
   await fs.writeFile(configPath, JSON.stringify({
+    mcpEnv: projectPiMcpEnvironment(process.env),
     mcpServers: { salesko: serverSpec({ ...serverConfig, recordTo }) },
     observation,
     permissionMode,

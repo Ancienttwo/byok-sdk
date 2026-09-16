@@ -1,8 +1,8 @@
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import type { ExtensionAPI, ExtensionFactory } from '@earendil-works/pi-coding-agent';
 import {
   registerSubagentCapabilityCeiling,
   type SubagentCapabilityCeilingHandle,
-} from 'pi-subagents/capability-ceiling';
+} from './subagents-ceiling.js';
 import {
   BYOK_PI_PERMISSION_MODE,
   BYOK_PI_READONLY_SUBAGENT_AGENTS,
@@ -19,8 +19,16 @@ function permissionMode(): 'auto' | 'readonly' {
  * Keep pi-subagents available in every Pi session without letting a readonly
  * parent widen its task contract through a child process.
  */
+/** Explicit task authority; the inline host never reads BYOK_PI_* policy env. */
+export function createByokSubagentsPolicyExtension(mode: 'auto' | 'readonly'): ExtensionFactory {
+  return (pi) => registerByokSubagentsPolicyWithMode(pi, mode);
+}
+
 export default function registerByokSubagentsPolicy(pi: ExtensionAPI): void {
-  const mode = permissionMode();
+  registerByokSubagentsPolicyWithMode(pi, permissionMode());
+}
+
+function registerByokSubagentsPolicyWithMode(pi: ExtensionAPI, mode: 'auto' | 'readonly'): void {
   let ceiling: SubagentCapabilityCeilingHandle | undefined;
 
   pi.on('session_start', (_event, ctx) => {

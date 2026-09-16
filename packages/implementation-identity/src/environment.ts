@@ -94,3 +94,8 @@ export function loaderEnvInjections(
       && matchesAny(name, LOADER_ENV_DENY_PATTERNS, caseInsensitive))
     .sort();
 }
+
+/** Directory selectors whose trusted values must be explicitly committed by a runtime launch. */
+export const CONTROLLED_PI_DIRECTORY_ENV_NAMES = Object.freeze([
+  'PI_PACKAGE_DIR', 'PI_CODING_AGENT_DIR', 'PI_CODING_AGENT_SESSION_DIR',
+] as const);
