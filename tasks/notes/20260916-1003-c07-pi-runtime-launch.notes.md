@@ -143,3 +143,12 @@ Focused pre-freeze evidence: keys strict ACL 57 pass; shared/client binding 10+7
 Packaging evidence: `p2-packaging-dependency-edges.json` lists nine direct dependencies, locked versions and extension import file/line; `p2-lock-package-set.json` shows all 646 resolved version/integrity tuples unchanged. `p2-node-external-counterexample.log` retains the real Node TS-only entry failure. No createRequire banner, public runtime-host export, source types mapping or splitting change. Private import resolves shipped dist. Windows four real ACL tests are scheduled in the existing non-admin lane but NOT RUN locally. Full S2 containment belongs to P3.
 
 Product freeze: `50b64f45` (54 files); registration/CHANGELOG kept separate. Attribution matches 0. Final required checks and actual pack follow on the documentation freeze head; no push.
+
+
+## P2b first frozen verification and bounded repair
+
+Frozen7a2c3d62 build/typecheck/API/version/release graph/workflow pass. Fullclient20failed/2608passed/15skipped:16missing mcpEnv fixtures,1old Pi process/session equality,1Bun MCP timeout,1missed team relay writer,1existing P3 containment. First gate FAIL pending repair. Full raw `_ops/c07-identity-workspace/p2-frozen-full-test.log` preserved. Same-tree isolated cwd3/3pass1.78s, not proven flaky; no timeout edits.
+
+Repair `ec351b06f926f9e93ea0bbac9ebdc6dd770a6447` only tests: explicit fixture env authority, unchanged drift assertions, Pi both process==trusted and sessionconfig==manifest (spec Runtime launch descriptions), Claude/Codex unchanged;76/76targeted. Shared test moved to package's existing __tests__ boundary rather than weakening constraint;13/13pass. Remaining12packagespassed once, keys490. Initial shared failure retained in p2-other-results, corrected in p2-r1-shared-test-layout.log.
+
+Team relay omitted new config field in production: source itself needs bounded repair, not merely a test change. Supervisor approved caller migration but exact final-env construction point requires clarification; no team product edits yet. Independent full/pack will run once on next fixed freeze, without parallel parent full. P2b remains incomplete, Windows new ACL lane unrun, P3 still red.
