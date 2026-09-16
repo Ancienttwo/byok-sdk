@@ -56,3 +56,8 @@ Product00c5529a is pending independent frozen gate. Local scoped checks recorded
 Supervisor PASS89e323b4, copied original `_ops/c07-identity-workspace/p3d/p3c-terminal-gate.md`. HIGH digest usage closed; build/typecheck/71targeted/API10/version/graph/strict and real release-pack pass (sourceGitSha89e323b4). Fullclient2660passed/11skipped/one knownS2 tripwire36failure; bothlanes get_state; not complete containment. Keys494/4skipped andidentity13 reused on unchanged surfaces.
 
 P3d activated by supervisor: static/build-time closure of SDK extension jiti/rpiv-i18n, remaining launcher/team/daemon discovery, and existing RPC non-digest CLI renderer inconsistency/recomputation. Three report-only entries now tracked in this bounded scope: pi-rpc-host fail/expected parse and create-daemon constructor native lookup. Clipboard12 belongs to1006 and hard tripwire zero assertion stays unchanged. Read-only two-part trace is in progress; design decisions must preserve async subagent/i18n functionality and runtime authority, not merely remove startup attempts. No product edit yet; no external action. `.ai/context/capabilities.json` absent in this worktree; existing context-map loaded, no scoped context added.
+
+
+## P3d partial progress / design hold
+
+35f04583 registers P3d;21ab3c86 usage renderer has build/typecheck/23targeted pass and supervisor bounded diff acceptance. Overall P3d pending, no terminal gate. §96 Decision Packet awaits review; supervisor explicitly holds runner implementation until Salesko P4 multi-kind record shape is defined. Existing S2 RED36 remains intact; no dependency/extension/record edits or functionality removal. No full/pack rerun or external action.

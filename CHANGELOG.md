@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Fixed (unreleased Pi helper usage)** — ordinary RPC argument validation,
+  interpreter/loader rejection and the policy argument recheck use the same
+  EX_CONFIG renderer. Pure parser callers still receive exceptions; model and
+  runtime errors retain their existing behavior.
+
 - **Fixed (unreleased Pi helper usage)** — missing, duplicate or malformed
   launcher config digests now exit with EX_CONFIG (78) and one host-prefixed
   error line from both callable hosts and thin bins. Installed Node smoke
