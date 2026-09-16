@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile, copyFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, copyFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -70,4 +70,7 @@ for (const directory of ['pi-tui/0.85.1', 'get-east-asian-width/1.6.0']) {
     await copyFile(new URL(`vendor/${directory}/${name}`, root), new URL(name, target));
   }
 }
-console.log(`sealed todo assets: ${rows.length} exact upstream files`);
+// Both build consumers have now validated the metafile. It is build-only
+// evidence, not a runtime asset; remove it before dist becomes a publish tree.
+await unlink(new URL('dist/bin/metafile-esm.json', root));
+console.log(`sealed todo assets: ${rows.length} exact upstream files; build metafile removed`);

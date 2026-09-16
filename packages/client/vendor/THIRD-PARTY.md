@@ -65,6 +65,8 @@ SOFTWARE.
 
 ## @juicesharp/rpiv-config@2.8.0
 
+licenseSource: same repository/same2.8.0 sibling rpiv-i18n LICENSE; rpiv-config package declares MIT but omits license file
+
 MIT License
 
 Copyright (c) 2026 juicesharp

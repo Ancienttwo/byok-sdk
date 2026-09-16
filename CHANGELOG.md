@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Validation (S2 containment)** — tripwire attempts decrease from36 to24:
+  `@juicesharp/rpiv-i18n`12 to0; clipboard ×12 and jiti ×12 remain for their
+  respective slices. Complete S2 containment is not yet verified.
+
 - **Changed (private todo integration)** — SDK now owns the source-declared MIT
   `rpiv-todo@2.8.0` integration; the npm todo dependency is removed. The real
   `rpiv-i18n@2.8.0` library loads only after host usage/config/binding and all nine
