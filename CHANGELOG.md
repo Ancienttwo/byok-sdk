@@ -40,10 +40,22 @@ and the D2 version number belongs to a separate SDK release contract.
   - An unparseable line is now answered with a `-32700` frame. All four helpers
     used to drop it silently, so a peer that wrote a malformed line got no
     reply at all and waited for one.
-  - A `tools/call` whose `params.name` is not a string is now rejected with
-    `-32600` and the message `tools/call requires a string params.name`,
-    before any handler runs. It used to reach the helper, which answered
-    `-32602` with its own unknown-tool message.
+  - A `tools/call` whose `params` is not an object, or whose `params.name` is
+    not a non-empty string, is now rejected with `-32602` and a message naming
+    the offending field, before any handler runs. It used to reach the helper,
+    which answered `-32602` with its own unknown-tool message: the code is
+    unchanged, the message text is now the core's. JSON-RPC 2.0 §5.1 reserves
+    `-32600` for a message that is not a valid Request object and `-32602` for
+    invalid method parameters, and a `tools/call` carrying an object `params`
+    is a valid Request object.
+  - A `tools/call` carrying an explicit `params.arguments` that is `null`, an
+    array or a scalar is now rejected with `-32602` and the message
+    `tools/call params.arguments must be an object when present`, before any
+    handler runs. It used to be silently rewritten to `undefined`, which three
+    helpers then refused with their own `-32602` input-shape message and the
+    approval helper coerced to `{}` and executed. An ABSENT `arguments` key is
+    unchanged and still reaches the handler as `undefined`, which the MCP
+    `tools/call` schema allows.
   - A tool handler that throws something other than an `McpServerToolError` is
     answered `-32603`; a handler that throws untyped leaves the core nothing to
     forward, so it maps the one code with no server-authored mapping.

@@ -341,17 +341,68 @@ describe('T6: parsing, id validation and the handler spy', () => {
     harness.handle.close();
   });
 
-  it('rejects a tools/call with no string params.name without reaching the handler', async () => {
-    const callTool = vi.fn(async () => ({ never: true }));
-    const harness = start({ callTool });
-    harness.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {} });
-    await harness.expectLines(1);
-    expect(harness.parsed(0)).toEqual({
-      jsonrpc: '2.0',
-      id: 1,
-      error: { code: -32600, message: 'tools/call requires a string params.name' },
+  /**
+   * JSON-RPC 2.0 §5.1: `-32600` is "The JSON sent is not a valid Request
+   * object", `-32602` is "Invalid method parameter(s)". A `tools/call` that
+   * carries an object `params` IS a valid Request object, so a malformed
+   * `name` or `arguments` inside it is a PARAMETER fault. Every row below is
+   * refused before the handler runs, with the offending field named.
+   */
+  const MALFORMED_TOOLS_CALL_PARAMS: readonly { readonly label: string; readonly params: unknown; readonly field: string }[] = [
+    { label: 'params absent', params: undefined, field: 'params' },
+    { label: 'params is an array', params: [], field: 'params' },
+    { label: 'name absent', params: {}, field: 'params.name' },
+    { label: 'name is a number', params: { name: 42 }, field: 'params.name' },
+    { label: 'name is the empty string', params: { name: '' }, field: 'params.name' },
+    { label: 'arguments is null', params: { name: 'echo', arguments: null }, field: 'params.arguments' },
+    { label: 'arguments is an array', params: { name: 'echo', arguments: [] }, field: 'params.arguments' },
+    { label: 'arguments is a number', params: { name: 'echo', arguments: 3 }, field: 'params.arguments' },
+    { label: 'arguments is a string', params: { name: 'echo', arguments: 'nope' }, field: 'params.arguments' },
+    { label: 'arguments is true', params: { name: 'echo', arguments: true }, field: 'params.arguments' },
+  ];
+
+  for (const [index, malformed] of MALFORMED_TOOLS_CALL_PARAMS.entries()) {
+    it(`rejects a tools/call whose ${malformed.label} with -32602, naming the field, without reaching the handler`, async () => {
+      const callTool = vi.fn(async () => ({ never: true }));
+      const harness = start({ callTool });
+      const id = 100 + index;
+      harness.send(
+        malformed.params === undefined
+          ? { jsonrpc: '2.0', id, method: 'tools/call' }
+          : { jsonrpc: '2.0', id, method: 'tools/call', params: malformed.params },
+      );
+      await harness.expectLines(1);
+      const response = harness.parsed(0);
+      expect(response.id).toBe(id);
+      expect(response.result).toBeUndefined();
+      const error = response.error as { code: number; message: string };
+      expect(error.code).toBe(-32602);
+      expect(error.message).toContain(malformed.field);
+      expect(callTool).not.toHaveBeenCalled();
+      harness.handle.close();
     });
-    expect(callTool).not.toHaveBeenCalled();
+  }
+
+  it('passes undefined to the handler when the arguments key is absent, and {} when it is an empty object', async () => {
+    const seen: { readonly name: string; readonly arguments: Record<string, unknown> | undefined }[] = [];
+    const harness = start({
+      callTool: async (call) => {
+        seen.push({ name: call.name, arguments: call.arguments });
+        return { ok: true };
+      },
+    });
+    harness.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'echo' } });
+    await harness.expectLines(1);
+    harness.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'echo', arguments: {} } });
+    await harness.expectLines(2);
+    expect(seen).toEqual([
+      { name: 'echo', arguments: undefined },
+      { name: 'echo', arguments: {} },
+    ]);
+    expect(seen[0]?.arguments).toBeUndefined();
+    expect(seen[1]?.arguments).toEqual({});
+    expect(harness.parsed(0).result).toEqual({ ok: true });
+    expect(harness.parsed(1).result).toEqual({ ok: true });
     harness.handle.close();
   });
 
@@ -696,7 +747,7 @@ describe('§4: error-mapping policy stays with the server', () => {
     harness.handle.close();
   });
 
-  it('hands the handler `arguments: undefined` when the peer sent no object', async () => {
+  it('hands the handler `arguments: undefined` only when the key was absent, and refuses a present non-object', async () => {
     const seen: (Record<string, unknown> | undefined)[] = [];
     const harness = start({
       callTool: async (call) => {
@@ -708,7 +759,17 @@ describe('§4: error-mapping policy stays with the server', () => {
     harness.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'echo', arguments: [1, 2] } });
     harness.send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'echo', arguments: { a: 1 } } });
     await harness.expectLines(3);
-    expect(seen).toEqual([undefined, undefined, { a: 1 }]);
+    // The array is a parameter fault, not an implicit `undefined`: the handler
+    // sees the two well-formed calls only.
+    expect(seen).toEqual([undefined, { a: 1 }]);
+    // The refusal is written synchronously, so it can precede the async
+    // handler answers; correlate by id rather than by emission order.
+    const responses = [0, 1, 2].map((index) => harness.parsed(index));
+    expect(responses.find((response) => response.id === 2)).toEqual({
+      jsonrpc: '2.0',
+      id: 2,
+      error: { code: -32602, message: 'tools/call params.arguments must be an object when present' },
+    });
     harness.handle.close();
   });
 });

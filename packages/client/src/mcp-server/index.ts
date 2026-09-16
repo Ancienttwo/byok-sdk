@@ -11,9 +11,13 @@
  *
  * ## What this core decides, and what it never decides
  *
- * It maps PROTOCOL faults only: `-32700` parse, `-32600` invalid request (bad
- * shape, unusable id, duplicate id, batch array, a `tools/call` with no string
- * `params.name`), `-32601` unknown method, `-32000` for the in-flight refusal,
+ * It maps PROTOCOL faults only: `-32700` parse, `-32600` invalid request (a
+ * message that is not a valid Request object: a missing or non-`"2.0"`
+ * `jsonrpc`, a non-string `method`, an unusable id, a duplicate id, a
+ * top-level batch array), `-32602` invalid params (a `tools/call` whose
+ * `params` is not an object, whose `params.name` is not a non-empty string, or
+ * which carries an `arguments` key holding anything but a plain object),
+ * `-32601` unknown method, `-32000` for the in-flight refusal,
  * and `-32603` for a tool handler that threw something other than an
  * {@link McpServerToolError} — the one code with no server-authored mapping
  * available, since a handler that throws untyped left the core nothing to
@@ -24,6 +28,17 @@
  * case: a permission-prompt-tool call that never cleanly answers makes claude
  * abandon the turn, so that failure must stay a `result`, and a transport core
  * must not be able to turn it into an `error`.
+ *
+ * The `-32600`/`-32602` split follows JSON-RPC 2.0 §5.1 literally: `-32600`
+ * Invalid Request is "The JSON sent is not a valid Request object", `-32602`
+ * Invalid params is "Invalid method parameter(s)". A `tools/call` whose
+ * `params` is an object IS a valid Request object, so a `name` or `arguments`
+ * that is the wrong shape inside it is a parameter fault and gets `-32602` —
+ * and it gets it before the handler runs, because a handler must never see a
+ * call whose declared shape the wire contract already refuses. An `arguments`
+ * key that is absent is NOT a fault: the MCP `tools/call` schema makes it
+ * optional, so absence reaches the handler as `undefined` and the server
+ * decides what a call with no arguments means.
  *
  * ## Advertised protocol versions
  *
@@ -202,6 +217,7 @@ export interface McpServerHandle {
 const PARSE_ERROR = -32700;
 const INVALID_REQUEST = -32600;
 const METHOD_NOT_FOUND = -32601;
+const INVALID_PARAMS = -32602;
 const INTERNAL_ERROR = -32603;
 const IN_FLIGHT_EXHAUSTED = -32000;
 
@@ -341,16 +357,30 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
       sendError(id, IN_FLIGHT_EXHAUSTED, `at most ${maxInFlight} tools/call requests may be in flight at once`);
       return;
     }
-    const name = params?.name;
-    if (typeof name !== 'string') {
-      sendError(id, INVALID_REQUEST, 'tools/call requires a string params.name');
+    // `classifyJsonRpcMessage` hands over `undefined` both for an absent
+    // `params` and for a by-position array, and `tools/call` accepts neither.
+    if (params === undefined) {
+      sendError(id, INVALID_PARAMS, 'tools/call requires an object params');
       return;
     }
-    const argumentsValue = params?.arguments;
-    const callArguments =
-      argumentsValue !== null && typeof argumentsValue === 'object' && !Array.isArray(argumentsValue)
-        ? (argumentsValue as Record<string, unknown>)
-        : undefined;
+    const name = params.name;
+    if (typeof name !== 'string' || name.length === 0) {
+      sendError(id, INVALID_PARAMS, 'tools/call requires a non-empty string params.name');
+      return;
+    }
+    // Present-but-wrong and absent are different facts. An `arguments` key the
+    // peer actually wrote must be a plain object or the call is refused here;
+    // silently rewriting `null`, an array or a scalar to `undefined` would hand
+    // the handler a call the peer never made.
+    let callArguments: Record<string, unknown> | undefined;
+    if (Object.prototype.hasOwnProperty.call(params, 'arguments')) {
+      const argumentsValue = params.arguments;
+      if (argumentsValue === null || typeof argumentsValue !== 'object' || Array.isArray(argumentsValue)) {
+        sendError(id, INVALID_PARAMS, 'tools/call params.arguments must be an object when present');
+        return;
+      }
+      callArguments = argumentsValue as Record<string, unknown>;
+    }
 
     const key = SeenRequestIds.key(id);
     const controller = new AbortController();

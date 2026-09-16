@@ -235,9 +235,28 @@ async function captureAll(): Promise<WireBaseline> {
  * - An unusable or duplicate id is now rejected.
  * - Both frame directions are now bounded.
  * - An unparseable line, silently dropped at base, now draws a `-32700` frame.
- * - A `tools/call` with a non-string `params.name` returned `-32602` with the
- *   helper's own message at base; the core now rejects it with `-32600` and
- *   `tools/call requires a string params.name`, before any handler runs.
+ * - A `tools/call` with a missing, non-string or empty `params.name`, or with
+ *   no object `params` at all, returned `-32602` with the helper's own
+ *   unknown-tool or input-shape message at base; the core now rejects it with
+ *   `-32602` and its own message (`tools/call requires a non-empty string
+ *   params.name` / `tools/call requires an object params`) before any handler
+ *   runs. The CODE is unchanged from base; only the message text moved from
+ *   the helper's wording to the core's.
+ * - A `tools/call` carrying an explicit `params.arguments` that is `null`, an
+ *   array or a scalar reached the helper as `arguments: undefined` at base,
+ *   where each of the four helpers' own manual check answered `-32602` with
+ *   its own wording (`message input must be an object`, `memory tool input
+ *   must be an object`, `team tool input must be an object`; the approval
+ *   helper coerced it to `{}` and ran the call). The core now refuses it with
+ *   `-32602` and `tools/call params.arguments must be an object when present`
+ *   before any handler runs — so the code is unchanged for three helpers, the
+ *   message text differs for all of them, and the approval helper no longer
+ *   executes a call the peer never made. An ABSENT `arguments` key is
+ *   unchanged: it still reaches the handler as `undefined`.
+ *
+ * No step of the script below exercises either: every `tools/call` step sends
+ * a string `name` and a plain-object `arguments`, so the frozen bytes are
+ * unaffected and are asserted byte-identical.
  */
 const MIGRATION_DELTAS: Readonly<Record<string, (frozen: string) => { readonly before: string; readonly after: string }>> = {
   // `initialize.result.protocolVersion`: echoed verbatim -> selected from the
