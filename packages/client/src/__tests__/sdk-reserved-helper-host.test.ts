@@ -87,7 +87,7 @@ describe('SDK-reserved helper host composition', () => {
   });
 
   it('keeps prepared import side-effect free and gives callable and thin bin the same usage validation', async () => {
-    const hostPath = path.resolve(import.meta.dirname, '../bin/pi-prepared-host.ts');
+    const hostPath = path.resolve(import.meta.dirname, '../../dist/bin/pi-runtime-host.js');
     const binPath = path.resolve(import.meta.dirname, '../bin/byok-pi-prepared.ts');
     const caller = await fixture('prepared-caller.ts', `
       import { runPiPreparedHost } from ${JSON.stringify(hostPath)};
@@ -110,7 +110,7 @@ describe('SDK-reserved helper host composition', () => {
     { argv: ['--config', '/config', '--mode', 'rpc', '--mode', 'rpc'], reason: 'duplicate argument --mode' },
     { argv: ['--unknown'], reason: 'unsupported argument --unknown' },
   ])('ordinary host renders non-digest usage: $reason', async ({ argv, reason }) => {
-    const hostPath = path.resolve(import.meta.dirname, '../bin/pi-rpc-host.ts');
+    const hostPath = path.resolve(import.meta.dirname, '../../dist/bin/pi-runtime-host.js');
     const binPath = path.resolve(import.meta.dirname, '../bin/byok-pi-rpc.ts');
     const caller = await fixture('rpc-usage-caller.ts', `
       import { runPiRpcHost } from ${JSON.stringify(hostPath)};
@@ -132,7 +132,7 @@ describe('SDK-reserved helper host composition', () => {
     { kind, label: 'malformed', argv: [`--config-digest=${'A'.repeat(64)}`], reason: '--config-digest must contain 64 lowercase hexadecimal characters' },
   ]))('$kind reports $label digest usage identically from callable and thin bin', async ({ kind, argv, reason }) => {
     const exportName = kind === 'pi-rpc' ? 'runPiRpcHost' : 'runPiPreparedHost';
-    const hostPath = path.resolve(import.meta.dirname, `../bin/${kind}-host.ts`);
+    const hostPath = path.resolve(import.meta.dirname, '../../dist/bin/pi-runtime-host.js');
     const binPath = path.resolve(import.meta.dirname, `../bin/byok-${kind}.ts`);
     const caller = await fixture(`${kind}-digest-caller.ts`, `
       import { ${exportName} } from ${JSON.stringify(hostPath)};

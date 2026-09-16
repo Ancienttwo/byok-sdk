@@ -1,13 +1,34 @@
 import { serializePiHostConfig } from '../adapters/pi/runtime-host-binding';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 
-const host = resolve(import.meta.dirname, '../bin/pi-rpc-host.ts');
+const clientRoot = resolve(import.meta.dirname, '../..');
+// Private parser/session exports are not public API. Compile their test entry
+// through the same peer-resolution author as the shipped ordinary host.
+const hostScratch = mkdtempSync(join(clientRoot, 'node_modules/.byok-rpc-host-test-'));
+const host = join(hostScratch, 'host.mjs');
 
 const bun = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['bun'], { encoding: 'utf8' }).stdout.trim().split(/\r?\n/)[0]!;
+beforeAll(() => {
+  const driver = join(hostScratch, 'build.ts');
+  const entry = `export {parsePiRpcHostArgs,parsePiRpcHostConfig,openPiRpcSession} from ${JSON.stringify(resolve(import.meta.dirname, '../bin/pi-rpc-host.ts'))};`;
+  writeFileSync(driver, `
+    import {createRequire} from 'node:module';
+    import {subagentsBuild} from ${JSON.stringify(join(clientRoot, 'scripts/subagents-build.ts'))};
+    const require = createRequire(createRequire(import.meta.url).resolve('tsup'));
+    await require('esbuild').build({
+      stdin:{contents:${JSON.stringify(entry)},resolveDir:${JSON.stringify(clientRoot)},loader:'ts'},
+      outfile:${JSON.stringify(host)},bundle:true,packages:'external',platform:'node',format:'esm',target:'es2022',
+      plugins:[subagentsBuild(false)]
+    });
+  `);
+  const result = spawnSync(bun, ['--no-install', driver], { cwd: clientRoot, encoding: 'utf8', timeout: 20_000 });
+  if (result.status !== 0) throw new Error(result.stderr || String(result.error));
+});
+afterAll(() => rmSync(hostScratch, { recursive: true, force: true }));
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function fixture() {

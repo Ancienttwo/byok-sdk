@@ -267,8 +267,9 @@ await runtime.dispose();
   assert.doesNotMatch(startup.stderr, /ERR_MODULE_NOT_FOUND|ERR_PACKAGE_PATH_NOT_EXPORTED|Cannot find (?:module|package)|Unknown file extension/);
   console.log('[release-pack] installed Node byok-pi-rpc imports reached the exact missing-config-digest refusal; sessions=0');
   const sealedEntry = pathToFileURL(path.join(clientRoot, 'dist/bin/pi-runtime-host-sealed.js')).href;
-  const sealedStartup = spawnSync(process.execPath, ['--input-type=module', '-e',
-    `import {runPiRpcHost} from ${JSON.stringify(sealedEntry)}; await runPiRpcHost([]);`],
+  const sealedProbe = path.join(dir, 'sealed-host-startup.mjs');
+  await writeFile(sealedProbe, `import {runPiRpcHost} from ${JSON.stringify(sealedEntry)}; await runPiRpcHost([]);`, { flag: 'wx' });
+  const sealedStartup = spawnSync(process.execPath, [sealedProbe],
     {cwd:dir,env:startupEnv,encoding:'utf8',timeout:15_000});
   assert.equal(sealedStartup.status, 78, sealedStartup.stderr || String(sealedStartup.error));
   assert.match(sealedStartup.stderr, /^byok-pi-rpc: exactly one --config-digest=<sha256> is required\n$/);
