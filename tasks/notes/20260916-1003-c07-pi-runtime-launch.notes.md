@@ -175,3 +175,10 @@ Supervisor independent gate **PASS**, frozen source eff16ae45943a9d2d741396b8ecc
 Evidence: `_ops/c07-identity-workspace/independent-eff16ae4/` and `p2b-eff16ae4-gate.md` (unaltered supervisor report). No duplicate full/pack run. Earlier timeout remains unproven load/timing report-only; SystemRoot input hardening and sourcemap warnings remain unchanged.
 
 P3 begins with the actual remaining resolution path and immutable native 1005 boundary. SDK-side containment, release asset selection, export_html path validation and closure prerequisites are in scope. Fork 1006 implementation/publication, scanner-boundary changes, photon feature reduction and Salesko P4 edits are not authorized by this entry. No push/merge/publish.
+
+
+## P3a map and guard boundary before product changes
+
+P1 map: Host owns immutable record/artifact/assets; shared identity owns physical measurement; client owns runtime decisions and SDK hosts; native owns resource loader/RPC and package-manager. P2 trace: PiAdapter.prepare eagerly resolves native bin; resolveRuntimeLaunch eagerly resolves dev client entry before the configured resolver; runtime-launch also reads the client pin through runtime manifest discovery. Prepared host unconditionally resolves installed native identity, while the attested-record projection exists but is not its caller. The prior containment guard instead calls two path helpers and reconstructs a retired prepared entry.
+
+P3 decision: first replace the guard driver only, preserving escaped/cache assertions. Tier 1 is the actual SDK adapter/binding/host path, no mutable cache or auto-install; Tier 2 is complete native closure and stays fork1006-dependent. Native initialization failure is neither Tier1 PASS nor sufficient proof of a Tier1 resolution defect. Synthetic release fixtures must not claim production ownership or provenance. No import loader workaround, scanner relaxation or feature removal is permitted to obtain a green result. At 10x the fixture's real bundling dominates test cost; one valid frozen test driver supplies the RED before any product change, and expensive full/pack evidence waits for a product freeze.
