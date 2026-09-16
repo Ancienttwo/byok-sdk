@@ -318,3 +318,22 @@ This106-file runner-only graph differs from three-root233 runtime files/234 unio
 - **c / Owner product decision:** foreground executor:5302 makes scripted workflow Worker/eval/vm functionally reachable on rpc→print. Decide whether sealed mode supports that functionality or explicitly accepts its loss, including worker isolation/cancel/timeout behavior; current async approval does not authorize deletion. Top-level createRequire:11 in runner's literal graph may be moved behind a proven lazy boundary as a source delta, with both reachable/unreachable tests; this does not authorize dynamic workflow execution or make that path closed.
 
 These dispositions supersede the earlier broad candidate Owner labels for a/b in the classification table. M2b product stays frozen; M2a full gate runs on be4a7c47 independently of this docs-only update. The §101 Owner ledger contains c as the new decision and a/b as engineering prerequisites.
+
+
+### M2b-0 reason decision and frozen-vector connection
+
+M2a full gate PASSbe4a7c47 found two MEDIUM gaps outside its proven composition cases. Keep both M0 JSON files byte-identical. Complete implementation vocabulary instead of rewriting frozen M0 expectedReason values:
+
+| Frozen case class | Product refusal / ordering |
+| --- | --- |
+| Charged new edge with verified parent already at maxDepth (including0) | descendant_depth_exhausted; no new depth charge allowed. Zero-cost runner→print at the current cap remains legal |
+| Candidate child depth above finite limits while parent still has budget | Existing descendant_depth_exceeded, unchanged composition refusal |
+| Context has unknown key / unknown env name / credential in config | descendant_context_unknown_key / descendant_env_name_unknown / descendant_credential_in_config; all before filesystem measurement |
+| Session root differs from controlled commitment | descendant_session_root_mismatch; controlledDirValues drift keeps its existing distinct reason |
+| Supplied depth/maxDepth env value differs from typed authority | descendant_depth_projection_mismatch, including when actual.env agrees with the forged envValues |
+| remainingDepth arithmetic inconsistent | descendant_depth_mismatch; independently wrong parent/edge/instance transition keeps descendant_parent_transition_mismatch |
+| Model attempt outside finite candidates | descendant_model_attempt_invalid |
+| MCP projected env contains provider credential | mcp_credential_env_forbidden; other loader/controlled-directory refusals retain their own category |
+| Effective limits exceed record / exact names differ | Existing descendant_limit_exceeded / descendant_exact_env_names_mismatch |
+
+All5 transition cases and15 contexts get data-driven tests. Grant cases only prove configured+grant arithmetic against a record cap using supplied expectations, never issuance authority. Old V1 measuredNames→declaredNames case must still run the old real reverify and return launch_env_drift. Optional absent/null env projections remain absent; when supplied, their value is the exact String(typed value), not a second number parser or authority. Production-required env presence and aggregate custody stay enablement gates. No dispatch change.

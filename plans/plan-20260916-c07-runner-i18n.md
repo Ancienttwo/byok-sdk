@@ -1,6 +1,6 @@
 # Plan: C07 runner/i18n implementation entry
 
-> **Status**: M1b accepted c8645877; M2a implemented pending frozen full gate, M2b blocked on custody/loader boundaries
+> **Status**: M1b accepted c8645877; M2a accepted be4a7c47; M2b-0 active, M2b blocked on custody/loader boundaries
 > **Task Profile**: implementation
 > **Planning Source**: Owner §96 Q1–Q3 design approval; supervisor6696c211 PASS and design-entry instruction
 > **Task Contract**: `tasks/contracts/20260916-c07-runner-i18n.contract.md`
@@ -36,7 +36,8 @@ Prepare the bounded implementation contract in [docs/researches/20260916-c07-run
 - [x] M1b supervisor complete gate plus packaging/docs re-gate PASS c8645877; S2 tripwire24 remains.
 - [x] Register M2a exact paths and M2b inactive234-source vendor inventory.
 - [x] M2a shared composition/physical gate + daemon config templates implemented; dispatch remains disabled.
-- [ ] M2a supervisor frozen full gate; local targeted119/119 and shared74/74 passed.
+- [x] M2a supervisor frozen full gate PASSbe4a7c47; client2724/identity74/real pack0, S2only24.
+- [ ] M2b-0 wire all20 context/transition vectors, capture RED, close projection/reason gaps and targeted gate; dispatch remains disabled.
 - [ ] M2b custody execution table and loader classification accepted before vendor/runner writes.
 - [ ] M2 runner: prove all custody execution calls before enabling descendant dispatch.
 - [ ] M3: functional/packed recursive and locale acceptance; clipboard remains1006 blocker.
