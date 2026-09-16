@@ -47,7 +47,7 @@ Prepare the bounded implementation contract in [docs/researches/20260916-c07-run
 - [x] M2b-2 supervisor accepted runtime-guard attribution and escalated to Owner: one widening, three classification/timing differences.
 - [ ] Owner select structured-output sealed scope: α explicit feature exclusion (Fable recommendation), β maintained construction-phase no-codegen preparation, or γ upstream API. Product and dispatch remain blocked.
 - [x] Draft M2b-3 execution/test matrix, helper activation order and downstream complete-plan notice (docs only).
-- [ ] Supervisor review M2b-3 design; root/session ownership and atomic transaction/crash semantics remain unimplemented stop conditions.
+- [x] Supervisor accepted M2b-3 design5e7c3ba7 with print-specific startup probe, full recursive/jiti-zero gate, and spec/P4 notice conditions. Root/session ownership and atomic transaction/crash proofs remain implementation stop conditions; no product work until external inputs.
 - [ ] M2b-3: prove all five custody execution points and consume accepted M2b-1/2 prerequisites; obtain scripted-workflow Owner disposition before recursive dispatch. This is the only dispatch-enabling slice; full gate.
 - [ ] When binding the real runner edge, evaluate a public refusal-reason union against frozen vocabulary and API golden; report-only until then.
 - [ ] M3: functional/packed recursive and locale acceptance; clipboard remains1006 blocker.

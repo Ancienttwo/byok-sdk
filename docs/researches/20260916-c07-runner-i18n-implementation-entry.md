@@ -443,3 +443,13 @@ The plan chain supplies immutable executable permission; it is not an expanded t
 Current verification points: requiredRuntimePlanKinds and parseRuntimeDescendantPlan, existing plan tests (missing reachable row/common identity/self equality), reserved-helper explicit not-enabled tests, frozen M0 context/transition cases. Product semantics are not changed by this notice.
 
 **P3 / decision and10x.** Reuse one daemon-issued template authority and one shared validator. Keep per-launch tasks outside sealed identity. Root budget and same-session exclusion are the first10x bottlenecks: local counters cannot coordinate recursive processes; eager expansion of the entire depth/fanout tree would grow exponentially. Propose finite kind templates plus bounded admission state, with no new schema/store/IPC author chosen here. Before implementation, freeze actual root/session ownership, transaction/rollback/crash semantics and a finite real-process test matrix. Unproved custody is a stop condition; no handler stub, widened scanner, timeout increase or unbounded test matrix.
+
+
+### Supervisor design acceptance —5e7c3ba7; implementation remains gated
+
+The bounded read-only review accepted the draft as M2b-3 design final, with three additional execution conditions:
+1. Before enabling the print stage, run an independent sealed-cwd print-mode startup dependency probe for theme/locales/skills and actual reads. RPC/get_state evidence does not establish print-mode behavior.
+2. The final five-edge cutover subject requires the complete gate and real recursive execution: concurrent fanout admission/rollback, charge-once and actual-parent transitions, plus unchanged S2 tripwire asserting jiti12→0. Targeted checks cannot close this slice.
+3. At cutover, put the downstream notice in docs/spec.md and the maxDepth>0 complete-plan refusal rule in the Salesko P4 contract. These are future registered writes, not activated product/spec/P4 changes in this docs-only freeze.
+
+PerLaunch comes from independently verified parent state, never env; a single written config byte sequence is covered by config-digest. Design phase is complete. No new work is dispatched: Owner structured-output α/β/γ, scripted-workflow scope, E-chain disposition and native1006 scope/publication boundaries remain external inputs. No choice or product activation is inferred from approval of the bounded review.
