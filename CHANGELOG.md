@@ -5,6 +5,55 @@
 Deliberately not filed under 0.18.0: none of this is in a published artifact,
 and the D2 version number belongs to a separate SDK release contract.
 
+- **Added (client, unreleased contract)** — `@byok-sdk/client/mcp-server`, a
+  tools-only stdio MCP **server** core, and the four SDK-reserved MCP helpers
+  now serve through it.
+
+  `src/mcp/client.ts` was already this SDK's single MCP client authority, but
+  the server side had four: `byok-approval-mcp`, `byok-agent-message-mcp`,
+  `byok-agent-memory-mcp` and `byok-agent-team-mcp` each hand-rolled the same
+  NDJSON loop, the same `initialize` answer and the same `-32601` fallthrough.
+  Four copies is four places for one wire contract to drift, and all four had
+  already drifted the same way. The new entry is transport and baseline only —
+  no product semantics, no dependency added, node builtins only in the emitted
+  bundle — and the four hand-rolled loops are deleted rather than deprecated.
+
+  Behaviour changes for anyone driving those four helpers directly:
+
+  - `initialize` now SELECTS from `['2025-11-25', '2025-06-18', '2024-11-05']`
+    instead of echoing the peer's `protocolVersion` verbatim. Echoing asserted
+    support for any string a peer sent, including revisions the servers do not
+    implement. An offer in the list is returned; anything else gets the newest
+    supported entry and the peer decides, which is what the official client
+    handles.
+  - `ping` is answered `{}`. It used to fall through to the unknown-method arm
+    and come back `-32601`.
+  - `notifications/cancelled` aborts the call's `AbortSignal` and NO response is
+    ever written for that id afterwards. Previously it was unrecognised, the
+    handler ran to completion, and the late answer made the peer log
+    `Received a response for an unknown message ID`.
+  - `id: null`, a float/object/array/boolean id, a missing or non-`"2.0"`
+    `jsonrpc`, a non-string `method`, a non-object non-array `params`, and a
+    top-level batch array are now rejected with `-32600` before any handler
+    runs. A repeated id within one session is rejected the same way. These used
+    to be echoed back inside whatever the method arm produced.
+  - Frames are bounded in BOTH directions at 1 MiB, matching the client-side
+    ceiling. An over-limit inbound line fails closed without parsing or
+    answering; an over-limit outbound frame is dropped whole — never truncated —
+    and the session closes. Both were unbounded.
+  - At most 64 `tools/call` requests may be in flight at once; the next one gets
+    a typed `-32000` refusal and the session stays open. This was unbounded.
+
+  Tool names, JSON Schema literals, result payloads and per-server error codes
+  are unchanged, byte for byte, and are frozen against a fixture captured before
+  the migration. In particular the approval helper still answers an unreachable
+  daemon with a successful `{behavior:'deny'}` result rather than a protocol
+  error.
+
+  `dist/agent-memory/index.js` grows from 39,006 B to 52,007 B because it now
+  carries the shared core instead of its own `node:readline` loop; its ceiling
+  moves from 48 KiB to 64 KiB at the same headroom and for the same purpose.
+
 - **Added (client, unreleased contract)** — `@byok-sdk/client/assertion-client`,
   a sub-path that exports exactly `requestTaskAssertion`,
   `requestDeviceAssertion` and their option/result types.
