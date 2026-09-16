@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
+import { parseTaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
@@ -33,6 +35,8 @@ export interface TeamPiMcpConfig {
 export interface PiTeamSessionOptions {
   workspaceId: string; cwd: string; sessionDir: string; provider: string; model: string;
   systemPrompt: string; mcpConfig: TeamPiMcpConfig; extensionPaths?: readonly string[];
+  /** CLI ambient snapshot, not daemon-admitted environment. */
+  env: Readonly<Record<string, string | undefined>>;
   onEvent: (event: Record<string, unknown>) => void;
 }
 
@@ -63,7 +67,12 @@ export class PiTeamSession {
     const mcpPath = path.join(options.sessionDir, 'team-mcp.json');
     const promptPath = path.join(options.sessionDir, 'system-prompt.txt');
     try {
-      for (const [file, text] of [[mcpPath, JSON.stringify(options.mcpConfig)], [promptPath, options.systemPrompt]] as const) {
+      const runtimeEnv = { ...options.env, BYOK_PI_MCP_CONFIG_PATH: mcpPath };
+      // Derive from the exact Pi env once; this relay is not a daemon admission lane.
+      const mcpConfig = parseTaskScopedMcpConfig({
+        ...options.mcpConfig, mcpEnv: projectPiMcpEnvironment(runtimeEnv),
+      }, message => { throw new Error(`Pi relay MCP configuration: ${message}`); });
+      for (const [file, text] of [[mcpPath, JSON.stringify(mcpConfig)], [promptPath, options.systemPrompt]] as const) {
         host.privateFiles.push(file); await fs.writeFile(file, text, { flag: 'wx', mode: 0o600 });
       }
       const packageDir = clientPackageRoot();
@@ -73,7 +82,7 @@ export class PiTeamSession {
         '--extension', path.join(packageDir, 'dist/adapters/pi/mcp-extension.js')];
       for (const extension of options.extensionPaths ?? []) args.push('--extension', extension);
       host.client = new PiRpcClient({ command: bin.command, args, cwd: options.cwd,
-        env: { ...process.env, BYOK_PI_MCP_CONFIG_PATH: mcpPath },
+        env: runtimeEnv,
         extensionUi: { mode: 'hold', onRequest: frame => host.onInteraction(frame) },
         onFrame: frame => host.onFrame(frame),
       });

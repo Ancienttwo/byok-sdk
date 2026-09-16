@@ -61,7 +61,13 @@ describe('Pi native interaction admission', () => {
   it('owned GUI host keeps expired request IDs until explicit response and rejects stale replies', async () => {
     const { dir, extension } = await fixture(); const events: Record<string,unknown>[] = [];
     const host = await PiTeamSession.start({workspaceId:'room',cwd:dir,sessionDir:path.join(dir,'session'),provider:'zai',model:'glm-5.3',systemPrompt:'Synthetic no-model probe.',extensionPaths:[extension],
+      env:{...process.env, PI_PROVIDER_API_KEY:'synthetic-relay-key', PI_CODING_AGENT_DIR:dir},
       mcpConfig:{mcpServers:{},observation:{},permissionMode:'auto'},onEvent:e=>events.push(e)}); children.push(host);
+    const config = JSON.parse(await fs.readFile(path.join(dir,'session','team-mcp.json'),'utf8'));
+    expect(config.mcpEnv.PI_PROVIDER_API_KEY).toBeUndefined();
+    expect(config.mcpEnv.PI_CODING_AGENT_DIR).toBeUndefined();
+    expect(config.mcpEnv.BYOK_PI_MCP_CONFIG_PATH).toBeUndefined();
+    expect(config.mcpEnv.PATH).toBe(process.env.PATH);
     await host.sendInput('/probe-timeout'); await until(() => host.status().phase === 'open' && host.status().pendingUi.length === 1);
     expect(await host.ready()).toBe(false);
     const requestId=host.status().pendingUi[0]!.id!; const sessionId=host.status().sessionId!;

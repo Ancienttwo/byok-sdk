@@ -59,6 +59,7 @@ export async function runTeamPiRelayCommand(input: {
     const helper = input.config.sdkHelperHost ? resolveSdkReservedHelperBin('agent-team-mcp', input.config.sdkHelperHost)
       : { command: process.execPath, args: [path.resolve(path.dirname(manifestPath), manifest.bin['byok-agent-team-mcp']!)] };
     pi = await PiTeamSession.start({ ...document.pi, workspaceId: input.workspaceId, onEvent: emit,
+      env: { ...process.env },
       // Command, args and env only — the per-server lifecycle/prefix/include
       // knobs were `pi-mcp-adapter`'s, and the SDK's own extension needs none
       // of them: it registers one Pi tool per tool the helper reports, under
