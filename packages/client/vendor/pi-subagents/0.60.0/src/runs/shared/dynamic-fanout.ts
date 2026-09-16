@@ -1,7 +1,7 @@
 import type { DynamicParallelStep, ParallelTaskItem } from "../../shared/settings.ts";
 import type { ArtifactPaths, ChainOutputMap, JsonSchemaObject, SingleResult } from "../../shared/types.ts";
 import { getSingleResultOutput } from "../../shared/utils.ts";
-import { validateStructuredOutputValue } from "./structured-output.ts";
+import { assertStructuredOutputSupported, validateStructuredOutputValue } from "./structured-output.ts";
 
 export class DynamicFanoutError extends Error {}
 
@@ -206,6 +206,8 @@ export function validateDynamicStepShape(step: DynamicParallelStep, stepIndex: n
 	if (!step.parallel.agent) throw new DynamicFanoutError(`${prefix} parallel.agent is required.`);
 	if (!step.collect?.as || !isSafeOutputName(step.collect.as)) throw new DynamicFanoutError(`${prefix} requires collect.as with a safe output name.`);
 	assertOnlyKeys(step.collect, DYNAMIC_COLLECT_KEYS, `${prefix} collect`);
+	assertStructuredOutputSupported(step.parallel.outputSchema);
+	assertStructuredOutputSupported(step.collect.outputSchema);
 	for (const [label, template] of [
 		["parallel.task", step.parallel.task],
 		["parallel.label", step.parallel.label],

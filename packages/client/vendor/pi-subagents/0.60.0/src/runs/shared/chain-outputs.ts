@@ -1,3 +1,4 @@
+import { assertStructuredOutputSupported } from "./structured-output.ts";
 import { isDynamicParallelStep, isParallelStep, type ChainStep, type SequentialStep } from "../../shared/settings.ts";
 import type { ChainOutputMap, ChainOutputMapEntry, SingleResult } from "../../shared/types.ts";
 import { getSingleResultOutput } from "../../shared/utils.ts";
@@ -41,6 +42,11 @@ export function validateChainOutputBindingsWithContext(
 	for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
 		const displayStepIndex = (context.startStepIndex ?? 0) + stepIndex + 1;
 		const step = steps[stepIndex]!;
+		if (isParallelStep(step)) {
+			for (const task of step.parallel) assertStructuredOutputSupported(task.outputSchema);
+		} else if (!isDynamicParallelStep(step)) {
+			assertStructuredOutputSupported((step as SequentialStep).outputSchema);
+		}
 		if (hasDynamicFanoutFields(step)) {
 			if (!isDynamicParallelStep(step)) {
 				throw new ChainOutputValidationError(`Dynamic chain step ${displayStepIndex} requires expand, a single parallel template object, and collect; dynamic expand/collect cannot be mixed with static parallel arrays.`);

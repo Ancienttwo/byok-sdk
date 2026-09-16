@@ -194,3 +194,6 @@ export function cleanupStructuredOutputRuntime(runtime: StructuredOutputRuntime 
 		// Best-effort temp cleanup.
 	}
 }
+
+/** SDK build-flavor seam; ordinary requests retain the upstream compiler contract. */
+export function assertStructuredOutputSupported(_schema: unknown): void {}

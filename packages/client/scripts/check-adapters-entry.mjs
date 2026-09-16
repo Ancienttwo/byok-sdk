@@ -47,7 +47,8 @@ assert.equal(manifest.byok?.piRuntimePin, manifest.dependencies?.['@earendil-wor
   'client byok.piRuntimePin must exactly project dependency alias');
 assert.equal(manifest.optionalDependencies?.['@earendil-works/pi-coding-agent'], undefined);
 assert.equal(manifest.dependencies?.['pi-web-access'], '0.24.1');
-assert.equal(manifest.dependencies?.['pi-subagents'], '0.60.0');
+assert.equal(manifest.dependencies?.['pi-subagents'], undefined);
+assert.equal(manifest.devDependencies?.['pi-subagents'], '0.60.0');
 // The MCP client this package's own core is built on. `pi-mcp-adapter` is
 // retired: the SDK owns its MCP connection, observation and tool projection
 // (`src/mcp/`), so there is no second MCP authority in the graph to pin.

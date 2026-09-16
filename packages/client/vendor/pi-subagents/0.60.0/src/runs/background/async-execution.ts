@@ -34,7 +34,7 @@ import { assertThinkingWithinCeiling, decodeThinkingCeiling, intersectThinkingCe
 import { resolveExpectedWorktreeAgentCwd } from "../shared/worktree.ts";
 import { buildWorkflowGraphSnapshot } from "../shared/workflow-graph.ts";
 import { ChainOutputValidationError, validateChainOutputBindings } from "../shared/chain-outputs.ts";
-import { createStructuredOutputRuntime } from "../shared/structured-output.ts";
+import { assertStructuredOutputSupported, createStructuredOutputRuntime } from "../shared/structured-output.ts";
 import { resolveEffectiveAcceptance, validateAcceptanceInput, validateExecutionAcceptance } from "../shared/acceptance.ts";
 import { createRunFanoutBudget, writeRunFanoutBudgetDescriptor } from "../shared/run-fanout-budget.ts";
 import { validateImplementationToolContract } from "../shared/completion-guard.ts";
@@ -1468,6 +1468,7 @@ export function executeAsyncSingle(
 	id: string,
 	params: AsyncSingleParams,
 ): AsyncExecutionResult {
+	assertStructuredOutputSupported(params.structuredOutputSchema);
 	const {
 		agent,
 		agentConfig,

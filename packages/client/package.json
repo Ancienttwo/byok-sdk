@@ -65,7 +65,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsup && node scripts/check-adapters-entry.mjs --build-todo && node scripts/build-todo-assets.mjs && node scripts/build-pi-export-assets.mjs && tsc -p tsconfig.build.json && node scripts/check-adapters-entry.mjs && node scripts/check-agent-memory-entry.mjs",
+    "build": "tsup && node scripts/check-adapters-entry.mjs --build-todo && node scripts/build-todo-assets.mjs && node scripts/build-pi-export-assets.mjs && node scripts/build-sealed-host.mjs && tsc -p tsconfig.build.json && node scripts/check-adapters-entry.mjs && node scripts/check-agent-memory-entry.mjs",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -85,7 +85,6 @@
     "@byok-sdk/protocol": "workspace:*",
     "@earendil-works/pi-coding-agent": "npm:@byok-sdk/pi-coding-agent@0.85.1005",
     "@modelcontextprotocol/client": "2.0.0",
-    "pi-subagents": "0.60.0",
     "pi-web-access": "0.24.1",
     "@byok-sdk/implementation-identity": "workspace:*",
     "@mozilla/readability": "0.6.0",
@@ -104,7 +103,8 @@
   },
   "devDependencies": {
     "@byok-sdk/server": "workspace:*",
-    "@hono/node-server": "^2.0.10"
+    "@hono/node-server": "^2.0.10",
+    "pi-subagents": "0.60.0"
   },
   "imports": {
     "#byok-pi-runtime-host": {
@@ -114,6 +114,10 @@
     "#byok-pi-todo-runtime": {
       "types": "./dist/bin/pi-todo-runtime.d.ts",
       "default": "./dist/bin/pi-todo-runtime.js"
+    },
+    "#byok-pi-runtime-host-sealed": {
+      "types": "./dist/bin/pi-runtime-host-sealed.d.ts",
+      "default": "./dist/bin/pi-runtime-host-sealed.js"
     }
   }
 }

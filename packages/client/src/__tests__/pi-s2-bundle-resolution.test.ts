@@ -211,7 +211,20 @@ describe('Pi launch path — S2 release containment', () => {
           api: 'openai-completions', baseUrl: providerUrl, apiKey: 'synthetic-never-sent', models: [fixture.model] } } }));
         await fs.writeFile(path.join(env.PI_CODING_AGENT_DIR, 'settings.json'), JSON.stringify({ defaultProvider: 'zai', defaultModel: 'glm-4.6' }));
         await fs.writeFile(path.join(release, 'sdk-entry.ts'), BUNDLE_ENTRY_SOURCE);
-        await execFileAsync(bun, ['build', './sdk-entry.ts', '--target', 'bun', '--format', 'esm', '--outfile', './sdk-entry.js'], { cwd: release });
+        // The product bundler selects the sealed private artifact. The actual
+        // SDK root dispatcher remains the runtime entry (no test dispatch copy).
+        const sealedHost = fileURLToPath(new URL('../../dist/bin/pi-runtime-host-sealed.js', import.meta.url));
+        const buildSource = `let redirects=0;
+          const result=await Bun.build({entrypoints:['./sdk-entry.ts'],target:'bun',format:'esm',
+            outdir:'.',naming:'sdk-entry.js',sourcemap:'external',plugins:[{name:'sealed-host-author',setup(build){
+              build.onResolve({filter:/^#byok-pi-runtime-host$/},()=>{redirects++;return {path:${JSON.stringify(sealedHost)}};});
+            }}]});
+          if(!result.success) throw new AggregateError(result.logs,'S2 build failed');
+          if(redirects===0) throw new Error('sealed host edge was not selected');`;
+        await execFileAsync(bun, ['--eval', buildSource], { cwd: release });
+        const sourceMap = JSON.parse(await fs.readFile(path.join(release, 'sdk-entry.js.map'), 'utf8'));
+        expect(sourceMap.sources.some((file: string) => file.endsWith('/pi-runtime-host.js'))).toBe(false);
+        expect(sourceMap.sources.some((file: string) => file.endsWith('/pi-runtime-host-sealed.js'))).toBe(true);
         const bundle = path.join(release, 'sdk-entry.js');
         const interpreter = path.join(release, 'bun'); await fs.copyFile(bun, interpreter); await fs.chmod(interpreter, 0o555);
         await fs.chmod(bundle, 0o444);

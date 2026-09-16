@@ -25,8 +25,10 @@
     {
       "path": "src/agents/agent-refinements.ts",
       "upstreamSha256": "aba761e241326306c1aeb71af4bff17e86c6b4fbed1d67b7c44a7262f3af55a4",
-      "vendoredSha256": "aba761e241326306c1aeb71af4bff17e86c6b4fbed1d67b7c44a7262f3af55a4",
-      "delta": []
+      "vendoredSha256": "711fa29d012d7acd4d9393df9c11cd277cabf9c1705d323551c071729dc22a3a",
+      "delta": [
+        "SDK build-flavor support assertion at the existing effective execution boundary; ordinary backend is a no-op, sealed backend explicitly refuses."
+      ]
     },
     {
       "path": "src/agents/agent-scope.ts",
@@ -319,8 +321,10 @@
     {
       "path": "src/runs/background/async-execution.ts",
       "upstreamSha256": "854ccef6d7e824a2988f3dfba8c30f511768420c1cb4be6b01b5968037c0990c",
-      "vendoredSha256": "854ccef6d7e824a2988f3dfba8c30f511768420c1cb4be6b01b5968037c0990c",
-      "delta": []
+      "vendoredSha256": "7de62b3cc52a66e2ad1135bca462cc48a0ab8480d3952fae8936c4c2f7e49571",
+      "delta": [
+        "SDK build-flavor support assertion at the existing effective execution boundary; ordinary backend is a no-op, sealed backend explicitly refuses."
+      ]
     },
     {
       "path": "src/runs/background/async-job-tracker.ts",
@@ -589,8 +593,10 @@
     {
       "path": "src/runs/foreground/subagent-executor.ts",
       "upstreamSha256": "378dd1e1f2edc70ce6679dc48a2e6a90595c6a7c1e1c9c47a3cd2365694b17a5",
-      "vendoredSha256": "378dd1e1f2edc70ce6679dc48a2e6a90595c6a7c1e1c9c47a3cd2365694b17a5",
-      "delta": []
+      "vendoredSha256": "3c2cb5d9f26db96dbedf4f8f5bb55de33023db14f2bef28e2b9c80ea9c60aa3a",
+      "delta": [
+        "SDK build-flavor support assertion at the existing effective execution boundary; ordinary backend is a no-op, sealed backend explicitly refuses."
+      ]
     },
     {
       "path": "src/runs/foreground/workflow-detach-reconcile.ts",
@@ -643,8 +649,10 @@
     {
       "path": "src/runs/shared/chain-outputs.ts",
       "upstreamSha256": "f7d8b03500c7c7f582673a70a7bc1a7d2fa562c64cb7d2705190663f2e843354",
-      "vendoredSha256": "f7d8b03500c7c7f582673a70a7bc1a7d2fa562c64cb7d2705190663f2e843354",
-      "delta": []
+      "vendoredSha256": "fabe365cee3e5c88b3742f2c7b6f909c99ddf2dda29cf328586fa32c9d8eaafc",
+      "delta": [
+        "SDK build-flavor support assertion at the existing effective execution boundary; ordinary backend is a no-op, sealed backend explicitly refuses."
+      ]
     },
     {
       "path": "src/runs/shared/child-identity.ts",
@@ -685,8 +693,10 @@
     {
       "path": "src/runs/shared/dynamic-fanout.ts",
       "upstreamSha256": "405bcfe1a3dd394570a70fec801eabb149e9fbf38b1d2c21424f589f7acd2eb1",
-      "vendoredSha256": "405bcfe1a3dd394570a70fec801eabb149e9fbf38b1d2c21424f589f7acd2eb1",
-      "delta": []
+      "vendoredSha256": "dbc324f76bdcac11247e947b410af6578093415546e4e840a0b48490466e942c",
+      "delta": [
+        "SDK build-flavor support assertion at the existing effective execution boundary; ordinary backend is a no-op, sealed backend explicitly refuses."
+      ]
     },
     {
       "path": "src/runs/shared/extension-bindings.ts",
@@ -883,8 +893,10 @@
     {
       "path": "src/runs/shared/structured-output.ts",
       "upstreamSha256": "1d16ec3b0813d99b2516f4aa99a389c614fb0f53af7b86b3cf8bc8343a568e08",
-      "vendoredSha256": "1d16ec3b0813d99b2516f4aa99a389c614fb0f53af7b86b3cf8bc8343a568e08",
-      "delta": []
+      "vendoredSha256": "a1b051c729ade61b8a0a565ca3a4ce1c12acb172bf5e311da63ec87a1b31a020",
+      "delta": [
+        "SDK build-flavor support assertion at the existing effective execution boundary; ordinary backend is a no-op, sealed backend explicitly refuses."
+      ]
     },
     {
       "path": "src/runs/shared/subagent-control.ts",
@@ -1141,8 +1153,10 @@
     {
       "path": "src/slash/delegation-adapters.ts",
       "upstreamSha256": "0f7ed4a25013779464023466ae646cc74b0726f7204e92e34f14ef5d03732f6e",
-      "vendoredSha256": "0f7ed4a25013779464023466ae646cc74b0726f7204e92e34f14ef5d03732f6e",
-      "delta": []
+      "vendoredSha256": "2960df24b0f5699287c34e18b41dea29383b6c91818a0380a1dd13e2cb92f2ee",
+      "delta": [
+        "SDK build-flavor support assertion at the existing effective execution boundary; ordinary backend is a no-op, sealed backend explicitly refuses."
+      ]
     },
     {
       "path": "src/slash/delegation-json.ts",
@@ -1377,6 +1391,13 @@
       "upstreamSha256": "2d20dfacd9742706e564470dc77438608a1e54b0ed46959f080709389209093c",
       "vendoredSha256": "2d20dfacd9742706e564470dc77438608a1e54b0ed46959f080709389209093c",
       "delta": []
+    }
+  ],
+  "sdkFiles": [
+    {
+      "path": "src/runs/shared/structured-output-sealed.ts",
+      "sha256": "80317c4ab62a4e13804b9e113f9fb6ed956b60db69b0c90a86c5eb6cf861f458",
+      "purpose": "Explicit sealed refusal backend; original types are erased, no compiler loader runtime edge."
     }
   ]
 }

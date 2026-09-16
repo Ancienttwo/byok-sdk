@@ -16,10 +16,11 @@ const refusal = 'sealed_structured_output_unsupported';
 // flavor seam as the private host. No mock replacement of those functions.
 beforeAll(async () => {
   const exports = [
+    ['src/runs/background/async-execution.ts', ['executeAsyncSingle']],
     ['src/agents/agent-refinements.ts', ['handleRefinementAction']],
     ['src/runs/shared/chain-outputs.ts', ['validateChainOutputBindings']],
     ['src/runs/shared/dynamic-fanout.ts', ['validateDynamicStepShape']],
-    ['src/runs/foreground/subagent-executor.ts', ['prepareWorkflowLaunchParams']],
+    ['src/runs/foreground/subagent-executor.ts', ['prepareWorkflowLaunchParams', 'createSubagentExecutor']],
     ['src/slash/delegation-adapters.ts', ['toSubagentDelegationExecutionParams']],
     ['src/runs/shared/structured-output.ts', ['createStructuredOutputRuntime', 'validateStructuredOutputValue', 'readStructuredOutput']],
   ] as const;
@@ -73,6 +74,14 @@ describe('sealed user-schema admission', () => {
   });
   it.each(cases)('%s retains ordinary structured output', (_name, structured) => {
     expect(probe(structured, false)).toMatchObject({ok:true});
+  });
+  it('foreground direct admission refuses before reading execution dependencies', () => {
+    expect(probe(`api.createSubagentExecutor({config:{},state:{}}).execute('id',{outputSchema:schema},new AbortController().signal,undefined,{})`))
+      .toMatchObject({ok:false,message:expect.stringContaining(refusal)});
+  });
+  it('background direct admission refuses before creating a runner or artifacts', () => {
+    expect(probe(`api.executeAsyncSingle('id',{structuredOutputSchema:schema})`))
+      .toMatchObject({ok:false,message:expect.stringContaining(refusal)});
   });
   it('refinement rejects before calling the proposal child', () => {
     const cwd=path.join(scratch,'refinement');

@@ -1,3 +1,4 @@
+import { assertStructuredOutputSupported } from "../runs/shared/structured-output.ts";
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -592,7 +593,9 @@ export async function handleRefinementAction(action: RefinementAction, params: {
 	const evidence = collectBoundedRefinementEvidence(ctx.cwd, agent.name, ctx.state);
 	if (evidence.length === 0) return result(`No bounded recent evidence was found for '${agent.name}'. No proposal child was launched and no overlay was written.`);
 	const current = existing.parsed?.current ?? "";
-	const child = await ctx.launchProposalChild(proposalTask(agent, current, evidence), proposalSchema(), ctx.signal);
+	const schema = proposalSchema();
+	assertStructuredOutputSupported(schema);
+	const child = await ctx.launchProposalChild(proposalTask(agent, current, evidence), schema, ctx.signal);
 	if (child.isError) return result(`Refinement proposal child failed. No overlay was written.`, true);
 	const validation = validateRefinementProposal(proposalFromChild(child), evidence.map((item) => item.id));
 	if (!validation.ok) return result(`${validation.error} No overlay was written.`, true);

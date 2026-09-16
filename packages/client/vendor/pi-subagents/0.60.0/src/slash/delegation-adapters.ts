@@ -1,3 +1,4 @@
+import { assertStructuredOutputSupported } from "../runs/shared/structured-output.ts";
 import {
 	type SubagentDelegationRequest,
 	type SubagentDelegationResponse,
@@ -283,6 +284,7 @@ export function toDelegationUpdate(requestId: string, update: PromptTemplateBrid
 }
 
 export function toSubagentDelegationExecutionParams(request: SubagentDelegationRequest): DelegatedSubagentExecutionParams {
+	if (request.result.kind === "structured") assertStructuredOutputSupported(request.result.schema);
 	return {
 		agent: request.agent,
 		task: request.task,

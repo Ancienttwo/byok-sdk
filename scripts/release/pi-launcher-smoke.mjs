@@ -266,6 +266,14 @@ await runtime.dispose();
   assert.match(startup.stderr, /^byok-pi-rpc: exactly one --config-digest=<sha256> is required\n$/);
   assert.doesNotMatch(startup.stderr, /ERR_MODULE_NOT_FOUND|ERR_PACKAGE_PATH_NOT_EXPORTED|Cannot find (?:module|package)|Unknown file extension/);
   console.log('[release-pack] installed Node byok-pi-rpc imports reached the exact missing-config-digest refusal; sessions=0');
+  const sealedEntry = pathToFileURL(path.join(clientRoot, 'dist/bin/pi-runtime-host-sealed.js')).href;
+  const sealedStartup = spawnSync(process.execPath, ['--input-type=module', '-e',
+    `import {runPiRpcHost} from ${JSON.stringify(sealedEntry)}; await runPiRpcHost([]);`],
+    {cwd:dir,env:startupEnv,encoding:'utf8',timeout:15_000});
+  assert.equal(sealedStartup.status, 78, sealedStartup.stderr || String(sealedStartup.error));
+  assert.match(sealedStartup.stderr, /^byok-pi-rpc: exactly one --config-digest=<sha256> is required\n$/);
+  assert.equal(requests, 0);
+  console.log('[release-pack] installed Node private sealed host reached exact usage refusal; sessions=0; requests=0');
   const todoEntry = pathToFileURL(path.join(clientRoot, 'dist/bin/pi-todo-runtime.js')).href;
   const todoAnchor = pathToFileURL(path.join(clientRoot, 'dist/assets/extensions/rpiv-todo/2.8.0') + path.sep).href;
   const todoStartup = spawnSync(process.execPath, ['--input-type=module', '-e',
