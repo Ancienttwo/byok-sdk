@@ -830,13 +830,6 @@ describe('SDK-owned Agent home contract', () => {
       const adapter = runtime === 'pi'
         ? new PiAdapter({
             resolveBin: () => ({ command: RUNTIME_FIXTURES.pi, source: 'env' }),
-            resolveExtensions: () => ({
-              webAccess: '/extensions/pi-web-access/index.ts',
-              mcpExtension: '/extensions/byok-pi-mcp.js',
-              subagentsPolicy: '/extensions/byok-pi-subagents-policy.js',
-              subagents: '/extensions/pi-subagents/index.ts',
-              todo: '/extensions/rpiv-todo/index.ts',
-            }),
             spawnFn,
           })
         : runtime === 'claude'

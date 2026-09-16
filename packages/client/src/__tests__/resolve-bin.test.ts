@@ -2,10 +2,11 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import clientManifest from '../../package.json';
 import type { ClientManifest } from '../adapters/pi/client-manifest';
 import { PI_PACKAGE_NAME, resolvePiBin, resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
 
-// The pinned Pi identity comes from exactly one place: the installed client
+// The pinned Pi identity comes from exactly one place: the statically imported client
 // manifest. Overriding that single read is enough to drive every fail-closed
 // path without touching node_modules; when the override is unset the real
 // manifest is used, so the positive cases stay end-to-end.
@@ -30,6 +31,12 @@ describe('resolvePiBin', () => {
     if (ORIGINAL === undefined) delete process.env.BYOK_PI_BIN;
     else process.env.BYOK_PI_BIN = ORIGINAL;
     state.manifest = undefined;
+  });
+
+  it('projects the exact pin from the bundled manifest import', () => {
+    const expected = clientManifest.dependencies[PI_PACKAGE_NAME];
+    const identity = resolvePiRuntimeIdentity();
+    expect(`npm:${identity.name}@${identity.version}`).toBe(expected);
   });
 
   it('resolves the bin from the exact required dependency', () => {

@@ -21,19 +21,10 @@ import {
 import { trustedCwd } from './fixtures/launch-cwd';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
-const FIXTURE_EXTENSIONS = Object.freeze({
-  webAccess: '/extensions/pi-web-access/index.ts',
-  mcpExtension: '/extensions/byok-pi-mcp.js',
-  subagentsPolicy: '/extensions/byok-pi-subagents-policy.js',
-  subagents: '/extensions/pi-subagents/index.ts',
-  todo: '/extensions/rpiv-todo/index.ts',
-});
-const resolveFixtureExtensions = () => FIXTURE_EXTENSIONS;
 
 function fakePiAdapter(): PiAdapter {
   return new PiAdapter({
     resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-    resolveExtensions: resolveFixtureExtensions,
   });
 }
 
@@ -93,7 +84,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
       await fs.copyFile(FIXTURE_PATH, script);
       await fs.chmod(script, 0o600);
       await fs.copyFile(path.join(path.dirname(FIXTURE_PATH), 'process-tree-receipt.mjs'), path.join(dir, 'process-tree-receipt.mjs'));
-      const adapter = new PiAdapter({ resolveBin: () => ({ command: script, source: 'package' }), resolveExtensions: resolveFixtureExtensions });
+      const adapter = new PiAdapter({ resolveBin: () => ({ command: script, source: 'package' }) });
       session = await startAdapter(adapter, baseTask, { workspaceDir: dir, policy: { mode: 'auto' }, env: process.env });
       expect(session.sessionRef.length).toBeGreaterThan(0);
       expect(await takeEvents(session, 5)).toHaveLength(5);
@@ -144,7 +135,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
   it('classifies spawn unavailability as typed start infrastructure retryable', async () => {
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-      resolveExtensions: resolveFixtureExtensions,
       spawnFn: (() => {
         throw new Error('spawn ENOENT');
       }) as never,
@@ -168,7 +158,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
     }) as never;
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-      resolveExtensions: resolveFixtureExtensions,
       spawnFn,
       byokLauncher: {
         command: '/opt/byok-pi-provider-launcher',
@@ -236,7 +225,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
     }) as never;
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-      resolveExtensions: resolveFixtureExtensions,
       spawnFn,
       byokLauncher: {
         command: '/opt/byok-pi-provider-launcher',
@@ -473,7 +461,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
     }) as never;
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-      resolveExtensions: resolveFixtureExtensions,
       spawnFn,
     });
     const ctx = await makeCtx();
@@ -504,7 +491,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
     }) as never;
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-      resolveExtensions: resolveFixtureExtensions,
       spawnFn,
     });
     const ctx = await makeCtx();
@@ -554,7 +540,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
     }) as never;
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-      resolveExtensions: resolveFixtureExtensions,
       spawnFn,
     });
     const task: TaskOfferPayload = { ...baseTask, policy: { mode: 'readonly' } };
@@ -592,7 +577,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
     const calls: string[][] = [];
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-      resolveExtensions: resolveFixtureExtensions,
       spawnFn: ((_command: string, args: string[]) => {
         calls.push([...args]);
         throw new Error('spawn must not be reached');
@@ -669,7 +653,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
     }) as never;
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-      resolveExtensions: resolveFixtureExtensions,
       spawnFn,
     });
     const task: TaskOfferPayload = { ...baseTask, policy: { mode: 'readonly' } };
@@ -715,7 +698,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
     const calls: string[][] = [];
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-      resolveExtensions: resolveFixtureExtensions,
       spawnFn: ((_command: string, args: string[]) => {
         calls.push([...args]);
         throw new Error('spawn must not be reached');
@@ -745,7 +727,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
     // child, where only its stderr carries the message.
     const adapter = new PiAdapter({
       resolveBin: () => { throw new Error('resolveBin must not be reached'); },
-      resolveExtensions: () => { throw new Error('resolveExtensions must not be reached'); },
       spawnFn: (() => { throw new Error('spawn must not be reached'); }) as never,
     });
     const offer: TaskOfferPayload = { ...baseTask, policy: { mode: 'auto' } };
@@ -768,7 +749,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
   it('rejects a projected server the daemon never observed, before anything is spawned', async () => {
     const adapter = new PiAdapter({
       resolveBin: () => { throw new Error('resolveBin must not be reached'); },
-      resolveExtensions: () => { throw new Error('resolveExtensions must not be reached'); },
       spawnFn: (() => { throw new Error('spawn must not be reached'); }) as never,
     });
     const offer: TaskOfferPayload = { ...baseTask, policy: { mode: 'auto' } };

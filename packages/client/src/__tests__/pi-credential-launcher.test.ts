@@ -12,13 +12,10 @@ import { PI_MODEL_FIXTURE } from '../../../keys/src/fixtures/pi-model-config';
 describe('Pi adapter / credential launcher composition', () => {
   it.each(['env', 'package'] as const)('%s preserves SDK host config and committed environment without forwarding ambient credentials', async (source) => {
     const dir = await mkdtemp(path.join(tmpdir(), 'pi-launcher-composition-'));
-    const extensions = Object.fromEntries(['webAccess', 'mcpExtension', 'subagentsPolicy', 'subagents', 'todo']
-      .map(name => [name, path.join(dir, `${name}.js`)])) as any;
     let captured: { args: string[]; env: NodeJS.ProcessEnv } | undefined;
     try {
       const adapter = new PiAdapter({
         resolveBin: () => ({ command: path.join(dir, 'pi'), source }),
-        resolveExtensions: () => extensions,
         byokLauncher: { command: path.join(dir, 'launcher'), profileDbPath: path.join(dir, 'profiles.db'), sessionDir: path.join(dir, 'sessions') },
         spawnFn: ((_command: string, args: string[], options: { env: NodeJS.ProcessEnv }) => {
           captured = { args, env: options.env }; throw new Error('capture only');

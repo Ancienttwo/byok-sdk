@@ -34,8 +34,8 @@ export async function resolvePiRuntimeLaunch(options: {
   env: Readonly<Record<string, string | undefined>>;
   projectionRoot: string;
   keysSessionDir?: string;
-  devCommand: string;
-  devEntry?: string;
+  /** Evaluated only after an explicitly unconfigured authority decision. */
+  resolveDevInvocation: () => { command: string; entry?: string };
 }): Promise<PiRuntimeLaunchResources> {
   const source = options.keysSessionDir === undefined ? 'pi-auth-store' : 'keys-profile';
   const original = Object.fromEntries(Object.entries(options.env).filter((entry): entry is [string, string] => entry[1] !== undefined));
@@ -88,10 +88,11 @@ export async function resolvePiRuntimeLaunch(options: {
         command: description.command, ...(description.entry === undefined ? {} : { entry: description.entry }),
         fixedArgv: description.fixedArgv, cwd: description.processCwd, envCommitments: description.directoryValues });
     } else {
+      const dev = options.resolveDevInvocation();
       const cwd = await resolveTrustedLaunchCwd();
       if (cwd.kind !== 'resolved') throw failure(`Pi process cwd unavailable: ${cwd.reason}`);
       binding = Object.freeze({ format: 'byok.implementation-spawn', version: 1, identity,
-        command: options.devCommand, ...(options.devEntry === undefined ? {} : { entry: options.devEntry }),
+        command: dev.command, ...(dev.entry === undefined ? {} : { entry: dev.entry }),
         fixedArgv: Object.freeze([]), cwd: cwd.dir, envCommitments: Object.freeze(directoryValues) });
     }
     return Object.freeze({ kind: options.kind, decision, binding, env: Object.freeze(env), sessionCwd: options.sessionCwd,

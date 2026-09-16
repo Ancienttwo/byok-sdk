@@ -51,7 +51,7 @@ async function nativeDigest(value: unknown): Promise<string> {
  * a REAL MCP server child in the REAL launch boundary of this machine, and a
  * REAL provider endpoint this suite runs and reads the request bytes off.
  *
- * Nothing about the pi adapter is stubbed — `resolveExtensions` least of all:
+ * Nothing about the pi adapter or its SDK-owned host is stubbed:
  * the prepared branch must not need the extension resolution the ordinary lane
  * uses, and stubbing it would hide a prepared launch that quietly depended on
  * it.

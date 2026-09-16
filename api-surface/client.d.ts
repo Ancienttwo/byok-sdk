@@ -724,7 +724,6 @@ export type { CodexAdapterOptions } from './codex/codex-adapter';
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type ResolvedBin } from './resolve-bin';
-import type { ResolvedPiExtensions } from './resolve-extensions';
 import { type SpawnFn } from './rpc-client';
 /**
  * Known provider credential env var *names* (never values) — see the
@@ -738,8 +737,6 @@ export interface PiAdapterOptions {
     resolveBin?: () => ResolvedBin;
     /** Override process spawning — tests substitute a fake spawn. */
     spawnFn?: SpawnFn;
-    /** Override bundled extension resolution — tests use stable fixture paths. */
-    resolveExtensions?: () => ResolvedPiExtensions;
     /**
      * Separate-process BYOK credential boundary. The launcher receives only
      * non-secret selection/config paths, resolves the OS credential itself,
@@ -832,21 +829,6 @@ export declare function resolvePiRuntimeIdentity(): PiRuntimeIdentity;
  * closed instead of launching an unverified runtime.
  */
 export declare function resolvePiBin(): ResolvedBin;
-// ==== @byok-sdk/client dist/adapters/pi/resolve-extensions.d.ts ====
-export interface ResolvedPiExtensions {
-    readonly webAccess: string;
-    readonly mcpExtension: string;
-    readonly subagentsPolicy: string;
-    readonly subagents: string;
-    readonly todo: string;
-}
-/**
- * Resolve the Pi extensions shipped as required `@byok-sdk/client`
- * dependencies. Pi receives explicit extension paths so runtime behavior is
- * pinned to this package graph rather than a user's mutable global Pi package
- * settings.
- */
-export declare function resolvePiExtensions(): ResolvedPiExtensions;
 // ==== @byok-sdk/client dist/adapters/pi/rpc-client.d.ts ====
 import { spawn } from 'node:child_process';
 export type SpawnFn = typeof spawn;
@@ -1026,8 +1008,11 @@ export declare function resolvePiRuntimeLaunch(options: {
     env: Readonly<Record<string, string | undefined>>;
     projectionRoot: string;
     keysSessionDir?: string;
-    devCommand: string;
-    devEntry?: string;
+    /** Evaluated only after an explicitly unconfigured authority decision. */
+    resolveDevInvocation: () => {
+        command: string;
+        entry?: string;
+    };
 }): Promise<PiRuntimeLaunchResources>;
 // ==== @byok-sdk/client dist/agent-home.d.ts ====
 import { type AgentHomeProjectionOutcome, type AgentHomeProjectionPayload, type AgentRef } from '@byok-sdk/protocol';

@@ -207,8 +207,6 @@ async function launchThroughAdapter(lane: 'ordinary' | 'prepared', home: string)
   let spawnCount = 0;
   const adapter = new PiAdapter({
     resolveBin: () => ({ command: compiledBin, source: 'env' }),
-    resolveExtensions: () => ({ webAccess: '/fixture/web.ts', mcpExtension: '/fixture/mcp.ts',
-      subagentsPolicy: '/fixture/policy.ts', subagents: '/fixture/subagents.ts', todo: '/fixture/todo.ts' }),
     spawnFn: ((command: string, args: readonly string[], options: SpawnOptions) => {
       spawnCount++;
       // Do not reconstruct options: the real adapter's cwd/env flow directly to Bun.

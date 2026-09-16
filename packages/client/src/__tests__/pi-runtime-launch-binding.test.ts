@@ -8,6 +8,7 @@ import {
   type ToolImplementationInstallRecordV1,
   type ToolImplementationAuthority,
 } from '@byok-sdk/implementation-identity';
+import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { resolvePiRuntimeLaunch } from '../adapters/pi/runtime-launch';
 import { resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
 import { resolveTrustedLaunchCwd } from '../daemon/trusted-launch-cwd';
@@ -23,7 +24,8 @@ async function fixture() {
     root,
     options: {
       kind:'pi-rpc' as const, sessionCwd, projectionRoot:path.join(root,'private-projections'),
-      keysSessionDir:path.join(root,'native-sessions'), devCommand:process.execPath, devEntry:path.join(root,'sdk entry.js'),
+      keysSessionDir:path.join(root,'native-sessions'),
+      resolveDevInvocation: vi.fn(() => ({ command:process.execPath, entry:path.join(root,'sdk entry.js') })),
       env:{PATH:process.env.PATH!, HOME:sessionCwd, PI_PACKAGE_DIR:'/ambient-assets', BYOK_PI_PERMISSION_MODE:'invalid', OPENAI_API_KEY:'ambient-secret'},
     },
   };
@@ -36,10 +38,28 @@ function spawnInput(resources: Awaited<ReturnType<typeof resolvePiRuntimeLaunch>
 describe('client runtime launch admission and resource binding', () => {
   it.each(['pi-rpc','pi-prepared'] as const)('passes only the runtime subject and %s entry to a configured resolver and refuses its denial', async (kind) => {
     const f = await fixture();
+    f.options.resolveDevInvocation.mockImplementation(() => { throw new Error('dev resolver must not run'); });
     const resolve = vi.fn(async () => ({kind:'unavailable' as const,reason:'implementation_identity_unattested' as const}));
     await expect(resolvePiRuntimeLaunch({...f.options,kind,authority:{resolve}})).rejects.toThrow(/runtime implementation unavailable/);
+    expect(f.options.resolveDevInvocation).not.toHaveBeenCalled();
     expect(resolve).toHaveBeenCalledExactlyOnceWith({subject:{kind:'runtime',runtimeId:'pi'},runtimeEntry:kind});
     expect(await fs.readdir(f.options.projectionRoot)).toEqual([]);
+  });
+
+  it.each(['instruction','prepared'] as const)('adapter %s admission never resolves the dev executable before configured authority', async (kind) => {
+    const f = await fixture();
+    const resolveBin = vi.fn(() => { throw new Error('dev executable resolution is forbidden'); });
+    const adapter = new PiAdapter({resolveBin});
+    const policy = {mode:'auto' as const};
+    const prepared = await adapter.prepare({offer:{instruction:'Never sent',policy},policy,descriptor:adapter.descriptor,requiredToolsetIds:[]});
+    expect(prepared.kind).toBe('prepared');
+    expect(resolveBin).not.toHaveBeenCalled();
+    if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
+    const resolve = vi.fn(async () => ({kind:'unavailable' as const,reason:'implementation_identity_unattested' as const}));
+    await expect(prepared.operation.resolveRuntimeLaunch!({kind,cwd:f.options.sessionCwd,env:{},projectionRoot:f.options.projectionRoot,authority:{resolve}}))
+      .rejects.toThrow(/runtime implementation unavailable/);
+    expect(resolveBin).not.toHaveBeenCalled();
+    expect(resolve).toHaveBeenCalledExactlyOnceWith({subject:{kind:'runtime',runtimeId:'pi'},runtimeEntry:kind==='prepared'?'pi-prepared':'pi-rpc'});
   });
 
   it('refuses a configured resolver claiming resolver_unconfigured instead of taking the dev path', async () => {
@@ -64,6 +84,7 @@ describe('client runtime launch admission and resource binding', () => {
     const f = await fixture();
     const resources = await resolvePiRuntimeLaunch(f.options);
     try {
+      expect(f.options.resolveDevInvocation).toHaveBeenCalledOnce();
       expect(resources.decision.kind).toBe('unconfigured');
       expect(resources.binding.identity).toEqual({kind:'unavailable',reason:'resolver_unconfigured'});
       const trusted = await resolveTrustedLaunchCwd();
@@ -72,8 +93,8 @@ describe('client runtime launch admission and resource binding', () => {
       expect(resources.binding.cwd).toBe(trusted.dir);
       expect(resources.binding.cwd).not.toBe(f.options.sessionCwd);
       expect(resources.sessionCwd).toBe(f.options.sessionCwd);
-      expect(resources.binding.command).toBe(f.options.devCommand);
-      expect(resources.binding.entry).toBe(f.options.devEntry);
+      expect(resources.binding.command).toBe(process.execPath);
+      expect(resources.binding.entry).toBe(path.join(f.root,'sdk entry.js'));
       expect(resources.credentialSource).toBe('keys-profile');
       const projection = resources.env.PI_CODING_AGENT_DIR!;
       const stat = await fs.lstat(projection);
@@ -127,13 +148,18 @@ describe('client runtime launch admission and resource binding', () => {
       nativeProvenance:{packageName:pin.name,packageVersion:pin.version,upstreamBase:'0.85.0',upstreamCommit:'c'.repeat(40),forkBuild:1005,compilerVersion:1},
     };
     const authority: ToolImplementationAuthority = {resolve:async () => record};
+    f.options.resolveDevInvocation.mockImplementation(() => { throw new Error('dev resolver must not run'); });
+    const wrongPin = { ...record, nativeProvenance: { ...record.nativeProvenance!, packageVersion:'9.9.9' } };
+    await expect(resolvePiRuntimeLaunch({...f.options,authority:{resolve:async () => wrongPin}}))
+      .rejects.toThrow(/runtime implementation unavailable: install_record_mismatch/);
     const resources = await resolvePiRuntimeLaunch({...f.options,authority});
     try {
+      expect(f.options.resolveDevInvocation).not.toHaveBeenCalled();
       expect(resources.decision.kind).toBe('attested');
       expect(resources.binding.envCommitments.PI_PACKAGE_DIR).toBe(record.assetRoot);
       expect(resources.env.PI_PACKAGE_DIR).toBe(record.assetRoot);
       expect(resources.binding.command).toBe(executable);
-      expect(resources.binding.command).not.toBe(f.options.devCommand);
+      expect(resources.binding.command).not.toBe(process.execPath);
       await expect(assertImplementationSpawnBinding(resources.binding,spawnInput(resources))).resolves.toBeUndefined();
       await expect(assertImplementationSpawnBinding(resources.binding,{...spawnInput(resources),env:{...resources.env,PI_PACKAGE_DIR:'/changed-after-description'}})).rejects.toThrow(/changed Pi directory/);
     } finally {await resources.release();}

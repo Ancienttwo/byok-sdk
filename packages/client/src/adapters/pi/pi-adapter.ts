@@ -38,7 +38,6 @@ import { RuntimeDisposalFailure, RuntimeExecutionFailure, isRuntimeExecutionFail
 import { grantFingerprint, resolveMcpToolsetGrants } from '../mcp-tool-grants';
 import { clientPackageRoot } from './client-manifest';
 import { resolvePiBin, type ResolvedBin } from './resolve-bin';
-import type { ResolvedPiExtensions } from './resolve-extensions';
 import { mapPermissionPolicyToPiArgs } from './permission-mapping';
 import { mapPiMessageToAgentEvent, ROUTINE_PI_EVENT_TYPES } from './events';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client';
@@ -87,8 +86,6 @@ export interface PiAdapterOptions {
   resolveBin?: () => ResolvedBin;
   /** Override process spawning — tests substitute a fake spawn. */
   spawnFn?: SpawnFn;
-  /** Override bundled extension resolution — tests use stable fixture paths. */
-  resolveExtensions?: () => ResolvedPiExtensions;
   /**
    * Separate-process BYOK credential boundary. The launcher receives only
    * non-secret selection/config paths, resolves the OS credential itself,
@@ -256,7 +253,6 @@ export class PiAdapter implements RuntimeAdapter {
       };
     }
 
-    const bin = this.resolveBin();
     // Inline factories are owned by the SDK entry; no runtime extension path resolution here.
     // Session/workspace continuity:
     // `task.sessionRef` is only ever non-empty here when `task-runner.ts`
@@ -296,8 +292,6 @@ export class PiAdapter implements RuntimeAdapter {
             }),
           }) as unknown as TaskOfferPayload['dispatchSelection']
         : Object.freeze({ ...selection }) as TaskOfferPayload['dispatchSelection'];
-    const invocation = piInvocation(bin);
-    let command = invocation.command;
     let launcherArgs: string[] | undefined;
     if (pinnedSelection !== undefined) {
       if ((pinnedSelection.lane !== 'byok' && pinnedSelection.lane !== 'byok-profile') || pinnedSelection.runtimeId !== 'pi') {
@@ -307,7 +301,6 @@ export class PiAdapter implements RuntimeAdapter {
       if (launcher === undefined) {
         return { kind: 'reject', reason: 'pi BYOK selection requires a configured credential-custody launcher', retryable: false };
       }
-      command = launcher.command;
       const providerProfile = pinnedSelection.lane === 'byok-profile'
         ? pinnedSelection.providerProfile
         : undefined;
@@ -326,10 +319,6 @@ export class PiAdapter implements RuntimeAdapter {
         }
       }
       launcherArgs = [
-        ...(launcher.args ?? []),
-        '--pi-bin',
-        invocation.command,
-        ...(invocation.entry === undefined ? [] : ['--pi-entry', invocation.entry]),
         '--profile-db',
         launcher.profileDbPath,
         '--session-dir',
@@ -360,16 +349,18 @@ export class PiAdapter implements RuntimeAdapter {
         resolveRuntimeLaunch: async (resources) => {
           if (boundRuntime !== undefined) throw authorityFailure('runtime launch resources were already resolved');
           const kind = resources.kind === 'prepared' ? 'pi-prepared' : 'pi-rpc';
-          // Explicit resolver overrides remain the dev/test target seam. A normal
-          // installed SDK runs its own host, rather than native main's cwd-bound CLI.
-          const dev = kind === 'pi-prepared' ? { command: process.execPath, entry: preparedPiLaunchBin() }
-            : this.options.resolveBin === undefined
-              ? { command: process.execPath, entry: path.join(clientPackageRoot(), 'dist', 'bin', 'byok-pi-rpc.js') }
-              : invocation;
           boundRuntime = await resolvePiRuntimeLaunch({
             ...resources, sessionCwd: resources.cwd, kind,
             env: pinnedSelection === undefined ? resources.env : withoutProviderCredentials(resources.env),
-            devCommand: dev.command, ...(dev.entry === undefined ? {} : { devEntry: dev.entry }),
+            resolveDevInvocation: () => {
+              // Validate the installed native package before choosing the SDK
+              // entry. Configured authority lanes never reach this dev resolver.
+              const bin = this.resolveBin();
+              if (kind === 'pi-prepared') return { command: process.execPath, entry: preparedPiLaunchBin() };
+              return this.options.resolveBin === undefined
+                ? { command: process.execPath, entry: path.join(clientPackageRoot(), 'dist', 'bin', 'byok-pi-rpc.js') }
+                : piInvocation(bin);
+            },
             ...(kind === 'pi-rpc' && pinnedSelection !== undefined
               ? { keysSessionDir: this.options.byokLauncher!.sessionDir } : {}),
           });
@@ -531,16 +522,11 @@ export class PiAdapter implements RuntimeAdapter {
           let launchCommand = launch.command;
           let launchArgs = targetArgs;
           if (launcherArgs !== undefined) {
-            const updated = [...launcherArgs];
-            const binIndex = updated.indexOf('--pi-bin');
-            updated[binIndex + 1] = launch.command;
-            const entryIndex = updated.indexOf('--pi-entry');
-            if (entryIndex >= 0) updated.splice(entryIndex, 2);
-            if (launch.entry !== undefined) updated.push('--pi-entry', launch.entry);
-            updated.push('--pi-cwd', launch.cwd, '--pi-fixed-args', JSON.stringify(launch.fixedArgv),
-              '--launch-binding', JSON.stringify(launch));
-            launchCommand = command;
-            launchArgs = [...updated, '--', ...piArgs];
+            launchCommand = this.options.byokLauncher!.command;
+            launchArgs = [...(this.options.byokLauncher!.args ?? []), '--pi-bin', launch.command, ...launcherArgs,
+              ...(launch.entry === undefined ? [] : ['--pi-entry', launch.entry]),
+              '--pi-cwd', launch.cwd, '--pi-fixed-args', JSON.stringify(launch.fixedArgv),
+              '--launch-binding', JSON.stringify(launch), '--', ...piArgs];
           }
           let rpc: PiRpcClient;
           try {
@@ -862,9 +848,8 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
 /**
  * The shipped prepared launch entry.
  *
- * Resolved from this package's own root, exactly as the Pi extensions are
- * (`./resolve-extensions.ts`): the host that consumes a frozen request must be
- * the one from THIS package graph, never whatever a PATH lookup finds.
+ * Used only for an explicitly unconfigured dev launch. Configured authorities
+ * supply their measured SDK entry through the runtime launch description.
  */
 function preparedPiLaunchBin(): string {
   return path.join(clientPackageRoot(), 'dist', 'bin', 'byok-pi-prepared.js');
