@@ -48,3 +48,28 @@ Both live in the session scratchpad `/private/tmp/claude-501/-Users-kito-Project
 Rule: these guards do not get weakened, relaxed or skipped to make a lane pass. P2 and P3 do not close until both files are green with the control still green, and they are registered in the contract's Verification Plan under check `test`.
 
 Observed at landing (`bun x vitest run` on the two files, worktree `codex/c07-pi-runtime-launch`): 3 failed, 1 passed — ordinary lane red (`expected true to be false` on `preloaded`), prepared lane red (same), containment red (`resolution failed with ResolveMessage: Unexpected while resolving package 'pi-web-access/index.ts'`), control green.
+
+## P0 probes p1-p6: outcomes and evidence
+
+Run against a real install of the fork pin `@earendil-works/pi-coding-agent` → `npm:@byok-sdk/pi-coding-agent@0.85.1005` (`packages/client/package.json:74`), in the session scratchpad only, with no provider credentials and no repository writes. Verbatim output lives at `/private/tmp/claude-501/-Users-kito-Projects-byok-sdk/be028169-eaee-4f98-8263-7bdcca465dd6/scratchpad/pi-launch-probes/out/p1.txt` … `p6.txt`, with the harness and the README alongside. The scratchpad is session-scoped and is not a repository artifact; the rulings below are what survives it.
+
+| Probe | Result | What it settles |
+|---|---|---|
+| p1 | holds | Inline `extensionFactories` work in `--mode rpc --no-extensions` and on a `--session` resume. Import from the package root only; assert the tool set with `pi.getAllTools()` (no `list_tools` RPC); add `--no-skills` because `--no-extensions` still loads `~/.agents` skills. |
+| p2 | holds | Process cwd and session cwd decouple safely for tools, session and profile. Residual `process.cwd()` sinks: `session-export.js:7` (`export_html` relative `outputPath`) and `utils/photon.js:38`. |
+| p3 | holds with adjustments | `PI_PACKAGE_DIR` unset is fine and a read-only projection is fine, but the value must match the runtime form. The compiled layout crashes an interpreted run at `initTheme` before any RPC frame. Single read point `config.js:313`. |
+| p4 | holds with adjustments | Fallback order `dirname(execPath)` → `<execDir>/photon` → `process.cwd()`, armed only after a package-relative ENOENT. A wasm planted at cwd is opened and instantiated for real. |
+| p5 | holds with adjustments | Theme JSON ×2 is a startup hard dependency of rpc mode; export-html templates and vendor files are lazy; `clankolas.png` is never reached in rpc. |
+| p6 | holds with adjustments | The launcher passes no `cwd`; the delegated projection refuses every token outside its six flags; the fixed prefix must be a launcher-own flag; the helper host requires `argv.length === 2`; `PI_PACKAGE_DIR` is in no env allowlist. |
+
+Nothing falsified the entry shape, the cwd split or the keys acceptance surface, so the plan's stop condition before P1 does not fire. The adjustments are folded into the plan's frozen design point 8 and into P1, P2, P3 and P5 of the Task Breakdown.
+
+## §80 ruling folded in
+
+O1 stands; O3 is not chosen. The S2 release carries a sealed, read-only assets set in the interpreted layout, per-file digests bound into the install record as a new `assets` component — static files, not code. The SDK launch description points `PI_PACKAGE_DIR` and the asset root at the release's own asset directory; `export_html` requires an absolute `outputPath` under the sealed cwd; the keys launcher gains an explicit `cwd`, a fixed-prefix own flag and `--no-skills` in its delegated allowlist; the helper host arity check is relaxed and gains the kinds `pi-rpc` and `pi-prepared`.
+
+Derivation of the `assets` component from the existing shapes, so P1 does not invent a second authority: `tool-implementation-identity.ts:190-239` defines `ToolImplementationAttestedV1` (`closureDigest`/`closureKind: 'artifact'` at `:205-206`, `entry` `:209`, `launchArgv` `:210`, `launchCwd` `:211`); `:280-283` derives `ToolImplementationInstallRecordV1` as that shape minus the four SDK-sealed keys listed at `:583-588`. So `assets: readonly { path: string; digest: string }[]` is a Host-declared record component — `path` relative to the release asset root, `digest` sha256 hex — needing an `INSTALL_RECORD_KEYS` entry (`:565-577`) and validation beside the existing `closureDigest`/`launchCwd` checks (`:612-641`). The record layout is Host-owned; the SDK consumes the declared list, measures it at resolve as it measures the artifact, and re-measures before every spawn.
+
+## Contract path correction
+
+`packages/keys/src/pi-provider-launcher-core.ts` and `packages/keys/src/pi-provider-projection.ts` are the real files; only `pi-provider-launcher.ts` lives under `packages/keys/src/bin/`. The contract's earlier `packages/keys/src/bin/pi-provider-projection.ts` entry named a path that does not exist and has been corrected. Separately, `allowed_paths` still lists `packages/keys/src/__tests__/`, which does not exist either — the keys tests are co-located (`packages/keys/src/pi-provider-launcher-core.test.ts`, `pi-provider-projection.test.ts`). That one is left as-is and reported rather than widened here.

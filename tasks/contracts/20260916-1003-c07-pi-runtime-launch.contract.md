@@ -36,6 +36,16 @@ Deliver one strict SDK runtime launch description, one provenance binding and on
 
 A Pi child starts whose interpreter, entry, argv, cwd or env differ from the attested description without a pre-spawn refusal. Cheapest proof: mutate each of those five fields between the outer check and the final spawn, on each of the three lanes, and require a refusal with zero native or provider side effects.
 
+## Completion Conditions (Owner)
+
+The Owner's three stated completion conditions, carried verbatim in intent from the approval and not restated as generalities:
+
+1. The photon cwd WASM fallback is closed — a `photon_rs_bg.wasm` planted in the Pi child's process cwd is never the file that loads, because the wasm is a sealed release asset and the child's cwd is the sealed launch cwd.
+2. Package provenance is bound — the release's package/fork/prepared-contract identity comes only from the single exact pin, `byokFork` and build inputs, bound into the runtime subject together with the sealed `assets` component digests; a HOME `package.json` is never a provenance source.
+3. The keys final env is reverified — the keys launcher re-measures the final env, argv and cwd at its own spawn boundary, after credential resolution and immediately before the child starts.
+
+These are in addition to the first batch running the full daemon plus Pi under the interpreter, with no compiled-only alias, no mutable wrapper and no reduction of the supported surface.
+
 ## Root Cause Evidence
 
 Not applicable; Task Profile is `code-change`.
@@ -83,13 +93,14 @@ allowed_paths:
   - packages/client/src/daemon/task-runner.ts
   - packages/client/src/__tests__/
   - packages/keys/src/bin/pi-provider-launcher.ts
-  - packages/keys/src/bin/pi-provider-projection.ts
+  - packages/keys/src/pi-provider-launcher-core.ts
+  - packages/keys/src/pi-provider-projection.ts
   - packages/keys/src/__tests__/
   - packages/protocol/src/
   - tests/
 ```
 
-Path notes: `packages/client/src/bin/` is limited to `byok-pi-*.ts`; `packages/client/src/daemon/task-runner.ts` is limited to the runtime-subject admission and decline path; `packages/protocol/src/` is only in scope if the wire record shape is actually touched by the `piEntrypoint` retirement. The MCP server surface is explicitly not in scope.
+Path notes: the keys launcher core and projection live at `packages/keys/src/pi-provider-launcher-core.ts` and `packages/keys/src/pi-provider-projection.ts`, not under `packages/keys/src/bin/`; only `pi-provider-launcher.ts` sits in `bin/`, and the earlier `bin/pi-provider-projection.ts` entry named a path that does not exist. `packages/client/src/bin/` is limited to `byok-pi-*.ts`; `packages/client/src/daemon/task-runner.ts` is limited to the runtime-subject admission and decline path; `packages/protocol/src/` is only in scope if the wire record shape is actually touched by the `piEntrypoint` retirement. The MCP server surface is explicitly not in scope.
 
 ## Evidence Requirements
 
