@@ -194,3 +194,7 @@ The approved absolute-only requirement is still unimplemented. Native1006 needs 
 ## P3a accepted and P3b immediate boundary
 
 Test-only1414e368 accepted by supervisor: genuine two-lane prepare-stage client manifest resolution RED, original assertions retained. Raw r2 and fixture-error r1 recorded in handoff §92, machine evidence p3-guard-evidence.json. Dual-process authority table is handoff §93 / _ops/c07-identity-workspace/p3-authority-table.md. P3b is limited to static client-manifest pin, lazy dev invocation evaluated only when resolver is unconfigured, and removal of unused extension resolver/option. Prepared independently authenticated native expectation stays open; no config label is promoted to authority.
+
+## P3b freeze and P3c registration
+
+Product6684d158: SDK manifest pin static; configured authority never evaluates the dev resolver; unused extension option/helper retired. Salesko daemon/config no caller. Client build/typecheck and five focused files60passed (`_ops/c07-identity-workspace/p3b/`). Regenerated client golden removes dead option/helper and records internal lazy resolver signature; not source-only. Attribution0. No full/pack repeated; prepared child lookup/detect probe remain explicit gaps. P3c exact approved checksum/binding order registered in handoff §93 and contract before implementation.

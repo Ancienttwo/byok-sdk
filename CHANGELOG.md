@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Changed (unreleased Pi configuration)** — removed the unused
+  `PiAdapterOptions.resolveExtensions` option and its resolver. Inline extension
+  factories already own that surface. Attested launch admission uses the SDK
+  manifest pin without runtime package discovery; only an unconfigured authority
+  evaluates the development launcher resolver.
+
 - **Changed (unreleased Pi startup)** — the SDK-owned RPC host resolves its initial
   model during session creation and rejects `modelFallbackMessage` immediately.
   The prior Pi binary RPC could stay model-less until the first prompt. Direct
