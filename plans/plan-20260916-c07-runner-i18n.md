@@ -1,6 +1,6 @@
 # Plan: C07 runner/i18n implementation entry
 
-> **Status**: M0 accepted0df88a7f; M1a active
+> **Status**: M1a acceptedd9e55a4e; M1b registered
 > **Task Profile**: implementation
 > **Planning Source**: Owner §96 Q1–Q3 design approval; supervisor6696c211 PASS and design-entry instruction
 > **Task Contract**: `tasks/contracts/20260916-c07-runner-i18n.contract.md`
@@ -30,8 +30,9 @@ Prepare the bounded implementation contract in [docs/researches/20260916-c07-run
 - [x] Register exact SDK M1a declaration/dependency/compiler/test paths; P4 remains separate.
 - [x] M1a implemented6eec0ab6: strict runtime wrapper/four-kind locator, immutable measured declaration, unchanged MCP, explicit compiler identity.
 - [x] Freeze M1a product6eec0ab6 separately from docs; local targeted checks passed.
-- [ ] Supervisor unique full/pack gate on M1a frozen subject.
-- [ ] M1b: atomic i18n dependency/private todo/one locale layout/preverify; registration precedes writes.
+- [x] Supervisor unique full/pack gate PASS on M1a d9e55a4e; S2 tripwire36 remains the explicit residual.
+- [x] M1b exact source/license inventory and product paths registered while M1a gate runs; no M1b product writes.
+- [ ] M1b: implement atomic i18n dependency/private todo/one locale layout/preverify and validate both roots.
 - [ ] M2 runner: prove all custody execution calls, register paths before enabling descendant dispatch.
 - [ ] M3: functional/packed recursive and locale acceptance; clipboard remains1006 blocker.
 

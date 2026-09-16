@@ -220,3 +220,59 @@ contextBytesSha256 is illustrative sorted-context hashing, not a product preimag
 M1a separates runtime declaration consumption from MCP: `resolveRuntimeImplementation` returns unavailable or {kind:attested,identity,descendantPolicy,edges}; Host still has one resolve method and returns strict {record,descendantPolicy,edges}. Shared physical measurement is extracted once, original V1 record keys/Omit/reverify unchanged. Root client projects five new Host-facing types without removing old names. Runtime self resources keep declaration; compiler needs only its explicitly derived native identity. No descendant config wire or recursive dispatcher is enabled by these declaration changes. The fixed prefix helper is now shared to prevent a duplicate requested-kind comparator; existing client description bytes stay the same. Fixed keys inherited-name constants move, not copy, so policy vocabulary can reuse them without a shared-module cycle.
 
 Adding @juicesharp/rpiv-i18n alone activates todo index.ts104-105 eager optional import and nine missing-locale warnings at the bundled import.meta.url. Supervisor therefore directed dependency rollback in M1a. M1b atomically combines that exact dependency/rpiv-config edge, source-declared todo integration, the single assetRoot/extensions/rpiv-todo/2.8.0 locale layout and preverification. No dist/bin/locales alternative, warning suppression or assertion relaxation. All five recursive custody gates remain unmet implementation obligations; runner/print reject explicitly.
+
+
+## M1b registered initialization and asset boundary
+
+P1: todo private integration owns only an explicit initialization seam and imports the real i18n dependency; upstream source/license and locale bytes retain provenance. Host record owns attested data digests; SDK build emits the same-layout unconfigured manifest from the same vendor bytes. Existing binding owns physical verification. Root is the only writer; no P4 author or runner execution changes.
+
+P2 observed failure: pi-runtime-host statically re-exports pi-rpc-host -> pi-extension-factories imports todo -> todo index.ts104-105 imports i18n/loader and registers import.meta.url-relative locales. state/i18n-bridge.ts also dynamically imports i18n; i18n.ts229 calls applyLocale(detectLocaleFromConfigAndEnv()) at module initialization. Therefore moving only registerLocalesFromDir does not establish the required boundary. M1a's withdrawn dependency attempt produced ten helper usage failures before session creation.
+
+Approved future path: usage parse -> same config bytes digest+strict parse -> self binding/native verification -> exactly nine locale assets verified -> one literal lazy private entry -> actual todo+i18n initialization -> ordinary factory registration -> existing session. Prepared/operator do not gain a todo factory or new locale requirement merely because they share the runtime-host barrel. Their invalid usage must stay quiet and single-line. Private entry must remain lazy in both built Node and Bun bundle output, demonstrated by process tests rather than presumed from source syntax.
+
+| Binding state | Root and expected digests | Refusal boundary |
+| --- | --- | --- |
+| Attested (S1 or S2) | record.assetRoot = bound PI_PACKAGE_DIR; each of nine paths in record.assets | Missing declaration/file, changed bytes or invalid data refuses before lazy entry; unconfigured root discovery never called |
+| Explicitly unconfigured S1 | Package-relative import.meta.url to client dist/assets; build-generated manifest from source inventory | Missing/changed bytes refuses; no node_modules search or native package directory modification |
+
+Shared relative layout is extensions/rpiv-todo/2.8.0/locales/{de,en,es,fr,pt,pt-BR,ru,uk,zh}.json. New todo-locale-layout.json is the single declarative relative-path projection consumed by build/runtime; provenance manifest records upstream hashes, and emitted manifest is generated, never hand-authored. P4 later consumes the release data and the same layout contract, not another SDK parser. Build copies exact bytes and license/provenance; it must not rewrite or synthesize translations. Nine existing M0 source digests were independently matched before registration. English has13 keys, other locales14: no false equal-key-set requirement.
+
+P3: same layout/two explicitly selected roots preserves existing dev/unconfigured operation without creating a failure fallback. Delaying the entire module preserves fail-closed usage and prevents dependency availability from introducing premature IO. At10x source churn, maintaining a private upstream snapshot is the first maintenance cost; keep a finite two-seam patch map and upstream byte hashes. At10x launches, nine-file IO grows; no cached attestation verdict is introduced. This is initialization/packaging work, not a new shared workspace or recursive executor.
+
+Proposed private source placement is packages/client/vendor/rpiv-todo/2.8.0 (outside client src typecheck, same existing JS/declaration boundary used for TS-only extension sources). Source is bundled, not runtime-loaded as TypeScript; no loader/banner/createRequire. Patch map: index.ts removes eager implicit-anchor optional registration in favor of explicit verified-anchor invocation through private entry; state/i18n-bridge.ts consumes the exact installed core library instead of optional dynamic catch-to-English. Keep todo factory/UI/replay/overlay behavior and literal local overlay import. Real i18n library loader's internal missing-file fallback is not modified; sealed preverification plus immutable release premise makes missing/corrupt locale branch unreachable. Mutable unconfigured files are not claimed to have OS isolation or race-free attestation.
+
+### Upstream source inventory before private integration
+
+Source @juicesharp/rpiv-todo2.8.0 from the pinned local package.27 files,85201 bytes:16 TypeScript source files,9 locale files,package.json and MIT LICENSE (copyright2026 juicesharp). Hashes below describe upstream bytes, not future patched copies. Existing node_modules is never edited. Ignored machine-readable copy: _ops/c07-identity-workspace/m1b/todo-source-inventory.json.
+
+| Upstream relative path | Bytes | SHA256 |
+| --- | ---: | --- |
+| config.ts | 4136 | 3fe24b3d3b128cabcbafc80a41f72b20907fd0edbdd84c8c57c391e27ffd76db |
+| index.ts | 12282 | 509904d71a601ba2e2694c3f0fda1f014553eaafde1515ddd99dab8bb123d85a |
+| state/i18n-bridge.ts | 2705 | b84a2076629ed7c4a123f714ce250e6988bd2d92ff0fbf5d19bb4812a13d3f2d |
+| state/invariants.ts | 743 | fbbafd0194a8f3dda36a85e974a485590246f6246477b533089f36fa715150c6 |
+| state/replay.ts | 1599 | 222eacd01e0ce983e2d7dd5597f31111c6344ef290908ba09f0fe9f556f8a5c0 |
+| state/selectors.ts | 4101 | 9548b044bea7cdceeaceb3664e779a966fe901f7f1485c6cc2bc22281e76ded6 |
+| state/state-reducer.ts | 8906 | cd7d03b0f167920b76a72069f5b5f40ecc524bf4c4f6dd8909469f711d273dd0 |
+| state/state.ts | 684 | f4eba088903593409555c7305c1aa8da627520a3905caf3e81f7bd7eff708717 |
+| state/store.ts | 4712 | 6f00fc447bf79c3c56cedd80b2862ff2da24c450874cda3aa2d64b6084de4fe2 |
+| state/task-graph.ts | 1754 | 8bf3ec428bd4796b32dea5ee5c15a2930818fb0fccda0c6ee60b777cf426075b |
+| todo-overlay.ts | 9338 | bcc44d001ff08cc4c42d019163d78214edc9df2f3ba9219080f01f13ad8520e3 |
+| todo.ts | 8252 | 44b06d99f4c7a82419447f1388e644e1e571efc6e64d0482f3d7bfb9f0c5b886 |
+| tool/response-envelope.ts | 4049 | 69aa3f344092c7ab735588d6b71abbc3d3f132517a42e874a057361c9277dad3 |
+| tool/sanitize.ts | 1282 | eea928b89bc7b1768e75f3123acb881e984fe1604435e6e2cd7b576a6006616c |
+| tool/types.ts | 4653 | 5f2f68579b5f563e115a7b25b52f59fbc1ceebbaacb3739b134f7a3368454572 |
+| view/format.ts | 6189 | 444cf33f80cb03c54ab57a78fc7d47d5c1632ffd53cade92c511eca6006ae2b6 |
+| LICENSE | 1067 | 25d0d5e4e54033f939a9657109044f1d71a0b6e8db9adc400456ca9190df3fb1 |
+| package.json | 1672 | 4e173ac72b21567abd1ddcc56db94391ace3d3cd156e07f6dfbcf7f944070d48 |
+| locales/de.json | 901 | a4ad7a630c88fd35ad7e43ddcedb90f002099da60bbbaddd8ee133235bee25cb |
+| locales/en.json | 586 | b2f0b7e335e7d013ae05f5c4902cf60c46477d1070a35da7b9bcd3c495abf4d6 |
+| locales/es.json | 755 | 7caa227c334010a61deb5bf3a896a96918299e5a8b1d619b94d94a4463ddc5bb |
+| locales/fr.json | 762 | 929f57f77111d63f05662d9b1c4f0eeacb502be8848e399673431c26fe1b78d0 |
+| locales/pt-BR.json | 763 | 7cde333677e2c57c4a3bad7a70d78b8db627a6ec443935f4e434edccf1e9e2b3 |
+| locales/pt.json | 752 | e621baac2d49bce89204ad22e9b6946039e837c3438dfae078ba2cf7ab1fc3f6 |
+| locales/ru.json | 940 | 18d4b269135eb988805d7b96f40ff691b9d9745ae036747c643f88a346826605 |
+| locales/uk.json | 944 | 85bef4b5e2f408fe972aec60d890813cd2414aea9afead99d076ed495bef8d8e |
+| locales/zh.json | 674 | 32dfe0555efc9bdfd7a7e1b27dfb3feb4d66c6db3dc499bff0f93fa71aa0d5d2 |
+
+No source has been copied or dependency installed in this registration. Exact runtime dependency inventory beyond i18n/rpiv-config must be checked against bundler output before freezing product; any additional direct-edge requirement needs precise registration and per-consumer lock proof, not implicit root dependency lookup. M1a d9e55a4e subsequently passed its unique supervisor gate; this M1b registration has no product implementation or containment claim. M1b expected tripwire reduction is36 to24 (i18n12 removed); clipboard12 and jiti12 remain their separate slices.
