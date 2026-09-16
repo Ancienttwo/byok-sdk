@@ -86,6 +86,21 @@ allowed_paths:
   - docs/researches/20260916-c07-pi-under-s2-track-b.md
   - docs/spec.md
   - CHANGELOG.md
+  - packages/implementation-identity/
+  - packages/client/package.json
+  - packages/keys/package.json
+  - packages/client/src/index.ts
+  - packages/client/src/types.ts
+  - packages/client/src/adapters/provider-credential-environment.ts
+  - packages/client/src/daemon/environment.ts
+  - packages/client/src/daemon/trusted-launch-cwd.ts
+  - api-surface/implementation-identity.d.ts
+  - api-surface/keys.d.ts
+  - scripts/api-surface/
+  - scripts/release/
+  - bun.lock
+  - package.json
+  - docs/architecture/sdk-architecture.md
   - packages/client/src/adapters/pi/
   - packages/client/src/bin/
   - packages/client/src/sdk-reserved-helper-host.ts
@@ -97,7 +112,7 @@ allowed_paths:
   - packages/keys/src/bin/pi-provider-launcher.ts
   - packages/keys/src/pi-provider-launcher-core.ts
   - packages/keys/src/pi-provider-projection.ts
-  - packages/keys/src/__tests__/
+  - packages/keys/src/*.test.ts
   - packages/protocol/src/
   - tests/
 ```
@@ -268,3 +283,13 @@ exit_criteria:
 
 - Commit / checkpoint: `4fe4ad6f`
 - Revert strategy: revert only task-owned files in this worktree; preserve every other worktree and all user WIP.
+
+## Owner-approved measurement workspace slice (2026-09-16, handoff §86)
+
+Owner approved `@byok-sdk/implementation-identity` / `packages/implementation-identity`: one Node-only measurement authority, aligned SDK train, keys and client packed exact same version; umbrella stays seven namespaces. Publication remains separately approved. Current execution base is `f25447d7` (P1 gate PASS), on rebased integration base `dca26ffc`; historical `4fe4ad6f` references above describe initial registration only.
+
+Scope first: move measurement/parser/reverify/assert and pure types, fixed credential exclusion inventory and loader classification; keep client runtime launch business, allowlist/stripping actions and helper host. No reverse dependency, no copied validator. The only source package import edges newly allowed are client/keys to the new package. Manifests, workspace lock, build/API/release inventory and architecture descriptions may change only to register and validate this package. `scripts/api-surface/` and `scripts/release/` allowlists are limited to shared-package inventory, aligned version/packed-edge validation and their meaningful negative tests. Keys common tests are colocated `src/*.test.ts`; no production keys spawn wiring in this migration slice.
+
+Independent migration acceptance: P1 three known failing guards retain exact ownership, their control stays green; client existing public identity names/shapes unchanged (re-export source changes only), new package golden added; actual dist-subpath-closure passes with shared external; fixed digest vectors preserve bytes; imports only node fs (including promises)/crypto/path; shared shipped code zero scanner-semantics findings under existing a1–a18 rules; packed client/keys exact-edge assertion and mismatched-version negative. Required checks retain known guard failures explicitly. P2 final spawn wiring is a separate subsequent slice.
+
+Publication order: the shared package must be available before dependent client/keys in the aligned train; keys next publication couples once to this train, as with its core edge. Source workspace:* follows current convention; published ranges are disallowed. Total graph becomes ten aligned manifests and eleven public packages.
