@@ -44,3 +44,8 @@ P3 begins with the actual remaining resolution path and immutable native 1005 bo
 ## P3c frozen candidate
 
 Product00c5529a is pending independent frozen gate. Local scoped checks recorded in notes; no full C07/P3 containment PASS. Registry attempt guard remains a hard failure, not waived. Supervisor owns the sole full/pack run after registration freeze.
+
+
+## P3c independent gate and r1 candidate
+
+8b016495 FAIL, only blocker helper config-digest usage returns1/stack instead of78/prefixed single line; known S2 guard separately remains RED36registry attempts. Both actual Pi lanes now reach get_state, prepared lookup failure closed. Product87d9b5f9 is the bounded five-file correction; pre-fix red and post-fix40targeted passes plus build/typecheck are recorded in notes. Final frozen client full and independent re-gate (including real pack with stricter smoke) remain pending. Keys/identity/API/graph unaffected, prior subject evidence reusable per supervisor. No terminal PASS yet.

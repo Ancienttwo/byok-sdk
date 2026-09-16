@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Fixed (unreleased Pi helper usage)** — missing, duplicate or malformed
+  launcher config digests now exit with EX_CONFIG (78) and one host-prefixed
+  error line from both callable hosts and thin bins. Installed Node smoke
+  requires that exact contract rather than accepting a stack-bearing exit 1.
+
 - **Changed (unreleased Pi child contract)** — both SDK Pi hosts require a
   launcher-owned checksum of the complete config bytes and a strict spawn
   binding. The child verifies its actual launch, sealed files and native manifest
