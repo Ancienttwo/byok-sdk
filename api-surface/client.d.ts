@@ -1424,6 +1424,7 @@ export type { RequestDeviceAssertionErrorCode } from '../daemon/assertion-client
 /** Typed result: a parsed `DeviceAssertionEnvelopeV1` with its expiry, or a refusal code and reason. Never throws for an expected outcome. */
 export type { RequestDeviceAssertionResult } from '../daemon/assertion-client';
 // ==== @byok-sdk/client dist/bin/agent-memory-mcp-server.d.ts ====
+import { type McpServerToolCall, type McpServerToolDefinition } from '../mcp-server';
 export declare const AGENT_MEMORY_RECALL_TOOL_NAME = "memory_recall";
 export declare const AGENT_MEMORY_SAVE_TOOL_NAME = "memory_save";
 export interface AgentMemoryMcpDeps {
@@ -1449,19 +1450,19 @@ export interface AgentMemoryMcpDeps {
         deleted: boolean;
     }>;
 }
-interface RequestLike {
-    jsonrpc?: unknown;
-    id?: unknown;
-    method?: unknown;
-    params?: unknown;
-}
-export declare function handleAgentMemoryMcpRequest(request: RequestLike, deps: AgentMemoryMcpDeps): Promise<Record<string, unknown> | undefined>;
+/** The exact tools this server advertises. The JSON Schema literals are product authority and reach the peer verbatim. */
+export declare const AGENT_MEMORY_TOOLS: readonly McpServerToolDefinition[];
+/**
+ * One `tools/call`, returning the JSON-RPC `result` payload. The path policy,
+ * the compare-and-swap contract and the exact accepted argument set stay here;
+ * envelope, framing and protocol faults belong to `../mcp-server`.
+ */
+export declare function handleAgentMemoryToolCall(call: McpServerToolCall, deps: AgentMemoryMcpDeps): Promise<Record<string, unknown>>;
 export declare function serveAgentMemoryMcpOverStdio(input: {
     deps: AgentMemoryMcpDeps;
     stdin?: NodeJS.ReadableStream;
     stdout?: NodeJS.WritableStream;
 }): void;
-export {};
 // ==== @byok-sdk/client dist/bin/team-tmux-view.d.ts ====
 export type TmuxRunner = (file: string, args: readonly string[]) => Promise<{
     stdout?: string;

@@ -16,7 +16,7 @@ import {
   snapshotAndProjectAgentMemory,
   type AgentMemoryTaskContext,
 } from '../daemon/agent-memory';
-import { handleAgentMemoryMcpRequest } from '../bin/agent-memory-mcp-server';
+import { AGENT_MEMORY_TOOLS, handleAgentMemoryToolCall } from '../bin/agent-memory-mcp-server';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
@@ -102,13 +102,20 @@ describe('Agent memory MCP local authority', () => {
       recall: async (input: { path: string; ifRevision?: string }) => { calls.push(`recall:${input.path}`); return { path: input.path, revision: sha256('v'), content: 'v' }; },
       save: async (input: { op: 'replace' | 'delete'; path: string; expectedRevision: string; content?: string }) => { calls.push(`save:${input.path}`); return { path: input.path, revision: sha256(input.content ?? ''), deleted: input.op === 'delete' }; },
     };
-    const list = await handleAgentMemoryMcpRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, deps);
-    expect(JSON.stringify(list)).toContain('memory_recall');
-    expect(JSON.stringify(list)).toContain('memory_save');
-    expect(JSON.stringify(list)).not.toContain('tenantId');
-    const bad = await handleAgentMemoryMcpRequest({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'memory_save', arguments: { op: 'delete', path: 'notes/a.md', expectedRevision: sha256(''), content: 'forbidden' } } }, deps);
-    expect(bad?.error).toBeDefined();
-    await handleAgentMemoryMcpRequest({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'memory_recall', arguments: { path: 'MEMORY.md' } } }, deps);
+    const advertised = JSON.stringify(AGENT_MEMORY_TOOLS);
+    expect(advertised).toContain('memory_recall');
+    expect(advertised).toContain('memory_save');
+    expect(advertised).not.toContain('tenantId');
+    await expect(
+      handleAgentMemoryToolCall(
+        { name: 'memory_save', arguments: { op: 'delete', path: 'notes/a.md', expectedRevision: sha256(''), content: 'forbidden' }, signal: new AbortController().signal },
+        deps,
+      ),
+    ).rejects.toMatchObject({ code: -32602 });
+    await handleAgentMemoryToolCall(
+      { name: 'memory_recall', arguments: { path: 'MEMORY.md' }, signal: new AbortController().signal },
+      deps,
+    );
     expect(calls).toEqual(['recall:MEMORY.md']);
   });
 

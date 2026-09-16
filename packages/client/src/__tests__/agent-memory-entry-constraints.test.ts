@@ -5,7 +5,7 @@
  * no daemon and owns no control socket — needs to compose the Agent-memory
  * service itself. Importing any memory symbol from the root entry instead
  * drags the daemon composition and transport layer in with it (the
- * root bundle is ~800 KB; this one is ~38 KB). That difference is not visible
+ * root bundle is ~1.2 MB; this one is ~52 KB). That difference is not visible
  * in any behavioral test: it shows up as a host bundle that suddenly ships a
  * transport it never calls, or — much worse — as `connectControlClient`
  * becoming reachable and `shutdown`, approval resolution, and the raw task
@@ -78,6 +78,11 @@ const GRAPH = walkModuleGraph(ENTRY);
 
 describe('the embedded agent-memory entry module graph', () => {
   it('reaches exactly the memory authority, its filesystem backends, and the Agent-home constant', () => {
+    // `mcp-server/*` is the SDK's single MCP server authority, reached because
+    // `serveAgentMemoryMcpOverStdio` serves the two memory tools through it
+    // instead of a fifth hand-rolled `node:readline` loop — which is why
+    // `node:readline` left the external list below in the same change.
+    //
     // `agent-home.ts` and its `path-mutation-gate` / `secure-dir` /
     // `exec-runner` tail are here for one value: `AGENT_HOME_INTERNAL_DIRECTORY`,
     // which `daemon/agent-memory.ts` imports to place its internal audit state.
@@ -95,6 +100,9 @@ describe('the embedded agent-memory entry module graph', () => {
       'daemon/memory-guidance.ts',
       'daemon/path-mutation-gate.ts',
       'lifecycle/exec-runner.ts',
+      'mcp-server/dispatch.ts',
+      'mcp-server/framing.ts',
+      'mcp-server/index.ts',
       'util/atomic-write.ts',
       'util/secure-dir.ts',
     ]);
@@ -112,7 +120,6 @@ describe('the embedded agent-memory entry module graph', () => {
       'node:net',
       'node:os',
       'node:path',
-      'node:readline',
     ]);
   });
 

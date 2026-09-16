@@ -218,8 +218,41 @@ async function captureAll(): Promise<WireBaseline> {
   };
 }
 
+/**
+ * The COMPLETE set of intentional wire changes the shared-core migration
+ * introduces for these four servers, one entry per affected step.
+ *
+ * Every step NOT listed here must be byte-identical to the frozen baseline.
+ * Each entry asserts both halves explicitly — what the frozen line was, and
+ * what the line must now be — rather than relaxing the comparison, so a second
+ * unintended change on the same step cannot hide behind the first.
+ *
+ * The other documented baseline changes (`notifications/cancelled` now aborts
+ * instead of answering, an unusable or duplicate id is now rejected, and both
+ * frame directions are now bounded) do not appear here because no step of this
+ * script exercises them; `mcp-server-core.test.ts` asserts each of them
+ * directly.
+ */
+const MIGRATION_DELTAS: Readonly<Record<string, (frozen: string) => { readonly before: string; readonly after: string }>> = {
+  // `initialize.result.protocolVersion`: echoed verbatim -> selected from the
+  // fixed three-member list. The script offers `2025-03-26`, a real revision
+  // this core does not implement, so the peer now gets the newest supported
+  // one instead of a false claim of support.
+  initialize: (frozen) => {
+    const parsed = JSON.parse(frozen) as { result: { protocolVersion: string } };
+    expect(parsed.result.protocolVersion, 'the baseline must show the echoed offer').toBe('2025-03-26');
+    parsed.result.protocolVersion = '2025-11-25';
+    return { before: frozen, after: JSON.stringify(parsed) };
+  },
+  // `ping`: fell through to the unknown-method arm -> answered `{}`.
+  ping: (frozen) => {
+    expect(frozen).toContain('"code":-32601');
+    return { before: frozen, after: '{"jsonrpc":"2.0","id":3,"result":{}}' };
+  },
+};
+
 describe('the four SDK-reserved MCP helpers on the wire', () => {
-  it(`still emits the bytes frozen at ${BASELINE_CAPTURE_SHA}`, async () => {
+  it(`still emits the bytes frozen at ${BASELINE_CAPTURE_SHA}, except the declared migration deltas`, async () => {
     if (UPDATING) {
       writeFileSync(BASELINE_FILE, `${JSON.stringify(await captureAll(), null, 2)}\n`);
     }
@@ -233,7 +266,18 @@ describe('the four SDK-reserved MCP helpers on the wire', () => {
       expect(frozen, `${server.name} is missing from the baseline`).toBeDefined();
       expect(frozen?.steps).toEqual(server.steps.map((step) => step.label));
       const emitted = await driveScript(server);
-      expect(emitted, `${server.name} drifted from the frozen wire bytes`).toEqual(frozen?.responses);
+
+      const expected = server.steps.map((step, index) => {
+        const frozenLine = frozen?.responses[index] ?? null;
+        const delta = MIGRATION_DELTAS[step.label];
+        if (delta === undefined || frozenLine === null) return frozenLine;
+        const { before, after } = delta(frozenLine);
+        expect(frozenLine, `${server.name} ${step.label} baseline moved`).toBe(before);
+        expect(after, `${server.name} ${step.label} delta is not a change`).not.toBe(before);
+        return after;
+      });
+
+      expect(emitted, `${server.name} drifted from the frozen wire bytes`).toEqual(expected);
     }
   });
 });
