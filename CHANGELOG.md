@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Breaking (internal Pi launch config)** — ordinary/prepared host configs now
+  require version2 and an immutable descendantPlan. Daemon resolves each reachable
+  kind's own Host record; missing rows or declaration/release drift reject. Version1
+  is not accepted. Runner/print dispatch remains explicitly not enabled.
+- **Added (implementation identity)** — strict DescendantLaunchV1 composition and
+  pre-spawn assertion share the existing physical measurement implementation.
+  New expectation/context types and policy/template validators are public from
+  implementation-identity; client launch resources carry the typed plan. Existing
+  MCP/V1 gates and root exports retain their behavior. This does not enable
+  recursive execution or claim budget/session custody is complete.
+
 - **Validation (S2 containment)** — tripwire attempts decrease from36 to24:
   `@juicesharp/rpiv-i18n`12 to0; clipboard ×12 and jiti ×12 remain for their
   respective slices. Complete S2 containment is not yet verified.
