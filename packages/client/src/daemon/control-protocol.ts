@@ -15,11 +15,11 @@ import type {
   InputPreparationModelV1,
   InputPreparationOptionsV1,
   InputPreparationPromptSnapshotV1,
+  InputPreparationMessageV1,
   InputPreparationReceiptV1,
   InputPreparationRequestV1,
   InputPreparationScopeClaimV1,
   InputPreparationSnapshotV1,
-  InputPreparationUserMessageV1,
 } from '../input-preparation';
 import {
   INPUT_PREPARATION_REQUEST_FORMAT,
@@ -1049,18 +1049,42 @@ function parsePromptSnapshot(value: unknown): InputPreparationPromptSnapshotV1 |
 }
 
 /**
- * First support set: text-only user messages. An assistant/toolResult message,
- * array (multimodal) content or any extra field is rejected outright rather
- * than coerced — a silently downgraded message would change what is counted.
+ * The support set: text-only user messages and host-canonical assistant text.
+ * A provider-generated assistant message, a toolResult message, array
+ * (multimodal) content or any extra field is rejected outright rather than
+ * coerced — a silently downgraded message would change what is counted.
+ *
+ * `origin` is the discriminant for the assistant kind, and it is required: an
+ * assistant message without it claims provenance this surface cannot check, and
+ * an assistant message WITH provenance fields (`usage`, `model`, `stopReason`
+ * and the rest) fails the exact-key check rather than having them dropped.
+ * Nothing here fabricates provenance for a host-canonical message, and nothing
+ * strips it from one that carries it.
  */
-function parseMessages(value: unknown): InputPreparationUserMessageV1[] | undefined {
+function parseMessages(value: unknown): InputPreparationMessageV1[] | undefined {
   if (!Array.isArray(value) || value.length === 0) return undefined;
-  const messages: InputPreparationUserMessageV1[] = [];
+  const messages: InputPreparationMessageV1[] = [];
   for (const entry of value) {
-    if (!plainRecord(entry) || !exactKeys(entry, ['role', 'content', 'timestamp'])) return undefined;
-    if (entry.role !== 'user' || typeof entry.content !== 'string') return undefined;
+    if (!plainRecord(entry)) return undefined;
+    if (typeof entry.content !== 'string') return undefined;
     if (!Number.isSafeInteger(entry.timestamp) || (entry.timestamp as number) < 0) return undefined;
-    messages.push({ role: 'user', content: entry.content, timestamp: entry.timestamp as number });
+    if (entry.role === 'user') {
+      if (!exactKeys(entry, ['role', 'content', 'timestamp'])) return undefined;
+      messages.push({ role: 'user', content: entry.content, timestamp: entry.timestamp as number });
+      continue;
+    }
+    if (entry.role === 'assistant') {
+      if (!exactKeys(entry, ['role', 'origin', 'content', 'timestamp'])) return undefined;
+      if (entry.origin !== 'host_canonical') return undefined;
+      messages.push({
+        role: 'assistant',
+        origin: 'host_canonical',
+        content: entry.content,
+        timestamp: entry.timestamp as number,
+      });
+      continue;
+    }
+    return undefined;
   }
   return messages;
 }

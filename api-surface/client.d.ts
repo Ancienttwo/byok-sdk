@@ -9984,7 +9984,7 @@ export type { OperationalHealthSnapshot, OperationalHealthState } from './daemon
  * drift apart.
  */
 export { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_ERROR_CODES, INPUT_PREPARATION_RECEIPT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INPUT_PREPARATION_REQUEST_FORMAT, INPUT_PREPARATION_RETIRED_PROMPT_KEYS, INPUT_PREPARATION_RETIRED_REQUEST_KEYS, INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS, INPUT_PREPARATION_VERSION, InputPreparationPolicyError, validateInputPreparationLimits, } from './input-preparation';
-export type { InputPreparationArtifactSummaryV1, InputPreparationAuthorityGrantV1, InputPreparationCompiledPromptSnapshotV1, InputPreparationCompiledSnapshotV1, InputPreparationAuthorityOutcomeV1, InputPreparationAuthorityResolver, InputPreparationBindingV1, InputPreparationCancelParamsV1, InputPreparationContextFileV1, InputPreparationCounterAdapter, InputPreparationCounterAuthorityV1, InputPreparationCounterEvidenceV1, InputPreparationCounterRequestV1, InputPreparationCounterResultV1, InputPreparationCounterTargetV1, InputPreparationCoverageProofV1, InputPreparationDenialReasonV1, InputPreparationDocsPathsV1, InputPreparationErrorCodeV1, InputPreparationLimitsPolicyV1, InputPreparationLookupParamsV1, InputPreparationModelCostV1, InputPreparationModelV1, InputPreparationOptionsV1, InputPreparationPinV1, InputPreparationPromptSnapshotV1, InputPreparationReadinessReasonV1, InputPreparationReceiptV1, InputPreparationRequestV1, InputPreparationRuntimeIdentityV1, InputPreparationScopeClaimV1, InputPreparationSelectionV1, InputPreparationSnapshotV1, InputPreparationSourceV1, InputPreparationStateV1, InputPreparationToolV1, InputPreparationUserMessageV1, } from './input-preparation';
+export type { InputPreparationArtifactSummaryV1, InputPreparationAuthorityGrantV1, InputPreparationCompiledPromptSnapshotV1, InputPreparationCompiledSnapshotV1, InputPreparationAuthorityOutcomeV1, InputPreparationAuthorityResolver, InputPreparationBindingV1, InputPreparationCancelParamsV1, InputPreparationContextFileV1, InputPreparationCounterAdapter, InputPreparationCounterAuthorityV1, InputPreparationCounterEvidenceV1, InputPreparationCounterRequestV1, InputPreparationCounterResultV1, InputPreparationCounterTargetV1, InputPreparationCoverageProofV1, InputPreparationDenialReasonV1, InputPreparationDocsPathsV1, InputPreparationErrorCodeV1, InputPreparationHostCanonicalAssistantMessageV1, InputPreparationLimitsPolicyV1, InputPreparationLookupParamsV1, InputPreparationModelCostV1, InputPreparationMessageV1, InputPreparationModelV1, InputPreparationOptionsV1, InputPreparationPinV1, InputPreparationPromptSnapshotV1, InputPreparationReadinessReasonV1, InputPreparationReceiptV1, InputPreparationRequestV1, InputPreparationRuntimeIdentityV1, InputPreparationScopeClaimV1, InputPreparationSelectionV1, InputPreparationSnapshotV1, InputPreparationSourceV1, InputPreparationStateV1, InputPreparationToolV1, InputPreparationUserMessageV1, } from './input-preparation';
 export { INPUT_PREPARATION_CANCEL_METHOD, INPUT_PREPARATION_IDENTIFIER_MAX_BYTES, INPUT_PREPARATION_LOOKUP_METHOD, INPUT_PREPARATION_PREPARE_METHOD, parseInputPreparationCancelParams, parseInputPreparationLookupParams, parseInputPreparationRequestParams, } from './daemon/control-protocol';
 export type { InputPreparationResult } from './daemon/control-protocol';
 export { journalHash, JournalUnavailableError, JournalCorruptError, JournalRecordTooLargeError, JournalUnknownTaskError, JournalClosedError, } from './daemon/journal/journal';
@@ -10286,17 +10286,48 @@ export interface InputPreparationCompiledPromptSnapshotV1 extends InputPreparati
 /**
  * One model-visible user message.
  *
- * The first support set is text-only user history plus the explicit current
- * user message. Multimodal content, assistant/tool-result history and custom
- * message kinds are NOT accepted and are NOT inferred: they reject as
- * `unsupported_input` (§10.3.2 — unknown input rejects rather than filling
- * gaps). Extending the set is a registration, not a parser relaxation.
+ * Text-only. Multimodal content and any extra field are NOT accepted and are
+ * NOT inferred: they reject as `unsupported_input` (§10.3.2 — unknown input
+ * rejects rather than filling gaps).
  */
 export interface InputPreparationUserMessageV1 {
     readonly role: 'user';
     readonly content: string;
     readonly timestamp: number;
 }
+/**
+ * One host-canonical assistant text message.
+ *
+ * A DIFFERENT fact from a provider-generated assistant turn, and the two are
+ * never interchanged: the host asserts this text was already said, and no
+ * provider generated it here. It therefore carries no `api`, `provider`,
+ * `model`, `usage` or `stopReason`, and none of those may be fabricated for it
+ * — a preparation that invented provenance would be counting a turn nobody
+ * produced. The native contract makes `origin` the discriminant, and a present
+ * key rather than a value: an assistant message without it is a provenance
+ * claim this surface cannot check, so it rejects as `unsupported_input`.
+ */
+export interface InputPreparationHostCanonicalAssistantMessageV1 {
+    readonly role: 'assistant';
+    readonly origin: 'host_canonical';
+    /** Text. The native shape is a text-block array; the conversion is the compiler's. */
+    readonly content: string;
+    readonly timestamp: number;
+}
+/**
+ * One model-visible message a CALLER may state.
+ *
+ * The support set is text-only user history, host-canonical assistant text
+ * history, and the current user message. Provider-generated assistant turns,
+ * tool-result history, multimodal content and custom message kinds are not
+ * accepted and are not inferred. Extending the set is a REGISTRATION — a new
+ * member here, in the wire schema and in both validators — never a parser
+ * relaxation.
+ *
+ * Host-canonical assistant text counts toward input tokens exactly like user
+ * text: nothing on any limit or counting path special-cases it.
+ */
+export type InputPreparationMessageV1 = InputPreparationUserMessageV1 | InputPreparationHostCanonicalAssistantMessageV1;
 /**
  * One complete model-visible tool schema. `parameters` is the full JSON schema
  * the model sees; a partial or elided schema is not accepted, because the whole
@@ -10320,7 +10351,7 @@ export interface InputPreparationToolV1 {
  */
 export interface InputPreparationSnapshotV1 {
     readonly prompt: InputPreparationPromptSnapshotV1;
-    readonly messages: readonly InputPreparationUserMessageV1[];
+    readonly messages: readonly InputPreparationMessageV1[];
 }
 /**
  * What the native compiler is actually handed: the caller's snapshot plus the

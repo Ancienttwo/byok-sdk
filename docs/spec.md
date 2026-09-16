@@ -313,6 +313,21 @@ from the whole admitted policy (`allowTools` and `denyTools`, not merely `mode`)
 so that the day the preparation side counts a native half, the policy that chose
 it is already what gets bound.
 
+The input support set is text-only user history, host-canonical assistant text
+history, and the current user message. Host-canonical assistant text is a
+DIFFERENT fact from a provider-generated assistant turn and the two are never
+interchanged: the host asserts the text was already said, nothing generated it
+here, so it carries no `api`, `provider`, `model`, `usage` or `stopReason` and
+none of those is fabricated to fill the provenance-carrying shape. The native
+contract makes `origin: 'host_canonical'` the discriminant — a present key, not
+a value — so an assistant message without it is a provenance claim this surface
+cannot check and rejects as `unsupported_input` rather than being narrowed to
+one it can. It counts toward input tokens exactly like user text; no limit or
+counting path special-cases it. Provider-generated assistant turns, tool-result
+history and multimodal content stay outside the set, and extending the set is a
+REGISTRATION in every validator — the wire schema, the device's hand-written
+parse and the native projection — never a relaxation of one of them.
+
 A preparation is admitted only if the `prompt_prepared` frame it would be
 launched with fits one RPC frame the runtime accepts. The bound is the
 RUNTIME's (`RPC_MAX_FRAME_BYTES`, imported from the fork rather than restated

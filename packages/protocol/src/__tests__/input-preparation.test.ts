@@ -223,13 +223,55 @@ describe('input preparation context document', () => {
         prompt: { ...document.prompt, selectedTools: ['read'] },
       }).success,
     ).toBe(false);
-    // Only `user` history is in the first support set; anything else rejects.
+    // An assistant message with no `origin` discriminant claims provenance
+    // nobody here can check, so it rejects rather than being narrowed to the
+    // host-canonical kind.
     expect(
       InputPreparationContextDocumentSchema.safeParse({
         ...document,
         messages: [{ role: 'assistant', content: 'hi', timestamp: 1 }],
       }).success,
     ).toBe(false);
+  });
+
+  it('accepts host-canonical assistant text beside user history, and nothing that claims provenance', () => {
+    const document = {
+      prompt: {
+        cwd: '/home/agent',
+        toolSnippets: {},
+        promptGuidelines: [],
+        contextFiles: [],
+        formattedSkills: '',
+        docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
+      },
+      messages: [
+        { role: 'user', content: 'hi', timestamp: 1767225600000 },
+        { role: 'assistant', origin: 'host_canonical', content: 'hello', timestamp: 1767225600001 },
+        { role: 'user', content: 'go on', timestamp: 1767225600002 },
+      ],
+    };
+    const parsed = InputPreparationContextDocumentSchema.safeParse(document);
+    expect(parsed.success).toBe(true);
+    expect(parsed.success ? parsed.data.messages : undefined).toEqual(document.messages);
+
+    const host = document.messages[1]!;
+    for (const forged of [
+      // The host asserts the text was already said; it cannot assert that a
+      // provider produced it, nor how many tokens that provider reported.
+      { ...host, usage: { input: 1, output: 2 } },
+      { ...host, model: 'glm-4.6' },
+      { ...host, provider: 'zai' },
+      { ...host, stopReason: 'stop' },
+      // `origin` is the discriminant, and only one value is a fact this
+      // surface can carry.
+      { ...host, origin: 'provider' },
+      // The native text-block array is the COMPILER's shape, never the wire's.
+      { ...host, content: [{ type: 'text', text: 'hello' }] },
+    ]) {
+      expect(
+        InputPreparationContextDocumentSchema.safeParse({ ...document, messages: [forged] }).success,
+      ).toBe(false);
+    }
   });
 });
 

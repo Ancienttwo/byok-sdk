@@ -106,6 +106,32 @@ and the D2 version number belongs to a separate SDK release contract.
   pack smoke imports the sub-path from the installed tarball and re-checks the
   same substrings there.
 
+- **Added (client, protocol, unreleased contract)** — host-canonical assistant
+  text joins the input-preparation support set, which is now text-only user
+  history, host-canonical assistant text history, and the current user message.
+  `InputPreparationMessageV1` is the union a caller may state;
+  `InputPreparationHostCanonicalAssistantMessageV1` is the new member
+  (`{role: 'assistant', origin: 'host_canonical', content, timestamp}`).
+
+  It is a different fact from a provider-generated assistant turn and the two
+  are never interchanged: the host asserts the text was already said, nothing
+  generated it here, so no `api`, `provider`, `model`, `usage` or `stopReason`
+  is carried or fabricated. `origin` is the discriminant and it is required —
+  an assistant message without it claims provenance this surface cannot check
+  and rejects as `unsupported_input` instead of being narrowed to one it can.
+  Host-canonical text counts toward input tokens exactly like user text; no
+  limit or counting path special-cases it.
+
+  Three validators speak this shape and none of them is authority over the
+  other two — the zod discriminated union in `@byok-sdk/protocol`, the
+  hand-written parse in `daemon/control-protocol.ts`, and the projection onto
+  the native `HostCanonicalAssistantMessage` in
+  `adapters/pi/input-preparation.ts`, which is exhaustive with a `never`
+  default. The type-level assignability assertions in
+  `daemon/input-preparation-remote.ts` bind the first two in both directions,
+  so registering a message kind in one and forgetting the other is a compile
+  error.
+
 - **Added (client, protocol, unreleased contract)** — a preparation is admitted
   only when the `prompt_prepared` frame it would be launched with fits one RPC
   frame the runtime accepts. The new non-retryable rejection

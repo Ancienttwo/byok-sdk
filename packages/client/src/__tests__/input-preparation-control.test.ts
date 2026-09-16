@@ -400,12 +400,29 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     ).toBe('unsupported_input');
     expect(counter.calls).toEqual([]);
 
-    // An assistant message is refused by the wire gate itself.
+    // An assistant message WITHOUT the host-canonical origin discriminant is
+    // refused by the wire gate itself: it claims provenance this surface
+    // cannot check, and the support set admits host-canonical text only.
     expect(
       await controlErrorCode(
         client!.request(INPUT_PREPARATION_PREPARE_METHOD, {
           ...base,
           snapshot: { ...base.snapshot, messages: [{ role: 'assistant', content: 'hi', timestamp: 1 }] },
+        }),
+      ),
+    ).toBe('bad_request');
+    // And host-canonical text that carries a fabricated provenance field is
+    // refused the same way rather than having the field stripped.
+    expect(
+      await controlErrorCode(
+        client!.request(INPUT_PREPARATION_PREPARE_METHOD, {
+          ...base,
+          snapshot: {
+            ...base.snapshot,
+            messages: [
+              { role: 'assistant', origin: 'host_canonical', content: 'hi', timestamp: 1, usage: { input: 1 } },
+            ],
+          },
         }),
       ),
     ).toBe('bad_request');

@@ -4,6 +4,7 @@ import {
   type AgentInputPreparationPayload,
   type InputPreparationCompletionRequest,
   type InputPreparationContextDocument,
+  type InputPreparationMessage,
   type InputPreparationReadinessReason,
   type InputPreparationReceiptSummary,
   type InputPreparationRejectionReason,
@@ -13,6 +14,7 @@ import {
   INPUT_PREPARATION_VERSION,
   type InputPreparationErrorCodeV1,
   type InputPreparationLimitsPolicyV1,
+  type InputPreparationMessageV1,
   type InputPreparationReadinessReasonV1,
   type InputPreparationReceiptV1,
   type InputPreparationRequestV1,
@@ -102,6 +104,26 @@ type _WireReadinessReasonsAreLocalReasons =
   InputPreparationReadinessReason extends InputPreparationReadinessReasonV1 ? true : never;
 const _wireReadinessReasonsAreLocalReasons: _WireReadinessReasonsAreLocalReasons = true;
 void _wireReadinessReasonsAreLocalReasons;
+
+/**
+ * And the message support set, both directions.
+ *
+ * Same absence of a single schema authority, one surface worse: the local set
+ * is a hand-written union in `../input-preparation`, the wire set is a zod
+ * discriminated union in `@byok-sdk/protocol`, and `./control-protocol.ts`
+ * carries a THIRD hand-written parse of the same shapes. These assertions are
+ * what make registering a message kind in one place and forgetting another a
+ * COMPILE error, instead of a context document the Host is allowed to send and
+ * the device answers with `unsupported_input`. Equality, not nesting: a kind
+ * the wire admits that no device can state is as broken as the reverse.
+ */
+type _LocalMessagesAreWireMessages = InputPreparationMessageV1 extends InputPreparationMessage ? true : never;
+const _localMessagesAreWireMessages: _LocalMessagesAreWireMessages = true;
+void _localMessagesAreWireMessages;
+
+type _WireMessagesAreLocalMessages = InputPreparationMessage extends InputPreparationMessageV1 ? true : never;
+const _wireMessagesAreLocalMessages: _WireMessagesAreLocalMessages = true;
+void _wireMessagesAreLocalMessages;
 
 export interface RemoteInputPreparationDeps {
   /** The authenticated local device record. Never the payload's word for it. */

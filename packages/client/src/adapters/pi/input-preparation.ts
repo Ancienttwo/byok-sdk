@@ -3,9 +3,14 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { PreparedSessionInputV2 } from '@earendil-works/pi-coding-agent/prepared-session-input';
+import type {
+  CodingAgentInputSnapshot,
+  HostCanonicalAssistantMessage,
+} from '@earendil-works/pi-coding-agent/input-preparation';
 import type { PermissionMode } from '@byok-sdk/protocol';
 import type {
   InputPreparationCompiledSnapshotV1,
+  InputPreparationMessageV1,
   InputPreparationModelV1,
   InputPreparationOptionsV1,
   InputPreparationProjectionV1,
@@ -26,6 +31,14 @@ import { PI_PACKAGE_NAME, resolvePiRuntimeIdentity } from './resolve-bin';
  * The ONE place in this package that imports the native
  * `@earendil-works/pi-coding-agent/prepared-session-input` subpath
  * (`docs/researches/runtime-input-preparation-contract.md` §10.4).
+ *
+ * It also names `@earendil-works/pi-coding-agent/input-preparation` TYPE-ONLY,
+ * for the native message shapes the compile stage projects onto. That import is
+ * erased, reaches no module graph at runtime, and is what keeps the projection
+ * bound to the fork's own declarations instead of to a local restatement of
+ * them — and it goes through the coding-agent re-export rather than
+ * `@earendil-works/pi-ai`, so this package takes on no direct dependency of its
+ * own on the provider layer.
  *
  * It does two things and nothing else:
  *
@@ -265,6 +278,49 @@ export function resolveInstalledPiRuntimeIdentity(): InputPreparationRuntimeIden
 }
 
 /**
+ * Project one supported caller message onto the native message it IS.
+ *
+ * Exported for the same reason `verifyCompiledPreparedInput` is: the exact
+ * native shape this SDK hands the compiler is a boundary, and a boundary
+ * crossable only by compiling against one particular installed fork is a
+ * boundary nobody can test on the day it matters.
+ *
+ * Exhaustive by construction: the `default` branch takes the union's residue,
+ * and a `never` there means registering a new message kind in
+ * `../../input-preparation` without deciding what it compiles to is a COMPILE
+ * error rather than a silently dropped or silently downgraded turn.
+ *
+ * The assistant shape is the fork's own `HostCanonicalAssistantMessage`, whose
+ * content is always a text-block array so it serializes through the ordinary
+ * assistant path byte-identically to a provenance-carrying assistant text
+ * message. No `api`, `provider`, `model`, `usage` or `stopReason` is written:
+ * the host asserts the text was already said, nothing generated it here, and
+ * inventing provenance to fill the native `AssistantMessage` shape would be a
+ * claim about a turn that never happened.
+ */
+export function projectPreparedInputMessage(message: InputPreparationMessageV1): CodingAgentInputSnapshot['messages'][number] {
+  switch (message.role) {
+    case 'user':
+      return { role: 'user', content: message.content, timestamp: message.timestamp };
+    case 'assistant': {
+      // Annotated against the PINNED native type, so a fork that changes the
+      // host-canonical shape breaks here rather than at the native validator.
+      const hostCanonical: HostCanonicalAssistantMessage = {
+        role: 'assistant',
+        origin: 'host_canonical',
+        content: [{ type: 'text', text: message.content }],
+        timestamp: message.timestamp,
+      };
+      return hostCanonical;
+    }
+    default: {
+      const unsupported: never = message;
+      return unsupported;
+    }
+  }
+}
+
+/**
  * Build the compiler bound to the installed native closure.
  *
  * The identity is resolved ONCE, here, and frozen onto the instance: a compile
@@ -313,11 +369,7 @@ export function createPiInputPreparationCompiler(): InputPreparationCompiler {
               formattedSkills: request.snapshot.prompt.formattedSkills,
               docsPaths: { ...request.snapshot.prompt.docsPaths },
             },
-            messages: request.snapshot.messages.map((message) => ({
-              role: 'user' as const,
-              content: message.content,
-              timestamp: message.timestamp,
-            })),
+            messages: request.snapshot.messages.map(projectPreparedInputMessage),
             tools: request.snapshot.tools.map((tool) => ({
               name: tool.name,
               description: tool.description,

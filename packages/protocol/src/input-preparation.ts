@@ -193,9 +193,8 @@ export const InputPreparationPromptSnapshotSchema = z
   .strict();
 
 /**
- * One model-visible user message. Text-only user history plus the explicit
- * current user message is the whole first support set; assistant/tool-result
- * history and multimodal content are not inferred, they reject.
+ * One model-visible user message. Text-only: multimodal content and any extra
+ * field are not inferred, they reject.
  */
 export const InputPreparationUserMessageSchema = z
   .object({
@@ -204,6 +203,41 @@ export const InputPreparationUserMessageSchema = z
     timestamp: z.number().int(),
   })
   .strict();
+
+/**
+ * One host-canonical assistant text message.
+ *
+ * A different fact from a provider-generated assistant turn: the host asserts
+ * this text was already said, and nothing generated it here. It carries no
+ * `api`, `provider`, `model`, `usage` or `stopReason`, and `.strict()` is what
+ * keeps one from being fabricated on the way in — an assistant message with
+ * provenance fields, or without the `origin` discriminant, is a claim this
+ * surface cannot check, so it rejects rather than being narrowed to one it can.
+ */
+export const InputPreparationHostCanonicalAssistantMessageSchema = z
+  .object({
+    role: z.literal('assistant'),
+    origin: z.literal('host_canonical'),
+    content: z.string(),
+    timestamp: z.number().int(),
+  })
+  .strict();
+
+/**
+ * The whole support set a caller may state: text-only user history,
+ * host-canonical assistant text history, and the current user message.
+ *
+ * A discriminated union on `role`, so an unsupported kind is refused by name
+ * rather than by a shape error on whichever member happened to be tried first.
+ * Provider-generated assistant turns, tool-result history and multimodal
+ * content are not members and are not inferred; adding one is a registration
+ * here AND in the device's hand-written parse, never a relaxation of either.
+ */
+export const InputPreparationMessageSchema = z.discriminatedUnion('role', [
+  InputPreparationUserMessageSchema,
+  InputPreparationHostCanonicalAssistantMessageSchema,
+]);
+export type InputPreparationMessage = z.infer<typeof InputPreparationMessageSchema>;
 
 /**
  * What `context.inline` (or the referenced blob) decodes to.
@@ -215,7 +249,7 @@ export const InputPreparationUserMessageSchema = z
 export const InputPreparationContextDocumentSchema = z
   .object({
     prompt: InputPreparationPromptSnapshotSchema,
-    messages: z.array(InputPreparationUserMessageSchema).max(4096),
+    messages: z.array(InputPreparationMessageSchema).max(4096),
   })
   .strict();
 export type InputPreparationContextDocument = z.infer<typeof InputPreparationContextDocumentSchema>;

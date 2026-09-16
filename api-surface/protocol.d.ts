@@ -5391,8 +5391,8 @@ export { AgentEgressPolicySchema, AgentEgressActivityPolicySchema, AgentReliable
 export type { AgentEgressPolicy, AgentEgressActivityPolicy, AgentReliableQuotaPolicy, ContentReadPolicy, AgentEgressLane, AgentEgressDropReason, AgentMessageContentType, AgentMessageEgressRequirement, AgentMessageServerContext, AgentContentReadSurface, AgentContentActorKind, AgentContentActor, AgentContentDecodeAs, AgentContentReadDecision, AgentContentReadDenialReason, } from './agent-egress';
 export { AGENT_HOME_PROJECTION_CAPABILITY, AGENT_HOME_PROJECTION_MAX_BYTES, AGENT_HOME_PROJECTION_PROFILE_REVISION_MAXIMUM, AgentHomeProjectionProfileRevisionSchema, AgentHomeProjectionHashSchema, AgentHomeProjectionOutcomeSchema, AgentHomeProjectionValueSchema, } from './agent-home-projection';
 export type { AgentHomeProjectionProfileRevision, AgentHomeProjectionHash, AgentHomeProjectionOutcome, AgentHomeProjectionValue, } from './agent-home-projection';
-export { AGENT_INPUT_PREPARATION_CAPABILITY, InputPreparationContentHashSchema, InputPreparationPermissionModeSchema, InputPreparationPolicyRevisionSchema, InputPreparationProfileIdSchema, InputPreparationSourceSchema, InputPreparationModelCostSchema, InputPreparationModelSchema, InputPreparationOptionsSchema, InputPreparationSelectionSchema, InputPreparationContextFileSchema, InputPreparationDocsPathsSchema, InputPreparationPromptSnapshotSchema, InputPreparationUserMessageSchema, InputPreparationContextDocumentSchema, InputPreparationStateSchema, InputPreparationReadinessReasonSchema, InputPreparationRuntimeIdentitySchema, InputPreparationCounterTargetSchema, InputPreparationAccountingPolicyRefSchema, InputPreparationCounterProviderEvidenceSchema, InputPreparationCounterEvidenceSchema, InputPreparationResidualValueClassSchema, InputPreparationResidualKeySchema, InputPreparationProjectionSchema, InputPreparationToolImplementationKindSchema, InputPreparationArtifactSummarySchema, InputPreparationBindingSchema, InputPreparationReceiptSummarySchema, InputPreparationReferenceSchema, InputPreparationOfferBindingSchema, InputPreparationRejectionReasonSchema, } from './input-preparation';
-export type { InputPreparationPermissionMode, InputPreparationSource, InputPreparationModel, InputPreparationOptions, InputPreparationSelection, InputPreparationContextDocument, InputPreparationState, InputPreparationReadinessReason, InputPreparationAccountingPolicyRef, InputPreparationResidualValueClass, InputPreparationRuntimeIdentity, InputPreparationReceiptSummary, InputPreparationOfferBinding, InputPreparationRejectionReason, } from './input-preparation';
+export { AGENT_INPUT_PREPARATION_CAPABILITY, InputPreparationContentHashSchema, InputPreparationPermissionModeSchema, InputPreparationPolicyRevisionSchema, InputPreparationProfileIdSchema, InputPreparationSourceSchema, InputPreparationModelCostSchema, InputPreparationModelSchema, InputPreparationOptionsSchema, InputPreparationSelectionSchema, InputPreparationContextFileSchema, InputPreparationDocsPathsSchema, InputPreparationPromptSnapshotSchema, InputPreparationUserMessageSchema, InputPreparationHostCanonicalAssistantMessageSchema, InputPreparationMessageSchema, InputPreparationContextDocumentSchema, InputPreparationStateSchema, InputPreparationReadinessReasonSchema, InputPreparationRuntimeIdentitySchema, InputPreparationCounterTargetSchema, InputPreparationAccountingPolicyRefSchema, InputPreparationCounterProviderEvidenceSchema, InputPreparationCounterEvidenceSchema, InputPreparationResidualValueClassSchema, InputPreparationResidualKeySchema, InputPreparationProjectionSchema, InputPreparationToolImplementationKindSchema, InputPreparationArtifactSummarySchema, InputPreparationBindingSchema, InputPreparationReceiptSummarySchema, InputPreparationReferenceSchema, InputPreparationOfferBindingSchema, InputPreparationRejectionReasonSchema, } from './input-preparation';
+export type { InputPreparationPermissionMode, InputPreparationSource, InputPreparationModel, InputPreparationOptions, InputPreparationSelection, InputPreparationMessage, InputPreparationContextDocument, InputPreparationState, InputPreparationReadinessReason, InputPreparationAccountingPolicyRef, InputPreparationResidualValueClass, InputPreparationRuntimeIdentity, InputPreparationReceiptSummary, InputPreparationOfferBinding, InputPreparationRejectionReason, } from './input-preparation';
 export { AGENT_MEMORY_PROJECTION_CAPABILITY, AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES, AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE, AgentMemoryProjectionGrantRefSchema, AgentMemoryProjectionSessionRefSchema, AgentMemoryProjectionWriterEpochSchema, AgentMemoryProjectionSourceSeqSchema, AgentMemoryProjectionSnapshotSchema, AgentMemoryProjectionMeteringReceiptSchema, AgentMemoryProjectionMutationSchema, AgentMemoryProjectionReceiptSchema, AgentMemoryProjectionEraseResultSchema, agentMemoryProjectionBase64UrlByteLength, } from './agent-memory-projection';
 export type { AgentMemoryProjectionGrantRef, AgentMemoryProjectionSessionRef, AgentMemoryProjectionWriterEpoch, AgentMemoryProjectionSourceSeq, AgentMemoryProjectionSnapshot, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionEraseResult, } from './agent-memory-projection';
 export { HOST_MCP_TASK_CONTEXT_CAPABILITY } from './task-assertion';
@@ -5633,15 +5633,51 @@ export declare const InputPreparationPromptSnapshotSchema: z.ZodObject<{
     }, z.core.$strict>;
 }, z.core.$strict>;
 /**
- * One model-visible user message. Text-only user history plus the explicit
- * current user message is the whole first support set; assistant/tool-result
- * history and multimodal content are not inferred, they reject.
+ * One model-visible user message. Text-only: multimodal content and any extra
+ * field are not inferred, they reject.
  */
 export declare const InputPreparationUserMessageSchema: z.ZodObject<{
     role: z.ZodLiteral<"user">;
     content: z.ZodString;
     timestamp: z.ZodNumber;
 }, z.core.$strict>;
+/**
+ * One host-canonical assistant text message.
+ *
+ * A different fact from a provider-generated assistant turn: the host asserts
+ * this text was already said, and nothing generated it here. It carries no
+ * `api`, `provider`, `model`, `usage` or `stopReason`, and `.strict()` is what
+ * keeps one from being fabricated on the way in — an assistant message with
+ * provenance fields, or without the `origin` discriminant, is a claim this
+ * surface cannot check, so it rejects rather than being narrowed to one it can.
+ */
+export declare const InputPreparationHostCanonicalAssistantMessageSchema: z.ZodObject<{
+    role: z.ZodLiteral<"assistant">;
+    origin: z.ZodLiteral<"host_canonical">;
+    content: z.ZodString;
+    timestamp: z.ZodNumber;
+}, z.core.$strict>;
+/**
+ * The whole support set a caller may state: text-only user history,
+ * host-canonical assistant text history, and the current user message.
+ *
+ * A discriminated union on `role`, so an unsupported kind is refused by name
+ * rather than by a shape error on whichever member happened to be tried first.
+ * Provider-generated assistant turns, tool-result history and multimodal
+ * content are not members and are not inferred; adding one is a registration
+ * here AND in the device's hand-written parse, never a relaxation of either.
+ */
+export declare const InputPreparationMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+    role: z.ZodLiteral<"user">;
+    content: z.ZodString;
+    timestamp: z.ZodNumber;
+}, z.core.$strict>, z.ZodObject<{
+    role: z.ZodLiteral<"assistant">;
+    origin: z.ZodLiteral<"host_canonical">;
+    content: z.ZodString;
+    timestamp: z.ZodNumber;
+}, z.core.$strict>], "role">;
+export type InputPreparationMessage = z.infer<typeof InputPreparationMessageSchema>;
 /**
  * What `context.inline` (or the referenced blob) decodes to.
  *
@@ -5667,11 +5703,16 @@ export declare const InputPreparationContextDocumentSchema: z.ZodObject<{
             examplesPath: z.ZodString;
         }, z.core.$strict>;
     }, z.core.$strict>;
-    messages: z.ZodArray<z.ZodObject<{
+    messages: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
         role: z.ZodLiteral<"user">;
         content: z.ZodString;
         timestamp: z.ZodNumber;
-    }, z.core.$strict>>;
+    }, z.core.$strict>, z.ZodObject<{
+        role: z.ZodLiteral<"assistant">;
+        origin: z.ZodLiteral<"host_canonical">;
+        content: z.ZodString;
+        timestamp: z.ZodNumber;
+    }, z.core.$strict>], "role">>;
 }, z.core.$strict>;
 export type InputPreparationContextDocument = z.infer<typeof InputPreparationContextDocumentSchema>;
 /** Durable lifecycle state of one local preparation record. */
