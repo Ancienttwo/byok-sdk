@@ -268,6 +268,8 @@ export type {
   InputPreparationAuthorityGrantV1,
   InputPreparationAuthorityOutcomeV1,
   InputPreparationAuthorityResolver,
+  InputPreparationSourceAuthorityRequestV1,
+  InputPreparationSourceAuthorityOutcomeV1,
   InputPreparationBindingV1,
   InputPreparationCancelParamsV1,
   InputPreparationContextFileV1,

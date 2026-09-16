@@ -525,3 +525,15 @@ The §17 native closure is now a registry artifact and the SDK pins it. `@byok-s
 **Declared limit — nested peer resolution differs by installer.** Under bun the dev tree links `pi-mcp-adapter`'s optional peer `@earendil-works/pi-ai` (declared `^0.84.1`) to the fork `@byok-sdk/pi-ai@0.85.1001` — the previously nested `0.84.2` lock entry disappeared — whereas an npm production install keeps a nested upstream `0.84.x` copy. Neither path is exercised by `scripts/release/pi-launcher-smoke.mjs`, which stubs `resolveExtensions` (line ~84) and so never loads the real MCP extension. Follow-up options recorded, not decided: pin the nested peer through an override, or make the launcher smoke load the real MCP extension.
 
 This slice pins and verifies the runtime only. Prepared-input consumption in the SDK (task-runner, pi-adapter, protocol) is untouched and remains the next slice.
+
+### PR187 review closure contract — 2026-09-17
+
+The local primitive must authorize source and snapshot through the configured authority before durable reservation, compilation or counter disclosure. `resolveScope` owns scope admission; mandatory `resolveSource` receives the verified grant and isolated copies of the opaque source pair and snapshot. Its authorized pair must exactly match the request. The SDK does not compute a Host source digest or infer a missing authority. Lookup and cancel retain their existing scope authorization. Implementations of the unpublished resolver interface must implement the new method; no optional or permissive compatibility path is provided.
+
+The SDK owns the bound on waiting for a counter. Timeout, operator cancellation and shutdown settle the durable record as `counter_interrupted` when a call was placed, even if the adapter ignores its abort signal. The allowance remains consumed, the same request never calls the counter again, and late resolution/rejection cannot change the terminal record. This does not prove physical cancellation of the provider-side request.
+
+The daemon opens and reconciles the preparation service during startup, collects expired unpinned artifacts, and keeps a single timer for the next configured expiry while running. It does not depend on later preparation traffic. Stop owns timer disposal and any in-flight collection. A background collection fault is latched and surfaced rather than swallowed; pinned records remain exempt. Artifact and tombstone horizons keep their existing meanings and values.
+
+A native runtime import or identity fault is reported as `runtime_identity_unavailable`, with the same durable failure detail. A request ID already reserved remains spent; a repaired installation does not silently recreate it. Caller-directed use of a new request ID remains necessary. This preserves the existing no-automatic-retry rule while distinguishing installation failure from unsupported input.
+
+This paragraph records the bounded repair contract, not completed verification or full C07 readiness. Exact RED/GREEN, full-check and acceptance evidence belongs to `tasks/notes/20260917-0218-pr187-review-closeout.notes.md` and the associated review/receipt.

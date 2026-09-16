@@ -579,14 +579,14 @@ export class InputPreparationStore {
    * is enforced here, not deferred, so G3b cannot introduce a GC race by
    * forgetting it.
    */
-  gc(nowMs = this.now()): Promise<{ artifactsRemoved: number; recordsRemoved: number }> {
+  gc(nowMs = this.now(), preserveInFlight = false): Promise<{ artifactsRemoved: number; recordsRemoved: number }> {
     return this.enqueue(async () => {
       this.assertOpen();
       let artifactsRemoved = 0;
       const survivors: InputPreparationRecord[] = [];
       const removedIds: string[] = [];
       for (const record of this.records.values()) {
-        if (record.pin !== undefined) {
+        if (record.pin !== undefined || (preserveInFlight && !isTerminalInputPreparationState(record.state))) {
           survivors.push(record);
           continue;
         }

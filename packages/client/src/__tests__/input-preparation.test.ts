@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   INPUT_PREPARATION_REQUEST_FORMAT,
   INPUT_PREPARATION_VERSION,
@@ -22,6 +22,7 @@ import {
 } from '../daemon/input-preparation-service';
 import {
   InputPreparationCompileError,
+  InputPreparationRuntimeIdentityError,
   type CompilePreparedInputRequest,
   type CompiledPreparedInput,
   type InputPreparationCompiler,
@@ -167,6 +168,7 @@ function fixtureCounter(
 }
 
 const ALWAYS_AUTHORIZED: InputPreparationAuthorityResolver = {
+  async resolveSource({ source }) { return { authorized: true, source }; },
   async resolveScope(claim) {
     return { authorized: true, grant: { scopeId: `scope:${claim.deviceId}`, ...claim } };
   },
@@ -189,6 +191,7 @@ async function makeService(overrides: {
     ...(overrides.now === undefined ? {} : { now: overrides.now }),
   });
   await service.open();
+  cleanups.push(() => service.stop().catch(() => undefined));
   return service;
 }
 
@@ -230,7 +233,7 @@ describe('B-P2 service: auth and isolation', () => {
     const service = await makeService({
       compiler,
       counter,
-      authorityResolver: { async resolveScope() { return { authorized: false, reason: 'unknown_device' }; } },
+      authorityResolver: { ...ALWAYS_AUTHORIZED, async resolveScope() { return { authorized: false, reason: 'unknown_device' }; } },
     });
     expect(await codeOf(service.prepare(request()))).toBe('scope_denied');
     expect(compiler.calls).toEqual([]);
@@ -242,7 +245,7 @@ describe('B-P2 service: auth and isolation', () => {
     const compiler = stubCompiler();
     const service = await makeService({
       compiler,
-      authorityResolver: { async resolveScope() { throw new Error('authority store offline'); } },
+      authorityResolver: { ...ALWAYS_AUTHORIZED, async resolveScope() { throw new Error('authority store offline'); } },
     });
     expect(await codeOf(service.prepare(request()))).toBe('authority_unavailable');
     expect(compiler.calls).toEqual([]);
@@ -253,6 +256,7 @@ describe('B-P2 service: auth and isolation', () => {
     const service = await makeService({
       compiler,
       authorityResolver: {
+        ...ALWAYS_AUTHORIZED,
         async resolveScope(claim) {
           // A forged/misbehaving resolver substituting another device.
           return { authorized: true, grant: { scopeId: 'scope:other', ...claim, deviceId: 'device-other' } };
@@ -754,5 +758,199 @@ describe('B-P2 service: restart reconciliation', () => {
     stall?.();
     await held.catch(() => undefined);
     await first.stop();
+  });
+});
+
+
+describe('PR187 review regressions', () => {
+  it.each(['pair', 'snapshot', 'malformed', 'throw'])('validates independent source authority: %s', async (mode) => {
+    const compiler = stubCompiler();
+    const counter = fixtureCounter();
+    const service = await makeService({ compiler, counter, authorityResolver: {
+      ...ALWAYS_AUTHORIZED,
+      async resolveSource({ grant, source, snapshot }) {
+        expect(grant.scopeId).toBe('scope:device-1');
+        expect(snapshot).toEqual(request().snapshot);
+        if (mode === 'throw') throw new Error('Host offline');
+        if (mode === 'malformed') return { authorized: 'yes' } as never;
+        if (mode === 'snapshot') return { authorized: false, reason: 'disclosure_denied' };
+        return { authorized: true, source: { ...source, digest: 'other' } };
+      },
+    } });
+    expect(await codeOf(service.prepare(request()))).toBe(['throw', 'malformed'].includes(mode) ? 'authority_unavailable' : 'scope_denied');
+    expect(compiler.calls).toEqual([]);
+    expect(counter.calls).toEqual([]);
+    expect(service.store.list()).toEqual([]);
+  });
+
+  it('isolates the request and verified grant from resolver mutation', async () => {
+    const compiler = stubCompiler();
+    let sourceCalls = 0;
+    const service = await makeService({ compiler, authorityResolver: {
+      ...ALWAYS_AUTHORIZED,
+      async resolveSource(input) {
+        sourceCalls += 1;
+        const original = structuredClone(input.source);
+        const mutable = input as unknown as { grant: { scopeId: string }; source: { digest: string }; snapshot: { messages: { content: string }[] } };
+        mutable.grant.scopeId = 'evil';
+        mutable.source.digest = 'evil';
+        mutable.snapshot.messages[0]!.content = 'evil';
+        await Promise.resolve();
+        return { authorized: true, source: original };
+      },
+    } });
+    const receipt = await service.prepare(request());
+    expect(sourceCalls).toBe(1);
+    expect(receipt.binding.source).toEqual(request().source);
+    expect(receipt.binding.scopeId).toBe('scope:device-1');
+    expect(compiler.calls[0]?.snapshot).toEqual(request().snapshot);
+  });
+
+  it.each(['timeout', 'cancel', 'stop'])('settles %s even when counter ignores abort, ignores late resolution/rejection', async (mode) => {
+    for (const late of ['resolve', 'reject']) {
+      let resolve!: (value: InputPreparationCounterResultV1) => void;
+      let reject!: (error: Error) => void;
+      const counter = fixtureCounter(() => new Promise((yes, no) => { resolve = yes; reject = no; }));
+      const limits = { ...LIMITS, counterTimeoutMs: mode === 'timeout' ? 20 : 5_000 };
+      const service = await makeService({ counter, limits });
+      const pending = codeOf(service.prepare(request()));
+      while (counter.calls.length === 0) await new Promise((done) => setImmediate(done));
+      const removeListener = vi.spyOn(counter.calls[0]!.signal, 'removeEventListener');
+      const action = mode === 'cancel' ? service.cancel({ requestId: 'prep-1', scope: request().scope }) : mode === 'stop' ? service.stop() : Promise.resolve();
+      try {
+        expect(await Promise.race([Promise.all([pending, action]).then(([code]) => code), new Promise((done) => setTimeout(() => done('hung'), 500))])).toBe('counter_interrupted');
+      } finally {
+        if (late === 'reject') reject(new Error('late counter rejection'));
+        else resolve({ method: 'fixture', methodVersion: '0', authority: 'test_fixture', kind: 'count', value: 2, coverage: { covered: true } });
+        await pending;
+        await action;
+      }
+      expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function));
+      expect(service.store.list()[0]?.state).toBe('counter_interrupted');
+      expect(service.store.list()[0]?.counterCalls).toBe(1);
+      if (mode !== 'stop') expect((await service.prepare(request())).state).toBe('counter_interrupted');
+      expect(counter.calls).toHaveLength(1);
+    }
+  });
+
+  it('maps typed runtime failure and keeps the reserved request spent', async () => {
+    const counter = fixtureCounter();
+    let calls = 0;
+    const service = await makeService({ counter, compiler: { ...stubCompiler(), async compile() {
+      calls += 1;
+      throw new InputPreparationRuntimeIdentityError('installed closure changed');
+    } } });
+    expect(await codeOf(service.prepare(request()))).toBe('runtime_identity_unavailable');
+    const receipt = await service.prepare(request());
+    expect(receipt.state).toBe('failed');
+    expect(receipt.detail).toBe('runtime_identity_unavailable');
+    expect(calls).toBe(1);
+    expect(counter.calls).toEqual([]);
+  });
+
+  it('collects idle artifacts, then tombstones without another prepare', async () => {
+    let clock = 1_000_000;
+    const limits = { ...LIMITS, counterTimeoutMs: 100, preparationDeadlineMs: 200, retentionMs: 400, retryHorizonMs: 100 };
+    const storeDir = await tmpStoreDir();
+    const service = await makeService({ storeDir, limits, now: () => clock });
+    await service.prepare(request());
+    clock += 401;
+    await new Promise((done) => setTimeout(done, 450));
+    expect(await fs.readdir(path.join(storeDir, 'input-preparation', 'artifacts'))).toEqual([]);
+    expect(service.store.list()).toHaveLength(1);
+    clock += 100;
+    await new Promise((done) => setTimeout(done, 150));
+    expect(service.store.list()).toEqual([]);
+  });
+
+  it('collects artifacts on restart after both horizons without another prepare', async () => {
+    let clock = 1_000_000;
+    const storeDir = await tmpStoreDir();
+    const first = await makeService({ storeDir, now: () => clock });
+    await first.prepare(request());
+    await first.stop();
+    clock += LIMITS.retentionMs + LIMITS.retryHorizonMs + 1;
+    const restarted = await makeService({ storeDir, now: () => clock });
+    expect(restarted.store.list()).toEqual([]);
+    expect(await fs.readdir(path.join(storeDir, 'input-preparation', 'artifacts'))).toEqual([]);
+  });
+
+  it('latches background GC faults for subsequent access and stop', async () => {
+    const limits = { ...LIMITS, counterTimeoutMs: 100, preparationDeadlineMs: 200, retentionMs: 400, retryHorizonMs: 100 };
+    const service = await makeService({ limits });
+    await service.prepare(request());
+    const fault = new Error('GC filesystem offline');
+    const gc = vi.spyOn(service.store, 'gc').mockRejectedValue(fault);
+    await new Promise((done) => setTimeout(done, 450));
+    expect(gc).toHaveBeenCalled();
+    await expect(service.lookup({ requestId: 'prep-1', scope: request().scope })).rejects.toBe(fault);
+    await expect(service.stop()).rejects.toBe(fault);
+    gc.mockRestore();
+  });
+});
+
+
+describe('PR187 retention lifecycle races', () => {
+  it('protects an active compile from GC after both horizons', async () => {
+    let clock = 1_000_000;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const compiler = stubCompiler();
+    const limits = { ...LIMITS, retryHorizonMs: 20 };
+    const service = await makeService({ limits, now: () => clock, compiler: {
+      ...compiler, async compile(input) { await gate; return compiler.compile(input); },
+    } });
+    const pending = service.prepare(request());
+    while (service.store.list().length === 0) await new Promise((done) => setImmediate(done));
+    clock += limits.retentionMs + limits.retryHorizonMs + 1;
+    try {
+      await new Promise((done) => setTimeout(done, 60));
+      expect(service.store.list()[0]?.state).toBe('reserved');
+    } finally { release(); }
+    expect((await pending).state).toBe('counted');
+  });
+
+  it('waits for in-flight GC on stop and leaves no timer running', async () => {
+    const service = await makeService({ limits: { ...LIMITS, counterTimeoutMs: 100, preparationDeadlineMs: 200, retentionMs: 400, retryHorizonMs: 100 } });
+    await service.prepare(request());
+    let release!: () => void;
+    const gate = new Promise<{ artifactsRemoved: number; recordsRemoved: number }>((resolve) => {
+      release = () => resolve({ artifactsRemoved: 0, recordsRemoved: 0 });
+    });
+    const gc = vi.spyOn(service.store, 'gc').mockReturnValue(gate);
+    while (gc.mock.calls.length === 0) await new Promise((done) => setTimeout(done, 5));
+    let stopped = false;
+    const stop = service.stop().then(() => { stopped = true; });
+    await new Promise((done) => setImmediate(done));
+    expect(stopped).toBe(false);
+    release();
+    await stop;
+    await new Promise((done) => setTimeout(done, 50));
+    expect(gc).toHaveBeenCalledTimes(1);
+    gc.mockRestore();
+  });
+});
+
+
+describe('PR187 shutdown admission race', () => {
+  it('does not place a counter call when stop races a pending durable reservation', async () => {
+    const counter = fixtureCounter();
+    const service = await makeService({ counter });
+    const originalReserve = service.store.reserve.bind(service.store);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const reserve = vi.spyOn(service.store, 'reserve').mockImplementation(async (input) => {
+      await gate;
+      return originalReserve(input);
+    });
+    const pending = codeOf(service.prepare(request()));
+    while (reserve.mock.calls.length === 0) await new Promise((done) => setImmediate(done));
+    const stopped = service.stop();
+    await new Promise((done) => setImmediate(done));
+    release();
+    await stopped;
+    expect(await pending).toBe('cancelled');
+    expect(service.store.list()[0]?.state).toBe('cancelled');
+    expect(counter.calls).toEqual([]);
   });
 });
