@@ -1,3 +1,85 @@
+// ==== @byok-sdk/implementation-identity dist/descendant-launch.d.ts ====
+import { type ImplementationSpawnBindingV1 } from './spawn-binding';
+import { type RuntimeDescendantPolicyV1, type RuntimeDescendantEdgeV1, type RuntimeEntryV1 } from './identity';
+export interface DescendantLimitsV1 {
+    readonly maxDepth: number;
+    readonly fanout: number;
+    readonly parallel: number;
+    readonly sessionCap: number;
+}
+export interface DescendantContextV1 {
+    readonly format: 'byok.runtime-descendant-context';
+    readonly version: 1;
+    readonly templateKind: RuntimeEntryV1;
+    readonly edge: {
+        readonly parent: RuntimeEntryV1;
+        readonly child: RuntimeEntryV1;
+    };
+    readonly rootTaskId: string;
+    readonly parentInstancePath: readonly number[];
+    readonly instancePath: readonly number[];
+    readonly depth: number;
+    readonly remainingDepth: number;
+    readonly effectiveLimits: DescendantLimitsV1;
+    readonly task: string;
+    readonly modelCandidates: readonly {
+        readonly provider: string;
+        readonly model: string;
+    }[];
+    readonly attempt: number;
+    readonly session: {
+        readonly cwd: string;
+        readonly root: string;
+        readonly file: string | null;
+    };
+    /** Metadata retains its owning MCP parser; this layer validates the envelope and env, not MCP semantics. */
+    readonly mcp: {
+        readonly env: Readonly<Record<string, string>>;
+        readonly metadata: Readonly<Record<string, unknown>>;
+    };
+    readonly exactNames: readonly string[];
+    readonly envValues: Readonly<Record<string, string | null>>;
+    readonly controlledDirValues: Readonly<Record<string, string>>;
+}
+export interface DescendantLaunchV1 {
+    readonly format: 'byok.descendant-launch';
+    readonly version: 1;
+    readonly template: ImplementationSpawnBindingV1;
+    readonly templateDigest: string;
+    readonly policy: RuntimeDescendantPolicyV1;
+    readonly perLaunch: DescendantContextV1;
+}
+/** Independently selected from the verified parent, never reconstructed from the submitted child config. */
+export interface DescendantSpawnExpectationV1 {
+    readonly template: ImplementationSpawnBindingV1;
+    readonly policy: RuntimeDescendantPolicyV1;
+    readonly edges: readonly RuntimeDescendantEdgeV1[];
+    readonly parent: {
+        readonly kind: RuntimeEntryV1;
+        readonly rootTaskId: string;
+        readonly instancePath: readonly number[];
+        readonly depth: number;
+        readonly effectiveLimits: DescendantLimitsV1;
+    };
+    readonly inheritedCredentialNames: readonly string[];
+}
+export interface DescendantSpawnActualV1 {
+    readonly command: string;
+    readonly entry?: string;
+    readonly fixedArgv: readonly string[];
+    readonly cwd: string;
+    readonly env: Readonly<Record<string, string>>;
+}
+export declare class DescendantLaunchError extends Error {
+    readonly reason: string;
+    constructor(reason: string);
+}
+/** Hash original JSON member order, before the V1 parser projects its output. */
+export declare function descendantTemplateDigest(template: ImplementationSpawnBindingV1): string;
+/** Strict owned shape only. Independent parent and final-env comparisons are mandatory in assertDescendantSpawn. */
+export declare function parseDescendantLaunch(value: unknown): DescendantLaunchV1;
+/** Necessary launch consistency, not an atomic budget claim or permission to enable recursive execution. */
+export declare function validateDescendantSpawn(input: unknown, expected: DescendantSpawnExpectationV1, actual: DescendantSpawnActualV1): DescendantLaunchV1;
 // ==== @byok-sdk/implementation-identity dist/environment.d.ts ====
 /** Fixed credential-name projection shared by measurement and client stripping. */
 export declare const PROVIDER_CREDENTIAL_ENV_DENY_NAMES: readonly ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "AZURE_OPENAI_API_KEY", "DEEPSEEK_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY", "OPENROUTER_API_KEY", "XAI_API_KEY", "ZAI_API_KEY", "ANT_LING_API_KEY", "NVIDIA_API_KEY", "CEREBRAS_API_KEY", "CLOUDFLARE_API_KEY", "AI_GATEWAY_API_KEY", "ZAI_CODING_CN_API_KEY", "OPENCODE_API_KEY", "RADIUS_API_KEY", "FIREWORKS_API_KEY", "TOGETHER_API_KEY", "BASETEN_API_KEY", "KIMI_API_KEY", "HF_TOKEN", "MOONSHOT_API_KEY", "MINIMAX_API_KEY", "MINIMAX_CN_API_KEY", "QWEN_TOKEN_PLAN_API_KEY", "QWEN_TOKEN_PLAN_CN_API_KEY", "XIAOMI_API_KEY", "XIAOMI_TOKEN_PLAN_CN_API_KEY", "XIAOMI_TOKEN_PLAN_AMS_API_KEY", "XIAOMI_TOKEN_PLAN_SGP_API_KEY", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS", "PI_PROVIDER_API_KEY"];
@@ -9,6 +91,7 @@ export declare const CONTROLLED_PI_DIRECTORY_ENV_NAMES: readonly ["PI_PACKAGE_DI
 export declare const KEYS_PI_INHERITED_ENV_NAMES: readonly ["PATH", "HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP", "LANG", "TZ", "TERM", "SHELL", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy"];
 export declare const KEYS_PI_WINDOWS_ENV_NAMES: readonly ["SystemRoot", "COMSPEC", "PATHEXT", "windir", "SYSTEMDRIVE", "PROGRAMFILES", "APPDATA", "LOCALAPPDATA"];
 // ==== @byok-sdk/implementation-identity dist/identity.d.ts ====
+import { type DescendantSpawnExpectationV1, type DescendantSpawnActualV1 } from './descendant-launch';
 import type { McpLaunchAttestation } from './launch-attestation';
 /**
  * The ONE authority for "which implementation backs this tool", and the only
@@ -563,6 +646,8 @@ export type ToolImplementationMeasurementFailure = 'install_record_mismatch' | '
 type LaunchEnvironment = Readonly<Record<string, string>> | ((record: ToolImplementationInstallRecordV1) => Readonly<Record<string, string>>);
 /** MCP-only entry; runtime declarations cannot be silently reduced to identity. */
 export declare function resolveToolImplementationIdentity(authority: ToolImplementationAuthority | undefined, locator: McpImplementationLocatorV1, launchEnv: LaunchEnvironment, probe?: ToolImplementationFsProbe): Promise<ToolImplementationIdentityV1>;
+/** One strict policy parser shared by Host declarations and internal launch plans. */
+export declare function parseRuntimeDescendantPolicy(value: unknown): RuntimeDescendantPolicyV1 | undefined;
 /** Strict runtime wrapper cutover. No bare record, defaults or shape guessing. */
 export declare function parseRuntimeImplementationRecord(value: unknown): RuntimeImplementationRecordV1 | undefined;
 export declare function resolveRuntimeImplementation(authority: ToolImplementationAuthority | undefined, locator: RuntimeImplementationLocatorV1, launchEnv: LaunchEnvironment, probe?: ToolImplementationFsProbe): Promise<ResolvedRuntimeImplementationV1>;
@@ -659,12 +744,15 @@ export declare class ToolImplementationReverifyError extends Error {
     readonly subject: ToolImplementationReverifySubject;
     constructor(message: string, reason: ToolImplementationReverifyFailure, subject: ToolImplementationReverifySubject);
 }
+/** Validates delegated consistency and physical bytes, not concurrency/budget custody. */
+export declare function assertDescendantSpawn(launch: unknown, expected: DescendantSpawnExpectationV1, actual: DescendantSpawnActualV1, probe?: ToolImplementationFsProbe): Promise<void>;
 export {};
 // ==== @byok-sdk/implementation-identity dist/index.d.ts ====
 export * from './identity';
 export * from './environment';
 export type { McpLaunchAttestation, ResolvedMcpLaunchCwdLauncher } from './launch-attestation';
 export * from './spawn-binding';
+export * from './descendant-launch';
 // ==== @byok-sdk/implementation-identity dist/launch-attestation.d.ts ====
 export type ResolvedMcpLaunchCwdLauncher = 
 /** POSIX: `interpreter` is the realpath of the system shell, `script` is the client-owned shell bootstrap. */

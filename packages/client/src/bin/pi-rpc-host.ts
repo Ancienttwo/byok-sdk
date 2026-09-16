@@ -1,3 +1,4 @@
+import { parseRuntimeDescendantPlan, type RuntimeDescendantPlanV1 } from '../adapters/pi/runtime-descendant-plan';
 import { extractPiConfigDigest, readPiHostConfig, requirePiHostBinding, verifyPiHostBinding } from '../adapters/pi/runtime-host-binding';
 import type { ImplementationSpawnBindingV1 } from '@byok-sdk/implementation-identity';
 import { isAbsolute, resolve } from 'node:path';
@@ -15,8 +16,9 @@ import { loaderEnvInjections } from '../daemon/tool-implementation-identity';
 
 export interface PiRpcHostConfig {
   readonly format: 'byok.pi.rpc-launch';
-  readonly version: 1;
+  readonly version: 2;
   readonly binding: ImplementationSpawnBindingV1;
+  readonly descendantPlan: RuntimeDescendantPlanV1 | null;
   /** Authorized session cwd, independent of the sealed process cwd. */
   readonly cwd: string;
   readonly mcp: TaskScopedMcpConfig;
@@ -49,11 +51,11 @@ function failUsage(message: string): never {
 export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail('config must be an object');
   const raw = value as Record<string, unknown>;
-  const keys = ['format', 'version', 'binding', 'cwd', 'mcp', 'policy'];
+  const keys = ['format', 'version', 'binding', 'descendantPlan', 'cwd', 'mcp', 'policy'];
   if (Object.keys(raw).some((key) => !keys.includes(key)) || keys.some((key) => !(key in raw))) {
-    fail('config must contain exactly format, version, binding, cwd, mcp, policy');
+    fail('config must contain exactly format, version, binding, descendantPlan, cwd, mcp, policy');
   }
-  if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 1) fail('unsupported config format/version');
+  if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 2) fail('unsupported config format/version');
   if (typeof raw.cwd !== 'string' || !isAbsolute(raw.cwd) || resolve(raw.cwd) !== raw.cwd) {
     fail('config.cwd must be a normalized absolute path');
   }
@@ -63,7 +65,14 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   if (!mapping.ok) fail(mapping.reason!);
   const mcp = parseTaskScopedMcpConfig(raw.mcp, fail);
   if (mcp.permissionMode !== policy.data.mode) fail('MCP permissionMode differs from policy.mode');
-  return { format: 'byok.pi.rpc-launch', version: 1, binding: requirePiHostBinding(raw.binding), cwd: raw.cwd, mcp, policy: policy.data };
+  const binding = requirePiHostBinding(raw.binding);
+  let descendantPlan: RuntimeDescendantPlanV1 | null;
+  try {
+    descendantPlan = parseRuntimeDescendantPlan(raw.descendantPlan, 'pi-rpc', raw.binding as ImplementationSpawnBindingV1);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
+  return { format: 'byok.pi.rpc-launch', version: 2, binding, descendantPlan, cwd: raw.cwd, mcp, policy: policy.data };
 }
 
 export function parsePiRpcHostArgs(

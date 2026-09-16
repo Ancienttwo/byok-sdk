@@ -3,6 +3,7 @@ import path from 'node:path';
 import { ensureSecureDir } from '../../util/secure-dir';
 import {
   CONTROLLED_PI_DIRECTORY_ENV_NAMES, projectKeysPiInheritedEnvironment,
+  parseImplementationSpawnBinding, type RuntimeEntryV1,
   type ImplementationSpawnBindingV1, type ToolImplementationAuthority, type ResolvedRuntimeImplementationV1,
 } from '@byok-sdk/implementation-identity';
 import {
@@ -11,12 +12,14 @@ import {
 import { resolveTrustedLaunchCwd } from '../../daemon/trusted-launch-cwd';
 import { RuntimeExecutionFailure } from '../../runtime-failure';
 import { resolvePiRuntimeIdentity } from './resolve-bin';
+import { createRuntimeDescendantPlan, requiredRuntimePlanKinds, type RuntimeDescendantPlanV1 } from './runtime-descendant-plan';
 
 export interface PiRuntimeLaunchResources {
   readonly kind: RuntimeLaunchKindV1;
   readonly declaration: ResolvedRuntimeImplementationV1;
   readonly decision: RuntimeLaunchDecisionV1;
   readonly binding: ImplementationSpawnBindingV1;
+  readonly descendantPlan: RuntimeDescendantPlanV1 | null;
   readonly env: Readonly<Record<string, string>>;
   readonly sessionCwd: string;
   readonly credentialSource: 'pi-auth-store' | 'keys-profile';
@@ -97,7 +100,34 @@ export async function resolvePiRuntimeLaunch(options: {
         command: dev.command, ...(dev.entry === undefined ? {} : { entry: dev.entry }),
         fixedArgv: Object.freeze([]), cwd: cwd.dir, envCommitments: Object.freeze(directoryValues) });
     }
-    return Object.freeze({ kind: options.kind, declaration, decision, binding, env: Object.freeze(env), sessionCwd: options.sessionCwd,
+    let descendantPlan: RuntimeDescendantPlanV1 | null = null;
+    if (declaration.kind === 'attested') {
+      const rows: {kind: RuntimeEntryV1; template: ImplementationSpawnBindingV1}[] = [{kind:options.kind,template:binding}];
+      const required = requiredRuntimePlanKinds(options.kind, declaration.descendantPolicy, declaration.edges);
+      // Each prefix comes from its own Host-resolved locator. Never retarget a
+      // parent's binding, synthesize unavailable rows or discover another bin.
+      for (const kind of required) {
+        if (kind === options.kind) continue;
+        const descendant = await resolveRuntimeImplementation(options.authority,
+          {subject:{kind:'runtime',runtimeId:'pi'},runtimeEntry:kind}, env);
+        if (descendant.kind !== 'attested') throw failure(`descendant implementation unavailable: ${kind}: ${descendant.reason}`);
+        if (JSON.stringify(descendant.descendantPolicy) !== JSON.stringify(declaration.descendantPolicy)
+          || JSON.stringify(descendant.edges) !== JSON.stringify(declaration.edges)) throw failure('descendant declaration differs from self');
+        const identity = descendant.identity;
+        const template = parseImplementationSpawnBinding({format:'byok.implementation-spawn',version:1,identity,
+          command:identity.form === 'interpreter+bundle' ? identity.interpreter?.path : identity.installPath,
+          ...(identity.form === 'interpreter+bundle' ? {entry:identity.installPath} : {}),
+          fixedArgv:identity.launchArgv,cwd:identity.launchCwd,envCommitments:binding.envCommitments});
+        if (template === undefined) throw failure('descendant implementation binding is invalid');
+        rows.push({kind,template});
+      }
+      try {
+        descendantPlan = createRuntimeDescendantPlan(options.kind,binding,declaration,rows);
+      } catch (error) {
+        throw failure(error instanceof Error ? error.message : String(error));
+      }
+    }
+    return Object.freeze({ kind: options.kind, declaration, decision, binding, descendantPlan, env: Object.freeze(env), sessionCwd: options.sessionCwd,
       credentialSource: source, release });
   } catch (error) {
     await release();

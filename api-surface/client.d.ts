@@ -988,14 +988,41 @@ export declare class PiRpcClient {
     private buildExitError;
     private onClosed;
 }
+// ==== @byok-sdk/client dist/adapters/pi/runtime-descendant-plan.d.ts ====
+import { type ImplementationSpawnBindingV1, type RuntimeDescendantEdgeV1, type RuntimeDescendantPolicyV1, type RuntimeEntryV1 } from '@byok-sdk/implementation-identity';
+export interface RuntimeDescendantDeclarationV1 {
+    readonly descendantPolicy: RuntimeDescendantPolicyV1;
+    readonly edges: readonly RuntimeDescendantEdgeV1[];
+}
+export interface RuntimeDescendantTemplateV1 {
+    readonly kind: RuntimeEntryV1;
+    readonly template: ImplementationSpawnBindingV1;
+    readonly templateDigest: string;
+}
+export interface RuntimeDescendantPlanV1 {
+    readonly format: 'byok.runtime-launch-plan';
+    readonly version: 1;
+    readonly selfKind: RuntimeEntryV1;
+    readonly policy: RuntimeDescendantPolicyV1;
+    readonly edges: readonly RuntimeDescendantEdgeV1[];
+    readonly templates: readonly RuntimeDescendantTemplateV1[];
+}
+/** The finite type closure is independent of instance depth/budget admission. */
+export declare function requiredRuntimePlanKinds(selfKind: RuntimeEntryV1, policy: RuntimeDescendantPolicyV1, edges: readonly RuntimeDescendantEdgeV1[]): readonly RuntimeEntryV1[];
+/** Validate raw template bytes before any V1 parser projection changes member order. */
+export declare function parseRuntimeDescendantPlan(value: unknown, selfKind: RuntimeEntryV1, selfBinding: ImplementationSpawnBindingV1, expectedDeclaration?: RuntimeDescendantDeclarationV1): RuntimeDescendantPlanV1 | null;
+/** Assemble already measured rows; this helper never resolves or measures Host records. */
+export declare function createRuntimeDescendantPlan(selfKind: RuntimeEntryV1, selfBinding: ImplementationSpawnBindingV1, declaration?: RuntimeDescendantDeclarationV1, templates?: readonly Pick<RuntimeDescendantTemplateV1, 'kind' | 'template'>[]): RuntimeDescendantPlanV1 | null;
 // ==== @byok-sdk/client dist/adapters/pi/runtime-launch.d.ts ====
 import { type ImplementationSpawnBindingV1, type ToolImplementationAuthority, type ResolvedRuntimeImplementationV1 } from '@byok-sdk/implementation-identity';
 import { type RuntimeLaunchDecisionV1, type RuntimeLaunchKindV1 } from '../../daemon/tool-implementation-identity';
+import { type RuntimeDescendantPlanV1 } from './runtime-descendant-plan';
 export interface PiRuntimeLaunchResources {
     readonly kind: RuntimeLaunchKindV1;
     readonly declaration: ResolvedRuntimeImplementationV1;
     readonly decision: RuntimeLaunchDecisionV1;
     readonly binding: ImplementationSpawnBindingV1;
+    readonly descendantPlan: RuntimeDescendantPlanV1 | null;
     readonly env: Readonly<Record<string, string>>;
     readonly sessionCwd: string;
     readonly credentialSource: 'pi-auth-store' | 'keys-profile';

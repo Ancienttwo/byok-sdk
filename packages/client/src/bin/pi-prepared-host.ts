@@ -1,3 +1,4 @@
+import { parseRuntimeDescendantPlan, type RuntimeDescendantPlanV1 } from '../adapters/pi/runtime-descendant-plan';
 import { extractPiConfigDigest, readPiHostConfig, requirePiHostBinding, verifyPiHostBinding } from '../adapters/pi/runtime-host-binding';
 import type { ImplementationSpawnBindingV1 } from '@byok-sdk/implementation-identity';
 import { isAbsolute, join } from 'node:path';
@@ -62,7 +63,7 @@ import {
  */
 
 const CONFIG_FORMAT = 'byok.pi.prepared-launch';
-const CONFIG_VERSION = 1;
+const CONFIG_VERSION = 2;
 const EXIT_CONFIG = 78; // EX_CONFIG
 
 function fail(message: string): never {
@@ -140,6 +141,7 @@ function parseLaunch(value: unknown): McpLaunchAttestation {
 /** What the pi adapter writes for exactly one prepared operation. */
 interface PreparedLaunchConfig {
   readonly binding: ImplementationSpawnBindingV1;
+  readonly descendantPlan: RuntimeDescendantPlanV1 | null;
   readonly cwd: string;
   readonly policy: PermissionPolicy;
   readonly countedPermissionMode: PermissionMode;
@@ -159,6 +161,8 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
     fail(`${configPath} could not be read as JSON: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
   if (!isPlainObject(parsed)) fail('the prepared launch configuration must be an object');
+  const keys = ['format','version','binding','descendantPlan','cwd','policy','countedPermissionMode','expected','toolBindingDigest','observationDigest','toolsetDefinitionRevisions','launch','mcp'];
+  if (Object.keys(parsed).length !== keys.length || !keys.every(key => Object.hasOwn(parsed, key))) fail('prepared config has missing or unknown keys');
   if (parsed.format !== CONFIG_FORMAT) fail(`the prepared launch configuration must declare format ${CONFIG_FORMAT}`);
   if (parsed.version !== CONFIG_VERSION) fail(`the prepared launch configuration must declare version ${CONFIG_VERSION}`);
 
@@ -188,8 +192,15 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
     fail('mcp.permissionMode disagrees with countedPermissionMode');
   }
 
+  const binding = requirePiHostBinding(parsed.binding);
+  let descendantPlan: RuntimeDescendantPlanV1 | null;
+  try {
+    descendantPlan = parseRuntimeDescendantPlan(parsed.descendantPlan, 'pi-prepared', parsed.binding as ImplementationSpawnBindingV1);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
   return Object.freeze({
-    binding: requirePiHostBinding(parsed.binding),
+    binding, descendantPlan,
     cwd,
     policy: policyResult.data,
     countedPermissionMode: countedPermissionMode as PermissionMode,

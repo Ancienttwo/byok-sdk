@@ -1,3 +1,4 @@
+import { validateDescendantSpawn, type DescendantSpawnExpectationV1, type DescendantSpawnActualV1 } from './descendant-launch';
 import { CONTROLLED_PI_DIRECTORY_ENV_NAMES, KEYS_PI_INHERITED_ENV_NAMES, KEYS_PI_WINDOWS_ENV_NAMES } from './environment';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
@@ -1361,12 +1362,9 @@ export async function resolveToolImplementationIdentity(
   return measureInstallRecord(record, launchEnv, probe);
 }
 
-/** Strict runtime wrapper cutover. No bare record, defaults or shape guessing. */
-export function parseRuntimeImplementationRecord(value: unknown): RuntimeImplementationRecordV1 | undefined {
-  if (!plainRecord(value) || !exactKeys(value, ['record', 'descendantPolicy', 'edges'])) return undefined;
-  const record = validateInstallRecord(value.record);
-  if (typeof record === 'string') return undefined;
-  const policy = value.descendantPolicy;
+/** One strict policy parser shared by Host declarations and internal launch plans. */
+export function parseRuntimeDescendantPolicy(value: unknown): RuntimeDescendantPolicyV1 | undefined {
+  const policy = value;
   if (!plainRecord(policy) || !exactKeys(policy, ['envNameAllowlist', 'maxDepth', 'fanout', 'parallel', 'sessionCap'])) return undefined;
   // Base names frozen by M0; additional per-launch names come only from the producer inventory.
   const vocabulary = new Set<string>([...KEYS_PI_INHERITED_ENV_NAMES, ...KEYS_PI_WINDOWS_ENV_NAMES, ...CONTROLLED_PI_DIRECTORY_ENV_NAMES, ...DESCENDANT_PER_LAUNCH_ENV_NAMES]);
@@ -1378,17 +1376,27 @@ export function parseRuntimeImplementationRecord(value: unknown): RuntimeImpleme
     const count = policy[key];
     if (typeof count !== 'number' || !Number.isSafeInteger(count) || Object.is(count, -0) || count < (key === 'maxDepth' ? 0 : 1)) return undefined;
   }
+  return Object.freeze({
+    envNameAllowlist: Object.freeze([...policy.envNameAllowlist]) as readonly string[],
+    maxDepth: policy.maxDepth as number, fanout: policy.fanout as number,
+    parallel: policy.parallel as number, sessionCap: policy.sessionCap as number,
+  });
+}
+
+/** Strict runtime wrapper cutover. No bare record, defaults or shape guessing. */
+export function parseRuntimeImplementationRecord(value: unknown): RuntimeImplementationRecordV1 | undefined {
+  if (!plainRecord(value) || !exactKeys(value, ['record', 'descendantPolicy', 'edges'])) return undefined;
+  const record = validateInstallRecord(value.record);
+  if (typeof record === 'string') return undefined;
+  const policy = parseRuntimeDescendantPolicy(value.descendantPolicy);
+  if (policy === undefined) return undefined;
   if (!Array.isArray(value.edges) || value.edges.length !== RUNTIME_DESCENDANT_EDGES.length) return undefined;
   for (const [index, edge] of value.edges.entries()) {
     const expected = RUNTIME_DESCENDANT_EDGES[index]!;
     if (!plainRecord(edge) || !exactKeys(edge, ['parent', 'child', 'inheritsCredential']) ||
       edge.parent !== expected.parent || edge.child !== expected.child || edge.inheritsCredential !== true) return undefined;
   }
-  return Object.freeze({ record, descendantPolicy: Object.freeze({
-    envNameAllowlist: Object.freeze([...policy.envNameAllowlist]) as readonly string[],
-    maxDepth: policy.maxDepth as number, fanout: policy.fanout as number,
-    parallel: policy.parallel as number, sessionCap: policy.sessionCap as number,
-  }), edges: RUNTIME_DESCENDANT_EDGES });
+  return Object.freeze({ record, descendantPolicy: policy, edges: RUNTIME_DESCENDANT_EDGES });
 }
 
 export async function resolveRuntimeImplementation(
@@ -1548,44 +1556,8 @@ export async function reverifyToolImplementationIdentity(
   launchEnv: Readonly<Record<string, string>>,
   probe: ToolImplementationFsProbe = realToolImplementationFsProbe,
 ): Promise<ToolImplementationReverifyResult> {
-  const measured = await measureCanonicalPathIdentity(identity.installPath, probe);
-  if (typeof measured === 'string') return { reason: measured, subject: 'artifact' };
-  if (!sameStatTuple(measured, identity.installStat)) {
-    return { reason: 'install_record_mismatch', subject: 'artifact' };
-  }
-  const matches = await digestMatches(identity.installPath, identity.closureDigest, probe);
-  if (matches !== true) return { reason: 'reverify_failed', subject: 'artifact' };
-  if (identity.interpreter !== undefined) {
-    const interpreter = await measureCanonicalPathIdentity(identity.interpreter.path, probe);
-    if (typeof interpreter === 'string') return { reason: interpreter, subject: 'interpreter' };
-    // `interpreterStat` is present on every identity this module seals for an
-    // `interpreter+bundle`, and `parseToolImplementationIdentity` refuses one
-    // that arrives without it, so an absent tuple here is an identity from
-    // nowhere rather than an older shape to tolerate.
-    if (identity.interpreterStat === undefined || !sameStatTuple(interpreter, identity.interpreterStat)) {
-      return { reason: 'install_record_mismatch', subject: 'interpreter' };
-    }
-    const interpreterMatches = await digestMatches(
-      identity.interpreter.path,
-      identity.interpreter.digest,
-      probe,
-    );
-    if (interpreterMatches !== true) return { reason: 'reverify_failed', subject: 'interpreter' };
-  }
-  if (identity.assetRoot !== undefined && identity.assets !== undefined) {
-    // `assetStats` is present on every identity this module seals for a record
-    // that declares assets, and `parseToolImplementationIdentity` refuses one
-    // that arrives without it, so an absent list here is an identity from
-    // nowhere rather than an older shape to tolerate.
-    if (identity.assetStats === undefined) return { reason: 'install_record_mismatch', subject: 'asset' };
-    const assetFailure = await reverifyDeclaredAssets(
-      identity.assetRoot,
-      identity.assets,
-      identity.assetStats,
-      probe,
-    );
-    if (assetFailure !== undefined) return { reason: assetFailure, subject: 'asset' };
-  }
+  const physical = await reverifyPhysicalImplementation(identity, probe);
+  if (physical !== 'ok') return physical;
   // Asked BEFORE the digests, so an unaccountable control name is reported as
   // itself rather than as generic drift — and so it still refuses when the
   // same name was present at resolve and the digests therefore agree.
@@ -1645,3 +1617,61 @@ export class ToolImplementationReverifyError extends Error {
   }
 }
 
+
+/** Physical checks have one implementation; existing V1 env semantics remain at their caller. */
+async function reverifyPhysicalImplementation(
+  identity: ToolImplementationAttestedV1, probe: ToolImplementationFsProbe,
+): Promise<ToolImplementationReverifyResult> {
+  const measured = await measureCanonicalPathIdentity(identity.installPath, probe);
+  if (typeof measured === 'string') return { reason: measured, subject: 'artifact' };
+  if (!sameStatTuple(measured, identity.installStat)) {
+    return { reason: 'install_record_mismatch', subject: 'artifact' };
+  }
+  const matches = await digestMatches(identity.installPath, identity.closureDigest, probe);
+  if (matches !== true) return { reason: 'reverify_failed', subject: 'artifact' };
+  if (identity.interpreter !== undefined) {
+    const interpreter = await measureCanonicalPathIdentity(identity.interpreter.path, probe);
+    if (typeof interpreter === 'string') return { reason: interpreter, subject: 'interpreter' };
+    // `interpreterStat` is present on every identity this module seals for an
+    // `interpreter+bundle`, and `parseToolImplementationIdentity` refuses one
+    // that arrives without it, so an absent tuple here is an identity from
+    // nowhere rather than an older shape to tolerate.
+    if (identity.interpreterStat === undefined || !sameStatTuple(interpreter, identity.interpreterStat)) {
+      return { reason: 'install_record_mismatch', subject: 'interpreter' };
+    }
+    const interpreterMatches = await digestMatches(
+      identity.interpreter.path,
+      identity.interpreter.digest,
+      probe,
+    );
+    if (interpreterMatches !== true) return { reason: 'reverify_failed', subject: 'interpreter' };
+  }
+  if (identity.assetRoot !== undefined && identity.assets !== undefined) {
+    // `assetStats` is present on every identity this module seals for a record
+    // that declares assets, and `parseToolImplementationIdentity` refuses one
+    // that arrives without it, so an absent list here is an identity from
+    // nowhere rather than an older shape to tolerate.
+    if (identity.assetStats === undefined) return { reason: 'install_record_mismatch', subject: 'asset' };
+    const assetFailure = await reverifyDeclaredAssets(
+      identity.assetRoot,
+      identity.assets,
+      identity.assetStats,
+      probe,
+    );
+    if (assetFailure !== undefined) return { reason: assetFailure, subject: 'asset' };
+  }
+  return 'ok';
+}
+
+/** Validates delegated consistency and physical bytes, not concurrency/budget custody. */
+export async function assertDescendantSpawn(
+  launch: unknown, expected: DescendantSpawnExpectationV1, actual: DescendantSpawnActualV1,
+  probe: ToolImplementationFsProbe = realToolImplementationFsProbe,
+): Promise<void> {
+  const parsed = validateDescendantSpawn(launch, expected, actual);
+  if (parsed.template.identity.kind !== 'attested') throw new Error('descendant_invalid_template');
+  const result = await reverifyPhysicalImplementation(parsed.template.identity, probe);
+  if (result !== 'ok') throw new ToolImplementationReverifyError(
+    `Descendant failed implementation reverification before launch: ${result.reason} (${result.subject})`, result.reason, result.subject,
+  );
+}

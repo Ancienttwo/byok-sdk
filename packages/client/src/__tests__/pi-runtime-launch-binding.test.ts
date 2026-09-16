@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  assertImplementationSpawnBinding,
+  assertImplementationSpawnBinding, runtimeEntryFixedArgv,
   type ToolImplementationInstallRecordV1,
   type ToolImplementationAuthority,
 } from '@byok-sdk/implementation-identity';
@@ -88,6 +88,7 @@ describe('client runtime launch admission and resource binding', () => {
       expect(f.options.resolveDevInvocation).toHaveBeenCalledOnce();
       expect(resources.decision.kind).toBe('unconfigured');
       expect(resources.binding.identity).toEqual({kind:'unavailable',reason:'resolver_unconfigured'});
+      expect(resources.descendantPlan).toBeNull();
       const trusted = await resolveTrustedLaunchCwd();
       expect(trusted.kind).toBe('resolved');
       if (trusted.kind !== 'resolved') throw new Error(trusted.reason);
@@ -160,6 +161,7 @@ describe('client runtime launch admission and resource binding', () => {
       expect(resources.declaration.kind).toBe('attested');
       if (resources.declaration.kind !== 'attested') throw new Error('declaration missing');
       expect(resources.declaration.descendantPolicy.maxDepth).toBe(0);
+      expect(resources.descendantPlan?.templates.map(row => row.kind)).toEqual(['pi-rpc']);
       expect(Object.isFrozen(resources.declaration.descendantPolicy)).toBe(true);
       expect(resources.binding.envCommitments.PI_PACKAGE_DIR).toBe(record.assetRoot);
       expect(resources.env.PI_PACKAGE_DIR).toBe(record.assetRoot);
@@ -168,5 +170,36 @@ describe('client runtime launch admission and resource binding', () => {
       await expect(assertImplementationSpawnBinding(resources.binding,spawnInput(resources))).resolves.toBeUndefined();
       await expect(assertImplementationSpawnBinding(resources.binding,{...spawnInput(resources),env:{...resources.env,PI_PACKAGE_DIR:'/changed-after-description'}})).rejects.toThrow(/changed Pi directory/);
     } finally {await resources.release();}
+
+    const resolvedKinds: string[] = [];
+    const delegatedAuthority: ToolImplementationAuthority = {resolve:async locator => {
+      if (locator.subject.kind !== 'runtime' || !('runtimeEntry' in locator) || !locator.runtimeEntry) throw new Error('runtime locator required');
+      resolvedKinds.push(locator.runtimeEntry);
+      const wrapper = runtimeRecordFixture({...record,launchArgv:runtimeEntryFixedArgv(locator.runtimeEntry)});
+      return {...wrapper,descendantPolicy:{...wrapper.descendantPolicy,maxDepth:2}};
+    }};
+    const delegated = await resolvePiRuntimeLaunch({...f.options,authority:delegatedAuthority});
+    try {
+      expect(resolvedKinds).toEqual(['pi-rpc','pi-subagent-print','pi-subagent-runner']);
+      expect(delegated.descendantPlan?.templates.map(row=>row.kind)).toEqual(resolvedKinds);
+      expect(JSON.stringify(delegated.descendantPlan?.templates[0]?.template)).toBe(JSON.stringify(delegated.binding));
+      expect(Object.isFrozen(delegated.descendantPlan?.templates)).toBe(true);
+      expect(f.options.resolveDevInvocation).not.toHaveBeenCalled();
+    } finally {await delegated.release();}
+
+    // No implicit self-only degradation when the Host omits a required record.
+    await expect(resolvePiRuntimeLaunch({...f.options,authority:{resolve:async locator =>
+      'runtimeEntry' in locator && locator.runtimeEntry==='pi-subagent-runner'
+        ? {kind:'unavailable',reason:'implementation_identity_unattested'}
+        : delegatedAuthority.resolve(locator)}})).rejects.toThrow(/descendant implementation unavailable: pi-subagent-runner/);
+    // A valid physical record with a different immutable policy is not a grant.
+    await expect(resolvePiRuntimeLaunch({...f.options,authority:{resolve:async locator => {
+      const value=await delegatedAuthority.resolve(locator);
+      return 'runtimeEntry' in locator && locator.runtimeEntry==='pi-subagent-print' && 'record' in value
+        ? {...value,descendantPolicy:{...value.descendantPolicy,fanout:value.descendantPolicy.fanout+1}}
+        : value;
+    }}})).rejects.toThrow(/descendant declaration differs from self/);
+    expect(await fs.readdir(f.options.projectionRoot)).toEqual([]);
+    expect(f.options.resolveDevInvocation).not.toHaveBeenCalled();
   });
 });

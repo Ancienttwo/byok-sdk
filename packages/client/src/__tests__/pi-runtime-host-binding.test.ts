@@ -1,5 +1,6 @@
 import { runtimeRecordFixture } from './fixtures/runtime-resolution';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -57,7 +58,16 @@ async function fixture(mutate: (record: ToolImplementationInstallRecordV1) => To
   return {root,native,record,binding,config,configPath,manifestPath,serialized};
 }
 
+const digestCases = (JSON.parse(readFileSync(new URL('../../../../tests/fixtures/c07-runtime-record/rejections.v1.json', import.meta.url), 'utf8')).compositionCases as { id:string; argvCases?: {id:string;argv:string[];expectedReason:string}[] }[])
+  .filter(test => test.argvCases !== undefined);
+
 describe('Pi child launch/config authority', () => {
+  it.each(digestCases)('executes frozen digest refusal family $id without enabling descendants', family => {
+    for (const test of family.argvCases!) expect(() => extractPiConfigDigest(test.argv)).toThrow(test.expectedReason);
+    // These are extraction reasons only. Disabled descendant hosts still reject
+    // as not-enabled; their future EX_CONFIG renderers are not claimed here.
+  });
+
   it.each([[], ['--config-digest'], ['--config-digest=x'], [`--config-digest=${'A'.repeat(64)}`],
     [`--config-digest=${'a'.repeat(64)}`,`--config-digest=${'a'.repeat(64)}`]].map(argv=>({argv})))('rejects missing, malformed or duplicate owned digest %#', ({argv}) => {
     expect(()=>extractPiConfigDigest(argv)).toThrow(/config-digest/);

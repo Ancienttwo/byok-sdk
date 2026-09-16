@@ -21,7 +21,7 @@ function fixture() {
   const command = spawnSync(bun, ['--print', 'process.execPath'], {encoding:'utf8'}).stdout.trim();
   const binding = {format:'byok.implementation-spawn',version:1,identity:{kind:'unavailable',reason:'resolver_unconfigured'},
     command,entry,fixedArgv:[],cwd:sealed,envCommitments:{PI_CODING_AGENT_DIR:join(root,'agent')}};
-  const config = { binding, format: 'byok.pi.rpc-launch', version: 1, cwd, policy: { mode: 'auto' },
+  const config = { binding, format: 'byok.pi.rpc-launch', version: 2, descendantPlan: null, cwd, policy: { mode: 'auto' },
     mcp: { mcpEnv: {}, mcpServers: {}, observation: {}, toolImplementations: {}, permissionMode: 'auto' } };
   const configPath = join(root, 'config.json');
   const serialized=serializePiHostConfig(config);
@@ -48,7 +48,7 @@ describe('SDK ordinary Pi RPC entry', () => {
       for (const argv of [[], ['--config','relative','--mode','rpc'], ['--config','/x','--mode','rpc','--extension','/x'], ['--config','/x','--mode','rpc','--config','/y'], ['--config','/x','--mode','rpc','--thinking','bogus']]) {
         try { host.parsePiRpcHostArgs(['--config-digest='+'a'.repeat(64),...argv]); rejected.push(false); } catch { rejected.push(true); }
       }
-      for (const cfg of [{...base, version:2}, {...base, cwd:'relative'}, {...base, extra:true}, {...base, policy:{mode:'readonly'}}]) {
+      for (const cfg of [{...base, version:1}, {...base, cwd:'relative'}, {...base, extra:true}, {...base, policy:{mode:'readonly'}}]) {
         try { host.parsePiRpcHostConfig(cfg); rejected.push(false); } catch { rejected.push(true); }
       }
       console.log(JSON.stringify(rejected));

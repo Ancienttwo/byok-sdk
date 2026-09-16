@@ -507,8 +507,8 @@ export class PiAdapter implements RuntimeAdapter {
             );
             hostConfigPath = path.join(mcpConfigDir!, 'rpc-launch.json');
             const serialized = serializePiHostConfig({
-              binding: runtimeLaunch.binding,
-              format: 'byok.pi.rpc-launch', version: 1, cwd: runtimeLaunch.sessionCwd,
+              binding: runtimeLaunch.binding, descendantPlan: runtimeLaunch.descendantPlan,
+              format: 'byok.pi.rpc-launch', version: 2, cwd: runtimeLaunch.sessionCwd,
               mcp: JSON.parse(await fs.readFile(mcpConfigPath, 'utf8')), policy: input.policy,
             });
             hostConfigDigest = serialized.digest;
@@ -734,8 +734,9 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     configPath = path.join(configDir, 'prepared-launch.json');
     const serialized = serializePiHostConfig({
         binding: input.runtimeLaunch.binding,
+        descendantPlan: input.runtimeLaunch.descendantPlan,
         format: 'byok.pi.prepared-launch',
-        version: 1,
+        version: 2,
         cwd: input.manifestCwd,
         policy: input.policy,
         countedPermissionMode: preparation.permissionMode,
