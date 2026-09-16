@@ -455,7 +455,7 @@ describe('the prepared pi launch entry', () => {
   // `prepared_model_drift` is a LATER fork: it is what the session reports when
   // its own resolved model disagrees with the expectation. The expectation
   // handed in here is checked first, against the model the envelope itself
-  // carries (`verifyPreparedSessionInput`, fork 0.85.1002's
+  // carries (`verifyPreparedSessionInput`, fork 0.85.1005's
   // `dist/core/prepared-session-input.js`), so an expectation nobody counted is
   // reported as `prepared_expectation_mismatch` and never reaches the session
   // comparison. The single code is pinned rather than an alternation, so a fork

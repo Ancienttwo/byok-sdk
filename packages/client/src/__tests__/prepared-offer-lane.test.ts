@@ -107,6 +107,7 @@ const TOOLSET_ID = 'team';
 const SERVER_NAME = 'teamserver';
 const TOOLSET_REVISION = 'team-definition-r1';
 
+/** Synthetic fixture identity: never resolved from the installed fork. */
 const RUNTIME: InputPreparationRuntimeIdentityV1 = {
   packageName: '@byok-sdk/pi-coding-agent',
   packageVersion: '0.85.1002',

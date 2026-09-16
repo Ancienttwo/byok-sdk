@@ -137,6 +137,7 @@ const MCP_CAPABLE: RuntimeCapabilities = {
   permissionModes: ['auto', 'confirm'],
 };
 
+/** Synthetic fixture identity: never resolved from the installed fork. */
 const RUNTIME: InputPreparationRuntimeIdentityV1 = {
   packageName: '@byok-sdk/pi-coding-agent',
   packageVersion: '0.85.1002',
