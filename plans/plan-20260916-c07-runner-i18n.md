@@ -62,3 +62,11 @@ The M1a contract activation supersedes historical M0-only Stop/verification text
 
 
 M2b-1 exact9-file scope registered before product edits. Native1005 lacks public export-html; supervisor narrowed to required asset declaration/preverify and single layout/source inventory. Native1006 item11 public subpath is now a prerequisite for M2b-3; no partial runner vendoring or private native inlining. Resource originals remain the exact pinned native package's assets; SDK build ships verified layout/inventory only. P4 installation and computed share import remain open. Evidence readback _ops/c07-identity-workspace/m2b-1/native1005-resource-inventory.json.
+
+
+### Alpha implementation sequence (Owner approved)
+
+- [ ] Exact227 factory graph registration, original-byte manifest and source provenance.
+- [ ] Real per-entry pre-fix RED with text controls, then sealed refusal implementation.
+- [ ] Dedicated sealed host build/private mapping; one vendor author, unsealed compiler retained, main dist unchanged.
+- [ ] Freeze product/docs and hand to supervisor for unique full gate/real release-pack; carry RPC codegen/S2 tripwire24 residuals.
