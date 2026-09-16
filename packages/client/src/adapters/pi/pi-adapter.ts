@@ -41,6 +41,7 @@ import { mapPermissionPolicyToPiArgs } from './permission-mapping';
 import { BYOK_PI_PERMISSION_MODE } from './subagents-policy-config';
 import { mapPiMessageToAgentEvent, ROUTINE_PI_EVENT_TYPES } from './events';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client';
+import { buildPreparedPromptCommand, PREPARED_PROMPT_COMMAND_ID } from './prepared-prompt-frame';
 import {
   PROVIDER_CREDENTIAL_ENV_NAMES,
   withoutProviderCredentials,
@@ -762,16 +763,11 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
 
   let response: PiRpcMessage;
   try {
-    response = await rpc.send({
-      type: 'prompt_prepared',
-      input: envelope,
-      expected: {
-        digest: preparation.expected.envelopeDigest,
-        model: preparation.expected.model,
-        binding: preparation.expected.binding,
-        toolManifestDigest: preparation.expected.toolManifestDigest,
-      },
-    });
+    // The SAME builder the preparation service measured against the runtime's
+    // RPC frame cap (`daemon/input-preparation-service.ts`). The id is stated,
+    // not left to the transport, so the frame that was admitted is the frame
+    // that is written.
+    response = await rpc.send(buildPreparedPromptCommand(envelope, preparation.expected, PREPARED_PROMPT_COMMAND_ID));
   } catch (cause) {
     rpc.kill();
     await cleanupMcpConfigDir(configDir);

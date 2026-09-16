@@ -10495,8 +10495,20 @@ export type InputPreparationAuthorityOutcomeV1 = {
 export interface InputPreparationAuthorityResolver {
     resolveScope(claim: InputPreparationScopeClaimV1): Promise<InputPreparationAuthorityOutcomeV1>;
 }
-/** The exact endpoint and model one counter call is bound to. */
+/**
+ * The exact INFERENCE target one counter call is bound to.
+ *
+ * `endpoint` is the inference target identity — the `selection.model.baseUrl`
+ * this preparation would be executed against — and NOT the URL of the
+ * counting/tokenizer HTTP call the adapter placed. The two are separate facts:
+ * a counter adapter may count over a tokenizer route, a sibling host, or an
+ * offline tokenizer, and this field says nothing about which. Whether the
+ * counting route is equivalent to the inference route for accounting purposes
+ * is UNPROVEN here and is external evidence work; the SDK asserts only that a
+ * count is bound to the inference identity it was taken for.
+ */
 export interface InputPreparationCounterTargetV1 {
+    /** The inference target identity (`selection.model.baseUrl`). Not the counting call's URL. */
     readonly endpoint: string;
     readonly modelId: string;
 }
@@ -10550,10 +10562,28 @@ export type InputPreparationCounterAuthorityV1 = 'provider' | 'test_fixture';
  * It carries no O (output) or W (whole-request) field, deliberately. The Host
  * holds its own request, and `binding.requestDigest` is what ties this evidence
  * to it.
+ *
+ * `endpoint` here is the INFERENCE target identity (`selection.model.baseUrl`)
+ * the count is bound to — never the URL of the counting/tokenizer HTTP call.
+ * Nothing in this SDK proves the counting route and the inference route are
+ * equivalent; establishing that is external evidence work.
+ *
+ * `method` and `methodVersion` are recorded as SIBLINGS on
+ * {@link InputPreparationCounterEvidenceV1}, deliberately NOT bound into this
+ * providerEvidence object. They are co-recorded, not asserted-about: the
+ * digest/target comparison covers `projectionDigest` and `endpoint`/`modelId`
+ * only. Binding the counting-method identity into providerEvidence would be a
+ * WIRE-SHAPE change and requires an Owner ruling, so it is not done here.
  */
 export interface InputPreparationCounterProviderEvidenceV1 {
     /** SHA-256 hex of the exact counted projection this count was taken over. */
     readonly projectionDigest: string;
+    /**
+     * The INFERENCE target identity this count is bound to — the same
+     * `selection.model.baseUrl` carried by {@link InputPreparationCounterTargetV1},
+     * NOT the URL of the counting/tokenizer HTTP call that produced `asserted`.
+     * The service compares it against the counted target and nothing else.
+     */
     readonly endpoint: string;
     readonly modelId: string;
     readonly asserted: {
@@ -10856,7 +10886,17 @@ export declare const INPUT_PREPARATION_ERROR_CODES: readonly ['input_preparation
  * manifest, and quietly counting a smaller one answers a question nobody
  * asked.
  */
-'permission_mode_denied'];
+'permission_mode_denied', 
+/**
+ * The `prompt_prepared` frame this preparation would be launched with does
+ * not fit one RPC frame the native runtime will accept
+ * (`RPC_MAX_FRAME_BYTES`). The bound is the RUNTIME's, not the operator's, so
+ * it is decided before the operator's per-artifact byte policy: an artifact
+ * that could never be delivered must not be counted, retained or charged
+ * against a scope aggregate. Terminal — the same input recompiles to the same
+ * frame, so nothing here retries.
+ */
+'rpc_frame_too_large'];
 export type InputPreparationErrorCodeV1 = (typeof INPUT_PREPARATION_ERROR_CODES)[number];
 /**
  * The two digests that bind one prepared tool surface, written ONCE here.

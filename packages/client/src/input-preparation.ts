@@ -1076,6 +1076,16 @@ export const INPUT_PREPARATION_ERROR_CODES = [
    * asked.
    */
   'permission_mode_denied',
+  /**
+   * The `prompt_prepared` frame this preparation would be launched with does
+   * not fit one RPC frame the native runtime will accept
+   * (`RPC_MAX_FRAME_BYTES`). The bound is the RUNTIME's, not the operator's, so
+   * it is decided before the operator's per-artifact byte policy: an artifact
+   * that could never be delivered must not be counted, retained or charged
+   * against a scope aggregate. Terminal — the same input recompiles to the same
+   * frame, so nothing here retries.
+   */
+  'rpc_frame_too_large',
 ] as const;
 
 export type InputPreparationErrorCodeV1 = (typeof INPUT_PREPARATION_ERROR_CODES)[number];

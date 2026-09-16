@@ -623,5 +623,13 @@ export const InputPreparationRejectionReasonSchema = z.enum([
    * silently narrowed to one the device would allow.
    */
   'permission_mode_denied',
+  /**
+   * The device compiled the input, then found that the `prompt_prepared` frame
+   * the runtime would have to be handed exceeds the single-frame byte cap that
+   * runtime enforces. The bound belongs to the runtime, not to the operator's
+   * retention policy, so it is decided first and nothing is retained: a
+   * preparation that could never be delivered is not a smaller preparation.
+   */
+  'rpc_frame_too_large',
 ]);
 export type InputPreparationRejectionReason = z.infer<typeof InputPreparationRejectionReasonSchema>;

@@ -106,6 +106,27 @@ and the D2 version number belongs to a separate SDK release contract.
   pack smoke imports the sub-path from the installed tarball and re-checks the
   same substrings there.
 
+- **Added (client, protocol, unreleased contract)** — a preparation is admitted
+  only when the `prompt_prepared` frame it would be launched with fits one RPC
+  frame the runtime accepts. The new non-retryable rejection
+  `rpc_frame_too_large` carries the measured byte length beside the runtime's
+  `RPC_MAX_FRAME_BYTES`.
+
+  The bound belongs to the runtime, not to the operator, so it is decided right
+  after the compile and before the per-artifact retention policy: an envelope
+  that can never be handed to the runtime in one frame can never be launched,
+  and counting, retaining or charging it against a scope aggregate would be
+  work done for an artifact nobody can consume.
+
+  The frame is built rather than estimated. `buildPreparedPromptCommand`
+  (`adapters/pi/prepared-prompt-frame.ts`) is the one place the command shape
+  exists; the preparation service measures its output and the pi launcher
+  writes it, and the command states its own correlation id so the transport
+  adds no byte the measurement did not see. `fitsRpcFrame`,
+  `rpcFrameByteLength` and `RPC_MAX_FRAME_BYTES` are imported from
+  `@earendil-works/pi-coding-agent/rpc-types` — a local copy of the cap would
+  be a second authority over a bound only the runtime enforces.
+
 - **Changed (client, protocol, unreleased contract)** — a prepared input now
   carries the native compiler's structural projection contract instead of an
   opaque coverage label. `InputPreparationArtifactSummaryV1.coverage` is gone,
@@ -997,7 +1018,6 @@ and the D2 version number belongs to a separate SDK release contract.
   messages, executable paths or failed probe streams. Display `present` is
   derived from `available`; wire registration and admission/retry semantics
   remain unchanged. Included in this minor release.
-
 
 ## 0.14.0 / @byok-sdk/keys 0.4.0 — 2026-09-06
 

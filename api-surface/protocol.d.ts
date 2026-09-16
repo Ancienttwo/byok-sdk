@@ -5043,6 +5043,7 @@ export declare const InputPreparationCompletionRequestSchema: z.ZodDiscriminated
         permission_mode_denied: "permission_mode_denied";
         policy_revision_mismatch: "policy_revision_mismatch";
         request_conflict: "request_conflict";
+        rpc_frame_too_large: "rpc_frame_too_large";
         runtime_identity_unavailable: "runtime_identity_unavailable";
         scope_denied: "scope_denied";
         toolsets_unobservable: "toolsets_unobservable";
@@ -5230,6 +5231,7 @@ export declare const InputPreparationReadbackSchema: z.ZodObject<{
         permission_mode_denied: "permission_mode_denied";
         policy_revision_mismatch: "policy_revision_mismatch";
         request_conflict: "request_conflict";
+        rpc_frame_too_large: "rpc_frame_too_large";
         runtime_identity_unavailable: "runtime_identity_unavailable";
         scope_denied: "scope_denied";
         toolsets_unobservable: "toolsets_unobservable";
@@ -6176,6 +6178,7 @@ export declare const InputPreparationRejectionReasonSchema: z.ZodEnum<{
     permission_mode_denied: "permission_mode_denied";
     policy_revision_mismatch: "policy_revision_mismatch";
     request_conflict: "request_conflict";
+    rpc_frame_too_large: "rpc_frame_too_large";
     runtime_identity_unavailable: "runtime_identity_unavailable";
     scope_denied: "scope_denied";
     toolsets_unobservable: "toolsets_unobservable";

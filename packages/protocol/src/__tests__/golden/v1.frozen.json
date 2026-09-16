@@ -25646,7 +25646,8 @@
                 "deadline_elapsed",
                 "launch_boundary_unavailable",
                 "observation_drift",
-                "permission_mode_denied"
+                "permission_mode_denied",
+                "rpc_frame_too_large"
               ]
             }
           },
@@ -26348,7 +26349,8 @@
             "deadline_elapsed",
             "launch_boundary_unavailable",
             "observation_drift",
-            "permission_mode_denied"
+            "permission_mode_denied",
+            "rpc_frame_too_large"
           ]
         },
         "completedAt": {

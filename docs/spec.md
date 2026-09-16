@@ -313,6 +313,20 @@ from the whole admitted policy (`allowTools` and `denyTools`, not merely `mode`)
 so that the day the preparation side counts a native half, the policy that chose
 it is already what gets bound.
 
+A preparation is admitted only if the `prompt_prepared` frame it would be
+launched with fits one RPC frame the runtime accepts. The bound is the
+RUNTIME's (`RPC_MAX_FRAME_BYTES`, imported from the fork rather than restated
+here), so it is decided immediately after the compile and BEFORE the operator's
+per-artifact retention policy: an envelope that can never be handed to the
+runtime in one frame can never be launched, and counting, retaining or charging
+it against a scope aggregate would be work done for an artifact nobody can
+consume. The frame is BUILT, not estimated — one builder produces the bytes the
+service measures and the bytes the launcher writes, and the command states its
+own correlation id so the transport adds nothing the measurement did not see. An
+over-cap frame refuses non-retryably as `rpc_frame_too_large`, carrying the
+measured length beside the cap; the same input recompiles to the same frame, so
+nothing here retries.
+
 ### The prepared offer, and the moment a record is consumed
 
 A prepared Execution reaches a device as `task.offer_prepared`, its own message

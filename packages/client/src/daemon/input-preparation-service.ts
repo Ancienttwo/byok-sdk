@@ -27,6 +27,19 @@ import {
   InputPreparationCompileError,
   type InputPreparationCompiler,
 } from '../adapters/pi/input-preparation';
+import {
+  buildPreparedPromptCommand,
+  PREPARED_PROMPT_COMMAND_ID,
+} from '../adapters/pi/prepared-prompt-frame';
+// The runtime's own frame contract, imported rather than restated. A local copy
+// of the cap or of the length function would be a second authority over a bound
+// only the runtime enforces, and it would go stale silently on a fork bump. The
+// module is dependency-free, so naming it statically costs nothing.
+import {
+  fitsRpcFrame,
+  rpcFrameByteLength,
+  RPC_MAX_FRAME_BYTES,
+} from '@earendil-works/pi-coding-agent/rpc-types';
 import type {
   PreparedToolSurface,
   PreparedToolSurfaceAssembler,
@@ -654,6 +667,43 @@ export function createInputPreparationService(options: InputPreparationServiceOp
         throw new InputPreparationRequestError('unsupported_input', cause.message, { cause });
       }
       throw new InputPreparationRequestError('unsupported_input', 'the prepared input could not be compiled', { cause });
+    }
+
+    // --- RPC frame admission ----------------------------------------------
+    // Decided HERE — after the compile that produces the envelope, and BEFORE
+    // the operator's per-artifact retention bound below — because these two
+    // bounds belong to different authorities and the runtime's comes first. An
+    // envelope that cannot be handed to the runtime in one frame can never be
+    // launched, so counting it, retaining it, or charging it against a scope
+    // aggregate would all be work done for an artifact nobody can consume.
+    //
+    // The frame is BUILT, not estimated: the same builder the launcher writes
+    // with (`adapters/pi/prepared-prompt-frame.ts`), carrying the same stated
+    // command id, so the bytes measured here are the bytes written there.
+    {
+      const command = buildPreparedPromptCommand(
+        compiled.envelope,
+        {
+          envelopeDigest: compiled.envelopeDigest,
+          toolManifestDigest: compiled.toolManifestDigest,
+          model: request.selection.model,
+          binding: {
+            inputIdentity: `${request.source.revision}:${request.source.digest}`,
+            runtimeIdentity: inputPreparationRuntimeIdentityString(options.compiler.runtime),
+            policyIdentity: limits.revision,
+            profileRevision: grant.profileRevision,
+          },
+        },
+        PREPARED_PROMPT_COMMAND_ID,
+      );
+      if (!fitsRpcFrame(command)) {
+        const measuredBytes = rpcFrameByteLength(command);
+        await markFailed(record.recordId, 'rpc_frame_too_large');
+        throw new InputPreparationRequestError(
+          'rpc_frame_too_large',
+          `the prepared prompt frame measures ${measuredBytes} bytes, above the ${RPC_MAX_FRAME_BYTES}-byte single-frame limit the runtime enforces`,
+        );
+      }
     }
 
     // --- retention budget -------------------------------------------------
