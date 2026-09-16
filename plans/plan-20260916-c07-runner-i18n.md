@@ -25,10 +25,10 @@ Prepare the bounded implementation contract in [docs/researches/20260916-c07-run
 - [x] Run docs-only diff/path/workflow checks and record evidence.
 - [x] Supervisor review of this new design-entry packet; two wording requests incorporated (not another product gate).
 - [x] Owner approved M0, SDK M1–M3 and Salesko P4 separately presented scopes (reply「批准」).
-- [x] Produce four-kind/five-edge draft, source inventory and independent byte vectors; keep C pending-with-recommendation.
+- [x] Produce four-kind/five-edge draft, source inventory and independent byte vectors; freeze C composition candidate with unchanged V1 templates and distinct policy/perLaunch.
 - [ ] M0 schema/byte vectors/vendor/recursive-custody gate; product work remains inactive until this passes.
 - [ ] Register exact SDK/P4 product paths, then implement M1–M3 under approved boundaries.
 
 ## Stop / verification
 
-Only the five contract docs plus the two explicitly approved inert JSON vectors are writable under this successor. No production schema/parser/test source/package/lock/golden edits, install, full/pack, external action or Salesko product change. `git diff --check` and `repo-harness run check-task-workflow --strict`; review verifies no accepted invariants weakened. Four-kind/five-edge draft and source inventory are prepared; separate descendant binding C and custody gate remain pending. Hash agreement is not M0 PASS.
+Only the five contract docs plus the two explicitly approved inert JSON vectors are writable under this successor. No production schema/parser/test source/package/lock/golden edits, install, full/pack, external action or Salesko product change. `git diff --check` and `repo-harness run check-task-workflow --strict`; review verifies no accepted invariants weakened. Four-kind/five-edge draft and source inventory are prepared; composition C and custody gate await supervisor acceptance. Hash agreement is not M0 PASS.
