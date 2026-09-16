@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Changed (private todo integration)** — SDK now owns the source-declared MIT
+  `rpiv-todo@2.8.0` integration; the npm todo dependency is removed. The real
+  `rpiv-i18n@2.8.0` library loads only after host usage/config/binding and all nine
+  locale assets pass verification. Attested releases use record asset digests;
+  unconfigured Node installs use a build-generated shipped manifest. Both use
+  `extensions/rpiv-todo/2.8.0/locales`, with no root fallback or warning suppression.
+- **Changed (packaging dependencies)** — promote existing `rpiv-config@2.8.0`,
+  `typebox@1.3.7` and fork `pi-ai@0.85.1005` (npm alias) to direct client edges.
+  Exact `@juicesharp/rpiv-i18n@2.8.0` replaces the npm todo edge:17 to20 dependencies.
+  Existing consumer resolutions/integrities remain unchanged; the two Pi aliases
+  have a same-version drift guard. Pi TUI0.85.1 Text/utils and get-east-asian-width1.6.0
+  are licensed, byte-identical vendored JS, inlined only into the private todo chunk;
+  no pi-tui runtime/dev dependency is added. Sibling declarations check consumers;
+  strict vendor TS and checkJs for the SDK-owned todo entry remain enabled.
+  Locale/provenance assets and complete third-party license notices ship in dist.
+
 - **Breaking (unreleased runtime attestation)** — runtime subjects now require the
   strict Host response `{ record, descendantPolicy, edges }`; bare successful
   runtime records are rejected in one cutover. MCP response bytes and its V1
@@ -17,9 +33,6 @@
 - **Changed (preparation compiler)** — runtime identity must be passed explicitly;
   omitted identity rejects without installed-package discovery. Unconfigured
   development discovery remains explicit at its caller.
-- The i18n dependency change is deferred to the atomic todo integration and
-  verified locale-layout slice. Adding the optional peer alone activates eager
-  locale loading and breaks helper usage output; this slice changes no dependency.
 
 - **Changed (unreleased preparation startup)** — enabled preparation resolves its
   compiler/service once before any control endpoint opens. Configured runtime

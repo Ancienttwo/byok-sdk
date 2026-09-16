@@ -1,6 +1,6 @@
 # Plan: C07 runner/i18n implementation entry
 
-> **Status**: M1a acceptedd9e55a4e; M1b registered
+> **Status**: M1a acceptedd9e55a4e; M1b frozen56f1e569, supervisor gate pending
 > **Task Profile**: implementation
 > **Planning Source**: Owner §96 Q1–Q3 design approval; supervisor6696c211 PASS and design-entry instruction
 > **Task Contract**: `tasks/contracts/20260916-c07-runner-i18n.contract.md`
@@ -32,7 +32,8 @@ Prepare the bounded implementation contract in [docs/researches/20260916-c07-run
 - [x] Freeze M1a product6eec0ab6 separately from docs; local targeted checks passed.
 - [x] Supervisor unique full/pack gate PASS on M1a d9e55a4e; S2 tripwire36 remains the explicit residual.
 - [x] M1b exact source/license inventory and product paths registered while M1a gate runs; no M1b product writes.
-- [ ] M1b: implement atomic i18n dependency/private todo/one locale layout/preverify and validate both roots.
+- [x] M1b implementation frozen56f1e569: private todo, both locale roots, six licensed UI sources and targeted validation.
+- [ ] M1b supervisor complete gate on frozen subject (full suite/real pack); remaining S2 tripwire24 is not containment PASS.
 - [ ] M2 runner: prove all custody execution calls, register paths before enabling descendant dispatch.
 - [ ] M3: functional/packed recursive and locale acceptance; clipboard remains1006 blocker.
 
