@@ -354,7 +354,7 @@ export async function startPiProvider(
   // Reject drift and invalid layout before opening custody. A second assertion
   // below remeasures the actual credential-bearing env at the final boundary.
   await assertImplementationSpawnBinding(binding, actual);
-  const projectionDir = binding.envCommitments.PI_CODING_AGENT_DIR!;
+  const projectionDir = env.PI_CODING_AGENT_DIR!;
   await assertPiProjectionDirectory(projectionDir, binding.envCommitments.PI_CODING_AGENT_DIR!);
   await ensurePiSessionDirectory(options.sessionDir);
   const modelsPath = path.join(projectionDir, 'models.json');

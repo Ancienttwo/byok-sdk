@@ -317,6 +317,17 @@ await runtime.dispose();
       await mkdir(path.dirname(configPath),{recursive:true});
       await writeFile(configPath,JSON.stringify(directConfig));
       try {
+        // Direct defaults require configured auth; keys below selects its auth-free
+        // model explicitly. Keep the earlier model-less refusal observable.
+        await assert.rejects(
+          rpcState(directInvocation.command,directInvocation.args,directInvocation.options),
+          /No models available/,
+        );
+        assert.equal(requests,0,'credential-free direct startup must not call the provider');
+        console.log('[release-pack] direct no-credential modelFallbackMessage refusal passed; requests=0');
+        await writeFile(path.join(directEnv.PI_CODING_AGENT_DIR,'auth.json'),JSON.stringify({
+          'byok-sdk-packed-zai': {type:'api_key',key:'synthetic-local-smoke-not-a-credential'},
+        }),{mode:0o600});
         const state=await rpcState(directInvocation.command,directInvocation.args,directInvocation.options);
         assert.equal(state.messageCount,0);
         assert.equal(await realpath((await readFile(reservedServerCwdMarker,'utf8')).trim()),await realpath(trustedLaunch.dir));
