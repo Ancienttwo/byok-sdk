@@ -17,20 +17,21 @@ set -euo pipefail
 #
 # Produces "<output-dir>/launcher-sea" (or "launcher-sea.exe" on Windows).
 #
-# Why bundle to CommonJS first: @byok-sdk/client ships ESM ("type": "module"),
-# while a Node SEA's injected main script must be a single, fully
-# self-contained file. Node also has a native `"mainFormat": "module"` SEA config for an
-# ESM main script, preserving real `import.meta.resolve` semantics, but it
-# was NOT reliably functional on Node 22.22.3 (the version this was built
-# against) as of this writing -- see the README's "why CJS, not ESM" note.
-# This recipe uses the battle-tested CJS path so it actually works on the
-# Node versions this SDK targets (engines.node >=22.22.0).
+# First bundle as ESM so standard tree-shaking can remove helper branches
+# unused by this launcher before imposing CommonJS parse restrictions.
+# A direct CJS bundle rejects their top-level await even when unused.
+# Then bundle that single intermediate as CJS for the existing SEA loader.
+# Required top-level await still fails; there is no async wrapper or fallback.
+# See the README for the measured Node/OS limits and sideEffects trust boundary.
 
 ENTRY="${1:?usage: build.sh <entry.ts> <output-dir>}"
 OUT_DIR="${2:?usage: build.sh <entry.ts> <output-dir>}"
 mkdir -p "$OUT_DIR"
 
+ESM_BUNDLE="$OUT_DIR/launcher-bundled.mjs"
+ESM_META="$OUT_DIR/launcher-esm.meta.json"
 BUNDLE="$OUT_DIR/launcher-bundled.cjs"
+CJS_META="$OUT_DIR/launcher-cjs.meta.json"
 BLOB="$OUT_DIR/sea-prep.blob"
 SEA_CONFIG="$OUT_DIR/sea-config.json"
 
@@ -65,8 +66,12 @@ else
   echo "FAIL: esbuild is unavailable; install it as a direct devDependency or set ESBUILD_BIN" >&2
   exit 1
 fi
-echo "==> bundling $ENTRY to a single CommonJS file (${ESBUILD_CMD[*]})"
-"${ESBUILD_CMD[@]}" "$ENTRY" --bundle --platform=node --format=cjs --outfile="$BUNDLE"
+echo "==> bundling $ENTRY to a single ESM intermediate (${ESBUILD_CMD[*]})"
+"${ESBUILD_CMD[@]}" "$ENTRY" --bundle --platform=node --format=esm --outfile="$ESM_BUNDLE" --metafile="$ESM_META" --sourcemap
+echo "==> bundling ESM intermediate to CommonJS"
+"${ESBUILD_CMD[@]}" "$ESM_BUNDLE" --bundle --platform=node --format=cjs --outfile="$BUNDLE" --metafile="$CJS_META" --sourcemap
+echo "==> checking final CommonJS parse"
+node --check "$BUNDLE"
 
 # On Windows, node.exe reads sea-config.json's "main"/"output" values
 # through its own native file APIs, NOT through git-bash's MSYS path

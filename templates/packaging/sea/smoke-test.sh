@@ -22,6 +22,7 @@ set -euo pipefail
 #
 # Usage: templates/packaging/sea/smoke-test.sh
 #   (no args -- LAUNCHER_ENTRY / ESBUILD_BIN env vars override the defaults)
+#   SEA_SMOKE_EVIDENCE_DIR optionally retains all artifacts in a new directory.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
@@ -40,8 +41,19 @@ if [ -z "$OS" ]; then
   esac
 fi
 
-WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/byok-sea-smoke.XXXXXX")"
-trap 'rm -rf "$WORK_DIR"' EXIT
+if [ "${SEA_SMOKE_EVIDENCE_DIR+x}" = x ]; then
+  # Never reuse or remove caller files. mkdir (without -p) also rejects an
+  # existing directory or symlink atomically. The parent must already exist.
+  if ! mkdir -m 700 -- "$SEA_SMOKE_EVIDENCE_DIR"; then
+    echo "FAIL: SEA_SMOKE_EVIDENCE_DIR must name a new directory" >&2
+    exit 1
+  fi
+  WORK_DIR="$(cd "$SEA_SMOKE_EVIDENCE_DIR" && pwd -P)"
+  echo "==> retaining smoke evidence in $WORK_DIR"
+else
+  WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/byok-sea-smoke.XXXXXX")"
+  trap 'rm -rf "$WORK_DIR"' EXIT
+fi
 
 echo "==> building"
 "$SCRIPT_DIR/build.sh" "$ENTRY" "$WORK_DIR/build"
@@ -106,12 +118,17 @@ assert_probe() {
     cat "$out"
     exit 1
   fi
-  local json ok kind
+  local json ok kind daemon_status_ok
   json="${line#BYOK_PACKAGING_PROBE }"
   ok="$(node -e "console.log(JSON.parse(process.argv[1]).ok)" "$json")"
   kind="$(node -e "console.log(JSON.parse(process.argv[1]).piDetect.kind)" "$json")"
   if [ "$ok" != "true" ] || [ "$kind" != "$expected_kind" ]; then
     echo "FAIL [$label]: expected ok=true piDetect.kind=$expected_kind, got: $json"
+    exit 1
+  fi
+  daemon_status_ok="$(node -e 'const status = JSON.parse(process.argv[1]).daemonStatus; console.log(status !== null && typeof status === "object" && status.paired === false && status.connected === false)' "$json")"
+  if [ "$daemon_status_ok" != "true" ]; then
+    echo "FAIL [$label]: expected daemonStatus paired=false connected=false, got: $json"
     exit 1
   fi
   echo "PASS [$label]: piDetect.kind=$kind ($json)"
@@ -121,12 +138,14 @@ echo "==> scenario 1: pi absent (isolated dir, no BYOK_PI_BIN)"
 OUT1="$WORK_DIR/out1.log"
 EXIT1=0
 ( cd "$ISOLATED_DIR" && "./$(basename "$RUN_BIN")" ) >"$OUT1" 2>&1 || EXIT1=$?
+printf '%s\n' "$EXIT1" > "$WORK_DIR/out1.exit-code"
 assert_probe "pi-sidecar-missing" "probe-failed" "$OUT1" "$EXIT1"
 
 echo "==> scenario 2: BYOK_PI_BIN stub (pi picked up)"
 OUT2="$WORK_DIR/out2.log"
 EXIT2=0
 ( cd "$ISOLATED_DIR" && BYOK_PI_BIN="$STUB_ENV_VALUE" "./$(basename "$RUN_BIN")" ) >"$OUT2" 2>&1 || EXIT2=$?
+printf '%s\n' "$EXIT2" > "$WORK_DIR/out2.exit-code"
 assert_probe "pi-stub-picked-up" "available" "$OUT2" "$EXIT2"
 
 echo "==> Node SEA packageability smoke: PASS"
