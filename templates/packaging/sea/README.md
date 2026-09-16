@@ -13,6 +13,16 @@ repo and adapt it to your own entry point, signing, and release pipeline.
 ## Prerequisites
 
 - Node.js >= 22.22.0 (this repo and the required pi runtime share this floor).
+  The executable must support the recipe's SEA fuse injection. A local
+  Homebrew Node24.18.0 shared-library build placed the fuse in `libnode`, not
+  its executable: bundling, parsing and blob generation passed, but postject
+  refused the executable and neither smoke scenario ran. That distribution
+  shape has not passed this recipe; do not inject or modify its installed
+  shared library as a workaround.
+  The same frozen recipe passed both real SEA scenarios with the official
+  Node24.18.0 darwin-arm64 distribution, downloaded to a temporary directory
+  and checked against its official SHASUMS256. This local result does not
+  establish Node22 or other-OS compatibility.
 - [`esbuild`](https://esbuild.github.io) to bundle the launcher as ESM, then
   convert that single intermediate to CJS (see "Why ESM then CommonJS" below).
   `examples/packaging` lists `esbuild` as a direct devDependency for exactly

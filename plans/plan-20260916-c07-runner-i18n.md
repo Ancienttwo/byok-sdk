@@ -20,8 +20,9 @@ Prepare the bounded implementation contract in [docs/researches/20260916-c07-run
 ## Task Breakdown
 
 - [x] SEA frozen-artifact analysis accepted as category①, limited to unchanged launcher; full authority bodies and dynamic namespace keys checked, actual SEA execution still unverified.
-- [ ] Supervisor review exact SEA recipe registration in `docs/researches/20260917-sea-two-stage-recipe.md` before recipe writes.
-- [ ] Implement only registered two-stage recipe/verification/docs, freeze separately, then bounded gate including real SEA two-scenario execution; Node22/OS matrix remains explicit until measured.
+- [x] Supervisor accepted exact SEA recipe registration aa6e2afa; product21de7650/docs86bbcdc4 frozen separately, no SDK/vendor/launcher/dependency change.
+- [x] SEA product21de7650 verified on clean86bbcdc4 using supervisor-authorized official Node24.18.0 Darwin: real injection/load and both scenarios passed, daemonStatus preserved, all input hashes unchanged. Initial Homebrew shared-node failure retained; no product change between attempts.
+- [ ] SEA independent bounded gate on frozen recipe/evidence; Node22/OS matrix remains explicit. No push before PASS authorization.
 
 - [x] WIN-CRLF accepted/pushed at87ebe865 after independent bounded gate. Run35157463643 has four existing failures (SEA three OS and Windows lifecycle); Windows Git job does not exercise vendor raw-hash tests, so windowsRunnerVerified=false remains. No workflow/lifecycle/conflict repair in this slice.
 

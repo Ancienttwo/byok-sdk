@@ -1,6 +1,6 @@
 # SEA two-stage recipe registration
 
-Status: registration accepted; recipe product frozen at `21de7650`, real SEA verification pending.
+Status: recipe product frozen at `21de7650`; both real SEA scenarios passed on `86bbcdc4` with official Node24 Darwin after the shared-library environment failure. Independent bounded gate pending.
 Base: `87ebe865f771fa15bc8f4ae3a5febe20a0dc5519`.
 Authority: supervisor accepted category ① on 2026-09-17, limited to the
 existing launcher entry, then accepted registration `aa6e2afa` for local
@@ -134,3 +134,54 @@ Supervisor performs the bounded gate after implementation/freeze. A PASS
 can authorize the milestone branch push under the existing staged-PR scope;
 no merge, ready marking, publication, installed release, native1006 staging,
 dispatch activation or c3/Photon product decision is included.
+
+## First frozen verification — stopped before runtime
+
+One smoke invocation on `86bbcdc4` produced both bundles, passed final CJS
+parsing and generated the SEA blob. Injection then exited1: the expected
+NODE_SEA_FUSE sentinel was absent from the copied executable. Neither
+scenario started. Evidence: `_ops/c07-identity-workspace/sea-recipe/`, with
+actual artifacts retained at `/private/tmp/byok-sea-recipe-gate-zawoyd81/evidence`.
+
+Read-only diagnosis: this Homebrew Node24.18.0 is a68,384-byte executable
+with `node_shared=true`; command resolution and process.execPath identify
+the same file. It contains zero SEA fuse strings, and its copied/unsigned
+50,000-byte executable also contains zero. LC_RPATH resolves libnode.137.dylib,
+which contains the expected sentinel exactly once. The existing recipe
+injects the executable, not a shared library. No library/binary/tool change,
+download, parameter tuning or second SEA attempt was made.
+
+301 tracked inputs (282 vendor files plus launcher/manifests/lock),263 dist
+files and129 resolved dependency package manifests are unchanged. Final ESM
+inventory remains2638 parsed/257 retained, no host contribution, exports[].
+Script syntax, exact command-line comparison, diffcheck and workflow strict
+passed. This establishes the build stages and local environment obstacle;
+it is not SEA load success, a scenario PASS or a general claim about all
+Node24 distributions. A compatible Node executable is required for the
+pending real load/scenario gate. Node22 and cross-OS gaps remain.
+
+## Official Node environment verification
+
+Supervisor authorized one download of the official Node v24.18.0 darwin-arm64
+archive from nodejs.org, verified against its SHASUMS256.txt, into a disposable
+`/private/tmp` directory. Archive SHA256:
+`e1a97e14c99c803e96c7339403282ea05a499c32f8d83defe9ef5ec66f979ed1`;
+official executable SHA256:
+`ee6fb0e015284d83a91e8ec5213f43a157f8a392b58555301682892ba928c04a`.
+Only the verification subprocess environment prepended that bin directory;
+no installation or user/system/current-shell PATH change. Both command
+resolution and process.execPath pointed to this executable, whose fuse was
+present exactly once. Four owned docs edits were saved to a patch, temporarily
+restored to HEAD for clean86bbcdc4 verification, then restored byte-identically.
+
+With unchanged scripts, flags and product subject, real SEA injection/load
+and both original scenarios passed (exit0): missing sidecar probe-failed;
+BYOK_PI_BIN fixture available; both daemonStatus paired=false/connected=false.
+301 tracked inputs/263 dist files/129 dependency manifests remained unchanged.
+Full raw evidence is in `sea-recipe/official-r2/`; artifacts are retained at
+`/private/tmp/byok-sea-recipe-gate-85oejply/evidence`. SEA executable SHA256:
+`7da416d2c9b828bb8aa8f7bf0a6593a0627f7e3bab2f2c84f3dc09f67ba25481`.
+The failed Homebrew run and diagnosis remain separate, unmodified records.
+Two cheap evidence-path controls also reject an existing directory/symlink
+before building and preserve every retained byte. No further SEA run or
+code-fix loop occurred. Independent gate, Node22 and other OSes remain open.
