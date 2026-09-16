@@ -19,7 +19,7 @@ Prepare the bounded implementation contract in [docs/researches/20260916-c07-run
 
 ## Task Breakdown
 
-- [ ] Correct confirmed alpha r2 TestServer read-ahead filtering loss; deterministic HTTP RED→fix guard, unchanged original assertions/timeouts; freeze and one client full before supervisor round3.
+- [x] Correct confirmed alpha r2 TestServer read-ahead filtering loss at7357ebb4; deterministic HTTP2RED→7targetedPASS, original assertions/timeouts unchanged; one frozen client full2763pass/11skip/soleS2RED24. Supervisor round3 pending.
 
 - [x] Read6696c211 independent gate; register compiler default discovery as future removal, preserve product freeze.
 - [x] Prepare schema/version/encoding freeze sheet, P4 interfaces, locale layout and recursive custody/env matrix.
