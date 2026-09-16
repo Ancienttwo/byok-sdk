@@ -31,3 +31,12 @@ Supervisor Fable: **PASS**. This supersedes the earlier pending/FAIL migration s
 Evidence: `_ops/c07-identity-workspace/frozen-client-e1cc484c.log`, `frozen-client-summary.json`, `release-pack-e1cc484c.log`, `pack-e1cc484c/release-manifest.json`, `frozen-packed-edges.json`. Actual pack exits 0, manifest sourceGitSha is e1cc484c9d1cdb328751d0b4b9a226008b17e1e2, all 11 package hashes verified. Packed client and keys both depend exactly on implementation-identity 0.18.0; physical wrong-version tarballs are rejected. Packed implementation bundle is the scanned 24472-byte object (0 hits), not a re-export barrel. Remaining 13 package suites passed. Client root identity export names remain unchanged; attribution matches 0. No push or publication.
 
 P2 is now released by the supervisor. Before product edits, handoff §88 records Owner notice for same-train piEntrypoint/argv0 retirement and contract:729 supersession; Salesko authoring/removal remains P4. Keys final-environment handoff and the minimal executable entry prerequisite are being traced before interface selection.
+
+
+## P2 terminal acceptance and P3 entry (2026-09-16)
+
+Supervisor independent gate **PASS**, frozen source eff16ae45943a9d2d741396b8eccc2bcab4e5b5b. Product P2 is complete; this does not accept P3 containment or the complete C07 train. Client 2628 passed / 11 skipped / one known P3 containment failure; keys 490 passed / four Windows ACL tests not run; identity 13 passed; targeted guards 23 passed. Build/typecheck/API10/version/graph/workflow/diff/attribution pass. Actual release-pack exits 0, manifest sourceGitSha is eff16ae4, all 11 tarball SHA256 values checked. No-auth direct refusal requests=0 and authenticated synthetic direct positive both pass; no real credentials used.
+
+Evidence: `_ops/c07-identity-workspace/independent-eff16ae4/` and `p2b-eff16ae4-gate.md` (unaltered supervisor report). No duplicate full/pack run. Earlier timeout remains unproven load/timing report-only; SystemRoot input hardening and sourcemap warnings remain unchanged.
+
+P3 begins with the actual remaining resolution path and immutable native 1005 boundary. SDK-side containment, release asset selection, export_html path validation and closure prerequisites are in scope. Fork 1006 implementation/publication, scanner-boundary changes, photon feature reduction and Salesko P4 edits are not authorized by this entry. No push/merge/publish.
