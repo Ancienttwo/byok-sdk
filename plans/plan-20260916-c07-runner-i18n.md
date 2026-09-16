@@ -1,6 +1,6 @@
 # Plan: C07 runner/i18n implementation entry
 
-> **Status**: M1b accepted c8645877; M2a accepted be4a7c47; M2b-0 active, M2b blocked on custody/loader boundaries
+> **Status**: M1b accepted c8645877; M2a accepted be4a7c47; M2b-0 accepted 7cabc200; M2b-1/2 engineering slices registered; M2b-3 dispatch gated
 > **Task Profile**: implementation
 > **Planning Source**: Owner §96 Q1–Q3 design approval; supervisor6696c211 PASS and design-entry instruction
 > **Task Contract**: `tasks/contracts/20260916-c07-runner-i18n.contract.md`
@@ -38,9 +38,12 @@ Prepare the bounded implementation contract in [docs/researches/20260916-c07-run
 - [x] M2a shared composition/physical gate + daemon config templates implemented; dispatch remains disabled.
 - [x] M2a supervisor frozen full gate PASSbe4a7c47; client2724/identity74/real pack0, S2only24.
 - [x] M2b-0 wire all20 context/transition vectors, capture10RED, freeze7cabc200 with104shared tests; dispatch remains disabled.
-- [ ] M2b-0 supervisor targeted gate on frozen product/docs (no full/pack).
-- [ ] M2b custody execution table and loader classification accepted before vendor/runner writes.
-- [ ] M2 runner: prove all custody execution calls before enabling descendant dispatch.
+- [x] M2b-0 supervisor targeted gate PASS7cabc200: identity104/client183, zero golden diff, seven authority hashes unchanged; no full/pack.
+- [x] Register M2b-1 export-html, M2b-2 interpreted structured-output, M2b-3 custody/dispatch as separate slices.
+- [ ] M2b-1: freeze exact static export dependency/resource paths and provenance before writes; implement export-html static binding plus declared sealed resources, targeted gate, dispatch remains disabled. Native1006 path-policy prerequisite remains open.
+- [ ] M2b-2: freeze exact structured-output/interpreter/vector paths before writes; prove same schema/input pass/fail and error location, targeted gate, dispatch remains disabled. Counterexample stops for product decision.
+- [ ] M2b-3: prove all five custody execution points and consume accepted M2b-1/2 prerequisites; obtain scripted-workflow Owner disposition before recursive dispatch. This is the only dispatch-enabling slice; full gate.
+- [ ] When binding the real runner edge, evaluate a public refusal-reason union against frozen vocabulary and API golden; report-only until then.
 - [ ] M3: functional/packed recursive and locale acceptance; clipboard remains1006 blocker.
 
 ## Stop / verification
