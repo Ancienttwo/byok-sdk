@@ -181,7 +181,7 @@ exit_criteria:
       "phase": "verification",
       "cost": "normal",
       "evidence_policy": "current_exact",
-      "necessity": "Carries the three final-spawn drift negatives, the loader-injection negative with its control, the escaped-resolution negative and the unchanged keys secret rules.",
+      "necessity": "Carries the three final-spawn drift negatives, the loader-injection negative with its control, the escaped-resolution negative and the unchanged keys secret rules. The P0 regression guards packages/client/src/__tests__/pi-runtime-launch-cwd.test.ts (loader-injection negative plus its load-bearing control) and packages/client/src/__tests__/pi-s2-bundle-resolution.test.ts (escaped-resolution negative) land red ahead of the fix and must be green, control included and unweakened, before P2 and P3 close.",
       "inputs": {
         "env": []
       }
