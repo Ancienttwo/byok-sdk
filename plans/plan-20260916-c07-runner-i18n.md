@@ -40,7 +40,9 @@ Prepare the bounded implementation contract in [docs/researches/20260916-c07-run
 - [x] M2b-0 wire all20 context/transition vectors, capture10RED, freeze7cabc200 with104shared tests; dispatch remains disabled.
 - [x] M2b-0 supervisor targeted gate PASS7cabc200: identity104/client183, zero golden diff, seven authority hashes unchanged; no full/pack.
 - [x] Register M2b-1 export-html, M2b-2 interpreted structured-output, M2b-3 custody/dispatch as separate slices.
-- [ ] M2b-1: freeze exact static export dependency/resource paths and provenance before writes; implement export-html static binding plus declared sealed resources, targeted gate, dispatch remains disabled. Native1006 path-policy prerequisite remains open.
+- [x] M2b-1 exact paths registeredd27be82e; scope narrowed because1005 has no public export-html API.
+- [x] M2b-1 asset prerequisite implemented1ec9ffce: single layout/source inventory + attested child preverify, no resource originals shipped or runner copy; local32asset/host +51closure/host/cwd pass.
+- [ ] M2b-1 frozen targeted supervisor gate. Static import/public export API and output path-policy remain1006 item11; M2b-3 cannot enable without them.
 - [ ] M2b-2: freeze exact structured-output/interpreter/vector paths before writes; prove same schema/input pass/fail and error location, targeted gate, dispatch remains disabled. Counterexample stops for product decision.
 - [ ] M2b-3: prove all five custody execution points and consume accepted M2b-1/2 prerequisites; obtain scripted-workflow Owner disposition before recursive dispatch. This is the only dispatch-enabling slice; full gate.
 - [ ] When binding the real runner edge, evaluate a public refusal-reason union against frozen vocabulary and API golden; report-only until then.

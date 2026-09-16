@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Changed (attested Pi assets)** — attested host startup now requires all five
+  export HTML resources in the measured record assets, with matching bytes and
+  PI_PACKAGE_DIR. Interpreted releases reject a `src` directory that would redirect
+  native asset lookup. Build emits verified layout/source metadata only; no new
+  resource originals or native implementation are distributed. Unconfigured
+  installs keep the native resource contract. Runner static export loading and
+  output path-policy remain native1006 prerequisites; dispatch is not enabled.
+
 - **Fixed (descendant validation)** — compare optional depth environment values
   against typed depth/maxDepth even when the supplied and actual env agree.
   Preserve absent/null projections, distinguish exhausted parent charge budget
