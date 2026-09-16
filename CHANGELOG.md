@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Fixed (descendant validation)** — compare optional depth environment values
+  against typed depth/maxDepth even when the supplied and actual env agree.
+  Preserve absent/null projections, distinguish exhausted parent charge budget
+  from an over-cap declaration, and retain zero-charge runner→print at the cap.
+  Frozen M0 context/transition refusal reasons now execute in tests; recursive
+  dispatch remains disabled.
+
 - **Breaking (internal Pi launch config)** — ordinary/prepared host configs now
   require version2 and an immutable descendantPlan. Daemon resolves each reachable
   kind's own Host record; missing rows or declaration/release drift reject. Version1

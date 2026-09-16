@@ -37,7 +37,8 @@ Prepare the bounded implementation contract in [docs/researches/20260916-c07-run
 - [x] Register M2a exact paths and M2b inactive234-source vendor inventory.
 - [x] M2a shared composition/physical gate + daemon config templates implemented; dispatch remains disabled.
 - [x] M2a supervisor frozen full gate PASSbe4a7c47; client2724/identity74/real pack0, S2only24.
-- [ ] M2b-0 wire all20 context/transition vectors, capture RED, close projection/reason gaps and targeted gate; dispatch remains disabled.
+- [x] M2b-0 wire all20 context/transition vectors, capture10RED, freeze7cabc200 with104shared tests; dispatch remains disabled.
+- [ ] M2b-0 supervisor targeted gate on frozen product/docs (no full/pack).
 - [ ] M2b custody execution table and loader classification accepted before vendor/runner writes.
 - [ ] M2 runner: prove all custody execution calls before enabling descendant dispatch.
 - [ ] M3: functional/packed recursive and locale acceptance; clipboard remains1006 blocker.
