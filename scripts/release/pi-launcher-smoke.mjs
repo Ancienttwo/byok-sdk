@@ -252,24 +252,26 @@ await runtime.dispose();
     BYOK_PI_MCP_CONFIG_PATH: mcpConfigPath, BYOK_PI_PERMISSION_MODE: 'readonly',
     ZAI_API_KEY: 'synthetic-must-not-forward', UNRELATED_CANARY: 'synthetic-must-not-forward',
   };
-  // A missing-config refusal proves Node loaded the installed SDK entry graph
+  // A missing launch-owned digest refusal proves Node loaded the installed SDK entry graph
   // before any native session, provider request or credential lookup can begin.
   const startupEnv = { ...env };
   delete startupEnv.BYOK_PI_MCP_CONFIG_PATH;
   delete startupEnv.BYOK_PI_PERMISSION_MODE;
   const startup = spawnSync(process.execPath, [sdkPiEntry], {cwd:dir,env:startupEnv,encoding:'utf8',timeout:15_000});
   assert.ok(startup.status === 1 || startup.status === 78, startup.stderr || String(startup.error));
-  assert.match(startup.stderr, /byok-pi-rpc: --config must be an absolute path/);
+  assert.match(startup.stderr, /exactly one --config-digest=<sha256> is required/);
   assert.doesNotMatch(startup.stderr, /ERR_MODULE_NOT_FOUND|ERR_PACKAGE_PATH_NOT_EXPORTED|Cannot find (?:module|package)|Unknown file extension/);
-  console.log('[release-pack] installed Node byok-pi-rpc imports reached the exact missing-config refusal; sessions=0');
+  console.log('[release-pack] installed Node byok-pi-rpc imports reached the exact missing-config-digest refusal; sessions=0');
 
   // Capture the actual installed adapter after the explicit resource phase.
   let directInvocation;
   let directConfig;
+  let directConfigBytes;
   const adapter = new PiAdapter({
     spawnFn: (command,args,options) => {
       directInvocation={command,args,options};
-      directConfig=JSON.parse(readFileSync(args[args.indexOf('--config')+1],'utf8'));
+      directConfigBytes=readFileSync(args[args.indexOf('--config')+1],'utf8');
+      directConfig=JSON.parse(directConfigBytes);
       throw new Error('capture before prompt');
     },
   });
@@ -315,7 +317,7 @@ await runtime.dispose();
       assert.equal(directConfig.mcp.launchCwd,trustedLaunch.dir);
       const configPath=directInvocation.args[directInvocation.args.indexOf('--config')+1];
       await mkdir(path.dirname(configPath),{recursive:true});
-      await writeFile(configPath,JSON.stringify(directConfig));
+      await writeFile(configPath,directConfigBytes);
       try {
         // Direct defaults require configured auth; keys below selects its auth-free
         // model explicitly. Keep the earlier model-less refusal observable.
@@ -362,11 +364,13 @@ await runtime.dispose();
     // is read: this profile declares auth_mode:none and start is intercepted.
     let keysInvocation;
     let keysConfig;
+    let keysConfigBytes;
     const keysAdapter=new PiAdapter({
       byokLauncher:{command:process.execPath,args:[path.join(keysRoot,'dist/bin/pi-provider-launcher.js')],profileDbPath,sessionDir},
       spawnFn:(command,args,options)=>{
         keysInvocation={command,args,options};
-        keysConfig=JSON.parse(readFileSync(args[args.indexOf('--config')+1],'utf8'));
+        keysConfigBytes=readFileSync(args[args.indexOf('--config')+1],'utf8');
+        keysConfig=JSON.parse(keysConfigBytes);
         throw new Error('capture before prompt');
       },
     });
@@ -391,7 +395,7 @@ await runtime.dispose();
       assert.equal(keysInvocation.options.env.UNRELATED_CANARY,undefined);
       assert.equal(keysInvocation.options.env.BYOK_PI_MCP_CONFIG_PATH,undefined);
       const configPath=option('--config');
-      await mkdir(path.dirname(configPath),{recursive:true}); await writeFile(configPath,JSON.stringify(keysConfig));
+      await mkdir(path.dirname(configPath),{recursive:true}); await writeFile(configPath,keysConfigBytes);
       await rm(reservedServerCwdMarker,{force:true});
       try {
         const state=await rpcState(keysInvocation.command,keysInvocation.args,{...keysInvocation.options,env:{

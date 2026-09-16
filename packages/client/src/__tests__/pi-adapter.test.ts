@@ -196,6 +196,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
       '--pi-cwd', await trustedCwd(),
       '--pi-fixed-args', '[]',
       '--launch-binding', expect.any(String),
+      '--pi-config-digest', expect.stringMatching(/^[0-9a-f]{64}$/),
       '--',
       '--config', expect.any(String),
       '--mode',
@@ -264,6 +265,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
         '--pi-cwd', await trustedCwd(),
         '--pi-fixed-args', '[]',
         '--launch-binding', expect.any(String),
+      '--pi-config-digest', expect.stringMatching(/^[0-9a-f]{64}$/),
         '--',
         '--config', expect.any(String),
         '--mode',
@@ -504,6 +506,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.args).toEqual([
+      expect.stringMatching(/^--config-digest=[0-9a-f]{64}$/),
       '--config', expect.any(String),
       '--mode',
       'rpc',
@@ -550,6 +553,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     openSessions.push(session);
 
     expect(calls[0]?.args).toEqual([
+      expect.stringMatching(/^--config-digest=[0-9a-f]{64}$/),
       '--config', expect.any(String),
       '--mode',
       'rpc',

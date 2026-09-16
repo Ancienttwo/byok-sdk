@@ -1,3 +1,4 @@
+import { serializePiHostConfig } from './runtime-host-binding';
 import { parsePiMcpEnvironment } from './mcp-environment';
 import { assertImplementationSpawnBinding } from '@byok-sdk/implementation-identity';
 import { resolvePiRuntimeLaunch, type PiRuntimeLaunchResources } from './runtime-launch';
@@ -457,6 +458,7 @@ export class PiAdapter implements RuntimeAdapter {
             });
           }
           let mcpConfigPath: string;
+          let hostConfigDigest: string;
           let hostConfigPath: string;
           try {
             mcpConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-mcp-'));
@@ -504,10 +506,13 @@ export class PiAdapter implements RuntimeAdapter {
               { mode: 0o600 },
             );
             hostConfigPath = path.join(mcpConfigDir!, 'rpc-launch.json');
-            await fs.writeFile(hostConfigPath, JSON.stringify({
+            const serialized = serializePiHostConfig({
+              binding: runtimeLaunch.binding,
               format: 'byok.pi.rpc-launch', version: 1, cwd: runtimeLaunch.sessionCwd,
               mcp: JSON.parse(await fs.readFile(mcpConfigPath, 'utf8')), policy: input.policy,
-            }), { mode: 0o600 });
+            });
+            hostConfigDigest = serialized.digest;
+            await fs.writeFile(hostConfigPath, serialized.bytes, { mode: 0o600 });
           } catch (cause) {
             await cleanupMcpConfigDir(mcpConfigDir);
             throw new RuntimeExecutionFailure({
@@ -518,7 +523,7 @@ export class PiAdapter implements RuntimeAdapter {
           const piArgs = ['--config', hostConfigPath, '--mode', 'rpc', '--no-skills',
             ...(resumeSessionId === undefined ? [] : ['--session', resumeSessionId]), ...mapping.args];
           const launch = runtimeLaunch.binding;
-          const targetArgs = [...(launch.entry === undefined ? [] : [launch.entry]), ...launch.fixedArgv, ...piArgs];
+          const targetArgs = [...(launch.entry === undefined ? [] : [launch.entry]), ...launch.fixedArgv, `--config-digest=${hostConfigDigest}`, ...piArgs];
           let launchCommand = launch.command;
           let launchArgs = targetArgs;
           if (launcherArgs !== undefined) {
@@ -526,7 +531,7 @@ export class PiAdapter implements RuntimeAdapter {
             launchArgs = [...(this.options.byokLauncher!.args ?? []), '--pi-bin', launch.command, ...launcherArgs,
               ...(launch.entry === undefined ? [] : ['--pi-entry', launch.entry]),
               '--pi-cwd', launch.cwd, '--pi-fixed-args', JSON.stringify(launch.fixedArgv),
-              '--launch-binding', JSON.stringify(launch), '--', ...piArgs];
+              '--launch-binding', JSON.stringify(launch), '--pi-config-digest', hostConfigDigest, '--', ...piArgs];
           }
           let rpc: PiRpcClient;
           try {
@@ -722,13 +727,13 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
 
   let configDir: string | undefined;
   let configPath: string;
+  let configDigest: string;
   try {
     configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-prepared-'));
     await fs.chmod(configDir, 0o700).catch(() => {});
     configPath = path.join(configDir, 'prepared-launch.json');
-    await fs.writeFile(
-      configPath,
-      JSON.stringify({
+    const serialized = serializePiHostConfig({
+        binding: input.runtimeLaunch.binding,
         format: 'byok.pi.prepared-launch',
         version: 1,
         cwd: input.manifestCwd,
@@ -750,9 +755,9 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
           launchCwd: mcpLaunch.cwd,
           toolImplementations,
         },
-      }),
-      { mode: 0o600 },
-    );
+      });
+    configDigest = serialized.digest;
+    await fs.writeFile(configPath, serialized.bytes, { mode: 0o600 });
   } catch (cause) {
     await cleanupMcpConfigDir(configDir);
     throw new RuntimeExecutionFailure({
@@ -768,7 +773,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     await reverifyPiRuntimeLaunch(input.runtimeLaunch);
     rpc = new PiRpcClient({
       command: binding.command,
-      args: [...(binding.entry === undefined ? [] : [binding.entry]), ...binding.fixedArgv, '--config', configPath],
+      args: [...(binding.entry === undefined ? [] : [binding.entry]), ...binding.fixedArgv, `--config-digest=${configDigest}`, '--config', configPath],
       cwd: binding.cwd,
       // Prepared retains its existing Pi auth-store credential source.
       env,

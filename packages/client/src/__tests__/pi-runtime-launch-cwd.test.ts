@@ -211,7 +211,7 @@ async function launchThroughAdapter(lane: 'ordinary' | 'prepared', home: string)
       spawnCount++;
       // Do not reconstruct options: the real adapter's cwd/env flow directly to Bun.
       if (lane === 'prepared') {
-        if (!args[0]?.endsWith('byok-pi-prepared.js') || args[1] !== '--config') {
+        if (!args[0]?.endsWith('byok-pi-prepared.js') || !/^--config-digest=[0-9a-f]{64}$/.test(args[1] ?? '') || args[2] !== '--config') {
           throw new Error('prepared marker must replace the actual SDK prepared entry');
         }
         return spawn(BUN_BIN!, [preparedEntry, ...args.slice(1)], options);

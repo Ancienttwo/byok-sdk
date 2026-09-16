@@ -323,13 +323,19 @@ describe.skipIf(!DIST_PRESENT)('the daemon-free dist sub-path closures', () => {
   it('pins the pi package name in dist/adapters/index.js as data, never as a module edge', () => {
     const source = readFileSync(path.join(DIST, 'adapters', 'index.js'), 'utf8');
     // The exception granted above is only defensible while every occurrence is
-    // an assignment of the name to a constant. An import, a re-export, or a
+    // one specifier constant or the exact dependency-alias projection. An import, a re-export, or a
     // dynamic `import()` of it fails here even though the substring is allowed.
     const occurrences = source
       .split('\n')
       .map((line, index) => ({ line: index + 1, text: line.trim() }))
       .filter(({ text }) => text.includes('pi-coding-agent') || text.includes('@earendil-works'));
-    expect(occurrences.map(({ text }) => text)).toEqual(['var PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";']);
+    const manifest = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8'));
+    const alias = manifest.dependencies['@earendil-works/pi-coding-agent'];
+    expect(manifest.byok.piRuntimePin).toBe(alias);
+    expect(occurrences.map(({ text }) => text)).toEqual([
+      `piRuntimePin: ${JSON.stringify(alias)}`,
+      'var PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";',
+    ]);
     expect(
       staticImportSpecifiers(source).filter((specifier) => specifier.includes('pi-coding-agent')),
     ).toEqual([]);

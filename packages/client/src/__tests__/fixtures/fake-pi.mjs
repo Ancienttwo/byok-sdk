@@ -125,6 +125,7 @@ const FLAG_TAKES_VALUE = {
 
 for (let i = 0; i < argv.length; i++) {
   const arg = argv[i];
+  if (/^--config-digest=[0-9a-f]{64}$/.test(arg)) continue;
   if (!arg.startsWith('--')) continue;
   if (!(arg in FLAG_TAKES_VALUE)) {
     process.stderr.write(`Error: Unknown option: ${arg}\n`);

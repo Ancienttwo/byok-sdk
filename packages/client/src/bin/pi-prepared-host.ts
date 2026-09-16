@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { extractPiConfigDigest, readPiHostConfig, requirePiHostBinding, verifyPiHostBinding } from '../adapters/pi/runtime-host-binding';
+import type { ImplementationSpawnBindingV1 } from '@byok-sdk/implementation-identity';
 import { isAbsolute, join } from 'node:path';
 import process from 'node:process';
 import { PERMISSION_MODES, PermissionPolicySchema, type PermissionMode, type PermissionPolicy } from '@byok-sdk/protocol';
@@ -16,7 +17,6 @@ import {
 import { inputPreparationRuntimeIdentityString, type InputPreparationModelV1 } from '../input-preparation';
 import { loaderEnvInjections } from '../daemon/environment';
 import type { McpLaunchAttestation } from '../daemon/trusted-launch-cwd';
-import { resolveInstalledPiRuntimeIdentity } from '../adapters/pi/input-preparation';
 import {
   McpServerPool,
   parseTaskScopedMcpConfig,
@@ -139,6 +139,7 @@ function parseLaunch(value: unknown): McpLaunchAttestation {
 
 /** What the pi adapter writes for exactly one prepared operation. */
 interface PreparedLaunchConfig {
+  readonly binding: ImplementationSpawnBindingV1;
   readonly cwd: string;
   readonly policy: PermissionPolicy;
   readonly countedPermissionMode: PermissionMode;
@@ -150,10 +151,10 @@ interface PreparedLaunchConfig {
   readonly mcp: TaskScopedMcpConfig;
 }
 
-function loadConfig(configPath: string): PreparedLaunchConfig {
+function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(configPath, 'utf8'));
+    parsed = readPiHostConfig(configPath, digest);
   } catch (cause) {
     fail(`${configPath} could not be read as JSON: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
@@ -188,6 +189,7 @@ function loadConfig(configPath: string): PreparedLaunchConfig {
   }
 
   return Object.freeze({
+    binding: requirePiHostBinding(parsed.binding),
     cwd,
     policy: policyResult.data,
     countedPermissionMode: countedPermissionMode as PermissionMode,
@@ -243,14 +245,15 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
     fail(`refusing to launch with loader environment variables set: ${injected.join(', ')}`);
   }
 
-  const config = loadConfig(parseArgs(argv));
+  const owned = extractPiConfigDigest(argv);
+  const config = loadConfig(parseArgs(owned.args), owned.digest);
 
   // Derived from the VERIFIED installed artifact closure, never from the
   // configuration: a runtime identity a caller could state is a fingerprint
   // input a caller could choose.
   let runtimeIdentity: string;
   try {
-    runtimeIdentity = inputPreparationRuntimeIdentityString(resolveInstalledPiRuntimeIdentity());
+    runtimeIdentity = inputPreparationRuntimeIdentityString(await verifyPiHostBinding(config.binding, 'pi-prepared'));
   } catch (cause) {
     fail(`the installed pi closure could not be verified: ${cause instanceof Error ? cause.message : String(cause)}`);
   }

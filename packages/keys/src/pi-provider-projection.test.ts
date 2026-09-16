@@ -23,7 +23,7 @@ describe('buildPiProviderProjection', () => {
   });
 
   it.each([
-    ['--config', './relative.json'], ['--config', '/bad\nconfig.json'],
+    ['--config-digest=' + 'a'.repeat(64)], ['--config-digest', 'a'.repeat(64)], ['--config', './relative.json'], ['--config', '/bad\nconfig.json'],
     ['__byok_sdk_helper', 'pi-rpc'], ['--pi-fixed-args', '[\"spoof\"]'], ['--no-skills', '--no-skills'],
     ['--extension', './relative.js'], ['--extension', 'https://example.com/extension.js'],
     ['--extension', path.resolve('bad\npath.js')], ['--extension'],

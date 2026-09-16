@@ -50,7 +50,7 @@ function binding(projectionDir = '/projection', sessionDir = '/sessions', comman
 }
 function launchFlags(command: string, sessionDir: string, entry?: string): string[] {
   const launch = binding('/projection', sessionDir, command, entry);
-  return ['--launch-binding', JSON.stringify(launch), '--pi-cwd', launch.cwd, '--pi-fixed-args', JSON.stringify(launch.fixedArgv)];
+  return ['--launch-binding', JSON.stringify(launch), '--pi-cwd', launch.cwd, '--pi-fixed-args', JSON.stringify(launch.fixedArgv), '--pi-config-digest', 'a'.repeat(64)];
 }
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -267,7 +267,7 @@ describe('committed Pi spawn boundary', () => {
     const options = parsePiProviderLauncherOptions([
       '--pi-bin', launch.command, '--pi-entry', launch.entry!, '--profile-db', path.join(root, 'db'),
       '--session-dir', sessions, '--provider', 'custom', '--model', 'local-model',
-      '--launch-binding', JSON.stringify(launch), '--pi-cwd', launch.cwd, '--pi-fixed-args', JSON.stringify(launch.fixedArgv),
+      '--launch-binding', JSON.stringify(launch), '--pi-cwd', launch.cwd, '--pi-fixed-args', JSON.stringify(launch.fixedArgv), '--pi-config-digest', 'a'.repeat(64),
       '--', '--config', path.join(root, 'task config.json'), '--mode', 'rpc', '--no-skills',
     ]);
     const provider = parseModelProviderProfile({ ...profile('bearer'), pi_model: PI_MODEL_FIXTURE });
@@ -275,6 +275,30 @@ describe('committed Pi spawn boundary', () => {
     await store.set(modelProviderSecretName('custom'), CANARY);
     return { root, projection, sessions, launch, options, provider, store };
   }
+
+  it('requires one launcher-owned digest and refuses delegated overrides', async () => {
+    const f = await fixture();
+    try {
+      const base = ['--pi-bin',f.launch.command,'--pi-entry',f.launch.entry!,'--profile-db',path.join(f.root,'db'),
+        '--session-dir',f.sessions,'--provider','custom','--model','local-model',...launchFlags(f.launch.command,f.sessions,f.launch.entry)];
+      const withoutDigest = base.slice(0,-2);
+      for (const own of [withoutDigest,[...withoutDigest,'--pi-config-digest','invalid'],[...base,'--pi-config-digest','a'.repeat(64)]]) {
+        expect(()=>parsePiProviderLauncherOptions([...own,'--','--mode','rpc'])).toThrow(/pi-config-digest/);
+      }
+      expect(()=>parsePiProviderLauncherOptions([...base,'--',`--config-digest=${'b'.repeat(64)}`,'--mode','rpc'])).toThrow(/override/);
+    } finally {await fs.rm(f.root,{recursive:true,force:true});}
+  });
+
+  it('programmatic custody entry rejects a delegated config digest before opening credentials', async () => {
+    const f = await fixture();
+    const createSecretStore = vi.fn(()=>f.store);
+    const spawn = vi.fn(()=>new ChildProcess());
+    try {
+      await expect(startPiProvider(f.provider,{...f.options,piArgs:[...f.options.piArgs,`--config-digest=${'b'.repeat(64)}`]},
+        {ambient:{},createSecretStore,spawn})).rejects.toThrow(/argument|config-digest/);
+      expect(createSecretStore).not.toHaveBeenCalled(); expect(spawn).not.toHaveBeenCalled();
+    } finally {await fs.rm(f.root,{recursive:true,force:true});}
+  });
 
   it('requires explicit binding for actual launch, while validate-only stays credential-blind', () => {
     const base = ['--pi-bin', '/opt/pi', '--profile-db', '/db', '--session-dir', '/sessions', '--provider', 'custom', '--model', 'local-model'];
@@ -350,7 +374,7 @@ describe('committed Pi spawn boundary', () => {
       expect(order).toEqual(['gate','secret','gate','spawn']);
       const [command, args, spawnOptions] = spawn.mock.calls[0] as unknown as [string,string[],{cwd:string;env:Record<string,string>}];
       expect(command).toBe(f.launch.command);
-      expect(args.slice(0,3)).toEqual([f.launch.entry,'__byok_sdk_helper','pi-rpc']);
+      expect(args.slice(0,4)).toEqual([f.launch.entry,'__byok_sdk_helper','pi-rpc',`--config-digest=${'a'.repeat(64)}`]);
       expect(spawnOptions.cwd).toBe(f.launch.cwd);
       expect(spawnOptions.env).toEqual({...snapshots[0], PI_PROVIDER_API_KEY:CANARY});
       expect(snapshots[1]).toEqual(spawnOptions.env);

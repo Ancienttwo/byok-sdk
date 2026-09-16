@@ -1,28 +1,35 @@
+import { serializePiHostConfig } from '../adapters/pi/runtime-host-binding';
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 
 const host = resolve(import.meta.dirname, '../bin/pi-rpc-host.ts');
-const entry = resolve(import.meta.dirname, '../bin/byok-pi-rpc.ts');
+
 const bun = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['bun'], { encoding: 'utf8' }).stdout.trim().split(/\r?\n/)[0]!;
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), 'pi-rpc-host-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'pi-rpc-host-')));
   roots.push(root);
   const cwd = join(root, 'session workspace');
   const sealed = join(root, 'sealed');
   mkdirSync(cwd); mkdirSync(sealed);
-  const config = { format: 'byok.pi.rpc-launch', version: 1, cwd, policy: { mode: 'auto' },
+  const entry = join(root, 'host-entry.ts');
+  writeFileSync(entry, `import {runPiRpcHost} from ${JSON.stringify(host)}; runPiRpcHost(process.argv.slice(2)).catch(error=>{console.error(String(error));process.exit(1)});`);
+  const command = spawnSync(bun, ['--print', 'process.execPath'], {encoding:'utf8'}).stdout.trim();
+  const binding = {format:'byok.implementation-spawn',version:1,identity:{kind:'unavailable',reason:'resolver_unconfigured'},
+    command,entry,fixedArgv:[],cwd:sealed,envCommitments:{PI_CODING_AGENT_DIR:join(root,'agent')}};
+  const config = { binding, format: 'byok.pi.rpc-launch', version: 1, cwd, policy: { mode: 'auto' },
     mcp: { mcpEnv: {}, mcpServers: {}, observation: {}, toolImplementations: {}, permissionMode: 'auto' } };
   const configPath = join(root, 'config.json');
-  writeFileSync(configPath, JSON.stringify(config));
+  const serialized=serializePiHostConfig(config);
+  writeFileSync(configPath, serialized.bytes);
   const env = { HOME: root, PATH: process.env.PATH!, PI_CODING_AGENT_DIR: join(root, 'agent'),
     // Deliberately invalid old control authorities must never be consulted.
     BYOK_PI_MCP_CONFIG_PATH: '/does/not/exist', BYOK_PI_PERMISSION_MODE: 'invalid' };
-  return { root, cwd, sealed, configPath, config, env };
+  return { root, cwd, sealed, configPath, config, env, entry, digest:serialized.digest };
 }
 function evaluate(body: string) {
   const result = spawnSync(bun, ['--eval', `import * as host from ${JSON.stringify(host)}; ${body}`], {
@@ -39,7 +46,7 @@ describe('SDK ordinary Pi RPC entry', () => {
       const base = ${JSON.stringify(f.config)};
       const rejected = [];
       for (const argv of [[], ['--config','relative','--mode','rpc'], ['--config','/x','--mode','rpc','--extension','/x'], ['--config','/x','--mode','rpc','--config','/y'], ['--config','/x','--mode','rpc','--thinking','bogus']]) {
-        try { host.parsePiRpcHostArgs(argv); rejected.push(false); } catch { rejected.push(true); }
+        try { host.parsePiRpcHostArgs(['--config-digest='+'a'.repeat(64),...argv]); rejected.push(false); } catch { rejected.push(true); }
       }
       for (const cfg of [{...base, version:2}, {...base, cwd:'relative'}, {...base, extra:true}, {...base, policy:{mode:'readonly'}}]) {
         try { host.parsePiRpcHostConfig(cfg); rejected.push(false); } catch { rejected.push(true); }
@@ -70,7 +77,7 @@ describe('SDK ordinary Pi RPC entry', () => {
 
   it('starts all inline factories under sealed process cwd with explicit config and native RPC', async () => {
     const f = fixture();
-    const child = spawn(bun, [entry, '--config', f.configPath, '--mode', 'rpc', '--no-extensions', '--no-skills', '--provider', 'anthropic', '--model', 'claude-sonnet-4-5', '--thinking', 'high'], {
+    const child = spawn(bun, [f.entry, `--config-digest=${f.digest}`, '--config', f.configPath, '--mode', 'rpc', '--no-extensions', '--no-skills', '--provider', 'anthropic', '--model', 'claude-sonnet-4-5', '--thinking', 'high'], {
       cwd: f.sealed, env: f.env, stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stderr = '';
@@ -106,9 +113,21 @@ describe('SDK ordinary Pi RPC entry', () => {
     }
   }, 25_000);
 
+  it.each(['cwd','binding'] as const)('rejects changed config %s bytes before creating a native session', (field) => {
+    const f = fixture();
+    const changed = field==='cwd' ? {...f.config,cwd:f.cwd+'-changed'} : {...f.config,binding:{...f.config.binding,cwd:f.sealed+'-changed'}};
+    writeFileSync(f.configPath,JSON.stringify(changed));
+    const result = spawnSync(bun,[f.entry,`--config-digest=${f.digest}`,'--config',f.configPath,'--mode','rpc'],
+      {cwd:f.sealed,env:f.env,encoding:'utf8',timeout:15_000});
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('config byte digest mismatch');
+    expect(result.stdout).toBe('');
+    expect(existsSync(join(f.root,'agent','sessions'))).toBe(false);
+  });
+
   it('refuses tool projection drift before starting RPC', () => {
     const f = fixture();
-    const result = spawnSync(bun, [entry, '--config', f.configPath, '--mode', 'rpc', '--tools', 'bash'], {
+    const result = spawnSync(bun, [f.entry, `--config-digest=${f.digest}`, '--config', f.configPath, '--mode', 'rpc', '--tools', 'bash'], {
       cwd:f.sealed, env:f.env, encoding:'utf8', timeout:15_000,
     });
     expect(result.status).toBe(1);

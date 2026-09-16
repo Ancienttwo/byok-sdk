@@ -25,6 +25,7 @@ export interface PiProviderLauncherOptions {
   launchBinding?: ImplementationSpawnBindingV1;
   piCwd?: string;
   piFixedArgs?: readonly string[];
+  piConfigDigest?: string;
   profileDbPath: string;
   /** Carried by the `--provider` flag: the exact local profile to launch. */
   profileRef: ProviderProfileRef;
@@ -50,6 +51,7 @@ export function parsePiProviderLauncherOptions(
     '--launch-binding',
     '--pi-cwd',
     '--pi-fixed-args',
+    '--pi-config-digest',
     '--profile-db',
     '--provider',
     '--model',
@@ -173,7 +175,15 @@ export function parsePiProviderLauncherOptions(
       throw new Error('launcher session/projection directories must match binding commitments');
     }
   }
+  const piConfigDigest = values.get('--pi-config-digest');
+  if ((!validateOnly || piConfigDigest !== undefined) && !/^[0-9a-f]{64}$/u.test(piConfigDigest ?? '')) {
+    throw new Error('--pi-config-digest requires 64 lowercase hexadecimal characters');
+  }
+  if (piArgs.some(arg => arg === '--config-digest' || arg.startsWith('--config-digest='))) {
+    throw new Error('delegated --config-digest override is forbidden');
+  }
   return {
+    ...(piConfigDigest === undefined ? {} : { piConfigDigest }),
     ...(piEntry === undefined ? {} : { piEntry }),
     piBin: required('--pi-bin'),
     ...(launchBinding === undefined ? {} : { launchBinding, piCwd, piFixedArgs }),
@@ -342,7 +352,7 @@ export async function startPiProvider(
   dependencies: PiProviderLaunchDependencies,
 ): Promise<{ child: ChildProcess; cleanup: () => Promise<void> }> {
   const binding = options.launchBinding;
-  if (options.validateOnly || binding === undefined || options.piCwd === undefined || options.piFixedArgs === undefined) {
+  if (options.validateOnly || binding === undefined || options.piCwd === undefined || options.piFixedArgs === undefined || !/^[0-9a-f]{64}$/u.test(options.piConfigDigest ?? '')) {
     throw new Error('Pi launch requires an explicit spawn binding, cwd and fixed args');
   }
   const projection = buildPiProviderProjection(profile);
@@ -372,7 +382,7 @@ export async function startPiProvider(
     finally { await file.close(); }
     const secret = await resolvePiProviderSecret(profile, dependencies.createSecretStore);
     if (secret !== undefined) env[PI_PROJECTED_KEY_ENV] = secret;
-    const childArgs = [...(actual.entry === undefined ? [] : [actual.entry]), ...actual.fixedArgv, ...delegated];
+    const childArgs = [...(actual.entry === undefined ? [] : [actual.entry]), ...actual.fixedArgv, `--config-digest=${options.piConfigDigest}`, ...delegated];
     const spawnChild = dependencies.spawn ?? spawn;
     await assertImplementationSpawnBinding(binding, actual);
     const child = spawnChild(actual.command, childArgs, { env, cwd: actual.cwd, stdio: 'inherit' });

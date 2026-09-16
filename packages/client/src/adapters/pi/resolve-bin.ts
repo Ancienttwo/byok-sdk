@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readClientManifest } from './client-manifest';
+import { readClientPiRuntimePin } from './client-manifest';
 
 /**
  * The module specifier every Pi import and resolution in this package uses.
@@ -68,7 +68,7 @@ function readPackageJson(dir: string): MinimalPackageJson | undefined {
  * `PI_PACKAGE_NAME`.
  */
 export function resolvePiRuntimeIdentity(): PiRuntimeIdentity {
-  const spec = readClientManifest().dependencies?.[PI_PACKAGE_NAME];
+  const spec = readClientPiRuntimePin();
   if (spec === undefined) {
     throw new Error(
       `@byok-sdk/client does not declare a ${PI_PACKAGE_NAME} dependency; reinstall @byok-sdk/client or set BYOK_PI_BIN to a Node 22.22+ pi sidecar`,

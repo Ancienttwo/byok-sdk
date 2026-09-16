@@ -1,0 +1,85 @@
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import {
+  assertImplementationSpawnBinding, parseImplementationSpawnBinding,
+  type ImplementationSpawnBindingV1,
+} from '@byok-sdk/implementation-identity';
+import type { RuntimeLaunchKindV1 } from '../../daemon/tool-implementation-identity';
+import { piRuntimeIdentityFromAttestedRecord, resolveInstalledPiRuntimeIdentity } from './input-preparation';
+import { resolvePiRuntimeIdentity } from './resolve-bin';
+
+const DIGEST_FLAG = '--config-digest=';
+const SHA256 = /^[0-9a-f]{64}$/u;
+
+/** Serialize once; the writer must write these exact bytes without re-encoding. */
+export function serializePiHostConfig(value: unknown): { bytes: Buffer; digest: string } {
+  const bytes = Buffer.from(JSON.stringify(value), 'utf8');
+  return { bytes, digest: createHash('sha256').update(bytes).digest('hex') };
+}
+
+/** This flag belongs to the launcher, not to Pi's delegated option namespace. */
+export function extractPiConfigDigest(argv: readonly string[]): { digest: string; args: string[] } {
+  const candidates = argv.filter(arg => arg === '--config-digest' || arg.startsWith(DIGEST_FLAG));
+  if (candidates.length !== 1) throw new Error('exactly one --config-digest=<sha256> is required');
+  const flag = candidates[0]!;
+  const digest = flag.slice(DIGEST_FLAG.length);
+  if (!flag.startsWith(DIGEST_FLAG) || !SHA256.test(digest)) throw new Error('--config-digest must contain 64 lowercase hexadecimal characters');
+  return { digest, args: argv.filter(arg => arg !== flag) };
+}
+
+/** Checksum and parse consume the same single read, including non-binding fields. */
+export function readPiHostConfig(configPath: string, digest: string): unknown {
+  const bytes = readFileSync(configPath);
+  if (!SHA256.test(digest) || createHash('sha256').update(bytes).digest('hex') !== digest) {
+    throw new Error('Pi host config byte digest mismatch');
+  }
+  return JSON.parse(bytes.toString('utf8')) as unknown;
+}
+
+export function requirePiHostBinding(value: unknown): ImplementationSpawnBindingV1 {
+  const binding = parseImplementationSpawnBinding(value);
+  if (binding === undefined) throw new Error('Pi host config.binding is not a valid implementation spawn binding');
+  return binding;
+}
+
+/** Verify this process before constructing any native session or transport. */
+export async function verifyPiHostBinding(binding: ImplementationSpawnBindingV1, kind: RuntimeLaunchKindV1) {
+  const rawArgs = process.argv.slice(2);
+  extractPiConfigDigest(rawArgs); // Also reject a duplicate outside the handler's tail.
+  const digestIndex = rawArgs.findIndex(arg => arg.startsWith(DIGEST_FLAG));
+  const fixedArgv = rawArgs.slice(0, digestIndex);
+  if (binding.identity.kind === 'attested'
+    && binding.fixedArgv.at(-1) !== kind) {
+    throw new Error('Pi host fixed dispatch prefix differs from runtime kind');
+  }
+  // Bun compiled argv[1] is /$bunfs/root/<entry>, not a separate physical
+  // script. Its measured executable is process.execPath. Interpreted launches
+  // carry their actual script in argv[1]. Both expose task argv at slice(2).
+  const compiled = binding.identity.kind === 'attested' && binding.identity.form === 'compiled-executable';
+  const env = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined));
+  await assertImplementationSpawnBinding(binding, {
+    command: process.execPath, ...(compiled ? {} : { entry: process.argv[1] }),
+    fixedArgv, cwd: process.cwd(), env,
+  });
+  const identity = binding.identity;
+  if (identity.kind === 'unavailable') {
+    // The shared strict parser permits only this explicitly unconfigured case.
+    return resolveInstalledPiRuntimeIdentity();
+  }
+  const manifestAsset = identity.assets?.find(asset => asset.path === 'package.json');
+  if (identity.assetRoot === undefined || manifestAsset === undefined) throw new Error('Pi native package.json must be a declared asset');
+  const bytes = readFileSync(path.join(identity.assetRoot, 'package.json'));
+  if (createHash('sha256').update(bytes).digest('hex') !== manifestAsset.digest) throw new Error('Pi native package.json byte digest mismatch');
+  const manifest = JSON.parse(bytes.toString('utf8')) as Record<string, unknown>;
+  const provenance = identity.nativeProvenance;
+  if (provenance === undefined) throw new Error('Pi nativeProvenance is missing');
+  const pin = resolvePiRuntimeIdentity();
+  if (manifest.name !== provenance.packageName || manifest.name !== pin.name) throw new Error('Pi native packageName differs from record or static SDK pin');
+  if (manifest.version !== provenance.packageVersion || manifest.version !== pin.version) throw new Error('Pi native packageVersion differs from record or static SDK pin');
+  const fork = manifest.byokFork as Record<string, unknown> | undefined;
+  for (const field of ['upstreamBase', 'upstreamCommit', 'forkBuild'] as const) {
+    if (!fork || fork[field] !== provenance[field]) throw new Error(`Pi native byokFork.${field} differs from record`);
+  }
+  return piRuntimeIdentityFromAttestedRecord(identity);
+}

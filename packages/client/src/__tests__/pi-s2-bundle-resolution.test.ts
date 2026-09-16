@@ -36,31 +36,34 @@ const BUNDLE_ENTRY_SOURCE = `
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {readFileSync} from 'node:fs';
+// Both bootstrap and helper use the same fixture-only ownership seam before
+// loading SDK code. It changes uid only within this artifact's release tree;
+// this is not evidence of a privileged production installation.
+const fixtureRelease=path.dirname(process.argv[1]);
+const lstat=fs.lstat.bind(fs);
+if(process.argv[2]!=='capture-untrusted') fs.lstat=async (...args)=>{
+  const stat=await lstat(...args);
+  const target=String(args[0]);
+  return target===fixtureRelease||target.startsWith(fixtureRelease+path.sep)?Object.assign(stat,{uid:0}):stat;
+};
 let sdk;
 try { sdk = await import(${JSON.stringify(CLIENT_DIST)}); } catch (error) {
-  if(process.argv[2]==='capture'){
+  if(process.argv[2]==='capture'||process.argv[2]==='capture-untrusted'){
     const input=JSON.parse(await fs.readFile(process.argv[3],'utf8'));
     await fs.writeFile(input.report,JSON.stringify({stage:'sdk-module-load',error:String(error)}));
   }
   throw error;
 }
-if (process.argv[2] !== 'capture') {
+if (process.argv[2] !== 'capture' && process.argv[2] !== 'capture-untrusted') {
   if (!await sdk.runSdkReservedHelperCommand(process.argv.slice(2))) throw new Error('not an SDK helper invocation');
 } else {
   const input=JSON.parse(await fs.readFile(process.argv[3],'utf8'));
-  // Only uid is simulated: actual bytes, digests, modes and inode/stat tuples
-  // remain real. This is not evidence of a root-owned production installation.
-  const lstat=fs.lstat.bind(fs);
-  fs.lstat=async (...args)=>{
-    const stat=await lstat(...args);
-    const target=String(args[0]);
-    return target===input.release||target.startsWith(input.release+path.sep)?Object.assign(stat,{uid:0}):stat;
-  };
   let capture; let runtime; let stage='prepare'; let resolveCalls=[];
   try {
     const adapter=new sdk.PiAdapter({spawnFn:(command,args,options)=>{
       const configPath=args[args.indexOf('--config')+1];
-      capture={command,args,options,configPath,config:JSON.parse(readFileSync(configPath,'utf8'))};
+      const configBytes=readFileSync(configPath,'utf8');
+      capture={command,args,options,configPath,configBytes,config:JSON.parse(configBytes)};
       throw new Error('S2_CAPTURE_BEFORE_PROMPT');
     }});
     const prepared=await adapter.prepare({offer:{instruction:'Never sent',policy:input.policy},policy:input.policy,
@@ -85,7 +88,7 @@ if (process.argv[2] !== 'capture') {
 
 interface Capture {
   command: string; args: string[]; options: { cwd: string; env: Record<string, string> };
-  configPath: string; config: unknown;
+  configPath: string; configBytes: string; config: unknown;
 }
 interface Report {
   stage: string; error?: string; capture?: Capture;
@@ -101,7 +104,7 @@ async function digest(file: string): Promise<string> {
 
 async function rpcState(capture: Capture): Promise<unknown> {
   await fs.mkdir(path.dirname(capture.configPath), { recursive: true });
-  await fs.writeFile(capture.configPath, JSON.stringify(capture.config));
+  await fs.writeFile(capture.configPath, capture.configBytes);
   return await new Promise((resolve, reject) => {
     // Exact adapter capture, including argv, cwd and environment; never append
     // model flags or replace an entry to make a failed startup pass.
@@ -230,6 +233,7 @@ describe('Pi launch path — S2 release containment', () => {
         const photonTarget = path.join(assetRoot, 'photon_rs_bg.wasm');
         await fs.copyFile(photonSource, photonTarget); await fs.chmod(photonTarget, 0o444);
         assets.push({ path: 'photon_rs_bg.wasm', digest: await digest(photonTarget) });
+        assets.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
         const paths: Record<string, string> = {}; const tier1: string[] = []; const nativeBlockers: string[] = [];
         for (const kind of ['instruction', 'prepared'] as const) {
           const entryKind = kind === 'instruction' ? 'pi-rpc' : 'pi-prepared';
@@ -245,6 +249,16 @@ describe('Pi launch path — S2 release containment', () => {
               forkBuild: fixture.runtime.forkBuild, compilerVersion: fixture.runtime.compilerVersion } };
           await fs.writeFile(inputPath, JSON.stringify({ ...fixture, release, policy: POLICY, kind, env, mcpEnv: { PATH: env.PATH },
             record, projectionRoot: path.join(runDir, 'projections'), report: reportPath }));
+          // With the fixture ownership seam OFF, the real product must reject
+          // this non-root-owned artifact before final spawn. Not an installer test.
+          if (kind === 'instruction' && process.getuid !== undefined && process.getuid() !== 0) {
+            await execFileAsync(interpreter, ['--no-install', bundle, 'capture-untrusted', inputPath], { cwd: runDir, env: bootstrapEnv, timeout: 20_000 });
+            const untrusted = JSON.parse(await fs.readFile(reportPath, 'utf8')) as Report;
+            expect(untrusted.stage).toBe('resolve');
+            expect(untrusted.error).toContain('runtime implementation unavailable: install_record_mismatch');
+            expect(untrusted.capture).toBeUndefined();
+            console.info('S2 ownership negative: actual uid rejected without the fixture uid seam; spawns=0');
+          }
           try { await execFileAsync(interpreter, ['--no-install', bundle, 'capture', inputPath], { cwd: runDir, env: bootstrapEnv, timeout: 20_000 }); }
           catch (error) {
             if (!existsSync(reportPath)) { nativeBlockers.push(`${entryKind} bootstrap failed before adapter evidence: ${String(error)}`); continue; }
