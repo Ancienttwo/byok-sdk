@@ -123,3 +123,23 @@ Supervisor approved replacing the handwritten adapterProcessCwd mirror with the 
 - `_ops/c07-identity-workspace/p2-guard-evidence.json` records byte-for-byte unchanged control and all six safety assertions, checked against e1cc484c. Only subsequent TS annotations/cast were needed for overloaded spawn typing; client typecheck passes (`p2-guard-typecheck-r2.log`).
 
 The test now fails on actual adapter-derived cwd. No timeout, safety assertion or control was weakened. No product fix is included in this commit.
+
+
+### CLAIM C — synthetic keys-to-MCP environment exposure (Owner immediate notice)
+
+Pre-fix real chain keys → native Pi → MCP pool → fake MCP server recorded the **names** PI_PROVIDER_API_KEY, PI_CODING_AGENT_DIR and PI_CODING_AGENT_SESSION_DIR in the MCP grandchild. Only a synthetic credential was used; values were not recorded, no live credentials/deployment were inspected. Existing S1 has the same ambient-env construction by source inference, not a live confirmation. Owner was informed in the Codex thread.
+
+Pre-fix evidence: `_ops/c07-identity-workspace/mcp-env-exposure/probe-result.json` and `report.md`; result SHA256 `4067a3b4b4ad578f8e43b1d80abcaf41e3af926a37a73ed9857d263a08692b5e` unchanged. Post-fix: `_ops/c07-identity-workspace/mcp-env-postfix/probe.stdout.log`, `probe-result.json`, `report.md`; result SHA256 `d4cab80da413eb3f79a55af29256e1ea96500b5a21c33c8f423d276259fa2598`. Production helper dispatch and built private runtime host were exercised. MCP child names are exactly HOME, PATH, MCP_PROBE_LOG; child exit 0. Raw result `secretValueLogged:false` records no secret value; nested `assertions.secretValueLogged:true` means that absence assertion passed (an awkward assertion label, not contradictory evidence). No raw probe output was rewritten.
+
+Correction: one daemon-side Pi MCP projection uses shared credential/directory inventories before measurement and probe; both ordinary and prepared hosts carry it explicitly. Pool rejects missing/credential-bearing/private-directory env and never inherits Pi env. Existing digest vectors without Pi private directories are unchanged. No claim is made about code already installed in production.
+
+
+## P2b local freeze preparation
+
+P1 map: client decides runtime policy and allocates the projection, shared identity measures it, keys alone reads custody, Pi host alone creates the native session. P2 trace: TaskRunner admission → measured launch resources → PiAdapter → (keys when selected) → final shared reverify → sealed process cwd → explicit native session cwd. MCP takes a distinct explicit credential-free environment through measurement/probe/config/pool. P3 decision: preserve the existing credential exclusion semantics and prepared auth-store source, remove ambient MCP inheritance, and ship one private runtime host artifact. Same-uid isolation and full S2 closure remain unproven.
+
+Focused pre-freeze evidence: keys strict ACL 57 pass; shared/client binding 10+7 pass; MCP env 53 pass; latest adapter/prepared-tool-surface/closure 68 pass. The two injection guards and control passed in `p2-entries-built-check.log`; its only failure was the new twentieth closure assertion rejecting the existing rpc-types constants import, corrected to name that exact allowed edge. All original 19 closure assertions remain unchanged. Final frozen aggregate evidence is pending.
+
+Packaging evidence: `p2-packaging-dependency-edges.json` lists nine direct dependencies, locked versions and extension import file/line; `p2-lock-package-set.json` shows all 646 resolved version/integrity tuples unchanged. `p2-node-external-counterexample.log` retains the real Node TS-only entry failure. No createRequire banner, public runtime-host export, source types mapping or splitting change. Private import resolves shipped dist. Windows four real ACL tests are scheduled in the existing non-admin lane but NOT RUN locally. Full S2 containment belongs to P3.
+
+Product freeze: `50b64f45` (54 files); registration/CHANGELOG kept separate. Attribution matches 0. Final required checks and actual pack follow on the documentation freeze head; no push.

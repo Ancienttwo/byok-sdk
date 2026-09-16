@@ -114,11 +114,14 @@ allowed_paths:
   - packages/keys/src/pi-provider-launcher-core.ts
   - packages/keys/src/pi-provider-projection.ts
   - packages/keys/src/*.test.ts
+  - .github/workflows/ci.yml
   - packages/protocol/src/
   - tests/
 ```
 
-Path notes: the keys launcher core and projection live at `packages/keys/src/pi-provider-launcher-core.ts` and `packages/keys/src/pi-provider-projection.ts`, not under `packages/keys/src/bin/`; only `pi-provider-launcher.ts` sits in `bin/`, and the earlier `bin/pi-provider-projection.ts` entry named a path that does not exist. `packages/client/src/bin/` is limited to `byok-pi-*.ts`, their Pi runtime host modules, and `sdk-reserved-helper-runners.ts` for the two callable Pi kinds (existing MCP helper behavior unchanged); `packages/client/tsup.config.ts` is limited to registering the new Pi entry in the existing build; `packages/client/src/daemon/task-runner.ts` is limited to the runtime-subject admission and decline path; `packages/client/src/daemon/prepared-tool-surface.ts` is limited to wrapping the locator's `subject` at its one construction site; `api-surface/client.d.ts` is regenerated output only, never hand-edited; `packages/protocol/src/` is only in scope if the wire record shape is actually touched by the `piEntrypoint` retirement. The MCP server surface is explicitly not in scope.
+Path notes: `.github/workflows/ci.yml` is limited to the existing Windows lowpriv lane running real keys projection ACL positive/negative tests (supervisor condition, no push authorization).
+
+ the keys launcher core and projection live at `packages/keys/src/pi-provider-launcher-core.ts` and `packages/keys/src/pi-provider-projection.ts`, not under `packages/keys/src/bin/`; only `pi-provider-launcher.ts` sits in `bin/`, and the earlier `bin/pi-provider-projection.ts` entry named a path that does not exist. `packages/client/src/bin/` is limited to `byok-pi-*.ts`, their Pi runtime host modules and pi-extension-factories.js/.d.ts ABI boundary, and `sdk-reserved-helper-runners.ts` for the two callable Pi kinds (existing MCP helper behavior unchanged); `packages/client/tsup.config.ts` is limited to registering the new Pi entry in the existing build; `packages/client/src/daemon/task-runner.ts` is limited to the runtime-subject admission and decline path; `packages/client/src/daemon/prepared-tool-surface.ts` also applies the same approved credential-free Pi MCP projection once before stage-1 measurement; stage-2 consumes that exact stored environment; `api-surface/client.d.ts` is regenerated output only, never hand-edited; `packages/protocol/src/` is only in scope if the wire record shape is actually touched by the `piEntrypoint` retirement. MCP tools/policy/identity semantics remain out of scope; the supervisor-approved credential-free explicit mcpEnv source correction is included.
 
 ## Evidence Requirements
 

@@ -1198,6 +1198,38 @@ interpreter, or a bundle that names none), `install_record_mismatch` and
 
 ### Runtime launch descriptions and the sealed asset set
 
+Pi runtime launch (unreleased P2) resolves `{subject: {kind: "runtime", runtimeId: "pi"},
+runtimeEntry: "pi-rpc" | "pi-prepared"}`. The caller supplies no guessed executable.
+The host selects one install record; the SDK derives and measures the command,
+entry, fixed helper prefix, sealed process cwd, native provenance and controlled
+Pi directory values. A configured authority cannot return `resolver_unconfigured`
+to select the unattested development path. The explicit session cwd remains a
+separate task input to the SDK-owned session entry.
+
+The keys lane receives this physical binding through reserved launcher flags.
+Client allocates its empty private projection directory; keys validates path,
+canonical/non-link shape, owner, access policy and emptiness before opening
+credential custody. It rechecks the final target immediately after adding the
+provider credential and before spawn. POSIX requires current uid and 0700;
+Windows requires current token owner SID, a protected DACL and only current-user,
+SYSTEM and Administrators Allow ACEs, and rejects reparse points. These checks
+prove layout/ownership at check time, not isolation from another same-uid process.
+The prepared lane retains its existing Pi auth-store credential source, explicitly
+recorded in the launch description; credential model unification is not claimed.
+
+Pi's MCP environment is projected once at daemon admission using the shared
+fixed credential exclusion set and three controlled Pi directory names. The
+same object goes to identity measurement, probe and config serialization. Pool
+configuration requires `mcpEnv`, refuses private/credential names and never reads
+Pi's ambient environment. Ordinary Pi's own allowed provider environment remains
+separate. Existing MCP vectors without Pi directory variables retain their digest.
+
+The Node package's private `#byok-pi-runtime-host` maps only to shipped dist JS
+and declaration files; it is not a public export. This keeps native Pi evaluation
+behind an explicit helper dispatch without runtime code generation or a loader
+fallback. Windows positive ACL proof for this slice and S2 bundle containment
+remain separate acceptance evidence; local POSIX checks do not prove them.
+
 An install record can be asked about two different subjects, and the SDK makes
 that explicit rather than leaving it to shape inference. A locator carries a
 `subject`: `{ kind: 'mcp-server', toolsetId, serverName }` names one configured
@@ -1879,4 +1911,4 @@ complete ContextPack/Summary, native-runtime, migration or production acceptance
 
 ### Pi credential launcher executable contract
 
-Package-resolved Pi is a JavaScript entry: one internal invocation projection supplies the interpreter and entry to version detection, direct RPC and credential custody. The existing version probe retains its timeout and error-classification ownership. For custody, the adapter passes the current Node executable as `--pi-bin` and the absolute package entry as `--pi-entry`. The launcher prepends this explicit entry to validated Pi arguments before spawning, with no shell, extension-based inference or spawn-failure fallback. Explicit native executable overrides omit `--pi-entry`. This preserves credential isolation and model/profile fencing.
+Pi custody consumes the client-decided runtime launch binding: `--pi-bin`, optional `--pi-entry`, `--pi-fixed-args`, `--pi-cwd` and `--launch-binding` describe the same physical target. Keys validates these fields and the declared projection directory before reading credentials, then reverifies immediately before spawn. The SDK-owned RPC entry receives explicit session cwd in its configuration. A configured install authority selects the interpreter and sealed entry; only the explicitly unconfigured development path uses package/runtime defaults. Version detection retains its existing timeout and error classification. No shell, argv0 fallback or inference from an executable suffix selects the runtime.

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Changed (unreleased Pi launch contract)** — ordinary and prepared Pi use SDK-owned
+  session entries with explicit session cwd and a separately verified process cwd.
+  Keys checks the declared launch and its client-owned empty projection directory
+  before credential access, then revalidates the final spawn after injection.
+  MCP config requires the daemon's credential-free measured `mcpEnv`; it never
+  inherits the credential-bearing Pi environment. Windows ACL evidence for this
+  slice is pending the configured real non-administrator CI lane.
+- **Changed (packaging)** — the TS-only Pi extensions have no Node-loadable package
+  entry, so their source is bundled while nine existing transitive dependencies
+  become explicit client dependencies and stay external: `@mozilla/readability`,
+  `jiti`, `linkedom`, `p-limit`, `promise.try`, `turndown`, `undici`, `unpdf`, `yaml`.
+  Their locked versions and integrity values do not change. The private
+  `#byok-pi-runtime-host` import points to shipped dist JS/declarations and keeps
+  the Pi runtime out of SDK root initialization; it is not a public export.
+
 Deliberately not filed under 0.18.0: none of this is in a published artifact,
 and the D2 version number belongs to a separate SDK release contract.
 
