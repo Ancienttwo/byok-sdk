@@ -1,7 +1,7 @@
 # Plan: C07 runner/i18n implementation entry
 
-> **Status**: Active M0 draft review; product stages gated
-> **Task Profile**: docs-only
+> **Status**: M0 accepted0df88a7f; M1a active
+> **Task Profile**: implementation
 > **Planning Source**: Owner §96 Q1–Q3 design approval; supervisor6696c211 PASS and design-entry instruction
 > **Task Contract**: `tasks/contracts/20260916-c07-runner-i18n.contract.md`
 > **Task Review**: `tasks/reviews/20260916-c07-runner-i18n.review.md`
@@ -26,9 +26,16 @@ Prepare the bounded implementation contract in [docs/researches/20260916-c07-run
 - [x] Supervisor review of this new design-entry packet; two wording requests incorporated (not another product gate).
 - [x] Owner approved M0, SDK M1–M3 and Salesko P4 separately presented scopes (reply「批准」).
 - [x] Produce four-kind/five-edge draft, source inventory and independent byte vectors; freeze C composition candidate with unchanged V1 templates and distinct policy/perLaunch.
-- [ ] M0 schema/byte vectors/vendor/recursive-custody gate; product work remains inactive until this passes.
-- [ ] Register exact SDK/P4 product paths, then implement M1–M3 under approved boundaries.
+- [x] M00df88a7f accepted; custody execution obligations remain explicit M1 enablement gates.
+- [x] Register exact SDK M1a declaration/dependency/compiler/test paths; P4 remains separate.
+- [ ] M1a: strict runtime wrapper/four-kind locator, immutable measured declaration, unchanged MCP, explicit compiler identity, exact i18n dependency/lock.
+- [ ] Freeze M1a product and registration separately, then supervisor full gate.
+- [ ] M1b/M2: prove all custody execution calls, register paths before enabling descendant dispatch.
+- [ ] M3: functional/packed recursive and locale acceptance; clipboard remains1006 blocker.
 
 ## Stop / verification
 
 Only the five contract docs plus the two explicitly approved inert JSON vectors are writable under this successor. No production schema/parser/test source/package/lock/golden edits, install, full/pack, external action or Salesko product change. `git diff --check` and `repo-harness run check-task-workflow --strict`; review verifies no accepted invariants weakened. Four-kind/five-edge draft and source inventory are prepared; composition C and custody gate await supervisor acceptance. Hash agreement is not M0 PASS.
+
+## Active implementation boundary
+The M1a contract activation supersedes historical M0-only Stop/verification text above. Only its enumerated paths are active; no runner/print dispatch or unproved recursive budget path is enabled. Root owns all edits including manifests/lock/goldens; read-only explorer maps impact.
