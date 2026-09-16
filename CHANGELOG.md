@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **Breaking (unreleased runtime attestation)** — runtime subjects now require the
+  strict Host response `{ record, descendantPolicy, edges }`; bare successful
+  runtime records are rejected in one cutover. MCP response bytes and its V1
+  validator remain unchanged. The shared `resolveToolImplementationIdentity`
+  API is MCP-only; `resolveRuntimeImplementation` retains the measured identity
+  with immutable policy and edges, using the same physical measurement code.
+- **Added (public Host types)** — client root re-exports `RuntimeEntryV1`,
+  `RuntimeDescendantPolicyV1`, `RuntimeDescendantEdgeV1`,
+  `RuntimeImplementationRecordV1`, and `RuntimeImplementationResolutionV1`.
+  All previous identity export names remain. Four locator kinds are declared;
+  runner/print dispatch explicitly refuses until recursive custody gates pass.
+  Pi runtime launch resources now retain the measured declaration.
+- **Changed (preparation compiler)** — runtime identity must be passed explicitly;
+  omitted identity rejects without installed-package discovery. Unconfigured
+  development discovery remains explicit at its caller.
+- The i18n dependency change is deferred to the atomic todo integration and
+  verified locale-layout slice. Adding the optional peer alone activates eager
+  locale loading and breaks helper usage output; this slice changes no dependency.
+
 - **Changed (unreleased preparation startup)** — enabled preparation resolves its
   compiler/service once before any control endpoint opens. Configured runtime
   authority must attest the prepared entry and match the static native pin;
