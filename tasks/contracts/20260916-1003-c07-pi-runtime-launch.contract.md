@@ -87,6 +87,7 @@ allowed_paths:
   - docs/spec.md
   - CHANGELOG.md
   - packages/implementation-identity/
+  - packages/client/tsup.config.ts
   - packages/client/package.json
   - packages/keys/package.json
   - packages/client/src/index.ts
@@ -117,7 +118,7 @@ allowed_paths:
   - tests/
 ```
 
-Path notes: the keys launcher core and projection live at `packages/keys/src/pi-provider-launcher-core.ts` and `packages/keys/src/pi-provider-projection.ts`, not under `packages/keys/src/bin/`; only `pi-provider-launcher.ts` sits in `bin/`, and the earlier `bin/pi-provider-projection.ts` entry named a path that does not exist. `packages/client/src/bin/` is limited to `byok-pi-*.ts`; `packages/client/src/daemon/task-runner.ts` is limited to the runtime-subject admission and decline path; `packages/client/src/daemon/prepared-tool-surface.ts` is limited to wrapping the locator's `subject` at its one construction site; `api-surface/client.d.ts` is regenerated output only, never hand-edited; `packages/protocol/src/` is only in scope if the wire record shape is actually touched by the `piEntrypoint` retirement. The MCP server surface is explicitly not in scope.
+Path notes: the keys launcher core and projection live at `packages/keys/src/pi-provider-launcher-core.ts` and `packages/keys/src/pi-provider-projection.ts`, not under `packages/keys/src/bin/`; only `pi-provider-launcher.ts` sits in `bin/`, and the earlier `bin/pi-provider-projection.ts` entry named a path that does not exist. `packages/client/src/bin/` is limited to `byok-pi-*.ts`, their Pi runtime host modules, and `sdk-reserved-helper-runners.ts` for the two callable Pi kinds (existing MCP helper behavior unchanged); `packages/client/tsup.config.ts` is limited to registering the new Pi entry in the existing build; `packages/client/src/daemon/task-runner.ts` is limited to the runtime-subject admission and decline path; `packages/client/src/daemon/prepared-tool-surface.ts` is limited to wrapping the locator's `subject` at its one construction site; `api-surface/client.d.ts` is regenerated output only, never hand-edited; `packages/protocol/src/` is only in scope if the wire record shape is actually touched by the `piEntrypoint` retirement. The MCP server surface is explicitly not in scope.
 
 ## Evidence Requirements
 
