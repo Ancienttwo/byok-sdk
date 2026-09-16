@@ -258,8 +258,8 @@ await runtime.dispose();
   delete startupEnv.BYOK_PI_MCP_CONFIG_PATH;
   delete startupEnv.BYOK_PI_PERMISSION_MODE;
   const startup = spawnSync(process.execPath, [sdkPiEntry], {cwd:dir,env:startupEnv,encoding:'utf8',timeout:15_000});
-  assert.ok(startup.status === 1 || startup.status === 78, startup.stderr || String(startup.error));
-  assert.match(startup.stderr, /exactly one --config-digest=<sha256> is required/);
+  assert.equal(startup.status, 78, startup.stderr || String(startup.error));
+  assert.match(startup.stderr, /^byok-pi-rpc: exactly one --config-digest=<sha256> is required\n$/);
   assert.doesNotMatch(startup.stderr, /ERR_MODULE_NOT_FOUND|ERR_PACKAGE_PATH_NOT_EXPORTED|Cannot find (?:module|package)|Unknown file extension/);
   console.log('[release-pack] installed Node byok-pi-rpc imports reached the exact missing-config-digest refusal; sessions=0');
 

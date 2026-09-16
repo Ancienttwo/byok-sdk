@@ -245,7 +245,7 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
     fail(`refusing to launch with loader environment variables set: ${injected.join(', ')}`);
   }
 
-  const owned = extractPiConfigDigest(argv);
+  const owned = extractPiConfigDigest(argv, fail);
   const config = loadConfig(parseArgs(owned.args), owned.digest);
 
   // Derived from the VERIFIED installed artifact closure, never from the
@@ -253,7 +253,7 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
   // input a caller could choose.
   let runtimeIdentity: string;
   try {
-    runtimeIdentity = inputPreparationRuntimeIdentityString(await verifyPiHostBinding(config.binding, 'pi-prepared'));
+    runtimeIdentity = inputPreparationRuntimeIdentityString(await verifyPiHostBinding(config.binding, 'pi-prepared', fail));
   } catch (cause) {
     fail(`the installed pi closure could not be verified: ${cause instanceof Error ? cause.message : String(cause)}`);
   }

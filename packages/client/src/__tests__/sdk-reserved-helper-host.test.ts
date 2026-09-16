@@ -92,17 +92,40 @@ describe('SDK-reserved helper host composition', () => {
     const caller = await fixture('prepared-caller.ts', `
       import { runPiPreparedHost } from ${JSON.stringify(hostPath)};
       console.log('imported');
-      try { await runPiPreparedHost(['--config', 'relative']); }
+      try { await runPiPreparedHost(['--config-digest='+'a'.repeat(64), '--config', 'relative']); }
       catch (error) { console.error(error.message); process.exitCode = 1; }
     `);
     const env = {PATH:process.env.PATH!, HOME:process.env.HOME!};
     const callable = spawnSync('bun', [caller], {env,encoding:'utf8',timeout:15_000});
-    const thin = spawnSync('bun', [binPath, '--config', 'relative'], {env,encoding:'utf8',timeout:15_000});
+    const thin = spawnSync('bun', [binPath, `--config-digest=${'a'.repeat(64)}`, '--config', 'relative'], {env,encoding:'utf8',timeout:15_000});
     expect(callable.status).toBe(78);
     expect(callable.stdout.trim()).toBe('imported');
-    expect(callable.stderr).toContain('--config must be an absolute path');
+    expect(callable.stderr).toBe('byok-pi-prepared: --config must be an absolute path\n');
     expect(thin.status).toBe(78);
-    expect(thin.stderr).toContain('--config must be an absolute path');
+    expect(thin.stderr).toBe('byok-pi-prepared: --config must be an absolute path\n');
+  });
+
+  it.each((['pi-rpc', 'pi-prepared'] as const).flatMap(kind => [
+    { kind, label: 'missing', argv: [], reason: 'exactly one --config-digest=<sha256> is required' },
+    { kind, label: 'duplicate', argv: [`--config-digest=${'a'.repeat(64)}`, `--config-digest=${'a'.repeat(64)}`], reason: 'exactly one --config-digest=<sha256> is required' },
+    { kind, label: 'malformed', argv: [`--config-digest=${'A'.repeat(64)}`], reason: '--config-digest must contain 64 lowercase hexadecimal characters' },
+  ]))('$kind reports $label digest usage identically from callable and thin bin', async ({ kind, argv, reason }) => {
+    const exportName = kind === 'pi-rpc' ? 'runPiRpcHost' : 'runPiPreparedHost';
+    const hostPath = path.resolve(import.meta.dirname, `../bin/${kind}-host.ts`);
+    const binPath = path.resolve(import.meta.dirname, `../bin/byok-${kind}.ts`);
+    const caller = await fixture(`${kind}-digest-caller.ts`, `
+      import { ${exportName} } from ${JSON.stringify(hostPath)};
+      console.log('imported');
+      try { await ${exportName}(process.argv.slice(2)); }
+      catch (error) { console.error(error.stack); process.exitCode = 1; }
+    `);
+    const env = { PATH: process.env.PATH!, HOME: process.env.HOME! };
+    for (const [entry, expectedStdout] of [[caller, 'imported\n'], [binPath, '']] as const) {
+      const result = spawnSync('bun', [entry, ...argv], { env, encoding: 'utf8', timeout: 15_000 });
+      expect(result.status, `${kind} ${entry} ${argv.join(' ')}`).toBe(78);
+      expect(result.stdout).toBe(expectedStdout);
+      expect(result.stderr).toBe(`byok-${kind}: ${reason}\n`);
+    }
   });
 
   /**

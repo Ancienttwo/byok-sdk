@@ -48,6 +48,12 @@ function fail(message: string): never {
   throw new Error(`byok-pi-rpc: ${message}`);
 }
 
+/** A callable host owns CLI usage errors; thin bins must not reformat them. */
+function failUsage(message: string): never {
+  process.stderr.write(`byok-pi-rpc: ${message}\n`);
+  process.exit(78); // EX_CONFIG, identical to the prepared helper contract.
+}
+
 export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail('config must be an object');
   const raw = value as Record<string, unknown>;
@@ -68,8 +74,10 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   return { format: 'byok.pi.rpc-launch', version: 1, binding: requirePiHostBinding(raw.binding), cwd: raw.cwd, mcp, policy: policy.data };
 }
 
-export function parsePiRpcHostArgs(argv: readonly string[]): PiRpcHostArgs {
-  const owned = extractPiConfigDigest(argv);
+export function parsePiRpcHostArgs(
+  argv: readonly string[], failDigest?: (message: string) => never,
+): PiRpcHostArgs {
+  const owned = extractPiConfigDigest(argv, failDigest);
   argv = owned.args;
   const values = new Map<string, string>();
   const flags = new Set<string>();
@@ -128,9 +136,9 @@ export async function runPiRpcHost(argv: readonly string[]): Promise<void> {
   if (process.execArgv.length > 0) fail('refusing non-empty interpreter argv');
   const injected = loaderEnvInjections(process.env);
   if (injected.length > 0) fail(`refusing loader environment variables: ${injected.join(', ')}`);
-  const args = parsePiRpcHostArgs(argv);
+  const args = parsePiRpcHostArgs(argv, failUsage);
   const config = parsePiRpcHostConfig(readPiHostConfig(args.configPath, args.configDigest));
-  await verifyPiHostBinding(config.binding, 'pi-rpc');
+  await verifyPiHostBinding(config.binding, 'pi-rpc', failUsage);
   // The policy is the single authority. Delegated tool flags must be its exact
   // projection, including absence; a stale or widened projection is refused.
   const mapping = mapPermissionPolicyToPiArgs(config.policy);

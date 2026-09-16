@@ -19,12 +19,15 @@ export function serializePiHostConfig(value: unknown): { bytes: Buffer; digest: 
 }
 
 /** This flag belongs to the launcher, not to Pi's delegated option namespace. */
-export function extractPiConfigDigest(argv: readonly string[]): { digest: string; args: string[] } {
+export function extractPiConfigDigest(
+  argv: readonly string[],
+  fail: (message: string) => never = (message) => { throw new Error(message); },
+): { digest: string; args: string[] } {
   const candidates = argv.filter(arg => arg === '--config-digest' || arg.startsWith(DIGEST_FLAG));
-  if (candidates.length !== 1) throw new Error('exactly one --config-digest=<sha256> is required');
+  if (candidates.length !== 1) fail('exactly one --config-digest=<sha256> is required');
   const flag = candidates[0]!;
   const digest = flag.slice(DIGEST_FLAG.length);
-  if (!flag.startsWith(DIGEST_FLAG) || !SHA256.test(digest)) throw new Error('--config-digest must contain 64 lowercase hexadecimal characters');
+  if (!flag.startsWith(DIGEST_FLAG) || !SHA256.test(digest)) fail('--config-digest must contain 64 lowercase hexadecimal characters');
   return { digest, args: argv.filter(arg => arg !== flag) };
 }
 
@@ -44,9 +47,12 @@ export function requirePiHostBinding(value: unknown): ImplementationSpawnBinding
 }
 
 /** Verify this process before constructing any native session or transport. */
-export async function verifyPiHostBinding(binding: ImplementationSpawnBindingV1, kind: RuntimeLaunchKindV1) {
+export async function verifyPiHostBinding(
+  binding: ImplementationSpawnBindingV1, kind: RuntimeLaunchKindV1,
+  failDigest?: (message: string) => never,
+) {
   const rawArgs = process.argv.slice(2);
-  extractPiConfigDigest(rawArgs); // Also reject a duplicate outside the handler's tail.
+  extractPiConfigDigest(rawArgs, failDigest); // Also reject a duplicate outside the handler's tail.
   const digestIndex = rawArgs.findIndex(arg => arg.startsWith(DIGEST_FLAG));
   const fixedArgv = rawArgs.slice(0, digestIndex);
   if (binding.identity.kind === 'attested'
