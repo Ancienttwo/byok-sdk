@@ -73,3 +73,15 @@ Derivation of the `assets` component from the existing shapes, so P1 does not in
 ## Contract path correction
 
 `packages/keys/src/pi-provider-launcher-core.ts` and `packages/keys/src/pi-provider-projection.ts` are the real files; only `pi-provider-launcher.ts` lives under `packages/keys/src/bin/`. The contract's earlier `packages/keys/src/bin/pi-provider-projection.ts` entry named a path that does not exist and has been corrected. Separately, `allowed_paths` still lists `packages/keys/src/__tests__/`, which does not exist either — the keys tests are co-located (`packages/keys/src/pi-provider-launcher-core.test.ts`, `pi-provider-projection.test.ts`). That one is left as-is and reported rather than widened here.
+
+## Allowed-path widening for P1
+
+Two paths P1 actually edits were not in `allowed_paths` and have been added rather than left as silent scope drift.
+
+`packages/client/src/daemon/prepared-tool-surface.ts` — the locator `subject` wrap. Making `ToolImplementationLocatorV1` carry an explicit `subject` moves the flat `toolsetId`/`serverName` pair inside an `mcp-server` subject, and this file holds one of the locator construction sites (`prepared-tool-surface.ts:329`). It is a three-line mechanical wrap of an existing call, not new behaviour; the alternative would be a compatibility shim accepting both locator shapes, which the no-fallback rule forbids. Scope is limited to that one construction site.
+
+`api-surface/client.d.ts` — golden regeneration. The public surface changes (the locator subject, the `asset` reverify subject, the `assets`/`assetStats`/`nativeProvenance` components and the three `deriveRuntimeLaunchDescription` / `runtimeLaunchDescriptionDigest` / `decideRuntimeLaunch` exports), so `bun run check:api-surface` fails until the golden is regenerated. The file is generated output: it is only ever written by `bun run check:api-surface -- --update`, never hand-edited, so listing it does not widen what P1 may design.
+
+## Compiler-version authority after the S2 rebase
+
+P1 was written on the pre-S2 base and introduced its own `NATIVE_COMPILER_VERSION = 1` beside the two native format tags. Rebasing onto the S2 merge tip (`dca26ffc`) brought in `SUPPORTED_PREPARED_COMPILER_VERSION = 2` (`packages/client/src/adapters/pi/input-preparation.ts:92`), which is the projection-contract-v2 authority the compile path already checks the native envelope against (`unsupported_compiler_version`). Two constants naming the same datum in one file is a duplicate authority, so `NATIVE_COMPILER_VERSION` is deleted and `piRuntimeIdentityFromAttestedRecord`'s cross-check now reads `SUPPORTED_PREPARED_COMPILER_VERSION`. The assertion is unchanged in strength — a record declaring any other revision is still refused — and `runtime-launch-description.test.ts` pins the shared constant instead of the literal, with the refusal case built as `SUPPORTED_PREPARED_COMPILER_VERSION + 1` so it cannot silently become the supported value. `NATIVE_ENVELOPE_FORMAT` / `NATIVE_REQUEST_FORMAT` stay: they are this module's own parser tags, not a contract revision, and both identity paths now read them from the one declaration.

@@ -91,7 +91,9 @@ allowed_paths:
   - packages/client/src/sdk-reserved-helper-host.ts
   - packages/client/src/daemon/tool-implementation-identity.ts
   - packages/client/src/daemon/task-runner.ts
+  - packages/client/src/daemon/prepared-tool-surface.ts
   - packages/client/src/__tests__/
+  - api-surface/client.d.ts
   - packages/keys/src/bin/pi-provider-launcher.ts
   - packages/keys/src/pi-provider-launcher-core.ts
   - packages/keys/src/pi-provider-projection.ts
@@ -100,7 +102,7 @@ allowed_paths:
   - tests/
 ```
 
-Path notes: the keys launcher core and projection live at `packages/keys/src/pi-provider-launcher-core.ts` and `packages/keys/src/pi-provider-projection.ts`, not under `packages/keys/src/bin/`; only `pi-provider-launcher.ts` sits in `bin/`, and the earlier `bin/pi-provider-projection.ts` entry named a path that does not exist. `packages/client/src/bin/` is limited to `byok-pi-*.ts`; `packages/client/src/daemon/task-runner.ts` is limited to the runtime-subject admission and decline path; `packages/protocol/src/` is only in scope if the wire record shape is actually touched by the `piEntrypoint` retirement. The MCP server surface is explicitly not in scope.
+Path notes: the keys launcher core and projection live at `packages/keys/src/pi-provider-launcher-core.ts` and `packages/keys/src/pi-provider-projection.ts`, not under `packages/keys/src/bin/`; only `pi-provider-launcher.ts` sits in `bin/`, and the earlier `bin/pi-provider-projection.ts` entry named a path that does not exist. `packages/client/src/bin/` is limited to `byok-pi-*.ts`; `packages/client/src/daemon/task-runner.ts` is limited to the runtime-subject admission and decline path; `packages/client/src/daemon/prepared-tool-surface.ts` is limited to wrapping the locator's `subject` at its one construction site; `api-surface/client.d.ts` is regenerated output only, never hand-edited; `packages/protocol/src/` is only in scope if the wire record shape is actually touched by the `piEntrypoint` retirement. The MCP server surface is explicitly not in scope.
 
 ## Evidence Requirements
 
