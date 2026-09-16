@@ -72,4 +72,5 @@ M2b-1 exact9-file scope registered before product edits. Native1005 lacks public
 - [ ] Freeze product/docs and hand to supervisor for unique full gate/real release-pack; carry RPC codegen/S2 tripwire24 residuals.
 
 - [x] Alpha raw baseline8995a4b1 with9 refusal RED/12controls GREEN; product107f4fb2 explicit refusal + dedicated private sealed artifact,51 focused/typecheck passed.
-- [ ] Alpha frozen complete supervisor gate + real installed release-pack; S2 residual24 remains explicit.
+- [x] Alpha first complete supervisor gate onad6b2fe5: FAIL;8 host driver regressions plus sealed smoke interpreter-argv fixture failure independently diagnosed.
+- [ ] Apply registered three-file test/script correction with unchanged assertions, freeze and obtain one supervisor re-gate; S2 residual24 remains explicit.
