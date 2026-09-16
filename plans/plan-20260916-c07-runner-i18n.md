@@ -44,7 +44,8 @@ Prepare the bounded implementation contract in [docs/researches/20260916-c07-run
 - [x] M2b-1 asset prerequisite implemented1ec9ffce: single layout/source inventory + attested child preverify, no resource originals shipped or runner copy; local32asset/host +51closure/host/cwd pass.
 - [ ] M2b-1 frozen targeted supervisor gate. Static import/public export API and output path-policy remain1006 item11; M2b-3 cannot enable without them.
 - [x] M2b-2 read-only15-row equivalence probe and actual upstream consumer reproduction; four regex counterexamples documented, no product writes.
-- [ ] M2b-2 supervisor review of runtime-guard equivalence and four-row attribution; identify authoritative no-codegen schema preparation or escalate concrete product tradeoff. Product blocked on this design, dispatch remains disabled.
+- [x] M2b-2 supervisor accepted runtime-guard attribution and escalated to Owner: one widening, three classification/timing differences.
+- [ ] Owner select structured-output sealed scope: α explicit feature exclusion (Fable recommendation), β maintained construction-phase no-codegen preparation, or γ upstream API. Product and dispatch remain blocked.
 - [ ] M2b-3: prove all five custody execution points and consume accepted M2b-1/2 prerequisites; obtain scripted-workflow Owner disposition before recursive dispatch. This is the only dispatch-enabling slice; full gate.
 - [ ] When binding the real runner edge, evaluate a public refusal-reason union against frozen vocabulary and API golden; report-only until then.
 - [ ] M3: functional/packed recursive and locale acceptance; clipboard remains1006 blocker.
