@@ -303,7 +303,12 @@ async function lane(options: {
   const attestation = mcpLaunchAttestation(launch);
   const implementation = await resolveToolImplementationIdentity(
     authority,
-    { toolsetId: TOOLSET_ID, serverName: SERVER_NAME, command: serverCommand, args: ['--stdio'], launch: attestation },
+    {
+      subject: { kind: 'mcp-server', toolsetId: TOOLSET_ID, serverName: SERVER_NAME },
+      command: serverCommand,
+      args: ['--stdio'],
+      launch: attestation,
+    },
     LANE_ENV,
     rootOwnedProbe(),
   );

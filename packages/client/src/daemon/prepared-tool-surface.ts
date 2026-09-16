@@ -326,8 +326,7 @@ export async function resolvePreparedToolBinding(
     const implementation = await resolveToolImplementationIdentity(
       deps.toolImplementationAuthority,
       {
-        toolsetId: entry.toolsetId,
-        serverName,
+        subject: { kind: 'mcp-server', toolsetId: entry.toolsetId, serverName },
         command: entry.server.command,
         args: Object.freeze([...(entry.server.args ?? [])]),
         launch,

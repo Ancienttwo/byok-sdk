@@ -146,6 +146,55 @@ export interface ToolImplementationInterpreterV1 {
 }
 
 /**
+ * One file of the release's SEALED ASSET SET: static data the runtime reads at
+ * startup or on demand, which is not code and therefore is not covered by the
+ * artifact's own closure digest.
+ *
+ * It exists because an interpreted release is not one file. Probe p5 measured
+ * that `dist/modes/interactive/theme/{dark,light}.json` is a HARD startup
+ * dependency of the runtime's rpc mode — missing them is an uncaught `initTheme`
+ * ENOENT before any frame — and that the export-html templates plus the photon
+ * `photon_rs_bg.wasm` are lazy dependencies of individual tools. Probe p4
+ * measured that the photon loader falls back to `process.cwd()/photon_rs_bg.wasm`
+ * and that a wasm planted there is opened and instantiated for real. A release
+ * whose assets are neither measured nor pinned is therefore a release whose
+ * behaviour an agent can change without touching a single byte of attested code.
+ *
+ * `path` is RELATIVE to {@link ToolImplementationAttestedV1.assetRoot} and must
+ * stay under it; `digest` is the sha256 hex of the file's bytes. The list is
+ * Host-declared — the SDK never discovers assets — and every entry is measured
+ * at resolve exactly as the artifact is, and re-measured before every spawn.
+ */
+export interface ToolImplementationAssetV1 {
+  readonly path: string;
+  readonly digest: string;
+}
+
+/**
+ * The native runtime's SEMANTIC identity, as the host declares it from the one
+ * exact pin it built the release from plus that build's own inputs.
+ *
+ * Separate from the artifact digest on purpose: the digest says which bytes ran,
+ * and this says which published package, which upstream commit and which fork
+ * build those bytes were produced from. A consumer that must know the compiler
+ * contract — input preparation counts against it — needs the second fact, and
+ * §10.3.1 forbids deriving it from caller text or a version label.
+ *
+ * A writable `package.json` under an agent's HOME is never a source for any of
+ * this. That is the entire reason this component is part of the immutable
+ * install record: a manifest the agent can rewrite would be an execution-identity
+ * authority the agent controls.
+ */
+export interface ToolImplementationNativeProvenanceV1 {
+  readonly packageName: string;
+  readonly packageVersion: string;
+  readonly upstreamBase: string;
+  readonly upstreamCommit: string;
+  readonly forkBuild: number;
+  readonly compilerVersion: number;
+}
+
+/**
  * The filesystem tuple measured at resolve and required to be unchanged at
  * every later spawn. One is measured for the artifact (`installStat`) and, for
  * an `interpreter+bundle`, one for the interpreter (`interpreterStat`).
@@ -210,6 +259,23 @@ export interface ToolImplementationAttestedV1 {
   readonly launchArgv: readonly string[];
   readonly launchCwd: string;
   /**
+   * The release's own asset directory: an absolute, symlink-free directory
+   * every {@link assets} entry is resolved under, and the value the launch
+   * description commits `PI_PACKAGE_DIR` to for a runtime subject.
+   *
+   * Present iff {@link assets} is. Both-or-neither, in both directions: an
+   * asset list with no root names files nothing can resolve, and a root with no
+   * list is a directory nothing measures.
+   */
+  readonly assetRoot?: string;
+  /**
+   * The sealed asset set, sorted by `path` and free of duplicates. See
+   * {@link ToolImplementationAssetV1}.
+   */
+  readonly assets?: readonly ToolImplementationAssetV1[];
+  /** See {@link ToolImplementationNativeProvenanceV1}. */
+  readonly nativeProvenance?: ToolImplementationNativeProvenanceV1;
+  /**
    * SDK-measured at resolve: the digest of the NAMES the child's environment
    * carries, never their values. See
    * {@link toolImplementationLaunchEnvNamesDigest} for the projection it is
@@ -236,6 +302,13 @@ export interface ToolImplementationAttestedV1 {
    * touched mtime, and an interpreter that stopped being root-owned.
    */
   readonly interpreterStat?: ToolImplementationStatTupleV1;
+  /**
+   * SDK-measured at resolve, present iff {@link assets} is, and in the SAME
+   * ORDER. Each sealed asset is bound to its inode for the same reason the
+   * artifact and the interpreter are: a theme JSON that still hashes right but
+   * is a different file at the same name is not the file that was attested.
+   */
+  readonly assetStats?: readonly ToolImplementationStatTupleV1[];
 }
 
 export type ToolImplementationIdentityV1 = ToolImplementationUnavailableV1 | ToolImplementationAttestedV1;
@@ -254,10 +327,47 @@ export const TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED: ToolImplementationUnavai
 // The host authority this SDK declares and never implements
 // ---------------------------------------------------------------------------
 
-/** What the resolver is asked about: one configured server, and where it launches. */
+/**
+ * Every runtime this SDK can ask a host to attest. A closed union, not a
+ * string: a runtime id the SDK does not know is not a runtime whose launch it
+ * can describe, so there is nothing to fall back to.
+ */
+export type RuntimeIdV1 = 'pi';
+
+export const RUNTIME_IDS: readonly RuntimeIdV1[] = Object.freeze(['pi']);
+
+/**
+ * WHAT is being attested, as an explicit discriminated subject rather than a
+ * shape a caller infers.
+ *
+ * There are two, and they are not interchangeable. An `mcp-server` subject
+ * names one configured server inside one toolset: it is addressed by the pair
+ * the daemon already uses everywhere else, and what it attests is the binary
+ * behind a tool. A `runtime` subject names the coding-agent runtime the task
+ * itself executes in: it is addressed by the runtime id alone, because there is
+ * exactly one runtime per task and no toolset owns it.
+ *
+ * The union exists so an MCP locator can never stand in for a runtime locator.
+ * The two carry different contracts — a runtime record additionally declares
+ * the sealed asset set and the native fork provenance, and an unattested
+ * runtime DECLINES the task where an unattested server merely reports itself
+ * unproven — and a subject-less locator would make those two contracts one
+ * shape that the resolver, not this SDK, got to choose between.
+ */
+export type ToolImplementationSubjectV1 =
+  | {
+    readonly kind: 'mcp-server';
+    readonly toolsetId: string;
+    readonly serverName: string;
+  }
+  | {
+    readonly kind: 'runtime';
+    readonly runtimeId: RuntimeIdV1;
+  };
+
+/** What the resolver is asked about: one subject, and where it launches. */
 export interface ToolImplementationLocatorV1 {
-  readonly toolsetId: string;
-  readonly serverName: string;
+  readonly subject: ToolImplementationSubjectV1;
   readonly command: string;
   readonly args: readonly string[];
   readonly launch: McpLaunchAttestation;
@@ -267,9 +377,9 @@ export interface ToolImplementationLocatorV1 {
  * The install record a resolver returns, which is an attested identity MINUS
  * everything a host does not get to assert:
  *
- * - `installStat` / `interpreterStat` — the filesystem tuples this SDK
- *   measures itself. A host that could choose them would be the authority on
- *   whether its own install moved.
+ * - `installStat` / `interpreterStat` / `assetStats` — the filesystem tuples
+ *   this SDK measures itself. A host that could choose them would be the
+ *   authority on whether its own install moved.
  * - `launchEnvNamesDigest` / `loaderEnvValuesDigest` — facts about the exact
  *   environment object THIS SDK will hand to `spawn`. A host does not have
  *   that object: it is `daemon/environment.ts`'s `buildRuntimeEnv` output for
@@ -279,7 +389,7 @@ export interface ToolImplementationLocatorV1 {
  */
 export type ToolImplementationInstallRecordV1 = Omit<
   ToolImplementationAttestedV1,
-  'installStat' | 'interpreterStat' | 'launchEnvNamesDigest' | 'loaderEnvValuesDigest'
+  'installStat' | 'interpreterStat' | 'assetStats' | 'launchEnvNamesDigest' | 'loaderEnvValuesDigest'
 >;
 
 export type ToolImplementationResolutionV1 =
@@ -561,6 +671,74 @@ function validateInterpreter(value: unknown): ToolImplementationInterpreterV1 | 
   });
 }
 
+const ASSET_KEYS = ['path', 'digest'] as const;
+
+/**
+ * The one rule for an asset's relative path, applied before anything is
+ * measured: it must be relative, already normalized, and must not climb.
+ *
+ * `path.normalize` is compared against the declared spelling rather than used
+ * to repair it. A record that says `theme/../../../etc/hosts` is a record that
+ * is wrong about its own release, and rewriting it into something measurable
+ * would be this SDK choosing a file the host did not declare.
+ */
+function normalizedRelativeAssetPath(value: unknown): string | undefined {
+  if (!nonEmptyString(value)) return undefined;
+  if (path.isAbsolute(value)) return undefined;
+  if (path.normalize(value) !== value) return undefined;
+  const segments = value.split(path.sep);
+  if (segments.some((segment) => segment === '' || segment === '.' || segment === '..')) return undefined;
+  return value;
+}
+
+/**
+ * Validate the sealed asset set. Sorted and duplicate-free is REQUIRED rather
+ * than repaired: the list is bound positionally to `assetStats`, and two
+ * spellings of the same set would be two records describing one release.
+ */
+function validateAssets(value: unknown): readonly ToolImplementationAssetV1[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const assets: ToolImplementationAssetV1[] = [];
+  let previous: string | undefined;
+  for (const entry of value) {
+    if (!plainRecord(entry) || !exactKeys(entry, ASSET_KEYS)) return undefined;
+    const relative = normalizedRelativeAssetPath(entry.path);
+    if (relative === undefined) return undefined;
+    if (typeof entry.digest !== 'string' || !SHA256_HEX.test(entry.digest)) return undefined;
+    if (previous !== undefined && relative <= previous) return undefined;
+    previous = relative;
+    assets.push(Object.freeze({ path: relative, digest: entry.digest }));
+  }
+  return Object.freeze(assets);
+}
+
+const NATIVE_PROVENANCE_KEYS = [
+  'packageName',
+  'packageVersion',
+  'upstreamBase',
+  'upstreamCommit',
+  'forkBuild',
+  'compilerVersion',
+] as const;
+
+function validateNativeProvenance(value: unknown): ToolImplementationNativeProvenanceV1 | undefined {
+  if (!plainRecord(value) || !exactKeys(value, NATIVE_PROVENANCE_KEYS)) return undefined;
+  if (!nonEmptyString(value.packageName)) return undefined;
+  if (!nonEmptyString(value.packageVersion)) return undefined;
+  if (!nonEmptyString(value.upstreamBase)) return undefined;
+  if (!nonEmptyString(value.upstreamCommit)) return undefined;
+  if (!Number.isSafeInteger(value.forkBuild)) return undefined;
+  if (!Number.isSafeInteger(value.compilerVersion)) return undefined;
+  return Object.freeze({
+    packageName: value.packageName,
+    packageVersion: value.packageVersion,
+    upstreamBase: value.upstreamBase,
+    upstreamCommit: value.upstreamCommit,
+    forkBuild: value.forkBuild as number,
+    compilerVersion: value.compilerVersion as number,
+  });
+}
+
 const UNAVAILABLE_KEYS = ['kind', 'reason'] as const;
 
 const INSTALL_RECORD_KEYS = [
@@ -575,15 +753,20 @@ const INSTALL_RECORD_KEYS = [
   'entry',
   'launchArgv',
   'launchCwd',
+  'assetRoot',
+  'assets',
+  'nativeProvenance',
 ] as const;
 
 /**
- * The four facts this SDK measures and seals onto a record. `interpreterStat`
- * is present iff the record names an interpreter; the other three always are.
+ * The facts this SDK measures and seals onto a record. `interpreterStat` is
+ * present iff the record names an interpreter and `assetStats` iff it declares
+ * assets; the other two always are.
  */
 const SEALED_KEYS = [
   'installStat',
   'interpreterStat',
+  'assetStats',
   'launchEnvNamesDigest',
   'loaderEnvValuesDigest',
 ] as const;
@@ -619,6 +802,24 @@ function validateInstallRecord(
     return 'not_a_record';
   }
   if (value.entry !== undefined && !nonEmptyString(value.entry)) return 'not_a_record';
+  // The sealed asset set, both-or-neither with its root. A root that is not
+  // absolute names a directory this SDK would have to resolve against
+  // something, and there is nothing it may legitimately resolve against.
+  let assetRoot: string | undefined;
+  let assets: readonly ToolImplementationAssetV1[] | undefined;
+  if (value.assetRoot !== undefined || value.assets !== undefined) {
+    if (value.assetRoot === undefined || value.assets === undefined) return 'not_a_record';
+    if (!nonEmptyString(value.assetRoot) || !path.isAbsolute(value.assetRoot)) return 'not_a_record';
+    if (path.normalize(value.assetRoot) !== value.assetRoot) return 'not_a_record';
+    assets = validateAssets(value.assets);
+    if (assets === undefined) return 'not_a_record';
+    assetRoot = value.assetRoot;
+  }
+  let nativeProvenance: ToolImplementationNativeProvenanceV1 | undefined;
+  if (value.nativeProvenance !== undefined) {
+    nativeProvenance = validateNativeProvenance(value.nativeProvenance);
+    if (nativeProvenance === undefined) return 'not_a_record';
+  }
   // The form decides whether an interpreter is part of the frozen install.
   // Neither direction is repaired: a compiled executable that names one, and a
   // bundle that names none, each describe an install nothing here can attest.
@@ -642,6 +843,8 @@ function validateInstallRecord(
     ...(value.entry === undefined ? {} : { entry: value.entry as string }),
     launchArgv: Object.freeze([...(value.launchArgv as string[])]),
     launchCwd: value.launchCwd,
+    ...(assetRoot === undefined || assets === undefined ? {} : { assetRoot, assets }),
+    ...(nativeProvenance === undefined ? {} : { nativeProvenance }),
   });
 }
 
@@ -687,6 +890,7 @@ export function parseToolImplementationIdentity(value: unknown): ToolImplementat
   const {
     installStat: rawStat,
     interpreterStat: rawInterpreterStat,
+    assetStats: rawAssetStats,
     launchEnvNamesDigest,
     loaderEnvValuesDigest,
     ...rest
@@ -697,17 +901,34 @@ export function parseToolImplementationIdentity(value: unknown): ToolImplementat
   if (installStat === undefined) return undefined;
   if (typeof launchEnvNamesDigest !== 'string' || !SHA256_HEX.test(launchEnvNamesDigest)) return undefined;
   if (typeof loaderEnvValuesDigest !== 'string' || !SHA256_HEX.test(loaderEnvValuesDigest)) return undefined;
+  // Present iff the record declares assets, both directions and position for
+  // position. An asset list with no tuples could only be reverified by digest,
+  // and a tuple list that does not line up with it names measurements of files
+  // nobody declared.
+  let assetStats: readonly ToolImplementationStatTupleV1[] | undefined;
+  if (record.assets === undefined) {
+    if (rawAssetStats !== undefined) return undefined;
+  } else {
+    if (!Array.isArray(rawAssetStats) || rawAssetStats.length !== record.assets.length) return undefined;
+    const tuples: ToolImplementationStatTupleV1[] = [];
+    for (const raw of rawAssetStats) {
+      const tuple = validateStatTuple(raw);
+      if (tuple === undefined) return undefined;
+      tuples.push(tuple);
+    }
+    assetStats = Object.freeze(tuples);
+  }
   // Present iff the record names an interpreter, both directions. A bundle
   // whose interpreter carries no tuple is an identity whose interpreter half
   // could only be reverified by digest, and an artifact-only identity that
   // carries one describes a measurement nothing here made.
   if (record.interpreter === undefined) {
     if (rawInterpreterStat !== undefined) return undefined;
-    return seal(record, { installStat, launchEnvNamesDigest, loaderEnvValuesDigest });
+    return seal(record, { installStat, assetStats, launchEnvNamesDigest, loaderEnvValuesDigest });
   }
   const interpreterStat = validateStatTuple(rawInterpreterStat);
   if (interpreterStat === undefined) return undefined;
-  return seal(record, { installStat, interpreterStat, launchEnvNamesDigest, loaderEnvValuesDigest });
+  return seal(record, { installStat, interpreterStat, assetStats, launchEnvNamesDigest, loaderEnvValuesDigest });
 }
 
 /** Everything an install record is missing before it is an identity. */
@@ -715,6 +936,8 @@ interface ToolImplementationSealedMeasurements {
   readonly installStat: ToolImplementationStatTupleV1;
   /** Present iff the record names an interpreter. */
   readonly interpreterStat?: ToolImplementationStatTupleV1;
+  /** Present iff the record declares assets, in the record's own order. */
+  readonly assetStats?: readonly ToolImplementationStatTupleV1[];
   readonly launchEnvNamesDigest: string;
   readonly loaderEnvValuesDigest: string;
 }
@@ -734,6 +957,7 @@ function seal(
     loaderEnvValuesDigest: measured.loaderEnvValuesDigest,
     installStat: measured.installStat,
     ...(measured.interpreterStat === undefined ? {} : { interpreterStat: measured.interpreterStat }),
+    ...(measured.assetStats === undefined ? {} : { assetStats: measured.assetStats }),
   });
 }
 
@@ -874,6 +1098,98 @@ function sameStatTuple(left: ToolImplementationStatTupleV1, right: ToolImplement
     && left.gid === right.gid;
 }
 
+/**
+ * Where one declared asset actually is, or nothing.
+ *
+ * The containment check is done on the RESOLVED absolute path rather than on
+ * the declared spelling alone, so a path that passed
+ * {@link normalizedRelativeAssetPath} but still lands outside the root — which
+ * `path.normalize` cannot produce for a climb-free relative path, and which a
+ * future root spelling change could — is refused rather than measured. Nothing
+ * here follows a link: {@link measureCanonicalPathIdentity} requires the parent
+ * chain to resolve to itself and the leaf to be a regular non-symlink file, so
+ * an asset symlinked out of the release fails on the leaf and an asset reached
+ * through a symlinked release subdirectory fails on the chain.
+ */
+function assetAbsolutePath(root: string, relative: string): string | undefined {
+  const resolved = path.resolve(root, relative);
+  const prefix = root.endsWith(path.sep) ? root : root + path.sep;
+  if (!resolved.startsWith(prefix)) return undefined;
+  return resolved;
+}
+
+/**
+ * Measure the sealed asset set the way the artifact is measured: canonical path
+ * identity, ownership, and the declared digest.
+ *
+ * Returns the per-asset stat tuples in the record's order, or the failure that
+ * stopped it. A record whose asset root does not resolve to itself is an
+ * `install_record_mismatch` for the same reason a symlinked install directory
+ * is: it names a directory whoever owns the intervening link chooses.
+ */
+async function measureDeclaredAssets(
+  assetRoot: string,
+  assets: readonly ToolImplementationAssetV1[],
+  probe: ToolImplementationFsProbe,
+): Promise<readonly ToolImplementationStatTupleV1[] | ToolImplementationMeasurementFailure> {
+  let resolvedRoot: string;
+  try {
+    resolvedRoot = await probe.realpath(assetRoot);
+  } catch {
+    return 'install_record_mismatch';
+  }
+  if (resolvedRoot !== assetRoot) return 'install_record_mismatch';
+  const tuples: ToolImplementationStatTupleV1[] = [];
+  for (const asset of assets) {
+    const target = assetAbsolutePath(assetRoot, asset.path);
+    if (target === undefined) return 'install_record_mismatch';
+    const measured = await measureCanonicalPathIdentity(target, probe);
+    if (typeof measured === 'string') return measured;
+    const ownership = measureOwnership(measured);
+    if (ownership !== undefined) return ownership;
+    const matches = await digestMatches(target, asset.digest, probe);
+    if (matches === 'unreadable') return 'reverify_failed';
+    if (!matches) return 'install_record_mismatch';
+    tuples.push(statTupleOf(measured));
+  }
+  return Object.freeze(tuples);
+}
+
+/**
+ * Re-measure the sealed asset set before a spawn: the same canonical path
+ * identity, the tuple this SDK measured at resolve, and the digest again.
+ *
+ * The split between the two failure words is the module's rule, unchanged: a
+ * tuple that moved is `install_record_mismatch` (this is not the file that was
+ * attested) and bytes that no longer hash are `reverify_failed` (it is the
+ * file, and it changed).
+ */
+async function reverifyDeclaredAssets(
+  assetRoot: string,
+  assets: readonly ToolImplementationAssetV1[],
+  assetStats: readonly ToolImplementationStatTupleV1[],
+  probe: ToolImplementationFsProbe,
+): Promise<ToolImplementationMeasurementFailure | undefined> {
+  let resolvedRoot: string;
+  try {
+    resolvedRoot = await probe.realpath(assetRoot);
+  } catch {
+    return 'install_record_mismatch';
+  }
+  if (resolvedRoot !== assetRoot) return 'install_record_mismatch';
+  if (assetStats.length !== assets.length) return 'install_record_mismatch';
+  for (const [index, asset] of assets.entries()) {
+    const target = assetAbsolutePath(assetRoot, asset.path);
+    if (target === undefined) return 'install_record_mismatch';
+    const measured = await measureCanonicalPathIdentity(target, probe);
+    if (typeof measured === 'string') return measured;
+    if (!sameStatTuple(measured, assetStats[index]!)) return 'install_record_mismatch';
+    const matches = await digestMatches(target, asset.digest, probe);
+    if (matches !== true) return 'reverify_failed';
+  }
+  return undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Resolve
 // ---------------------------------------------------------------------------
@@ -929,8 +1245,18 @@ export async function resolveToolImplementationIdentity(
   // The env facts are measured HERE, off the exact object the caller will hand
   // to `spawn`, and are not part of what the resolver was asked. A host does
   // not have this object and must not reconstruct one.
+  // The sealed asset set is measured HERE, per file, exactly as the artifact
+  // was: a release whose static startup data is unmeasured is a release whose
+  // behaviour changes without a byte of attested code changing.
+  let assetStats: readonly ToolImplementationStatTupleV1[] | undefined;
+  if (record.assetRoot !== undefined && record.assets !== undefined) {
+    const measuredAssets = await measureDeclaredAssets(record.assetRoot, record.assets, probe);
+    if (typeof measuredAssets === 'string') return toolImplementationUnavailable(measuredAssets);
+    assetStats = measuredAssets;
+  }
   const measurements: ToolImplementationSealedMeasurements = {
     installStat: statTupleOf(measured),
+    ...(assetStats === undefined ? {} : { assetStats }),
     launchEnvNamesDigest: toolImplementationLaunchEnvNamesDigest(launchEnv),
     loaderEnvValuesDigest: toolImplementationLoaderEnvValuesDigest(launchEnv),
   };
@@ -981,10 +1307,10 @@ export type ToolImplementationReverifyFailure =
 
 /**
  * WHICH of the things an identity binds moved. Carried beside the reason
- * because `reverify_failed` on the artifact and `reverify_failed` on the
- * interpreter send an operator to two different files.
+ * because `reverify_failed` on the artifact, on the interpreter and on a sealed
+ * asset send an operator to three different files.
  */
-export type ToolImplementationReverifySubject = 'artifact' | 'interpreter' | 'launch-env';
+export type ToolImplementationReverifySubject = 'artifact' | 'interpreter' | 'asset' | 'launch-env';
 
 export type ToolImplementationReverifyResult =
   | 'ok'
@@ -1057,6 +1383,20 @@ export async function reverifyToolImplementationIdentity(
     );
     if (interpreterMatches !== true) return { reason: 'reverify_failed', subject: 'interpreter' };
   }
+  if (identity.assetRoot !== undefined && identity.assets !== undefined) {
+    // `assetStats` is present on every identity this module seals for a record
+    // that declares assets, and `parseToolImplementationIdentity` refuses one
+    // that arrives without it, so an absent list here is an identity from
+    // nowhere rather than an older shape to tolerate.
+    if (identity.assetStats === undefined) return { reason: 'install_record_mismatch', subject: 'asset' };
+    const assetFailure = await reverifyDeclaredAssets(
+      identity.assetRoot,
+      identity.assets,
+      identity.assetStats,
+      probe,
+    );
+    if (assetFailure !== undefined) return { reason: assetFailure, subject: 'asset' };
+  }
   // Asked BEFORE the digests, so an unaccountable control name is reported as
   // itself rather than as generic drift — and so it still refuses when the
   // same name was present at resolve and the digests therefore agree.
@@ -1114,4 +1454,286 @@ export class ToolImplementationReverifyError extends Error {
     super(message);
     this.name = 'ToolImplementationReverifyError';
   }
+}
+
+// ---------------------------------------------------------------------------
+// Runtime launch description
+// ---------------------------------------------------------------------------
+
+/**
+ * WHICH logical entry of the runtime a launch addresses.
+ *
+ * Two, and they are the two this SDK owns: the ordinary rpc lane and the
+ * prepared lane. Both start through the reserved-helper entry shape
+ * `<interpreter> <entry> __byok_sdk_helper <kind> …`, so the kind is the only
+ * thing that differs between them and it is bound, not passed as text.
+ */
+export type RuntimeLaunchKindV1 = 'pi-rpc' | 'pi-prepared';
+
+export const RUNTIME_LAUNCH_KINDS: readonly RuntimeLaunchKindV1[] = Object.freeze([
+  'pi-rpc',
+  'pi-prepared',
+]);
+
+/** The SDK-reserved helper dispatch token, as `sdk-reserved-helper-host.ts` reads it. */
+const SDK_RESERVED_HELPER_TOKEN = '__byok_sdk_helper';
+
+/**
+ * The FIXED argv prefix for each kind, bound here and nowhere else.
+ *
+ * It is a constant of this SDK rather than a record field the host chooses,
+ * and it is separate from every task flag on purpose: the prefix says which
+ * entry inside the sealed bundle runs, and task flags say what that entry is
+ * asked to do. A host that could choose the prefix could point an attested
+ * interpreter at a different entry of the same attested bundle; a consumer that
+ * could fold task flags into it could smuggle a flag past the binding. The
+ * record must DECLARE the same prefix as its `launchArgv` — that is how the
+ * prefix becomes part of what the artifact was attested with — and
+ * {@link deriveRuntimeLaunchDescription} refuses a record that declares
+ * anything else.
+ */
+const RUNTIME_LAUNCH_FIXED_ARGV: Readonly<Record<RuntimeLaunchKindV1, readonly string[]>> = Object.freeze({
+  'pi-rpc': Object.freeze([SDK_RESERVED_HELPER_TOKEN, 'pi-rpc']),
+  'pi-prepared': Object.freeze([SDK_RESERVED_HELPER_TOKEN, 'pi-prepared']),
+});
+
+/**
+ * The environment NAMES a runtime launch description commits a value for.
+ *
+ * Exactly one today: `PI_PACKAGE_DIR`, which probe p3 measured to be the
+ * runtime's single read point for its own package layout (`config.js:313`) and
+ * which probe p5 measured to be a hard startup dependency in the interpreted
+ * layout. The description points it at {@link RuntimeLaunchDescriptionV1.assetRoot}
+ * — the release's own asset directory — so the runtime reads the measured,
+ * read-only theme JSON rather than whatever a writable projection directory
+ * happens to contain.
+ *
+ * This is a commitment of NAMES, not values: it says which variables the launch
+ * description is the authority for, so a consumer that sets one of them from
+ * anywhere else is visibly wrong rather than quietly last-write-wins.
+ */
+export const RUNTIME_LAUNCH_ENV_COMMITMENT_NAMES: readonly string[] = Object.freeze([
+  'PI_PACKAGE_DIR',
+]);
+
+/**
+ * The ONE description of how a runtime child starts. Strict, immutable, and
+ * derived from nothing but an attested install record plus the exact pin this
+ * build of the SDK declares.
+ *
+ * Every field exists because the alternative was a value discovered at launch
+ * time from something writable:
+ *
+ * - `command` / `entry` — the interpreter and the sealed bundle, taken from the
+ *   attested identity itself, never rebuilt from a package shape, a resolved
+ *   bin or `import.meta.resolve`. The object that was checked is the object
+ *   that is spawned.
+ * - `fixedArgv` — the reserved-helper prefix for {@link kind}, bound separately
+ *   from task flags.
+ * - `processCwd` — the SEALED launch cwd, which is the child's `process.cwd()`.
+ *   It is not the Agent home. A writable process cwd executes `bunfig.toml`
+ *   preload and `.env` before any JavaScript inside the entry can check
+ *   anything, and probe p4 measured that a `photon_rs_bg.wasm` planted in it is
+ *   opened and instantiated for real.
+ * - `sessionCwd` — the Agent home, passed to the runtime EXPLICITLY. Probe p2
+ *   measured that every tool resolves against the session cwd rather than the
+ *   process cwd, so the two decouple safely; this field is what makes the split
+ *   a stated contract instead of an inherited accident.
+ * - `assetRoot` — the release's own asset directory, and the value the launch
+ *   commits `PI_PACKAGE_DIR` to.
+ * - `envCommitments` — see {@link RUNTIME_LAUNCH_ENV_COMMITMENT_NAMES}.
+ *
+ * What it deliberately does NOT carry: task flags, model selection, session ids,
+ * credentials, or anything else that differs per task. Those are the consumer's
+ * to append after the fixed prefix, and folding them in here would make the
+ * description — and its digest — a per-task value that binds nothing.
+ */
+export interface RuntimeLaunchDescriptionV1 {
+  readonly runtimeId: RuntimeIdV1;
+  readonly kind: RuntimeLaunchKindV1;
+  /** The interpreter's path, or the compiled artifact's. */
+  readonly command: string;
+  /** The sealed bundle the interpreter runs. Present iff the form is `interpreter+bundle`. */
+  readonly entry?: string;
+  readonly fixedArgv: readonly string[];
+  readonly processCwd: string;
+  readonly sessionCwd: string;
+  readonly assetRoot: string;
+  readonly envCommitments: readonly string[];
+}
+
+/** The per-launch inputs a description cannot derive from the record alone. */
+export interface RuntimeLaunchInputV1 {
+  readonly runtimeId: RuntimeIdV1;
+  readonly kind: RuntimeLaunchKindV1;
+  /**
+   * The Agent home this task runs in, passed to the runtime explicitly. It is
+   * NOT the process cwd and must not be: that is the whole split.
+   */
+  readonly sessionCwd: string;
+  /**
+   * The exact pin this build of the SDK declares — `adapters/pi/resolve-bin.ts`'s
+   * `resolvePiRuntimeIdentity()`. Passed in rather than read here so this module
+   * performs no package resolution of its own: the identity authority reads the
+   * filesystem to MEASURE, never to discover.
+   */
+  readonly pin: { readonly name: string; readonly version: string };
+}
+
+/**
+ * The canonical digest of one description, for binding.
+ *
+ * Taken over the description alone, with the keys inserted in sorted order so
+ * the hashed bytes are a function of the content. It is what a consumer carries
+ * from the moment the launch was decided to the moment the child is spawned:
+ * the attested identity already binds the interpreter, the bundle, the sealed
+ * assets, the asset root, the fixed argv (as the record's own `launchArgv`) and
+ * the process cwd, and this digest additionally binds the per-launch session
+ * cwd and the resolved kind — the two facts an identity cannot carry without
+ * becoming a different identity for every task.
+ */
+export function runtimeLaunchDescriptionDigest(description: RuntimeLaunchDescriptionV1): string {
+  return canonicalDigest({
+    assetRoot: description.assetRoot,
+    command: description.command,
+    ...(description.entry === undefined ? {} : { entry: description.entry }),
+    envCommitments: [...description.envCommitments],
+    fixedArgv: [...description.fixedArgv],
+    kind: description.kind,
+    processCwd: description.processCwd,
+    runtimeId: description.runtimeId,
+    sessionCwd: description.sessionCwd,
+  });
+}
+
+/**
+ * Turn one attested identity into the description of the child it starts, or
+ * say why it cannot.
+ *
+ * Every refusal below is `install_record_mismatch`, and for one reason: each is
+ * the record failing to describe a launch this SDK can perform, not a file that
+ * changed or a resolver that declined. There is no repair path and no default —
+ * a missing asset root, a missing fork provenance, an argv prefix the host chose
+ * for itself, or a sealed cwd that is the Agent home are all records that cannot
+ * be launched, and a description invented over the top of one would be this SDK
+ * attesting its own guess.
+ */
+export function deriveRuntimeLaunchDescription(
+  identity: ToolImplementationAttestedV1,
+  input: RuntimeLaunchInputV1,
+): RuntimeLaunchDescriptionV1 | 'install_record_mismatch' {
+  if (!path.isAbsolute(input.sessionCwd)) return 'install_record_mismatch';
+  if (path.normalize(input.sessionCwd) !== input.sessionCwd) return 'install_record_mismatch';
+  // The defect this whole contract exists to close: a process cwd that IS the
+  // Agent home hands the agent a `bunfig.toml` preload on the next launch.
+  if (input.sessionCwd === identity.launchCwd) return 'install_record_mismatch';
+  // A second entry authority. §77 ruling 5: one release-derived launch
+  // description, so the interpreter runs the artifact that was measured and
+  // nothing else may name a different one.
+  if (identity.entry !== undefined) return 'install_record_mismatch';
+  if (identity.assetRoot === undefined || identity.assets === undefined) return 'install_record_mismatch';
+  const provenance = identity.nativeProvenance;
+  if (provenance === undefined) return 'install_record_mismatch';
+  if (provenance.packageName !== input.pin.name || provenance.packageVersion !== input.pin.version) {
+    return 'install_record_mismatch';
+  }
+  const fixedArgv = RUNTIME_LAUNCH_FIXED_ARGV[input.kind];
+  if (identity.launchArgv.length !== fixedArgv.length) return 'install_record_mismatch';
+  if (identity.launchArgv.some((arg, index) => arg !== fixedArgv[index])) return 'install_record_mismatch';
+  let command: string;
+  let entry: string | undefined;
+  if (identity.form === 'interpreter+bundle') {
+    // `validateInstallRecord` already refuses this form without an interpreter,
+    // so the guard is the type's, not a second policy.
+    if (identity.interpreter === undefined) return 'install_record_mismatch';
+    command = identity.interpreter.path;
+    entry = identity.installPath;
+  } else {
+    command = identity.installPath;
+  }
+  return Object.freeze({
+    runtimeId: input.runtimeId,
+    kind: input.kind,
+    command,
+    ...(entry === undefined ? {} : { entry }),
+    fixedArgv,
+    processCwd: identity.launchCwd,
+    sessionCwd: input.sessionCwd,
+    assetRoot: identity.assetRoot,
+    envCommitments: RUNTIME_LAUNCH_ENV_COMMITMENT_NAMES,
+  });
+}
+
+/**
+ * Why a runtime launch was declined. Every unavailable reason EXCEPT
+ * `resolver_unconfigured`, which is not a decline at all — see
+ * {@link RuntimeLaunchDecisionV1}.
+ */
+export type RuntimeLaunchDeclineReasonV1 = Exclude<
+  ToolImplementationUnavailableReasonV1,
+  'resolver_unconfigured'
+>;
+
+/**
+ * What a consumer is allowed to do with a runtime subject, as three cases that
+ * cannot be confused for one another.
+ *
+ * The runtime subject is STRICTER than the MCP subject, and this type is where
+ * that asymmetry is stated (§77 ruling 3). An MCP server whose implementation
+ * is unproven still runs and the receipt says it is unproven; a RUNTIME whose
+ * implementation is unproven does not run at all, because it is the process the
+ * whole task executes inside and an unattested one makes every downstream
+ * attestation decorative.
+ *
+ * - `attested` — the description and the identity it came from. The consumer
+ *   spawns exactly this, after re-measuring.
+ * - `unconfigured` — no {@link ToolImplementationAuthority} is wired in. This
+ *   SDK ships no resolver, so it is the default state and it is the DEV path:
+ *   the launch proceeds unattested, exactly as it does today. It is a separate
+ *   arm rather than a decline reason so a consumer cannot decline the dev path
+ *   by reading `kind` alone.
+ * - `declined` — an authority IS configured and the runtime is not attested.
+ *   The consumer refuses the task. It is a separate arm rather than a reason on
+ *   `unconfigured` so a consumer cannot let a configured-but-unattested runtime
+ *   through by reading `kind` alone either. The distinction is carried by the
+ *   TYPE because it is the one distinction that decides whether credentials
+ *   reach a child.
+ */
+export type RuntimeLaunchDecisionV1 =
+  | {
+    readonly kind: 'attested';
+    readonly description: RuntimeLaunchDescriptionV1;
+    readonly identity: ToolImplementationAttestedV1;
+  }
+  | {
+    readonly kind: 'unconfigured';
+    readonly reason: 'resolver_unconfigured';
+  }
+  | {
+    readonly kind: 'declined';
+    readonly reason: RuntimeLaunchDeclineReasonV1;
+  };
+
+/**
+ * Decide one runtime launch from an already-resolved identity.
+ *
+ * Pure: it measures nothing and reads nothing. The measurement happened in
+ * {@link resolveToolImplementationIdentity}, and it happens AGAIN in
+ * {@link reverifyToolImplementationIdentity} immediately before the child is
+ * spawned. This function only says which of the three cases the consumer is in.
+ */
+export function decideRuntimeLaunch(
+  identity: ToolImplementationIdentityV1,
+  input: RuntimeLaunchInputV1,
+): RuntimeLaunchDecisionV1 {
+  if (identity.kind === 'unavailable') {
+    return identity.reason === 'resolver_unconfigured'
+      ? Object.freeze({ kind: 'unconfigured' as const, reason: 'resolver_unconfigured' as const })
+      : Object.freeze({ kind: 'declined' as const, reason: identity.reason });
+  }
+  const description = deriveRuntimeLaunchDescription(identity, input);
+  if (typeof description === 'string') {
+    return Object.freeze({ kind: 'declined' as const, reason: description });
+  }
+  return Object.freeze({ kind: 'attested' as const, description, identity });
 }

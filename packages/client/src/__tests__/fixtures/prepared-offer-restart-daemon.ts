@@ -207,7 +207,12 @@ const launchBinding = { cwd: await trustedCwd() } as const;
 const attestation = mcpLaunchAttestation(launchBinding);
 const implementation = await resolveToolImplementationIdentity(
   authority,
-  { toolsetId: TOOLSET_ID, serverName: SERVER_NAME, command: config.serverCommand, args: ['--stdio'], launch: attestation },
+  {
+    subject: { kind: 'mcp-server', toolsetId: TOOLSET_ID, serverName: SERVER_NAME },
+    command: config.serverCommand,
+    args: ['--stdio'],
+    launch: attestation,
+  },
   LANE_ENV,
   rootOwnedProbe(),
 );

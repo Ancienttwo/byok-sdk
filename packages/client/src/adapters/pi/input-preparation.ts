@@ -22,6 +22,7 @@ import type { McpToolsetServerObservation } from '../../mcp/observation';
 import type { McpLaunchAttestation } from '../../daemon/trusted-launch-cwd';
 import {
   toolImplementationUnavailable,
+  type ToolImplementationAttestedV1,
   type ToolImplementationIdentityV1,
 } from '../../daemon/tool-implementation-identity';
 import { filterMcpObservationForPolicy, projectMcpTools, qualifiedMcpToolName } from '../../mcp/projection';
@@ -271,9 +272,73 @@ export function resolveInstalledPiRuntimeIdentity(): InputPreparationRuntimeIden
     upstreamBase: fork.upstreamBase,
     upstreamCommit: fork.upstreamCommit,
     forkBuild: fork.forkBuild as number,
-    envelopeFormat: 'pi.session.prepared-input',
-    requestFormat: 'pi.openai-completions.prepared',
+    envelopeFormat: NATIVE_ENVELOPE_FORMAT,
+    requestFormat: NATIVE_REQUEST_FORMAT,
     compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,
+  });
+}
+
+/**
+ * The two native format tags this module is the authority for. They describe
+ * what THIS code knows how to read out of the native envelope, not a fact about
+ * the installed release, so they stay SDK constants: a host that could declare
+ * them would be telling this SDK what its own parser accepts.
+ */
+const NATIVE_ENVELOPE_FORMAT = 'pi.session.prepared-input';
+const NATIVE_REQUEST_FORMAT = 'pi.openai-completions.prepared';
+
+/**
+ * Derive the runtime / compiler identity from an ATTESTED install record
+ * instead of from package resolution.
+ *
+ * This is the encapsulated form's path, and it exists because the unencapsulated
+ * one cannot work there. {@link resolveInstalledPiRuntimeIdentity} finds the
+ * installed manifest by resolving the package specifier and walking upward —
+ * which under a single-artifact release resolves through Bun's user-writable
+ * install cache, and which in any form reads a `package.json` that is not part
+ * of what was attested. A writable manifest is never an execution-identity
+ * authority (§77 ruling 3), so where a host install record exists, the record's
+ * own declared fork provenance is the only source.
+ *
+ * Fails closed, with no fallback to the resolution path: a record that carries
+ * no `nativeProvenance`, or one whose package identity is not exactly the pin
+ * this build declares, describes a release whose compiler contract is not
+ * known. Input preparation counts tokens against that contract, so there is
+ * nothing to degrade to.
+ *
+ * The unencapsulated dev form keeps {@link resolveInstalledPiRuntimeIdentity}:
+ * with no authority wired in there is no record to read, and that path is the
+ * `resolver_unconfigured` one this SDK ships by default.
+ */
+export function piRuntimeIdentityFromAttestedRecord(
+  identity: ToolImplementationAttestedV1,
+): InputPreparationRuntimeIdentityV1 {
+  const pinned = resolvePiRuntimeIdentity();
+  const provenance = identity.nativeProvenance;
+  if (provenance === undefined) {
+    throw new InputPreparationRuntimeIdentityError(
+      `the attested install record at ${identity.installPath} declares no nativeProvenance; the prepared-session-input seam is fork-only and its provenance must come from the record, never from a package manifest`,
+    );
+  }
+  if (provenance.packageName !== pinned.name || provenance.packageVersion !== pinned.version) {
+    throw new InputPreparationRuntimeIdentityError(
+      `the attested install record at ${identity.installPath} declares ${provenance.packageName}@${provenance.packageVersion}, but @byok-sdk/client pins ${pinned.name}@${pinned.version}`,
+    );
+  }
+  if (provenance.compilerVersion !== SUPPORTED_PREPARED_COMPILER_VERSION) {
+    throw new InputPreparationRuntimeIdentityError(
+      `the attested install record at ${identity.installPath} declares compiler version ${String(provenance.compilerVersion)}, but this build of @byok-sdk/client prepares input against version ${String(SUPPORTED_PREPARED_COMPILER_VERSION)}`,
+    );
+  }
+  return Object.freeze({
+    packageName: provenance.packageName,
+    packageVersion: provenance.packageVersion,
+    upstreamBase: provenance.upstreamBase,
+    upstreamCommit: provenance.upstreamCommit,
+    forkBuild: provenance.forkBuild,
+    envelopeFormat: NATIVE_ENVELOPE_FORMAT,
+    requestFormat: NATIVE_REQUEST_FORMAT,
+    compilerVersion: provenance.compilerVersion,
   });
 }
 

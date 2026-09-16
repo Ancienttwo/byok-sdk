@@ -2314,8 +2314,7 @@ export class TaskRunner {
           identities[serverName] = await resolveToolImplementationIdentity(
             this.deps.toolImplementationAuthority,
             {
-              toolsetId,
-              serverName,
+              subject: { kind: 'mcp-server', toolsetId, serverName },
               command: server.command,
               args: Object.freeze([...(server.args ?? [])]),
               launch,

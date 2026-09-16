@@ -17,6 +17,7 @@ import {
   type ToolImplementationAttestedV1,
   type ToolImplementationAuthority,
   type ToolImplementationFsProbe,
+  type ToolImplementationIdentityV1,
   type ToolImplementationInstallRecordV1,
   type ToolImplementationLocatorV1,
 } from '../daemon/tool-implementation-identity';
@@ -55,7 +56,17 @@ const LAUNCH = Object.freeze({
 });
 
 function locator(command: string): ToolImplementationLocatorV1 {
-  return { toolsetId: 'salesko', serverName: 'salesko', command, args: [], launch: LAUNCH };
+  return {
+    subject: { kind: 'mcp-server', toolsetId: 'salesko', serverName: 'salesko' },
+    command,
+    args: [],
+    launch: LAUNCH,
+  };
+}
+
+/** The runtime subject's locator, for the same resolver seam. */
+function runtimeLocator(command: string): ToolImplementationLocatorV1 {
+  return { subject: { kind: 'runtime', runtimeId: 'pi' }, command, args: [], launch: LAUNCH };
 }
 
 const EMPTY_MAP_DIGEST = createHash('sha256').update('{}', 'utf8').digest('hex');
@@ -1114,5 +1125,204 @@ describe('path identity is the inode behind a symlink-free name', () => {
     expect((await fs.lstat(artifact)).ino).not.toBe(attested.installStat.ino);
     expect(await reverifyToolImplementationIdentity(attested, ENV, rootOwnedProbe()))
       .toEqual({ reason: 'install_record_mismatch', subject: 'artifact' });
+  });
+});
+
+/**
+ * The sealed asset set (§80). These run against the `runtime` subject's
+ * locator, because that is the subject whose contract requires them — but the
+ * MEASUREMENT is the record's, not the subject's, so the suite exercises it
+ * exactly where a host declares one.
+ */
+describe('the sealed asset set is measured like the artifact, per file', () => {
+  let assetRoot: string;
+  let theme: string;
+  let wasm: string;
+  let assets: readonly { path: string; digest: string }[];
+
+  beforeEach(async () => {
+    assetRoot = path.join(dir, 'release-assets');
+    await fs.mkdir(path.join(assetRoot, 'dist', 'modes', 'interactive', 'theme'), { recursive: true });
+    theme = path.join(assetRoot, 'dist', 'modes', 'interactive', 'theme', 'dark.json');
+    wasm = path.join(assetRoot, 'photon_rs_bg.wasm');
+    await fs.writeFile(theme, '{"name":"dark"}\n');
+    await fs.writeFile(wasm, 'not really wasm\n');
+    // Sorted, as the record contract requires.
+    assets = Object.freeze([
+      {
+        path: path.join('dist', 'modes', 'interactive', 'theme', 'dark.json'),
+        digest: await realToolImplementationFsProbe.digest(theme),
+      },
+      {
+        path: 'photon_rs_bg.wasm',
+        digest: await realToolImplementationFsProbe.digest(wasm),
+      },
+    ]);
+  });
+
+  function recordWithAssets(
+    overrides: {
+      readonly assetRoot?: string;
+      readonly assets?: readonly { path: string; digest: string }[];
+    } = {},
+  ): ToolImplementationInstallRecordV1 {
+    return {
+      ...installRecord(artifact, artifactDigest),
+      assetRoot: overrides.assetRoot ?? assetRoot,
+      assets: overrides.assets ?? assets,
+    };
+  }
+
+  async function resolveWithAssets(
+    record: ToolImplementationInstallRecordV1,
+  ): Promise<ToolImplementationIdentityV1> {
+    return resolveToolImplementationIdentity(
+      authorityReturning(record),
+      runtimeLocator(artifact),
+      ENV,
+      rootOwnedProbe(),
+    );
+  }
+
+  it('seals one stat tuple per declared asset, in the record order', async () => {
+    const identity = await resolveWithAssets(recordWithAssets());
+    expect(identity.kind).toBe('attested');
+    const attested = identity as ToolImplementationAttestedV1;
+    expect(attested.assetRoot).toBe(assetRoot);
+    expect(attested.assets).toEqual(assets);
+    expect(attested.assetStats).toHaveLength(2);
+    // SDK-measured, not resolver-supplied: the record carried no tuples.
+    expect(attested.assetStats?.[0]?.ino).toBe((await fs.lstat(theme)).ino);
+    expect(attested.assetStats?.[1]?.ino).toBe((await fs.lstat(wasm)).ino);
+    expect(attested.assetStats?.[0]?.uid).toBe(0);
+    expect(await reverifyToolImplementationIdentity(attested, ENV, rootOwnedProbe())).toBe('ok');
+  });
+
+  it('refuses a declared asset that is not on disk', async () => {
+    await fs.rm(wasm);
+    expect(await resolveWithAssets(recordWithAssets()))
+      .toEqual({ kind: 'unavailable', reason: 'install_record_mismatch' });
+  });
+
+  it('refuses a declared asset whose bytes do not hash to the declared digest', async () => {
+    await fs.writeFile(theme, '{"name":"dark!"}\n');
+    expect(await resolveWithAssets(recordWithAssets()))
+      .toEqual({ kind: 'unavailable', reason: 'install_record_mismatch' });
+  });
+
+  it('refuses an asset reached through a symlink leaf', async () => {
+    const elsewhere = path.join(dir, 'planted-theme.json');
+    await fs.writeFile(elsewhere, '{"name":"dark"}\n');
+    await fs.rm(theme);
+    await fs.symlink(elsewhere, theme);
+    // Non-vacuous: the link's TARGET hashes to exactly the declared digest, so
+    // only the leaf check can be what refuses this.
+    expect(await realToolImplementationFsProbe.digest(theme)).toBe(assets[0]!.digest);
+    expect(await resolveWithAssets(recordWithAssets()))
+      .toEqual({ kind: 'unavailable', reason: 'install_record_mismatch' });
+  });
+
+  it('refuses an asset path that climbs out of the asset root', async () => {
+    const outside = path.join(dir, 'outside.json');
+    await fs.writeFile(outside, '{"name":"dark"}\n');
+    const record = recordWithAssets({
+      assets: [{ path: path.join('..', 'outside.json'), digest: await realToolImplementationFsProbe.digest(outside) }],
+    });
+    // Rejected as a RECORD, before anything is measured: the declared path is
+    // not a normalized, climb-free relative path.
+    expect(await resolveWithAssets(record))
+      .toEqual({ kind: 'unavailable', reason: 'implementation_identity_unattested' });
+  });
+
+  it('refuses an asset root that is not itself, symlinked in its own parent chain', async () => {
+    const linkedRoot = path.join(dir, 'linked-assets');
+    await fs.symlink(assetRoot, linkedRoot);
+    expect(await resolveWithAssets(recordWithAssets({ assetRoot: linkedRoot })))
+      .toEqual({ kind: 'unavailable', reason: 'install_record_mismatch' });
+  });
+
+  it('refuses an asset list that is unsorted or carries a duplicate', async () => {
+    expect(await resolveWithAssets(recordWithAssets({ assets: [assets[1]!, assets[0]!] })))
+      .toEqual({ kind: 'unavailable', reason: 'implementation_identity_unattested' });
+    expect(await resolveWithAssets(recordWithAssets({ assets: [assets[0]!, assets[0]!] })))
+      .toEqual({ kind: 'unavailable', reason: 'implementation_identity_unattested' });
+  });
+
+  it('refuses an asset root with no assets, and assets with no root', async () => {
+    const { assets: _assets, ...rootOnly } = recordWithAssets();
+    expect(await resolveWithAssets(rootOnly as ToolImplementationInstallRecordV1))
+      .toEqual({ kind: 'unavailable', reason: 'implementation_identity_unattested' });
+    const { assetRoot: _root, ...assetsOnly } = recordWithAssets();
+    expect(await resolveWithAssets(assetsOnly as ToolImplementationInstallRecordV1))
+      .toEqual({ kind: 'unavailable', reason: 'implementation_identity_unattested' });
+  });
+
+  it('re-measures every asset before a spawn, not only at resolve', async () => {
+    const attested = await resolveWithAssets(recordWithAssets()) as ToolImplementationAttestedV1;
+    // A byte change under an UNCHANGED stat tuple, so only the digest can be
+    // what refuses this — the same seam the artifact's own byte-flip case uses.
+    const bytesMoved: ToolImplementationFsProbe = {
+      ...rootOwnedProbe(),
+      digest: async (target) => (target === wasm
+        ? createHash('sha256').update('hostile bytes, identical tuple\n').digest('hex')
+        : realToolImplementationFsProbe.digest(target)),
+    };
+    expect(await reverifyToolImplementationIdentity(attested, ENV, bytesMoved))
+      .toEqual({ reason: 'reverify_failed', subject: 'asset' });
+    // And a change that DOES move the tuple is the other word, on the same file.
+    await fs.writeFile(wasm, 'hostile bytes, different length!\n');
+    expect(await reverifyToolImplementationIdentity(attested, ENV, rootOwnedProbe()))
+      .toEqual({ reason: 'install_record_mismatch', subject: 'asset' });
+  });
+
+  it('refuses at spawn an asset replaced by a different inode with identical bytes', async () => {
+    const attested = await resolveWithAssets(recordWithAssets()) as ToolImplementationAttestedV1;
+    const replacement = path.join(dir, 'replacement-theme.json');
+    await fs.writeFile(replacement, '{"name":"dark"}\n');
+    await fs.rm(theme);
+    await fs.rename(replacement, theme);
+    // Non-vacuous: the bytes still hash to the declared digest.
+    expect(await realToolImplementationFsProbe.digest(theme)).toBe(assets[0]!.digest);
+    expect(await reverifyToolImplementationIdentity(attested, ENV, rootOwnedProbe()))
+      .toEqual({ reason: 'install_record_mismatch', subject: 'asset' });
+  });
+
+  it('refuses at spawn an asset that stopped being readable', async () => {
+    const attested = await resolveWithAssets(recordWithAssets()) as ToolImplementationAttestedV1;
+    const unreadable: ToolImplementationFsProbe = {
+      ...rootOwnedProbe(),
+      digest: async (target) => {
+        if (target === wasm) throw new Error('EACCES');
+        return realToolImplementationFsProbe.digest(target);
+      },
+    };
+    expect(await reverifyToolImplementationIdentity(attested, ENV, unreadable))
+      .toEqual({ reason: 'reverify_failed', subject: 'asset' });
+  });
+
+  it('carries the sealed asset tuples through the task-scoped file, both directions', async () => {
+    const attested = await resolveWithAssets(recordWithAssets()) as ToolImplementationAttestedV1;
+    expect(parseToolImplementationIdentity(JSON.parse(JSON.stringify(attested)))).toEqual(attested);
+    // A record that declares assets but arrives with no tuples could only be
+    // reverified by digest.
+    const { assetStats: _stats, ...withoutStats } = JSON.parse(JSON.stringify(attested)) as Record<string, unknown>;
+    expect(parseToolImplementationIdentity(withoutStats)).toBeUndefined();
+    // And tuples for assets nobody declared are measurements from nowhere.
+    const { assetRoot: _r, assets: _a, ...withoutAssets } = JSON.parse(JSON.stringify(attested)) as Record<string, unknown>;
+    expect(parseToolImplementationIdentity(withoutAssets)).toBeUndefined();
+  });
+
+  it('leaves an MCP record with no asset set untouched', async () => {
+    const identity = await resolveToolImplementationIdentity(
+      authorityReturning(installRecord(artifact, artifactDigest)),
+      locator(artifact),
+      ENV,
+      rootOwnedProbe(),
+    );
+    const attested = identity as ToolImplementationAttestedV1;
+    expect(attested.assetRoot).toBeUndefined();
+    expect(attested.assets).toBeUndefined();
+    expect(attested.assetStats).toBeUndefined();
+    expect(await reverifyToolImplementationIdentity(attested, ENV, rootOwnedProbe())).toBe('ok');
   });
 });

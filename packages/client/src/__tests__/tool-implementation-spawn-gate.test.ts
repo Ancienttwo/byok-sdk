@@ -205,15 +205,14 @@ describe('one resolve per server reaches both spawn points', () => {
       resolve: vi.fn(async (input) => {
         // The locator carries what the operator configured, not a guess.
         expect(input).toMatchObject({
-          toolsetId: 'salesko',
-          serverName: 'salesko',
+          subject: { kind: 'mcp-server', toolsetId: 'salesko', serverName: 'salesko' },
           command: '/opt/salesko/bin/mcp',
           args: ['--stdio'],
         });
         expect(input.launch.launchCwd).toBe(await trustedCwd());
         // The locator is the whole of what a host is asked. It carries no
         // environment, and a resolver that wanted one could not have it.
-        expect(Object.keys(input).sort()).toEqual(['args', 'command', 'launch', 'serverName', 'toolsetId']);
+        expect(Object.keys(input).sort()).toEqual(['args', 'command', 'launch', 'subject']);
         return {
           kind: 'attested',
           authority: 'host-install-record',
