@@ -10,6 +10,7 @@ export default defineConfig({
     'src/adapters/index.ts',
     'src/agent-memory/index.ts',
     'src/assertion-client/index.ts',
+    'src/mcp-server/index.ts',
     'src/adapters/pi/mcp-extension.ts',
     'src/adapters/pi/team-interaction-extension.ts',
     'src/adapters/pi/subagents-policy-extension.ts',

@@ -1384,9 +1384,9 @@ export type { AgentRef } from '../agent-home';
  *
  * So this entry re-exports exactly the two request functions and their public
  * option/result types from `../daemon/assertion-client`, whose own transitive
- * imports are only `@byok-sdk/core`, `../bin/control-client`,
- * `../daemon/control-protocol` and `../daemon/store` (plus `zod` through core's
- * protocol types). Nothing else may be added here.
+ * imports are only `@byok-sdk/core`, `@byok-sdk/protocol`,
+ * `../bin/control-client`, `../daemon/control-protocol` and `../daemon/store`
+ * (plus `zod` through core's protocol types). Nothing else may be added here.
  *
  * Two things are deliberately absent, and this file is the record of why.
  *
@@ -11316,6 +11316,186 @@ export declare const localStateRelocation: Readonly<{
     acquire: typeof acquire;
 }>;
 export {};
+// ==== @byok-sdk/client dist/mcp-server/dispatch.d.ts ====
+/**
+ * JSON-RPC 2.0 classification and per-session id bookkeeping.
+ *
+ * Everything here runs BEFORE a tool handler can be reached. A message that
+ * does not classify as a well-formed request never reaches `callTool`, which is
+ * the point: a server's tool logic should never have to defend itself against a
+ * malformed envelope, and today's four hand-rolled helpers each do, differently.
+ */
+/** A JSON-RPC 2.0 id this core will answer: a string, or an INTEGER number. `0` is valid and common. */
+export type McpServerRequestId = string | number;
+export type ClassifiedMessage = {
+    readonly kind: 'request';
+    readonly id: McpServerRequestId;
+    readonly method: string;
+    readonly params: Record<string, unknown> | undefined;
+} | {
+    readonly kind: 'notification';
+    readonly method: string;
+    readonly params: Record<string, unknown> | undefined;
+}
+/** `id` is `undefined` when no usable id could be read at all — the one case where a response may omit or null it. */
+ | {
+    readonly kind: 'invalid';
+    readonly id: McpServerRequestId | undefined;
+    readonly message: string;
+};
+/**
+ * The official client sends monotonic INTEGER ids starting at `0`
+ * (`_requestMessageId = 0`), so every id test must be a type test. `if (!id)`
+ * and `if (id)` are both bugs against a real peer's very first request.
+ */
+export declare function isUsableRequestId(value: unknown): value is McpServerRequestId;
+/**
+ * Classifies one already-parsed JSON value.
+ *
+ * The id is read FIRST, so a message that is invalid for some other reason
+ * still echoes the id the peer can correlate. A batch array is classified
+ * `invalid` rather than expanded: this core does not implement batch receipt,
+ * which is exactly why the advertised version list excludes every revision that
+ * makes receiving one a MUST.
+ */
+export declare function classifyJsonRpcMessage(value: unknown): ClassifiedMessage;
+/**
+ * Per-session record of every request id already answered.
+ *
+ * BOUNDED, deliberately. A session that issues more than `capacity` distinct
+ * ids can no longer detect a replay of an EVICTED id; that is the trade taken
+ * against an unbounded set a peer could grow on purpose. The official client's
+ * ids are monotonic integers from 0, so eviction never produces a false
+ * positive against a real peer.
+ */
+export declare class SeenRequestIds {
+    private readonly seen;
+    private readonly order;
+    private readonly capacity;
+    constructor(capacity: number);
+    /** `true` when this id has already been used in this session. */
+    has(id: McpServerRequestId): boolean;
+    /** Records the id, evicting the oldest once `capacity` is reached. */
+    add(id: McpServerRequestId): void;
+    /** `"7"` and `7` are different JSON-RPC ids and must not collide. */
+    static key(id: McpServerRequestId): string;
+}
+// ==== @byok-sdk/client dist/mcp-server/index.d.ts ====
+import { type McpServerRequestId } from './dispatch';
+/** The revisions this core implements and will answer `initialize` with. Final; see the module header for each entry's and each exclusion's citation. */
+export declare const MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS: readonly string[];
+/** Inbound: maximum bytes between two newlines before the session fails closed. */
+export declare const MCP_SERVER_MAX_LINE_BYTES = 1048576;
+/**
+ * Outbound: maximum UTF-8 bytes of one encoded frame. Matches
+ * `MCP_MAX_FRAME_BYTES` in `src/mcp/client.ts`, so an SDK server and an SDK
+ * client agree on the same 1 MiB ceiling in both directions.
+ */
+export declare const MCP_SERVER_MAX_FRAME_BYTES = 1048576;
+/** Maximum `tools/call` requests in flight or queued at once. */
+export declare const MCP_SERVER_MAX_IN_FLIGHT = 64;
+/** Maximum distinct request ids remembered per session for duplicate detection. */
+export declare const MCP_SERVER_MAX_SEEN_IDS = 4096;
+export interface McpServerToolDefinition {
+    readonly name: string;
+    readonly description?: string;
+    /** Caller-supplied, passed through verbatim. The core never authors, validates against, or rewrites it. */
+    readonly inputSchema: Readonly<Record<string, unknown>>;
+}
+export interface McpServerToolCall {
+    readonly name: string;
+    /** The peer's `params.arguments` when it is a JSON object; `undefined` otherwise. */
+    readonly arguments: Readonly<Record<string, unknown>> | undefined;
+    /** Aborted when the peer sends `notifications/cancelled` for this request id. */
+    readonly signal: AbortSignal;
+}
+/**
+ * The handler's return value is written as the JSON-RPC `result` VERBATIM, and
+ * a thrown {@link McpServerToolError} as the `error`. Mapping a domain failure
+ * onto either is the SERVER'S decision, not this core's: a handler that returns
+ * normally always produces a `result`.
+ */
+export type McpServerToolHandler = (call: McpServerToolCall) => Promise<Record<string, unknown>>;
+/** Opt-in. A handler throws this to author its own JSON-RPC `error`; returning normally always produces a `result`. */
+export declare class McpServerToolError extends Error {
+    readonly code: number;
+    readonly data?: unknown;
+    constructor(code: number, message: string, data?: unknown);
+}
+/** One encoded frame exceeded the outbound cap. Nothing was written for it — never a truncated prefix. */
+export declare class McpServerFrameTooLargeError extends Error {
+    /** The id of the request whose response could not be sent, or `undefined` for an unsolicited notification. */
+    readonly requestId: McpServerRequestId | undefined;
+    readonly bytes: number;
+    readonly limitBytes: number;
+    constructor(requestId: McpServerRequestId | undefined, bytes: number, limitBytes: number);
+}
+/**
+ * Supplying one of these is the ONLY way to make the core advertise
+ * `{ tools: { listChanged: true } }`. The core subscribes once at construction
+ * and unsubscribes when the session closes.
+ */
+export interface McpServerToolsListChangedEmitter {
+    /** Called once with the notifier to invoke when the tool list changes. Returns an unsubscribe. */
+    onToolsListChanged(notify: () => void): () => void;
+}
+export type McpServerCloseReason = 
+/** The read side ended. */
+{
+    readonly kind: 'eof';
+}
+/** A single inbound line exceeded `maxLineBytes`; nothing was parsed or answered. */
+ | {
+    readonly kind: 'frame-limit';
+    readonly limitBytes: number;
+}
+/** A single outbound frame exceeded `maxOutboundFrameBytes`; nothing was written for it. */
+ | {
+    readonly kind: 'outbound-frame-limit';
+    readonly limitBytes: number;
+    readonly bytes: number;
+    readonly error: McpServerFrameTooLargeError;
+};
+export interface McpServerOptions {
+    readonly serverInfo: {
+        readonly name: string;
+        readonly version: string;
+    };
+    readonly tools: readonly McpServerToolDefinition[];
+    readonly callTool: McpServerToolHandler;
+    /**
+     * Opt-in only. Supplying a real emitter makes the core advertise
+     * `{ tools: { listChanged: true } }` and emit
+     * `notifications/tools/list_changed`. Omitted, the core advertises
+     * `{ tools: {} }`. There is no other way to influence the advertised
+     * capabilities.
+     */
+    readonly toolsListChanged?: McpServerToolsListChangedEmitter;
+    /** Default {@link MCP_SERVER_MAX_LINE_BYTES}. Fail closed and close on exceed. */
+    readonly maxLineBytes?: number;
+    /** Default {@link MCP_SERVER_MAX_FRAME_BYTES}. Outbound cap; an over-cap frame is never partially written. */
+    readonly maxOutboundFrameBytes?: number;
+    /** Default {@link MCP_SERVER_MAX_IN_FLIGHT}. Over-limit `tools/call` requests get a typed `-32000` refusal. */
+    readonly maxInFlight?: number;
+    readonly input?: NodeJS.ReadableStream;
+    readonly output?: NodeJS.WritableStream;
+    /** Called at most once, when the read side ends or a bound is breached. An explicit `close()` does not fire it. */
+    readonly onClose?: (reason: McpServerCloseReason) => void;
+}
+export interface McpServerHandle {
+    /** Stops reading and writing and aborts every in-flight call. Does NOT fire `onClose`. Idempotent. */
+    close(): void;
+}
+/**
+ * Serves `options.tools` as a tools-only MCP server over one NDJSON stdio
+ * session.
+ *
+ * Throws at construction for the two caller faults it can see — an empty tool
+ * list and two tools sharing a name — because a server that advertises the
+ * `tools` capability with nothing callable is a silent dead end: the peer
+ * connects, then every `tools/call` fails on its side.
+ */
+export declare function serveMcpOverStdio(options: McpServerOptions): McpServerHandle;
 // ==== @byok-sdk/client dist/mcp/client.d.ts ====
 import { type ToolImplementationFsProbe, type ToolImplementationIdentityV1 } from '../daemon/tool-implementation-identity';
 import { type CallToolResult, type Tool } from '@modelcontextprotocol/client';

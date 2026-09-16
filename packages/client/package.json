@@ -45,6 +45,10 @@
       "types": "./dist/assertion-client/index.d.ts",
       "import": "./dist/assertion-client/index.js"
     },
+    "./mcp-server": {
+      "types": "./dist/mcp-server/index.d.ts",
+      "import": "./dist/mcp-server/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

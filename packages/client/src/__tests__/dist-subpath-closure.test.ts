@@ -72,6 +72,7 @@ const DIST = path.join(PACKAGE_ROOT, 'dist');
  */
 const GUARDED: readonly { readonly file: string; readonly allowedSubstrings: readonly string[] }[] = [
   { file: 'assertion-client/index.js', allowedSubstrings: [] },
+  { file: 'mcp-server/index.js', allowedSubstrings: [] },
   { file: 'adapters/index.js', allowedSubstrings: ['pi-coding-agent', '@earendil-works'] },
   { file: 'agent-memory/index.js', allowedSubstrings: [] },
   { file: 'bin/byok-approval-mcp.js', allowedSubstrings: [] },

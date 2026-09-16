@@ -321,6 +321,12 @@ if (
 ) {
   errors.push('packages/client/package.json: daemon-free assertion-client import/types exports are incomplete');
 }
+if (
+  clientManifest?.exports?.['./mcp-server']?.import !== './dist/mcp-server/index.js' ||
+  clientManifest?.exports?.['./mcp-server']?.types !== './dist/mcp-server/index.d.ts'
+) {
+  errors.push('packages/client/package.json: tools-only MCP server core import/types exports are incomplete');
+}
 
 const cloudDataplaneManifest = manifests.get('@byok-sdk/cloud-dataplane');
 if (

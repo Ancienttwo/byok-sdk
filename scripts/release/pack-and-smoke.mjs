@@ -407,7 +407,7 @@ try {
         `const sdk = await import('byok-sdk');\n` +
         `assert.deepEqual(Object.keys(sdk).sort(), expected);\n` +
         `assert.equal('keys' in sdk, false);\n` +
-        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/client/agent-memory','@byok-sdk/client/assertion-client','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/cloud-dataplane/runtime','@byok-sdk/ui-runtime','@byok-sdk/testkit','@byok-sdk/keys']) await import(name);\n` +
+        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/client/agent-memory','@byok-sdk/client/assertion-client','@byok-sdk/client/mcp-server','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/cloud-dataplane/runtime','@byok-sdk/ui-runtime','@byok-sdk/testkit','@byok-sdk/keys']) await import(name);\n` +
         `const { AgentHomeBusyError, AgentHomeManager } = await import('@byok-sdk/client');\n` +
         `const parallelRoot = mkdtempSync(path.join(tmpdir(), 'byok-packed-agent-session-'));\n` +
         `try {\n` +
@@ -456,6 +456,20 @@ try {
         `const assertionSource = readFileSync(assertionEntry, 'utf8');\n` +
         `for (const needle of ['ajv','pi-coding-agent','@earendil-works','@modelcontextprotocol/client','new Function']) {\n` +
         `  assert.equal(assertionSource.includes(needle), false, assertionEntry + ' carries ' + needle);\n` +
+        `}\n` +
+        // The MCP server core is the same argument a third time, and the
+        // sharpest: it is a SERVER a CSP-locked host spawns, and its whole
+        // reason to exist is that an SDK-reserved MCP server must not need
+        // `@modelcontextprotocol/sdk` (or anything that generates code) to
+        // answer a JSON-RPC line. The installed tarball is the only place that
+        // is true for a consumer.
+        `const mcpServer = await import('@byok-sdk/client/mcp-server');\n` +
+        `assert.equal(typeof mcpServer.serveMcpOverStdio, 'function');\n` +
+        `assert.deepEqual([...mcpServer.MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS], ['2025-11-25','2025-06-18','2024-11-05']);\n` +
+        `const mcpServerEntry = path.join('node_modules','@byok-sdk','client','dist','mcp-server','index.js');\n` +
+        `const mcpServerSource = readFileSync(mcpServerEntry, 'utf8');\n` +
+        `for (const needle of ['ajv','pi-coding-agent','@earendil-works','@modelcontextprotocol/client','@modelcontextprotocol/sdk','new Function']) {\n` +
+        `  assert.equal(mcpServerSource.includes(needle), false, mcpServerEntry + ' carries ' + needle);\n` +
         `}\n` +
         `for (const [name, version] of [['byok-sdk','${releaseVersion}'],['@byok-sdk/core','${releaseVersion}'],['@byok-sdk/protocol','${releaseVersion}'],['@byok-sdk/client','${releaseVersion}'],['@byok-sdk/server','${releaseVersion}'],['@byok-sdk/cloud','${releaseVersion}'],['@byok-sdk/cloud-dataplane','${releaseVersion}'],['@byok-sdk/ui-runtime','${releaseVersion}'],['@byok-sdk/testkit','${releaseVersion}'],['@byok-sdk/keys','${keysVersion}']]) {\n` +
         `  const manifest = require(name + '/package.json');\n` +
