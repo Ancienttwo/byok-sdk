@@ -42,10 +42,12 @@ Prepare the bounded implementation contract in [docs/researches/20260916-c07-run
 - [x] Register M2b-1 export-html, M2b-2 interpreted structured-output, M2b-3 custody/dispatch as separate slices.
 - [x] M2b-1 exact paths registeredd27be82e; scope narrowed because1005 has no public export-html API.
 - [x] M2b-1 asset prerequisite implemented1ec9ffce: single layout/source inventory + attested child preverify, no resource originals shipped or runner copy; local32asset/host +51closure/host/cwd pass.
-- [ ] M2b-1 frozen targeted supervisor gate. Static import/public export API and output path-policy remain1006 item11; M2b-3 cannot enable without them.
+- [x] M2b-1 frozen targeted supervisor gate PASS7d56a6fb (assets/preverify only);83 targeted tests, S2 still24. Native public export/path-policy remain1006 item11.
 - [x] M2b-2 read-only15-row equivalence probe and actual upstream consumer reproduction; four regex counterexamples documented, no product writes.
 - [x] M2b-2 supervisor accepted runtime-guard attribution and escalated to Owner: one widening, three classification/timing differences.
 - [ ] Owner select structured-output sealed scope: α explicit feature exclusion (Fable recommendation), β maintained construction-phase no-codegen preparation, or γ upstream API. Product and dispatch remain blocked.
+- [x] Draft M2b-3 execution/test matrix, helper activation order and downstream complete-plan notice (docs only).
+- [ ] Supervisor review M2b-3 design; root/session ownership and atomic transaction/crash semantics remain unimplemented stop conditions.
 - [ ] M2b-3: prove all five custody execution points and consume accepted M2b-1/2 prerequisites; obtain scripted-workflow Owner disposition before recursive dispatch. This is the only dispatch-enabling slice; full gate.
 - [ ] When binding the real runner edge, evaluate a public refusal-reason union against frozen vocabulary and API golden; report-only until then.
 - [ ] M3: functional/packed recursive and locale acceptance; clipboard remains1006 blocker.
