@@ -35,3 +35,9 @@ Product candidate af77aee2 accepted. Q5-A deterministic fixed-order complete set
 - Executor matrix follows supervisor allocation: freeze first, one complete14-package test matrix, no repeated full. Gate independently does build/typecheck/focused10-golden/strict/diff/attribution/real pack. Public package publication, Salesko consumption, native closure and real installation are NOT RUN here.
 
 Product frozen9f697036 (26 source/test/golden files). Additional read-only cwd27/27 covers observable-yet-writable versus full checker rejection and exact readonly invalid shapes. Spec/architecture/CHANGELOG registered separately; frozen executor matrix pending, no PASS inferred.
+
+## Frozen discovery and fixture correction registration
+
+d5949148 executor matrix completed all14 packages once: client24 failed/2778 passed/11 skipped; other13 passed. Existing S2 accounts for1; prepared-offer-lane22 + process-restart1 are missing-method fixture wiring, not timing failures. `_ops/c07-installed-observation-product/frozen/failure-classification.{md,json}` records exact P1/P2/P3 and source hashes. Full raw SHA2566d5f4b71f4cc9bd51ab54acda69e153c8a84b6164ec3a1108ea02d3b1c2d8ef7. No product gate acceptance yet.
+
+Supervisor accepts the classification and only two local fake-adapter paths: check exact context/same authority then return explicit synthetic availability. Global stub/old assertions/budgets/product unchanged. New frozen client full once authorized; remaining13 results retain validity by bytes. Findings evidence remains archived.

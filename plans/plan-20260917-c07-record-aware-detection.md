@@ -1,6 +1,6 @@
 # Plan: C07 record-aware detection and typed refusal
 
-> Status: Product implemented; frozen executor matrix pending
+> Status: Frozen full found two fixture wiring gaps; bounded test-only correction authorized
 > Task Profile: feature
 > Task Contract: `tasks/contracts/20260917-c07-record-aware-detection.contract.md`
 > Task Review: `tasks/reviews/20260917-c07-record-aware-detection.review.md`
@@ -30,7 +30,9 @@ P3: one authority per datum; reuse measurement, do not duplicate the record read
 - [x] Exact product candidate af77aee2 accepted; Q5-A fixed order/first reason/equal version, exact paths activated.
 - [x] Commit test-only drivers8c9f7a26 and preserve real behavioral RED5/6.
 - [x] Implement physical observation, routing, refusal and consumer cutover; focused verification and two-golden review.
-- [ ] Freeze product/docs separately, complete required checks and submit independent gate.
+- [x] Freeze product9f697036/docs d5949148 and run discovery14-package matrix once; retain23 new fixture failures plus inherited S2.
+- [ ] Register and correct only two local fake-adapter installed-observation declarations; original assertions/product unchanged.
+- [ ] Freeze test-only correction, run client full once, combine unchanged13-package evidence and submit independent gate.
 
 ## Verification
 

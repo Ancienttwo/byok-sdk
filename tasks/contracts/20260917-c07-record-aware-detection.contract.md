@@ -66,6 +66,8 @@ allowed_paths:
   - packages/client/src/__tests__/device-doctor.test.ts
   - packages/client/src/__tests__/trusted-launch-cwd.test.ts
   - packages/client/src/__tests__/runtime-detection-routing.test.ts
+  - packages/client/src/__tests__/prepared-offer-lane.test.ts
+  - packages/client/src/__tests__/fixtures/prepared-offer-restart-daemon.ts
   - packages/client/src/__tests__/pi-runtime-host-binding.test.ts
   - packages/client/src/__tests__/pi-runtime-launch-binding.test.ts
   - api-surface/client.d.ts
@@ -128,3 +130,9 @@ The original docs subject a4dab4a4 is accepted. The research addendum now propos
 Supervisor accepted af77aee2 product candidate: shared physical core/result with structural type/parser spawn exclusion; explicit installed method plus central route; strict refused/reason; readonly cwd observation; manifest author extraction; client+identity golden delta (other8 unchanged). Q5-A is selected: enabled top-level set from RUNTIME_LAUNCH_KINDS in fixed order, first failed entry's exact finite refusal wins, aggregate available has only equal verified native version. No lane switching, descendants, metadata guessing or scope-unknown fallback implementation. Entry-scoped observation is explicit; generic scope is explicitly enabled-top-level. Prepared-only/rpc-only controls mandatory.
 
 Driver-only behavioral RED precedes product. Product/docs commits separate. Freeze before one complete gate (build/typecheck/test/api/version/graph/strict/release-pack); no parallel full/pack with supervisor. Original24 vectors become executable obligations with exact driver mappings; inherited unsupported native/CI conditions stay named, no new red automatically waived.
+
+## Approved bounded fixture correction after frozen full
+
+Supervisor approves exactly two additional test paths above: makeRunner in prepared-offer-lane.test.ts and the local fake adapter in fixtures/prepared-offer-restart-daemon.ts. They model a configured complete runtime with an explicit installed-observation declaration. Each checks same authority identity and enabled-top-level context before returning its original synthetic available result; no old detect call. Global StubRuntimeAdapter, existing assertions/timeouts and all product bytes stay unchanged. Registration precedes test-only independent commit.
+
+Discovery subject d5949148: client23 new failures from missing injected method plus inherited S2 failure; other13 packages passed once. Preserve discovery logs. After test-only freeze, run client full exactly once on new head as final client evidence; carry other13 from d5949148 by unchanged product/non-client test bytes. Gate package includes both subjects, classification and raw log hashes.
