@@ -1,6 +1,6 @@
 # Plan: Integrate C07 PR191 trusted MCP launch
 
-> **Status**: Executing
+> **Status**: Blocked
 > **Artifact Level**: work-package
 > **Promotion Reason**: Integrate and accept the independently mergeable PR191 boundary
 > **Verification Boundary**: Current-main MCP preparation and runtime projection with repository required checks
@@ -24,8 +24,8 @@ Retain existing platform admission/launcher semantics. Resolve trusted cwd once 
 
 ## Task Breakdown
 - [x] Verify dependency and merge accepted main, preserving both document additions.
-- [ ] Freeze authority/projection and run canonical checks.
-- [ ] Obtain one independent exact-subject acceptance and finalize.
+- [x] Freeze authority/projection and run canonical checks; preserve the failed API result and subsequent narrow correction.
+- [ ] Obtain passing independent acceptance: current verdict FAIL on Windows ACL authority.
 - [ ] Push, verify exact-head CI and merge PR191; preserve dependent PR bases until retargeted.
 
 ## Stop Conditions
@@ -45,3 +45,6 @@ No provider calls/publication/deployment. Preserve other worktrees and concurren
 - Review/acceptance boundary: Typed AcceptanceReceipt from independent Codex review.
 - High-risk surface: MCP tool identity, runtime projection and preparation binding.
 - Why not checklist row: An independently mergeable PR with shared public API and runtime ownership changes.
+
+## Blocking Acceptance Finding
+Windows directory admission lacks an authoritative effective-token ACL proof for directory replacement, subdirectory creation and DACL changes. Existing file-create probe is insufficient. Keep this PR and dependent candidates unmerged until a bounded Windows ACL repair has real regression evidence and independent acceptance. Do not remove Windows support or waive this finding merely to merge.

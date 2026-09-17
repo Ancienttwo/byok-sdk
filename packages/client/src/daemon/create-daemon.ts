@@ -182,7 +182,8 @@ import {
 import { MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS, probeMcpServer } from './mcp-tools-probe';
 import { buildRuntimeEnv } from './environment';
 import { resolveAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
-import { resolveTrustedLaunchCwd, mcpLaunchAttestation, type McpLaunchCwdConfig } from './trusted-launch-cwd';
+import { resolveTrustedLaunchCwd, mcpLaunchAttestation } from './trusted-launch-cwd';
+import type { McpLaunchCwdConfig } from './trusted-launch-cwd';
 import { preflightAgentMessageMcp } from './agent-message-mcp-preflight';
 import { resolveAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
 import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
