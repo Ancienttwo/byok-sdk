@@ -70,6 +70,34 @@ export interface McpStdioServerConfig {
 /** A logical group of local MCP servers selectable by a wire-level toolset id. */
 export interface McpToolsetConfig {
   mcpServers: Readonly<Record<string, McpStdioServerConfig>>;
+  /**
+   * The operator's own read/mutation classification of this toolset's tools,
+   * per `(server, tool)`. It is what makes a permission mode other than `auto`
+   * expressible for a toolset task at all.
+   *
+   * The device configuration owner declares it and nothing else may. A
+   * server's own `annotations.readOnlyHint` is that server's self-assessment
+   * rather than a security authority, and a tool's name, description or schema
+   * is not evidence of anything — inferring the classification from any of
+   * them would be exactly the heuristic that makes a permission boundary
+   * meaningless.
+   *
+   * Two fail-closed defaults follow, both enforced by
+   * `filterMcpObservationForPolicy` (`mcp/projection.ts`): a tool the server
+   * exposes that this declaration omits is treated as a MUTATION tool, and a
+   * toolset carrying no declaration at all cannot run under a non-`auto`
+   * policy — the refusal names the missing classification rather than quietly
+   * running with every tool enabled.
+   *
+   * The registry validates it strictly (every server named here must be
+   * defined in `mcpServers`, every tool name must be grantable, no
+   * duplicates), the daemon cross-checks it against each server's own
+   * `tools/list` answer before admission (a classified tool the server does not
+   * expose is a stale config and is rejected), and it is folded into the
+   * toolset's `definitionRevision` — so changing a classification changes the
+   * toolset revision and therefore every executor fingerprint derived from it.
+   */
+  readOnlyTools?: Readonly<Record<string, readonly string[]>>;
 }
 
 /** Lifecycle facts a device host may explicitly report for one configured toolset. */

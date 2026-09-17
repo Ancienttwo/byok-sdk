@@ -51,6 +51,11 @@ describe('hosted Salesko MCP toolset over the real cloud transport', () => {
             mcpServers: {
               salesko: { command: process.execPath, args: [SALESKO_MCP_FIXTURE] },
             },
+            // The device operator's own classification. Without it a
+            // `readonly` toolset task is refused as an inexpressible policy:
+            // nothing else on this device can say which of a server's tools
+            // merely read.
+            readOnlyTools: { salesko: ['find_leads'] },
           },
         },
       },

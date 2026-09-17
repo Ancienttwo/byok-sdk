@@ -6586,7 +6586,7 @@ import type { GitWorkspaceManager, GitWorkspaceObservation } from './git-workspa
 import type { GitWorkspaceStore, GitWorkspacePhase } from './git-workspace-store';
 import type { AgentEgressController } from './agent-egress-controller';
 import { type McpToolsProbeOptions } from './mcp-tools-probe';
-import type { McpServerObservation } from '../mcp/observation';
+import { type McpServerObservation } from '../mcp/observation';
 import type { ResolvedAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
 import type { ResolvedAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
 import { type AgentMemoryAuditWarning, type AgentMemoryHostedProjection } from './agent-memory';
@@ -9862,18 +9862,61 @@ export interface McpServerObservation {
     readonly tools: readonly McpToolDescriptor[];
 }
 /**
- * One observed server together with the toolset it was projected from.
+ * One observed tool plus the operator's classification of it.
  *
- * The toolset id is the daemon's fact, not the server's, so it is attached
- * here rather than inside {@link McpServerObservation}: the core observes
- * servers and knows nothing about the registry. Carrying it ON the entry
- * instead of in a parallel `serverName -> toolsetId` map is deliberate — two
- * structures that must agree are two structures that can disagree, and the
- * projection's ordering is derived from this id.
+ * `readOnly` comes from device toolset configuration
+ * (`McpToolsetConfig.readOnlyTools`) and from nowhere else — never from the
+ * tool's name, its description, its schema, or the server's own
+ * `annotations.readOnlyHint`, which is a self-assessment rather than a
+ * security authority. The field is deliberately three-state:
+ *
+ * - `true`  — the device config lists this `(server, tool)` as read-only.
+ * - `false` — the config classifies this tool's TOOLSET but not this tool, so
+ *             it counts as a mutation tool. That is the fail-closed default: a
+ *             tool an operator forgot to classify is never granted under a
+ *             restricted policy.
+ * - absent  — the toolset carries no classification at all. Not "it mutates"
+ *             but "nobody said", which is why it stays distinguishable: a
+ *             non-`auto` policy is then refused outright instead of silently
+ *             resolving to an empty toolset.
  */
-export interface McpToolsetServerObservation extends McpServerObservation {
-    readonly toolsetId: string;
+export interface McpClassifiedToolDescriptor extends McpToolDescriptor {
+    readonly readOnly?: boolean;
 }
+/**
+ * One observed server together with the toolset it was projected from and the
+ * operator classification of each of its tools.
+ *
+ * Both additions are the daemon's facts, not the server's, so they are
+ * attached here rather than inside {@link McpServerObservation}: the core
+ * observes servers and knows nothing about the registry. Carrying them ON the
+ * entry instead of in parallel `serverName -> …` maps is deliberate — two
+ * structures that must agree are two structures that can disagree, and both
+ * the projection's ordering and its policy filter are derived from these.
+ */
+export interface McpToolsetServerObservation extends Omit<McpServerObservation, 'tools'> {
+    readonly toolsetId: string;
+    /** Ordered by tool name, code unit. */
+    readonly tools: readonly McpClassifiedToolDescriptor[];
+}
+/**
+ * Join one raw server observation to the daemon facts about it: which toolset
+ * projected it, and which of its tools the device's operator declared
+ * read-only.
+ *
+ * `readOnlyTools` is `null` when the toolset declares no classification at
+ * all — every tool then comes back unclassified, and a non-`auto` policy fails
+ * later rather than being resolved into "nothing is read-only" here. A
+ * declared name the server does not expose is a STALE configuration and is
+ * rejected: the operator classified a tool that no longer exists, so the rest
+ * of the declaration cannot be trusted to describe this server either. It
+ * throws {@link McpAuthorityError} for the same reason an ungrantable tool
+ * name does — the answer will not change on a retry.
+ */
+export declare function classifyMcpToolsetServerObservation(observation: McpServerObservation, binding: {
+    readonly toolsetId: string;
+    readonly readOnlyTools: readonly string[] | null;
+}): McpToolsetServerObservation;
 export interface ObserveMcpServerOptions extends Omit<McpStdioClientOptions, 'maxStdoutBytes'> {
     readonly signal?: AbortSignal;
 }
@@ -10122,6 +10165,34 @@ export interface McpStdioServerConfig {
 /** A logical group of local MCP servers selectable by a wire-level toolset id. */
 export interface McpToolsetConfig {
     mcpServers: Readonly<Record<string, McpStdioServerConfig>>;
+    /**
+     * The operator's own read/mutation classification of this toolset's tools,
+     * per `(server, tool)`. It is what makes a permission mode other than `auto`
+     * expressible for a toolset task at all.
+     *
+     * The device configuration owner declares it and nothing else may. A
+     * server's own `annotations.readOnlyHint` is that server's self-assessment
+     * rather than a security authority, and a tool's name, description or schema
+     * is not evidence of anything — inferring the classification from any of
+     * them would be exactly the heuristic that makes a permission boundary
+     * meaningless.
+     *
+     * Two fail-closed defaults follow, both enforced by
+     * `filterMcpObservationForPolicy` (`mcp/projection.ts`): a tool the server
+     * exposes that this declaration omits is treated as a MUTATION tool, and a
+     * toolset carrying no declaration at all cannot run under a non-`auto`
+     * policy — the refusal names the missing classification rather than quietly
+     * running with every tool enabled.
+     *
+     * The registry validates it strictly (every server named here must be
+     * defined in `mcpServers`, every tool name must be grantable, no
+     * duplicates), the daemon cross-checks it against each server's own
+     * `tools/list` answer before admission (a classified tool the server does not
+     * expose is a stale config and is rejected), and it is folded into the
+     * toolset's `definitionRevision` — so changing a classification changes the
+     * toolset revision and therefore every executor fingerprint derived from it.
+     */
+    readOnlyTools?: Readonly<Record<string, readonly string[]>>;
 }
 /** Lifecycle facts a device host may explicitly report for one configured toolset. */
 export type McpToolsetLifecycleState = 'installed' | 'unauthorized' | 'starting' | 'ready' | 'degraded' | 'crashed' | 'incompatible';

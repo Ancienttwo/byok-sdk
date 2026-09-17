@@ -59,17 +59,89 @@ export interface McpServerObservation {
 }
 
 /**
- * One observed server together with the toolset it was projected from.
+ * One observed tool plus the operator's classification of it.
  *
- * The toolset id is the daemon's fact, not the server's, so it is attached
- * here rather than inside {@link McpServerObservation}: the core observes
- * servers and knows nothing about the registry. Carrying it ON the entry
- * instead of in a parallel `serverName -> toolsetId` map is deliberate — two
- * structures that must agree are two structures that can disagree, and the
- * projection's ordering is derived from this id.
+ * `readOnly` comes from device toolset configuration
+ * (`McpToolsetConfig.readOnlyTools`) and from nowhere else — never from the
+ * tool's name, its description, its schema, or the server's own
+ * `annotations.readOnlyHint`, which is a self-assessment rather than a
+ * security authority. The field is deliberately three-state:
+ *
+ * - `true`  — the device config lists this `(server, tool)` as read-only.
+ * - `false` — the config classifies this tool's TOOLSET but not this tool, so
+ *             it counts as a mutation tool. That is the fail-closed default: a
+ *             tool an operator forgot to classify is never granted under a
+ *             restricted policy.
+ * - absent  — the toolset carries no classification at all. Not "it mutates"
+ *             but "nobody said", which is why it stays distinguishable: a
+ *             non-`auto` policy is then refused outright instead of silently
+ *             resolving to an empty toolset.
  */
-export interface McpToolsetServerObservation extends McpServerObservation {
+export interface McpClassifiedToolDescriptor extends McpToolDescriptor {
+  readonly readOnly?: boolean;
+}
+
+/**
+ * One observed server together with the toolset it was projected from and the
+ * operator classification of each of its tools.
+ *
+ * Both additions are the daemon's facts, not the server's, so they are
+ * attached here rather than inside {@link McpServerObservation}: the core
+ * observes servers and knows nothing about the registry. Carrying them ON the
+ * entry instead of in parallel `serverName -> …` maps is deliberate — two
+ * structures that must agree are two structures that can disagree, and both
+ * the projection's ordering and its policy filter are derived from these.
+ */
+export interface McpToolsetServerObservation extends Omit<McpServerObservation, 'tools'> {
   readonly toolsetId: string;
+  /** Ordered by tool name, code unit. */
+  readonly tools: readonly McpClassifiedToolDescriptor[];
+}
+
+/**
+ * Join one raw server observation to the daemon facts about it: which toolset
+ * projected it, and which of its tools the device's operator declared
+ * read-only.
+ *
+ * `readOnlyTools` is `null` when the toolset declares no classification at
+ * all — every tool then comes back unclassified, and a non-`auto` policy fails
+ * later rather than being resolved into "nothing is read-only" here. A
+ * declared name the server does not expose is a STALE configuration and is
+ * rejected: the operator classified a tool that no longer exists, so the rest
+ * of the declaration cannot be trusted to describe this server either. It
+ * throws {@link McpAuthorityError} for the same reason an ungrantable tool
+ * name does — the answer will not change on a retry.
+ */
+export function classifyMcpToolsetServerObservation(
+  observation: McpServerObservation,
+  binding: { readonly toolsetId: string; readonly readOnlyTools: readonly string[] | null },
+): McpToolsetServerObservation {
+  const declared = binding.readOnlyTools;
+  if (declared === null) {
+    return Object.freeze({
+      ...observation,
+      toolsetId: binding.toolsetId,
+      tools: Object.freeze(observation.tools.map((tool) => Object.freeze({ ...tool }))),
+    });
+  }
+  const exposed = new Set(observation.tools.map((tool) => tool.name));
+  const stale = declared.filter((name) => !exposed.has(name)).sort(compareCodeUnits);
+  if (stale.length > 0) {
+    throw new McpAuthorityError(
+      `MCP server ${JSON.stringify(observation.serverName)} does not expose tool name(s) `
+      + `[${stale.map((name) => JSON.stringify(name)).join(', ')}] that the device's mcpToolsets `
+      + `readOnlyTools declaration for toolset ${JSON.stringify(binding.toolsetId)} classifies as read-only`,
+    );
+  }
+  const readOnly = new Set(declared);
+  return Object.freeze({
+    ...observation,
+    toolsetId: binding.toolsetId,
+    tools: Object.freeze(observation.tools.map((tool) => Object.freeze({
+      ...tool,
+      readOnly: readOnly.has(tool.name),
+    }))),
+  });
 }
 
 export interface ObserveMcpServerOptions extends Omit<McpStdioClientOptions, 'maxStdoutBytes'> {

@@ -217,6 +217,10 @@ async function buildRequest(
   try {
     ({ toolExecutors } = await buildToolExecutorsFromObservation({
       observation: observed.observation,
+      // This task-free lane fingerprints the complete observed snapshot it
+      // compiled above. Non-narrowing projection is explicit; it grants no
+      // execution permission and the unattested receipt remains not-ready.
+      permissionMode: 'auto',
       toolsetDefinitionRevisions: observed.toolsetDefinitionRevisions,
       // Declared limit for this slice: the remote lane compiles the observed
       // MCP toolset tools only. Pi's own native tools are selected by a runtime
