@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { defaultRuntimeAdapters, probeRuntimes } from '../bin/runtime-probe';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
@@ -75,5 +75,33 @@ describe('bin/runtime-probe: probeRuntimes', () => {
     expect(probed?.present).toBe(false);
     expect(probed?.outcome).toBe('probe-failed');
     expect(probed?.id).toBe('broken');
+  });
+
+  it('a wrapper deadline stays timeout after a late typed refusal, without claiming cancellation', async () => {
+    vi.useFakeTimers();
+    try {
+      let settle!: (value: { kind: 'refused'; reason: 'install_record_mismatch' }) => void;
+      const adapter = Object.assign(new StubRuntimeAdapter('pi'), {
+        detectInstallation: vi.fn(() => new Promise<{ kind: 'refused'; reason: 'install_record_mismatch' }>(resolve => { settle = resolve; })),
+      });
+      const pending = probeRuntimes([adapter], { timeoutMs: 25, toolImplementationAuthority: { resolve: async () => ({ kind: 'unavailable', reason: 'resolver_unconfigured' }) } });
+      await vi.advanceTimersByTimeAsync(25);
+      const result = await pending;
+      expect(result[0]).toMatchObject({ outcome: 'timeout', present: false });
+      settle({ kind: 'refused', reason: 'install_record_mismatch' });
+      await Promise.resolve();
+      expect(result[0]).not.toHaveProperty('reason');
+      expect(adapter.detectInstallation).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('does not parse a custom error message into a trusted reason or expose it', async () => {
+    const adapter = Object.assign(new StubRuntimeAdapter('pi'), {
+      detectInstallation: async () => { throw new Error('install_record_mismatch /private/PRIVATE_SENTINEL credential=PRIVATE_SENTINEL'); },
+    });
+    const [result] = await probeRuntimes([adapter], { toolImplementationAuthority: { resolve: async () => ({ kind: 'unavailable', reason: 'resolver_unconfigured' }) } });
+    expect(result).toMatchObject({ outcome: 'probe-failed', present: false });
+    expect(result).not.toHaveProperty('reason');
+    expect(JSON.stringify(result)).not.toContain('PRIVATE_SENTINEL');
   });
 });

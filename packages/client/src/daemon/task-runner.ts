@@ -4,7 +4,7 @@ import { awaitAdmission } from './admission-wait';
 import { terminalIdentity } from './terminal-identity';
 import { startOwnedRuntime } from './runtime-start';
 import { DEFAULT_ARTIFACT_LIMITS, readArtifactBytes } from './artifact-read';
-import { validateRuntimeDetectResult } from '../runtime-detection';
+import { observeRuntimeDetection } from '../runtime-detection';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { promises as fs, constants as fsConstants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
@@ -5198,7 +5198,7 @@ export class TaskRunner {
           retryable: false,
         };
       }
-      const detected = validateRuntimeDetectResult(await awaitAdmission(() => adapter.detect(signal), signal));
+      const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, this.deps.toolImplementationAuthority, signal), signal);
       if (detected.kind !== 'available') {
         return {
           ok: false,
@@ -5219,7 +5219,7 @@ export class TaskRunner {
       const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
       if (!adapterSupportsMode(descriptor, policyMode)) continue;
       if (requiresMcpToolsets && !adapterSupportsMcpToolsets(descriptor)) continue;
-      const detected = validateRuntimeDetectResult(await awaitAdmission(() => adapter.detect(signal), signal));
+      const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, this.deps.toolImplementationAuthority, signal), signal);
       if (detected.kind === 'available') return { ok: true, adapter, descriptor };
     }
     return {

@@ -247,7 +247,7 @@ function ancestorsOf(dir: string): string[] {
  */
 type PathComponentRejection = 'unreadable' | 'is_a_symlink' | 'not_a_directory' | 'owned_by_current_uid' | 'is_writable';
 
-async function checkOnePathComponent(
+async function inspectOnePathComponent(
   target: string,
   currentUid: number | undefined,
 ): Promise<PathComponentRejection | undefined> {
@@ -263,6 +263,12 @@ async function checkOnePathComponent(
   if (stats.isSymbolicLink()) return 'is_a_symlink';
   if (!stats.isDirectory()) return 'not_a_directory';
   if (currentUid !== undefined && stats.uid === currentUid) return 'owned_by_current_uid';
+  return undefined;
+}
+
+async function checkOnePathComponent(target: string, currentUid: number | undefined): Promise<PathComponentRejection | undefined> {
+  const observed = await inspectOnePathComponent(target, currentUid);
+  if (observed !== undefined) return observed;
   if (!(await provesNonWritable(target))) return 'is_writable';
   return undefined;
 }
@@ -291,6 +297,21 @@ async function checkCandidate(
     return unavailable(`${prefix}_${ANCESTOR_REJECTION[rejection]}`);
   }
   return Object.freeze({ kind: 'resolved' as const, dir });
+}
+
+/** Read-only facts only: success makes no ACL/non-writability claim and is not launch admission. */
+export async function inspectTrustedLaunchCwd(dir: string): Promise<TrustedLaunchCwd> {
+  if (!path.isAbsolute(dir) || path.normalize(dir) !== dir) return unavailable('configured_dir_not_absolute');
+  try { if (await fs.realpath(dir) !== dir) return unavailable('configured_dir_is_a_symlink'); }
+  catch { return unavailable('configured_dir_unreadable'); }
+  const uid = process.getuid?.();
+  const leaf = await inspectOnePathComponent(dir, uid);
+  if (leaf !== undefined) return unavailable(`configured_dir_${leaf}`);
+  for (const ancestor of ancestorsOf(dir)) {
+    const rejection = await inspectOnePathComponent(ancestor, uid);
+    if (rejection !== undefined) return unavailable(`configured_dir_${ANCESTOR_REJECTION[rejection]}`);
+  }
+  return Object.freeze({ kind: 'resolved', dir });
 }
 
 /**

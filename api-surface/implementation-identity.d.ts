@@ -485,6 +485,21 @@ export type ResolvedRuntimeImplementationV1 = ToolImplementationUnavailableV1 | 
     readonly descendantPolicy: RuntimeDescendantPolicyV1;
     readonly edges: readonly RuntimeDescendantEdgeV1[];
 };
+/** Read-only installation facts. Deliberately not a launch identity: no environment digests. */
+export interface RuntimeInstallationMeasurementV1 {
+    readonly kind: 'measured-installation';
+    readonly record: ToolImplementationInstallRecordV1;
+    readonly installStat: ToolImplementationStatTupleV1;
+    readonly interpreterStat?: ToolImplementationStatTupleV1;
+    readonly assetStats?: readonly ToolImplementationStatTupleV1[];
+    readonly descendantPolicy: RuntimeDescendantPolicyV1;
+    readonly edges: readonly RuntimeDescendantEdgeV1[];
+}
+export type RuntimeInstallationMeasurementResultV1 = RuntimeInstallationMeasurementV1 | ToolImplementationUnavailableV1;
+export type RuntimeInstallationReverifyResult = 'ok' | {
+    readonly reason: ToolImplementationMeasurementFailure;
+    readonly subject: 'artifact' | 'interpreter' | 'asset';
+};
 export type ToolImplementationResolutionV1 = ToolImplementationUnavailableV1 | ToolImplementationInstallRecordV1 | RuntimeImplementationRecordV1;
 /**
  * The host's install-record authority.
@@ -651,6 +666,10 @@ export declare function parseRuntimeDescendantPolicy(value: unknown): RuntimeDes
 /** Strict runtime wrapper cutover. No bare record, defaults or shape guessing. */
 export declare function parseRuntimeImplementationRecord(value: unknown): RuntimeImplementationRecordV1 | undefined;
 export declare function resolveRuntimeImplementation(authority: ToolImplementationAuthority | undefined, locator: RuntimeImplementationLocatorV1, launchEnv: LaunchEnvironment, probe?: ToolImplementationFsProbe): Promise<ResolvedRuntimeImplementationV1>;
+/** No process, environment construction, task state or credential observation. */
+export declare function measureRuntimeInstallation(authority: ToolImplementationAuthority, locator: RuntimeImplementationLocatorV1, probe?: ToolImplementationFsProbe): Promise<RuntimeInstallationMeasurementResultV1>;
+/** Fresh read-only observation, never a pre-spawn authorization or environment claim. */
+export declare function reverifyRuntimeInstallation(measurement: RuntimeInstallationMeasurementV1, probe?: ToolImplementationFsProbe): Promise<RuntimeInstallationReverifyResult>;
 /**
  * The one failure that exists only at spawn.
  *

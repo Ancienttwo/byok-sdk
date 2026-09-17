@@ -1,3 +1,5 @@
+import { observePiInstallation } from './installation-observation';
+import type { RuntimeInstallationObservationContext } from '../../types';
 import { serializePiHostConfig } from './runtime-host-binding';
 import { parsePiMcpEnvironment } from './mcp-environment';
 import { assertImplementationSpawnBinding } from '@byok-sdk/implementation-identity';
@@ -205,6 +207,11 @@ export class PiAdapter implements RuntimeAdapter {
 
   constructor(private readonly options: PiAdapterOptions = {}) {
     validatePiByokLauncherConfig(options.byokLauncher);
+  }
+
+  async detectInstallation(context: RuntimeInstallationObservationContext, signal?: AbortSignal): Promise<RuntimeDetectResult> {
+    try { return await observePiInstallation(context, signal); }
+    catch (error) { return classifyDetectError(error); }
   }
 
   async detect(): Promise<RuntimeDetectResult> {

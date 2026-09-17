@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { realpathSync, statSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   MCP_LAUNCH_CWD_SHELL_SCRIPT,
   mcpLaunchAttestation,
+  inspectTrustedLaunchCwd,
   resolveMcpLaunchCwdLauncher,
   resolveTrustedLaunchCwd,
   wrapMcpServerWithLaunchCwd,
@@ -24,6 +25,36 @@ const NOBODY_UID = 65534;
 async function tempRoot(): Promise<string> {
   return fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-launch-cwd-')));
 }
+
+describe('read-only installed cwd facts, without ACL certification', () => {
+  it('may observe a writable directory without proving it safe, while the full checker independently refuses', async () => {
+    const root = await tempRoot();
+    const uid = process.getuid ? vi.spyOn(process, 'getuid').mockReturnValue(NOBODY_UID) : undefined;
+    const open = vi.spyOn(fs, 'open');
+    try {
+      expect(await inspectTrustedLaunchCwd(root)).toEqual({ kind: 'resolved', dir: root });
+      expect(open).not.toHaveBeenCalled();
+      expect(await resolveTrustedLaunchCwd({ dir: root }, { getuid: () => NOBODY_UID }))
+        .toEqual({ kind: 'unavailable', reason: 'configured_dir_is_writable' });
+      expect(open).toHaveBeenCalled();
+      expect(await fs.readdir(root)).toEqual([]);
+    } finally { uid?.mockRestore(); open.mockRestore(); await fs.rm(root, { recursive: true, force: true }); }
+  });
+
+  it('refuses observed missing, file, nonabsolute and symlink shapes without writes or alternate cwd', async () => {
+    const root = await tempRoot();
+    const file = path.join(root, 'file'); const link = path.join(root, 'link');
+    await fs.writeFile(file, 'fixture'); await fs.symlink(root, link, process.platform === 'win32' ? 'junction' : 'dir');
+    const open = vi.spyOn(fs, 'open');
+    try {
+      expect(await inspectTrustedLaunchCwd(path.join(root, 'missing'))).toEqual({ kind: 'unavailable', reason: 'configured_dir_unreadable' });
+      expect(await inspectTrustedLaunchCwd(file)).toEqual({ kind: 'unavailable', reason: 'configured_dir_not_a_directory' });
+      expect(await inspectTrustedLaunchCwd('relative')).toEqual({ kind: 'unavailable', reason: 'configured_dir_not_absolute' });
+      expect(await inspectTrustedLaunchCwd(link)).toEqual({ kind: 'unavailable', reason: 'configured_dir_is_a_symlink' });
+      expect(open).not.toHaveBeenCalled();
+    } finally { open.mockRestore(); await fs.rm(root, { recursive: true, force: true }); }
+  });
+});
 
 describe('resolveTrustedLaunchCwd', () => {
   it('resolves the platform default and leaves no probe file behind', async () => {

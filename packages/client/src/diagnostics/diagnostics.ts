@@ -601,7 +601,11 @@ function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>): DiagnosticChe
       status: snapshot.runtimes.some((runtime) => runtime.present) ? 'pass' : 'warn',
       summary: `${snapshot.runtimes.filter((runtime) => runtime.present).length}/${snapshot.runtimes.length} present; `
         + RUNTIME_DETECTION_FAILURE_KINDS
-          .map((kind) => `${kind}=${snapshot.runtimes.filter((runtime) => runtime.outcome === kind).length}`).join(' '),
+           .filter(kind => kind !== 'refused' || snapshot.runtimes.some(runtime => runtime.outcome === 'refused'))
+          .map((kind) => `${kind}=${snapshot.runtimes.filter((runtime) => runtime.outcome === kind).length}`).concat(
+            [...new Set(snapshot.runtimes.flatMap(runtime => runtime.outcome === 'refused' && runtime.reason !== undefined ? [runtime.reason] : []))].sort()
+              .map(reason => `refused:${reason}=${snapshot.runtimes.filter(runtime => runtime.outcome === 'refused' && runtime.reason === reason).length}`),
+          ).join(' '),
     },
     {
       id: 'control',
@@ -656,7 +660,7 @@ export async function collectDiagnostics(
   const connectControl = options.connectControl ?? connectControlClient;
   const [device, probedRuntimes, health, journal, workspace, quarantine, controlConnection] = await Promise.all([
     inspectDevice(resolvedStoreDir),
-    probeRuntimes(adapters, { timeoutMs: options.runtimeProbeTimeoutMs }),
+    probeRuntimes(adapters, { timeoutMs: options.runtimeProbeTimeoutMs, toolImplementationAuthority: config.toolImplementationAuthority }),
     inspectOperationalHealthFile(resolvedStoreDir),
     inspectJournal(resolvedStoreDir),
     inspectWorkspace(config.workspaceRoot),
@@ -667,6 +671,7 @@ export async function collectDiagnostics(
     idHash: stableIdentifierHash(runtime.id),
     present: runtime.present,
     outcome: runtime.outcome,
+    ...(runtime.outcome === 'refused' ? { reason: runtime.reason } : {}),
     versionPresent: runtime.version !== undefined,
     ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
     steer: runtime.steer,

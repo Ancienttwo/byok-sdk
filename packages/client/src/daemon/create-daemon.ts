@@ -1,7 +1,7 @@
 import { terminalIdentity } from './terminal-identity';
 import { HarnessIdSchema, type HarnessInfo } from '@byok-sdk/protocol';
 import { TerminalCommitQueue } from './terminal-commit-queue';
-import { validateRuntimeDetectResult } from '../runtime-detection';
+import { observeRuntimeDetection } from '../runtime-detection';
 import {
   DEVICE_ASSERTION_AUDIENCE_MAX_BYTES,
   DEVICE_ASSERTION_DEFAULT_TTL_MS,
@@ -999,8 +999,8 @@ function isRuntimeId(id: string): id is RuntimeId {
 }
 
 /** Runtimes actually detected as present on this device, typed per protocol §10 gap #4 (`ConnHelloPayload.runtimes`). Computed once at `start()` — re-probing on every reconnect would mean re-spawning each runtime's `--version` check for no real benefit within one daemon lifetime. */
-async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{ runtimes: RuntimeInfo[]; harnesses: HarnessInfo[] }> {
-  const detections = await Promise.all(adapters.map(async (adapter) => ({ adapter, detected: validateRuntimeDetectResult(await adapter.detect()) })));
+async function detectRuntimes(adapters: RuntimeAdapter[], authority: ToolImplementationAuthority | undefined): Promise<{ runtimes: RuntimeInfo[]; harnesses: HarnessInfo[] }> {
+  const detections = await Promise.all(adapters.map(async (adapter) => ({ adapter, detected: await observeRuntimeDetection(adapter, authority) })));
   const runtimes: RuntimeInfo[] = [];
   const harnesses: HarnessInfo[] = [];
   for (const { adapter, detected } of detections) {
@@ -2107,7 +2107,7 @@ export function buildDaemonWithAdapters(
 
     blobLifecycleAbort = new AbortController();
     const [{ runtimes, harnesses }, blobClient] = await Promise.all([
-      detectRuntimes(adapters),
+      detectRuntimes(adapters, config.toolImplementationAuthority),
       Promise.resolve(new BlobClient(config.serverUrl, auth, { signal: blobLifecycleAbort.signal })),
     ]);
     // M3-2a: local runtime-detection result — computed once per `start()`,

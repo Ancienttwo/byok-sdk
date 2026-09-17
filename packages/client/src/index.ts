@@ -10,6 +10,8 @@ export type {
   RuntimeOperationStartInput,
   RuntimeCapabilities,
   RuntimeDetectResult,
+  RuntimeDetectionRefusalReason,
+  RuntimeInstallationObservationContext,
   Session,
   GitWorkspaceConfig,
   McpLaunchBinding,

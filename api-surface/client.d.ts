@@ -721,6 +721,7 @@ export type { ClaudeAdapterOptions } from './claude/claude-adapter';
 export { CodexAdapter } from './codex/codex-adapter';
 export type { CodexAdapterOptions } from './codex/codex-adapter';
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
+import type { RuntimeInstallationObservationContext } from '../../types';
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type ResolvedBin } from './resolve-bin';
@@ -760,6 +761,7 @@ export declare class PiAdapter implements RuntimeAdapter {
     private readonly options;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
     constructor(options?: PiAdapterOptions);
+    detectInstallation(context: RuntimeInstallationObservationContext, signal?: AbortSignal): Promise<RuntimeDetectResult>;
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private resolveBin;
@@ -1009,6 +1011,9 @@ export interface RuntimeDescendantPlanV1 {
 }
 /** The finite type closure is independent of instance depth/budget admission. */
 export declare function requiredRuntimePlanKinds(selfKind: RuntimeEntryV1, policy: RuntimeDescendantPolicyV1, edges: readonly RuntimeDescendantEdgeV1[]): readonly RuntimeEntryV1[];
+export declare function runtimeRecordCommonFields<T extends {
+    readonly launchArgv: readonly string[];
+}>(record: T): Omit<T, 'launchArgv'>;
 /** Validate raw template bytes before any V1 parser projection changes member order. */
 export declare function parseRuntimeDescendantPlan(value: unknown, selfKind: RuntimeEntryV1, selfBinding: ImplementationSpawnBindingV1, expectedDeclaration?: RuntimeDescendantDeclarationV1): RuntimeDescendantPlanV1 | null;
 /** Assemble already measured rows; this helper never resolves or measures Host records. */
@@ -9161,6 +9166,8 @@ export interface TrustedLaunchCwdEnvironment {
      */
     readonly shellStat?: LaunchCwdShellStat;
 }
+/** Read-only facts only: success makes no ACL/non-writability claim and is not launch admission. */
+export declare function inspectTrustedLaunchCwd(dir: string): Promise<TrustedLaunchCwd>;
 /**
  * Resolve the directory every MCP toolset server child of this daemon is
  * launched in, or state why no such directory could be proven.
@@ -9494,7 +9501,7 @@ export declare function exportDeviceSupportBundle(config: DaemonConfig, input: E
 export declare function archiveAgentTerminalMessages(config: DaemonConfig, input: ArchiveAgentTerminalMessagesInput): Promise<AgentTerminalMessagesArchiveResult>;
 export {};
 // ==== @byok-sdk/client dist/diagnostics/types.d.ts ====
-import type { RuntimeDetectResult } from '../types';
+import type { RuntimeDetectResult, RuntimeDetectionRefusalReason } from '../types';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import type { OperationalHealthFileInspection } from '../daemon/operational-health';
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
@@ -9530,6 +9537,7 @@ export interface DiagnosticsSnapshot {
         idHash: string;
         present: boolean;
         outcome: RuntimeDetectResult['kind'];
+        reason?: RuntimeDetectionRefusalReason;
         versionPresent: boolean;
         authPresent?: boolean;
         steer: boolean;
@@ -9587,7 +9595,7 @@ export type OperationalHealthFixResult = {
     sizeBytes: number;
 };
 // ==== @byok-sdk/client dist/index.d.ts ====
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, Session, GitWorkspaceConfig, McpLaunchBinding, McpLaunchCwdConfig, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, LaunchCwdRejection, TrustedLaunchCwd, TrustedLaunchCwdUnavailableReason, } from './types';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeInstallationObservationContext, Session, GitWorkspaceConfig, McpLaunchBinding, McpLaunchCwdConfig, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, LaunchCwdRejection, TrustedLaunchCwd, TrustedLaunchCwdUnavailableReason, } from './types';
 export { resolveMcpLaunchCwdLauncher, resolveTrustedLaunchCwd } from './daemon/trusted-launch-cwd';
 /**
  * The host install-record authority this SDK declares and never implements
@@ -11928,7 +11936,7 @@ export declare const RESERVED_MCP_SERVER_NAMES: readonly ["byokagentmessage", "b
 /** Whether `name` is one of the SDK-owned MCP server names above. */
 export declare function isReservedMcpServerName(name: string): boolean;
 // ==== @byok-sdk/client dist/types.d.ts ====
-import type { ToolImplementationAuthority } from '@byok-sdk/implementation-identity';
+import type { ToolImplementationAuthority, ToolImplementationUnavailableReasonV1 } from '@byok-sdk/implementation-identity';
 import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
 import type { AgentEvent, PermissionMode, PermissionPolicy, TaskOfferPayload } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation';
@@ -11948,7 +11956,7 @@ export interface GitWorkspaceConfig {
 /**
  * Failure vocabulary shared by the detection contract and local diagnostics.
  */
-export declare const RUNTIME_DETECTION_FAILURE_KINDS: readonly ['not-found', 'not-executable', 'timeout', 'probe-failed'];
+export declare const RUNTIME_DETECTION_FAILURE_KINDS: readonly ['not-found', 'not-executable', 'timeout', 'probe-failed', 'refused'];
 /**
  * One probe outcome, never a separately authored presence boolean. Authentication
  * observation retains each adapter's native status/env-name probe and never
@@ -11959,8 +11967,21 @@ export type RuntimeDetectResult = {
     readonly version?: string;
     readonly authPresent?: boolean;
 } | {
-    readonly kind: typeof RUNTIME_DETECTION_FAILURE_KINDS[number];
+    readonly kind: Exclude<typeof RUNTIME_DETECTION_FAILURE_KINDS[number], 'refused'>;
+} | {
+    readonly kind: 'refused';
+    readonly reason: RuntimeDetectionRefusalReason;
 };
+export type RuntimeDetectionRefusalReason = ToolImplementationUnavailableReasonV1 | 'installation_observation_unsupported' | 'native_identity_mismatch' | 'launch_cwd_unavailable';
+/** Explicit scope, never a launch environment or task/lane-selection authority. */
+export type RuntimeInstallationObservationContext = {
+    readonly authority: ToolImplementationAuthority;
+} & ({
+    readonly scope: 'entry';
+    readonly runtimeEntry: 'pi-rpc' | 'pi-prepared';
+} | {
+    readonly scope: 'enabled-top-level';
+});
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
     readonly steer: boolean;
@@ -12451,6 +12472,8 @@ export interface RuntimeAdapter {
     readonly descriptor: RuntimeAdapterDescriptor;
     /** Readiness probing must not mutate an Agent home or allocate execution ownership. */
     detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
+    /** Configured local installation observation. Absence refuses; it never falls back to detect. */
+    detectInstallation?(context: RuntimeInstallationObservationContext, signal?: AbortSignal): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
 }
 /** Copy then deeply freeze descriptor authority so callers cannot retain a mutable source reference. */

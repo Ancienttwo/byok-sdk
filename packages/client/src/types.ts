@@ -1,4 +1,4 @@
-import type { ToolImplementationAuthority } from '@byok-sdk/implementation-identity';
+import type { ToolImplementationAuthority, ToolImplementationUnavailableReasonV1 } from '@byok-sdk/implementation-identity';
 import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
 import type {
   AgentEgressPolicy,
@@ -38,7 +38,7 @@ export interface GitWorkspaceConfig {
 /**
  * Failure vocabulary shared by the detection contract and local diagnostics.
  */
-export const RUNTIME_DETECTION_FAILURE_KINDS = ['not-found', 'not-executable', 'timeout', 'probe-failed'] as const;
+export const RUNTIME_DETECTION_FAILURE_KINDS = ['not-found', 'not-executable', 'timeout', 'probe-failed', 'refused'] as const;
 
 /**
  * One probe outcome, never a separately authored presence boolean. Authentication
@@ -47,7 +47,17 @@ export const RUNTIME_DETECTION_FAILURE_KINDS = ['not-found', 'not-executable', '
  */
 export type RuntimeDetectResult =
   | { readonly kind: 'available'; readonly version?: string; readonly authPresent?: boolean }
-  | { readonly kind: typeof RUNTIME_DETECTION_FAILURE_KINDS[number] };
+  | { readonly kind: Exclude<typeof RUNTIME_DETECTION_FAILURE_KINDS[number], 'refused'> }
+  | { readonly kind: 'refused'; readonly reason: RuntimeDetectionRefusalReason };
+
+export type RuntimeDetectionRefusalReason = ToolImplementationUnavailableReasonV1
+  | 'installation_observation_unsupported' | 'native_identity_mismatch' | 'launch_cwd_unavailable';
+
+/** Explicit scope, never a launch environment or task/lane-selection authority. */
+export type RuntimeInstallationObservationContext = { readonly authority: ToolImplementationAuthority } & (
+  | { readonly scope: 'entry'; readonly runtimeEntry: 'pi-rpc' | 'pi-prepared' }
+  | { readonly scope: 'enabled-top-level' }
+);
 
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
@@ -570,6 +580,8 @@ export interface RuntimeAdapter {
   readonly descriptor: RuntimeAdapterDescriptor;
   /** Readiness probing must not mutate an Agent home or allocate execution ownership. */
   detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
+  /** Configured local installation observation. Absence refuses; it never falls back to detect. */
+  detectInstallation?(context: RuntimeInstallationObservationContext, signal?: AbortSignal): Promise<RuntimeDetectResult>;
   prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
 }
 

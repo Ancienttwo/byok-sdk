@@ -1,4 +1,4 @@
-import type { RuntimeDetectResult } from '../types';
+import type { RuntimeDetectResult, RuntimeDetectionRefusalReason } from '../types';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import type { OperationalHealthFileInspection } from '../daemon/operational-health';
 
@@ -26,6 +26,7 @@ export interface DiagnosticsSnapshot {
     idHash: string;
     present: boolean;
     outcome: RuntimeDetectResult['kind'];
+    reason?: RuntimeDetectionRefusalReason;
     versionPresent: boolean;
     authPresent?: boolean;
     steer: boolean;

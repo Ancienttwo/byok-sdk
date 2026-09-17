@@ -1,3 +1,8 @@
+import { createEnvelope } from '@byok-sdk/protocol';
+import type { RuntimeAdapter, RuntimeInstallationObservationContext } from '../types';
+import { runStatusCommand } from '../bin/commands/status';
+import { runDoctorCommand } from '../bin/commands/doctor';
+import { diagnoseDevice } from '../diagnostics/device-doctor';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -70,4 +75,42 @@ it('unconfigured custom observation remains an explicit independent lane', async
   const lines: string[] = [];
   await runRuntimesCommand(cfg, { adapters: [new StubRuntimeAdapter('pi')], log: line => lines.push(line) });
   expect(lines[0]).toContain('pi: present');
+});
+
+it.each(['explicit', 'automatic'] as const)('real TaskRunner %s selection uses installed observation without a lane substitution', async mode => {
+  const cfg = await config(); const server = await TestServer.start(); servers.push(server); cfg.serverUrl = server.url;
+  const base = new StubRuntimeAdapter('pi');
+  const detect = vi.fn(async () => ({ kind: 'available' as const }));
+  const installed = vi.fn(async (context: RuntimeInstallationObservationContext) => {
+    expect(context).toEqual({ authority: cfg.toolImplementationAuthority, scope: 'enabled-top-level' });
+    return { kind: 'refused' as const, reason: 'install_record_mismatch' as const };
+  });
+  const adapter: RuntimeAdapter = Object.assign(base, { detect, detectInstallation: installed });
+  const daemon = createDaemonWithAdapters(cfg, [adapter]); daemons.push(daemon);
+  await daemon.pair('pairing-code'); await daemon.start();
+  expect(installed).toHaveBeenCalledTimes(1);
+  server.send(createEnvelope('task.offer', { instruction: 'no start', policy: { mode: 'auto' }, ...(mode === 'explicit' ? { runtime: 'pi' as const } : {}) },
+    { taskId: `refuse-${mode}`, seq: server.nextSeq() }));
+  const declined = await server.waitFor(e => e.type === 'task.decline');
+  expect(declined.payload).toMatchObject({ retryable: true }); // diagnostic reason does not rewrite task policy
+  expect(installed).toHaveBeenCalledTimes(2); expect(detect).not.toHaveBeenCalled(); expect(base.startCalls).toHaveLength(0);
+});
+it('projects finite refusal through status and public doctor without private information', async () => {
+  const cfg = await config(); const adapter = new StubRuntimeAdapter('pi');
+  const lines: string[] = []; const connectControl = async () => ({ ok: false as const, reason: 'offline' });
+  await runStatusCommand(cfg, { adapters: [adapter], log: line => lines.push(line), connectControl });
+  expect(lines).toContain('runtimes: pi=refused:installation_observation_unsupported');
+  const snapshot = await diagnoseDevice(cfg, { adapters: [adapter] });
+  expect(snapshot.runtimes[0]).toMatchObject({ outcome: 'refused', reason: 'installation_observation_unsupported', present: false });
+  expect(snapshot.checks.find(c => c.id === 'runtimes')?.summary).toContain('refused:installation_observation_unsupported=1');
+  const json: string[] = [];
+  await runDoctorCommand(cfg, { adapters: [adapter], connectControl, json: true, log: line => json.push(line) });
+  expect(JSON.parse(json[0]!).diagnostics.runtimes[0].reason).toBe('installation_observation_unsupported');
+});
+it.each([
+  { kind: 'refused' }, { kind: 'refused', reason: 'PRIVATE_SENTINEL' },
+  { kind: 'refused', reason: 'install_record_mismatch', path: 'PRIVATE_SENTINEL' },
+  { kind: 'available', reason: 'install_record_mismatch' }, { kind: 'timeout', reason: 'install_record_mismatch' },
+])('strictly rejects malformed refusal %j', value => {
+  expect(() => validateRuntimeDetectResult(value)).toThrow('invalid runtime detection result');
 });

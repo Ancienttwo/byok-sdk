@@ -55,9 +55,13 @@ export function requiredRuntimePlanKinds(
   }
   return Object.freeze([...result]);
 }
+export function runtimeRecordCommonFields<T extends { readonly launchArgv: readonly string[] }>(record: T): Omit<T, 'launchArgv'> {
+  const { launchArgv: _launchArgv, ...common } = record;
+  return common;
+}
 function commonBinding(binding: ImplementationSpawnBindingV1): unknown {
   if (binding.identity.kind !== 'attested') fail('unattested_template');
-  const { launchArgv: _launchArgv, ...identity } = binding.identity;
+  const identity = runtimeRecordCommonFields(binding.identity);
   const { fixedArgv: _fixedArgv, identity: _identity, ...physical } = binding;
   return { ...physical, identity };
 }

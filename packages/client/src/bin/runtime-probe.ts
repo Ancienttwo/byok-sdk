@@ -1,5 +1,6 @@
-import type { RuntimeDetectResult } from '../types';
-import { validateRuntimeDetectResult } from '../runtime-detection';
+import type { ToolImplementationAuthority } from '@byok-sdk/implementation-identity';
+import type { RuntimeDetectResult, RuntimeDetectionRefusalReason } from '../types';
+import { observeRuntimeDetection } from '../runtime-detection';
 import { PiAdapter, ClaudeAdapter, CodexAdapter, type RuntimeAdapter } from '../index';
 
 /**
@@ -24,11 +25,11 @@ function boundedSingleLine(value: string, maxChars: number): string {
 
 class RuntimeProbeTimeout extends Error {}
 
-async function detectWithTimeout(adapter: RuntimeAdapter, timeoutMs: number): ReturnType<RuntimeAdapter['detect']> {
+async function detectWithTimeout(adapter: RuntimeAdapter, timeoutMs: number, authority: ToolImplementationAuthority | undefined): ReturnType<RuntimeAdapter['detect']> {
   let timer: NodeJS.Timeout | undefined;
   try {
     return await Promise.race([
-      adapter.detect(),
+      observeRuntimeDetection(adapter, authority),
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => reject(new RuntimeProbeTimeout()), timeoutMs);
         timer.unref?.();
@@ -68,6 +69,7 @@ export interface ProbedRuntime {
   /** Deterministic projection of outcome, never adapter-authored. */
   present: boolean;
   outcome: RuntimeDetectResult['kind'];
+  reason?: RuntimeDetectionRefusalReason;
   version?: string;
   authPresent?: boolean;
   steer: boolean;
@@ -82,7 +84,7 @@ export interface ProbedRuntime {
  */
 export async function probeRuntimes(
   adapters: readonly RuntimeAdapter[],
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; toolImplementationAuthority?: ToolImplementationAuthority } = {},
 ): Promise<ProbedRuntime[]> {
   const timeoutMs = options.timeoutMs ?? RUNTIME_PROBE_TIMEOUT_MS;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new Error('runtime probe timeout must be a positive integer');
@@ -100,11 +102,12 @@ export async function probeRuntimes(
         permissionModes = caps.permissionModes
           .slice(0, MAX_PERMISSION_MODES)
           .map((mode) => boundedSingleLine(mode, MAX_PERMISSION_MODE_CHARS));
-        const detected = validateRuntimeDetectResult(await detectWithTimeout(adapter, timeoutMs));
+        const detected = await detectWithTimeout(adapter, timeoutMs, options.toolImplementationAuthority);
         return {
           id,
           present: detected.kind === 'available',
           outcome: detected.kind,
+          ...(detected.kind === 'refused' ? { reason: detected.reason } : {}),
           ...(detected.kind !== 'available' || detected.version === undefined
             ? {}
             : { version: boundedSingleLine(detected.version, MAX_RUNTIME_VERSION_CHARS) }),

@@ -504,6 +504,24 @@ export type ResolvedRuntimeImplementationV1 = ToolImplementationUnavailableV1 | 
   readonly edges: readonly RuntimeDescendantEdgeV1[];
 };
 
+/** Read-only installation facts. Deliberately not a launch identity: no environment digests. */
+export interface RuntimeInstallationMeasurementV1 {
+  readonly kind: 'measured-installation';
+  readonly record: ToolImplementationInstallRecordV1;
+  readonly installStat: ToolImplementationStatTupleV1;
+  readonly interpreterStat?: ToolImplementationStatTupleV1;
+  readonly assetStats?: readonly ToolImplementationStatTupleV1[];
+  readonly descendantPolicy: RuntimeDescendantPolicyV1;
+  readonly edges: readonly RuntimeDescendantEdgeV1[];
+}
+export type RuntimeInstallationMeasurementResultV1 = RuntimeInstallationMeasurementV1 | ToolImplementationUnavailableV1;
+type PhysicalMeasurements = Pick<RuntimeInstallationMeasurementV1, 'installStat' | 'interpreterStat' | 'assetStats'>;
+type PhysicalIdentity = Omit<ToolImplementationAttestedV1, 'launchEnvNamesDigest' | 'loaderEnvValuesDigest'>;
+export type RuntimeInstallationReverifyResult = 'ok' | {
+  readonly reason: ToolImplementationMeasurementFailure;
+  readonly subject: 'artifact' | 'interpreter' | 'asset';
+};
+
 export type ToolImplementationResolutionV1 =
   | ToolImplementationUnavailableV1
   | ToolImplementationInstallRecordV1
@@ -1399,12 +1417,10 @@ export function parseRuntimeImplementationRecord(value: unknown): RuntimeImpleme
   return Object.freeze({ record, descendantPolicy: policy, edges: RUNTIME_DESCENDANT_EDGES });
 }
 
-export async function resolveRuntimeImplementation(
+async function resolveRuntimeDeclaration(
   authority: ToolImplementationAuthority | undefined,
   locator: RuntimeImplementationLocatorV1,
-  launchEnv: LaunchEnvironment,
-  probe: ToolImplementationFsProbe = realToolImplementationFsProbe,
-): Promise<ResolvedRuntimeImplementationV1> {
+): Promise<RuntimeImplementationRecordV1 | ToolImplementationUnavailableV1> {
   if (locator.subject.kind !== 'runtime' || locator.subject.runtimeId !== 'pi' || !RUNTIME_ENTRIES.includes(locator.runtimeEntry)) {
     return toolImplementationUnavailable('implementation_identity_unattested');
   }
@@ -1416,9 +1432,46 @@ export async function resolveRuntimeImplementation(
   if (declaration.record.launchArgv.length !== fixedArgv.length || declaration.record.launchArgv.some((arg, i) => arg !== fixedArgv[i])) {
     return toolImplementationUnavailable('install_record_mismatch');
   }
+  return declaration;
+}
+
+export async function resolveRuntimeImplementation(
+  authority: ToolImplementationAuthority | undefined,
+  locator: RuntimeImplementationLocatorV1,
+  launchEnv: LaunchEnvironment,
+  probe: ToolImplementationFsProbe = realToolImplementationFsProbe,
+): Promise<ResolvedRuntimeImplementationV1> {
+  const declaration = await resolveRuntimeDeclaration(authority, locator);
+  if ('kind' in declaration) return declaration;
   const identity = await measureInstallRecord(declaration.record, launchEnv, probe);
   if (identity.kind === 'unavailable') return identity;
   return Object.freeze({ kind: 'attested', identity, descendantPolicy: declaration.descendantPolicy, edges: declaration.edges });
+}
+
+/** No process, environment construction, task state or credential observation. */
+export async function measureRuntimeInstallation(
+  authority: ToolImplementationAuthority,
+  locator: RuntimeImplementationLocatorV1,
+  probe: ToolImplementationFsProbe = realToolImplementationFsProbe,
+): Promise<RuntimeInstallationMeasurementResultV1> {
+  const declaration = await resolveRuntimeDeclaration(authority, locator);
+  if ('kind' in declaration) return declaration;
+  const physical = await measurePhysicalRecord(declaration.record, probe);
+  if ('kind' in physical) return physical;
+  return Object.freeze({ kind: 'measured-installation', record: declaration.record, ...physical,
+    descendantPolicy: declaration.descendantPolicy, edges: declaration.edges });
+}
+
+/** Fresh read-only observation, never a pre-spawn authorization or environment claim. */
+export async function reverifyRuntimeInstallation(
+  measurement: RuntimeInstallationMeasurementV1,
+  probe: ToolImplementationFsProbe = realToolImplementationFsProbe,
+): Promise<RuntimeInstallationReverifyResult> {
+  return reverifyPhysicalImplementation({ ...measurement.record,
+    installStat: measurement.installStat,
+    ...(measurement.interpreterStat === undefined ? {} : { interpreterStat: measurement.interpreterStat }),
+    ...(measurement.assetStats === undefined ? {} : { assetStats: measurement.assetStats }),
+  }, probe);
 }
 
 /** Single physical measurement authority, shared by the two subject-specific consumers. */
@@ -1427,6 +1480,23 @@ async function measureInstallRecord(
   launchEnv: LaunchEnvironment,
   probe: ToolImplementationFsProbe,
 ): Promise<ToolImplementationIdentityV1> {
+  let environment!: Pick<ToolImplementationSealedMeasurements, 'launchEnvNamesDigest' | 'loaderEnvValuesDigest'>;
+  const physical = await measurePhysicalRecord(record, probe, () => {
+    // Preserve the existing callback/check order: assets, env, interpreter.
+    const resolvedLaunchEnv = typeof launchEnv === 'function' ? launchEnv(record) : launchEnv;
+    environment = {
+      launchEnvNamesDigest: toolImplementationLaunchEnvNamesDigest(resolvedLaunchEnv),
+      loaderEnvValuesDigest: toolImplementationLoaderEnvValuesDigest(resolvedLaunchEnv),
+    };
+  });
+  return 'kind' in physical ? physical : seal(record, { ...physical, ...environment });
+}
+
+async function measurePhysicalRecord(
+  record: ToolImplementationInstallRecordV1,
+  probe: ToolImplementationFsProbe,
+  beforeInterpreter?: () => void,
+): Promise<PhysicalMeasurements | ToolImplementationUnavailableV1> {
   const measured = await measureCanonicalPathIdentity(record.installPath, probe);
   if (typeof measured === 'string') return toolImplementationUnavailable(measured);
   const ownership = measureOwnership(measured);
@@ -1438,9 +1508,8 @@ async function measureInstallRecord(
   // no earlier one to have moved away from. `reverify_failed` is the spawn
   // gate's word for the same disagreement against the SDK's own prior digest.
   if (!matches) return toolImplementationUnavailable('install_record_mismatch');
-  // The env facts are measured HERE, off the exact object the caller will hand
-  // to `spawn`, and are not part of what the resolver was asked. A host does
-  // not have this object and must not reconstruct one.
+  // This physical core does not invent an environment. The launch consumer
+  // computes its original env facts at beforeInterpreter; observation does not.
   // The sealed asset set is measured HERE, per file, exactly as the artifact
   // was: a release whose static startup data is unmeasured is a release whose
   // behaviour changes without a byte of attested code changing.
@@ -1450,14 +1519,12 @@ async function measureInstallRecord(
     if (typeof measuredAssets === 'string') return toolImplementationUnavailable(measuredAssets);
     assetStats = measuredAssets;
   }
-  const resolvedLaunchEnv = typeof launchEnv === 'function' ? launchEnv(record) : launchEnv;
-  const measurements: ToolImplementationSealedMeasurements = {
+  beforeInterpreter?.();
+  const measurements: PhysicalMeasurements = {
     installStat: statTupleOf(measured),
     ...(assetStats === undefined ? {} : { assetStats }),
-    launchEnvNamesDigest: toolImplementationLaunchEnvNamesDigest(resolvedLaunchEnv),
-    loaderEnvValuesDigest: toolImplementationLoaderEnvValuesDigest(resolvedLaunchEnv),
   };
-  if (record.interpreter === undefined) return seal(record, measurements);
+  if (record.interpreter === undefined) return Object.freeze(measurements);
   const interpreter = await measureCanonicalPathIdentity(record.interpreter.path, probe);
   if (typeof interpreter === 'string') return toolImplementationUnavailable(interpreter);
   const interpreterOwnership = measureOwnership(interpreter);
@@ -1469,7 +1536,7 @@ async function measureInstallRecord(
   // without it the spawn gate can only re-hash the interpreter's bytes, and a
   // replaced inode, a touched mtime or an interpreter that stopped being
   // root-owned would all pass.
-  return seal(record, { ...measurements, interpreterStat: statTupleOf(interpreter) });
+  return Object.freeze({ ...measurements, interpreterStat: statTupleOf(interpreter) });
 }
 
 // ---------------------------------------------------------------------------
@@ -1620,8 +1687,8 @@ export class ToolImplementationReverifyError extends Error {
 
 /** Physical checks have one implementation; existing V1 env semantics remain at their caller. */
 async function reverifyPhysicalImplementation(
-  identity: ToolImplementationAttestedV1, probe: ToolImplementationFsProbe,
-): Promise<ToolImplementationReverifyResult> {
+  identity: PhysicalIdentity, probe: ToolImplementationFsProbe,
+): Promise<RuntimeInstallationReverifyResult> {
   const measured = await measureCanonicalPathIdentity(identity.installPath, probe);
   if (typeof measured === 'string') return { reason: measured, subject: 'artifact' };
   if (!sameStatTuple(measured, identity.installStat)) {

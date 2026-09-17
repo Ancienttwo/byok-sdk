@@ -311,7 +311,7 @@ const NATIVE_REQUEST_FORMAT = 'pi.openai-completions.prepared';
  * `resolver_unconfigured` one this SDK ships by default.
  */
 export function piRuntimeIdentityFromAttestedRecord(
-  identity: ToolImplementationAttestedV1,
+  identity: Pick<ToolImplementationAttestedV1, 'installPath' | 'nativeProvenance'>,
 ): InputPreparationRuntimeIdentityV1 {
   const pinned = resolvePiRuntimeIdentity();
   const provenance = identity.nativeProvenance;
