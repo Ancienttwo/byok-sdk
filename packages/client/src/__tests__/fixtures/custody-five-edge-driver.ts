@@ -16,7 +16,8 @@
  *
  * Usage: <this process> <results-json-path>
  */
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -25,6 +26,7 @@ import {
   BYOK_SDK_CUSTODY_LAUNCH_RECORD_ENV,
   BYOK_SDK_CUSTODY_PARENT_DEPTH_ENV,
 } from '../../custody/custody-commitments';
+import { CustodyDispatchRefusalError, dispatchCustodyPiSubagentSpawn } from '../../custody/custody-dispatcher';
 
 const clientRoot = path.resolve(import.meta.dirname, '../../..');
 
@@ -143,6 +145,99 @@ async function waitForEvidence(budgetDirectory: string, kind: string, seen: numb
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`timed out waiting for a '${kind}' child evidence`);
+}
+
+// ---------------------------------------------------------------------------
+// Gate F1/F2 helpers: faithful on-disk forgeries of dispatcher state.
+// ---------------------------------------------------------------------------
+
+/** The dispatcher's slot-name sanitizer (custody-dispatcher.ts safeKeySegment), replicated byte-for-byte so forged cap paths match. */
+function safeKeySegment(value: string): string {
+  return value.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'unknown';
+}
+
+/** Sorted listing of a directory; [] when it does not exist (ENOENT). */
+function listDirSafe(directory: string): string[] {
+  try {
+    return readdirSync(directory).sort();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
+/** Recursive sorted paths relative to `root`; [] when the root does not exist. */
+function listTreeSafe(root: string): string[] {
+  const out: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of listDirSafe(dir)) {
+      const full = path.join(dir, entry);
+      out.push(path.relative(root, full));
+      let stat: import('node:fs').Stats;
+      try {
+        stat = statSync(full);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory()) walk(full);
+    }
+  };
+  walk(root);
+  return out.sort();
+}
+
+function fileExists(target: string): boolean {
+  try {
+    statSync(target);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+/**
+ * Pre-create cap slot files exactly as a second dispatcher process would
+ * leave them: claimCapSlot's naming (`NNNNNN.json`), content shape and mode
+ * (custody-dispatcher.ts :442-454). A dead previous dispatcher wrote the
+ * dead pid; the stale claim's age is backdated, never wall-clock waited.
+ */
+function forgeCapSlots(directory: string, count: number, pid: number, claimedAt: number): string[] {
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const paths: string[] = [];
+  for (let slot = 0; slot < count; slot++) {
+    const slotPath = path.join(directory, `${String(slot).padStart(6, '0')}.json`);
+    writeFileSync(slotPath, `${JSON.stringify({ version: 1, pid, claimedAt })}\n`, { mode: 0o600 });
+    paths.push(slotPath);
+  }
+  return paths;
+}
+
+/** Run a dispatcher call, capturing the fail-closed refusal shape. */
+function refusalOf(run: () => unknown): { refused: boolean; errorName: string; reason: string } {
+  try {
+    run();
+    return { refused: false, errorName: '', reason: '' };
+  } catch (error) {
+    return {
+      refused: error instanceof CustodyDispatchRefusalError,
+      errorName: error instanceof Error ? error.name : '',
+      reason: error instanceof Error ? error.message : '',
+    };
+  }
+}
+
+/** A genuinely dead pid: a child that already exited and was reaped by spawnSync. */
+function deadLauncherPid(): { pid: number; confirmed: boolean } {
+  const dead = spawnSync(process.execPath, ['--version'], { encoding: 'utf8' });
+  const pid = dead.pid ?? -1;
+  if (pid <= 0) return { pid, confirmed: false };
+  try {
+    process.kill(pid, 0);
+    return { pid, confirmed: false };
+  } catch {
+    return { pid, confirmed: true };
+  }
 }
 
 async function main(): Promise<void> {
@@ -482,6 +577,172 @@ async function main(): Promise<void> {
           parseError = (error as Error).message;
         }
         results['forge-template'] = { parseError };
+      } finally {
+        harness.dispose();
+      }
+    },
+    // 9. cap-session (gate F1): slot files exactly as a second dispatcher
+    // process would leave them exhaust the session cap; the next dispatch
+    // must refuse fail-closed and leave zero state.
+    async () => {
+      const harness = makeBudgetHarness('cap-session');
+      const savedMaxSpawns = process.env.PI_SUBAGENT_MAX_SPAWNS_PER_SESSION;
+      try {
+        process.env.PI_SUBAGENT_MAX_SPAWNS_PER_SESSION = '2';
+        const budgetDirectory = harness.budget.directory;
+        const sessionDir = path.join(budgetDirectory, 'custody-caps', 'session', safeKeySegment(harness.sessionsDir));
+        forgeCapSlots(sessionDir, 2, process.pid, Date.now() - 5_000);
+        const outcome = refusalOf(() => dispatchCustodyPiSubagentSpawn({ child: 'pi-subagent-print', cwd: harness.workspace }));
+        results['cap-session'] = {
+          cap: {
+            ...outcome,
+            records: listDirSafe(path.join(budgetDirectory, 'custody-records')),
+            launches: listDirSafe(path.join(budgetDirectory, 'custody-launches')),
+            sessionSlots: listDirSafe(sessionDir),
+            parallelSlots: listDirSafe(path.join(budgetDirectory, 'custody-caps', 'parallel')),
+            claims: listDirSafe(path.join(budgetDirectory, 'claims')),
+          },
+        } as never;
+      } finally {
+        if (savedMaxSpawns === undefined) delete process.env.PI_SUBAGENT_MAX_SPAWNS_PER_SESSION;
+        else process.env.PI_SUBAGENT_MAX_SPAWNS_PER_SESSION = savedMaxSpawns;
+        harness.dispose();
+      }
+    },
+    // 10. cap-parallel (gate F1): the frozen default parallel cap (4) forged
+    // full for this root task refuses the next dispatch, fail-closed.
+    async () => {
+      const harness = makeBudgetHarness('cap-parallel');
+      const savedMaxSpawns = process.env.PI_SUBAGENT_MAX_SPAWNS_PER_SESSION;
+      try {
+        delete process.env.PI_SUBAGENT_MAX_SPAWNS_PER_SESSION;
+        const budgetDirectory = harness.budget.directory;
+        const parallelDir = path.join(budgetDirectory, 'custody-caps', 'parallel', safeKeySegment(harness.budget.rootRunId));
+        forgeCapSlots(parallelDir, 4, process.pid, Date.now() - 5_000);
+        const outcome = refusalOf(() => dispatchCustodyPiSubagentSpawn({ child: 'pi-subagent-print', cwd: harness.workspace }));
+        results['cap-parallel'] = {
+          cap: {
+            ...outcome,
+            records: listDirSafe(path.join(budgetDirectory, 'custody-records')),
+            launches: listDirSafe(path.join(budgetDirectory, 'custody-launches')),
+            sessionSlots: listDirSafe(path.join(budgetDirectory, 'custody-caps', 'session')),
+            parallelSlots: listDirSafe(parallelDir),
+            claims: listDirSafe(path.join(budgetDirectory, 'claims')),
+          },
+        } as never;
+      } finally {
+        if (savedMaxSpawns === undefined) delete process.env.PI_SUBAGENT_MAX_SPAWNS_PER_SESSION;
+        else process.env.PI_SUBAGENT_MAX_SPAWNS_PER_SESSION = savedMaxSpawns;
+        harness.dispose();
+      }
+    },
+    // 11. stale-reclaim (gate F2a): real dispatcher-written admission state
+    // (record, sidecar, ledger, both cap slots) backdated past the 60 s
+    // staleness window with a genuinely dead launcher pid; one real
+    // foreground-pipeline dispatch must sweep it and proceed.
+    async () => {
+      const harness = makeBudgetHarness('stale-reclaim');
+      try {
+        const dead = deadLauncherPid();
+        // Real admission state: the mint leaves record + sidecar + ledger +
+        // both cap slots + a fanout claim, with the launcher pid ALIVE (this
+        // driver) — 已准入未spawn.
+        const first = dispatchCustodyPiSubagentSpawn({ child: 'pi-subagent-print', cwd: harness.workspace });
+        const budgetDirectory = harness.budget.directory;
+        const ledgerPath = path.join(budgetDirectory, 'custody-launches', `${first.launchId}.json`);
+        const sidecarPath = `${first.recordPath}.sidecar.json`;
+        const ledger = JSON.parse(readFileSync(ledgerPath, 'utf8')) as {
+          sessionSlotPath: string;
+          parallelSlotPath: string;
+        };
+        // Forge the crash: point the ledger at the dead launcher pid and
+        // backdate the recorded claim past CUSTODY_STALE_MS on disk — the
+        // exact 已准入未spawn shape the sweep reclaims. The stale slots carry
+        // the dead pid (what the crashed dispatcher wrote at claim time), so
+        // reclaim-then-reclaim is observable in the slot content.
+        const staleClaimedAt = Date.now() - 61_000;
+        const staleLedger = { ...ledger, launcherPid: dead.pid, claimedAt: staleClaimedAt };
+        writeFileSync(ledgerPath, `${JSON.stringify(staleLedger)}\n`, { mode: 0o600 });
+        writeFileSync(sidecarPath, `${JSON.stringify({ launcherPid: dead.pid, claimedAt: staleClaimedAt })}\n`, { mode: 0o600 });
+        writeFileSync(ledger.sessionSlotPath, `${JSON.stringify({ version: 1, pid: dead.pid, claimedAt: staleClaimedAt })}\n`, { mode: 0o600 });
+        writeFileSync(ledger.parallelSlotPath, `${JSON.stringify({ version: 1, pid: dead.pid, claimedAt: staleClaimedAt })}\n`, { mode: 0o600 });
+        // One dispatch on the real foreground pipeline: the sweep runs inside
+        // this admission, before the new launch proceeds.
+        await runForegroundOnce(harness.workspace, harness.sessionsDir, 'wp4-five-edge-stale-reclaim');
+        await waitForEvidence(budgetDirectory, 'pi-subagent-print', 0);
+        const readSlotPid = (slotPath: string): number | undefined => {
+          try {
+            return (JSON.parse(readFileSync(slotPath, 'utf8')) as { pid: number }).pid;
+          } catch {
+            return undefined;
+          }
+        };
+        const recordFiles = listDirSafe(recordsDir(budgetDirectory)).filter(
+          (file) => file.endsWith('.json') && !file.includes('.evidence.') && !file.includes('.sidecar.'),
+        );
+        const launchLedgers = listDirSafe(path.join(budgetDirectory, 'custody-launches'))
+          .filter((file) => file.endsWith('.json'))
+          .map((file) => JSON.parse(readFileSync(path.join(budgetDirectory, 'custody-launches', file), 'utf8')) as { launcherPid: number });
+        results['stale-reclaim'] = {
+          reclaim: {
+            deadPidConfirmed: dead.confirmed,
+            staleLaunchId: first.launchId,
+            staleGone: {
+              record: !fileExists(first.recordPath),
+              sidecar: !fileExists(sidecarPath),
+              ledger: !fileExists(ledgerPath),
+            },
+            // The stale slot path is necessarily re-claimed by the new launch
+            // (same session/root keys inside one budget); it was reclaimed iff
+            // the surviving slot content now belongs to the live new launcher.
+            staleSlotsReclaimed: {
+              session: readSlotPid(ledger.sessionSlotPath) === process.pid,
+              parallel: readSlotPid(ledger.parallelSlotPath) === process.pid,
+            },
+            recordFiles,
+            evidence: readEvidence(budgetDirectory).filter((entry) => entry.kind === 'pi-subagent-print').length,
+            newLedgerLauncherPidIsDriver: launchLedgers.some((entry) => entry.launcherPid === process.pid),
+          },
+        } as never;
+      } finally {
+        harness.dispose();
+      }
+    },
+    // 12. refuse-edge (gate F2b): a runner->runner dispatch is outside the
+    // frozen edge vocabulary; the refusal must leave the budget tree
+    // byte-for-byte unchanged (no partial admission state).
+    async () => {
+      const harness = makeBudgetHarness('refuse-edge');
+      try {
+        await runBackgroundOnce(harness.workspace, harness.sessionsDir, `wp4-five-edge-${randomUUID()}`, harness.budget);
+        await waitForEvidence(harness.budget.directory, 'pi-subagent-runner', 0);
+        const mint = readEvidence(harness.budget.directory).filter((entry) => entry.kind === 'pi-subagent-runner').at(-1)!;
+        const runnerRecord = readRecords(harness.budget.directory)
+          .map((entry) => entry as { perLaunch: { templateKind: string; depth: number } })
+          .find((entry) => entry.perLaunch.templateKind === 'pi-subagent-runner')!;
+        adoptChildParentContext(runnerRecord, mint.env[BYOK_SDK_CUSTODY_LAUNCH_RECORD_ENV]!, mint.env.BYOK_SDK_CUSTODY_RUNNER_CONFIG!);
+        const before = listTreeSafe(harness.budget.directory);
+        const outcome = refusalOf(() =>
+          dispatchCustodyPiSubagentSpawn({
+            child: 'pi-subagent-runner',
+            cwd: harness.workspace,
+            runnerConfigPath: path.resolve(harness.workspace, 'unused-runner-config.json'),
+          }),
+        );
+        results['refuse-edge'] = { refusal: { ...outcome, before, after: listTreeSafe(harness.budget.directory) } } as never;
+      } finally {
+        harness.dispose();
+      }
+    },
+    // 13. refuse-no-budget (gate F2b): no inherited budget anywhere — the
+    // refusal must precede any state write and leave the (now unreferenced)
+    // budget directory without any custody-* state at all.
+    async () => {
+      const harness = makeBudgetHarness('refuse-no-budget');
+      try {
+        delete process.env[RUN_FANOUT_BUDGET_ENV];
+        const outcome = refusalOf(() => dispatchCustodyPiSubagentSpawn({ child: 'pi-subagent-print', cwd: harness.workspace }));
+        results['refuse-no-budget'] = { refusal: { ...outcome, budgetListing: listDirSafe(harness.budget.directory) } } as never;
       } finally {
         harness.dispose();
       }

@@ -65,6 +65,36 @@ interface CaseResult {
   asyncResult?: { isError?: boolean; content?: Array<{ text?: string }> };
   forged?: ForgeOutcome;
   parseError?: string;
+  /** Gate F1 cases: the refusal shape plus post-refusal state listings. */
+  cap?: {
+    refused: boolean;
+    errorName: string;
+    reason: string;
+    records: string[];
+    launches: string[];
+    sessionSlots: string[];
+    parallelSlots: string[];
+    claims: string[];
+  };
+  /** Gate F2a case: stale-claim reclamation evidence. */
+  reclaim?: {
+    deadPidConfirmed: boolean;
+    staleLaunchId: string;
+    staleGone: { record: boolean; sidecar: boolean; ledger: boolean };
+    staleSlotsReclaimed: { session: boolean; parallel: boolean };
+    recordFiles: string[];
+    evidence: number;
+    newLedgerLauncherPidIsDriver: boolean;
+  };
+  /** Gate F2b cases: admission refusals leave zero state. */
+  refusal?: {
+    refused: boolean;
+    errorName: string;
+    reason: string;
+    before?: string[];
+    after?: string[];
+    budgetListing?: string[];
+  };
 }
 
 let results: Record<string, CaseResult> = {};
@@ -241,5 +271,75 @@ describe('custody five-edge dispatch: forged records refuse at the attested entr
   it('a record whose attested template bytes were tampered refuses to parse', () => {
     const result = requireCase('forge-template');
     expect(result.parseError, 'the tampered record must refuse to parse').toBeTruthy();
+  });
+});
+
+// Gate findings F1/F2 (acceptance review 4de4dcb0): the cap-enforcement and
+// crash-stage-sweep branches of the dispatcher had no coverage. The driver
+// forges the on-disk state a second dispatcher process would leave (slot
+// files, admission ledger, sidecar) and runs real dispatches against it.
+describe('custody five-edge dispatch: cross-process cap enforcement refuses fail-closed (F1)', () => {
+  it('a second dispatcher session full of slot files refuses the next dispatch without minting anything', () => {
+    const result = requireCase('cap-session').cap!;
+    expect(result.refused, `expected a refusal, got success: ${result.reason}`).toBe(true);
+    expect(result.errorName).toBe('CustodyDispatchRefusalError');
+    expect(result.reason).toContain('session cap exhausted: 2 live dispatched children for this session');
+    // Fail-closed: the refusal mints no record or ledger, claims no new
+    // slot, and leaves no fanout claim behind — only the forged slots exist.
+    expect(result.records).toEqual([]);
+    expect(result.launches).toEqual([]);
+    expect(result.sessionSlots).toEqual(['000000.json', '000001.json']);
+    expect(result.parallelSlots).toEqual([]);
+    expect(result.claims).toEqual([]);
+  });
+
+  it('a full parallel-cap slot set for this root task refuses the next dispatch without minting anything', () => {
+    const result = requireCase('cap-parallel').cap!;
+    expect(result.refused, `expected a refusal, got success: ${result.reason}`).toBe(true);
+    expect(result.errorName).toBe('CustodyDispatchRefusalError');
+    expect(result.reason).toContain('parallel cap exhausted: 4 live dispatched children for this root task');
+    expect(result.records).toEqual([]);
+    expect(result.launches).toEqual([]);
+    expect(result.sessionSlots).toEqual([]);
+    expect(result.parallelSlots).toEqual(['000000.json', '000001.json', '000002.json', '000003.json']);
+    expect(result.claims).toEqual([]);
+  });
+});
+
+describe('custody five-edge dispatch: crash-stage sweep and refusal leave no state (F2)', () => {
+  it('the admission sweep reclaims a dead-launcher stale claim before the next real launch proceeds', () => {
+    const result = requireCase('stale-reclaim').reclaim!;
+    expect(result.deadPidConfirmed, 'the forged launcher pid must be genuinely dead').toBe(true);
+    // Precondition: the full 已准入未spawn state existed on disk (real
+    // dispatcher-written record, sidecar, ledger, both cap slots).
+    // The sweep removed the stale record, sidecar and ledger (launchId-keyed,
+    // never recreated by the new launch).
+    expect(result.staleGone).toEqual({ record: true, sidecar: true, ledger: true });
+    // The new launch proceeded through the real foreground pipeline: a real
+    // child re-entered and left evidence, a new record was minted, and the
+    // live ledger names the driver as its (alive) launcher.
+    expect(result.evidence).toBeGreaterThan(0);
+    expect(result.recordFiles).not.toContain(`${result.staleLaunchId}.json`);
+    expect(result.newLedgerLauncherPidIsDriver).toBe(true);
+    // The stale slot claims were reclaimed inside the same admission: the
+    // surviving slot files at the stale paths now belong to the live new
+    // launcher (the forged content carried the dead pid).
+    expect(result.staleSlotsReclaimed).toEqual({ session: true, parallel: true });
+  });
+
+  it('an invalid-edge refusal (runner -> runner) leaves the budget tree byte-for-byte unchanged', () => {
+    const result = requireCase('refuse-edge').refusal!;
+    expect(result.refused, `expected a refusal, got success: ${result.reason}`).toBe(true);
+    expect(result.errorName).toBe('CustodyDispatchRefusalError');
+    expect(result.reason).toContain('not in the frozen runtime edge vocabulary');
+    expect(result.after).toEqual(result.before);
+  });
+
+  it('a missing-budget refusal leaves custody-records/, custody-launches/ and custody-caps/ absent', () => {
+    const result = requireCase('refuse-no-budget').refusal!;
+    expect(result.refused, `expected a refusal, got success: ${result.reason}`).toBe(true);
+    expect(result.reason).toContain('no SDK dispatch context');
+    const custodyEntries = (result.budgetListing ?? []).filter((entry) => entry.startsWith('custody-'));
+    expect(custodyEntries, `unexpected custody state in the untouched budget: ${JSON.stringify(result.budgetListing)}`).toEqual([]);
   });
 });

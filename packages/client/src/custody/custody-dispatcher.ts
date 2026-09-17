@@ -6,9 +6,10 @@
  *
  *   vendor foreground (print lane)  runs/foreground/execution.ts
  *   vendor background (runner lane) runs/background/async-execution.ts spawnRunner
- *   vendor legacy seam callers      runs/shared/pi-spawn.ts getPiSpawnCommand
- *                                   (profiles/herdr probes keep working through
- *                                   the same delegation, fail-closed)
+ *   vendor runner bootstrap step    runs/background/subagent-runner.ts
+ *   vendor probe lane (herdr)       profiles/profiles.ts probeModel
+ *                                   (each site surfaces a dispatch refusal
+ *                                   through its own failure path, fail-closed)
  *
  * The dispatcher performs, in order, the frozen custody chain:
  *

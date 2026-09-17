@@ -92,12 +92,12 @@ export async function runSdkReservedHelperCommand(
   if (argv[0] !== BYOK_SDK_HELPER_SUBCOMMAND) return false;
   if (argv[1] === 'pi-subagent-runner') {
     // The runner bootstrap edge routes to the single attested exec point.
-    // This is the direct-connect shape only (`__byok_sdk_helper
-    // pi-subagent-runner`): no vendor runner spawn site is rerouted here —
-    // that is the later five-edge cut (plan 1459) — so until it lands no
-    // vendor lane can reach this branch. Every custody gate inside
-    // (`custody/pi-subagent-runner-entry.ts` launchAttestedPiSubagentRunner)
-    // is fail-closed.
+    // This is the direct-connect re-entry shape (`__byok_sdk_helper
+    // pi-subagent-runner`): the vendor's runner spawn sites are rerouted to
+    // the custody dispatcher (the five-edge cut has landed), so the minted
+    // runner children re-enter the bundle through this branch. Every custody
+    // gate inside (`custody/pi-subagent-runner-entry.ts`
+    // launchAttestedPiSubagentRunner) is fail-closed.
     const exitCode = await runAttestedPiSubagentRunnerFromEnvironment(process.env);
     if (exitCode !== 0) throw new Error(`attested pi-subagent-runner exec exited ${exitCode}`);
     return true;

@@ -1,40 +1,37 @@
 #!/usr/bin/env bun
 /**
- * WP3 charge-once print preset entry (`pi-subagent-print` bootstrap edge).
+ * WP4 print direct-connect entry (`pi-subagent-print` helper re-entry).
  *
- * The vendored pi-subagents runtime spawns every physical print child through
- * its own `getPiSpawnCommand` seam (`runs/shared/pi-spawn.ts`): when
- * `PI_SUBAGENT_PI_BINARY` is set, that value is spawned directly, verbatim, as
- * the whole command. The SDK presets that seam with THIS file (the print
- * preset entry), so the vendor's unconditional `getSubagentDepthEnv` depth
- * increment (the double-charge: one logical delegation charged twice) is
- * applied to this entry instead of to the real runtime — and this entry
- * discards it.
+ * The WP3 transport is gone: the vendored `getPiSpawnCommand` chain and its
+ * `PI_SUBAGENT_PI_BINARY` env seam are deleted from the vendored tree. Every
+ * physical print child is now minted by the custody dispatcher
+ * (`custody/custody-dispatcher.ts` — the only mint and dispatch authority),
+ * which spawns the helper direct-connect shape `node <bundle>
+ * __byok_sdk_helper pi-subagent-print`; the SDK-reserved helper host routes
+ * that argv to `runAttestedPiSubagentPrintFromEnvironment` here. The
+ * argv-template-gated preset flow (`runPiSubagentPrintEntry`) remains as the
+ * secondary transport for the store-package seam probe; both converge on the
+ * single attested exec point `launchAttestedPiSubagentPrint`.
  *
  * Depth authority is the SDK frozen counting table alone (owner ruling
  * 2026-09-17): the runner->print bootstrap edge charges zero, so the print
- * child's contract depth is exactly the runner's contract depth. The runner's
+ * child's contract depth is exactly the runner's contract depth. The parent's
  * contract depth arrives as the parent-minted environment commitment
- * `BYOK_SDK_CUSTODY_PARENT_DEPTH`; the vendor's own `PI_SUBAGENT_DEPTH` is
- * never read.
+ * `BYOK_SDK_CUSTODY_PARENT_DEPTH`; the vendor's own `PI_SUBAGENT_DEPTH`
+ * increment is discarded at the reroute sites and never read here.
  *
- * The per-launch record (`byok.descendant-launch`) is minted by the parent
- * from the verified runner launch and handed to the entry through the
- * `BYOK_SDK_CUSTODY_LAUNCH_RECORD` path commitment. The entry re-stamps the
- * depth from the commitment (never from the record, never from the vendor),
- * validates the record against that commitment, runs the identity module's
- * `validateDescendantSpawn` + `assertDescendantSpawn` (first real product
- * caller), and only then execs the attested target through the single
- * attested exec point `launchAttestedPiSubagentPrint`. Every gate is
+ * The per-launch record (`byok.descendant-launch`) is minted by the
+ * dispatcher and handed over through the `BYOK_SDK_CUSTODY_LAUNCH_RECORD`
+ * path commitment. The entry re-stamps the depth from the commitment (never
+ * from the vendor), validates the record against that commitment, runs the
+ * identity module's `validateDescendantSpawn` + `assertDescendantSpawn`, and
+ * only then proceeds: when the validated template describes exactly the
+ * running process (the dispatcher always mints this shape) the
+ * spawned-liveness sidecar is claimed and the delegated payload runs
+ * in-process; any other template execs the attested target. Every gate is
  * fail-closed: a missing commitment, a non-integer commitment, an argv
  * mismatch, an unreadable record or any validation refusal exits nonzero
  * without execing anything. There is no fallback path.
- *
- * Direct executable shape (shebang above): the vendor spawns this file by
- * absolute path, so it must stay a directly executable artifact. Windows
- * cannot spawn a script file through `child_process.spawn` without a shell,
- * so the seam shape is POSIX-only in this slice (registered in
- * `tasks/todos.md` for Windows coverage).
  *
  * WP4 (contract 20260917-2002) extracted the commitment core shared with the
  * runner entry into `custody-commitments.ts`; this module re-exports the
