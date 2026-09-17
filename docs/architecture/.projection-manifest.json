@@ -98,8 +98,8 @@
       "outputDigest": "sha256:8222fcd9af4f9c98f517da7bef7d2e7d4598d5b86469f723f04a6d54ce6f0f53",
       "verifiedAgainst": {
         "branch": "codex/c07-launch-cwd",
-        "commit": "bf866f4fbff9c8b283cf33a383066ca05b50d518",
-        "committedAt": "2026-09-17T14:24:20+08:00"
+        "commit": "ec9a836f7fcef20626902bb328620ab9a6d51aab",
+        "committedAt": "2026-09-17T14:36:45+08:00"
       }
     },
     {
