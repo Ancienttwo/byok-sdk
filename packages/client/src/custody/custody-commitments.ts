@@ -30,6 +30,14 @@ import {
 export const BYOK_SDK_CUSTODY_PARENT_DEPTH_ENV = 'BYOK_SDK_CUSTODY_PARENT_DEPTH';
 /** Parent-minted commitment naming the per-launch descendant record file. */
 export const BYOK_SDK_CUSTODY_LAUNCH_RECORD_ENV = 'BYOK_SDK_CUSTODY_LAUNCH_RECORD';
+/**
+ * Parent-minted commitment naming the per-launch background runner config
+ * file (WP4): the dispatcher writes the runner config exactly where the old
+ * jiti spawn wrote it and hands the absolute path to the runner payload
+ * through this transport commitment. Like the other two custody commitments
+ * it is transport-only — never part of the attested exec env projection.
+ */
+export const BYOK_SDK_CUSTODY_RUNNER_CONFIG_ENV = 'BYOK_SDK_CUSTODY_RUNNER_CONFIG';
 
 /**
  * A custody refusal: the entry stops without execing instead of guessing.
@@ -83,6 +91,26 @@ export function loadCustodyLaunchRecord(env: Readonly<Record<string, string | un
   } catch (error) {
     refusal(`launch record at ${recordPath} is not valid JSON: ${(error as Error).message}`);
   }
+}
+
+/** Read and shape-check the parent-minted runner config path commitment. */
+export function loadCustodyRunnerConfigPath(env: Readonly<Record<string, string | undefined>>): string {
+  const configPath = env[BYOK_SDK_CUSTODY_RUNNER_CONFIG_ENV];
+  if (configPath === undefined || configPath === '' || !path.isAbsolute(configPath) || /[\u0000\r\n]/u.test(configPath)) {
+    refusal(`${BYOK_SDK_CUSTODY_RUNNER_CONFIG_ENV} must be an absolute path to the parent-written runner config`);
+  }
+  let text: string;
+  try {
+    text = readFileSync(configPath, 'utf8');
+  } catch (error) {
+    refusal(`${BYOK_SDK_CUSTODY_RUNNER_CONFIG_ENV} unreadable at ${configPath}: ${(error as Error).message}`);
+  }
+  try {
+    JSON.parse(text) as unknown;
+  } catch (error) {
+    refusal(`runner config at ${configPath} is not valid JSON: ${(error as Error).message}`);
+  }
+  return configPath;
 }
 
 /**

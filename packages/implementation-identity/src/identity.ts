@@ -671,6 +671,11 @@ export const TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES: readonly string[] =
   'BYOK_PRODUCT_ID',
   'BYOK_SDK_CUSTODY_LAUNCH_RECORD',
   'BYOK_SDK_CUSTODY_PARENT_DEPTH',
+  // WP4: transport-only path of the parent-written background runner config.
+  // Minted by the SDK custody dispatcher between dispatch and spawn, consumed
+  // by the pi-subagent-runner payload re-entry, never part of an attested exec
+  // env projection (same discipline as the two custody names above).
+  'BYOK_SDK_CUSTODY_RUNNER_CONFIG',
   'BYOK_STORE_DIR',
 ]);
 

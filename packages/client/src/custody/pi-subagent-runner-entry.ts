@@ -44,11 +44,14 @@ import {
   type DescendantLaunchV1,
 } from '@byok-sdk/implementation-identity';
 import {
+  BYOK_SDK_CUSTODY_LAUNCH_RECORD_ENV,
   deriveCustodyExpectation,
   loadCustodyLaunchRecord,
   parseCustodyParentDepthCommitment,
   refusal,
 } from './custody-commitments';
+import { claimSpawnedLaunchLiveness } from './custody-dispatcher';
+import { isSelfReentrySpawn } from './custody-self-reentry';
 
 /** Frozen counting table: every runner bootstrap edge charges one (rpc->runner = 1, print->runner = 1). */
 const RUNNER_ENTRY_BOOTSTRAP_CHARGE = 1;
@@ -100,12 +103,24 @@ export interface AttestedPiSubagentRunnerLaunchInput {
   readonly observedEnv: Readonly<Record<string, string | undefined>>;
   /** Exec override for unit tests; the product default spawns for real. */
   readonly spawnImpl?: (command: string, args: readonly string[], options: { readonly cwd: string; readonly env: Record<string, string> }) => Promise<number>;
+  /**
+   * WP4: the in-bundle runner payload, invoked INSTEAD of the trampoline exec
+   * when the validated template describes exactly the running process (the
+   * dispatcher always mints this shape). Lazy: it is imported only when a
+   * self-reentry actually happens.
+   */
+  readonly payloadRunner?: (launch: DescendantLaunchV1) => Promise<number>;
+  /** The launch record path commitment, for the spawned-liveness claim. */
+  readonly recordPath?: string;
 }
 
 /**
  * THE single attested exec point for the runner bootstrap edge. Validates the
  * per-launch record against the parent commitment, re-measures the attested
- * target immediately before the exec, and only then execs it.
+ * target immediately before the exec, and only then execs it — or, when the
+ * validated template IS this process (the dispatcher's helper re-entry
+ * shape), claims the spawned-liveness sidecar and runs the runner payload
+ * in-process.
  */
 export async function launchAttestedPiSubagentRunner(input: AttestedPiSubagentRunnerLaunchInput): Promise<number> {
   const { parentDepth, observedEnv } = input;
@@ -134,8 +149,14 @@ export async function launchAttestedPiSubagentRunner(input: AttestedPiSubagentRu
   } catch (error) {
     refusal(`attested implementation reverification failed: ${(error as Error).message}`);
   }
+  if (input.payloadRunner !== undefined && isSelfReentrySpawn(template)) {
+    // 已spawn: this process is the attested child. Claim liveness (the sweep
+    // sidecar goes away) and run the runner payload in-process.
+    if (input.recordPath !== undefined) claimSpawnedLaunchLiveness(input.recordPath);
+    return input.payloadRunner(launch);
+  }
   const exec = input.spawnImpl ?? defaultAttestedExec;
-  return exec(template.command, [...template.fixedArgv], { cwd: template.cwd, env: execEnv });
+  return exec(template.command, [...(template.entry !== undefined ? [template.entry] : []), ...template.fixedArgv], { cwd: template.cwd, env: execEnv });
 }
 
 function defaultAttestedExec(command: string, args: readonly string[], options: { readonly cwd: string; readonly env: Record<string, string> }): Promise<number> {
@@ -153,5 +174,22 @@ function defaultAttestedExec(command: string, args: readonly string[], options: 
 export async function runAttestedPiSubagentRunnerFromEnvironment(env: Readonly<Record<string, string | undefined>>): Promise<number> {
   const parentDepth = parseCustodyParentDepthCommitment(env);
   const launch = loadCustodyLaunchRecord(env);
-  return launchAttestedPiSubagentRunner({ launch, parentDepth, observedEnv: env });
+  const recordPath = typeof env[BYOK_SDK_CUSTODY_LAUNCH_RECORD_ENV] === 'string'
+    ? env[BYOK_SDK_CUSTODY_LAUNCH_RECORD_ENV] as string
+    : undefined;
+  return launchAttestedPiSubagentRunner({
+    launch,
+    parentDepth,
+    observedEnv: env,
+    recordPath,
+    payloadRunner: async () => {
+      // Lazy: the payload (and the vendored runner closure it pulls in)
+      // loads only when a self-reentry actually runs. Fire-and-forget, the
+      // same lifetime the jiti child had: this process stays alive through
+      // the runner's own handles and exits when the run completes.
+      const payload = await import('./pi-subagent-runner-payload');
+      payload.runPiSubagentRunnerPayload();
+      return 0;
+    },
+  });
 }

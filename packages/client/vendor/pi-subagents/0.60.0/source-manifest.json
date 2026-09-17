@@ -219,8 +219,10 @@
     {
       "path": "src/inspectors/herdr/project-panes.ts",
       "upstreamSha256": "7e36343657f1e1242b92856e8cc3ef663fe268bb4a0faa01ab69b2e6bf6c42dc",
-      "vendoredSha256": "7e36343657f1e1242b92856e8cc3ef663fe268bb4a0faa01ab69b2e6bf6c42dc",
-      "delta": []
+      "vendoredSha256": "c8d90f8186d831678da80499a98c636cb7fe34787083e8f7a8972d661d677e9b",
+      "delta": [
+        "WP4 five-edge custody cut: the interactive pane launcher fails closed in the SDK custody runtime (no attested interactive pi exec point) and the legacy discovery import is removed."
+      ]
     },
     {
       "path": "src/inspectors/herdr/session-roots-codec.ts",
@@ -303,8 +305,10 @@
     {
       "path": "src/profiles/profiles.ts",
       "upstreamSha256": "5219d05856b83a1fac31bf4a8abc040bea18321fd1062cb806c3484e3e75da57",
-      "vendoredSha256": "5219d05856b83a1fac31bf4a8abc040bea18321fd1062cb806c3484e3e75da57",
-      "delta": []
+      "vendoredSha256": "ab7e08e6fe742c31c0822e43188f870a61d4b1bfdd45b62092ad5d6ed3c7a3ae",
+      "delta": [
+        "WP4 five-edge custody cut: the model-probe print child is minted and dispatched by the SDK custody dispatcher; dispatch refusals surface as the probe's existing skipped status."
+      ]
     },
     {
       "path": "src/runs/background/active-async-capacity.ts",
@@ -321,9 +325,10 @@
     {
       "path": "src/runs/background/async-execution.ts",
       "upstreamSha256": "854ccef6d7e824a2988f3dfba8c30f511768420c1cb4be6b01b5968037c0990c",
-      "vendoredSha256": "7de62b3cc52a66e2ad1135bca462cc48a0ab8480d3952fae8936c4c2f7e49571",
+      "vendoredSha256": "6667d769cffa73480e927ba22fd9e32ba66c64ce9eb2da8ae0845d5ba76bce17",
       "delta": [
-        "SDK build-flavor support assertion at the existing effective execution boundary; ordinary backend is a no-op, sealed backend explicitly refuses."
+        "SDK build-flavor support assertion at the existing effective execution boundary; ordinary backend is a no-op, sealed backend explicitly refuses.",
+        "WP4 five-edge custody cut: the background runner child is minted and dispatched by the SDK custody dispatcher; the jiti CLI resolution and its spawn are removed and availability no longer depends on a resolvable jiti install."
       ]
     },
     {
@@ -507,6 +512,15 @@
       "delta": []
     },
     {
+      "path": "src/runs/background/subagent-runner.ts",
+      "upstreamSha256": "f35cb3b7062faf25a56dd83e21df6841faf87b2c900b5c9d162622384df35801",
+      "vendoredSha256": "85b8d40a843b5282766490a1db1d3d3a54c405ffe7b98c72807eb7d597da2553",
+      "delta": [
+        "WP4 five-edge custody cut: every print child this runner spawns is minted and dispatched by the SDK custody dispatcher (helper direct-connect argv shape) and the vendor depth-env increment is dropped.",
+        "WP4 five-edge custody cut: adds runSubagentRunnerEntry, the in-bundle entry the runner payload invokes with the custody transport commitment's config path instead of a jiti child's process.argv[2]."
+      ]
+    },
+    {
       "path": "src/runs/background/subagent-wait.ts",
       "upstreamSha256": "70313be41b7233abd2cc6374b45c923bb27c803059a27d2970ae1932ddb87b8b",
       "vendoredSha256": "70313be41b7233abd2cc6374b45c923bb27c803059a27d2970ae1932ddb87b8b",
@@ -569,8 +583,10 @@
     {
       "path": "src/runs/foreground/execution.ts",
       "upstreamSha256": "054de3b5e96b7c450d78a2d0ce188c06440f545f26b1e03ef5f625c95e906cd1",
-      "vendoredSha256": "054de3b5e96b7c450d78a2d0ce188c06440f545f26b1e03ef5f625c95e906cd1",
-      "delta": []
+      "vendoredSha256": "6e035c95850b8a419c050cea5224cadc4c8983aaa43f56c848a041d2e9b98176",
+      "delta": [
+        "WP4 five-edge custody cut: the foreground print child is minted and dispatched by the SDK custody dispatcher (helper direct-connect argv shape); the vendor depth-env increment is dropped and a dispatch refusal becomes a structured lane failure."
+      ]
     },
     {
       "path": "src/runs/foreground/foreground-control.ts",
@@ -673,6 +689,18 @@
       "delta": []
     },
     {
+      "path": "src/runs/shared/claude-code-adapter.ts",
+      "upstreamSha256": "d789680b5889db052e45e7bc88d7193e3bc30a0b1ce923734a49ebfe386a2a6f",
+      "vendoredSha256": "d789680b5889db052e45e7bc88d7193e3bc30a0b1ce923734a49ebfe386a2a6f",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/codex-exec-adapter.ts",
+      "upstreamSha256": "1ce2efd60aae251800196d3ad5b58a2852bcd5b65e8fb1e6b9505161788687a2",
+      "vendoredSha256": "1ce2efd60aae251800196d3ad5b58a2852bcd5b65e8fb1e6b9505161788687a2",
+      "delta": []
+    },
+    {
       "path": "src/runs/shared/completion-evidence.ts",
       "upstreamSha256": "93823250ad1b430d4a135455815e863e2ba3f17e3280f2fad951c922ccee1232",
       "vendoredSha256": "93823250ad1b430d4a135455815e863e2ba3f17e3280f2fad951c922ccee1232",
@@ -688,6 +716,12 @@
       "path": "src/runs/shared/context-mode.ts",
       "upstreamSha256": "baefa0ce44f200b0ba44ffb0009ffbbdfe5c6ccd368d72b0535a0b6cafe53e16",
       "vendoredSha256": "baefa0ce44f200b0ba44ffb0009ffbbdfe5c6ccd368d72b0535a0b6cafe53e16",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/cursor-agent-adapter.ts",
+      "upstreamSha256": "b0ea563c6bc1956dfe77f0d9511cb45e998e5f38e098d7b8aa88d56b9ef00096",
+      "vendoredSha256": "b0ea563c6bc1956dfe77f0d9511cb45e998e5f38e098d7b8aa88d56b9ef00096",
       "delta": []
     },
     {
@@ -708,6 +742,18 @@
       "path": "src/runs/shared/external-cli-contract.ts",
       "upstreamSha256": "850d53a1ef1aa13c2f6da9e342a685325bac39e83e7ce8486c06cc80ec34e665",
       "vendoredSha256": "850d53a1ef1aa13c2f6da9e342a685325bac39e83e7ce8486c06cc80ec34e665",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/external-cli-preflight.ts",
+      "upstreamSha256": "5701877efb7f11dd6e1617630d1197e3460df524cb461b02fcb621a4c789a98a",
+      "vendoredSha256": "5701877efb7f11dd6e1617630d1197e3460df524cb461b02fcb621a4c789a98a",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/external-cli-runner.ts",
+      "upstreamSha256": "51f41fc6ee753ca3d96cfb93a083e64c62acc5d359ac4169e0f9e357967ca0e0",
+      "vendoredSha256": "51f41fc6ee753ca3d96cfb93a083e64c62acc5d359ac4169e0f9e357967ca0e0",
       "delta": []
     },
     {
@@ -845,8 +891,10 @@
     {
       "path": "src/runs/shared/pi-spawn.ts",
       "upstreamSha256": "b52607ba8f25fd1fb2f029aa7826ab445ed1ad45dc38495d73987304239b573c",
-      "vendoredSha256": "b52607ba8f25fd1fb2f029aa7826ab445ed1ad45dc38495d73987304239b573c",
-      "delta": []
+      "vendoredSha256": "bcf386ef427d9e9e5943de07217e0b32858d8ea90aa67cfd9e55819347e22a76",
+      "delta": [
+        "WP4 five-edge custody cut: the legacy spawn-command chain (getPiSpawnCommand, the PI_SUBAGENT_PI_BINARY seam, CLI script resolution) is deleted; only the package-root resolvers the SDK build flavor still needs remain."
+      ]
     },
     {
       "path": "src/runs/shared/process-signal.ts",
@@ -1094,6 +1142,12 @@
       "path": "src/shared/session-identity.ts",
       "upstreamSha256": "856d15b4e1afba45e35d9c2fcd82c44403027535d38905629548e22a27803872",
       "vendoredSha256": "856d15b4e1afba45e35d9c2fcd82c44403027535d38905629548e22a27803872",
+      "delta": []
+    },
+    {
+      "path": "src/shared/session-tokens.ts",
+      "upstreamSha256": "799a917ced6cfb8547a46cfddc5073f5588a799bc98e02ceea74aada95a3e5a9",
+      "vendoredSha256": "799a917ced6cfb8547a46cfddc5073f5588a799bc98e02ceea74aada95a3e5a9",
       "delta": []
     },
     {

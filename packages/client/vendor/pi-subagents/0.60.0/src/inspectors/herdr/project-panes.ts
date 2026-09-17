@@ -1,13 +1,17 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import { getPiSpawnCommand } from "../../runs/shared/pi-spawn.ts";
+// WP4 custody reroute: the legacy pi discovery seam this module used to
+// launch an interactive pi session is gone. The SDK runtime is headless — an
+// interactive REPL pane is not an attested exec point and cannot be a
+// descendant record — so this lane now refuses with a visible error instead
+// of discovering a launcher.
+import { formatShellCommand } from "./shell-command.ts";
 import { getProjectSubagentsDir } from "../../shared/artifacts.ts";
 import { writeAtomicJson } from "../../shared/atomic-json.ts";
 import type { Details, HerdrProjectPaneSnapshot, SubagentState } from "../../shared/types.ts";
 import { createHerdrClient, detectHerdr, type HerdrClient, type HerdrErrorCode } from "./client.ts";
 import { focusHerdrPane, herdrPaneFocusTarget, herdrPaneRecord } from "./focus.ts";
-import { formatShellCommand } from "./shell-command.ts";
 
 export const HERDR_PROJECT_PANE_ACTIONS = ["project.open", "project.status", "project.close"] as const;
 export type HerdrProjectPaneAction = typeof HERDR_PROJECT_PANE_ACTIONS[number];
@@ -407,9 +411,13 @@ async function inspectPane(client: HerdrClient, paneId: string, signal?: AbortSi
 }
 
 function projectPaneCommand(message: string | undefined): string {
-	const args = message?.trim() ? [message.trim()] : [];
-	const command = getPiSpawnCommand(args);
-	return formatShellCommand(command.command, command.args);
+	void message;
+	// Fail-closed: an interactive pi session in a pane is not one of the
+	// attested subagent exec points, and the SDK custody runtime mints no
+	// descendant record for one. The refusal is the visible tool result.
+	return formatShellCommand("printf", [
+		"herdr project pane launch is unavailable in the SDK custody runtime: no attested interactive pi exec point",
+	]);
 }
 
 function canonicalRuntimePath(value: string | undefined): string | undefined {

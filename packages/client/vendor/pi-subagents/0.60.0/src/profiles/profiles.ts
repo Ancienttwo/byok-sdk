@@ -3,7 +3,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { BUILTIN_AGENT_NAMES } from "../agents/agents.ts";
-import { getPiSpawnCommand } from "../runs/shared/pi-spawn.ts";
+// WP4 custody reroute: the model probe spawns a real print-lane child, so it
+// is minted and dispatched by the SDK custody dispatcher like every other
+// spawn; no legacy discovery remains on this lane.
+import { dispatchCustodyPiSubagentSpawn, CustodyDispatchRefusalError } from "../../../../../src/custody/custody-dispatcher.ts";
+import { consumeWorkflowChildPermit } from "../shared/workflow-child-permit.ts";
 import { findModelInfo, getSupportedThinkingLevels, splitKnownThinkingSuffix, toModelInfo } from "../shared/model-info.ts";
 import { getAgentDir } from "../shared/utils.ts";
 
@@ -340,7 +344,31 @@ async function probeModel(
 	if (typeof pi.exec !== "function") {
 		return { status: "skipped", message: "pi.exec is unavailable in this runtime." };
 	}
-	const spawnSpec = getPiSpawnCommand(["-p", "--model", fullId, "--no-tools", 'Reply with exactly "OK".']);
+	let spawnSpec: { command: string; args: string[] };
+	try {
+		const dispatched = dispatchCustodyPiSubagentSpawn({
+			child: "pi-subagent-print",
+			cwd: os.tmpdir(),
+			vendorArgv: ["-p", "--model", fullId, "--no-tools", 'Reply with exactly "OK".'],
+			agent: "model-probe",
+		});
+		const permitLaunch = dispatched.permitLaunch;
+		const permitError = consumeWorkflowChildPermit(permitLaunch.permit, {
+			workflowRunId: permitLaunch.workflowRunId,
+			childKey: permitLaunch.childKey,
+			agent: permitLaunch.agent,
+			launchContractDigest: permitLaunch.launchContractDigest,
+			context: permitLaunch.context,
+			runner: "pi",
+		});
+		if (permitError) return { status: "error", message: `Model probe permit refused: ${permitError}` };
+		spawnSpec = { command: dispatched.command, args: [...dispatched.args] };
+	} catch (dispatchError) {
+		if (dispatchError instanceof CustodyDispatchRefusalError) {
+			return { status: "skipped", message: `Model probe unavailable outside an SDK dispatch context: ${dispatchError.reason}` };
+		}
+		throw dispatchError;
+	}
 	const result = await pi.exec(spawnSpec.command, spawnSpec.args, {
 		cwd: os.tmpdir(),
 		timeout: 45_000,

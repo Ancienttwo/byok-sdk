@@ -49,7 +49,9 @@ describe('sealed factory build author and bounded compiler exclusion', () => {
   it('binds every vendored byte to its explicit provenance delta', () => {
     const vendor = path.join(root,'vendor/pi-subagents/0.60.0');
     const manifest=JSON.parse(readFileSync(path.join(vendor,'source-manifest.json'),'utf8'));
-    expect(manifest.files).toHaveLength(229);
+    // WP4 five-edge custody cut un-pruned 7 upstream files (the runner
+    // closure) into the vendored tree: 229 + 7 = 236.
+    expect(manifest.files).toHaveLength(236);
     for(const row of manifest.files) {
       expect(sha(path.join(vendor,row.path)),row.path).toBe(row.vendoredSha256);
       expect(row.delta.length>0,row.path).toBe(row.upstreamSha256!==row.vendoredSha256);
