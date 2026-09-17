@@ -875,6 +875,16 @@ jobs:
             # defaults -- the same class of fix as the summary-file unset above.
             Remove-Item Env:PSModulePath -ErrorAction SilentlyContinue
 
+            # Cold-start latency prepay, separate from the env fix above: a fresh
+            # local account also pays first-use PS 5.1 module analysis (~2-4s) on
+            # its first powershell.exe spawn. Round 7 with the env fix alone left
+            # the positive keys test at 5004ms against vitest's 5s default; paying
+            # the cold cost here keeps every test inside its own budget. Round 4
+            # (unset + warm-up) is the only green configuration observed so far.
+            & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
+              -NoProfile -NonInteractive -Command 'Import-Module Microsoft.PowerShell.Security; [void](Get-Command Get-Acl).Name'
+            if ($LASTEXITCODE -ne 0) { Fail 92 'PS 5.1 module warm-up failed under the standard-user token' }
+
             # git compares safe.directory against its own forward-slash spelling of
             # this exact checkout. Never '*'.
             $env:GIT_CONFIG_COUNT = '1'
