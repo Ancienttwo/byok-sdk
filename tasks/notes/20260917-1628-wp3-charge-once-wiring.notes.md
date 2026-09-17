@@ -60,3 +60,11 @@ Promote a candidate to `tasks/lessons.md`, `docs/researches/`, or harness asset 
 ## Promotion Candidates
 
 - 「模块被打进宿主 bundle 后 `import.meta.url` 折叠为 bundle 自身路径，CLI 守卫必须用 `import.meta.main`」：满足难逆（产品守卫写法）、意外性高（首轮全量才暴露）、真实权衡（argv 比对 vs main 标志），建议下次触碰 CLI 模块时晋升 lessons。
+
+## 收口（2026-09-17 17:5x）
+
+- gatekeeper 独立验收 **PASS**：9 项 Verification Plan 独立重跑全绿（custody 4 pass / vendored 零字节 / assertDescendantSpawn 1 个产品调用者 pi-subagent-print-entry.ts:236 / identity 110 / client 2805 过 1 既有 S2 tripwire / typecheck / api-surface / version-authority / 无 attribution）；工作树零脏；13 文件全在 1545+1628 allowed_paths 并集内。
+- 测试加严而非弱化：链健康断言全保留，新增 MAX_DEPTH='3'（丢弃 vendor '8'）与 custody 键/seam 键零泄漏 exec env 的 pin。
+- 专项裁决：A=dispatcher 接线真实生效（pin 实际拆分更新于 d69e9cc8，交付报告「字节一致」表述有误、工作正确）；B=fail-closed 未绕过（descendant-launch.ts:125 unexpectedLaunchEnvControlNames 拒未枚举 BYOK_*，custody 两键仅作 entry 输入、exactNames 精确投影）；C=win32 skip 三处显式+todos；E=bun 直跑 matcher 差异系既有 runner 差异。
+- 债务（WP4 首刀，已在 todos）：BYOK_SDK_CUSTODY_PARENT_DEPTH/LAUNCH_RECORD 注册进 identity.ts:663 枚举 + :810 pin 同刀更新；Windows seam spawn 覆盖。
+- 自动 architecture projection 在 prepare-acceptance 阶段死信（已知 archctx 节点粗粒度缺陷族，jobId null / signalId 8aaaa31f…，candidate 落 .ai/harness/architecture-projection/acceptance-candidates/）——按 1545 先例以本 notes+review 为人工投影收口，report-only 不阻塞。
