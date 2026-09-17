@@ -98,8 +98,8 @@
       "outputDigest": "sha256:8222fcd9af4f9c98f517da7bef7d2e7d4598d5b86469f723f04a6d54ce6f0f53",
       "verifiedAgainst": {
         "branch": "codex/c07-g4-remote-preparation",
-        "commit": "f9850b659687fb83c620d92178a30603710a081f",
-        "committedAt": "2026-09-17T13:58:06+08:00"
+        "commit": "8bd91c030d39d38f21f2095fa535a8c9628986cf",
+        "committedAt": "2026-09-17T14:00:58+08:00"
       }
     },
     {
