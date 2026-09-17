@@ -4,10 +4,16 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { connectControlClient } from '../bin/control-client';
+import {
+  cancelInputPreparation,
+  connectControlClient,
+  lookupInputPreparation,
+  requestInputPreparation,
+} from '../bin/control-client';
 import {
   computeServerProof,
   CONTROL_PROTOCOL_VERSION,
+  controlSocketPath,
   controlTokenPath,
   encodeFrame,
   MAX_LINE_BYTES,
@@ -165,5 +171,116 @@ describe('control-client: hardening against a misbehaving/hostile control server
     expect(result).toMatchObject({ ok: false });
     if (result.ok) throw new Error('unreachable');
     expect(result.reason).toMatch(/not a real regular file|safe open/);
+  });
+});
+
+/**
+ * B-P2 local primitive: the three typed control-client verbs
+ * (`docs/researches/runtime-input-preparation-contract.md` §10.4).
+ *
+ * Driven against a well-behaved fake control server that completes the REAL
+ * handshake, so what is proven is the verb contract itself: it sends the fixed
+ * method name and the caller's params verbatim, it unwraps `result.receipt`
+ * without interpreting readiness, and a typed daemon refusal arrives as a
+ * `ControlError` carrying the daemon's own code rather than a generic failure.
+ */
+function startFakeControlServer(
+  endpoint: string,
+  token: string,
+  respond: (method: string, params: unknown) => { ok: true; result: unknown } | { ok: false; code: string },
+): Promise<{ close: () => void; seen: { method: string; params: unknown }[] }> {
+  const seen: { method: string; params: unknown }[] = [];
+  return new Promise((resolve, reject) => {
+    const server = net.createServer((socket) => {
+      const reader = new NdjsonLineReader();
+      let phase: 'hello' | 'auth' | 'ready' = 'hello';
+      socket.on('error', () => {});
+      socket.on('data', (chunk: Buffer) => {
+        for (const line of reader.push(chunk)) {
+          const parsed = JSON.parse(line) as Record<string, unknown>;
+          if (phase === 'hello') {
+            socket.write(
+              encodeFrame({
+                v: CONTROL_PROTOCOL_VERSION,
+                hello: 'server',
+                proof: computeServerProof(token, parsed.nonce as string),
+                nonce: randomNonceHex(),
+              }),
+            );
+            phase = 'auth';
+            continue;
+          }
+          if (phase === 'auth') {
+            socket.write(encodeFrame({ v: CONTROL_PROTOCOL_VERSION, ready: true }));
+            phase = 'ready';
+            continue;
+          }
+          seen.push({ method: parsed.method as string, params: parsed.params });
+          const answer = respond(parsed.method as string, parsed.params);
+          socket.write(
+            encodeFrame(
+              answer.ok
+                ? { v: 1, id: parsed.id, ok: true, result: answer.result }
+                : { v: 1, id: parsed.id, ok: false, error: { code: answer.code, message: answer.code } },
+            ),
+          );
+        }
+      });
+    });
+    server.once('error', reject);
+    server.listen(endpoint, () => resolve({ close: () => server.close(), seen }));
+  });
+}
+
+describe('control-client: input_preparation verbs', () => {
+  const scope = { deviceId: 'device-1', agentRef: 'agent-1', profileId: 'profile-1', profileRevision: 'profile-rev-1' };
+  const receipt = { format: 'byok.input-preparation.receipt', version: 1, reference: 'ref-1', requestId: 'prep-1', ready: false };
+
+  it('sends the fixed method names with the caller params verbatim and unwraps the receipt', async () => {
+    const storeDir = await tmpDir('byok-ctl-client-prep-');
+    const token = 'd'.repeat(64);
+    await fs.writeFile(controlTokenPath(storeDir), token);
+    const fake = await startFakeControlServer(controlSocketPath(storeDir), token, () => ({ ok: true, result: { receipt } }));
+    try {
+      const connected = await connectControlClient({ storeDir, productId: 'acme' });
+      if (!connected.ok) throw new Error(connected.reason);
+      const request = { format: 'byok.input-preparation.request', version: 1, requestId: 'prep-1' } as never;
+
+      expect(await requestInputPreparation(connected.client, request)).toEqual(receipt);
+      expect(await lookupInputPreparation(connected.client, { requestId: 'prep-1', scope })).toEqual(receipt);
+      expect(await cancelInputPreparation(connected.client, { requestId: 'prep-1', scope })).toEqual(receipt);
+      connected.client.close();
+
+      expect(fake.seen.map((entry) => entry.method)).toEqual([
+        'input_preparation.prepare',
+        'input_preparation.lookup',
+        'input_preparation.cancel',
+      ]);
+      expect(fake.seen[1]?.params).toEqual({ requestId: 'prep-1', scope });
+      expect(fake.seen[2]?.params).toEqual({ requestId: 'prep-1', scope });
+    } finally {
+      fake.close();
+    }
+  });
+
+  it('surfaces the daemon refusal code rather than a generic failure', async () => {
+    const storeDir = await tmpDir('byok-ctl-client-prep-err-');
+    const token = 'e'.repeat(64);
+    await fs.writeFile(controlTokenPath(storeDir), token);
+    const fake = await startFakeControlServer(controlSocketPath(storeDir), token, () => ({
+      ok: false,
+      code: 'input_preparation_unconfigured',
+    }));
+    try {
+      const connected = await connectControlClient({ storeDir, productId: 'acme' });
+      if (!connected.ok) throw new Error(connected.reason);
+      await expect(lookupInputPreparation(connected.client, { requestId: 'prep-1', scope })).rejects.toMatchObject({
+        name: 'ControlError',
+        code: 'input_preparation_unconfigured',
+      });
+      connected.client.close();
+    } finally {
+      fake.close();
+    }
   });
 });

@@ -13,6 +13,10 @@ import {
 } from '../daemon/control-server';
 import {
   CONTROL_PROTOCOL_VERSION,
+  ControlError,
+  INPUT_PREPARATION_CANCEL_METHOD,
+  INPUT_PREPARATION_LOOKUP_METHOD,
+  INPUT_PREPARATION_PREPARE_METHOD,
   computeClientAuth,
   controlSocketPath,
   controlTokenPath,
@@ -341,6 +345,96 @@ describe('control-server: RPC dispatch', () => {
 
     subscription.close();
     await vi.waitFor(() => expect(aborted).toBe(true));
+  });
+});
+
+/**
+ * B-P2 local primitive: the three `input_preparation.*` methods are ordinary
+ * unary methods on this same dispatch table — they are reached only after the
+ * handshake, they have no streaming half, and their typed refusals ride the
+ * existing `ControlError` shape. This is the dispatch-level half; the whole
+ * stack lives in `input-preparation-control.test.ts`.
+ */
+describe('control-server: input_preparation dispatch', () => {
+  let handle: ControlServerHandle | undefined;
+  afterEach(async () => {
+    await handle?.close();
+    handle = undefined;
+  });
+
+  it('dispatches the three methods post-handshake and carries their typed error code back', async () => {
+    const storeDir = await tmpDir('byok-ctl-input-prep-');
+    const seen: string[] = [];
+    handle = await startControlServer({
+      storeDir,
+      productId: 'acme',
+      methods: {
+        unary: {
+          [INPUT_PREPARATION_PREPARE_METHOD]: () => {
+            seen.push('prepare');
+            return { receipt: { reference: 'ref-1' } };
+          },
+          [INPUT_PREPARATION_LOOKUP_METHOD]: () => {
+            seen.push('lookup');
+            throw new ControlError('not_found', 'no preparation record for this requestId in this scope');
+          },
+          [INPUT_PREPARATION_CANCEL_METHOD]: () => {
+            seen.push('cancel');
+            throw new ControlError('input_preparation_unconfigured', 'this daemon is not configured for input preparation');
+          },
+        },
+        stream: {},
+      },
+    });
+    const token = await readToken(storeDir);
+    const socket = await rawConnectAndHandshake(handle.endpoint, token);
+    const frames = frameStream(socket);
+
+    socket.write(encodeFrame({ v: 1, id: 'p1', method: INPUT_PREPARATION_PREPARE_METHOD, params: {} }));
+    expect(await frames.next()).toMatchObject({ id: 'p1', ok: true, result: { receipt: { reference: 'ref-1' } } });
+
+    socket.write(encodeFrame({ v: 1, id: 'p2', method: INPUT_PREPARATION_LOOKUP_METHOD, params: {} }));
+    expect(await frames.next()).toMatchObject({ id: 'p2', ok: false, error: { code: 'not_found' } });
+
+    socket.write(encodeFrame({ v: 1, id: 'p3', method: INPUT_PREPARATION_CANCEL_METHOD, params: {} }));
+    expect(await frames.next()).toMatchObject({ id: 'p3', ok: false, error: { code: 'input_preparation_unconfigured' } });
+
+    expect(seen).toEqual(['prepare', 'lookup', 'cancel']);
+    socket.destroy();
+  });
+
+  it('never reaches a handler for a peer that has not completed the handshake', async () => {
+    const storeDir = await tmpDir('byok-ctl-input-prep-unauth-');
+    const seen: string[] = [];
+    handle = await startControlServer({
+      storeDir,
+      productId: 'acme',
+      methods: {
+        unary: {
+          [INPUT_PREPARATION_PREPARE_METHOD]: () => {
+            seen.push('prepare');
+            return {};
+          },
+        },
+        stream: {},
+      },
+    });
+
+    const closed = await new Promise<boolean>((resolve) => {
+      const socket = net.createConnection(handle!.endpoint);
+      socket.on('error', () => undefined);
+      socket.once('connect', () => {
+        socket.write(encodeFrame({ v: 1, id: 'p1', method: INPUT_PREPARATION_PREPARE_METHOD, params: {} }));
+      });
+      socket.on('data', () => {
+        socket.destroy();
+        resolve(false);
+      });
+      socket.once('close', () => resolve(true));
+    });
+
+    expect(closed).toBe(true);
+    expect(seen).toEqual([]);
   });
 });
 
