@@ -1,7 +1,13 @@
+> **Archived**: 2026-09-15 13:14
+> **Related Plan**: plans/archive/plan-20260914-1028-agent-gateway-session-probe.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260915-1314
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: 2026-09-17 02:18
+> **Updated**: (archive-workflow)
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.

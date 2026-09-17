@@ -1,12 +1,22 @@
+> **Archived**: 2026-09-15 12:50
+> **Related Plan**: plans/archive/plan-20260906-0450-release-014-prep.md
+> **Outcome**: Superseded
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260915-1800
+> **Archive Projection V1**: `plans/plan-20260906-0450-release-014-prep.md` => `plans/archive/plan-20260906-0450-release-014-prep.md`
+> **Archive Projection V1**: `tasks/notes/20260906-0450-release-014-prep.notes.md` => `tasks/archive/notes-20260915-1800-release-014-prep.md`
+> **Archive Projection V1**: `tasks/contracts/20260906-0450-release-014-prep.contract.md` => `tasks/archive/contract-20260915-1800-release-014-prep.md`
+> **Archive Projection V1**: `tasks/reviews/20260906-0450-release-014-prep.review.md` => `tasks/archive/review-20260915-1800-release-014-prep.md`
+
 # Task Contract: release-014-prep
 
 > **Status**: Blocked
-> **Plan**: plans/plan-20260906-0450-release-014-prep.md
+> **Plan**: plans/archive/plan-20260906-0450-release-014-prep.md
 > **Task Profile**: code-change
 > **Owner**: kito
 > **Capability ID**: root
-> **Review File**: `tasks/reviews/20260906-0450-release-014-prep.review.md`
-> **Notes File**: `tasks/notes/20260906-0450-release-014-prep.notes.md`
+> **Review File**: `tasks/archive/review-20260915-1800-release-014-prep.md`
+> **Notes File**: `tasks/archive/notes-20260915-1800-release-014-prep.md`
 
 ## Why
 Prepare reviewable immutable artifacts containing accepted #147 before any release action.
@@ -28,9 +38,9 @@ allowed_paths:
   - README.md
   - docs/spec.md
   - CHANGELOG.md
-  - plans/plan-20260906-0450-release-014-prep.md
-  - tasks/contracts/20260906-0450-release-014-prep.contract.md
-  - tasks/reviews/20260906-0450-release-014-prep.review.md
+  - plans/archive/plan-20260906-0450-release-014-prep.md
+  - tasks/archive/contract-20260915-1800-release-014-prep.md
+  - tasks/archive/review-20260915-1800-release-014-prep.md
   - tasks/notes/
 ```
 
@@ -44,7 +54,7 @@ evidence_requirements:
 ```yaml
 exit_criteria:
   files_exist:
-    - tasks/notes/20260906-0450-release-014-prep.notes.md
+    - tasks/archive/notes-20260915-1800-release-014-prep.md
   commands_succeed:
     - bun run build
     - bun run typecheck

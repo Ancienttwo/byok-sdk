@@ -1837,6 +1837,9 @@ export function buildDaemonWithAdapters(
     terminalCommits.resume();
     if (!daemonOwnerLease) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
     try {
+    // Retention is owned by daemon lifecycle, including idle restarts. Open
+    // only under the store lease and before exposing any control endpoint.
+    await inputPreparationService?.open();
     // Only the explicitly enabled service-enrollment path resolves credential
     // custody before hosted storage. A WinSW service has a different Windows
     // logon token from the operator CLI, so an unpaired service must be able to
