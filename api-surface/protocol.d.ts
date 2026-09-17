@@ -699,6 +699,10 @@ interface EnvelopeShapeOptions {
         taskId?: never;
         seq: number;
     };
+    'agent.input.preparation': {
+        taskId?: never;
+        seq: number;
+    };
     'agent.content.receipt': {
         taskId?: string;
         seq?: number;
@@ -1425,6 +1429,85 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }, z.core.$strict>;
         projectionHash: z.ZodString;
         projection: z.ZodType<import("./agent-home-projection").AgentHomeProjectionValue, unknown, z.core.$ZodTypeInternals<import("./agent-home-projection").AgentHomeProjectionValue, unknown>>;
+    }, z.core.$strict>;
+}, z.core.$strip>, z.ZodObject<{
+    v: z.ZodNumber;
+    id: z.ZodUUID;
+    ts: z.ZodISODateTime;
+    type: z.ZodLiteral<"agent.input.preparation">;
+    task_id: z.ZodOptional<z.ZodNever>;
+    session_ref: z.ZodOptional<z.ZodString>;
+    seq: z.ZodNumber;
+    payload: z.ZodObject<{
+        requestId: z.ZodUUID;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        profileId: z.ZodString;
+        policyRevision: z.ZodString;
+        source: z.ZodObject<{
+            revision: z.ZodString;
+            digest: z.ZodString;
+        }, z.core.$strict>;
+        selection: z.ZodObject<{
+            model: z.ZodObject<{
+                id: z.ZodString;
+                name: z.ZodString;
+                api: z.ZodLiteral<"openai-completions">;
+                provider: z.ZodString;
+                baseUrl: z.ZodString;
+                reasoning: z.ZodBoolean;
+                input: z.ZodArray<z.ZodEnum<{
+                    image: "image";
+                    text: "text";
+                }>>;
+                cost: z.ZodObject<{
+                    input: z.ZodNumber;
+                    output: z.ZodNumber;
+                    cacheRead: z.ZodNumber;
+                    cacheWrite: z.ZodNumber;
+                }, z.core.$strict>;
+                contextWindow: z.ZodNumber;
+                maxTokens: z.ZodNumber;
+            }, z.core.$strict>;
+            options: z.ZodObject<{
+                cacheRetention: z.ZodEnum<{
+                    long: "long";
+                    none: "none";
+                    short: "short";
+                }>;
+                maxTokens: z.ZodNumber;
+                temperature: z.ZodOptional<z.ZodNumber>;
+                toolChoice: z.ZodOptional<z.ZodEnum<{
+                    auto: "auto";
+                    none: "none";
+                    required: "required";
+                }>>;
+                reasoningEffort: z.ZodOptional<z.ZodEnum<{
+                    high: "high";
+                    low: "low";
+                    max: "max";
+                    medium: "medium";
+                    minimal: "minimal";
+                    xhigh: "xhigh";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+        deadlineAt: z.ZodISODateTime;
+        context: z.ZodUnion<readonly [z.ZodObject<{
+            inline: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            contentHash: z.ZodString;
+        }, z.core.$strict>]>;
+        requiredToolsets: z.ZodArray<z.ZodString>;
     }, z.core.$strict>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -2686,6 +2769,85 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
         v: z.ZodNumber;
         id: z.ZodUUID;
         ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"agent.input.preparation">;
+        task_id: z.ZodOptional<z.ZodNever>;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodNumber;
+        payload: z.ZodObject<{
+            requestId: z.ZodUUID;
+            agentRef: z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>;
+            profileId: z.ZodString;
+            policyRevision: z.ZodString;
+            source: z.ZodObject<{
+                revision: z.ZodString;
+                digest: z.ZodString;
+            }, z.core.$strict>;
+            selection: z.ZodObject<{
+                model: z.ZodObject<{
+                    id: z.ZodString;
+                    name: z.ZodString;
+                    api: z.ZodLiteral<"openai-completions">;
+                    provider: z.ZodString;
+                    baseUrl: z.ZodString;
+                    reasoning: z.ZodBoolean;
+                    input: z.ZodArray<z.ZodEnum<{
+                        image: "image";
+                        text: "text";
+                    }>>;
+                    cost: z.ZodObject<{
+                        input: z.ZodNumber;
+                        output: z.ZodNumber;
+                        cacheRead: z.ZodNumber;
+                        cacheWrite: z.ZodNumber;
+                    }, z.core.$strict>;
+                    contextWindow: z.ZodNumber;
+                    maxTokens: z.ZodNumber;
+                }, z.core.$strict>;
+                options: z.ZodObject<{
+                    cacheRetention: z.ZodEnum<{
+                        long: "long";
+                        none: "none";
+                        short: "short";
+                    }>;
+                    maxTokens: z.ZodNumber;
+                    temperature: z.ZodOptional<z.ZodNumber>;
+                    toolChoice: z.ZodOptional<z.ZodEnum<{
+                        auto: "auto";
+                        none: "none";
+                        required: "required";
+                    }>>;
+                    reasoningEffort: z.ZodOptional<z.ZodEnum<{
+                        high: "high";
+                        low: "low";
+                        max: "max";
+                        medium: "medium";
+                        minimal: "minimal";
+                        xhigh: "xhigh";
+                    }>>;
+                }, z.core.$strict>;
+            }, z.core.$strict>;
+            deadlineAt: z.ZodISODateTime;
+            context: z.ZodUnion<readonly [z.ZodObject<{
+                inline: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                blobRef: z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                    url: z.ZodOptional<z.ZodString>;
+                }, z.core.$strip>;
+                contentHash: z.ZodString;
+            }, z.core.$strict>]>;
+            requiredToolsets: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
         type: z.ZodLiteral<"task.approve">;
         task_id: z.ZodString;
         session_ref: z.ZodOptional<z.ZodString>;
@@ -3814,6 +3976,85 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
         v: z.ZodNumber;
         id: z.ZodUUID;
         ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"agent.input.preparation">;
+        task_id: z.ZodOptional<z.ZodNever>;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodNumber;
+        payload: z.ZodObject<{
+            requestId: z.ZodUUID;
+            agentRef: z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>;
+            profileId: z.ZodString;
+            policyRevision: z.ZodString;
+            source: z.ZodObject<{
+                revision: z.ZodString;
+                digest: z.ZodString;
+            }, z.core.$strict>;
+            selection: z.ZodObject<{
+                model: z.ZodObject<{
+                    id: z.ZodString;
+                    name: z.ZodString;
+                    api: z.ZodLiteral<"openai-completions">;
+                    provider: z.ZodString;
+                    baseUrl: z.ZodString;
+                    reasoning: z.ZodBoolean;
+                    input: z.ZodArray<z.ZodEnum<{
+                        image: "image";
+                        text: "text";
+                    }>>;
+                    cost: z.ZodObject<{
+                        input: z.ZodNumber;
+                        output: z.ZodNumber;
+                        cacheRead: z.ZodNumber;
+                        cacheWrite: z.ZodNumber;
+                    }, z.core.$strict>;
+                    contextWindow: z.ZodNumber;
+                    maxTokens: z.ZodNumber;
+                }, z.core.$strict>;
+                options: z.ZodObject<{
+                    cacheRetention: z.ZodEnum<{
+                        long: "long";
+                        none: "none";
+                        short: "short";
+                    }>;
+                    maxTokens: z.ZodNumber;
+                    temperature: z.ZodOptional<z.ZodNumber>;
+                    toolChoice: z.ZodOptional<z.ZodEnum<{
+                        auto: "auto";
+                        none: "none";
+                        required: "required";
+                    }>>;
+                    reasoningEffort: z.ZodOptional<z.ZodEnum<{
+                        high: "high";
+                        low: "low";
+                        max: "max";
+                        medium: "medium";
+                        minimal: "minimal";
+                        xhigh: "xhigh";
+                    }>>;
+                }, z.core.$strict>;
+            }, z.core.$strict>;
+            deadlineAt: z.ZodISODateTime;
+            context: z.ZodUnion<readonly [z.ZodObject<{
+                inline: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                blobRef: z.ZodObject<{
+                    blobId: z.ZodString;
+                    contentHash: z.ZodString;
+                    size: z.ZodNumber;
+                    contentType: z.ZodString;
+                    url: z.ZodOptional<z.ZodString>;
+                }, z.core.$strip>;
+                contentHash: z.ZodString;
+            }, z.core.$strict>]>;
+            requiredToolsets: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
         type: z.ZodLiteral<"task.approve">;
         task_id: z.ZodString;
         session_ref: z.ZodOptional<z.ZodString>;
@@ -4360,6 +4601,273 @@ export declare const AgentHomeProjectionReadbackSchema: z.ZodObject<{
     completedAt: z.ZodOptional<z.ZodISODateTime>;
 }, z.core.$strict>;
 export type AgentHomeProjectionReadback = z.infer<typeof AgentHomeProjectionReadbackSchema>;
+export declare const InputPreparationCompletionRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+    outcome: z.ZodLiteral<"prepared">;
+    requestId: z.ZodUUID;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    profileId: z.ZodString;
+    policyRevision: z.ZodString;
+    receipt: z.ZodObject<{
+        reference: z.ZodString;
+        state: z.ZodEnum<{
+            cancelled: "cancelled";
+            counted: "counted";
+            counter_interrupted: "counter_interrupted";
+            counting: "counting";
+            failed: "failed";
+            reserved: "reserved";
+        }>;
+        binding: z.ZodObject<{
+            scopeId: z.ZodString;
+            deviceId: z.ZodString;
+            agentRef: z.ZodString;
+            profileId: z.ZodString;
+            profileRevision: z.ZodString;
+            source: z.ZodObject<{
+                revision: z.ZodString;
+                digest: z.ZodString;
+            }, z.core.$strict>;
+            target: z.ZodObject<{
+                endpoint: z.ZodString;
+                modelId: z.ZodString;
+            }, z.core.$strict>;
+            policyRevision: z.ZodString;
+            runtime: z.ZodObject<{
+                packageName: z.ZodString;
+                packageVersion: z.ZodString;
+                upstreamBase: z.ZodString;
+                upstreamCommit: z.ZodString;
+                forkBuild: z.ZodNumber;
+                envelopeFormat: z.ZodString;
+                requestFormat: z.ZodString;
+                compilerVersion: z.ZodNumber;
+            }, z.core.$strict>;
+            requestDigest: z.ZodString;
+        }, z.core.$strict>;
+        artifact: z.ZodOptional<z.ZodObject<{
+            requestDigest: z.ZodString;
+            envelopeDigest: z.ZodString;
+            toolManifestDigest: z.ZodString;
+            requestBytes: z.ZodNumber;
+            projectionBytes: z.ZodNumber;
+            coverage: z.ZodString;
+        }, z.core.$strict>>;
+        counter: z.ZodOptional<z.ZodObject<{
+            method: z.ZodString;
+            methodVersion: z.ZodString;
+            authority: z.ZodEnum<{
+                provider: "provider";
+                test_fixture: "test_fixture";
+            }>;
+            kind: z.ZodEnum<{
+                bound: "bound";
+                count: "count";
+            }>;
+            value: z.ZodNumber;
+            coverage: z.ZodObject<{
+                covered: z.ZodBoolean;
+                reason: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>;
+            target: z.ZodObject<{
+                endpoint: z.ZodString;
+                modelId: z.ZodString;
+            }, z.core.$strict>;
+            calledAt: z.ZodISODateTime;
+            completedAt: z.ZodISODateTime;
+        }, z.core.$strict>>;
+        ready: z.ZodBoolean;
+        readinessReasons: z.ZodArray<z.ZodEnum<{
+            artifact_expired: "artifact_expired";
+            cancelled: "cancelled";
+            compiler_coverage_unknown: "compiler_coverage_unknown";
+            counter_authority_not_production: "counter_authority_not_production";
+            counter_coverage_incomplete: "counter_coverage_incomplete";
+            counter_interrupted: "counter_interrupted";
+            executor_identity_unproven: "executor_identity_unproven";
+            failed: "failed";
+            not_counted: "not_counted";
+        }>>;
+        detail: z.ZodOptional<z.ZodString>;
+        artifactExpiresAt: z.ZodISODateTime;
+    }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    outcome: z.ZodLiteral<"rejected">;
+    requestId: z.ZodUUID;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    profileId: z.ZodString;
+    policyRevision: z.ZodString;
+    reason: z.ZodEnum<{
+        authority_unavailable: "authority_unavailable";
+        bad_request: "bad_request";
+        cancelled: "cancelled";
+        context_hash_mismatch: "context_hash_mismatch";
+        context_unresolvable: "context_unresolvable";
+        counter_interrupted: "counter_interrupted";
+        counter_unavailable: "counter_unavailable";
+        deadline_elapsed: "deadline_elapsed";
+        durable_write_failed: "durable_write_failed";
+        input_preparation_unconfigured: "input_preparation_unconfigured";
+        limit_exceeded: "limit_exceeded";
+        not_found: "not_found";
+        policy_revision_mismatch: "policy_revision_mismatch";
+        request_conflict: "request_conflict";
+        runtime_identity_unavailable: "runtime_identity_unavailable";
+        scope_denied: "scope_denied";
+        toolsets_unobservable: "toolsets_unobservable";
+        unsupported_input: "unsupported_input";
+    }>;
+}, z.core.$strict>], "outcome">;
+export type InputPreparationCompletionRequest = z.infer<typeof InputPreparationCompletionRequestSchema>;
+/** `pending` until the device records a terminal fact; the other two are terminal. */
+export declare const InputPreparationStatusSchema: z.ZodEnum<{
+    pending: "pending";
+    prepared: "prepared";
+    rejected: "rejected";
+}>;
+export type InputPreparationStatus = z.infer<typeof InputPreparationStatusSchema>;
+/**
+ * Tenant/device/request-bound durable readback. `receipt` and `reason` are
+ * present only on their own terminal status, never together and never on
+ * `pending`.
+ */
+export declare const InputPreparationReadbackSchema: z.ZodObject<{
+    tenantId: z.ZodString;
+    deviceId: z.ZodString;
+    requestId: z.ZodUUID;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    profileId: z.ZodString;
+    policyRevision: z.ZodString;
+    status: z.ZodEnum<{
+        pending: "pending";
+        prepared: "prepared";
+        rejected: "rejected";
+    }>;
+    receipt: z.ZodOptional<z.ZodObject<{
+        reference: z.ZodString;
+        state: z.ZodEnum<{
+            cancelled: "cancelled";
+            counted: "counted";
+            counter_interrupted: "counter_interrupted";
+            counting: "counting";
+            failed: "failed";
+            reserved: "reserved";
+        }>;
+        binding: z.ZodObject<{
+            scopeId: z.ZodString;
+            deviceId: z.ZodString;
+            agentRef: z.ZodString;
+            profileId: z.ZodString;
+            profileRevision: z.ZodString;
+            source: z.ZodObject<{
+                revision: z.ZodString;
+                digest: z.ZodString;
+            }, z.core.$strict>;
+            target: z.ZodObject<{
+                endpoint: z.ZodString;
+                modelId: z.ZodString;
+            }, z.core.$strict>;
+            policyRevision: z.ZodString;
+            runtime: z.ZodObject<{
+                packageName: z.ZodString;
+                packageVersion: z.ZodString;
+                upstreamBase: z.ZodString;
+                upstreamCommit: z.ZodString;
+                forkBuild: z.ZodNumber;
+                envelopeFormat: z.ZodString;
+                requestFormat: z.ZodString;
+                compilerVersion: z.ZodNumber;
+            }, z.core.$strict>;
+            requestDigest: z.ZodString;
+        }, z.core.$strict>;
+        artifact: z.ZodOptional<z.ZodObject<{
+            requestDigest: z.ZodString;
+            envelopeDigest: z.ZodString;
+            toolManifestDigest: z.ZodString;
+            requestBytes: z.ZodNumber;
+            projectionBytes: z.ZodNumber;
+            coverage: z.ZodString;
+        }, z.core.$strict>>;
+        counter: z.ZodOptional<z.ZodObject<{
+            method: z.ZodString;
+            methodVersion: z.ZodString;
+            authority: z.ZodEnum<{
+                provider: "provider";
+                test_fixture: "test_fixture";
+            }>;
+            kind: z.ZodEnum<{
+                bound: "bound";
+                count: "count";
+            }>;
+            value: z.ZodNumber;
+            coverage: z.ZodObject<{
+                covered: z.ZodBoolean;
+                reason: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>;
+            target: z.ZodObject<{
+                endpoint: z.ZodString;
+                modelId: z.ZodString;
+            }, z.core.$strict>;
+            calledAt: z.ZodISODateTime;
+            completedAt: z.ZodISODateTime;
+        }, z.core.$strict>>;
+        ready: z.ZodBoolean;
+        readinessReasons: z.ZodArray<z.ZodEnum<{
+            artifact_expired: "artifact_expired";
+            cancelled: "cancelled";
+            compiler_coverage_unknown: "compiler_coverage_unknown";
+            counter_authority_not_production: "counter_authority_not_production";
+            counter_coverage_incomplete: "counter_coverage_incomplete";
+            counter_interrupted: "counter_interrupted";
+            executor_identity_unproven: "executor_identity_unproven";
+            failed: "failed";
+            not_counted: "not_counted";
+        }>>;
+        detail: z.ZodOptional<z.ZodString>;
+        artifactExpiresAt: z.ZodISODateTime;
+    }, z.core.$strict>>;
+    reason: z.ZodOptional<z.ZodEnum<{
+        authority_unavailable: "authority_unavailable";
+        bad_request: "bad_request";
+        cancelled: "cancelled";
+        context_hash_mismatch: "context_hash_mismatch";
+        context_unresolvable: "context_unresolvable";
+        counter_interrupted: "counter_interrupted";
+        counter_unavailable: "counter_unavailable";
+        deadline_elapsed: "deadline_elapsed";
+        durable_write_failed: "durable_write_failed";
+        input_preparation_unconfigured: "input_preparation_unconfigured";
+        limit_exceeded: "limit_exceeded";
+        not_found: "not_found";
+        policy_revision_mismatch: "policy_revision_mismatch";
+        request_conflict: "request_conflict";
+        runtime_identity_unavailable: "runtime_identity_unavailable";
+        scope_denied: "scope_denied";
+        toolsets_unobservable: "toolsets_unobservable";
+        unsupported_input: "unsupported_input";
+    }>>;
+    completedAt: z.ZodOptional<z.ZodISODateTime>;
+}, z.core.$strict>;
+export type InputPreparationReadback = z.infer<typeof InputPreparationReadbackSchema>;
+/**
+ * Query identity for the status GET. The request key is
+ * `(deviceId, agentRef, requestId)`; `deviceId` comes from bearer auth, the
+ * path carries `requestId`, so only the AgentRef halves travel as query
+ * parameters.
+ */
+export declare const InputPreparationStatusQuerySchema: z.ZodObject<{
+    agentId: z.ZodString;
+    profileRevision: z.ZodString;
+}, z.core.$strict>;
+export type InputPreparationStatusQuery = z.infer<typeof InputPreparationStatusQuerySchema>;
 export declare const AgentMemoryProjectionCommitRequestSchema: z.ZodObject<{
     taskId: z.ZodString;
     agentRef: z.ZodObject<{
@@ -4432,6 +4940,12 @@ export declare const BYOK_MESSAGES_PATH = "/byok/messages";
 export declare const BYOK_AGENT_HOME_PROJECTIONS_PATH = "/byok/agent-home-projections";
 export declare const BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE = "/byok/agent-home-projections/:requestId/completion";
 export declare function byokAgentHomeProjectionCompletionPath(requestId: string): string;
+/** `PUT /byok/input-preparations/:requestId/completion` and `GET /byok/input-preparations/:requestId`. */
+export declare const BYOK_INPUT_PREPARATIONS_PATH = "/byok/input-preparations";
+export declare const BYOK_INPUT_PREPARATION_COMPLETION_ROUTE = "/byok/input-preparations/:requestId/completion";
+export declare const BYOK_INPUT_PREPARATION_STATUS_ROUTE = "/byok/input-preparations/:requestId";
+export declare function byokInputPreparationCompletionPath(requestId: string): string;
+export declare function byokInputPreparationStatusPath(requestId: string): string;
 /** `POST /byok/agent-memory-projections` — optional local-to-hosted redacted snapshot commit. */
 export declare const BYOK_AGENT_MEMORY_PROJECTIONS_PATH = "/byok/agent-memory-projections";
 /** `PUT /byok/presence` — presence heartbeat. */
@@ -4494,6 +5008,8 @@ export { AgentEgressPolicySchema, AgentEgressActivityPolicySchema, AgentReliable
 export type { AgentEgressPolicy, AgentEgressActivityPolicy, AgentReliableQuotaPolicy, ContentReadPolicy, AgentEgressLane, AgentEgressDropReason, AgentMessageContentType, AgentMessageEgressRequirement, AgentMessageServerContext, AgentContentReadSurface, AgentContentActorKind, AgentContentActor, AgentContentDecodeAs, AgentContentReadDecision, AgentContentReadDenialReason, } from './agent-egress';
 export { AGENT_HOME_PROJECTION_CAPABILITY, AGENT_HOME_PROJECTION_MAX_BYTES, AGENT_HOME_PROJECTION_PROFILE_REVISION_MAXIMUM, AgentHomeProjectionProfileRevisionSchema, AgentHomeProjectionHashSchema, AgentHomeProjectionOutcomeSchema, AgentHomeProjectionValueSchema, } from './agent-home-projection';
 export type { AgentHomeProjectionProfileRevision, AgentHomeProjectionHash, AgentHomeProjectionOutcome, AgentHomeProjectionValue, } from './agent-home-projection';
+export { AGENT_INPUT_PREPARATION_CAPABILITY, InputPreparationContentHashSchema, InputPreparationPolicyRevisionSchema, InputPreparationProfileIdSchema, InputPreparationSourceSchema, InputPreparationModelCostSchema, InputPreparationModelSchema, InputPreparationOptionsSchema, InputPreparationSelectionSchema, InputPreparationContextFileSchema, InputPreparationDocsPathsSchema, InputPreparationPromptSnapshotSchema, InputPreparationUserMessageSchema, InputPreparationContextDocumentSchema, InputPreparationStateSchema, InputPreparationReadinessReasonSchema, InputPreparationRuntimeIdentitySchema, InputPreparationCounterTargetSchema, InputPreparationCounterEvidenceSchema, InputPreparationArtifactSummarySchema, InputPreparationBindingSchema, InputPreparationReceiptSummarySchema, InputPreparationRejectionReasonSchema, } from './input-preparation';
+export type { InputPreparationSource, InputPreparationModel, InputPreparationOptions, InputPreparationSelection, InputPreparationContextDocument, InputPreparationState, InputPreparationReadinessReason, InputPreparationRuntimeIdentity, InputPreparationReceiptSummary, InputPreparationRejectionReason, } from './input-preparation';
 export { AGENT_MEMORY_PROJECTION_CAPABILITY, AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES, AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE, AgentMemoryProjectionGrantRefSchema, AgentMemoryProjectionSessionRefSchema, AgentMemoryProjectionWriterEpochSchema, AgentMemoryProjectionSourceSeqSchema, AgentMemoryProjectionSnapshotSchema, AgentMemoryProjectionMeteringReceiptSchema, AgentMemoryProjectionMutationSchema, AgentMemoryProjectionReceiptSchema, AgentMemoryProjectionEraseResultSchema, agentMemoryProjectionBase64UrlByteLength, } from './agent-memory-projection';
 export type { AgentMemoryProjectionGrantRef, AgentMemoryProjectionSessionRef, AgentMemoryProjectionWriterEpoch, AgentMemoryProjectionSourceSeq, AgentMemoryProjectionSnapshot, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionEraseResult, } from './agent-memory-projection';
 export { HOST_MCP_TASK_CONTEXT_CAPABILITY } from './task-assertion';
@@ -4501,18 +5017,486 @@ export { TERMINAL_PROJECTION_SELECTION_CAPABILITY, TerminalProjectionContractSch
 export type { TerminalProjectionSelection } from './terminal-projection';
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
-export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
-export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, ConnAckPayload, TaskOfferPayload, TaskOfferWithToolsetsPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, } from './messages';
+export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
+export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, ConnAckPayload, TaskOfferPayload, TaskOfferWithToolsetsPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, } from './messages';
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';
 export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
 export { encodeEnvelope, decodeEnvelope, createEnvelope, parseMessage } from './codec';
 export type { CreateEnvelopeOptions } from './codec';
-export { PairRequestSchema, PairResponseTenantIdSchema, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH, PairResponseSchema, ChallengeRequestSchema, ChallengeResponseSchema, TokenRequestSchema, TokenResponseSchema, PresencePublishRequestSchema, CreateBlobRequestSchema, CreateBlobResponseSchema, BlobDownloadUrlResponseSchema, EventsPollQuerySchema, EventsPollResponseSchema, MessagesSendRequestSchema, MessagesSendResponseSchema, AgentHomeProjectionCompletionRequestSchema, AgentHomeProjectionStatusSchema, AgentHomeProjectionReadbackSchema, AgentMemoryProjectionCommitRequestSchema, AgentMemoryProjectionCommitResponseSchema, MAX_MESSAGES_PER_BATCH, BYOK_PAIR_PATH, BYOK_CHALLENGE_PATH, BYOK_TOKEN_PATH, BYOK_CAPABILITIES_PATH, BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, BYOK_AGENT_HOME_PROJECTIONS_PATH, BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE, byokAgentHomeProjectionCompletionPath, BYOK_AGENT_MEMORY_PROJECTIONS_PATH, BYOK_PRESENCE_PATH, BYOK_ACTIVITY_PATH, BYOK_BOARD_PATH, BYOK_BOARD_STREAM_PATH, BYOK_BOARD_CLAIM_ROUTE, BYOK_BOARD_UNCLAIM_ROUTE, BYOK_BOARD_STATUS_ROUTE, BYOK_RECORDS_PATH, BYOK_RECORD_ROUTE, byokRecordPath, BYOK_SKILL_PACKS_PATH, BYOK_SKILL_PACK_FILE_ROUTE, byokSkillPackFilePath, BYOK_BLOBS_PATH, BYOK_BLOB_FINALIZE_ROUTE, BYOK_BLOB_URL_ROUTE, BYOK_BLOB_CONTENT_ROUTE, byokBlobFinalizePath, byokBlobUrlPath, byokBlobContentPath, } from './http-api';
-export type { PairRequest, PairResponse, ChallengeRequest, ChallengeResponse, TokenRequest, TokenResponse, PresencePublishRequest, CreateBlobRequest, CreateBlobResponse, BlobDownloadUrlResponse, EventsPollQuery, EventsPollResponse, MessagesSendRequest, MessagesSendResponse, AgentHomeProjectionCompletionRequest, AgentHomeProjectionStatus, AgentHomeProjectionReadback, AgentMemoryProjectionCommitRequest, AgentMemoryProjectionCommitResponse, } from './http-api';
+export { PairRequestSchema, PairResponseTenantIdSchema, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH, PairResponseSchema, ChallengeRequestSchema, ChallengeResponseSchema, TokenRequestSchema, TokenResponseSchema, PresencePublishRequestSchema, CreateBlobRequestSchema, CreateBlobResponseSchema, BlobDownloadUrlResponseSchema, EventsPollQuerySchema, EventsPollResponseSchema, MessagesSendRequestSchema, MessagesSendResponseSchema, AgentHomeProjectionCompletionRequestSchema, AgentHomeProjectionStatusSchema, AgentHomeProjectionReadbackSchema, AgentMemoryProjectionCommitRequestSchema, AgentMemoryProjectionCommitResponseSchema, MAX_MESSAGES_PER_BATCH, BYOK_PAIR_PATH, BYOK_CHALLENGE_PATH, BYOK_TOKEN_PATH, BYOK_CAPABILITIES_PATH, BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, BYOK_AGENT_HOME_PROJECTIONS_PATH, BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE, byokAgentHomeProjectionCompletionPath, BYOK_AGENT_MEMORY_PROJECTIONS_PATH, BYOK_PRESENCE_PATH, BYOK_ACTIVITY_PATH, BYOK_BOARD_PATH, BYOK_BOARD_STREAM_PATH, BYOK_BOARD_CLAIM_ROUTE, BYOK_BOARD_UNCLAIM_ROUTE, BYOK_BOARD_STATUS_ROUTE, BYOK_RECORDS_PATH, BYOK_RECORD_ROUTE, byokRecordPath, BYOK_SKILL_PACKS_PATH, BYOK_SKILL_PACK_FILE_ROUTE, byokSkillPackFilePath, BYOK_BLOBS_PATH, BYOK_BLOB_FINALIZE_ROUTE, BYOK_BLOB_URL_ROUTE, BYOK_BLOB_CONTENT_ROUTE, byokBlobFinalizePath, byokBlobUrlPath, byokBlobContentPath, BYOK_INPUT_PREPARATIONS_PATH, BYOK_INPUT_PREPARATION_COMPLETION_ROUTE, BYOK_INPUT_PREPARATION_STATUS_ROUTE, byokInputPreparationCompletionPath, byokInputPreparationStatusPath, InputPreparationCompletionRequestSchema, InputPreparationStatusSchema, InputPreparationReadbackSchema, InputPreparationStatusQuerySchema, } from './http-api';
+export type { PairRequest, PairResponse, ChallengeRequest, ChallengeResponse, TokenRequest, TokenResponse, PresencePublishRequest, CreateBlobRequest, CreateBlobResponse, BlobDownloadUrlResponse, EventsPollQuery, EventsPollResponse, MessagesSendRequest, MessagesSendResponse, AgentHomeProjectionCompletionRequest, AgentHomeProjectionStatus, AgentHomeProjectionReadback, AgentMemoryProjectionCommitRequest, AgentMemoryProjectionCommitResponse, InputPreparationCompletionRequest, InputPreparationStatus, InputPreparationReadback, InputPreparationStatusQuery, } from './http-api';
 export type { TaskOfferType } from './messages';
 export type { HarnessId, HarnessInfo } from './messages';
 export { CUSTOM_HARNESS_CAPABILITY } from './version';
+// ==== @byok-sdk/protocol dist/input-preparation.d.ts ====
+import { z } from 'zod';
+/**
+ * Remote authenticated runtime input preparation — the wire half of
+ * `docs/researches/runtime-input-preparation-contract.md` §19 (channel shape)
+ * and the C07 G4 design decision §17 B.
+ *
+ * This module owns ONLY the leaf shapes. The server -> device payload lives in
+ * `messages.ts` beside every other message payload (so the one inline byte
+ * bound `MAX_INLINE_BYTES` stays a single module-local authority), and the two
+ * authenticated HTTP bodies live in `http-api.ts`.
+ *
+ * Three structural rules this surface exists to hold:
+ *
+ * 1. The request carries NO tools, NO tool executors and NO runtime identity.
+ *    Those are LOCAL observations: only the device can honestly say which MCP
+ *    toolsets it has, what schemas their servers publish, and which native
+ *    package closure is installed. A Host that could state them would be
+ *    stating an identity it cannot verify.
+ * 2. The receipt summary discloses identities, digests, sizes, counter
+ *    evidence and readiness — never D, never P(D), never the snapshot. A
+ *    digest proves content identity; it is not a disclosure channel and not a
+ *    bearer token (§10.3.4).
+ * 3. Every shape here is `.strict()`. This is control data: an unrecognized
+ *    field must be REJECTED, not silently stripped, per docs/protocol.md's
+ *    freeze-rule asymmetry. Adding a field post-freeze is therefore a
+ *    breaking change, exactly like `PermissionPolicySchema`.
+ */
+/** Capability required before a task-free remote input preparation is admitted. */
+export declare const AGENT_INPUT_PREPARATION_CAPABILITY: 'agent-input-preparation';
+/** The preparation surface uses the package-wide lowercase `sha256:<hex>` transport form. */
+export declare const InputPreparationContentHashSchema: z.ZodString;
+/**
+ * The operator-assigned limits-policy revision a device must already hold. The
+ * SDK compares it for exact equality and never negotiates it: a device whose
+ * configured revision differs rejects rather than preparing under a policy the
+ * caller believed was in force.
+ */
+export declare const InputPreparationPolicyRevisionSchema: z.ZodString;
+/**
+ * Host-owned Profile identity. It rides beside `agentRef` rather than inside
+ * it because `AgentRefSchema` is the frozen generic Agent identity shared by
+ * every other message, and widening that would be a breaking change to all of
+ * them. The device never trusts this value directly — its configured local
+ * authority resolver validates it against trusted local Profile records before
+ * anything is compiled.
+ */
+export declare const InputPreparationProfileIdSchema: z.ZodString;
+/**
+ * The canonical Host source snapshot this input was assembled from. Both
+ * values are Host authority carried verbatim so the receipt binds the exact
+ * revision/digest a later consumer must re-present. The SDK interprets
+ * neither.
+ */
+export declare const InputPreparationSourceSchema: z.ZodObject<{
+    revision: z.ZodString;
+    digest: z.ZodString;
+}, z.core.$strict>;
+export type InputPreparationSource = z.infer<typeof InputPreparationSourceSchema>;
+export declare const InputPreparationModelCostSchema: z.ZodObject<{
+    input: z.ZodNumber;
+    output: z.ZodNumber;
+    cacheRead: z.ZodNumber;
+    cacheWrite: z.ZodNumber;
+}, z.core.$strict>;
+/**
+ * The exact model identity the request compiles for.
+ *
+ * `api` is a single literal, not an open enum: `openai-completions` is the one
+ * API the frozen B-P1 native validator admits, and widening it is a
+ * registration, not a parser relaxation.
+ */
+export declare const InputPreparationModelSchema: z.ZodObject<{
+    id: z.ZodString;
+    name: z.ZodString;
+    api: z.ZodLiteral<"openai-completions">;
+    provider: z.ZodString;
+    baseUrl: z.ZodString;
+    reasoning: z.ZodBoolean;
+    input: z.ZodArray<z.ZodEnum<{
+        image: "image";
+        text: "text";
+    }>>;
+    cost: z.ZodObject<{
+        input: z.ZodNumber;
+        output: z.ZodNumber;
+        cacheRead: z.ZodNumber;
+        cacheWrite: z.ZodNumber;
+    }, z.core.$strict>;
+    contextWindow: z.ZodNumber;
+    maxTokens: z.ZodNumber;
+}, z.core.$strict>;
+export type InputPreparationModel = z.infer<typeof InputPreparationModelSchema>;
+/** Body-affecting options only. Transport options are deliberately not on this wire. */
+export declare const InputPreparationOptionsSchema: z.ZodObject<{
+    cacheRetention: z.ZodEnum<{
+        long: "long";
+        none: "none";
+        short: "short";
+    }>;
+    maxTokens: z.ZodNumber;
+    temperature: z.ZodOptional<z.ZodNumber>;
+    toolChoice: z.ZodOptional<z.ZodEnum<{
+        auto: "auto";
+        none: "none";
+        required: "required";
+    }>>;
+    reasoningEffort: z.ZodOptional<z.ZodEnum<{
+        high: "high";
+        low: "low";
+        max: "max";
+        medium: "medium";
+        minimal: "minimal";
+        xhigh: "xhigh";
+    }>>;
+}, z.core.$strict>;
+export type InputPreparationOptions = z.infer<typeof InputPreparationOptionsSchema>;
+export declare const InputPreparationSelectionSchema: z.ZodObject<{
+    model: z.ZodObject<{
+        id: z.ZodString;
+        name: z.ZodString;
+        api: z.ZodLiteral<"openai-completions">;
+        provider: z.ZodString;
+        baseUrl: z.ZodString;
+        reasoning: z.ZodBoolean;
+        input: z.ZodArray<z.ZodEnum<{
+            image: "image";
+            text: "text";
+        }>>;
+        cost: z.ZodObject<{
+            input: z.ZodNumber;
+            output: z.ZodNumber;
+            cacheRead: z.ZodNumber;
+            cacheWrite: z.ZodNumber;
+        }, z.core.$strict>;
+        contextWindow: z.ZodNumber;
+        maxTokens: z.ZodNumber;
+    }, z.core.$strict>;
+    options: z.ZodObject<{
+        cacheRetention: z.ZodEnum<{
+            long: "long";
+            none: "none";
+            short: "short";
+        }>;
+        maxTokens: z.ZodNumber;
+        temperature: z.ZodOptional<z.ZodNumber>;
+        toolChoice: z.ZodOptional<z.ZodEnum<{
+            auto: "auto";
+            none: "none";
+            required: "required";
+        }>>;
+        reasoningEffort: z.ZodOptional<z.ZodEnum<{
+            high: "high";
+            low: "low";
+            max: "max";
+            medium: "medium";
+            minimal: "minimal";
+            xhigh: "xhigh";
+        }>>;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+export type InputPreparationSelection = z.infer<typeof InputPreparationSelectionSchema>;
+export declare const InputPreparationContextFileSchema: z.ZodObject<{
+    path: z.ZodString;
+    content: z.ZodString;
+}, z.core.$strict>;
+export declare const InputPreparationDocsPathsSchema: z.ZodObject<{
+    readmePath: z.ZodString;
+    docsPath: z.ZodString;
+    examplesPath: z.ZodString;
+}, z.core.$strict>;
+/**
+ * Explicit, already-authorized inputs for the native system prompt renderer.
+ *
+ * `selectedTools`/`toolSnippets` are PROMPT TEXT the Host authored — they are
+ * not the model-visible tool schemas, which the device observes locally and
+ * the Host never states (see this module's rule 1).
+ */
+export declare const InputPreparationPromptSnapshotSchema: z.ZodObject<{
+    customPrompt: z.ZodOptional<z.ZodString>;
+    appendSystemPrompt: z.ZodOptional<z.ZodString>;
+    cwd: z.ZodString;
+    selectedTools: z.ZodArray<z.ZodString>;
+    toolSnippets: z.ZodRecord<z.ZodString, z.ZodString>;
+    promptGuidelines: z.ZodArray<z.ZodString>;
+    contextFiles: z.ZodArray<z.ZodObject<{
+        path: z.ZodString;
+        content: z.ZodString;
+    }, z.core.$strict>>;
+    formattedSkills: z.ZodString;
+    docsPaths: z.ZodObject<{
+        readmePath: z.ZodString;
+        docsPath: z.ZodString;
+        examplesPath: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+/**
+ * One model-visible user message. Text-only user history plus the explicit
+ * current user message is the whole first support set; assistant/tool-result
+ * history and multimodal content are not inferred, they reject.
+ */
+export declare const InputPreparationUserMessageSchema: z.ZodObject<{
+    role: z.ZodLiteral<"user">;
+    content: z.ZodString;
+    timestamp: z.ZodNumber;
+}, z.core.$strict>;
+/**
+ * What `context.inline` (or the referenced blob) decodes to.
+ *
+ * Deliberately NOT the whole compiled snapshot: `tools` is absent because the
+ * device adds it from its own MCP observation. A Host that could send `tools`
+ * could claim a toolset the device does not have.
+ */
+export declare const InputPreparationContextDocumentSchema: z.ZodObject<{
+    prompt: z.ZodObject<{
+        customPrompt: z.ZodOptional<z.ZodString>;
+        appendSystemPrompt: z.ZodOptional<z.ZodString>;
+        cwd: z.ZodString;
+        selectedTools: z.ZodArray<z.ZodString>;
+        toolSnippets: z.ZodRecord<z.ZodString, z.ZodString>;
+        promptGuidelines: z.ZodArray<z.ZodString>;
+        contextFiles: z.ZodArray<z.ZodObject<{
+            path: z.ZodString;
+            content: z.ZodString;
+        }, z.core.$strict>>;
+        formattedSkills: z.ZodString;
+        docsPaths: z.ZodObject<{
+            readmePath: z.ZodString;
+            docsPath: z.ZodString;
+            examplesPath: z.ZodString;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
+    messages: z.ZodArray<z.ZodObject<{
+        role: z.ZodLiteral<"user">;
+        content: z.ZodString;
+        timestamp: z.ZodNumber;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+export type InputPreparationContextDocument = z.infer<typeof InputPreparationContextDocumentSchema>;
+/** Durable lifecycle state of one local preparation record. */
+export declare const InputPreparationStateSchema: z.ZodEnum<{
+    cancelled: "cancelled";
+    counted: "counted";
+    counter_interrupted: "counter_interrupted";
+    counting: "counting";
+    failed: "failed";
+    reserved: "reserved";
+}>;
+export type InputPreparationState = z.infer<typeof InputPreparationStateSchema>;
+/** Why a receipt is not ready. An empty list is the only thing that makes `ready` true. */
+export declare const InputPreparationReadinessReasonSchema: z.ZodEnum<{
+    artifact_expired: "artifact_expired";
+    cancelled: "cancelled";
+    compiler_coverage_unknown: "compiler_coverage_unknown";
+    counter_authority_not_production: "counter_authority_not_production";
+    counter_coverage_incomplete: "counter_coverage_incomplete";
+    counter_interrupted: "counter_interrupted";
+    executor_identity_unproven: "executor_identity_unproven";
+    failed: "failed";
+    not_counted: "not_counted";
+}>;
+export type InputPreparationReadinessReason = z.infer<typeof InputPreparationReadinessReasonSchema>;
+/**
+ * Runtime/compiler identity derived from the VERIFIED installed package
+ * closure on the device. A Host never states it and cannot override it.
+ */
+export declare const InputPreparationRuntimeIdentitySchema: z.ZodObject<{
+    packageName: z.ZodString;
+    packageVersion: z.ZodString;
+    upstreamBase: z.ZodString;
+    upstreamCommit: z.ZodString;
+    forkBuild: z.ZodNumber;
+    envelopeFormat: z.ZodString;
+    requestFormat: z.ZodString;
+    compilerVersion: z.ZodNumber;
+}, z.core.$strict>;
+export type InputPreparationRuntimeIdentity = z.infer<typeof InputPreparationRuntimeIdentitySchema>;
+export declare const InputPreparationCounterTargetSchema: z.ZodObject<{
+    endpoint: z.ZodString;
+    modelId: z.ZodString;
+}, z.core.$strict>;
+/**
+ * Counter evidence exactly as the device's adapter reported it.
+ *
+ * `authority: 'test_fixture'` is a first-class value, not a debug flag: a
+ * fixture result can never produce a ready receipt, which is what keeps an
+ * offline suite from ever looking like production accounting evidence.
+ */
+export declare const InputPreparationCounterEvidenceSchema: z.ZodObject<{
+    method: z.ZodString;
+    methodVersion: z.ZodString;
+    authority: z.ZodEnum<{
+        provider: "provider";
+        test_fixture: "test_fixture";
+    }>;
+    kind: z.ZodEnum<{
+        bound: "bound";
+        count: "count";
+    }>;
+    value: z.ZodNumber;
+    coverage: z.ZodObject<{
+        covered: z.ZodBoolean;
+        reason: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>;
+    target: z.ZodObject<{
+        endpoint: z.ZodString;
+        modelId: z.ZodString;
+    }, z.core.$strict>;
+    calledAt: z.ZodISODateTime;
+    completedAt: z.ZodISODateTime;
+}, z.core.$strict>;
+/** Identities and sizes only. Never D, never P(D), never the snapshot. */
+export declare const InputPreparationArtifactSummarySchema: z.ZodObject<{
+    requestDigest: z.ZodString;
+    envelopeDigest: z.ZodString;
+    toolManifestDigest: z.ZodString;
+    requestBytes: z.ZodNumber;
+    projectionBytes: z.ZodNumber;
+    coverage: z.ZodString;
+}, z.core.$strict>;
+/** The immutable binding a receipt carries and a later consumer must re-present. */
+export declare const InputPreparationBindingSchema: z.ZodObject<{
+    scopeId: z.ZodString;
+    deviceId: z.ZodString;
+    agentRef: z.ZodString;
+    profileId: z.ZodString;
+    profileRevision: z.ZodString;
+    source: z.ZodObject<{
+        revision: z.ZodString;
+        digest: z.ZodString;
+    }, z.core.$strict>;
+    target: z.ZodObject<{
+        endpoint: z.ZodString;
+        modelId: z.ZodString;
+    }, z.core.$strict>;
+    policyRevision: z.ZodString;
+    runtime: z.ZodObject<{
+        packageName: z.ZodString;
+        packageVersion: z.ZodString;
+        upstreamBase: z.ZodString;
+        upstreamCommit: z.ZodString;
+        forkBuild: z.ZodNumber;
+        envelopeFormat: z.ZodString;
+        requestFormat: z.ZodString;
+        compilerVersion: z.ZodNumber;
+    }, z.core.$strict>;
+    requestDigest: z.ZodString;
+}, z.core.$strict>;
+/**
+ * The exact receipt projection a device reports back.
+ *
+ * `reference` names the record inside the device-local authenticated scope
+ * that created it. It is not a capability: local lookup re-resolves authority
+ * on every call and derives the record key from the trusted grant.
+ */
+export declare const InputPreparationReceiptSummarySchema: z.ZodObject<{
+    reference: z.ZodString;
+    state: z.ZodEnum<{
+        cancelled: "cancelled";
+        counted: "counted";
+        counter_interrupted: "counter_interrupted";
+        counting: "counting";
+        failed: "failed";
+        reserved: "reserved";
+    }>;
+    binding: z.ZodObject<{
+        scopeId: z.ZodString;
+        deviceId: z.ZodString;
+        agentRef: z.ZodString;
+        profileId: z.ZodString;
+        profileRevision: z.ZodString;
+        source: z.ZodObject<{
+            revision: z.ZodString;
+            digest: z.ZodString;
+        }, z.core.$strict>;
+        target: z.ZodObject<{
+            endpoint: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>;
+        policyRevision: z.ZodString;
+        runtime: z.ZodObject<{
+            packageName: z.ZodString;
+            packageVersion: z.ZodString;
+            upstreamBase: z.ZodString;
+            upstreamCommit: z.ZodString;
+            forkBuild: z.ZodNumber;
+            envelopeFormat: z.ZodString;
+            requestFormat: z.ZodString;
+            compilerVersion: z.ZodNumber;
+        }, z.core.$strict>;
+        requestDigest: z.ZodString;
+    }, z.core.$strict>;
+    artifact: z.ZodOptional<z.ZodObject<{
+        requestDigest: z.ZodString;
+        envelopeDigest: z.ZodString;
+        toolManifestDigest: z.ZodString;
+        requestBytes: z.ZodNumber;
+        projectionBytes: z.ZodNumber;
+        coverage: z.ZodString;
+    }, z.core.$strict>>;
+    counter: z.ZodOptional<z.ZodObject<{
+        method: z.ZodString;
+        methodVersion: z.ZodString;
+        authority: z.ZodEnum<{
+            provider: "provider";
+            test_fixture: "test_fixture";
+        }>;
+        kind: z.ZodEnum<{
+            bound: "bound";
+            count: "count";
+        }>;
+        value: z.ZodNumber;
+        coverage: z.ZodObject<{
+            covered: z.ZodBoolean;
+            reason: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>;
+        target: z.ZodObject<{
+            endpoint: z.ZodString;
+            modelId: z.ZodString;
+        }, z.core.$strict>;
+        calledAt: z.ZodISODateTime;
+        completedAt: z.ZodISODateTime;
+    }, z.core.$strict>>;
+    ready: z.ZodBoolean;
+    readinessReasons: z.ZodArray<z.ZodEnum<{
+        artifact_expired: "artifact_expired";
+        cancelled: "cancelled";
+        compiler_coverage_unknown: "compiler_coverage_unknown";
+        counter_authority_not_production: "counter_authority_not_production";
+        counter_coverage_incomplete: "counter_coverage_incomplete";
+        counter_interrupted: "counter_interrupted";
+        executor_identity_unproven: "executor_identity_unproven";
+        failed: "failed";
+        not_counted: "not_counted";
+    }>>;
+    detail: z.ZodOptional<z.ZodString>;
+    artifactExpiresAt: z.ZodISODateTime;
+}, z.core.$strict>;
+export type InputPreparationReceiptSummary = z.infer<typeof InputPreparationReceiptSummarySchema>;
+/**
+ * Why a device refused to prepare at all. These are the device-owned typed
+ * rejections; none of them ever accompanies an artifact.
+ *
+ * `input_preparation_unconfigured` is the answer from a device that advertised
+ * nothing: the whole surface is off there. It is reported rather than thrown so
+ * one mis-targeted request cannot freeze the device's mailbox cursor behind it.
+ */
+export declare const InputPreparationRejectionReasonSchema: z.ZodEnum<{
+    authority_unavailable: "authority_unavailable";
+    bad_request: "bad_request";
+    cancelled: "cancelled";
+    context_hash_mismatch: "context_hash_mismatch";
+    context_unresolvable: "context_unresolvable";
+    counter_interrupted: "counter_interrupted";
+    counter_unavailable: "counter_unavailable";
+    deadline_elapsed: "deadline_elapsed";
+    durable_write_failed: "durable_write_failed";
+    input_preparation_unconfigured: "input_preparation_unconfigured";
+    limit_exceeded: "limit_exceeded";
+    not_found: "not_found";
+    policy_revision_mismatch: "policy_revision_mismatch";
+    request_conflict: "request_conflict";
+    runtime_identity_unavailable: "runtime_identity_unavailable";
+    scope_denied: "scope_denied";
+    toolsets_unobservable: "toolsets_unobservable";
+    unsupported_input: "unsupported_input";
+}>;
+export type InputPreparationRejectionReason = z.infer<typeof InputPreparationRejectionReasonSchema>;
 // ==== @byok-sdk/protocol dist/messages.d.ts ====
 import { z } from 'zod';
 export declare const RuntimeIdSchema: z.ZodEnum<{
@@ -5396,6 +6380,98 @@ export declare const AgentHomeProjectionPayloadSchema: z.ZodObject<{
     projection: z.ZodType<import("./agent-home-projection").AgentHomeProjectionValue, unknown, z.core.$ZodTypeInternals<import("./agent-home-projection").AgentHomeProjectionValue, unknown>>;
 }, z.core.$strict>;
 export type AgentHomeProjectionPayload = z.infer<typeof AgentHomeProjectionPayloadSchema>;
+/**
+ * Server -> daemon: one task-free, exact-device remote input preparation.
+ *
+ * Distinct message type rather than an optional field on an existing one, for
+ * the same N/N-1 reason `task.offer_with_toolsets` is: a daemon that predates
+ * this contract SKIPS an unknown type outright (`parseMessage` ->
+ * `UnknownMessageTypeError`), whereas it would legally STRIP an unknown
+ * optional field and then answer as though a preparation it never performed
+ * had somehow been handled.
+ *
+ * What is deliberately NOT here (§17 B): `tools`, `toolExecutors`, runtime or
+ * compiler identity, `tenantId` and `deviceId`. The first three are local
+ * observations; the last two come from the device's own authenticated record,
+ * never from the payload — a sender that could name them could redirect a
+ * preparation's binding to a device it does not own.
+ *
+ * `deadlineAt` may only ever be TIGHTENED locally: the device clamps to
+ * `min(deadlineAt - now, limits.preparationDeadlineMs)`, so a generous Host
+ * deadline cannot enlarge a configured local bound.
+ */
+export declare const AgentInputPreparationPayloadSchema: z.ZodObject<{
+    requestId: z.ZodUUID;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    profileId: z.ZodString;
+    policyRevision: z.ZodString;
+    source: z.ZodObject<{
+        revision: z.ZodString;
+        digest: z.ZodString;
+    }, z.core.$strict>;
+    selection: z.ZodObject<{
+        model: z.ZodObject<{
+            id: z.ZodString;
+            name: z.ZodString;
+            api: z.ZodLiteral<"openai-completions">;
+            provider: z.ZodString;
+            baseUrl: z.ZodString;
+            reasoning: z.ZodBoolean;
+            input: z.ZodArray<z.ZodEnum<{
+                image: "image";
+                text: "text";
+            }>>;
+            cost: z.ZodObject<{
+                input: z.ZodNumber;
+                output: z.ZodNumber;
+                cacheRead: z.ZodNumber;
+                cacheWrite: z.ZodNumber;
+            }, z.core.$strict>;
+            contextWindow: z.ZodNumber;
+            maxTokens: z.ZodNumber;
+        }, z.core.$strict>;
+        options: z.ZodObject<{
+            cacheRetention: z.ZodEnum<{
+                long: "long";
+                none: "none";
+                short: "short";
+            }>;
+            maxTokens: z.ZodNumber;
+            temperature: z.ZodOptional<z.ZodNumber>;
+            toolChoice: z.ZodOptional<z.ZodEnum<{
+                auto: "auto";
+                none: "none";
+                required: "required";
+            }>>;
+            reasoningEffort: z.ZodOptional<z.ZodEnum<{
+                high: "high";
+                low: "low";
+                max: "max";
+                medium: "medium";
+                minimal: "minimal";
+                xhigh: "xhigh";
+            }>>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
+    deadlineAt: z.ZodISODateTime;
+    context: z.ZodUnion<readonly [z.ZodObject<{
+        inline: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        blobRef: z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+            url: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>;
+        contentHash: z.ZodString;
+    }, z.core.$strict>]>;
+    requiredToolsets: z.ZodArray<z.ZodString>;
+}, z.core.$strict>;
+export type AgentInputPreparationPayload = z.infer<typeof AgentInputPreparationPayloadSchema>;
 /**
  * server -> daemon: approve a pending `task.await_approval` request.
  *
@@ -7056,6 +8132,77 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         projectionHash: z.ZodString;
         projection: z.ZodType<import("./agent-home-projection").AgentHomeProjectionValue, unknown, z.core.$ZodTypeInternals<import("./agent-home-projection").AgentHomeProjectionValue, unknown>>;
     }, z.core.$strict>;
+    readonly 'agent.input.preparation': z.ZodObject<{
+        requestId: z.ZodUUID;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        profileId: z.ZodString;
+        policyRevision: z.ZodString;
+        source: z.ZodObject<{
+            revision: z.ZodString;
+            digest: z.ZodString;
+        }, z.core.$strict>;
+        selection: z.ZodObject<{
+            model: z.ZodObject<{
+                id: z.ZodString;
+                name: z.ZodString;
+                api: z.ZodLiteral<"openai-completions">;
+                provider: z.ZodString;
+                baseUrl: z.ZodString;
+                reasoning: z.ZodBoolean;
+                input: z.ZodArray<z.ZodEnum<{
+                    image: "image";
+                    text: "text";
+                }>>;
+                cost: z.ZodObject<{
+                    input: z.ZodNumber;
+                    output: z.ZodNumber;
+                    cacheRead: z.ZodNumber;
+                    cacheWrite: z.ZodNumber;
+                }, z.core.$strict>;
+                contextWindow: z.ZodNumber;
+                maxTokens: z.ZodNumber;
+            }, z.core.$strict>;
+            options: z.ZodObject<{
+                cacheRetention: z.ZodEnum<{
+                    long: "long";
+                    none: "none";
+                    short: "short";
+                }>;
+                maxTokens: z.ZodNumber;
+                temperature: z.ZodOptional<z.ZodNumber>;
+                toolChoice: z.ZodOptional<z.ZodEnum<{
+                    auto: "auto";
+                    none: "none";
+                    required: "required";
+                }>>;
+                reasoningEffort: z.ZodOptional<z.ZodEnum<{
+                    high: "high";
+                    low: "low";
+                    max: "max";
+                    medium: "medium";
+                    minimal: "minimal";
+                    xhigh: "xhigh";
+                }>>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+        deadlineAt: z.ZodISODateTime;
+        context: z.ZodUnion<readonly [z.ZodObject<{
+            inline: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            contentHash: z.ZodString;
+        }, z.core.$strict>]>;
+        requiredToolsets: z.ZodArray<z.ZodString>;
+    }, z.core.$strict>;
     readonly 'task.approve': z.ZodObject<{
         approvalId: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>;
@@ -7287,7 +8434,7 @@ export declare const MESSAGE_TYPES: MessageType[];
  * (`envelope.ts`) to decide which branches require envelope `seq` (M1
  * redelivery cursor).
  */
-export declare const SERVER_TO_DAEMON_TYPES: readonly ["conn.ack", "task.offer", "task.offer_with_toolsets", "task.offer_for_agent", "task.offer_for_agent_with_egress", "task.offer_for_agent_with_egress_fresh", "agent.egress.ack", "agent.message.disposition", "agent.content.read", "agent.home.projection", "task.approve", "task.reject", "task.cancel", "task.steer"];
+export declare const SERVER_TO_DAEMON_TYPES: readonly ["conn.ack", "task.offer", "task.offer_with_toolsets", "task.offer_for_agent", "task.offer_for_agent_with_egress", "task.offer_for_agent_with_egress_fresh", "agent.egress.ack", "agent.message.disposition", "agent.content.read", "agent.home.projection", "agent.input.preparation", "task.approve", "task.reject", "task.cancel", "task.steer"];
 /**
  * Message types the daemon sends to the server — the flip side of
  * {@link SERVER_TO_DAEMON_TYPES}. `conn.hello` is deliberately excluded: it's
@@ -7547,5 +8694,5 @@ export declare const STRICT_AGENT_ONLY_CAPABILITY: 'strict-agent-only';
  * cannot accidentally execute the instruction without the required tools.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];

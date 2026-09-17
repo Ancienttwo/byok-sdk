@@ -73,6 +73,16 @@ export const CLOUD_ERROR_CODES = {
   agent_home_projection_receipt_mismatch: 'agent_home_projection_receipt_mismatch',
   /** A receipt-store row at the projection namespace violated the frozen projection schema. */
   agent_home_projection_receipt_invalid: 'agent_home_projection_receipt_invalid',
+  /** A remote input-preparation request id already names a different immutable desired request. */
+  input_preparation_request_conflict: 'input_preparation_request_conflict',
+  /** A device completion did not identify a stored desired request for this exact device. */
+  input_preparation_request_not_found: 'input_preparation_request_not_found',
+  /** A device completion changed the first durable terminal outcome. */
+  input_preparation_completion_conflict: 'input_preparation_completion_conflict',
+  /** A completion did not exactly echo its immutable desired request/Agent/policy binding. */
+  input_preparation_receipt_mismatch: 'input_preparation_receipt_mismatch',
+  /** A receipt-store row at the preparation namespace violated the frozen schema. */
+  input_preparation_receipt_invalid: 'input_preparation_receipt_invalid',
   /** A hosted Agent-memory mutation did not match the durable task/device/AgentRef binding. */
   agent_memory_projection_task_mismatch: 'agent_memory_projection_task_mismatch',
   /** The embedder-owned grant/consent authority denied a hosted memory mutation. */
