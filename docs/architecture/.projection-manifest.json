@@ -98,8 +98,8 @@
       "outputDigest": "sha256:8222fcd9af4f9c98f517da7bef7d2e7d4598d5b86469f723f04a6d54ce6f0f53",
       "verifiedAgainst": {
         "branch": "codex/c07-g3b-mcp-core",
-        "commit": "84c2f683c36edca10c1969ded9195a2f2e88c34f",
-        "committedAt": "2026-09-17T13:35:13+08:00"
+        "commit": "143ba390304bb5f36fff879b2098513af7540eb1",
+        "committedAt": "2026-09-17T13:39:12+08:00"
       }
     },
     {
