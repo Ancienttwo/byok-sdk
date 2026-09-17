@@ -36,7 +36,7 @@ import {
   type InputPreparationModelV1,
   type InputPreparationRuntimeIdentityV1,
 } from '../input-preparation';
-import type { McpToolsetConfig, RuntimeCapabilities } from '../types';
+import type { McpToolsetConfig, RuntimeCapabilities, RuntimeInstallationObservationContext } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { observationOf } from './fixtures/mcp-observation';
 import { trustedCwd } from './fixtures/launch-cwd';
@@ -395,6 +395,15 @@ async function lane(options: {
 
 async function makeRunner(built: Lane, adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partial<TaskRunnerDeps> = {}): Promise<TaskRunner> {
   const storeDir = await tempDir('byok-prepared-runner-store-');
+  // This local fake models a configured complete runtime, not physical attestation.
+  if (adapter.descriptor.id === 'pi') Object.assign(adapter, {
+    detectInstallation: async (context: RuntimeInstallationObservationContext) => {
+      expect(Object.keys(context).sort()).toEqual(['authority', 'scope']);
+      expect(context.authority).toBe(Object.hasOwn(extra, 'toolImplementationAuthority') ? extra.toolImplementationAuthority : built.authority);
+      expect(context.scope).toBe('enabled-top-level');
+      return { kind: 'available' as const };
+    },
+  });
   return new TaskRunner({
     adapters: [adapter],
     workspaceRoot: await tempDir('byok-prepared-workspace-'),

@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
@@ -32,7 +33,7 @@ import {
   type InputPreparationPinV1,
   type InputPreparationRuntimeIdentityV1,
 } from '../../input-preparation';
-import type { McpToolsetConfig, RuntimeCapabilities } from '../../types';
+import type { McpToolsetConfig, RuntimeCapabilities, RuntimeInstallationObservationContext } from '../../types';
 import { StubRuntimeAdapter } from './stub-adapter';
 import { observationOf } from './mcp-observation';
 import { trustedCwd } from './launch-cwd';
@@ -240,7 +241,15 @@ const ensureOpen = (): Promise<void> => (opening ??= (async () => {
   await store.open();
 })());
 
-const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+const adapter = Object.assign(new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE), {
+  // Same explicit fake readiness as this fixture's old probe, never a measurement claim.
+  detectInstallation: async (context: RuntimeInstallationObservationContext) => {
+    assert.deepEqual(Object.keys(context).sort(), ['authority', 'scope']);
+    assert.equal(context.authority, authority);
+    assert.equal(context.scope, 'enabled-top-level');
+    return { kind: 'available' as const };
+  },
+});
 const sent: Envelope[] = [];
 
 await fs.mkdir(config.runnerStoreDir, { recursive: true });
