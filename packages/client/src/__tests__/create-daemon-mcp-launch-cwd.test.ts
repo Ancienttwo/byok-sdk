@@ -1,13 +1,20 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { fileURLToPath } from 'node:url';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { resolveTrustedLaunchCwd } from '../daemon/trusted-launch-cwd';
+import { createRemoteInputPreparationHandler } from '../daemon/input-preparation-remote';
 import type { RuntimeCapabilities } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+
+vi.mock('../daemon/input-preparation-remote', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../daemon/input-preparation-remote')>();
+  return { ...actual, createRemoteInputPreparationHandler: vi.fn(actual.createRemoteInputPreparationHandler) };
+});
 
 /**
  * `DaemonConfig.mcpLaunchCwd` — the operator's input to the MCP toolset launch
@@ -114,7 +121,7 @@ describe('createDaemon MCP launch boundary: the configured directory reaches the
     await server.close();
   });
 
-  async function startDaemon(mcpLaunchCwd?: DaemonConfig['mcpLaunchCwd']): Promise<StubRuntimeAdapter> {
+  async function startDaemon(mcpLaunchCwd?: DaemonConfig['mcpLaunchCwd'], recordTo?: string): Promise<StubRuntimeAdapter> {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available', version: '0.0.0' }, TOOLSET_CAPABLE, false);
     daemon = createDaemonWithAdapters(
       {
@@ -124,7 +131,7 @@ describe('createDaemon MCP launch boundary: the configured directory reaches the
         serverUrl: server.url,
         workspaceRoot: await tmpDir('byok-launch-cwd-offer-workspace-'),
         storeDir: await tmpDir('byok-launch-cwd-offer-store-'),
-        mcpToolsets: { salesko: { mcpServers: { salesko: { command: '/opt/salesko/bin/mcp' } } } },
+        mcpToolsets: { salesko: { mcpServers: { salesko: (recordTo === undefined ? { command: '/opt/salesko/bin/mcp' } : { command: process.execPath, args: [fileURLToPath(new URL('./fixtures/mcp-fixture-server.mjs', import.meta.url)), JSON.stringify({ recordTo })] }) } } },
         ...(mcpLaunchCwd === undefined ? {} : { mcpLaunchCwd }),
       },
       [adapter],
@@ -160,6 +167,24 @@ describe('createDaemon MCP launch boundary: the configured directory reaches the
       expect(adapter.startCalls[0]?.ctx.workspaceDir).not.toBe(NON_DEFAULT_TRUSTED_DIR);
     },
   );
+
+  it.skipIf(NON_DEFAULT_TRUSTED_DIR === undefined)('binds remote preparation probes to the configured trusted cwd', async () => {
+    const recordTo = path.join(await tmpDir('byok-remote-cwd-'), 'child.jsonl');
+    await startDaemon({ dir: NON_DEFAULT_TRUSTED_DIR }, recordTo);
+    const deps = vi.mocked(createRemoteInputPreparationHandler).mock.calls.at(-1)![0];
+    const observed = await deps.observeToolsets(['salesko']);
+    const events = (await fs.readFile(recordTo, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    expect(events.find((event) => event.event === 'start')?.cwd).toBe(NON_DEFAULT_TRUSTED_DIR);
+    expect(observed).toMatchObject({ launch: { launchCwd: NON_DEFAULT_TRUSTED_DIR, launcher: null } });
+  });
+
+  it('rejects remote probing before spawn when the configured cwd is writable', async () => {
+    const recordTo = path.join(await tmpDir('byok-remote-refusal-'), 'child.jsonl');
+    await startDaemon({ dir: await tmpDir('byok-remote-writable-') }, recordTo);
+    const deps = vi.mocked(createRemoteInputPreparationHandler).mock.calls.at(-1)![0];
+    await expect(deps.observeToolsets(['salesko'])).rejects.toThrow('configured_dir_owned_by_current_uid');
+    await expect(fs.stat(recordTo)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
 
   it('declines non-retryably when the configured directory fails the boundary this uid can write', async () => {
     // The strongest evidence that the config is consulted at all: a directory

@@ -120,7 +120,6 @@ createInterface({ input: process.stdin }).on('line', line => {
   // observation it took at admission. The extension registers from the
   // observation and discovers nothing of its own.
   const mcpTaskConfig = {
-    permissionMode: 'auto',
     mcpServers: {
       fixture: { command: process.execPath, args: [fixtureServer] },
       // An SDK-RESERVED helper, which the extension reads live at

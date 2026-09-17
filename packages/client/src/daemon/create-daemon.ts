@@ -182,7 +182,7 @@ import {
 import { MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS, probeMcpServer } from './mcp-tools-probe';
 import { buildRuntimeEnv } from './environment';
 import { resolveAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
-import type { McpLaunchCwdConfig } from './trusted-launch-cwd';
+import { resolveTrustedLaunchCwd, mcpLaunchAttestation, type McpLaunchCwdConfig } from './trusted-launch-cwd';
 import { preflightAgentMessageMcp } from './agent-message-mcp-preflight';
 import { resolveAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
 import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
@@ -2158,6 +2158,13 @@ export function buildDaemonWithAdapters(
       }
       if (servers.size === 0) throw new Error('required MCP toolsets resolved to no servers');
 
+      const trusted = await resolveTrustedLaunchCwd(mcpLaunchCwd);
+      if (trusted.kind === 'unavailable') {
+        throw new Error(`MCP toolset launch directory unavailable: ${trusted.reason}`);
+      }
+      // Remote observation uses direct stdio spawn, exactly as Pi does.
+      // Bind the same proven directory into the resulting executor identity.
+      const launch = mcpLaunchAttestation({ cwd: trusted.dir });
       const piDescriptor = adapters.find((adapter) => adapter.descriptor.id === 'pi')?.descriptor;
       const env = buildRuntimeEnv({
         ambient: process.env,
@@ -2174,11 +2181,13 @@ export function buildDaemonWithAdapters(
           label: `MCP toolset server "${serverName}"`,
           timeoutMs: MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
           env,
+          cwd: trusted.dir,
         });
         if (observation.tools.length === 0) throw new Error(`MCP toolset server "${serverName}" reported no tools`);
         return [serverName, Object.freeze({ ...observation, toolsetId: entry.toolsetId })] as const;
       }));
       return {
+        launch,
         observation: Object.freeze(Object.fromEntries(observed)),
         toolsetDefinitionRevisions: Object.freeze(toolsetDefinitionRevisions),
       };

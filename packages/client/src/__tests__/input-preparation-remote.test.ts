@@ -197,6 +197,7 @@ const ALWAYS_AUTHORIZED: InputPreparationAuthorityResolver = {
 };
 
 const OBSERVATION: RemoteInputPreparationObservation = {
+  launch: { launchCwd: '/fixture/trusted-probe', launcher: null },
   observation: {
     teamserver: {
       serverName: 'teamserver',
@@ -316,6 +317,19 @@ describe('remote input preparation: in-process, never the control socket', () =>
     // The Host-authorized prompt and messages survive verbatim.
     expect(compiled.snapshot.prompt).toEqual(CONTEXT_DOCUMENT.prompt);
     expect(compiled.snapshot.messages).toEqual(CONTEXT_DOCUMENT.messages);
+  });
+
+  it('binds the observed launch boundary into remote executor fingerprints', async () => {
+    const first = await makeHarness();
+    const changed = await makeHarness({ observeToolsets: async () => ({
+      ...OBSERVATION, launch: { launchCwd: '/fixture/other-trusted-probe', launcher: null },
+    }) });
+    await first.handle(payload());
+    await changed.handle(payload());
+    expect(first.compiler.calls).toHaveLength(1);
+    expect(changed.compiler.calls).toHaveLength(1);
+    expect(first.compiler.calls[0]!.snapshot.tools).toEqual(changed.compiler.calls[0]!.snapshot.tools);
+    expect(first.compiler.calls[0]!.toolExecutors).not.toEqual(changed.compiler.calls[0]!.toolExecutors);
   });
 
   it.each([

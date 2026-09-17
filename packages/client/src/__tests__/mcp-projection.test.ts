@@ -693,6 +693,7 @@ describe.each([
       nativeTools: [],
       runtimeIdentity: 'fixture-runtime',
       permissionMode: 'auto',
+      launch: LAUNCH,
     })).rejects.toThrow(`duplicate MCP runtime tool name "${name}"`);
   });
 });
