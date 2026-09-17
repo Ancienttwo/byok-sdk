@@ -292,7 +292,7 @@ export async function assertWindowsPiProjectionAcl(
     JSON.stringify({ path: directory }),
   );
   if (result.exitCode !== 0) {
-    const stderrTail = result.stderr.trim().split(/\r?\n/u).slice(-3).join(' | ').trim();
+    const stderrTail = result.stderr.trim().split(/\r?\n/u).slice(-8).join(' | ').slice(0, 1600).trim();
     throw new Error(`Pi projection ACL query failed${stderrTail === '' ? '' : `: ${stderrTail}`}`);
   }
   let acl: unknown;
