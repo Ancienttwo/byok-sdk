@@ -190,6 +190,7 @@ function fixtureCounter() {
 }
 
 const ALWAYS_AUTHORIZED: InputPreparationAuthorityResolver = {
+  async resolveSource({ source }) { return { authorized: true, source }; },
   async resolveScope(claim) {
     return { authorized: true, grant: { scopeId: `scope:${claim.deviceId}`, ...claim } };
   },
@@ -317,9 +318,30 @@ describe('remote input preparation: in-process, never the control socket', () =>
     expect(compiled.snapshot.messages).toEqual(CONTEXT_DOCUMENT.messages);
   });
 
+  it.each([
+    [['a', 'b__c'], ['a__b', 'c']],
+    [['a_', 'b'], ['a', '_b']],
+  ])('records terminal refusal for colliding MCP identities %j and %j', async (left, right) => {
+    const observation = Object.fromEntries([left, right].map(([serverName, toolName]) => [serverName!, {
+      ...OBSERVATION.observation.teamserver!,
+      serverName: serverName!,
+      tools: [{ name: toolName!, description: 'collision', inputSchema: { type: 'object' } }],
+    }]));
+    const harness = await makeHarness({
+      observeToolsets: async () => ({ ...OBSERVATION, observation }),
+    });
+    const completion = await harness.handle(payload());
+    expect(completion).toMatchObject({ outcome: 'rejected', reason: 'unsupported_input' });
+    expect(harness.completions).toEqual([completion]);
+    expect(harness.compiler.calls).toHaveLength(0);
+    expect(harness.counter.calls).toHaveLength(0);
+    expect(socketOpens).toBe(0);
+  });
+
   it('reports a resolver refusal as a rejection, with no artifact and no compile', async () => {
     const harness = await makeHarness({
       authorityResolver: {
+        ...ALWAYS_AUTHORIZED,
         async resolveScope() {
           return { authorized: false, reason: 'unknown_agent' };
         },

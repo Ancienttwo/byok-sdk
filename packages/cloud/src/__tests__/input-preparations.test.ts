@@ -349,7 +349,7 @@ describe('remote input preparation', () => {
    * without the flag (first test in this file), and the completion is still
    * bound to the exact authenticated device, `AgentRef` and `policyRevision`.
    */
-  it('records an unconfigured device\'s rejection as a terminal fact, capability flag or not', async () => {
+  it.each(['input_preparation_unconfigured', 'unsupported_input'] as const)('records %s as a terminal fact without a capability flag', async (reason) => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await admitPreparation(harness, device.deviceId);
@@ -374,7 +374,7 @@ describe('remote input preparation', () => {
     const response = await harness.request(byokInputPreparationCompletionPath(REQUEST_A), {
       method: 'PUT',
       headers: { ...device.authorization, 'content-type': 'application/json' },
-      body: JSON.stringify(rejectedCompletion(REQUEST_A, 'input_preparation_unconfigured')),
+      body: JSON.stringify(rejectedCompletion(REQUEST_A, reason)),
     });
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
@@ -383,13 +383,13 @@ describe('remote input preparation', () => {
       requestId: REQUEST_A,
       agentRef: AGENT_A,
       status: 'rejected',
-      reason: 'input_preparation_unconfigured',
+      reason,
     });
 
     // Durable, not just echoed back.
     await expect(
       harness.cloud.getInputPreparationStatus(TENANT_A, device.deviceId, { requestId: REQUEST_A, agentRef: AGENT_A }),
-    ).resolves.toMatchObject({ status: 'rejected', reason: 'input_preparation_unconfigured' });
+    ).resolves.toMatchObject({ status: 'rejected', reason });
 
     // And the cursor actually moves: the device ACKs the envelope it just
     // discharged, and the durable mailbox cursor is past it with nothing left.

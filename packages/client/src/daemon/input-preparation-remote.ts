@@ -16,6 +16,7 @@ import {
   type InputPreparationRequestV1,
   type InputPreparationToolV1,
 } from '../input-preparation';
+import { McpAuthorityError } from '../mcp/client';
 import type { McpToolsetServerObservation } from '../mcp/observation';
 import { projectMcpTools, qualifiedMcpToolName } from '../mcp/projection';
 import { buildToolExecutorsFromObservation } from '../adapters/pi/input-preparation';
@@ -196,15 +197,21 @@ async function buildRequest(
   // core's one canonical order — the same order the ordinary extension
   // registers and the model is shown, so a prepared digest cannot depend on
   // which consumer built it.
-  const tools: InputPreparationToolV1[] = projectMcpTools(observed.observation).map((tool) => ({
-    name: qualifiedMcpToolName(tool.serverName, tool.toolName),
-    description: tool.description,
-    // No `?? {}` fallback: `observation.ts`'s `validateTool` already refuses a
-    // tool whose `inputSchema` is absent or is not a JSON object, so an
-    // empty-schema default here would be dead code posing as a safety net —
-    // and, if it ever were reachable, it would count a schema no model was shown.
-    parameters: tool.inputSchema as Readonly<Record<string, unknown>>,
-  }));
+  let tools: InputPreparationToolV1[];
+  try {
+    tools = projectMcpTools(observed.observation).map((tool) => ({
+      name: qualifiedMcpToolName(tool.serverName, tool.toolName),
+      description: tool.description,
+      // No `?? {}` fallback: `observation.ts`'s `validateTool` already refuses a
+      // tool whose `inputSchema` is absent or is not a JSON object, so an
+      // empty-schema default here would be dead code posing as a safety net —
+      // and, if it ever were reachable, it would count a schema no model was shown.
+      parameters: tool.inputSchema as Readonly<Record<string, unknown>>,
+    }));
+  } catch (cause) {
+    if (!(cause instanceof McpAuthorityError)) throw cause;
+    throw new RemoteRejection('unsupported_input', 'the observed MCP tool identities are ambiguous', { cause });
+  }
 
   let toolExecutors: Readonly<Record<string, string>>;
   try {
