@@ -103,9 +103,9 @@ See captured planning output.
 Round 4 (run 35200434840) closed the module-load question: under the lowpriv token, a cold PS 5.1 profile fails to auto-load Microsoft.PowerShell.Security inside the keys suite's -EncodedCommand query (rounds 1-3), and a single explicit Import-Module under that token first (diagA/diagB) makes the product path resolve Get-Acl — 3/4 keys tests green, including the previously failing positive ACL case. The temporary [ps51-diag] block and the two probe commits in packages/keys were evidence instruments and must leave the tree; the warm-up must stay as environment setup for the synthetic account.
 
 ## Task Breakdown
-- [ ] Restore packages/keys/src/pi-provider-launcher-core.ts to baseline d4dcf961 bytes (drop the two temporary probe edits 5dd0056a/2bb441ba).
-- [ ] Replace the [ps51-diag] block in .github/workflows/ci.yml with a permanent one-line PS 5.1 module warm-up (Import-Module Microsoft.PowerShell.Security under the lowpriv token, before the keys suite), with rationale comment.
-- [ ] Commit both (no AI attribution). No push: the owner-mismatch keys test remains red on a pre-existing product-code Translate bug (WINDOWS_PROJECTION_ACL_SCRIPT eager per-ACE IdentityReference.Translate fails under lowpriv on SystemRoot), reported to the Owner for a packages/keys ownership ruling before any further push.
+- [x] Restore packages/keys/src/pi-provider-launcher-core.ts to baseline d4dcf961 bytes (drop the two temporary probe edits 5dd0056a/2bb441ba).
+- [x] Replace the [ps51-diag] block in .github/workflows/ci.yml with a permanent one-line PS 5.1 module warm-up (Import-Module Microsoft.PowerShell.Security under the lowpriv token, before the keys suite), with rationale comment.
+- [x] Commit both (no AI attribution). No push: the owner-mismatch keys test remains red on a pre-existing product-code Translate bug (WINDOWS_PROJECTION_ACL_SCRIPT eager per-ACE IdentityReference.Translate fails under lowpriv on SystemRoot), reported to the Owner for a packages/keys ownership ruling before any further push.
 
 ## Evidence Contract
 - round-4 logs 35200434840: [ps51-diag] as-inherited/sanitized both resolve Get-Acl; keys suite 3 passed / 1 failed with MethodInvocationException Translate.
@@ -118,6 +118,6 @@ Owner-approved WP1 chain ("批准": gate -> push -> Windows CI verification) con
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
 ## Task Breakdown
-- [ ] Restore packages/keys/src/pi-provider-launcher-core.ts to baseline d4dcf961 bytes (drop the two temporary probe edits 5dd0056a/2bb441ba).
-- [ ] Replace the [ps51-diag] block in .github/workflows/ci.yml with a permanent one-line PS 5.1 module warm-up (Import-Module Microsoft.PowerShell.Security under the lowpriv token, before the keys suite), with rationale comment.
-- [ ] Commit both (no AI attribution). No push: the owner-mismatch keys test remains red on a pre-existing product-code Translate bug (WINDOWS_PROJECTION_ACL_SCRIPT eager per-ACE IdentityReference.Translate fails under lowpriv on SystemRoot), reported to the Owner for a packages/keys ownership ruling before any further push.
+- [x] Restore packages/keys/src/pi-provider-launcher-core.ts to baseline d4dcf961 bytes (drop the two temporary probe edits 5dd0056a/2bb441ba).
+- [x] Replace the [ps51-diag] block in .github/workflows/ci.yml with a permanent one-line PS 5.1 module warm-up (Import-Module Microsoft.PowerShell.Security under the lowpriv token, before the keys suite), with rationale comment.
+- [x] Commit both (no AI attribution). No push: the owner-mismatch keys test remains red on a pre-existing product-code Translate bug (WINDOWS_PROJECTION_ACL_SCRIPT eager per-ACE IdentityReference.Translate fails under lowpriv on SystemRoot), reported to the Owner for a packages/keys ownership ruling before any further push.
