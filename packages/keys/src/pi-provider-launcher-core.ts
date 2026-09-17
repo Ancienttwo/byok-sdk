@@ -257,8 +257,9 @@ try {
   $acl = Get-Acl -LiteralPath ([string]$request.path)
   $sidType = [System.Security.Principal.SecurityIdentifier]
   $rules = @($acl.Access | ForEach-Object {
+    $sid = if ($_.IdentityReference -is [System.Security.Principal.SecurityIdentifier]) { $_.IdentityReference.Value } else { try { $_.IdentityReference.Translate($sidType).Value } catch { $null } }
     [ordered]@{
-      sid = $_.IdentityReference.Translate($sidType).Value
+      sid = $sid
       allow = $_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow
       fullControl = ($_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -eq [System.Security.AccessControl.FileSystemRights]::FullControl
       inherits = ($_.InheritanceFlags -band 3) -eq 3 -and $_.PropagationFlags -eq [System.Security.AccessControl.PropagationFlags]::None
