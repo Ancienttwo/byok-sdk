@@ -1,6 +1,10 @@
 # Plan: Integrate C07 PR188 shared MCP core
 
 > **Status**: Executing
+> **Artifact Level**: work-package
+> **Promotion Reason**: Integrate and accept the independently mergeable PR188 boundary
+> **Verification Boundary**: Current-main MCP preparation and runtime projection with repository required checks
+> **Rollback Surface**: Revert PR188 integration without touching other candidates
 > **Planning Source**: Owner-approved C07 merge train; existing PR188 design retained
 > **Task Contract**: `tasks/contracts/20260917-1330-c07-pr188-integration.contract.md`
 > **Task Review**: `tasks/reviews/20260917-1330-c07-pr188-integration.review.md`
@@ -26,3 +30,18 @@ Retain the existing PR188 design and use Git's conflict-free main merge. No comp
 
 ## Stop Conditions
 No provider calls/publication/deployment. Preserve other worktrees and concurrent PR193 work. At most three fix/verify rounds per issue; report unrelated failures.
+
+## Evidence Contract
+- State/progress path: This plan Task Breakdown and matching contract/notes/review.
+- Verification evidence: Canonical .ai/harness/checks/latest.json and immutable .ai/harness/runs records.
+- Evaluator rubric: One independent Codex verdict on the frozen MCP integration boundary.
+- Stop condition: Checks and acceptance pass, exact-head CI passes, PR188 merged.
+- Rollback surface: Revert this PR188 integration.
+
+## Promotion Gate
+- Merge/PR unit: PR188 shared MCP core and current-main integration.
+- Rollback surface: Revert PR188 without modifying other C07 branches.
+- Verification boundary: Canonical contract checks and exact-head GitHub CI.
+- Review/acceptance boundary: Typed AcceptanceReceipt from independent Codex review.
+- High-risk surface: MCP tool identity, runtime projection and preparation binding.
+- Why not checklist row: An independently mergeable PR with shared public API and runtime ownership changes.

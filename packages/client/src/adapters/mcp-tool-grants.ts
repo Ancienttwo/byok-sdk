@@ -11,6 +11,7 @@ import {
 } from '../bin/agent-memory-mcp-server';
 import { GRANTABLE_MCP_SERVER_NAME, GRANTABLE_TOOL_NAME } from '../mcp/observation';
 import { mcpToolsetToolNames } from '../mcp/projection';
+import { McpAuthorityError } from '../mcp/client';
 
 /** One projected toolset server and the exact tool names observed on it. */
 export interface McpToolsetGrant {
@@ -86,7 +87,13 @@ export function resolveMcpToolsetGrants(
   // separately supplied list: one authority for "which tools exist" means the
   // grant a runtime is given and the schema the model is shown cannot describe
   // different tool sets.
-  const observed = mcpToolsetToolNames(observation ?? {});
+  let observed: Readonly<Record<string, readonly string[]>>;
+  try {
+    observed = mcpToolsetToolNames(observation ?? {});
+  } catch (error) {
+    if (error instanceof McpAuthorityError) return { ok: false, reason: error.message };
+    throw error;
+  }
   const unexpected = Object.keys(observed).filter((name) => !projected.includes(name)).sort();
   if (unexpected.length > 0) {
     return {
