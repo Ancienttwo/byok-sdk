@@ -623,6 +623,25 @@ describe.each([
     )).toEqual({ ok: false, reason: `duplicate MCP runtime tool name "${name}"` });
   });
 
+  it.each(['auto', 'confirm', 'readonly', 'plan'] as const)(
+    'rejects raw read/mutation identity collisions before %s filtering', async (mode) => {
+      const raw = await collidingObservation();
+      const entries = Object.entries(raw).map(([serverName, server], index) => [serverName, {
+        ...server,
+        tools: [
+          ...server.tools.map((tool) => ({ ...tool, readOnly: index === 0 })),
+          { name: 'safe_read', description: '', inputSchema: { type: 'object' }, readOnly: true },
+        ],
+      }] as const);
+      const observation = Object.fromEntries(entries);
+      const reason = `duplicate MCP runtime tool name "${name}"`;
+      expect(filterMcpObservationForPolicy(observation, mode)).toEqual({ ok: false, reason });
+      expect(resolveMcpToolsetGrants(
+        Object.fromEntries(pairs.map(([server]) => [server!, serverSpec()])), observation, mode,
+      )).toEqual({ ok: false, reason });
+    },
+  );
+
   it('refuses a prepared executor map instead of overwriting a tool fingerprint', async () => {
     await expect(buildToolExecutorsFromObservation({
       observation: await collidingObservation(),

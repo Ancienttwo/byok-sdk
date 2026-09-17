@@ -192,6 +192,14 @@ export function filterMcpObservationForPolicy(
   observation: Readonly<Record<string, McpToolsetServerObservation>>,
   permissionMode: PermissionMode,
 ): McpObservationPolicyResolution {
+  // A filtered-out mutation must not share the runtime grant identifier of
+  // a surviving read tool. Validate the complete authority before narrowing.
+  try {
+    assertUniqueQualifiedNames(observation);
+  } catch (error) {
+    if (error instanceof McpAuthorityError) return { ok: false, reason: error.message };
+    throw error;
+  }
   if (!narrowsToReadOnlyTools(permissionMode)) return { ok: true, observation };
   const filtered: Record<string, McpToolsetServerObservation> = {};
   for (const serverName of Object.keys(observation).sort(compareCodeUnits)) {
