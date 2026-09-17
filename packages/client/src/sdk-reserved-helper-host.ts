@@ -2,6 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runSdkReservedHelper } from './bin/sdk-reserved-helper-runners';
 import { runAttestedPiSubagentPrintFromEnvironment } from './custody/pi-subagent-print-entry';
+import { runAttestedPiSubagentRunnerFromEnvironment } from './custody/pi-subagent-runner-entry';
 
 export const BYOK_SDK_HELPER_SUBCOMMAND = '__byok_sdk_helper';
 
@@ -90,7 +91,16 @@ export async function runSdkReservedHelperCommand(
 ): Promise<boolean> {
   if (argv[0] !== BYOK_SDK_HELPER_SUBCOMMAND) return false;
   if (argv[1] === 'pi-subagent-runner') {
-    throw new Error('SDK descendant runtime dispatch is not enabled: custody execution gates pending');
+    // The runner bootstrap edge routes to the single attested exec point.
+    // This is the direct-connect shape only (`__byok_sdk_helper
+    // pi-subagent-runner`): no vendor runner spawn site is rerouted here —
+    // that is the later five-edge cut (plan 1459) — so until it lands no
+    // vendor lane can reach this branch. Every custody gate inside
+    // (`custody/pi-subagent-runner-entry.ts` launchAttestedPiSubagentRunner)
+    // is fail-closed.
+    const exitCode = await runAttestedPiSubagentRunnerFromEnvironment(process.env);
+    if (exitCode !== 0) throw new Error(`attested pi-subagent-runner exec exited ${exitCode}`);
+    return true;
   }
   if (argv[1] === 'pi-subagent-print') {
     // The print bootstrap edge routes to the single attested exec point. The

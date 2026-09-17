@@ -410,8 +410,14 @@ describe('custody charge-once: one logical delegation charges one depth level', 
     }
   }, 60_000);
 
-  it('keeps the runner edge gated pending in the helper host dispatcher', async () => {
+  // WP4 runner groundwork moved this pin: the runner branch now routes to the
+  // attested exec point (custody/pi-subagent-runner-entry.ts) exactly like the
+  // print branch above, still reachable only through the direct helper argv
+  // shape, and still fails closed without the parent custody commitments.
+  it('routes the runner edge to the attested exec point, which refuses without the custody commitments', async () => {
+    delete process.env.BYOK_SDK_CUSTODY_PARENT_DEPTH;
+    delete process.env.BYOK_SDK_CUSTODY_LAUNCH_RECORD;
     await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-subagent-runner'])).rejects.toThrow(
-      'SDK descendant runtime dispatch is not enabled: custody execution gates pending');
+      'BYOK_SDK_CUSTODY_PARENT_DEPTH missing');
   });
 });

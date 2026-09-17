@@ -35,24 +35,37 @@
  * cannot spawn a script file through `child_process.spawn` without a shell,
  * so the seam shape is POSIX-only in this slice (registered in
  * `tasks/todos.md` for Windows coverage).
+ *
+ * WP4 (contract 20260917-2002) extracted the commitment core shared with the
+ * runner entry into `custody-commitments.ts`; this module re-exports the
+ * moved names under their original print-entry spellings so the existing
+ * import surface (tests included) keeps working unchanged.
  */
 import { spawn as nodeSpawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import {
   assertDescendantSpawn,
   DescendantLaunchError,
   parseDescendantLaunch,
-  RUNTIME_DESCENDANT_EDGES,
   validateDescendantSpawn,
   type DescendantLaunchV1,
-  type DescendantSpawnExpectationV1,
 } from '@byok-sdk/implementation-identity';
+import {
+  deriveCustodyExpectation,
+  loadCustodyLaunchRecord,
+  parseCustodyParentDepthCommitment,
+  refusal,
+} from './custody-commitments';
 
-/** Parent-minted commitment carrying the runner's contract depth. */
-export const BYOK_SDK_CUSTODY_PARENT_DEPTH_ENV = 'BYOK_SDK_CUSTODY_PARENT_DEPTH';
-/** Parent-minted commitment naming the per-launch descendant record file. */
-export const BYOK_SDK_CUSTODY_LAUNCH_RECORD_ENV = 'BYOK_SDK_CUSTODY_LAUNCH_RECORD';
+// Moved to the shared custody commitment core; re-exported under the original
+// print-entry spellings so existing imports of this module keep working.
+export {
+  BYOK_SDK_CUSTODY_LAUNCH_RECORD_ENV,
+  BYOK_SDK_CUSTODY_PARENT_DEPTH_ENV,
+  parseCustodyParentDepthCommitment,
+  loadCustodyLaunchRecord,
+} from './custody-commitments';
+export { PiSubagentCustodyRefusalError as PiSubagentPrintRefusalError } from './custody-commitments';
+export { deriveCustodyExpectation as derivePrintExpectation } from './custody-commitments';
 
 /**
  * The registered pi-style argv template of the vendor's print invocation
@@ -64,18 +77,6 @@ export const PRINT_ENTRY_REGISTERED_ARGV_TEMPLATE: readonly string[] = Object.fr
 
 /** Frozen counting table: the runner->print bootstrap edge charges zero. */
 const PRINT_ENTRY_BOOTSTRAP_CHARGE = 0;
-
-/** A custody refusal: the entry stops without execing instead of guessing. */
-export class PiSubagentPrintRefusalError extends Error {
-  constructor(readonly reason: string) {
-    super(`pi-subagent-print entry refused: ${reason}`);
-    this.name = 'PiSubagentPrintRefusalError';
-  }
-}
-
-function refusal(reason: string): never {
-  throw new PiSubagentPrintRefusalError(reason);
-}
 
 /** Bitwise argv-template gate against the registered pi-style prefix. */
 export function assertPrintEntryArgvTemplate(argv: readonly string[]): void {
@@ -93,65 +94,6 @@ export function assertPrintEntryArgvTemplate(argv: readonly string[]): void {
       refusal('argv template mismatch: empty or control-bearing argument');
     }
   }
-}
-
-/**
- * Parse the parent depth commitment. Missing, empty or non-integer values
- * refuse; the vendor-computed depth is never consulted.
- */
-export function parseCustodyParentDepthCommitment(env: Readonly<Record<string, string | undefined>>): number {
-  const raw = env[BYOK_SDK_CUSTODY_PARENT_DEPTH_ENV];
-  if (raw === undefined || raw === '') {
-    refusal(`${BYOK_SDK_CUSTODY_PARENT_DEPTH_ENV} missing: the runner contract depth commitment is required`);
-  }
-  if (!/^[0-9]+$/u.test(raw)) {
-    refusal(`${BYOK_SDK_CUSTODY_PARENT_DEPTH_ENV} must be a non-negative integer, got ${JSON.stringify(raw)}`);
-  }
-  const depth = Number(raw);
-  if (!Number.isSafeInteger(depth)) {
-    refusal(`${BYOK_SDK_CUSTODY_PARENT_DEPTH_ENV} is not a safe integer`);
-  }
-  return depth;
-}
-
-/** Read and shape-check the parent-minted per-launch record path commitment. */
-export function loadCustodyLaunchRecord(env: Readonly<Record<string, string | undefined>>): unknown {
-  const recordPath = env[BYOK_SDK_CUSTODY_LAUNCH_RECORD_ENV];
-  if (recordPath === undefined || recordPath === '' || !path.isAbsolute(recordPath) || /[\u0000\r\n]/u.test(recordPath)) {
-    refusal(`${BYOK_SDK_CUSTODY_LAUNCH_RECORD_ENV} must be an absolute path to the parent-minted launch record`);
-  }
-  let text: string;
-  try {
-    text = readFileSync(recordPath, 'utf8');
-  } catch (error) {
-    refusal(`${BYOK_SDK_CUSTODY_LAUNCH_RECORD_ENV} unreadable at ${recordPath}: ${(error as Error).message}`);
-  }
-  try {
-    return JSON.parse(text) as unknown;
-  } catch (error) {
-    refusal(`launch record at ${recordPath} is not valid JSON: ${(error as Error).message}`);
-  }
-}
-
-/**
- * The expectation is the frozen module vocabulary plus the parent's own
- * commitment: the parent charge comes from the environment commitment, so a
- * record forged with a different parent depth cannot self-consistently pass.
- */
-export function derivePrintExpectation(launch: DescendantLaunchV1, parentDepth: number): DescendantSpawnExpectationV1 {
-  return {
-    template: launch.template,
-    policy: launch.policy,
-    edges: RUNTIME_DESCENDANT_EDGES,
-    inheritedCredentialNames: [],
-    parent: {
-      kind: launch.perLaunch.edge.parent,
-      rootTaskId: launch.perLaunch.rootTaskId,
-      instancePath: launch.perLaunch.parentInstancePath,
-      depth: parentDepth,
-      effectiveLimits: launch.perLaunch.effectiveLimits,
-    },
-  };
 }
 
 /**
@@ -223,7 +165,7 @@ export async function launchAttestedPiSubagentPrint(input: AttestedPiSubagentPri
     throw error;
   }
   const template = launch.template;
-  const expected = derivePrintExpectation(launch, parentDepth);
+  const expected = deriveCustodyExpectation(launch, parentDepth);
   const execEnv = projectAttestedPrintExecEnv(launch, parentDepth, observedEnv);
   const actual = { command: template.command, entry: template.entry, fixedArgv: template.fixedArgv, cwd: template.cwd, env: execEnv };
   try {

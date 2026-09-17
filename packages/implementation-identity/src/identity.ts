@@ -619,7 +619,7 @@ const BYOK_CONTROL_ENV_PREFIX = 'BYOK_';
  * this SDK reads elsewhere, so "starts with BYOK_" is not a reason to project
  * a name away unnoticed.
  *
- * Every entry, with where it is minted — three names, and each one is here
+ * Every entry, with where it is minted — five names, and each one is here
  * because this SDK itself puts it on a GATED CHILD's environment after the
  * identity was measured. A name that never reaches a gated child does not
  * belong on this list: projecting it away would blind the gate to a control
@@ -633,6 +633,12 @@ const BYOK_CONTROL_ENV_PREFIX = 'BYOK_';
  * - `BYOK_STORE_DIR` / `BYOK_PRODUCT_ID` — minted into the same per-server
  *   `env` block at `daemon/task-runner.ts:3353-3354`, and reaching the gated
  *   child by the same path.
+ * - `BYOK_SDK_CUSTODY_LAUNCH_RECORD` / `BYOK_SDK_CUSTODY_PARENT_DEPTH` — the
+ *   custody pair minted by the SDK custody dispatcher between resolve and
+ *   spawn as preset-entry inputs: the parent's contract depth commitment and
+ *   the per-launch descendant record path. The custody preset entries
+ *   (`custody/pi-subagent-print-entry.ts`, `custody/pi-subagent-runner-entry.ts`)
+ *   consume and re-project them; neither is ever part of the attested exec env.
  *
  * OUT OF SCOPE, deliberately, and NOT exempt — a name below appearing on a
  * gated child environment is a refusal, not a projection:
@@ -663,6 +669,8 @@ const BYOK_CONTROL_ENV_PREFIX = 'BYOK_';
 export const TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES: readonly string[] = Object.freeze([
   'BYOK_HOST_TOOLSET_CONTEXT',
   'BYOK_PRODUCT_ID',
+  'BYOK_SDK_CUSTODY_LAUNCH_RECORD',
+  'BYOK_SDK_CUSTODY_PARENT_DEPTH',
   'BYOK_STORE_DIR',
 ]);
 
