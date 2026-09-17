@@ -865,6 +865,16 @@ jobs:
             # its own summary file and writes to it untouched.
             Remove-Item Env:GITHUB_STEP_SUMMARY -ErrorAction SilentlyContinue
 
+            # Second administrator-parent leak. The inherited PSModulePath carries
+            # the runneradmin and packer profile module directories, which this
+            # token cannot traverse; PS 5.1 auto-load inside the keys suite's
+            # -EncodedCommand query then fails (CommandNotFoundException) while
+            # plain -Command probes against the same env succeed. Rounds 1-3 and
+            # 5-6 failed with it inherited; round 4 passed only because a probe
+            # block unset it. Unsetting it lets PS 5.1 reconstruct the machine
+            # defaults -- the same class of fix as the summary-file unset above.
+            Remove-Item Env:PSModulePath -ErrorAction SilentlyContinue
+
             # git compares safe.directory against its own forward-slash spelling of
             # this exact checkout. Never '*'.
             $env:GIT_CONFIG_COUNT = '1'
@@ -890,20 +900,6 @@ jobs:
             # packing.
             bun run --filter @byok-sdk/implementation-identity build
             if ($LASTEXITCODE -ne 0) { Fail $LASTEXITCODE 'implementation-identity build failed under the standard-user token' }
-
-            # A freshly created local account starts with no PS 5.1 module-analysis
-            # cache, and the first powershell.exe spawn under this token then fails
-            # to auto-load Microsoft.PowerShell.Security (CommandNotFoundException)
-            # inside the keys suite's -EncodedCommand ACL query -- observed in three
-            # earlier CI rounds, gone once an explicit Import-Module ran under this
-            # token first. Warm the cache once: environment setup for the synthetic
-            # account, not product behavior. Real hosts have warm profiles.
-            # The (Get-Command Get-Acl) suffix is load-bearing: Import-Module alone
-            # demonstrably does NOT fix later processes (round 5 = rounds-1-3 failure
-            # signature); resolving Get-Acl in the warm-up process does (round 4).
-            & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
-              -NoProfile -NonInteractive -Command 'Import-Module Microsoft.PowerShell.Security; [void](Get-Command Get-Acl).Name'
-            if ($LASTEXITCODE -ne 0) { Fail 92 'PS 5.1 module warm-up failed under the standard-user token' }
 
             # Real credential-projection directory validation under this same token.
             bun run --filter @byok-sdk/keys test -- src/pi-projection-windows.test.ts
