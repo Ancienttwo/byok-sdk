@@ -68,6 +68,7 @@ const LIMITS = validateInputPreparationLimits({
 
 /** Authorizes exactly one trusted local record. Every other claim is refused. */
 const authorityResolver: InputPreparationAuthorityResolver = {
+  async resolveSource({ source }) { return { authorized: true, source }; },
   async resolveScope(claim) {
     if (
       claim.deviceId !== TRUSTED.deviceId ||
@@ -267,6 +268,24 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     expect(stat.mode & 0o777).toBe(0o600);
   });
 
+  it('collects expired artifacts at daemon restart before any preparation RPC', async () => {
+    const { storeDir, config } = await start({ enabled: true, productId: 'acme-prep-startup-gc' });
+    await requestInputPreparation(client!, preparationRequest());
+    client!.close();
+    client = undefined;
+    await daemon!.stop();
+    const logPath = path.join(storeDir, 'input-preparation', 'records.jsonl');
+    const lines = (await fs.readFile(logPath, 'utf8')).trim().split('\n').map((line) => ({
+      ...JSON.parse(line), artifactExpiresAt: new Date(0).toISOString(), recordExpiresAt: new Date(1).toISOString(),
+    }));
+    await fs.writeFile(logPath, lines.map((line) => JSON.stringify(line)).join('\n') + '\n');
+    daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter('pi')]);
+    await daemon.start();
+    expect(await fs.readdir(path.join(storeDir, 'input-preparation', 'artifacts'))).toEqual([]);
+    expect(await fs.readFile(logPath, 'utf8')).toBe('');
+    expect(counter.calls).toHaveLength(1);
+  });
+
   it('answers lookup and cancel from the same durable record, and never across a scope', async () => {
     await start({ enabled: true, productId: 'acme-prep-scope' });
     const prepared = await requestInputPreparation(client!, preparationRequest());
@@ -382,6 +401,6 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     expect(outcome).toBe('closed');
     expect(counter.calls).toEqual([]);
     const artifactDir = path.join(storeDir, 'input-preparation', 'artifacts');
-    await expect(fs.readdir(artifactDir)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await fs.readdir(artifactDir)).toEqual([]);
   });
 });

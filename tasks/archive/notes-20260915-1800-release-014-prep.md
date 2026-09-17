@@ -1,3 +1,13 @@
+> **Archived**: 2026-09-15 12:50
+> **Related Plan**: plans/archive/plan-20260906-0450-release-014-prep.md
+> **Outcome**: Superseded
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260915-1800
+> **Archive Projection V1**: `plans/plan-20260906-0450-release-014-prep.md` => `plans/archive/plan-20260906-0450-release-014-prep.md`
+> **Archive Projection V1**: `tasks/notes/20260906-0450-release-014-prep.notes.md` => `tasks/archive/notes-20260915-1800-release-014-prep.md`
+> **Archive Projection V1**: `tasks/contracts/20260906-0450-release-014-prep.contract.md` => `tasks/archive/contract-20260915-1800-release-014-prep.md`
+> **Archive Projection V1**: `tasks/reviews/20260906-0450-release-014-prep.review.md` => `tasks/archive/review-20260915-1800-release-014-prep.md`
+
 # BYOK release014 preparation — single handoff
 
 Status: REVIEWABLE VERSION/GRAPH CHECKPOINT; paused by release coordination. NOT final release subject.
@@ -30,7 +40,7 @@ Evidence in worktree:
 - tasks/notes/release-014-source-checks.json: exact source SHA, exit codes, log hashes.
 - _ops/releases/0.14.0/logs/{build,typecheck,test,metadata}.log: actual local output.
 - tasks/notes/release-014-registry-before.json: timestamped live registry metadata; all ten candidate versions were absent, latest was SDK0.13.0 / keys0.3.10. This is time-bound preparation evidence; publication requires fresh vacancy readback.
-- tasks/contracts/20260906-0450-release-014-prep.contract.md and matching plan: coordinated hold recorded.
+- tasks/archive/contract-20260915-1800-release-014-prep.md and matching plan: coordinated hold recorded.
 
 No tarballs or release-manifest.json were generated. No pack matrix, npm publish, push, PR, tag, deploy, live-secret modification or downstream pin was performed here. Source checks are not external semantic acceptance, registry proof, final integration checks or Salesko released-binary recovery acceptance. Existing #147 receipt applies to its recorded older source/target only.
 

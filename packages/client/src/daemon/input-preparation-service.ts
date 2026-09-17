@@ -17,10 +17,12 @@ import {
   type InputPreparationReadinessReasonV1,
   type InputPreparationReceiptV1,
   type InputPreparationRequestV1,
+  type InputPreparationRuntimeIdentityV1,
   type InputPreparationScopeClaimV1,
 } from '../input-preparation';
 import {
   InputPreparationCompileError,
+  InputPreparationRuntimeIdentityError,
   type InputPreparationCompiler,
 } from '../adapters/pi/input-preparation';
 import {
@@ -86,6 +88,19 @@ export class InputPreparationRequestError extends Error {
   }
 }
 
+/**
+ * The ONE spelling of a runtime identity string.
+ *
+ * It binds every artifact through `CompilePreparedInputRequest.binding` and it
+ * binds every tool-executor fingerprint. Those two must agree exactly, so the
+ * formula lives here rather than being written out at each site.
+ */
+export function inputPreparationRuntimeIdentityString(
+  runtime: InputPreparationRuntimeIdentityV1,
+): string {
+  return `${runtime.packageName}@${runtime.packageVersion}+${runtime.upstreamCommit}.${String(runtime.forkBuild)}`;
+}
+
 // ---------------------------------------------------------------------------
 // Options
 // ---------------------------------------------------------------------------
@@ -99,14 +114,35 @@ export interface InputPreparationServiceOptions {
   readonly now?: () => number;
 }
 
+/**
+ * Per-call bounds a caller may TIGHTEN, never loosen.
+ *
+ * The remote lane (`input-preparation-remote.ts`) carries a Host-stated
+ * `deadlineAt`. It is applied here as `min(requested, configured)` so a
+ * generous Host deadline can never enlarge this daemon's configured
+ * `preparationDeadlineMs` — the local policy stays the ceiling, and the caller
+ * only ever gets less time than it asked for.
+ */
+export interface InputPreparationCallOptions {
+  readonly deadlineMs?: number;
+}
+
 export interface InputPreparationService {
   /** Replay, confirm and reconcile the durable log. Must complete before any method answers. */
   open(): Promise<void>;
-  prepare(request: InputPreparationRequestV1): Promise<InputPreparationReceiptV1>;
+  prepare(request: InputPreparationRequestV1, options?: InputPreparationCallOptions): Promise<InputPreparationReceiptV1>;
   lookup(params: InputPreparationLookupParamsV1): Promise<InputPreparationReceiptV1>;
   cancel(params: InputPreparationCancelParamsV1): Promise<InputPreparationReceiptV1>;
   /** Aborts every owned counter call. Outcomes stay observable in the durable record. */
   stop(): Promise<void>;
+  /**
+   * The runtime/compiler identity this service binds every artifact to,
+   * derived from the VERIFIED installed closure. Exposed because a caller that
+   * builds `toolExecutors` must fingerprint against the SAME identity the
+   * compiler will bind, and re-deriving it from its own copy of the compiler
+   * is how those two silently drift apart.
+   */
+  readonly runtime: InputPreparationRuntimeIdentityV1;
   /** Internal test seam: the durable store behind this service. */
   readonly store: InputPreparationStore;
 }
@@ -288,6 +324,42 @@ export function createInputPreparationService(options: InputPreparationServiceOp
   /** Per-record serialization, so two concurrent duplicates cannot both compile or both count. */
   const locks = new Map<string, Promise<unknown>>();
   let opened: Promise<void> | undefined;
+  let stopped = false;
+  let gcTimer: ReturnType<typeof setTimeout> | undefined;
+  let gcInFlight: Promise<void> | undefined;
+  let gcFailure: { cause: unknown } | undefined;
+
+  function assertAvailable(): void {
+    if (gcFailure) rethrowDurable(gcFailure.cause);
+    if (stopped) throw new InputPreparationRequestError('cancelled', 'the input-preparation service is stopped');
+  }
+
+  // One timer for the earliest retained expiry. Active records are protected
+  // until their owning run settles and rearms this timer; an overdue compile
+  // must not cause a zero-delay GC loop. An empty or wholly pinned store sleeps.
+  function scheduleGc(): void {
+    if (gcTimer !== undefined) clearTimeout(gcTimer);
+    gcTimer = undefined;
+    if (stopped || gcFailure || gcInFlight !== undefined) return;
+    let nextExpiry = Number.POSITIVE_INFINITY;
+    for (const record of store.list()) {
+      if (record.pin !== undefined || !isTerminalInputPreparationState(record.state)) continue;
+      nextExpiry = Math.min(nextExpiry, Date.parse(record.recordExpiresAt));
+      if (record.artifactBytes > 0) nextExpiry = Math.min(nextExpiry, Date.parse(record.artifactExpiresAt));
+    }
+    if (!Number.isFinite(nextExpiry)) return;
+    gcTimer = setTimeout(() => {
+      gcTimer = undefined;
+      gcInFlight = store.gc(now(), true).then(
+        () => undefined,
+        (cause: unknown) => { gcFailure = { cause }; },
+      ).finally(() => {
+        gcInFlight = undefined;
+        scheduleGc();
+      });
+    }, Math.min(Math.max(1, nextExpiry - now()), 2_147_483_647));
+    gcTimer.unref?.();
+  }
 
   function withRecordLock<T>(recordId: string, work: () => Promise<T>): Promise<T> {
     const previous = locks.get(recordId) ?? Promise.resolve();
@@ -363,8 +435,11 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     opened ??= (async (): Promise<void> => {
       await store.open();
       await reconcile();
+      await store.gc(now(), true);
+      scheduleGc();
     })();
     await opened;
+    assertAvailable();
   }
 
   /**
@@ -421,6 +496,37 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     };
   }
 
+  async function resolveSourceAuthority(
+    request: InputPreparationRequestV1,
+    grant: InputPreparationAuthorityGrantV1,
+  ): Promise<InputPreparationRequestV1['source']> {
+    let outcome;
+    try {
+      // Resolver-owned mutable data must never alias the later compile input.
+      outcome = await options.authorityResolver.resolveSource(structuredClone({
+        grant, source: request.source, snapshot: request.snapshot,
+      }));
+      // Take ownership before validating; a retained resolver object cannot
+      // replace the pair between verification and binding.
+      outcome = structuredClone(outcome);
+      if (outcome === null || typeof outcome !== 'object' ||
+          (outcome.authorized !== true && outcome.authorized !== false)) {
+        throw new Error('source authority returned no valid decision');
+      }
+      if (outcome.authorized === true && (outcome.source === null || typeof outcome.source !== 'object' ||
+          typeof outcome.source.revision !== 'string' || outcome.source.revision.length === 0 ||
+          typeof outcome.source.digest !== 'string' || outcome.source.digest.length === 0)) {
+        throw new Error('source authority returned no valid source pair');
+      }
+    } catch (cause) {
+      throw new InputPreparationRequestError('authority_unavailable', 'the configured source authority could not be consulted', { cause });
+    }
+    if (!outcome.authorized || outcome.source.revision !== request.source.revision || outcome.source.digest !== request.source.digest) {
+      throw new InputPreparationRequestError('scope_denied', 'the source snapshot is not authorized in the verified scope');
+    }
+    return { revision: outcome.source.revision, digest: outcome.source.digest };
+  }
+
   function buildBinding(
     request: InputPreparationRequestV1,
     grant: InputPreparationAuthorityGrantV1,
@@ -460,13 +566,17 @@ export function createInputPreparationService(options: InputPreparationServiceOp
         options: request.selection.options,
         binding: {
           inputIdentity: `${request.source.revision}:${request.source.digest}`,
-          runtimeIdentity: `${options.compiler.runtime.packageName}@${options.compiler.runtime.packageVersion}+${options.compiler.runtime.upstreamCommit}.${String(options.compiler.runtime.forkBuild)}`,
+          runtimeIdentity: inputPreparationRuntimeIdentityString(options.compiler.runtime),
           policyIdentity: limits.revision,
           profileRevision: grant.profileRevision,
         },
         toolExecutors: request.toolExecutors,
       });
     } catch (cause) {
+      if (cause instanceof InputPreparationRuntimeIdentityError) {
+        await markFailed(record.recordId, 'runtime_identity_unavailable');
+        throw new InputPreparationRequestError('runtime_identity_unavailable', cause.message, { cause });
+      }
       await markFailed(record.recordId, 'compile_rejected');
       if (cause instanceof InputPreparationCompileError) {
         throw new InputPreparationRequestError('unsupported_input', cause.message, { cause });
@@ -564,13 +674,24 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     callTimeout.unref?.();
     const calledAt = new Date(now()).toISOString();
     let counted: InputPreparationCounterResultV1;
+    let removeAbortListener = (): void => {};
     try {
       counted = validateCounterResult(
-        await options.counter.count({
-          counterProjection: compiled.counterProjection,
-          target,
-          timeoutMs: limits.counterTimeoutMs,
-          signal: run.controller.signal,
+        await new Promise<InputPreparationCounterResultV1>((resolve, reject) => {
+          const interrupted = (): void => reject(new InputPreparationRequestError(
+            'counter_interrupted', 'the counter wait was interrupted; its outcome is unknown',
+          ));
+          run.controller.signal.addEventListener('abort', interrupted, { once: true });
+          removeAbortListener = () => run.controller.signal.removeEventListener('abort', interrupted);
+          if (run.controller.signal.aborted) { interrupted(); return; }
+          // Both handlers stay attached even after the SDK wait has settled.
+          // Late adapter resolution cannot write state; late rejection is consumed.
+          options.counter.count({
+            counterProjection: compiled.counterProjection,
+            target,
+            timeoutMs: limits.counterTimeoutMs,
+            signal: run.controller.signal,
+          }).then(resolve, reject);
         }),
       );
       if (run.controller.signal.aborted) {
@@ -599,6 +720,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       });
     } finally {
       clearTimeout(callTimeout);
+      removeAbortListener();
     }
 
     const evidence: InputPreparationCounterEvidenceV1 = {
@@ -614,7 +736,10 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     }
   }
 
-  async function prepare(rawRequest: InputPreparationRequestV1): Promise<InputPreparationReceiptV1> {
+  async function prepare(
+    rawRequest: InputPreparationRequestV1,
+    callOptions?: InputPreparationCallOptions,
+  ): Promise<InputPreparationReceiptV1> {
     // Copy before the first await. Everything below reads this copy only.
     const request = structuredClone(rawRequest) as InputPreparationRequestV1;
     await ensureOpen();
@@ -631,6 +756,9 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     }
 
     const grant = await resolveAuthority(request.scope);
+    const source = await resolveSourceAuthority(request, grant);
+    const verifiedRequest = { ...request, source };
+    assertAvailable();
     const runtime = options.compiler.runtime;
     const requestDigest = sha256Hex(
       canonicalInputPreparationJson({
@@ -652,7 +780,9 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     const recordId = inputPreparationRecordId(key);
 
     return withRecordLock(recordId, async () => {
-      await store.gc(now()).catch(rethrowDurable);
+      assertAvailable();
+      await store.gc(now(), true).catch(rethrowDurable);
+      assertAvailable();
       let outcome;
       try {
         // The in-flight bound travels WITH the reservation: two different
@@ -661,7 +791,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
         outcome = await store.reserve({
           key,
           requestDigest,
-          binding: buildBinding(request, grant, target, requestDigest),
+          binding: buildBinding(verifiedRequest, grant, target, requestDigest),
           maxInFlight: limits.maxInFlight,
         });
       } catch (cause) {
@@ -688,11 +818,19 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       // halves must observe the same `cancelRequested` flag and the same
       // controller, or a cancel lands on a copy nobody reads.
       const controller = new AbortController();
+      // Shutdown may have started while the durable reservation was queued.
+      // Its waiter owns this lock too; do not begin a new counter after stop.
+      if (stopped) controller.abort();
       const run: ActiveRun = { controller, done: Promise.resolve(), cancelRequested: false };
       // The whole preparation's deadline. The single counter call has its own,
       // separate bound, started inside `runPreparation` when that call actually
       // begins. Both are explicit policy; neither is a default.
-      const deadline = setTimeout(() => controller.abort(), limits.preparationDeadlineMs);
+      const requestedDeadlineMs = callOptions?.deadlineMs;
+      const deadlineMs =
+        requestedDeadlineMs === undefined || !Number.isFinite(requestedDeadlineMs)
+          ? limits.preparationDeadlineMs
+          : Math.max(1, Math.min(requestedDeadlineMs, limits.preparationDeadlineMs));
+      const deadline = setTimeout(() => controller.abort(), deadlineMs);
       deadline.unref?.();
       active.set(recordId, run);
       const settled = runPreparation(outcome.record, request, grant, target, run);
@@ -705,6 +843,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       } finally {
         clearTimeout(deadline);
         active.delete(recordId);
+        scheduleGc();
       }
     });
   }
@@ -728,8 +867,15 @@ export function createInputPreparationService(options: InputPreparationServiceOp
 
   return {
     store,
-    open: ensureOpen,
+    async open(): Promise<void> {
+      const wasOpened = opened !== undefined;
+      stopped = false;
+      await ensureOpen();
+      if (wasOpened) await store.gc(now(), true).catch(rethrowDurable);
+      scheduleGc();
+    },
     prepare,
+    runtime: options.compiler.runtime,
     async lookup(params: InputPreparationLookupParamsV1): Promise<InputPreparationReceiptV1> {
       const { record } = await locate(params);
       return toReceipt(record, now());
@@ -759,9 +905,16 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       }
     },
     async stop(): Promise<void> {
+      stopped = true;
+      if (gcTimer !== undefined) clearTimeout(gcTimer);
+      gcTimer = undefined;
+      await opened;
       const pending = [...active.values()];
       for (const run of pending) run.controller.abort();
       await Promise.all(pending.map((run) => run.done));
+      await Promise.all(locks.values());
+      await gcInFlight;
+      if (gcFailure) rethrowDurable(gcFailure.cause);
     },
   };
 }

@@ -48,7 +48,7 @@
   },
   "worktree_strategy": {
     "base_branch": "main",
-    "review_base": "f811634c8c9ac6a16891c354eaf0adcb869004a2",
+    "review_base": "f800f4a7b45a34d1e628f562fe615bcf0123fd3a",
     "merge_back": {
       "target": "main"
     }

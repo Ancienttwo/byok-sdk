@@ -2,11 +2,18 @@ import { z } from 'zod';
 import { CONTENT_HASH_RE } from './blob';
 import { EnvelopeSchema } from './envelope';
 import {
+  AgentRefSchema,
   ConfiguredToolsetsSchema,
   ProtocolVersionNumberSchema,
   RuntimeIdSchema,
   AgentHomeProjectionAgentRefSchema,
 } from './messages';
+import {
+  InputPreparationProfileIdSchema,
+  InputPreparationPolicyRevisionSchema,
+  InputPreparationReceiptSummarySchema,
+  InputPreparationRejectionReasonSchema,
+} from './input-preparation';
 import {
   AgentHomeProjectionHashSchema,
   AgentHomeProjectionOutcomeSchema,
@@ -290,6 +297,95 @@ export const AgentHomeProjectionReadbackSchema = z
 export type AgentHomeProjectionReadback = z.infer<typeof AgentHomeProjectionReadbackSchema>;
 
 // ---------------------------------------------------------------------------
+// Remote input preparation completion/readback. Same shape as the Agent-home
+// pair above and for the same reason: the device -> cloud leg of a task-free
+// control request is a direct AUTHENTICATED HTTP call, not a mailbox envelope,
+// because the daemon may advance its server -> daemon cursor only once the
+// terminal fact is durably recorded — and an outbox envelope gives it nothing
+// to wait on.
+//
+// The completion is a discriminated union rather than an outcome enum plus
+// optional siblings: `prepared` without a receipt, or `rejected` carrying one,
+// must both be unrepresentable rather than merely discouraged.
+// ---------------------------------------------------------------------------
+
+export const InputPreparationCompletionRequestSchema = z.discriminatedUnion('outcome', [
+  z
+    .object({
+      outcome: z.literal('prepared'),
+      requestId: z.uuid(),
+      agentRef: AgentRefSchema,
+      profileId: InputPreparationProfileIdSchema,
+      policyRevision: InputPreparationPolicyRevisionSchema,
+      receipt: InputPreparationReceiptSummarySchema,
+    })
+    .strict(),
+  z
+    .object({
+      outcome: z.literal('rejected'),
+      requestId: z.uuid(),
+      agentRef: AgentRefSchema,
+      profileId: InputPreparationProfileIdSchema,
+      policyRevision: InputPreparationPolicyRevisionSchema,
+      reason: InputPreparationRejectionReasonSchema,
+    })
+    .strict(),
+]);
+export type InputPreparationCompletionRequest = z.infer<typeof InputPreparationCompletionRequestSchema>;
+
+/** `pending` until the device records a terminal fact; the other two are terminal. */
+export const InputPreparationStatusSchema = z.enum(['pending', 'prepared', 'rejected']);
+export type InputPreparationStatus = z.infer<typeof InputPreparationStatusSchema>;
+
+/**
+ * Tenant/device/request-bound durable readback. `receipt` and `reason` are
+ * present only on their own terminal status, never together and never on
+ * `pending`.
+ */
+export const InputPreparationReadbackSchema = z
+  .object({
+    tenantId: z.string().min(1),
+    deviceId: z.string().min(1),
+    requestId: z.uuid(),
+    agentRef: AgentRefSchema,
+    profileId: InputPreparationProfileIdSchema,
+    policyRevision: InputPreparationPolicyRevisionSchema,
+    status: InputPreparationStatusSchema,
+    receipt: InputPreparationReceiptSummarySchema.optional(),
+    reason: InputPreparationRejectionReasonSchema.optional(),
+    completedAt: z.iso.datetime({ offset: true }).optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const expectsReceipt = value.status === 'prepared';
+    const expectsReason = value.status === 'rejected';
+    if (expectsReceipt !== (value.receipt !== undefined)) {
+      ctx.addIssue({ code: 'custom', path: ['receipt'], message: 'receipt is present exactly when status is "prepared"' });
+    }
+    if (expectsReason !== (value.reason !== undefined)) {
+      ctx.addIssue({ code: 'custom', path: ['reason'], message: 'reason is present exactly when status is "rejected"' });
+    }
+    if ((value.status !== 'pending') !== (value.completedAt !== undefined)) {
+      ctx.addIssue({ code: 'custom', path: ['completedAt'], message: 'completedAt is present exactly when the status is terminal' });
+    }
+  });
+export type InputPreparationReadback = z.infer<typeof InputPreparationReadbackSchema>;
+
+/**
+ * Query identity for the status GET. The request key is
+ * `(deviceId, agentRef, requestId)`; `deviceId` comes from bearer auth, the
+ * path carries `requestId`, so only the AgentRef halves travel as query
+ * parameters.
+ */
+export const InputPreparationStatusQuerySchema = z
+  .object({
+    agentId: z.string().min(1),
+    profileRevision: z.string().min(1),
+  })
+  .strict();
+export type InputPreparationStatusQuery = z.infer<typeof InputPreparationStatusQuerySchema>;
+
+// ---------------------------------------------------------------------------
 // POST /byok/agent-memory-projections — optional hosted, redacted, one-way
 // snapshots. Tenant and device identity come only from bearer authentication.
 // ---------------------------------------------------------------------------
@@ -338,6 +434,17 @@ export const BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE =
   '/byok/agent-home-projections/:requestId/completion';
 export function byokAgentHomeProjectionCompletionPath(requestId: string): string {
   return `${BYOK_AGENT_HOME_PROJECTIONS_PATH}/${encodeURIComponent(requestId)}/completion`;
+}
+
+/** `PUT /byok/input-preparations/:requestId/completion` and `GET /byok/input-preparations/:requestId`. */
+export const BYOK_INPUT_PREPARATIONS_PATH = '/byok/input-preparations';
+export const BYOK_INPUT_PREPARATION_COMPLETION_ROUTE = '/byok/input-preparations/:requestId/completion';
+export const BYOK_INPUT_PREPARATION_STATUS_ROUTE = '/byok/input-preparations/:requestId';
+export function byokInputPreparationCompletionPath(requestId: string): string {
+  return `${BYOK_INPUT_PREPARATIONS_PATH}/${encodeURIComponent(requestId)}/completion`;
+}
+export function byokInputPreparationStatusPath(requestId: string): string {
+  return `${BYOK_INPUT_PREPARATIONS_PATH}/${encodeURIComponent(requestId)}`;
 }
 
 /** `POST /byok/agent-memory-projections` — optional local-to-hosted redacted snapshot commit. */

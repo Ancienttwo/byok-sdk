@@ -8876,7 +8876,7 @@ export type { OperationalHealthSnapshot, OperationalHealthState } from './daemon
  * drift apart.
  */
 export { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_ERROR_CODES, INPUT_PREPARATION_RECEIPT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INPUT_PREPARATION_REQUEST_FORMAT, INPUT_PREPARATION_VERSION, InputPreparationPolicyError, validateInputPreparationLimits, } from './input-preparation';
-export type { InputPreparationArtifactSummaryV1, InputPreparationAuthorityGrantV1, InputPreparationAuthorityOutcomeV1, InputPreparationAuthorityResolver, InputPreparationBindingV1, InputPreparationCancelParamsV1, InputPreparationContextFileV1, InputPreparationCounterAdapter, InputPreparationCounterAuthorityV1, InputPreparationCounterEvidenceV1, InputPreparationCounterRequestV1, InputPreparationCounterResultV1, InputPreparationCounterTargetV1, InputPreparationCoverageProofV1, InputPreparationDenialReasonV1, InputPreparationDocsPathsV1, InputPreparationErrorCodeV1, InputPreparationLimitsPolicyV1, InputPreparationLookupParamsV1, InputPreparationModelCostV1, InputPreparationModelV1, InputPreparationOptionsV1, InputPreparationPinV1, InputPreparationPromptSnapshotV1, InputPreparationReadinessReasonV1, InputPreparationReceiptV1, InputPreparationRequestV1, InputPreparationRuntimeIdentityV1, InputPreparationScopeClaimV1, InputPreparationSelectionV1, InputPreparationSnapshotV1, InputPreparationSourceV1, InputPreparationStateV1, InputPreparationToolV1, InputPreparationUserMessageV1, } from './input-preparation';
+export type { InputPreparationArtifactSummaryV1, InputPreparationAuthorityGrantV1, InputPreparationAuthorityOutcomeV1, InputPreparationAuthorityResolver, InputPreparationSourceAuthorityRequestV1, InputPreparationSourceAuthorityOutcomeV1, InputPreparationBindingV1, InputPreparationCancelParamsV1, InputPreparationContextFileV1, InputPreparationCounterAdapter, InputPreparationCounterAuthorityV1, InputPreparationCounterEvidenceV1, InputPreparationCounterRequestV1, InputPreparationCounterResultV1, InputPreparationCounterTargetV1, InputPreparationCoverageProofV1, InputPreparationDenialReasonV1, InputPreparationDocsPathsV1, InputPreparationErrorCodeV1, InputPreparationLimitsPolicyV1, InputPreparationLookupParamsV1, InputPreparationModelCostV1, InputPreparationModelV1, InputPreparationOptionsV1, InputPreparationPinV1, InputPreparationPromptSnapshotV1, InputPreparationReadinessReasonV1, InputPreparationReceiptV1, InputPreparationRequestV1, InputPreparationRuntimeIdentityV1, InputPreparationScopeClaimV1, InputPreparationSelectionV1, InputPreparationSnapshotV1, InputPreparationSourceV1, InputPreparationStateV1, InputPreparationToolV1, InputPreparationUserMessageV1, } from './input-preparation';
 export { INPUT_PREPARATION_CANCEL_METHOD, INPUT_PREPARATION_IDENTIFIER_MAX_BYTES, INPUT_PREPARATION_LOOKUP_METHOD, INPUT_PREPARATION_PREPARE_METHOD, parseInputPreparationCancelParams, parseInputPreparationLookupParams, parseInputPreparationRequestParams, } from './daemon/control-protocol';
 export type { InputPreparationResult } from './daemon/control-protocol';
 export { journalHash, JournalUnavailableError, JournalCorruptError, JournalRecordTooLargeError, JournalUnknownTaskError, JournalClosedError, } from './daemon/journal/journal';
@@ -9186,6 +9186,19 @@ export type InputPreparationAuthorityOutcomeV1 = {
     readonly authorized: false;
     readonly reason: InputPreparationDenialReasonV1;
 };
+/** A trusted Host decision binding the exact source pair to the supplied snapshot. */
+export type InputPreparationSourceAuthorityOutcomeV1 = {
+    readonly authorized: true;
+    readonly source: InputPreparationSourceV1;
+} | {
+    readonly authorized: false;
+    readonly reason: InputPreparationDenialReasonV1;
+};
+export interface InputPreparationSourceAuthorityRequestV1 {
+    readonly grant: InputPreparationAuthorityGrantV1;
+    readonly source: InputPreparationSourceV1;
+    readonly snapshot: InputPreparationSnapshotV1;
+}
 /**
  * The configured local authority. It owns the device/Agent/Profile records this
  * daemon trusts and decides whether the claimed scope may be disclosed at all.
@@ -9198,6 +9211,8 @@ export type InputPreparationAuthorityOutcomeV1 = {
  */
 export interface InputPreparationAuthorityResolver {
     resolveScope(claim: InputPreparationScopeClaimV1): Promise<InputPreparationAuthorityOutcomeV1>;
+    /** Independently verify source and snapshot under the already verified scope grant. */
+    resolveSource(request: InputPreparationSourceAuthorityRequestV1): Promise<InputPreparationSourceAuthorityOutcomeV1>;
 }
 /** The exact endpoint and model one counter call is bound to. */
 export interface InputPreparationCounterTargetV1 {
