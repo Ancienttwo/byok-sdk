@@ -12,6 +12,7 @@ import type {
   InputPreparationSnapshotV1,
 } from '../../input-preparation';
 import type { McpToolsetServerObservation } from '../../mcp/observation';
+import type { McpLaunchAttestation } from '../../daemon/trusted-launch-cwd';
 import { filterMcpObservationForPolicy, projectMcpTools, qualifiedMcpToolName } from '../../mcp/projection';
 import { PI_PACKAGE_NAME, resolvePiRuntimeIdentity } from './resolve-bin';
 
@@ -421,6 +422,19 @@ export interface McpToolFingerprintInput {
   readonly inputSchema: unknown;
   /** The resolved native runtime identity string the binding already uses. */
   readonly runtimeIdentity: string;
+  /**
+   * WHERE this tool's server is launched, and through what.
+   *
+   * Carried beside the toolset's `definitionRevision` rather than inside it
+   * (`daemon/toolset-registry.ts`): that digest is the operator's configured
+   * intent — the `command`/`args` they wrote and the classification they
+   * declared — and an SDK launcher upgrade is not a change to their
+   * configuration. Both are still bound here, so a launch directory or a
+   * launcher that changed between preparation and launch is drift and the
+   * frozen manifest is refused, without churning the operator's revision on
+   * every SDK release.
+   */
+  readonly launch: McpLaunchAttestation;
 }
 
 /** Everything one Pi-native tool's fingerprint binds. */
@@ -443,6 +457,7 @@ export async function mcpToolObservationFingerprint(input: McpToolFingerprintInp
     toolName: input.toolName,
     toolSchemaDigest: await canonicalDigest(input.inputSchema),
     runtimeIdentity: input.runtimeIdentity,
+    launch: { launchCwd: input.launch.launchCwd, launcher: input.launch.launcher },
     implementationIdentity: TOOL_IMPLEMENTATION_IDENTITY_UNAVAILABLE,
   });
 }
@@ -471,6 +486,14 @@ export interface ToolExecutorsRequest {
   readonly permissionMode: PermissionMode;
   /** `toolsetId` -> the registry's definition revision for it. Every observed toolset must appear. */
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
+  /**
+   * The launch boundary this task's MCP servers were observed under and will
+   * run under — `daemon/trusted-launch-cwd.ts`'s
+   * {@link McpLaunchAttestation}. Required, not optional: a manifest frozen
+   * without it would validate a launch in any directory, which is the exact
+   * fact it exists to pin.
+   */
+  readonly launch: McpLaunchAttestation;
   /** Pi's own tools, already filtered by policy, in the order they are registered. */
   readonly nativeTools: readonly { readonly name: string; readonly parameters: unknown }[];
   readonly runtimeIdentity: string;
@@ -530,6 +553,7 @@ export async function buildToolExecutorsFromObservation(
       toolName: tool.toolName,
       inputSchema: tool.inputSchema,
       runtimeIdentity: request.runtimeIdentity,
+      launch: request.launch,
     });
   }
   return Object.freeze({

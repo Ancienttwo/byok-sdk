@@ -25,6 +25,7 @@ import {
   inputPreparationRuntimeIdentityString,
   type InputPreparationService,
 } from './input-preparation-service';
+import type { McpLaunchAttestation } from './trusted-launch-cwd';
 import type { InputPreparationCompletionClient } from './input-preparation-completion-client';
 
 /**
@@ -73,6 +74,8 @@ void _localCodesAreWireReasons;
 
 /** What the daemon observed for the payload's `requiredToolsets`. */
 export interface RemoteInputPreparationObservation {
+  /** Actual verified direct-spawn boundary used by the observation probe. */
+  readonly launch: McpLaunchAttestation;
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
   /** `toolsetId` -> the registry's definition revision. Every observed toolset must appear. */
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
@@ -217,6 +220,7 @@ async function buildRequest(
   try {
     ({ toolExecutors } = await buildToolExecutorsFromObservation({
       observation: observed.observation,
+      launch: observed.launch,
       // This task-free lane fingerprints the complete observed snapshot it
       // compiled above. Non-narrowing projection is explicit; it grants no
       // execution permission and the unattested receipt remains not-ready.

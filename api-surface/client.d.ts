@@ -3453,6 +3453,7 @@ import { type ProgressBatcherOptions } from './progress-batcher';
 import { type AgentEgressReliableAppendResult } from './agent-egress-controller';
 import { type AgentEgressStatus } from './agent-egress-policy';
 import { type AgentEgressSanitizer } from './agent-egress-sanitizer';
+import type { McpLaunchCwdConfig } from './trusted-launch-cwd';
 import { type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
 import { type AgentMemoryHostedProjection } from './agent-memory';
 import type { AgentMemoryFilesystemHelperConfig } from './agent-memory-filesystem';
@@ -3887,6 +3888,26 @@ export interface DaemonConfig {
      * believes a limit is in force.
      */
     inputPreparation?: InputPreparationDaemonConfig;
+    /**
+     * Operator input to the MCP toolset launch boundary
+     * (`./trusted-launch-cwd.ts`), forwarded verbatim to
+     * `TaskRunnerDeps.mcpLaunchCwd`.
+     *
+     * Absent means the platform default directory and — only when this process
+     * is provably plain Node — `process.execPath` as the launcher interpreter.
+     * Neither default is assumed: both are proven per offer, and an offer whose
+     * boundary this daemon cannot prove is declined non-retryably rather than
+     * started without one.
+     *
+     * A PRESENT section is validated here, at construction, the same discipline
+     * `deviceAssertion` and `inputPreparation` follow: a non-absolute `dir`, or a
+     * `launcherInterpreter` that is not an existing regular file, is a
+     * construction error rather than a per-offer decline nobody reads. What
+     * cannot be decided here is deliberately left to the resolver: whether the
+     * directory is still non-writable is a fact about the filesystem NOW, so it
+     * is proven once per offer and never cached.
+     */
+    mcpLaunchCwd?: McpLaunchCwdConfig;
 }
 /**
  * Every part of the local preparation surface is required together. There is no
@@ -4433,6 +4454,17 @@ export interface BuildRuntimeEnvOptions {
      */
     platform?: NodeJS.Platform;
 }
+/**
+ * Environment variable names that change how an interpreter LOADS code, and
+ * which therefore take effect before the first statement of whatever it was
+ * asked to run — including the two launch-cwd launchers, whose entire job is to
+ * establish a trusted working directory before an MCP server binary starts
+ * (`./trusted-launch-cwd.ts`): the POSIX `/bin/sh -c` bootstrap, and this
+ * package's own `bin/byok-launch-cwd.mjs` on win32. The Node launcher
+ * re-asserts this same list on itself, because it is also reached through a
+ * runtime CLI that composes its own child environment.
+ */
+export declare const LOADER_ENV_DENY_PATTERNS: readonly string[];
 /**
  * Build the environment one specific runtime's spawned child process should
  * actually receive — a fresh object, never `options.ambient` itself and
@@ -6579,6 +6611,7 @@ import { type RuntimeDisposalStage } from '../runtime-failure';
 import { type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { TaskQueueWatermark } from './control-protocol';
+import { type McpLaunchCwdConfig } from './trusted-launch-cwd';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import { type ProgressBatcherOptions } from './progress-batcher';
 import type { SessionWorkspaceStore } from './session-workspace-store';
@@ -6781,6 +6814,15 @@ export interface TaskRunnerDeps {
     }>;
     /** Reads the daemon's current validated device-local registry once per offer. */
     getMcpToolsets?: () => ReadonlyMap<string, McpToolsetConfig>;
+    /**
+     * Operator input to the MCP toolset launch boundary
+     * (`./trusted-launch-cwd.ts`). Unset means the platform default directory
+     * and — only when this process is provably plain Node — `process.execPath`
+     * as the launcher interpreter. Neither default is assumed: both are proven
+     * at admission, and an offer that needs a boundary this daemon cannot prove
+     * is declined non-retryably instead of being started without one.
+     */
+    mcpLaunchCwd?: McpLaunchCwdConfig;
     permissionDefaults?: PermissionPolicy;
     workspaceRoot: string;
     /** Strict Agent offer authority. Absent means legacy offers never resolve an Agent home. */
@@ -8156,6 +8198,309 @@ export declare class McpToolsetRegistry {
     report(toolsetId: string, expectedDefinitionRevision: string, observation: McpToolsetObservation): void;
     private statusRows;
 }
+// ==== @byok-sdk/client dist/daemon/trusted-launch-cwd.d.ts ====
+import type { McpStdioServerConfig } from '../types';
+/**
+ * The working directory an MCP toolset SERVER child is launched in, and why it
+ * is not the Agent home.
+ *
+ * A `bun --compile` single-file binary reads `$cwd/bunfig.toml` and runs its
+ * `preload` entries BEFORE any of the program's own code — verified on
+ * Bun 1.4.2, and `--config=/dev/null` does not suppress it for a compiled
+ * binary (it suppresses it only for the bare interpreter, because the flag
+ * reaches the program's argv rather than the runtime). The only control point
+ * is therefore the child's cwd.
+ *
+ * Until this module existed, every MCP toolset server child inherited the
+ * canonical Agent home as its cwd — a directory the agent's own tools write to
+ * by design. Any compiled server binary (Salesko's `salesko-agent mcp serve`
+ * is one) could be handed arbitrary preload code by the agent it is supposed
+ * to be serving.
+ *
+ * The RUNTIME process (the pi/claude/codex CLI itself) keeps the manifest cwd:
+ * session resume and relative-path resolution depend on it, and it is not the
+ * thing this boundary is about.
+ *
+ * Non-writability is PROVEN, never assumed from a mode bit: `resolve` attempts
+ * to create a file in the candidate and requires the attempt to fail with
+ * `EACCES`/`EPERM`/`EROFS`. A candidate that accepts the write is rejected
+ * (and the probe file removed) even if its permissions looked right — mode
+ * bits do not account for ACLs, for the effective uid, or for a filesystem
+ * that was remounted read-write.
+ *
+ * The probe alone is not the boundary, because both of its premises are things
+ * this uid can change:
+ *
+ * - A directory OWNED by this uid answers the probe with `EACCES` while its
+ *   owner remains free to `chmod` it writable first. Ownership by another uid
+ *   (root, for the intended immutable versioned release directory) is therefore
+ *   required, not just a cleared write bit.
+ * - `rename(2)` replaces a directory using write permission on its PARENT.
+ *   A root-owned 0555 directory sitting inside a directory this uid can write
+ *   is a directory this uid can swap out wholesale. So every ancestor up to the
+ *   volume root is put through the identical check.
+ *
+ * WHAT DOES THE CHDIR, on each platform:
+ *
+ * - POSIX (darwin, linux): the trusted system `/bin/sh`, run as
+ *   `sh -c 'cd -- "$0" && exec "$@"' <dir> <command> [...args]`. The shell is
+ *   already on the machine, is root-owned and not group/other-writable (both
+ *   proven here, not assumed), reads no rc file for `-c`, and `exec`s so the
+ *   runtime CLI's child IS the server. No Node host is required, which is the
+ *   point: a daemon embedded in a `bun --compile` product executable has a
+ *   trusted launcher without attesting anything.
+ * - win32: this package's `bin/byok-launch-cwd.mjs`, which needs a real Node
+ *   host. A host that is not plain Node (Bun, Deno, a single-executable
+ *   application) and attests no interpreter is REFUSED, fail-closed. There is
+ *   deliberately no Windows shell path: `cmd.exe` has no `exec`, and its
+ *   quoting rules are not something a boundary should be built on.
+ *
+ * A launch-cwd PASS asserts WHERE the server starts. It does not assert that
+ * the launcher or the executor is the binary it claims to be — that is the
+ * separate attested-install work.
+ */
+/** Operator-supplied inputs to {@link resolveTrustedLaunchCwd}. Both fields are optional and both are validated. */
+export interface McpLaunchCwdConfig {
+    /**
+     * An absolute directory to launch MCP toolset servers in, in preference to
+     * the platform default. It must still pass every check below — a configured
+     * directory is a preference, never an exemption.
+     *
+     * The intended value is an immutable, root-owned versioned release
+     * directory. `os.tmpdir()` and anything else this daemon's own uid can write
+     * is rejected by the write probe: the agent runs at that same uid in the
+     * common deployment, so such a directory isolates other users and nothing
+     * else.
+     */
+    readonly dir?: string;
+    /**
+     * ESCAPE HATCH, not a supported path. An absolute path to a Node executable
+     * used to run this package's `bin/byok-launch-cwd.mjs` for the runtimes whose
+     * MCP configuration cannot express a per-server cwd (claude, codex).
+     *
+     * The supported launchers need no configuration: POSIX bootstraps through the
+     * trusted system `/bin/sh`, and win32 runs the shipped launcher script on a
+     * real Node host. This field exists for the deployment that has neither and
+     * can attest a Node binary of its own. A host that sets it takes on proving
+     * the binary it names is one the agent's uid cannot replace — nothing here
+     * can prove that for an arbitrary path.
+     */
+    readonly launcherInterpreter?: string;
+}
+/**
+ * Why one candidate directory failed, independent of where the candidate came
+ * from. `is_writable` is the one that matters most: it means the write probe
+ * SUCCEEDED, so this uid can create files there and the directory isolates
+ * nobody the agent is not already running as.
+ */
+export type LaunchCwdRejection = 'not_absolute' | 'unreadable' | 'is_a_symlink' | 'not_a_directory' | 'is_writable'
+/**
+ * The candidate is owned by the uid this daemon runs as. A mode bit is not a
+ * boundary against its own owner: the agent, running at that same uid, can
+ * `chmod` the directory writable and then plant `bunfig.toml` in it. Only an
+ * owner OUTSIDE this uid (root, in the intended immutable-release shape) puts
+ * the directory beyond the agent's reach.
+ */
+ | 'owned_by_current_uid'
+/**
+ * An ancestor could not be inspected, is a symlink, is not a directory, is
+ * owned by this uid, or accepted the write probe. Any of those lets this uid
+ * `rename` the candidate out of the way and put its own directory at the same
+ * path — the leaf's own mode never comes into it.
+ */
+ | 'ancestor_unreadable' | 'ancestor_is_a_symlink' | 'ancestor_not_a_directory' | 'ancestor_owned_by_current_uid' | 'ancestor_writable';
+/**
+ * `root_cannot_prove_write_boundary` is uid 0: no directory on the machine is
+ * unwritable by this process, so the boundary cannot be proven at all. The
+ * rest name which candidate was tried and how it failed.
+ */
+export type TrustedLaunchCwdUnavailableReason = 'root_cannot_prove_write_boundary' | 'no_platform_default_directory' | `configured_dir_${LaunchCwdRejection}` | `platform_default_${LaunchCwdRejection}`;
+export type TrustedLaunchCwd = {
+    readonly kind: 'resolved';
+    readonly dir: string;
+} | {
+    readonly kind: 'unavailable';
+    readonly reason: TrustedLaunchCwdUnavailableReason;
+};
+/** The three facts the POSIX launcher check reads off one path. */
+export interface LaunchCwdShellStatEntry {
+    readonly uid: number;
+    /** The permission bits, as `st_mode` carries them. */
+    readonly mode: number;
+    readonly isFile: boolean;
+}
+/**
+ * The `node:fs` calls {@link resolveMcpLaunchCwdLauncher} makes on the system
+ * shell, as one injectable triple. Each call throws exactly as `fs` does when
+ * the path cannot be inspected.
+ */
+export interface LaunchCwdShellStat {
+    readonly lstat: (target: string) => LaunchCwdShellStatEntry;
+    readonly stat: (target: string) => LaunchCwdShellStatEntry;
+    readonly realpath: (target: string) => string;
+}
+/** Seam for the tests that must run the uid-0 and filesystem branches without being root. */
+export interface TrustedLaunchCwdEnvironment {
+    readonly platform?: NodeJS.Platform;
+    readonly getuid?: () => number;
+    readonly env?: Readonly<Record<string, string | undefined>>;
+    /**
+     * The system shell the POSIX launcher bootstraps through. Defaults to
+     * `/bin/sh` and is overridden only by tests, which point it at a shell built
+     * to fail one specific trust check.
+     */
+    readonly systemShell?: string;
+    /**
+     * How the shell's ownership and mode are read. Defaults to real `node:fs`.
+     * Injected by the tests that must exercise a root-owned-but-group-writable
+     * shell, which a non-root test process cannot create on disk.
+     */
+    readonly shellStat?: LaunchCwdShellStat;
+}
+/**
+ * Resolve the directory every MCP toolset server child of this daemon is
+ * launched in, or state why no such directory could be proven.
+ *
+ * Not memoized: the whole result is one `lstat` plus one failed `open`, and a
+ * cached "resolved" would keep asserting a boundary after the directory it
+ * names was remounted, replaced, or chmodded.
+ */
+export declare function resolveTrustedLaunchCwd(config?: McpLaunchCwdConfig, environment?: TrustedLaunchCwdEnvironment): Promise<TrustedLaunchCwd>;
+/**
+ * The POSIX bootstrap program, run as `sh -c <SCRIPT> <trustedCwd> <command>
+ * [...args]`.
+ *
+ * `sh -c` assigns the first word after the program text to `$0` and the rest
+ * to `$1...`, so `$0` is the trusted directory and `"$@"` is the target's argv
+ * with no shell word splitting, no globbing and no quoting round trip: an
+ * argument containing a space, a tab, a newline, a quote, `$(...)`, a backtick,
+ * `*`, `;`, `&&`, `~` or non-ASCII bytes arrives byte-identical.
+ *
+ * `cd --` (rather than a bare `cd`) is what keeps a directory named `-L` or
+ * `-P` from being read as an option. The target is reached through `exec`, so
+ * the shell replaces itself and the runtime CLI's child IS the server: one
+ * pid, signals and exit status pass through with nothing in between.
+ *
+ * `exec -- "$@"` is NOT used, and must not be: dash rejects it outright
+ * (`exec: --: not found`, exit 127). The form below is the one verified on
+ * dash 0.5.12, bash 5.2.37 invoked as `sh`, busybox ash, and macOS `/bin/sh`.
+ *
+ * `cd` is given an ABSOLUTE realpath by {@link wrapMcpServerWithLaunchCwd},
+ * because a relative argument to `cd` is resolved through `CDPATH` — which is
+ * why `CDPATH` (along with `ENV`, `BASH_ENV`, `SHELLOPTS`, `BASHOPTS` and
+ * `PS4`) is in the loader deny list `daemon/environment.ts` enforces.
+ */
+export declare const MCP_LAUNCH_CWD_SHELL_SCRIPT = "cd -- \"$0\" && exec \"$@\"";
+/**
+ * Why no trusted launcher could be produced for this host. Every one of these
+ * refuses the offer: there is no fallback launcher, because every fallback
+ * available here is one the agent's own uid could have written.
+ */
+export type McpLaunchCwdLauncherUnavailableReason = 
+/**
+ * win32 only: this process is not a plain Node that would run the launcher
+ * script it is handed (Bun, Deno, or a single-executable application), and
+ * the operator attested no interpreter. A compiled Bun host is the case that
+ * matters — it would read `$cwd/bunfig.toml` and run its `preload` before the
+ * launcher's own first statement, which is the exact vector this boundary
+ * closes.
+ */
+'launch_cwd_launcher_unavailable'
+/** POSIX: `/bin/sh` could not be inspected at all. */
+ | 'launch_cwd_shell_unreadable'
+/** POSIX: `/bin/sh` resolves to something that is not a regular file. */
+ | 'launch_cwd_shell_not_a_regular_file'
+/**
+ * POSIX: `/bin/sh`, or the symlink standing at that path, is not owned by
+ * root. A shell this uid owns is a shell the agent can replace, and the
+ * bootstrap would then be running the agent's own program.
+ */
+ | 'launch_cwd_shell_not_root_owned'
+/** POSIX: `/bin/sh` is group- or world-writable, so its owner is not the only writer. */
+ | 'launch_cwd_shell_writable';
+/** A launcher that was resolved: which mechanism, what runs it, and what it runs. */
+export type ResolvedMcpLaunchCwdLauncher = 
+/** POSIX: `interpreter` is the realpath of the system shell, `script` is {@link MCP_LAUNCH_CWD_SHELL_SCRIPT}. */
+{
+    readonly kind: 'shell';
+    readonly interpreter: string;
+    readonly script: string;
+}
+/** win32: `interpreter` is a plain-Node executable, `script` is this package's `bin/byok-launch-cwd.mjs`. */
+ | {
+    readonly kind: 'node';
+    readonly interpreter: string;
+    readonly script: string;
+};
+export type McpLaunchCwdLauncher = ResolvedMcpLaunchCwdLauncher | {
+    readonly kind: 'unavailable';
+    readonly reason: McpLaunchCwdLauncherUnavailableReason;
+};
+/** The shipped launcher script, resolved from this package's own root so it works from `dist/` and from source. */
+export declare function launchCwdScriptPath(): string;
+export declare function resolveMcpLaunchCwdLauncher(config?: McpLaunchCwdConfig, environment?: TrustedLaunchCwdEnvironment): McpLaunchCwdLauncher;
+/** What the daemon resolved once per offer and every adapter of that offer launches through. */
+export interface McpLaunchBinding {
+    /** The proven non-writable directory every MCP toolset server child starts in. */
+    readonly cwd: string;
+    /** Present only for adapters whose MCP configuration cannot carry a cwd. */
+    readonly launcher?: ResolvedMcpLaunchCwdLauncher;
+}
+/**
+ * Rewrite one server's `command`/`args` so the child reaches its real
+ * executable already chdir'd into the trusted directory.
+ *
+ * argv is passed through structurally — no shell word splitting, no quoting,
+ * no concatenation — so a server argument containing a space, a quote,
+ * `$(...)`, a semicolon or a newline arrives byte-identical. The `shell`
+ * launcher runs a fixed program text that never interpolates an argument into
+ * itself; the arguments reach it as positional parameters.
+ *
+ * `env` is carried through untouched: it is the server's own task-scoped
+ * authority and the launcher is not a place to edit it.
+ *
+ * Three refusals, all fail-closed, all specific to the fact that a shell now
+ * stands between the runtime and the server:
+ *
+ * - A relative `cwd` would be resolved by `cd` through `CDPATH`, so the
+ *   directory the boundary names must be absolute.
+ * - A `command` starting with `-` would be read by `exec` as one of ITS own
+ *   options rather than as the program to run.
+ * - A relative `command` is a PATH lookup performed after the chdir, which is
+ *   not the identity the binding attested. It is not resolved here — this
+ *   module does not own a PATH lookup and is not the place to invent one — so
+ *   it is refused.
+ *
+ * The last two are this wrapper's OWN boundary assertion, standing behind the
+ * registry rule rather than substituting for it: `./toolset-registry.ts` already
+ * refuses a non-absolute or option-like `command` at load, so an operator's
+ * configuration can never reach here carrying one. These stay because this
+ * function also wraps commands the registry never saw — the SDK's reserved
+ * helpers — and because a wrapper that quietly launched whatever it was handed
+ * would make the earlier rule the only thing holding the boundary up.
+ */
+export declare function wrapMcpServerWithLaunchCwd(server: Readonly<McpStdioServerConfig>, binding: McpLaunchBinding & {
+    readonly launcher: ResolvedMcpLaunchCwdLauncher;
+}): McpStdioServerConfig;
+/**
+ * The identity of the launch path, as a value a fingerprint can bind.
+ *
+ * Deliberately NOT folded into the toolset's `definitionRevision`
+ * (`./toolset-registry.ts`): that digest is the operator's configured intent —
+ * the `command`/`args` they wrote and the read/mutation classification they
+ * declared. An SDK launcher upgrade is not a change to their configuration,
+ * and making it one would churn every stored revision on every SDK release.
+ * It is drift of a different fact, so it is bound as a different fact.
+ *
+ * `kind` is part of the bound value: a shell bootstrap and a Node launcher are
+ * different launch mechanisms and must never fingerprint equal, even in the
+ * degenerate case where they were handed the same two strings.
+ */
+export interface McpLaunchAttestation {
+    readonly launchCwd: string;
+    readonly launcher: ResolvedMcpLaunchCwdLauncher | null;
+}
+export declare function mcpLaunchAttestation(binding: McpLaunchBinding): McpLaunchAttestation;
 // ==== @byok-sdk/client dist/daemon/truth-memory-client.d.ts ====
 import { type ContentHash, type TruthRecordKind, type TruthRecordSelector } from '@byok-sdk/core';
 import type { DeviceProofSigner } from './device-proof-signer';
@@ -8456,7 +8801,8 @@ export type OperationalHealthFixResult = {
     sizeBytes: number;
 };
 // ==== @byok-sdk/client dist/index.d.ts ====
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, Session, GitWorkspaceConfig, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, Session, GitWorkspaceConfig, McpLaunchBinding, McpLaunchCwdConfig, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, LaunchCwdRejection, TrustedLaunchCwd, TrustedLaunchCwdUnavailableReason, } from './types';
+export { resolveMcpLaunchCwdLauncher, resolveTrustedLaunchCwd } from './daemon/trusted-launch-cwd';
 export type { AgentRef } from './agent-home';
 export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjection, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home';
 export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store';
@@ -10103,12 +10449,14 @@ export declare function isReservedMcpServerName(name: string): boolean;
 // ==== @byok-sdk/client dist/types.d.ts ====
 import type { AgentEvent, PermissionPolicy, TaskOfferPayload } from '@byok-sdk/protocol';
 import type { RuntimeEnvironmentRequirements } from './daemon/environment';
+import type { McpLaunchBinding } from './daemon/trusted-launch-cwd';
 import type { AgentRef } from './agent-home';
 import type { McpToolsetServerObservation } from './mcp/observation';
 export type { AgentRef } from './agent-home';
 export type { McpServerObservation, McpToolDescriptor, McpToolsetServerObservation, } from './mcp/observation';
 export type { AgentEgressPolicy } from '@byok-sdk/protocol';
 export type { RuntimeEnvironmentRequirements } from './daemon/environment';
+export type { LaunchCwdRejection, McpLaunchBinding, McpLaunchCwdConfig, TrustedLaunchCwd, TrustedLaunchCwdUnavailableReason, } from './daemon/trusted-launch-cwd';
 export interface GitWorkspaceConfig {
     mode: 'local-checkpoints';
 }
@@ -10330,6 +10678,50 @@ export interface RuntimeAdapterDescriptor {
      * declaration.
      */
     readonly requiresMcpToolsetToolObservation?: boolean;
+    /**
+     * HOW this adapter's MCP toolset server children get the trusted launch
+     * working directory (`daemon/trusted-launch-cwd.ts`).
+     *
+     * `'direct-cwd'` — the adapter spawns the servers itself and passes the
+     * directory to `spawn` (pi: its SDK-owned extension opens each server from
+     * the task-scoped config the adapter writes).
+     *
+     * `'launcher-wrapped'` — an external CLI spawns the servers from a
+     * configuration format with no per-server cwd field (claude's `mcpServers`
+     * JSON, codex's `-c mcp_servers.*`), so the adapter must rewrite each
+     * server's `command`/`args` through this package's
+     * `bin/byok-launch-cwd.mjs`.
+     *
+     * Optional, including for an adapter declaring `capabilities.mcpToolsets`.
+     * `TaskRunner` resolves the trusted directory for every such task and hands
+     * it to the adapter, but it resolves a LAUNCHER only for
+     * `'launcher-wrapped'`; a host platform where no launcher is available then
+     * declines the offer non-retryably. An adapter that declares nothing is
+     * admitted with no launcher, exactly like `'direct-cwd'`, and is itself
+     * responsible for starting its MCP server children in the trusted
+     * directory it was handed: the SDK cannot make a third-party adapter launch
+     * through a launcher by declining here. The three bundled adapters all
+     * declare their mode explicitly.
+     */
+    readonly mcpServerLaunch?: 'direct-cwd' | 'launcher-wrapped';
+    /**
+     * Whether this adapter GENERATES a reserved approval MCP server of its own
+     * when it is started under `policy.mode: 'confirm'` (claude's
+     * `--permission-prompt-tool` server, `adapters/claude/claude-adapter.ts`).
+     *
+     * Such a server exists nowhere in the daemon's projected `mcpServers` map,
+     * so the daemon cannot see it by counting that map — but it is an MCP
+     * server child of the task like any other, and it must start in the same
+     * proven-non-writable launch directory (`daemon/trusted-launch-cwd.ts`).
+     * `TaskRunner` therefore resolves the launch binding for a `confirm`-mode
+     * task on an adapter that declares this, even when the task projects no
+     * host toolset and needs no reserved helper at all.
+     *
+     * Omission means "generates none": an adapter that generates one and does
+     * not declare it would receive no binding and its own fail-closed guard
+     * refuses the start rather than launching the server unwrapped.
+     */
+    readonly generatesApprovalMcpServer?: boolean;
 }
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
 export interface RuntimeAdapterPrepareInput {
@@ -10423,6 +10815,16 @@ export interface RuntimeOperationStartInput {
     readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
     /** {@link McpToolsetToolObservation} for exactly the projected toolset servers in `mcpServers`. */
     readonly mcpToolsetTools?: McpToolsetToolObservation;
+    /**
+     * The proven-non-writable directory every MCP toolset server child of this
+     * task is launched in, plus the launcher an external CLI needs to reach it.
+     *
+     * Resolved ONCE per offer by `TaskRunner` (`daemon/trusted-launch-cwd.ts`)
+     * and carried here so every spawn site of one task agrees on one directory.
+     * Present whenever `mcpServers` is; an adapter that finds MCP servers
+     * without it must refuse rather than fall back to its own cwd.
+     */
+    readonly mcpLaunch?: McpLaunchBinding;
     /** Optional, adapter-agnostic out-of-band approval channel. */
     readonly approvalChannel?: ApprovalChannel;
 }

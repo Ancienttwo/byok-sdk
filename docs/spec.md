@@ -691,6 +691,20 @@ snapshot before claim, and rejects missing ids or colliding server names.
 Runtime selection also requires an adapter that advertises `mcpToolsets`; no
 semantic fallback to a tool-less runtime exists.
 
+`command` must be an absolute path. A definition carrying a bare name, a
+relative path (`mcp_toolset_command_not_absolute`) or a command starting with
+`-` (`mcp_toolset_command_option_like`) is rejected when it enters the registry
+— at daemon construction and at every reload — so it never reaches an admission
+probe, a claim, or a runtime `start()`. Nothing is resolved, normalized or
+looked up on PATH: a bare name is a lookup performed in the child's environment
+at spawn time, which would make the registry's content revision identify a
+string rather than a program, and the launch-directory boundary chdirs before
+that lookup would happen. The rule is global across pi, codex and claude. An
+absolute path is not executor attestation — it says the device named one file,
+not that the file is the product it claims to be. SDK-reserved helper servers
+are unaffected: they are built from `process.execPath` or an asserted-absolute
+host executable, never from operator configuration.
+
 Before admitting a toolset task the daemon starts each projected server and
 reads its own `initialize` + `tools/list` answer. That observation — full tool
 descriptors, the server's self-reported identity and the negotiated protocol
@@ -736,6 +750,150 @@ under it. The two fail-closed refusals therefore apply only under a narrowing
 mode: a toolset with no declaration at all cannot run under `readonly` or
 `plan` and is declined by name, and a projected server the mode leaves with no
 callable tool declines the whole admission rather than half-satisfying it.
+
+### The launch working directory
+
+Every MCP server child the daemon is responsible for — the admission probe, pi's
+own pool, and the servers claude and codex spawn from the configuration the SDK
+writes them — starts in a directory this daemon's uid has been PROVEN unable to
+write. The runtime CLI itself is unaffected and keeps its manifest cwd, because
+session resume and relative-path resolution depend on it.
+
+The boundary is scoped by ORIGIN-INDEPENDENCE: it covers every MCP server the
+task will generate, not only the host toolsets the device projects. The
+reserved SDK helpers the daemon injects (agent messaging, agent memory) and the
+reserved approval server a runtime adapter generates for itself under
+`policy.mode: 'confirm'` are the same kind of child, launched by the same CLI
+from the same inherited cwd. `TaskRunner` therefore resolves the binding
+whenever a task will generate at least one server of any origin — the projected
+toolsets, the reserved helpers it adds, or a server the picked adapter declares
+it generates itself (`RuntimeAdapterDescriptor.generatesApprovalMcpServer`
+paired with the effective mode) — and an adapter's own fail-closed guard counts
+the configuration it GENERATED, not the map the daemon handed it. A task that
+generates no MCP server at all resolves no binding and is never refused for
+one.
+
+The reason is an interpreter fact, not a hypothetical: a `bun --compile`
+single-file binary reads `$cwd/bunfig.toml` and runs its `preload` entries
+before any of the program's own code, and `--config=/dev/null` does not suppress
+that for a compiled binary. Until this boundary existed, those children
+inherited the canonical Agent home — the directory the agent's own tools write
+by design — so an agent could hand arbitrary preload code to the very server it
+was being served by. Controlling the cwd is the only control point for it.
+
+The directory is resolved once per offer, and non-writability is proven rather
+than assumed: the daemon attempts to create a file in the candidate and requires
+the attempt to fail with `EACCES`, `EPERM` or `EROFS`. A candidate that accepts
+the write is rejected even if its mode bits looked right — mode bits do not
+account for ACLs, for the effective uid, or for a filesystem remounted
+read-write. The candidate is `DaemonConfig.mcpLaunchCwd.dir` (forwarded to
+`TaskRunnerDeps.mcpLaunchCwd`) when the operator configured one (the intended
+value is an immutable, root-owned versioned release directory), otherwise the
+platform default: `/` on POSIX, `%SystemRoot%` on Windows. A directory this same
+uid can write — anything under `os.tmpdir()` included — is refused: the agent's
+tools run at that same uid, so a 0700 random directory isolates other users and
+nothing else. A symlink is refused rather than followed.
+
+The probe alone is not the boundary, because both of its premises are facts this
+uid can change, so the directory AND every ancestor up to the volume root must
+lie outside this uid's control. A directory OWNED by this uid answers the probe
+with `EACCES` while its owner stays free to `chmod` the write bit back, so
+ownership by another uid (root, in the intended shape) is required rather than a
+cleared write bit — `..._owned_by_current_uid` names that rejection. And
+`rename(2)` replaces a directory using write permission on its PARENT, not on
+the directory being replaced, so a root-owned 0555 directory inside a directory
+this uid can write is one this uid can swap out wholesale; every ancestor is put
+through the identical check, and `..._ancestor_writable`,
+`..._ancestor_owned_by_current_uid`, `..._ancestor_is_a_symlink`,
+`..._ancestor_not_a_directory` and `..._ancestor_unreadable` name which link of
+the chain failed.
+
+Two conditions make the boundary unprovable, and both refuse the offer
+non-retryably instead of admitting an unprotected launch:
+
+- **Running as uid 0.** No directory on the machine is unwritable by root, so
+  the daemon reports `root_cannot_prove_write_boundary`. This is a documented
+  limitation of running the daemon as root, not a default that is quietly
+  filled in.
+
+  Windows has the same posture under a different name. A daemon running
+  elevated (Administrator) can create files in `%SystemRoot%`, so the platform
+  default accepts the write probe and is refused with
+  `platform_default_is_writable`; every MCP toolset launch on that host is then
+  refused. The refusal is the boundary working, not a defect. To get a usable
+  launch cwd there, run the daemon non-elevated, and use a default or
+  explicitly configured directory that passes the same directory proof; an
+  explicit `mcpLaunchCwd.dir` is not an elevation bypass — whether it is usable
+  depends only on the proof result.
+- **No trusted launcher.** claude's `mcpServers` JSON and codex's
+  `-c mcp_servers.*` have no per-server cwd field, so each server there is
+  reached through a launcher that changes directory and then execs the real
+  command with its argv passed through structurally — no shell word splitting,
+  no quoting, so an argument containing a space, a tab, a newline, a quote,
+  `$(...)`, a backtick, `*`, `;` or `&&` arrives byte-identical. Which launcher
+  depends on the platform, and a host that has neither is refused:
+
+  | Platform | Launcher | Evidence |
+  |---|---|---|
+  | darwin | trusted system `/bin/sh` bootstrap | verified on the development host |
+  | linux | trusted system `/bin/sh` bootstrap (dash, bash-as-sh, busybox) | verified in containers |
+  | win32 | `bin/byok-launch-cwd.mjs` on a real Node host; a non-Node host without a trusted launcher is refused | three separate facts: (a) the launcher executed for real on windows-latest — VERIFIED on run 34975106907/34975103065 (job 104400732107): 10/10 launcher cases including the target's terminal state; the termination behaviour of launcher and target is verified for that runner and process shape, the forwarding mechanism is not observed (run 34960882911 failed in the test fixture; run 34965275367 failed the earlier launcher-only signal assertion — `docs/researches/20260915-c07-launch-cwd-shell-bootstrap-evidence.md`); (b) a writable platform default refused with `platform_default_is_writable` — VERIFIED on run 34960882911, whose elevated runner produced exactly that refusal, and pinned by a unit test; (c) non-elevated admission of a real directory on Windows — VERIFIED on run 34984246100 (job 104432153979, head 86675f4d): the `npm-release-pack` windows-latest leg ran the same driver under a freshly created non-administrator local account (asserted `BUILTIN\Users`, not `BUILTIN\Administrators`, Medium integrity), both negative-control writes to `%SystemRoot%` and the volume root were denied, the real platform default resolved under that token, the packed Pi stack's reserved MCP server started in the trusted directory, and all three `packed-cli-mcp` `tools/call` paths passed; teardown revoked the account's ACEs by SID and removed it. This is admission and the forward smoke on that runner and process shape; it says nothing about elevated hosts (see the uid-0/elevated bullet) — `docs/researches/20260915-c07-launch-cwd-shell-bootstrap-evidence.md` |
+
+  On POSIX the launcher is `sh -c 'cd -- "$0" && exec "$@"' <dir> <command>
+  [...args]`: `$0` is the trusted directory and `"$@"` is the target's argv, so
+  nothing is ever interpolated into the program text. The shell is required to
+  be a root-owned, non-group/other-writable regular file (checked on the
+  realpath, with the `/bin/sh` symlink itself required to be root-owned too);
+  otherwise the offer is refused with `launch_cwd_shell_not_root_owned`,
+  `launch_cwd_shell_writable`, `launch_cwd_shell_not_a_regular_file` or
+  `launch_cwd_shell_unreadable`. No Node host is needed, so a daemon embedded in
+  a `bun --compile` product executable has a trusted launcher with no
+  configuration at all.
+
+  On win32 the launcher is this package's `bin/byok-launch-cwd.mjs`, which needs
+  a real Node: a daemon embedded in a `bun --compile` product executable must not
+  run it on `process.execPath`, because Bun would read `bunfig.toml` and preload
+  before the launcher's own first statement. `process.execPath` is used only when
+  the process is provably plain Node (not Bun, not Deno, not a single-executable
+  application); any other win32 host is refused with
+  `launch_cwd_launcher_unavailable`. There is deliberately no Windows shell path.
+
+  A launch-cwd PASS asserts WHERE the server starts. It does **not** assert that
+  the launcher or the executor is the binary it claims to be — launcher/executor
+  identity integrity is the separate attested-install work (§26).
+
+`McpLaunchCwdConfig` reaches the daemon as `DaemonConfig.mcpLaunchCwd`, which
+`createDaemon` forwards verbatim to `TaskRunnerDeps.mcpLaunchCwd`. An absent
+section leaves the host on the platform default directory and the platform
+launcher above, which is the supported shape. `launcherInterpreter` is an
+ESCAPE HATCH for a host that has neither platform launcher and can attest a Node
+binary of its own; it is not a supported path, and a host that sets it takes on
+proving the binary it names is one the agent's uid cannot replace. A present
+section is validated at CONSTRUCTION — `dir` must be absolute, and
+`launcherInterpreter` must be an absolute path to an existing regular file — so
+a host that configured a boundary it cannot have fails to start rather than
+discovering it on the first offer that needed one. What construction deliberately
+does not decide is whether the directory is still outside this uid's control:
+that is a fact about the filesystem now, so it is proven once per offer and
+never cached.
+
+Loader environment variables are denied absolutely, above every allowlist layer
+including the operator's own `runtimeEnvironment.<id>.allow`. `NODE_OPTIONS`,
+`NODE_REPL_EXTERNAL_MODULE`, `NODE_PATH`, `BUN_*`, `DYLD_*` and `LD_*` change how
+an interpreter loads code before the launcher's first statement; `ENV`,
+`BASH_ENV`, `SHELLOPTS`, `BASHOPTS`, `CDPATH` and `PS4` do the same to the shell
+bootstrap (`ENV`/`BASH_ENV` name a file the shell sources first, `SHELLOPTS` is
+imported by bash-as-sh and applied before the script, `CDPATH` redirects a
+relative `cd`, `PS4` is expanded while tracing). The Node launcher re-asserts the
+same list on itself and refuses to start if it sees one, because it is also
+reached through a runtime CLI that composes its own child environment.
+
+The launch directory and the launcher's identity are bound into the prepared
+launch path's executor fingerprints as their own fact, beside the toolset's
+`definitionRevision` rather than inside it: an SDK launcher upgrade is drift a
+frozen manifest must refuse, but it is not a change to the operator's configured
+`command`/`args`, and folding it in would churn every stored revision on every
+SDK release.
 
 The authenticated local control socket accepts an expected-revision
 compare-and-swap reload of the complete registry. The CLI host reads
