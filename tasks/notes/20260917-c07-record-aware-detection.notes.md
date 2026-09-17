@@ -11,3 +11,11 @@
 ## Design acceptance receipt
 
 Supervisor accepted a4dab4a4 and independently checked freeze8e9d8416. `reviewPending` is false for this docs-only design subject. Product ABI and write scope are still pending their own review. Q1-Q4 directional decisions are recorded in the review file; no implementation or executable-vector acceptance is inferred. P4 gate remains accepted/unrepeated; old row4 evidence and notes remain unchanged.
+
+## Exact product candidate preparation
+
+- Read-only explorer plus root confirmed all current detect consumers and defaults/injected arrays. Product remains a4dab4a4's product base; no build/test/pack or executable vectors. Root is sole documentation writer.
+- New pressure points: identity.ts resolver includes launch env digests; trusted-launch-cwd non-writability uses wx; generic detect runs before Pi resources.kind. Candidate does not fabricate env/launch identity, write-probe from detection, or a default pi-rpc target.
+- Proposed optional installed method and finite refused arm remain candidates. Shared measured-installation has a distinct top-level tag and lacks env fields; type/parser exclusion from spawn is an acceptance requirement. Read-only cwd facts do not prove ACL non-writability.
+- Q5 complete-top-level observation is recommended for review; exact aggregate shape/precedence and release-commonality reuse remain open. This does not silently activate the proposed source/test/spec/golden inventory. Pre-fix drivers follow accepted exact product registration, not this document.
+- New evidence directory `_ops/c07-record-aware-detection-product-candidate/`; original freeze8e9d8416 preserved. Separate acceptance90d598cc retained. No P4 gate, old notes/row4 or native decision packet altered.

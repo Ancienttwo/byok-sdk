@@ -78,3 +78,7 @@ Design names real consumers, end-to-end binding/error paths, mutually exclusive 
 ## Stop conditions
 
 Stop before product or executable vector files, a new authority or launch kind, generic Error.message forwarding, relaxed record/loader security, current spec mutation, new dependency/pin, or external action. If any negative vector needs a missing upstream/native/Host capability, mark the implementation gate blocked rather than inventing data or removing the vector. No full-suite rerun as a docs acceptance proxy.
+
+## Exact product candidate review (not activated)
+
+The original docs subject a4dab4a4 is accepted. The research addendum now proposes distinct shared physical measurement, an explicit installed observation method, strict refused/reason projection and the full consumer/driver inventory. Only the five existing documentation paths remain writable. Product inventory is deliberately NOT an allowed_paths extension. Q5 (generic observation before runtime lane selection) must be decided, along with structural spawn exclusion and read-only cwd semantics, before an exact product contract/pre-fix driver is activated. Neither preliminary direction nor this registration permits product code, spec/golden or test files.

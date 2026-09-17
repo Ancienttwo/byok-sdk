@@ -11,3 +11,7 @@ Supervisor independently verified freeze SHA256 `8e9d84162c12fa6cc6dca777f790475
 Q1 measured local installation is preferred, without --version augmentation/candidate execution/schema-success-as-available. Q2 explicit client-owned observation context must cover the real default daemon construction route; injected adapters must receive an explicit unsupported-refusal lane rather than replacement. Q3 finite SDK-owned typed projection; extend versus new kind remains a product-review choice with spec/golden single cutover; generic kind-only remains for genuinely unknown errors. Q4 missing facts remain unavailable/unknown under the reviewed contract, never enable not-enabled dispatch. These are directions, not finalized public signatures.
 
 Next review is a new boundary: exact API/spec/golden decisions, pre-fix regression drivers, all affected consumers and precise product scope/gate. Original design vectors remain unexecuted.
+
+## Next boundary submitted separately
+
+The exact product candidate in the research addendum is pending review. It includes the two shared-physical/read-only-cwd pressure points and a new Q5 source finding: generic detection precedes instruction/prepared lane selection. No implicit pi-rpc default is retained. Requested ruling covers explicit complete-top-level observation versus scope-unknown, followed by exact API/path activation. This pending state does not reopen the accepted a4dab4a4 design receipt.
