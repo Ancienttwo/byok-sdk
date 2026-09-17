@@ -103,6 +103,44 @@ export type {
 } from './agent-home-projection';
 
 export {
+  AGENT_INPUT_PREPARATION_CAPABILITY,
+  InputPreparationContentHashSchema,
+  InputPreparationPolicyRevisionSchema,
+  InputPreparationProfileIdSchema,
+  InputPreparationSourceSchema,
+  InputPreparationModelCostSchema,
+  InputPreparationModelSchema,
+  InputPreparationOptionsSchema,
+  InputPreparationSelectionSchema,
+  InputPreparationContextFileSchema,
+  InputPreparationDocsPathsSchema,
+  InputPreparationPromptSnapshotSchema,
+  InputPreparationUserMessageSchema,
+  InputPreparationContextDocumentSchema,
+  InputPreparationStateSchema,
+  InputPreparationReadinessReasonSchema,
+  InputPreparationRuntimeIdentitySchema,
+  InputPreparationCounterTargetSchema,
+  InputPreparationCounterEvidenceSchema,
+  InputPreparationArtifactSummarySchema,
+  InputPreparationBindingSchema,
+  InputPreparationReceiptSummarySchema,
+  InputPreparationRejectionReasonSchema,
+} from './input-preparation';
+export type {
+  InputPreparationSource,
+  InputPreparationModel,
+  InputPreparationOptions,
+  InputPreparationSelection,
+  InputPreparationContextDocument,
+  InputPreparationState,
+  InputPreparationReadinessReason,
+  InputPreparationRuntimeIdentity,
+  InputPreparationReceiptSummary,
+  InputPreparationRejectionReason,
+} from './input-preparation';
+
+export {
   AGENT_MEMORY_PROJECTION_CAPABILITY,
   AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES,
   AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE,
@@ -177,6 +215,7 @@ export {
   AgentContentReadPayloadSchema,
   AgentContentReceiptPayloadSchema,
   AgentHomeProjectionPayloadSchema,
+  AgentInputPreparationPayloadSchema,
   TaskApprovePayloadSchema,
   TaskRejectPayloadSchema,
   TaskCancelPayloadSchema,
@@ -224,6 +263,7 @@ export type {
   AgentContentReadPayload,
   AgentContentReceiptPayload,
   AgentHomeProjectionPayload,
+  AgentInputPreparationPayload,
   TaskApprovePayload,
   TaskRejectPayload,
   TaskCancelPayload,
@@ -307,6 +347,15 @@ export {
   byokBlobFinalizePath,
   byokBlobUrlPath,
   byokBlobContentPath,
+  BYOK_INPUT_PREPARATIONS_PATH,
+  BYOK_INPUT_PREPARATION_COMPLETION_ROUTE,
+  BYOK_INPUT_PREPARATION_STATUS_ROUTE,
+  byokInputPreparationCompletionPath,
+  byokInputPreparationStatusPath,
+  InputPreparationCompletionRequestSchema,
+  InputPreparationStatusSchema,
+  InputPreparationReadbackSchema,
+  InputPreparationStatusQuerySchema,
 } from './http-api';
 export type {
   PairRequest,
@@ -328,6 +377,10 @@ export type {
   AgentHomeProjectionReadback,
   AgentMemoryProjectionCommitRequest,
   AgentMemoryProjectionCommitResponse,
+  InputPreparationCompletionRequest,
+  InputPreparationStatus,
+  InputPreparationReadback,
+  InputPreparationStatusQuery,
 } from './http-api';
 
 export type { TaskOfferType } from './messages';

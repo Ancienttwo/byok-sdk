@@ -155,6 +155,32 @@ function minimalPayload(type: MessageType): unknown {
         projectionHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
         projection: { schemaVersion: 'opaque.v1' },
       };
+    case 'agent.input.preparation':
+      return {
+        requestId: '00000000-0000-4000-8000-000000000025',
+        agentRef: { agentId: 'agent-1', profileRevision: '1' },
+        profileId: 'profile-1',
+        policyRevision: 'limits-r1',
+        source: { revision: 'src-r1', digest: 'sha256:src' },
+        selection: {
+          model: {
+            id: 'model-1',
+            name: 'Model One',
+            api: 'openai-completions',
+            provider: 'provider-1',
+            baseUrl: 'https://provider.example/v1',
+            reasoning: false,
+            input: ['text'],
+            cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 128000,
+            maxTokens: 4096,
+          },
+          options: { cacheRetention: 'none', maxTokens: 1024 },
+        },
+        deadlineAt: '2026-01-01T00:00:30.000Z',
+        context: { inline: '{"prompt":{},"messages":[]}' },
+        requiredToolsets: ['team'],
+      };
     case 'task.approve':
       return {};
     case 'task.reject':
