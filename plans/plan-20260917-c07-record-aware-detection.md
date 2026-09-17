@@ -1,6 +1,6 @@
 # Plan: C07 record-aware detection and typed refusal
 
-> Status: Authorized docs-only design registration; SDK review pending
+> Status: Docs-only design accepted at a4dab4a4; exact product registration pending
 > Task Profile: docs-only
 > Task Contract: `tasks/contracts/20260917-c07-record-aware-detection.contract.md`
 > Task Review: `tasks/reviews/20260917-c07-record-aware-detection.review.md`
@@ -25,8 +25,9 @@ P3: one authority per datum; reuse measurement, do not duplicate the record read
 - [x] Confirm clean SDK subject and read current specification/public call paths.
 - [x] Map detect, default/injected adapter construction, task/daemon validation and local display consumers.
 - [x] Register closed docs-only paths, authority constraints and semantic negative vectors.
-- [ ] Supervisor SDK design review: settle the bounded observation route, authority delivery and strict result projection shape.
-- [ ] Record accepted decisions or required corrections; product registration is a separate authorization boundary.
+- [x] Supervisor bounded design review accepted a4dab4a4 and freeze8e9d8416; Q1-Q4 directions accepted without freezing API shape.
+- [x] Record accepted directions and exact product-entry prerequisites; product registration remains a separate review boundary.
+- [ ] Submit exact API/spec/golden decisions, pre-fix driver plan and coherent consumer/path scope for product review; do not write product before acceptance.
 
 ## Verification
 

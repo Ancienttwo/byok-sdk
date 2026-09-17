@@ -7,3 +7,7 @@
 - .ai/context/context-map.json read. Referenced capabilities.json is absent in this worktree; no scoped agent context added or repaired. No CodeGraph directory, so source reads used explicit known paths.
 - Existing source/notes evidence and accepted gates are unchanged. Row4 LOW is retained report-only; future citations use exact measured interval, not whole-function claims.
 - Validation receipts will be stored in _ops/c07-record-aware-detection-design; no build/typecheck/full/pack repetition on unchanged products.
+
+## Design acceptance receipt
+
+Supervisor accepted a4dab4a4 and independently checked freeze8e9d8416. `reviewPending` is false for this docs-only design subject. Product ABI and write scope are still pending their own review. Q1-Q4 directional decisions are recorded in the review file; no implementation or executable-vector acceptance is inferred. P4 gate remains accepted/unrepeated; old row4 evidence and notes remain unchanged.
