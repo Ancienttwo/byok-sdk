@@ -1,0 +1,23 @@
+bun test v1.4.2 (744846f84)
+
+packages/client/src/__tests__/custody-charge-once-double-charge.test.ts:
+195 |       );
+196 | 
+197 |       // THE contract assertion: runner->print is a zero-charge bootstrap edge,
+198 |       // so the print child must observe the contract depth 1. The unfixed
+199 |       // vendor wiring increments at every physical spawn and observes 2.
+200 |       expect(probe.env.PI_SUBAGENT_DEPTH).toBe(CONTRACT_PRINT_DEPTH);
+                                                ^
+error: expect(received).toBe(expected)
+
+Expected: "1"
+Received: "2"
+
+      at <anonymous> (/Users/kito/Projects/byok-sdk-wt-wp3-wiring/packages/client/src/__tests__/custody-charge-once-double-charge.test.ts:200:43)
+(fail) custody charge-once: one logical delegation charges one depth level > print child observes the contract depth projection 1 after rpc->runner->print [2368.47ms]
+
+ 0 pass
+ 1 fail
+ 6 expect() calls
+Ran 1 test across 1 file. [2.44s]
+RED_EXIT=1
