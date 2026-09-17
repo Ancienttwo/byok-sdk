@@ -41,3 +41,11 @@ Product frozen9f697036 (26 source/test/golden files). Additional read-only cwd27
 d5949148 executor matrix completed all14 packages once: client24 failed/2778 passed/11 skipped; other13 passed. Existing S2 accounts for1; prepared-offer-lane22 + process-restart1 are missing-method fixture wiring, not timing failures. `_ops/c07-installed-observation-product/frozen/failure-classification.{md,json}` records exact P1/P2/P3 and source hashes. Full raw SHA2566d5f4b71f4cc9bd51ab54acda69e153c8a84b6164ec3a1108ea02d3b1c2d8ef7. No product gate acceptance yet.
 
 Supervisor accepts the classification and only two local fake-adapter paths: check exact context/same authority then return explicit synthetic availability. Global stub/old assertions/budgets/product unchanged. New frozen client full once authorized; remaining13 results retain validity by bytes. Findings evidence remains archived.
+
+## Executor final evidence (gate pending)
+
+Fixture correctionc5c5e081 is exactly2 files+21/-3, original assertions/timeouts/global stub/product unchanged. Both local fake methods verify exact keys, authority identity, enabled-top-level scope before synthetic available. Focused prepared suites27/27. Supervisor independently accepted scope/correction.
+
+Final frozen client full on c5c5e081 ran exactly once:1 inherited S2 failure/2801 pass/11 skip,235 pass files/1 fail/2 skip; discovery23 fixture failures gone. Full original path `_ops/c07-installed-observation-product/final-client/test-client-full.log`, SHA256 225ccb048f6f873213830061824cd61558bbaf28cb370a501f856017c688759f. Client typecheck exit0. Other13 packages retain d5949148 one-run results, all exit0 with exact per-log hashes in result.json/frozen/full-matrix.json. Combined5172 pass/1 inherited fail/141 skipped; not a full-suite-green or full-S2 claim.
+
+Frozen d5949148 root build/typecheck/api/version/graph/workflow each exit0. Only client+identity goldens changed;8 unchanged golden hashes+312 protected files recorded. New tests and TypeScript negative are real, fixtures remain synthetic install bytes/uid seam (not real release proof). Independent gate will rerun build/typecheck/focus/API/strict/real release-pack; no full duplication. Executor did not run pack. Formal read set is `_ops/c07-installed-observation-product/gate-request.md` and freeze.json. No push/merge/publish/stage/install.

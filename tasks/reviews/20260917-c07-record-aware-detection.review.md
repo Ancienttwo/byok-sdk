@@ -23,3 +23,7 @@ Owner-thread supervisor receipt accepts af77aee2 items1-7, Q5-A complete top-lev
 ## Product gate allocation
 
 Supervisor checkpoint allocates one full matrix to executor on frozen tested head. Independent gate does not repeat full; it reruns build/typecheck, routing/strict-result/physical-parity/host-binding/cwd/closure,10 golden checks (2 changed/8 unchanged), strict/diff/attribution and real release-pack. Full original logs plus hashes are required. Product gate pending; no push.
+
+## Frozen executor handoff
+
+Product9f697036; discovery tested d5949148; fixture-only correctionc5c5e081. Discovery findings preserved and supervisor-approved two-path correction passed27 focused and final client full (only inherited S2). Remaining13 packages reuse unchanged bytes and own raw logs. Independent gate remains PENDING; no self-issued PASS/acceptance, no repeated full requested. Scope and result hashes live in ignored evidence directory, not a second product authority.
