@@ -46,12 +46,12 @@ const modelConfig = {
     supportsUsageInStreaming: true, maxTokensField: 'max_tokens', thinkingFormat: 'zai', zaiToolStream: true },
 };
 let child;
-async function rpcState(command,args,options,custodyProbe) {
+async function rpcState(command,args,options,custodyProbe,timeoutMs = 30_000) {
   child=spawn(command,args,{...options,stdio:['pipe','pipe','pipe']});
   const closed=once(child,'close');
   let stderr=''; child.stderr.on('data',bytes=>{stderr+=bytes.toString();});
   const lines=createInterface({input:child.stdout});
-  const timer=setTimeout(()=>child.kill('SIGTERM'),30_000);
+  const timer=setTimeout(()=>child.kill('SIGTERM'),timeoutMs);
   try {
     const iterator = lines[Symbol.asyncIterator]();
     const request = async (frame) => {
@@ -428,13 +428,16 @@ await runtime.dispose();
       await mkdir(path.dirname(configPath),{recursive:true}); await writeFile(configPath,keysConfigBytes);
       await rm(reservedServerCwdMarker,{force:true});
       try {
+        // Windows lowpriv CI rounds 8-9 (35206575959, 35208560163): this
+        // keys chain (launcher + SQLite + ACL powershell + pi host) exceeds
+        // the default 30s cap on its first cold execution; scoped here only.
         const state=await rpcState(keysInvocation.command,keysInvocation.args,{...keysInvocation.options,env:{
           ...keysInvocation.options.env,
           // Deliberately challenge the real keys projection with extra ambient
           // names after the captured client boundary, without changing argv.
           ZAI_API_KEY:env.ZAI_API_KEY,UNRELATED_CANARY:env.UNRELATED_CANARY,
           BYOK_PI_MCP_CONFIG_PATH:env.BYOK_PI_MCP_CONFIG_PATH,BYOK_PI_PERMISSION_MODE:env.BYOK_PI_PERMISSION_MODE,
-        }},custodyProbe);
+        }},custodyProbe,process.platform === 'win32' ? 120_000 : 30_000);
         assert.equal(state.model.provider,'byok-sdk-packed-zai');
         assert.equal(state.model.id,profile.model);
         assert.equal(state.model.contextWindow,modelConfig.contextWindow);
