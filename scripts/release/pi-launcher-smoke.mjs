@@ -215,8 +215,8 @@ createInterface({ input: process.stdin }).on('line', line => {
   // inline test observer; it is NOT registry evidence inside the keys child.
   await writeFile(toolsObserver, `import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync} from 'node:fs';
-import {createAgentSessionServices,createAgentSession,AgentSessionRuntime} from ${JSON.stringify(piEntry)};
-import {createByokMcpExtension} from ${JSON.stringify(sdkMcpExtension)};
+import {createAgentSessionServices,createAgentSession,AgentSessionRuntime} from ${JSON.stringify(pathToFileURL(piEntry).href)};
+import {createByokMcpExtension} from ${JSON.stringify(pathToFileURL(sdkMcpExtension).href)};
 const config=JSON.parse(readFileSync(${JSON.stringify(mcpConfigPath)},'utf8'));
 const services=await createAgentSessionServices({
  cwd:${JSON.stringify(dir)},agentDir:${JSON.stringify(path.join(dir,'observer-agent'))},
