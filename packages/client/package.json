@@ -69,9 +69,9 @@
   "dependencies": {
     "@byok-sdk/core": "workspace:*",
     "@byok-sdk/protocol": "workspace:*",
-    "@earendil-works/pi-coding-agent": "npm:@byok-sdk/pi-coding-agent@0.85.1001",
+    "@earendil-works/pi-coding-agent": "npm:@byok-sdk/pi-coding-agent@0.85.1002",
     "@juicesharp/rpiv-todo": "2.8.0",
-    "pi-mcp-adapter": "2.27.0",
+    "@modelcontextprotocol/client": "2.0.0",
     "pi-subagents": "0.60.0",
     "pi-web-access": "0.24.1"
   },

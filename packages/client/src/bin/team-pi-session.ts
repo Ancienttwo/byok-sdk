@@ -10,9 +10,21 @@ import { codexTeamNotification } from './team-codex-relay';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const DIALOGS = new Set(['confirm', 'select', 'input', 'editor']);
 export interface PiInteractionResponse { sessionId: string; requestId: string; response: { cancelled: true } | { confirmed: boolean } | { value: string }; }
+/**
+ * The task-scoped file the SDK's own MCP extension reads
+ * (`../adapters/pi/mcp-extension.ts`). A relay projects only SDK-reserved
+ * helpers, whose tools the extension reads live from the helper itself, so
+ * `observation` — the daemon's frozen view of HOST toolset servers — is
+ * always empty here.
+ */
+export interface TeamPiMcpConfig {
+  mcpServers: Readonly<Record<string, { command: string; args?: readonly string[]; env?: Readonly<Record<string, string>> }>>;
+  observation: Readonly<Record<string, never>>;
+}
+
 export interface PiTeamSessionOptions {
   workspaceId: string; cwd: string; sessionDir: string; provider: string; model: string;
-  systemPrompt: string; mcpConfig: Record<string, unknown>; extensionPaths?: readonly string[];
+  systemPrompt: string; mcpConfig: TeamPiMcpConfig; extensionPaths?: readonly string[];
   onEvent: (event: Record<string, unknown>) => void;
 }
 
@@ -48,7 +60,7 @@ export class PiTeamSession {
       }
       const packageDir = clientPackageRoot();
       const args = ['--mode', 'rpc', '--session-dir', options.sessionDir, '--provider', options.provider, '--model', options.model,
-        '--system-prompt', promptPath, '--no-extensions', '--no-context-files', '--no-skills', '--no-prompt-templates', '--no-themes', '--no-builtin-tools', '--exclude-tools', 'mcp,mcpScript',
+        '--system-prompt', promptPath, '--no-extensions', '--no-context-files', '--no-skills', '--no-prompt-templates', '--no-themes', '--no-builtin-tools',
         '--extension', path.join(packageDir, 'dist/adapters/pi/team-interaction-extension.js'),
         '--extension', path.join(packageDir, 'dist/adapters/pi/mcp-extension.js')];
       for (const extension of options.extensionPaths ?? []) args.push('--extension', extension);

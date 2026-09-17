@@ -348,9 +348,9 @@ remain the only device protocol.
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. `@byok-sdk/client` depends on the exact npm
-artifact `@byok-sdk/pi-coding-agent@0.85.1001` — the SDK's fork of upstream
+artifact `@byok-sdk/pi-coding-agent@0.85.1002` — the SDK's fork of upstream
 0.85.1 at `d981de1`, carrying the prepared-session-input seam — declared as
-`"@earendil-works/pi-coding-agent": "npm:@byok-sdk/pi-coding-agent@0.85.1001"`
+`"@earendil-works/pi-coding-agent": "npm:@byok-sdk/pi-coding-agent@0.85.1002"`
 so the import specifier and the installed directory stay upstream while the
 resolved manifest carries the fork identity. That one manifest entry is the
 authority for both halves: `PI_PACKAGE_NAME` is the resolution specifier and
@@ -690,6 +690,27 @@ into one content-addressed snapshot, resolves every requested id from exactly on
 snapshot before claim, and rejects missing ids or colliding server names.
 Runtime selection also requires an adapter that advertises `mcpToolsets`; no
 semantic fallback to a tool-less runtime exists.
+
+Before admitting a toolset task the daemon starts each projected server and
+reads its own `initialize` + `tools/list` answer. That observation — full tool
+descriptors, the server's self-reported identity and the negotiated protocol
+version — is the only authority on what a toolset contains: configuration
+carries `command`/`args` and cannot say what a server exposes. Every runtime
+binds the same observation, claude and codex by pre-granting the observed
+names and pi by registering one tool per observed tool with that tool's own
+schema. A server that reports a tool name outside the grantable shape fails
+the whole observation and the task is declined permanently.
+
+The registry still carries no per-tool read/mutation classification, so a
+toolset task under any permission mode other than `auto` is declined as an
+inexpressible policy. Making `readonly` usable for a read-only toolset
+requires an operator-owned classification in `DaemonConfig.mcpToolsets`
+(`readOnlyTools`, validated against the observed names). That field is named
+here as the shape such a classification would take; it is **not yet accepted
+by the registry**, and a `McpToolsetConfig` that carries it today is rejected
+as unknown configuration. It is deliberately not inferred from tool names,
+descriptions, schemas, or a server's own `readOnlyHint` annotation, which is
+the server's self-assessment rather than a security authority.
 
 The authenticated local control socket accepts an expected-revision
 compare-and-swap reload of the complete registry. The CLI host reads

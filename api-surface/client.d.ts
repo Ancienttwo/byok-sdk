@@ -835,7 +835,7 @@ export declare function resolvePiBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/pi/resolve-extensions.d.ts ====
 export interface ResolvedPiExtensions {
     readonly webAccess: string;
-    readonly mcpAdapter: string;
+    readonly mcpExtension: string;
     readonly subagentsPolicy: string;
     readonly subagents: string;
     readonly todo: string;
@@ -5594,77 +5594,33 @@ export declare class LocalStoragePressureEngine {
 export declare function createStatfsFreeBytesProvider(dir: string): () => Promise<number>;
 // ==== @byok-sdk/client dist/daemon/mcp-tools-probe.d.ts ====
 import type { McpStdioServerConfig } from '../types';
-export declare const MCP_TOOLS_PROBE_TIMEOUT_MS = 10000;
+import { McpAuthorityError } from '../mcp/client';
+import { type McpServerObservation } from '../mcp/observation';
 /**
- * Hard cap on the bytes one probed server may write to stdout before its
- * `tools/list` answer is complete. The probe reads a fixed two-message
- * handshake, so a server still streaming past this is either broken or
- * hostile; either way it must not be able to grow the daemon's heap while an
- * offer waits on admission. Exceeding it is a probe failure, never a partial
- * observation.
+ * The daemon's admission-time use of the shared MCP core (`../mcp/`).
+ *
+ * This file owns the admission POLICY — the deadlines an offer may wait on and
+ * what the runner does with a failure — and nothing else. The connection, the
+ * byte bounds, the name rules and the descriptor shape all belong to the core,
+ * so the observation the daemon admits on and the one the Pi extension
+ * projects its tools from are the same code reading the same server.
  */
-export declare const MCP_TOOLS_PROBE_MAX_STDOUT_BYTES = 1048576;
+export declare const MCP_TOOLS_PROBE_TIMEOUT_MS = 10000;
 /**
  * The single admission budget for observing ALL of one task's projected
  * toolset servers, however many there are.
  *
  * `handleOffer` runs inside its connection's FIFO, so anything it awaits also
  * delays the `task.cancel` / `task.approve` / next-offer envelopes queued
- * behind it. Probing a toolset's servers one after another would multiply the
- * per-server timeout by the server count — a device configured to the current
- * ceiling (16 toolsets × 16 servers) could hold the control channel for
- * minutes on a single unresponsive command. The runner therefore starts every
- * probe at once and gives each one this same deadline, so total admission
- * latency is bounded by one timeout regardless of server count, and each probe
- * still kills its own child when the deadline expires.
+ * behind it. Observing a toolset's servers one after another would multiply
+ * the per-server timeout by the server count — a device configured to the
+ * current ceiling (16 toolsets × 16 servers) could hold the control channel
+ * for minutes on a single unresponsive command. The runner therefore starts
+ * every observation at once and gives each one this same deadline, so total
+ * admission latency is bounded by one timeout regardless of server count, and
+ * each one still kills its own child when the deadline expires.
  */
 export declare const MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS = 10000;
-/**
- * Tool names an adapter is allowed to pre-grant must be OBSERVED, never
- * configured: the daemon's own `mcpToolsets` config carries `command`/`args`
- * only (see `toolset-registry.ts`), so the single authority for "which tools
- * does this server actually expose" is the server's own `tools/list` answer.
- *
- * A name that survives this filter is about to be interpolated into runtime
- * CLI authority — `--allowedTools mcp__<server>__<tool>` for claude, and
- * `mcp_servers.<server>.tools.<tool>.approval_mode` for codex. A comma, a
- * dot, a quote, or whitespace in a tool name would forge additional grants or
- * a different config key out of one legitimate one.
- *
- * A server that reports ANY name outside this shape fails the whole probe —
- * the observation is rejected, and the task is declined permanently rather
- * than partially granted. Granting the well-formed subset and silently
- * dropping the rest would hand the model a toolset it can only half call, and
- * would let one bad name ride along with good ones; only observed, validated
- * names are ever granted, and a list that cannot be validated in full yields
- * no grant at all. The shape is deliberately narrower than MCP's own
- * (unbounded) name rule: the two real servers this SDK ships and every toolset
- * server observed so far satisfy it, and a legitimate server that does not can
- * still be listed and called by a runtime that grants tools itself — it simply
- * cannot be pre-granted here, and this SDK will not admit a task for it.
- */
-export declare const GRANTABLE_TOOL_NAME: RegExp;
-/**
- * The same rule for the SERVER half of the identifier, enforced at grant
- * resolution (`../adapters/mcp-tool-grants.ts`). A projected server name is
- * interpolated into `mcp__<server>__<tool>` for claude and into the flat TOML
- * key `mcp_servers.<server>.tools.<tool>.approval_mode` for codex: a `.` would
- * split that key into a different table, and a quote, comma, or space would
- * forge a second grant out of one. `toolset-registry.ts` already validates
- * configured server names, so this is the second, local gate that keeps the
- * grant surface honest for a server that reached an adapter some other way.
- */
-export declare const GRANTABLE_MCP_SERVER_NAME: RegExp;
-/**
- * A probe failure caused by the server's own ANSWER rather than by its
- * environment — an ungrantable tool name, a malformed tool entry, or an
- * oversized stream. Retrying cannot change it: the same configured command
- * reports the same names next time. Callers use this to decline the task
- * permanently instead of re-offering it forever (see `task-runner.ts`).
- */
-export declare class McpToolsProbeAuthorityError extends Error {
-    constructor(message: string);
-}
 export interface McpToolsProbeOptions {
     /** Prefix used in every error message, so a failure names the thing that failed. */
     label?: string;
@@ -5689,15 +5645,32 @@ export interface McpToolsProbeOptions {
     cwd?: string;
 }
 /**
- * Start the exact configured stdio MCP server, complete an
- * `initialize` + `tools/list` handshake, and return the reported tool names.
- * No `tools/call` is ever sent, so an authenticated task binding stays unused
- * until the real runtime invokes it.
+ * Observe one projected toolset server: start it, complete `initialize` +
+ * `tools/list`, and return everything it reported about itself.
  *
- * The child is always killed before this resolves — the probe proves the
- * server can start and enumerate its tools; the runtime spawns its own copy.
+ * No `tools/call` is ever sent, so an authenticated task binding stays unused
+ * until the real runtime invokes it. The child is always killed before this
+ * resolves — the observation proves the server can start and enumerate its
+ * tools; the runtime spawns its own copy.
  */
-export declare function probeMcpServerTools(server: Readonly<McpStdioServerConfig>, options: McpToolsProbeOptions): Promise<readonly string[]>;
+export declare function probeMcpServer(serverName: string, server: Readonly<McpStdioServerConfig>, options: McpToolsProbeOptions): Promise<McpServerObservation>;
+/**
+ * The names-only form, for the one caller that proves a helper can START
+ * rather than deciding what a model may call: the Agent message helper
+ * preflight (`./agent-message-mcp-preflight.ts`).
+ */
+export declare function probeMcpServerTools(serverName: string, server: Readonly<McpStdioServerConfig>, options: McpToolsProbeOptions): Promise<readonly string[]>;
+/**
+ * A probe failure caused by the server's own ANSWER rather than by its
+ * environment — an ungrantable tool name, a malformed tool entry, an oversized
+ * stream. Retrying cannot change it: the same configured command reports the
+ * same thing next time. Callers use this to decline the task permanently
+ * instead of re-offering it forever (see `task-runner.ts`).
+ *
+ * The classification is the core's; the retry decision it drives is the
+ * daemon's.
+ */
+export { McpAuthorityError };
 // ==== @byok-sdk/client dist/daemon/memory-guidance.d.ts ====
 /**
  * Runtime-neutral instructions for an Agent's model-authored local memory.
@@ -6613,6 +6586,7 @@ import type { GitWorkspaceManager, GitWorkspaceObservation } from './git-workspa
 import type { GitWorkspaceStore, GitWorkspacePhase } from './git-workspace-store';
 import type { AgentEgressController } from './agent-egress-controller';
 import { type McpToolsProbeOptions } from './mcp-tools-probe';
+import type { McpServerObservation } from '../mcp/observation';
 import type { ResolvedAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
 import type { ResolvedAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
 import { type AgentMemoryAuditWarning, type AgentMemoryHostedProjection } from './agent-memory';
@@ -7028,14 +7002,14 @@ export interface TaskRunnerDeps {
      */
     agentMessageMcpPreflight?: (server: Readonly<McpStdioServerConfig>, env: Readonly<Record<string, string>>, cwd?: string) => Promise<void>;
     /**
-     * Override the `tools/list` observation of a projected toolset MCP server.
-     * Defaults to the real handshake (`mcp-tools-probe.ts`); tests substitute a
-     * stub. It is deliberately NOT optional-with-no-default the way
-     * `agentMessageMcpPreflight` is: an adapter may only grant tool names that
-     * were observed, so a runner with no observation at all would silently
-     * project toolsets the model can list and never call.
+     * Override the `initialize` + `tools/list` observation of a projected
+     * toolset MCP server. Defaults to the real handshake
+     * (`mcp-tools-probe.ts`); tests substitute a stub. It is deliberately NOT
+     * optional-with-no-default the way `agentMessageMcpPreflight` is: an adapter
+     * may only bind tools that were observed, so a runner with no observation at
+     * all would silently project toolsets the model can list and never call.
      */
-    mcpToolsetToolsProbe?: (server: Readonly<McpStdioServerConfig>, options: McpToolsProbeOptions) => Promise<readonly string[]>;
+    mcpToolsetToolsProbe?: (serverName: string, server: Readonly<McpStdioServerConfig>, options: McpToolsProbeOptions) => Promise<McpServerObservation>;
     /** SDK-owned MCP helper injected only into strict Agent tasks. */
     agentMemoryMcpBin?: Readonly<ResolvedAgentMemoryMcpBin>;
     /** Explicit external secure-fs helper. No PATH discovery or bundled native addon exists. */
@@ -9039,7 +9013,7 @@ export interface InputPreparationPinV1 {
  */
 export type InputPreparationStateV1 = 'reserved' | 'counting' | 'counted' | 'cancelled' | 'failed' | 'counter_interrupted';
 /** Why a receipt is not ready. An empty list is the only thing that makes `ready` true. */
-export type InputPreparationReadinessReasonV1 = 'not_counted' | 'counter_interrupted' | 'cancelled' | 'failed' | 'artifact_expired' | 'counter_authority_not_production' | 'counter_coverage_incomplete' | 'compiler_coverage_unknown';
+export type InputPreparationReadinessReasonV1 = 'not_counted' | 'counter_interrupted' | 'cancelled' | 'failed' | 'artifact_expired' | 'counter_authority_not_production' | 'counter_coverage_incomplete' | 'compiler_coverage_unknown' | 'executor_identity_unproven';
 /**
  * The scoped reference plus readiness evidence one preparation answers with.
  *
@@ -9680,6 +9654,272 @@ export declare const localStateRelocation: Readonly<{
     acquire: typeof acquire;
 }>;
 export {};
+// ==== @byok-sdk/client dist/mcp/client.d.ts ====
+import { type CallToolResult, type Tool } from '@modelcontextprotocol/client';
+/**
+ * The SDK's single MCP client authority.
+ *
+ * Every place this package talks MCP goes through here: the daemon's
+ * admission observation (`../daemon/mcp-tools-probe.ts`), the Pi ordinary
+ * extension (`../adapters/pi/mcp-extension.ts`), and the frozen projection the
+ * prepared launch entry consumes. One authority is the point — a second
+ * hand-rolled JSON-RPC dialect (or a third-party adapter's) would be a second
+ * place for the framing, the bounds and the name rules to diverge.
+ *
+ * Protocol, framing and request correlation come from
+ * `@modelcontextprotocol/client@2.0.0`. Only the process layer is ours, and
+ * only because the bounds below cannot be expressed through the package's own
+ * `StdioClientTransport`: it exposes a per-frame `maxBufferSize` and the
+ * child's stderr, but no hook on stdout, so the total-stdout cap that
+ * `mcp-tools-probe.ts` has always enforced would be silently lost. Spawning
+ * ourselves also keeps the environment explicit — `StdioClientTransport`
+ * falls back to `getDefaultEnvironment()` when `env` is omitted, and this SDK
+ * never lets an MCP child inherit the daemon's ambient environment.
+ *
+ * stdio only. No HTTP, no SSE, no OAuth, no unix socket.
+ */
+/**
+ * Hard cap on the bytes one server may write to stdout across the whole
+ * lifetime of an OBSERVATION client, carried over verbatim from the probe this
+ * replaces. The observation reads a fixed handshake, so a server still
+ * streaming past this is either broken or hostile; either way it must not grow
+ * the daemon's heap while an offer waits on admission.
+ *
+ * Deliberately NOT a default: a long-lived call client legitimately receives
+ * more than this across many `tools/call` answers, and a lifetime cap there
+ * would fail a healthy session at an arbitrary point. Callers that have a
+ * bounded lifecycle opt in; everyone else is bounded per frame instead.
+ */
+export declare const MCP_OBSERVATION_MAX_STDOUT_BYTES = 1048576;
+/**
+ * Hard cap on a single JSON-RPC frame, always applied. A server that never
+ * emits a newline cannot make the client accumulate without limit: the read
+ * buffer rejects at this size and the connection fails closed.
+ */
+export declare const MCP_MAX_FRAME_BYTES = 1048576;
+/** Default ceiling for one request/response round trip. */
+export declare const MCP_DEFAULT_REQUEST_TIMEOUT_MS = 10000;
+/**
+ * A failure caused by the server's own ANSWER rather than by its environment:
+ * an ungrantable tool name, a malformed tool entry, an oversized stream, a
+ * refused handshake. Retrying cannot change it — the same configured command
+ * reports the same thing next time — so callers decline permanently rather
+ * than re-offering forever.
+ */
+export declare class McpAuthorityError extends Error {
+    constructor(message: string, options?: {
+        cause?: unknown;
+    });
+}
+/**
+ * A failure of the server's ENVIRONMENT rather than its answer: it could not
+ * be spawned, it exited before answering, the deadline expired, the pipe
+ * broke. These may well succeed later and stay retryable.
+ */
+export declare class McpTransportError extends Error {
+    constructor(message: string, options?: {
+        cause?: unknown;
+    });
+}
+/** The exact stdio server this client drives. Command and args only, like the registry. */
+export interface McpStdioServerSpec {
+    readonly command: string;
+    readonly args?: readonly string[];
+    /**
+     * Layered on top of `env` exactly as the runtime path layers it. Only
+     * SDK-reserved servers ever carry one; host toolset configuration rejects
+     * the field outright (`../daemon/toolset-registry.ts`).
+     */
+    readonly env?: Readonly<Record<string, string>>;
+}
+export interface McpStdioClientOptions {
+    /** Prefix on every error message, so a failure names the thing that failed. */
+    readonly label?: string;
+    /**
+     * The exact base environment the RUNTIME child of this task receives
+     * (`buildRuntimeEnv`) — never `process.env`. Required, deliberately: a
+     * caller that forgets it fails to compile rather than silently reinstating
+     * a blanket passthrough of the daemon's own credentials.
+     */
+    readonly env: Readonly<Record<string, string>>;
+    /** Working directory for the child — the same one the runtime CLI is spawned in. */
+    readonly cwd?: string;
+    /** Per-request deadline. */
+    readonly timeoutMs?: number;
+    /** Opt-in lifetime stdout cap; see {@link MCP_OBSERVATION_MAX_STDOUT_BYTES}. */
+    readonly maxStdoutBytes?: number;
+}
+/**
+ * One connected stdio MCP server.
+ *
+ * The lifecycle is explicit and total: `connect()` starts the child and
+ * completes `initialize`, `close()` always ends the child. There is no lazy
+ * reconnect and no keep-alive hook — a caller that needs the server holds the
+ * client, and a caller that is finished closes it.
+ */
+export declare class McpStdioClient {
+    private readonly server;
+    private readonly options;
+    private readonly client;
+    private readonly transport;
+    private readonly label;
+    private readonly timeoutMs;
+    private connected;
+    constructor(server: McpStdioServerSpec, options: McpStdioClientOptions);
+    /** Start the child and complete `initialize`. */
+    connect(signal?: AbortSignal): Promise<void>;
+    /** The server's self-reported identity, as returned by `initialize`. */
+    serverInfo(): {
+        readonly name: string;
+        readonly version: string;
+    };
+    /** The protocol version this connection negotiated. */
+    protocolVersion(): string;
+    /** Every tool the server reports, across every page. */
+    listTools(signal?: AbortSignal): Promise<readonly Tool[]>;
+    /**
+     * Invoke one tool. An aborted `signal` cancels in band — the protocol layer
+     * sends `notifications/cancelled` for the in-flight request — so a cancelled
+     * call does not orphan work on the server.
+     */
+    callTool(name: string, args: Readonly<Record<string, unknown>> | undefined, options?: {
+        readonly signal?: AbortSignal;
+        readonly timeoutMs?: number;
+    }): Promise<CallToolResult>;
+    /** Always safe to call, including before `connect()` and more than once. */
+    close(): Promise<void>;
+    /**
+     * Map one thrown value onto the two-way split callers act on.
+     *
+     * The split is retryability, and it follows WHO is at fault. A server that
+     * answered — with a result that is not a valid `tools/list`, with a result
+     * type nothing can read, with more pages than the client will walk, or for a
+     * capability it never advertised — has stated a permanent fact about itself;
+     * re-offering the task would ask the same command and get the same answer
+     * forever. A server that timed out, closed, or could not be written to may
+     * well succeed later.
+     *
+     * A JSON-RPC error response the server sent is split the same way, by
+     * {@link AUTHORITY_PROTOCOL_ERROR_CODES}: a rejection of the REQUEST is
+     * permanent, a report of the server's own condition is not.
+     *
+     * An {@link McpAuthorityError} raised inside the transport (an oversized
+     * stream, a refused frame) surfaces through the client's `onerror` funnel
+     * and arrives here unchanged.
+     */
+    private classify;
+}
+// ==== @byok-sdk/client dist/mcp/observation.d.ts ====
+import { type McpStdioClientOptions, type McpStdioServerSpec } from './client';
+/**
+ * Tool names an adapter is allowed to pre-grant must be OBSERVED, never
+ * configured: the daemon's own `mcpToolsets` config carries `command`/`args`
+ * only (see `../daemon/toolset-registry.ts`), so the single authority for
+ * "which tools does this server actually expose" is the server's own
+ * `tools/list` answer.
+ *
+ * A name that survives this filter is about to be interpolated into runtime
+ * CLI authority — `--allowedTools mcp__<server>__<tool>` for claude,
+ * `mcp_servers.<server>.tools.<tool>.approval_mode` for codex, and the
+ * registered Pi tool name for pi. A comma, a dot, a quote, or whitespace in a
+ * tool name would forge additional grants or a different config key out of one
+ * legitimate one.
+ *
+ * A server that reports ANY name outside this shape fails the whole
+ * observation — it is rejected, and the task is declined permanently rather
+ * than partially granted. Granting the well-formed subset and silently
+ * dropping the rest would hand the model a toolset it can only half call, and
+ * would let one bad name ride along with good ones. The shape is deliberately
+ * narrower than MCP's own (unbounded) name rule.
+ */
+export declare const GRANTABLE_TOOL_NAME: RegExp;
+/**
+ * The same rule for the SERVER half of the identifier, enforced at grant
+ * resolution (`../adapters/mcp-tool-grants.ts`). A projected server name is
+ * interpolated into `mcp__<server>__<tool>` for claude and into the flat TOML
+ * key `mcp_servers.<server>.tools.<tool>.approval_mode` for codex: a `.` would
+ * split that key into a different table, and a quote, comma, or space would
+ * forge a second grant out of one.
+ */
+export declare const GRANTABLE_MCP_SERVER_NAME: RegExp;
+/** One tool exactly as its server described it. The model-visible truth, unedited. */
+export interface McpToolDescriptor {
+    readonly name: string;
+    /** Empty string when the server supplied none; never inferred. */
+    readonly description: string;
+    /** The server's own JSON Schema, passed through verbatim. */
+    readonly inputSchema: unknown;
+}
+/** Everything one `initialize` + `tools/list` exchange established about a server. */
+export interface McpServerObservation {
+    readonly serverName: string;
+    readonly serverInfo: {
+        readonly name: string;
+        readonly version: string;
+    };
+    readonly protocolVersion: string;
+    /** Ordered by tool name, code unit. */
+    readonly tools: readonly McpToolDescriptor[];
+}
+/**
+ * One observed server together with the toolset it was projected from.
+ *
+ * The toolset id is the daemon's fact, not the server's, so it is attached
+ * here rather than inside {@link McpServerObservation}: the core observes
+ * servers and knows nothing about the registry. Carrying it ON the entry
+ * instead of in a parallel `serverName -> toolsetId` map is deliberate — two
+ * structures that must agree are two structures that can disagree, and the
+ * projection's ordering is derived from this id.
+ */
+export interface McpToolsetServerObservation extends McpServerObservation {
+    readonly toolsetId: string;
+}
+export interface ObserveMcpServerOptions extends Omit<McpStdioClientOptions, 'maxStdoutBytes'> {
+    readonly signal?: AbortSignal;
+}
+/**
+ * Structural JSON equality: same keys, same values, arrays positionally.
+ *
+ * Object key ORDER is not part of a JSON value, so a server that re-emits the
+ * same schema with its keys in another order has not changed anything and must
+ * not read as drift. This is deliberately a comparison rather than a canonical
+ * serialization: introducing a second canonical form here would make this
+ * module a rival authority to the native `canonicalPreparedValue` that every
+ * digest in this package is computed with.
+ */
+export declare function jsonEquals(left: unknown, right: unknown): boolean;
+/**
+ * Start the exact configured stdio server, complete `initialize` +
+ * `tools/list`, and return everything it said about itself.
+ *
+ * No `tools/call` is ever sent, so an authenticated task binding stays unused
+ * until the real runtime invokes it. The child is always gone before this
+ * resolves — the observation proves the server can start and enumerate its
+ * tools; whoever runs it spawns their own copy.
+ */
+export declare function observeMcpServer(serverName: string, server: McpStdioServerSpec, options: ObserveMcpServerOptions): Promise<McpServerObservation>;
+/** Why a re-observation is not the observation that was frozen. */
+export type McpObservationDriftReason = 'tool_added' | 'tool_removed' | 'tool_description_changed' | 'tool_schema_changed' | 'server_info_changed' | 'protocol_version_changed';
+export interface McpObservationDrift {
+    readonly reason: McpObservationDriftReason;
+    /** Absent for the two server-level reasons. */
+    readonly toolName?: string;
+    readonly detail: string;
+}
+/**
+ * Compare a fresh observation against a frozen one and report EVERY way they
+ * differ.
+ *
+ * Set equality, not containment: a tool that appeared is as much a drift as
+ * one that vanished. A server that grew a tool between preparation and launch
+ * is offering the model authority nobody froze, priced or disclosed — so an
+ * extra tool is rejected rather than skipped, exactly like a missing one.
+ *
+ * The reasons are distinct on purpose. "The schema changed" and "a tool
+ * disappeared" are different operational events with different fixes, and
+ * collapsing them into one "drift" would hide which one happened.
+ */
+export declare function diffMcpObservation(frozen: McpServerObservation, observed: McpServerObservation): readonly McpObservationDrift[];
 // ==== @byok-sdk/client dist/release-identity.d.ts ====
 /** Local Agent application-release identity. It is observability data, never a protocol or capability gate. */
 export interface LocalAgentReleaseIdentity {
@@ -9821,7 +10061,9 @@ export declare function isReservedMcpServerName(name: string): boolean;
 import type { AgentEvent, PermissionPolicy, TaskOfferPayload } from '@byok-sdk/protocol';
 import type { RuntimeEnvironmentRequirements } from './daemon/environment';
 import type { AgentRef } from './agent-home';
+import type { McpToolsetServerObservation } from './mcp/observation';
 export type { AgentRef } from './agent-home';
+export type { McpServerObservation, McpToolDescriptor, McpToolsetServerObservation, } from './mcp/observation';
 export type { AgentEgressPolicy } from '@byok-sdk/protocol';
 export type { RuntimeEnvironmentRequirements } from './daemon/environment';
 export interface GitWorkspaceConfig {
@@ -10000,21 +10242,21 @@ export interface RuntimeAdapterDescriptor {
     /**
      * Whether this adapter actually CONSUMES
      * {@link RuntimeAdapterPrepareInput.mcpToolsetTools} — i.e. whether it
-     * pre-grants each projected toolset server's tools in the runtime's own
-     * grant surface (claude's `--allowedTools`, codex's `enabled_tools` +
-     * per-tool `approval_mode`) and therefore needs the daemon to observe
-     * them first.
+     * needs the daemon to observe each projected toolset server before
+     * admission, because it binds those tools into the runtime's own surface:
+     * claude's `--allowedTools`, codex's `enabled_tools` + per-tool
+     * `approval_mode`, and pi's per-tool registration of the observed schemas.
      *
      * The daemon uses this, and only this, to decide whether to pay for the
-     * pre-admission `tools/list` probe of every projected server
-     * (`daemon/mcp-tools-probe.ts`). An adapter that projects toolsets through
-     * its own proxy and grants them itself (the pi adapter) declares nothing
-     * here and never makes an offer wait on a probe it has no use for.
+     * pre-admission `tools/list` observation of every projected server
+     * (`daemon/mcp-tools-probe.ts`). An adapter that consumes no observation
+     * never makes an offer wait on one it has no use for.
      *
-     * Omission is fail-closed in the direction that matters: no probe means no
-     * observation, and an adapter that does consume the observation rejects a
-     * projected server it has no tool names for (`adapters/mcp-tool-grants.ts`).
-     * A grant is never widened by a missing declaration.
+     * Omission is fail-closed in the direction that matters: no observation
+     * means no names and no schemas, and an adapter that does consume the
+     * observation rejects a projected server it has neither for
+     * (`adapters/mcp-tool-grants.ts`). A grant is never widened by a missing
+     * declaration.
      */
     readonly requiresMcpToolsetToolObservation?: boolean;
 }
@@ -10032,17 +10274,29 @@ export interface RuntimeAdapterPrepareInput {
     mcpToolsetTools?: McpToolsetToolObservation;
 }
 /**
- * Tool names observed by starting each projected toolset MCP server and
- * reading its own `tools/list` answer (`daemon/mcp-tools-probe.ts`), keyed by
- * the projected server name. SDK-reserved servers are never keyed here — they
- * carry their own fixed, single-tool grants inside the adapters.
+ * What each projected toolset MCP server said about itself when the daemon
+ * started it and read its own `initialize` + `tools/list` answer
+ * (`daemon/mcp-tools-probe.ts`), keyed by the projected server name.
+ * SDK-reserved servers are never keyed here — they carry their own fixed,
+ * single-tool grants inside the adapters.
  *
- * This is the ONLY set of names an adapter may pre-grant to a runtime. Device
- * toolset configuration carries `command`/`args` only, so a configured value
- * could never be an authority on what a server exposes; a name absent from
- * this observation is a name the runtime is never told to allow.
+ * This is the ONLY authority an adapter may bind a runtime to. Device toolset
+ * configuration carries `command`/`args` only, so a configured value could
+ * never say what a server exposes; a tool absent from this observation is a
+ * tool no runtime is ever told about.
+ *
+ * It carries FULL descriptors — name, description and the server's own
+ * `inputSchema` — plus the server identity and negotiated protocol version,
+ * because the three runtimes need different parts of the same fact and only
+ * one of them can be authoritative. claude and codex pre-grant by name; pi
+ * registers one tool per MCP tool with the real schema; the prepared launch
+ * path binds the schema digest into a frozen tool manifest. The names-only
+ * view every grant resolver uses is DERIVED from this
+ * (`mcp/projection.ts`'s `mcpToolsetToolNames`), never carried alongside it —
+ * a separately transported name list would be a second authority free to
+ * disagree with the schemas the model was actually shown.
  */
-export type McpToolsetToolObservation = Readonly<Record<string, readonly string[]>>;
+export type McpToolsetToolObservation = Readonly<Record<string, McpToolsetServerObservation>>;
 /** A permanent or currently-unavailable pre-claim admission rejection. */
 export interface RuntimeAdapterRejectedOperation {
     kind: 'reject';

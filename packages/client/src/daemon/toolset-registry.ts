@@ -14,6 +14,7 @@ import type {
   McpToolsetStatus,
 } from '../types';
 import { isReservedMcpServerName } from '../sdk-reserved-mcp';
+import { compareCodeUnits } from '../util/compare-code-units';
 
 const MAX_LOCAL_MCP_SERVERS_PER_TOOLSET = 16;
 const MAX_LOCAL_MCP_ARGS = 64;
@@ -75,10 +76,6 @@ function isNonEmptySingleLine(value: unknown, maxChars = MAX_LOCAL_MCP_TOKEN_CHA
 
 function digest(value: unknown): string {
   return `sha256:${createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex')}`;
-}
-
-function compareCodeUnits(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function canonicalServers(toolset: McpToolsetConfig): readonly unknown[] {

@@ -9,6 +9,7 @@ import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import type { RuntimeAdapter, Session } from '../types';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
+import { observationOf } from './fixtures/mcp-observation';
 
 /**
  * Adapter-level contract for the projected-toolset MCP grant, against the
@@ -103,7 +104,7 @@ describe('projected MCP toolset grant — claude', () => {
       policy: { mode: 'readonly', allowTools: [] },
       env: process.env,
       mcpServers: { saleskoprobe: { command: process.execPath, args: ['/opt/probe.mjs'] } },
-      mcpToolsetTools: { saleskoprobe: ['echo'] },
+      mcpToolsetTools: observationOf({ saleskoprobe: ['echo'] }),
     });
     await drain(session, 1);
 
@@ -143,7 +144,7 @@ describe('projected MCP toolset grant — claude', () => {
       policy: { mode: 'readonly', allowTools: [] },
       env: process.env,
       mcpServers: { saleskoprobe: { command: process.execPath, args: ['/opt/probe.mjs'] } },
-      mcpToolsetTools: { saleskoprobe: ['echo'] },
+      mcpToolsetTools: observationOf({ saleskoprobe: ['echo'] }),
     });
     await drain(session, 1);
 
@@ -178,8 +179,8 @@ describe('projected MCP toolset grant — claude', () => {
       policy: { mode: 'readonly', allowTools: [] },
       env: process.env,
       mcpServers: { saleskoprobe: { command: process.execPath, args: ['/opt/probe.mjs'] } },
-      mcpToolsetTools: { saleskoprobe: ['echo'] },
-      startMcpToolsetTools: { saleskoprobe: ['echo', 'delete_everything'] },
+      mcpToolsetTools: observationOf({ saleskoprobe: ['echo'] }),
+      startMcpToolsetTools: observationOf({ saleskoprobe: ['echo', 'delete_everything'] }),
     })).rejects.toMatchObject({
       category: 'authority',
       retry: 'non-retryable',
@@ -197,7 +198,7 @@ describe('projected MCP toolset grant — claude', () => {
       descriptor: adapter.descriptor,
       requiredToolsetIds: ['salesko'],
       mcpServers: { 'salesko.probe': { command: process.execPath } },
-      mcpToolsetTools: { 'salesko.probe': ['echo'] },
+      mcpToolsetTools: observationOf({ 'salesko.probe': ['echo'] }),
     })).resolves.toMatchObject({
       kind: 'reject',
       retryable: false,
@@ -240,7 +241,7 @@ describe('projected MCP toolset grant — codex', () => {
       policy: { mode: 'readonly', allowTools: [] },
       env: process.env,
       mcpServers: { saleskoprobe: { command: process.execPath, args: ['/opt/probe.mjs'] } },
-      mcpToolsetTools: { saleskoprobe: ['echo'] },
+      mcpToolsetTools: observationOf({ saleskoprobe: ['echo'] }),
     });
     await drain(session, 1);
 
@@ -281,7 +282,7 @@ describe('projected MCP toolset grant — codex', () => {
       policy: { mode: 'readonly', allowTools: [] },
       env: process.env,
       mcpServers: { saleskoprobe: { command: process.execPath, args: ['/opt/probe.mjs'] } },
-      mcpToolsetTools: { saleskoprobe: ['echo'] },
+      mcpToolsetTools: observationOf({ saleskoprobe: ['echo'] }),
     });
     await drain(session, 1);
 
@@ -308,7 +309,7 @@ describe('projected MCP toolset grant — codex', () => {
         descriptor: adapter.descriptor,
         requiredToolsetIds: ['salesko'],
         mcpServers: { saleskoprobe: { command: process.execPath } },
-        mcpToolsetTools: { saleskoprobe: ['echo'] },
+        mcpToolsetTools: observationOf({ saleskoprobe: ['echo'] }),
       })).resolves.toMatchObject({
         kind: 'reject',
         retryable: false,
@@ -347,8 +348,8 @@ describe('projected MCP toolset grant — codex', () => {
       policy: { mode: 'readonly', allowTools: [] },
       env: process.env,
       mcpServers: { saleskoprobe: { command: process.execPath, args: ['/opt/probe.mjs'] } },
-      mcpToolsetTools: { saleskoprobe: ['echo'] },
-      startMcpToolsetTools: { saleskoprobe: ['echo', 'delete_everything'] },
+      mcpToolsetTools: observationOf({ saleskoprobe: ['echo'] }),
+      startMcpToolsetTools: observationOf({ saleskoprobe: ['echo', 'delete_everything'] }),
     })).rejects.toMatchObject({
       category: 'authority',
       retry: 'non-retryable',
@@ -365,7 +366,7 @@ describe('projected MCP toolset grant — codex', () => {
       descriptor: adapter.descriptor,
       requiredToolsetIds: ['salesko'],
       mcpServers: { 'salesko.probe': { command: process.execPath } },
-      mcpToolsetTools: { 'salesko.probe': ['echo'] },
+      mcpToolsetTools: observationOf({ 'salesko.probe': ['echo'] }),
     })).resolves.toMatchObject({
       kind: 'reject',
       retryable: false,

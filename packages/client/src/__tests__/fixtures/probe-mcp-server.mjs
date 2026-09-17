@@ -1,16 +1,19 @@
 #!/usr/bin/env node
 /**
- * A deliberately misbehaving stdio MCP server, used to pin
- * `daemon/mcp-tools-probe.ts`'s contract: which `tools/list` answers are
- * accepted, which are rejected, what the probed child's environment and cwd
- * actually are, and that the child is gone once the probe settles.
+ * A deliberately misbehaving stdio MCP server, used to pin the daemon-facing
+ * half of `daemon/mcp-tools-probe.ts`: what the spawned child is allowed to
+ * see of the daemon's environment and working directory, that it is always
+ * gone once the observation settles, and that an answer the server itself gave
+ * is classified as permanent rather than retryable.
  *
- * The well-behaved counterpart is `toolset-echo-mcp.mjs`, which the live
- * permission smokes use; this one exists to produce answers a real server
- * should never produce.
+ * The protocol-level contract (framing, byte bounds, drift) lives in
+ * `../mcp-core.test.ts` against `mcp-fixture-server.mjs`; this one stays
+ * focused on the child process.
  *
  * Usage: node probe-mcp-server.mjs '<json config>'
- *   tools       raw value placed in `result.tools` (may contain non-strings)
+ *   tools       raw value placed in `result.tools` (may contain non-objects).
+ *               Any object entry without an `inputSchema` gets a trivial one:
+ *               these cases are about NAMES and streams, not schemas.
  *   silent      answer nothing at all, ever (drives the timeout path)
  *   floodBytes  emit at least this many bytes of unrelated stdout first
  *   dumpEnvTo   write the child's own process.env there as JSON
@@ -35,6 +38,15 @@ function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
 
+/** Tool entries pass through untouched except for a default schema. */
+function answeredTools() {
+  const tools = config.tools ?? [];
+  if (!Array.isArray(tools)) return tools;
+  return tools.map((tool) => (tool !== null && typeof tool === 'object' && !Array.isArray(tool)
+    ? { description: '', inputSchema: { type: 'object' }, ...tool }
+    : tool));
+}
+
 createInterface({ input: process.stdin }).on('line', (line) => {
   if (config.silent) return;
   const text = line.trim();
@@ -45,34 +57,46 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   } catch {
     return;
   }
-  if (request.id === 1 && request.method === 'initialize') {
+  const { id, method, params } = request;
+
+  if (id === undefined || id === null) {
+    if (method === 'notifications/initialized') initialized = true;
+    return;
+  }
+
+  if (method === 'initialize') {
     if (
-      request.params?.protocolVersion !== '2024-11-05'
-      || request.params?.capabilities === null
-      || typeof request.params?.capabilities !== 'object'
-      || typeof request.params?.clientInfo?.name !== 'string'
-      || typeof request.params?.clientInfo?.version !== 'string'
+      typeof params?.protocolVersion !== 'string'
+      || params?.capabilities === null
+      || typeof params?.capabilities !== 'object'
+      || typeof params?.clientInfo?.name !== 'string'
+      || typeof params?.clientInfo?.version !== 'string'
     ) {
-      send({ jsonrpc: '2.0', id: 1, error: { code: -32602, message: 'invalid initialize params' } });
+      send({ jsonrpc: '2.0', id, error: { code: -32602, message: 'invalid initialize params' } });
       return;
     }
-    send({ jsonrpc: '2.0', id: 1, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} } } });
+    send({
+      jsonrpc: '2.0',
+      id,
+      result: {
+        protocolVersion: params.protocolVersion,
+        capabilities: { tools: {} },
+        serverInfo: { name: 'byok-probe-fixture', version: '0.0.0' },
+      },
+    });
     return;
   }
-  if (request.method === 'notifications/initialized' && request.id === undefined) {
-    initialized = true;
-    return;
-  }
-  if (request.id !== 2) return;
+
+  if (method !== 'tools/list') return;
   if (!initialized) {
-    send({ jsonrpc: '2.0', id: 2, error: { code: -32002, message: 'server not initialized' } });
+    send({ jsonrpc: '2.0', id, error: { code: -32002, message: 'server not initialized' } });
     clearInterval(keepAlive);
     return;
   }
   if (typeof config.floodBytes === 'number') {
-    // Unrelated, well-formed newline-delimited JSON the probe must skip. The
+    // Unrelated, well-formed newline-delimited JSON the client must skip. The
     // answer never arrives; the byte cap is what ends this.
-    const filler = `${JSON.stringify({ jsonrpc: '2.0', method: 'log', params: { text: 'x'.repeat(4000) } })}\n`;
+    const filler = `${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/message', params: { text: 'x'.repeat(4000) } })}\n`;
     let written = 0;
     while (written < config.floodBytes) {
       process.stdout.write(filler);
@@ -80,6 +104,6 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     }
     return;
   }
-  send({ jsonrpc: '2.0', id: 2, result: { tools: config.tools ?? [] } });
+  send({ jsonrpc: '2.0', id, result: { tools: answeredTools() } });
   clearInterval(keepAlive);
 });

@@ -1,8 +1,14 @@
 import type { AgentEgressPolicy, AgentEvent, PermissionPolicy, TaskOfferPayload } from '@byok-sdk/protocol';
 import type { RuntimeEnvironmentRequirements } from './daemon/environment';
 import type { AgentRef } from './agent-home';
+import type { McpToolsetServerObservation } from './mcp/observation';
 
 export type { AgentRef } from './agent-home';
+export type {
+  McpServerObservation,
+  McpToolDescriptor,
+  McpToolsetServerObservation,
+} from './mcp/observation';
 export type { AgentEgressPolicy } from '@byok-sdk/protocol';
 
 export type { RuntimeEnvironmentRequirements } from './daemon/environment';
@@ -199,21 +205,21 @@ export interface RuntimeAdapterDescriptor {
   /**
    * Whether this adapter actually CONSUMES
    * {@link RuntimeAdapterPrepareInput.mcpToolsetTools} — i.e. whether it
-   * pre-grants each projected toolset server's tools in the runtime's own
-   * grant surface (claude's `--allowedTools`, codex's `enabled_tools` +
-   * per-tool `approval_mode`) and therefore needs the daemon to observe
-   * them first.
+   * needs the daemon to observe each projected toolset server before
+   * admission, because it binds those tools into the runtime's own surface:
+   * claude's `--allowedTools`, codex's `enabled_tools` + per-tool
+   * `approval_mode`, and pi's per-tool registration of the observed schemas.
    *
    * The daemon uses this, and only this, to decide whether to pay for the
-   * pre-admission `tools/list` probe of every projected server
-   * (`daemon/mcp-tools-probe.ts`). An adapter that projects toolsets through
-   * its own proxy and grants them itself (the pi adapter) declares nothing
-   * here and never makes an offer wait on a probe it has no use for.
+   * pre-admission `tools/list` observation of every projected server
+   * (`daemon/mcp-tools-probe.ts`). An adapter that consumes no observation
+   * never makes an offer wait on one it has no use for.
    *
-   * Omission is fail-closed in the direction that matters: no probe means no
-   * observation, and an adapter that does consume the observation rejects a
-   * projected server it has no tool names for (`adapters/mcp-tool-grants.ts`).
-   * A grant is never widened by a missing declaration.
+   * Omission is fail-closed in the direction that matters: no observation
+   * means no names and no schemas, and an adapter that does consume the
+   * observation rejects a projected server it has neither for
+   * (`adapters/mcp-tool-grants.ts`). A grant is never widened by a missing
+   * declaration.
    */
   readonly requiresMcpToolsetToolObservation?: boolean;
 }
@@ -233,17 +239,29 @@ export interface RuntimeAdapterPrepareInput {
 }
 
 /**
- * Tool names observed by starting each projected toolset MCP server and
- * reading its own `tools/list` answer (`daemon/mcp-tools-probe.ts`), keyed by
- * the projected server name. SDK-reserved servers are never keyed here — they
- * carry their own fixed, single-tool grants inside the adapters.
+ * What each projected toolset MCP server said about itself when the daemon
+ * started it and read its own `initialize` + `tools/list` answer
+ * (`daemon/mcp-tools-probe.ts`), keyed by the projected server name.
+ * SDK-reserved servers are never keyed here — they carry their own fixed,
+ * single-tool grants inside the adapters.
  *
- * This is the ONLY set of names an adapter may pre-grant to a runtime. Device
- * toolset configuration carries `command`/`args` only, so a configured value
- * could never be an authority on what a server exposes; a name absent from
- * this observation is a name the runtime is never told to allow.
+ * This is the ONLY authority an adapter may bind a runtime to. Device toolset
+ * configuration carries `command`/`args` only, so a configured value could
+ * never say what a server exposes; a tool absent from this observation is a
+ * tool no runtime is ever told about.
+ *
+ * It carries FULL descriptors — name, description and the server's own
+ * `inputSchema` — plus the server identity and negotiated protocol version,
+ * because the three runtimes need different parts of the same fact and only
+ * one of them can be authoritative. claude and codex pre-grant by name; pi
+ * registers one tool per MCP tool with the real schema; the prepared launch
+ * path binds the schema digest into a frozen tool manifest. The names-only
+ * view every grant resolver uses is DERIVED from this
+ * (`mcp/projection.ts`'s `mcpToolsetToolNames`), never carried alongside it —
+ * a separately transported name list would be a second authority free to
+ * disagree with the schemas the model was actually shown.
  */
-export type McpToolsetToolObservation = Readonly<Record<string, readonly string[]>>;
+export type McpToolsetToolObservation = Readonly<Record<string, McpToolsetServerObservation>>;
 
 /** A permanent or currently-unavailable pre-claim admission rejection. */
 export interface RuntimeAdapterRejectedOperation {

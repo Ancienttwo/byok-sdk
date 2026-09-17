@@ -1,13 +1,17 @@
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { PreparedSessionInputV1 } from '@earendil-works/pi-coding-agent/prepared-session-input';
 import type {
   InputPreparationModelV1,
   InputPreparationOptionsV1,
+  InputPreparationReadinessReasonV1,
   InputPreparationRuntimeIdentityV1,
   InputPreparationSnapshotV1,
 } from '../../input-preparation';
+import type { McpToolsetServerObservation } from '../../mcp/observation';
+import { projectMcpTools, qualifiedMcpToolName } from '../../mcp/projection';
 import { PI_PACKAGE_NAME, resolvePiRuntimeIdentity } from './resolve-bin';
 
 /**
@@ -327,4 +331,195 @@ export function createPiInputPreparationCompiler(): InputPreparationCompiler {
       };
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Tool executor observation fingerprints
+// ---------------------------------------------------------------------------
+
+/**
+ * What the native compiler calls a tool "executor identity" is, on this
+ * device, an OBSERVATION FINGERPRINT — and the two must not be confused.
+ *
+ * The fingerprint binds everything that was actually established about a tool:
+ * the toolset definition revision the daemon resolved it from, the server's
+ * own `serverInfo`, the negotiated protocol version, the tool name, and a
+ * digest of the exact schema the model was shown. Change any of those and the
+ * fingerprint changes, which is what makes drift between preparation and
+ * launch a hard refusal.
+ *
+ * What it does NOT bind is which executable will serve the call. The daemon
+ * holds a server only as `command`/`args`; observation and launch are two
+ * separate spawns, so even hashing the binary in between would be a TOCTOU
+ * claim rather than a proof. Folding `command`/`args` into the fingerprint and
+ * calling the result an identity would be worse than leaving the gap open —
+ * it would read as an integrity guarantee that nothing verifies. So the gap is
+ * carried explicitly instead, as {@link ToolImplementationIdentityV1}, and it
+ * travels into the receipt as a readiness reason that no preparation can clear
+ * (`executor_identity_unproven`).
+ */
+
+/**
+ * Proof of which implementation backs a tool. There is exactly one value
+ * today, and it is the absence of proof.
+ *
+ * A typed marker rather than an omitted field on purpose: it is part of what
+ * every fingerprint hashes, so the day a real proof exists, every previously
+ * issued fingerprint changes — which is correct. A tool whose implementation
+ * is proven is not the same tool as one whose implementation was merely
+ * assumed, and nothing frozen under the weaker claim should silently validate
+ * under the stronger one.
+ */
+export type ToolImplementationIdentityV1 = {
+  readonly kind: 'unavailable';
+  readonly reason: 'implementation_identity_unattested';
+};
+
+export const TOOL_IMPLEMENTATION_IDENTITY_UNAVAILABLE: ToolImplementationIdentityV1 = Object.freeze({
+  kind: 'unavailable',
+  reason: 'implementation_identity_unattested',
+});
+
+type CanonicalPreparedValue =
+  typeof import('@earendil-works/pi-coding-agent/prepared-session-input').canonicalPreparedValue;
+
+/** Memoized for the same reason the compiler is: the native graph is evaluated at most once. */
+let nativeCanonical: Promise<CanonicalPreparedValue> | undefined;
+
+function loadCanonicalPreparedValue(): Promise<CanonicalPreparedValue> {
+  nativeCanonical ??= import('@earendil-works/pi-coding-agent/prepared-session-input').then(
+    (module) => module.canonicalPreparedValue,
+  );
+  return nativeCanonical;
+}
+
+/**
+ * Digest one value with the NATIVE canonical form.
+ *
+ * `canonicalPreparedValue` is the one canonicalization authority in this
+ * package. The native compiler hashes the tool manifest with it, so a
+ * fingerprint computed with a locally written key-sorted serializer could
+ * agree with it today and diverge on the first value where the two definitions
+ * differ.
+ */
+async function canonicalDigest(value: unknown): Promise<string> {
+  const canonical = await loadCanonicalPreparedValue();
+  return createHash('sha256').update(canonical(value), 'utf8').digest('hex');
+}
+
+/** Everything one MCP tool's fingerprint binds. */
+export interface McpToolFingerprintInput {
+  readonly toolsetId: string;
+  /** `toolset-registry.ts`'s digest of the toolset's canonical server list. */
+  readonly toolsetDefinitionRevision: string;
+  readonly serverName: string;
+  readonly serverInfo: { readonly name: string; readonly version: string };
+  readonly protocolVersion: string;
+  readonly toolName: string;
+  /** The server's own schema; digested, not embedded. */
+  readonly inputSchema: unknown;
+  /** The resolved native runtime identity string the binding already uses. */
+  readonly runtimeIdentity: string;
+}
+
+/** Everything one Pi-native tool's fingerprint binds. */
+export interface NativeToolFingerprintInput {
+  readonly toolName: string;
+  /** The tool's model-visible schema; digested, not embedded. */
+  readonly parameters: unknown;
+  readonly runtimeIdentity: string;
+}
+
+export async function mcpToolObservationFingerprint(input: McpToolFingerprintInput): Promise<string> {
+  return canonicalDigest({
+    v: 1,
+    source: 'mcp',
+    toolsetId: input.toolsetId,
+    toolsetDefinitionRevision: input.toolsetDefinitionRevision,
+    serverName: input.serverName,
+    serverInfo: { name: input.serverInfo.name, version: input.serverInfo.version },
+    protocolVersion: input.protocolVersion,
+    toolName: input.toolName,
+    toolSchemaDigest: await canonicalDigest(input.inputSchema),
+    runtimeIdentity: input.runtimeIdentity,
+    implementationIdentity: TOOL_IMPLEMENTATION_IDENTITY_UNAVAILABLE,
+  });
+}
+
+export async function nativeToolObservationFingerprint(input: NativeToolFingerprintInput): Promise<string> {
+  return canonicalDigest({
+    v: 1,
+    source: 'pi-native',
+    toolName: input.toolName,
+    toolSchemaDigest: await canonicalDigest(input.parameters),
+    runtimeIdentity: input.runtimeIdentity,
+    implementationIdentity: TOOL_IMPLEMENTATION_IDENTITY_UNAVAILABLE,
+  });
+}
+
+export interface ToolExecutorsRequest {
+  /** The daemon's frozen observation, keyed by projected server name. */
+  readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
+  /** `toolsetId` -> the registry's definition revision for it. Every observed toolset must appear. */
+  readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
+  /** Pi's own tools, already filtered by policy, in the order they are registered. */
+  readonly nativeTools: readonly { readonly name: string; readonly parameters: unknown }[];
+  readonly runtimeIdentity: string;
+}
+
+export interface ToolExecutorsResult {
+  /** Keyed by the model-visible tool name, exactly as the native manifest expects. */
+  readonly toolExecutors: Readonly<Record<string, string>>;
+  /**
+   * Always contains `executor_identity_unproven`. Surfaced rather than
+   * asserted, so the caller carries the limitation into the receipt instead of
+   * a reader having to know it.
+   */
+  readonly readinessReasons: readonly InputPreparationReadinessReasonV1[];
+}
+
+/**
+ * Build the `toolExecutors` map a prepared input is compiled with, from one
+ * observation.
+ *
+ * Pure: it reads no server, spawns nothing, and touches no filesystem beyond
+ * the memoized native module the digest function needs. Native tools come
+ * first, in the order the caller registers them, then the MCP tools in the
+ * core's canonical `(toolsetId, serverName, toolName)` order — the same
+ * sequence the ordinary extension registers and the model is shown.
+ */
+export async function buildToolExecutorsFromObservation(
+  request: ToolExecutorsRequest,
+): Promise<ToolExecutorsResult> {
+  const toolExecutors: Record<string, string> = {};
+  for (const tool of request.nativeTools) {
+    toolExecutors[tool.name] = await nativeToolObservationFingerprint({
+      toolName: tool.name,
+      parameters: tool.parameters,
+      runtimeIdentity: request.runtimeIdentity,
+    });
+  }
+  for (const tool of projectMcpTools(request.observation)) {
+    const server = request.observation[tool.serverName]!;
+    const toolsetDefinitionRevision = request.toolsetDefinitionRevisions[tool.toolsetId];
+    if (toolsetDefinitionRevision === undefined) {
+      throw new InputPreparationCompileError(
+        `toolset ${JSON.stringify(tool.toolsetId)} has no definition revision; its tools cannot be fingerprinted`,
+      );
+    }
+    toolExecutors[qualifiedMcpToolName(tool.serverName, tool.toolName)] = await mcpToolObservationFingerprint({
+      toolsetId: tool.toolsetId,
+      toolsetDefinitionRevision,
+      serverName: tool.serverName,
+      serverInfo: server.serverInfo,
+      protocolVersion: server.protocolVersion,
+      toolName: tool.toolName,
+      inputSchema: tool.inputSchema,
+      runtimeIdentity: request.runtimeIdentity,
+    });
+  }
+  return Object.freeze({
+    toolExecutors: Object.freeze(toolExecutors),
+    readinessReasons: Object.freeze(['executor_identity_unproven' as const]),
+  });
 }

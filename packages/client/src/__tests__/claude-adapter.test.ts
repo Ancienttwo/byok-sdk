@@ -10,6 +10,7 @@ import type { SpawnFn } from '../adapters/claude/process-client';
 import { SteerUnsupportedError, type Session } from '../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
+import { observationOf } from './fixtures/mcp-observation';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 
@@ -346,7 +347,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     ctx.mcpServers = {
       salesko: { command: process.execPath, args: ['/opt/salesko/fake-mcp.mjs'], env: { BYOK_AGENT_MESSAGE_CONTEXT: 'sealed-context' } },
     };
-    ctx.mcpToolsetTools = { salesko: ['find_leads'] };
+    ctx.mcpToolsetTools = observationOf({ salesko: ['find_leads'] });
 
     const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);

@@ -577,7 +577,8 @@ export type InputPreparationReadinessReasonV1 =
   | 'artifact_expired'
   | 'counter_authority_not_production'
   | 'counter_coverage_incomplete'
-  | 'compiler_coverage_unknown';
+  | 'compiler_coverage_unknown'
+  | 'executor_identity_unproven';
 
 /**
  * The scoped reference plus readiness evidence one preparation answers with.

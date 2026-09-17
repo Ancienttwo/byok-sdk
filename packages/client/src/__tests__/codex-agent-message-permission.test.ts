@@ -8,6 +8,7 @@ import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import type { Session } from '../types';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
+import { observationOf } from './fixtures/mcp-observation';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-codex.mjs', import.meta.url));
 const sessions: Session[] = [];
@@ -50,7 +51,7 @@ describe('Codex reserved Agent-message permission composition', () => {
         },
         productdocs: { command: '/opt/product-docs-mcp' },
       },
-      mcpToolsetTools: { productdocs: ['search_docs'] },
+      mcpToolsetTools: observationOf({ productdocs: ['search_docs'] }),
     };
     const task: TaskOfferPayload = { instruction: 'publish one message', policy: { mode: 'auto' } };
     const session = await startPreparedOperation(adapter, task, resources);
