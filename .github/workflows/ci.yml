@@ -891,18 +891,15 @@ jobs:
             bun run --filter @byok-sdk/implementation-identity build
             if ($LASTEXITCODE -ne 0) { Fail $LASTEXITCODE 'implementation-identity build failed under the standard-user token' }
 
-            # [ps51-diag] temporary probe: PS 5.1 module resolution under this token.
-            # Evidence only (Write-Host); never gates the step. Remove with the fix.
-            $psHome5 = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0'
-            Write-Host "[ps51-diag] PSModulePath=$env:PSModulePath"
-            Write-Host "[ps51-diag] LOCALAPPDATA=$env:LOCALAPPDATA"
-            Write-Host "[ps51-diag] SecurityModule dir exists: $(Test-Path (Join-Path $psHome5 'Modules\Microsoft.PowerShell.Security'))"
-            $diagA = & (Join-Path $psHome5 'powershell.exe') -NoProfile -NonInteractive -Command "Import-Module Microsoft.PowerShell.Security; (Get-Command Get-Acl).Name" 2>&1
-            Write-Host "[ps51-diag] as-inherited: $($diagA -join ' || ')"
-            $env:PSModulePath = (Join-Path $psHome5 'Modules')
-            $diagB = & (Join-Path $psHome5 'powershell.exe') -NoProfile -NonInteractive -Command "Import-Module Microsoft.PowerShell.Security; (Get-Command Get-Acl).Name" 2>&1
-            Write-Host "[ps51-diag] sanitized: $($diagB -join ' || ')"
-            Remove-Item Env:PSModulePath
+            # A freshly created local account starts with no PS 5.1 module-analysis
+            # cache, and the first powershell.exe spawn under this token then fails
+            # to auto-load Microsoft.PowerShell.Security (CommandNotFoundException)
+            # inside the keys suite's -EncodedCommand ACL query -- observed in three
+            # earlier CI rounds, gone once an explicit Import-Module ran under this
+            # token first. Warm the cache once: environment setup for the synthetic
+            # account, not product behavior. Real hosts have warm profiles.
+            & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
+              -NoProfile -NonInteractive -Command 'Import-Module Microsoft.PowerShell.Security'
 
             # Real credential-projection directory validation under this same token.
             bun run --filter @byok-sdk/keys test -- src/pi-projection-windows.test.ts
