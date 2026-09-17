@@ -252,7 +252,7 @@ await runtime.dispose();
   await mkdir(isolatedHome);
   const env = {
     PATH: process.env.PATH, HOME: isolatedHome, USERPROFILE: isolatedHome,
-    ...(process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot, COMSPEC: process.env.COMSPEC } : {}),
+    ...(process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot, COMSPEC: process.env.COMSPEC, ProgramFiles: process.env.ProgramFiles } : {}),
     BYOK_PI_MCP_CONFIG_PATH: mcpConfigPath, BYOK_PI_PERMISSION_MODE: 'readonly',
     ZAI_API_KEY: 'synthetic-must-not-forward', UNRELATED_CANARY: 'synthetic-must-not-forward',
   };
