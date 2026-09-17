@@ -63,7 +63,7 @@ test('publish and readback reject a missing or latest prerelease tag before regi
       const fixturePackage = path.join(fixtureRoot, 'packages', name);
       mkdirSync(fixturePackage, { recursive: true });
       const manifest = { name: `@byok-sdk/${name}`, version };
-      if (name === 'client') manifest.dependencies = { '@earendil-works/pi-coding-agent': 'npm:@byok-sdk/pi-coding-agent@0.85.1001' };
+      if (name === 'client') manifest.dependencies = { '@earendil-works/pi-coding-agent': 'npm:@byok-sdk/pi-coding-agent@0.85.1002' };
       writeFileSync(path.join(fixturePackage, 'package.json'), `${JSON.stringify(manifest)}\n`);
     }
 

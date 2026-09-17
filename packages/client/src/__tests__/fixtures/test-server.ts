@@ -520,7 +520,7 @@ export class TestServer {
     res.writeHead(200, { 'content-type': blob.contentType }).end(blob.bytes);
   }
 
-  /** Drains the queued test page in order while honoring the caller's durable cursor. */
+  /** Selects a scripted page without treating the read-ahead cursor as an ACK. */
   private async handleEventsPoll(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!this.requireBearer(req, res)) return;
     if (this.failEventsPolls) {
@@ -529,10 +529,20 @@ export class TestServer {
     }
     const query = new URL(req.url ?? '/', 'http://internal').searchParams;
     const requestedCursor = Number(query.get('afterSeq') ?? query.get('cursor') ?? 0);
-    const entries = this.pendingLongPollEntries.splice(0).filter((entry) => {
+    const entries: unknown[] = [];
+    const retained: unknown[] = [];
+    for (const entry of this.pendingLongPollEntries) {
       const seq = typeof entry === 'object' && entry !== null ? (entry as { seq?: unknown }).seq : undefined;
-      return typeof seq !== 'number' || !Number.isSafeInteger(seq) || seq > requestedCursor;
-    });
+      if (typeof seq !== 'number' || !Number.isSafeInteger(seq) || seq > requestedCursor) {
+        entries.push(entry);
+      } else {
+        retained.push(entry);
+      }
+    }
+    // afterSeq may be ahead of the durable cursor. Preserve excluded retries
+    // for the client's empty-page rewind, as a real mailbox read would do.
+    // Returned entries stay one-shot: tests explicitly script each redelivery.
+    this.pendingLongPollEntries = retained;
     // Not re-validated here — this response is hand-serialized exactly like
     // the real server's `EventsPollResponse`, so a raw entry queued via
     // `pushRawLongPollEvent` rides along unchanged, the same way a genuinely

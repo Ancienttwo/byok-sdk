@@ -204,7 +204,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
     expect(names).not.toContain('mcp__byokagentteam__echo');
   });
 
-  it('refuses two MCP tools that claim the same registered name', async () => {
+  it('namespacing alone is not a clash: a reserved bare name may equal a host tool\'s bare name', async () => {
     const dir = await tempDir();
     const configPath = path.join(dir, 'mcp-config.json');
     const observation = await realObservation();
@@ -233,6 +233,30 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
     await expect(onSessionStart?.()).resolves.toBeUndefined();
     expect(names).toContain('mcp__salesko__echo');
     expect(names).toContain('echo');
+  });
+
+  it('refuses two MCP tools that claim the same registered name', async () => {
+    // A genuine clash: two RESERVED helpers registering bare names, both of
+    // which expose `echo`. Silently keeping the first would pick a winner on
+    // the model's behalf for a name it cannot then address unambiguously.
+    const dir = await tempDir();
+    const configPath = path.join(dir, 'mcp-config.json');
+    await fs.writeFile(configPath, JSON.stringify({
+      mcpServers: { byokagentteam: serverSpec(), byokagentmessage: serverSpec() },
+      observation: {},
+    }));
+    process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
+
+    let onSessionStart: (() => Promise<void>) | undefined;
+    const pi = {
+      registerTool: () => {},
+      on: (event: string, handler: () => Promise<void>) => {
+        if (event === 'session_start') onSessionStart = handler;
+      },
+    };
+    const extension = await import('../adapters/pi/mcp-extension');
+    extension.default(pi as never);
+    await expect(onSessionStart?.()).rejects.toThrow(/two MCP tools claim the name "echo"/u);
   });
 
   it('refuses to start when a projected server arrived without a daemon observation', async () => {
@@ -394,5 +418,44 @@ describe('MCP projection — grants derive from the same observation', () => {
     };
     const resolution = resolveMcpToolsetGrants(servers, observation);
     expect(resolution.ok).toBe(false);
+  });
+});
+
+
+describe.each([
+  { pairs: [['a', 'b__c'], ['a__b', 'c']], name: 'mcp__a__b__c' },
+  { pairs: [['a_', 'b'], ['a', '_b']], name: 'mcp__a___b' },
+])('MCP qualified-name collisions: $name', ({ pairs, name }) => {
+  async function collidingObservation(): Promise<Record<string, McpToolsetServerObservation>> {
+    const entries = await Promise.all(pairs.map(async ([serverName, toolName]) => {
+      const observed = await observeMcpServer(serverName!, serverSpec({
+        tools: [{ name: toolName!, description: '', inputSchema: { type: 'object' } }],
+      }), { env: ENV, timeoutMs: 15_000 });
+      return [serverName!, { ...observed, toolsetId: serverName! }] as const;
+    }));
+    return Object.fromEntries(entries);
+  }
+
+  it('rejects distinct observed server/tool pairs with the same runtime name', async () => {
+    const observation = await collidingObservation();
+    expect(() => projectMcpTools(observation)).toThrow(`duplicate MCP runtime tool name "${name}"`);
+  });
+
+  it('rejects the same collision in names-only grants before runtime launch', async () => {
+    const observation = await collidingObservation();
+    expect(() => mcpToolsetToolNames(observation)).toThrow(`duplicate MCP runtime tool name "${name}"`);
+    expect(resolveMcpToolsetGrants(
+      Object.fromEntries(pairs.map(([server]) => [server!, serverSpec()])),
+      observation,
+    )).toEqual({ ok: false, reason: `duplicate MCP runtime tool name "${name}"` });
+  });
+
+  it('refuses a prepared executor map instead of overwriting a tool fingerprint', async () => {
+    await expect(buildToolExecutorsFromObservation({
+      observation: await collidingObservation(),
+      toolsetDefinitionRevisions: Object.fromEntries(pairs.map(([server]) => [server!, `revision-${server}`])),
+      nativeTools: [],
+      runtimeIdentity: 'fixture-runtime',
+    })).rejects.toThrow(`duplicate MCP runtime tool name "${name}"`);
   });
 });

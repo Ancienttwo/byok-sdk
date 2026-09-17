@@ -82,10 +82,14 @@ export async function probeMcpServer(
  * preflight (`./agent-message-mcp-preflight.ts`).
  */
 export async function probeMcpServerTools(
+  serverName: string,
   server: Readonly<McpStdioServerConfig>,
   options: McpToolsProbeOptions,
 ): Promise<readonly string[]> {
-  const observation = await probeMcpServer(options.label ?? 'server', server, options);
+  // The real server name, not the message label: `observeMcpServer` stamps it
+  // onto the observation it returns, and a placeholder there would put a name
+  // no configuration uses into the one record of what was observed.
+  const observation = await probeMcpServer(serverName, server, options);
   return Object.freeze(observation.tools.map((tool) => tool.name));
 }
 

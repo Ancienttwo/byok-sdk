@@ -12,7 +12,7 @@ import { PI_MODEL_FIXTURE } from '../../../keys/src/fixtures/pi-model-config';
 describe('Pi adapter / credential launcher composition', () => {
   it.each(['env', 'package'] as const)('%s preserves actual SDK extension argv and task environment without forwarding ambient credentials', async (source) => {
     const dir = await mkdtemp(path.join(tmpdir(), 'pi-launcher-composition-'));
-    const extensions = Object.fromEntries(['webAccess', 'mcpAdapter', 'subagentsPolicy', 'subagents', 'todo']
+    const extensions = Object.fromEntries(['webAccess', 'mcpExtension', 'subagentsPolicy', 'subagents', 'todo']
       .map(name => [name, path.join(dir, `${name}.js`)])) as any;
     let captured: { args: string[]; env: NodeJS.ProcessEnv } | undefined;
     try {

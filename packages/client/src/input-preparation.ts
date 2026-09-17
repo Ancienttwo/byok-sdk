@@ -377,6 +377,17 @@ export type InputPreparationAuthorityOutcomeV1 =
   | { readonly authorized: true; readonly grant: InputPreparationAuthorityGrantV1 }
   | { readonly authorized: false; readonly reason: InputPreparationDenialReasonV1 };
 
+/** A trusted Host decision binding the exact source pair to the supplied snapshot. */
+export type InputPreparationSourceAuthorityOutcomeV1 =
+  | { readonly authorized: true; readonly source: InputPreparationSourceV1 }
+  | { readonly authorized: false; readonly reason: InputPreparationDenialReasonV1 };
+
+export interface InputPreparationSourceAuthorityRequestV1 {
+  readonly grant: InputPreparationAuthorityGrantV1;
+  readonly source: InputPreparationSourceV1;
+  readonly snapshot: InputPreparationSnapshotV1;
+}
+
 /**
  * The configured local authority. It owns the device/Agent/Profile records this
  * daemon trusts and decides whether the claimed scope may be disclosed at all.
@@ -389,6 +400,8 @@ export type InputPreparationAuthorityOutcomeV1 =
  */
 export interface InputPreparationAuthorityResolver {
   resolveScope(claim: InputPreparationScopeClaimV1): Promise<InputPreparationAuthorityOutcomeV1>;
+  /** Independently verify source and snapshot under the already verified scope grant. */
+  resolveSource(request: InputPreparationSourceAuthorityRequestV1): Promise<InputPreparationSourceAuthorityOutcomeV1>;
 }
 
 // ---------------------------------------------------------------------------

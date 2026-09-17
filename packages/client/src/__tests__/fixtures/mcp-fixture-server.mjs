@@ -19,7 +19,15 @@
  *                  before answering `tools/list`
  *   oversizedFrame emit a single frame of at least this many bytes
  *   callDelayMs    delay every `tools/call` answer by this long
- *   recordTo       append every received method (and cancellation) as JSONL here
+ *   callError      answer every `tools/call` with this JSON-RPC error instead of a
+ *                  result: `{ code, message }` — for the client's error classification
+ *   callResult     answer every `tools/call` with this raw `result` object instead of
+ *                  the default echo — for exercising content block kinds
+ *                  (resource links, audio, `structuredContent`, empty content)
+ *                  that no correct echo server would ever return
+ *   recordTo       append every received method (and cancellation) as JSONL here,
+ *                  preceded by one `{ event: 'start', pid, byokEnv }` entry so a test
+ *                  can prove the child is gone and see which BYOK_* variables reached it
  */
 import { appendFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
@@ -52,6 +60,15 @@ const DEFAULT_TOOLS = [
 function record(entry) {
   if (config.recordTo) appendFileSync(config.recordTo, `${JSON.stringify(entry)}\n`);
 }
+
+// The very first line: the child's own pid, so a test can prove the pool
+// actually reaped it, and the BYOK_* variables it was spawned with, so a test
+// can prove the SDK's own control variables were stripped before the spawn.
+record({
+  event: 'start',
+  pid: process.pid,
+  byokEnv: Object.keys(process.env).filter((name) => name.startsWith('BYOK_')).sort(),
+});
 
 function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
@@ -127,14 +144,18 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     case 'tools/call': {
       const name = params?.name;
       const args = params?.arguments ?? {};
-      const answer = () => send({
-        jsonrpc: '2.0',
-        id,
-        result: {
-          content: [{ type: 'text', text: `byok-fixture:${name}:${JSON.stringify(args)}` }],
-          isError: false,
-        },
-      });
+      const answer = () => (config.callError
+        ? send({ jsonrpc: '2.0', id, error: { code: config.callError.code, message: config.callError.message } })
+        : config.callResult
+        ? send({ jsonrpc: '2.0', id, result: config.callResult })
+        : send({
+          jsonrpc: '2.0',
+          id,
+          result: {
+            content: [{ type: 'text', text: `byok-fixture:${name}:${JSON.stringify(args)}` }],
+            isError: false,
+          },
+        }));
       if (typeof config.callDelayMs === 'number') {
         const timer = setTimeout(answer, config.callDelayMs);
         timer.unref?.();

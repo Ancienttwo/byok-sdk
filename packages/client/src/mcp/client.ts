@@ -1,6 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import {
   Client,
+  ProtocolError,
+  ProtocolErrorCode,
   ReadBuffer,
   SdkError,
   SdkErrorCode,
@@ -65,14 +67,53 @@ const CHILD_TERMINATION_GRACE_MS = 2_000;
 /**
  * SDK error codes that describe the SERVER'S OWN ANSWER rather than its
  * environment. Everything not listed here is treated as environmental and
- * stays retryable — including a JSON-RPC error response, which a server that
- * is still warming up may legitimately return once.
+ * stays retryable.
  */
 const AUTHORITY_ERROR_CODES: ReadonlySet<string> = new Set([
   SdkErrorCode.InvalidResult,
   SdkErrorCode.UnsupportedResultType,
   SdkErrorCode.CapabilityNotSupported,
   SdkErrorCode.ListPaginationExceeded,
+]);
+
+/**
+ * JSON-RPC error codes a server returns that are statements about the REQUEST
+ * this client sent, not about the server's condition: the method does not
+ * exist, the request is not one this server accepts, the parameters are not
+ * ones it accepts, the protocol revision it was sent under is not one the
+ * server speaks, or it required a client capability this client does not
+ * declare. The same command re-offered later sends the same request — same
+ * method, same params, same protocol version, same fixed `CLIENT_INFO` and
+ * capability set — and gets the same answer, so these are authority failures.
+ *
+ * The complete authority set, and nothing else:
+ *
+ * - `-32601` `MethodNotFound`
+ * - `-32600` `InvalidRequest`
+ * - `-32602` `InvalidParams`
+ * - `-32022` `UnsupportedProtocolVersion` — this client sends one fixed
+ *   protocol revision, so a server that rejects it rejects every later offer
+ *   identically.
+ * - `-32021` `MissingRequiredClientCapability` — the declared capability set
+ *   is fixed here too, so a request refused for lacking one stays refused.
+ *
+ * Every other code — `-32603` `InternalError`, `-32700` `ParseError`,
+ * `-32002` `ResourceNotFound`, `-32042` `UrlElicitationRequired`, and any
+ * unrecognised code — defaults to retryable. They describe a condition on the
+ * server's side, or in the resource it was asked about, rather than a verdict
+ * on the request's shape: a handler that threw, a frame it could not read, a
+ * server still warming up may legitimately report one once.
+ *
+ * Retryable here means only "the offer may be made again later". It never
+ * means this client replays anything: a `tools/call` is issued exactly once
+ * and its failure is returned to the caller as the call's outcome.
+ */
+const AUTHORITY_PROTOCOL_ERROR_CODES: ReadonlySet<number> = new Set([
+  ProtocolErrorCode.MethodNotFound,
+  ProtocolErrorCode.InvalidRequest,
+  ProtocolErrorCode.InvalidParams,
+  ProtocolErrorCode.UnsupportedProtocolVersion,
+  ProtocolErrorCode.MissingRequiredClientCapability,
 ]);
 
 /**
@@ -431,6 +472,10 @@ export class McpStdioClient {
    * forever. A server that timed out, closed, or could not be written to may
    * well succeed later.
    *
+   * A JSON-RPC error response the server sent is split the same way, by
+   * {@link AUTHORITY_PROTOCOL_ERROR_CODES}: a rejection of the REQUEST is
+   * permanent, a report of the server's own condition is not.
+   *
    * An {@link McpAuthorityError} raised inside the transport (an oversized
    * stream, a refused frame) surfaces through the client's `onerror` funnel
    * and arrives here unchanged.
@@ -439,6 +484,12 @@ export class McpStdioClient {
     if (cause instanceof McpAuthorityError || cause instanceof McpTransportError) return cause;
     if (cause instanceof SdkError && AUTHORITY_ERROR_CODES.has(cause.code)) {
       return new McpAuthorityError(`${this.label} ${phase} failed: ${cause.message}`, { cause });
+    }
+    if (cause instanceof ProtocolError && AUTHORITY_PROTOCOL_ERROR_CODES.has(cause.code)) {
+      return new McpAuthorityError(
+        `${this.label} ${phase} failed: the server answered JSON-RPC error ${cause.code}: ${cause.message}`,
+        { cause },
+      );
     }
     // A transport failure tears the connection down, so the protocol layer
     // rejects the in-flight request with a generic "closed" error. The reason

@@ -15,7 +15,7 @@ import { observationOf } from './fixtures/mcp-observation';
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
 const FIXTURE_EXTENSIONS = Object.freeze({
   webAccess: '/extensions/pi-web-access/index.ts',
-  mcpAdapter: '/extensions/byok-pi-mcp.js',
+  mcpExtension: '/extensions/byok-pi-mcp.js',
   subagentsPolicy: '/extensions/byok-pi-subagents-policy.js',
   subagents: '/extensions/pi-subagents/index.ts',
   todo: '/extensions/rpiv-todo/index.ts',
@@ -202,7 +202,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
       '--extension',
       FIXTURE_EXTENSIONS.webAccess,
       '--extension',
-      FIXTURE_EXTENSIONS.mcpAdapter,
+      FIXTURE_EXTENSIONS.mcpExtension,
       '--extension',
       FIXTURE_EXTENSIONS.subagentsPolicy,
       '--extension',
@@ -276,7 +276,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
         '--extension',
         FIXTURE_EXTENSIONS.webAccess,
         '--extension',
-        FIXTURE_EXTENSIONS.mcpAdapter,
+        FIXTURE_EXTENSIONS.mcpExtension,
         '--extension',
         FIXTURE_EXTENSIONS.subagentsPolicy,
         '--extension',
@@ -490,7 +490,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
       '--extension',
       FIXTURE_EXTENSIONS.webAccess,
       '--extension',
-      FIXTURE_EXTENSIONS.mcpAdapter,
+      FIXTURE_EXTENSIONS.mcpExtension,
       '--extension',
       FIXTURE_EXTENSIONS.subagentsPolicy,
       '--extension',
@@ -539,7 +539,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
       '--extension',
       FIXTURE_EXTENSIONS.webAccess,
       '--extension',
-      FIXTURE_EXTENSIONS.mcpAdapter,
+      FIXTURE_EXTENSIONS.mcpExtension,
       '--extension',
       FIXTURE_EXTENSIONS.subagentsPolicy,
       '--extension',
@@ -558,6 +558,35 @@ describe('PiAdapter against the fake-pi fixture', () => {
     await session.close();
     openSessions.splice(openSessions.indexOf(session), 1);
     await expect(fs.access(configPath as string)).rejects.toThrow();
+  });
+
+  it('fails non-retryably when the tool observation drifts between prepare() and start()', async () => {
+    // pi bakes no grant into a CLI argument — the task-scoped MCP config the
+    // extension registers from IS the grant — so without a re-check at start()
+    // a caller could hand start() a widened observation and the child would
+    // register tools nobody admitted this task for. The refusal lands before
+    // the config is written and before anything is spawned.
+    const calls: string[][] = [];
+    const adapter = new PiAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
+      resolveExtensions: resolveFixtureExtensions,
+      spawnFn: ((_command: string, args: string[]) => {
+        calls.push([...args]);
+        throw new Error('spawn must not be reached');
+      }) as never,
+    });
+    const ctx = await makeCtx();
+    ctx.mcpServers = { docs: { command: '/opt/docs-mcp' } };
+    ctx.mcpToolsetTools = observationOf({ docs: ['search_docs'] });
+    ctx.startMcpToolsetTools = observationOf({ docs: ['search_docs', 'delete_everything'] });
+
+    await expect(startAdapter(adapter, baseTask, ctx)).rejects.toMatchObject({
+      category: 'authority',
+      retry: 'non-retryable',
+      message: expect.stringContaining('different MCP toolset tool authority'),
+    });
+    // The widened observation never reached a process.
+    expect(calls).toHaveLength(0);
   });
 
   it('consumes the daemon observation, like every other toolset-capable adapter', () => {
@@ -589,6 +618,54 @@ describe('PiAdapter against the fake-pi fixture', () => {
     });
     // Nothing about the old proxy reasoning survives in the refusal.
     expect((rejection as { reason: string }).reason).not.toMatch(/proxy/);
+  });
+
+  it('rejects an ungrantable projected server name before anything is spawned', async () => {
+    // claude and codex refuse this in prepare() because they interpolate the
+    // name into a CLI grant. pi refuses it for its own reason: the projection
+    // the extension registers from applies the same name rule, so the failure
+    // would otherwise land at extension load inside an already-claimed task's
+    // child, where only its stderr carries the message.
+    const adapter = new PiAdapter({
+      resolveBin: () => { throw new Error('resolveBin must not be reached'); },
+      resolveExtensions: () => { throw new Error('resolveExtensions must not be reached'); },
+      spawnFn: (() => { throw new Error('spawn must not be reached'); }) as never,
+    });
+    const offer: TaskOfferPayload = { ...baseTask, policy: { mode: 'auto' } };
+    const rejection = await adapter.prepare({
+      offer,
+      policy: offer.policy,
+      descriptor: adapter.descriptor,
+      requiredToolsetIds: ['docs'],
+      mcpServers: { 'docs.read.v1': { command: '/opt/docs-mcp' } },
+      mcpToolsetTools: observationOf({ 'docs.read.v1': ['search_docs'] }),
+    });
+    expect(rejection).toMatchObject({
+      kind: 'reject',
+      retryable: false,
+      reason: expect.stringMatching(/pi adapter cannot register projected MCP toolset tools/u),
+    });
+    expect((rejection as { reason: string }).reason).toMatch(/docs\.read\.v1/u);
+  });
+
+  it('rejects a projected server the daemon never observed, before anything is spawned', async () => {
+    const adapter = new PiAdapter({
+      resolveBin: () => { throw new Error('resolveBin must not be reached'); },
+      resolveExtensions: () => { throw new Error('resolveExtensions must not be reached'); },
+      spawnFn: (() => { throw new Error('spawn must not be reached'); }) as never,
+    });
+    const offer: TaskOfferPayload = { ...baseTask, policy: { mode: 'auto' } };
+    const rejection = await adapter.prepare({
+      offer,
+      policy: offer.policy,
+      descriptor: adapter.descriptor,
+      requiredToolsetIds: ['docs'],
+      mcpServers: { docs: { command: '/opt/docs-mcp' } },
+    });
+    // The extension refuses to discover a projected server's tools itself; the
+    // adapter must not hand it a task that can only end that way.
+    expect(rejection).toMatchObject({ kind: 'reject', retryable: false });
+    expect((rejection as { reason: string }).reason).toMatch(/no tools\/list observation/u);
   });
 
   it('accepts an auto toolset offer and hands the observation to the extension', async () => {

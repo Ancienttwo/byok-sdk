@@ -52,7 +52,7 @@ async function probe(
   server: McpStdioServerConfig,
   overrides: { timeoutMs?: number; cwd?: string; env?: Record<string, string> } = {},
 ): Promise<readonly string[]> {
-  return probeMcpServerTools(server, {
+  return probeMcpServerTools('probed_server', server, {
     label: 'probed server',
     timeoutMs: overrides.timeoutMs ?? 5_000,
     env: overrides.env ?? runtimeEnv(),
