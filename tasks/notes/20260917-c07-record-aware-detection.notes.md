@@ -19,3 +19,7 @@ Supervisor accepted a4dab4a4 and independently checked freeze8e9d8416. `reviewPe
 - Proposed optional installed method and finite refused arm remain candidates. Shared measured-installation has a distinct top-level tag and lacks env fields; type/parser exclusion from spawn is an acceptance requirement. Read-only cwd facts do not prove ACL non-writability.
 - Q5 complete-top-level observation is recommended for review; exact aggregate shape/precedence and release-commonality reuse remain open. This does not silently activate the proposed source/test/spec/golden inventory. Pre-fix drivers follow accepted exact product registration, not this document.
 - New evidence directory `_ops/c07-record-aware-detection-product-candidate/`; original freeze8e9d8416 preserved. Separate acceptance90d598cc retained. No P4 gate, old notes/row4 or native decision packet altered.
+
+## Product scope activation
+
+Product candidate af77aee2 accepted. Q5-A deterministic fixed-order complete set, first exact refusal, no aggregate metadata beyond verified equal native version; Q5-B is historical only, no fallback. Root owns all writes. Exact contract activated before pre-fix drivers; no product bytes changed in this registration.

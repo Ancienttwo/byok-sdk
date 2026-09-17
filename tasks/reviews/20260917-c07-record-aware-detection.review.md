@@ -15,3 +15,7 @@ Next review is a new boundary: exact API/spec/golden decisions, pre-fix regressi
 ## Next boundary submitted separately
 
 The exact product candidate in the research addendum is pending review. It includes the two shared-physical/read-only-cwd pressure points and a new Q5 source finding: generic detection precedes instruction/prepared lane selection. No implicit pi-rpc default is retained. Requested ruling covers explicit complete-top-level observation versus scope-unknown, followed by exact API/path activation. This pending state does not reopen the accepted a4dab4a4 design receipt.
+
+## Product candidate accepted
+
+Owner-thread supervisor receipt accepts af77aee2 items1-7, Q5-A complete top-level set with deterministic first refusal/equal verified version. Exact source/test/spec/golden scope is activated separately in this registration commit. Runtime product verification/gate remains pending; candidate review is not product acceptance.
