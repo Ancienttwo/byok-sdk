@@ -272,7 +272,7 @@ try {
     rules = $rules
   } | ConvertTo-Json -Depth 4 -Compress
 } catch {
-  [Console]::Error.WriteLine('Pi projection ACL query failed')
+  [Console]::Error.WriteLine("Pi projection ACL query failed: $($_.Exception.GetType().FullName): $($_.Exception.Message) :: $($_.InvocationInfo.PositionMessage)")
   exit 1
 }
 `;
@@ -291,7 +291,10 @@ export async function assertWindowsPiProjectionAcl(
     ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(WINDOWS_PROJECTION_ACL_SCRIPT, 'utf16le').toString('base64')],
     JSON.stringify({ path: directory }),
   );
-  if (result.exitCode !== 0) throw new Error('Pi projection ACL query failed');
+  if (result.exitCode !== 0) {
+    const stderrTail = result.stderr.trim().split(/\r?\n/u).slice(-3).join(' | ').trim();
+    throw new Error(`Pi projection ACL query failed${stderrTail === '' ? '' : `: ${stderrTail}`}`);
+  }
   let acl: unknown;
   try { acl = JSON.parse(result.stdout); }
   catch { throw new Error('pi_projection_acl_invalid_json'); }
