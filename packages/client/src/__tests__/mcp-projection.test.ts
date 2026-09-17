@@ -593,3 +593,43 @@ describe('MCP projection — one policy filter, every consumer', () => {
     });
   });
 });
+
+describe.each([
+  { pairs: [['a', 'b__c'], ['a__b', 'c']], name: 'mcp__a__b__c' },
+  { pairs: [['a_', 'b'], ['a', '_b']], name: 'mcp__a___b' },
+])('MCP qualified-name collisions: $name', ({ pairs, name }) => {
+  async function collidingObservation(): Promise<Record<string, McpToolsetServerObservation>> {
+    const entries = await Promise.all(pairs.map(async ([serverName, toolName]) => {
+      const observed = await observeMcpServer(serverName!, serverSpec({
+        tools: [{ name: toolName!, description: '', inputSchema: { type: 'object' } }],
+      }), { env: ENV, timeoutMs: 15_000 });
+      return [serverName!, { ...observed, toolsetId: serverName! }] as const;
+    }));
+    return Object.fromEntries(entries);
+  }
+
+  it('rejects distinct observed server/tool pairs with the same runtime name', async () => {
+    const observation = await collidingObservation();
+    expect(() => projectMcpTools(observation)).toThrow(`duplicate MCP runtime tool name "${name}"`);
+  });
+
+  it('rejects the same collision in names-only grants before runtime launch', async () => {
+    const observation = await collidingObservation();
+    expect(() => mcpToolsetToolNames(observation)).toThrow(`duplicate MCP runtime tool name "${name}"`);
+    expect(resolveMcpToolsetGrants(
+      Object.fromEntries(pairs.map(([server]) => [server!, serverSpec()])),
+      observation,
+      'auto',
+    )).toEqual({ ok: false, reason: `duplicate MCP runtime tool name "${name}"` });
+  });
+
+  it('refuses a prepared executor map instead of overwriting a tool fingerprint', async () => {
+    await expect(buildToolExecutorsFromObservation({
+      observation: await collidingObservation(),
+      toolsetDefinitionRevisions: Object.fromEntries(pairs.map(([server]) => [server!, `revision-${server}`])),
+      nativeTools: [],
+      runtimeIdentity: 'fixture-runtime',
+      permissionMode: 'auto',
+    })).rejects.toThrow(`duplicate MCP runtime tool name "${name}"`);
+  });
+});

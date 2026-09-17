@@ -1,6 +1,6 @@
 # sdk/sdk-root 架構文檔
 
-<!-- BEGIN ARCHCONTEXT:generated target="projection_target.entity.capability-sdk-sdk-root" sourceDigest="sha256:95281392cf0c8e8713ca79bbd04797dbd6211805246bdaf33be28aa8f45675ab" rendererVersion="archcontext.docs-renderer/v4" outputDigest="sha256:a3e7e57949957d270f02f21e50ad0b4e5348d2a26178c04c92ef41c3455098d7" -->
+<!-- BEGIN ARCHCONTEXT:generated target="projection_target.entity.capability-sdk-sdk-root" sourceDigest="sha256:b529778eefbc69b17bb089e832735ad1e7f2df5d56b635619f6d4b074941f00b" rendererVersion="archcontext.docs-renderer/v4" outputDigest="sha256:8222fcd9af4f9c98f517da7bef7d2e7d4598d5b86469f723f04a6d54ce6f0f53" -->
 > **狀態**:`active`
 > **Capability ID**:`capability.sdk.sdk-root`(kind `capability`)
 > **Matched Prefixes**:`packages/**`
@@ -36,7 +36,7 @@ flowchart LR
 
 ### 1.3 規模信號
 
-- 規模量級:`500–1000` 個文件 / `200k–500k` 行
+- 規模量級:`1000–2000` 個文件 / `200k–500k` 行
 - 匹配前綴:`packages/**`
 - 推導:掃描 `source.include` 減 `source.exclude`,跳過 `.git/` 與 `node_modules/`,再按 1–2–5 階梯分桶。精確計數不入本文檔:量級足以回答「這個能力有多大」,而逐行計數會讓覆蓋範圍內任何一次源碼改動都改寫本文檔。
 
