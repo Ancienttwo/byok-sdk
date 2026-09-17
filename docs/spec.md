@@ -173,10 +173,49 @@ when a real local probe supplied them, and missing facts stay omitted.
 ### Local runtime probe observation
 
 `RuntimeDetectResult` has one required `kind`: `available`, `not-found`,
-`not-executable`, `timeout`, or `probe-failed`. Only `available` may carry the
+`not-executable`, `timeout`, `probe-failed`, or `refused`. Only `available` may carry the
 existing optional `version` and `authPresent` facts. Custom adapters must author
 this shape; old `present` shapes, mixed authorities, unknown kinds, and malformed
 metadata are rejected. There is no compatibility translation.
+
+`refused` requires exactly `kind` and `reason`. Its finite reason vocabulary is
+the shared implementation unavailable vocabulary plus
+`installation_observation_unsupported`, `native_identity_mismatch` and
+`launch_cwd_unavailable`. No other arm accepts `reason`; arbitrary error text
+is never parsed into a reason. A custom adapter's valid declaration is not
+proof that the adapter performed a trusted measurement.
+
+With a configured Pi implementation authority, daemon registration, task
+selection and local CLI/doctor use the single installed-observation route.
+They call `detectInstallation(context, signal?)` on the actual adapter;
+a missing method returns `refused/installation_observation_unsupported`.
+Injected adapters are not replaced and this route never falls back to `detect`.
+Unconfigured Pi and non-Pi retain their explicit existing discovery routes.
+
+`RuntimeInstallationObservationContext` carries the authority and either an
+explicit enabled `runtimeEntry` or `scope: 'enabled-top-level'`. Generic consumers
+use the complete enabled top-level set in `RUNTIME_LAUNCH_KINDS` order
+(`pi-rpc`, then `pi-prepared`). The first failed entry supplies its exact finite
+reason; both entries must have equal common record, physical measurements,
+policy, edges and verified native version. Aggregate `available` carries only
+that version. Runner/print are not enabled or substituted. Detection never
+chooses the task lane; `resources.kind` retains that authority.
+
+Bundled Pi installed observation measures selected artifact/interpreter/assets,
+fixed prefix and native package manifest using the shared physical core. It
+executes no candidate or version child, allocates no task state, constructs no
+launch env and observes no authentication/credential facts. The separate shared
+`RuntimeInstallationMeasurementV1` result lacks environment digests and is
+rejected as a launch identity by both types and the identity/spawn parsers.
+Native version comes from digest-verified manifest bytes compared with the
+record and static SDK pin, never schema success or a guessed version.
+
+Cwd observation is strictly read-only: observed missing, noncanonical, symlink,
+non-directory or current-owner components refuse. It does not perform `wx`
+probes, measure ACLs or prove non-writability. Read success is not launch
+admission. Prepare/final-spawn retains independent measurement and full cwd
+checks; a later mutation must still fail there. No measured observation is
+cached or lent to launch authorization.
 
 Bundled version probes map OS `ENOENT` to `not-found` and
 `EACCES`/`EPERM`/`ENOEXEC` to `not-executable`. Platform errno differences remain
@@ -189,7 +228,7 @@ paths, raw error messages, stdout or stderr. Existing authentication observation
 semantics and credential custody remain unchanged.
 
 Fresh local `runtimes` and `status` show failure kinds; `doctor` carries the same
-closed outcome in JSON and counts failures by kind in text. Its existing
+closed outcome and finite refusal reason in JSON and counts them in text. Its existing
 any-present pass/warn rule remains unchanged. Display `present` is a deterministic
 projection of `kind === 'available'`, never independent adapter authority.
 Custom-adapter throw/malformed results are observed as `probe-failed`; the local

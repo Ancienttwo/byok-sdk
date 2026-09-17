@@ -786,6 +786,18 @@ flowchart LR
 
 ### 7.3 Shared Node implementation measurement
 
+Installed Pi observation uses `measureRuntimeInstallation` and
+`reverifyRuntimeInstallation`, sharing the private physical core with existing
+launch resolve/reverify. Its distinct result has record/stat facts but no
+environment digests, so it cannot satisfy the spawn identity contract. The
+launch consumer alone supplies real environment measurement at the original
+assets → env → interpreter point. Existing MCP and launch result ordering is
+retained. Client owns native-manifest comparison, enabled top-level scope,
+read-only cwd observation and finite result projection. It shares native
+manifest verification with host startup; neither Host nor diagnostics writes
+another pin/version authority. Read-only detection does not prove ACL safety,
+credentials, recursive readiness, or later execution admission.
+
 `@byok-sdk/implementation-identity` owns install-record parsing, artifact/interpreter/assets measurement, fixed environment measurement projection, resolve/reverify and the final pre-spawn assertion. Its shipped code uses only Node fs/crypto/path; it does not import client, keys, server, protocol or Pi. `@byok-sdk/core` remains Node-free. Client and keys depend on the same package; client re-exports its existing public identity names without changing their shapes.
 
 Client retains runtime launch descriptions and decisions, native-pin expectations, daemon environment allowlist/stripping actions and reserved helper hosting. The shared package owns only the fixed credential-name measurement exclusion inventory and loader-name classification; client applies policy using those definitions. Credential values never enter the shared measurement API. Keys still owns OS custody and the credential-bearing child process. Measurement extraction alone does not implement the keys/Pi runtime final-spawn wiring; that is the subsequent P2 slice.

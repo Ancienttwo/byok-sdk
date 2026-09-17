@@ -244,3 +244,29 @@ The exact discriminant/aggregate refusal precedence and record-commonality extra
 ## Product activation decision
 
 Supervisor bounded review accepts af77aee2 items1-7. This supersedes pending wording above; historical alternatives are not parallel product paths. Q5-A uses explicit context union `{authority,scope:'entry',runtimeEntry}` or `{authority,scope:'enabled-top-level'}`. In aggregate scope the existing RUNTIME_LAUNCH_KINDS order is the sole ordering author; first failure wins unchanged. Success requires equal release/physical declaration excluding only launchArgv, equal policy/edges, and equal verified native version. Only that version is returned, no auth inference. Method absence refuses without fallback. Type/parser exclusion, readonly cwd limits and 24 vector obligations remain as reviewed. Exact active product paths are now in the contract, including runtime-descendant-plan.ts.
+
+## Product freeze and executable-vector map
+
+Product9f697036 follows driver8c9f7a26; exact allowed_paths were activated by1137ae33. Root single writer; no manifest/lock/workflow/native/Host edits. New APIs/spec are the accepted measured-only/Q5-A/strict-refusal choices. This map identifies executable obligations; final frozen full matrix remains pending when this document is committed. Evidence root: `_ops/c07-installed-observation-product/`.
+
+| Vectors | Executable driver / observation | Boundary |
+| --- | --- | --- |
+| D01-D02 | pi-installation-observation: two forms, explicit prepared, exact fixed-order resolver calls, real bytes+uid seam | Synthetic install input; no real installed release claim |
+| D03-D04 | runtime-resolution frozen wrapper negatives; installation/routing configured denial; shared bare-record/prefix test | No dev/child fallback |
+| D05-D06 | shared runtime-installation-observation artifact/interpreter/asset mutation; physical-reverify-parity; pi-runtime-host-binding process fields; installation read-window mutation | Exact finite physical refusal, spawn0 |
+| D07 | pi-runtime-host-binding native name/version/fork/compiler/manifest-byte negatives plus installed observer pin/provenance | One extracted native comparison author |
+| D08 | trusted-launch-cwd read-only missing/file/nonabsolute/symlink plus install observer current-owner refusal | ACL not measured: writable-but-observable control passes read-only, full checker refuses; not non-writability proof |
+| D09 | pi-installation-observation rpc-only/prepared-only missing controls, disabled runner/print/unknown scope, unequal policy/release | No substitution, fixed first-refusal order; double failure uses two different reasons |
+| D10 | installed observer poisoned PI_PACKAGE_DIR/BYOK_PI_BIN/NODE_OPTIONS and resolveBin/spawn/open counters | No child means no Bun startup/config load; no env/auth fact claims |
+| D11-D12 | runtime-detection-routing explicit unconfigured, real default/injected daemon conn.hello, explicit/automatic TaskRunner, runtimes/status/public diagnoseDevice/doctor | One route; actual injected adapter preserved |
+| D13 | N/A installed child; runtime-detection-observation retains real legacy errno/deadline/overflow/reap controls | No candidate child was chosen, not a deleted obligation |
+| D14 | installed observer success then artifact mutation, real prepared-operation resolveRuntimeLaunch on both instruction/prepared lanes; shared reverify mutations | Independent prepare/final gate, no measurement cache lease |
+| R01,R04,R08 | routing strict finite result + CLI/status/doctor projections + real conn.hello/task decline | Custom shaped result not attestation; retry unchanged; no protocol field |
+| R02,R09 | bin-runtime-probe configured custom throw contains reason-looking text/private sentinel → redacted probe-failed; legacy probe stream/error controls | No Error.message parser or credential value |
+| R03,R05,R10 | routing missing/unknown/extra/mixed refusal cases; runtime-detection-observation legacy/mixed shapes | No translation; conflicting own keys refused |
+| R06 | unchanged runtime-detection-observation real errno-only mapping and explicit errno controls | No filename heuristic |
+| R07 | bin-runtime-probe fake-clock deadline then late finite refusal | One settled timeout, no cancellation claim |
+
+Equivalence receipt: `physical-parity.json` is28 exact old/new serialized-result/throw and ordered-call comparisons using frozen M0 declarations. `extraction-equivalence.json` is native comparison body + expanded commonBinding body + physical reverify body/subsequent functions + seal serializer + eight unchanged goldens. Common helper expansion is precisely one destructuring statement; no generalized normalization. Same-policy/edges/facts comparison still runs at each original plan position.
+
+Final evidence ownership: executor runs one14-package full matrix on frozen head; gatekeeper reads raw logs+hashes and independently reruns build/typecheck/focused/API/strict/real pack only. No second full. Registry publication, real Host/native combination, ACL certification, full S2 containment and Windows CI repairs remain outside this acceptance.

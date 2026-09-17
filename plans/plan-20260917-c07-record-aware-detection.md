@@ -1,6 +1,6 @@
 # Plan: C07 record-aware detection and typed refusal
 
-> Status: Product scope activated; pre-fix drivers next
+> Status: Product implemented; frozen executor matrix pending
 > Task Profile: feature
 > Task Contract: `tasks/contracts/20260917-c07-record-aware-detection.contract.md`
 > Task Review: `tasks/reviews/20260917-c07-record-aware-detection.review.md`
@@ -8,7 +8,7 @@
 
 ## Goal
 
-Register API-D+API-R as one SDK public-boundary design: both installed forms bind detection to their existing runtime authority and fixed dispatch prefix, and named refusals survive validated local projections without arbitrary diagnostics. No product/API implementation or activation in this slice. Final API shape is decided in SDK review.
+Register API-D+API-R as one SDK public-boundary design: both installed forms bind detection to their existing runtime authority and fixed dispatch prefix, and named refusals survive validated local projections without arbitrary diagnostics. Initial docs-only registration was accepted; af77aee2 bounded product review subsequently activated the exact implementation scope. No runtime dispatch is enabled.
 
 ## Authority / isolation
 
@@ -28,10 +28,10 @@ P3: one authority per datum; reuse measurement, do not duplicate the record read
 - [x] Supervisor bounded design review accepted a4dab4a4 and freeze8e9d8416; Q1-Q4 directions accepted without freezing API shape.
 - [x] Record accepted directions and exact product-entry prerequisites; product registration remains a separate review boundary.
 - [x] Exact product candidate af77aee2 accepted; Q5-A fixed order/first reason/equal version, exact paths activated.
-- [ ] Commit test-only drivers and preserve real behavioral RED.
-- [ ] Implement physical observation, routing, refusal and consumer cutover; focused verification.
+- [x] Commit test-only drivers8c9f7a26 and preserve real behavioral RED5/6.
+- [x] Implement physical observation, routing, refusal and consumer cutover; focused verification and two-golden review.
 - [ ] Freeze product/docs separately, complete required checks and submit independent gate.
 
 ## Verification
 
-Scope/hash/attribution/diff/YAML/workflow checks only. Vectors are documentation, not executable tests and not PASS evidence. Do not repeat build/typecheck/full/pack on unchanged product. Future product slice must register exact implementation/test/golden/spec paths and use real pre-fix evidence before editing.
+Scope/hash/attribution/diff/YAML/workflow plus product required checks. Executor runs one complete test matrix on the frozen head; supervisor gate independently runs build/typecheck/focused checks/api/strict/release-pack and reads the full raw logs/hashes, without a second full run. Existing native/S2/Windows limitations remain explicit; no new failure is automatically waived.

@@ -19,3 +19,7 @@ The exact product candidate in the research addendum is pending review. It inclu
 ## Product candidate accepted
 
 Owner-thread supervisor receipt accepts af77aee2 items1-7, Q5-A complete top-level set with deterministic first refusal/equal verified version. Exact source/test/spec/golden scope is activated separately in this registration commit. Runtime product verification/gate remains pending; candidate review is not product acceptance.
+
+## Product gate allocation
+
+Supervisor checkpoint allocates one full matrix to executor on frozen tested head. Independent gate does not repeat full; it reruns build/typecheck, routing/strict-result/physical-parity/host-binding/cwd/closure,10 golden checks (2 changed/8 unchanged), strict/diff/attribution and real release-pack. Full original logs plus hashes are required. Product gate pending; no push.

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Added (installed Pi observation)** — configured detection now measures the
+  selected S1/S2 installation through its authority without executing a version
+  child or discovering another binary. Generic observations require both enabled
+  top-level entries, in fixed order, and report the first exact refusal. Cwd
+  facts are read-only; ACL/non-writability and final launch admission remain
+  separate. No authentication or synthetic environment facts are reported.
+- **Changed (public detection contract)** — add the strict `refused`/finite
+  `reason` arm, explicit `RuntimeInstallationObservationContext` and optional
+  adapter `detectInstallation` method. A configured adapter lacking the method
+  refuses without replacing the adapter or using its legacy probe. Daemon,
+  task selection and runtimes/status/doctor share this route and preserve finite
+  reasons locally; wire and retry/permission contracts are unchanged. The shared
+  identity package adds a structurally separate measured-installation API;
+  existing physical measurement and native-manifest checks retain one author.
+
 - **Fixed (SEA recipe)** — bundle the unchanged launcher through an ESM
   intermediate before producing the CJS SEA main, avoiding an unused helper's
   top-level-await parse failure. Preserve daemon construction/status and both
