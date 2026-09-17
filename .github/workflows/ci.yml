@@ -898,8 +898,12 @@ jobs:
             # earlier CI rounds, gone once an explicit Import-Module ran under this
             # token first. Warm the cache once: environment setup for the synthetic
             # account, not product behavior. Real hosts have warm profiles.
+            # The (Get-Command Get-Acl) suffix is load-bearing: Import-Module alone
+            # demonstrably does NOT fix later processes (round 5 = rounds-1-3 failure
+            # signature); resolving Get-Acl in the warm-up process does (round 4).
             & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
-              -NoProfile -NonInteractive -Command 'Import-Module Microsoft.PowerShell.Security'
+              -NoProfile -NonInteractive -Command 'Import-Module Microsoft.PowerShell.Security; [void](Get-Command Get-Acl).Name'
+            if ($LASTEXITCODE -ne 0) { Fail 92 'PS 5.1 module warm-up failed under the standard-user token' }
 
             # Real credential-projection directory validation under this same token.
             bun run --filter @byok-sdk/keys test -- src/pi-projection-windows.test.ts
