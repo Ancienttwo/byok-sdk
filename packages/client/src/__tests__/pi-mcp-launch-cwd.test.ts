@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { BYOK_PI_MCP_CONFIG_PATH } from '../adapters/pi/mcp-config';
 import { observeMcpServer } from '../mcp/observation';
 import { trustedCwd } from './fixtures/launch-cwd';
+import { resolveBunBin } from './support/test-bun-bin';
 
 /**
  * The Pi call path's half of the launch-cwd boundary.
@@ -30,20 +30,10 @@ const PRELOAD = 'globalThis.__BYOK_LAUNCH_CWD_PRELOADED__ = true;\n';
 /**
  * bun, if this machine has one. Resolved once, synchronously, so the case
  * below is either RUN or visibly SKIPPED — never a body that returns early and
- * reports as a pass.
+ * reports as a pass. The candidate list and the BYOK_REQUIRE_BUN fail-closed
+ * law live in the shared helper.
  */
-const BUN_BIN = ((): string | undefined => {
-  const candidates = [
-    process.env.BYOK_TEST_BUN_BIN,
-    path.join(os.homedir(), '.local/bin/bun'),
-    '/opt/homebrew/bin/bun',
-    '/usr/local/bin/bun',
-  ];
-  for (const candidate of candidates) {
-    if (candidate !== undefined && existsSync(candidate)) return candidate;
-  }
-  return undefined;
-})();
+const BUN_BIN = resolveBunBin();
 
 const originalCwd = process.cwd();
 afterEach(() => {

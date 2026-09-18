@@ -21,10 +21,10 @@ import { classifyMcpToolsetServerObservation, observeMcpServer } from '../mcp/ob
 import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_VERSION } from '../input-preparation';
 import { TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED } from '../daemon/tool-implementation-identity';
 import { trustedCwd } from './fixtures/launch-cwd';
+import { resolveBunBin } from './support/test-bun-bin';
 
 const execFileAsync = promisify(execFile);
-const BUN_BIN = [process.env.BYOK_TEST_BUN_BIN, path.join(os.homedir(), '.local/bin/bun'), '/opt/homebrew/bin/bun', '/usr/local/bin/bun']
-  .find((candidate): candidate is string => candidate !== undefined && existsSync(candidate));
+const BUN_BIN = resolveBunBin();
 const CLIENT_DIST = fileURLToPath(new URL('../../dist/index.js', import.meta.url));
 const POLICY: PermissionPolicy = { mode: 'readonly', allowTools: [] };
 
@@ -335,4 +335,25 @@ describe('Pi launch path — S2 release containment', () => {
       }
     }, 120_000,
   );
+
+  // Active negative control for the registry monitor above, and deliberately
+  // NOT gated on BUN_BIN: on a runner without bun the case above skips, which
+  // is exactly where the zero-attempt assertion would otherwise go unproven.
+  // A real request against the same recording-handler shape must show up in
+  // registryAttempts; if this ever fails, the zero-attempt assertion is a
+  // vacuous pass rather than evidence.
+  it('registry monitor is live: a real request is recorded by the loopback tripwire', async () => {
+    const registryAttempts: string[] = [];
+    const registry = createServer((request, response) => { registryAttempts.push(request.url ?? ''); response.writeHead(503).end(); });
+    await new Promise<void>(resolve => registry.listen(0, '127.0.0.1', resolve));
+    try {
+      const registryUrl = `http://127.0.0.1:${(registry.address() as { port: number }).port}`;
+      const response = await fetch(`${registryUrl}/negative-control/s2-registry-monitor`);
+      await response.arrayBuffer();
+      expect(registryAttempts, 'the monitor captured the probe request').toEqual(['/negative-control/s2-registry-monitor']);
+      expect(registryAttempts, 'exactly the probe, nothing else').toHaveLength(1);
+    } finally {
+      await new Promise<void>(resolve => registry.close(() => resolve()));
+    }
+  });
 });
