@@ -362,7 +362,7 @@ console.log('[release-pack] recurring public imports, strict submission and inde
   // back nothing, on both public surfaces.
   assert.equal(await readDisposition(otherTenant, acceptedTask, acceptedPayload), undefined);
   assert.equal(await readDisposition(msgTenant, 'packed-other-task', acceptedPayload), undefined);
-  assert.equal(await readMessage(msgTenant, acceptedTask, agentRef), acceptedMessage);
+  assert.deepEqual(await readMessage(msgTenant, acceptedTask, agentRef), acceptedMessage);
   assert.equal(await composition.cloud.readTaskAgentMessage(otherTenant, device.deviceId, acceptedTask, agentRef), undefined);
   assert.equal(await composition.cloud.readTaskAgentMessage(msgTenant, 'packed-other-device', acceptedTask, agentRef), undefined);
   assert.equal(await readDisposition(msgTenant, acceptedTask, { ...acceptedPayload, body: 'other' }), undefined);
