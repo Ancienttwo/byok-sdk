@@ -31,7 +31,6 @@ import {
 	type AcceptanceLedger,
 	type ResolvedAcceptanceConfig,
 	truncateOutput,
-	getSubagentDepthEnv,
 } from "../../shared/types.ts";
 import {
 	DEFAULT_CONTROL_CONFIG,
@@ -60,8 +59,11 @@ import { evaluateCompletionMutationGuard, expectsImplementationMutation, hasMuta
 import { planCompletionEvidence } from "../shared/completion-evidence.ts";
 import { planAbortRecovery } from "../shared/abort-recovery.ts";
 import { arbitrateCompletionGuardRescue } from "../shared/llm-intent-arbiter.ts";
-import { getPiSpawnCommand } from "../shared/pi-spawn.ts";
 import { preflightLaunchCwd } from "../shared/launch-cwd.ts";
+// WP4 custody reroute: the foreground print child is minted and dispatched by
+// the SDK custody dispatcher (admission -> permit -> descendant record ->
+// helper direct-connect shape). No legacy discovery remains on this lane.
+import { dispatchCustodyPiSubagentSpawn } from "../../../../../../src/custody/custody-dispatcher.ts";
 import { createJsonlWriter } from "../../shared/jsonl-writer.ts";
 import { createOrcaProgressTab, type OrcaProgressTab } from "../shared/orca-progress-tabs.ts";
 import { attachPostExitStdioGuard, trySignalChild } from "../../shared/post-exit-stdio-guard.ts";
@@ -555,7 +557,34 @@ async function runSingleAttempt(
 		};
 		return result;
 	}
-	const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.maxSubagentDepth) };
+	// WP4 custody reroute: the depth env increment (getSubagentDepthEnv) is
+	// discarded here — the frozen counting table is the dispatcher's alone —
+	// and the child env/argv are exactly what the minted descendant record
+	// attests. Dispatch refusal is a structured failure of this attempt.
+	let dispatched: ReturnType<typeof dispatchCustodyPiSubagentSpawn>;
+	try {
+		dispatched = dispatchCustodyPiSubagentSpawn({
+			child: "pi-subagent-print",
+			cwd: options.cwd ?? runtimeCwd,
+			vendorArgv: args,
+			vendorEnv: sharedEnv,
+			agent: agent.name,
+			launchContractDigest,
+			context: options.context ?? "fresh",
+			index: options.index ?? 0,
+			childKey: options.workflowChildPermitLaunch?.childKey,
+		});
+	} catch (dispatchError) {
+		const dispatchMessage = dispatchError instanceof Error ? dispatchError.message : String(dispatchError);
+		cleanupTempDir(tempDir);
+		result.exitCode = 1;
+		result.error = dispatchMessage;
+		result.finalOutput = dispatchMessage;
+		progress.status = "failed";
+		progress.error = dispatchMessage;
+		return result;
+	}
+	const spawnEnv = dispatched.env;
 	const mutationSnapshot = snapshotTrackedMutations(options.cwd ?? runtimeCwd);
 	let observedMutationAttempt = false;
 	let structuredOutputToolInvoked = false;
@@ -563,29 +592,29 @@ async function runSingleAttempt(
 	let toolAvailabilityError: string | undefined;
 	let abortedBySignal = options.signal?.aborted === true;
 
-	const spawnSpec = getPiSpawnCommand(args);
-	if (options.workflowChildPermitLaunch) {
-		const permitError = consumeWorkflowChildPermit(options.workflowChildPermitLaunch.permit, {
-			workflowRunId: options.workflowChildPermitLaunch.workflowRunId,
-			childKey: options.workflowChildPermitLaunch.childKey,
-			agent: agent.name,
-			launchContractDigest,
-			context: options.context ?? "fresh",
-			runner: "pi",
-		});
-		if (permitError) {
-			cleanupTempDir(tempDir);
-			result.exitCode = 1;
-			result.error = permitError;
-			result.finalOutput = permitError;
-			progress.status = "failed";
-			progress.error = permitError;
-			return result;
-		}
+	// ④: the permit the dispatcher issued is consumed at this existing vendored
+	// consume site, immediately before the one physical spawn.
+	const permitLaunch = dispatched.permitLaunch;
+	const permitError = consumeWorkflowChildPermit(permitLaunch.permit, {
+		workflowRunId: permitLaunch.workflowRunId,
+		childKey: permitLaunch.childKey,
+		agent: permitLaunch.agent,
+		launchContractDigest: permitLaunch.launchContractDigest,
+		context: permitLaunch.context,
+		runner: "pi",
+	});
+	if (permitError) {
+		cleanupTempDir(tempDir);
+		result.exitCode = 1;
+		result.error = permitError;
+		result.finalOutput = permitError;
+		progress.status = "failed";
+		progress.error = permitError;
+		return result;
 	}
 	let afterCompactionSettlement = false;
 	const exitCode = await new Promise<number>((resolve) => {
-		const proc = spawn(spawnSpec.command, spawnSpec.args, {
+		const proc = spawn(dispatched.command, dispatched.args, {
 			cwd: options.cwd ?? runtimeCwd,
 			env: spawnEnv,
 			stdio: ["ignore", "pipe", "pipe"],

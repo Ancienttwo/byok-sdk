@@ -6,8 +6,6 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { discoverAgents, formatUnknownAgentError, unknownAgentDiagnosticContext, type AgentConfig, type UnknownAgentDiagnosticContext } from "../../agents/agents.ts";
 import { appendAgentRefinementOverlay } from "../../agents/agent-refinements.ts";
@@ -21,8 +19,13 @@ import type { RunnerStep } from "../shared/parallel-utils.ts";
 import type { ContextMode } from "../shared/context-mode.ts";
 import { resolvePiPackageRoot } from "../shared/pi-spawn.ts";
 import { preflightLaunchCwd } from "../shared/launch-cwd.ts";
-import { resolveNodeExecutable } from "../../shared/node-executable.ts";
 import { backgroundProcessOptions } from "../shared/background-process-options.ts";
+// WP4 custody reroute: the background runner child is minted and dispatched by
+// the SDK custody dispatcher (admission -> permit -> descendant record ->
+// helper direct-connect shape). The jiti CLI resolution and its spawn die with
+// this reroute; the runner payload re-enters this bundle in-process.
+import { dispatchCustodyPiSubagentSpawn } from "../../../../../../src/custody/custody-dispatcher.ts";
+import { consumeWorkflowChildPermit } from "../../shared/workflow-child-permit.ts";
 import { buildSkillInjection, normalizeSkillInput, resolveSkillsWithFallback } from "../../agents/skills.ts";
 import { buildAgentMemoryInjection } from "../../agents/agent-memory.ts";
 import { PI_CODING_AGENT_PACKAGE_ROOT_ENV, PROMPT_REDACTED, resolveChildCwd } from "../../shared/utils.ts";
@@ -80,54 +83,7 @@ import { resolvePermissionRules, type PermissionConfig } from "../shared/permiss
 import { normalizeExtensionBindings, omitExtensionBindingsEnv, type ExtensionBindings } from "../shared/extension-bindings.ts";
 import { assertWorkflowLaneKey, normalizeWorkflowLaneMetadata } from "../shared/lane-metadata.ts";
 
-const require = createRequire(import.meta.url);
 const piPackageRoot = resolvePiPackageRoot();
-
-function resolveJitiCliFromPackageJson(packageJsonPath: string): string | undefined {
-	if (!fs.existsSync(packageJsonPath)) return undefined;
-	const packageRoot = path.dirname(packageJsonPath);
-	const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8")) as {
-		bin?: string | Record<string, string>;
-	};
-	const binField = pkg.bin;
-	const binPath = typeof binField === "string"
-		? binField
-		: binField?.jiti ?? Object.values(binField ?? {})[0];
-	const candidates = [binPath, "lib/jiti-cli.mjs"].filter((candidate): candidate is string => Boolean(candidate));
-	for (const candidate of candidates) {
-		const cliPath = path.resolve(packageRoot, candidate);
-		if (fs.existsSync(cliPath)) return cliPath;
-	}
-	return undefined;
-}
-
-function resolveJitiCliPath(): string | undefined {
-	const candidates: Array<() => string | undefined> = [
-		() => require.resolve("jiti/package.json"),
-		() => piPackageRoot
-			? createRequire(path.join(piPackageRoot, "package.json")).resolve("jiti/package.json")
-			: undefined,
-		() => {
-			if (!process.argv[1]) return undefined;
-			const piEntry = fs.realpathSync(process.argv[1]);
-			return createRequire(piEntry).resolve("jiti/package.json");
-		},
-		() => piPackageRoot ? path.join(piPackageRoot, "node_modules", "jiti", "package.json") : undefined,
-	];
-	for (const candidate of candidates) {
-		try {
-			const packageJsonPath = candidate();
-			if (!packageJsonPath) continue;
-			const cliPath = resolveJitiCliFromPackageJson(packageJsonPath);
-			if (cliPath) return cliPath;
-		} catch {
-			// Candidate not available in this install, continue probing.
-		}
-	}
-	return undefined;
-}
-
-const jitiCliPath = resolveJitiCliPath();
 
 interface AsyncExecutionContext {
 	pi: ExtensionAPI;
@@ -353,10 +309,12 @@ export function formatAsyncStartedMessage(headline: string, interactive: boolean
 }
 
 /**
- * Check if jiti is available for async execution
+ * Async execution no longer depends on an external jiti CLI: the runner
+ * payload re-enters this bundle through the SDK custody dispatcher's helper
+ * direct-connect shape, so availability is structural, not discovered.
  */
 export function isAsyncAvailable(): boolean {
-	return jitiCliPath !== undefined;
+	return true;
 }
 
 export function resolveAsyncRunnerLogPaths(cfg: object): { stdoutPath: string; stderrPath: string } | undefined {
@@ -523,10 +481,6 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
 	const cwdError = preflightLaunchCwd(requestedCwd, cwd);
 	if (cwdError) return { error: cwdError };
 
-	if (!jitiCliPath) {
-		return { error: "upstream jiti for TypeScript execution could not be found; ensure package dependencies are installed" };
-	}
-
 	fs.mkdirSync(TEMP_ROOT_DIR, { recursive: true });
 	const cfgPath = getAsyncConfigPath(suffix);
 	const runnerProcessInstanceId = randomUUID();
@@ -534,8 +488,41 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
 	const launchBarrierToken = hasRevivalLease ? undefined : runnerProcessInstanceId;
 	const launchConfig = { ...cfg, runnerProcessInstanceId, ...(launchBarrierToken ? { launchBarrierToken } : {}) };
 	writePrivateAtomicJson(cfgPath, launchConfig);
-	const runner = path.join(path.dirname(fileURLToPath(import.meta.url)), "subagent-runner.ts");
-	const nodeCommand = resolveNodeExecutable();
+	// WP4 custody reroute: the runner child is dispatched (admission, permit,
+	// descendant record, helper direct-connect shape) with the same written
+	// config the jiti spawn used to hand over; the config path travels as the
+	// BYOK_SDK_CUSTODY_RUNNER_CONFIG transport commitment.
+	let dispatched: ReturnType<typeof dispatchCustodyPiSubagentSpawn>;
+	try {
+		dispatched = dispatchCustodyPiSubagentSpawn({
+			child: "pi-subagent-runner",
+			cwd,
+			runnerConfigPath: cfgPath,
+			// The same env the jiti spawn projected: extension-binding knobs
+			// omitted, package root pinned. The dispatcher projects it onto the
+			// record's declared names; nothing is forwarded wholesale.
+			vendorEnv: {
+				...omitExtensionBindingsEnv(process.env),
+				...(piPackageRoot ? { [PI_CODING_AGENT_PACKAGE_ROOT_ENV]: piPackageRoot } : {}),
+			},
+			childKey: `async-runner:${suffix}`,
+			agent: "pi-subagent-runner",
+		});
+	} catch (dispatchError) {
+		return { error: dispatchError instanceof Error ? dispatchError.message : String(dispatchError) };
+	}
+	const permitLaunch = dispatched.permitLaunch;
+	const permitError = consumeWorkflowChildPermit(permitLaunch.permit, {
+		workflowRunId: permitLaunch.workflowRunId,
+		childKey: permitLaunch.childKey,
+		agent: permitLaunch.agent,
+		launchContractDigest: permitLaunch.launchContractDigest,
+		context: permitLaunch.context,
+		runner: "pi",
+	});
+	if (permitError) {
+		return { error: permitError };
+	}
 	const launchForStartup = launchConfig as typeof launchConfig & { asyncDir?: unknown; id?: unknown; sessionId?: unknown; completionOwnerId?: unknown; revivalLease?: unknown };
 	const launchAsyncDir = typeof launchForStartup.asyncDir === "string" ? launchForStartup.asyncDir : undefined;
 	const launchRunId = typeof launchForStartup.id === "string" ? launchForStartup.id : suffix;
@@ -561,14 +548,11 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
 			stdoutFd = fs.openSync(logPaths.stdoutPath, "a");
 			stderrFd = fs.openSync(logPaths.stderrPath, "a");
 		}
-		const proc = spawn(nodeCommand, [jitiCliPath, runner, cfgPath], {
+		const proc = spawn(dispatched.command, dispatched.args, {
 			cwd,
 			...backgroundProcessOptions(),
 			stdio: ["ignore", stdoutFd ?? "ignore", stderrFd ?? "ignore"],
-			env: {
-				...omitExtensionBindingsEnv(process.env),
-				...(piPackageRoot ? { [PI_CODING_AGENT_PACKAGE_ROOT_ENV]: piPackageRoot } : {}),
-			},
+			env: dispatched.env,
 		});
 		closeFd(stdoutFd);
 		closeFd(stderrFd);

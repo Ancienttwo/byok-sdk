@@ -260,7 +260,25 @@ describe('SDK-reserved helper host composition', () => {
   });
 });
 
-it.each(['pi-subagent-runner', 'pi-subagent-print'])('explicitly refuses declared but inactive %s dispatch', async kind => {
-  await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, kind])).rejects.toThrow(
-    'SDK descendant runtime dispatch is not enabled: custody execution gates pending');
+// WP3 charge-once wiring (contract 20260917-1628) routed the print edge to
+// the single attested exec point (custody/pi-subagent-print-entry.ts
+// launchAttestedPiSubagentPrint); WP4 runner groundwork (contract
+// 20260917-2002) routes the runner edge the same way
+// (custody/pi-subagent-runner-entry.ts launchAttestedPiSubagentRunner),
+// reachable only through this direct `__byok_sdk_helper` argv shape — no
+// vendor spawn site is rerouted yet (the later five-edge cut, plan 1459).
+// Both branches refuse fail-closed when the parent custody commitments are
+// absent.
+it('routes pi-subagent-runner dispatch to the attested exec point, which refuses without the custody commitments', async () => {
+  delete process.env.BYOK_SDK_CUSTODY_PARENT_DEPTH;
+  delete process.env.BYOK_SDK_CUSTODY_LAUNCH_RECORD;
+  await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-subagent-runner'])).rejects.toThrow(
+    'BYOK_SDK_CUSTODY_PARENT_DEPTH missing');
+});
+
+it('routes pi-subagent-print dispatch to the attested exec point, which refuses without the custody commitments', async () => {
+  delete process.env.BYOK_SDK_CUSTODY_PARENT_DEPTH;
+  delete process.env.BYOK_SDK_CUSTODY_LAUNCH_RECORD;
+  await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-subagent-print'])).rejects.toThrow(
+    'BYOK_SDK_CUSTODY_PARENT_DEPTH missing');
 });

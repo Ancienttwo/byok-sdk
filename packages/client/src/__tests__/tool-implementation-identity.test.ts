@@ -805,11 +805,19 @@ describe('the launch-env projection subtracts an enumerated set, never a prefix'
   it('projects away exactly the lifecycle names this SDK mints between resolve and spawn', () => {
     // Pinned as a list, not only as a loop: a name added here is a name the
     // gate stops seeing, so it must be a deliberate edit rather than a
-    // side effect. Each of the three is minted into the per-server `env` block
+    // side effect. The first three are minted into the per-server `env` block
     // `mcp/client.ts:244` layers onto a GATED child (`task-runner.ts:3353-3355`).
+    // The custody trio is minted by the SDK custody dispatcher between resolve
+    // and spawn as preset-entry inputs (the parent contract depth commitment +
+    // the per-launch record path + the WP4 runner-config transport path),
+    // consumed and re-projected by the custody preset entries, never part of
+    // the attested exec env.
     expect([...TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES]).toEqual([
       'BYOK_HOST_TOOLSET_CONTEXT',
       'BYOK_PRODUCT_ID',
+      'BYOK_SDK_CUSTODY_LAUNCH_RECORD',
+      'BYOK_SDK_CUSTODY_PARENT_DEPTH',
+      'BYOK_SDK_CUSTODY_RUNNER_CONFIG',
       'BYOK_STORE_DIR',
     ]);
     const baseline = toolImplementationLaunchEnvNamesDigest(ENV);
