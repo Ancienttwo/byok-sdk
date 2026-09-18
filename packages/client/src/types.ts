@@ -1,5 +1,16 @@
-import type { AgentEgressPolicy, AgentEvent, PermissionPolicy, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { ToolImplementationAuthority, ToolImplementationUnavailableReasonV1 } from '@byok-sdk/implementation-identity';
+import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
+import type {
+  AgentEgressPolicy,
+  AgentEvent,
+  PermissionMode,
+  PermissionPolicy,
+  TaskOfferPayload,
+} from '@byok-sdk/protocol';
+import type { InputPreparationModelV1 } from './input-preparation';
 import type { RuntimeEnvironmentRequirements } from './daemon/environment';
+import type { McpLaunchBinding } from './daemon/trusted-launch-cwd';
+import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
 import type { AgentRef } from './agent-home';
 import type { McpToolsetServerObservation } from './mcp/observation';
 
@@ -12,6 +23,13 @@ export type {
 export type { AgentEgressPolicy } from '@byok-sdk/protocol';
 
 export type { RuntimeEnvironmentRequirements } from './daemon/environment';
+export type {
+  LaunchCwdRejection,
+  McpLaunchBinding,
+  McpLaunchCwdConfig,
+  TrustedLaunchCwd,
+  TrustedLaunchCwdUnavailableReason,
+} from './daemon/trusted-launch-cwd';
 
 export interface GitWorkspaceConfig {
   mode: 'local-checkpoints';
@@ -20,7 +38,7 @@ export interface GitWorkspaceConfig {
 /**
  * Failure vocabulary shared by the detection contract and local diagnostics.
  */
-export const RUNTIME_DETECTION_FAILURE_KINDS = ['not-found', 'not-executable', 'timeout', 'probe-failed'] as const;
+export const RUNTIME_DETECTION_FAILURE_KINDS = ['not-found', 'not-executable', 'timeout', 'probe-failed', 'refused'] as const;
 
 /**
  * One probe outcome, never a separately authored presence boolean. Authentication
@@ -29,7 +47,17 @@ export const RUNTIME_DETECTION_FAILURE_KINDS = ['not-found', 'not-executable', '
  */
 export type RuntimeDetectResult =
   | { readonly kind: 'available'; readonly version?: string; readonly authPresent?: boolean }
-  | { readonly kind: typeof RUNTIME_DETECTION_FAILURE_KINDS[number] };
+  | { readonly kind: Exclude<typeof RUNTIME_DETECTION_FAILURE_KINDS[number], 'refused'> }
+  | { readonly kind: 'refused'; readonly reason: RuntimeDetectionRefusalReason };
+
+export type RuntimeDetectionRefusalReason = ToolImplementationUnavailableReasonV1
+  | 'installation_observation_unsupported' | 'native_identity_mismatch' | 'launch_cwd_unavailable';
+
+/** Explicit scope, never a launch environment or task/lane-selection authority. */
+export type RuntimeInstallationObservationContext = { readonly authority: ToolImplementationAuthority } & (
+  | { readonly scope: 'entry'; readonly runtimeEntry: 'pi-rpc' | 'pi-prepared' }
+  | { readonly scope: 'enabled-top-level' }
+);
 
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
@@ -250,6 +278,50 @@ export interface RuntimeAdapterDescriptor {
    * declaration.
    */
   readonly requiresMcpToolsetToolObservation?: boolean;
+  /**
+   * HOW this adapter's MCP toolset server children get the trusted launch
+   * working directory (`daemon/trusted-launch-cwd.ts`).
+   *
+   * `'direct-cwd'` — the adapter spawns the servers itself and passes the
+   * directory to `spawn` (pi: its SDK-owned extension opens each server from
+   * the task-scoped config the adapter writes).
+   *
+   * `'launcher-wrapped'` — an external CLI spawns the servers from a
+   * configuration format with no per-server cwd field (claude's `mcpServers`
+   * JSON, codex's `-c mcp_servers.*`), so the adapter must rewrite each
+   * server's `command`/`args` through this package's
+   * `bin/byok-launch-cwd.mjs`.
+   *
+   * Optional, including for an adapter declaring `capabilities.mcpToolsets`.
+   * `TaskRunner` resolves the trusted directory for every such task and hands
+   * it to the adapter, but it resolves a LAUNCHER only for
+   * `'launcher-wrapped'`; a host platform where no launcher is available then
+   * declines the offer non-retryably. An adapter that declares nothing is
+   * admitted with no launcher, exactly like `'direct-cwd'`, and is itself
+   * responsible for starting its MCP server children in the trusted
+   * directory it was handed: the SDK cannot make a third-party adapter launch
+   * through a launcher by declining here. The three bundled adapters all
+   * declare their mode explicitly.
+   */
+  readonly mcpServerLaunch?: 'direct-cwd' | 'launcher-wrapped';
+  /**
+   * Whether this adapter GENERATES a reserved approval MCP server of its own
+   * when it is started under `policy.mode: 'confirm'` (claude's
+   * `--permission-prompt-tool` server, `adapters/claude/claude-adapter.ts`).
+   *
+   * Such a server exists nowhere in the daemon's projected `mcpServers` map,
+   * so the daemon cannot see it by counting that map — but it is an MCP
+   * server child of the task like any other, and it must start in the same
+   * proven-non-writable launch directory (`daemon/trusted-launch-cwd.ts`).
+   * `TaskRunner` therefore resolves the launch binding for a `confirm`-mode
+   * task on an adapter that declares this, even when the task projects no
+   * host toolset and needs no reserved helper at all.
+   *
+   * Omission means "generates none": an adapter that generates one and does
+   * not declare it would receive no binding and its own fail-closed guard
+   * refuses the start rather than launching the server unwrapped.
+   */
+  readonly generatesApprovalMcpServer?: boolean;
 }
 
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
@@ -339,23 +411,163 @@ export interface RuntimeOperationManifest {
   readonly forwardedEnvironmentNames: readonly string[];
 }
 
-/** Runtime resources only available after TaskRunner has sealed the manifest and claimed the task. */
-export interface RuntimeOperationStartInput {
+/**
+ * The durable identity of one already-counted preparation record
+ * (`daemon/input-preparation-store.ts`'s {@link InputPreparationRecordKey} plus
+ * its derived `recordId`).
+ *
+ * Carried so a prepared launch names the record it consumes rather than being
+ * handed anonymous bytes: the launch is refused if the artifact on disk does
+ * not carry this `recordId`.
+ */
+export interface RuntimePreparedLaunchReferenceV1 {
+  readonly scopeId: string;
+  readonly agentRef: string;
+  readonly requestId: string;
+  readonly recordId: string;
+}
+
+/**
+ * The independently trusted expectations the native prepared-input verifier
+ * requires (`@earendil-works/pi-coding-agent/prepared-session-input`'s
+ * `PreparedSessionExpectedV1`).
+ *
+ * They come from the DURABLE record — its artifact summary and its binding —
+ * never from the artifact file itself. The native contract is explicit that a
+ * value read out of the envelope can never serve as its own expectation, so
+ * carrying them here is what makes the envelope on disk checkable at all.
+ */
+export interface RuntimePreparedLaunchExpectationV1 {
+  /** `InputPreparationArtifactSummaryV1.envelopeDigest`. */
+  readonly envelopeDigest: string;
+  /** `InputPreparationArtifactSummaryV1.toolManifestDigest`. */
+  readonly toolManifestDigest: string;
+  /** The exact model identity the record's binding pinned. */
+  readonly model: InputPreparationModelV1;
+  /** The compiler binding the record's request was compiled under. */
+  readonly binding: {
+    readonly inputIdentity: string;
+    readonly runtimeIdentity: string;
+    readonly policyIdentity: string;
+    readonly profileRevision: string;
+  };
+}
+
+/**
+ * Everything one prepared Execution needs to launch the frozen request it was
+ * counted for.
+ *
+ * There is no `instruction` here and no way to supply one: the user request is
+ * already inside the frozen envelope, and a prepared run that accepted a
+ * separate instruction would have two answers to what it is about to send.
+ *
+ * The admitted permission POLICY is not repeated — it is
+ * `RuntimeOperationManifest.policy`, already sealed. Only the mode the manifest
+ * was COUNTED for is carried, so the adapter can refuse a manifest admitted
+ * under a different mode instead of discovering the divergence as tool drift.
+ */
+export interface RuntimePreparedLaunchV1 {
+  readonly reference: RuntimePreparedLaunchReferenceV1;
+  /**
+   * Absolute path of the retained `InputPreparationArtifact` JSON.
+   *
+   * A path rather than inline bytes on purpose: the artifact carries D, P(D)
+   * and the whole native envelope, and there is exactly one retained copy of
+   * it. A second inline representation would be a second authority over the
+   * same bytes.
+   */
+  readonly artifactPath: string;
+  readonly expected: RuntimePreparedLaunchExpectationV1;
+  /** The mode `daemon/prepared-tool-surface.ts` filtered the counted manifest for. */
+  readonly permissionMode: PermissionMode;
+  readonly toolBindingDigest: string;
+  readonly observationDigest: string;
+  /** The same trusted launch boundary the preparation observed every server under. */
+  readonly launch: McpLaunchBinding;
+  /** The implementation identity the preparation resolved per projected server. */
+  readonly toolImplementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
+  /** `toolsetId` -> the registry definition revision the preparation bound. */
+  readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
+}
+
+/** Runtime resources shared by every start variant. */
+interface RuntimeOperationStartBase {
+  readonly runtimeLaunch?: PiRuntimeLaunchResources;
+  /** Exact daemon MCP admission environment; Pi requires it and never inherits runtime credentials. */
+  readonly mcpEnv?: Readonly<Record<string, string>>;
   /** Startup cancellation only; rejection must preserve unresolved process ownership. */
   readonly signal?: AbortSignal;
   readonly manifest: RuntimeOperationManifest;
-  readonly instruction: string;
   readonly env: NodeJS.ProcessEnv;
   /** Local MCP authority resolved from logical wire ids. */
   readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
   /** {@link McpToolsetToolObservation} for exactly the projected toolset servers in `mcpServers`. */
   readonly mcpToolsetTools?: McpToolsetToolObservation;
+  /**
+   * The proven-non-writable directory every MCP toolset server child of this
+   * task is launched in, plus the launcher an external CLI needs to reach it.
+   *
+   * Resolved ONCE per offer by `TaskRunner` (`daemon/trusted-launch-cwd.ts`)
+   * and carried here so every spawn site of one task agrees on one directory.
+   * Present whenever `mcpServers` is; an adapter that finds MCP servers
+   * without it must refuse rather than fall back to its own cwd.
+   */
+  readonly mcpLaunch?: McpLaunchBinding;
+  /**
+   * What this daemon established about the implementation behind each
+   * projected toolset server, keyed by projected server name
+   * (`daemon/tool-implementation-identity.ts`).
+   *
+   * Resolved ONCE per offer by `TaskRunner`, alongside the launch binding
+   * above and for the same reason: the admission probe and every adapter spawn
+   * of one task must be talking about the same install. An adapter that spawns
+   * toolset servers itself carries these values to its spawn point unchanged;
+   * it never resolves its own.
+   */
+  readonly mcpToolImplementations?: Readonly<Record<string, ToolImplementationIdentityV1>>;
   /** Optional, adapter-agnostic out-of-band approval channel. */
   readonly approvalChannel?: ApprovalChannel;
 }
 
+/** The ordinary start: a resolved instruction the runtime turns into its own first request. */
+export interface RuntimeOperationInstructionStartInput extends RuntimeOperationStartBase {
+  readonly kind: 'instruction';
+  readonly instruction: string;
+}
+
+/**
+ * The prepared start: an already-compiled, already-counted provider request the
+ * runtime must send verbatim.
+ *
+ * A separate variant rather than an optional field beside `instruction`,
+ * because the two are mutually exclusive authority over the same bytes: with
+ * both reachable on one shape every adapter would have to decide which one
+ * wins, and the answer would be written three times.
+ */
+export interface RuntimeOperationPreparedStartInput extends RuntimeOperationStartBase {
+  readonly kind: 'prepared';
+  readonly preparation: RuntimePreparedLaunchV1;
+}
+
+/**
+ * Runtime resources only available after TaskRunner has sealed the manifest and
+ * claimed the task.
+ *
+ * Discriminated, not an optional bag: an adapter that does not implement the
+ * prepared lane must refuse it by name, and a union is what makes forgetting to
+ * a compile error rather than a silently ignored field.
+ */
+export type RuntimeOperationStartInput =
+  | RuntimeOperationInstructionStartInput
+  | RuntimeOperationPreparedStartInput;
+
 /** A pinned provider/runtime decision. `start()` receives resources only, never a raw offer. */
 export interface PreparedRuntimeOperation {
+  /** Resource phase after workspace resolution and before claim; never reads a credential. */
+  resolveRuntimeLaunch?(input: {
+    kind: 'instruction' | 'prepared'; cwd: string; env: Readonly<Record<string, string | undefined>>;
+    projectionRoot: string; authority?: ToolImplementationAuthority;
+  }): Promise<PiRuntimeLaunchResources>;
   start(input: RuntimeOperationStartInput): Promise<Session>;
 }
 
@@ -368,6 +580,8 @@ export interface RuntimeAdapter {
   readonly descriptor: RuntimeAdapterDescriptor;
   /** Readiness probing must not mutate an Agent home or allocate execution ownership. */
   detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
+  /** Configured local installation observation. Absence refuses; it never falls back to detect. */
+  detectInstallation?(context: RuntimeInstallationObservationContext, signal?: AbortSignal): Promise<RuntimeDetectResult>;
   prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
 }
 
@@ -395,6 +609,10 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
     id: descriptor.id,
     supportsDispatchSelection: descriptor.supportsDispatchSelection === true,
     requiresMcpToolsetToolObservation: descriptor.requiresMcpToolsetToolObservation === true,
+    ...(descriptor.mcpServerLaunch === undefined ? {} : { mcpServerLaunch: descriptor.mcpServerLaunch }),
+    ...(descriptor.generatesApprovalMcpServer === undefined
+      ? {}
+      : { generatesApprovalMcpServer: descriptor.generatesApprovalMcpServer === true }),
     capabilities: Object.freeze({
       steer: descriptor.capabilities.steer === true,
       resume: descriptor.capabilities.resume === true,

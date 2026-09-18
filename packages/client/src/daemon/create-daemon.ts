@@ -1,13 +1,14 @@
 import { terminalIdentity } from './terminal-identity';
 import { HarnessIdSchema, type HarnessInfo } from '@byok-sdk/protocol';
 import { TerminalCommitQueue } from './terminal-commit-queue';
-import { validateRuntimeDetectResult } from '../runtime-detection';
+import { observeRuntimeDetection } from '../runtime-detection';
 import {
   DEVICE_ASSERTION_AUDIENCE_MAX_BYTES,
   DEVICE_ASSERTION_DEFAULT_TTL_MS,
   DEVICE_ASSERTION_MAX_TTL_MS,
 } from '@byok-sdk/core';
 import path from 'node:path';
+import { statSync } from 'node:fs';
 import {
   createEnvelope,
   decodeEnvelope,
@@ -129,9 +130,10 @@ import {
   InputPreparationRequestError,
   type InputPreparationService,
 } from './input-preparation-service';
-import { createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
+import { resolvePiInputPreparationCompiler } from '../adapters/pi/input-preparation-runtime';
 import { decodeTeamMemberContext, encodeTeamMemberContext, LocalTeamWorkspace } from './team-workspace';
 import { McpToolsetRegistry, McpToolsetRevisionConflictError } from './toolset-registry';
+import type { ToolImplementationAuthority } from './tool-implementation-identity';
 import { ConnectionManager } from './connection-manager';
 import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
 import { OperationalHealthTracker, type OperationalHealthSnapshot } from './operational-health';
@@ -176,11 +178,11 @@ import { AgentHomeProjectionCompletionClient } from './agent-home-projection-cli
 import { InputPreparationCompletionClient } from './input-preparation-completion-client';
 import {
   createRemoteInputPreparationHandler,
-  type RemoteInputPreparationObservation,
 } from './input-preparation-remote';
-import { MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS, probeMcpServer } from './mcp-tools-probe';
+import { createPreparedToolSurfaceAssembler } from './prepared-tool-surface';
 import { buildRuntimeEnv } from './environment';
 import { resolveAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
+import type { McpLaunchCwdConfig } from './trusted-launch-cwd';
 import { preflightAgentMessageMcp } from './agent-message-mcp-preflight';
 import { resolveAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
 import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
@@ -643,6 +645,43 @@ export interface DaemonConfig {
    * believes a limit is in force.
    */
   inputPreparation?: InputPreparationDaemonConfig;
+  /**
+   * Operator input to the MCP toolset launch boundary
+   * (`./trusted-launch-cwd.ts`), forwarded verbatim to
+   * `TaskRunnerDeps.mcpLaunchCwd`.
+   *
+   * Absent means the platform default directory and — only when this process
+   * is provably plain Node — `process.execPath` as the launcher interpreter.
+   * Neither default is assumed: both are proven per offer, and an offer whose
+   * boundary this daemon cannot prove is declined non-retryably rather than
+   * started without one.
+   *
+   * A PRESENT section is validated here, at construction, the same discipline
+   * `deviceAssertion` and `inputPreparation` follow: a non-absolute `dir`, or a
+   * `launcherInterpreter` that is not an existing regular file, is a
+   * construction error rather than a per-offer decline nobody reads. What
+   * cannot be decided here is deliberately left to the resolver: whether the
+   * directory is still non-writable is a fact about the filesystem NOW, so it
+   * is proven once per offer and never cached.
+   */
+  mcpLaunchCwd?: McpLaunchCwdConfig;
+  /**
+   * The host's install-record authority for MCP toolset server
+   * implementations (`./tool-implementation-identity.ts`), forwarded verbatim
+   * to `TaskRunnerDeps.toolImplementationAuthority`.
+   *
+   * This SDK ships NO resolver and NO default, and there is nothing to
+   * validate here: an absent section is the supported state, and it means
+   * every implementation identity this daemon resolves is
+   * `resolver_unconfigured`. An absolute path is not an attestation, so a
+   * daemon without this section proves nothing about which executable serves a
+   * tool call and says so rather than implying otherwise.
+   *
+   * What a PRESENT authority buys is the refusal: an install it attested is
+   * re-measured before every spawn of that server, and a spawn whose artifact
+   * no longer measures the same is declined non-retryably.
+   */
+  toolImplementationAuthority?: ToolImplementationAuthority;
 }
 
 /**
@@ -960,8 +999,8 @@ function isRuntimeId(id: string): id is RuntimeId {
 }
 
 /** Runtimes actually detected as present on this device, typed per protocol §10 gap #4 (`ConnHelloPayload.runtimes`). Computed once at `start()` — re-probing on every reconnect would mean re-spawning each runtime's `--version` check for no real benefit within one daemon lifetime. */
-async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{ runtimes: RuntimeInfo[]; harnesses: HarnessInfo[] }> {
-  const detections = await Promise.all(adapters.map(async (adapter) => ({ adapter, detected: validateRuntimeDetectResult(await adapter.detect()) })));
+async function detectRuntimes(adapters: RuntimeAdapter[], authority: ToolImplementationAuthority | undefined): Promise<{ runtimes: RuntimeInfo[]; harnesses: HarnessInfo[] }> {
+  const detections = await Promise.all(adapters.map(async (adapter) => ({ adapter, detected: await observeRuntimeDetection(adapter, authority) })));
   const runtimes: RuntimeInfo[] = [];
   const harnesses: HarnessInfo[] = [];
   for (const { adapter, detected } of detections) {
@@ -1229,6 +1268,47 @@ function resolveDeviceAssertionTtlMs(config: DeviceAssertionConfig | undefined):
   return ttlMs;
 }
 
+/**
+ * Validates `DaemonConfig.mcpLaunchCwd` — see that field's own doc comment for
+ * why this is a construction error and what is deliberately NOT checked here.
+ *
+ * `launcherInterpreter` is stat'ed (following symlinks: a packaged Node is
+ * routinely a symlink into a versioned prefix) and required to be a regular
+ * file. An attested interpreter that does not exist would otherwise surface as
+ * a spawn failure inside the first task that needed a launcher-wrapped
+ * runtime, long after the operator could connect it to what they configured.
+ */
+function validateMcpLaunchCwd(config: McpLaunchCwdConfig | undefined): McpLaunchCwdConfig | undefined {
+  if (config === undefined) return undefined;
+  if (config.dir !== undefined && (!path.isAbsolute(config.dir) || /[\u0000\r\n]/u.test(config.dir))) {
+    throw new Error(
+      `DaemonConfig.mcpLaunchCwd.dir must be an absolute directory path — got ${JSON.stringify(config.dir)}. Omit the section to use the platform default (\`/\` on POSIX, %SystemRoot% on Windows).`,
+    );
+  }
+  const interpreter = config.launcherInterpreter;
+  if (interpreter !== undefined) {
+    if (!path.isAbsolute(interpreter) || /[\u0000\r\n]/u.test(interpreter)) {
+      throw new Error(
+        `DaemonConfig.mcpLaunchCwd.launcherInterpreter must be an absolute executable path — got ${JSON.stringify(interpreter)}`,
+      );
+    }
+    let stats;
+    try {
+      stats = statSync(interpreter);
+    } catch {
+      throw new Error(
+        `DaemonConfig.mcpLaunchCwd.launcherInterpreter ${JSON.stringify(interpreter)} does not exist`,
+      );
+    }
+    if (!stats.isFile()) {
+      throw new Error(
+        `DaemonConfig.mcpLaunchCwd.launcherInterpreter ${JSON.stringify(interpreter)} is not a regular file`,
+      );
+    }
+  }
+  return config;
+}
+
 export function createDaemonWithAdapters(
   config: DaemonConfig,
   adapters: RuntimeAdapter[],
@@ -1367,6 +1447,7 @@ export function buildDaemonWithAdapters(
   // Resolved into a `Set` (exact membership, no ordering, no pattern) and a
   // number here, once, so the handler below cannot read a different allowlist
   // or a different TTL than the one that was validated.
+  const mcpLaunchCwd = validateMcpLaunchCwd(config.mcpLaunchCwd);
   const deviceAssertionAudiences = resolveDeviceAssertionAudiences(config.deviceAssertion);
   const deviceAssertionTtlMs = resolveDeviceAssertionTtlMs(config.deviceAssertion);
   /**
@@ -1399,20 +1480,60 @@ export function buildDaemonWithAdapters(
    */
   const inputPreparationLimits =
     config.inputPreparation === undefined ? undefined : validateInputPreparationLimits(config.inputPreparation.limits);
+  /**
+   * The ONE prepared-tool-surface entry, bound to this daemon's registry,
+   * launch-cwd configuration and implementation authority
+   * (`./prepared-tool-surface.ts`).
+   *
+   * It replaces the remote lane's former `observeRequiredToolsets`, which
+   * probed with a label, a timeout and an environment and nothing else — no
+   * trusted launch directory and no implementation identity. There is
+   * deliberately no second path left: both the local `input_preparation.prepare`
+   * control call and the remote `agent.input.preparation` envelope reach this
+   * assembler through `InputPreparationService.prepare`, so a preparation's
+   * fingerprints and an offer's admission bind the same launch boundary.
+   *
+   * The runtime environment is resolved PER CALL, from the pi descriptor and
+   * `config.runtimeEnvironment`, exactly as the offer path builds it — a value
+   * captured at construction would shadow a later configuration reload.
+   */
+  const preparationRuntimeEnv = () => {
+    const piDescriptor = adapters.find((adapter) => adapter.descriptor.id === 'pi')?.descriptor;
+    return buildRuntimeEnv({
+      ambient: process.env,
+      ...(piDescriptor?.environmentRequirements === undefined
+        ? {}
+        : { requirements: piDescriptor.environmentRequirements }),
+      ...(config.runtimeEnvironment?.pi?.allow === undefined
+        ? {}
+        : { locallyAllowedNames: config.runtimeEnvironment.pi.allow }),
+    });
+  };
+  const preparedToolSurface = createPreparedToolSurfaceAssembler({
+    toolsetRegistry,
+    ...(mcpLaunchCwd === undefined ? {} : { mcpLaunchCwd }),
+    runtimeEnv: preparationRuntimeEnv,
+    ...(config.permissionDefaults === undefined ? {} : { permissionCeiling: config.permissionDefaults }),
+    ...(config.toolImplementationAuthority === undefined
+      ? {}
+      : { toolImplementationAuthority: config.toolImplementationAuthority }),
+  });
   let inputPreparationService: InputPreparationService | undefined;
-  let inputPreparationRuntimeError: unknown;
-  if (config.inputPreparation !== undefined && inputPreparationLimits !== undefined) {
-    try {
+  let inputPreparationInitialization: Promise<void> | undefined;
+  function initializeInputPreparation(): Promise<void> {
+    return inputPreparationInitialization ??= (async () => {
+      if (config.inputPreparation === undefined || inputPreparationLimits === undefined) return;
+      const compiler = await resolvePiInputPreparationCompiler({
+        authority: config.toolImplementationAuthority,
+        env: preparationRuntimeEnv(), sessionCwd: config.workspaceRoot,
+      });
       inputPreparationService = createInputPreparationService({
-        storeDir,
-        limits: inputPreparationLimits,
+        storeDir, limits: inputPreparationLimits,
         authorityResolver: config.inputPreparation.authorityResolver,
         counter: config.inputPreparation.counter,
-        compiler: createPiInputPreparationCompiler(),
+        compiler, toolSurface: preparedToolSurface,
       });
-    } catch (error) {
-      inputPreparationRuntimeError = error;
-    }
+    })();
   }
 
   /** Maps this service's typed refusals onto the wire. No refusal is ever widened into a result. */
@@ -1425,12 +1546,8 @@ export function buildDaemonWithAdapters(
         'this daemon is not configured for input preparation (DaemonConfig.inputPreparation is absent)',
       );
     }
-    if (inputPreparationService === undefined) {
-      throw new ControlError(
-        'runtime_identity_unavailable',
-        `the installed pi runtime closure could not be verified: ${inputPreparationRuntimeError instanceof Error ? inputPreparationRuntimeError.message : String(inputPreparationRuntimeError)}`,
-      );
-    }
+    await initializeInputPreparation();
+    if (inputPreparationService === undefined) throw new ControlError('runtime_identity_unavailable', 'input preparation initialization did not produce a service');
     if (shuttingDown) {
       throw new ControlError('shutting_down', 'this daemon is shutting down and will not prepare new input');
     }
@@ -1853,6 +1970,9 @@ export function buildDaemonWithAdapters(
     terminalCommits.resume();
     if (!daemonOwnerLease) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
     try {
+    // Initialization is one instance promise, including refusal. Even the
+    // enrollment-only control endpoint must not expose a half-initialized service.
+    await initializeInputPreparation();
     // Retention is owned by daemon lifecycle, including idle restarts. Open
     // only under the store lease and before exposing any control endpoint.
     await inputPreparationService?.open();
@@ -1990,7 +2110,7 @@ export function buildDaemonWithAdapters(
 
     blobLifecycleAbort = new AbortController();
     const [{ runtimes, harnesses }, blobClient] = await Promise.all([
-      detectRuntimes(adapters),
+      detectRuntimes(adapters, config.toolImplementationAuthority),
       Promise.resolve(new BlobClient(config.serverUrl, auth, { signal: blobLifecycleAbort.signal })),
     ]);
     // M3-2a: local runtime-detection result — computed once per `start()`,
@@ -2056,69 +2176,7 @@ export function buildDaemonWithAdapters(
         blobClient.resolveInstruction(blobRef, {
           ...(blobLifecycleAbort === undefined ? {} : { signal: blobLifecycleAbort.signal }),
         }),
-      observeToolsets: (requiredToolsets) => observeRequiredToolsets(requiredToolsets),
     });
-
-    /**
-     * Observe the payload's required toolsets with the SAME probe the task
-     * runner admits an offer with (`mcpToolsetToolsProbe` ->
-     * `probeMcpServer`). A second observation path would be a second answer to
-     * "what tools does this device have", and the prepared digest would then
-     * depend on which one asked.
-     *
-     * Every server is probed concurrently under one shared deadline, and a
-     * single failure refuses the whole preparation: a partial tool set is not
-     * a smaller preparation, it is a different one.
-     */
-    async function observeRequiredToolsets(
-      requiredToolsets: readonly string[],
-    ): Promise<RemoteInputPreparationObservation> {
-      const snapshot = toolsetRegistry.snapshot();
-      const status = toolsetRegistry.status();
-      const revisionByToolsetId = new Map(status.toolsets.map((row) => [row.id as string, row.definitionRevision]));
-      const servers = new Map<string, { toolsetId: string; server: McpStdioServerConfig }>();
-      const toolsetDefinitionRevisions: Record<string, string> = {};
-      for (const toolsetId of requiredToolsets) {
-        const toolset = snapshot.toolsets.get(toolsetId);
-        const definitionRevision = revisionByToolsetId.get(toolsetId);
-        if (toolset === undefined || definitionRevision === undefined) {
-          throw new Error(`required MCP toolset ${JSON.stringify(toolsetId)} is not configured on this device`);
-        }
-        toolsetDefinitionRevisions[toolsetId] = definitionRevision;
-        for (const [serverName, server] of Object.entries(toolset.mcpServers)) {
-          if (servers.has(serverName)) {
-            throw new Error(`required MCP toolsets collide on server name ${JSON.stringify(serverName)}`);
-          }
-          servers.set(serverName, { toolsetId, server });
-        }
-      }
-      if (servers.size === 0) throw new Error('required MCP toolsets resolved to no servers');
-
-      const piDescriptor = adapters.find((adapter) => adapter.descriptor.id === 'pi')?.descriptor;
-      const env = buildRuntimeEnv({
-        ambient: process.env,
-        ...(piDescriptor?.environmentRequirements === undefined
-          ? {}
-          : { requirements: piDescriptor.environmentRequirements }),
-        ...(config.runtimeEnvironment?.pi?.allow === undefined
-          ? {}
-          : { locallyAllowedNames: config.runtimeEnvironment.pi.allow }),
-      });
-      const entries = [...servers.entries()];
-      const observed = await Promise.all(entries.map(async ([serverName, entry]) => {
-        const observation = await probeMcpServer(serverName, entry.server, {
-          label: `MCP toolset server "${serverName}"`,
-          timeoutMs: MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
-          env,
-        });
-        if (observation.tools.length === 0) throw new Error(`MCP toolset server "${serverName}" reported no tools`);
-        return [serverName, Object.freeze({ ...observation, toolsetId: entry.toolsetId })] as const;
-      }));
-      return {
-        observation: Object.freeze(Object.fromEntries(observed)),
-        toolsetDefinitionRevisions: Object.freeze(toolsetDefinitionRevisions),
-      };
-    }
 
     capabilities.push('custom-harness');
     // Contract §8.1 / §8.3: the device-level capability string is NOT computed
@@ -2221,6 +2279,37 @@ export function buildDaemonWithAdapters(
       // M5: see `DaemonConfig.runtimeEnvironment`'s own doc comment above.
       runtimeEnvironment: config.runtimeEnvironment,
       getMcpToolsets: () => toolsetRegistry.snapshot().toolsets,
+      // The prepared-Execution lane, present only on a daemon whose input
+      // preparation service actually constructed — which is also the only
+      // daemon that advertises `agent-input-preparation` and can hold a record
+      // a `task.offer_prepared` could name. The three device facts travel with
+      // the store because this file already owns them: re-deriving the
+      // installed runtime identity or the operator's policy revision inside the
+      // task runner would be a second opinion about the same configuration.
+      ...(inputPreparationService === undefined || inputPreparationLimits === undefined
+        ? {}
+        : {
+          inputPreparationLane: {
+            store: inputPreparationService.store,
+            // The service's own once-only open latch. The task runner awaits
+            // it before its first record read so a restarted daemon that has
+            // served no control call yet still sees its durable records; the
+            // replay behind it stays the service's single authority.
+            open: inputPreparationService.open,
+            runtime: inputPreparationService.runtime,
+            policyRevision: inputPreparationLimits.revision,
+            toolsetDefinitionRevisions: () => new Map(
+              toolsetRegistry.status().toolsets.map((row) => [row.id as string, row.definitionRevision]),
+            ),
+          },
+        }),
+      // The operator's launch-boundary input, already validated above. Passed
+      // through unchanged: the daemon holds no second opinion about which
+      // directory is trusted — `resolveTrustedLaunchCwd` proves it per offer.
+      ...(mcpLaunchCwd === undefined ? {} : { mcpLaunchCwd }),
+      ...(config.toolImplementationAuthority === undefined
+        ? {}
+        : { toolImplementationAuthority: config.toolImplementationAuthority }),
       // M3-2a: `send` is already this file's OWN closure (not something
       // `TaskRunner` builds) — every `task.claim`/`task.started`/
       // `task.progress`/`task.artifact`/`task.await_approval`/
@@ -3393,13 +3482,17 @@ export function buildDaemonWithAdapters(
       [INPUT_PREPARATION_PREPARE_METHOD]: (params) =>
         runInputPreparation((service) => {
           const parsed = parseInputPreparationRequestParams(params);
-          if (!parsed) {
+          if (!parsed.ok) {
+            // Two distinct codes, forwarded as the parser classified them: a
+            // caller sending a RETIRED key hears `unsupported_input` and which
+            // key, rather than adjusting field types against a generic shape
+            // error forever.
             throw new ControlError(
-              'bad_request',
-              `${INPUT_PREPARATION_PREPARE_METHOD} requires exactly the one strict request shape; unknown fields are rejected`,
+              parsed.code,
+              `${INPUT_PREPARATION_PREPARE_METHOD}: ${parsed.detail}`,
             );
           }
-          return service.prepare(parsed);
+          return service.prepare(parsed.request);
         }),
       [INPUT_PREPARATION_LOOKUP_METHOD]: (params) =>
         runInputPreparation((service) => {

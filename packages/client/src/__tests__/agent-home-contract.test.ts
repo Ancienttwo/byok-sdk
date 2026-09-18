@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs';
+import { promises as fs, readFileSync } from 'node:fs';
 import { spawn as realSpawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
@@ -29,6 +29,7 @@ import {
 import { sealRuntimeOperationManifest } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { startPreparedOperation } from './fixtures/prepared-operation';
+import { trustedCwd } from './fixtures/launch-cwd';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
@@ -810,24 +811,25 @@ describe('SDK-owned Agent home contract', () => {
   });
 
   it.each(['pi', 'claude', 'codex'] as const)(
-    'binds the %s process cwd to the sealed manifest cwd',
+    'binds the %s Agent home while respecting its runtime process cwd contract',
     async (runtime) => {
       const cwd = await makeRoot();
       const observedCwds: Array<string | URL | undefined> = [];
+      const piSessionCwds: string[] = [];
+      const expectedProcessCwd = runtime === 'pi' ? await trustedCwd() : cwd;
       const spawnFn = ((command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
         observedCwds.push(options?.cwd);
+        if (runtime === 'pi') {
+          const configIndex = args.indexOf('--config');
+          expect(configIndex).toBeGreaterThanOrEqual(0);
+          const config = JSON.parse(readFileSync(args[configIndex + 1]!, 'utf8')) as { cwd: string };
+          piSessionCwds.push(config.cwd);
+        }
         return realSpawn(command, args, options);
       }) as never;
       const adapter = runtime === 'pi'
         ? new PiAdapter({
             resolveBin: () => ({ command: RUNTIME_FIXTURES.pi, source: 'env' }),
-            resolveExtensions: () => ({
-              webAccess: '/extensions/pi-web-access/index.ts',
-              mcpExtension: '/extensions/byok-pi-mcp.js',
-              subagentsPolicy: '/extensions/byok-pi-subagents-policy.js',
-              subagents: '/extensions/pi-subagents/index.ts',
-              todo: '/extensions/rpiv-todo/index.ts',
-            }),
             spawnFn,
           })
         : runtime === 'claude'
@@ -840,7 +842,14 @@ describe('SDK-owned Agent home contract', () => {
       );
       await session.close();
       expect(observedCwds.length).toBeGreaterThan(0);
-      expect(observedCwds.every((observed) => observed === cwd)).toBe(true);
+      // docs/spec.md: Runtime launch descriptions sealed asset set; P2
+      // separates trusted process cwd from the manifest-owned session cwd.
+      expect(observedCwds.every((observed) => observed === expectedProcessCwd)).toBe(true);
+      if (runtime === 'pi') {
+        expect(expectedProcessCwd).not.toBe(cwd);
+        expect(piSessionCwds).toHaveLength(observedCwds.length);
+        expect(piSessionCwds.every((observed) => observed === cwd)).toBe(true);
+      }
     },
   );
 });

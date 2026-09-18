@@ -2,11 +2,13 @@ import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import {
   freezeRuntimeAdapterDescriptor,
   type RuntimeAdapter,
+  type RuntimeAdapterDescriptor,
   type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult,
   type RuntimeCapabilities,
   type RuntimeDetectResult,
   type RuntimeOperationStartInput,
+  type RuntimePreparedLaunchV1,
   type Session,
 } from '../../types';
 import { AsyncQueue } from '../../util/async-queue';
@@ -187,9 +189,23 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
       env: NodeJS.ProcessEnv;
       mcpServers?: RuntimeOperationStartInput['mcpServers'];
       mcpToolsetTools?: RuntimeOperationStartInput['mcpToolsetTools'];
+      mcpLaunch?: RuntimeOperationStartInput['mcpLaunch'];
+      mcpToolImplementations?: RuntimeOperationStartInput['mcpToolImplementations'];
       gitWorkspace?: { workspaceId: string; baseline?: string };
       approvalChannel?: RuntimeOperationStartInput['approvalChannel'];
     };
+  }> = [];
+  /**
+   * Every prepared start this adapter was handed, in order.
+   *
+   * Recorded separately from {@link startCalls} rather than folded into it: the
+   * two lanes carry mutually exclusive authority over the request bytes, and a
+   * single list would let a test assert "it started" without saying which
+   * request it started.
+   */
+  readonly preparedStartCalls: Array<{
+    preparation: RuntimePreparedLaunchV1;
+    manifest: RuntimeOperationStartInput['manifest'];
   }> = [];
   readonly sessions: StubSession[] = [];
   private readonly detectResult: RuntimeDetectResult;
@@ -219,6 +235,18 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
     detectResult: RuntimeDetectResult = { kind: 'available', version: '0.0.0' },
     capabilities: RuntimeCapabilities = DEFAULT_STUB_CAPABILITIES,
     requiresMcpToolsetToolObservation = true,
+    /**
+     * The two descriptor declarations that drive the daemon's MCP launch
+     * boundary: HOW this adapter's servers reach the trusted directory
+     * (`mcpServerLaunch`) and whether it generates a reserved approval server
+     * of its own under `confirm` (`generatesApprovalMcpServer`). Omitted
+     * everywhere except the tests that pin that boundary, so the default stub
+     * stays the "spawns its own servers, generates none" shape.
+     */
+    launchDeclarations: Pick<
+      RuntimeAdapterDescriptor,
+      'mcpServerLaunch' | 'generatesApprovalMcpServer'
+    > = {},
   ) {
     this.detectResult = detectResult;
     this.descriptor = freezeRuntimeAdapterDescriptor({
@@ -227,6 +255,12 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
       requiresMcpToolsetToolObservation,
       capabilities,
       environmentRequirements: { credentialNames: [] },
+      ...(launchDeclarations.mcpServerLaunch === undefined
+        ? {}
+        : { mcpServerLaunch: launchDeclarations.mcpServerLaunch }),
+      ...(launchDeclarations.generatesApprovalMcpServer === undefined
+        ? {}
+        : { generatesApprovalMcpServer: launchDeclarations.generatesApprovalMcpServer }),
     });
   }
 
@@ -259,6 +293,18 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
   }
 
   private async startPrepared(prepared: RuntimeAdapterPrepareInput, startInput: RuntimeOperationStartInput): Promise<Session> {
+    // The prepared lane carries no instruction at all, so it is recorded as
+    // itself rather than as an instruction start with an empty string.
+    if (startInput.kind === 'prepared') {
+      this.preparedStartCalls.push({ preparation: startInput.preparation, manifest: startInput.manifest });
+      void prepared;
+      if (this.startError) throw this.startError;
+      if (this.startGate) await this.startGate;
+      this.sessionCounter += 1;
+      const preparedSession = new StubSession(`stub-session-${this.sessionCounter}`);
+      this.sessions.push(preparedSession);
+      return preparedSession;
+    }
     this.startCalls.push({
       task: {
         instruction: startInput.instruction,
@@ -272,6 +318,10 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
         env: startInput.env,
         ...(startInput.mcpServers === undefined ? {} : { mcpServers: startInput.mcpServers }),
         ...(startInput.mcpToolsetTools === undefined ? {} : { mcpToolsetTools: startInput.mcpToolsetTools }),
+        ...(startInput.mcpLaunch === undefined ? {} : { mcpLaunch: startInput.mcpLaunch }),
+        ...(startInput.mcpToolImplementations === undefined
+          ? {}
+          : { mcpToolImplementations: startInput.mcpToolImplementations }),
         ...(startInput.manifest.workspace.workspaceId === undefined
           ? {}
           : { gitWorkspace: { workspaceId: startInput.manifest.workspace.workspaceId, baseline: startInput.manifest.workspace.baseline } }),

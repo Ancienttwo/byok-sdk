@@ -1,0 +1,86 @@
+# Plan: C07 runner/i18n implementation entry
+
+> **Status**: M1b accepted c8645877; M2a accepted be4a7c47; M2b-0 accepted 7cabc200; M2b-1/2 engineering slices registered; M2b-3 dispatch gated
+> **Task Profile**: implementation
+> **Planning Source**: Owner §96 Q1–Q3 design approval; supervisor6696c211 PASS and design-entry instruction
+> **Task Contract**: `tasks/contracts/20260916-c07-runner-i18n.contract.md`
+> **Task Review**: `tasks/reviews/20260916-c07-runner-i18n.review.md`
+> **Implementation Notes**: `tasks/notes/20260916-c07-runner-i18n.notes.md`
+
+## Goal
+
+Prepare the bounded implementation contract in [docs/researches/20260916-c07-runner-i18n-implementation-entry.md](../docs/researches/20260916-c07-runner-i18n-implementation-entry.md), without product writes. Preserve async behavior/localization and strict launch authority. SDK6696c211 is accepted helper-lookup base, not complete containment.
+
+## P1 / P2 / P3
+
+- P1: Host owns immutable declarations; shared owns measurement; daemon owns launch policy; keys owns custody; child consumes declarations.
+- P2: daemon resolves self/descendants → exact config checksum → Pi → runner → later Pi → result/cancel. Last recursive edge still needs a complete custody/env trace before product implementation.
+- P3: Host finite multi-kind table projects one single-prefix SDK record per locator. Same artifact does not authorize child retargeting. Private source integration and real i18n dependency preserve capabilities; publication/feature removal remain separate.
+
+## Task Breakdown
+
+- [x] SEA frozen-artifact analysis accepted as category①, limited to unchanged launcher; full authority bodies and dynamic namespace keys checked, actual SEA execution still unverified.
+- [x] Supervisor accepted exact SEA recipe registration aa6e2afa; product21de7650/docs86bbcdc4 frozen separately, no SDK/vendor/launcher/dependency change.
+- [x] SEA product21de7650 verified on clean86bbcdc4 using supervisor-authorized official Node24.18.0 Darwin: real injection/load and both scenarios passed, daemonStatus preserved, all input hashes unchanged. Initial Homebrew shared-node failure retained; no product change between attempts.
+- [ ] SEA independent bounded gate on frozen recipe/evidence; Node22/OS matrix remains explicit. No push before PASS authorization.
+
+- [x] WIN-CRLF accepted/pushed at87ebe865 after independent bounded gate. Run35157463643 has four existing failures (SEA three OS and Windows lifecycle); Windows Git job does not exercise vendor raw-hash tests, so windowsRunnerVerified=false remains. No workflow/lifecycle/conflict repair in this slice.
+
+- [x] Correct confirmed alpha r2 TestServer read-ahead filtering loss at7357ebb4; deterministic HTTP2RED→7targetedPASS, original assertions/timeouts unchanged; one frozen client full2763pass/11skip/soleS2RED24. Supervisor round3 pending.
+
+- [x] Read6696c211 independent gate; register compiler default discovery as future removal, preserve product freeze.
+- [x] Prepare schema/version/encoding freeze sheet, P4 interfaces, locale layout and recursive custody/env matrix.
+- [x] Register inactive implementation scope, native1006 checklist and Owner decision boundaries.
+- [x] Run docs-only diff/path/workflow checks and record evidence.
+- [x] Supervisor review of this new design-entry packet; two wording requests incorporated (not another product gate).
+- [x] Owner approved M0, SDK M1–M3 and Salesko P4 separately presented scopes (reply「批准」).
+- [x] Produce four-kind/five-edge draft, source inventory and independent byte vectors; freeze C composition candidate with unchanged V1 templates and distinct policy/perLaunch.
+- [x] M00df88a7f accepted; custody execution obligations remain explicit M1 enablement gates.
+- [x] Register exact SDK M1a declaration/dependency/compiler/test paths; P4 remains separate.
+- [x] M1a implemented6eec0ab6: strict runtime wrapper/four-kind locator, immutable measured declaration, unchanged MCP, explicit compiler identity.
+- [x] Freeze M1a product6eec0ab6 separately from docs; local targeted checks passed.
+- [x] Supervisor unique full/pack gate PASS on M1a d9e55a4e; S2 tripwire36 remains the explicit residual.
+- [x] M1b exact source/license inventory and product paths registered while M1a gate runs; no M1b product writes.
+- [x] M1b implementation frozen56f1e569: private todo, both locale roots, six licensed UI sources and targeted validation.
+- [x] M1b supervisor complete gate plus packaging/docs re-gate PASS c8645877; S2 tripwire24 remains.
+- [x] Register M2a exact paths and M2b inactive234-source vendor inventory.
+- [x] M2a shared composition/physical gate + daemon config templates implemented; dispatch remains disabled.
+- [x] M2a supervisor frozen full gate PASSbe4a7c47; client2724/identity74/real pack0, S2only24.
+- [x] M2b-0 wire all20 context/transition vectors, capture10RED, freeze7cabc200 with104shared tests; dispatch remains disabled.
+- [x] M2b-0 supervisor targeted gate PASS7cabc200: identity104/client183, zero golden diff, seven authority hashes unchanged; no full/pack.
+- [x] Register M2b-1 export-html, M2b-2 interpreted structured-output, M2b-3 custody/dispatch as separate slices.
+- [x] M2b-1 exact paths registeredd27be82e; scope narrowed because1005 has no public export-html API.
+- [x] M2b-1 asset prerequisite implemented1ec9ffce: single layout/source inventory + attested child preverify, no resource originals shipped or runner copy; local32asset/host +51closure/host/cwd pass.
+- [x] M2b-1 frozen targeted supervisor gate PASS7d56a6fb (assets/preverify only);83 targeted tests, S2 still24. Native public export/path-policy remain1006 item11.
+- [x] M2b-2 read-only15-row equivalence probe and actual upstream consumer reproduction; four regex counterexamples documented, no product writes.
+- [x] M2b-2 supervisor accepted runtime-guard attribution and escalated to Owner: one widening, three classification/timing differences.
+- [x] Owner selected α explicitly: sealed structured-output feature requests refuse; ordinary text subagents retained. No scripted-workflow/native/P4 approval inferred.
+- [x] M2b-2α trace all effective request/recovery/delegation consumers and sealed build graph, then register exact implementation paths. Runtime refusal and codegen graph exclusion require separate evidence; dispatch stays gated.
+- [x] Draft M2b-3 execution/test matrix, helper activation order and downstream complete-plan notice (docs only).
+- [x] Supervisor accepted M2b-3 design5e7c3ba7 with print-specific startup probe, full recursive/jiti-zero gate, and spec/P4 notice conditions. Root/session ownership and atomic transaction/crash proofs remain implementation stop conditions; no product work until external inputs.
+- [ ] M2b-3: prove all five custody execution points and consume accepted M2b-1/2 prerequisites; obtain scripted-workflow Owner disposition before recursive dispatch. This is the only dispatch-enabling slice; full gate.
+- [ ] When binding the real runner edge, evaluate a public refusal-reason union against frozen vocabulary and API golden; report-only until then.
+- [ ] M3: functional/packed recursive and locale acceptance; clipboard remains1006 blocker.
+
+## Stop / verification
+
+Only the five contract docs plus the two explicitly approved inert JSON vectors are writable under this successor. No production schema/parser/test source/package/lock/golden edits, install, full/pack, external action or Salesko product change. `git diff --check` and `repo-harness run check-task-workflow --strict`; review verifies no accepted invariants weakened. Four-kind/five-edge draft and source inventory are prepared; composition C and custody gate await supervisor acceptance. Hash agreement is not M0 PASS.
+
+## Active implementation boundary
+The M1a contract activation supersedes historical M0-only Stop/verification text above. Only its enumerated paths are active; no runner/print dispatch or unproved recursive budget path is enabled. Root owns all edits including manifests/lock/goldens; read-only explorer maps impact.
+
+
+M2b-1 exact9-file scope registered before product edits. Native1005 lacks public export-html; supervisor narrowed to required asset declaration/preverify and single layout/source inventory. Native1006 item11 public subpath is now a prerequisite for M2b-3; no partial runner vendoring or private native inlining. Resource originals remain the exact pinned native package's assets; SDK build ships verified layout/inventory only. P4 installation and computed share import remain open. Evidence readback _ops/c07-identity-workspace/m2b-1/native1005-resource-inventory.json.
+
+
+### Alpha implementation sequence (Owner approved)
+
+- [ ] Exact227 factory graph registration, original-byte manifest and source provenance.
+- [ ] Real per-entry pre-fix RED with text controls, then sealed refusal implementation.
+- [ ] Dedicated sealed host build/private mapping; one vendor author, unsealed compiler retained, main dist unchanged.
+- [ ] Freeze product/docs and hand to supervisor for unique full gate/real release-pack; carry RPC codegen/S2 tripwire24 residuals.
+
+- [x] Alpha raw baseline8995a4b1 with9 refusal RED/12controls GREEN; product107f4fb2 explicit refusal + dedicated private sealed artifact,51 focused/typecheck passed.
+- [x] Alpha first complete supervisor gate onad6b2fe5: FAIL;8 host driver regressions plus sealed smoke interpreter-argv fixture failure independently diagnosed.
+- [x] Apply three-file driver correctiona9730e43;25/25 affected tests, client/vendor typecheck and assertion byte equality pass.
+- [ ] Obtain one supervisor complete re-gate plus real pack on the correction freeze; include other13 packages skipped after first client failure. S2 residual24 remains explicit.

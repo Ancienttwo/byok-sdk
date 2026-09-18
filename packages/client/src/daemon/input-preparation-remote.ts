@@ -4,6 +4,8 @@ import {
   type AgentInputPreparationPayload,
   type InputPreparationCompletionRequest,
   type InputPreparationContextDocument,
+  type InputPreparationMessage,
+  type InputPreparationReadinessReason,
   type InputPreparationReceiptSummary,
   type InputPreparationRejectionReason,
 } from '@byok-sdk/protocol';
@@ -12,17 +14,13 @@ import {
   INPUT_PREPARATION_VERSION,
   type InputPreparationErrorCodeV1,
   type InputPreparationLimitsPolicyV1,
+  type InputPreparationMessageV1,
+  type InputPreparationReadinessReasonV1,
   type InputPreparationReceiptV1,
   type InputPreparationRequestV1,
-  type InputPreparationToolV1,
 } from '../input-preparation';
-import { McpAuthorityError } from '../mcp/client';
-import type { McpToolsetServerObservation } from '../mcp/observation';
-import { projectMcpTools, qualifiedMcpToolName } from '../mcp/projection';
-import { buildToolExecutorsFromObservation } from '../adapters/pi/input-preparation';
 import {
   InputPreparationRequestError,
-  inputPreparationRuntimeIdentityString,
   type InputPreparationService,
 } from './input-preparation-service';
 import type { InputPreparationCompletionClient } from './input-preparation-completion-client';
@@ -49,8 +47,12 @@ import type { InputPreparationCompletionClient } from './input-preparation-compl
  *    never from the payload. A sender that could name them could bind a
  *    preparation to a device it does not own.
  * 2. Tools and tool-executor identities are LOCAL observations. The payload
- *    names required toolsets; this module probes those servers itself and
- *    fingerprints what they actually report.
+ *    names required toolsets and a permission mode; the daemon's ONE prepared
+ *    tool-surface entry (`./prepared-tool-surface.ts`, reached through
+ *    `InputPreparationService.prepare`) resolves the launch boundary, resolves
+ *    an implementation identity per server, probes them itself and
+ *    fingerprints what they actually report. This module states no tool and no
+ *    executor, which is why it no longer has an observation seam of its own.
  * 3. The Host's `deadlineAt` may only TIGHTEN the configured local deadline.
  *
  * Failure posture: a business refusal is REPORTED as a terminal completion so
@@ -64,6 +66,13 @@ import type { InputPreparationCompletionClient } from './input-preparation-compl
  * Every local refusal code is a legal wire rejection reason. Stated as a type
  * constraint so adding a local code without adding it to the protocol enum is
  * a compile error rather than an `unknown_reason` at runtime.
+ *
+ * ONE-DIRECTIONAL on purpose, and the mirror is NOT asserted: the wire
+ * rejection enum is deliberately a strict SUPERSET of the local codes. It also
+ * carries the reasons this remote lane itself owns and the service never
+ * answers with — `context_unresolvable`, `context_hash_mismatch` and
+ * `deadline_elapsed` — so a `Wire extends Local` assertion would fail on
+ * reasons that are correct by design.
  */
 type _LocalCodesAreWireReasons = InputPreparationErrorCodeV1 extends InputPreparationRejectionReason
   ? true
@@ -71,12 +80,50 @@ type _LocalCodesAreWireReasons = InputPreparationErrorCodeV1 extends InputPrepar
 const _localCodesAreWireReasons: _LocalCodesAreWireReasons = true;
 void _localCodesAreWireReasons;
 
-/** What the daemon observed for the payload's `requiredToolsets`. */
-export interface RemoteInputPreparationObservation {
-  readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
-  /** `toolsetId` -> the registry's definition revision. Every observed toolset must appear. */
-  readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
-}
+/**
+ * Same constraint, one surface over: every local readiness reason is a legal
+ * wire readiness reason. There is no single schema authority for this pair —
+ * the local set is a hand-written union in `../input-preparation` and the wire
+ * set is a zod enum in `@byok-sdk/protocol` — so this assertion is what makes
+ * adding a reason to one and forgetting the other a COMPILE error rather than
+ * a receipt the cloud rejects at parse time.
+ */
+type _LocalReadinessReasonsAreWireReasons =
+  InputPreparationReadinessReasonV1 extends InputPreparationReadinessReason ? true : never;
+const _localReadinessReasonsAreWireReasons: _LocalReadinessReasonsAreWireReasons = true;
+void _localReadinessReasonsAreWireReasons;
+
+/**
+ * And the mirror, because unlike the refusal codes above the two readiness sets
+ * are meant to be EQUAL, not nested: every readiness reason the cloud can parse
+ * must be one this device can actually produce. Without this direction, a
+ * reason added to the zod enum alone would compile forever as a value the wire
+ * admits and no device ever emits.
+ */
+type _WireReadinessReasonsAreLocalReasons =
+  InputPreparationReadinessReason extends InputPreparationReadinessReasonV1 ? true : never;
+const _wireReadinessReasonsAreLocalReasons: _WireReadinessReasonsAreLocalReasons = true;
+void _wireReadinessReasonsAreLocalReasons;
+
+/**
+ * And the message support set, both directions.
+ *
+ * Same absence of a single schema authority, one surface worse: the local set
+ * is a hand-written union in `../input-preparation`, the wire set is a zod
+ * discriminated union in `@byok-sdk/protocol`, and `./control-protocol.ts`
+ * carries a THIRD hand-written parse of the same shapes. These assertions are
+ * what make registering a message kind in one place and forgetting another a
+ * COMPILE error, instead of a context document the Host is allowed to send and
+ * the device answers with `unsupported_input`. Equality, not nesting: a kind
+ * the wire admits that no device can state is as broken as the reverse.
+ */
+type _LocalMessagesAreWireMessages = InputPreparationMessageV1 extends InputPreparationMessage ? true : never;
+const _localMessagesAreWireMessages: _LocalMessagesAreWireMessages = true;
+void _localMessagesAreWireMessages;
+
+type _WireMessagesAreLocalMessages = InputPreparationMessage extends InputPreparationMessageV1 ? true : never;
+const _wireMessagesAreLocalMessages: _WireMessagesAreLocalMessages = true;
+void _wireMessagesAreLocalMessages;
 
 export interface RemoteInputPreparationDeps {
   /** The authenticated local device record. Never the payload's word for it. */
@@ -95,7 +142,6 @@ export interface RemoteInputPreparationDeps {
   readonly resolveBlobText: (
     blobRef: Extract<AgentInputPreparationPayload['context'], { blobRef: unknown }>['blobRef'],
   ) => Promise<string>;
-  readonly observeToolsets: (requiredToolsets: readonly string[]) => Promise<RemoteInputPreparationObservation>;
   readonly now?: () => number;
 }
 
@@ -119,14 +165,42 @@ function sha256Hash(text: string): string {
  * whatever the local receipt gains next. The assignment to the PROTOCOL type is
  * also the drift check between the local receipt and the wire summary.
  */
+/**
+ * The binding, with the Host's accounting ruling copied into a mutable shape.
+ *
+ * Written out rather than spread so the ruling that leaves this device is
+ * provably the one the record holds, field by field — a spread would carry
+ * whatever the local binding gains next straight onto the wire.
+ */
+function toWireBinding(
+  binding: InputPreparationReceiptV1['binding'],
+): InputPreparationReceiptSummary['binding'] {
+  const { accountingPolicyRef, ...rest } = binding;
+  return {
+    ...rest,
+    ...(accountingPolicyRef === undefined
+      ? {}
+      : {
+        accountingPolicyRef: {
+          revision: accountingPolicyRef.revision,
+          ruledRuntime: accountingPolicyRef.ruledRuntime,
+          ruledTarget: { ...accountingPolicyRef.ruledTarget },
+          ruledResidualKeys: [...accountingPolicyRef.ruledResidualKeys],
+        },
+      }),
+  };
+}
+
 export function toInputPreparationReceiptSummary(
   receipt: InputPreparationReceiptV1,
 ): InputPreparationReceiptSummary {
   return {
     reference: receipt.reference,
     state: receipt.state,
-    binding: receipt.binding,
-    ...(receipt.artifact === undefined ? {} : { artifact: receipt.artifact }),
+    binding: toWireBinding(receipt.binding),
+    ...(receipt.artifact === undefined
+      ? {}
+      : { artifact: { ...receipt.artifact, residual: receipt.artifact.residual.map((entry) => ({ ...entry })) } }),
     ...(receipt.counter === undefined ? {} : { counter: receipt.counter }),
     ready: receipt.ready,
     readinessReasons: [...receipt.readinessReasons],
@@ -175,64 +249,21 @@ async function resolveContextDocument(
   return result.data;
 }
 
+/**
+ * Turn one authorized envelope into the LOCAL request shape.
+ *
+ * It is a projection, not an assembly: every field is either copied from the
+ * payload or read off this device's authenticated record. Nothing about tools
+ * is decided here — `requiredToolsets` and `permissionMode` travel through to
+ * the service, which reaches the one assembly entry. That is what makes "the
+ * remote lane cannot state a tool schema or an executor" a structural fact
+ * about this file rather than a rule it has to remember.
+ */
 async function buildRequest(
   payload: AgentInputPreparationPayload,
   deps: RemoteInputPreparationDeps,
-  service: InputPreparationService,
 ): Promise<InputPreparationRequestV1> {
   const context = await resolveContextDocument(payload, deps);
-
-  let observed: RemoteInputPreparationObservation;
-  try {
-    observed = await deps.observeToolsets(payload.requiredToolsets);
-  } catch (cause) {
-    throw new RemoteRejection(
-      'toolsets_unobservable',
-      'a required MCP toolset server could not be observed on this device',
-      { cause },
-    );
-  }
-
-  // The model-visible tool set is what the servers THEMSELVES reported, in the
-  // core's one canonical order — the same order the ordinary extension
-  // registers and the model is shown, so a prepared digest cannot depend on
-  // which consumer built it.
-  let tools: InputPreparationToolV1[];
-  try {
-    tools = projectMcpTools(observed.observation).map((tool) => ({
-      name: qualifiedMcpToolName(tool.serverName, tool.toolName),
-      description: tool.description,
-      // No `?? {}` fallback: `observation.ts`'s `validateTool` already refuses a
-      // tool whose `inputSchema` is absent or is not a JSON object, so an
-      // empty-schema default here would be dead code posing as a safety net —
-      // and, if it ever were reachable, it would count a schema no model was shown.
-      parameters: tool.inputSchema as Readonly<Record<string, unknown>>,
-    }));
-  } catch (cause) {
-    if (!(cause instanceof McpAuthorityError)) throw cause;
-    throw new RemoteRejection('unsupported_input', 'the observed MCP tool identities are ambiguous', { cause });
-  }
-
-  let toolExecutors: Readonly<Record<string, string>>;
-  try {
-    ({ toolExecutors } = await buildToolExecutorsFromObservation({
-      observation: observed.observation,
-      // This task-free lane fingerprints the complete observed snapshot it
-      // compiled above. Non-narrowing projection is explicit; it grants no
-      // execution permission and the unattested receipt remains not-ready.
-      permissionMode: 'auto',
-      toolsetDefinitionRevisions: observed.toolsetDefinitionRevisions,
-      // Declared limit for this slice: the remote lane compiles the observed
-      // MCP toolset tools only. Pi's own native tools are selected by a runtime
-      // policy this task-free path never resolves, and inventing one here would
-      // put a tool in the manifest that no authority admitted.
-      nativeTools: [],
-      runtimeIdentity: inputPreparationRuntimeIdentityString(service.runtime),
-    }));
-  } catch (cause) {
-    throw new RemoteRejection('unsupported_input', 'the observed toolsets could not be fingerprinted', { cause });
-  }
-
   return {
     format: INPUT_PREPARATION_REQUEST_FORMAT,
     version: INPUT_PREPARATION_VERSION,
@@ -247,8 +278,14 @@ async function buildRequest(
     },
     source: payload.source,
     selection: payload.selection,
-    snapshot: { prompt: context.prompt, messages: context.messages, tools },
-    toolExecutors,
+    permissionMode: payload.permissionMode,
+    requiredToolsets: Object.freeze([...payload.requiredToolsets]),
+    snapshot: { prompt: context.prompt, messages: context.messages },
+    // Host authority, carried verbatim. Absent stays absent: this lane never
+    // supplies an accounting ruling the Host did not state.
+    ...(payload.accountingPolicyRef === undefined
+      ? {}
+      : { accountingPolicyRef: payload.accountingPolicyRef }),
   };
 }
 
@@ -292,7 +329,7 @@ export function createRemoteInputPreparationHandler(deps: RemoteInputPreparation
         throw new RemoteRejection('deadline_elapsed', 'the authorized preparation deadline has already elapsed');
       }
 
-      const request = await buildRequest(payload, deps, service);
+      const request = await buildRequest(payload, deps);
       // Re-delivery is absorbed by the store's own reserve -> `existing` path:
       // the same `(scope, Agent, requestId)` under the same normalized digest
       // returns the durable receipt without a second compile or a second

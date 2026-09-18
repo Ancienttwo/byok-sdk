@@ -17,6 +17,39 @@ import { TestServer } from './fixtures/test-server';
 // Independent completeness oracle: enumerate the declared wire family, not the
 // implementation's classifier. Payloads still pass the real EnvelopeSchema.
 const offerTypes = MESSAGE_TYPES.filter((type) => type === 'task.offer' || type.startsWith('task.offer_'));
+
+/**
+ * Observation budget for this file's eventual-state polls: the durable cursor
+ * and journal rows they read back are written by the daemon's own inbound
+ * chain, which has to complete a long-poll cycle (`idleDelayMs` default
+ * 250ms), a real SQLite admission and a cursor save before the polled-for
+ * value can exist. `vi.waitFor`'s own default budget is 1000ms, which is a
+ * vitest default, not a latency contract this file states or tests.
+ *
+ * This constant widens the TEST's observation window for those polls. It is
+ * not evidence about production timing and it is not a fix for any production
+ * timing behaviour: nothing here asserts that the daemon must reach the polled
+ * state within any particular wall-clock bound, and no production default
+ * changes with it. A poll whose state never arrives still fails, inside this
+ * budget and well inside the suite's 10s `testTimeout`.
+ */
+const EVENTUAL_STATE_BUDGET_MS = 4_000;
+
+/**
+ * Offer types this fixture's daemon declines rather than starts.
+ *
+ * Not a gap in the journal contract — it IS the journal contract for a declined
+ * offer, which is why the first test still runs for every one of them: the
+ * durable `journal_task` row and the redelivery absorption are what an
+ * acknowledged offer owes regardless of whether it was admitted. The second
+ * test needs a started task to interrupt, so it enumerates the rest.
+ *
+ * `task.offer_with_toolsets` names a toolset this device has not configured.
+ * `task.offer_prepared` names a preparation record on a daemon configured with
+ * no `inputPreparation` section at all, so it declines
+ * `preparation_lane_unconfigured` before any adapter is picked.
+ */
+const declinedByThisFixture = new Set(['task.offer_with_toolsets', 'task.offer_prepared']);
 const agentRef = { agentId: 'journal-family-agent', profileRevision: 'r1' };
 let daemon: Daemon | undefined;
 let server: TestServer;
@@ -57,17 +90,24 @@ async function setup(type: string) {
   daemon = createDaemonWithAdapters(config, [adapter]);
   const device = await daemon.pair('pair-code');
   await daemon.start();
-  const payload = {
-    instruction: 'journal lifecycle', policy: { mode: 'auto' }, runtime: 'pi',
-    ...(type.includes('for_agent') ? { agentRef } : {}),
-    ...(type.includes('with_egress') ? { egressPolicy: DEFAULT_AGENT_EGRESS_POLICY } : {}),
-    ...(type === 'task.offer_for_agent_with_egress' ? { sessionRef: 'resume-session' } : {}),
-    ...(type === 'task.offer_with_toolsets' ? { requiredToolsets: ['test-missing'] } : {}),
-  };
+  const payload = type === 'task.offer_prepared'
+    // The one offer that carries no instruction: the request is already inside
+    // the frozen envelope the referenced record retained.
+    ? {
+      policy: { mode: 'auto' }, runtime: 'pi', agentRef,
+      preparation: { reference: 'journal-family-record', requestDigest: 'journal-family-request-digest' },
+    }
+    : {
+      instruction: 'journal lifecycle', policy: { mode: 'auto' }, runtime: 'pi',
+      ...(type.includes('for_agent') ? { agentRef } : {}),
+      ...(type.includes('with_egress') ? { egressPolicy: DEFAULT_AGENT_EGRESS_POLICY } : {}),
+      ...(type === 'task.offer_for_agent_with_egress' ? { sessionRef: 'resume-session' } : {}),
+      ...(type === 'task.offer_with_toolsets' ? { requiredToolsets: ['test-missing'] } : {}),
+    };
   const seq = server.nextSeq();
   const envelope: Envelope = EnvelopeSchema.parse({ v: 1, id: randomUUID(), ts: new Date().toISOString(), type, task_id: 'task-147', seq, payload });
   server.send(envelope);
-  await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server.url, device.deviceId)).toBe(seq));
+  await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server.url, device.deviceId)).toBe(seq), EVENTUAL_STATE_BUDGET_MS);
   return { config, adapter, storeDir, envelope, device };
 }
 
@@ -79,13 +119,13 @@ describe('issue #147 protocol offer family through real hosted SQLite journal', 
     // A later acknowledged frame proves the duplicate has passed the ordered inbound chain.
     const laterSeq = server.nextSeq();
     server.send({ ...envelope, id: randomUUID(), seq: laterSeq });
-    await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server.url, device.deviceId)).toBe(laterSeq));
-    await vi.waitFor(() => expect(rows(storeDir, 'SELECT count(*) AS n FROM journal_envelope WHERE task_id IS NOT NULL')[0]?.n).toBe(2));
+    await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server.url, device.deviceId)).toBe(laterSeq), EVENTUAL_STATE_BUDGET_MS);
+    await vi.waitFor(() => expect(rows(storeDir, 'SELECT count(*) AS n FROM journal_envelope WHERE task_id IS NOT NULL')[0]?.n).toBe(2), EVENTUAL_STATE_BUDGET_MS);
     expect(rows(storeDir, 'SELECT task_id FROM journal_task')).toHaveLength(1);
-    expect(adapter.startCalls).toHaveLength(type === 'task.offer_with_toolsets' ? 0 : 1);
+    expect(adapter.startCalls).toHaveLength(declinedByThisFixture.has(type) ? 0 : 1);
   });
 
-  it.each(offerTypes.filter((type) => type !== 'task.offer_with_toolsets'))('%s records the exact interrupted terminal before transport confirmation on restart', async (type) => {
+  it.each(offerTypes.filter((type) => !declinedByThisFixture.has(type)))('%s records the exact interrupted terminal before transport confirmation on restart', async (type) => {
     const { config, adapter, storeDir } = await setup(type);
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-147');
     expect(rows(storeDir, 'SELECT task_id, recovery_marker FROM journal_task')).toEqual([{ task_id: 'task-147', recovery_marker: null }]);

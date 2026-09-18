@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
+import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
+import { parseTaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { PiRpcClient, type PiRpcMessage } from '../adapters/pi/rpc-client';
-import { resolvePiBin, resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
-import { clientPackageRoot } from '../adapters/pi/client-manifest';
+import { resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
+import { serializePiHostConfig } from '../adapters/pi/runtime-host-binding';
+import { PI_TEAM_OPERATOR_TOKEN, type PiTeamOperatorInvocation } from './team-pi-operator-entry';
 import { codexTeamNotification } from './team-codex-relay';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
@@ -31,8 +33,12 @@ export interface TeamPiMcpConfig {
 }
 
 export interface PiTeamSessionOptions {
+  /** Supplied by the official CLI entry, never inferred from a daemon helper host. */
+  operatorInvocation: PiTeamOperatorInvocation;
   workspaceId: string; cwd: string; sessionDir: string; provider: string; model: string;
   systemPrompt: string; mcpConfig: TeamPiMcpConfig; extensionPaths?: readonly string[];
+  /** CLI ambient snapshot, not daemon-admitted environment. */
+  env: Readonly<Record<string, string | undefined>>;
   onEvent: (event: Record<string, unknown>) => void;
 }
 
@@ -52,28 +58,31 @@ export class PiTeamSession {
   static async start(options: PiTeamSessionOptions): Promise<PiTeamSession> {
     for (const value of [options.cwd, options.sessionDir, ...(options.extensionPaths ?? [])]) if (!path.isAbsolute(value)) throw new Error('Pi relay paths must be absolute');
     if (!options.provider || !options.model || !options.systemPrompt) throw new Error('Pi relay requires explicit provider, model and system prompt');
-    const bin = resolvePiBin();
-    const version = await new Promise<string>((resolve, reject) => execFile(bin.command, ['--version'], { timeout: 10_000, maxBuffer: 1024 }, (error, stdout) => error ? reject(new Error('Pi version preflight failed')) : resolve(stdout.trim())));
-    // The pinned runtime is the only authority for this gate; `@byok-sdk/client`'s
-    // own manifest declares which exact Pi build the relay contract was written against.
-    const pinned = resolvePiRuntimeIdentity().version;
-    if (version !== pinned) throw new Error(`Pi relay requires exactly ${pinned}`);
+    const invocation = options.operatorInvocation;
+    if (!path.isAbsolute(invocation.command) || invocation.args.at(-1) !== PI_TEAM_OPERATOR_TOKEN) throw new Error('invalid official Pi operator invocation');
+    const version = resolvePiRuntimeIdentity().version;
     const host = new PiTeamSession(options);
     await fs.mkdir(options.sessionDir, { mode: 0o700 }); // Explicit fresh session; never adopt.
     const mcpPath = path.join(options.sessionDir, 'team-mcp.json');
     const promptPath = path.join(options.sessionDir, 'system-prompt.txt');
     try {
-      for (const [file, text] of [[mcpPath, JSON.stringify(options.mcpConfig)], [promptPath, options.systemPrompt]] as const) {
+      const runtimeEnv = { ...options.env, BYOK_PI_MCP_CONFIG_PATH: mcpPath };
+      // Derive from the exact Pi env once; this relay is not a daemon admission lane.
+      const mcpConfig = parseTaskScopedMcpConfig({
+        ...options.mcpConfig, mcpEnv: projectPiMcpEnvironment(runtimeEnv),
+      }, message => { throw new Error(`Pi relay MCP configuration: ${message}`); });
+      for (const [file, text] of [[mcpPath, JSON.stringify(mcpConfig)], [promptPath, options.systemPrompt]] as const) {
         host.privateFiles.push(file); await fs.writeFile(file, text, { flag: 'wx', mode: 0o600 });
       }
-      const packageDir = clientPackageRoot();
-      const args = ['--mode', 'rpc', '--session-dir', options.sessionDir, '--provider', options.provider, '--model', options.model,
-        '--system-prompt', promptPath, '--no-extensions', '--no-context-files', '--no-skills', '--no-prompt-templates', '--no-themes', '--no-builtin-tools',
-        '--extension', path.join(packageDir, 'dist/adapters/pi/team-interaction-extension.js'),
-        '--extension', path.join(packageDir, 'dist/adapters/pi/mcp-extension.js')];
-      for (const extension of options.extensionPaths ?? []) args.push('--extension', extension);
-      host.client = new PiRpcClient({ command: bin.command, args, cwd: options.cwd,
-        env: { ...process.env, BYOK_PI_MCP_CONFIG_PATH: mcpPath },
+      const operatorPath = path.join(options.sessionDir, 'team-operator.json');
+      const serialized = serializePiHostConfig({ format: 'byok.pi.team-operator', version: 1,
+        cwd: options.cwd, sessionDir: options.sessionDir, provider: options.provider, model: options.model,
+        systemPromptPath: promptPath, extensionPaths: [...(options.extensionPaths ?? [])], mcp: mcpConfig });
+      host.privateFiles.push(operatorPath);
+      await fs.writeFile(operatorPath, serialized.bytes, { flag: 'wx', mode: 0o600 });
+      const args = [...invocation.args, `--config-digest=${serialized.digest}`, '--config', operatorPath];
+      host.client = new PiRpcClient({ command: invocation.command, args, cwd: options.cwd,
+        env: runtimeEnv,
         extensionUi: { mode: 'hold', onRequest: frame => host.onInteraction(frame) },
         onFrame: frame => host.onFrame(frame),
       });

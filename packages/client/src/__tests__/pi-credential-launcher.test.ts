@@ -10,15 +10,12 @@ import { parsePiProviderLauncherOptions, buildPiProviderChildEnvironment } from 
 import { PI_MODEL_FIXTURE } from '../../../keys/src/fixtures/pi-model-config';
 
 describe('Pi adapter / credential launcher composition', () => {
-  it.each(['env', 'package'] as const)('%s preserves actual SDK extension argv and task environment without forwarding ambient credentials', async (source) => {
+  it.each(['env', 'package'] as const)('%s preserves SDK host config and committed environment without forwarding ambient credentials', async (source) => {
     const dir = await mkdtemp(path.join(tmpdir(), 'pi-launcher-composition-'));
-    const extensions = Object.fromEntries(['webAccess', 'mcpExtension', 'subagentsPolicy', 'subagents', 'todo']
-      .map(name => [name, path.join(dir, `${name}.js`)])) as any;
     let captured: { args: string[]; env: NodeJS.ProcessEnv } | undefined;
     try {
       const adapter = new PiAdapter({
         resolveBin: () => ({ command: path.join(dir, 'pi'), source }),
-        resolveExtensions: () => extensions,
         byokLauncher: { command: path.join(dir, 'launcher'), profileDbPath: path.join(dir, 'profiles.db'), sessionDir: path.join(dir, 'sessions') },
         spawnFn: ((_command: string, args: string[], options: { env: NodeJS.ProcessEnv }) => {
           captured = { args, env: options.env }; throw new Error('capture only');
@@ -41,10 +38,11 @@ describe('Pi adapter / credential launcher composition', () => {
       expect(buildPiProviderArgs(profile, options.piArgs)).toEqual([
         ...options.piArgs, '--provider', 'byok-sdk-test-zai', '--model', 'glm-5.3-flash', '--thinking', 'low',
       ]);
-      expect(options.piArgs.filter(arg => arg === '--extension')).toHaveLength(5);
-      const env = buildPiProviderChildEnvironment({ ambient: captured!.env, projectionDir: dir, sessionDir: dir, secret: undefined });
-      expect(env.BYOK_PI_MCP_CONFIG_PATH).toBe(captured!.env.BYOK_PI_MCP_CONFIG_PATH);
-      expect(env.BYOK_PI_PERMISSION_MODE).toBe('readonly');
+      expect(options.piArgs).toContain('--config');
+      expect(options.piArgs).not.toContain('--extension');
+      const env = buildPiProviderChildEnvironment({ ambient: captured!.env, binding: options.launchBinding!, sessionDir: options.sessionDir, secret: undefined });
+      expect(env.BYOK_PI_MCP_CONFIG_PATH).toBeUndefined();
+      expect(env.BYOK_PI_PERMISSION_MODE).toBeUndefined();
       expect(env.ZAI_API_KEY).toBeUndefined();
       expect(env.UNRELATED).toBeUndefined();
     } finally { await rm(dir, { recursive: true, force: true }); }

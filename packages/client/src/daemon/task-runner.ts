@@ -1,8 +1,10 @@
+import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
+import type { PiRuntimeLaunchResources } from '../adapters/pi/runtime-launch';
 import { awaitAdmission } from './admission-wait';
 import { terminalIdentity } from './terminal-identity';
 import { startOwnedRuntime } from './runtime-start';
 import { DEFAULT_ARTIFACT_LIMITS, readArtifactBytes } from './artifact-read';
-import { validateRuntimeDetectResult } from '../runtime-detection';
+import { observeRuntimeDetection } from '../runtime-detection';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { promises as fs, constants as fsConstants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
@@ -31,7 +33,9 @@ import {
   type TaskOfferForAgentPayload,
   type TaskOfferForAgentWithEgressPayload,
   type TaskOfferForAgentWithEgressFreshPayload,
+  type TaskOfferPreparedPayload,
   type TaskOfferWithToolsetsPayload,
+  type InputPreparationOfferBinding,
 } from '@byok-sdk/protocol';
 import {
   SteerUnsupportedError,
@@ -42,8 +46,18 @@ import {
   type RuntimeAdapter,
   type RuntimeAdapterDescriptor,
   type RuntimeOperationStartInput,
+  type RuntimePreparedLaunchV1,
   type Session,
 } from '../types';
+import {
+  admitPreparedOffer,
+  type PreparedOfferServerProjection,
+} from './prepared-offer-admission';
+import type { InputPreparationStore } from './input-preparation-store';
+import {
+  inputPreparationDigest,
+  type InputPreparationRuntimeIdentityV1,
+} from '../input-preparation';
 import {
   AgentHomeBusyError,
   AgentHomeResolutionError,
@@ -69,6 +83,19 @@ import type { TaskQueueWatermark } from './control-protocol';
 import { DEFAULT_MAX_INLINE_EVENT_BYTES, spillOversizedEvent } from './event-spill';
 import { buildRuntimeEnv } from './environment';
 import { computeEffectivePolicy } from './policy';
+import {
+  mcpLaunchAttestation,
+  resolveMcpLaunchCwdLauncher,
+  resolveTrustedLaunchCwd,
+  type McpLaunchBinding,
+  type McpLaunchCwdConfig,
+} from './trusted-launch-cwd';
+import {
+  resolveToolImplementationIdentity,
+  type ToolImplementationAuthority,
+  type ToolImplementationFsProbe,
+  type ToolImplementationIdentityV1,
+} from './tool-implementation-identity';
 import { toRuntimeInfoCapabilities } from './runtime-capabilities';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import {
@@ -343,6 +370,59 @@ export interface TaskRunnerDeps {
   runtimeEnvironment?: Record<string, { allow?: string[] }>;
   /** Reads the daemon's current validated device-local registry once per offer. */
   getMcpToolsets?: () => ReadonlyMap<string, McpToolsetConfig>;
+  /**
+   * The prepared-Execution lane. Absent on a daemon with no `inputPreparation`
+   * section, and a `task.offer_prepared` arriving there is declined by name
+   * rather than reinterpreted as an ordinary offer.
+   *
+   * It carries the durable store plus the three device facts a prepared
+   * admission compares against, resolved by the daemon that already owns them —
+   * never re-derived here, because a second derivation of the installed runtime
+   * identity or the operator's policy revision is a second opinion about the
+   * same configuration.
+   */
+  inputPreparationLane?: {
+    readonly store: InputPreparationStore;
+    /**
+     * Await the store's open before the first record read.
+     *
+     * The prepared offer path is reachable on a freshly restarted daemon that
+     * has served no prepare/lookup/cancel call yet, and a store that was never
+     * opened holds an EMPTY map — which would make a perfectly good durable
+     * record answer `preparation_not_found`. This is the preparation service's
+     * own once-only `ensureOpen` latch, passed in rather than re-implemented:
+     * the replay that recovers the log stays the service's, so this lane adds
+     * no second open authority and no second replay path.
+     */
+    readonly open: () => Promise<void>;
+    /** The VERIFIED installed runtime/compiler identity every artifact is bound to. */
+    readonly runtime: InputPreparationRuntimeIdentityV1;
+    /** The operator's configured limits-policy revision currently in force. */
+    readonly policyRevision: string;
+    /** `toolsetId` -> definition revision, from one registry read per call. */
+    readonly toolsetDefinitionRevisions: () => ReadonlyMap<string, string>;
+  };
+  /**
+   * Operator input to the MCP toolset launch boundary
+   * (`./trusted-launch-cwd.ts`). Unset means the platform default directory
+   * and — only when this process is provably plain Node — `process.execPath`
+   * as the launcher interpreter. Neither default is assumed: both are proven
+   * at admission, and an offer that needs a boundary this daemon cannot prove
+   * is declined non-retryably instead of being started without one.
+   */
+  mcpLaunchCwd?: McpLaunchCwdConfig;
+  /**
+   * The host's install-record authority for MCP toolset server
+   * implementations (`./tool-implementation-identity.ts`).
+   *
+   * Unset means EVERY implementation identity resolves to
+   * `resolver_unconfigured` — this SDK ships no resolver and no default. It is
+   * not a degradation: an unconfigured daemon simply proves nothing about its
+   * executors and says so, and no spawn is refused for a claim nobody made.
+   */
+  toolImplementationAuthority?: ToolImplementationAuthority;
+  /** Test seam for the implementation measurement; see {@link ToolImplementationFsProbe}. */
+  toolImplementationFsProbe?: ToolImplementationFsProbe;
   permissionDefaults?: PermissionPolicy;
   workspaceRoot: string;
   /** Strict Agent offer authority. Absent means legacy offers never resolve an Agent home. */
@@ -802,16 +882,45 @@ type AcceptedOfferPayload =
   | TaskOfferWithToolsetsPayload
   | TaskOfferForAgentPayload
   | TaskOfferForAgentWithEgressPayload
-  | TaskOfferForAgentWithEgressFreshPayload;
+  | TaskOfferForAgentWithEgressFreshPayload
+  | TaskOfferPreparedPayload;
 
 function withoutRequiredToolsets(payload: AcceptedOfferPayload): TaskOfferPayload {
-  const { requiredToolsets, egressPolicy, messageEgress, ...offer } = payload as TaskOfferWithToolsetsPayload
+  const { requiredToolsets, egressPolicy, messageEgress, preparation, ...offer } = payload as TaskOfferWithToolsetsPayload
     & Partial<TaskOfferForAgentWithEgressPayload>
-    & Partial<TaskOfferForAgentWithEgressFreshPayload>;
+    & Partial<TaskOfferForAgentWithEgressFreshPayload>
+    & Partial<TaskOfferPreparedPayload>;
   void requiredToolsets;
   void egressPolicy;
   void messageEgress;
+  // Deliberately stripped before the adapter sees the offer: `prepare()`
+  // admits a RUNTIME, and a preparation reference is not a runtime input. The
+  // prepared lane carries it to `start()` as its own start variant instead.
+  void preparation;
   return offer as TaskOfferPayload;
+}
+
+/**
+ * The preparation this offer names, or `undefined` for every ordinary offer.
+ *
+ * The presence of this value is what selects the prepared lane. It is read from
+ * the parsed payload rather than from the envelope type so one branch reads one
+ * fact: `task.offer_prepared` is the only message whose schema carries it.
+ */
+function offeredPreparation(payload: AcceptedOfferPayload): InputPreparationOfferBinding | undefined {
+  return 'preparation' in payload ? payload.preparation : undefined;
+}
+
+/**
+ * The instruction an ordinary offer carries.
+ *
+ * A prepared offer has none, and that is not an omission to default around: the
+ * user request is already inside the frozen envelope its record retained, and a
+ * prepared run that resolved a separate instruction would have two answers to
+ * what it is about to send.
+ */
+function offeredInstruction(payload: AcceptedOfferPayload): TaskOfferPayload['instruction'] | undefined {
+  return 'instruction' in payload ? payload.instruction : undefined;
 }
 
 function sameEgressPolicy(left: Readonly<AgentEgressPolicy>, right: Readonly<AgentEgressPolicy>): boolean {
@@ -1172,6 +1281,16 @@ export class TaskRunner {
    * `MAX_TRACKED_TASK_IDS`), so scanning past it to find an evictable entry
    * costs nothing.
    */
+  /**
+   * `taskId` -> the preparation record this Execution pinned.
+   *
+   * The pin is a durable single-consumer claim on already-counted tokens, so it
+   * is held for exactly as long as the Execution that took it can still be
+   * running — and released at ONE moment, the Execution's terminal. Not at
+   * claim, not at start, not when the session closes: GC must not collect a
+   * record whose bytes a live process may still be sending.
+   */
+  private readonly preparationPinsByTask = new Map<string, string>();
   private readonly inFlightOffers = new Set<string>();
   /** Blob I/O before an offer becomes an active task still belongs to that offer's cancellation authority. */
   private readonly inFlightBlobAborts = new Map<string, AbortController>();
@@ -1728,6 +1847,9 @@ export class TaskRunner {
       case 'task.offer_for_agent_with_egress_fresh':
         await this.handleOffer(envelope.task_id, envelope.payload, true);
         return;
+      case 'task.offer_prepared':
+        await this.handleOffer(envelope.task_id, envelope.payload, true);
+        return;
       case 'task.cancel':
         await this.handleCancel(envelope.task_id, envelope.payload.reason);
         return;
@@ -1788,6 +1910,39 @@ export class TaskRunner {
       this.decline(taskId, reason, retryable, agentRef);
     };
     const sessionRef = offeredSessionRef(payload);
+    // The prepared lane is selected by the presence of this value and nothing
+    // else. Absent for every ordinary offer, so every branch below that does
+    // not mention it behaves exactly as it did before this lane existed.
+    const preparation = offeredPreparation(payload);
+    const preparationLane = this.deps.inputPreparationLane;
+    if (preparation !== undefined) {
+      if (preparationLane === undefined) {
+        // By name, not by reinterpretation. A daemon with no input-preparation
+        // section holds no record this reference could mean, and running the
+        // offer some other way would be running an Execution nobody counted.
+        this.decline(taskId, 'preparation_lane_unconfigured: this daemon is not configured for input preparation', false, agentRef);
+        return;
+      }
+      // BEFORE the first read. A restarted daemon reaches this line with a
+      // store that nothing has opened yet, and an unopened store is not an
+      // empty one — `get` refuses rather than answering `undefined`, so this
+      // await is what turns a durable record back into a visible one.
+      try {
+        await preparationLane.open();
+      } catch (error) {
+        this.decline(
+          taskId,
+          `preparation_store_unavailable: the preparation store could not be opened: ${errorMessage(error)}`,
+          false,
+          agentRef,
+        );
+        return;
+      }
+      if (preparationLane.store.get(preparation.reference) === undefined) {
+        this.decline(taskId, 'preparation_not_found: no preparation record under this reference on this device', false, agentRef);
+        return;
+      }
+    }
     const messageRequirement = 'messageEgress' in payload ? payload.messageEgress : undefined;
     const terminalProjection = 'terminalProjection' in payload ? payload.terminalProjection : undefined;
     if ('egressPolicy' in payload) {
@@ -1827,6 +1982,7 @@ export class TaskRunner {
     this.inFlightBlobAborts.set(taskId, blobAbort);
     let agentBinding: AgentHomeExecutionBinding | undefined;
     let agentLeaseTransferred = false;
+    let runtimeLaunch: PiRuntimeLaunchResources | undefined;
     let reservedHome: string | undefined;
     const releaseReservation = (): void => {
       if (reservedHome === undefined) return;
@@ -2040,6 +2196,7 @@ export class TaskRunner {
         requirements: pick.descriptor.environmentRequirements,
         locallyAllowedNames: this.deps.runtimeEnvironment?.[pick.descriptor.id]?.allow,
       });
+      const mcpEnv = pick.descriptor.id === 'pi' ? projectPiMcpEnvironment(env) : env;
       if (resolvedMcp?.ok && agentRef !== undefined && this.deps.prepareHostTaskContext) {
         await this.deps.prepareHostTaskContext(taskId, blobAbort.signal);
         if (admissionWithdrawn()) return;
@@ -2063,27 +2220,122 @@ export class TaskRunner {
       // server on every offer.
       const needsToolsetObservation = resolvedMcp?.ok === true
         && pick.descriptor.requiresMcpToolsetToolObservation === true;
-      // Same cwd the runtime CLI itself is spawned in, so a probed server
-      // resolves relative paths exactly as it will at run time. Only the
-      // Agent-home case is knowable this early: a non-Agent task's workspace
-      // directory is created after admission, below.
-      let probeCwd: string | undefined;
+      // The one launch boundary for every MCP server child of this task —
+      // the admission probe here and, via `startInput.mcpLaunch`, every
+      // adapter spawn below. It is resolved ONCE, so the directory the daemon
+      // observed a server in is the directory the runtime runs it in.
+      //
+      // It is NOT the Agent home, which is what it used to be. A
+      // `bun --compile` server binary executes `$cwd/bunfig.toml` `preload`
+      // before its own code, and the Agent home is writable by the very agent
+      // the server is serving — see `./trusted-launch-cwd.ts`. The RUNTIME
+      // CLI keeps the manifest cwd; only its MCP server children move.
+      //
+      // The binding covers EVERY MCP server this task will generate, whatever
+      // its origin — not only the host toolsets the device projects. The
+      // reserved SDK helpers (agent message, agent memory) and the reserved
+      // approval server the picked adapter generates itself under
+      // `policy.mode: 'confirm'` are the same kind of child process, launched
+      // by the same CLI, from the same inherited cwd; a task whose only MCP
+      // server is one of those used to reach `start()` with no binding at all
+      // and have it written unwrapped.
+      //
+      // The predicate lives HERE, once, computed from the same inputs the
+      // adapters themselves branch on: the projected toolsets, the reserved
+      // helpers this daemon adds to `taskMcpServers`, and the descriptor's
+      // own declaration that it generates a reserved approval MCP server
+      // (`RuntimeAdapterDescriptor.generatesApprovalMcpServer`) paired with
+      // the effective mode that makes it do so. A task that generates NO MCP
+      // server resolves no binding and is never declined for one.
+      const generatesApprovalMcp = decision.policy.mode === 'confirm'
+        && pick.descriptor.generatesApprovalMcpServer === true;
+      // `taskMcpServers` already carries the projected host toolsets and the
+      // agent-message helper; the agent-memory helper is added below, after
+      // the binding it needs has been resolved.
+      const generatesAnMcpServer = Object.keys(taskMcpServers ?? {}).length > 0
+        || requiresAgentMemoryMcp
+        || generatesApprovalMcp;
       const probesAnMcpServer = needsToolsetObservation
         || (messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined);
-      if (probesAnMcpServer && agentRef !== undefined && this.deps.agentHome !== undefined) {
-        try {
-          probeCwd = (await this.deps.agentHome.layout.resolve(agentRef)).canonicalHome;
-        } catch (error) {
-          decline(
-            `Agent home admission failed: ${errorMessage(error)}`,
-            !(error instanceof AgentHomeResolutionError),
-          );
+      let mcpLaunch: McpLaunchBinding | undefined;
+      if (probesAnMcpServer || generatesAnMcpServer) {
+        const trusted = await resolveTrustedLaunchCwd(this.deps.mcpLaunchCwd);
+        if (trusted.kind === 'unavailable') {
+          // Non-retryable: nothing about re-offering this task changes which
+          // directories this uid can write. The reason names the exact
+          // condition so an operator can fix it (configure an immutable
+          // directory, or stop running the daemon as root) rather than
+          // discovering a silently unprotected launch later.
+          decline(`MCP toolset launch directory unavailable: ${trusted.reason}`, false);
           return;
         }
+        // Only the adapters that declare `launcher-wrapped` pay for a
+        // launcher. An adapter that spawns its own servers (pi) passes the
+        // directory to `spawn` and needs nothing else, and an adapter that
+        // declares nothing is treated the same way — the SDK cannot make a
+        // third-party adapter use a launcher by declining here, and the three
+        // bundled adapters all state their mode explicitly.
+        let launcher: McpLaunchBinding['launcher'];
+        if (pick.descriptor.mcpServerLaunch === 'launcher-wrapped') {
+          const resolvedLauncher = resolveMcpLaunchCwdLauncher(this.deps.mcpLaunchCwd);
+          if (resolvedLauncher.kind === 'unavailable') {
+            decline(
+              `MCP toolset launch directory unavailable: ${resolvedLauncher.reason}`,
+              false,
+            );
+            return;
+          }
+          launcher = resolvedLauncher;
+        }
+        mcpLaunch = Object.freeze({
+          cwd: trusted.dir,
+          ...(launcher === undefined ? {} : { launcher }),
+        });
+      }
+      const probeCwd = mcpLaunch?.cwd;
+      // The ONE implementation identity this task carries per projected
+      // toolset server, resolved HERE and consumed by both spawn points:
+      // the admission probe immediately below, and — through
+      // `startInput.mcpToolImplementations` and the task-scoped MCP config the
+      // pi adapter writes — the extension's server pool inside the runtime
+      // child. Resolving it once is the point. A second resolve at launch
+      // would be a second opinion about the same install, and the two could
+      // disagree without anything noticing; one value, measured again at each
+      // spawn, cannot.
+      //
+      // Resolution NEVER declines the offer. This SDK ships no resolver, so
+      // the unconfigured answer is `resolver_unconfigured` for every server,
+      // and a task whose executors are unproven still runs — it simply proves
+      // nothing about them. What does refuse is the re-measurement at spawn,
+      // and only for a server that WAS attested.
+      let mcpToolImplementations: Readonly<Record<string, ToolImplementationIdentityV1>> | undefined;
+      if (resolvedMcp?.ok === true && mcpLaunch !== undefined) {
+        const launch = mcpLaunchAttestation(mcpLaunch);
+        const identities: Record<string, ToolImplementationIdentityV1> = {};
+        for (const [serverName, server] of Object.entries(resolvedMcp.servers)) {
+          const toolsetId = resolvedMcp.toolsetIdByServer.get(serverName);
+          if (toolsetId === undefined) continue;
+          identities[serverName] = await resolveToolImplementationIdentity(
+            this.deps.toolImplementationAuthority,
+            {
+              subject: { kind: 'mcp-server', toolsetId, serverName },
+              command: server.command,
+              args: Object.freeze([...(server.args ?? [])]),
+              launch,
+            },
+            // The environment fact is the SDK's, never the resolver's: this is
+            // the exact object the admission probe below spawns with and the
+            // one serialized for the MCP pool. Pi runtime custody has its
+            // own environment; the locator carries no environment at all.
+            mcpEnv,
+            this.deps.toolImplementationFsProbe,
+          );
+        }
+        mcpToolImplementations = Object.freeze(identities);
       }
       if (messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined) {
         try {
-          await this.deps.agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, env, probeCwd);
+          await this.deps.agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, mcpEnv, probeCwd);
         } catch (error) {
           decline(`required Agent message helper preflight failed: ${errorMessage(error)}`, false);
           return;
@@ -2123,11 +2375,16 @@ export class TaskRunner {
         const probe = this.deps.mcpToolsetToolsProbe ?? probeMcpServer;
         const entries = Object.entries(resolvedMcp!.servers);
         const settled = await Promise.allSettled(entries.map(async ([serverName, server]) => {
+          const implementation = mcpToolImplementations?.[serverName];
           const observation = await probe(serverName, server, {
             label: `MCP toolset server "${serverName}"`,
             timeoutMs: MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
-            env,
+            env: mcpEnv,
             ...(probeCwd === undefined ? {} : { cwd: probeCwd }),
+            // Spawn point one. An attested server is re-measured before this
+            // child starts; a failure raises `McpAuthorityError`, which the
+            // decline below already treats as permanent.
+            ...(implementation === undefined ? {} : { implementation }),
           });
           if (observation.tools.length === 0) throw new Error('tools/list reported no tools');
           // The toolset id and the operator's read/mutation classification are
@@ -2288,6 +2545,20 @@ export class TaskRunner {
         return;
       }
 
+      if (prepared.operation.resolveRuntimeLaunch !== undefined) {
+        try {
+          runtimeLaunch = await prepared.operation.resolveRuntimeLaunch({
+            kind: preparation === undefined ? 'instruction' : 'prepared', cwd: workspaceDir, env,
+            projectionRoot: path.join(this.deps.storeDir, 'runtime-projections'),
+            authority: this.deps.toolImplementationAuthority,
+          });
+        } catch (error) {
+          if (!admissionWithdrawn()) decline(`runtime launch admission failed: ${errorMessage(error)}`, false);
+          return;
+        }
+        if (admissionWithdrawn()) return;
+      }
+
       // `env` was built before admission (see its declaration above) so the
       // MCP probes and the runtime child are guaranteed to share one
       // allowlist decision rather than two computations that could drift.
@@ -2317,6 +2588,86 @@ export class TaskRunner {
         },
         forwardedEnvironmentNames: Object.freeze(Object.keys(env).sort()),
       });
+
+      // The prepared lane's whole admission, in the one order it is allowed to
+      // happen: COMPARE the sealed Execution against the record item by item,
+      // then PIN, then claim. Pinning strictly before the claim is what makes
+      // single consumption real — two runners that both compared successfully
+      // race the store's compare-and-set, and the loser returns here having
+      // sent no claim and dispatched nothing.
+      let preparedLaunch: RuntimePreparedLaunchV1 | undefined;
+      if (preparation !== undefined) {
+        const lane = preparationLane!;
+        const record = lane.store.get(preparation.reference);
+        if (record === undefined) {
+          gitLease?.release();
+          decline('preparation_not_found: no preparation record under this reference on this device', false);
+          return;
+        }
+        const revisions: Record<string, string> = {};
+        for (const [toolsetId, revision] of lane.toolsetDefinitionRevisions()) revisions[toolsetId] = revision;
+        const servers: PreparedOfferServerProjection[] = [];
+        for (const [serverName, server] of Object.entries(resolvedMcp?.ok ? resolvedMcp.servers : {})) {
+          const toolsetId = resolvedMcp!.toolsetIdByServer.get(serverName);
+          if (toolsetId === undefined) continue;
+          servers.push({
+            serverName,
+            toolsetId,
+            command: server.command,
+            args: Object.freeze([...(server.args ?? [])]),
+          });
+        }
+        const admitted = await admitPreparedOffer({
+          record,
+          artifactPath: lane.store.artifactPathOf(record),
+          offered: preparation,
+          agentRef: agentRef!,
+          deviceId: this.deps.deviceId,
+          policyRevision: lane.policyRevision,
+          runtime: lane.runtime,
+          // The ADMITTED mode, not the offered one: a manifest is the
+          // policy-filtered set for exactly one mode, and the mode this device
+          // merged the offer down to is the mode it will actually run.
+          admittedMode: decision.policy.mode,
+          launch: mcpLaunch,
+          observation: mcpToolsetTools,
+          implementations: mcpToolImplementations,
+          servers,
+          toolsetDefinitionRevisions: Object.freeze(revisions),
+          nowMs: Date.now(),
+        });
+        if (!admitted.ok) {
+          gitLease?.release();
+          // Non-retryable, every one of them: re-offering the same reference
+          // against the same device state reaches the same answer, and a
+          // prepared failure never permits sending a DIFFERENT input under the
+          // same accounting.
+          decline(`${admitted.reason}: ${admitted.detail}`, false);
+          return;
+        }
+        let pinned: Awaited<ReturnType<InputPreparationStore['pin']>>;
+        try {
+          pinned = await lane.store.pin(record.recordId, {
+            taskId,
+            manifestDigest: inputPreparationDigest(manifest),
+            sealedAt: new Date().toISOString(),
+          });
+        } catch (error) {
+          gitLease?.release();
+          decline(`preparation_not_ready: the preparation pin could not be written: ${errorMessage(error)}`, false);
+          return;
+        }
+        if (pinned.kind === 'occupied') {
+          gitLease?.release();
+          decline(
+            `preparation_already_pinned: task ${JSON.stringify(pinned.record.pin!.taskId)} already consumed this preparation`,
+            false,
+          );
+          return;
+        }
+        this.preparationPinsByTask.set(taskId, record.recordId);
+        preparedLaunch = admitted.launch;
+      }
 
       // All semantic admission is now in `prepare()` and the frozen manifest.
       // Claim is the first externally visible commitment; instruction bytes,
@@ -2365,9 +2716,15 @@ export class TaskRunner {
       );
 
       // Resolve the instruction blob after claim; workspace preparation follows.
+      // A prepared Execution resolves nothing here — it carries no instruction,
+      // and the empty string below is never read: the prepared start variant has
+      // no `instruction` field for it to reach.
+      const offeredInstructionValue = offeredInstruction(payload);
       let resolvedInstruction: string;
       try {
-        resolvedInstruction = await this.resolveInstruction(payload.instruction, blobAbort.signal);
+        resolvedInstruction = offeredInstructionValue === undefined
+          ? ''
+          : await this.resolveInstruction(offeredInstructionValue, blobAbort.signal);
         if (plainWorkspaceNeedsResolve) workspaceDir = await this.resolveWorkspaceDir(taskId, known?.workspaceDir);
       } catch (err) {
         gitLease?.release();
@@ -2442,13 +2799,29 @@ export class TaskRunner {
       }
 
       const startInput: RuntimeOperationStartInput = {
+        mcpEnv,
+        ...(runtimeLaunch === undefined ? {} : { runtimeLaunch }),
+        // The two lanes are mutually exclusive authority over the same bytes,
+        // so they are two variants rather than one shape with an optional
+        // field: the prepared Execution's request was compiled, counted and
+        // frozen before this offer existed, and the ordinary one's is the
+        // instruction resolved above. `preparedLaunch` is set ONLY after the
+        // item-by-item comparison passed, the manifest was sealed, the record
+        // was pinned and the claim went out.
+        ...(preparedLaunch === undefined
+          ? {
+            kind: 'instruction' as const,
+            instruction: agentBinding === undefined
+              ? (gitWorkspaceId ? prependGitWorkspaceGuidance(resolvedInstruction) : resolvedInstruction)
+              : prependAgentMemoryGuidance(resolvedInstruction),
+          }
+          : { kind: 'prepared' as const, preparation: preparedLaunch }),
         manifest,
-        instruction: agentBinding === undefined
-          ? (gitWorkspaceId ? prependGitWorkspaceGuidance(resolvedInstruction) : resolvedInstruction)
-          : prependAgentMemoryGuidance(resolvedInstruction),
         env,
         ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
         ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
+        ...(mcpLaunch === undefined ? {} : { mcpLaunch }),
+        ...(mcpToolImplementations === undefined ? {} : { mcpToolImplementations }),
         approvalChannel: {
           taskId,
           storeDir: this.deps.storeDir,
@@ -2745,6 +3118,14 @@ export class TaskRunner {
       }
       if (agentBinding !== undefined && !agentLeaseTransferred) {
         await agentBinding.lease.release().catch(() => {});
+      }
+      // An offer that never became an Execution is already terminal here: it
+      // declined, failed, or was cancelled before `start()` published a
+      // session. A task that DID start is in `this.tasks`, and its pin is
+      // released at its own terminal instead (`finishOnce`).
+      if (!this.tasks.has(taskId)) {
+        await this.releasePreparationPin(taskId);
+        await runtimeLaunch?.release();
       }
       this.inFlightBlobAborts.delete(taskId);
       this.inFlightOffers.delete(taskId);
@@ -4676,6 +5057,7 @@ export class TaskRunner {
         leaseReleased = false;
       }
       active.gitLease?.release();
+      await this.releasePreparationPin(taskId);
       this.tasks.delete(taskId);
       this.revokeAgentMessageContext(taskId);
       this.revokeAgentMemoryContext(taskId);
@@ -4684,6 +5066,7 @@ export class TaskRunner {
       return leaseReleased;
     }
     active.gitLease?.release();
+    await this.releasePreparationPin(taskId);
     this.tasks.delete(taskId);
     this.revokeAgentMessageContext(taskId);
     this.revokeAgentMemoryContext(taskId);
@@ -4705,6 +5088,28 @@ export class TaskRunner {
       active.resolveSemanticTerminalSettled = resolve;
     });
     return true;
+  }
+
+  /**
+   * Release the preparation pin this Execution holds, if it took one.
+   *
+   * Best effort by design, and loudly: a pin that cannot be released costs
+   * retention, not correctness — the record stays uncollectable until an
+   * operator intervenes — whereas turning a release failure into a task-terminal
+   * would rewrite an already-established result for a reason the task itself had
+   * nothing to do with.
+   */
+  private async releasePreparationPin(taskId: string): Promise<void> {
+    const recordId = this.preparationPinsByTask.get(taskId);
+    if (recordId === undefined) return;
+    this.preparationPinsByTask.delete(taskId);
+    try {
+      await this.deps.inputPreparationLane?.store.unpin(recordId, taskId);
+    } catch (error) {
+      console.error(
+        `[byok/client] preparation pin for task ${taskId} could not be released: ${errorMessage(error)}`,
+      );
+    }
   }
 
   /** M3-B: bounded insert for `finishedTaskIds` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest (first-inserted) entry once over cap, same idiom as `ConnectionHub.checkAndRecordDuplicate` (packages/server/src/hub.ts). */
@@ -4793,7 +5198,7 @@ export class TaskRunner {
           retryable: false,
         };
       }
-      const detected = validateRuntimeDetectResult(await awaitAdmission(() => adapter.detect(signal), signal));
+      const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, this.deps.toolImplementationAuthority, signal), signal);
       if (detected.kind !== 'available') {
         return {
           ok: false,
@@ -4814,7 +5219,7 @@ export class TaskRunner {
       const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
       if (!adapterSupportsMode(descriptor, policyMode)) continue;
       if (requiresMcpToolsets && !adapterSupportsMcpToolsets(descriptor)) continue;
-      const detected = validateRuntimeDetectResult(await awaitAdmission(() => adapter.detect(signal), signal));
+      const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, this.deps.toolImplementationAuthority, signal), signal);
       if (detected.kind === 'available') return { ok: true, adapter, descriptor };
     }
     return {

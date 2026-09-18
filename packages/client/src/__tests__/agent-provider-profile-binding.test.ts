@@ -42,13 +42,6 @@ describe('Agent provider profile binding admission', () => {
     const validateProviderProfileBinding = vi.fn(async () => undefined);
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: '/tmp/pi', source: 'env' }),
-      resolveExtensions: () => ({
-        webAccess: '/tmp/web-access.mjs',
-        mcpExtension: '/tmp/mcp-extension.mjs',
-        subagentsPolicy: '/tmp/subagents-policy.mjs',
-        subagents: '/tmp/subagents.mjs',
-        todo: '/tmp/todo.mjs',
-      }),
       byokLauncher: {
         command: '/tmp/byok-pi-provider-launcher',
         profileDbPath: '/tmp/providers.sqlite',
@@ -67,13 +60,6 @@ describe('Agent provider profile binding admission', () => {
   it('declines stale local profile authority before preparation completes', async () => {
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: '/tmp/pi', source: 'env' }),
-      resolveExtensions: () => ({
-        webAccess: '/tmp/web-access.mjs',
-        mcpExtension: '/tmp/mcp-extension.mjs',
-        subagentsPolicy: '/tmp/subagents-policy.mjs',
-        subagents: '/tmp/subagents.mjs',
-        todo: '/tmp/todo.mjs',
-      }),
       byokLauncher: {
         command: '/tmp/byok-pi-provider-launcher',
         profileDbPath: '/tmp/providers.sqlite',
@@ -100,13 +86,6 @@ describe('Agent provider profile binding admission', () => {
     });
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: PI_FIXTURE_PATH, source: 'env' }),
-      resolveExtensions: () => ({
-        webAccess: '/tmp/web-access.mjs',
-        mcpExtension: '/tmp/mcp-extension.mjs',
-        subagentsPolicy: '/tmp/subagents-policy.mjs',
-        subagents: '/tmp/subagents.mjs',
-        todo: '/tmp/todo.mjs',
-      }),
       spawnFn: spawnFn as never,
       byokLauncher: {
         command: '/tmp/byok-pi-provider-launcher',

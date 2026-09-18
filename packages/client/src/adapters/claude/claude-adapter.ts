@@ -14,9 +14,11 @@ import {
   type RuntimeDetectResult,
   type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult,
+  type McpStdioServerConfig,
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types';
+import { wrapMcpServerWithLaunchCwd } from '../../daemon/trusted-launch-cwd';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
 import { withoutProviderCredentials } from '../provider-credential-environment';
@@ -174,6 +176,12 @@ export class ClaudeAdapter implements RuntimeAdapter {
     // tool explicitly, so this adapter cannot admit a projected server
     // without the daemon's own `tools/list` observation of it.
     requiresMcpToolsetToolObservation: true,
+    mcpServerLaunch: 'launcher-wrapped',
+    // `permission-mapping.ts`'s `needsApprovalMcp`: mode 'confirm' makes
+    // `start()` below generate the approval server, so the daemon must
+    // resolve the launch binding for such a task even when it projects no
+    // toolset of its own.
+    generatesApprovalMcpServer: true,
     capabilities: {
       steer: false,
       resume: true,
@@ -261,6 +269,19 @@ export class ClaudeAdapter implements RuntimeAdapter {
       retry: 'non-retryable',
       reason: 'prepared claude permission mapping was invalid',
     });
+    // This adapter has no prepared-input lane: a frozen provider request is
+    // compiled against the pi runtime's own verified closure, and claude cannot
+    // be told to send someone else's bytes. Refused by name rather than
+    // ignored, so a prepared Execution routed here fails visibly instead of
+    // running as an ordinary turn with no instruction at all.
+    if (startInput.kind !== 'instruction') {
+      throw new RuntimeExecutionFailure({
+        phase: 'start',
+        category: 'authority',
+        retry: 'non-retryable',
+        reason: 'the claude adapter has no prepared-input lane',
+      });
+    }
     if (typeof startInput.instruction !== 'string') {
       throw new RuntimeExecutionFailure({
         phase: 'start',
@@ -343,6 +364,50 @@ export class ClaudeAdapter implements RuntimeAdapter {
             BYOK_APPROVAL_TIMEOUT_MS: String(approvalChannel.timeoutMs),
           },
         };
+      }
+      // The claude CLI spawns every server in this file itself, and
+      // `mcpServers` has no per-server cwd field — the child would inherit the
+      // CLI's cwd, which is the manifest cwd, which for an Agent task is the
+      // Agent home the agent writes by design. A `bun --compile` server binary
+      // runs `$cwd/bunfig.toml` `preload` before its own code, so every entry
+      // is rewritten through this package's `bin/byok-launch-cwd.mjs`, which
+      // chdirs into the daemon's proven-non-writable launch directory and
+      // execs the real command with its argv byte-identical.
+      //
+      // The CLI's OWN cwd is deliberately unchanged: session resume and
+      // relative path resolution depend on it (`agent-home-contract.test.ts`).
+      //
+      // The guard below counts the GENERATED map, not the daemon's projected
+      // one: the approval server this adapter adds itself is an MCP server
+      // child like any other, and a `confirm`-mode task with no host toolset
+      // at all used to slip past a host-toolset-only guard and be written
+      // unwrapped.
+      const launchBinding = startInput.mcpLaunch;
+      if (Object.keys(mcpServers).length > 0
+        && (launchBinding === undefined || launchBinding.launcher === undefined)) {
+        throw new RuntimeExecutionFailure({
+          phase: 'start', category: 'authority', retry: 'non-retryable',
+          reason: 'prepared claude operation received MCP servers without a trusted launch directory',
+        });
+      }
+      if (launchBinding?.launcher !== undefined) {
+        const wrapped = { cwd: launchBinding.cwd, launcher: launchBinding.launcher };
+        for (const [name, server] of Object.entries(mcpServers)) {
+          try {
+            mcpServers[name] = wrapMcpServerWithLaunchCwd(server as McpStdioServerConfig, wrapped);
+          } catch (cause) {
+            // A refusal from the launcher wrapper is this adapter's own
+            // pre-spawn refusal, exactly like the ones above, and must reach
+            // TaskRunner as one: an untyped throw is projected as a generic
+            // `runtime adapter contract violation during start`, which hides
+            // the `launch_cwd_*` reason the operator needs to fix their MCP
+            // server configuration.
+            throw new RuntimeExecutionFailure({
+              phase: 'start', category: 'authority', retry: 'non-retryable',
+              reason: `prepared claude operation cannot launch an MCP server in the trusted launch directory: ${cause instanceof Error ? cause.message : 'launch_cwd_target_refused'}`,
+            }, { cause });
+          }
+        }
       }
       await fs.writeFile(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });
       mapping.args = [

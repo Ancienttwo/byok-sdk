@@ -1,5 +1,7 @@
-import { createHash } from 'node:crypto';
 import {
+  canonicalInputPreparationJson,
+  inputPreparationDigest,
+  inputPreparationRuntimeIdentityString,
   INPUT_PREPARATION_ARTIFACT_FORMAT,
   INPUT_PREPARATION_RECEIPT_FORMAT,
   INPUT_PREPARATION_VERSION,
@@ -9,6 +11,7 @@ import {
   type InputPreparationCancelParamsV1,
   type InputPreparationCounterAdapter,
   type InputPreparationCounterEvidenceV1,
+  type InputPreparationCounterProviderEvidenceV1,
   type InputPreparationCounterResultV1,
   type InputPreparationCounterTargetV1,
   type InputPreparationErrorCodeV1,
@@ -25,6 +28,24 @@ import {
   InputPreparationRuntimeIdentityError,
   type InputPreparationCompiler,
 } from '../adapters/pi/input-preparation';
+import {
+  buildPreparedPromptCommand,
+  PREPARED_PROMPT_COMMAND_ID,
+} from '../adapters/pi/prepared-prompt-frame';
+// The runtime's own frame contract, imported rather than restated. A local copy
+// of the cap or of the length function would be a second authority over a bound
+// only the runtime enforces, and it would go stale silently on a fork bump. The
+// module is dependency-free, so naming it statically costs nothing.
+import {
+  fitsRpcFrame,
+  rpcFrameByteLength,
+  RPC_MAX_FRAME_BYTES,
+} from '@earendil-works/pi-coding-agent/rpc-types';
+import type {
+  PreparedToolSurface,
+  PreparedToolSurfaceAssembler,
+  PreparedToolSurfaceRefusal,
+} from './prepared-tool-surface';
 import {
   InputPreparationConflictError,
   InputPreparationDurabilityError,
@@ -64,7 +85,12 @@ import {
  *     installed closure. Caller text contributes nothing to that identity.
  *  5. Durable reserve, before the counter is ever invoked. Same key and digest
  *     returns the existing fact; a different digest conflicts (§10.3.5).
- *  6. Pure compile, then ONE serialized closure that admits the call against the
+ *  6. The ONE prepared-tool-surface assembly (`./prepared-tool-surface.ts`) —
+ *     launch boundary, implementation identities, probe, policy filter,
+ *     projection, fingerprints — deliberately AFTER the reserve, so a
+ *     re-delivery of an already-recorded requestId answers from the durable
+ *     record without starting a single server.
+ *  7. Pure compile, then ONE serialized closure that admits the call against the
  *     per-scope bounds, retains the artifact and durably reserves the counter
  *     call, then the counter, then the durably persisted result — in that
  *     order, so no success is ever reported that is not already on disk, and no
@@ -88,19 +114,6 @@ export class InputPreparationRequestError extends Error {
   }
 }
 
-/**
- * The ONE spelling of a runtime identity string.
- *
- * It binds every artifact through `CompilePreparedInputRequest.binding` and it
- * binds every tool-executor fingerprint. Those two must agree exactly, so the
- * formula lives here rather than being written out at each site.
- */
-export function inputPreparationRuntimeIdentityString(
-  runtime: InputPreparationRuntimeIdentityV1,
-): string {
-  return `${runtime.packageName}@${runtime.packageVersion}+${runtime.upstreamCommit}.${String(runtime.forkBuild)}`;
-}
-
 // ---------------------------------------------------------------------------
 // Options
 // ---------------------------------------------------------------------------
@@ -111,6 +124,16 @@ export interface InputPreparationServiceOptions {
   readonly authorityResolver: InputPreparationAuthorityResolver;
   readonly counter: InputPreparationCounterAdapter;
   readonly compiler: InputPreparationCompiler;
+  /**
+   * The ONE prepared-tool-surface entry (`./prepared-tool-surface.ts`).
+   *
+   * Required, with no default: a service constructed without one could not
+   * derive a tool manifest at all, and the only alternative to deriving one is
+   * accepting a caller's — which is precisely what this version of the request
+   * contract removed. Injected rather than constructed here so this module
+   * still names no registry, no launch configuration and no MCP probe.
+   */
+  readonly toolSurface: PreparedToolSurfaceAssembler;
   readonly now?: () => number;
 }
 
@@ -148,46 +171,39 @@ export interface InputPreparationService {
 }
 
 // ---------------------------------------------------------------------------
-// Canonical serialization
-// ---------------------------------------------------------------------------
-
-/**
- * Key-sorted JSON, so two structurally equal requests always produce the same
- * bytes and therefore the same digest. Field ORDER on the wire must never be
- * able to turn one request into two idempotency keys.
- */
-export function canonicalInputPreparationJson(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
-  if (Array.isArray(value)) return `[${value.map((entry) => canonicalInputPreparationJson(entry)).join(',')}]`;
-  const record = value as Record<string, unknown>;
-  const parts: string[] = [];
-  for (const key of Object.keys(record).sort()) {
-    const entry = record[key];
-    if (entry === undefined) continue;
-    parts.push(`${JSON.stringify(key)}:${canonicalInputPreparationJson(entry)}`);
-  }
-  return `{${parts.join(',')}}`;
-}
-
-function sha256Hex(input: string): string {
-  return createHash('sha256').update(input, 'utf8').digest('hex');
-}
-
-// ---------------------------------------------------------------------------
 // Readiness
 // ---------------------------------------------------------------------------
 
 /**
- * Why this record is not ready to admit an Execution.
+ * Why this record is not ready to be CONSUMED.
  *
- * An empty list is the only thing that makes `ready` true, and today the list
- * can never be empty: the native compiler proves `coverage: "unknown"`, so
- * `compiler_coverage_unknown` is always present, and tool executor identity is
- * an observation fingerprint rather than a proof, so
- * `executor_identity_unproven` always joins it. That is the honest state of
- * §10.2's G4, not a placeholder — a fixture counter adds
- * `counter_authority_not_production` on top of it, so an offline suite cannot
- * even accidentally look like production accounting evidence.
+ * An empty list is the only thing that makes `ready` true. `ready` answers
+ * exactly one question — can this preparation be consumed — and it is
+ * deliberately NOT Host budget admission: the Host decides the spend against
+ * the accounting ruling this service only NAMES, and nothing here performs
+ * budget arithmetic.
+ *
+ * Every reason is read off recorded evidence rather than asserted:
+ *
+ * - `projection_unknown` — the native compiler's own projection kind is not
+ *   `content_complete`. The SDK never re-derives that kind: the compiler owns
+ *   the classification table, and a second local copy of it would be a shadow
+ *   parser for the same semantic fact.
+ * - `accounting_policy_missing` / `accounting_policy_inapplicable` /
+ *   `residual_not_ruled` — pure APPLICABILITY of the Host's accounting ruling.
+ *   Was one named at all; was it ruled for this runtime and this
+ *   endpoint/model; does it name every residual key the compiler classified.
+ *   There is no default ruling, so a request that named none stays unready
+ *   rather than being silently treated as ruled.
+ * - `counter_missing` — no counter evidence is persisted. It used to be
+ *   implied by an always-present coverage reason, and it is a different fact.
+ * - `executor_identity_unproven` — derived from the recorded per-tool
+ *   implementation kinds: a manifest is only as proven as its least proven
+ *   entry. On this SDK's default — no configured `toolImplementationAuthority`
+ *   — every kind is `unavailable:resolver_unconfigured`.
+ * - `counter_authority_not_production` — a fixture count can never make a
+ *   receipt ready, so an offline suite cannot look like production accounting
+ *   evidence.
  */
 export function inputPreparationReadinessReasons(
   record: InputPreparationRecord,
@@ -214,21 +230,45 @@ export function inputPreparationReadinessReasons(
   if (record.artifact === undefined) {
     if (!reasons.includes('not_counted')) reasons.push('not_counted');
   } else {
-    if (record.artifact.coverage !== 'complete') reasons.push('compiler_coverage_unknown');
-    // Tool executor strings are OBSERVATION fingerprints: they bind what a
-    // server said about a tool — its toolset revision, its self-reported
-    // identity, its negotiated protocol version, its schema — and none of that
-    // proves which executable will actually serve the call. Observation and
-    // launch are two separate spawns of a command the daemon only knows as
-    // `command`/`args`, so even hashing the binary would be a TOCTOU claim.
-    // Until an implementation-identity proof exists, no receipt may be ready
-    // on the strength of a fingerprint, exactly as `compiler_coverage_unknown`
-    // keeps one from being ready on unproven token coverage. The condition
-    // changes when the proof does, not before.
-    reasons.push('executor_identity_unproven');
+    if (record.artifact.projection.kind !== 'content_complete') reasons.push('projection_unknown');
+    // Applicability of the Host's accounting ruling, and nothing else. The SDK
+    // compares names and identities; it never decides what a residual key COSTS,
+    // because the compiler proved only the key's SHAPE and the price of a shape
+    // is an external accounting fact no local rule can re-derive.
+    const policy = record.binding.accountingPolicyRef;
+    if (policy === undefined) {
+      reasons.push('accounting_policy_missing');
+    } else if (
+      policy.ruledRuntime !== inputPreparationRuntimeIdentityString(record.binding.runtime) ||
+      policy.ruledTarget.endpoint !== record.binding.target.endpoint ||
+      policy.ruledTarget.modelId !== record.binding.target.modelId
+    ) {
+      reasons.push('accounting_policy_inapplicable');
+    } else {
+      const ruled = new Set(policy.ruledResidualKeys);
+      if (record.artifact.residual.some((entry) => !ruled.has(entry.key))) reasons.push('residual_not_ruled');
+    }
+    // A tool executor string is an OBSERVATION fingerprint. It binds what a
+    // server said about a tool AND the implementation identity this daemon
+    // resolved for that server — so whether it proves anything about the
+    // executable depends entirely on whether that identity was attested.
+    //
+    // The receipt therefore reads the recorded kinds rather than asserting the
+    // limitation unconditionally: any tool whose implementation is
+    // `unavailable` keeps the whole preparation unready, because a manifest is
+    // only as proven as its least proven entry. On this SDK's default — no
+    // configured `toolImplementationAuthority` — every kind is
+    // `unavailable:resolver_unconfigured` and the reason is always present,
+    // which is the same honest answer as before; what changed is that it is
+    // now derived from evidence instead of hard-coded.
+    if (Object.values(record.artifact.toolImplementationKinds).some((kind) => kind !== 'attested')) {
+      reasons.push('executor_identity_unproven');
+    }
     if (record.artifactBytes === 0 || nowMs >= Date.parse(record.artifactExpiresAt)) reasons.push('artifact_expired');
   }
-  if (record.counter !== undefined) {
+  if (record.counter === undefined) {
+    reasons.push('counter_missing');
+  } else {
     if (record.counter.authority !== 'provider') reasons.push('counter_authority_not_production');
     if (!record.counter.coverage.covered) reasons.push('counter_coverage_incomplete');
   }
@@ -296,6 +336,60 @@ function validateCounterResult(value: unknown): InputPreparationCounterResultV1 
     coverage: {
       covered: coverage.covered,
       ...(coverage.reason === undefined ? {} : { reason: coverage.reason as string }),
+    },
+    providerEvidence: validateProviderEvidence(result.providerEvidence),
+  };
+}
+
+/**
+ * The provider half of a count, validated as a SHAPE only.
+ *
+ * Nothing inside `asserted` is recomputed or second-guessed here: it is what
+ * the provider answered, and re-deriving a usage number locally would be the
+ * shadow accounting this whole surface exists to avoid. What IS checked, and
+ * checked elsewhere against the artifact, is the identity of the bytes the
+ * count was taken over — a number whose projection nobody can name is not
+ * evidence about this preparation.
+ */
+function validateProviderEvidence(value: unknown): InputPreparationCounterProviderEvidenceV1 {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new InputPreparationRequestError('counter_unavailable', 'the counter adapter returned no provider evidence');
+  }
+  const evidence = value as Record<string, unknown>;
+  const asserted = evidence.asserted as Record<string, unknown> | undefined;
+  if (
+    typeof evidence.projectionDigest !== 'string' ||
+    !/^[0-9a-f]{64}$/u.test(evidence.projectionDigest) ||
+    typeof evidence.endpoint !== 'string' ||
+    evidence.endpoint.length === 0 ||
+    typeof evidence.modelId !== 'string' ||
+    evidence.modelId.length === 0 ||
+    typeof asserted !== 'object' ||
+    asserted === null ||
+    Array.isArray(asserted) ||
+    !Number.isSafeInteger(asserted.httpStatus) ||
+    typeof asserted.responseDigest !== 'string' ||
+    asserted.responseDigest.length === 0 ||
+    typeof asserted.usageFields !== 'object' ||
+    asserted.usageFields === null ||
+    Array.isArray(asserted.usageFields) ||
+    !Object.values(asserted.usageFields as Record<string, unknown>).every(
+      (field) => typeof field === 'number' && Number.isFinite(field),
+    )
+  ) {
+    throw new InputPreparationRequestError(
+      'counter_unavailable',
+      'the counter adapter returned provider evidence outside the accepted shape',
+    );
+  }
+  return {
+    projectionDigest: evidence.projectionDigest,
+    endpoint: evidence.endpoint,
+    modelId: evidence.modelId,
+    asserted: {
+      httpStatus: asserted.httpStatus as number,
+      usageFields: { ...(asserted.usageFields as Record<string, number>) },
+      responseDigest: asserted.responseDigest,
     },
   };
 }
@@ -542,9 +636,37 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       source: { revision: request.source.revision, digest: request.source.digest },
       target,
       policyRevision: limits.revision,
+      permissionMode: request.permissionMode,
       runtime: options.compiler.runtime,
       requestDigest,
+      // Host authority, carried verbatim. Never defaulted: a preparation whose
+      // request named no accounting ruling answers with a receipt that says so.
+      ...(request.accountingPolicyRef === undefined
+        ? {}
+        : {
+          accountingPolicyRef: {
+            revision: request.accountingPolicyRef.revision,
+            ruledRuntime: request.accountingPolicyRef.ruledRuntime,
+            ruledTarget: { ...request.accountingPolicyRef.ruledTarget },
+            ruledResidualKeys: [...request.accountingPolicyRef.ruledResidualKeys],
+          },
+        }),
     };
+  }
+
+  /**
+   * Turn one assembly refusal into the typed rejection the wire carries, and
+   * record WHY on the durable record before it leaves.
+   *
+   * The refusal detail is a stable code, so a later `lookup` answers the same
+   * fact the original call did rather than only "failed".
+   */
+  async function refuseAssembly(
+    recordId: string,
+    refusal: PreparedToolSurfaceRefusal,
+  ): Promise<never> {
+    await markFailed(recordId, refusal.detail);
+    throw new InputPreparationRequestError(refusal.code, refusal.message);
   }
 
   async function runPreparation(
@@ -554,6 +676,23 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     target: InputPreparationCounterTargetV1,
     run: ActiveRun,
   ): Promise<InputPreparationRecord> {
+    // --- observation stage ------------------------------------------------
+    // The one entry that resolves the launch boundary, resolves an
+    // implementation identity per server, probes through both, and returns the
+    // frozen tool surface. It runs AFTER the durable reserve above, which is
+    // what makes a re-delivery return the recorded fact without a second
+    // spawn: no server is started until this key is provably new.
+    let surface: PreparedToolSurface;
+    {
+      const assembled = await options.toolSurface.assemble({
+        requiredToolsets: request.requiredToolsets,
+        permissionMode: request.permissionMode,
+        runtimeIdentity: inputPreparationRuntimeIdentityString(options.compiler.runtime),
+      });
+      if (!assembled.ok) await refuseAssembly(record.recordId, assembled);
+      surface = (assembled as { readonly surface: PreparedToolSurface }).surface;
+    }
+
     // --- pure stage -------------------------------------------------------
     // No filesystem, environment, session, process, tool or network access
     // happens inside this call; the runtime identity it is bound to was read
@@ -561,7 +700,21 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     let compiled;
     try {
       compiled = await options.compiler.compile({
-        snapshot: request.snapshot,
+        snapshot: {
+          prompt: {
+            ...request.snapshot.prompt,
+            // Daemon-derived, and it has to be: the native contract requires
+            // this list to equal the model-visible manifest exactly, and the
+            // manifest is this device's observation. A caller-stated list
+            // would be a second, unverified copy of the manifest arriving
+            // through the prompt.
+            selectedTools: surface.tools.map((tool) => tool.name),
+          },
+          messages: request.snapshot.messages,
+          // Daemon-derived, never caller-stated. The tools the model is shown
+          // and the executors the manifest binds come from the same assembly.
+          tools: surface.tools,
+        },
         model: request.selection.model,
         options: request.selection.options,
         binding: {
@@ -570,18 +723,62 @@ export function createInputPreparationService(options: InputPreparationServiceOp
           policyIdentity: limits.revision,
           profileRevision: grant.profileRevision,
         },
-        toolExecutors: request.toolExecutors,
+        toolExecutors: surface.toolExecutors,
       });
     } catch (cause) {
       if (cause instanceof InputPreparationRuntimeIdentityError) {
         await markFailed(record.recordId, 'runtime_identity_unavailable');
         throw new InputPreparationRequestError('runtime_identity_unavailable', cause.message, { cause });
       }
-      await markFailed(record.recordId, 'compile_rejected');
+      // A compile refusal that names a specific broken contract — an
+      // unsupported compiler version, a projection digest that does not
+      // describe its own bytes — records THAT code, so a later `lookup`
+      // answers the same fact instead of a generic `compile_rejected`.
+      await markFailed(
+        record.recordId,
+        cause instanceof InputPreparationCompileError && cause.detail !== undefined ? cause.detail : 'compile_rejected',
+      );
       if (cause instanceof InputPreparationCompileError) {
         throw new InputPreparationRequestError('unsupported_input', cause.message, { cause });
       }
       throw new InputPreparationRequestError('unsupported_input', 'the prepared input could not be compiled', { cause });
+    }
+
+    // --- RPC frame admission ----------------------------------------------
+    // Decided HERE — after the compile that produces the envelope, and BEFORE
+    // the operator's per-artifact retention bound below — because these two
+    // bounds belong to different authorities and the runtime's comes first. An
+    // envelope that cannot be handed to the runtime in one frame can never be
+    // launched, so counting it, retaining it, or charging it against a scope
+    // aggregate would all be work done for an artifact nobody can consume.
+    //
+    // The frame is BUILT, not estimated: the same builder the launcher writes
+    // with (`adapters/pi/prepared-prompt-frame.ts`), carrying the same stated
+    // command id, so the bytes measured here are the bytes written there.
+    {
+      const command = buildPreparedPromptCommand(
+        compiled.envelope,
+        {
+          envelopeDigest: compiled.envelopeDigest,
+          toolManifestDigest: compiled.toolManifestDigest,
+          model: request.selection.model,
+          binding: {
+            inputIdentity: `${request.source.revision}:${request.source.digest}`,
+            runtimeIdentity: inputPreparationRuntimeIdentityString(options.compiler.runtime),
+            policyIdentity: limits.revision,
+            profileRevision: grant.profileRevision,
+          },
+        },
+        PREPARED_PROMPT_COMMAND_ID,
+      );
+      if (!fitsRpcFrame(command)) {
+        const measuredBytes = rpcFrameByteLength(command);
+        await markFailed(record.recordId, 'rpc_frame_too_large');
+        throw new InputPreparationRequestError(
+          'rpc_frame_too_large',
+          `the prepared prompt frame measures ${measuredBytes} bytes, above the ${RPC_MAX_FRAME_BYTES}-byte single-frame limit the runtime enforces`,
+        );
+      }
     }
 
     // --- retention budget -------------------------------------------------
@@ -594,7 +791,8 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       toolManifestDigest: compiled.toolManifestDigest,
       requestBody: compiled.requestBody,
       counterProjection: compiled.counterProjection,
-      coverage: compiled.coverage,
+      projection: compiled.projection,
+      residual: compiled.residual,
       envelope: compiled.envelope,
     } as const;
     // The per-ARTIFACT bound is a property of this one artifact, so it is
@@ -635,7 +833,11 @@ export function createInputPreparationService(options: InputPreparationServiceOp
           toolManifestDigest: compiled.toolManifestDigest,
           requestBytes: compiled.requestBytes,
           projectionBytes: compiled.projectionBytes,
-          coverage: compiled.coverage,
+          projection: compiled.projection,
+          residual: compiled.residual,
+          observationDigest: surface.observationDigest,
+          toolBindingDigest: surface.toolBindingDigest,
+          toolImplementationKinds: surface.toolImplementationKinds,
         },
         bounds: {
           maxScopeAggregateBytes: limits.maxScopeAggregateBytes,
@@ -699,6 +901,23 @@ export function createInputPreparationService(options: InputPreparationServiceOp
         // reached us after the decision to stop, so it is not a clean count.
         throw new InputPreparationRequestError('counter_interrupted', 'the counter call was aborted before its result was accepted');
       }
+      // The count must be evidence about THIS preparation. The adapter was
+      // handed P(D) and a target; the evidence it answers with names a
+      // projection digest and an endpoint/model, and both are compared against
+      // the compiled artifact rather than taken on trust. A number bound to a
+      // different projection is not a smaller count, it is a count of something
+      // else, and persisting it would make the receipt claim a fact nobody
+      // established.
+      if (
+        counted.providerEvidence.projectionDigest !== compiled.projection.digest ||
+        counted.providerEvidence.endpoint !== target.endpoint ||
+        counted.providerEvidence.modelId !== target.modelId
+      ) {
+        throw new InputPreparationRequestError(
+          'counter_unavailable',
+          'the counter evidence names a projection or target other than the one this preparation compiled',
+        );
+      }
     } catch (cause) {
       const detail = run.cancelRequested
         ? 'cancelled_during_counter'
@@ -760,14 +979,12 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     const verifiedRequest = { ...request, source };
     assertAvailable();
     const runtime = options.compiler.runtime;
-    const requestDigest = sha256Hex(
-      canonicalInputPreparationJson({
-        request,
-        scopeId: grant.scopeId,
-        runtime,
-        policyRevision: limits.revision,
-      }),
-    );
+    const requestDigest = inputPreparationDigest({
+      request,
+      scopeId: grant.scopeId,
+      runtime,
+      policyRevision: limits.revision,
+    });
     const target: InputPreparationCounterTargetV1 = {
       endpoint: request.selection.model.baseUrl,
       modelId: request.selection.model.id,
@@ -792,6 +1009,11 @@ export function createInputPreparationService(options: InputPreparationServiceOp
           key,
           requestDigest,
           binding: buildBinding(verifiedRequest, grant, target, requestDigest),
+          // Recorded with the reservation, before anything is compiled: a
+          // prepared launch must re-present this exact identity to the native
+          // verifier, and the only other copy of it is inside the envelope the
+          // native contract forbids reading expectations out of.
+          model: request.selection.model,
           maxInFlight: limits.maxInFlight,
         });
       } catch (cause) {
@@ -809,8 +1031,40 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       }
       if (outcome.kind === 'existing') {
         // Idempotent: the durable fact is the answer. Never a second compile,
-        // never a second counter call — including for a record whose counter
-        // outcome is unknown.
+        // never a second counter call, and — since the tool manifest became a
+        // daemon observation rather than caller text — never a second PROBE
+        // either. A repeat that re-observed would mint a second executor fact
+        // under one idempotency key, which is the substitution this key exists
+        // to prevent.
+        //
+        // Drift is still checked, on the half of the evidence that can be
+        // re-derived without starting anything: the launch attestation, the
+        // toolset definition revisions, the configured argv and the
+        // implementation identities. If any of those moved since the recorded
+        // artifact was frozen, the recorded receipt no longer describes this
+        // device and the repeat is REFUSED rather than answered — the caller
+        // mints a new preparation instead of silently receiving one bound to
+        // stale evidence.
+        //
+        // A record with no artifact yet (a concurrent duplicate still in
+        // flight, or one that failed before it froze anything) has nothing to
+        // compare against, so it answers with its own durable state.
+        const recorded = outcome.record.artifact;
+        if (recorded !== undefined) {
+          const rebound = await options.toolSurface.resolveBinding({
+            requiredToolsets: request.requiredToolsets,
+          });
+          if (!rebound.ok) {
+            throw new InputPreparationRequestError(rebound.code, rebound.message);
+          }
+          if (rebound.binding.toolBindingDigest !== recorded.toolBindingDigest) {
+            throw new InputPreparationRequestError(
+              'observation_drift',
+              'the launch binding, toolset definitions or tool implementations behind this preparation'
+                + ' changed after its artifact was frozen; it will not be re-derived under the same requestId',
+            );
+          }
+        }
         return toReceipt(outcome.record, now());
       }
 

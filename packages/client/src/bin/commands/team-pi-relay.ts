@@ -1,5 +1,4 @@
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import { createInterface } from 'node:readline';
 import type { DaemonConfig } from '../../daemon/create-daemon';
@@ -9,6 +8,7 @@ import { connectControlClient } from '../control-client';
 import { resolveStoreDir } from '../config';
 import { loadPrivateTeamDocument, parseCodexTeamBinding, preflightCodexRelay, queueCodexTeamNotification, type CodexTeamBinding } from '../team-codex-relay';
 import { TeamNotificationRelay, type TeamRelayBinding } from '../team-notification-relay';
+import type { PiTeamOperatorInvocation } from '../team-pi-operator-entry';
 import { PiTeamSession, type PiInteractionResponse } from '../team-pi-session';
 import { acquireTeamRelayLock } from './team-relay';
 import { AGENT_TEAM_MCP_SERVER_NAME } from '../../sdk-reserved-mcp';
@@ -30,8 +30,10 @@ export function parsePiRelayBindings(value: unknown, workspaceId: string) {
 }
 type Binding = (CodexTeamBinding & { kind: 'codex' }) | (TeamRelayBinding & { kind: 'pi' });
 export async function runTeamPiRelayCommand(input: {
+  operatorInvocation: PiTeamOperatorInvocation;
   config: DaemonConfig; workspaceId: string; bindingsFile: string; codexBin: string; maxNotifications: number; signal: AbortSignal;
 }): Promise<void> {
+  if (input.config.sdkHelperHost !== undefined) throw new Error('Pi operator relay unsupported by product sdkHelperHost; requires the official byok-agent CLI');
   if (!Number.isInteger(input.maxNotifications) || input.maxNotifications < 1 || input.maxNotifications > 100) throw new Error('max-notifications must be from 1 to 100');
   const document = parsePiRelayBindings(await loadPrivateTeamDocument(input.bindingsFile), input.workspaceId);
   if (!path.isAbsolute(input.codexBin)) throw new Error('Codex executable must be absolute');
@@ -53,12 +55,10 @@ export async function runTeamPiRelayCommand(input: {
     release = await acquireTeamRelayLock(storeDir, input.workspaceId);
     if (input.signal.aborted) throw new Error('relay stopped');
     for (const binding of [document.codex, document.pi]) await client.request('team_notifications.snapshot', { context: binding.context, afterSeq: binding.afterSeq });
-    // The installed manifest is the authority for packaged helper entrypoints.
-    const manifestPath = fileURLToPath(import.meta.resolve('@byok-sdk/client/package.json'));
-    const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as { bin: Record<string, string> };
-    const helper = input.config.sdkHelperHost ? resolveSdkReservedHelperBin('agent-team-mcp', input.config.sdkHelperHost)
-      : { command: process.execPath, args: [path.resolve(path.dirname(manifestPath), manifest.bin['byok-agent-team-mcp']!)] };
+    const helper = resolveSdkReservedHelperBin('agent-team-mcp');
     pi = await PiTeamSession.start({ ...document.pi, workspaceId: input.workspaceId, onEvent: emit,
+      operatorInvocation: input.operatorInvocation,
+      env: { ...process.env },
       // Command, args and env only — the per-server lifecycle/prefix/include
       // knobs were `pi-mcp-adapter`'s, and the SDK's own extension needs none
       // of them: it registers one Pi tool per tool the helper reports, under

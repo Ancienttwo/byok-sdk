@@ -1,6 +1,7 @@
 import type { McpStdioServerConfig } from '../types';
 import { McpAuthorityError } from '../mcp/client';
 import { observeMcpServer, type McpServerObservation } from '../mcp/observation';
+import type { ToolImplementationIdentityV1 } from './tool-implementation-identity';
 
 /**
  * The daemon's admission-time use of the shared MCP core (`../mcp/`).
@@ -52,6 +53,17 @@ export interface McpToolsProbeOptions {
    * admission.
    */
   cwd?: string;
+  /**
+   * What this daemon established about the implementation behind this server
+   * (`./tool-implementation-identity.ts`), forwarded to the shared MCP core so
+   * the probe spawn re-measures an attested one before starting it.
+   *
+   * Absent means nothing was claimed. The core refuses the spawn rather than
+   * demoting the claim, so a probe of an attested server that no longer
+   * measures the same fails with an {@link McpAuthorityError} and the task
+   * declines permanently.
+   */
+  implementation?: ToolImplementationIdentityV1;
 }
 
 /**
@@ -72,6 +84,7 @@ export async function probeMcpServer(
     ...(options.label === undefined ? {} : { label: options.label }),
     env: options.env,
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+    ...(options.implementation === undefined ? {} : { implementation: options.implementation }),
     timeoutMs: options.timeoutMs ?? MCP_TOOLS_PROBE_TIMEOUT_MS,
   });
 }

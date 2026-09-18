@@ -48,6 +48,7 @@ function desired(
     deadlineAt: '2026-01-01T00:01:00.000Z',
     context: { inline: '{"prompt":{},"messages":[]}' },
     requiredToolsets: ['team'],
+    permissionMode: 'auto' as const,
     ...overrides,
   };
 }
@@ -64,6 +65,7 @@ const RECEIPT: InputPreparationReceiptSummary = {
     source: { revision: 'source-r42', digest: `sha256:${'c'.repeat(64)}` },
     target: { endpoint: 'https://provider.example/v1', modelId: 'model-1' },
     policyRevision: POLICY,
+    permissionMode: 'auto',
     runtime: {
       packageName: '@byok-sdk/pi-coding-agent',
       packageVersion: '0.85.1001',
@@ -72,7 +74,7 @@ const RECEIPT: InputPreparationReceiptSummary = {
       forkBuild: 1,
       envelopeFormat: 'pi.prepared-session-input.v1',
       requestFormat: 'openai-completions.v1',
-      compilerVersion: 1,
+      compilerVersion: 2,
     },
     requestDigest: 'sha256:req',
   },
@@ -82,10 +84,14 @@ const RECEIPT: InputPreparationReceiptSummary = {
     toolManifestDigest: 'sha256:tools',
     requestBytes: 1024,
     projectionBytes: 900,
-    coverage: 'unknown',
+    projection: { version: 2, kind: 'content_complete', digest: 'a'.repeat(64) },
+    residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
+    observationDigest: 'sha256:observation',
+    toolBindingDigest: 'sha256:binding',
+    toolImplementationKinds: { mcp__teamserver__list: 'unavailable:resolver_unconfigured' },
   },
   ready: false,
-  readinessReasons: ['compiler_coverage_unknown', 'executor_identity_unproven'],
+  readinessReasons: ['accounting_policy_missing', 'executor_identity_unproven'],
   artifactExpiresAt: '2026-01-01T01:00:00.000Z',
 };
 

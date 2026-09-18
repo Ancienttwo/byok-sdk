@@ -10,7 +10,7 @@ import {
   AGENT_MEMORY_RECALL_TOOL_NAME,
   AGENT_MEMORY_SAVE_TOOL_NAME,
 } from '../bin/agent-memory-mcp-server';
-import { McpAuthorityError } from '../mcp/client';
+import { McpAuthorityError } from '../mcp/authority-error';
 import { GRANTABLE_MCP_SERVER_NAME, GRANTABLE_TOOL_NAME } from '../mcp/observation';
 import { filterMcpObservationForPolicy, mcpToolsetToolNames } from '../mcp/projection';
 

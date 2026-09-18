@@ -1,0 +1,46 @@
+{
+  "format": "byok.pi-export-asset-source",
+  "version": 1,
+  "packageName": "@byok-sdk/pi-coding-agent",
+  "packageVersion": "0.85.1005",
+  "byokFork": {
+    "upstreamBase": "0.85.1",
+    "upstreamCommit": "d981de1229ef899957bbe968bc8dcda02a21f477",
+    "forkBuild": 5
+  },
+  "sourceBasePath": "dist/core/export-html",
+  "files": [
+    {
+      "path": "template.html",
+      "bytes": 2225,
+      "sha256": "916782b1184a9597527605ad751e2b3af30fcea23ba2194002969cd217a06881"
+    },
+    {
+      "path": "template.css",
+      "bytes": 22724,
+      "sha256": "28c16e3827c23a62eef8283cac316b478f946e023093adad25ff9c9b891d41af"
+    },
+    {
+      "path": "template.js",
+      "bytes": 76742,
+      "sha256": "1893cdb77587f592eef5717905391269886d6d7a4dc6a488417a73da374d9226"
+    },
+    {
+      "path": "vendor/marked.min.js",
+      "bytes": 42882,
+      "sha256": "d5487edc7258b404bfa74c393d74a6393155f02517bd5e7e77cd64f8187f39a0"
+    },
+    {
+      "path": "vendor/highlight.min.js",
+      "bytes": 121727,
+      "sha256": "837a6fa5b0c736b52bbde2b2b6190f305da3fc9ed41681db5321507057b5c846"
+    }
+  ],
+  "licenseSources": {
+    "template.html": "native package LICENSE (MIT)",
+    "template.css": "native package LICENSE (MIT)",
+    "template.js": "native package LICENSE (MIT)",
+    "vendor/marked.min.js": "embedded header: marked 18.0.5, MIT; original bytes remain in native package",
+    "vendor/highlight.min.js": "embedded header: Highlight.js 11.9.0, BSD-3-Clause; original bytes remain in native package"
+  }
+}

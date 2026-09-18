@@ -1,4 +1,5 @@
 import childProcess from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fsModule, { existsSync, readFileSync, realpathSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -8,11 +9,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   createPiInputPreparationCompiler,
   resolveInstalledPiRuntimeIdentity,
+  verifyCompiledPreparedInput,
   InputPreparationCompileError,
+  SUPPORTED_PREPARED_COMPILER_VERSION,
   type CompilePreparedInputRequest,
 } from '../adapters/pi/input-preparation';
 import { PI_PACKAGE_NAME, resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
-import type { InputPreparationSnapshotV1 } from '../input-preparation';
+import type { InputPreparationCompiledSnapshotV1 } from '../input-preparation';
 
 /**
  * B-P2 §10.5 "Completeness/purity" for the ONE module that composes the native
@@ -34,7 +37,7 @@ import type { InputPreparationSnapshotV1 } from '../input-preparation';
  * creates a task, claim, Execution or nonce.
  */
 
-function snapshot(): InputPreparationSnapshotV1 {
+function snapshot(): InputPreparationCompiledSnapshotV1 {
   return {
     prompt: {
       cwd: '/workspace/project',
@@ -228,13 +231,16 @@ describe('B-P2 native composition: runtime identity', () => {
     expect(identity.forkBuild).toBe(installed.byokFork.forkBuild);
     expect(identity.envelopeFormat).toBe('pi.session.prepared-input');
     expect(identity.requestFormat).toBe('pi.openai-completions.prepared');
+    // The SUPPORTED constant, not a literal claim about the native: every
+    // compile proves the envelope actually carries this same number.
+    expect(identity.compilerVersion).toBe(SUPPORTED_PREPARED_COMPILER_VERSION);
     expect(Object.isFrozen(identity)).toBe(true);
   });
 });
 
 describe('B-P2 native composition: pure compile', () => {
-  it('compiles the authorized full schemas and text into D, P(D) and unknown coverage', async () => {
-    const compiler = createPiInputPreparationCompiler();
+  it('compiles the authorized full schemas and text into D, P(D) and the structural projection contract', async () => {
+    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
     const compiled = await compiler.compile(compileRequest());
 
     const body = JSON.parse(compiled.requestBody) as {
@@ -253,7 +259,17 @@ describe('B-P2 native composition: pure compile', () => {
     expect(body.tools.map((tool) => tool.function.name)).toEqual(['read', 'bash']);
     expect(body.tools[0]?.function.parameters).toMatchObject({ properties: { path: { type: 'string' } } });
 
-    expect(compiled.coverage).toBe('unknown');
+    // The native compiler's own structural projection contract, verbatim: a
+    // content-complete projection whose digest describes the exact counted
+    // bytes, plus the classification of every key of D outside P(D).
+    expect(compiled.projection.version).toBe(2);
+    expect(compiled.projection.kind).toBe('content_complete');
+    expect(compiled.projection.digest).toBe(
+      createHash('sha256').update(compiled.counterProjection, 'utf8').digest('hex'),
+    );
+    expect(compiled.residual.length).toBeGreaterThan(0);
+    expect(compiled.residual.map((entry) => entry.key)).toContain('max_tokens');
+    expect(compiled.envelope.providerRequest.compilerVersion).toBe(SUPPORTED_PREPARED_COMPILER_VERSION);
     expect(compiled.requestBytes).toBe(Buffer.byteLength(compiled.requestBody, 'utf8'));
     expect(compiled.projectionBytes).toBe(Buffer.byteLength(compiled.counterProjection, 'utf8'));
     expect(compiled.requestDigest).toMatch(/^[0-9a-f]{64}$/u);
@@ -265,7 +281,7 @@ describe('B-P2 native composition: pure compile', () => {
   });
 
   it('is deterministic: the same authorized input always yields the same D and digest', async () => {
-    const compiler = createPiInputPreparationCompiler();
+    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
     const first = await compiler.compile(compileRequest());
     const second = await compiler.compile(compileRequest());
     expect(second.requestBody).toBe(first.requestBody);
@@ -277,7 +293,7 @@ describe('B-P2 native composition: pure compile', () => {
   it('touches no filesystem, process, child-process, socket or network surface while compiling', async () => {
     // Construct FIRST: the compiler reads the installed manifest exactly once,
     // at construction, which is outside the pure stage by design.
-    const compiler = createPiInputPreparationCompiler();
+    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
 
     const hits: string[] = [];
     trap(fsModule, 'readFileSync', hits, 'fs.readFileSync');
@@ -400,7 +416,117 @@ describe('B-P2 native composition: unsupported input rejects rather than filling
       },
     ],
   ])('rejects %s', async (_label, build) => {
-    const compiler = createPiInputPreparationCompiler();
+    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
     await expect(compiler.compile(build())).rejects.toBeInstanceOf(InputPreparationCompileError);
   });
+});
+
+/**
+ * The envelope-contract boundary, exercised WITHOUT the installed package.
+ *
+ * Every case here is about what this SDK refuses to read, not about what the
+ * fork produces, so the envelope is stated literally and the identity is the
+ * one this build supports. A boundary that could only be reached by compiling
+ * against a particular installed fork would be a boundary whose refusals are
+ * untestable on the day they matter most — when the installed fork is the
+ * wrong one.
+ */
+describe('B-P2 native composition: the envelope contract is verified, not assumed', () => {
+  const COUNTER_PROJECTION = '{"model":"glm-4.6","messages":[],"tools":[]}';
+
+  const SUPPORTED_IDENTITY = {
+    packageName: '@byok-sdk/pi-coding-agent',
+    packageVersion: '0.85.1005',
+    upstreamBase: '0.85.1',
+    upstreamCommit: 'd981de1229ef899957bbe968bc8dcda02a21f477',
+    forkBuild: 5,
+    envelopeFormat: 'pi.session.prepared-input',
+    requestFormat: 'pi.openai-completions.prepared',
+    compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,
+  } as const;
+
+  function envelope(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      format: 'pi.session.prepared-input',
+      version: 2,
+      snapshot: {},
+      context: {},
+      providerRequest: {
+        format: 'pi.openai-completions.prepared',
+        compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,
+        body: '{"model":"glm-4.6","messages":[],"max_tokens":4096}',
+        counterProjection: COUNTER_PROJECTION,
+        projection: {
+          version: 2,
+          kind: 'content_complete',
+          digest: createHash('sha256').update(COUNTER_PROJECTION, 'utf8').digest('hex'),
+        },
+        residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
+        digest: 'a'.repeat(64),
+        ...overrides,
+      },
+      toolManifest: { order: [], executors: [], digest: 'c'.repeat(64) },
+      digest: 'b'.repeat(64),
+    };
+  }
+
+  function refusalOf(value: Record<string, unknown>): InputPreparationCompileError {
+    try {
+      verifyCompiledPreparedInput(value as never, SUPPORTED_IDENTITY);
+    } catch (error) {
+      if (error instanceof InputPreparationCompileError) return error;
+      throw error;
+    }
+    throw new Error('expected the envelope to be refused');
+  }
+
+  it('accepts an envelope that carries exactly the supported contract', () => {
+    const verified = verifyCompiledPreparedInput(envelope() as never, SUPPORTED_IDENTITY);
+
+    expect(verified.projection).toEqual({
+      version: 2,
+      kind: 'content_complete',
+      digest: createHash('sha256').update(COUNTER_PROJECTION, 'utf8').digest('hex'),
+    });
+    expect(verified.residual).toEqual([{ key: 'max_tokens', valueClass: 'bounded_integer' }]);
+    expect(verified.projectionBytes).toBe(Buffer.byteLength(COUNTER_PROJECTION, 'utf8'));
+  });
+
+  it('refuses an envelope whose format tags are not the ones the runtime identity promises', () => {
+    // Both tags, because the identity was derived from the installed manifest
+    // and only the envelope in hand proves what the code that actually ran
+    // produced.
+    expect(refusalOf({ ...envelope(), format: 'pi.session.other-input' }).detail).toBe('unsupported_envelope_format');
+    expect(refusalOf(envelope({ format: 'pi.anthropic-messages.prepared' })).detail).toBe(
+      'unsupported_envelope_format',
+    );
+  });
+
+  it('refuses an envelope compiled to a prepared-request version this build does not consume', () => {
+    expect(refusalOf(envelope({ compilerVersion: 1 })).detail).toBe('unsupported_compiler_version');
+  });
+
+  it('refuses a projection digest that does not describe the counted bytes it travels with', () => {
+    // The bytes move, the declared digest does not: exactly the drift a digest
+    // that only ever travels beside its own bytes would never catch.
+    expect(refusalOf(envelope({ counterProjection: `${COUNTER_PROJECTION} ` })).detail).toBe(
+      'projection_digest_mismatch',
+    );
+  });
+
+  it('refuses a residual value class outside the supported classification contract', () => {
+    expect(refusalOf(envelope({ residual: [{ key: 'max_tokens', valueClass: 'probably_free' }] })).detail).toBe(
+      'unsupported_residual_value_class',
+    );
+  });
+
+  it('refuses a projection version this build does not consume', () => {
+    expect(
+      refusalOf(envelope({ projection: { version: 1, kind: 'content_complete', digest: 'd'.repeat(64) } })).detail,
+    ).toBe('unsupported_projection_shape');
+  });
+});
+
+it('requires explicit compiler identity instead of performing default discovery', () => {
+  expect(() => createPiInputPreparationCompiler(undefined as never)).toThrow('explicit runtime identity required');
 });

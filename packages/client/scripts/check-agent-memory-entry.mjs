@@ -36,13 +36,20 @@ assert.doesNotMatch(bundledEntry, /\bControlClient\b/);
 assert.doesNotMatch(bundledEntry, /control\.sock/);
 assert.doesNotMatch(bundledEntry, /snapshotAndProjectAgentMemory/);
 
-// Upper bound, set from the measured 39,006 B build of this entry. The number
-// that matters is the ratio, not the absolute size: the root entry is 817,399 B
-// and the adapters entry is 121,351 B, so a leak of the daemon composition or
-// the transport overshoots this ceiling by an order of magnitude and fails
-// loudly. 48 KiB leaves ~26% headroom for real growth of the memory surface
-// itself while staying 2.4x under the adapters entry.
-const ENTRY_BYTE_CEILING = 48 * 1024;
+// Upper bound, set from the measured 52,007 B build of this entry. The number
+// that matters is the ratio, not the absolute size: the root entry is
+// 1,253,919 B and the adapters entry is 177,593 B, so a leak of the daemon
+// composition or the transport overshoots this ceiling by an order of magnitude
+// and fails loudly. 64 KiB leaves ~26% headroom for real growth of the memory
+// surface itself while staying 2.7x under the adapters entry.
+//
+// Raised from 48 KiB with the shared MCP server core: `serveAgentMemoryMcpOverStdio`
+// used to carry its own `node:readline` loop and now bundles
+// `src/mcp-server` (+12.9 KB of node-builtin-only transport code) instead of
+// one of four hand-rolled copies. That is growth of the SERVED surface, not a
+// leak of the graph this ceiling exists to catch: the sub-path closure guard
+// independently proves this entry still reaches node builtins only.
+const ENTRY_BYTE_CEILING = 64 * 1024;
 assert.ok(
   entryBytes <= ENTRY_BYTE_CEILING,
   `dist/agent-memory/index.js is ${entryBytes} bytes, over the ${ENTRY_BYTE_CEILING} byte ceiling`,

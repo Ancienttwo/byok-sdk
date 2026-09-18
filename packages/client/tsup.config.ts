@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { defineConfig } from 'tsup';
+import { subagentsBuild } from './scripts/subagents-build';
 
 const manifest = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version?: unknown };
 if (typeof manifest.version !== 'string') throw new Error('packages/client/package.json must declare a string version');
@@ -9,10 +10,15 @@ export default defineConfig({
     'src/index.ts',
     'src/adapters/index.ts',
     'src/agent-memory/index.ts',
+    'src/assertion-client/index.ts',
+    'src/mcp-server/index.ts',
     'src/adapters/pi/mcp-extension.ts',
     'src/adapters/pi/team-interaction-extension.ts',
     'src/adapters/pi/subagents-policy-extension.ts',
     'src/bin/byok-agent.ts',
+    'src/bin/byok-pi-prepared.ts',
+    'src/bin/byok-pi-rpc.ts',
+    'src/bin/pi-runtime-host.ts',
     'src/bin/byok-mcp-env.ts',
     'src/bin/byok-approval-mcp.ts',
     'src/bin/byok-agent-message-mcp.ts',
@@ -27,12 +33,18 @@ export default defineConfig({
   clean: true,
   splitting: false,
   treeshake: true,
-  noExternal: ['pi-subagents'],
+  noExternal: ['pi-web-access'],
+  esbuildPlugins: [subagentsBuild(false)],
   // koffi is the win32 job-object backstop's native binding layer and an
   // `optionalDependencies` entry: it must stay a runtime resolution so a
   // non-win32 install (where the addon may be absent) never has it inlined,
   // and so the win32 branch loads the host's own prebuilt addon.
-  external: ['koffi'],
+  external: [
+    'koffi', '#byok-pi-runtime-host', '#byok-pi-runtime-host-sealed', '#byok-pi-todo-runtime',
+    'typebox', 'typebox/compile',
+    '@mozilla/readability', 'linkedom', 'p-limit', 'promise.try',
+    'turndown', 'unpdf', 'undici', 'jiti', 'yaml',
+  ],
   define: {
     __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(manifest.version),
   },

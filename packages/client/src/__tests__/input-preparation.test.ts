@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,27 +7,37 @@ import {
   INPUT_PREPARATION_REQUEST_FORMAT,
   INPUT_PREPARATION_VERSION,
   InputPreparationPolicyError,
+  canonicalInputPreparationJson,
   validateInputPreparationLimits,
   type InputPreparationAuthorityResolver,
   type InputPreparationCounterAdapter,
   type InputPreparationCounterRequestV1,
+  type InputPreparationAccountingPolicyRefV1,
+  type InputPreparationCounterProviderEvidenceV1,
   type InputPreparationCounterResultV1,
   type InputPreparationLimitsPolicyV1,
   type InputPreparationRequestV1,
 } from '../input-preparation';
+import { inputPreparationRuntimeIdentityString } from '../input-preparation';
 import {
   createInputPreparationService,
   InputPreparationRequestError,
-  canonicalInputPreparationJson,
   type InputPreparationService,
 } from '../daemon/input-preparation-service';
+import { recordingToolSurface, type RecordingToolSurface } from './fixtures/prepared-tool-surface';
 import {
   InputPreparationCompileError,
   InputPreparationRuntimeIdentityError,
+  verifyCompiledPreparedInput,
   type CompilePreparedInputRequest,
   type CompiledPreparedInput,
   type InputPreparationCompiler,
 } from '../adapters/pi/input-preparation';
+import {
+  buildPreparedPromptCommand,
+  PREPARED_PROMPT_COMMAND_ID,
+} from '../adapters/pi/prepared-prompt-frame';
+import { rpcFrameByteLength, RPC_MAX_FRAME_BYTES } from '@earendil-works/pi-coding-agent/rpc-types';
 
 /**
  * B-P2 §10.5 for the orchestration layer: auth/isolation, purity of the
@@ -89,17 +100,16 @@ function request(overrides: Partial<InputPreparationRequestV1> = {}): InputPrepa
     snapshot: {
       prompt: {
         cwd: '/workspace/project',
-        selectedTools: ['read'],
-        toolSnippets: { read: 'snippet' },
+        toolSnippets: {},
         promptGuidelines: [],
         contextFiles: [],
         formattedSkills: '',
         docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
       },
       messages: [{ role: 'user', content: 'hello', timestamp: 1_700_000_000_000 }],
-      tools: [{ name: 'read', description: 'read a file', parameters: { type: 'object', properties: {} } }],
     },
-    toolExecutors: { read: 'exec:read@1' },
+    permissionMode: 'auto',
+    requiredToolsets: ['team'],
     ...overrides,
   };
 }
@@ -108,7 +118,46 @@ interface StubCompiler extends InputPreparationCompiler {
   readonly calls: CompilePreparedInputRequest[];
 }
 
-function stubCompiler(options: { fail?: boolean; body?: () => string } = {}): StubCompiler {
+/** The exact identity string the service binds, so a Host ruling can name it. */
+function runtimeIdentityOf(compiler: InputPreparationCompiler): string {
+  return inputPreparationRuntimeIdentityString(compiler.runtime);
+}
+
+function sha256Hex(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+/** Provider evidence bound to the exact projection and target the adapter was handed. */
+function fixtureEvidence(counterRequest: InputPreparationCounterRequestV1): InputPreparationCounterProviderEvidenceV1 {
+  return {
+    projectionDigest: sha256Hex(counterRequest.counterProjection),
+    endpoint: counterRequest.target.endpoint,
+    modelId: counterRequest.target.modelId,
+    asserted: { httpStatus: 200, usageFields: { prompt_tokens: 123 }, responseDigest: 'e'.repeat(64) },
+  };
+}
+
+/** The Host ruling that makes the stub compiler's one residual key applicable. */
+function accountingPolicyRef(
+  overrides: Partial<InputPreparationAccountingPolicyRefV1> = {},
+): InputPreparationAccountingPolicyRefV1 {
+  return {
+    revision: 'accounting-rev-1',
+    ruledRuntime: '@byok-sdk/pi-coding-agent@0.85.1005+d981de1229ef899957bbe968bc8dcda02a21f477.1',
+    ruledTarget: { endpoint: 'https://api.z.ai/api/coding/paas/v4', modelId: 'glm-4.6' },
+    ruledResidualKeys: ['max_tokens'],
+    ...overrides,
+  };
+}
+
+function stubCompiler(
+  options: {
+    fail?: boolean;
+    body?: () => string;
+    projectionKind?: 'content_complete' | 'unknown';
+    residual?: readonly { readonly key: string; readonly valueClass: 'bounded_integer' }[];
+  } = {},
+): StubCompiler {
   const calls: CompilePreparedInputRequest[] = [];
   return {
     calls,
@@ -120,7 +169,7 @@ function stubCompiler(options: { fail?: boolean; body?: () => string } = {}): St
       forkBuild: 1,
       envelopeFormat: 'pi.session.prepared-input',
       requestFormat: 'pi.openai-completions.prepared',
-      compilerVersion: 1,
+      compilerVersion: 2,
     },
     async compile(compileRequest: CompilePreparedInputRequest): Promise<CompiledPreparedInput> {
       // Deep-copy at capture time so a later mutation of the service's own
@@ -128,17 +177,65 @@ function stubCompiler(options: { fail?: boolean; body?: () => string } = {}): St
       calls.push(structuredClone(compileRequest) as CompilePreparedInputRequest);
       if (options.fail === true) throw new InputPreparationCompileError('stub refuses this input');
       const body = options.body?.() ?? JSON.stringify({ model: compileRequest.model.id, snapshot: compileRequest.snapshot });
+      const counterProjection = JSON.stringify({ model: compileRequest.model.id });
       return {
         requestBody: body,
-        counterProjection: JSON.stringify({ model: compileRequest.model.id }),
+        counterProjection,
         requestBytes: Buffer.byteLength(body, 'utf8'),
         projectionBytes: 32,
         requestDigest: 'a'.repeat(64),
         envelopeDigest: 'b'.repeat(64),
         toolManifestDigest: 'c'.repeat(64),
-        coverage: 'unknown',
-        envelope: { format: 'pi.session.prepared-input', version: 1 } as never,
+        // The digest a real compiler would have taken over these exact bytes,
+        // so a fixture counter's evidence can bind to the same projection the
+        // service compares it against.
+        projection: {
+          version: 2,
+          kind: options.projectionKind ?? 'content_complete',
+          digest: sha256Hex(counterProjection),
+        },
+        residual: options.residual ?? [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
+        envelope: { format: 'pi.session.prepared-input', version: 2 } as never,
       };
+    },
+  };
+}
+
+/**
+ * A compiler that hands the REAL envelope verifier an envelope whose declared
+ * projection digest does not describe its own counted bytes.
+ *
+ * It states the envelope literally and calls `verifyCompiledPreparedInput`
+ * itself, so the refusal under test is the product verifier's, not a stub's
+ * imitation of one — and no product seam had to be added to reach it.
+ */
+function tamperedProjectionDigestCompiler(): InputPreparationCompiler {
+  const runtime = stubCompiler().runtime;
+  const counterProjection = '{"model":"glm-4.6","messages":[],"tools":[]}';
+  return {
+    runtime,
+    async compile(): Promise<CompiledPreparedInput> {
+      return verifyCompiledPreparedInput(
+        {
+          format: runtime.envelopeFormat,
+          version: 2,
+          snapshot: {},
+          context: {},
+          providerRequest: {
+            format: runtime.requestFormat,
+            compilerVersion: runtime.compilerVersion,
+            body: '{"model":"glm-4.6","messages":[],"max_tokens":4096}',
+            counterProjection,
+            // The digest of DIFFERENT bytes than the ones it travels with.
+            projection: { version: 2, kind: 'content_complete', digest: sha256Hex(`${counterProjection} `) },
+            residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
+            digest: 'a'.repeat(64),
+          },
+          toolManifest: { order: [], executors: [], digest: 'c'.repeat(64) },
+          digest: 'b'.repeat(64),
+        } as never,
+        runtime,
+      );
     },
   };
 }
@@ -148,13 +245,16 @@ interface StubCounter extends InputPreparationCounterAdapter {
 }
 
 function fixtureCounter(
-  behaviour: (request: InputPreparationCounterRequestV1) => Promise<InputPreparationCounterResultV1> = async () => ({
+  behaviour: (request: InputPreparationCounterRequestV1) => Promise<InputPreparationCounterResultV1> = async (
+    counterRequest,
+  ) => ({
     method: 'fixture.tokenizer',
     methodVersion: '0',
     authority: 'test_fixture',
     kind: 'count',
     value: 123,
     coverage: { covered: true },
+    providerEvidence: fixtureEvidence(counterRequest),
   }),
 ): StubCounter {
   const calls: InputPreparationCounterRequestV1[] = [];
@@ -180,6 +280,7 @@ async function makeService(overrides: {
   authorityResolver?: InputPreparationAuthorityResolver;
   counter?: InputPreparationCounterAdapter;
   compiler?: InputPreparationCompiler;
+  toolSurface?: RecordingToolSurface;
   now?: () => number;
 } = {}): Promise<InputPreparationService> {
   const service = createInputPreparationService({
@@ -188,6 +289,7 @@ async function makeService(overrides: {
     authorityResolver: overrides.authorityResolver ?? ALWAYS_AUTHORIZED,
     counter: overrides.counter ?? fixtureCounter(),
     compiler: overrides.compiler ?? stubCompiler(),
+    toolSurface: overrides.toolSurface ?? recordingToolSurface(),
     ...(overrides.now === undefined ? {} : { now: overrides.now }),
   });
   await service.open();
@@ -328,21 +430,112 @@ describe('B-P2 service: binding authority', () => {
 });
 
 describe('B-P2 service: readiness never reaches ready offline', () => {
-  it('returns explicit not-ready reasons for a fixture counter and unknown compiler coverage', async () => {
+  it('returns explicit not-ready reasons for a fixture counter and an unruled residual key', async () => {
     const service = await makeService();
     const receipt = await service.prepare(request());
 
     expect(receipt.state).toBe('counted');
     expect(receipt.ready).toBe(false);
-    expect(receipt.readinessReasons).toContain('compiler_coverage_unknown');
+    // The projection IS content-complete — the stub compiles what a real one
+    // compiles — so what keeps this receipt unready is the missing Host
+    // accounting ruling and the fixture counter authority, not a blanket
+    // coverage label that could never be cleared.
+    expect(receipt.readinessReasons).not.toContain('projection_unknown');
+    expect(receipt.readinessReasons).toContain('accounting_policy_missing');
     expect(receipt.readinessReasons).toContain('counter_authority_not_production');
     expect(receipt.counter).toMatchObject({ authority: 'test_fixture', kind: 'count', value: 123 });
-    expect(receipt.artifact?.coverage).toBe('unknown');
+    expect(receipt.artifact?.projection).toEqual({
+      version: 2,
+      kind: 'content_complete',
+      digest: sha256Hex(JSON.stringify({ model: 'glm-4.6' })),
+    });
+    expect(receipt.artifact?.residual).toEqual([{ key: 'max_tokens', valueClass: 'bounded_integer' }]);
     // A receipt discloses identities and sizes, never D, P(D) or the snapshot.
     expect(JSON.stringify(receipt)).not.toContain('hello');
     // Nothing here is, or reserves, an Execution.
     expect(receipt.pin).toBeUndefined();
     expect(JSON.stringify(receipt)).not.toContain('taskId');
+  });
+
+  it('clears every projection and accounting reason when the policy rules the compiler\'s residual keys', async () => {
+    const compiler = stubCompiler();
+    const service = await makeService({ compiler });
+    const receipt = await service.prepare(
+      request({ accountingPolicyRef: accountingPolicyRef({ ruledRuntime: runtimeIdentityOf(compiler) }) }),
+    );
+
+    expect(receipt.readinessReasons).not.toContain('projection_unknown');
+    expect(receipt.readinessReasons).not.toContain('residual_not_ruled');
+    expect(receipt.readinessReasons).not.toContain('accounting_policy_missing');
+    expect(receipt.readinessReasons).not.toContain('accounting_policy_inapplicable');
+    expect(receipt.readinessReasons).not.toContain('counter_missing');
+    // The fixture counter authority is what is left, which is the honest state
+    // of an offline suite and is exactly what must never be clearable here.
+    expect(receipt.readinessReasons).toContain('counter_authority_not_production');
+  });
+
+  it('carries projection_unknown when the native compiler claims nothing about P(D)', async () => {
+    const compiler = stubCompiler({ projectionKind: 'unknown', residual: [] });
+    const service = await makeService({ compiler });
+    const receipt = await service.prepare(
+      request({ accountingPolicyRef: accountingPolicyRef({ ruledRuntime: runtimeIdentityOf(compiler) }) }),
+    );
+
+    expect(receipt.artifact?.projection.kind).toBe('unknown');
+    expect(receipt.readinessReasons).toContain('projection_unknown');
+  });
+
+  it('carries residual_not_ruled for a classified key the Host ruling does not name', async () => {
+    const compiler = stubCompiler();
+    const service = await makeService({ compiler });
+    const receipt = await service.prepare(
+      request({
+        accountingPolicyRef: accountingPolicyRef({
+          ruledRuntime: runtimeIdentityOf(compiler),
+          ruledResidualKeys: ['temperature'],
+        }),
+      }),
+    );
+
+    expect(receipt.readinessReasons).toContain('residual_not_ruled');
+    expect(receipt.readinessReasons).not.toContain('accounting_policy_inapplicable');
+  });
+
+  it.each([
+    ['a runtime the ruling was not made for', () => accountingPolicyRef({ ruledRuntime: 'some-other-runtime@1+abc.1' })],
+    [
+      'a target the ruling was not made for',
+      () => accountingPolicyRef({ ruledTarget: { endpoint: 'https://elsewhere.example', modelId: 'glm-4.6' } }),
+    ],
+  ])('carries accounting_policy_inapplicable for %s', async (_label, build) => {
+    const compiler = stubCompiler();
+    const service = await makeService({ compiler });
+    const receipt = await service.prepare(request({ accountingPolicyRef: build() }));
+
+    expect(receipt.readinessReasons).toContain('accounting_policy_inapplicable');
+    // Applicability is decided before the key subset: a ruling about another
+    // runtime says nothing about these keys, so claiming they are unruled
+    // would be a second, invented verdict.
+    expect(receipt.readinessReasons).not.toContain('residual_not_ruled');
+  });
+
+  it('refuses counter evidence that names a projection this preparation did not compile', async () => {
+    const service = await makeService({
+      counter: fixtureCounter(async (counterRequest) => ({
+        method: 'fixture.tokenizer',
+        methodVersion: '0',
+        authority: 'provider',
+        kind: 'count',
+        value: 11,
+        coverage: { covered: true },
+        providerEvidence: { ...fixtureEvidence(counterRequest), projectionDigest: 'f'.repeat(64) },
+      })),
+    });
+
+    expect(await codeOf(service.prepare(request()))).toBe('counter_unavailable');
+    const receipt = await service.lookup({ requestId: 'prep-1', scope: request().scope });
+    expect(receipt.counter).toBeUndefined();
+    expect(receipt.readinessReasons).toContain('counter_missing');
   });
 
   it('hands the counter only P(D), the target and an explicit call policy', async () => {
@@ -359,7 +552,15 @@ describe('B-P2 service: readiness never reaches ready offline', () => {
 
   it('refuses a counter result outside the accepted shape rather than inventing one', async () => {
     const service = await makeService({
-      counter: fixtureCounter(async () => ({ method: '', methodVersion: '', authority: 'provider', kind: 'count', value: -1, coverage: { covered: true } })),
+      counter: fixtureCounter(async (counterRequest) => ({
+        method: '',
+        methodVersion: '',
+        authority: 'provider',
+        kind: 'count',
+        value: -1,
+        coverage: { covered: true },
+        providerEvidence: fixtureEvidence(counterRequest),
+      })),
     });
     // The call WAS placed, so the record is an unknown outcome; the wire code
     // says which half failed. Neither invents a number.
@@ -377,9 +578,17 @@ describe('B-P2 service: idempotency and uncertainty', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const counter = fixtureCounter(async () => {
+    const counter = fixtureCounter(async (counterRequest) => {
       await gate;
-      return { method: 'fixture.tokenizer', methodVersion: '0', authority: 'test_fixture', kind: 'count', value: 7, coverage: { covered: true } };
+      return {
+        method: 'fixture.tokenizer',
+        methodVersion: '0',
+        authority: 'test_fixture',
+        kind: 'count',
+        value: 7,
+        coverage: { covered: true },
+        providerEvidence: fixtureEvidence(counterRequest),
+      };
     });
     const service = await makeService({ compiler, counter });
 
@@ -545,6 +754,25 @@ describe('B-P2 service: compile refusal', () => {
     expect(receipt.detail).toBe('compile_rejected');
     expect(receipt.artifact).toBeUndefined();
   });
+
+  it('pairs the wire code and the recorded detail on a tampered projection digest', async () => {
+    // The pairing, end to end, rather than the two halves separately: the REAL
+    // envelope verifier refuses a projection digest that does not describe the
+    // bytes it travels with, the caller is told `unsupported_input`, and the
+    // durable record keeps the specific `projection_digest_mismatch` a later
+    // `lookup` can answer with. A generic `compile_rejected` here would lose
+    // exactly which contract broke.
+    const counter = fixtureCounter();
+    const service = await makeService({ compiler: tamperedProjectionDigestCompiler(), counter });
+
+    expect(await codeOf(service.prepare(request()))).toBe('unsupported_input');
+
+    const receipt = await service.lookup({ requestId: 'prep-1', scope: request().scope });
+    expect(receipt.state).toBe('failed');
+    expect(receipt.detail).toBe('projection_digest_mismatch');
+    expect(receipt.artifact).toBeUndefined();
+    expect(counter.calls).toEqual([]);
+  });
 });
 
 describe('B-P2 service: byte, call and in-flight policy', () => {
@@ -602,9 +830,17 @@ describe('B-P2 service: byte, call and in-flight policy', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const counter = fixtureCounter(async () => {
+    const counter = fixtureCounter(async (counterRequest) => {
       await gate;
-      return { method: 'fixture.tokenizer', methodVersion: '0', authority: 'test_fixture', kind: 'count', value: 1, coverage: { covered: true } };
+      return {
+        method: 'fixture.tokenizer',
+        methodVersion: '0',
+        authority: 'test_fixture',
+        kind: 'count',
+        value: 1,
+        coverage: { covered: true },
+        providerEvidence: fixtureEvidence(counterRequest),
+      };
     });
     const service = await makeService({ limits, counter });
 
@@ -615,6 +851,120 @@ describe('B-P2 service: byte, call and in-flight policy', () => {
     );
     release?.();
     await held;
+  });
+});
+
+/**
+ * A compiler whose envelope is padded until the `prompt_prepared` frame the
+ * launcher would write measures EXACTLY `targetFrameBytes`.
+ *
+ * The padding is derived through the product builder itself, never from a
+ * hardcoded overhead: the frame under test is the frame the service builds,
+ * and `RPC_MAX_FRAME_BYTES` is read off the runtime rather than restated here,
+ * so a fork that moves the cap moves this test with it.
+ */
+function frameSizedCompiler(targetFrameBytes: number): InputPreparationCompiler {
+  const base = stubCompiler();
+  return {
+    runtime: base.runtime,
+    async compile(compileRequest: CompilePreparedInputRequest): Promise<CompiledPreparedInput> {
+      const compiled = await base.compile(compileRequest);
+      const expected = {
+        envelopeDigest: compiled.envelopeDigest,
+        toolManifestDigest: compiled.toolManifestDigest,
+        model: compileRequest.model,
+        binding: compileRequest.binding,
+      };
+      const skeleton = { format: 'pi.session.prepared-input', version: 2, pad: '' };
+      const overhead = rpcFrameByteLength(
+        buildPreparedPromptCommand(skeleton, expected, PREPARED_PROMPT_COMMAND_ID),
+      );
+      const envelope = { ...skeleton, pad: 'x'.repeat(targetFrameBytes - overhead) };
+      return { ...compiled, envelope: envelope as never };
+    },
+  };
+}
+
+describe('B-P2 service: the runtime frame bound is decided before the operator byte policy', () => {
+  it('admits an envelope whose prepared frame measures exactly the runtime cap', async () => {
+    // Everything the OPERATOR bounds is opened wide on purpose: what is under
+    // test is the RUNTIME's bound, and a retention refusal here would answer a
+    // different question.
+    const limits = validateInputPreparationLimits({
+      ...LIMITS,
+      revision: 'limits-rev-roomy',
+      maxArtifactBytes: 32 * 1024 * 1024,
+      maxScopeAggregateBytes: 32 * 1024 * 1024,
+    });
+    const counter = fixtureCounter();
+    const service = await makeService({
+      limits,
+      counter,
+      compiler: frameSizedCompiler(RPC_MAX_FRAME_BYTES),
+    });
+
+    const receipt = await service.prepare(request({ policyRevision: 'limits-rev-roomy' }));
+    expect(receipt.state).toBe('counted');
+    expect(counter.calls).toHaveLength(1);
+  });
+
+  it('refuses one byte over the cap as rpc_frame_too_large, naming the measured length', async () => {
+    const limits = validateInputPreparationLimits({
+      ...LIMITS,
+      revision: 'limits-rev-roomy',
+      maxArtifactBytes: 32 * 1024 * 1024,
+      maxScopeAggregateBytes: 32 * 1024 * 1024,
+    });
+    const counter = fixtureCounter();
+    const service = await makeService({
+      limits,
+      counter,
+      compiler: frameSizedCompiler(RPC_MAX_FRAME_BYTES + 1),
+    });
+
+    let error: InputPreparationRequestError | undefined;
+    try {
+      await service.prepare(request({ policyRevision: 'limits-rev-roomy' }));
+    } catch (thrown) {
+      if (!(thrown instanceof InputPreparationRequestError)) throw thrown;
+      error = thrown;
+    }
+    expect(error?.code).toBe('rpc_frame_too_large');
+    expect(error?.message).toContain(String(RPC_MAX_FRAME_BYTES + 1));
+    expect(error?.message).toContain(String(RPC_MAX_FRAME_BYTES));
+
+    // Nothing was counted, and the refusal is the durable fact a later lookup
+    // answers with rather than a generic failure.
+    expect(counter.calls).toEqual([]);
+    expect((await service.lookup({ requestId: 'prep-1', scope: request().scope })).detail).toBe(
+      'rpc_frame_too_large',
+    );
+  });
+
+  it('decides the runtime bound BEFORE the per-artifact retention bound', async () => {
+    // Both bounds are violated by this preparation. The runtime's is the one
+    // that must answer: an artifact that can never be delivered is not an
+    // artifact the operator's retention policy has an opinion about yet.
+    const limits = validateInputPreparationLimits({
+      ...LIMITS,
+      revision: 'limits-rev-small',
+      maxArtifactBytes: 200,
+      maxScopeAggregateBytes: 200,
+    });
+    const counter = fixtureCounter();
+    const service = await makeService({
+      limits,
+      counter,
+      compiler: frameSizedCompiler(RPC_MAX_FRAME_BYTES + 1),
+    });
+
+    expect(await codeOf(service.prepare(request({ policyRevision: 'limits-rev-small' })))).toBe(
+      'rpc_frame_too_large',
+    );
+    expect((await service.lookup({ requestId: 'prep-1', scope: request().scope })).detail).not.toBe(
+      'artifact_bytes_exceeded',
+    );
+    expect(counter.calls).toEqual([]);
   });
 });
 
@@ -733,9 +1083,17 @@ describe('B-P2 service: restart reconciliation', () => {
     const gate = new Promise<void>((resolve) => {
       stall = resolve;
     });
-    const counter = fixtureCounter(async () => {
+    const counter = fixtureCounter(async (counterRequest) => {
       await gate;
-      return { method: 'fixture.tokenizer', methodVersion: '0', authority: 'test_fixture', kind: 'count', value: 1, coverage: { covered: true } };
+      return {
+        method: 'fixture.tokenizer',
+        methodVersion: '0',
+        authority: 'test_fixture',
+        kind: 'count',
+        value: 1,
+        coverage: { covered: true },
+        providerEvidence: fixtureEvidence(counterRequest),
+      };
     });
     const first = await makeService({ storeDir, counter });
     const held = first.prepare(request());
@@ -803,14 +1161,24 @@ describe('PR187 review regressions', () => {
     expect(sourceCalls).toBe(1);
     expect(receipt.binding.source).toEqual(request().source);
     expect(receipt.binding.scopeId).toBe('scope:device-1');
-    expect(compiler.calls[0]?.snapshot).toEqual(request().snapshot);
+    // The compile input is the daemon-derived projection: `selectedTools` and
+    // the tool list are this device's observation, not the caller's. Isolation
+    // is about what the CALLER stated — every caller-stated field reaches the
+    // compiler verbatim, and the resolver's mutations reach nothing at all.
+    expect(compiler.calls[0]?.snapshot.prompt).toMatchObject(request().snapshot.prompt);
+    expect(compiler.calls[0]?.snapshot.messages).toEqual(request().snapshot.messages);
+    expect(JSON.stringify(compiler.calls[0])).not.toContain('evil');
   });
 
   it.each(['timeout', 'cancel', 'stop'])('settles %s even when counter ignores abort, ignores late resolution/rejection', async (mode) => {
     for (const late of ['resolve', 'reject']) {
       let resolve!: (value: InputPreparationCounterResultV1) => void;
       let reject!: (error: Error) => void;
-      const counter = fixtureCounter(() => new Promise((yes, no) => { resolve = yes; reject = no; }));
+      let lateRequest!: InputPreparationCounterRequestV1;
+      const counter = fixtureCounter((counterRequest) => {
+        lateRequest = counterRequest;
+        return new Promise((yes, no) => { resolve = yes; reject = no; });
+      });
       const limits = { ...LIMITS, counterTimeoutMs: mode === 'timeout' ? 20 : 5_000 };
       const service = await makeService({ counter, limits });
       const pending = codeOf(service.prepare(request()));
@@ -821,7 +1189,7 @@ describe('PR187 review regressions', () => {
         expect(await Promise.race([Promise.all([pending, action]).then(([code]) => code), new Promise((done) => setTimeout(() => done('hung'), 500))])).toBe('counter_interrupted');
       } finally {
         if (late === 'reject') reject(new Error('late counter rejection'));
-        else resolve({ method: 'fixture', methodVersion: '0', authority: 'test_fixture', kind: 'count', value: 2, coverage: { covered: true } });
+        else resolve({ method: 'fixture', methodVersion: '0', authority: 'test_fixture', kind: 'count', value: 2, coverage: { covered: true }, providerEvidence: fixtureEvidence(lateRequest) });
         await pending;
         await action;
       }
@@ -855,12 +1223,16 @@ describe('PR187 review regressions', () => {
     const service = await makeService({ storeDir, limits, now: () => clock });
     await service.prepare(request());
     clock += 401;
-    await new Promise((done) => setTimeout(done, 450));
-    expect(await fs.readdir(path.join(storeDir, 'input-preparation', 'artifacts'))).toEqual([]);
+    // The GC timer is a real timer whose delay comes from the fake clock, so a
+    // fixed wall-clock sleep races CI load; poll for the drained state.
+    await vi.waitFor(async () => {
+      expect(await fs.readdir(path.join(storeDir, 'input-preparation', 'artifacts'))).toEqual([]);
+    }, { timeout: 5_000 });
     expect(service.store.list()).toHaveLength(1);
     clock += 100;
-    await new Promise((done) => setTimeout(done, 150));
-    expect(service.store.list()).toEqual([]);
+    await vi.waitFor(() => {
+      expect(service.store.list()).toEqual([]);
+    }, { timeout: 5_000 });
   });
 
   it('collects artifacts on restart after both horizons without another prepare', async () => {
@@ -881,8 +1253,9 @@ describe('PR187 review regressions', () => {
     await service.prepare(request());
     const fault = new Error('GC filesystem offline');
     const gc = vi.spyOn(service.store, 'gc').mockRejectedValue(fault);
-    await new Promise((done) => setTimeout(done, 450));
-    expect(gc).toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(gc).toHaveBeenCalled();
+    }, { timeout: 5_000 });
     await expect(service.lookup({ requestId: 'prep-1', scope: request().scope })).rejects.toBe(fault);
     await expect(service.stop()).rejects.toBe(fault);
     gc.mockRestore();

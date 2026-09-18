@@ -125,6 +125,9 @@ class ControlledAdapter implements RuntimeAdapter {
       kind: 'prepared',
       operation: {
         start: async (startInput: RuntimeOperationStartInput) => {
+          if (startInput.kind !== 'instruction') {
+            throw new Error('execution-recovery fixture adapter has no prepared-input lane');
+          }
           const taskId = startInput.manifest.taskId;
           appendFileSync(
             path.join(config.controlDir, 'runtime-starts.jsonl'),

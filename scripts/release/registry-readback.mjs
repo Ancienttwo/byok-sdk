@@ -1,3 +1,4 @@
+import { assertImplementationIdentityDependency } from './implementation-identity-edges.mjs';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,6 +27,7 @@ if (typeof keysVersion !== 'string' || !exactReleaseVersion.test(keysVersion)) {
 }
 const packages = [
   '@byok-sdk/core',
+  '@byok-sdk/implementation-identity',
   '@byok-sdk/protocol',
   '@byok-sdk/server',
   '@byok-sdk/cloud',
@@ -41,6 +43,9 @@ const packages = [
 const expectedLatestVersions = new Map(
   packages.map((packageName) => [packageName, packageName === '@byok-sdk/keys' ? '0.3.2' : '0.8.1']),
 );
+// New support package has no historical stable tag. Its first prerelease must
+// not create latest; later publication contracts must freeze their own baseline.
+expectedLatestVersions.set('@byok-sdk/implementation-identity', undefined);
 const expectedPackageVersions = Object.fromEntries(
   packages.map((packageName) => [packageName, packageName === '@byok-sdk/keys' ? keysVersion : expectedVersion]),
 );
@@ -139,6 +144,9 @@ for (const packageName of packages) {
       throw new Error(`${packageName}: registry dist-tag ${distTag} is ${JSON.stringify(distTags?.[distTag])}, expected ${packageVersion}`);
     }
     const expectedLatestVersion = expectedLatestVersions.get(packageName);
+    if (packageName === '@byok-sdk/implementation-identity' && distTags.latest !== undefined) {
+      throw new Error(`${packageName}: first prerelease must not create latest`);
+    }
     if (expectedLatestVersion && distTags.latest !== expectedLatestVersion) {
       throw new Error(`${packageName}: registry latest is ${JSON.stringify(distTags.latest)}, expected stable ${expectedLatestVersion}`);
     }
@@ -295,6 +303,8 @@ try {
   }
   assertInstalledPiRuntime(smokeDir, piRuntime, 'registry-readback');
   const keysManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'keys', 'package.json'), 'utf8'));
+  assertImplementationIdentityDependency(clientManifest, expectedVersion);
+  assertImplementationIdentityDependency(keysManifest, expectedVersion);
   if (keysManifest.dependencies?.['@byok-sdk/core'] !== expectedVersion || keysManifest.dependencies?.['@byok-sdk/core'] === 'workspace:*') {
     throw new Error(`registry keys manifest must declare core ${expectedVersion} directly`);
   }

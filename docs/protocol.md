@@ -277,6 +277,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `policy`, `agentRef`, `runtime?`, `dispatchSelection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
 | `task.offer_for_agent_with_egress` | S→D | **required** | **required** | All strict Agent fields plus required `sessionRef` and exact `egressPolicy` | An Agent dispatch targets a daemon that consumed the revisioned egress contract |
 | `task.offer_for_agent_with_egress_fresh` | S→D | **required** | **required** | All strict Agent fields plus exact `egressPolicy`, with no `sessionRef` | A fresh Agent dispatch targets a daemon advertising `agent-egress-fresh-session` |
+| `task.offer_prepared` | S→D | **required** | **required** | `policy`, `agentRef`, `preparation` (`reference`, `requestDigest`, `artifactDigest?`), `runtime?`, `dispatchSelection?`, `requiredToolsets?`, `terminalProjection?`, `limits?` — and deliberately NO `instruction` and NO `sessionRef` | An already-counted preparation is dispatched to the device that counted it |
 | `agent.egress.ack` | S→D | optional | **required** | exact `agentRef`, `sessionRef`, `policyRevision`, `eventId`, `cursor`, `receiptId` | Cloud durably recorded one reliable Agent event |
 | `agent.content.read` | S→D | optional | **required** | `requestId`, surface, actor, exact Agent/session/runtime/cwd, policy revision, relative target, MIME, decode mode, bounded policy | An independently authorized explicit content read is requested |
 | `agent.home.projection` | S→D | forbidden | **required** | exact `requestId`, AgentRef/profile revision, SHA-256 projection identity, bounded opaque JSON | A durable task-free projection targets one exact capable device |
@@ -296,6 +297,27 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2) — gated on the `approval_resolved` capability flag |
 | `agent.egress.reliable` | D→S | optional | optional | exact Agent/session/policy identity, stable `eventId`/`cursor`, sanitized payload hash and byte count | A locally fsynced reliable event is sent or retried |
 | `agent.content.receipt` | D→S | optional | optional | exact request/actor/Agent/session/runtime/cwd/policy/target/MIME/decode identity; allowed includes hash/size/BlobRef, denied includes zero bytes and typed reason | Local content policy and audit completed |
+
+### 2.0 Prepared Executions
+
+`task.offer_prepared` is a distinct message rather than a `preparation` field on
+`task.offer_for_agent`, and the reason is the freeze rule's own asymmetry: an
+older daemon skips an unknown message TYPE whole, but would legally strip an
+unknown optional FIELD and run the task as an ordinary instruction offer —
+compiling a request of its own against tokens that were already counted for a
+different one. Server and hosted cloud require `agent-home-contract` and
+`agent-input-preparation` before allocating the task/mailbox row.
+
+It carries no `instruction`: the user request is already inside the frozen
+envelope the referenced record retained. It carries no `sessionRef` either — a
+prepared Execution never resumes, because resuming binds the frozen request to a
+history nobody counted.
+
+Nothing under `preparation` is authority. Every value is the Host re-presenting
+what the device's own receipt told it, and the device compares each one against
+its durable record before admitting an Execution. A difference declines the
+offer non-retryably with a reason naming the item that differed; the device
+never reconciles, narrows or re-derives.
 
 ### 2.1 Agent egress and explicit content reads
 

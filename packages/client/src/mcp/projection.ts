@@ -1,6 +1,7 @@
 import type { PermissionMode } from '@byok-sdk/protocol';
 import { compareCodeUnits } from '../util/compare-code-units';
-import { McpAuthorityError, type McpStdioServerSpec } from './client';
+import { McpAuthorityError } from './authority-error';
+import type { McpStdioServerSpec } from './client';
 import {
   GRANTABLE_MCP_SERVER_NAME,
   type McpServerObservation,

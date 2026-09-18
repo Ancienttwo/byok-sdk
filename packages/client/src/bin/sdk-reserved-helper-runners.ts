@@ -122,8 +122,17 @@ async function runAgentTeamMcp(): Promise<void> {
   await waitForInputClose();
 }
 
-export async function runSdkReservedHelper(kind: SdkReservedHelperKind): Promise<void> {
+export async function runSdkReservedHelper(kind: SdkReservedHelperKind, argv: readonly string[] = []): Promise<void> {
+  if (kind !== 'pi-rpc' && kind !== 'pi-prepared' && argv.length !== 0) {
+    throw new Error('SDK-reserved MCP helpers do not accept arguments');
+  }
   switch (kind) {
+    case 'pi-rpc':
+      await (await import('#byok-pi-runtime-host')).runPiRpcHost(argv);
+      return;
+    case 'pi-prepared':
+      await (await import('#byok-pi-runtime-host')).runPiPreparedHost(argv);
+      return;
     case 'mcp-env':
       await runMcpEnvLauncher();
       return;

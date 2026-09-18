@@ -1,22 +1,16 @@
 import { readFileSync } from 'node:fs';
-import { PERMISSION_MODES, type PermissionMode } from '@byok-sdk/protocol';
-import type { CallToolResult } from '@modelcontextprotocol/client';
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { McpAuthorityError, McpStdioClient, type McpStdioServerSpec } from '../../mcp/client';
-import {
-  diffMcpObservation,
-  GRANTABLE_TOOL_NAME,
-  type McpClassifiedToolDescriptor,
-  type McpServerObservation,
-  type McpToolDescriptor,
-  type McpToolsetServerObservation,
-} from '../../mcp/observation';
+import type { ExtensionAPI, ExtensionFactory } from '@earendil-works/pi-coding-agent';
 import {
   filterMcpObservationForPolicy,
   projectMcpTools,
   type McpToolProjection,
 } from '../../mcp/projection';
-import { createPiMcpTools, type McpToolCallHost, type PiMcpToolNaming } from './mcp-tools';
+import { createPiMcpTools, type PiMcpToolNaming } from './mcp-tools';
+import {
+  McpServerPool,
+  parseTaskScopedMcpConfig,
+  type TaskScopedMcpConfig,
+} from './mcp-server-pool';
 import { BYOK_PI_MCP_CONFIG_PATH } from './mcp-config';
 import { isReservedMcpServerName } from '../../sdk-reserved-mcp';
 import { compareCodeUnits } from '../../util/compare-code-units';
@@ -39,97 +33,8 @@ import { compareCodeUnits } from '../../util/compare-code-units';
  * launcher from the install graph.
  */
 
-/** What the adapter writes for exactly one task. Strict: an unknown shape is refused, never repaired. */
-interface TaskScopedMcpConfig {
-  readonly mcpServers: Readonly<Record<string, McpStdioServerSpec>>;
-  /**
-   * Everything the daemon observed, classification included — NOT the subset
-   * the policy allows. Registration narrows it; drift verification does not,
-   * because a server that grew a tool since admission has drifted whether or
-   * not the model would have been shown that tool.
-   */
-  readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
-  /** This task's permission mode, applied to the observation by the shared core. */
-  readonly permissionMode: PermissionMode;
-}
-
-/**
- * The SDK's own Pi control variables, by name shape. Every variable the
- * adapter sets on the Pi child to address this SDK's extensions
- * (`BYOK_PI_MCP_CONFIG_PATH`, `BYOK_PI_PERMISSION_MODE`) matches it, so a new
- * one is stripped from MCP server children by existing.
- */
-const BYOK_PI_CONTROL_ENV_PREFIX = /^BYOK_PI_/u;
-
 function fail(message: string): never {
   throw new Error(`BYOK Pi MCP extension: ${message}`);
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function parseServer(name: string, raw: unknown): McpStdioServerSpec {
-  if (!isPlainObject(raw) || typeof raw.command !== 'string' || raw.command.length === 0) {
-    fail(`mcpServers.${name} must declare a non-empty command`);
-  }
-  const args = raw.args;
-  if (args !== undefined && (!Array.isArray(args) || args.some((arg) => typeof arg !== 'string'))) {
-    fail(`mcpServers.${name}.args must be an array of strings`);
-  }
-  const env = raw.env;
-  if (env !== undefined && !isPlainObject(env)) fail(`mcpServers.${name}.env must be an object`);
-  return Object.freeze({
-    command: raw.command,
-    ...(args === undefined ? {} : { args: Object.freeze([...(args as string[])]) }),
-    ...(env === undefined ? {} : { env: Object.freeze({ ...(env as Record<string, string>) }) }),
-  });
-}
-
-function parseTool(server: string, raw: unknown): McpClassifiedToolDescriptor {
-  if (!isPlainObject(raw) || typeof raw.name !== 'string' || !GRANTABLE_TOOL_NAME.test(raw.name)) {
-    fail(`observation.${server} carries a tool without a grantable name`);
-  }
-  const name = raw.name as string;
-  if (raw.description !== undefined && typeof raw.description !== 'string') {
-    fail(`observation.${server}.${name} has a non-string description`);
-  }
-  if (!isPlainObject(raw.inputSchema)) fail(`observation.${server}.${name} has no object inputSchema`);
-  // Present on every tool of a classified toolset and on none of an
-  // unclassified one. A non-boolean is refused rather than coerced: this field
-  // decides what a restricted policy may call, and a truthy string would widen
-  // the very boundary it describes. Live `tools/list` answers carry no
-  // classification at all — the server is not the authority on it.
-  if (raw.readOnly !== undefined && typeof raw.readOnly !== 'boolean') {
-    fail(`observation.${server}.${name} has a non-boolean readOnly classification`);
-  }
-  return Object.freeze({
-    name,
-    description: (raw.description as string | undefined) ?? '',
-    inputSchema: raw.inputSchema,
-    ...(raw.readOnly === undefined ? {} : { readOnly: raw.readOnly as boolean }),
-  });
-}
-
-function parseObservation(name: string, raw: unknown): McpToolsetServerObservation {
-  if (!isPlainObject(raw)) fail(`observation.${name} must be an object`);
-  const { toolsetId, serverName, serverInfo, protocolVersion, tools } = raw;
-  if (typeof toolsetId !== 'string' || toolsetId.length === 0) fail(`observation.${name} has no toolsetId`);
-  if (serverName !== name) fail(`observation.${name} disagrees with its own key`);
-  if (!isPlainObject(serverInfo) || typeof serverInfo.name !== 'string' || typeof serverInfo.version !== 'string') {
-    fail(`observation.${name} has no serverInfo`);
-  }
-  if (typeof protocolVersion !== 'string' || protocolVersion.length === 0) {
-    fail(`observation.${name} has no protocolVersion`);
-  }
-  if (!Array.isArray(tools) || tools.length === 0) fail(`observation.${name} lists no tools`);
-  return Object.freeze({
-    toolsetId: toolsetId as string,
-    serverName: name,
-    serverInfo: Object.freeze({ name: serverInfo.name as string, version: serverInfo.version as string }),
-    protocolVersion: protocolVersion as string,
-    tools: Object.freeze(tools.map((tool) => parseTool(name, tool))),
-  });
 }
 
 function loadTaskScopedConfig(): TaskScopedMcpConfig {
@@ -141,176 +46,8 @@ function loadTaskScopedConfig(): TaskScopedMcpConfig {
   } catch (cause) {
     fail(`${configPath} could not be read as JSON: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
-  if (!isPlainObject(parsed)) fail('the task-scoped configuration must be an object');
-  if (!isPlainObject(parsed.mcpServers)) fail('the task-scoped configuration must contain an mcpServers object');
-  if (!isPlainObject(parsed.observation)) fail('the task-scoped configuration must contain an observation object');
-  // Validated against the protocol's own enumeration, not merely "a non-empty
-  // string": this file reads a mode the shared core then decides policy from,
-  // and an unrecognized value would otherwise reach
-  // `filterMcpObservationForPolicy` as a mode nobody wrote a rule for.
-  if (typeof parsed.permissionMode !== 'string'
-    || !(PERMISSION_MODES as readonly string[]).includes(parsed.permissionMode)) {
-    fail(`the task-scoped configuration must contain a permissionMode of [${PERMISSION_MODES.join(', ')}]`);
-  }
-  const mcpServers: Record<string, McpStdioServerSpec> = {};
-  for (const [name, raw] of Object.entries(parsed.mcpServers)) mcpServers[name] = parseServer(name, raw);
-  const observation: Record<string, McpToolsetServerObservation> = {};
-  for (const [name, raw] of Object.entries(parsed.observation)) {
-    if (mcpServers[name] === undefined) fail(`observation.${name} names a server this task does not project`);
-    if (isReservedMcpServerName(name)) fail(`observation.${name} is an SDK-reserved server and is never observed by the daemon`);
-    observation[name] = parseObservation(name, raw);
-  }
-  // Every non-reserved server MUST arrive with the daemon's observation. A
-  // host toolset server the daemon never observed is one whose tools nobody
-  // admitted this task for, and discovering them here would make the extension
-  // the authority instead of the daemon.
-  for (const name of Object.keys(mcpServers)) {
-    if (!isReservedMcpServerName(name) && observation[name] === undefined) {
-      fail(`mcpServers.${name} has no daemon observation; refusing to discover its tools here`);
-    }
-  }
-  return Object.freeze({
-    mcpServers: Object.freeze(mcpServers),
-    observation: Object.freeze(observation),
-    permissionMode: parsed.permissionMode as PermissionMode,
-  });
+  return parseTaskScopedMcpConfig(parsed, fail);
 }
-
-/**
- * One connected server per projected server, opened on first use and verified
- * against the frozen observation before any tool runs.
- *
- * Lazy because a session that never calls a toolset tool should not pay to
- * start its servers, and eager startup would move a server fault into session
- * start where Pi cannot report it usefully.
- *
- * Verified because admission and execution are two different spawns of the
- * same command. Between them a server can be upgraded, and the tools the model
- * was shown would then not be the tools it is calling. The comparison is set
- * equality with the frozen descriptors — a tool that appeared is as much a
- * refusal as one that vanished, because an extra tool is authority nobody
- * admitted this task for.
- */
-class McpServerPool implements McpToolCallHost {
-  private readonly clients = new Map<string, Promise<McpStdioClient>>();
-  private closed = false;
-
-  constructor(private readonly config: TaskScopedMcpConfig) {}
-
-  /**
-   * The environment an MCP server child is spawned with.
-   *
-   * This process's own environment minus the SDK's own Pi control variables.
-   * They address THIS extension and the sibling policy extension — the path to
-   * the task-scoped config file, the task's permission mode — and a host
-   * toolset server has no business reading either: the config file names every
-   * server this task projects and the exact observation it was admitted with,
-   * which is a different toolset's configuration from the point of view of any
-   * one server. Nothing else is filtered: the Pi child was already spawned
-   * with a filtered environment by the adapter, so PATH, HOME and the rest are
-   * the task's, not the daemon's.
-   */
-  private childEnv(): Record<string, string> {
-    const env: Record<string, string> = {};
-    for (const [name, value] of Object.entries(process.env)) {
-      if (value === undefined || BYOK_PI_CONTROL_ENV_PREFIX.test(name)) continue;
-      env[name] = value;
-    }
-    return env;
-  }
-
-  private async open(serverName: string): Promise<McpStdioClient> {
-    const server = this.config.mcpServers[serverName];
-    if (server === undefined) {
-      throw new McpAuthorityError(`MCP server "${serverName}" is not projected for this task`);
-    }
-    const frozen = this.config.observation[serverName];
-    const client = new McpStdioClient(server, {
-      label: `MCP toolset server "${serverName}"`,
-      // The extension runs INSIDE the Pi child the adapter already spawned
-      // with a filtered environment, so this process's own environment is the
-      // task's environment — it is not the daemon's. The SDK's own Pi control
-      // variables are still stripped; see `childEnv`.
-      env: this.childEnv(),
-    });
-    try {
-      await client.connect();
-      const observed: McpServerObservation = {
-        serverName,
-        serverInfo: client.serverInfo(),
-        protocolVersion: client.protocolVersion(),
-        tools: (await client.listTools()).map((tool) => parseTool(serverName, tool)),
-      };
-      // An SDK-reserved helper has no daemon observation to compare against —
-      // its tool set is fixed by the protocol the SDK itself defines, and it is
-      // read live below rather than frozen at admission.
-      if (frozen !== undefined) {
-        const drifts = diffMcpObservation(frozen, observed);
-        if (drifts.length > 0) {
-          throw new McpAuthorityError(
-            `MCP toolset server "${serverName}" no longer matches the tools this task was admitted with: `
-            + drifts.map((drift) => `${drift.reason} (${drift.detail})`).join('; '),
-          );
-        }
-      }
-      return client;
-    } catch (error) {
-      await client.close();
-      throw error;
-    }
-  }
-
-  private client(serverName: string): Promise<McpStdioClient> {
-    let pending = this.clients.get(serverName);
-    if (pending === undefined) {
-      pending = this.open(serverName);
-      this.clients.set(serverName, pending);
-      // A failed open must not be cached as a permanently poisoned entry with
-      // an unhandled rejection attached; the next call re-opens and fails
-      // again with its own reason.
-      pending.catch(() => this.clients.delete(serverName));
-    }
-    return pending;
-  }
-
-  async call(
-    tool: McpToolProjection,
-    args: Readonly<Record<string, unknown>>,
-    signal?: AbortSignal,
-  ): Promise<CallToolResult> {
-    if (this.closed) throw new McpAuthorityError('the MCP toolset connections for this task are closed');
-    const client = await this.client(tool.serverName);
-    return client.callTool(tool.toolName, args, {
-      ...(signal === undefined ? {} : { signal }),
-      // A tool call is the model's work, not a handshake: it gets a real
-      // budget rather than the admission deadline.
-      timeoutMs: MCP_TOOL_CALL_TIMEOUT_MS,
-    });
-  }
-
-  /** Connect if needed and report what the server says its tools are. */
-  async observe(serverName: string): Promise<readonly McpToolDescriptor[]> {
-    const client = await this.client(serverName);
-    return (await client.listTools()).map((tool) => parseTool(serverName, tool));
-  }
-
-  async close(): Promise<void> {
-    this.closed = true;
-    const pending = [...this.clients.values()];
-    this.clients.clear();
-    await Promise.all(pending.map(async (entry) => {
-      const client = await entry.catch(() => undefined);
-      await client?.close();
-    }));
-  }
-}
-
-/**
- * Ceiling for one `tools/call`. A host tool doing real work (a database query,
- * an API round trip) is not a handshake and must not inherit the admission
- * deadline; the task's own cancellation remains the real bound.
- */
-const MCP_TOOL_CALL_TIMEOUT_MS = 120_000;
 
 /**
  * Read one SDK-reserved helper's own tools.
@@ -345,9 +82,17 @@ async function reservedServerTools(
   return Object.freeze(projections);
 }
 
+/** Explicit task authority for the SDK-owned inline entry. */
+export function createByokMcpExtension(config: TaskScopedMcpConfig): ExtensionFactory {
+  return (pi) => registerByokMcpToolsWithConfig(pi, config);
+}
+
 export default function registerByokMcpTools(pi: ExtensionAPI): void {
-  const config = loadTaskScopedConfig();
-  const pool = new McpServerPool(config);
+  registerByokMcpToolsWithConfig(pi, loadTaskScopedConfig());
+}
+
+function registerByokMcpToolsWithConfig(pi: ExtensionAPI, config: TaskScopedMcpConfig): void {
+  const pool = new McpServerPool(config, fail);
   const registered = new Set<string>();
   const register = (tools: readonly McpToolProjection[], naming: PiMcpToolNaming): void => {
     for (const tool of createPiMcpTools(tools, pool, naming)) {
@@ -362,7 +107,7 @@ export default function registerByokMcpTools(pi: ExtensionAPI): void {
       // compile-time type can describe, and rebuilding it as TypeBox would
       // make this file the authority on a schema the server owns. Pi treats
       // the value as JSON Schema at runtime — empirically honoured by
-      // 0.85.1002, whose registered tools carry these schemas verbatim.
+      // 0.85.1005, whose registered tools carry these schemas verbatim.
       (pi.registerTool as (definition: unknown) => void)(tool);
     }
   };

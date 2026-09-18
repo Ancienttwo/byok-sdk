@@ -911,7 +911,7 @@ import { type RecurringExecutionInput } from './recurring';
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
+import { type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -1048,6 +1048,22 @@ export interface AgentDispatchInput {
     /** Strict Agent payload carrying the exact opaque AgentRef. */
     readonly payload: TaskOfferForAgentPayload;
 }
+/**
+ * Strict dispatch of an already-counted preparation back to the device that
+ * counted it.
+ *
+ * Deliberately NOT an optional field on {@link AgentDispatchInput}: the wire
+ * message is distinct for the freeze-rule reason documented on
+ * `TaskOfferPreparedPayloadSchema`, and a host API that could express both
+ * through one input would let a caller reach the ordinary lane by omitting one
+ * property.
+ */
+export interface PreparedDispatchInput {
+    /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+    readonly taskId?: string;
+    /** Instruction-free strict payload naming the preparation this Execution consumes. */
+    readonly payload: TaskOfferPreparedPayload;
+}
 /** Strict Agent dispatch that supplies the policy consumed by the typed egress lanes. */
 export interface AgentEgressDispatchInput {
     /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
@@ -1155,6 +1171,17 @@ export interface ByokCloud {
      * before either the mailbox append or task-attempt open.
      */
     enqueueAgentOffer(tenant: TenantId, deviceId: string, input: AgentDispatchInput): Promise<EnqueuedOffer>;
+    /**
+     * Host control plane: enqueue an offer for an already-counted preparation.
+     *
+     * Admission requires the device to durably advertise both the Agent-home
+     * contract and `agent-input-preparation` — the second because only a device
+     * that can prepare holds the durable record this offer names. A device that
+     * advertises neither never receives the message, and a device whose protocol
+     * build predates the type skips it whole rather than running it as an
+     * ordinary instruction offer.
+     */
+    enqueuePreparedOffer(tenant: TenantId, deviceId: string, input: PreparedDispatchInput): Promise<EnqueuedOffer>;
     /**
      * Host control plane: enqueue the typed egress-policy Agent offer. Missing
      * egress/reliable-ack capabilities reject before a mailbox row is allocated.

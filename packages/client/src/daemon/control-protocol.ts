@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
-import type { TaskState } from '@byok-sdk/protocol';
+import { PERMISSION_MODES, type PermissionMode, type TaskState } from '@byok-sdk/protocol';
 import type { ApprovalDecision, PendingApproval } from './approvals';
 import type { StorageCategory } from './journal/journal';
 import type { StoragePressureState } from './journal/storage-policy';
@@ -9,19 +9,25 @@ import type { LocalAgentReleaseIdentity } from '../release-identity';
 import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types';
 import type { AgentHomeExecutionStatus } from '../agent-home';
 import type {
+  InputPreparationAccountingPolicyRefV1,
   InputPreparationCancelParamsV1,
   InputPreparationLookupParamsV1,
   InputPreparationModelV1,
   InputPreparationOptionsV1,
   InputPreparationPromptSnapshotV1,
+  InputPreparationMessageV1,
   InputPreparationReceiptV1,
   InputPreparationRequestV1,
   InputPreparationScopeClaimV1,
   InputPreparationSnapshotV1,
-  InputPreparationToolV1,
-  InputPreparationUserMessageV1,
 } from '../input-preparation';
-import { INPUT_PREPARATION_REQUEST_FORMAT, INPUT_PREPARATION_VERSION } from '../input-preparation';
+import {
+  INPUT_PREPARATION_REQUEST_FORMAT,
+  INPUT_PREPARATION_RETIRED_PROMPT_KEYS,
+  INPUT_PREPARATION_RETIRED_REQUEST_KEYS,
+  INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS,
+  INPUT_PREPARATION_VERSION,
+} from '../input-preparation';
 
 
 /**
@@ -1005,7 +1011,6 @@ function parsePromptSnapshot(value: unknown): InputPreparationPromptSnapshotV1 |
       'customPrompt',
       'appendSystemPrompt',
       'cwd',
-      'selectedTools',
       'toolSnippets',
       'promptGuidelines',
       'contextFiles',
@@ -1018,7 +1023,6 @@ function parsePromptSnapshot(value: unknown): InputPreparationPromptSnapshotV1 |
   if (value.customPrompt !== undefined && typeof value.customPrompt !== 'string') return undefined;
   if (value.appendSystemPrompt !== undefined && typeof value.appendSystemPrompt !== 'string') return undefined;
   if (typeof value.cwd !== 'string' || value.cwd.length === 0) return undefined;
-  if (!stringArray(value.selectedTools)) return undefined;
   if (!stringMap(value.toolSnippets)) return undefined;
   if (!stringArray(value.promptGuidelines)) return undefined;
   if (!Array.isArray(value.contextFiles)) return undefined;
@@ -1036,7 +1040,6 @@ function parsePromptSnapshot(value: unknown): InputPreparationPromptSnapshotV1 |
     ...(value.customPrompt === undefined ? {} : { customPrompt: value.customPrompt }),
     ...(value.appendSystemPrompt === undefined ? {} : { appendSystemPrompt: value.appendSystemPrompt }),
     cwd: value.cwd,
-    selectedTools: [...value.selectedTools],
     toolSnippets: { ...value.toolSnippets },
     promptGuidelines: [...value.promptGuidelines],
     contextFiles,
@@ -1046,98 +1049,243 @@ function parsePromptSnapshot(value: unknown): InputPreparationPromptSnapshotV1 |
 }
 
 /**
- * First support set: text-only user messages. An assistant/toolResult message,
- * array (multimodal) content or any extra field is rejected outright rather
- * than coerced — a silently downgraded message would change what is counted.
+ * The support set: text-only user messages and host-canonical assistant text.
+ * A provider-generated assistant message, a toolResult message, array
+ * (multimodal) content or any extra field is rejected outright rather than
+ * coerced — a silently downgraded message would change what is counted.
+ *
+ * `origin` is the discriminant for the assistant kind, and it is required: an
+ * assistant message without it claims provenance this surface cannot check, and
+ * an assistant message WITH provenance fields (`usage`, `model`, `stopReason`
+ * and the rest) fails the exact-key check rather than having them dropped.
+ * Nothing here fabricates provenance for a host-canonical message, and nothing
+ * strips it from one that carries it.
  */
-function parseMessages(value: unknown): InputPreparationUserMessageV1[] | undefined {
+function parseMessages(value: unknown): InputPreparationMessageV1[] | undefined {
   if (!Array.isArray(value) || value.length === 0) return undefined;
-  const messages: InputPreparationUserMessageV1[] = [];
+  const messages: InputPreparationMessageV1[] = [];
   for (const entry of value) {
-    if (!plainRecord(entry) || !exactKeys(entry, ['role', 'content', 'timestamp'])) return undefined;
-    if (entry.role !== 'user' || typeof entry.content !== 'string') return undefined;
+    if (!plainRecord(entry)) return undefined;
+    if (typeof entry.content !== 'string') return undefined;
     if (!Number.isSafeInteger(entry.timestamp) || (entry.timestamp as number) < 0) return undefined;
-    messages.push({ role: 'user', content: entry.content, timestamp: entry.timestamp as number });
+    if (entry.role === 'user') {
+      if (!exactKeys(entry, ['role', 'content', 'timestamp'])) return undefined;
+      messages.push({ role: 'user', content: entry.content, timestamp: entry.timestamp as number });
+      continue;
+    }
+    if (entry.role === 'assistant') {
+      if (!exactKeys(entry, ['role', 'origin', 'content', 'timestamp'])) return undefined;
+      if (entry.origin !== 'host_canonical') return undefined;
+      messages.push({
+        role: 'assistant',
+        origin: 'host_canonical',
+        content: entry.content,
+        timestamp: entry.timestamp as number,
+      });
+      continue;
+    }
+    return undefined;
   }
   return messages;
 }
 
-/** Complete model-visible schemas only: a tool without a JSON-object `parameters` is unsupported, never defaulted to `{}`. */
-function parseTools(value: unknown): InputPreparationToolV1[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const tools: InputPreparationToolV1[] = [];
-  const seen = new Set<string>();
-  for (const entry of value) {
-    if (!plainRecord(entry) || !exactKeys(entry, ['name', 'description', 'parameters'])) return undefined;
-    if (!identifier(entry.name) || seen.has(entry.name)) return undefined;
-    if (typeof entry.description !== 'string' || entry.description.length === 0) return undefined;
-    if (!plainRecord(entry.parameters)) return undefined;
-    seen.add(entry.name);
-    tools.push({ name: entry.name, description: entry.description, parameters: entry.parameters });
-  }
-  return tools;
-}
-
 function parseSnapshot(value: unknown): InputPreparationSnapshotV1 | undefined {
-  if (!plainRecord(value) || !exactKeys(value, ['prompt', 'messages', 'tools'])) return undefined;
+  // `tools` is NOT parsed here and is not accepted: the model-visible schemas
+  // are a local observation assembled by `./prepared-tool-surface.ts`. The
+  // retired key is caught by name above this function so the caller hears
+  // which authority it tried to assert, rather than a generic shape error.
+  if (!plainRecord(value) || !exactKeys(value, ['prompt', 'messages'])) return undefined;
   const prompt = parsePromptSnapshot(value.prompt);
   const messages = parseMessages(value.messages);
-  const tools = parseTools(value.tools);
-  if (!prompt || !messages || !tools) return undefined;
-  return { prompt, messages, tools };
+  if (!prompt || !messages) return undefined;
+  return { prompt, messages };
+}
+
+/**
+ * The Host's accounting ruling, validated as a SHAPE and carried verbatim.
+ *
+ * Nothing here interprets the ruling: `ruledResidualKeys` is a list of names
+ * this daemon only compares against what the native compiler classified, and
+ * `ruledRuntime`/`ruledTarget` are what the applicability check compares the
+ * binding against. An empty key list is legal and means exactly what it says —
+ * the Host ruled on no residual key — so any preparation whose request D
+ * carries one stays unready.
+ */
+function parseAccountingPolicyRef(value: unknown): InputPreparationAccountingPolicyRefV1 | undefined {
+  if (!plainRecord(value) || !exactKeys(value, ['revision', 'ruledRuntime', 'ruledTarget', 'ruledResidualKeys'])) {
+    return undefined;
+  }
+  if (!identifier(value.revision) || !identifier(value.ruledRuntime)) return undefined;
+  if (!plainRecord(value.ruledTarget) || !exactKeys(value.ruledTarget, ['endpoint', 'modelId'])) return undefined;
+  if (!identifier(value.ruledTarget.endpoint) || !identifier(value.ruledTarget.modelId)) return undefined;
+  if (!Array.isArray(value.ruledResidualKeys)) return undefined;
+  const keys = new Set<string>();
+  for (const entry of value.ruledResidualKeys) {
+    if (!identifier(entry) || keys.has(entry)) return undefined;
+    keys.add(entry as string);
+  }
+  return {
+    revision: value.revision,
+    ruledRuntime: value.ruledRuntime,
+    ruledTarget: { endpoint: value.ruledTarget.endpoint, modelId: value.ruledTarget.modelId },
+    ruledResidualKeys: Object.freeze([...keys]),
+  };
+}
+
+/** Configured MCP toolset ids: non-empty, deduplicated, and each a usable identifier. */
+function parseRequiredToolsets(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (!identifier(entry) || seen.has(entry)) return undefined;
+    seen.add(entry as string);
+  }
+  return [...seen];
+}
+
+/**
+ * Why `input_preparation.prepare` params were refused.
+ *
+ * Two distinct codes, because they are two distinct facts. `bad_request` is
+ * "this is not the shape" — a wrong type, a missing field, an unknown extra.
+ * `unsupported_input` is "this is the OLD shape": the caller sent a key this
+ * contract retired, which means it is asserting authority over the tool
+ * manifest that version 2 moved onto the device. Answering that with a generic
+ * shape error would leave the caller adjusting field types forever.
+ */
+export type InputPreparationRequestParseResult =
+  | { readonly ok: true; readonly request: InputPreparationRequestV1 }
+  | { readonly ok: false; readonly code: 'bad_request' | 'unsupported_input'; readonly detail: string };
+
+function badRequest(detail: string): InputPreparationRequestParseResult {
+  return { ok: false, code: 'bad_request', detail };
 }
 
 /**
  * Strict shape gate for `input_preparation.prepare`.
  *
- * `undefined` means `bad_request`. Every object is key-exact: an unknown field
- * anywhere in the request is a rejection, never an ignored extra — a tolerated
- * field is how a caller comes to believe it can influence the compiled body,
- * the runtime identity or the policy this daemon enforces.
+ * Every object is key-exact: an unknown field anywhere in the request is a
+ * rejection, never an ignored extra — a tolerated field is how a caller comes
+ * to believe it can influence the compiled body, the runtime identity or the
+ * policy this daemon enforces.
  *
  * This gate validates SHAPE only. Scope authority, policy revision, runtime
- * identity and every limit are resolved by `input-preparation-service.ts`; none
- * of them can be asserted here by a caller.
+ * identity, the tool manifest and every limit are resolved by
+ * `input-preparation-service.ts`; none of them can be asserted here by a
+ * caller.
  */
-export function parseInputPreparationRequestParams(value: unknown): InputPreparationRequestV1 | undefined {
-  if (
-    !plainRecord(value) ||
-    !exactKeys(value, ['format', 'version', 'requestId', 'policyRevision', 'scope', 'source', 'selection', 'snapshot', 'toolExecutors'])
-  ) {
-    return undefined;
+export function parseInputPreparationRequestParams(value: unknown): InputPreparationRequestParseResult {
+  if (!plainRecord(value)) return badRequest('the params must be an object');
+  // Named first, and by name: a caller still sending either key is not sending
+  // a slightly wrong request, it is claiming an authority this contract moved.
+  for (const retired of INPUT_PREPARATION_RETIRED_REQUEST_KEYS) {
+    if (retired in value) {
+      return {
+        ok: false,
+        code: 'unsupported_input',
+        detail: `this contract no longer accepts ${JSON.stringify(retired)}: tool executor identity is a local`
+          + ' observation this daemon derives from `requiredToolsets`, never a value a caller may state',
+      };
+    }
   }
-  if (value.format !== INPUT_PREPARATION_REQUEST_FORMAT || value.version !== INPUT_PREPARATION_VERSION) return undefined;
-  if (!identifier(value.requestId) || !identifier(value.policyRevision)) return undefined;
+  if (plainRecord(value.snapshot) && plainRecord(value.snapshot.prompt)) {
+    for (const retired of INPUT_PREPARATION_RETIRED_PROMPT_KEYS) {
+      if (retired in value.snapshot.prompt) {
+        return {
+          ok: false,
+          code: 'unsupported_input',
+          detail: `this contract no longer accepts ${JSON.stringify(`snapshot.prompt.${retired}`)}: the native contract`
+            + ' requires that list to equal the model-visible manifest exactly, and the manifest is a local'
+            + ' observation this daemon derives from `requiredToolsets`',
+        };
+      }
+    }
+  }
+  if (plainRecord(value.snapshot)) {
+    for (const retired of INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS) {
+      if (retired in value.snapshot) {
+        return {
+          ok: false,
+          code: 'unsupported_input',
+          detail: `this contract no longer accepts ${JSON.stringify(`snapshot.${retired}`)}: the model-visible tool`
+            + ' schemas are a local observation this daemon derives from `requiredToolsets`',
+        };
+      }
+    }
+  }
+  if (
+    !exactKeys(value, [
+      'format',
+      'version',
+      'requestId',
+      'policyRevision',
+      'scope',
+      'source',
+      'selection',
+      'permissionMode',
+      'requiredToolsets',
+      'snapshot',
+      'accountingPolicyRef',
+    ])
+  ) {
+    return badRequest('the params carry a field this request shape does not define');
+  }
+  if (value.format !== INPUT_PREPARATION_REQUEST_FORMAT || value.version !== INPUT_PREPARATION_VERSION) {
+    return badRequest(
+      `the request must carry format ${JSON.stringify(INPUT_PREPARATION_REQUEST_FORMAT)}`
+      + ` and version ${String(INPUT_PREPARATION_VERSION)}`,
+    );
+  }
+  if (!identifier(value.requestId) || !identifier(value.policyRevision)) {
+    return badRequest('requestId and policyRevision must be non-empty single-line identifiers');
+  }
   const scope = parseScopeClaim(value.scope);
-  if (!scope) return undefined;
-  if (!plainRecord(value.source) || !exactKeys(value.source, ['revision', 'digest'])) return undefined;
-  if (!identifier(value.source.revision) || !identifier(value.source.digest)) return undefined;
-  if (!plainRecord(value.selection) || !exactKeys(value.selection, ['model', 'options'])) return undefined;
+  if (!scope) return badRequest('scope must be exactly {deviceId, agentRef, profileId, profileRevision}');
+  if (!plainRecord(value.source) || !exactKeys(value.source, ['revision', 'digest'])) {
+    return badRequest('source must be exactly {revision, digest}');
+  }
+  if (!identifier(value.source.revision) || !identifier(value.source.digest)) {
+    return badRequest('source.revision and source.digest must be non-empty single-line identifiers');
+  }
+  if (!plainRecord(value.selection) || !exactKeys(value.selection, ['model', 'options'])) {
+    return badRequest('selection must be exactly {model, options}');
+  }
   const model = parseModel(value.selection.model);
   const options = parseOptions(value.selection.options);
-  if (!model || !options) return undefined;
+  if (!model || !options) return badRequest('selection.model / selection.options are outside the accepted shape');
+  if (typeof value.permissionMode !== 'string' || !(PERMISSION_MODES as readonly string[]).includes(value.permissionMode)) {
+    return badRequest(`permissionMode must be one of ${PERMISSION_MODES.map((mode) => JSON.stringify(mode)).join(', ')}`);
+  }
+  const requiredToolsets = parseRequiredToolsets(value.requiredToolsets);
+  if (!requiredToolsets) {
+    return badRequest('requiredToolsets must be a non-empty array of distinct configured toolset ids');
+  }
   const snapshot = parseSnapshot(value.snapshot);
-  if (!snapshot) return undefined;
-  if (!stringMap(value.toolExecutors)) return undefined;
-  // Executable identity must cover exactly the model-visible tools — no more,
-  // no fewer. Schema equality alone never proves the same executable closure.
-  const executorNames = Object.keys(value.toolExecutors);
-  if (executorNames.length !== snapshot.tools.length) return undefined;
-  const toolNames = new Set(snapshot.tools.map((tool) => tool.name));
-  for (const name of executorNames) {
-    if (!toolNames.has(name)) return undefined;
-    if (!identifier(value.toolExecutors[name])) return undefined;
+  if (!snapshot) return badRequest('snapshot must be exactly {prompt, messages}');
+  let accountingPolicyRef: InputPreparationAccountingPolicyRefV1 | undefined;
+  if (value.accountingPolicyRef !== undefined) {
+    accountingPolicyRef = parseAccountingPolicyRef(value.accountingPolicyRef);
+    if (!accountingPolicyRef) {
+      return badRequest(
+        'accountingPolicyRef must be exactly {revision, ruledRuntime, ruledTarget: {endpoint, modelId}, ruledResidualKeys}',
+      );
+    }
   }
   return {
-    format: INPUT_PREPARATION_REQUEST_FORMAT,
-    version: INPUT_PREPARATION_VERSION,
-    requestId: value.requestId,
-    policyRevision: value.policyRevision,
-    scope,
-    source: { revision: value.source.revision, digest: value.source.digest },
-    selection: { model, options },
-    snapshot,
-    toolExecutors: { ...value.toolExecutors },
+    ok: true,
+    request: {
+      format: INPUT_PREPARATION_REQUEST_FORMAT,
+      version: INPUT_PREPARATION_VERSION,
+      requestId: value.requestId,
+      policyRevision: value.policyRevision,
+      scope,
+      source: { revision: value.source.revision, digest: value.source.digest },
+      selection: { model, options },
+      permissionMode: value.permissionMode as PermissionMode,
+      requiredToolsets: Object.freeze(requiredToolsets),
+      snapshot,
+      ...(accountingPolicyRef === undefined ? {} : { accountingPolicyRef }),
+    },
   };
 }
 

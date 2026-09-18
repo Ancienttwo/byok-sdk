@@ -1,3 +1,4 @@
+import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { observeMcpServer, type McpToolsetServerObservation } from '../mcp';
 import { BYOK_PI_MCP_CONFIG_PATH } from '../adapters/pi/mcp-config';
 import { BYOK_PI_PERMISSION_MODE } from '../adapters/pi/subagents-policy-config';
+import { trustedCwd } from './fixtures/launch-cwd';
 
 /**
  * The Pi MCP extension's CALL path, end to end against a real stdio server.
@@ -92,9 +94,11 @@ async function loadExtension(
   const recordTo = path.join(dir, 'received.jsonl');
   const configPath = path.join(dir, 'mcp-config.json');
   await fs.writeFile(configPath, JSON.stringify({
+    mcpEnv: projectPiMcpEnvironment(process.env),
     mcpServers: { salesko: serverSpec({ ...serverConfig, recordTo }) },
     observation,
     permissionMode,
+    launchCwd: await trustedCwd(),
   }));
   process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
 

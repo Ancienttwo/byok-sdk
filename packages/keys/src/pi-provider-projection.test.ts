@@ -23,6 +23,8 @@ describe('buildPiProviderProjection', () => {
   });
 
   it.each([
+    ['--config-digest=' + 'a'.repeat(64)], ['--config-digest', 'a'.repeat(64)], ['--config', './relative.json'], ['--config', '/bad\nconfig.json'],
+    ['__byok_sdk_helper', 'pi-rpc'], ['--pi-fixed-args', '[\"spoof\"]'], ['--no-skills', '--no-skills'],
     ['--extension', './relative.js'], ['--extension', 'https://example.com/extension.js'],
     ['--extension', path.resolve('bad\npath.js')], ['--extension'],
     ['--model', 'override'], ['--thinking', 'max'], ['--settings', '/untrusted'],
@@ -35,6 +37,13 @@ describe('buildPiProviderProjection', () => {
     const extension = path.resolve('owned-extension.js');
     const args = ['--mode', 'rpc', '--extension', extension, '--tools', 'read', '--exclude-tools', 'bash'];
     expect(buildPiProviderArgs(argvProfile(), args).slice(0, args.length)).toEqual(args);
+  });
+
+  it('preserves explicit SDK entry config and disabled discovery flags', () => {
+    const args = ['--config', path.resolve('task config.json'), '--mode', 'rpc', '--no-skills', '--no-extensions'];
+    expect(buildPiProviderArgs(argvProfile(), args)).toEqual([
+      ...args, '--provider', 'byok-sdk-synthetic', '--model', 'explicit-model', '--thinking', thinkingLevel,
+    ]);
   });
 
   it('projects an OpenAI-compatible profile without embedding its secret', () => {

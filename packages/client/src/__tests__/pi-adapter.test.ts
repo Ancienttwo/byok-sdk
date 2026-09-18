@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentEvent, PermissionMode, TaskOfferPayload } from '@byok-sdk/protocol';
+import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
 import type { Session } from '../types';
@@ -17,21 +18,13 @@ import {
   qualifiedMcpToolName,
   type McpToolsetServerObservation,
 } from '../mcp';
+import { trustedCwd } from './fixtures/launch-cwd';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
-const FIXTURE_EXTENSIONS = Object.freeze({
-  webAccess: '/extensions/pi-web-access/index.ts',
-  mcpExtension: '/extensions/byok-pi-mcp.js',
-  subagentsPolicy: '/extensions/byok-pi-subagents-policy.js',
-  subagents: '/extensions/pi-subagents/index.ts',
-  todo: '/extensions/rpiv-todo/index.ts',
-});
-const resolveFixtureExtensions = () => FIXTURE_EXTENSIONS;
 
 function fakePiAdapter(): PiAdapter {
   return new PiAdapter({
     resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-    resolveExtensions: resolveFixtureExtensions,
   });
 }
 
@@ -91,7 +84,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
       await fs.copyFile(FIXTURE_PATH, script);
       await fs.chmod(script, 0o600);
       await fs.copyFile(path.join(path.dirname(FIXTURE_PATH), 'process-tree-receipt.mjs'), path.join(dir, 'process-tree-receipt.mjs'));
-      const adapter = new PiAdapter({ resolveBin: () => ({ command: script, source: 'package' }), resolveExtensions: resolveFixtureExtensions });
+      const adapter = new PiAdapter({ resolveBin: () => ({ command: script, source: 'package' }) });
       session = await startAdapter(adapter, baseTask, { workspaceDir: dir, policy: { mode: 'auto' }, env: process.env });
       expect(session.sessionRef.length).toBeGreaterThan(0);
       expect(await takeEvents(session, 5)).toHaveLength(5);
@@ -142,7 +135,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
   it('classifies spawn unavailability as typed start infrastructure retryable', async () => {
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-      resolveExtensions: resolveFixtureExtensions,
       spawnFn: (() => {
         throw new Error('spawn ENOENT');
       }) as never,
@@ -166,7 +158,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
     }) as never;
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-      resolveExtensions: resolveFixtureExtensions,
       spawnFn,
       byokLauncher: {
         command: '/opt/byok-pi-provider-launcher',
@@ -202,19 +193,15 @@ describe('PiAdapter against the fake-pi fixture', () => {
       'openai',
       '--model',
       'gpt-5.2',
+      '--pi-cwd', await trustedCwd(),
+      '--pi-fixed-args', '[]',
+      '--launch-binding', expect.any(String),
+      '--pi-config-digest', expect.stringMatching(/^[0-9a-f]{64}$/),
       '--',
+      '--config', expect.any(String),
       '--mode',
       'rpc',
-      '--extension',
-      FIXTURE_EXTENSIONS.webAccess,
-      '--extension',
-      FIXTURE_EXTENSIONS.mcpExtension,
-      '--extension',
-      FIXTURE_EXTENSIONS.subagentsPolicy,
-      '--extension',
-      FIXTURE_EXTENSIONS.subagents,
-      '--extension',
-      FIXTURE_EXTENSIONS.todo,
+      '--no-skills',
     ]);
     expect(JSON.stringify(calls[0])).not.toContain('sk-sentinel');
     expect(calls[0]?.env.OPENAI_API_KEY).toBeUndefined();
@@ -239,7 +226,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
     }) as never;
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-      resolveExtensions: resolveFixtureExtensions,
       spawnFn,
       byokLauncher: {
         command: '/opt/byok-pi-provider-launcher',
@@ -276,19 +262,15 @@ describe('PiAdapter against the fake-pi fixture', () => {
         'openai',
         '--model',
         'gpt-5.2',
+        '--pi-cwd', await trustedCwd(),
+        '--pi-fixed-args', '[]',
+        '--launch-binding', expect.any(String),
+      '--pi-config-digest', expect.stringMatching(/^[0-9a-f]{64}$/),
         '--',
+        '--config', expect.any(String),
         '--mode',
         'rpc',
-        '--extension',
-        FIXTURE_EXTENSIONS.webAccess,
-        '--extension',
-        FIXTURE_EXTENSIONS.mcpExtension,
-        '--extension',
-        FIXTURE_EXTENSIONS.subagentsPolicy,
-        '--extension',
-        FIXTURE_EXTENSIONS.subagents,
-        '--extension',
-        FIXTURE_EXTENSIONS.todo,
+        '--no-skills',
       ],
     }]);
   });
@@ -469,6 +451,40 @@ describe('PiAdapter against the fake-pi fixture', () => {
     await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/No API key found/);
   });
 
+  it('carries the trusted launch directory for a task whose only MCP server is a reserved SDK helper', async () => {
+    // The reserved helpers (memory, messaging) are MCP server children like
+    // any projected toolset server, and pi's own extension opens them from
+    // this config — so the boundary has to be in the file even when the
+    // device projected no host toolset at all.
+    const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
+    const spawnFn = ((_command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
+      calls.push({ args: [...args], env: options?.env ?? {} });
+      return realSpawn(FIXTURE_PATH, args, options);
+    }) as never;
+    const adapter = new PiAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
+      spawnFn,
+    });
+    const ctx = await makeCtx();
+    ctx.mcpServers = { byokagentmemory: { command: '/opt/byok-agent-memory-mcp' } };
+
+    const session = await startAdapter(adapter, baseTask, ctx);
+    openSessions.push(session);
+
+    const configPath = calls[0]?.args[calls[0]!.args.indexOf('--config') + 1];
+    if (typeof configPath !== 'string') throw new Error('missing pi mcp config path');
+    expect(JSON.parse(await fs.readFile(configPath, 'utf8')).mcp).toMatchObject({
+      mcpServers: { byokagentmemory: { command: '/opt/byok-agent-memory-mcp' } },
+      // `mcp-extension.ts` refuses to open any server without this and passes
+      // it straight to `spawn` as the child's cwd (`pi-mcp-launch-cwd.test.ts`
+      // reads it back out of a real child).
+      launchCwd: await trustedCwd(),
+    });
+
+    await session.close();
+    openSessions.splice(openSessions.indexOf(session), 1);
+  });
+
   it('loads bundled web access, subagents, and an isolated task-scoped MCP config, then removes the config on close', async () => {
     const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
     const spawnFn = ((_command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
@@ -477,7 +493,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
     }) as never;
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-      resolveExtensions: resolveFixtureExtensions,
       spawnFn,
     });
     const ctx = await makeCtx();
@@ -491,30 +506,28 @@ describe('PiAdapter against the fake-pi fixture', () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.args).toEqual([
+      expect.stringMatching(/^--config-digest=[0-9a-f]{64}$/),
+      '--config', expect.any(String),
       '--mode',
       'rpc',
-      '--extension',
-      FIXTURE_EXTENSIONS.webAccess,
-      '--extension',
-      FIXTURE_EXTENSIONS.mcpExtension,
-      '--extension',
-      FIXTURE_EXTENSIONS.subagentsPolicy,
-      '--extension',
-      FIXTURE_EXTENSIONS.subagents,
-      '--extension',
-      FIXTURE_EXTENSIONS.todo,
+      '--no-skills',
     ]);
-    const configPath = calls[0]?.env.BYOK_PI_MCP_CONFIG_PATH;
+    const configPath = calls[0]?.args[calls[0]!.args.indexOf('--config') + 1];
     expect(typeof configPath).toBe('string');
-    expect(calls[0]?.env.BYOK_PI_PERMISSION_MODE).toBe('auto');
+    expect(calls[0]?.env.BYOK_PI_PERMISSION_MODE).toBeUndefined();
     // The daemon's observation travels WITH the servers: the extension
     // registers exactly these tools and discovers none of its own.
-    expect(JSON.parse(await fs.readFile(configPath as string, 'utf8'))).toEqual({
+    expect(JSON.parse(await fs.readFile(configPath as string, 'utf8')).mcp).toEqual({
+      mcpEnv: projectPiMcpEnvironment(ctx.env),
       mcpServers: {
         docs: { command: '/opt/docs-mcp', args: ['--readonly'], env: { BYOK_AGENT_MESSAGE_CONTEXT: 'sealed-context' } },
       },
       observation: observationOf({ docs: ['search_docs'] }),
       permissionMode: 'auto',
+      // pi's own extension opens these servers, so the operator's
+      // command/args are untouched and the trusted directory travels beside
+      // them — it reaches `spawn` as `cwd`, not as a launcher wrapper.
+      launchCwd: await trustedCwd(),
     });
 
     await session.close();
@@ -530,7 +543,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
     }) as never;
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-      resolveExtensions: resolveFixtureExtensions,
       spawnFn,
     });
     const task: TaskOfferPayload = { ...baseTask, policy: { mode: 'readonly' } };
@@ -541,26 +553,19 @@ describe('PiAdapter against the fake-pi fixture', () => {
     openSessions.push(session);
 
     expect(calls[0]?.args).toEqual([
+      expect.stringMatching(/^--config-digest=[0-9a-f]{64}$/),
+      '--config', expect.any(String),
       '--mode',
       'rpc',
-      '--extension',
-      FIXTURE_EXTENSIONS.webAccess,
-      '--extension',
-      FIXTURE_EXTENSIONS.mcpExtension,
-      '--extension',
-      FIXTURE_EXTENSIONS.subagentsPolicy,
-      '--extension',
-      FIXTURE_EXTENSIONS.subagents,
-      '--extension',
-      FIXTURE_EXTENSIONS.todo,
+      '--no-skills',
       '--tools',
       'read,grep,find,ls,subagent,todo',
     ]);
-    const configPath = calls[0]?.env.BYOK_PI_MCP_CONFIG_PATH;
+    const configPath = calls[0]?.args[calls[0]!.args.indexOf('--config') + 1];
     expect(typeof configPath).toBe('string');
-    expect(calls[0]?.env.BYOK_PI_PERMISSION_MODE).toBe('readonly');
-    expect(JSON.parse(await fs.readFile(configPath as string, 'utf8')))
-      .toEqual({ mcpServers: {}, observation: {}, permissionMode: 'readonly' });
+    expect(calls[0]?.env.BYOK_PI_PERMISSION_MODE).toBeUndefined();
+    expect(JSON.parse(await fs.readFile(configPath as string, 'utf8')).mcp)
+      .toEqual({ mcpEnv: projectPiMcpEnvironment(ctx.env), mcpServers: {}, observation: {}, permissionMode: 'readonly' });
 
     await session.close();
     openSessions.splice(openSessions.indexOf(session), 1);
@@ -576,7 +581,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
     const calls: string[][] = [];
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-      resolveExtensions: resolveFixtureExtensions,
       spawnFn: ((_command: string, args: string[]) => {
         calls.push([...args]);
         throw new Error('spawn must not be reached');
@@ -653,7 +657,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
     }) as never;
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-      resolveExtensions: resolveFixtureExtensions,
       spawnFn,
     });
     const task: TaskOfferPayload = { ...baseTask, policy: { mode: 'readonly' } };
@@ -668,9 +671,9 @@ describe('PiAdapter against the fake-pi fixture', () => {
     const session = await startAdapter(adapter, task, ctx);
     openSessions.push(session);
 
-    const configPath = calls[0]?.env.BYOK_PI_MCP_CONFIG_PATH as string;
-    expect(calls[0]?.env.BYOK_PI_PERMISSION_MODE).toBe('readonly');
-    const written = JSON.parse(await fs.readFile(configPath, 'utf8')) as {
+    const configPath = calls[0]?.args[calls[0]!.args.indexOf('--config') + 1] as string;
+    expect(calls[0]?.env.BYOK_PI_PERMISSION_MODE).toBeUndefined();
+    const written = JSON.parse(await fs.readFile(configPath, 'utf8')).mcp as {
       permissionMode: PermissionMode;
       observation: Record<string, McpToolsetServerObservation>;
     };
@@ -699,7 +702,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
     const calls: string[][] = [];
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-      resolveExtensions: resolveFixtureExtensions,
       spawnFn: ((_command: string, args: string[]) => {
         calls.push([...args]);
         throw new Error('spawn must not be reached');
@@ -729,7 +731,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
     // child, where only its stderr carries the message.
     const adapter = new PiAdapter({
       resolveBin: () => { throw new Error('resolveBin must not be reached'); },
-      resolveExtensions: () => { throw new Error('resolveExtensions must not be reached'); },
       spawnFn: (() => { throw new Error('spawn must not be reached'); }) as never,
     });
     const offer: TaskOfferPayload = { ...baseTask, policy: { mode: 'auto' } };
@@ -752,7 +753,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
   it('rejects a projected server the daemon never observed, before anything is spawned', async () => {
     const adapter = new PiAdapter({
       resolveBin: () => { throw new Error('resolveBin must not be reached'); },
-      resolveExtensions: () => { throw new Error('resolveExtensions must not be reached'); },
       spawnFn: (() => { throw new Error('spawn must not be reached'); }) as never,
     });
     const offer: TaskOfferPayload = { ...baseTask, policy: { mode: 'auto' } };

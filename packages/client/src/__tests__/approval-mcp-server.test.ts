@@ -2,24 +2,43 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   APPROVAL_SUMMARY_MAX_CHARS,
   APPROVAL_TOOL_NAME,
-  handleMcpRequest,
+  APPROVAL_TOOLS,
+  handleApprovalToolCall,
   summarizeToolCall,
   type ApprovalMcpDeps,
 } from '../bin/approval-mcp-server';
 
 /**
  * M4 Phase 3: unit coverage for `byok-approval-mcp`'s testable core —
- * `handleMcpRequest`/`summarizeToolCall`. The wire shapes asserted here
+ * `handleApprovalToolCall`/`summarizeToolCall`. The wire shapes asserted here
  * (tools/call arguments `{tool_name, input, tool_use_id}`, the expected
  * `{behavior:'allow'|'deny', ...}` JSON-in-text-content response) were
  * empirically verified end-to-end against the real installed claude 2.1.216
  * binary during M4 Phase 3 STEP 0 — see `approval-mcp-server.ts`'s own
  * module doc comment and `../adapters/claude/permission-mapping.ts`'s
  * `confirm`-mode doc comment for the full writeup.
+ *
+ * The JSON-RPC envelope around all of this is `../mcp-server`'s since the
+ * shared-core migration; `reserved-mcp-wire-regression.test.ts` asserts the
+ * emitted bytes and `mcp-server-core.test.ts` asserts the protocol behaviour.
  */
 
 function fakeDeps(requestApproval: ApprovalMcpDeps['requestApproval']): ApprovalMcpDeps {
   return { requestApproval };
+}
+
+function call(name: string, args: Record<string, unknown> | undefined): {
+  name: string;
+  arguments: Record<string, unknown> | undefined;
+  signal: AbortSignal;
+} {
+  return { name, arguments: args, signal: new AbortController().signal };
+}
+
+function payloadOf(result: Record<string, unknown>): Record<string, unknown> {
+  const content = result.content as { type: string; text: string }[];
+  expect(content).toHaveLength(1);
+  return JSON.parse(content[0]?.text ?? '') as Record<string, unknown>;
 }
 
 describe('summarizeToolCall', () => {
@@ -42,104 +61,64 @@ describe('summarizeToolCall', () => {
   });
 });
 
-describe('handleMcpRequest', () => {
-  it('initialize echoes the requested protocolVersion (or a default) and advertises tools capability', async () => {
-    const deps = fakeDeps(async () => ({ approved: true }));
-    const response = await handleMcpRequest({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-11-25' } }, deps, 't1');
-    expect(response).toEqual({
-      jsonrpc: '2.0',
-      id: 0,
-      result: {
-        protocolVersion: '2025-11-25',
-        capabilities: { tools: {} },
-        serverInfo: { name: 'byok-approval-mcp', version: '0.0.1' },
-      },
+describe('the advertised approval tool', () => {
+  it('is exactly one tool, named APPROVAL_TOOL_NAME, with the schema claude was verified against', () => {
+    expect(APPROVAL_TOOLS).toHaveLength(1);
+    expect(APPROVAL_TOOLS[0]?.name).toBe(APPROVAL_TOOL_NAME);
+    expect(APPROVAL_TOOLS[0]?.inputSchema).toEqual({
+      type: 'object',
+      properties: { tool_name: { type: 'string' }, input: { type: 'object' } },
     });
   });
+});
 
-  it('initialize defaults protocolVersion to 2024-11-05 when the request omits it', async () => {
-    const deps = fakeDeps(async () => ({ approved: true }));
-    const response = await handleMcpRequest({ id: 0, method: 'initialize' }, deps, 't1');
-    expect((response?.result as { protocolVersion: string }).protocolVersion).toBe('2024-11-05');
-  });
-
-  it('notifications/initialized returns undefined (no response — it is a notification, not a request)', async () => {
-    const deps = fakeDeps(async () => ({ approved: true }));
-    const response = await handleMcpRequest({ method: 'notifications/initialized' }, deps, 't1');
-    expect(response).toBeUndefined();
-  });
-
-  it('tools/list advertises exactly one tool, named APPROVAL_TOOL_NAME', async () => {
-    const deps = fakeDeps(async () => ({ approved: true }));
-    const response = await handleMcpRequest({ id: 1, method: 'tools/list' }, deps, 't1');
-    const tools = (response?.result as { tools: Array<{ name: string }> }).tools;
-    expect(tools).toHaveLength(1);
-    expect(tools[0]?.name).toBe(APPROVAL_TOOL_NAME);
-  });
-
-  it('tools/call for the approval tool forwards {taskId, summary} to requestApproval and returns behavior:allow with updatedInput echoing the original input on approval', async () => {
+describe('handleApprovalToolCall', () => {
+  it('forwards {taskId, summary} to requestApproval and returns behavior:allow with updatedInput echoing the original input on approval', async () => {
     const requestApproval = vi.fn(async (taskId: string, summary: string) => {
       expect(taskId).toBe('task-42');
       expect(summary).toBe('Bash: {"command":"echo hi"}');
       return { approved: true };
     });
-    const deps = fakeDeps(requestApproval);
-    const response = await handleMcpRequest(
-      {
-        id: 2,
-        method: 'tools/call',
-        params: { name: APPROVAL_TOOL_NAME, arguments: { tool_name: 'Bash', input: { command: 'echo hi' }, tool_use_id: 'toolu_1' } },
-      },
-      deps,
+    const result = await handleApprovalToolCall(
+      call(APPROVAL_TOOL_NAME, { tool_name: 'Bash', input: { command: 'echo hi' }, tool_use_id: 'toolu_1' }),
+      fakeDeps(requestApproval),
       'task-42',
     );
     expect(requestApproval).toHaveBeenCalledTimes(1);
-    const content = (response?.result as { content: Array<{ type: string; text: string }> }).content;
-    expect(content).toHaveLength(1);
-    expect(JSON.parse(content[0]?.text ?? '')).toEqual({ behavior: 'allow', updatedInput: { command: 'echo hi' } });
+    expect(payloadOf(result)).toEqual({ behavior: 'allow', updatedInput: { command: 'echo hi' } });
   });
 
-  it('tools/call returns behavior:deny with the reason on rejection', async () => {
-    const deps = fakeDeps(async () => ({ approved: false, reason: 'operator said no' }));
-    const response = await handleMcpRequest(
-      { id: 3, method: 'tools/call', params: { name: APPROVAL_TOOL_NAME, arguments: { tool_name: 'Write', input: { file_path: '/x' } } } },
-      deps,
+  it('returns behavior:deny with the reason on rejection', async () => {
+    const result = await handleApprovalToolCall(
+      call(APPROVAL_TOOL_NAME, { tool_name: 'Write', input: { file_path: '/x' } }),
+      fakeDeps(async () => ({ approved: false, reason: 'operator said no' })),
       't1',
     );
-    const content = (response?.result as { content: Array<{ type: string; text: string }> }).content;
-    expect(JSON.parse(content[0]?.text ?? '')).toEqual({ behavior: 'deny', message: 'operator said no' });
+    expect(payloadOf(result)).toEqual({ behavior: 'deny', message: 'operator said no' });
   });
 
   it('fails closed (deny) rather than throwing/hanging when requestApproval itself rejects (daemon unreachable, control request timed out, etc.)', async () => {
-    const deps = fakeDeps(async () => {
-      throw new Error('control socket unreachable');
-    });
-    const response = await handleMcpRequest(
-      { id: 4, method: 'tools/call', params: { name: APPROVAL_TOOL_NAME, arguments: { tool_name: 'Bash', input: {} } } },
-      deps,
+    const result = await handleApprovalToolCall(
+      call(APPROVAL_TOOL_NAME, { tool_name: 'Bash', input: {} }),
+      fakeDeps(async () => {
+        throw new Error('control socket unreachable');
+      }),
       't1',
     );
-    const content = (response?.result as { content: Array<{ type: string; text: string }> }).content;
-    const payload = JSON.parse(content[0]?.text ?? '') as { behavior: string; message: string };
+    // A RESULT, never an error: the core writes a normal return verbatim, so a
+    // fail-closed deny cannot be turned into a protocol error on the way out.
+    const payload = payloadOf(result) as { behavior: string; message: string };
     expect(payload.behavior).toBe('deny');
     expect(payload.message).toMatch(/could not reach the approving device/);
     expect(payload.message).toMatch(/control socket unreachable/);
   });
 
-  it('a tools/call naming a DIFFERENT tool than the approval tool is rejected with a protocol error, never silently approved', async () => {
+  it('a call naming a DIFFERENT tool than the approval tool is rejected with a protocol error, never silently approved', async () => {
     const requestApproval = vi.fn();
-    const deps = fakeDeps(requestApproval);
-    const response = await handleMcpRequest({ id: 5, method: 'tools/call', params: { name: 'some_other_tool', arguments: {} } }, deps, 't1');
+    await expect(
+      handleApprovalToolCall(call('some_other_tool', {}), fakeDeps(requestApproval), 't1'),
+    ).rejects.toMatchObject({ code: -32602, message: 'unknown tool "some_other_tool"' });
     expect(requestApproval).not.toHaveBeenCalled();
-    expect(response?.error).toBeDefined();
-  });
-
-  it('an unknown method with an id gets a JSON-RPC method-not-found error; without an id (a notification) it is silently ignored', async () => {
-    const deps = fakeDeps(async () => ({ approved: true }));
-    const withId = await handleMcpRequest({ id: 6, method: 'totally/unknown' }, deps, 't1');
-    expect(withId?.error).toBeDefined();
-    const withoutId = await handleMcpRequest({ method: 'totally/unknown' }, deps, 't1');
-    expect(withoutId).toBeUndefined();
   });
 
   it('missing/non-string tool_name falls back to "unknown tool" rather than throwing', async () => {
@@ -147,8 +126,13 @@ describe('handleMcpRequest', () => {
       expect(summary).toMatch(/^unknown tool:/);
       return { approved: false };
     });
-    const deps = fakeDeps(requestApproval);
-    await handleMcpRequest({ id: 7, method: 'tools/call', params: { name: APPROVAL_TOOL_NAME, arguments: {} } }, deps, 't1');
+    await handleApprovalToolCall(call(APPROVAL_TOOL_NAME, {}), fakeDeps(requestApproval), 't1');
     expect(requestApproval).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats absent arguments the same as empty arguments rather than failing the call', async () => {
+    const requestApproval = vi.fn(async () => ({ approved: false, reason: 'no' }));
+    const result = await handleApprovalToolCall(call(APPROVAL_TOOL_NAME, undefined), fakeDeps(requestApproval), 't1');
+    expect(payloadOf(result)).toEqual({ behavior: 'deny', message: 'no' });
   });
 });

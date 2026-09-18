@@ -123,6 +123,7 @@ function codecRequirednessMatrix(): CodecRequirednessMatrix {
     'task.offer_for_agent': { taskId: 'required', seq: 'required' },
     'task.offer_for_agent_with_egress': { taskId: 'required', seq: 'required' },
     'task.offer_for_agent_with_egress_fresh': { taskId: 'required', seq: 'required' },
+    'task.offer_prepared': { taskId: 'required', seq: 'required' },
     'agent.egress.reliable': { taskId: 'optional', seq: 'optional' },
     'agent.egress.ack': { taskId: 'optional', seq: 'required' },
     'agent.message.publish': { taskId: 'required', seq: 'optional' },
@@ -187,6 +188,10 @@ type CodecRequirednessMatrix = {
   'task.offer_for_agent_with_egress_fresh': {
     taskId: FieldRequiredness<'task.offer_for_agent_with_egress_fresh', 'taskId'>;
     seq: FieldRequiredness<'task.offer_for_agent_with_egress_fresh', 'seq'>;
+  };
+  'task.offer_prepared': {
+    taskId: FieldRequiredness<'task.offer_prepared', 'taskId'>;
+    seq: FieldRequiredness<'task.offer_prepared', 'seq'>;
   };
   'agent.egress.reliable': {
     taskId: FieldRequiredness<'agent.egress.reliable', 'taskId'>;
@@ -546,6 +551,15 @@ function minimalPayloadForProbe(type: MessageType): unknown {
           transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
         },
       };
+    case 'task.offer_prepared':
+      return {
+        policy: { mode: 'auto' },
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+        preparation: {
+          reference: 'prep-record-1',
+          requestDigest: 'request-digest-1',
+        },
+      };
     case 'agent.egress.reliable':
       return {
         agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
@@ -655,6 +669,7 @@ function minimalPayloadForProbe(type: MessageType): unknown {
         deadlineAt: '2026-01-01T00:00:30.000Z',
         context: { inline: '{"prompt":{},"messages":[]}' },
         requiredToolsets: ['team'],
+        permissionMode: 'auto',
       };
     case 'task.approve':
       return {};

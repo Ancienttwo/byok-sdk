@@ -23,7 +23,10 @@ import {
   AgentHomeProjectionValueSchema,
 } from './agent-home-projection';
 import {
+  InputPreparationAccountingPolicyRefSchema,
   InputPreparationContentHashSchema,
+  InputPreparationOfferBindingSchema,
+  InputPreparationPermissionModeSchema,
   InputPreparationPolicyRevisionSchema,
   InputPreparationProfileIdSchema,
   InputPreparationSelectionSchema,
@@ -387,6 +390,35 @@ export const TaskOfferForAgentWithEgressFreshPayloadSchema = TaskOfferForAgentPa
   .strict();
 export type TaskOfferForAgentWithEgressFreshPayload = z.infer<typeof TaskOfferForAgentWithEgressFreshPayloadSchema>;
 
+/**
+ * Strict offer for an already-counted prepared Execution.
+ *
+ * A DISTINCT message type, not a `preparation` field added to
+ * `task.offer_for_agent`, for the same N/N-1 reason the toolset and egress
+ * variants are distinct: an older daemon skips a message type it does not know
+ * (`UnknownMessageTypeError`, and the long-poll transport skips that entry
+ * whole), whereas it would legally STRIP an unknown optional field and run the
+ * task as an ordinary instruction offer — compiling a request of its own
+ * against tokens that were already counted for a different one.
+ *
+ * It carries no `instruction`: the user request is already inside the frozen
+ * envelope the referenced record retained, and an offer that carried both would
+ * have two answers to what the runtime is about to send. `sessionRef` is absent
+ * for the same structural reason the adapter refuses the pair — a prepared
+ * Execution never resumes.
+ *
+ * Every value under `preparation` is the Host RE-PRESENTING what the device
+ * already told it. The device compares each one against its own durable record
+ * and declines non-retryably on any difference; nothing here is authority.
+ */
+export const TaskOfferPreparedPayloadSchema = TaskOfferForAgentPayloadSchema.omit({
+  instruction: true,
+  sessionRef: true,
+})
+  .extend({ preparation: InputPreparationOfferBindingSchema })
+  .strict();
+export type TaskOfferPreparedPayload = z.infer<typeof TaskOfferPreparedPayloadSchema>;
+
 const EGRESS_SAFE_VALUE = z
   .json()
   .refine(
@@ -633,6 +665,14 @@ const InputPreparationBlobContextSchema = z
  * `deadlineAt` may only ever be TIGHTENED locally: the device clamps to
  * `min(deadlineAt - now, limits.preparationDeadlineMs)`, so a generous Host
  * deadline cannot enlarge a configured local bound.
+ *
+ * `permissionMode` is DECLARED by the requester and validated by the device;
+ * the device never infers it. A preparation counts tokens for one concrete
+ * tool manifest, and that manifest is the policy-filtered set for exactly one
+ * mode (`mcp/projection.ts`'s `filterMcpObservationForPolicy`) — so a
+ * preparation whose mode is unstated is a count of a manifest nobody named.
+ * The device applies the declared mode to its own observation and records it
+ * in the artifact binding; it is not a grant, and it authorizes nothing.
  */
 export const AgentInputPreparationPayloadSchema = z
   .object({
@@ -645,6 +685,14 @@ export const AgentInputPreparationPayloadSchema = z
     deadlineAt: z.iso.datetime({ offset: true }),
     context: z.union([InputPreparationInlineContextSchema, InputPreparationBlobContextSchema]),
     requiredToolsets: RequiredToolsetsSchema,
+    permissionMode: InputPreparationPermissionModeSchema,
+    /**
+     * The Host's accounting ruling for this preparation, carried verbatim onto
+     * the receipt's binding. Optional and defaulted NOWHERE: a payload that
+     * omits it produces a receipt that says `accounting_policy_missing`, which
+     * is the honest answer — the device rules on no residual key by itself.
+     */
+    accountingPolicyRef: InputPreparationAccountingPolicyRefSchema.optional(),
   })
   .strict();
 export type AgentInputPreparationPayload = z.infer<typeof AgentInputPreparationPayloadSchema>;
@@ -1229,6 +1277,7 @@ const TASK_OFFER_PAYLOAD_SCHEMAS = {
   'task.offer_for_agent': TaskOfferForAgentPayloadSchema,
   'task.offer_for_agent_with_egress': TaskOfferForAgentWithEgressPayloadSchema,
   'task.offer_for_agent_with_egress_fresh': TaskOfferForAgentWithEgressFreshPayloadSchema,
+  'task.offer_prepared': TaskOfferPreparedPayloadSchema,
 } as const;
 
 export type TaskOfferType = keyof typeof TASK_OFFER_PAYLOAD_SCHEMAS;
@@ -1285,6 +1334,7 @@ export const SERVER_TO_DAEMON_TYPES = [
   'task.offer_for_agent',
   'task.offer_for_agent_with_egress',
   'task.offer_for_agent_with_egress_fresh',
+  'task.offer_prepared',
   'agent.egress.ack',
   'agent.message.disposition',
   'agent.content.read',

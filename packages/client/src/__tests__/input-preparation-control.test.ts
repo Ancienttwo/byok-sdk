@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { fileURLToPath } from 'node:url';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import {
   ControlError,
@@ -32,6 +34,25 @@ import {
 } from '../input-preparation';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { trustedCwd } from './fixtures/launch-cwd';
+
+/**
+ * One real stdio MCP server, configured as a device toolset.
+ *
+ * It is here because the request contract no longer lets a caller state a tool
+ * manifest: a preparation names `requiredToolsets`, and the daemon observes
+ * them itself. So the end-to-end path only exists when this device actually
+ * has a toolset to observe, and these cases now exercise the real probe, the
+ * real launch boundary and the real fingerprints along with everything else.
+ */
+const MCP_FIXTURE = fileURLToPath(new URL('./fixtures/mcp-fixture-server.mjs', import.meta.url));
+const TOOLSETS = {
+  team: {
+    mcpServers: {
+      teamserver: { command: process.execPath, args: [MCP_FIXTURE, '{}'] },
+    },
+  },
+} as const;
 
 /**
  * B-P2 §10.5 across the WHOLE local stack: the real control server and its
@@ -99,6 +120,14 @@ function fixtureCounter(): RecordingCounter {
         kind: 'bound',
         value: 4_242,
         coverage: { covered: false, reason: 'offline fixture' },
+        // Bound to the exact projection the adapter was handed: a count whose
+        // projection nobody can name is refused before it is persisted.
+        providerEvidence: {
+          projectionDigest: createHash('sha256').update(request.counterProjection, 'utf8').digest('hex'),
+          endpoint: request.target.endpoint,
+          modelId: request.target.modelId,
+          asserted: { httpStatus: 200, usageFields: { prompt_tokens: 4_242 }, responseDigest: 'e'.repeat(64) },
+        },
       };
     },
   };
@@ -130,23 +159,16 @@ function preparationRequest(overrides: Partial<InputPreparationRequestV1> = {}):
     snapshot: {
       prompt: {
         cwd: '/workspace/project',
-        selectedTools: ['read'],
-        toolSnippets: { read: 'read snippet' },
+        toolSnippets: {},
         promptGuidelines: ['prefer small diffs'],
         contextFiles: [{ path: 'AGENTS.md', content: 'be precise' }],
         formattedSkills: '',
         docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
       },
       messages: [{ role: 'user', content: 'summarise the repository', timestamp: 1_700_000_000_000 }],
-      tools: [
-        {
-          name: 'read',
-          description: 'read a file',
-          parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
-        },
-      ],
     },
-    toolExecutors: { read: 'exec:read@1' },
+    permissionMode: 'auto',
+    requiredToolsets: ['team'],
     ...overrides,
   };
 }
@@ -194,6 +216,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
       serverUrl: server.url,
       workspaceRoot,
       storeDir,
+      mcpToolsets: { ...TOOLSETS },
       ...(options.enabled ? { inputPreparation: { limits: LIMITS, authorityResolver, counter } } : {}),
     };
     daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter('pi')]);
@@ -204,6 +227,34 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     client = connected.client;
     return { storeDir, config };
   }
+
+  it('awaits once-only configured runtime identity before exposing any control endpoint', async () => {
+    const storeDir = await tmpDir('byok-prep-init-store-');
+    const workspaceRoot = await tmpDir('byok-prep-init-ws-');
+    let entered!: () => void;
+    const resolving = new Promise<void>(resolve => { entered = resolve; });
+    let decline!: () => void;
+    const blocked = new Promise<void>(resolve => { decline = resolve; });
+    const resolve = vi.fn(async () => { entered(); await blocked; return { kind: 'unavailable', reason: 'implementation_identity_unattested' } as const; });
+    daemon = createDaemonWithAdapters({
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-prep-init',
+      serverUrl: server.url, workspaceRoot, storeDir,
+      inputPreparation: { limits: LIMITS, authorityResolver, counter },
+      toolImplementationAuthority: { resolve }, serviceEnrollment: { enabled: true },
+    }, [new StubRuntimeAdapter('pi')]);
+    expect(resolve).not.toHaveBeenCalled(); // The public factory remains synchronous and side-effect free here.
+    const starting = daemon.start();
+    const rejected = expect(starting).rejects.toThrow('configured pi-prepared implementation unavailable');
+    await resolving;
+    const endpoint = await connectControlClient({ storeDir, productId: 'acme-prep-init' });
+    expect(endpoint.ok).toBe(false);
+    decline(); await rejected;
+    await expect(daemon.start()).rejects.toThrow('configured pi-prepared implementation unavailable');
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(resolve).toHaveBeenCalledWith({ subject: { kind: 'runtime', runtimeId: 'pi' }, runtimeEntry: 'pi-prepared' });
+    expect((await connectControlClient({ storeDir, productId: 'acme-prep-init' })).ok).toBe(false);
+    expect(counter.calls).toEqual([]);
+  });
 
   it('keeps the whole surface off when no inputPreparation section is configured', async () => {
     await start({ enabled: false, productId: 'acme-prep-off' });
@@ -244,17 +295,52 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
 
     expect(receipt.format).toBe('byok.input-preparation.receipt');
     expect(receipt.state).toBe('counted');
-    expect(receipt.artifact?.coverage).toBe('unknown');
+    // The native compiler's own structural projection contract, carried
+    // verbatim — not a label this SDK chose.
+    expect(receipt.artifact?.projection.version).toBe(2);
+    expect(receipt.artifact?.projection.kind).toBe('content_complete');
+    expect(receipt.artifact?.projection.digest).toMatch(/^[0-9a-f]{64}$/u);
+    expect(receipt.artifact?.residual.length).toBeGreaterThan(0);
+    for (const entry of receipt.artifact?.residual ?? []) {
+      expect(typeof entry.key).toBe('string');
+      expect(typeof entry.valueClass).toBe('string');
+    }
     expect(receipt.artifact?.requestBytes).toBeGreaterThan(0);
     expect(receipt.binding.runtime.packageName).toBe('@byok-sdk/pi-coding-agent');
     expect(receipt.binding.runtime.upstreamCommit).toMatch(/^[0-9a-f]{40}$/u);
+    // The mode the manifest was filtered for is recorded, not inferred.
+    expect(receipt.binding.permissionMode).toBe('auto');
+    // The tools were OBSERVED from the configured toolset, and every one of
+    // them carries the implementation kind this daemon resolved for it. This
+    // SDK ships no `toolImplementationAuthority`, so that is the unconfigured
+    // answer — stated as evidence rather than assumed.
+    expect(Object.keys(receipt.artifact?.toolImplementationKinds ?? {})).toEqual([
+      'mcp__teamserver__echo',
+      'mcp__teamserver__find_leads',
+    ]);
+    expect(new Set(Object.values(receipt.artifact?.toolImplementationKinds ?? {}))).toEqual(
+      new Set(['unavailable:resolver_unconfigured']),
+    );
+    expect(receipt.artifact?.observationDigest).toMatch(/^[0-9a-f]{64}$/u);
+    expect(receipt.artifact?.toolBindingDigest).toMatch(/^[0-9a-f]{64}$/u);
+    // The observation happened inside the proven launch boundary.
+    expect(await trustedCwd()).toBeTruthy();
     expect(receipt.counter).toMatchObject({ authority: 'test_fixture', kind: 'bound', value: 4_242 });
 
-    // A fixture count and unknown compiler coverage can never be ready.
+    // A fixture count, an unruled residual set and unattested executors can
+    // never be ready. `projection_unknown` is absent on purpose: the compiler
+    // DID prove a content-complete projection, so what is missing is the Host's
+    // accounting ruling, which this request deliberately does not carry.
     expect(receipt.ready).toBe(false);
     expect(receipt.readinessReasons).toEqual(
-      expect.arrayContaining(['compiler_coverage_unknown', 'counter_authority_not_production', 'counter_coverage_incomplete']),
+      expect.arrayContaining([
+        'accounting_policy_missing',
+        'counter_authority_not_production',
+        'counter_coverage_incomplete',
+        'executor_identity_unproven',
+      ]),
     );
+    expect(receipt.readinessReasons).not.toContain('projection_unknown');
 
     // Task-free: nothing entered the runner.
     const status = await client!.request<{ activeTasks: unknown[]; runtimeIds: string[] }>('status');
@@ -335,20 +421,55 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
   it('rejects an input outside the declared first support set instead of filling the gap', async () => {
     await start({ enabled: true, productId: 'acme-prep-unsupported' });
     const base = preparationRequest();
-    // A tool schema that is not a full object schema passes the wire gate (it
-    // is a JSON object) and is refused by the native compiler.
-    const unsupported = preparationRequest({
-      snapshot: { ...base.snapshot, tools: [{ name: 'read', description: 'read a file', parameters: { type: 'object' } }] },
-    });
-    expect(await controlErrorCode(requestInputPreparation(client!, unsupported))).toBe('unsupported_input');
+    // A toolset this device does not configure is refused as unsupported
+    // input: the daemon will not prepare a manifest it cannot observe, and it
+    // will not silently prepare a smaller one.
+    expect(
+      await controlErrorCode(requestInputPreparation(client!, preparationRequest({ requiredToolsets: ['nonesuch'] }))),
+    ).toBe('unsupported_input');
     expect(counter.calls).toEqual([]);
 
-    // An assistant message is refused by the wire gate itself.
+    // A caller-stated tool schema is refused by NAME, not as a shape error:
+    // the model-visible manifest is a local observation this contract moved
+    // onto the device.
+    expect(
+      await controlErrorCode(
+        client!.request(INPUT_PREPARATION_PREPARE_METHOD, {
+          ...base,
+          snapshot: { ...base.snapshot, tools: [{ name: 'read', description: 'd', parameters: { type: 'object' } }] },
+        }),
+      ),
+    ).toBe('unsupported_input');
+    expect(
+      await controlErrorCode(
+        client!.request(INPUT_PREPARATION_PREPARE_METHOD, { ...base, toolExecutors: { read: 'exec:read@1' } }),
+      ),
+    ).toBe('unsupported_input');
+    expect(counter.calls).toEqual([]);
+
+    // An assistant message WITHOUT the host-canonical origin discriminant is
+    // refused by the wire gate itself: it claims provenance this surface
+    // cannot check, and the support set admits host-canonical text only.
     expect(
       await controlErrorCode(
         client!.request(INPUT_PREPARATION_PREPARE_METHOD, {
           ...base,
           snapshot: { ...base.snapshot, messages: [{ role: 'assistant', content: 'hi', timestamp: 1 }] },
+        }),
+      ),
+    ).toBe('bad_request');
+    // And host-canonical text that carries a fabricated provenance field is
+    // refused the same way rather than having the field stripped.
+    expect(
+      await controlErrorCode(
+        client!.request(INPUT_PREPARATION_PREPARE_METHOD, {
+          ...base,
+          snapshot: {
+            ...base.snapshot,
+            messages: [
+              { role: 'assistant', origin: 'host_canonical', content: 'hi', timestamp: 1, usage: { input: 1 } },
+            ],
+          },
         }),
       ),
     ).toBe('bad_request');

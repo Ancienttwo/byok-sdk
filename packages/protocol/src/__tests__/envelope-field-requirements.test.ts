@@ -71,6 +71,15 @@ function minimalPayload(type: MessageType): unknown {
           transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
         },
       };
+    case 'task.offer_prepared':
+      return {
+        policy: { mode: 'auto' },
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+        preparation: {
+          reference: 'prep-record-1',
+          requestDigest: 'request-digest-1',
+        },
+      };
     case 'agent.egress.reliable':
       return {
         agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
@@ -180,6 +189,7 @@ function minimalPayload(type: MessageType): unknown {
         deadlineAt: '2026-01-01T00:00:30.000Z',
         context: { inline: '{"prompt":{},"messages":[]}' },
         requiredToolsets: ['team'],
+        permissionMode: 'auto',
       };
     case 'task.approve':
       return {};

@@ -50,6 +50,7 @@ function payload(overrides: Record<string, unknown> = {}): Record<string, unknow
     deadlineAt: '2026-01-01T00:01:00.000Z',
     context: { inline: '{"prompt":{},"messages":[]}' },
     requiredToolsets: ['team'],
+    permissionMode: 'auto',
     ...overrides,
   };
 }
@@ -63,6 +64,7 @@ const BINDING = {
   source: SOURCE,
   target: { endpoint: 'https://provider.example/v1', modelId: 'model-1' },
   policyRevision: 'limits-r1',
+  permissionMode: 'auto',
   runtime: {
     packageName: '@byok-sdk/pi-coding-agent',
     packageVersion: '0.85.1001',
@@ -86,10 +88,14 @@ const RECEIPT = {
     toolManifestDigest: 'sha256:tools',
     requestBytes: 1024,
     projectionBytes: 900,
-    coverage: 'unknown',
+    projection: { version: 2, kind: 'content_complete', digest: 'a'.repeat(64) },
+    residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
+    observationDigest: 'sha256:observation',
+    toolBindingDigest: 'sha256:binding',
+    toolImplementationKinds: { mcp__team__list: 'unavailable:resolver_unconfigured' },
   },
   ready: false,
-  readinessReasons: ['compiler_coverage_unknown', 'executor_identity_unproven'],
+  readinessReasons: ['accounting_policy_missing', 'executor_identity_unproven'],
   artifactExpiresAt: '2026-01-01T01:00:00.000Z',
 } as const;
 
@@ -135,9 +141,14 @@ describe('agent.input.preparation envelope', () => {
   it('carries no tools, tool executors, runtime identity, tenant or device', () => {
     const shape = Object.keys(AgentInputPreparationPayloadSchema.shape).sort();
     expect(shape).toEqual([
+      // Host accounting authority, carried verbatim. It rules on residual KEYS
+      // by name; it states no tool, no executor and no runtime identity, all of
+      // which stay local observations the device alone can make.
+      'accountingPolicyRef',
       'agentRef',
       'context',
       'deadlineAt',
+      'permissionMode',
       'policyRevision',
       'profileId',
       'requestId',
@@ -192,7 +203,6 @@ describe('input preparation context document', () => {
     const document = {
       prompt: {
         cwd: '/home/agent',
-        selectedTools: ['read'],
         toolSnippets: { read: 'reads a file' },
         promptGuidelines: [],
         contextFiles: [],
@@ -205,13 +215,63 @@ describe('input preparation context document', () => {
     // `tools` is a device observation. A Host that could send it could claim a
     // toolset the device does not have.
     expect(InputPreparationContextDocumentSchema.safeParse({ ...document, tools: [] }).success).toBe(false);
-    // Only `user` history is in the first support set; anything else rejects.
+    // `selectedTools` is the manifest's own name list by native contract, so a
+    // Host stating it would be stating the manifest through the prompt.
+    expect(
+      InputPreparationContextDocumentSchema.safeParse({
+        ...document,
+        prompt: { ...document.prompt, selectedTools: ['read'] },
+      }).success,
+    ).toBe(false);
+    // An assistant message with no `origin` discriminant claims provenance
+    // nobody here can check, so it rejects rather than being narrowed to the
+    // host-canonical kind.
     expect(
       InputPreparationContextDocumentSchema.safeParse({
         ...document,
         messages: [{ role: 'assistant', content: 'hi', timestamp: 1 }],
       }).success,
     ).toBe(false);
+  });
+
+  it('accepts host-canonical assistant text beside user history, and nothing that claims provenance', () => {
+    const document = {
+      prompt: {
+        cwd: '/home/agent',
+        toolSnippets: {},
+        promptGuidelines: [],
+        contextFiles: [],
+        formattedSkills: '',
+        docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
+      },
+      messages: [
+        { role: 'user', content: 'hi', timestamp: 1767225600000 },
+        { role: 'assistant', origin: 'host_canonical', content: 'hello', timestamp: 1767225600001 },
+        { role: 'user', content: 'go on', timestamp: 1767225600002 },
+      ],
+    };
+    const parsed = InputPreparationContextDocumentSchema.safeParse(document);
+    expect(parsed.success).toBe(true);
+    expect(parsed.success ? parsed.data.messages : undefined).toEqual(document.messages);
+
+    const host = document.messages[1]!;
+    for (const forged of [
+      // The host asserts the text was already said; it cannot assert that a
+      // provider produced it, nor how many tokens that provider reported.
+      { ...host, usage: { input: 1, output: 2 } },
+      { ...host, model: 'glm-4.6' },
+      { ...host, provider: 'zai' },
+      { ...host, stopReason: 'stop' },
+      // `origin` is the discriminant, and only one value is a fact this
+      // surface can carry.
+      { ...host, origin: 'provider' },
+      // The native text-block array is the COMPILER's shape, never the wire's.
+      { ...host, content: [{ type: 'text', text: 'hello' }] },
+    ]) {
+      expect(
+        InputPreparationContextDocumentSchema.safeParse({ ...document, messages: [forged] }).success,
+      ).toBe(false);
+    }
   });
 });
 

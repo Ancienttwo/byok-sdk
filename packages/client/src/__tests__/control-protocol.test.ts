@@ -244,6 +244,15 @@ describe('control-protocol: NdjsonLineReader', () => {
 describe('control-protocol: input_preparation param gates', () => {
   const scope = { deviceId: 'device-1', agentRef: 'agent-1', profileId: 'profile-1', profileRevision: 'profile-rev-1' };
 
+  function accountingPolicyRef(): Record<string, unknown> {
+    return {
+      revision: 'accounting-r1',
+      ruledRuntime: '@byok-sdk/pi-coding-agent@0.85.1005+d981de1229ef899957bbe968bc8dcda02a21f477.5',
+      ruledTarget: { endpoint: 'https://api.z.ai/api/coding/paas/v4', modelId: 'glm-4.6' },
+      ruledResidualKeys: ['max_tokens'],
+    };
+  }
+
   function validRequest(): Record<string, unknown> {
     return {
       format: INPUT_PREPARATION_REQUEST_FORMAT,
@@ -270,35 +279,77 @@ describe('control-protocol: input_preparation param gates', () => {
       snapshot: {
         prompt: {
           cwd: '/workspace',
-          selectedTools: ['read'],
-          toolSnippets: { read: 'snippet' },
+          toolSnippets: {},
           promptGuidelines: [],
           contextFiles: [{ path: 'AGENTS.md', content: 'x' }],
           formattedSkills: '',
           docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
         },
         messages: [{ role: 'user', content: 'hello', timestamp: 1 }],
-        tools: [{ name: 'read', description: 'read a file', parameters: { type: 'object', properties: {} } }],
       },
-      toolExecutors: { read: 'exec:read@1' },
+      permissionMode: 'auto',
+      requiredToolsets: ['team'],
     };
   }
 
   it('accepts exactly the one strict request shape and returns a private copy', () => {
     const raw = validRequest();
     const parsed = parseInputPreparationRequestParams(raw);
-    expect(parsed).toBeDefined();
-    expect(parsed?.requestId).toBe('prep-1');
-    expect(parsed?.snapshot.tools[0]?.name).toBe('read');
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error('unreachable');
+    expect(parsed.request.requestId).toBe('prep-1');
+    expect(parsed.request.permissionMode).toBe('auto');
+    expect(parsed.request.requiredToolsets).toEqual(['team']);
     // A copy, not the caller's own arrays/objects.
-    expect(parsed?.snapshot.prompt.selectedTools).not.toBe((raw.snapshot as { prompt: { selectedTools: unknown } }).prompt.selectedTools);
-    expect(parsed?.toolExecutors).not.toBe(raw.toolExecutors);
+    expect(parsed.request.snapshot.prompt.toolSnippets).not.toBe((raw.snapshot as { prompt: { toolSnippets: unknown } }).prompt.toolSnippets);
+    expect(parsed.request.requiredToolsets).not.toBe(raw.requiredToolsets);
+  });
+
+  /**
+   * The property this contract turns on: a caller cannot state a tool schema
+   * and cannot state an executor identity. Both are refused by NAME, as
+   * `unsupported_input` rather than `bad_request`, because a caller sending
+   * either is not sending a slightly wrong request — it is asserting an
+   * authority that now belongs to the device.
+   */
+  it.each([
+    ['a caller-supplied executor map', (r: Record<string, unknown>) => ({ ...r, toolExecutors: { read: 'exec:read@1' } }), 'toolExecutors'],
+    [
+      'a caller-supplied tool schema',
+      (r: Record<string, unknown>) => ({
+        ...r,
+        snapshot: {
+          ...(r.snapshot as object),
+          tools: [{ name: 'read', description: 'read a file', parameters: { type: 'object' } }],
+        },
+      }),
+      'snapshot.tools',
+    ],
+    [
+      'a caller-supplied selected-tool list',
+      (r: Record<string, unknown>) => ({
+        ...r,
+        snapshot: {
+          ...(r.snapshot as object),
+          prompt: { ...((r.snapshot as { prompt: object }).prompt), selectedTools: ['read'] },
+        },
+      }),
+      'snapshot.prompt.selectedTools',
+    ],
+  ])('refuses %s by name rather than as a shape error', (_label, mutate, key) => {
+    const parsed = parseInputPreparationRequestParams(mutate(validRequest()));
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) throw new Error('unreachable');
+    expect(parsed.code).toBe('unsupported_input');
+    expect(parsed.detail).toContain(key);
   });
 
   it.each([
     ['an unknown top-level field', (r: Record<string, unknown>) => ({ ...r, runtimeIdentity: 'forged' })],
     ['a wrong format tag', (r: Record<string, unknown>) => ({ ...r, format: 'byok.input-preparation.request.v2' })],
-    ['a wrong version', (r: Record<string, unknown>) => ({ ...r, version: 2 })],
+    ['the RETIRED version 1', (r: Record<string, unknown>) => ({ ...r, version: 1 })],
+    ['the RETIRED version 2', (r: Record<string, unknown>) => ({ ...r, version: 2 })],
+    ['a future version', (r: Record<string, unknown>) => ({ ...r, version: 4 })],
     ['an unknown scope field', (r: Record<string, unknown>) => ({ ...r, scope: { ...scope, tenantId: 't' } })],
     ['a non-openai-completions api', (r: Record<string, unknown>) => ({ ...r, selection: { ...(r.selection as object), model: { ...((r.selection as { model: object }).model), api: 'anthropic-messages' } } })],
     ['an unsupported model field', (r: Record<string, unknown>) => ({ ...r, selection: { ...(r.selection as object), model: { ...((r.selection as { model: object }).model), compat: {} } } })],
@@ -306,15 +357,38 @@ describe('control-protocol: input_preparation param gates', () => {
     ['an assistant message', (r: Record<string, unknown>) => ({ ...r, snapshot: { ...(r.snapshot as object), messages: [{ role: 'assistant', content: 'hi', timestamp: 1 }] } })],
     ['multimodal message content', (r: Record<string, unknown>) => ({ ...r, snapshot: { ...(r.snapshot as object), messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }], timestamp: 1 }] } })],
     ['no messages at all', (r: Record<string, unknown>) => ({ ...r, snapshot: { ...(r.snapshot as object), messages: [] } })],
-    ['a tool schema that is not an object', (r: Record<string, unknown>) => ({ ...r, snapshot: { ...(r.snapshot as object), tools: [{ name: 'read', description: 'd', parameters: 'schema' }] } })],
-    ['a duplicate tool name', (r: Record<string, unknown>) => ({ ...r, snapshot: { ...(r.snapshot as object), tools: [{ name: 'read', description: 'd', parameters: { type: 'object' } }, { name: 'read', description: 'd', parameters: { type: 'object' } }] }, toolExecutors: { read: 'e' } })],
-    ['executor identities that do not cover the tools', (r: Record<string, unknown>) => ({ ...r, toolExecutors: {} })],
-    ['an executor for a tool that is not present', (r: Record<string, unknown>) => ({ ...r, toolExecutors: { read: 'e', bash: 'e' } })],
+    ['an unknown snapshot field', (r: Record<string, unknown>) => ({ ...r, snapshot: { ...(r.snapshot as object), toolExecutors: {} } })],
+    ['a permission mode outside the closed set', (r: Record<string, unknown>) => ({ ...r, permissionMode: 'yolo' })],
+    ['a missing permission mode', (r: Record<string, unknown>) => { const { permissionMode: _mode, ...rest } = r; return rest; }],
+    ['no required toolsets at all', (r: Record<string, unknown>) => ({ ...r, requiredToolsets: [] })],
+    ['a duplicate toolset id', (r: Record<string, unknown>) => ({ ...r, requiredToolsets: ['team', 'team'] })],
+    ['a non-string toolset id', (r: Record<string, unknown>) => ({ ...r, requiredToolsets: [7] })],
     ['an empty requestId', (r: Record<string, unknown>) => ({ ...r, requestId: '' })],
+    ['an accounting ruling with an unknown field', (r: Record<string, unknown>) => ({ ...r, accountingPolicyRef: { ...accountingPolicyRef(), budget: 10 } })],
+    ['an accounting ruling naming no runtime', (r: Record<string, unknown>) => { const { ruledRuntime: _runtime, ...rest } = accountingPolicyRef(); return { ...r, accountingPolicyRef: rest }; }],
+    ['an accounting ruling naming no target', (r: Record<string, unknown>) => { const { ruledTarget: _target, ...rest } = accountingPolicyRef(); return { ...r, accountingPolicyRef: rest }; }],
+    ['an accounting ruling repeating a residual key', (r: Record<string, unknown>) => ({ ...r, accountingPolicyRef: { ...accountingPolicyRef(), ruledResidualKeys: ['max_tokens', 'max_tokens'] } })],
     ['a null params value', () => null],
     ['an array params value', () => []],
   ])('rejects %s', (_label, mutate) => {
-    expect(parseInputPreparationRequestParams(mutate(validRequest()))).toBeUndefined();
+    const parsed = parseInputPreparationRequestParams(mutate(validRequest()) as Record<string, unknown>);
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) throw new Error('unreachable');
+    expect(parsed.code).toBe('bad_request');
+  });
+
+  it('carries the Host accounting ruling verbatim, and defaults none when it is absent', () => {
+    const withoutRuling = parseInputPreparationRequestParams(validRequest());
+    expect(withoutRuling.ok).toBe(true);
+    if (!withoutRuling.ok) throw new Error('unreachable');
+    // No default: a request that rules on nothing produces a request that says
+    // so, and the receipt answers `accounting_policy_missing`.
+    expect(withoutRuling.request.accountingPolicyRef).toBeUndefined();
+
+    const parsed = parseInputPreparationRequestParams({ ...validRequest(), accountingPolicyRef: accountingPolicyRef() });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error('unreachable');
+    expect(parsed.request.accountingPolicyRef).toEqual(accountingPolicyRef());
   });
 
   it('gates lookup and cancel on exactly {requestId, scope}', () => {

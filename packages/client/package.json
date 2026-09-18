@@ -1,6 +1,9 @@
 {
   "name": "@byok-sdk/client",
   "version": "0.18.0",
+  "byok": {
+    "piRuntimePin": "npm:@byok-sdk/pi-coding-agent@0.85.1005"
+  },
   "description": "BYOK SDK client daemon: runs on the end user's machine, pairs with a SaaS server, and drives a local coding-agent runtime",
   "type": "module",
   "license": "MIT",
@@ -25,7 +28,9 @@
     "byok-approval-mcp": "./dist/bin/byok-approval-mcp.js",
     "byok-agent-message-mcp": "./dist/bin/byok-agent-message-mcp.js",
     "byok-agent-memory-mcp": "./dist/bin/byok-agent-memory-mcp.js",
-    "byok-agent-team-mcp": "./dist/bin/byok-agent-team-mcp.js"
+    "byok-agent-team-mcp": "./dist/bin/byok-agent-team-mcp.js",
+    "byok-pi-prepared": "./dist/bin/byok-pi-prepared.js",
+    "byok-pi-rpc": "./dist/bin/byok-pi-rpc.js"
   },
   "exports": {
     ".": {
@@ -40,9 +45,18 @@
       "types": "./dist/agent-memory/index.d.ts",
       "import": "./dist/agent-memory/index.js"
     },
+    "./assertion-client": {
+      "types": "./dist/assertion-client/index.d.ts",
+      "import": "./dist/assertion-client/index.js"
+    },
+    "./mcp-server": {
+      "types": "./dist/mcp-server/index.d.ts",
+      "import": "./dist/mcp-server/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
+    "bin",
     "dist",
     "README.md",
     "LICENSE"
@@ -51,11 +65,11 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsup && tsc -p tsconfig.build.json && node scripts/check-adapters-entry.mjs && node scripts/check-agent-memory-entry.mjs",
+    "build": "tsup && node scripts/check-adapters-entry.mjs --build-todo && node scripts/build-todo-assets.mjs && node scripts/build-pi-export-assets.mjs && node scripts/build-sealed-host.mjs && tsc -p tsconfig.build.json && node scripts/check-adapters-entry.mjs && node scripts/check-agent-memory-entry.mjs",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.vendor.json",
     "smoke:adapters": "node scripts/adapter-task-smoke.mjs",
     "smoke:claude-toolset-permission": "node scripts/claude-toolset-permission-smoke.mjs",
     "smoke:codex-toolset-permission": "node scripts/codex-toolset-permission-smoke.mjs",
@@ -69,14 +83,41 @@
   "dependencies": {
     "@byok-sdk/core": "workspace:*",
     "@byok-sdk/protocol": "workspace:*",
-    "@earendil-works/pi-coding-agent": "npm:@byok-sdk/pi-coding-agent@0.85.1002",
-    "@juicesharp/rpiv-todo": "2.8.0",
+    "@earendil-works/pi-coding-agent": "npm:@byok-sdk/pi-coding-agent@0.85.1005",
     "@modelcontextprotocol/client": "2.0.0",
-    "pi-subagents": "0.60.0",
-    "pi-web-access": "0.24.1"
+    "pi-web-access": "0.24.1",
+    "@byok-sdk/implementation-identity": "workspace:*",
+    "@mozilla/readability": "0.6.0",
+    "linkedom": "0.16.11",
+    "p-limit": "6.2.0",
+    "promise.try": "2.0.1",
+    "turndown": "7.2.4",
+    "unpdf": "1.8.1",
+    "undici": "8.9.0",
+    "jiti": "2.7.0",
+    "yaml": "2.8.3",
+    "@juicesharp/rpiv-i18n": "2.8.0",
+    "@juicesharp/rpiv-config": "2.8.0",
+    "typebox": "1.3.7",
+    "@earendil-works/pi-ai": "npm:@byok-sdk/pi-ai@0.85.1005"
   },
   "devDependencies": {
     "@byok-sdk/server": "workspace:*",
-    "@hono/node-server": "^2.0.10"
+    "@hono/node-server": "^2.0.10",
+    "pi-subagents": "0.60.0"
+  },
+  "imports": {
+    "#byok-pi-runtime-host": {
+      "types": "./dist/bin/pi-runtime-host.d.ts",
+      "default": "./dist/bin/pi-runtime-host.js"
+    },
+    "#byok-pi-todo-runtime": {
+      "types": "./dist/bin/pi-todo-runtime.d.ts",
+      "default": "./dist/bin/pi-todo-runtime.js"
+    },
+    "#byok-pi-runtime-host-sealed": {
+      "types": "./dist/bin/pi-runtime-host-sealed.d.ts",
+      "default": "./dist/bin/pi-runtime-host-sealed.js"
+    }
   }
 }

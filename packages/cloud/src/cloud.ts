@@ -94,6 +94,7 @@ import {
   TaskOfferForAgentWithEgressPayloadSchema,
   TaskOfferForAgentWithEgressFreshPayloadSchema,
   TaskOfferForAgentPayloadSchema,
+  TaskOfferPreparedPayloadSchema,
   type AgentRef,
   type AgentContentReceiptPayload,
   type AgentContentReadPayload,
@@ -114,6 +115,7 @@ import {
   type TaskOfferPayload,
   type TaskSteerPayload,
   type TaskOfferForAgentPayload,
+  type TaskOfferPreparedPayload,
   type TaskOfferForAgentWithEgressPayload,
   type TaskOfferForAgentWithEgressFreshPayload,
   type TaskOfferWithToolsetsPayload,
@@ -372,6 +374,23 @@ export interface AgentDispatchInput {
   readonly payload: TaskOfferForAgentPayload;
 }
 
+/**
+ * Strict dispatch of an already-counted preparation back to the device that
+ * counted it.
+ *
+ * Deliberately NOT an optional field on {@link AgentDispatchInput}: the wire
+ * message is distinct for the freeze-rule reason documented on
+ * `TaskOfferPreparedPayloadSchema`, and a host API that could express both
+ * through one input would let a caller reach the ordinary lane by omitting one
+ * property.
+ */
+export interface PreparedDispatchInput {
+  /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+  readonly taskId?: string;
+  /** Instruction-free strict payload naming the preparation this Execution consumes. */
+  readonly payload: TaskOfferPreparedPayload;
+}
+
 /** Strict Agent dispatch that supplies the policy consumed by the typed egress lanes. */
 export interface AgentEgressDispatchInput {
   /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
@@ -485,6 +504,21 @@ export interface ByokCloud {
    * before either the mailbox append or task-attempt open.
    */
   enqueueAgentOffer(tenant: TenantId, deviceId: string, input: AgentDispatchInput): Promise<EnqueuedOffer>;
+  /**
+   * Host control plane: enqueue an offer for an already-counted preparation.
+   *
+   * Admission requires the device to durably advertise both the Agent-home
+   * contract and `agent-input-preparation` — the second because only a device
+   * that can prepare holds the durable record this offer names. A device that
+   * advertises neither never receives the message, and a device whose protocol
+   * build predates the type skips it whole rather than running it as an
+   * ordinary instruction offer.
+   */
+  enqueuePreparedOffer(
+    tenant: TenantId,
+    deviceId: string,
+    input: PreparedDispatchInput,
+  ): Promise<EnqueuedOffer>;
   /**
    * Host control plane: enqueue the typed egress-policy Agent offer. Missing
    * egress/reliable-ack capabilities reject before a mailbox row is allocated.
@@ -1831,6 +1865,23 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       const payload = TaskOfferForAgentPayloadSchema.parse(input.payload);
       return enqueueTaskEnvelope(tenant, deviceId, input.taskId, payload.agentRef, (taskId, seq, messageId) =>
         createEnvelope('task.offer_for_agent', payload, { id: messageId, taskId, seq }),
+      );
+    },
+
+    async enqueuePreparedOffer(tenant, deviceId, input) {
+      await assertAgentCapabilities(tenant, deviceId, [
+        AGENT_HOME_CONTRACT_CAPABILITY,
+        AGENT_INPUT_PREPARATION_CAPABILITY,
+        ...(input.payload.terminalProjection === undefined ? [] : [TERMINAL_PROJECTION_SELECTION_CAPABILITY]),
+      ]);
+      // Parsed before a mailbox sequence is reserved, exactly as the strict
+      // Agent offer above is: a malformed preparation reference must not leave
+      // a durable delivery row behind. `.strict()` also means a caller that
+      // tried to smuggle an `instruction` or a `sessionRef` onto this lane is
+      // rejected here rather than silently stripped.
+      const payload = TaskOfferPreparedPayloadSchema.parse(input.payload);
+      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, payload.agentRef, (taskId, seq, messageId) =>
+        createEnvelope('task.offer_prepared', payload, { id: messageId, taskId, seq }),
       );
     },
 

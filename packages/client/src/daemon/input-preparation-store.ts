@@ -10,7 +10,10 @@ import {
   type InputPreparationBindingV1,
   type InputPreparationArtifactSummaryV1,
   type InputPreparationCounterEvidenceV1,
+  type InputPreparationModelV1,
   type InputPreparationPinV1,
+  type InputPreparationProjectionV1,
+  type InputPreparationResidualKeyV1,
   type InputPreparationStateV1,
 } from '../input-preparation';
 
@@ -52,6 +55,37 @@ import {
 // Record shape
 // ---------------------------------------------------------------------------
 
+/**
+ * The durable RECORD schema version, and nothing else.
+ *
+ * Deliberately separate from `INPUT_PREPARATION_VERSION`, which versions the
+ * wire shapes — the control request, the receipt, the retained artifact. Those
+ * are what two parties agree on; this one is what one daemon's own on-disk log
+ * is written in, and the two move for different reasons. Bumping the wire
+ * version because a private durable field became required would make every
+ * peer re-negotiate a contract that did not change; reusing the wire version
+ * for the log would make the log's meaning depend on an agreement it is not a
+ * party to.
+ *
+ * 3 was the first version in which `model` is a required durable fact (a
+ * prepared launch must re-present the counted model identity as an INDEPENDENT
+ * expectation, and the only other copy of it lives inside the retained
+ * envelope, which the native contract forbids using as its own expectation).
+ *
+ * 4 is the first version whose artifact carries the native compiler's
+ * structural projection contract — `projection` plus a classified `residual`
+ * list — in place of the single opaque `coverage` label version 3 wrote. A
+ * version-3 record cannot be read forward: nothing can honestly decide whether
+ * a record frozen under an opaque label had a content-complete projection or
+ * which residual keys its request carried, and inventing either is precisely
+ * the shadow accounting this contract forbids.
+ *
+ * A record at any other version is refused — see
+ * {@link InputPreparationUnsupportedRecordVersionError}. There is no
+ * compatibility read.
+ */
+export const INPUT_PREPARATION_RECORD_VERSION = 4;
+
 /** The durable idempotency key. Never a task id, and never caller-asserted: `scopeId` comes from the trusted authority grant. */
 export interface InputPreparationRecordKey {
   readonly scopeId: string;
@@ -61,13 +95,26 @@ export interface InputPreparationRecordKey {
 
 export interface InputPreparationRecord {
   readonly format: typeof INPUT_PREPARATION_RECORD_FORMAT;
-  readonly version: typeof INPUT_PREPARATION_VERSION;
+  /** The RECORD schema version — see {@link INPUT_PREPARATION_RECORD_VERSION}. Not the wire version. */
+  readonly version: typeof INPUT_PREPARATION_RECORD_VERSION;
   readonly recordId: string;
   readonly key: InputPreparationRecordKey;
   /** Digest over the whole normalized request, scope and runtime identity. */
   readonly requestDigest: string;
   readonly state: InputPreparationStateV1;
   readonly binding: InputPreparationBindingV1;
+  /**
+   * The exact model identity the request was compiled for.
+   *
+   * Durable, and BESIDE the binding rather than inside it. Beside, because the
+   * binding is the wire projection a receipt discloses and a model identity
+   * carries a base URL and a cost table a receipt has no business publishing.
+   * Durable, because a prepared launch must re-present it to the native
+   * verifier as an INDEPENDENT expectation — the only other copy of it lives
+   * inside the retained envelope, and the native contract is explicit that a
+   * value read out of the envelope can never serve as its own expectation.
+   */
+  readonly model: InputPreparationModelV1;
   readonly artifact?: InputPreparationArtifactSummaryV1;
   readonly counter?: InputPreparationCounterEvidenceV1;
   /** Retained bytes attributable to this record, counted against the per-scope aggregate. */
@@ -80,7 +127,7 @@ export interface InputPreparationRecord {
   readonly updatedAt: string;
   readonly artifactExpiresAt: string;
   readonly recordExpiresAt: string;
-  /** Reserved for G3b. This package never writes it. */
+  /** The committed Execution that consumed this record, written once by {@link InputPreparationStore.pin}. */
   readonly pin?: InputPreparationPinV1;
 }
 
@@ -96,7 +143,10 @@ export interface InputPreparationArtifact {
   readonly requestBody: string;
   /** P(D) — the counted projection, unchanged. */
   readonly counterProjection: string;
-  readonly coverage: string;
+  /** What the native compiler proved about P(D), copied verbatim off the envelope. */
+  readonly projection: InputPreparationProjectionV1;
+  /** Every top-level key of D outside P(D), classified by the native compiler. */
+  readonly residual: readonly InputPreparationResidualKeyV1[];
   /** The native envelope, retained verbatim so a later consumer re-verifies rather than recompiles. */
   readonly envelope: unknown;
 }
@@ -167,6 +217,30 @@ export class InputPreparationIntegrityError extends Error {
   }
 }
 
+/**
+ * The log holds a record written in a schema version this build does not
+ * support.
+ *
+ * A refusal, never a migration and never a compatibility read: the older shape
+ * is missing facts a prepared Execution cannot be launched without, and a store
+ * that silently held records it could not honor would be worse than one that
+ * says so. The refusal happens during replay, BEFORE the store is open, so it
+ * performs zero writes and zero cleanup — the log and every artifact beside it
+ * are left exactly as found for an operator to dispose of explicitly.
+ */
+export class InputPreparationUnsupportedRecordVersionError extends InputPreparationIntegrityError {
+  readonly reason = 'unsupported_record_version';
+
+  constructor(readonly recordId: string, readonly recordVersion: unknown) {
+    super(
+      `the input-preparation record log contains record ${recordId} at record schema version ${JSON.stringify(recordVersion)},`
+      + ` which this build does not support (it supports record schema version ${INPUT_PREPARATION_RECORD_VERSION} only);`
+      + ' the record is an unsupported older version and has been left untouched pending explicit operator disposition',
+    );
+    this.name = 'InputPreparationUnsupportedRecordVersionError';
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
@@ -183,6 +257,8 @@ export interface ReserveInput {
   readonly key: InputPreparationRecordKey;
   readonly requestDigest: string;
   readonly binding: InputPreparationBindingV1;
+  /** See {@link InputPreparationRecord.model}. */
+  readonly model: InputPreparationModelV1;
   /**
    * The caller's in-flight bound, enforced in the same closure that appends the
    * new record. Never consulted for a key that already exists: reading back an
@@ -209,6 +285,17 @@ export interface CounterReservationInput {
 export type ReserveOutcome =
   | { readonly kind: 'created'; readonly record: InputPreparationRecord }
   | { readonly kind: 'existing'; readonly record: InputPreparationRecord };
+
+/**
+ * The result of one compare-and-set against a record's single pin slot.
+ *
+ * `occupied` is not an error: it is the answer the losing runner of a race is
+ * supposed to get, and it carries the record so the caller can report WHICH
+ * Execution holds it.
+ */
+export type PinOutcome =
+  | { readonly kind: 'pinned'; readonly record: InputPreparationRecord }
+  | { readonly kind: 'occupied'; readonly record: InputPreparationRecord };
 
 /** The mutable fields one durable transition may set. Identity and key are immutable. */
 export interface RecordPatch {
@@ -292,8 +379,16 @@ export class InputPreparationStore {
         );
       }
       const record = parsed as InputPreparationRecord;
-      if (record.format !== INPUT_PREPARATION_RECORD_FORMAT || record.version !== INPUT_PREPARATION_VERSION) {
-        throw new InputPreparationIntegrityError('the input-preparation record log contains an unknown record format or version');
+      if (record.format !== INPUT_PREPARATION_RECORD_FORMAT) {
+        throw new InputPreparationIntegrityError('the input-preparation record log contains an unknown record format');
+      }
+      // The version is the ONLY thing that discriminates a supported record
+      // from an older one. Probing for an individual field instead (does it
+      // carry `model`?) would be a second, weaker authority over the same
+      // question, and would quietly accept any future shape that happens to
+      // have the field the probe knows to look for.
+      if (record.version !== INPUT_PREPARATION_RECORD_VERSION) {
+        throw new InputPreparationUnsupportedRecordVersionError(record.recordId, record.version);
       }
       // Last write wins per record id: the log is an append-only history of
       // one record's transitions, replayed in order.
@@ -314,6 +409,20 @@ export class InputPreparationStore {
     await this.log.confirmRecovered();
     this.records = await this.replay();
     this.opened = true;
+  }
+
+  /**
+   * Drop this instance's replayed state.
+   *
+   * Nothing on disk is touched: the log and the artifacts are the durable
+   * facts, and this only ends one process's view of them. After it, every read
+   * refuses instead of answering `undefined` — which is the whole point, since
+   * a closed store and an empty one would otherwise be indistinguishable to a
+   * caller. Re-opening replays from disk again.
+   */
+  close(): void {
+    this.opened = false;
+    this.records = new Map();
   }
 
   private assertOpen(): void {
@@ -377,12 +486,13 @@ export class InputPreparationStore {
       const artifactExpiresAtMs = createdAtMs + this.options.retentionMs;
       const record: InputPreparationRecord = {
         format: INPUT_PREPARATION_RECORD_FORMAT,
-        version: INPUT_PREPARATION_VERSION,
+        version: INPUT_PREPARATION_RECORD_VERSION,
         recordId,
         key: { ...input.key },
         requestDigest: input.requestDigest,
         state: 'reserved',
         binding: input.binding,
+        model: input.model,
         artifactBytes: 0,
         counterCalls: 0,
         createdAt: new Date(createdAtMs).toISOString(),
@@ -421,16 +531,28 @@ export class InputPreparationStore {
     });
   }
 
+  /**
+   * Every read asserts the store is open, for one reason: an unopened store
+   * and an empty store are indistinguishable from the in-memory map, and they
+   * mean opposite things. `undefined` from an unopened store would read as "no
+   * such record on this device" while the record sits durably on disk — which
+   * is exactly how a restart turns a counted preparation into
+   * `preparation_not_found`. Refusing is the only answer that cannot be
+   * mistaken for an answer about the durable state.
+   */
   get(recordId: string): InputPreparationRecord | undefined {
+    this.assertOpen();
     return this.records.get(recordId);
   }
 
   find(key: InputPreparationRecordKey): InputPreparationRecord | undefined {
+    this.assertOpen();
     return this.records.get(inputPreparationRecordId(key));
   }
 
   /** Every live record, for tests and for the aggregate below. */
   list(): readonly InputPreparationRecord[] {
+    this.assertOpen();
     return [...this.records.values()];
   }
 
@@ -442,6 +564,7 @@ export class InputPreparationStore {
    * fresh counter-call allowance.
    */
   scopeUsage(scopeId: string): ScopeUsage {
+    this.assertOpen();
     let artifactBytes = 0;
     let counterCalls = 0;
     let liveRecords = 0;
@@ -463,6 +586,7 @@ export class InputPreparationStore {
    * permanent hole in the in-flight allowance.
    */
   inFlightCount(nowMs = this.now()): number {
+    this.assertOpen();
     let count = 0;
     for (const record of this.records.values()) {
       if (isTerminalInputPreparationState(record.state)) continue;
@@ -541,12 +665,101 @@ export class InputPreparationStore {
   }
 
   /**
+   * The absolute path of one record's retained artifact.
+   *
+   * Exposed because a prepared Execution is handed a PATH, not bytes: the
+   * artifact carries D, P(D) and the whole native envelope, and there is
+   * exactly one retained copy of it. A second inline representation crossing to
+   * the adapter would be a second authority over the same bytes. Deriving the
+   * path anywhere else would be a second authority over the layout instead.
+   */
+  artifactPathOf(record: InputPreparationRecord): string {
+    return this.artifactPath(record.recordId);
+  }
+
+  /**
+   * Bind one committed Execution to this record, or report that another one
+   * already did.
+   *
+   * A compare-and-set, inside the same serialized closure as the append, for
+   * the same reason every other admission in this file is: two runners racing
+   * the same reference share no caller-side lock, so a `pin === undefined`
+   * check made before this closure is a check both of them pass. The loser gets
+   * `occupied` with the pin that won, and its caller sends zero claim and
+   * dispatches nothing.
+   *
+   * Idempotent for the SAME Execution: a replay that re-presents the identical
+   * taskId and manifest digest reads back `pinned` with the record it already
+   * has, because re-deriving the same seal is not a second consumer. A
+   * different taskId, or the same taskId with a different sealed manifest, is
+   * `occupied` — it is a different Execution.
+   *
+   * Only a `counted` record with a retained artifact may be pinned: a pin on a
+   * record that has no artifact would keep a tombstone alive forever without
+   * ever being launchable.
+   */
+  pin(recordId: string, pin: InputPreparationPinV1): Promise<PinOutcome> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      const current = this.records.get(recordId);
+      if (!current) throw new InputPreparationIntegrityError(`no input-preparation record ${recordId}`);
+      if (current.state !== 'counted' || current.artifact === undefined || current.artifactBytes === 0) {
+        throw new InputPreparationIntegrityError(
+          `input-preparation record ${recordId} is in state ${current.state} with no retained artifact and cannot be pinned`,
+        );
+      }
+      const existing = current.pin;
+      if (existing !== undefined) {
+        const same = existing.taskId === pin.taskId && existing.manifestDigest === pin.manifestDigest;
+        if (!same) return { kind: 'occupied', record: current } as const;
+        return { kind: 'pinned', record: current } as const;
+      }
+      const next: InputPreparationRecord = { ...current, pin, updatedAt: new Date(this.now()).toISOString() };
+      await this.append(next);
+      return { kind: 'pinned', record: next } as const;
+    });
+  }
+
+  /**
+   * Release the pin this Execution holds.
+   *
+   * Scoped to the holder on purpose: `taskId` must match, so a task cannot
+   * release a record another Execution consumed. Releasing a record that is
+   * already unpinned is not an error — the pin's job is done either way, and a
+   * terminal path that had to know whether it ever pinned would grow a second
+   * answer to a question the record already holds.
+   *
+   * WHEN a pin is released is a single rule: the Execution reached a terminal.
+   * Not at claim, not at start, not when the session closes — a record stays
+   * pinned for exactly as long as the Execution that consumed it can still be
+   * running, which is also exactly as long as GC must not collect it.
+   */
+  unpin(recordId: string, taskId: string): Promise<InputPreparationRecord> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      const current = this.records.get(recordId);
+      if (!current) throw new InputPreparationIntegrityError(`no input-preparation record ${recordId}`);
+      if (current.pin === undefined) return current;
+      if (current.pin.taskId !== taskId) {
+        throw new InputPreparationIntegrityError(
+          `input-preparation record ${recordId} is pinned by task ${current.pin.taskId} and cannot be released by ${taskId}`,
+        );
+      }
+      const { pin: _released, ...rest } = current;
+      const next: InputPreparationRecord = { ...rest, updatedAt: new Date(this.now()).toISOString() };
+      await this.append(next);
+      return next;
+    });
+  }
+
+  /**
    * Read the artifact back and re-check the identity it claims.
    *
    * The digest comparison is integrity, not authorization: authority was
    * already resolved before the caller reached this method.
    */
   async readArtifact(record: InputPreparationRecord): Promise<InputPreparationArtifact | undefined> {
+    this.assertOpen();
     let raw: string;
     try {
       raw = await fs.readFile(this.artifactPath(record.recordId), 'utf8');
@@ -574,10 +787,11 @@ export class InputPreparationStore {
   /**
    * Drop expired artifacts and, one retry horizon later, expired records.
    *
-   * A pinned record is never collected. Nothing in this package pins today, so
-   * the guard is the shape §10.3.7 requires rather than live behavior — but it
-   * is enforced here, not deferred, so G3b cannot introduce a GC race by
-   * forgetting it.
+   * A pinned record is never collected — not its artifact and not its
+   * tombstone. That is what makes a pin meaningful: the Execution holding it
+   * has not reached a terminal yet, so the bytes it is about to send (or is
+   * sending) must still be on disk, whatever the retention horizon says. The
+   * horizon resumes the moment `unpin` lands.
    */
   gc(nowMs = this.now(), preserveInFlight = false): Promise<{ artifactsRemoved: number; recordsRemoved: number }> {
     return this.enqueue(async () => {

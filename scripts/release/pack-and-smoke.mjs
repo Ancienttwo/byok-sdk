@@ -1,3 +1,4 @@
+import { assertImplementationIdentityDependency } from './implementation-identity-edges.mjs';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -27,6 +28,7 @@ if (typeof keysVersion !== 'string' || !exactReleaseVersion.test(keysVersion)) {
 }
 const packages = [
   { name: '@byok-sdk/core', directory: 'packages/core' },
+  { name: '@byok-sdk/implementation-identity', directory: 'packages/implementation-identity' },
   { name: '@byok-sdk/protocol', directory: 'packages/protocol' },
   { name: '@byok-sdk/server', directory: 'packages/server' },
   { name: '@byok-sdk/cloud', directory: 'packages/cloud' },
@@ -186,6 +188,9 @@ function assertTarballInternalEdges(tarballPath, packageName, expectedPackageVer
         'the artifact must carry a published core version, not a workspace override',
     );
   }
+  if (packageName === '@byok-sdk/client' || packageName === '@byok-sdk/keys') {
+    assertImplementationIdentityDependency(packed, releaseVersion);
+  }
   for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
     for (const [dependency, range] of Object.entries(packed[field] ?? {})) {
       if (dependency === 'byok-sdk' || dependency.startsWith('@byok-sdk/')) {
@@ -330,6 +335,42 @@ function runStaleKeysEdgeNegativeControl() {
   }
 }
 
+function runStaleImplementationIdentityNegativeControl() {
+  const dependency = '@byok-sdk/implementation-identity';
+  const stale = releaseVersion === '0.0.0' ? '0.0.1' : '0.0.0';
+  for (const name of ['@byok-sdk/client', '@byok-sdk/keys']) {
+    const fixtureRoot = mkdtempSync(path.join(os.tmpdir(), 'byok-stale-identity-edge-'));
+    try {
+      const version = expectedPackageVersions[name];
+      const tarballDirectory = path.join(fixtureRoot, 'tarballs');
+      mkdirSync(tarballDirectory);
+      writeFileSync(path.join(fixtureRoot, 'package.json'), JSON.stringify({
+        name, version, dependencies: { '@byok-sdk/core': releaseVersion, [dependency]: stale },
+      }));
+      run(npmInvocation.command, [...npmInvocation.prefix, 'pack', '--pack-destination', tarballDirectory], fixtureRoot);
+      const tarballs = readdirSync(tarballDirectory).filter((entry) => entry.endsWith('.tgz'));
+      if (tarballs.length !== 1) throw new Error(`${name}: negative control must produce one tarball`);
+      let rejection;
+      try {
+        assertTarballInternalEdges(path.join(tarballDirectory, tarballs[0]), name, version);
+      } catch (error) {
+        rejection = error instanceof Error ? error.message : String(error);
+      }
+      if (!rejection?.includes(`dependency ${dependency} is ${stale}, expected ${releaseVersion}`)) {
+        throw new Error(`${name}: stale shared identity edge was not rejected: ${rejection ?? '(no rejection)'}`);
+      }
+      console.log(`[release-pack] negative control rejected ${name} packed identity edge ${stale}`);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  }
+}
+
+if (process.argv.includes('--self-test-stale-identity-edge')) {
+  runStaleImplementationIdentityNegativeControl();
+  process.exit(0);
+}
+
 if (process.argv.includes('--self-test-stale-keys-edge')) {
   runStaleKeysEdgeNegativeControl();
   process.exit(0);
@@ -355,6 +396,7 @@ try {
   }
   mkdirSync(outDir, { recursive: true });
   run(nodeBin, ['scripts/release/check-package-graph.mjs']);
+  runStaleImplementationIdentityNegativeControl();
   run(bunBin, ['run', 'build']);
 
   const tarballs = [];
@@ -398,7 +440,7 @@ try {
     writeFileSync(
       path.join(smokeDir, 'smoke.mjs'),
       `import assert from 'node:assert/strict';\n` +
-        `import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';\n` +
+        `import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';\n` +
         `import { createRequire } from 'node:module';\n` +
         `import { tmpdir } from 'node:os';\n` +
         `import path from 'node:path';\n` +
@@ -407,7 +449,7 @@ try {
         `const sdk = await import('byok-sdk');\n` +
         `assert.deepEqual(Object.keys(sdk).sort(), expected);\n` +
         `assert.equal('keys' in sdk, false);\n` +
-        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/client/agent-memory','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/cloud-dataplane/runtime','@byok-sdk/ui-runtime','@byok-sdk/testkit','@byok-sdk/keys']) await import(name);\n` +
+        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/client/agent-memory','@byok-sdk/client/assertion-client','@byok-sdk/client/mcp-server','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/cloud-dataplane/runtime','@byok-sdk/ui-runtime','@byok-sdk/testkit','@byok-sdk/keys']) await import(name);\n` +
         `const { AgentHomeBusyError, AgentHomeManager } = await import('@byok-sdk/client');\n` +
         `const parallelRoot = mkdtempSync(path.join(tmpdir(), 'byok-packed-agent-session-'));\n` +
         `try {\n` +
@@ -445,10 +487,38 @@ try {
         `assert.equal(typeof agentMemory.serveAgentMemoryMcpOverStdio, 'function');\n` +
         `assert.equal('connectControlClient' in agentMemory, false);\n` +
         `assert.equal('createDaemon' in agentMemory, false);\n` +
-        `for (const [name, version] of [['byok-sdk','${releaseVersion}'],['@byok-sdk/core','${releaseVersion}'],['@byok-sdk/protocol','${releaseVersion}'],['@byok-sdk/client','${releaseVersion}'],['@byok-sdk/server','${releaseVersion}'],['@byok-sdk/cloud','${releaseVersion}'],['@byok-sdk/cloud-dataplane','${releaseVersion}'],['@byok-sdk/ui-runtime','${releaseVersion}'],['@byok-sdk/testkit','${releaseVersion}'],['@byok-sdk/keys','${keysVersion}']]) {\n` +
+        // Same argument for the assertion sub-path, and its value is likewise
+        // what it does NOT carry: a Host toolset server imports it precisely to
+        // request an assertion without the daemon graph — which drags
+        // `@modelcontextprotocol/client` and, through pi, `ajv`'s `new Function`
+        // provider in. Only the installed tarball proves that for a consumer.
+        `const assertionClient = await import('@byok-sdk/client/assertion-client');\n` +
+        `assert.deepEqual(Object.keys(assertionClient).sort(), ['requestDeviceAssertion','requestTaskAssertion']);\n` +
+        `const assertionEntry = path.join('node_modules','@byok-sdk','client','dist','assertion-client','index.js');\n` +
+        `const assertionSource = readFileSync(assertionEntry, 'utf8');\n` +
+        `for (const needle of ['ajv','pi-coding-agent','@earendil-works','@modelcontextprotocol/client','new Function']) {\n` +
+        `  assert.equal(assertionSource.includes(needle), false, assertionEntry + ' carries ' + needle);\n` +
+        `}\n` +
+        // The MCP server core is the same argument a third time, and the
+        // sharpest: it is a SERVER a CSP-locked host spawns, and its whole
+        // reason to exist is that an SDK-reserved MCP server must not need
+        // `@modelcontextprotocol/sdk` (or anything that generates code) to
+        // answer a JSON-RPC line. The installed tarball is the only place that
+        // is true for a consumer.
+        `const mcpServer = await import('@byok-sdk/client/mcp-server');\n` +
+        `assert.equal(typeof mcpServer.serveMcpOverStdio, 'function');\n` +
+        `assert.deepEqual([...mcpServer.MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS], ['2025-11-25','2025-06-18','2024-11-05']);\n` +
+        `const mcpServerEntry = path.join('node_modules','@byok-sdk','client','dist','mcp-server','index.js');\n` +
+        `const mcpServerSource = readFileSync(mcpServerEntry, 'utf8');\n` +
+        `for (const needle of ['ajv','pi-coding-agent','@earendil-works','@modelcontextprotocol/client','@modelcontextprotocol/sdk','new Function']) {\n` +
+        `  assert.equal(mcpServerSource.includes(needle), false, mcpServerEntry + ' carries ' + needle);\n` +
+        `}\n` +
+        `for (const [name, version] of [['byok-sdk','${releaseVersion}'],['@byok-sdk/core','${releaseVersion}'],['@byok-sdk/implementation-identity','${releaseVersion}'],['@byok-sdk/protocol','${releaseVersion}'],['@byok-sdk/client','${releaseVersion}'],['@byok-sdk/server','${releaseVersion}'],['@byok-sdk/cloud','${releaseVersion}'],['@byok-sdk/cloud-dataplane','${releaseVersion}'],['@byok-sdk/ui-runtime','${releaseVersion}'],['@byok-sdk/testkit','${releaseVersion}'],['@byok-sdk/keys','${keysVersion}']]) {\n` +
         `  const manifest = require(name + '/package.json');\n` +
         `  assert.equal(manifest.version, version, name);\n` +
         `}\n` +
+        `await import('@byok-sdk/implementation-identity');\n` +
+        `for (const consumer of ['client', 'keys']) assert.equal(require('@byok-sdk/' + consumer + '/package.json').dependencies['@byok-sdk/implementation-identity'], '${releaseVersion}');\n` +
         `const keysManifest = require('@byok-sdk/keys/package.json');\n` +
         `assert.equal(keysManifest.dependencies?.['@byok-sdk/core'], '${releaseVersion}');\n` +
         `assert.notEqual(keysManifest.dependencies?.['@byok-sdk/core'], 'workspace:*');\n` +
@@ -482,6 +552,10 @@ try {
       throw new Error('@byok-sdk/cloud-dataplane/dist/runtime.js must not reference node: builtins (worker runtime)');
     }
     const clientManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'package.json'), 'utf8'));
+    if (clientManifest.dependencies['@juicesharp/rpiv-todo'] !== undefined) throw new Error('packed client retained a second npm todo authority');
+    console.log('[release-pack] client dependencies=' + Object.keys(clientManifest.dependencies).length +
+      '; delta from M1a: -rpiv-todo +rpiv-i18n +rpiv-config +typebox +pi-ai(fork) (pi-tui/width: vendored build inputs only)');
+
     const installedAgentBin = path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'dist', 'bin', 'byok-agent.js');
     const emptyAgentHome = path.join(smokeDir, 'empty-agent-home');
     mkdirSync(emptyAgentHome);
@@ -509,7 +583,7 @@ try {
           `${installedAgentVersion.stdout}${installedAgentVersion.stderr}`,
       );
     }
-    run(nodeBin, [path.join(repoRoot, 'packages/client/scripts/packed-cli-mcp-smoke.mjs'), '--install-root', smokeDir]);
+    console.log(run(nodeBin, [path.join(repoRoot, 'packages/client/scripts/packed-cli-mcp-smoke.mjs'), '--install-root', smokeDir]));
     const expectedAgentVersionOutput = `${clientManifest.version}\n`;
     if (installedAgentVersion.stdout !== expectedAgentVersionOutput || installedAgentVersion.stderr !== '') {
       throw new Error(

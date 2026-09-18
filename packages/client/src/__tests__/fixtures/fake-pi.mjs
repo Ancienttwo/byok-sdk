@@ -91,7 +91,8 @@
 //                                    is still alive. See
 //                                    ./process-tree-descendant.mjs.
 
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { spawnProcessTreeDescendant } from './process-tree-receipt.mjs';
 
@@ -111,6 +112,9 @@ if (process.env.FAKE_PI_CRASH_WITH_STDERR) {
 // today — see the module doc comment above for why this is intentionally
 // narrow rather than mirroring pi's entire `--help` surface.
 const FLAG_TAKES_VALUE = {
+  '--config': true,
+  '--no-skills': false,
+  '--no-extensions': false,
   '--mode': true,
   '--session': true,
   '--extension': true,
@@ -121,6 +125,7 @@ const FLAG_TAKES_VALUE = {
 
 for (let i = 0; i < argv.length; i++) {
   const arg = argv[i];
+  if (/^--config-digest=[0-9a-f]{64}$/.test(arg)) continue;
   if (!arg.startsWith('--')) continue;
   if (!(arg in FLAG_TAKES_VALUE)) {
     process.stderr.write(`Error: Unknown option: ${arg}\n`);
@@ -128,6 +133,12 @@ for (let i = 0; i < argv.length; i++) {
   }
   if (FLAG_TAKES_VALUE[arg]) i += 1; // skip this flag's value token
 }
+
+// The SDK entry separates the tool/session cwd from the process cwd. Mirror
+// that explicit config contract; do not change process.cwd() in this fixture.
+const configIndex = argv.indexOf('--config');
+const rpcConfig = configIndex < 0 ? undefined : JSON.parse(readFileSync(argv[configIndex + 1], 'utf8'));
+const sessionCwd = rpcConfig?.cwd ?? process.cwd();
 
 const sessionId = process.env.FAKE_PI_SESSION_ID ?? 'fake-session-1';
 
@@ -251,7 +262,7 @@ async function handleCommand(msg) {
       if (artifactName) {
         const size = Number(process.env.FAKE_PI_ARTIFACT_SIZE ?? 70000);
         const contentType = process.env.FAKE_PI_ARTIFACT_CONTENT_TYPE ?? 'application/octet-stream';
-        writeFileSync(artifactName, Buffer.alloc(size, 'A'));
+        writeFileSync(path.resolve(sessionCwd, artifactName), Buffer.alloc(size, 'A'));
         send({
           type: 'tool_execution_start',
           toolCallId: 'call_artifact',

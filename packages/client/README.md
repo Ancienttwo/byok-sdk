@@ -280,6 +280,97 @@ Because each entry is bundled separately, `AgentMemoryError` imported from
 constructors. Discriminate on `error.name`, not `instanceof`, if a host mixes
 both entries.
 
+## Daemon-free assertion requests
+
+A Host toolset server is a short-lived stdio process the daemon spawns for one
+task. Its whole job is to trade the `BYOK_HOST_TOOLSET_CONTEXT` nonce it was
+started with for one short-lived task assertion and present it to the product's
+cloud; it runs no daemon, drives no runtime, and touches no transport. Importing
+`requestTaskAssertion` from the package root handed it all three anyway — the
+root entry composes `createDaemon`, which reaches
+`@earendil-works/pi-coding-agent` and through it `@modelcontextprotocol/sdk` and
+`ajv`, and the root graph statically imports `@modelcontextprotocol/client`,
+whose published dist embeds an `ajv` provider built on `new Function`. Under a
+Content-Security-Policy or any runtime that refuses code generation, the call a
+toolset server needed was unreachable because of code it never ran.
+`@byok-sdk/client/assertion-client` is the same two functions without that
+graph.
+
+```ts
+import { requestTaskAssertion } from '@byok-sdk/client/assertion-client';
+
+const result = await requestTaskAssertion({
+  productId, contextToken, audience: 'https://api.example.com',
+});
+if (!result.ok) return refuse(result.code, result.reason);
+presentToCloud(result.assertion, result.expiresAt);
+```
+
+The entry exports exactly `requestTaskAssertion`, `requestDeviceAssertion` and
+their option/result types. `connectControlClient` stays unreachable here for the
+same reason it is unreachable everywhere else in this package: that socket also
+carries `shutdown`, approval resolution, and the raw task-event stream. The root
+entry keeps exporting both functions; this is a narrower door to the same
+authority, not a replacement. `src/__tests__/dist-subpath-closure.test.ts` walks
+the emitted bundle for runtime code generation and for any import specifier that
+is not a node builtin, `@byok-sdk/core`, `@byok-sdk/protocol`, or a relative
+path, and runs the same checker against `dist/index.js` as a control that must
+report hits.
+
+## Serving an MCP toolset over stdio
+
+`@byok-sdk/client/mcp-server` is the server counterpart to this package's MCP
+client authority: a tools-only stdio MCP server, transport and baseline only,
+with no product semantics in it. The four SDK-reserved helpers
+(`byok-approval-mcp`, `byok-agent-message-mcp`, `byok-agent-memory-mcp`,
+`byok-agent-team-mcp`) are served through it, and a host that spawns its own
+toolset server can use the same entry.
+
+```ts
+import { McpServerToolError, serveMcpOverStdio } from '@byok-sdk/client/mcp-server';
+
+serveMcpOverStdio({
+  serverInfo: { name: 'acme-toolset', version: '1.0.0' },
+  tools: [{ name: 'lookup', description: 'Look one record up.', inputSchema: LOOKUP_SCHEMA }],
+  callTool: async ({ name, arguments: args, signal }) => {
+    if (name !== 'lookup') throw new McpServerToolError(-32602, `unknown tool "${name}"`);
+    return { content: [{ type: 'text', text: await lookup(args, { signal }) }] };
+  },
+});
+```
+
+What the core decides is the protocol and nothing else. It answers `initialize`
+by SELECTING from `MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS`
+(`['2025-11-25', '2025-06-18', '2024-11-05']`) and never by echoing what the
+peer offered — echoing asserts support for any string a peer sends, including
+revisions the server does not implement. It authors the advertised capabilities
+itself (`{tools:{}}`, or `{tools:{listChanged:true}}` only when you supply a
+real `toolsListChanged` emitter): a client routes requests on that
+advertisement, so a capability the core does not implement must never appear in
+it, and there is no option through which you can add one. Both frame directions
+are bounded at 1 MiB — the same ceiling `@byok-sdk/client`'s MCP client applies
+— and an over-cap outbound frame is dropped whole rather than truncated, with
+the session closing fail-closed. A `notifications/cancelled` aborts the call's
+`AbortSignal` and no response is ever written for that id afterwards; a late
+answer is an observable protocol violation, not a nicety. Malformed envelopes,
+unusable or duplicate ids and batch arrays are refused before your handler is
+reachable.
+
+What the core never decides is anything about a TOOL. Your `callTool` owns which
+names exist, what an invalid argument is, and whether a domain failure is an
+error or a successful result carrying a refusal: a handler that returns normally
+always produces a `result`, and only a thrown `McpServerToolError` becomes an
+`error`. That is what lets the approval helper answer an unreachable daemon with
+a successful `{behavior:'deny'}` payload, which is the behaviour that keeps
+claude from abandoning the turn.
+
+The entry adds no dependency. `@modelcontextprotocol/sdk` is not required to run
+an SDK-reserved MCP server; the emitted bundle reaches node builtins only, and
+`src/__tests__/dist-subpath-closure.test.ts` keeps that true.
+
+The sub-path is an unreleased candidate: it is not in a published artifact yet,
+so consume it from the workspace until the release that ships it.
+
 ## Agent egress and explicit content reads
 
 `agentEgress` is consumed policy configuration, not a profile or tenant

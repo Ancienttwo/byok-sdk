@@ -10,8 +10,12 @@ export type {
   RuntimeOperationStartInput,
   RuntimeCapabilities,
   RuntimeDetectResult,
+  RuntimeDetectionRefusalReason,
+  RuntimeInstallationObservationContext,
   Session,
   GitWorkspaceConfig,
+  McpLaunchBinding,
+  McpLaunchCwdConfig,
   McpStdioServerConfig,
   McpToolsetConfig,
   McpToolsetLifecycleState,
@@ -20,7 +24,38 @@ export type {
   McpToolsetRegistryStatus,
   McpToolsetReloadReceipt,
   AgentEgressPolicy,
+  LaunchCwdRejection,
+  TrustedLaunchCwd,
+  TrustedLaunchCwdUnavailableReason,
 } from './types';
+export { resolveMcpLaunchCwdLauncher, resolveTrustedLaunchCwd } from './daemon/trusted-launch-cwd';
+/**
+ * The host install-record authority this SDK declares and never implements
+ * (`daemon/tool-implementation-identity.ts`). A daemon constructed without one
+ * resolves every tool implementation identity to `resolver_unconfigured`.
+ *
+ * `parseToolImplementationIdentity` is deliberately NOT exported: it is the
+ * only function that turns a parsed value into an attested identity, and its
+ * one caller is this package's own task-scoped configuration reader.
+ */
+export type {
+  RuntimeEntryV1,
+  RuntimeDescendantPolicyV1,
+  RuntimeDescendantEdgeV1,
+  RuntimeImplementationRecordV1,
+  RuntimeImplementationResolutionV1,
+  ToolImplementationAttestedV1,
+  ToolImplementationAuthority,
+  ToolImplementationIdentityV1,
+  ToolImplementationInstallRecordV1,
+  ToolImplementationInterpreterV1,
+  ToolImplementationLocatorV1,
+  ToolImplementationResolutionV1,
+  ToolImplementationStatTupleV1,
+  ToolImplementationUnavailableReasonV1,
+  ToolImplementationUnavailableV1,
+} from '@byok-sdk/implementation-identity';
+export { ToolImplementationReverifyError } from '@byok-sdk/implementation-identity';
 export type { AgentRef } from './agent-home';
 export {
   AgentHomeError,
@@ -259,6 +294,9 @@ export {
   INPUT_PREPARATION_RECEIPT_FORMAT,
   INPUT_PREPARATION_RECORD_FORMAT,
   INPUT_PREPARATION_REQUEST_FORMAT,
+  INPUT_PREPARATION_RETIRED_PROMPT_KEYS,
+  INPUT_PREPARATION_RETIRED_REQUEST_KEYS,
+  INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS,
   INPUT_PREPARATION_VERSION,
   InputPreparationPolicyError,
   validateInputPreparationLimits,
@@ -266,6 +304,8 @@ export {
 export type {
   InputPreparationArtifactSummaryV1,
   InputPreparationAuthorityGrantV1,
+  InputPreparationCompiledPromptSnapshotV1,
+  InputPreparationCompiledSnapshotV1,
   InputPreparationAuthorityOutcomeV1,
   InputPreparationAuthorityResolver,
   InputPreparationSourceAuthorityRequestV1,
@@ -283,9 +323,11 @@ export type {
   InputPreparationDenialReasonV1,
   InputPreparationDocsPathsV1,
   InputPreparationErrorCodeV1,
+  InputPreparationHostCanonicalAssistantMessageV1,
   InputPreparationLimitsPolicyV1,
   InputPreparationLookupParamsV1,
   InputPreparationModelCostV1,
+  InputPreparationMessageV1,
   InputPreparationModelV1,
   InputPreparationOptionsV1,
   InputPreparationPinV1,

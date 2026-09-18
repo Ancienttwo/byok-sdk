@@ -1,0 +1,15 @@
+{
+  "format": "byok.pi-export-asset-layout",
+  "version": 1,
+  "basePaths": {
+    "interpreter+bundle": "dist/core/export-html",
+    "compiled-executable": "export-html"
+  },
+  "files": [
+    "template.html",
+    "template.css",
+    "template.js",
+    "vendor/marked.min.js",
+    "vendor/highlight.min.js"
+  ]
+}

@@ -1,0 +1,1403 @@
+{
+  "package": "pi-subagents",
+  "version": "0.60.0",
+  "source": "npm pi-subagents@0.60.0; frozen M0 inventory and installed tarball",
+  "lockTuple": "\"pi-subagents\": [\"pi-subagents@0.60.0\", \"\", { \"dependencies\": { \"acorn\": \"8.18.0\", \"jiti\": \"2.7.0\", \"typebox\": \"1.1.38\", \"yaml\": \"2.8.3\" }, \"peerDependencies\": { \"@earendil-works/pi-agent-core\": \"*\", \"@earendil-works/pi-ai\": \">=0.80.0\", \"@earendil-works/pi-coding-agent\": \"*\", \"@earendil-works/pi-tui\": \"*\" }, \"optionalPeers\": [\"@earendil-works/pi-agent-core\", \"@earendil-works/pi-ai\", \"@earendil-works/pi-coding-agent\", \"@earendil-works/pi-tui\"], \"bin\": { \"pi-subagents\": \"install.mjs\" } }, \"sha512-H3Xgfab3/CYxQeTKvpatvcUy0yChMAViCTEc9tqKaTpSv7dhyP5NM3Vi5+qZuV6UpOunkCpe9Vkww4DhT+SvBA==\"],",
+  "files": [
+    {
+      "path": "index.ts",
+      "upstreamSha256": "a2f11dbe8e200bd8c590441316a9c6ab222318d2aa738670dedcf0e72592dde3",
+      "vendoredSha256": "a2f11dbe8e200bd8c590441316a9c6ab222318d2aa738670dedcf0e72592dde3",
+      "delta": []
+    },
+    {
+      "path": "src/agents/agent-management.ts",
+      "upstreamSha256": "06c1b721c119fae098d003e1558751ddb335104e79d30847dd626f2898b85a46",
+      "vendoredSha256": "06c1b721c119fae098d003e1558751ddb335104e79d30847dd626f2898b85a46",
+      "delta": []
+    },
+    {
+      "path": "src/agents/agent-memory.ts",
+      "upstreamSha256": "ef4bc855b6512498fb7d763e95737b0ad259eaf40b01fe385b1c338fc28c3b9d",
+      "vendoredSha256": "ef4bc855b6512498fb7d763e95737b0ad259eaf40b01fe385b1c338fc28c3b9d",
+      "delta": []
+    },
+    {
+      "path": "src/agents/agent-refinements.ts",
+      "upstreamSha256": "aba761e241326306c1aeb71af4bff17e86c6b4fbed1d67b7c44a7262f3af55a4",
+      "vendoredSha256": "711fa29d012d7acd4d9393df9c11cd277cabf9c1705d323551c071729dc22a3a",
+      "delta": [
+        "SDK build-flavor support assertion at the existing effective execution boundary; ordinary backend is a no-op, sealed backend explicitly refuses."
+      ]
+    },
+    {
+      "path": "src/agents/agent-scope.ts",
+      "upstreamSha256": "22b567ec03196e4f4007957a62ad5b2456154a471786442e24538a997090da0f",
+      "vendoredSha256": "22b567ec03196e4f4007957a62ad5b2456154a471786442e24538a997090da0f",
+      "delta": []
+    },
+    {
+      "path": "src/agents/agent-selection.ts",
+      "upstreamSha256": "937862b01c6ef004708a30b72da85174d7d480511249a790106affd38ace1b8b",
+      "vendoredSha256": "937862b01c6ef004708a30b72da85174d7d480511249a790106affd38ace1b8b",
+      "delta": []
+    },
+    {
+      "path": "src/agents/agent-serializer.ts",
+      "upstreamSha256": "378285d9209cede13c4f99e4e5b4fa38816615a583d597f575451ea91163ce95",
+      "vendoredSha256": "378285d9209cede13c4f99e4e5b4fa38816615a583d597f575451ea91163ce95",
+      "delta": []
+    },
+    {
+      "path": "src/agents/agents.ts",
+      "upstreamSha256": "cc2dba308f2de6f6fbe99a6e3a9e49a83c4758fb05f08449a2a2729adfb1539c",
+      "vendoredSha256": "cc2dba308f2de6f6fbe99a6e3a9e49a83c4758fb05f08449a2a2729adfb1539c",
+      "delta": []
+    },
+    {
+      "path": "src/agents/builtin-names.ts",
+      "upstreamSha256": "ed7aebb05169368dde372a43998381817d24f752715c69acd598868d42944383",
+      "vendoredSha256": "ed7aebb05169368dde372a43998381817d24f752715c69acd598868d42944383",
+      "delta": []
+    },
+    {
+      "path": "src/agents/chain-serializer.ts",
+      "upstreamSha256": "16b128bff8d0a3cb48071df650fce7b48e1eae931bab3d265c47299c40aaff06",
+      "vendoredSha256": "16b128bff8d0a3cb48071df650fce7b48e1eae931bab3d265c47299c40aaff06",
+      "delta": []
+    },
+    {
+      "path": "src/agents/frontmatter.ts",
+      "upstreamSha256": "5ba39cb6eb57e552d76e7e4a0b5cfab3393b8ea61af1b7b3174199c799f2f574",
+      "vendoredSha256": "5ba39cb6eb57e552d76e7e4a0b5cfab3393b8ea61af1b7b3174199c799f2f574",
+      "delta": []
+    },
+    {
+      "path": "src/agents/identity.ts",
+      "upstreamSha256": "994092630217e368d8501879775be22c10e8340d739492d51e893c747fbbdde2",
+      "vendoredSha256": "994092630217e368d8501879775be22c10e8340d739492d51e893c747fbbdde2",
+      "delta": []
+    },
+    {
+      "path": "src/agents/proactive-skills.ts",
+      "upstreamSha256": "b36f4b7cecbd0f4abcd106dfb3e5b37473ffb8bb908f7b807d20ac4d81530888",
+      "vendoredSha256": "b36f4b7cecbd0f4abcd106dfb3e5b37473ffb8bb908f7b807d20ac4d81530888",
+      "delta": []
+    },
+    {
+      "path": "src/agents/runtime-agent-events.ts",
+      "upstreamSha256": "b160682a12a041978a8ce939dbb3793545a6f35d2ff566edceac6e3eca9f2e32",
+      "vendoredSha256": "b160682a12a041978a8ce939dbb3793545a6f35d2ff566edceac6e3eca9f2e32",
+      "delta": []
+    },
+    {
+      "path": "src/agents/runtime-agent-registry.ts",
+      "upstreamSha256": "3d2f508c17f57a4f5600048c042338aaabf62fa9944aa844aec76ae17721ee44",
+      "vendoredSha256": "3d2f508c17f57a4f5600048c042338aaabf62fa9944aa844aec76ae17721ee44",
+      "delta": []
+    },
+    {
+      "path": "src/agents/skills.ts",
+      "upstreamSha256": "e17c0b224da5b264dc8973731dacc31d21c497efbda78443a015b0ab15903e14",
+      "vendoredSha256": "e17c0b224da5b264dc8973731dacc31d21c497efbda78443a015b0ab15903e14",
+      "delta": []
+    },
+    {
+      "path": "src/api/background-work.ts",
+      "upstreamSha256": "57a0f31bb0ee8c993bfb0bec79960178a1fc8409a87a8c2f2164a3d04f5f2064",
+      "vendoredSha256": "57a0f31bb0ee8c993bfb0bec79960178a1fc8409a87a8c2f2164a3d04f5f2064",
+      "delta": []
+    },
+    {
+      "path": "src/api/capability-ceiling.ts",
+      "upstreamSha256": "ff65506811609f471832d58a1cf8836618a097d28c71e43eb1c07b335a3028b4",
+      "vendoredSha256": "ff65506811609f471832d58a1cf8836618a097d28c71e43eb1c07b335a3028b4",
+      "delta": []
+    },
+    {
+      "path": "src/api/delegation.ts",
+      "upstreamSha256": "aadeca03d164519642413b9cea1875d9e191a8598e4825d99f74e28148ab7819",
+      "vendoredSha256": "aadeca03d164519642413b9cea1875d9e191a8598e4825d99f74e28148ab7819",
+      "delta": []
+    },
+    {
+      "path": "src/api/external-job-provider.ts",
+      "upstreamSha256": "249874fdf318ae39398fcac3f11c3458d2e0066693a40b7d8b1246b729fa4a4e",
+      "vendoredSha256": "249874fdf318ae39398fcac3f11c3458d2e0066693a40b7d8b1246b729fa4a4e",
+      "delta": []
+    },
+    {
+      "path": "src/api/external-runs.ts",
+      "upstreamSha256": "e40a7e06dcb94114b8e81ecd4ec9c6ded555fae253d15f526b98722baa9d76ad",
+      "vendoredSha256": "e40a7e06dcb94114b8e81ecd4ec9c6ded555fae253d15f526b98722baa9d76ad",
+      "delta": []
+    },
+    {
+      "path": "src/extension/config.ts",
+      "upstreamSha256": "2e38f8b40f39dc67c739c40086c7307562976a1d24d0e065a24fdfaf45d37a0a",
+      "vendoredSha256": "2e38f8b40f39dc67c739c40086c7307562976a1d24d0e065a24fdfaf45d37a0a",
+      "delta": []
+    },
+    {
+      "path": "src/extension/control-notices.ts",
+      "upstreamSha256": "78a3e7a4a9bd62da32d0ecaf54b4b613667f1f770e88a5ba6aff471cac66256e",
+      "vendoredSha256": "78a3e7a4a9bd62da32d0ecaf54b4b613667f1f770e88a5ba6aff471cac66256e",
+      "delta": []
+    },
+    {
+      "path": "src/extension/doctor.ts",
+      "upstreamSha256": "469af277db5e4c2620ca31857d97a0aa8b37ba300fa793f9489323f567be7185",
+      "vendoredSha256": "469af277db5e4c2620ca31857d97a0aa8b37ba300fa793f9489323f567be7185",
+      "delta": []
+    },
+    {
+      "path": "src/extension/index.ts",
+      "upstreamSha256": "43a99e983a21a80236e7e01d63aa6a687253f637bd3c69a7c2444bc813a0c188",
+      "vendoredSha256": "43a99e983a21a80236e7e01d63aa6a687253f637bd3c69a7c2444bc813a0c188",
+      "delta": []
+    },
+    {
+      "path": "src/extension/public-execution.ts",
+      "upstreamSha256": "2c9b6ac108993b867b8595409d86ec95d5241e9da4a3937e2b29dbdf14066156",
+      "vendoredSha256": "2c9b6ac108993b867b8595409d86ec95d5241e9da4a3937e2b29dbdf14066156",
+      "delta": []
+    },
+    {
+      "path": "src/extension/rpc.ts",
+      "upstreamSha256": "be50a3bae1998f68814699e9c81e9bf2b8518553f14e8b015d016e8efd37bd2e",
+      "vendoredSha256": "be50a3bae1998f68814699e9c81e9bf2b8518553f14e8b015d016e8efd37bd2e",
+      "delta": []
+    },
+    {
+      "path": "src/extension/schemas.ts",
+      "upstreamSha256": "ce3cd4278cf4ec72f271f38798741601fbf8b1fd01c63f8045f892f49cf756b8",
+      "vendoredSha256": "ce3cd4278cf4ec72f271f38798741601fbf8b1fd01c63f8045f892f49cf756b8",
+      "delta": []
+    },
+    {
+      "path": "src/extension/steering-notices.ts",
+      "upstreamSha256": "b1ecb53128b0fd56a1c6ed2e677f1a8bbee049a84409b0cb4428f8283b342995",
+      "vendoredSha256": "b1ecb53128b0fd56a1c6ed2e677f1a8bbee049a84409b0cb4428f8283b342995",
+      "delta": []
+    },
+    {
+      "path": "src/extension/subagent-guide.ts",
+      "upstreamSha256": "5ce0cbeaada17f2abcf13727a6c7c85a153311933983f2f2c3168e0b86753853",
+      "vendoredSha256": "5ce0cbeaada17f2abcf13727a6c7c85a153311933983f2f2c3168e0b86753853",
+      "delta": []
+    },
+    {
+      "path": "src/extension/tool-description.ts",
+      "upstreamSha256": "61554d01f59fa631fc100d401e644117719812c10395898f9e860c391d81ba7f",
+      "vendoredSha256": "61554d01f59fa631fc100d401e644117719812c10395898f9e860c391d81ba7f",
+      "delta": []
+    },
+    {
+      "path": "src/extension/tool-result.ts",
+      "upstreamSha256": "14fb8162d7c0a5948c0068b5990c82c4b1f4fbf04176c04618286a71e7f55b87",
+      "vendoredSha256": "14fb8162d7c0a5948c0068b5990c82c4b1f4fbf04176c04618286a71e7f55b87",
+      "delta": []
+    },
+    {
+      "path": "src/inspectors/herdr/actions.ts",
+      "upstreamSha256": "f380ad5c3b1ea6758c2ebc0fa161e722e1544360df9f7a09194503a9449c837f",
+      "vendoredSha256": "f380ad5c3b1ea6758c2ebc0fa161e722e1544360df9f7a09194503a9449c837f",
+      "delta": []
+    },
+    {
+      "path": "src/inspectors/herdr/client.ts",
+      "upstreamSha256": "2de5033041ed5dfc84176f224653aeaeca177f4d2d7c1111c779d8dd206c078d",
+      "vendoredSha256": "2de5033041ed5dfc84176f224653aeaeca177f4d2d7c1111c779d8dd206c078d",
+      "delta": []
+    },
+    {
+      "path": "src/inspectors/herdr/focus.ts",
+      "upstreamSha256": "baf08c80695992a9d3911d3c9f8d86a78c0b3d287dfa51b7bbbe2576c0dc6f4c",
+      "vendoredSha256": "baf08c80695992a9d3911d3c9f8d86a78c0b3d287dfa51b7bbbe2576c0dc6f4c",
+      "delta": []
+    },
+    {
+      "path": "src/inspectors/herdr/project-panes.ts",
+      "upstreamSha256": "7e36343657f1e1242b92856e8cc3ef663fe268bb4a0faa01ab69b2e6bf6c42dc",
+      "vendoredSha256": "7e36343657f1e1242b92856e8cc3ef663fe268bb4a0faa01ab69b2e6bf6c42dc",
+      "delta": []
+    },
+    {
+      "path": "src/inspectors/herdr/session-roots-codec.ts",
+      "upstreamSha256": "06d5071dd05ed99007f51057be3e96cadbf662c74e7e3e4b988af7f3594b0e92",
+      "vendoredSha256": "06d5071dd05ed99007f51057be3e96cadbf662c74e7e3e4b988af7f3594b0e92",
+      "delta": []
+    },
+    {
+      "path": "src/inspectors/herdr/shell-command.ts",
+      "upstreamSha256": "1fd53e036e639fa65a0b1e765ea230db61a196bafb0180e27baa282fa8014e03",
+      "vendoredSha256": "1fd53e036e639fa65a0b1e765ea230db61a196bafb0180e27baa282fa8014e03",
+      "delta": []
+    },
+    {
+      "path": "src/integrations/herdr-status.ts",
+      "upstreamSha256": "4ad239ed7f9b8909250cf2aa730d112013ee702a80378e571f0cddb420b661c1",
+      "vendoredSha256": "4ad239ed7f9b8909250cf2aa730d112013ee702a80378e571f0cddb420b661c1",
+      "delta": []
+    },
+    {
+      "path": "src/intercom/intercom-bridge.ts",
+      "upstreamSha256": "e015bab790d7451eea8a849bc045c9cde08faf98fc83f97db7b6ff6d5c832351",
+      "vendoredSha256": "e015bab790d7451eea8a849bc045c9cde08faf98fc83f97db7b6ff6d5c832351",
+      "delta": []
+    },
+    {
+      "path": "src/intercom/native-supervisor-channel.ts",
+      "upstreamSha256": "42be9a7ad856f1e82df33379d504f8f9259cff037e65a5b49cebf0670fb8c329",
+      "vendoredSha256": "42be9a7ad856f1e82df33379d504f8f9259cff037e65a5b49cebf0670fb8c329",
+      "delta": []
+    },
+    {
+      "path": "src/intercom/result-intercom.ts",
+      "upstreamSha256": "136b122eb87153a3173ff6d619f7aebb9f764989fc739cfe30e6e66675f4f682",
+      "vendoredSha256": "136b122eb87153a3173ff6d619f7aebb9f764989fc739cfe30e6e66675f4f682",
+      "delta": []
+    },
+    {
+      "path": "src/missions/actions.ts",
+      "upstreamSha256": "2af845c59e9180bbb20410923882bbe69f5a94b695aed923455fa815f61609f9",
+      "vendoredSha256": "2af845c59e9180bbb20410923882bbe69f5a94b695aed923455fa815f61609f9",
+      "delta": []
+    },
+    {
+      "path": "src/missions/goal-driver.ts",
+      "upstreamSha256": "a6d8dfc3e3909993cf5b974e268fe6b7d752e3424400b646766b4399ac983e7d",
+      "vendoredSha256": "a6d8dfc3e3909993cf5b974e268fe6b7d752e3424400b646766b4399ac983e7d",
+      "delta": []
+    },
+    {
+      "path": "src/missions/lifecycle.ts",
+      "upstreamSha256": "da9499a69313f7e06cf13cba63fc08e1433baafdcc394c7604576633b032f58b",
+      "vendoredSha256": "da9499a69313f7e06cf13cba63fc08e1433baafdcc394c7604576633b032f58b",
+      "delta": []
+    },
+    {
+      "path": "src/missions/store.ts",
+      "upstreamSha256": "d7dcf1763eb6ced32894c93b7c01d5a36c6ea1670f8212490196a3c9afbe3846",
+      "vendoredSha256": "d7dcf1763eb6ced32894c93b7c01d5a36c6ea1670f8212490196a3c9afbe3846",
+      "delta": []
+    },
+    {
+      "path": "src/missions/types.ts",
+      "upstreamSha256": "dc0e98cb19250e93be8f7a55772a4ef6438ab2e0cabd7bc6774f389a722384d9",
+      "vendoredSha256": "dc0e98cb19250e93be8f7a55772a4ef6438ab2e0cabd7bc6774f389a722384d9",
+      "delta": []
+    },
+    {
+      "path": "src/missions/workflow-state.ts",
+      "upstreamSha256": "7c2187d9f529e3a58dca2beaf51b36f5ccf43d660dfb98ebf7ab916e1e67f360",
+      "vendoredSha256": "7c2187d9f529e3a58dca2beaf51b36f5ccf43d660dfb98ebf7ab916e1e67f360",
+      "delta": []
+    },
+    {
+      "path": "src/policy/authority.ts",
+      "upstreamSha256": "9b63de153344c60f1ced6fe03eb1974898a34b6555274cd10f8af3db9ad98914",
+      "vendoredSha256": "9b63de153344c60f1ced6fe03eb1974898a34b6555274cd10f8af3db9ad98914",
+      "delta": []
+    },
+    {
+      "path": "src/profiles/profiles.ts",
+      "upstreamSha256": "5219d05856b83a1fac31bf4a8abc040bea18321fd1062cb806c3484e3e75da57",
+      "vendoredSha256": "5219d05856b83a1fac31bf4a8abc040bea18321fd1062cb806c3484e3e75da57",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/active-async-capacity.ts",
+      "upstreamSha256": "f6b55a6b270b2fc5129c2f9995c54cff69caa56031b82802b83e5e7eb73ccfbf",
+      "vendoredSha256": "f6b55a6b270b2fc5129c2f9995c54cff69caa56031b82802b83e5e7eb73ccfbf",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/active-run-index.ts",
+      "upstreamSha256": "1d06b549c95302ea16837a80c6de514e6bdc2c82b47a166c491b984731d11569",
+      "vendoredSha256": "1d06b549c95302ea16837a80c6de514e6bdc2c82b47a166c491b984731d11569",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/async-execution.ts",
+      "upstreamSha256": "854ccef6d7e824a2988f3dfba8c30f511768420c1cb4be6b01b5968037c0990c",
+      "vendoredSha256": "7de62b3cc52a66e2ad1135bca462cc48a0ab8480d3952fae8936c4c2f7e49571",
+      "delta": [
+        "SDK build-flavor support assertion at the existing effective execution boundary; ordinary backend is a no-op, sealed backend explicitly refuses."
+      ]
+    },
+    {
+      "path": "src/runs/background/async-job-tracker.ts",
+      "upstreamSha256": "246b553b1dd6a031cf495adfc96e4cc5e882ddd3be722fd095aa288a5b4b3fd9",
+      "vendoredSha256": "246b553b1dd6a031cf495adfc96e4cc5e882ddd3be722fd095aa288a5b4b3fd9",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/async-resume.ts",
+      "upstreamSha256": "707a68841543c64eac8043e7a891427b07763a159c244f0e92b7cf855ba63bc0",
+      "vendoredSha256": "707a68841543c64eac8043e7a891427b07763a159c244f0e92b7cf855ba63bc0",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/async-retention.ts",
+      "upstreamSha256": "496e416e3b9c00feec18453c0d5a200c27f7d7f68896e7531871fad6abdb417d",
+      "vendoredSha256": "496e416e3b9c00feec18453c0d5a200c27f7d7f68896e7531871fad6abdb417d",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/async-status-snapshot.ts",
+      "upstreamSha256": "755b0db87eeca8d1c119644b8572065f65fa9b976168f73f4e3d06d2a96a0d3d",
+      "vendoredSha256": "755b0db87eeca8d1c119644b8572065f65fa9b976168f73f4e3d06d2a96a0d3d",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/async-status.ts",
+      "upstreamSha256": "e59121e761f3afc134c1b4b1c20644bcfc20cef66d06d23f47d8ce24f2d2d1ac",
+      "vendoredSha256": "e59121e761f3afc134c1b4b1c20644bcfc20cef66d06d23f47d8ce24f2d2d1ac",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/auto-drain.ts",
+      "upstreamSha256": "8133379d43c7ff445829650b744e5c7ba43b802212c4dda5b907ae874dfacf7f",
+      "vendoredSha256": "8133379d43c7ff445829650b744e5c7ba43b802212c4dda5b907ae874dfacf7f",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/chain-append.ts",
+      "upstreamSha256": "842ddeaf9eacdb06781283b154dec31639bb7037702f96a0dc5b41277c3fdc86",
+      "vendoredSha256": "842ddeaf9eacdb06781283b154dec31639bb7037702f96a0dc5b41277c3fdc86",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/chain-root-attachment.ts",
+      "upstreamSha256": "d1bb1c42b7b161acbb65a8278ccef43b379f54c387a6004d2b6461738fa0e653",
+      "vendoredSha256": "d1bb1c42b7b161acbb65a8278ccef43b379f54c387a6004d2b6461738fa0e653",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/completion-batcher.ts",
+      "upstreamSha256": "a6935ae375623fcfcb167c178cac4032316dbd93e8edfd7c300bf91e798f5da0",
+      "vendoredSha256": "a6935ae375623fcfcb167c178cac4032316dbd93e8edfd7c300bf91e798f5da0",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/completion-dedupe.ts",
+      "upstreamSha256": "e9ea4c620a59983d187292706a08af1df7fe87c3d5b64c4fdb967db92888319b",
+      "vendoredSha256": "e9ea4c620a59983d187292706a08af1df7fe87c3d5b64c4fdb967db92888319b",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/completion-replay.ts",
+      "upstreamSha256": "1028f628ef14c4ebbb2ca388fcd2a0253ff1a99c7d5f61810f4fddf5047084e6",
+      "vendoredSha256": "1028f628ef14c4ebbb2ca388fcd2a0253ff1a99c7d5f61810f4fddf5047084e6",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/control-channel.ts",
+      "upstreamSha256": "a69810721ca573f78ae24eb959fbfbeea8b31ca8e8da9dcc4fecda62cbeaa391",
+      "vendoredSha256": "a69810721ca573f78ae24eb959fbfbeea8b31ca8e8da9dcc4fecda62cbeaa391",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/fleet-view.ts",
+      "upstreamSha256": "c17a765f58eaf48d35fc310d912cbf3c53a05d86e0979deaf14a996a5dd3510a",
+      "vendoredSha256": "c17a765f58eaf48d35fc310d912cbf3c53a05d86e0979deaf14a996a5dd3510a",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/index-segment.ts",
+      "upstreamSha256": "1ee5e60273c5a45ba7b16ac21c4ae049af5dd914a7a7f3053ec838f0d60dd7ee",
+      "vendoredSha256": "1ee5e60273c5a45ba7b16ac21c4ae049af5dd914a7a7f3053ec838f0d60dd7ee",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/inspect-rpc.ts",
+      "upstreamSha256": "6562fff97153527e830995fdf936b73dc4edf984a44be6eba083551caf1a4189",
+      "vendoredSha256": "6562fff97153527e830995fdf936b73dc4edf984a44be6eba083551caf1a4189",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/notify.ts",
+      "upstreamSha256": "c48cea546ebb5dd39e2039a55fb52dae86c62e841afc7e901b5b474ce8c3907e",
+      "vendoredSha256": "c48cea546ebb5dd39e2039a55fb52dae86c62e841afc7e901b5b474ce8c3907e",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/owned-process-tree.ts",
+      "upstreamSha256": "2eb4242149bafe04cf3409d0707466737300e109bd5af8dca4cbeb733a1e8ae9",
+      "vendoredSha256": "2eb4242149bafe04cf3409d0707466737300e109bd5af8dca4cbeb733a1e8ae9",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/parallel-groups.ts",
+      "upstreamSha256": "e4d8323ae801a303d1dcae6eb8235bee92ab98e7017a9e727ef4c5133ba2d1ab",
+      "vendoredSha256": "e4d8323ae801a303d1dcae6eb8235bee92ab98e7017a9e727ef4c5133ba2d1ab",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/process-terminal.ts",
+      "upstreamSha256": "c52f79ac35d018bf61b52522e5577573cff5438bf5b0ad6bc8c41f83ce9ac955",
+      "vendoredSha256": "c52f79ac35d018bf61b52522e5577573cff5438bf5b0ad6bc8c41f83ce9ac955",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/result-delivery-ownership.ts",
+      "upstreamSha256": "97ab7c94cbb81902fdc034edd24acde5cdc38d663026149cce6bea1f38ebfbf0",
+      "vendoredSha256": "97ab7c94cbb81902fdc034edd24acde5cdc38d663026149cce6bea1f38ebfbf0",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/result-files.ts",
+      "upstreamSha256": "ac49985bd3e99f0cc9a2dab5fd62c92b58c56a260074e6418acda2bbca231344",
+      "vendoredSha256": "ac49985bd3e99f0cc9a2dab5fd62c92b58c56a260074e6418acda2bbca231344",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/result-watcher.ts",
+      "upstreamSha256": "1cc53ce2dd536c1e7e8bf27810b4d07e1ddc1aebc901906bb5169dcb2198ffb7",
+      "vendoredSha256": "1cc53ce2dd536c1e7e8bf27810b4d07e1ddc1aebc901906bb5169dcb2198ffb7",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/resume-guidance.ts",
+      "upstreamSha256": "34cf98439eae42d6d2d16217633dc5d2f2028ab4d941366250ef73a9dc661683",
+      "vendoredSha256": "34cf98439eae42d6d2d16217633dc5d2f2028ab4d941366250ef73a9dc661683",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/retained-children.ts",
+      "upstreamSha256": "961534bf0ef2e21c93d3624d2be853202b4f3afcd06de22201cfd285a775883a",
+      "vendoredSha256": "961534bf0ef2e21c93d3624d2be853202b4f3afcd06de22201cfd285a775883a",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/run-id-query.ts",
+      "upstreamSha256": "d83cf9c2a68c130bf772bdb9dfbd6f4216a62065c3ce009fe8a5617115438e07",
+      "vendoredSha256": "d83cf9c2a68c130bf772bdb9dfbd6f4216a62065c3ce009fe8a5617115438e07",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/run-id-resolver.ts",
+      "upstreamSha256": "81efa2f0e31f9a5148aaa39f3c136243675896af911190f379a6227a5d7654fe",
+      "vendoredSha256": "81efa2f0e31f9a5148aaa39f3c136243675896af911190f379a6227a5d7654fe",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/run-status.ts",
+      "upstreamSha256": "8685897e3c8066422d6617965d2a763bbcc6e3a2eb7f1397d5812b8496026f02",
+      "vendoredSha256": "8685897e3c8066422d6617965d2a763bbcc6e3a2eb7f1397d5812b8496026f02",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/scheduled-runs.ts",
+      "upstreamSha256": "76877f9d09b7c49ba28d740fb09d212646ec6a92c597dbacc3d06a425668e132",
+      "vendoredSha256": "76877f9d09b7c49ba28d740fb09d212646ec6a92c597dbacc3d06a425668e132",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/stale-run-reconciler.ts",
+      "upstreamSha256": "de717a2f6485fc2f87ea60854f8fbb99b8f01eefd2d691c96f93209081261c6f",
+      "vendoredSha256": "de717a2f6485fc2f87ea60854f8fbb99b8f01eefd2d691c96f93209081261c6f",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/steering.ts",
+      "upstreamSha256": "23a4cf70477c5ffe21479c959911333235236d9a7ac3ba9e734a3df00d618312",
+      "vendoredSha256": "23a4cf70477c5ffe21479c959911333235236d9a7ac3ba9e734a3df00d618312",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/subagent-wait.ts",
+      "upstreamSha256": "70313be41b7233abd2cc6374b45c923bb27c803059a27d2970ae1932ddb87b8b",
+      "vendoredSha256": "70313be41b7233abd2cc6374b45c923bb27c803059a27d2970ae1932ddb87b8b",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/terminal-run-index.ts",
+      "upstreamSha256": "a69cdd59bd6976963f430f21f485918ef2ffc688d3e823412f207213140fa9f9",
+      "vendoredSha256": "a69cdd59bd6976963f430f21f485918ef2ffc688d3e823412f207213140fa9f9",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/top-level-async.ts",
+      "upstreamSha256": "c0c60cf72bbe7beea845d3a4f802b8930af78b7932790cff5adcbf0dd545b6ba",
+      "vendoredSha256": "c0c60cf72bbe7beea845d3a4f802b8930af78b7932790cff5adcbf0dd545b6ba",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/wait-completions.ts",
+      "upstreamSha256": "8fc0ac3a94d06ff1ffa4d3cd3dceb8591e6e64a365ad82361c7fbfcec26bc1ff",
+      "vendoredSha256": "8fc0ac3a94d06ff1ffa4d3cd3dceb8591e6e64a365ad82361c7fbfcec26bc1ff",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/wait-config.ts",
+      "upstreamSha256": "51a0faf216a858a6beda0c3f41cb1b48cc3975ac7d8514758fb7ec2397c42c66",
+      "vendoredSha256": "51a0faf216a858a6beda0c3f41cb1b48cc3975ac7d8514758fb7ec2397c42c66",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/wait-subscriptions.ts",
+      "upstreamSha256": "ee21a0e5bf06ee3b0d9e033ded1e0d2ea493921759f8fd657758e7da58f3cb02",
+      "vendoredSha256": "ee21a0e5bf06ee3b0d9e033ded1e0d2ea493921759f8fd657758e7da58f3cb02",
+      "delta": []
+    },
+    {
+      "path": "src/runs/background/wait-tool.ts",
+      "upstreamSha256": "3990974388572c8a6e68acc229f7f05ec857ea5f329c129b53aae8b22ce52e0f",
+      "vendoredSha256": "3990974388572c8a6e68acc229f7f05ec857ea5f329c129b53aae8b22ce52e0f",
+      "delta": []
+    },
+    {
+      "path": "src/runs/foreground/async-dismiss-action.ts",
+      "upstreamSha256": "33e078a983b6fe73f7a6522c83a14fb2f65eb85ad6e67ffc4dd707313436718d",
+      "vendoredSha256": "33e078a983b6fe73f7a6522c83a14fb2f65eb85ad6e67ffc4dd707313436718d",
+      "delta": []
+    },
+    {
+      "path": "src/runs/foreground/async-steering-action.ts",
+      "upstreamSha256": "7876596b69dd03501df79bb4cae5a3814acd07d3902adde014289904589dd73c",
+      "vendoredSha256": "7876596b69dd03501df79bb4cae5a3814acd07d3902adde014289904589dd73c",
+      "delta": []
+    },
+    {
+      "path": "src/runs/foreground/async-stop-action.ts",
+      "upstreamSha256": "740c8dd4b246ab26f8066db48252377106d2b90d7742cfdd8d838adb02ffb07a",
+      "vendoredSha256": "740c8dd4b246ab26f8066db48252377106d2b90d7742cfdd8d838adb02ffb07a",
+      "delta": []
+    },
+    {
+      "path": "src/runs/foreground/execution.ts",
+      "upstreamSha256": "054de3b5e96b7c450d78a2d0ce188c06440f545f26b1e03ef5f625c95e906cd1",
+      "vendoredSha256": "054de3b5e96b7c450d78a2d0ce188c06440f545f26b1e03ef5f625c95e906cd1",
+      "delta": []
+    },
+    {
+      "path": "src/runs/foreground/foreground-control.ts",
+      "upstreamSha256": "f1367a5ecbc4d4b3715764cad40b4d00dbca866db4095569bb0ecff9b222c404",
+      "vendoredSha256": "f1367a5ecbc4d4b3715764cad40b4d00dbca866db4095569bb0ecff9b222c404",
+      "delta": []
+    },
+    {
+      "path": "src/runs/foreground/foreground-history.ts",
+      "upstreamSha256": "b9cf2be34dfeff0ea3f098002d49e5445629cfa6d36dc384531c3203d37179dc",
+      "vendoredSha256": "b9cf2be34dfeff0ea3f098002d49e5445629cfa6d36dc384531c3203d37179dc",
+      "delta": []
+    },
+    {
+      "path": "src/runs/foreground/prompt-audit.ts",
+      "upstreamSha256": "4d17c9fdce1f8359aba1fa77942299493851e63166666149bd8c49b1cc31c799",
+      "vendoredSha256": "4d17c9fdce1f8359aba1fa77942299493851e63166666149bd8c49b1cc31c799",
+      "delta": []
+    },
+    {
+      "path": "src/runs/foreground/subagent-executor.ts",
+      "upstreamSha256": "378dd1e1f2edc70ce6679dc48a2e6a90595c6a7c1e1c9c47a3cd2365694b17a5",
+      "vendoredSha256": "3c2cb5d9f26db96dbedf4f8f5bb55de33023db14f2bef28e2b9c80ea9c60aa3a",
+      "delta": [
+        "SDK build-flavor support assertion at the existing effective execution boundary; ordinary backend is a no-op, sealed backend explicitly refuses."
+      ]
+    },
+    {
+      "path": "src/runs/foreground/workflow-detach-reconcile.ts",
+      "upstreamSha256": "774fe3548416522d0f3bc1b3d0bbc2a6821eb5c63e6410da889c437260fc9a22",
+      "vendoredSha256": "774fe3548416522d0f3bc1b3d0bbc2a6821eb5c63e6410da889c437260fc9a22",
+      "delta": []
+    },
+    {
+      "path": "src/runs/foreground/workflow-foreground-steering.ts",
+      "upstreamSha256": "a4822b1d3eb8a43785661ce4707443ed368c0967f506edee1237488f59bdd1b7",
+      "vendoredSha256": "a4822b1d3eb8a43785661ce4707443ed368c0967f506edee1237488f59bdd1b7",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/abort-recovery.ts",
+      "upstreamSha256": "87fd58c9c98a06b7320b376e6e632e7fcdf5dcf231c8dd47fc270195ede413b8",
+      "vendoredSha256": "87fd58c9c98a06b7320b376e6e632e7fcdf5dcf231c8dd47fc270195ede413b8",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/acceptance.ts",
+      "upstreamSha256": "13a53447f5047c1ba1a47ef98745070c33cedbd02bb24aebb05d517a925efcee",
+      "vendoredSha256": "13a53447f5047c1ba1a47ef98745070c33cedbd02bb24aebb05d517a925efcee",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/agent-contract.ts",
+      "upstreamSha256": "9c381e9b94dbf50a25a7c67db270d06fccacbdd74af5612fb9d494a962300c12",
+      "vendoredSha256": "9c381e9b94dbf50a25a7c67db270d06fccacbdd74af5612fb9d494a962300c12",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/async-status-projection.ts",
+      "upstreamSha256": "c0b44c88592a16a669cc5fbb1def4fae8c20eabe40b9e43f0b17c9534b1c17d6",
+      "vendoredSha256": "c0b44c88592a16a669cc5fbb1def4fae8c20eabe40b9e43f0b17c9534b1c17d6",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/background-process-options.ts",
+      "upstreamSha256": "0bcd3a3f69e5610030185ea05dc6074c1e80439205ada8f8dd558cb815ad8bd7",
+      "vendoredSha256": "0bcd3a3f69e5610030185ea05dc6074c1e80439205ada8f8dd558cb815ad8bd7",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/capability-ceiling.ts",
+      "upstreamSha256": "3b264cceff58c4e95c52b86b1ddfcb51cc0a7825643079a0332bd66898415652",
+      "vendoredSha256": "3b264cceff58c4e95c52b86b1ddfcb51cc0a7825643079a0332bd66898415652",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/chain-outputs.ts",
+      "upstreamSha256": "f7d8b03500c7c7f582673a70a7bc1a7d2fa562c64cb7d2705190663f2e843354",
+      "vendoredSha256": "fabe365cee3e5c88b3742f2c7b6f909c99ddf2dda29cf328586fa32c9d8eaafc",
+      "delta": [
+        "SDK build-flavor support assertion at the existing effective execution boundary; ordinary backend is a no-op, sealed backend explicitly refuses."
+      ]
+    },
+    {
+      "path": "src/runs/shared/child-identity.ts",
+      "upstreamSha256": "74c4f5626aef1dcd365d5ad5a504bf0d1b8512454f82302b06dc7da827142d25",
+      "vendoredSha256": "74c4f5626aef1dcd365d5ad5a504bf0d1b8512454f82302b06dc7da827142d25",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/child-launch-plan.ts",
+      "upstreamSha256": "a5e1b36ca879f98af383ee94ffb8fdb1d4a872b7451e7a5ce9d59e98e8650c23",
+      "vendoredSha256": "a5e1b36ca879f98af383ee94ffb8fdb1d4a872b7451e7a5ce9d59e98e8650c23",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/child-protocol.ts",
+      "upstreamSha256": "08cc0df0358e5eb557852b549ae545160ff1112a0c84a5e7da93e0814b514961",
+      "vendoredSha256": "08cc0df0358e5eb557852b549ae545160ff1112a0c84a5e7da93e0814b514961",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/completion-evidence.ts",
+      "upstreamSha256": "93823250ad1b430d4a135455815e863e2ba3f17e3280f2fad951c922ccee1232",
+      "vendoredSha256": "93823250ad1b430d4a135455815e863e2ba3f17e3280f2fad951c922ccee1232",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/completion-guard.ts",
+      "upstreamSha256": "033f45ca762b9499defde04545862e0f0d4bb576eca2534fe32e64f43f6760fc",
+      "vendoredSha256": "033f45ca762b9499defde04545862e0f0d4bb576eca2534fe32e64f43f6760fc",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/context-mode.ts",
+      "upstreamSha256": "baefa0ce44f200b0ba44ffb0009ffbbdfe5c6ccd368d72b0535a0b6cafe53e16",
+      "vendoredSha256": "baefa0ce44f200b0ba44ffb0009ffbbdfe5c6ccd368d72b0535a0b6cafe53e16",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/dynamic-fanout.ts",
+      "upstreamSha256": "405bcfe1a3dd394570a70fec801eabb149e9fbf38b1d2c21424f589f7acd2eb1",
+      "vendoredSha256": "dbc324f76bdcac11247e947b410af6578093415546e4e840a0b48490466e942c",
+      "delta": [
+        "SDK build-flavor support assertion at the existing effective execution boundary; ordinary backend is a no-op, sealed backend explicitly refuses."
+      ]
+    },
+    {
+      "path": "src/runs/shared/extension-bindings.ts",
+      "upstreamSha256": "55bf824caa684eb49be04ba3760325b19ee5cee8f01a6082be4ba530fe26c8d2",
+      "vendoredSha256": "55bf824caa684eb49be04ba3760325b19ee5cee8f01a6082be4ba530fe26c8d2",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/external-cli-contract.ts",
+      "upstreamSha256": "850d53a1ef1aa13c2f6da9e342a685325bac39e83e7ce8486c06cc80ec34e665",
+      "vendoredSha256": "850d53a1ef1aa13c2f6da9e342a685325bac39e83e7ce8486c06cc80ec34e665",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/external-job-bridge.ts",
+      "upstreamSha256": "52eaa9728740d044c0b8308b6ecec68931642c3dc4e451d7600b3ead19223187",
+      "vendoredSha256": "52eaa9728740d044c0b8308b6ecec68931642c3dc4e451d7600b3ead19223187",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/external-job-runner.ts",
+      "upstreamSha256": "1978d02e0cb7a7279af48acf299d9e0cd8a8e77dd4d21214845eab691c286100",
+      "vendoredSha256": "1978d02e0cb7a7279af48acf299d9e0cd8a8e77dd4d21214845eab691c286100",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/host-step-status.ts",
+      "upstreamSha256": "d3e62faccb07c46030e8e27d077af8c1de9ffbf9a1b5c4be3e7c4dd377091226",
+      "vendoredSha256": "d3e62faccb07c46030e8e27d077af8c1de9ffbf9a1b5c4be3e7c4dd377091226",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/lane-metadata.ts",
+      "upstreamSha256": "bb8089a489aee9bce21fb8587406802d06e6a9bda0c676e073e93a1e1cc8d617",
+      "vendoredSha256": "bb8089a489aee9bce21fb8587406802d06e6a9bda0c676e073e93a1e1cc8d617",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/launch-cwd.ts",
+      "upstreamSha256": "8183da336c62c872ebf80eb9ec1b2120476e14ff874533cb07e4b8cf327df2f5",
+      "vendoredSha256": "8183da336c62c872ebf80eb9ec1b2120476e14ff874533cb07e4b8cf327df2f5",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/llm-intent-arbiter.ts",
+      "upstreamSha256": "3ed0821f9f8ff2b3e3b5a4737ef4b46177ecdc17f296b6c259c1394104beb5cc",
+      "vendoredSha256": "3ed0821f9f8ff2b3e3b5a4737ef4b46177ecdc17f296b6c259c1394104beb5cc",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/long-running-guard.ts",
+      "upstreamSha256": "688b70444acbf505ec155442567851a906716f630aa502f6838a00bbe3c556f0",
+      "vendoredSha256": "688b70444acbf505ec155442567851a906716f630aa502f6838a00bbe3c556f0",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/mcp-config-sources.ts",
+      "upstreamSha256": "16fbb42e44cfdc3206e3d1e276cf82391f2c3636e931555729e22eecf1b44ebf",
+      "vendoredSha256": "16fbb42e44cfdc3206e3d1e276cf82391f2c3636e931555729e22eecf1b44ebf",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/mcp-direct-tool-allowlist.ts",
+      "upstreamSha256": "6b258b5986b66cd340f2e3b316e06e2a12c7aa878ba1db3534f9c324ceb00974",
+      "vendoredSha256": "6b258b5986b66cd340f2e3b316e06e2a12c7aa878ba1db3534f9c324ceb00974",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/mcp-direct-tool-grant.ts",
+      "upstreamSha256": "4c764aeef56b1553b52d1df7e96f36ae80538151b3ad7c9b68fa02c734bf7f3b",
+      "vendoredSha256": "4c764aeef56b1553b52d1df7e96f36ae80538151b3ad7c9b68fa02c734bf7f3b",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/model-exclusions.ts",
+      "upstreamSha256": "b98645f9e660acfbfd2401549197f93046e0d5dde5260facdbc0b92c55cad773",
+      "vendoredSha256": "b98645f9e660acfbfd2401549197f93046e0d5dde5260facdbc0b92c55cad773",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/model-fallback.ts",
+      "upstreamSha256": "c4af57e2596f48b00ffd1b08649ca776bc2567090c68b332d3d78f95d6d42eea",
+      "vendoredSha256": "c4af57e2596f48b00ffd1b08649ca776bc2567090c68b332d3d78f95d6d42eea",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/model-scope.ts",
+      "upstreamSha256": "cddbd03c5f767ecba490f4f342faf925f9e133c76add37607127152c8b34d68c",
+      "vendoredSha256": "cddbd03c5f767ecba490f4f342faf925f9e133c76add37607127152c8b34d68c",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/mutation-evidence.ts",
+      "upstreamSha256": "212f37bfd48886bfdb5606ef283d22fba38783bfa48c05e31fe80daeb7b29ed2",
+      "vendoredSha256": "212f37bfd48886bfdb5606ef283d22fba38783bfa48c05e31fe80daeb7b29ed2",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/nested-events.ts",
+      "upstreamSha256": "4fb65f1a38da2c37c391a234749195773452184e6775ff7c38eacbb404924b49",
+      "vendoredSha256": "4fb65f1a38da2c37c391a234749195773452184e6775ff7c38eacbb404924b49",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/nested-path.ts",
+      "upstreamSha256": "928b319259a6c20421b661c59ea7c038b338b1457f3d34adcb6d1944bfd67d71",
+      "vendoredSha256": "928b319259a6c20421b661c59ea7c038b338b1457f3d34adcb6d1944bfd67d71",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/nested-render.ts",
+      "upstreamSha256": "430bbe99e89ec452f10ee31bc0ede12789a5c11caf0d6228cace8fa5f31b17f3",
+      "vendoredSha256": "430bbe99e89ec452f10ee31bc0ede12789a5c11caf0d6228cace8fa5f31b17f3",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/orca-progress-tabs.ts",
+      "upstreamSha256": "b22a829c76d00d6889a3404164e84b8dd8700c1b4822c7d7e4513d4db7e2935d",
+      "vendoredSha256": "b22a829c76d00d6889a3404164e84b8dd8700c1b4822c7d7e4513d4db7e2935d",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/parallel-handoff.ts",
+      "upstreamSha256": "19370f6463865ea69a2cfc18a4fb182011ea4cb774eec09a4806cefbf7cb6a6d",
+      "vendoredSha256": "19370f6463865ea69a2cfc18a4fb182011ea4cb774eec09a4806cefbf7cb6a6d",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/parallel-utils.ts",
+      "upstreamSha256": "f1badacd86aef4768b68b0aca18b9c698652a7c35d68e847a55d75e8b70867a2",
+      "vendoredSha256": "f1badacd86aef4768b68b0aca18b9c698652a7c35d68e847a55d75e8b70867a2",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/permissions.ts",
+      "upstreamSha256": "9c6a50e381022e5c522d9571870a7faa1137138220712934e6988a9188ff9eff",
+      "vendoredSha256": "9c6a50e381022e5c522d9571870a7faa1137138220712934e6988a9188ff9eff",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/pi-args.ts",
+      "upstreamSha256": "7317753c99a27ba6184837a78ffdee9270f31e5fc2a6c2bdd57361f7bf8ef772",
+      "vendoredSha256": "7317753c99a27ba6184837a78ffdee9270f31e5fc2a6c2bdd57361f7bf8ef772",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/pi-spawn.ts",
+      "upstreamSha256": "b52607ba8f25fd1fb2f029aa7826ab445ed1ad45dc38495d73987304239b573c",
+      "vendoredSha256": "b52607ba8f25fd1fb2f029aa7826ab445ed1ad45dc38495d73987304239b573c",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/process-signal.ts",
+      "upstreamSha256": "c3bea76e48b62dd36e018c800796114bfa1b4ef3a92cf120cb5006e01155ea19",
+      "vendoredSha256": "c3bea76e48b62dd36e018c800796114bfa1b4ef3a92cf120cb5006e01155ea19",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/run-fanout-budget.ts",
+      "upstreamSha256": "adf1ef492e34e6390bc3952a10283046333b91562768efdfba2c93aa8a759192",
+      "vendoredSha256": "adf1ef492e34e6390bc3952a10283046333b91562768efdfba2c93aa8a759192",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/run-history.ts",
+      "upstreamSha256": "7a20f4dbd5c1c07e24403bf3092a451bd4f5068b9c62a679ccb55242f5482f0c",
+      "vendoredSha256": "7a20f4dbd5c1c07e24403bf3092a451bd4f5068b9c62a679ccb55242f5482f0c",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/runtime-acknowledged-extensions.ts",
+      "upstreamSha256": "ee72863e6e94df1aeb9b6568f0a82d3520bd93e444c8dd89ede7541bc436efab",
+      "vendoredSha256": "ee72863e6e94df1aeb9b6568f0a82d3520bd93e444c8dd89ede7541bc436efab",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/session-lease.ts",
+      "upstreamSha256": "e39dfeb2da0c1d8bb25c717f251deb4dd51bafea5a366b00e98ecb6a1439a205",
+      "vendoredSha256": "e39dfeb2da0c1d8bb25c717f251deb4dd51bafea5a366b00e98ecb6a1439a205",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/single-output.ts",
+      "upstreamSha256": "030313a8a9e14706452f0dda05d567ab5f787e4c83800b495de045827b40aaa3",
+      "vendoredSha256": "030313a8a9e14706452f0dda05d567ab5f787e4c83800b495de045827b40aaa3",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/spawn-budget.ts",
+      "upstreamSha256": "fbc12ffc3623444fd4f802a5dce3165924a2864c06a151c562d8de59e3a4a7f8",
+      "vendoredSha256": "fbc12ffc3623444fd4f802a5dce3165924a2864c06a151c562d8de59e3a4a7f8",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/structured-output.ts",
+      "upstreamSha256": "1d16ec3b0813d99b2516f4aa99a389c614fb0f53af7b86b3cf8bc8343a568e08",
+      "vendoredSha256": "a1b051c729ade61b8a0a565ca3a4ce1c12acb172bf5e311da63ec87a1b31a020",
+      "delta": [
+        "SDK build-flavor support assertion at the existing effective execution boundary; ordinary backend is a no-op, sealed backend explicitly refuses."
+      ]
+    },
+    {
+      "path": "src/runs/shared/subagent-control.ts",
+      "upstreamSha256": "245294f546b08e5ad5fad071a5522bfc8d0c31d31a81c11e310938591e30e770",
+      "vendoredSha256": "245294f546b08e5ad5fad071a5522bfc8d0c31d31a81c11e310938591e30e770",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/subagent-startup-retry.ts",
+      "upstreamSha256": "df84a7b95842967427fac197034ab49c320dffaebb62a0b2e1fc710abae22f33",
+      "vendoredSha256": "df84a7b95842967427fac197034ab49c320dffaebb62a0b2e1fc710abae22f33",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/task-intent.ts",
+      "upstreamSha256": "273b8d9a3bbc03bf8467f9269140eeeea5f2cffe103f06faf44006fd9b5fcc2a",
+      "vendoredSha256": "273b8d9a3bbc03bf8467f9269140eeeea5f2cffe103f06faf44006fd9b5fcc2a",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/tool-availability.ts",
+      "upstreamSha256": "03d820ed7ad2f5a6e83713be4c8b19592191d1202214c9166dcdfa1de3a42f55",
+      "vendoredSha256": "03d820ed7ad2f5a6e83713be4c8b19592191d1202214c9166dcdfa1de3a42f55",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/tool-budget.ts",
+      "upstreamSha256": "df34d62144513d3844d2730637ced2b3f6461eb8fe364fc4034c956cec998441",
+      "vendoredSha256": "df34d62144513d3844d2730637ced2b3f6461eb8fe364fc4034c956cec998441",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/tool-timeout.ts",
+      "upstreamSha256": "fa686c539d02a9310bb5e50c88a1f5fefa628780e7bc737a076c3acff0b6769c",
+      "vendoredSha256": "fa686c539d02a9310bb5e50c88a1f5fefa628780e7bc737a076c3acff0b6769c",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/usage-budget.ts",
+      "upstreamSha256": "c2ac0c5e99948435c1f9aee4cdd0ce3b97ffe3f7ea66922ab7626f0c5cb12b7f",
+      "vendoredSha256": "c2ac0c5e99948435c1f9aee4cdd0ce3b97ffe3f7ea66922ab7626f0c5cb12b7f",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/workflow-graph.ts",
+      "upstreamSha256": "c366c68b3f3785508ba1278b71cbcf63b566fbf58f7874d89da97c752e0363df",
+      "vendoredSha256": "c366c68b3f3785508ba1278b71cbcf63b566fbf58f7874d89da97c752e0363df",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/worktree-cleanup-plan.ts",
+      "upstreamSha256": "e8a301893706a411b2f2f02ee042757ae18fa1350f20a0d85d9142e74ed4a831",
+      "vendoredSha256": "e8a301893706a411b2f2f02ee042757ae18fa1350f20a0d85d9142e74ed4a831",
+      "delta": []
+    },
+    {
+      "path": "src/runs/shared/worktree.ts",
+      "upstreamSha256": "c2f393d20dcd2c27635e2b7c4d1c5891e6c2586faa026a69f57e04b8c1e1c5c0",
+      "vendoredSha256": "c2f393d20dcd2c27635e2b7c4d1c5891e6c2586faa026a69f57e04b8c1e1c5c0",
+      "delta": []
+    },
+    {
+      "path": "src/shared/accessible-dir.ts",
+      "upstreamSha256": "699f633e244ea23631c6af54939de43942b8432d90e95f826efc82e0bd0d0dbd",
+      "vendoredSha256": "699f633e244ea23631c6af54939de43942b8432d90e95f826efc82e0bd0d0dbd",
+      "delta": []
+    },
+    {
+      "path": "src/shared/agent-stream-options.ts",
+      "upstreamSha256": "a07f91f98c1f0a7d386777656f73418ad04e62dfb68040b58bd9ffe8979f7ba4",
+      "vendoredSha256": "a07f91f98c1f0a7d386777656f73418ad04e62dfb68040b58bd9ffe8979f7ba4",
+      "delta": []
+    },
+    {
+      "path": "src/shared/artifacts.ts",
+      "upstreamSha256": "ccca09e94181458bb53c2431dc6b96ec434544187d64cc411c46f1e7f4c22003",
+      "vendoredSha256": "ccca09e94181458bb53c2431dc6b96ec434544187d64cc411c46f1e7f4c22003",
+      "delta": []
+    },
+    {
+      "path": "src/shared/atomic-json.ts",
+      "upstreamSha256": "f6e532b370aef25f1a01f11fe7e62ad811b1e4ed6c4702199524c98d44375657",
+      "vendoredSha256": "f6e532b370aef25f1a01f11fe7e62ad811b1e4ed6c4702199524c98d44375657",
+      "delta": []
+    },
+    {
+      "path": "src/shared/capacity-resilient-json.ts",
+      "upstreamSha256": "a4798e256114606d18a504527e35f487904b05099c151ccb51f0e7dbedd404de",
+      "vendoredSha256": "a4798e256114606d18a504527e35f487904b05099c151ccb51f0e7dbedd404de",
+      "delta": []
+    },
+    {
+      "path": "src/shared/child-session-name.ts",
+      "upstreamSha256": "74df84c58316d2ddf5f1879e4b5384278bb6196b17316386de5b485cd6bd281d",
+      "vendoredSha256": "74df84c58316d2ddf5f1879e4b5384278bb6196b17316386de5b485cd6bd281d",
+      "delta": []
+    },
+    {
+      "path": "src/shared/child-transcript.ts",
+      "upstreamSha256": "a8d5505d8c6719f68e3823a444ead4d0efa1c16a8745c89bb5a8f671436e9e65",
+      "vendoredSha256": "a8d5505d8c6719f68e3823a444ead4d0efa1c16a8745c89bb5a8f671436e9e65",
+      "delta": []
+    },
+    {
+      "path": "src/shared/completion-owner.ts",
+      "upstreamSha256": "5c65179fb61a555aaa573ce068e838351388e4a47283aed99398a6e3ed5ffe8f",
+      "vendoredSha256": "5c65179fb61a555aaa573ce068e838351388e4a47283aed99398a6e3ed5ffe8f",
+      "delta": []
+    },
+    {
+      "path": "src/shared/display-text.ts",
+      "upstreamSha256": "1d48751f0270ef46521923492dbc7576fd995d264f22250f7a98cf9950491d6b",
+      "vendoredSha256": "1d48751f0270ef46521923492dbc7576fd995d264f22250f7a98cf9950491d6b",
+      "delta": []
+    },
+    {
+      "path": "src/shared/extension-context.ts",
+      "upstreamSha256": "5ae4e69605da88a16489fa5df22fd7e26074ac143dca401d2fc9d32d80f3d405",
+      "vendoredSha256": "5ae4e69605da88a16489fa5df22fd7e26074ac143dca401d2fc9d32d80f3d405",
+      "delta": []
+    },
+    {
+      "path": "src/shared/file-coalescer.ts",
+      "upstreamSha256": "c677b8e93f75f8d32f87a41aa10fddedca435443cce6e9201f95dd2ebfdf8c55",
+      "vendoredSha256": "c677b8e93f75f8d32f87a41aa10fddedca435443cce6e9201f95dd2ebfdf8c55",
+      "delta": []
+    },
+    {
+      "path": "src/shared/file-system-retry.ts",
+      "upstreamSha256": "85101173fc14c0b74698496d8c2034ad6a664d58f765b82dd1a2787015be4acb",
+      "vendoredSha256": "85101173fc14c0b74698496d8c2034ad6a664d58f765b82dd1a2787015be4acb",
+      "delta": []
+    },
+    {
+      "path": "src/shared/fork-context.ts",
+      "upstreamSha256": "0947810882331ca2142e7685507abf9eeb47280ccb3f44a61c9e7b0a85b7c060",
+      "vendoredSha256": "0947810882331ca2142e7685507abf9eeb47280ccb3f44a61c9e7b0a85b7c060",
+      "delta": []
+    },
+    {
+      "path": "src/shared/formatters.ts",
+      "upstreamSha256": "cafb1e738a3c4d132dbb35d8c295e96b4583140eaace2d0de3d275883d6fd526",
+      "vendoredSha256": "cafb1e738a3c4d132dbb35d8c295e96b4583140eaace2d0de3d275883d6fd526",
+      "delta": []
+    },
+    {
+      "path": "src/shared/jsonl-writer.ts",
+      "upstreamSha256": "b1a18d6447532d55bb681a9b6153ef0510e6dce50a10c437ed22af6411c8b839",
+      "vendoredSha256": "b1a18d6447532d55bb681a9b6153ef0510e6dce50a10c437ed22af6411c8b839",
+      "delta": []
+    },
+    {
+      "path": "src/shared/launch-contract.ts",
+      "upstreamSha256": "8be3dd85be14e347e762c1ea8ddcdecb6cdee259f1062b13a0dc7479fcf18dbd",
+      "vendoredSha256": "8be3dd85be14e347e762c1ea8ddcdecb6cdee259f1062b13a0dc7479fcf18dbd",
+      "delta": []
+    },
+    {
+      "path": "src/shared/model-info.ts",
+      "upstreamSha256": "a1972b79c6d91a7bad46303c786788f484aa3e29a59482452d441a3690e6c346",
+      "vendoredSha256": "a1972b79c6d91a7bad46303c786788f484aa3e29a59482452d441a3690e6c346",
+      "delta": []
+    },
+    {
+      "path": "src/shared/node-executable.ts",
+      "upstreamSha256": "cb744d872082859a98332a59ba3ee78d7a87fcca017924ea195700653ebb6fe2",
+      "vendoredSha256": "cb744d872082859a98332a59ba3ee78d7a87fcca017924ea195700653ebb6fe2",
+      "delta": []
+    },
+    {
+      "path": "src/shared/post-exit-stdio-guard.ts",
+      "upstreamSha256": "19cd314075b019a2d0a18ff46b4c1a11cc211dc5d52a3dca40cd8434dc992b14",
+      "vendoredSha256": "19cd314075b019a2d0a18ff46b4c1a11cc211dc5d52a3dca40cd8434dc992b14",
+      "delta": []
+    },
+    {
+      "path": "src/shared/prompt-resources.ts",
+      "upstreamSha256": "798808a2f50bf02b62c9cc77c5c975d30bcd8aac6184e6ff88d7a6235658669a",
+      "vendoredSha256": "798808a2f50bf02b62c9cc77c5c975d30bcd8aac6184e6ff88d7a6235658669a",
+      "delta": []
+    },
+    {
+      "path": "src/shared/pruned-fork.ts",
+      "upstreamSha256": "d1c9c3091faaf464cf6eecb1fd265a6fd89406b4fa0ff1b64d6fced87b850e41",
+      "vendoredSha256": "d1c9c3091faaf464cf6eecb1fd265a6fd89406b4fa0ff1b64d6fced87b850e41",
+      "delta": []
+    },
+    {
+      "path": "src/shared/session-file-trust.ts",
+      "upstreamSha256": "daca5e095066c5f526dfda6148ebd3a5e1920bae92b6d52adc2828c26d9f658f",
+      "vendoredSha256": "daca5e095066c5f526dfda6148ebd3a5e1920bae92b6d52adc2828c26d9f658f",
+      "delta": []
+    },
+    {
+      "path": "src/shared/session-identity.ts",
+      "upstreamSha256": "856d15b4e1afba45e35d9c2fcd82c44403027535d38905629548e22a27803872",
+      "vendoredSha256": "856d15b4e1afba45e35d9c2fcd82c44403027535d38905629548e22a27803872",
+      "delta": []
+    },
+    {
+      "path": "src/shared/settings.ts",
+      "upstreamSha256": "e8018b03b8176d48f1d9ee093e7f5c0342b56b468574eebdaa1547d030222b1a",
+      "vendoredSha256": "e8018b03b8176d48f1d9ee093e7f5c0342b56b468574eebdaa1547d030222b1a",
+      "delta": []
+    },
+    {
+      "path": "src/shared/shortcuts.ts",
+      "upstreamSha256": "677feea68ea1d670f2c52e8f8919f3bbf25af3d90e8ac3843e5487f25e1b3413",
+      "vendoredSha256": "677feea68ea1d670f2c52e8f8919f3bbf25af3d90e8ac3843e5487f25e1b3413",
+      "delta": []
+    },
+    {
+      "path": "src/shared/status-format.ts",
+      "upstreamSha256": "0c8bb72be421361b1ce3f67b0f56098c88706aefb89666757192525389d0bbf3",
+      "vendoredSha256": "0c8bb72be421361b1ce3f67b0f56098c88706aefb89666757192525389d0bbf3",
+      "delta": []
+    },
+    {
+      "path": "src/shared/thinking-ceiling.ts",
+      "upstreamSha256": "c365c988d5dbbe200337e7ce36e287efc35340b42fd6c9038c3d694e49fe6be8",
+      "vendoredSha256": "c365c988d5dbbe200337e7ce36e287efc35340b42fd6c9038c3d694e49fe6be8",
+      "delta": []
+    },
+    {
+      "path": "src/shared/types.ts",
+      "upstreamSha256": "9489c348f514d224ca22dd70878c1d3138e99550393d78241ea877cb11d359a4",
+      "vendoredSha256": "9489c348f514d224ca22dd70878c1d3138e99550393d78241ea877cb11d359a4",
+      "delta": []
+    },
+    {
+      "path": "src/shared/utf8.ts",
+      "upstreamSha256": "b6caa640aff53a36896a9b02f40cc89421522f637c48fba546d4b66e1d2405e3",
+      "vendoredSha256": "b6caa640aff53a36896a9b02f40cc89421522f637c48fba546d4b66e1d2405e3",
+      "delta": []
+    },
+    {
+      "path": "src/shared/utils.ts",
+      "upstreamSha256": "d4e1583f2fcadffcabd706849d7ca5962c4bc1fc2627e02f1112963dda62555c",
+      "vendoredSha256": "d4e1583f2fcadffcabd706849d7ca5962c4bc1fc2627e02f1112963dda62555c",
+      "delta": []
+    },
+    {
+      "path": "src/shared/watch-strategy.ts",
+      "upstreamSha256": "7517208e3176a2a91450fd5d88fdb96db6d4b3513a77894be1640565c930c8bc",
+      "vendoredSha256": "7517208e3176a2a91450fd5d88fdb96db6d4b3513a77894be1640565c930c8bc",
+      "delta": []
+    },
+    {
+      "path": "src/shared/workflow-child-permit.ts",
+      "upstreamSha256": "6f26cb22502a560e273d4c7c0a8437dbbef8de3999d2a6765769435082ced833",
+      "vendoredSha256": "6f26cb22502a560e273d4c7c0a8437dbbef8de3999d2a6765769435082ced833",
+      "delta": []
+    },
+    {
+      "path": "src/slash/delegation-adapters.ts",
+      "upstreamSha256": "0f7ed4a25013779464023466ae646cc74b0726f7204e92e34f14ef5d03732f6e",
+      "vendoredSha256": "2960df24b0f5699287c34e18b41dea29383b6c91818a0380a1dd13e2cb92f2ee",
+      "delta": [
+        "SDK build-flavor support assertion at the existing effective execution boundary; ordinary backend is a no-op, sealed backend explicitly refuses."
+      ]
+    },
+    {
+      "path": "src/slash/delegation-json.ts",
+      "upstreamSha256": "a36297f52c984acf98298768262bd4c6ac2cc8194081a30bac6e0778d8cc20f0",
+      "vendoredSha256": "a36297f52c984acf98298768262bd4c6ac2cc8194081a30bac6e0778d8cc20f0",
+      "delta": []
+    },
+    {
+      "path": "src/slash/delegation-request.ts",
+      "upstreamSha256": "306269e285a5eace15b0a5b4fe98e58e1f04310aee68a78bdf7373a580b5c1d3",
+      "vendoredSha256": "306269e285a5eace15b0a5b4fe98e58e1f04310aee68a78bdf7373a580b5c1d3",
+      "delta": []
+    },
+    {
+      "path": "src/slash/prompt-template-bridge.ts",
+      "upstreamSha256": "35e8706e50b814e23006dc9f37c18698c38d5b78819b35bea846d68f18036b7f",
+      "vendoredSha256": "35e8706e50b814e23006dc9f37c18698c38d5b78819b35bea846d68f18036b7f",
+      "delta": []
+    },
+    {
+      "path": "src/slash/prompt-workflows.ts",
+      "upstreamSha256": "b059fd64c7710688f99aee907350ab4b864ed35b2cac43fe816cab86661885d1",
+      "vendoredSha256": "b059fd64c7710688f99aee907350ab4b864ed35b2cac43fe816cab86661885d1",
+      "delta": []
+    },
+    {
+      "path": "src/slash/selector.ts",
+      "upstreamSha256": "595841a54bc04452299470dba6fc8a37570db979f77bf3596b774c3716406f1c",
+      "vendoredSha256": "595841a54bc04452299470dba6fc8a37570db979f77bf3596b774c3716406f1c",
+      "delta": []
+    },
+    {
+      "path": "src/slash/slash-bridge.ts",
+      "upstreamSha256": "f74851147e82ef8f666e002d15e4959bb0d6b1fee39bb2f59a2ca482dd45c560",
+      "vendoredSha256": "f74851147e82ef8f666e002d15e4959bb0d6b1fee39bb2f59a2ca482dd45c560",
+      "delta": []
+    },
+    {
+      "path": "src/slash/slash-commands.ts",
+      "upstreamSha256": "88ad7a83cbd007a7c45828a16ed4ff83ab94c0f352b5071737fa2f031551586c",
+      "vendoredSha256": "88ad7a83cbd007a7c45828a16ed4ff83ab94c0f352b5071737fa2f031551586c",
+      "delta": []
+    },
+    {
+      "path": "src/slash/slash-live-state.ts",
+      "upstreamSha256": "db61ef7b228687579171624dbb7a10416f85a7fb32b0d0829562da289ed05a9b",
+      "vendoredSha256": "db61ef7b228687579171624dbb7a10416f85a7fb32b0d0829562da289ed05a9b",
+      "delta": []
+    },
+    {
+      "path": "src/slash/subagents-admin.ts",
+      "upstreamSha256": "1b0dc98e1ee2dfb917df379d4010376bb62c06214dba97b2ea871cf8a3d73d07",
+      "vendoredSha256": "1b0dc98e1ee2dfb917df379d4010376bb62c06214dba97b2ea871cf8a3d73d07",
+      "delta": []
+    },
+    {
+      "path": "src/tui/fleet-status.ts",
+      "upstreamSha256": "aed3a4c7bdb8df2c045951235f75014ca9e639ba19be437de42709a2efbb0ea1",
+      "vendoredSha256": "aed3a4c7bdb8df2c045951235f75014ca9e639ba19be437de42709a2efbb0ea1",
+      "delta": []
+    },
+    {
+      "path": "src/tui/fleet-transcript.ts",
+      "upstreamSha256": "908c039d01b2183268b82bcba1efc674bb0e0ca2caa04a304e64c6329f790567",
+      "vendoredSha256": "908c039d01b2183268b82bcba1efc674bb0e0ca2caa04a304e64c6329f790567",
+      "delta": []
+    },
+    {
+      "path": "src/tui/fleet.ts",
+      "upstreamSha256": "42aaf5ba5aa36668582e898dab79e433aab12e638a28f238e0e77cf214e9f90e",
+      "vendoredSha256": "42aaf5ba5aa36668582e898dab79e433aab12e638a28f238e0e77cf214e9f90e",
+      "delta": []
+    },
+    {
+      "path": "src/tui/render-helpers.ts",
+      "upstreamSha256": "934f572f4a959d01357916caf0ce640cf690b5a96c7d1a1d36f6107da1d8006a",
+      "vendoredSha256": "934f572f4a959d01357916caf0ce640cf690b5a96c7d1a1d36f6107da1d8006a",
+      "delta": []
+    },
+    {
+      "path": "src/tui/render.ts",
+      "upstreamSha256": "ec22f8a0c1af18d99b1f88e3aee084fd342a36c3bc5eafd3f7d3f05ffc5fd909",
+      "vendoredSha256": "ec22f8a0c1af18d99b1f88e3aee084fd342a36c3bc5eafd3f7d3f05ffc5fd909",
+      "delta": []
+    },
+    {
+      "path": "src/types/pi-runtime-compat.d.ts",
+      "upstreamSha256": "88b3d4bc13a80ce00fc1a5cb113241135673fd3ab3015c6c2c24b7aefc827866",
+      "vendoredSha256": "88b3d4bc13a80ce00fc1a5cb113241135673fd3ab3015c6c2c24b7aefc827866",
+      "delta": []
+    },
+    {
+      "path": "src/watchdog/change-signature.ts",
+      "upstreamSha256": "68fb6e82a06b4882820dbff5700cba450a0dac811a3c62960ecac2894ad6b7b4",
+      "vendoredSha256": "68fb6e82a06b4882820dbff5700cba450a0dac811a3c62960ecac2894ad6b7b4",
+      "delta": []
+    },
+    {
+      "path": "src/watchdog/child-status.ts",
+      "upstreamSha256": "ce015a6226d63351540739f100a2a4deefb80ef335732b7cf717886e9814f08d",
+      "vendoredSha256": "ce015a6226d63351540739f100a2a4deefb80ef335732b7cf717886e9814f08d",
+      "delta": []
+    },
+    {
+      "path": "src/watchdog/emission-guard.ts",
+      "upstreamSha256": "5b5237f17720a6941d7100df5a20c9ba0f3af5250290f9837c9102611abce514",
+      "vendoredSha256": "5b5237f17720a6941d7100df5a20c9ba0f3af5250290f9837c9102611abce514",
+      "delta": []
+    },
+    {
+      "path": "src/watchdog/lsp-diagnostics.ts",
+      "upstreamSha256": "cffcb229043aaf1f3e5ff12e327560b34c262ebd8b2bc035900bae153807a7c0",
+      "vendoredSha256": "cffcb229043aaf1f3e5ff12e327560b34c262ebd8b2bc035900bae153807a7c0",
+      "delta": []
+    },
+    {
+      "path": "src/watchdog/model-selection.ts",
+      "upstreamSha256": "7c97b99e7416dcbd193b9300a8dffcfaf134a0f3e16a7c2455fd76cd119c2d7d",
+      "vendoredSha256": "7c97b99e7416dcbd193b9300a8dffcfaf134a0f3e16a7c2455fd76cd119c2d7d",
+      "delta": []
+    },
+    {
+      "path": "src/watchdog/register-main.ts",
+      "upstreamSha256": "471a861bf7474500a11f98f7a83f01997384f8dc3c6675d4c0b77f13e287b526",
+      "vendoredSha256": "471a861bf7474500a11f98f7a83f01997384f8dc3c6675d4c0b77f13e287b526",
+      "delta": []
+    },
+    {
+      "path": "src/watchdog/render.ts",
+      "upstreamSha256": "ae7176f3b5640cfd331faaac68b3aa52c57eda289efaaa8e981b56e554d99129",
+      "vendoredSha256": "ae7176f3b5640cfd331faaac68b3aa52c57eda289efaaa8e981b56e554d99129",
+      "delta": []
+    },
+    {
+      "path": "src/watchdog/review.ts",
+      "upstreamSha256": "ad6fcb90eb2564748fba51df1320fbbabb6a335b631f481c913ad3d35dddbb61",
+      "vendoredSha256": "ad6fcb90eb2564748fba51df1320fbbabb6a335b631f481c913ad3d35dddbb61",
+      "delta": []
+    },
+    {
+      "path": "src/watchdog/runtime.ts",
+      "upstreamSha256": "c2f9b49f196161fb15d9795113026378a5bbd07884dbb1ae87c93e2f3b8db5bb",
+      "vendoredSha256": "c2f9b49f196161fb15d9795113026378a5bbd07884dbb1ae87c93e2f3b8db5bb",
+      "delta": []
+    },
+    {
+      "path": "src/watchdog/scope.ts",
+      "upstreamSha256": "3cd0120501e53be2e3fa8890e6e119ec7c9ecac42406dc25411528f1e1469d52",
+      "vendoredSha256": "3cd0120501e53be2e3fa8890e6e119ec7c9ecac42406dc25411528f1e1469d52",
+      "delta": []
+    },
+    {
+      "path": "src/watchdog/settings.ts",
+      "upstreamSha256": "efcb29fd65b30d57469e8ba799731dd8a26a6495293c157dd3f135502110061f",
+      "vendoredSha256": "efcb29fd65b30d57469e8ba799731dd8a26a6495293c157dd3f135502110061f",
+      "delta": []
+    },
+    {
+      "path": "src/watchdog/tool-actions.ts",
+      "upstreamSha256": "442a0abb62cbd69419539dd027cce9d67a04b875ef4a02552d998fb3f8a98a46",
+      "vendoredSha256": "442a0abb62cbd69419539dd027cce9d67a04b875ef4a02552d998fb3f8a98a46",
+      "delta": []
+    },
+    {
+      "path": "src/watchdog/turn-delta.ts",
+      "upstreamSha256": "bb7a7332cd4397aea03037f9fd52b8e906c3892822ddde17e2be864e07c6b07c",
+      "vendoredSha256": "bb7a7332cd4397aea03037f9fd52b8e906c3892822ddde17e2be864e07c6b07c",
+      "delta": []
+    },
+    {
+      "path": "src/watchdog/types.ts",
+      "upstreamSha256": "fa8d9c5b823c57639e8644cbd5232e62f0628f9fb5269cae77c37ffef18cc54b",
+      "vendoredSha256": "fa8d9c5b823c57639e8644cbd5232e62f0628f9fb5269cae77c37ffef18cc54b",
+      "delta": []
+    },
+    {
+      "path": "src/watchdog/warning-format.ts",
+      "upstreamSha256": "22cf7d9178bbf6243e7eee13c7c5567c97d3cb793bb6a88d532537ae0e7f3e88",
+      "vendoredSha256": "22cf7d9178bbf6243e7eee13c7c5567c97d3cb793bb6a88d532537ae0e7f3e88",
+      "delta": []
+    },
+    {
+      "path": "src/workflows/chat-progress.ts",
+      "upstreamSha256": "f9d9cbf0daa093816dce1521383c52e0755408bfca68956cdef4d34dd296779a",
+      "vendoredSha256": "f9d9cbf0daa093816dce1521383c52e0755408bfca68956cdef4d34dd296779a",
+      "delta": []
+    },
+    {
+      "path": "src/workflows/host-command.ts",
+      "upstreamSha256": "74aa9dcc29ec66f92cb9b419bb8c57d154cffa2b0bdd5aef6489baae72c56c6e",
+      "vendoredSha256": "74aa9dcc29ec66f92cb9b419bb8c57d154cffa2b0bdd5aef6489baae72c56c6e",
+      "delta": []
+    },
+    {
+      "path": "src/workflows/scripted-workflow.ts",
+      "upstreamSha256": "fa979f21d31894e427bec42292bdf5ac01b53d475269ec2cc82d898932bc35c1",
+      "vendoredSha256": "fa979f21d31894e427bec42292bdf5ac01b53d475269ec2cc82d898932bc35c1",
+      "delta": []
+    },
+    {
+      "path": "src/workflows/workflow-child-summary.ts",
+      "upstreamSha256": "990c9e46300091a3793819d849835de37c061ebc17788e48f7d1b2620d78ba7a",
+      "vendoredSha256": "990c9e46300091a3793819d849835de37c061ebc17788e48f7d1b2620d78ba7a",
+      "delta": []
+    },
+    {
+      "path": "src/workflows/workflow-preflight.ts",
+      "upstreamSha256": "b2ad58546429ac76fec8e65523c6cadc311a31bc83277f5e4223091d9aad798b",
+      "vendoredSha256": "b2ad58546429ac76fec8e65523c6cadc311a31bc83277f5e4223091d9aad798b",
+      "delta": []
+    },
+    {
+      "path": "src/workflows/workflow-receipt.ts",
+      "upstreamSha256": "ad905db5650257340f242033f265b1d3c28fe2a98a561a7bb30921764af0d485",
+      "vendoredSha256": "ad905db5650257340f242033f265b1d3c28fe2a98a561a7bb30921764af0d485",
+      "delta": []
+    },
+    {
+      "path": "src/workflows/workflow-settlement.ts",
+      "upstreamSha256": "37211dd7ae080c8291f20dabe789fb4dfd9485f1599737c049d11aae0fa199bd",
+      "vendoredSha256": "37211dd7ae080c8291f20dabe789fb4dfd9485f1599737c049d11aae0fa199bd",
+      "delta": []
+    },
+    {
+      "path": "package.json",
+      "upstreamSha256": "dd38aaba2b2e5ef9c8bc7aa437965126fc159851e2a3fec90ec3e9e3ab23c22d",
+      "vendoredSha256": "dd38aaba2b2e5ef9c8bc7aa437965126fc159851e2a3fec90ec3e9e3ab23c22d",
+      "delta": []
+    },
+    {
+      "path": "LICENSE",
+      "upstreamSha256": "2d20dfacd9742706e564470dc77438608a1e54b0ed46959f080709389209093c",
+      "vendoredSha256": "2d20dfacd9742706e564470dc77438608a1e54b0ed46959f080709389209093c",
+      "delta": []
+    }
+  ],
+  "sdkFiles": [
+    {
+      "path": "src/runs/shared/structured-output-sealed.ts",
+      "sha256": "80317c4ab62a4e13804b9e113f9fb6ed956b60db69b0c90a86c5eb6cf861f458",
+      "purpose": "Explicit sealed refusal backend; original types are erased, no compiler loader runtime edge."
+    }
+  ]
+}

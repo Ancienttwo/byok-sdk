@@ -8,6 +8,8 @@ import {
   InputPreparationIntegrityError,
   InputPreparationLimitError,
   InputPreparationStore,
+  InputPreparationUnsupportedRecordVersionError,
+  INPUT_PREPARATION_RECORD_VERSION,
   inputPreparationRecordId,
   type CounterReservationInput,
   type InputPreparationArtifact,
@@ -16,9 +18,11 @@ import {
 } from '../daemon/input-preparation-store';
 import {
   INPUT_PREPARATION_ARTIFACT_FORMAT,
+  INPUT_PREPARATION_RECORD_FORMAT,
   INPUT_PREPARATION_VERSION,
   type InputPreparationArtifactSummaryV1,
   type InputPreparationBindingV1,
+  type InputPreparationModelV1,
 } from '../input-preparation';
 
 /**
@@ -56,6 +60,7 @@ function binding(overrides: Partial<InputPreparationBindingV1> = {}): InputPrepa
     source: { revision: 'src-rev-1', digest: 'src-digest-1' },
     target: { endpoint: 'https://api.z.ai/api/coding/paas/v4', modelId: 'glm-4.6' },
     policyRevision: 'policy-1',
+    permissionMode: 'auto',
     runtime: {
       packageName: '@byok-sdk/pi-coding-agent',
       packageVersion: '0.85.1001',
@@ -64,12 +69,25 @@ function binding(overrides: Partial<InputPreparationBindingV1> = {}): InputPrepa
       forkBuild: 1,
       envelopeFormat: 'pi.session.prepared-input',
       requestFormat: 'pi.openai-completions.prepared',
-      compilerVersion: 1,
+      compilerVersion: 2,
     },
     requestDigest: 'digest-1',
     ...overrides,
   };
 }
+
+const MODEL: InputPreparationModelV1 = {
+  id: 'glm-4.6',
+  name: 'GLM 4.6',
+  api: 'openai-completions',
+  provider: 'zai',
+  baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+  reasoning: false,
+  input: ['text'],
+  cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+  contextWindow: 200_000,
+  maxTokens: 8_192,
+};
 
 /** D is deliberately awkward: multi-byte, embedded quotes and a lone newline. */
 const REQUEST_BODY = '{"model":"glm-4.6","messages":[{"role":"user","content":"héllo \\"world\\"\\nsecond line — ✅"}]}';
@@ -84,8 +102,9 @@ function artifact(recordId: string, overrides: Partial<InputPreparationArtifact>
     toolManifestDigest: 'manifest-digest-1',
     requestBody: REQUEST_BODY,
     counterProjection: '{"model":"glm-4.6"}',
-    coverage: 'unknown',
-    envelope: { format: 'pi.session.prepared-input', version: 1 },
+    projection: { version: 2, kind: 'content_complete', digest: 'a'.repeat(64) },
+    residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
+    envelope: { format: 'pi.session.prepared-input', version: 2 },
     ...overrides,
   };
 }
@@ -96,12 +115,16 @@ const SUMMARY: InputPreparationArtifactSummaryV1 = {
   toolManifestDigest: 'manifest-digest-1',
   requestBytes: Buffer.byteLength(REQUEST_BODY, 'utf8'),
   projectionBytes: 19,
-  coverage: 'unknown',
+  projection: { version: 2, kind: 'content_complete', digest: 'a'.repeat(64) },
+  residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
+  observationDigest: 'observation-digest-1',
+  toolBindingDigest: 'tool-binding-digest-1',
+  toolImplementationKinds: { mcp__team__list: 'unavailable:resolver_unconfigured' },
 };
 
 /** A reservation with bounds far above anything these durability tests write. */
 function reserve(overrides: Partial<ReserveInput> = {}): ReserveInput {
-  return { key: key(), requestDigest: 'digest-1', binding: binding(), maxInFlight: 100, ...overrides };
+  return { key: key(), requestDigest: 'digest-1', binding: binding(), model: MODEL, maxInFlight: 100, ...overrides };
 }
 
 /** One counter reservation: the artifact write and the charge, as the store fuses them. */
@@ -113,6 +136,21 @@ function commit(recordId: string, overrides: Partial<CounterReservationInput> = 
     bounds: { maxScopeAggregateBytes: 10_000_000, maxCounterCallsPerScope: 100 },
     ...overrides,
   };
+}
+
+/** Every file under the store subtree with its size, so "no other files touched" is checkable. */
+async function inventory(storeDir: string): Promise<Record<string, number>> {
+  const root = path.join(storeDir, 'input-preparation');
+  const out: Record<string, number> = {};
+  const walk = async (dir: string): Promise<void> => {
+    for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) await walk(full);
+      else out[path.relative(root, full)] = (await fs.stat(full)).size;
+    }
+  };
+  await walk(root);
+  return out;
 }
 
 async function openStore(storeDir: string, options: { retentionMs?: number; retryHorizonMs?: number; now?: () => number } = {}): Promise<InputPreparationStore> {
@@ -187,7 +225,8 @@ describe('B-P2 store: restart roundtrip', () => {
     const readBack = await restarted.readArtifact(record!);
     expect(readBack?.requestBody).toBe(REQUEST_BODY);
     expect(Buffer.from(readBack!.requestBody, 'utf8').equals(Buffer.from(REQUEST_BODY, 'utf8'))).toBe(true);
-    expect(readBack?.coverage).toBe('unknown');
+    expect(readBack?.projection).toEqual({ version: 2, kind: 'content_complete', digest: 'a'.repeat(64) });
+    expect(readBack?.residual).toEqual([{ key: 'max_tokens', valueClass: 'bounded_integer' }]);
   });
 
   it('rejects an artifact whose stored identity drifted from its record binding', async () => {
@@ -215,6 +254,65 @@ describe('B-P2 store: restart roundtrip', () => {
 
     const restarted = new InputPreparationStore({ storeDir, retentionMs: 60_000, retryHorizonMs: 30_000 });
     await expect(restarted.open()).rejects.toBeInstanceOf(InputPreparationIntegrityError);
+  });
+
+  it('refuses a record written at an older record schema version, and leaves every byte of the store where it found it', async () => {
+    const storeDir = await tmpStoreDir();
+    const store = await openStore(storeDir);
+    const created = await store.reserve(reserve());
+    await store.commitCounterReservation(commit(created.record.recordId));
+
+    // A record exactly as version 3 wrote it: its artifact summary carries the
+    // opaque `coverage` label, because the structural projection contract
+    // became the recorded fact only at version 4. Nothing can honestly decide
+    // what that label meant about P(D), which is why the refusal below is the
+    // only correct answer.
+    const logPath = path.join(storeDir, 'input-preparation', 'records.jsonl');
+    const recorded = store.get(created.record.recordId)!;
+    const { projection: _projection, residual: _residual, ...summaryWithoutProjection } = recorded.artifact!;
+    await fs.writeFile(
+      logPath,
+      `${JSON.stringify({
+        ...recorded,
+        format: INPUT_PREPARATION_RECORD_FORMAT,
+        version: 3,
+        artifact: { ...summaryWithoutProjection, coverage: 'unknown' },
+      })}\n`,
+      'utf8',
+    );
+    const before = await fs.readFile(logPath);
+    const treeBefore = await inventory(storeDir);
+
+    const restarted = new InputPreparationStore({ storeDir, retentionMs: 60_000, retryHorizonMs: 30_000 });
+    const refusal = await restarted.open().then(() => undefined, (error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(InputPreparationUnsupportedRecordVersionError);
+    expect((refusal as InputPreparationUnsupportedRecordVersionError).reason).toBe('unsupported_record_version');
+    const message = (refusal as Error).message;
+    expect(message).toContain('unsupported older version');
+    expect(message).toContain('pending explicit operator disposition');
+    // The refusal must never advise an operator to destroy durable evidence:
+    // the record may be the only proof of a counter call that already happened.
+    expect(message).not.toMatch(/remove|delete|start clean|wipe/iu);
+
+    // Zero writes and zero cleanup: the log is byte-identical and no file in
+    // the subtree was added, dropped or resized.
+    expect(await fs.readFile(logPath)).toEqual(before);
+    expect(await inventory(storeDir)).toEqual(treeBefore);
+    // And the store stayed closed, so nothing can mistake it for an empty one.
+    expect(() => restarted.list()).toThrow(InputPreparationDurabilityError);
+  });
+
+  it('stamps the record schema version, which is independent of the wire version', async () => {
+    const storeDir = await tmpStoreDir();
+    const store = await openStore(storeDir);
+    const created = await store.reserve(reserve());
+
+    expect(created.record.version).toBe(INPUT_PREPARATION_RECORD_VERSION);
+    expect(INPUT_PREPARATION_RECORD_VERSION).toBe(4);
+    // The wire version is a different agreement, moved by a different reason.
+    expect(INPUT_PREPARATION_VERSION).toBe(3);
+    expect((await openStore(storeDir)).get(created.record.recordId)?.version).toBe(INPUT_PREPARATION_RECORD_VERSION);
   });
 });
 
@@ -389,28 +487,77 @@ describe('B-P2 store: policy accounting and retention', () => {
     expect(store.scopeUsage('scope-a').counterCalls).toBe(1);
   });
 
-  it('never collects a pinned record, so a later G3b pin cannot race GC', async () => {
+  it('never collects a pinned record, and collects it again once the pin is released', async () => {
     const storeDir = await tmpStoreDir();
     let clock = 1_000_000;
     const store = await openStore(storeDir, { retentionMs: 10_000, retryHorizonMs: 1_000, now: () => clock });
     const created = await store.reserve(reserve());
-    await store.update(created.record.recordId, { state: 'counted', counterCalls: 1 });
+    await store.commitCounterReservation(commit(created.record.recordId));
+    await store.update(created.record.recordId, { state: 'counted' });
+    await store.pin(created.record.recordId, { taskId: 't-1', manifestDigest: 'm-1', sealedAt: new Date(clock).toISOString() });
 
-    // This package never writes `pin`; reaching in here proves the GC guard
-    // exists BEFORE G3b can depend on it.
-    const logPath = path.join(storeDir, 'input-preparation', 'records.jsonl');
-    const lines = (await fs.readFile(logPath, 'utf8')).split('\n').filter((line) => line.length > 0);
-    const last = JSON.parse(lines[lines.length - 1]!) as Record<string, unknown>;
-    await fs.appendFile(
-      logPath,
-      `${JSON.stringify({ ...last, pin: { taskId: 't-1', attempt: 1, sourceIdentity: 's-1', pinnedAt: new Date(clock).toISOString() } })}\n`,
-      'utf8',
-    );
-
+    // Long past both horizons: the pin, not the clock, is what keeps the record
+    // and its retained bytes alive.
     const restarted = await openStore(storeDir, { retentionMs: 10_000, retryHorizonMs: 1_000, now: () => clock });
     clock += 1_000_000;
     expect(await restarted.gc()).toEqual({ artifactsRemoved: 0, recordsRemoved: 0 });
     expect(restarted.find(key())?.pin?.taskId).toBe('t-1');
+
+    await restarted.unpin(created.record.recordId, 't-1');
+    expect(await restarted.gc()).toEqual({ artifactsRemoved: 0, recordsRemoved: 1 });
+    expect(restarted.find(key())).toBeUndefined();
+  });
+
+  it('admits exactly one of two Executions racing the same record, and tells the loser who won', async () => {
+    const storeDir = await tmpStoreDir();
+    const store = await openStore(storeDir);
+    const created = await store.reserve(reserve());
+    await store.commitCounterReservation(commit(created.record.recordId));
+    await store.update(created.record.recordId, { state: 'counted' });
+
+    const at = new Date().toISOString();
+    const outcomes = await Promise.all([
+      store.pin(created.record.recordId, { taskId: 'task-left', manifestDigest: 'manifest-left', sealedAt: at }),
+      store.pin(created.record.recordId, { taskId: 'task-right', manifestDigest: 'manifest-right', sealedAt: at }),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.kind === 'pinned')).toHaveLength(1);
+    const loser = outcomes.find((outcome) => outcome.kind === 'occupied');
+    expect(loser).toBeDefined();
+    // The loser learns WHICH Execution holds the record, not merely that one does.
+    expect(loser!.record.pin?.taskId).toBe(store.get(created.record.recordId)?.pin?.taskId);
+    expect(['task-left', 'task-right']).toContain(store.get(created.record.recordId)?.pin?.taskId);
+  });
+
+  it('reads back the same pin for a replay of the same Execution, and refuses a different seal of the same task', async () => {
+    const storeDir = await tmpStoreDir();
+    const store = await openStore(storeDir);
+    const created = await store.reserve(reserve());
+    await store.commitCounterReservation(commit(created.record.recordId));
+    await store.update(created.record.recordId, { state: 'counted' });
+    const pin = { taskId: 'task-1', manifestDigest: 'manifest-1', sealedAt: new Date().toISOString() } as const;
+
+    expect((await store.pin(created.record.recordId, pin)).kind).toBe('pinned');
+    expect((await store.pin(created.record.recordId, pin)).kind).toBe('pinned');
+    expect((await store.pin(created.record.recordId, { ...pin, manifestDigest: 'manifest-2' })).kind).toBe('occupied');
+  });
+
+  it('refuses to pin a record that retains no artifact, and refuses a release by a task that does not hold the pin', async () => {
+    const storeDir = await tmpStoreDir();
+    const store = await openStore(storeDir);
+    const created = await store.reserve(reserve());
+    await expect(store.pin(created.record.recordId, { taskId: 't', manifestDigest: 'm', sealedAt: new Date().toISOString() }))
+      .rejects.toBeInstanceOf(InputPreparationIntegrityError);
+
+    await store.commitCounterReservation(commit(created.record.recordId));
+    await store.update(created.record.recordId, { state: 'counted' });
+    await store.pin(created.record.recordId, { taskId: 'holder', manifestDigest: 'm', sealedAt: new Date().toISOString() });
+    await expect(store.unpin(created.record.recordId, 'someone-else')).rejects.toBeInstanceOf(InputPreparationIntegrityError);
+    expect(store.get(created.record.recordId)?.pin?.taskId).toBe('holder');
+
+    // Releasing a record nobody pinned is not an error: the pin's job is done either way.
+    const second = await store.reserve(reserve({ key: key({ requestId: 'req-unpinned' }), requestDigest: 'digest-unpinned' }));
+    expect((await store.unpin(second.record.recordId, 'holder')).pin).toBeUndefined();
   });
 });
 
