@@ -17,7 +17,11 @@
  *                   plus the verified-parent binding: a parent that is itself a
  *                   dispatched child must present its own launch record whose
  *                   depth commitment agrees with the record's contract depth,
- *                   else the dispatch refuses before any state exists.
+ *                   else the dispatch refuses before any state exists. Runner
+ *                   dispatches additionally pass the N1 external-CLI admission
+ *                   gate (`external-cli-admission.ts`, plan 20260918-2052): a
+ *                   config whose steps carry an external-cli runner refuses
+ *                   typed — that delegation edge is not a custody edge yet.
  *   ② caps        — session/parallel cross-process caps execute as wx slot
  *                   files under the budget directory (keyed by session and
  *                   root task), created inside the existing fanout admission
@@ -81,6 +85,7 @@ import {
   parseCustodyParentDepthCommitment,
 } from './custody-commitments';
 import { parsePiPrintArgv } from './pi-print-argv';
+import { externalCliAdmissionRefusal } from './external-cli-admission';
 // The vendored budget-lock and child-permit primitives come through the JS
 // bridge (`custody-vendor-bridge.js`): the vendored tree publishes TS with no
 // consumable declarations and is type-checked by no tsc pass, so client .ts
@@ -479,6 +484,16 @@ export function dispatchCustodyPiSubagentSpawn(input: CustodyDispatchInput): Cus
   const edge = RUNTIME_DESCENDANT_EDGES.find((candidate) => candidate.parent === ctx.parentKind && candidate.child === input.child);
   if (edge === undefined) {
     refuse(`edge ${ctx.parentKind} -> ${input.child} is not in the frozen runtime edge vocabulary`);
+  }
+  // N1 external-CLI admission gate (plan 20260918-2052): the external-cli lane
+  // is async-only and every background runner child is minted here, so the
+  // parent-written runner config is the one place the kind crosses an
+  // SDK-owned boundary. Until the sixth custody edge lands (terminal state B),
+  // a config whose steps carry an external-cli runner refuses typed, before
+  // any state exists — no fallback lane, no name-based exception.
+  if (input.child === 'pi-subagent-runner') {
+    const externalCliRefusal = externalCliAdmissionRefusal(input.runnerConfigPath!);
+    if (externalCliRefusal !== undefined) refuse(externalCliRefusal);
   }
   const bootstrap = ctx.parentKind === 'pi-subagent-runner' && input.child === 'pi-subagent-print';
   const charge = bootstrap ? RUNNER_PRINT_BOOTSTRAP_CHARGE : DEFAULT_EDGE_CHARGE;
