@@ -110,3 +110,11 @@ Reviewed subject: merge commit 962fcbfd (parents 9cc3b7cd + d882aef4) + 未提�
 非阻塞：worker notes 行数计数 14 vs 实际 13（byte 级同一性使该项不成立为问题）；plan 1525 为被 1526 取代的同题草稿（remove）。
 
 Expected post-push CI：两 Windows job 转绿（前向验收）；其余全绿。
+
+## CI acceptance receipt (2026-09-18, post-push)
+
+Run `35321641946` @ `1ff6d6d1`（push 9cc3b7cd..1ff6d6d1 后）：**conclusion=success，0 red**。
+
+- 前向验收达成：`built adapter lifecycle smoke (windows-latest)` 与 `npm release pack/install (windows-latest, fixed Node)` 双双转绿——#193 线遗留的两 Windows face（cwd admission + implementation-identity entry 解析）经 WP1 17 commits + post-193 main 合流后消除。
+- 其余 23 job 全绿（含 ubuntu build/typecheck/test——flake hardening 在本树同样成立；K1 本地 tripwire 于 CI 绿，再证 CI authoritative）。
+- Owner 已批准 WP1 合入 main（条件 = 本收据）。
