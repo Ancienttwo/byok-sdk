@@ -365,7 +365,9 @@ console.log('[release-pack] recurring public imports, strict submission and inde
   assert.deepEqual(await readMessage(msgTenant, acceptedTask, agentRef), acceptedMessage);
   assert.equal(await composition.cloud.readTaskAgentMessage(otherTenant, device.deviceId, acceptedTask, agentRef), undefined);
   assert.equal(await composition.cloud.readTaskAgentMessage(msgTenant, 'packed-other-device', acceptedTask, agentRef), undefined);
-  assert.equal(await readDisposition(msgTenant, acceptedTask, { ...acceptedPayload, body: 'other' }), undefined);
+  // A forged body keeps the payload self-consistent (the schema re-validates
+  // byteCount against the body on every read), just not the stored one.
+  assert.equal(await readDisposition(msgTenant, acceptedTask, { ...acceptedPayload, body: 'x'.repeat(acceptedPayload.byteCount) }), undefined);
   assert.equal(await readDisposition(msgTenant, acceptedTask, { ...acceptedPayload, messageId: randomUUID() }), undefined);
   assert.equal(await readMessage(msgTenant, acceptedTask, { ...agentRef, agentId: 'other' }), undefined);
   assert.equal(await readMessage(msgTenant, acceptedTask, { ...agentRef, profileRevision: 'other' }), undefined);
