@@ -2,6 +2,8 @@
 
 日期：2026-09-10。状态：IN_PROGRESS；K1–K4 SDK 候选阶段已验收，K5 Salesko 验证推进中，K6 暂停，K7 整体产品验收未完成。
 
+> 导航限定（2026-09-19 补注）：下方各 checkpoint 是绑定各自 subject 的历史切片记录，互不替代、不随主线合并自动失效或生效；复用时先核对 subject。当前聚合状态（main 实现 / open 候选 / 已发布包 / 真实 Host 接入 / native 生产验收）见 [README 状态表](../../README.md#conversation-turn-mode-current-status-and-authoritative-path)，验收细节以 §13 指向的 [Salesko Sprint 账本](https://github.com/Ancienttwo/salesko-new/blob/codex/recurring-sdk-adoption-test/plans/plan-20260909-private-agent-chat-host-reliability-sprints.md) 为唯一账本；Salesko 侧本机路径只是记录时点状态，可达入口以 Salesko Draft PR #241 与该账本为准。
+
 ## Authority and scope
 
 Owner 最新指令：先做 SDK，供 Salesko 与 aiphabee 接入；Salesko 是真实集成测试先行入口。目标保持“完成整 Sprint，按阶段验收并提交 PR”。原 Salesko-first Sprint 的 SDK 只读限制不能继续作为不实现 SDK 的理由。

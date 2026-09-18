@@ -110,6 +110,60 @@ for diagnostic UI, local CLI wiring, bounded health repair, support bundles,
 and acceptance scenarios. It distinguishes device diagnostics from Agent
 readiness and identifies SDK capabilities still needed by embedded hosts.
 
+## Conversation-turn mode: current status and authoritative path
+
+Continuous multi-agent conversation ("conversation-turn", a "Grok Bot"-style
+experience) is a Host composition over the SDK's fresh-execution and reliable
+message primitives. The Grok Bot reference describes the target experience
+only; no third party's internal storage, lifecycle, or exactly-once behavior
+has been independently verified.
+
+Read the layers in order; each has exactly one authority, and there is no
+second acceptance ledger:
+
+| Layer | Authority |
+|---|---|
+| SDK product truth | [`docs/spec.md`](docs/spec.md) — [Durable Agent homes](docs/spec.md#durable-agent-homes), [Fresh Agent egress versus exact resume](docs/spec.md#fresh-agent-egress-versus-exact-resume), [Host exact Agent message disposition readback](docs/spec.md#host-exact-agent-message-disposition-readback), [Recurring Host composition requirements](docs/spec.md#recurring-host-composition-requirements) |
+| Host composition requirements (approved) | [Conversation-turn Fresh MVP PRD](docs/researches/2026-09-09_conversation-turn-fresh-mvp-prd.md) and the [Host Reliability Addendum](docs/researches/2026-09-09_conversation-turn-mode-host-reliability-addendum.md) |
+| Design history | [Original design draft](docs/researches/2026-09-09_conversation-turn-mode-design.md) — historical draft; its open questions, hybrid/resume outlook, and simplified completion bridge are superseded (see the qualifier at its top) |
+| Sole acceptance ledger | [Salesko Host reliability Sprint plan](https://github.com/Ancienttwo/salesko-new/blob/codex/recurring-sdk-adoption-test/plans/plan-20260909-private-agent-chat-host-reliability-sprints.md) (external repo, draft branch), with the [SDK-first plan](plans/plan-20260910-conversation-turn-sdk-first.md) as the in-repo stage entry |
+| Active PRs | byok-sdk: #191, #201, #202, #203 (open, unmerged); Salesko integration: draft PR #241 |
+
+Status rows, each bound to a source SHA, artifact, or CI evidence; 未验收
+means not accepted, and no overall percentage is defined:
+
+| Dimension | Status | Bound to |
+|---|---|---|
+| main implementation | Merged | `main` @ `a6c5a297` (2026-09-18): recurring input, exact message disposition and fresh egress per the spec section above; #193 C07 Pi runtime launch (`d882aef4`), #198 Windows CI elimination (`49ec7477`), #199 custody five-edge enablement (`e0423d84`), #200 N1 external-CLI admission gate (`ec1cea36`) |
+| Open candidates | Unmerged | #191 (draft: MCP launch-cwd boundary), #201 (reserved agent-message tool grants), #202 (Pi fork pin 0.85.1006 / S2 clipboard tripwire), #203 (WP5 S2 CI flip); Salesko draft PR #241 |
+| Published packages | 0.17.0 stable published | [0.17.0 publication record](docs/releases/v0.17.0-publication.md) (SDK 0.17.0, keys 0.4.3); 0.18.0 / keys 0.5.0 remain unpublished release candidates ([handoff](docs/releases/v0.18.0-handoff.md)); Pi fork pin `@byok-sdk/pi-coding-agent@0.85.1005` in `packages/client/package.json` |
+| Real Host integration | In progress, not accepted | Salesko Sprint ledger: K5 in progress, K7 incomplete; A01–A29 at 24 LOCAL_PASS / 5 BLOCKED at the latest recorded checkpoint. Host-side subjects and evidence live in that ledger, not here |
+| Native / production acceptance | 未验收 | Target-runtime S9 not executed; aiphabee (K6) paused by owner decision; no production migration, deployment, or paid-runtime acceptance |
+
+Frozen decisions — do not re-ask: capacity `maxUnsettledTurnsPerConversation = 8`;
+settled no-reply Turns stay in history with truthful outcome metadata and no
+renewed execution authority; internal Summary runs as a same-home strict fresh
+result-document task before the dependent user Execution; a message becomes
+`accepted` only AFTER the Host atomically commits body, exact message identity
+and verdict in one transaction — the early draft's
+`accepted → host appends body` arrow is a simplified sketch and must not be
+used as implementation guidance.
+
+Still open, tracked separately (not "pending freeze"): first-request token
+accounting and the enablement gate (#194), Host ContextPack → same-home
+Summary → fresh reply integration acceptance (#195), recurring packed-smoke
+positive recovery readback (#196), reserved agent-message tool grants (#180,
+candidate #201), budget/disclosure/quality/storage inputs (PRD §9.3–§9.5),
+and native runtime acceptance (S9).
+
+Reading reused evidence: a historical run counts only for its original
+subject, verified by SHA before reuse. For example, the SDK artifact
+checkpoint `38e238049977…` reports 4004 PASS / 135 SKIP — the SKIP lanes lack
+the canonical Postgres/S3 substrate and are never counted green, and the C07
+detection gate 7/7 @ `d4dcf961` covers that sub-slice only. Expected
+tripwires, SKIP, and BLOCKED rows are never counted as passing, and a PR
+sub-slice PASS never closes the full MVP (K7).
+
 ## Downstream issues and requests
 
 Found a bug, missing SDK capability, or documentation gap during integration?
