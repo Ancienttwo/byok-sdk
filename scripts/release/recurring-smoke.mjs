@@ -107,11 +107,11 @@ async function pairCapableDevice(composition, tenant, deviceName) {
   return { deviceId: paired.deviceId, authorization: { authorization: `Bearer ${paired.accessToken}` } };
 }
 
-function recurringInput(taskId, deviceId, instruction) {
+function recurringInput(taskId, deviceId, instruction, agentRef = { agentId: 'packed-agent', profileRevision: 'profile' }) {
   return RecurringExecutionInputSchema.parse({
     taskId, deviceId,
     payload: { instruction, runtime: 'codex', policy: { mode: 'auto' },
-      agentRef: { agentId: 'packed-agent', profileRevision: 'profile' },
+      agentRef,
       egressPolicy: { policyRevision: 'policy', activity: { mode: 'metadata-status', delivery: 'latest-value' },
         reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
         transfers: { workspace: { maxBytes: 512, allowedMimeTypes: ['text/plain'] }, transcript: 'disabled', artifact: 'disabled' } },
@@ -266,7 +266,7 @@ console.log('[release-pack] recurring public imports, strict submission and inde
   });
   const composition = createInMemoryByokCloud({ agentMessage: { consume: consumer.consume } });
   const device = await pairCapableDevice(composition, msgTenant, 'packed-msg-device');
-  const submit = (taskId) => composition.cloud.submitRecurringExecution(msgTenant, recurringInput(taskId, device.deviceId, `resolve ${taskId}`));
+  const submit = (taskId) => composition.cloud.submitRecurringExecution(msgTenant, recurringInput(taskId, device.deviceId, `resolve ${taskId}`, agentRef));
   const readDisposition = (t, taskId, payload) => composition.cloud.readAgentMessageDisposition(t, device.deviceId, taskId, payload);
   const readMessage = (t, taskId, ref) => composition.cloud.readTaskAgentMessage(t, device.deviceId, taskId, ref);
 
