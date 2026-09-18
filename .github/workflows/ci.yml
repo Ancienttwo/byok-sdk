@@ -181,7 +181,326 @@ jobs:
         run: bun run build
 
       - name: Run built adapter lifecycle smoke
+        if: matrix.os != 'windows-latest'
         run: bun run --filter @byok-sdk/client smoke:adapters
+
+      # The Pi positive case launches against the platform-default cwd, whose
+      # admission requires that THIS token must not be able to write it
+      # (`platform_default_is_writable` otherwise). The hosted windows-latest
+      # runner is an ADMINISTRATOR, so under its token the launch admission
+      # correctly refuses and the positive half can never run; that refusal is
+      # pinned by the unit suites (which this change leaves untouched). This leg
+      # produces the positive half the same way the npm-release-pack job below
+      # does: the SAME driver, with the same arguments, under a freshly created
+      # NON-administrator local account, with `%SystemRoot%` and the drive root
+      # measured NOT writable by that token (negative controls) before anything
+      # launches. No ACL surgery on the default, no configured directory, no
+      # product change.
+      - name: Run built adapter lifecycle smoke as a freshly created NON-administrator local user
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          # This one script runs twice: once as the runner's administrator
+          # (parent), and once as the synthetic standard user, which runs a
+          # byte-identical copy of this same file. Same bytes, two tokens. Same
+          # mechanism as the npm-release-pack step below; see its comment for
+          # why the mode and the child paths travel in BYOK_LOWPRIV_*
+          # environment variables instead of a top-level `param(...)`.
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+
+          function Fail([int]$code, [string]$message) {
+            Write-Host "[lowpriv] FAIL($code) $message"
+            exit $code
+          }
+
+          if ($env:BYOK_LOWPRIV_MODE -eq 'child') {
+            # ---------------- standard-user half ----------------
+            $ScratchRoot = $env:BYOK_LOWPRIV_SCRATCH
+            $Workspace = $env:BYOK_LOWPRIV_WORKSPACE
+            $NodeDir = $env:BYOK_LOWPRIV_NODEDIR
+            foreach ($pair in @(@('BYOK_LOWPRIV_SCRATCH', $ScratchRoot), @('BYOK_LOWPRIV_WORKSPACE', $Workspace), @('BYOK_LOWPRIV_NODEDIR', $NodeDir))) {
+              if ([string]::IsNullOrWhiteSpace($pair[1])) { Fail 86 "child mode is missing $($pair[0])" }
+            }
+
+            # 1. The token is evidence INPUT, not decoration: assert it, do not just print it.
+            $me = (whoami).Trim()
+            Write-Host "[lowpriv] whoami: $me"
+            $names = @(whoami /groups /fo csv | ConvertFrom-Csv | ForEach-Object { $_.'Group Name' })
+            foreach ($n in $names) { Write-Host "[lowpriv] group: $n" }
+            if ($names -notcontains 'BUILTIN\Users') { Fail 80 'this token is NOT a member of BUILTIN\Users' }
+            if ($names -contains 'BUILTIN\Administrators') { Fail 81 'this token IS a member of BUILTIN\Administrators' }
+            $labels = @($names | Where-Object { $_ -like 'Mandatory Label\*' })
+            if ($labels.Count -ne 1) { Fail 82 "expected exactly one mandatory integrity label, saw $($labels.Count)" }
+            if ($labels[0] -match 'High Mandatory Level|System Mandatory Level') { Fail 83 "integrity label is $($labels[0])" }
+            Write-Host "[lowpriv] integrity label: $($labels[0])"
+
+            # 2. Negative controls. The Pi launch admission below needs the
+            #    platform default to be unwritable by THIS token. If either of
+            #    these WRITES, the positive half would be vacuous and the step
+            #    stops right here. No ACL fallback, no rerun.
+            function Assert-NotWritable([string]$dir, [int]$code) {
+              $probe = Join-Path $dir (".byok-lowpriv-negctl-{0}.tmp" -f [guid]::NewGuid().ToString('N'))
+              try {
+                [System.IO.File]::WriteAllText($probe, 'x')
+              } catch [System.UnauthorizedAccessException] {
+                Write-Host "[lowpriv] negative control OK: $dir is NOT writable by this token (access denied)"
+                return
+              } catch {
+                Fail ($code + 10) "negative control on $dir failed for an unexpected reason: $($_.Exception.GetType().FullName): $($_.Exception.Message)"
+              }
+              Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+              Fail $code "negative control WROTE $probe -- the launch-cwd platform default is writable by this token; stopping"
+            }
+            Assert-NotWritable $env:SystemRoot 90
+            Assert-NotWritable ([System.IO.Path]::GetPathRoot($env:SystemRoot)) 91
+
+            # 3. Every per-user path points under the scratch root -- nothing
+            #    inherits the administrator runner's home -- and each one is
+            #    asserted to be granted to THIS account before anything writes
+            #    to it. The smoke derives its synthetic HOME/TEMP from these,
+            #    so every write it performs lands inside the scratch root.
+            $userHome = Join-Path $ScratchRoot 'home'
+            $env:USERPROFILE = $userHome
+            $env:HOME = $userHome
+            $env:APPDATA = Join-Path $userHome 'AppData\Roaming'
+            $env:LOCALAPPDATA = Join-Path $userHome 'AppData\Local'
+            $env:TEMP = Join-Path $ScratchRoot 'tmp'
+            $env:TMP = $env:TEMP
+            $env:npm_config_cache = Join-Path $ScratchRoot 'npm-cache'
+            $env:BUN_INSTALL_CACHE_DIR = Join-Path $ScratchRoot 'bun-cache'
+            foreach ($d in @($userHome, $env:APPDATA, $env:LOCALAPPDATA, $env:TEMP, $env:npm_config_cache, $env:BUN_INSTALL_CACHE_DIR)) {
+              if (-not $d.StartsWith($ScratchRoot, [System.StringComparison]::OrdinalIgnoreCase)) { Fail 84 "$d is not under $ScratchRoot" }
+              New-Item -ItemType Directory -Force -Path $d | Out-Null
+              $acl = (icacls $d) -join "`n"
+              if ($acl -notmatch [regex]::Escape($me)) { Fail 85 "$d is not granted to ${me}:`n$acl" }
+              $probe = Join-Path $d '.byok-lowpriv-write.tmp'
+              [System.IO.File]::WriteAllText($probe, 'x')
+              Remove-Item -LiteralPath $probe -Force
+              Write-Host "[lowpriv] private dir OK: $d"
+            }
+
+            # Inherited from the administrator parent and pointing at a file only
+            # that token can write; unset in the child only.
+            Remove-Item Env:GITHUB_STEP_SUMMARY -ErrorAction SilentlyContinue
+
+            $env:PATH = "$ScratchRoot\tools;$NodeDir;$env:PATH"
+
+            Set-Location -LiteralPath $Workspace
+            Write-Host "[lowpriv] node: $((Get-Command node).Source)"
+            Write-Host "[lowpriv] bun: $((Get-Command bun).Source)"
+
+            # 4. Same driver, same arguments as the other two legs. The Pi
+            #    positive case runs its real launch-cwd admission against the
+            #    platform default this token has been PROVEN unable to write
+            #    (controls above). A `platform_default_is_writable` refusal
+            #    here is a failure, never a pass.
+            bun run --filter @byok-sdk/client smoke:adapters
+            if ($LASTEXITCODE -ne 0) { Fail $LASTEXITCODE 'built adapter lifecycle smoke failed under the standard-user token' }
+
+            Write-Host '[lowpriv] built adapter lifecycle smoke completed under a non-administrator token'
+            exit 0
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($env:BYOK_LOWPRIV_MODE)) {
+            throw "unknown BYOK_LOWPRIV_MODE '$($env:BYOK_LOWPRIV_MODE)'"
+          }
+
+          # ---------------- administrator half ----------------
+          $selfScript = $PSCommandPath
+          if ([string]::IsNullOrWhiteSpace($selfScript) -or -not (Test-Path -LiteralPath $selfScript)) {
+            throw 'cannot locate this step script to re-invoke it as the standard user'
+          }
+
+          # Unique per run AND per attempt, and short enough for the 20-character
+          # local-account limit, so a re-run can never adopt a leftover account.
+          $runId = "$env:GITHUB_RUN_ID"
+          $runTag = '{0}a{1}' -f $runId.Substring([Math]::Max(0, $runId.Length - 8)), $env:GITHUB_RUN_ATTEMPT
+          $account = "byoklp$runTag"
+          if ($account.Length -gt 20) { throw "generated account name '$account' exceeds the 20-character local account limit" }
+          $scratch = "C:\byok-lowpriv-$runTag"
+          $canary = "C:\byok-lowpriv-canary-$runTag"
+          $checkout = "$env:GITHUB_WORKSPACE"
+          $nodeHome = Split-Path -Parent (Get-Command node).Source
+          $bunSrc = (Get-Command bun).Source
+          $pwshExe = (Get-Command pwsh).Source
+          Write-Host "[lowpriv] account=$account scratch=$scratch canary=$canary checkout=$checkout"
+          Write-Host "[lowpriv] node dir=$nodeHome bun=$bunSrc"
+
+          $created = $false
+          $accountSid = $null
+          $scratchCreated = $false
+          $canaryCreated = $false
+          $childCode = $null
+          $cleanupFailures = @()
+          try {
+            # Password: generated in memory into a PSCredential. Never echoed, never on
+            # a command line, never in GITHUB_ENV, never in a step output.
+            $bytes = [byte[]]::new(32)
+            [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+            $secret = ConvertTo-SecureString ([Convert]::ToBase64String($bytes) + '!Aa1') -AsPlainText -Force
+            [System.Array]::Clear($bytes, 0, $bytes.Length)
+
+            New-LocalUser -Name $account -Password $secret -AccountNeverExpires -PasswordNeverExpires -UserMayNotChangePassword -Description 'ephemeral byok CI standard user' | Out-Null
+            $created = $true
+            # Captured now, while the name still resolves: teardown revokes ACEs by SID
+            # so that revocation does not depend on the account still existing.
+            $accountSid = (Get-LocalUser -Name $account).SID.Value
+            Write-Host "[lowpriv] account SID: $accountSid"
+            Add-LocalGroupMember -Group 'Users' -Member $account
+            $cred = [System.Management.Automation.PSCredential]::new("$env:COMPUTERNAME\$account", $secret)
+
+            # Only a scratch root THIS run creates is ever torn down. A pre-existing
+            # path of the same name is refused, never adopted and never deleted.
+            if (Test-Path -LiteralPath $scratch) { throw "scratch root $scratch already exists; refusing to adopt or delete a path this run did not create" }
+            New-Item -ItemType Directory -Path $scratch | Out-Null
+            $scratchCreated = $true
+            # The only two grants this account ever gets: the scratch root and the checkout.
+            icacls $scratch /grant "${account}:(OI)(CI)(M)" /Q
+            if ($LASTEXITCODE -ne 0) { throw "icacls grant on $scratch failed ($LASTEXITCODE)" }
+            icacls $checkout /grant "${account}:(OI)(CI)(M)" /T /C /Q
+            if ($LASTEXITCODE -ne 0) { throw "icacls grant on $checkout failed ($LASTEXITCODE)" }
+
+            # Out-of-tree canary: the junction below points OUTSIDE the scratch
+            # root. If teardown recursion ever follows a link out of the tree,
+            # this file dies with the trip and the teardown fails instead of
+            # silently crawling the filesystem outside the scratch root.
+            if (Test-Path -LiteralPath $canary) { throw "canary root $canary already exists; refusing to adopt or delete a path this run did not create" }
+            New-Item -ItemType Directory -Path $canary | Out-Null
+            $canaryCreated = $true
+            Set-Content -LiteralPath (Join-Path $canary 'canary.txt') -Value "byok-lowpriv canary $runTag" -NoNewline
+            New-Item -ItemType Junction -Path (Join-Path $scratch 'canary-link') -Target $canary | Out-Null
+            Write-Host "[lowpriv] canary: $canary linked at $(Join-Path $scratch 'canary-link')"
+
+            New-Item -ItemType Directory -Force -Path "$scratch\tools", "$scratch\logs" | Out-Null
+            # bun lives under the administrator's profile, which this account cannot execute.
+            Copy-Item -LiteralPath $bunSrc -Destination "$scratch\tools\bun.exe"
+            $childScript = Join-Path $scratch 'run-lowpriv.ps1'
+            Copy-Item -LiteralPath $selfScript -Destination $childScript
+
+            # The launcher carries no logic: it sets the four variables and invokes the
+            # byte-identical copy in its own process, then propagates its exit code.
+            $q = { param([string]$v) "'" + $v.Replace("'", "''") + "'" }
+            $launcher = Join-Path $scratch 'launch-lowpriv.ps1'
+            $launcherLines = [string[]] @(
+              ('$env:BYOK_LOWPRIV_MODE = ' + (& $q 'child')),
+              ('$env:BYOK_LOWPRIV_SCRATCH = ' + (& $q $scratch)),
+              ('$env:BYOK_LOWPRIV_WORKSPACE = ' + (& $q $checkout)),
+              ('$env:BYOK_LOWPRIV_NODEDIR = ' + (& $q $nodeHome)),
+              ('& ' + (& $q $childScript)),
+              'exit $LASTEXITCODE'
+            )
+            Set-Content -LiteralPath $launcher -Value $launcherLines -Encoding utf8
+            Write-Host "[lowpriv] launcher written to $launcher"
+
+            $stdoutLog = Join-Path $scratch 'logs\child-stdout.log'
+            $stderrLog = Join-Path $scratch 'logs\child-stderr.log'
+            $argLine = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}"' -f $launcher
+            $proc = Start-Process -FilePath $pwshExe -ArgumentList $argLine -Credential $cred -WorkingDirectory $scratch -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -Wait -PassThru
+            # An unreadable exit code must never read as success.
+            try { $childCode = $proc.ExitCode } catch { $childCode = $null }
+
+            foreach ($logFile in @($stdoutLog, $stderrLog)) {
+              Write-Host "===== $(Split-Path -Leaf $logFile) ====="
+              if (Test-Path -LiteralPath $logFile) {
+                Get-Content -LiteralPath $logFile | ForEach-Object { Write-Host $_ }
+              } else {
+                Write-Host '(no such file)'
+              }
+              Write-Host "===== end $(Split-Path -Leaf $logFile) ====="
+            }
+          } finally {
+            # Order matters: revoke the ACEs while the SID is still meaningful, THEN
+            # delete the account, THEN the profile and the scratch root. `icacls` is a
+            # native command -- its failure is an exit code, not a terminating error,
+            # so every call is checked explicitly instead of relying on `catch`.
+            if ($accountSid) {
+              $aceTargets = @($checkout)
+              if ($scratchCreated) { $aceTargets += $scratch }
+              foreach ($target in $aceTargets) {
+                if ([string]::IsNullOrWhiteSpace($target) -or -not (Test-Path -LiteralPath $target)) { continue }
+                icacls $target /remove:g "*$accountSid" /T /C /Q | Out-Null
+                if ($LASTEXITCODE -ne 0) {
+                  $cleanupFailures += "icacls /remove:g *$accountSid on $target exited $LASTEXITCODE"
+                } else {
+                  Write-Host "[lowpriv] teardown: revoked *$accountSid on $target"
+                }
+              }
+            } elseif ($created) {
+              $cleanupFailures += "no SID was captured for $account; its ACEs could not be revoked by SID"
+            }
+
+            if ($created) {
+              try {
+                if ($accountSid) {
+                  Remove-LocalUser -SID ([System.Security.Principal.SecurityIdentifier]$accountSid)
+                } else {
+                  Remove-LocalUser -Name $account
+                }
+                Write-Host "[lowpriv] teardown: removed local account $account"
+              } catch {
+                $cleanupFailures += "Remove-LocalUser for $account failed: $($_.Exception.Message)"
+              }
+
+              $profileDir = "C:\Users\$account"
+              if (Test-Path -LiteralPath $profileDir) {
+                Remove-Item -LiteralPath $profileDir -Recurse -Force -ErrorAction SilentlyContinue
+                if (Test-Path -LiteralPath $profileDir) { $cleanupFailures += "profile directory $profileDir is still present" }
+              }
+            }
+
+            if ($scratchCreated) {
+              # Remove reparse points FIRST, link only: a recursive delete here
+              # once followed a test-created junction out of the scratch root and
+              # walked the drive root trying to delete system files. A link that
+              # no longer exists cannot be recursed through. The passes handle a
+              # link nested inside a link; enumeration does not descend into
+              # reparse points.
+              foreach ($pass in 1..5) {
+                $reparse = @(Get-ChildItem -LiteralPath $scratch -Recurse -Force -Attributes ReparsePoint -ErrorAction SilentlyContinue)
+                if ($reparse.Count -eq 0) { break }
+                foreach ($rp in $reparse) {
+                  Write-Host "[lowpriv] teardown: removing reparse point link $($rp.FullName)"
+                  try {
+                    if ($rp.PSIsContainer) { [System.IO.Directory]::Delete($rp.FullName, $false) }
+                    else { [System.IO.File]::Delete($rp.FullName) }
+                  } catch {
+                    if ($pass -eq 5) { $cleanupFailures += "reparse point $($rp.FullName) could not be removed: $($_.Exception.Message)" }
+                  }
+                }
+              }
+              Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
+              if (Test-Path -LiteralPath $scratch) { $cleanupFailures += "scratch root $scratch is still present" }
+            }
+
+            # The canary is the negative control for the sweep above: if
+            # recursion ever escapes the scratch root through a link, this file
+            # is gone and the teardown fails instead of reporting success.
+            if ($canaryCreated) {
+              $canaryFile = Join-Path $canary 'canary.txt'
+              $canaryValue = "byok-lowpriv canary $runTag"
+              if ((-not (Test-Path -LiteralPath $canaryFile)) -or ((Get-Content -LiteralPath $canaryFile -Raw) -ne $canaryValue)) {
+                $cleanupFailures += 'out-of-tree canary was touched or deleted: teardown recursion escaped the scratch root'
+              } else {
+                Write-Host '[lowpriv] teardown: out-of-tree canary untouched; recursion never left the scratch root'
+              }
+              Remove-Item -LiteralPath $canary -Recurse -Force -ErrorAction SilentlyContinue
+              if (Test-Path -LiteralPath $canary) { $cleanupFailures += "canary root $canary is still present" }
+            }
+
+            foreach ($failure in $cleanupFailures) { Write-Host "[lowpriv] teardown FAILED: $failure" }
+          }
+
+          # Never report success without a real exit code from the standard-user child.
+          if ($null -eq $childCode) { throw 'the standard-user child exit code could not be read; refusing to report success' }
+          Write-Host "[lowpriv] standard-user child exited with $childCode"
+          # A failed main run keeps its own exit code (the teardown failures above are
+          # already printed). A clean main run with a failed teardown is not a pass.
+          if ($childCode -eq 0 -and $cleanupFailures.Count -gt 0) {
+            Write-Host "[lowpriv] the run itself passed but $($cleanupFailures.Count) teardown step(s) failed; failing the step"
+            exit 70
+          }
+          exit $childCode
 
   # S4A dataplane guarantee: runs the suites that need a REAL Postgres, against
   # the same `docker-compose.test.yml` a developer starts locally. This job is
@@ -445,12 +764,16 @@ jobs:
       # would prove our ACE, not the platform default.
       #
       # Everything this step creates (the account, one scratch root, one granted
-      # ACE on the checkout) lives on this ephemeral runner and is removed in
-      # `finally`. Evidence in the job log: the ASSERTED token membership and
-      # integrity label, two negative controls, `trusted-launch-cwd.test.ts`
-      # passing (its own negative control is what keeps that from being vacuous),
-      # `[release-pack] installed Pi...`/`[packed-cli-mcp] ... passed`, and the
-      # ABSENCE of `task.decline`, `asserted fail-closed refusal instead`, and
+      # ACE on the checkout, one out-of-tree canary root behind a junction) lives
+      # on this ephemeral runner and is removed in `finally`; the teardown strips
+      # reparse points link-only before any recursive delete, and the canary file
+      # OUTSIDE the scratch root is what proves that recursion never followed a
+      # link out of the tree. Evidence in the job log: the ASSERTED token
+      # membership and integrity label, two negative controls,
+      # `trusted-launch-cwd.test.ts` passing (its own negative control is what
+      # keeps that from being vacuous), `[release-pack] installed Pi...`/
+      # `[packed-cli-mcp] ... passed`, the surviving canary, and the ABSENCE of
+      # `task.decline`, `asserted fail-closed refusal instead`, and
       # `launch boundary unprovable`.
       - name: Check graph, pack, and install as a freshly created NON-administrator local user
         if: matrix.os == 'windows-latest'
@@ -542,6 +865,26 @@ jobs:
             # its own summary file and writes to it untouched.
             Remove-Item Env:GITHUB_STEP_SUMMARY -ErrorAction SilentlyContinue
 
+            # Second administrator-parent leak. The inherited PSModulePath carries
+            # the runneradmin and packer profile module directories, which this
+            # token cannot traverse; PS 5.1 auto-load inside the keys suite's
+            # -EncodedCommand query then fails (CommandNotFoundException) while
+            # plain -Command probes against the same env succeed. Rounds 1-3 and
+            # 5-6 failed with it inherited; round 4 passed only because a probe
+            # block unset it. Unsetting it lets PS 5.1 reconstruct the machine
+            # defaults -- the same class of fix as the summary-file unset above.
+            Remove-Item Env:PSModulePath -ErrorAction SilentlyContinue
+
+            # Cold-start latency prepay, separate from the env fix above: a fresh
+            # local account also pays first-use PS 5.1 module analysis (~2-4s) on
+            # its first powershell.exe spawn. Round 7 with the env fix alone left
+            # the positive keys test at 5004ms against vitest's 5s default; paying
+            # the cold cost here keeps every test inside its own budget. Round 4
+            # (unset + warm-up) is the only green configuration observed so far.
+            & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
+              -NoProfile -NonInteractive -Command 'Import-Module Microsoft.PowerShell.Security; [void](Get-Command Get-Acl).Name'
+            if ($LASTEXITCODE -ne 0) { Fail 92 'PS 5.1 module warm-up failed under the standard-user token' }
+
             # git compares safe.directory against its own forward-slash spelling of
             # this exact checkout. Never '*'.
             $env:GIT_CONFIG_COUNT = '1'
@@ -558,6 +901,15 @@ jobs:
             #    rejected) is what keeps a pass from being vacuous.
             bun run --filter @byok-sdk/client test -- src/__tests__/trusted-launch-cwd.test.ts
             if ($LASTEXITCODE -ne 0) { Fail $LASTEXITCODE 'trusted-launch-cwd.test.ts failed under the standard-user token' }
+
+            # The clean checkout has no built workspace artifacts, and the keys
+            # suite resolves `@byok-sdk/implementation-identity` through its
+            # dist-only package entry, so build it before that suite loads it.
+            # The other two legs get the equivalent build from pack-and-smoke.mjs,
+            # which runs later in this child and rebuilds the full workspace for
+            # packing.
+            bun run --filter @byok-sdk/implementation-identity build
+            if ($LASTEXITCODE -ne 0) { Fail $LASTEXITCODE 'implementation-identity build failed under the standard-user token' }
 
             # Real credential-projection directory validation under this same token.
             bun run --filter @byok-sdk/keys test -- src/pi-projection-windows.test.ts
@@ -590,16 +942,18 @@ jobs:
           $account = "byoklp$runTag"
           if ($account.Length -gt 20) { throw "generated account name '$account' exceeds the 20-character local account limit" }
           $scratch = "C:\byok-lowpriv-$runTag"
+          $canary = "C:\byok-lowpriv-canary-$runTag"
           $checkout = "$env:GITHUB_WORKSPACE"
           $nodeHome = Split-Path -Parent (Get-Command node).Source
           $bunSrc = (Get-Command bun).Source
           $pwshExe = (Get-Command pwsh).Source
-          Write-Host "[lowpriv] account=$account scratch=$scratch checkout=$checkout"
+          Write-Host "[lowpriv] account=$account scratch=$scratch canary=$canary checkout=$checkout"
           Write-Host "[lowpriv] node dir=$nodeHome bun=$bunSrc"
 
           $created = $false
           $accountSid = $null
           $scratchCreated = $false
+          $canaryCreated = $false
           $childCode = $null
           $cleanupFailures = @()
           try {
@@ -629,6 +983,17 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "icacls grant on $scratch failed ($LASTEXITCODE)" }
             icacls $checkout /grant "${account}:(OI)(CI)(M)" /T /C /Q
             if ($LASTEXITCODE -ne 0) { throw "icacls grant on $checkout failed ($LASTEXITCODE)" }
+
+            # Out-of-tree canary: the junction below points OUTSIDE the scratch
+            # root. If teardown recursion ever follows a link out of the tree,
+            # this file dies with the trip and the teardown fails instead of
+            # silently crawling the filesystem outside the scratch root.
+            if (Test-Path -LiteralPath $canary) { throw "canary root $canary already exists; refusing to adopt or delete a path this run did not create" }
+            New-Item -ItemType Directory -Path $canary | Out-Null
+            $canaryCreated = $true
+            Set-Content -LiteralPath (Join-Path $canary 'canary.txt') -Value "byok-lowpriv canary $runTag" -NoNewline
+            New-Item -ItemType Junction -Path (Join-Path $scratch 'canary-link') -Target $canary | Out-Null
+            Write-Host "[lowpriv] canary: $canary linked at $(Join-Path $scratch 'canary-link')"
 
             New-Item -ItemType Directory -Force -Path "$scratch\tools", "$scratch\logs" | Out-Null
             # bun lives under the administrator's profile, which this account cannot execute.
@@ -708,8 +1073,42 @@ jobs:
             }
 
             if ($scratchCreated) {
+              # Remove reparse points FIRST, link only: a recursive delete here
+              # once followed a test-created junction out of the scratch root and
+              # walked the drive root trying to delete system files. A link that
+              # no longer exists cannot be recursed through. The passes handle a
+              # link nested inside a link; enumeration does not descend into
+              # reparse points.
+              foreach ($pass in 1..5) {
+                $reparse = @(Get-ChildItem -LiteralPath $scratch -Recurse -Force -Attributes ReparsePoint -ErrorAction SilentlyContinue)
+                if ($reparse.Count -eq 0) { break }
+                foreach ($rp in $reparse) {
+                  Write-Host "[lowpriv] teardown: removing reparse point link $($rp.FullName)"
+                  try {
+                    if ($rp.PSIsContainer) { [System.IO.Directory]::Delete($rp.FullName, $false) }
+                    else { [System.IO.File]::Delete($rp.FullName) }
+                  } catch {
+                    if ($pass -eq 5) { $cleanupFailures += "reparse point $($rp.FullName) could not be removed: $($_.Exception.Message)" }
+                  }
+                }
+              }
               Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
               if (Test-Path -LiteralPath $scratch) { $cleanupFailures += "scratch root $scratch is still present" }
+            }
+
+            # The canary is the negative control for the sweep above: if
+            # recursion ever escapes the scratch root through a link, this file
+            # is gone and the teardown fails instead of reporting success.
+            if ($canaryCreated) {
+              $canaryFile = Join-Path $canary 'canary.txt'
+              $canaryValue = "byok-lowpriv canary $runTag"
+              if ((-not (Test-Path -LiteralPath $canaryFile)) -or ((Get-Content -LiteralPath $canaryFile -Raw) -ne $canaryValue)) {
+                $cleanupFailures += 'out-of-tree canary was touched or deleted: teardown recursion escaped the scratch root'
+              } else {
+                Write-Host '[lowpriv] teardown: out-of-tree canary untouched; recursion never left the scratch root'
+              }
+              Remove-Item -LiteralPath $canary -Recurse -Force -ErrorAction SilentlyContinue
+              if (Test-Path -LiteralPath $canary) { $cleanupFailures += "canary root $canary is still present" }
             }
 
             foreach ($failure in $cleanupFailures) { Write-Host "[lowpriv] teardown FAILED: $failure" }
