@@ -1,0 +1,95 @@
+
+ RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-180/packages/client
+
+ ❯ src/__tests__/agent-message-reserved-grants.test.ts (8 tests | 5 failed) 1550ms
+     × pre-grants send_agent_message in the --allowedTools shape and mounts the server 520ms
+     × grants the reserved message tool beside the memory tools under readonly, exactly like codex 89ms
+     × admits the bare send_agent_message into the readonly allowlist and writes the server into the task config 518ms
+     × emits an explicit allowlist for readonly + allowTools:[] instead of --no-tools when the message lane is projected 89ms
+     × appends the reserved name to an auto-mode allowTools list without widening the operator's own entries 86ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/agent-message-reserved-grants.test.ts > reserved Agent-message grant — claude > pre-grants send_agent_message in the --allowedTools shape and mounts the server
+AssertionError: expected '-p' to be 'mcp__byokagentmessage__send_agent_mes…' // Object.is equality
+
+Expected: "mcp__byokagentmessage__send_agent_message"
+Received: "-p"
+
+ ❯ src/__tests__/agent-message-reserved-grants.test.ts:110:54
+    108|     // so this identifier is the difference between a callable tool an…
+    109|     // mounted-but-dead one.
+    110|     expect(argv[argv.indexOf('--allowedTools') + 1]).toBe('mcp__byokag…
+       |                                                      ^
+    111|     // Delivered: the server itself rides the task-scoped --mcp-config…
+    112|     // granted identifier names a server claude actually spawns.
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/__tests__/agent-message-reserved-grants.test.ts > reserved Agent-message grant — claude > grants the reserved message tool beside the memory tools under readonly, exactly like codex
+AssertionError: expected 'mcp__byokagentmemory__memory_recall,m…' to be 'mcp__byokagentmessage__send_agent_mes…' // Object.is equality
+
+Expected: "mcp__byokagentmessage__send_agent_message,mcp__byokagentmemory__memory_recall,mcp__byokagentmemory__memory_save"
+Received: "mcp__byokagentmemory__memory_recall,mcp__byokagentmemory__memory_save"
+
+ ❯ src/__tests__/agent-message-reserved-grants.test.ts:142:54
+    140|     // grants are unchanged, the message grant joins them, and nothing…
+    141|     // (no unobserved host-toolset name, no server wildcard) sneaks in.
+    142|     expect(argv[argv.indexOf('--allowedTools') + 1]).toBe(
+       |                                                      ^
+    143|       'mcp__byokagentmessage__send_agent_message'
+    144|       + ',mcp__byokagentmemory__memory_recall,mcp__byokagentmemory__me…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/__tests__/agent-message-reserved-grants.test.ts > reserved Agent-message grant — pi > admits the bare send_agent_message into the readonly allowlist and writes the server into the task config
+AssertionError: expected 'read,grep,find,ls,subagent,todo' to be 'read,grep,find,ls,subagent,todo,send_…' // Object.is equality
+
+Expected: "read,grep,find,ls,subagent,todo,send_agent_message"
+Received: "read,grep,find,ls,subagent,todo"
+
+ ❯ src/__tests__/agent-message-reserved-grants.test.ts:188:47
+    186|     // Authorized: pi's --tools allowlist drops extension-registered t…
+    187|     // does not name, so the bare protocol name must ride the list.
+    188|     expect(argv[argv.indexOf('--tools') + 1]).toBe('read,grep,find,ls,…
+       |                                               ^
+    189|     // Delivered: the extension opens the server from this config and
+    190|     // registers its tools under those same bare names.
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/__tests__/agent-message-reserved-grants.test.ts > reserved Agent-message grant — pi > emits an explicit allowlist for readonly + allowTools:[] instead of --no-tools when the message lane is projected
+AssertionError: expected [ …(7) ] to not include '--no-tools'
+ ❯ src/__tests__/agent-message-reserved-grants.test.ts:215:22
+    213|     // new-registry-name bookkeeping; an allowlist naming exactly the …
+    214|     // lane keeps every native off and the message tool on, explicitly.
+    215|     expect(argv).not.toContain('--no-tools');
+       |                      ^
+    216|     expect(argv[argv.indexOf('--tools') + 1]).toBe('send_agent_message…
+    217|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  src/__tests__/agent-message-reserved-grants.test.ts > reserved Agent-message grant — pi > appends the reserved name to an auto-mode allowTools list without widening the operator's own entries
+AssertionError: expected 'read,bash' to be 'read,bash,send_agent_message' // Object.is equality
+
+Expected: "read,bash,send_agent_message"
+Received: "read,bash"
+
+ ❯ src/__tests__/agent-message-reserved-grants.test.ts:233:47
+    231|
+    232|     const argv = captured[0] ?? [];
+    233|     expect(argv[argv.indexOf('--tools') + 1]).toBe('read,bash,send_age…
+       |                                               ^
+    234|   });
+    235|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 3 passed (8)
+   Start at  22:33:17
+   Duration  2.03s (transform 246ms, setup 0ms, import 370ms, tests 1.55s, environment 0ms)
+
+PRE_FIX_EXIT=1
