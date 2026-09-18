@@ -1,6 +1,7 @@
 import type { PermissionMode } from '@byok-sdk/protocol';
 import { compareCodeUnits } from '../util/compare-code-units';
-import { McpAuthorityError, type McpStdioServerSpec } from './client';
+import { McpAuthorityError } from './authority-error';
+import type { McpStdioServerSpec } from './client';
 import {
   GRANTABLE_MCP_SERVER_NAME,
   type McpServerObservation,
@@ -37,12 +38,28 @@ export interface McpToolProjection {
  * `mcp__<server>__<tool>` is already the grant vocabulary claude and codex
  * interpolate into their own authority surfaces, so pi registering the same
  * string keeps one name per tool across all three runtimes instead of a
- * per-runtime dialect. Both halves passed {@link GRANTABLE_MCP_SERVER_NAME} /
- * `GRANTABLE_TOOL_NAME` before reaching here, so the `__` separator cannot be
- * ambiguous: neither half may contain one.
+ * per-runtime dialect. Names may contain `__`; {@link projectMcpTools}
+ * rejects collisions across the complete observation before either consumer
+ * registers tools or builds executor bindings.
  */
 export function qualifiedMcpToolName(serverName: string, toolName: string): string {
   return `mcp__${serverName}__${toolName}`;
+}
+
+/** Shared by runtime grants and prepared/ordinary tool projection. */
+function assertUniqueQualifiedNames(
+  observation: Readonly<Record<string, McpServerObservation>>,
+): void {
+  const qualifiedNames = new Set<string>();
+  for (const [serverName, server] of Object.entries(observation)) {
+    for (const tool of server.tools) {
+      const name = qualifiedMcpToolName(serverName, tool.name);
+      if (qualifiedNames.has(name)) {
+        throw new McpAuthorityError(`duplicate MCP runtime tool name ${JSON.stringify(name)}`);
+      }
+      qualifiedNames.add(name);
+    }
+  }
 }
 
 /**
@@ -58,6 +75,7 @@ export function qualifiedMcpToolName(serverName: string, toolName: string): stri
 export function projectMcpTools(
   observation: Readonly<Record<string, McpToolsetServerObservation>>,
 ): readonly McpToolProjection[] {
+  assertUniqueQualifiedNames(observation);
   const projections: McpToolProjection[] = [];
   for (const [serverName, server] of Object.entries(observation)) {
     if (!GRANTABLE_MCP_SERVER_NAME.test(serverName)) {
@@ -93,6 +111,7 @@ export function projectMcpTools(
 export function mcpToolsetToolNames(
   observation: Readonly<Record<string, McpServerObservation>>,
 ): Readonly<Record<string, readonly string[]>> {
+  assertUniqueQualifiedNames(observation);
   const names: Record<string, readonly string[]> = {};
   for (const [serverName, server] of Object.entries(observation)) {
     names[serverName] = Object.freeze(server.tools.map((tool) => tool.name).sort(compareCodeUnits));
@@ -174,6 +193,14 @@ export function filterMcpObservationForPolicy(
   observation: Readonly<Record<string, McpToolsetServerObservation>>,
   permissionMode: PermissionMode,
 ): McpObservationPolicyResolution {
+  // A filtered-out mutation must not share the runtime grant identifier of
+  // a surviving read tool. Validate the complete authority before narrowing.
+  try {
+    assertUniqueQualifiedNames(observation);
+  } catch (error) {
+    if (error instanceof McpAuthorityError) return { ok: false, reason: error.message };
+    throw error;
+  }
   if (!narrowsToReadOnlyTools(permissionMode)) return { ok: true, observation };
   const filtered: Record<string, McpToolsetServerObservation> = {};
   for (const serverName of Object.keys(observation).sort(compareCodeUnits)) {

@@ -205,6 +205,7 @@ function fixtureCounter() {
 }
 
 const ALWAYS_AUTHORIZED: InputPreparationAuthorityResolver = {
+  async resolveSource({ source }) { return { authorized: true, source }; },
   async resolveScope(claim) {
     return { authorized: true, grant: { scopeId: `scope:${claim.deviceId}`, ...claim } };
   },
@@ -392,6 +393,7 @@ describe('remote input preparation: in-process, never the control socket', () =>
   it('reports a resolver refusal as a rejection, with no artifact and no compile', async () => {
     const harness = await makeHarness({
       authorityResolver: {
+        ...ALWAYS_AUTHORIZED,
         async resolveScope() {
           return { authorized: false, reason: 'unknown_agent' };
         },

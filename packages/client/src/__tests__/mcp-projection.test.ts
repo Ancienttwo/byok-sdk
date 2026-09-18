@@ -702,3 +702,66 @@ describe('MCP projection — one policy filter, every consumer', () => {
     });
   });
 });
+
+describe.each([
+  { pairs: [['a', 'b__c'], ['a__b', 'c']], name: 'mcp__a__b__c' },
+  { pairs: [['a_', 'b'], ['a', '_b']], name: 'mcp__a___b' },
+])('MCP qualified-name collisions: $name', ({ pairs, name }) => {
+  async function collidingObservation(): Promise<Record<string, McpToolsetServerObservation>> {
+    const entries = await Promise.all(pairs.map(async ([serverName, toolName]) => {
+      const observed = await observeMcpServer(serverName!, serverSpec({
+        tools: [{ name: toolName!, description: '', inputSchema: { type: 'object' } }],
+      }), { env: ENV, timeoutMs: 15_000 });
+      return [serverName!, { ...observed, toolsetId: serverName! }] as const;
+    }));
+    return Object.fromEntries(entries);
+  }
+
+  it('rejects distinct observed server/tool pairs with the same runtime name', async () => {
+    const observation = await collidingObservation();
+    expect(() => projectMcpTools(observation)).toThrow(`duplicate MCP runtime tool name "${name}"`);
+  });
+
+  it('rejects the same collision in names-only grants before runtime launch', async () => {
+    const observation = await collidingObservation();
+    expect(() => mcpToolsetToolNames(observation)).toThrow(`duplicate MCP runtime tool name "${name}"`);
+    expect(resolveMcpToolsetGrants(
+      Object.fromEntries(pairs.map(([server]) => [server!, serverSpec()])),
+      observation,
+      'auto',
+    )).toEqual({ ok: false, reason: `duplicate MCP runtime tool name "${name}"` });
+  });
+
+  it.each(['auto', 'confirm', 'readonly', 'plan'] as const)(
+    'rejects raw read/mutation identity collisions before %s filtering', async (mode) => {
+      const raw = await collidingObservation();
+      const entries = Object.entries(raw).map(([serverName, server], index) => [serverName, {
+        ...server,
+        tools: [
+          ...server.tools.map((tool) => ({ ...tool, readOnly: index === 0 })),
+          { name: 'safe_read', description: '', inputSchema: { type: 'object' }, readOnly: true },
+        ],
+      }] as const);
+      const observation = Object.fromEntries(entries);
+      const reason = `duplicate MCP runtime tool name "${name}"`;
+      expect(filterMcpObservationForPolicy(observation, mode)).toEqual({ ok: false, reason });
+      expect(resolveMcpToolsetGrants(
+        Object.fromEntries(pairs.map(([server]) => [server!, serverSpec()])), observation, mode,
+      )).toEqual({ ok: false, reason });
+    },
+  );
+
+  it('refuses a prepared executor map instead of overwriting a tool fingerprint', async () => {
+    await expect(buildToolExecutorsFromObservation({
+      observation: await collidingObservation(),
+      toolsetDefinitionRevisions: Object.fromEntries(pairs.map(([server]) => [server!, `revision-${server}`])),
+      // Consumed only after the projection below rejects the collision, so the
+      // tested refusal is reached before either fixture fact is read.
+      launch: { launchCwd: '/', launcher: null },
+      implementations: {},
+      nativeTools: [],
+      runtimeIdentity: 'fixture-runtime',
+      permissionMode: 'auto',
+    })).rejects.toThrow(`duplicate MCP runtime tool name "${name}"`);
+  });
+});

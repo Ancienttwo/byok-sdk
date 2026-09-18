@@ -20,6 +20,9 @@ import {
   type Transport,
 } from '@modelcontextprotocol/client';
 import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/client/validators/cf-worker';
+import { McpAuthorityError } from './authority-error';
+
+export { McpAuthorityError };
 
 /**
  * The SDK's single MCP client authority.
@@ -132,20 +135,6 @@ const CLIENT_INFO: Implementation = Object.freeze({
   name: '@byok-sdk/client',
   version: '1',
 });
-
-/**
- * A failure caused by the server's own ANSWER rather than by its environment:
- * an ungrantable tool name, a malformed tool entry, an oversized stream, a
- * refused handshake. Retrying cannot change it — the same configured command
- * reports the same thing next time — so callers decline permanently rather
- * than re-offering forever.
- */
-export class McpAuthorityError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = 'McpAuthorityError';
-  }
-}
 
 /**
  * A failure of the server's ENVIRONMENT rather than its answer: it could not
