@@ -5171,7 +5171,7 @@ export declare class InputPreparationStore {
      * sending) must still be on disk, whatever the retention horizon says. The
      * horizon resumes the moment `unpin` lands.
      */
-    gc(nowMs?: number): Promise<{
+    gc(nowMs?: number, preserveInFlight?: boolean): Promise<{
         artifactsRemoved: number;
         recordsRemoved: number;
     }>;
@@ -9681,7 +9681,7 @@ export type { OperationalHealthSnapshot, OperationalHealthState } from './daemon
  * drift apart.
  */
 export { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_ERROR_CODES, INPUT_PREPARATION_RECEIPT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INPUT_PREPARATION_REQUEST_FORMAT, INPUT_PREPARATION_RETIRED_PROMPT_KEYS, INPUT_PREPARATION_RETIRED_REQUEST_KEYS, INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS, INPUT_PREPARATION_VERSION, InputPreparationPolicyError, validateInputPreparationLimits, } from './input-preparation';
-export type { InputPreparationArtifactSummaryV1, InputPreparationAuthorityGrantV1, InputPreparationCompiledPromptSnapshotV1, InputPreparationCompiledSnapshotV1, InputPreparationAuthorityOutcomeV1, InputPreparationAuthorityResolver, InputPreparationBindingV1, InputPreparationCancelParamsV1, InputPreparationContextFileV1, InputPreparationCounterAdapter, InputPreparationCounterAuthorityV1, InputPreparationCounterEvidenceV1, InputPreparationCounterRequestV1, InputPreparationCounterResultV1, InputPreparationCounterTargetV1, InputPreparationCoverageProofV1, InputPreparationDenialReasonV1, InputPreparationDocsPathsV1, InputPreparationErrorCodeV1, InputPreparationHostCanonicalAssistantMessageV1, InputPreparationLimitsPolicyV1, InputPreparationLookupParamsV1, InputPreparationModelCostV1, InputPreparationMessageV1, InputPreparationModelV1, InputPreparationOptionsV1, InputPreparationPinV1, InputPreparationPromptSnapshotV1, InputPreparationReadinessReasonV1, InputPreparationReceiptV1, InputPreparationRequestV1, InputPreparationRuntimeIdentityV1, InputPreparationScopeClaimV1, InputPreparationSelectionV1, InputPreparationSnapshotV1, InputPreparationSourceV1, InputPreparationStateV1, InputPreparationToolV1, InputPreparationUserMessageV1, } from './input-preparation';
+export type { InputPreparationArtifactSummaryV1, InputPreparationAuthorityGrantV1, InputPreparationCompiledPromptSnapshotV1, InputPreparationCompiledSnapshotV1, InputPreparationAuthorityOutcomeV1, InputPreparationAuthorityResolver, InputPreparationSourceAuthorityRequestV1, InputPreparationSourceAuthorityOutcomeV1, InputPreparationBindingV1, InputPreparationCancelParamsV1, InputPreparationContextFileV1, InputPreparationCounterAdapter, InputPreparationCounterAuthorityV1, InputPreparationCounterEvidenceV1, InputPreparationCounterRequestV1, InputPreparationCounterResultV1, InputPreparationCounterTargetV1, InputPreparationCoverageProofV1, InputPreparationDenialReasonV1, InputPreparationDocsPathsV1, InputPreparationErrorCodeV1, InputPreparationHostCanonicalAssistantMessageV1, InputPreparationLimitsPolicyV1, InputPreparationLookupParamsV1, InputPreparationModelCostV1, InputPreparationMessageV1, InputPreparationModelV1, InputPreparationOptionsV1, InputPreparationPinV1, InputPreparationPromptSnapshotV1, InputPreparationReadinessReasonV1, InputPreparationReceiptV1, InputPreparationRequestV1, InputPreparationRuntimeIdentityV1, InputPreparationScopeClaimV1, InputPreparationSelectionV1, InputPreparationSnapshotV1, InputPreparationSourceV1, InputPreparationStateV1, InputPreparationToolV1, InputPreparationUserMessageV1, } from './input-preparation';
 export { INPUT_PREPARATION_CANCEL_METHOD, INPUT_PREPARATION_IDENTIFIER_MAX_BYTES, INPUT_PREPARATION_LOOKUP_METHOD, INPUT_PREPARATION_PREPARE_METHOD, parseInputPreparationCancelParams, parseInputPreparationLookupParams, parseInputPreparationRequestParams, } from './daemon/control-protocol';
 export type { InputPreparationResult } from './daemon/control-protocol';
 export { journalHash, JournalUnavailableError, JournalCorruptError, JournalRecordTooLargeError, JournalUnknownTaskError, JournalClosedError, } from './daemon/journal/journal';
@@ -10210,6 +10210,19 @@ export type InputPreparationAuthorityOutcomeV1 = {
     readonly authorized: false;
     readonly reason: InputPreparationDenialReasonV1;
 };
+/** A trusted Host decision binding the exact source pair to the supplied snapshot. */
+export type InputPreparationSourceAuthorityOutcomeV1 = {
+    readonly authorized: true;
+    readonly source: InputPreparationSourceV1;
+} | {
+    readonly authorized: false;
+    readonly reason: InputPreparationDenialReasonV1;
+};
+export interface InputPreparationSourceAuthorityRequestV1 {
+    readonly grant: InputPreparationAuthorityGrantV1;
+    readonly source: InputPreparationSourceV1;
+    readonly snapshot: InputPreparationSnapshotV1;
+}
 /**
  * The configured local authority. It owns the device/Agent/Profile records this
  * daemon trusts and decides whether the claimed scope may be disclosed at all.
@@ -10222,6 +10235,8 @@ export type InputPreparationAuthorityOutcomeV1 = {
  */
 export interface InputPreparationAuthorityResolver {
     resolveScope(claim: InputPreparationScopeClaimV1): Promise<InputPreparationAuthorityOutcomeV1>;
+    /** Independently verify source and snapshot under the already verified scope grant. */
+    resolveSource(request: InputPreparationSourceAuthorityRequestV1): Promise<InputPreparationSourceAuthorityOutcomeV1>;
 }
 /**
  * The exact INFERENCE target one counter call is bound to.
@@ -11452,9 +11467,28 @@ export interface McpServerHandle {
  * connects, then every `tools/call` fails on its side.
  */
 export declare function serveMcpOverStdio(options: McpServerOptions): McpServerHandle;
+// ==== @byok-sdk/client dist/mcp/authority-error.d.ts ====
+/**
+ * The MCP authority error, on a module of its own and importing nothing.
+ *
+ * `mcp/client.ts` owns the single MCP client authority, but the client's own
+ * module graph reaches `@modelcontextprotocol/client`. Modules that must
+ * IDENTIFY an authority refusal without taking that graph — the daemon-free
+ * adapters closure above all (`dist-subpath-closure.test.ts` guards the
+ * emitted bundle against exactly this edge) — import the class from here.
+ * One definition, re-exported by `mcp/client.ts`, so `instanceof` is exact
+ * everywhere and no second error type is minted.
+ */
+export declare class McpAuthorityError extends Error {
+    constructor(message: string, options?: {
+        cause?: unknown;
+    });
+}
 // ==== @byok-sdk/client dist/mcp/client.d.ts ====
 import { type ToolImplementationFsProbe, type ToolImplementationIdentityV1 } from '../daemon/tool-implementation-identity';
 import { type CallToolResult, type Tool } from '@modelcontextprotocol/client';
+import { McpAuthorityError } from './authority-error';
+export { McpAuthorityError };
 /**
  * The SDK's single MCP client authority.
  *
@@ -11498,18 +11532,6 @@ export declare const MCP_OBSERVATION_MAX_STDOUT_BYTES = 1048576;
 export declare const MCP_MAX_FRAME_BYTES = 1048576;
 /** Default ceiling for one request/response round trip. */
 export declare const MCP_DEFAULT_REQUEST_TIMEOUT_MS = 10000;
-/**
- * A failure caused by the server's own ANSWER rather than by its environment:
- * an ungrantable tool name, a malformed tool entry, an oversized stream, a
- * refused handshake. Retrying cannot change it — the same configured command
- * reports the same thing next time — so callers decline permanently rather
- * than re-offering forever.
- */
-export declare class McpAuthorityError extends Error {
-    constructor(message: string, options?: {
-        cause?: unknown;
-    });
-}
 /**
  * A failure of the server's ENVIRONMENT rather than its answer: it could not
  * be spawned, it exited before answering, the deadline expired, the pipe
