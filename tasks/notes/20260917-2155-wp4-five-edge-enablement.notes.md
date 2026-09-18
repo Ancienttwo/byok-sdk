@@ -73,3 +73,7 @@ Disposition: F1+F2+N2 re-dispatched to fast-worker as one bounded test slice; re
 Fix commit `67afe3b3` (test-only + 3 comment blocks; +395/−36, 5 files): `cap-session` / `cap-parallel` (F1, faithful claimCapSlot forge, cap-exhausted refusal, zero new state), `stale-reclaim` (F2a, real dead pid + on-disk backdate past 60s → sweep reclaims and re-claims for live launcher), `refuse-edge` / `refuse-no-budget` (F2b, 未准入 leaves no custody state); N2 comments refreshed in dispatcher/helper-host/print-entry headers.
 
 Main-loop spot checks: production diffs comment-only (grep-verified), attribution clean, targeted suite 22/22 (five-edge 21 + closure + double-charge). Strict re-run on 67afe3b3: 13 checks 12 PASS, sole FAIL = the same pre-declared local registry tripwire (log verification-vx-88f0a0f7b8d44c80b85b.log). Gatekeeper round 2 dispatched on the same criteria.
+
+## CI receipt (2026-09-18)
+
+Run 35305890535 @ e0f27c74: ubuntu/macos all green incl. full client suite (local tripwire green on CI → local-env-only confirmed); only two windows-latest jobs red, signatures byte-identical to baseline run 35225498896 @ 07b8798d → baseline/WP1 face. WP4 closed. Receipt recorded in tasks/reviews/20260917-2155-wp4-five-edge-enablement.review.md; receipt commit pushed on Owner authorization.

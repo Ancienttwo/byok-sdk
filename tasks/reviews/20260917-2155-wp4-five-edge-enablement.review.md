@@ -35,3 +35,12 @@ Round 2 (against 67afe3b3): PASS — F1 closed (cap-session/cap-parallel: byte-f
 ## Ship recommendation
 
 Push claude/wp3-custody-wiring (67afe3b3) once the Owner authorizes; CI (incl. the two known-red Windows jobs = WP1 face) becomes authoritative post-push.
+
+## CI acceptance receipt (2026-09-18, post-push)
+
+Run `35305890535` @ `e0f27c74` (pushed by Owner after SHIP_WITH_N1_TODO review):
+
+- Green: all ubuntu/macos jobs — including `build, typecheck, test (fixed Node)` (full client suite) and `npm release pack/install (ubuntu, fixed Node)`. The local-only strict red (`pi-s2-bundle-resolution.test.ts:327` registry tripwire) is green on CI, confirming the pre-declared local-env disposition; CI is the exercised authority.
+- Red (2/23 jobs, both windows-latest): `built adapter lifecycle smoke` ("accepts at most 1 arg(s), received 4") and `npm release pack/install (fixed Node)` (keys suite fails resolving `@byok-sdk/implementation-identity` entry under the standard-user token). Failure signatures are byte-identical to baseline run `35225498896` @ `07b8798d` → falsifier classification: baseline/WP1 face, NOT introduced by this work-package. Remediation path = WP1 branch merge (claude/wp1-windows-ci-on-193 @ 9cc3b7cd, round-12 all-green), sequenced by the Owner.
+
+Verdict: WP4 five-edge enablement CLOSED. Contract 20260917-2155 Fulfilled; gatekeeper r2 PASS; N1 (external-CLI lane custody semantics) recorded in tasks/todos.md per Owner ruling.
