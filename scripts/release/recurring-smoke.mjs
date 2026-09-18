@@ -477,6 +477,7 @@ if (substrateConfigured) {
       deviceId: device.deviceId,
       taskId: durableTask,
       agentRef: durableRef,
+      context: MESSAGE_CONTEXT,
       envelope: durableEnvelope,
       payload: durablePayload,
       expectedDisposition: durableReceipt,
