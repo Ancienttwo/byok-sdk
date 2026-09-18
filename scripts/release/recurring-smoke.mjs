@@ -124,6 +124,7 @@ function recurringInput(taskId, deviceId, instruction) {
 const MESSAGE_BODY = 'packed persisted reply body — read back through the installed tarball, not a stub';
 const messagePayload = (agentRef) => ({
   agentRef,
+  sessionRef: 'packed-session-1',
   contract: 'conversation-turn/v1',
   messageId: randomUUID(),
   cursor: 1,
@@ -155,9 +156,9 @@ function assertExactDisposition(receipt, payload, outcome, reasonCode) {
   else assert.equal(receipt.reasonCode, reasonCode);
   assert.deepEqual(
     { ...receipt, receiptId: undefined },
-    { agentRef: payload.agentRef, contract: payload.contract, messageId: payload.messageId,
-      cursor: payload.cursor, contentHash: payload.contentHash, outcome, receiptId: undefined,
-      ...(reasonCode === undefined ? {} : { reasonCode }) },
+    { agentRef: payload.agentRef, sessionRef: payload.sessionRef, contract: payload.contract,
+      messageId: payload.messageId, cursor: payload.cursor, contentHash: payload.contentHash,
+      outcome, receiptId: undefined, ...(reasonCode === undefined ? {} : { reasonCode }) },
   );
   assert.match(receipt.receiptId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
 }
