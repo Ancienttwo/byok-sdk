@@ -1,0 +1,9 @@
+PRE_FIX_EXIT=1
+# Round 5 pre-fix failure evidence (transcribed from CI run 35203870015, branch claude/wp1-windows-ci-on-193).
+# Suite: packages/keys/src/pi-projection-windows.test.ts (bun run --filter @byok-sdk/keys test; lowpriv child, windows-latest)
+# Warm-up state at this commit: Import-Module only (no (Get-Command Get-Acl).Name).
+pi-projection-windows.test.ts > positive keys projection test  FAILED 5006ms (vitest 5s budget)
+pi-projection-windows.test.ts > external ACE projection test                  FAILED  398ms (generic)
+pi-projection-windows.test.ts > owner mismatch projection test                FAILED  345ms (generic)
+pi-projection-windows.test.ts > junction/reparse projection test              FAILED  366ms (generic)
+# Signature matches round 3 (4044/398/345/366ms): PS 5.1 module auto-load never completed.

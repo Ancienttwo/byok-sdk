@@ -676,3 +676,14 @@ Nothing is weakened, and each weakening is a test: a symlink leaf is refused (re
 - §22 (line ~613), §23 (line ~631), §24 (line ~661): "Pin stays 0.85.1002, so `fitsRpcFrame` is not wired." The pin is `0.85.1005` and `fitsRpcFrame` is wired — `packages/client/src/daemon/input-preparation-service.ts:39,699` pre-checks the `prompt_prepared` command against the frame cap before transport, so an oversized prepared envelope is refused by the sender by name instead of arriving as an unparsed frame at the native reader.
 
 This slice moves the pin and the frame admission only. The prepared native tool half remains uncounted and G4 accounting/Host CAS/S0 activation is unchanged.
+### PR187 review closure contract — 2026-09-17
+
+The local primitive must authorize source and snapshot through the configured authority before durable reservation, compilation or counter disclosure. `resolveScope` owns scope admission; mandatory `resolveSource` receives the verified grant and isolated copies of the opaque source pair and snapshot. Its authorized pair must exactly match the request. The SDK does not compute a Host source digest or infer a missing authority. Lookup and cancel retain their existing scope authorization. Implementations of the unpublished resolver interface must implement the new method; no optional or permissive compatibility path is provided.
+
+The SDK owns the bound on waiting for a counter. Timeout, operator cancellation and shutdown settle the durable record as `counter_interrupted` when a call was placed, even if the adapter ignores its abort signal. The allowance remains consumed, the same request never calls the counter again, and late resolution/rejection cannot change the terminal record. This does not prove physical cancellation of the provider-side request.
+
+The daemon opens and reconciles the preparation service during startup, collects expired unpinned artifacts, and keeps a single timer for the next configured expiry while running. It does not depend on later preparation traffic. Stop owns timer disposal and any in-flight collection. A background collection fault is latched and surfaced rather than swallowed; pinned records remain exempt. Artifact and tombstone horizons keep their existing meanings and values.
+
+A native runtime import or identity fault is reported as `runtime_identity_unavailable`, with the same durable failure detail. A request ID already reserved remains spent; a repaired installation does not silently recreate it. Caller-directed use of a new request ID remains necessary. This preserves the existing no-automatic-retry rule while distinguishing installation failure from unsupported input.
+
+This paragraph records the bounded repair contract, not completed verification or full C07 readiness. Exact RED/GREEN, full-check and acceptance evidence belongs to `tasks/notes/20260917-0218-pr187-review-closeout.notes.md` and the associated review/receipt.

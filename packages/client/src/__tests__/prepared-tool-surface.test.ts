@@ -155,6 +155,7 @@ const CONTEXT_JSON = JSON.stringify({
 });
 
 const ALWAYS_AUTHORIZED: InputPreparationAuthorityResolver = {
+  async resolveSource({ source }) { return { authorized: true, source }; },
   async resolveScope(claim) {
     return { authorized: true, grant: { scopeId: `scope:${claim.deviceId}`, ...claim } };
   },
