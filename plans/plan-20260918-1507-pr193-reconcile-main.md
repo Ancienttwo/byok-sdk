@@ -123,7 +123,7 @@ PR #193 CONFLICTING vs main (8 files, c07 overlap where main holds the #185–#1
 - [x] gatekeeper PASS（B1–B7；N1/N2 非阻塞）
 - [x] orchestrator push `pr193-reconcile -> codex/c07-pi-runtime-launch` + CI watcher（0a3202f3 + 145dbb97；CI 判定见 review 收据）
 - [x] test-only flake hardening：input-preparation.test.ts 三处固定 sleep（450/150/450ms，fake-clock GC timer 余量 ~50ms）改 vi.waitFor 轮询；本地验证后随收据 commit push（已向 Owner 预告）
-- [ ] 回报
+- [x] 回报
 
 ## Non-Goals
 WP1/WP4 合流（stage 2/3）、CI/workflow 改动、mark ready、merge PR、任何 compatibility shim。
@@ -143,4 +143,4 @@ WP1/WP4 合流（stage 2/3）、CI/workflow 改动、mark ready、merge PR、任
 - [x] gatekeeper PASS（B1–B7；N1/N2 非阻塞）
 - [x] orchestrator push `pr193-reconcile -> codex/c07-pi-runtime-launch` + CI watcher（0a3202f3 + 145dbb97；CI 判定见 review 收据）
 - [x] test-only flake hardening：input-preparation.test.ts 三处固定 sleep（450/150/450ms，fake-clock GC timer 余量 ~50ms）改 vi.waitFor 轮询；本地验证后随收据 commit push（已向 Owner 预告）
-- [ ] 回报
+- [x] 回报
