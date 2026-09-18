@@ -324,14 +324,14 @@ console.log('[release-pack] recurring public imports, strict submission and inde
   };
   const outageResponse = await publishAgentMessage(composition.cloud, device.authorization, recoveryEnvelope);
   assert.equal(outageResponse.status >= 500, true, `finalize outage must surface as a failed response, got ${outageResponse.status}`);
-  assert.equal(consumer.calls.length, 2); // accepted + recovery first attempt
+  assert.equal(consumer.calls.length, 3); // accepted + held + recovery first attempt
   assert.equal(consumer.committed.has(recoveryPayload.messageId), true); // product transaction committed
   assert.equal(await readDisposition(msgTenant, recoveryTask, recoveryPayload), undefined); // pending has no disposition
   assert.deepEqual(await readMessage(msgTenant, recoveryTask, agentRef), { payload: recoveryPayload, context: MESSAGE_CONTEXT });
   const recoveryResponse = await publishAgentMessage(composition.cloud, device.authorization, recoveryEnvelope);
   assert.equal(recoveryResponse.status, 200);
   assert.deepEqual(await recoveryResponse.json(), { accepted: 1 });
-  assert.equal(consumer.calls.length, 3); // at-least-once: the consumer reconciled the pending admission
+  assert.equal(consumer.calls.length, 4); // at-least-once: the consumer reconciled the pending admission
   assert.equal(consumer.calls.filter((call) => call.messageId === recoveryPayload.messageId).length, 2);
   assert.equal(consumer.committed.get(recoveryPayload.messageId).outcome, 'accepted'); // one logical effect
   const recoveryReceipt = await readDisposition(msgTenant, recoveryTask, recoveryPayload);
@@ -341,7 +341,7 @@ console.log('[release-pack] recurring public imports, strict submission and inde
   // A third exact replay is a pure duplicate: no third consumer invocation.
   const duplicateResponse = await publishAgentMessage(composition.cloud, device.authorization, recoveryEnvelope);
   assert.deepEqual(await duplicateResponse.json(), { accepted: 1 });
-  assert.equal(consumer.calls.length, 3);
+  assert.equal(consumer.calls.length, 4);
   assert.deepEqual(await readDisposition(msgTenant, recoveryTask, recoveryPayload), recoveryReceipt);
 
   // Cancel after acceptance keeps the durable decision; cancel intent never
