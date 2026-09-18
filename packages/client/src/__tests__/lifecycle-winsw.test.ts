@@ -161,6 +161,63 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
     expect(fs.rm).not.toHaveBeenCalled();
   });
 
+  // CI job "Windows service install smoke" flake: Windows releases the just-
+  // stopped service process's image section asynchronously after SCM
+  // STOPPED/deregistration, so an unlink issued immediately after
+  // `winsw uninstall` returns can lose that race and get EPERM
+  // (`EPERM: unlink ...logs\byok-winsw-smoke-<pid>.exe`), voiding an
+  // otherwise-passing run. These tests pin BOTH directions of the bounded
+  // retry: transient image-lock errors are retried to resolution, but a
+  // persistently locked exe still fails closed after the budget (no
+  // masking, no silent success).
+  it('uninstall() retries rm past a transient Windows image-lock EPERM on the exe and still resolves', async () => {
+    const eperm = () =>
+      Object.assign(new Error("EPERM: operation not permitted, unlink 'C:\\acme\\logs/Acme-Agent-.exe'"), { code: 'EPERM' });
+    const fs = fakeFs();
+    let exeRmAttempts = 0;
+    fs.rm.mockImplementation(async (p: string) => {
+      if (p.endsWith('.exe')) {
+        exeRmAttempts += 1;
+        if (exeRmAttempts <= 2) {
+          throw eperm();
+        }
+      }
+    });
+    const run = vi.fn<Runner>().mockResolvedValue(fail(1060, '', 'The specified service does not exist as an installed service.'));
+    const lifecycle = createWinswLifecycle(def(), { run, fs });
+
+    await lifecycle.uninstall();
+
+    expect(exeRmAttempts).toBe(3);
+    expect(fs.rm).toHaveBeenCalledWith('C:\\acme\\logs/Acme-Agent-.exe', { force: true });
+    expect(fs.rm).toHaveBeenCalledWith('C:\\acme\\logs/Acme-Agent-.xml', { force: true });
+  });
+
+  it('uninstall() still rejects (fail-closed) after the retry budget when the exe stays EPERM-locked', async () => {
+    const fs = fakeFs();
+    fs.rm.mockImplementation(async () => {
+      throw Object.assign(new Error("EPERM: operation not permitted, unlink 'C:\\acme\\logs/Acme-Agent-.exe'"), { code: 'EPERM' });
+    });
+    const run = vi.fn<Runner>().mockResolvedValue(fail(1060, '', 'The specified service does not exist as an installed service.'));
+    const lifecycle = createWinswLifecycle(def(), { run, fs });
+
+    await expect(lifecycle.uninstall()).rejects.toMatchObject({ code: 'EPERM' });
+    // The budget itself: 10 attempts (initial + 9 retries) before rethrow.
+    expect(fs.rm).toHaveBeenCalledTimes(10);
+  });
+
+  it('uninstall() does NOT retry rm for errors outside the image-lock class (EACCES rethrows immediately)', async () => {
+    const fs = fakeFs();
+    fs.rm.mockImplementation(async () => {
+      throw Object.assign(new Error("EACCES: permission denied, unlink 'C:\\acme\\logs/Acme-Agent-.exe'"), { code: 'EACCES' });
+    });
+    const run = vi.fn<Runner>().mockResolvedValue(fail(1060, '', 'The specified service does not exist as an installed service.'));
+    const lifecycle = createWinswLifecycle(def(), { run, fs });
+
+    await expect(lifecycle.uninstall()).rejects.toMatchObject({ code: 'EACCES' });
+    expect(fs.rm).toHaveBeenCalledTimes(1);
+  });
+
   it('start() throws "not installed" when the xml config does not exist on disk', async () => {
     const run = vi.fn<Runner>().mockResolvedValue(ok());
     const lifecycle = createWinswLifecycle(def(), { run, fs: fakeFs() });
