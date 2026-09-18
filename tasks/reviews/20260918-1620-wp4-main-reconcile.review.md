@@ -110,3 +110,7 @@ Reviewed subject: merge commit 03b0dbb5 (parents 420d1306 + 49ec7477) + untracke
 非阻塞：verify-sprint receipt 沿 1526 同因受阻（architecture projection 机器 drift-cursor 缺陷，环境项）；allowed_paths 中 1605 plan 为 stale 路径（cosmetic，草稿已删）。
 
 Expected post-push CI：全矩阵绿（K1 于 CI 转绿；无预留豁免——Windows face 已消除、flake 已修复）。
+
+## CI acceptance receipt (2026-09-18, post-push)
+
+Run `35325984106` @ `353db13b`：**conclusion=success，0 red**。前向验收达成——全矩阵绿无豁免（K1 本地 tripwire 于 CI 绿；custody 五边用例全绿）。Owner 已批准 WP4 合入 main（三段收官）。
