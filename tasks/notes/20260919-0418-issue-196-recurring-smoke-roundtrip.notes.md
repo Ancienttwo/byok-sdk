@@ -19,8 +19,23 @@
 
 ## Verification log
 
-(filled at close)
+All commands run 2026-09-19 on this branch (claude/issue-196-recurring-smoke-roundtrip, base a6c5a297 = origin/main).
+
+- `bun run build` exit 0; `bun run typecheck` exit 0; `bun run check:api-surface` "10 package golden(s) match"; `bun run check:version-authority` README/spec agree with byok-sdk@0.18.0 / keys@0.5.0.
+- Full release driver WITH substrate env: `BYOK_TEST_POSTGRES_URL=... BYOK_TEST_S3_ENDPOINT=... node scripts/release/pack-and-smoke.mjs --out-dir /private/tmp/byok-196-artifacts` → exit 0 (packs 11 tarballs, isolated npm install, both smoke legs, Pi launcher, packed-CLI MCP). Manifest printed at end (sourceGitSha 125b89063b4421a174daa49da011809a3df8dd0b, per-tarball sha256) — also copied to tasks/runs/20260919-0418-issue-196-release-manifest.json.
+- Standalone isolated install (`/private/tmp/byok-196-isolated`, npm install of the manifest tarballs):
+  - in-memory leg only: `node recurring-smoke.mjs` → exit 0 (tasks/runs/20260919-0418-issue-196-smoke-in-memory.green.log)
+  - both legs: with env pair → exit 0, durable markers visible (tasks/runs/20260919-0418-issue-196-smoke-durable-restart.green.log): reopened-process read-back with no TaskHandle, zero-execution exact replay, per-run `byok_smoke_<uuid>` database migrated by the installed runner, dropped in `finally` (DROP ... WITH (FORCE)).
+  - fail-closed: `BYOK_REQUIRE_DATAPLANE=1` without substrate → exit 1; half-configured (POSTGRES_URL only) → exit 1 (tasks/runs/20260919-0418-issue-196-fail-closed.env-check.log).
+- Mutation check (checkbox 6): patched installed `@byok-sdk/cloud/dist/index.js` `readTaskAgentMessage` head to `return undefined;` → smoke exit 1, failing on the new non-empty read-back assertion (recurring-smoke.mjs:286); pre-existing assertions still passed — they alone cannot catch it. Reverted; dist sha256 re-verified (69cc080e...). Evidence: tasks/runs/20260919-0418-issue-196-mutation-check.red.log.
+- `bun run test` → exit 1 with EXACTLY the pre-existing darwin baseline: `pi-s2-bundle-resolution.test.ts:327` local registry tripwire (2872 passed / 1 failed / 11 skipped). Failure set diffed identical to the pre-existing baseline log tasks/runs/20260919-0244-wp5-s2-ci-flip.full-test.log (same single FAIL line) — zero new failures from this branch (tasks/runs/20260919-0418-issue-196.full-test.log).
+- `.github/workflows/ci.yml` YAML validity: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))"` → OK (step inserted in dataplane job only, ci.yml:586-603).
+- `repo-harness run check-task-workflow --strict`: run at close; result recorded in the review file.
 
 ## Deviations
 
-(filled at close)
+- None from the agreed design. pack-and-smoke.mjs untouched (substrate env flows through `run()`'s default spawnSync env inheritance — verified in source and by the durable leg executing during the driver run). packages/client/src/__tests__ untouched (scenarios copied, not extracted).
+- The durable restart leg composes `createByokCloud` + Postgres stores instead of `createByokServer` — this is the design, not a deviation: `ByokServerStorage` is memory|sqlite only (packages/server/src/types.ts:29-39); the kernel-level public composition is the same one dataplane conformance uses (packages/cloud-dataplane/src/__tests__/conformance.test.ts:56-78, incl. filtering blobsContentProxy when no proxy is mounted).
+- `objectStorage` is a REQUIRED construction parameter of `createPostgresCloudStores`; the leg passes the compose MinIO config but never exercises the byte plane and leaves blobs.contentproxy undeclared — structural absence, not a hidden skip.
+- The smoke's injected-outage scenario surfaces Hono's console error line for the injected 500 between markers in standalone runs; pack-and-smoke's `run()` discards smoke stdout, so CI logs never see it. Asserted behavior is the >=500 response plus the recovery path.
+- The mutation RED fails as a TypeError (undefined payload access) rather than a formatted assertion — the contract "smoke must fail" holds (exit 1); noted for honesty in the evidence header.

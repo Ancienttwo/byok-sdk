@@ -1,6 +1,6 @@
 # Task Contract: issue-196-recurring-smoke-roundtrip
 
-> **Status**: In Progress
+> **Status**: Complete
 > **Plan**: plans/plan-20260919-0418-issue-196-recurring-smoke-roundtrip.md
 > **Task Profile**: code-change
 > **Owner**: kito
@@ -141,8 +141,8 @@ exit_criteria:
     {"id":"typecheck","kind":"command","command":"bun run typecheck","cwd":".","phase":"verification","cost":"normal","evidence_policy":"current_exact","necessity":"tree typechecks","inputs":{"env":[]}},
     {"id":"api-surface","kind":"command","command":"bun run check:api-surface","cwd":".","phase":"verification","cost":"normal","evidence_policy":"current_exact","necessity":"golden","inputs":{"env":[]}},
     {"id":"version-authority","kind":"command","command":"bun run check:version-authority","cwd":".","phase":"verification","cost":"normal","evidence_policy":"current_exact","necessity":"version authority","inputs":{"env":[]}},
-    {"id":"smoke-in-memory-isolated-install","kind":"command","command":"node scripts/release/recurring-smoke.mjs","cwd":".smoke-verify-isolated","phase":"verification","cost":"normal","evidence_policy":"current_exact","necessity":"extended in-memory leg green from installed tarballs (isolated-install mode, same as pack-and-smoke)","inputs":{"env":[]}},
-    {"id":"smoke-durable-local-substrate","kind":"command","command":"node scripts/release/recurring-smoke.mjs","cwd":".smoke-verify-isolated","phase":"verification","cost":"normal","evidence_policy":"current_exact","necessity":"durable restart leg green against local docker compose Postgres+MinIO","inputs":{"env":["BYOK_TEST_POSTGRES_URL","BYOK_TEST_S3_ENDPOINT"]}},
+    {"id":"smoke-in-memory-isolated-install","kind":"command","command":"node recurring-smoke.mjs","cwd":"/private/tmp/byok-196-isolated","phase":"verification","cost":"normal","evidence_policy":"current_exact","necessity":"extended in-memory leg green from installed tarballs (isolated install of the pack-and-smoke tarballs)","inputs":{"env":[]}},
+    {"id":"smoke-durable-local-substrate","kind":"command","command":"BYOK_TEST_POSTGRES_URL=postgres://byok:byok@127.0.0.1:5433/byok_test BYOK_TEST_S3_ENDPOINT=http://127.0.0.1:9100 node recurring-smoke.mjs","cwd":"/private/tmp/byok-196-isolated","phase":"verification","cost":"normal","evidence_policy":"current_exact","necessity":"durable restart leg green against local docker compose Postgres+MinIO","inputs":{"env":["BYOK_TEST_POSTGRES_URL","BYOK_TEST_S3_ENDPOINT"]}},
     {"id":"mutation-check-red","kind":"command","command":"tasks/runs/20260919-0418-issue-196-mutation-check.red.log","cwd":".","phase":"verification","cost":"normal","evidence_policy":"current_exact","necessity":"patched read-back (undefined for non-empty) turns the installed smoke RED","inputs":{"env":[]}},
     {"id":"full-test-delta","kind":"command","command":"bun run test","cwd":".","phase":"verification","cost":"heavy","evidence_policy":"baseline_with_delta","necessity":"full suite; known darwin hasDisplay baseline pi-s2-bundle-resolution:327 red (fixed by PR #202, not this branch) — prove delta only","inputs":{"env":[]}},
     {"id":"ci-yaml-valid","kind":"command","command":"python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))\"","cwd":".","phase":"verification","cost":"normal","evidence_policy":"current_exact","necessity":"YAML validity of ci.yml change","inputs":{"env":[]}},

@@ -61,6 +61,23 @@ submitRecurringExecution (consumer registered) → /byok/pair (entitlement → p
 - Implementation notes file: `tasks/notes/20260919-0418-issue-196-recurring-smoke-roundtrip.notes.md`
 - Verification command: `repo-harness run check-task-workflow --strict`
 
+## Promotion Gate
+
+- **Merge/PR unit**: this plan `plans/plan-20260919-0418-issue-196-recurring-smoke-roundtrip.md` is the mergeable execution unit (branch `claude/issue-196-recurring-smoke-roundtrip` → PR → issue #196).
+- **Rollback surface**: before execution remove the plan/contract/notes artifacts; after execution revert the branch commits.
+- **Verification boundary**: the contract Verification Plan checks (build, typecheck, api-surface, version-authority, isolated-install smoke both legs, mutation RED, full-test baseline-with-delta, ci.yml YAML validity, `repo-harness run check-task-workflow --strict`).
+- **Review/acceptance boundary**: `tasks/reviews/20260919-0418-issue-196-recurring-smoke-roundtrip.review.md` records the disposition per issue checkbox; gate review is a separate dispatch by the orchestrator.
+- **High-risk surface**: none (coverage-only; no product source).
+- **Why not checklist row**: human_decision_boundary
+
+## Evidence Contract
+
+- **State/progress path**: this plan, `tasks/contracts/20260919-0418-issue-196-recurring-smoke-roundtrip.contract.md`, `tasks/reviews/20260919-0418-issue-196-recurring-smoke-roundtrip.review.md`, `tasks/notes/20260919-0418-issue-196-recurring-smoke-roundtrip.notes.md`
+- **Verification evidence**: `tasks/runs/20260919-0418-issue-196-*` (smoke green logs, mutation RED, fail-closed env check, release manifest, full-test log), `.ai/harness/checks/latest.json`, `.ai/harness/runs/`
+- **Evaluator rubric**: `tasks/reviews/20260919-0418-issue-196-recurring-smoke-roundtrip.review.md` records pass against the issue #196 checkboxes
+- **Stop condition**: all contract exit criteria verified, workflow gate passes, review recommends pass
+- **Rollback surface**: before execution remove the plan/contract/notes artifacts; after execution revert the branch commits.
+
 ## Handoff
 - Checks file: `.ai/harness/checks/latest.json`
 - Session handoff: `.ai/harness/handoff/current.md`
