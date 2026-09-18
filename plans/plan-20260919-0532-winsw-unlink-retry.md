@@ -6,7 +6,7 @@
 > **Planning Source**: orchestrator-dispatch
 > **Orchestration Kind**: host-plan
 > **Source Ref**: independent root-cause diagnosis (confirmed upstream; do not re-derive)
-> **Artifact Level**: slice
+> **Artifact Level**: work-package
 > **Promotion Reason**: confirmed-bugfix
 > **Verification Boundary**: Commands named in this plan's contract Verification Plan plus `repo-harness run check-task-workflow --strict`.
 > **Rollback Surface**: Before execution remove this plan trio; after execution revert branch `claude/winsw-uninstall-image-lock-retry` commits (no push, no PR from this slice).
@@ -97,3 +97,28 @@ const RM_IMAGE_LOCK_BACKOFF_MS = 250;
 
 - Checks file: `.ai/harness/checks/latest.json`
 - Report channel: final agent text to orchestrator (no push, no PR from this slice).
+
+## Promotion Gate
+
+- **Merge/PR unit**: This plan `plans/plan-20260919-0532-winsw-unlink-retry.md` plus its diff on branch `claude/winsw-uninstall-image-lock-retry` is the proposed mergeable execution unit.
+- **Rollback surface**: Before execution remove the plan trio; after execution revert the branch commits (base `a6c5a297` = origin/main).
+- **Verification boundary**: Commands named in the contract's Verification Plan plus `repo-harness run check-task-workflow --strict`.
+- **Review/acceptance boundary**: `tasks/reviews/20260919-0532-winsw-unlink-retry.review.md` must record pass against the contract's acceptance criteria (independent gate dispatch; this slice does not push or open PRs).
+- **High-risk surface**: None beyond the named uninstall path; public API surface untouched (`WinswDeps` shape unchanged).
+- **Why not checklist row**: confirmed CI-flaky bugfix needing a RED-first artifact trail.
+
+## Evidence Contract
+
+- **State/progress path**: this plan's Task Breakdown, `tasks/contracts/20260919-0532-winsw-unlink-retry.contract.md`, `tasks/notes/20260919-0532-winsw-unlink-retry.notes.md`, `tasks/reviews/20260919-0532-winsw-unlink-retry.review.md`
+- **Verification evidence**: `.ai/harness/checks/latest.json`, `.ai/harness/runs/`, the RED artifact `tasks/runs/20260919-0532-winsw-unlink-red.log`, and the commands named in the contract's Verification Plan
+- **Evaluator rubric**: `tasks/reviews/20260919-0532-winsw-unlink-retry.review.md` must record a passing gate recommendation (RED artifact non-zero `PRE_FIX_EXIT=` + green rerun + zero new full-suite failures)
+- **Stop condition**: task breakdown complete, contract verification passes (with the single pre-declared darwin baseline failure), review recommends pass
+- **Rollback surface**: Before execution remove the plan trio; after execution revert the branch commits.
+
+## Task Breakdown
+
+- [x] Plan/contract/notes trio committed first (allowed_paths widened before any other edit)
+- [x] RED guard tests added to `lifecycle-winsw.test.ts`; pre-fix failing run captured to `tasks/runs/20260919-0532-winsw-unlink-red.log` (`PRE_FIX_EXIT=1`)
+- [x] Bounded image-lock retry applied to `winsw.ts` uninstall path; guard suite green (24/24)
+- [ ] Full verification battery (build, typecheck, api-surface, version-authority, full suite zero-new-failures, strict workflow gate)
+- [ ] Notes/contract closeout commit

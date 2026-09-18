@@ -25,4 +25,11 @@ RED-first 协议：先落测试（winsw.ts 不动）→ 跑 RED → 存 `tasks/r
 
 ## 验证结论
 
-（closeout 时回填）
+- RED artifact（pre-fix，winsw.ts 未动）：`tasks/runs/20260919-0532-winsw-unlink-red.log` —— `Tests 2 failed | 22 passed (24)`，`PRE_FIX_EXIT=1`；两条新用例分别以 `Error: EPERM ... unlink`（trace 指到 `winsw.ts:185:14`，即根因行）与 `expected "vi.fn()" to be called 10 times, but got 1 times` 失败，与根因逐字吻合。EACCES 零重试伴生用例 pre-fix 即绿（预期内，方向不依赖修复）。
+- 修复后同命令：`bun run --filter @byok-sdk/client test -- src/__tests__/lifecycle-winsw.test.ts` → `Tests 24 passed (24)`，Duration 2.94s（含 fail-closed 用例真实 ~2.3s backoff；未加 delay 注入点，见上）。
+- `bun run build` ✓（Build success, exit 0）；`bun run typecheck` ✓（全包 Done）
+- `bun run check:api-surface` ✓（`10 package golden(s) match`——`WinswDeps` 未动，golden 零变化）
+- `bun run check:version-authority` ✓（byok-sdk@0.18.0 / @byok-sdk/keys@0.5.0）
+- `bun run test` 全量：`Tests 1 failed | 2875 passed | 11 skipped (2887)`——唯一失败 = 已记录 darwin 基线 `pi-s2-bundle-resolution.test.ts`（:327 local registry tripwire，PR #202 已在别处修复，本分支不碰）；2875 = 基线 2872 + 新增 3 绿，零新增失败。
+- `repo-harness run check-task-workflow --strict` ✓（补齐 plan 的 Promotion Gate / Evidence Contract / Task Breakdown 三节并把 Artifact Level 升为 work-package 后 `[workflow] OK`）
+- 备注：`tasks/runs/*.log` 命中 `.gitignore` 全局 `*.log` 规则，按仓内既有 pre-fix log 先例（tasks/evidence/ 下 13 个 tracked log）`git add -f` 落盘。

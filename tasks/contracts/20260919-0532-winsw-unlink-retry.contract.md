@@ -1,12 +1,12 @@
 # Task Contract: winsw-unlink-retry
 
-> **Status**: In Progress
+> **Status**: Complete
 > **Plan**: plans/plan-20260919-0532-winsw-unlink-retry.md
 > **Task Profile**: bugfix
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
-> **Last Updated**: 2026-09-19 05:32
+> **Last Updated**: 2026-09-19 05:45
 > **Review File**: `tasks/reviews/20260919-0532-winsw-unlink-retry.review.md`
 > **Notes File**: `tasks/notes/20260919-0532-winsw-unlink-retry.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
