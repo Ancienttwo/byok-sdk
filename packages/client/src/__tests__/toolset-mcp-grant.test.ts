@@ -76,7 +76,7 @@ async function startWith(
 }
 
 describe('projected MCP toolset grant — claude', () => {
-  it('pre-grants exactly the SDK-reserved memory tools under readonly', async () => {
+  it('pre-grants exactly the SDK-reserved helper tools under readonly', async () => {
     const captured: string[][] = [];
     const adapter = new ClaudeAdapter({
       resolveBin: () => ({ command: CLAUDE_FIXTURE, source: 'path' }),
@@ -95,10 +95,13 @@ describe('projected MCP toolset grant — claude', () => {
 
     const argv = captured[0] ?? [];
     expect(argv[argv.indexOf('--tools') + 1]).toBe('');
+    // The whole reserved table, one sorted identifier list (#180): the memory
+    // grants keep their exact shape and the message server present in this
+    // task's servers contributes exactly its single protocol tool.
     expect(argv[argv.indexOf('--allowedTools') + 1]).toBe(
-      'mcp__byokagentmemory__memory_recall,mcp__byokagentmemory__memory_save',
+      'mcp__byokagentmemory__memory_recall,mcp__byokagentmemory__memory_save'
+      + ',mcp__byokagentmessage__send_agent_message',
     );
-    expect(argv[argv.indexOf('--allowedTools') + 1]).not.toContain('send_agent_message');
   });
 
   it('readonly + allowTools:[] grants exactly the observed tools and keeps built-ins disabled', async () => {

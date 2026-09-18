@@ -12,6 +12,7 @@ import { createByokMcpExtension } from '../adapters/pi/mcp-extension';
 import { createByokSubagentsPolicyExtension } from '../adapters/pi/subagents-policy-extension';
 import { parseTaskScopedMcpConfig, type TaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
 import { mapPermissionPolicyToPiArgs } from '../adapters/pi/permission-mapping';
+import { resolveReservedMcpToolGrants } from '../adapters/mcp-tool-grants';
 import { loaderEnvInjections } from '../daemon/tool-implementation-identity';
 
 export interface PiRpcHostConfig {
@@ -124,9 +125,19 @@ export async function runPiRpcHost(argv: readonly string[]): Promise<void> {
   const args = parsePiRpcHostArgs(argv, failUsage);
   const config = parsePiRpcHostConfig(readPiHostConfig(args.configPath, args.configDigest));
   await verifyPiHostBinding(config.binding, 'pi-rpc', failUsage);
-  // The policy is the single authority. Delegated tool flags must be its exact
+  // The config is the single authority. Delegated tool flags must be its exact
   // projection, including absence; a stale or widened projection is refused.
-  const mapping = mapPermissionPolicyToPiArgs(config.policy);
+  // Policy alone no longer reproduces that projection: since #180 the adapter
+  // folds the SDK-reserved grants into it, derived from the very server
+  // projection this config carries (`config.mcp.mcpServers`). Re-deriving them
+  // from the same table over the same config keeps this check a projection
+  // equality test — deriving from policy alone would refuse the exact flags
+  // the policy calls for, and accepting them unverified would dissolve the
+  // check's entire reason to exist.
+  const mapping = mapPermissionPolicyToPiArgs(
+    config.policy,
+    resolveReservedMcpToolGrants(config.mcp.mcpServers),
+  );
   const expected = parsePiRpcHostArgs([`--config-digest=${args.configDigest}`, '--config', args.configPath, '--mode', 'rpc', ...mapping.args], failUsage);
   if (JSON.stringify([args.tools, args.excludeTools, args.noTools]) !== JSON.stringify([expected.tools, expected.excludeTools, expected.noTools])) {
     fail('delegated tool flags differ from policy');

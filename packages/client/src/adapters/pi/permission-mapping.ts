@@ -1,4 +1,5 @@
 import type { PermissionPolicy } from '@byok-sdk/protocol';
+import type { McpToolsetGrant } from '../mcp-tool-grants';
 import { BYOK_PI_READONLY_PARENT_TOOLS } from './subagents-policy-config';
 
 export interface PiPermissionMapping {
@@ -32,8 +33,35 @@ const READONLY_TOOLS: readonly string[] = ['read', 'grep', 'find', 'ls', ...BYOK
  * - `--tools` is an allowlist and `--exclude-tools` is a denylist. Passing
  *   both lets pi remain the authority for its active tool registry instead
  *   of duplicating pi's default tool list in this adapter.
+ *
+ * ## Reserved grants: a name inside the allowlist, because the allowlist IS
+ * ## the registry (#180)
+ *
+ * `resolveReservedMcpToolGrants` decides WHICH reserved tools a task may
+ * call; this mapper decides how pi hears about it. Pi's `--tools` flag is
+ * not a permission pre-grant the way claude's `--allowedTools` is — it is a
+ * registry allowlist over builtin AND extension-registered tools alike (the
+ * fork's `_refreshToolRegistry` drops every tool the list does not name),
+ * and the SDK's MCP extension registers the reserved helpers under their
+ * bare protocol names (`send_agent_message`, `memory_save`). So a reserved
+ * grant a projected `byokagentmessage` server implies is inexpressible
+ * UNLESS its bare name rides whatever allowlist this mapper emits; the same
+ * task under codex/claude is granted the identical tool from the identical
+ * table. The names never come from `policy.allowTools`: a reserved lane is
+ * admitted by the offer's server projection, and routing it through
+ * `allowTools` would make the grant depend on an operator list the reserved
+ * protocol cannot see. When NO allowlist is emitted (`auto` without
+ * `allowTools`), none is invented for the reserved lane either: pi's
+ * undefined allowlist admits every extension tool, the reserved one
+ * included, and a list naming only the reserved names would cage pi's
+ * native default registry. `denyTools` still wins on top of everything: it
+ * travels as `--exclude-tools`, and pi's exclusion filter applies after the
+ * allowlist, so an operator denial of a reserved tool name keeps its force.
  */
-export function mapPermissionPolicyToPiArgs(policy: PermissionPolicy): PiPermissionMapping {
+export function mapPermissionPolicyToPiArgs(
+  policy: PermissionPolicy,
+  reservedGrants: readonly McpToolsetGrant[] = [],
+): PiPermissionMapping {
   if (policy.network === false) {
     return {
       ok: false,
@@ -51,21 +79,33 @@ export function mapPermissionPolicyToPiArgs(policy: PermissionPolicy): PiPermiss
   }
 
   const denyTools = policy.denyTools ?? [];
+  // Bare names in the table's own server order: the extension registers the
+  // reserved helpers under exactly these strings, so the allowlist and the
+  // registry agree by construction rather than by a rename happening to line
+  // up. Deduplicated against the native list below — an operator who names a
+  // reserved tool in `allowTools` gets one entry, not two.
+  const grantedReserved = [...new Set(reservedGrants.flatMap((grant) => [...grant.tools]))];
 
   if (policy.mode === 'readonly') {
     const base = policy.allowTools ? policy.allowTools.filter((tool) => READONLY_TOOLS.includes(tool)) : [...READONLY_TOOLS];
+    // The reserved lane joins the readonly base rather than waiting on
+    // pi's new-registry-name activation (the `--no-tools` path): readonly
+    // with an emptied native list and a projected message server emits
+    // `--tools send_agent_message`, which keeps every native off and the
+    // granted lane on, explicitly.
+    const allowed = [...base, ...grantedReserved.filter((tool) => !base.includes(tool))];
     // Never fall through to an absent `--tools` flag here — that would run
     // pi's full default toolset, silently widening a readonly request.
-    if (base.length === 0) return { ok: true, args: ['--no-tools'] };
+    if (allowed.length === 0) return { ok: true, args: ['--no-tools'] };
     return {
       ok: true,
-      args: ['--tools', base.join(','), ...(denyTools.length > 0 ? ['--exclude-tools', denyTools.join(',')] : [])],
+      args: ['--tools', allowed.join(','), ...(denyTools.length > 0 ? ['--exclude-tools', denyTools.join(',')] : [])],
     };
   }
 
   const args: string[] = [];
   if (policy.allowTools && policy.allowTools.length > 0) {
-    args.push('--tools', policy.allowTools.join(','));
+    args.push('--tools', [...new Set([...policy.allowTools, ...grantedReserved])].join(','));
   }
   if (denyTools.length > 0) args.push('--exclude-tools', denyTools.join(','));
 
@@ -88,6 +128,10 @@ export function mapPermissionPolicyToPiArgs(policy: PermissionPolicy): PiPermiss
  * authority on its own default set. Naming that set here would copy pi's
  * default registry into this package, where it would silently rot against the
  * next fork bump — so it is refused instead, by name.
+ *
+ * Reserved grants are deliberately NOT threaded in: this resolves the NATIVE
+ * tool set a prepared session binds, and a reserved helper's tools are
+ * registered by the extension from its own config, never counted as natives.
  */
 export type PiNativeToolSelection =
   | {
