@@ -1223,12 +1223,16 @@ describe('PR187 review regressions', () => {
     const service = await makeService({ storeDir, limits, now: () => clock });
     await service.prepare(request());
     clock += 401;
-    await new Promise((done) => setTimeout(done, 450));
-    expect(await fs.readdir(path.join(storeDir, 'input-preparation', 'artifacts'))).toEqual([]);
+    // The GC timer is a real timer whose delay comes from the fake clock, so a
+    // fixed wall-clock sleep races CI load; poll for the drained state.
+    await vi.waitFor(async () => {
+      expect(await fs.readdir(path.join(storeDir, 'input-preparation', 'artifacts'))).toEqual([]);
+    }, { timeout: 5_000 });
     expect(service.store.list()).toHaveLength(1);
     clock += 100;
-    await new Promise((done) => setTimeout(done, 150));
-    expect(service.store.list()).toEqual([]);
+    await vi.waitFor(() => {
+      expect(service.store.list()).toEqual([]);
+    }, { timeout: 5_000 });
   });
 
   it('collects artifacts on restart after both horizons without another prepare', async () => {
@@ -1249,8 +1253,9 @@ describe('PR187 review regressions', () => {
     await service.prepare(request());
     const fault = new Error('GC filesystem offline');
     const gc = vi.spyOn(service.store, 'gc').mockRejectedValue(fault);
-    await new Promise((done) => setTimeout(done, 450));
-    expect(gc).toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(gc).toHaveBeenCalled();
+    }, { timeout: 5_000 });
     await expect(service.lookup({ requestId: 'prep-1', scope: request().scope })).rejects.toBe(fault);
     await expect(service.stop()).rejects.toBe(fault);
     gc.mockRestore();

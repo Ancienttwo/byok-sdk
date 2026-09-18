@@ -22,8 +22,8 @@ PR #193 CONFLICTING vs main (8 files, c07 overlap where main holds the #185–#1
 - [x] deep-worker 完成：merge commit 0a3202f3（8 文件按裁决 + 6 interlock + notes 落账，全矩阵绿除 K1/K2 已知项）
 - [x] strict 12 检查 10 绿（K1 本地 tripwire、K2 继承 whitespace，均已定性）
 - [x] gatekeeper PASS（B1–B7；N1/N2 非阻塞）
-- [ ] orchestrator push `pr193-reconcile -> codex/c07-pi-runtime-launch` + CI watcher（approved stage-1 terminal action；mark-ready/merge 仍 Owner-gated）
-- [ ] 回报
+- [x] orchestrator push `pr193-reconcile -> codex/c07-pi-runtime-launch` + CI watcher（0a3202f3 + 145dbb97；CI 判定见 review 收据）
+- [x] 回报（flake hardening 随附刀 1507 承接）
 
 ## Non-Goals
 WP1/WP4 合流（stage 2/3）、CI/workflow 改动、mark ready、merge PR、任何 compatibility shim。
