@@ -53,6 +53,59 @@ const WINSW_ALREADY_STOPPED: IdempotentAbsence = {
   neverAbsence: WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE,
 };
 
+/**
+ * Transient "the file is still mapped/held by the service process" errnos
+ * an unlink can hit while racing the Windows SCM's async teardown: after
+ * `winsw uninstall` returns, Windows releases the service process's image
+ * section asynchronously, so deleting the service executable immediately
+ * can lose that race and fail with `EPERM`/`EBUSY` — the exact
+ * `windows-service-smoke` CI job flake (`EPERM: unlink
+ * ...logs\byok-winsw-smoke-<pid>.exe` voiding an otherwise-passing run).
+ * NOT a license to mask a real failure: errors outside this set, and
+ * errors that persist past the retry budget below, are rethrown as-is, so
+ * a genuinely locked exe still surfaces (same fail-closed stance as the
+ * `neverAbsence` guards above).
+ */
+const RM_IMAGE_LOCK_CODES: ReadonlySet<string> = new Set(['EPERM', 'EBUSY', 'ENOTEMPTY']);
+
+/**
+ * Bounded retry budget for `rmWithImageLockRetry` below: 10 attempts with
+ * a flat ~250ms wait between them (~2.3s worst case — a few seconds, far
+ * longer than the teardown race needs to resolve, while keeping
+ * `uninstall()`'s worst-case delay bounded). Deliberately NOT node's own
+ * `fs.rm` `maxRetries`/`retryDelay` options: those are silently ignored
+ * unless `recursive: true` is also passed, and the service exe/xml are
+ * plain files.
+ */
+const RM_IMAGE_LOCK_MAX_ATTEMPTS = 10;
+const RM_IMAGE_LOCK_BACKOFF_MS = 250;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * `fs.rm(..., { force: true })` behind the bounded image-lock retry above
+ * (`force: true` only suppresses ENOENT — it never retries anything). The
+ * last error is rethrown unchanged once the budget is exhausted: a
+ * genuinely locked exe must still fail `uninstall()` rather than be
+ * reported as removed.
+ */
+async function rmWithImageLockRetry(fs: Pick<typeof fsp, 'rm'>, p: string): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await fs.rm(p, { force: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | null)?.code;
+      if (attempt >= RM_IMAGE_LOCK_MAX_ATTEMPTS || !code || !RM_IMAGE_LOCK_CODES.has(code)) {
+        throw error;
+      }
+      await sleep(RM_IMAGE_LOCK_BACKOFF_MS);
+    }
+  }
+}
+
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
 export interface WinswDeps {
   run?: Runner;
@@ -182,8 +235,8 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
     // #7).
     await runIdempotent(run, exePath, ['stop'], 'winsw stop', WINSW_NOT_INSTALLED);
     await runIdempotent(run, exePath, ['uninstall'], 'winsw uninstall', WINSW_NOT_INSTALLED);
-    await fs.rm(exePath, { force: true });
-    await fs.rm(xmlPath, { force: true });
+    await rmWithImageLockRetry(fs, exePath);
+    await rmWithImageLockRetry(fs, xmlPath);
   }
 
   async function start(): Promise<void> {

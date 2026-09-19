@@ -1,0 +1,44 @@
+@byok-sdk/client test: 
+@byok-sdk/client test:  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-winsw-fix/packages/client
+@byok-sdk/client test: 
+@byok-sdk/client test:  ❯ src/__tests__/lifecycle-winsw.test.ts (24 tests | 2 failed) 9ms
+@byok-sdk/client test:      × uninstall() retries rm past a transient Windows image-lock EPERM on the exe and still resolves 2ms
+@byok-sdk/client test:      × uninstall() still rejects (fail-closed) after the retry budget when the exe stays EPERM-locked 1ms
+@byok-sdk/client test: 
+@byok-sdk/client test: ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+@byok-sdk/client test: 
+@byok-sdk/client test:  FAIL  src/__tests__/lifecycle-winsw.test.ts > lifecycle/winsw: createWinswLifecycle > uninstall() retries rm past a transient Windows image-lock EPERM on the exe and still resolves
+@byok-sdk/client test: Error: EPERM: operation not permitted, unlink 'C:\acme\logs/Acme-Agent-.exe'
+@byok-sdk/client test:  ❯ eperm src/__tests__/lifecycle-winsw.test.ts:175:21
+@byok-sdk/client test:     173|   it('uninstall() retries rm past a transient Windows image-lock EPERM…
+@byok-sdk/client test:     174|     const eperm = () =>
+@byok-sdk/client test:     175|       Object.assign(new Error("EPERM: operation not permitted, unlink …
+@byok-sdk/client test:        |                     ^
+@byok-sdk/client test:     176|     const fs = fakeFs();
+@byok-sdk/client test:     177|     let exeRmAttempts = 0;
+@byok-sdk/client test:  ❯ Object.<anonymous> src/__tests__/lifecycle-winsw.test.ts:182:17
+@byok-sdk/client test:  ❯ Object.uninstall src/lifecycle/winsw.ts:185:14
+@byok-sdk/client test:  ❯ src/__tests__/lifecycle-winsw.test.ts:189:5
+@byok-sdk/client test: 
+@byok-sdk/client test: ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+@byok-sdk/client test: 
+@byok-sdk/client test:  FAIL  src/__tests__/lifecycle-winsw.test.ts > lifecycle/winsw: createWinswLifecycle > uninstall() still rejects (fail-closed) after the retry budget when the exe stays EPERM-locked
+@byok-sdk/client test: AssertionError: expected "vi.fn()" to be called 10 times, but got 1 times
+@byok-sdk/client test:  ❯ src/__tests__/lifecycle-winsw.test.ts:206:19
+@byok-sdk/client test:     204|     await expect(lifecycle.uninstall()).rejects.toMatchObject({ code: …
+@byok-sdk/client test:     205|     // The budget itself: 10 attempts (initial + 9 retries) before ret…
+@byok-sdk/client test:     206|     expect(fs.rm).toHaveBeenCalledTimes(10);
+@byok-sdk/client test:        |                   ^
+@byok-sdk/client test:     207|   });
+@byok-sdk/client test:     208|
+@byok-sdk/client test: 
+@byok-sdk/client test: ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+@byok-sdk/client test: 
+@byok-sdk/client test: 
+@byok-sdk/client test:  Test Files  1 failed (1)
+@byok-sdk/client test:       Tests  2 failed | 22 passed (24)
+@byok-sdk/client test:    Start at  05:36:04
+@byok-sdk/client test:    Duration  187ms (transform 26ms, setup 0ms, import 34ms, tests 9ms, environment 0ms)
+@byok-sdk/client test: 
+@byok-sdk/client test: Exited with code 1
+PRE_FIX_EXIT=1

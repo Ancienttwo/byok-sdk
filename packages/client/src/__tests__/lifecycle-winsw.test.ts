@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createWinswLifecycle, generateWinswXml } from '../lifecycle/winsw';
 import type { RunResult, Runner } from '../lifecycle/exec-runner';
 import type { ServiceDefinition } from '../lifecycle/service-types';
@@ -76,6 +76,33 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
       stat: vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
     };
   }
+
+  // The image-lock retry tests below fake the timer queue instead of paying
+  // the real flat-250ms-per-retry backoff in wall-clock time (~2.3s for the
+  // budget-exhaustion case alone). Constraint found by probing both runners
+  // this file is executed by: bun:test's vi has NO *Async timer-advance API
+  // (`vi.advanceTimersByTimeAsync` is vitest-only), so this drives the retry
+  // loop with the runner-common subset — microtask hops let the retry
+  // await-chain run up to (or past) its next fake `setTimeout`, then the
+  // sync `vi.advanceTimersByTime` fires it. No early exit on "no pending
+  // timer": the uninstall preamble (two runIdempotent awaits plus the rm
+  // await) chains ~5 microtask links before the FIRST sleep is even
+  // registered, and a timer count of 0 there would abort the drain and park
+  // the test on a sleep that never fires. Extra trailing advances are
+  // harmless no-ops. Verified under `bun test` (jest-compat vi) AND
+  // `vitest run` (what `bun run test` executes for this package).
+  async function drainImageLockRetry(maxSteps: number): Promise<void> {
+    for (let step = 0; step < maxSteps; step += 1) {
+      for (let hop = 0; hop < 10; hop += 1) {
+        await Promise.resolve();
+      }
+      vi.advanceTimersByTime(250);
+    }
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   it('throws synchronously if ServiceDefinition.windows is missing', () => {
     expect(() => createWinswLifecycle(def({ windows: undefined }))).toThrow(/windows\.winswBin/);
@@ -159,6 +186,133 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
     await expect(lifecycle.uninstall()).rejects.toThrow(/winsw uninstall failed \(exit 1\): Access is denied\./);
 
     expect(fs.rm).not.toHaveBeenCalled();
+  });
+
+  // CI job "Windows service install smoke" flake: Windows releases the just-
+  // stopped service process's image section asynchronously after SCM
+  // STOPPED/deregistration, so an unlink issued immediately after
+  // `winsw uninstall` returns can lose that race and get EPERM
+  // (`EPERM: unlink ...logs\byok-winsw-smoke-<pid>.exe`), voiding an
+  // otherwise-passing run. These tests pin BOTH directions of the bounded
+  // retry: transient image-lock errors are retried to resolution, but a
+  // persistently locked exe still fails closed after the budget (no
+  // masking, no silent success).
+  it('uninstall() retries rm past a transient Windows image-lock EPERM on the exe and still resolves', async () => {
+    vi.useFakeTimers();
+    const eperm = () =>
+      Object.assign(new Error("EPERM: operation not permitted, unlink 'C:\\acme\\logs/Acme-Agent-.exe'"), { code: 'EPERM' });
+    const fs = fakeFs();
+    let exeRmAttempts = 0;
+    fs.rm.mockImplementation(async (p: string) => {
+      if (p.endsWith('.exe')) {
+        exeRmAttempts += 1;
+        if (exeRmAttempts <= 2) {
+          throw eperm();
+        }
+      }
+    });
+    const run = vi.fn<Runner>().mockResolvedValue(fail(1060, '', 'The specified service does not exist as an installed service.'));
+    const lifecycle = createWinswLifecycle(def(), { run, fs });
+
+    const uninstalling = lifecycle.uninstall();
+    await drainImageLockRetry(4); // 2 backoff sleeps, then attempt 3 succeeds
+    await uninstalling;
+
+    expect(exeRmAttempts).toBe(3);
+    expect(fs.rm).toHaveBeenCalledWith('C:\\acme\\logs/Acme-Agent-.exe', { force: true });
+    expect(fs.rm).toHaveBeenCalledWith('C:\\acme\\logs/Acme-Agent-.xml', { force: true });
+  });
+
+  it('uninstall() retries rm past a transient EBUSY on the exe too (same image-lock class) and still resolves', async () => {
+    vi.useFakeTimers();
+    const fs = fakeFs();
+    let exeRmAttempts = 0;
+    fs.rm.mockImplementation(async (p: string) => {
+      if (p.endsWith('.exe')) {
+        exeRmAttempts += 1;
+        if (exeRmAttempts <= 2) {
+          throw Object.assign(new Error("EBUSY: resource busy or locked, unlink 'C:\\acme\\logs/Acme-Agent-.exe'"), { code: 'EBUSY' });
+        }
+      }
+    });
+    const run = vi.fn<Runner>().mockResolvedValue(fail(1060, '', 'The specified service does not exist as an installed service.'));
+    const lifecycle = createWinswLifecycle(def(), { run, fs });
+
+    const uninstalling = lifecycle.uninstall();
+    await drainImageLockRetry(4); // 2 backoff sleeps, then attempt 3 succeeds
+    await uninstalling;
+
+    expect(exeRmAttempts).toBe(3);
+    expect(fs.rm).toHaveBeenCalledWith('C:\\acme\\logs/Acme-Agent-.exe', { force: true });
+    expect(fs.rm).toHaveBeenCalledWith('C:\\acme\\logs/Acme-Agent-.xml', { force: true });
+  });
+
+  it('uninstall() retries the XML config deletion through the same image-lock retry (exe deleted first try)', async () => {
+    vi.useFakeTimers();
+    const fs = fakeFs();
+    let xmlRmAttempts = 0;
+    fs.rm.mockImplementation(async (p: string) => {
+      if (p.endsWith('.xml')) {
+        xmlRmAttempts += 1;
+        if (xmlRmAttempts <= 2) {
+          throw Object.assign(new Error("EPERM: operation not permitted, unlink 'C:\\acme\\logs/Acme-Agent-.xml'"), { code: 'EPERM' });
+        }
+      }
+    });
+    const run = vi.fn<Runner>().mockResolvedValue(fail(1060, '', 'The specified service does not exist as an installed service.'));
+    const lifecycle = createWinswLifecycle(def(), { run, fs });
+
+    const uninstalling = lifecycle.uninstall();
+    await drainImageLockRetry(4); // 2 backoff sleeps on the xml, then success
+    await uninstalling;
+
+    expect(xmlRmAttempts).toBe(3);
+    // The exe removal needed no retry: exe once + xml three times = 4 rm calls.
+    expect(fs.rm).toHaveBeenCalledTimes(4);
+    expect(fs.rm).toHaveBeenCalledWith('C:\\acme\\logs/Acme-Agent-.exe', { force: true });
+    expect(fs.rm).toHaveBeenCalledWith('C:\\acme\\logs/Acme-Agent-.xml', { force: true });
+  });
+
+  it('uninstall() still rejects (fail-closed) after the retry budget when the exe stays EPERM-locked, rethrowing the ORIGINAL last error', async () => {
+    vi.useFakeTimers();
+    const fs = fakeFs();
+    // One stable error identity thrown on EVERY attempt: the final rejection
+    // must be this exact object rethrown as-is, never a wrapped/re-created
+    // "retries exhausted" error (the genuine lock cause must surface).
+    const persistentLock = Object.assign(
+      new Error("EPERM: operation not permitted, unlink 'C:\\acme\\logs/Acme-Agent-.exe'"),
+      { code: 'EPERM' },
+    );
+    fs.rm.mockImplementation(async () => {
+      throw persistentLock;
+    });
+    const run = vi.fn<Runner>().mockResolvedValue(fail(1060, '', 'The specified service does not exist as an installed service.'));
+    const lifecycle = createWinswLifecycle(def(), { run, fs });
+
+    const rejection = lifecycle.uninstall().catch((error: unknown) => error);
+    await drainImageLockRetry(11); // 9 backoff sleeps, then attempt 10 rethrows
+    const caught = (await rejection) as NodeJS.ErrnoException;
+
+    // The budget itself: 10 attempts (initial + 9 retries) before rethrow.
+    expect(fs.rm).toHaveBeenCalledTimes(10);
+    // Original-error contract: same identity as the thrown error...
+    expect(caught).toBe(persistentLock);
+    // ...same code and exact message — not a wrapped/new error.
+    expect(caught.code).toBe('EPERM');
+    expect(caught.message).toBe("EPERM: operation not permitted, unlink 'C:\\acme\\logs/Acme-Agent-.exe'");
+  });
+
+  it('uninstall() does NOT retry rm for errors outside the image-lock class (EACCES rethrows immediately)', async () => {
+    vi.useFakeTimers();
+    const fs = fakeFs();
+    fs.rm.mockImplementation(async () => {
+      throw Object.assign(new Error("EACCES: permission denied, unlink 'C:\\acme\\logs/Acme-Agent-.exe'"), { code: 'EACCES' });
+    });
+    const run = vi.fn<Runner>().mockResolvedValue(fail(1060, '', 'The specified service does not exist as an installed service.'));
+    const lifecycle = createWinswLifecycle(def(), { run, fs });
+
+    await expect(lifecycle.uninstall()).rejects.toMatchObject({ code: 'EACCES' });
+    expect(fs.rm).toHaveBeenCalledTimes(1);
   });
 
   it('start() throws "not installed" when the xml config does not exist on disk', async () => {
