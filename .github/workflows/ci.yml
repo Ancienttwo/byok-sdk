@@ -400,10 +400,13 @@ jobs:
             Set-Content -LiteralPath $canaryFile -Value "byok-lowpriv canary $runTag" -NoNewline
             $canaryHashBefore = (Get-FileHash -LiteralPath $canaryFile -Algorithm SHA256).Hash
             New-Item -ItemType Junction -Path (Join-Path $scratch 'canary-link') -Target $canary | Out-Null
-            $canaryAclBefore = Join-Path $env:RUNNER_TEMP "byok-lowpriv-canary-$runTag-acl-before.acl"
-            icacls $canary $canaryFile /save $canaryAclBefore /Q
-            if ($LASTEXITCODE -ne 0) { throw "icacls /save on the canary exited $LASTEXITCODE; refusing cleanup without a provable out-of-tree baseline" }
-            Write-Host "[lowpriv] canary: $canary linked at $(Join-Path $scratch 'canary-link'); acl baseline $canaryAclBefore; sha256 $canaryHashBefore"
+            $canaryAclBeforeFile = Join-Path $env:RUNNER_TEMP "byok-lowpriv-canary-$runTag-acl-before-file.acl"
+            $canaryAclBeforeDir = Join-Path $env:RUNNER_TEMP "byok-lowpriv-canary-$runTag-acl-before-dir.acl"
+            icacls $canaryFile /save $canaryAclBeforeFile /Q
+            if ($LASTEXITCODE -ne 0) { throw "icacls /save of the canary file exited $LASTEXITCODE; refusing cleanup without a provable out-of-tree baseline" }
+            icacls $canary /save $canaryAclBeforeDir /Q
+            if ($LASTEXITCODE -ne 0) { throw "icacls /save of the canary root exited $LASTEXITCODE; refusing cleanup without a provable out-of-tree baseline" }
+            Write-Host "[lowpriv] canary: $canary linked at $(Join-Path $scratch 'canary-link'); acl baselines $canaryAclBeforeDir + $canaryAclBeforeFile; sha256 $canaryHashBefore"
 
             New-Item -ItemType Directory -Force -Path "$scratch\tools", "$scratch\logs" | Out-Null
             # bun lives under the administrator's profile, which this account cannot execute.
@@ -537,19 +540,25 @@ jobs:
                   $cleanupFailures += "out-of-tree canary content hash changed (expected $canaryHashBefore, got $canaryHashAfter): a recursive pass escaped the scratch root"
                   $canaryOk = $false
                 }
-                $canaryAclAfter = Join-Path $env:RUNNER_TEMP "byok-lowpriv-canary-$runTag-acl-after.acl"
-                icacls $canary $canaryFile /save $canaryAclAfter /Q | Out-Null
-                if ($LASTEXITCODE -ne 0) {
-                  $cleanupFailures += "out-of-tree canary ACL re-read exited $LASTEXITCODE; out-of-tree ACL preservation is unprovable"
+                $canaryAclAfterFile = Join-Path $env:RUNNER_TEMP "byok-lowpriv-canary-$runTag-acl-after-file.acl"
+                $canaryAclAfterDir = Join-Path $env:RUNNER_TEMP "byok-lowpriv-canary-$runTag-acl-after-dir.acl"
+                icacls $canaryFile /save $canaryAclAfterFile /Q | Out-Null
+                $canaryAclFileExit = $LASTEXITCODE
+                icacls $canary /save $canaryAclAfterDir /Q | Out-Null
+                $canaryAclDirExit = $LASTEXITCODE
+                if ($canaryAclFileExit -ne 0 -or $canaryAclDirExit -ne 0) {
+                  $cleanupFailures += "out-of-tree canary ACL re-read exited file=$canaryAclFileExit dir=$canaryAclDirExit; out-of-tree ACL preservation is unprovable"
                   $canaryOk = $false
-                } elseif ([string]::IsNullOrWhiteSpace($canaryAclBefore) -or -not (Test-Path -LiteralPath $canaryAclBefore)) {
-                  $cleanupFailures += "pre-cleanup canary ACL baseline $canaryAclBefore is missing; out-of-tree ACL preservation is unprovable"
+                } elseif ([string]::IsNullOrWhiteSpace($canaryAclBeforeFile) -or -not (Test-Path -LiteralPath $canaryAclBeforeFile) -or [string]::IsNullOrWhiteSpace($canaryAclBeforeDir) -or -not (Test-Path -LiteralPath $canaryAclBeforeDir)) {
+                  $cleanupFailures += "pre-cleanup canary ACL baselines $canaryAclBeforeDir + $canaryAclBeforeFile are missing; out-of-tree ACL preservation is unprovable"
                   $canaryOk = $false
                 } else {
-                  $aclHashBefore = (Get-FileHash -LiteralPath $canaryAclBefore -Algorithm SHA256).Hash
-                  $aclHashAfter = (Get-FileHash -LiteralPath $canaryAclAfter -Algorithm SHA256).Hash
-                  if ($aclHashBefore -ne $aclHashAfter) {
-                    $cleanupFailures += "out-of-tree canary ACL snapshot changed (expected $aclHashBefore, got $aclHashAfter): a recursive pass rewrote out-of-tree ACLs"
+                  $aclFileHashBefore = (Get-FileHash -LiteralPath $canaryAclBeforeFile -Algorithm SHA256).Hash
+                  $aclFileHashAfter = (Get-FileHash -LiteralPath $canaryAclAfterFile -Algorithm SHA256).Hash
+                  $aclDirHashBefore = (Get-FileHash -LiteralPath $canaryAclBeforeDir -Algorithm SHA256).Hash
+                  $aclDirHashAfter = (Get-FileHash -LiteralPath $canaryAclAfterDir -Algorithm SHA256).Hash
+                  if ($aclFileHashBefore -ne $aclFileHashAfter -or $aclDirHashBefore -ne $aclDirHashAfter) {
+                    $cleanupFailures += "out-of-tree canary ACL snapshot changed: a recursive pass rewrote out-of-tree ACLs"
                     $canaryOk = $false
                   }
                 }
@@ -1098,10 +1107,13 @@ jobs:
             Set-Content -LiteralPath $canaryFile -Value "byok-lowpriv canary $runTag" -NoNewline
             $canaryHashBefore = (Get-FileHash -LiteralPath $canaryFile -Algorithm SHA256).Hash
             New-Item -ItemType Junction -Path (Join-Path $scratch 'canary-link') -Target $canary | Out-Null
-            $canaryAclBefore = Join-Path $env:RUNNER_TEMP "byok-lowpriv-canary-$runTag-acl-before.acl"
-            icacls $canary $canaryFile /save $canaryAclBefore /Q
-            if ($LASTEXITCODE -ne 0) { throw "icacls /save on the canary exited $LASTEXITCODE; refusing cleanup without a provable out-of-tree baseline" }
-            Write-Host "[lowpriv] canary: $canary linked at $(Join-Path $scratch 'canary-link'); acl baseline $canaryAclBefore; sha256 $canaryHashBefore"
+            $canaryAclBeforeFile = Join-Path $env:RUNNER_TEMP "byok-lowpriv-canary-$runTag-acl-before-file.acl"
+            $canaryAclBeforeDir = Join-Path $env:RUNNER_TEMP "byok-lowpriv-canary-$runTag-acl-before-dir.acl"
+            icacls $canaryFile /save $canaryAclBeforeFile /Q
+            if ($LASTEXITCODE -ne 0) { throw "icacls /save of the canary file exited $LASTEXITCODE; refusing cleanup without a provable out-of-tree baseline" }
+            icacls $canary /save $canaryAclBeforeDir /Q
+            if ($LASTEXITCODE -ne 0) { throw "icacls /save of the canary root exited $LASTEXITCODE; refusing cleanup without a provable out-of-tree baseline" }
+            Write-Host "[lowpriv] canary: $canary linked at $(Join-Path $scratch 'canary-link'); acl baselines $canaryAclBeforeDir + $canaryAclBeforeFile; sha256 $canaryHashBefore"
 
             New-Item -ItemType Directory -Force -Path "$scratch\tools", "$scratch\logs" | Out-Null
             # bun lives under the administrator's profile, which this account cannot execute.
@@ -1235,19 +1247,25 @@ jobs:
                   $cleanupFailures += "out-of-tree canary content hash changed (expected $canaryHashBefore, got $canaryHashAfter): a recursive pass escaped the scratch root"
                   $canaryOk = $false
                 }
-                $canaryAclAfter = Join-Path $env:RUNNER_TEMP "byok-lowpriv-canary-$runTag-acl-after.acl"
-                icacls $canary $canaryFile /save $canaryAclAfter /Q | Out-Null
-                if ($LASTEXITCODE -ne 0) {
-                  $cleanupFailures += "out-of-tree canary ACL re-read exited $LASTEXITCODE; out-of-tree ACL preservation is unprovable"
+                $canaryAclAfterFile = Join-Path $env:RUNNER_TEMP "byok-lowpriv-canary-$runTag-acl-after-file.acl"
+                $canaryAclAfterDir = Join-Path $env:RUNNER_TEMP "byok-lowpriv-canary-$runTag-acl-after-dir.acl"
+                icacls $canaryFile /save $canaryAclAfterFile /Q | Out-Null
+                $canaryAclFileExit = $LASTEXITCODE
+                icacls $canary /save $canaryAclAfterDir /Q | Out-Null
+                $canaryAclDirExit = $LASTEXITCODE
+                if ($canaryAclFileExit -ne 0 -or $canaryAclDirExit -ne 0) {
+                  $cleanupFailures += "out-of-tree canary ACL re-read exited file=$canaryAclFileExit dir=$canaryAclDirExit; out-of-tree ACL preservation is unprovable"
                   $canaryOk = $false
-                } elseif ([string]::IsNullOrWhiteSpace($canaryAclBefore) -or -not (Test-Path -LiteralPath $canaryAclBefore)) {
-                  $cleanupFailures += "pre-cleanup canary ACL baseline $canaryAclBefore is missing; out-of-tree ACL preservation is unprovable"
+                } elseif ([string]::IsNullOrWhiteSpace($canaryAclBeforeFile) -or -not (Test-Path -LiteralPath $canaryAclBeforeFile) -or [string]::IsNullOrWhiteSpace($canaryAclBeforeDir) -or -not (Test-Path -LiteralPath $canaryAclBeforeDir)) {
+                  $cleanupFailures += "pre-cleanup canary ACL baselines $canaryAclBeforeDir + $canaryAclBeforeFile are missing; out-of-tree ACL preservation is unprovable"
                   $canaryOk = $false
                 } else {
-                  $aclHashBefore = (Get-FileHash -LiteralPath $canaryAclBefore -Algorithm SHA256).Hash
-                  $aclHashAfter = (Get-FileHash -LiteralPath $canaryAclAfter -Algorithm SHA256).Hash
-                  if ($aclHashBefore -ne $aclHashAfter) {
-                    $cleanupFailures += "out-of-tree canary ACL snapshot changed (expected $aclHashBefore, got $aclHashAfter): a recursive pass rewrote out-of-tree ACLs"
+                  $aclFileHashBefore = (Get-FileHash -LiteralPath $canaryAclBeforeFile -Algorithm SHA256).Hash
+                  $aclFileHashAfter = (Get-FileHash -LiteralPath $canaryAclAfterFile -Algorithm SHA256).Hash
+                  $aclDirHashBefore = (Get-FileHash -LiteralPath $canaryAclBeforeDir -Algorithm SHA256).Hash
+                  $aclDirHashAfter = (Get-FileHash -LiteralPath $canaryAclAfterDir -Algorithm SHA256).Hash
+                  if ($aclFileHashBefore -ne $aclFileHashAfter -or $aclDirHashBefore -ne $aclDirHashAfter) {
+                    $cleanupFailures += "out-of-tree canary ACL snapshot changed: a recursive pass rewrote out-of-tree ACLs"
                     $canaryOk = $false
                   }
                 }

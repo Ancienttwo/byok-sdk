@@ -39,3 +39,9 @@ Separately, the keys-ACL positive test ("accepts a private empty directory with 
 ## Annotations
 
 Windows-only paths cannot execute on this darwin host: PowerShell blocks are syntax-reviewed only (no pwsh installed); acceptance is the windows-latest CI run.
+
+## Incident 2026-09-19 (run 35425487116): canary /save 语法缺陷
+- 现象：两个 windows 低权限 leg 全败于 `Invalid parameter "C:\byok-lowpriv-canary-*.txt"`（icacls exit 87），子进程未执行。
+- 根因：`icacls $canary $canaryFile /save X /Q` 传了两个 name；icacls 只接受单个 name，第二个定位参数报 Invalid parameter。setup 基线即失败 → fail-closed throw → finally teardown 正常执行并再次暴露同一错误 → exit 1（childCode 为 null 的路径被异常先行短路）。防逃逸与 fail-closed 行为本身按设计工作。
+- 修复：file 与 root 各自单 name /save（4 快照），setup 双 throw guard，verify 双退出码 + 双哈希对比。两 job byte-identical 同步。
+- 未变：断言、审批标准、预算、link-first 顺序、canary 逃逸检测语义。
