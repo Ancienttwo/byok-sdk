@@ -101,6 +101,8 @@ allowed_paths:
   - docs/architecture/index.md
   - docs/architecture/sdk-architecture.md
   # OP3 方向的可执行护栏：fork 专有 import 只能减少
+  - packages/client/src/adapters/pi/request-shape.ts
+  - packages/client/src/__tests__/request-shape.test.ts
   - scripts/release/check-pi-fork-surface.mjs
   - scripts/release/check-pi-fork-surface.test.mjs
   - package.json
@@ -259,6 +261,19 @@ exit_criteria:
       "cost": "normal",
       "evidence_policy": "current_exact",
       "necessity": "The release watcher must run and parse the registry tags; exit 10 (a newer release exists) is an expected outcome, not a failure.",
+      "inputs": {
+        "env": []
+      }
+    },
+    {
+      "id": "request-shape-test",
+      "kind": "command",
+      "command": "cd packages/client && bun x vitest run src/__tests__/request-shape.test.ts",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "normal",
+      "evidence_policy": "current_exact",
+      "necessity": "G-B drift detection must refuse unknown request keys instead of counting approximately.",
       "inputs": {
         "env": []
       }

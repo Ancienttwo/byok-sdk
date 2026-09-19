@@ -195,3 +195,13 @@
 可执行面里 **111 / 154 集中在两族 C07 runtime-record fixture**（`rejections.v1.json` 70、`canonical-revision.v1.json` 41）——它们编码 `expectedStaticPin` 与 `nativeProvenance.packageName` 等身份期望；其余为 `resolve-bin.test.ts`(9)、`pack-and-smoke.test.mjs`(5)、`packages/client/package.json`(3)、`pi-runtime-identity.mjs`、`check-adapters-entry.mjs` 与约 15 个 1–2 处测试。
 
 含义：**OP5 的最大单项是 fixture 重生成，不是身份脚本**。切换后 `check:release-graph` / `check:release-pack` / client 测试会红一片，其中大部分红来自 fixture 期望而非实现缺陷——G3 的验收必须先区分这两类。
+
+## G-B 收敛：漂移由 BYOK 在运行时拒绝（2026-09-19）
+
+与 G-C 同样追问「是否真的需要上游」。答案是不需要：危险失败模式是「上游加键 → BYOK 静默少算」，而 BYOK 已能在自己的 transport 上拿到最终 payload 本体，所以只要**记录已知键类别 + 未知即拒绝**即可。
+
+实现：`packages/client/src/adapters/pi/request-shape.ts`（20 键 → content/framing/transport；`assertRequestShape` 抛 `RequestShapeDriftError`）+ `request-shape.test.ts` **5 用例全绿**（含「新增未知键被拒」「未知 api 视为漂移」两个负控）。
+
+关键取舍：与「本地清单」的区别不在清单，而在**失败方向**——护栏让漂移变成响亮拒绝，权威让漂移变成安静错预算。前者是允许的 fail-closed 校验，后者才是被禁止的第二语义权威。
+
+结果：**上游请求实质只剩 G-C 一项**；G-B 降为可选改进。

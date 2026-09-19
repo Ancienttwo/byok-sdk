@@ -359,6 +359,22 @@ G-B 原来只有存在性描述（「payload 不携带任何覆盖证明」）�
 | G-B | payload 无覆盖证明 | 公开请求形状契约（键集合 + 值类别）并对未知键 fail closed |
 | G-C | 无法导入 host 断言历史 | 需上游在三种形状中选一（A 实测 146 处代价） |
 
+## 13. G-B 收敛：BYOK 侧已能自行发现漂移（2026-09-19）
+
+与 G-C 同样的追问：G-B 是否真的需要上游交付一份契约？答案是不需要——**漂移可以在运行时被拒绝**。
+
+问题的实际形态是：危险的失败模式为「上游新增一个键，BYOK 静默少算」。而 BYOK 已能在自己的 transport 上拿到**最终 payload 本体**（P04/P03b 已证）。因此它不需要预测上游，只需要
+
+1. 记录自己**知道如何计量**的键集合与类别；
+2. 在发送点对实际 payload 分类；
+3. **出现未知键即拒绝**，而不是按经验比例估算。
+
+已实现：`packages/client/src/adapters/pi/request-shape.ts`（`OPENAI_COMPLETIONS_REQUEST_KEYS` 20 键 → `content`/`framing`/`transport` 三类、`CONTENT_REQUEST_KEYS`、`classifyRequestShape`、`assertRequestShape` + `RequestShapeDriftError`），配 `packages/client/src/__tests__/request-shape.test.ts`，**5 用例全绿**。
+
+关键取舍：**未知即拒绝**。与「本地清单」的区别不在清单本身，而在失败方向——清单当护栏时，漂移表现为**响亮的拒绝**；清单当权威时，漂移表现为**安静的错预算**。前者是允许的 fail-closed 校验，后者才是被禁止的第二语义权威。
+
+因此 G-B 从「请求上游公开契约」降级为**可选改进**（契约仍更好，可把拒绝提前到编译期）。上游请求实质只剩 **G-C 一项**，且已附 5 行补丁与可运行反例。
+
 ## 10. 基线重估（同日只读核对 `main`）：固定候选可能已经过时
 
 写完 §1–§6 之后又做了一次只读核对，结果推翻了「把 `0.85.1` 当作接口工作对象」这个前提，必须显式记录。

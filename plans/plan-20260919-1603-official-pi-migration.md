@@ -561,6 +561,9 @@ bun run check:task-workflow
   - [x] P05 装载/递归兼容 → **supported（装载面）**；递归 spawn 语义不在本探针覆盖范围（归 OP4）
   - [x] **G1 裁定：第二档**——基础执行可行，缺 pure compile/consume 与历史导入；推进 OP2-U 最小上游接口；相关生产路径保持禁用
 - [ ] OP2 预算/prepared 接口替代（必要时 OP2-U 最小上游改进）
+  - [x] OP2 的 G-B 收敛（2026-09-19）：BYOK **不需要**上游交付契约也能满足 INV-06——新增 `packages/client/src/adapters/pi/request-shape.ts`（20 键分类 + `classifyRequestShape` + `assertRequestShape` + `RequestShapeDriftError`），在发送点对**实际 payload** 分类，**未知键即拒绝**；`packages/client/src/__tests__/request-shape.test.ts` **5 用例全绿**。
+    - 取舍：与「本地清单」的区别在失败方向——护栏使漂移变成**响亮拒绝**，权威使漂移变成**安静错预算**；前者是允许的 fail-closed 校验。
+    - 后果：**上游请求实质只剩 G-C 一项**（已附 5 行补丁 + 可运行反例）；G-B 降级为可选改进。
   - [x] OP2-U 定界：追加 `p03b`/`p04d` 两个探针，把「缺三样」切成可提接口的粒度，落位 `docs/researches/2026-09-19-official-pi-op2u-upstream-request.md`
     - G-A 会话首请求无法在会话外复现（会话外 248 字节 vs 会话 308 字节；系统消息被追加 cwd，顶层键多出 prompt cache 两项）
     - G-B payload 无任何覆盖证明/结构分类
