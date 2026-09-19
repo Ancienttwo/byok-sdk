@@ -561,4 +561,27 @@ G-A 解决、G-B 收敛之后，还剩一个疑问：**消费冻结请求**（fo
 
 **因此给上游的请求可以指名形状**：建议 A（146 处）而非 B（256 处），两者都附实测分布。这也纠正了本文件先前「B 可能更窄」的猜测——实测更宽。
 
+## 17. 身份/发布链工作面实测（2026-09-19）：6 个文件，其中一处不是机械替换
+
+OP5 的最后一处未知是身份 gate。实测其导出面与消费者：
+
+| 该模块的导出 | 迁移后 |
+|---|---|
+| `PI_DEPENDENCY_SPECIFIER`（`@earendil-works/pi-coding-agent`） | **不变** |
+| `PI_FORK_UPSTREAM_COMMIT`（`d981de12…`） | 由「fork 声明的上游 commit」变为「官方发行版 gitHead」，或直接由 integrity 取代 |
+| `PI_PREPARED_INPUT_ENTRY`（`dist/core/prepared-session-input.js`） | **该路径在官方发行版不存在** —— 见下 |
+| `parsePiRuntimeIdentity(clientManifest)` | 断言从 `npm:@byok-sdk/pi-*@x.y.z` alias 改为**官方 exact version** |
+| `assertInstalledPiRuntime(installRoot, identity, label)` | 断言从 `byokFork.upstreamCommit` + prepared entry 改为**官方包名/版本/integrity + 实际 exports** |
+
+消费者共 **6 个文件**：`scripts/release/pack-and-smoke.mjs`（= `check:release-pack`）、`registry-readback.mjs`、`pi-launcher-smoke.mjs`、`check-package-graph.mjs`（= `check:release-graph`）、`pack-and-smoke.test.mjs`、`packages/client/src/__tests__/resolve-bin.test.ts`（9 处 fork 名）。
+
+### 唯一非机械替换：prepared entry 断言必须改成**能力断言**
+
+现有 gate 要求「已安装运行时**必须**带 `dist/core/prepared-session-input.js`」——这是 fork 专有产物。迁移后该文件不存在，所以这条断言不能只是换路径，而要拆成两件事：
+
+1. **来源身份**：官方包名 + exact version + tarball integrity + 实际 exports（gate 的本职）；
+2. **能力状态**：prepared 能力当前**不可用**，且必须**显式声明为不可用**，而不是让「文件不存在」这个事实悄悄代替一个结论。
+
+第 2 点正是 INV-14（已承诺能力不得静默降级）在发布链上的具体形态：**gate 不能因为断言对象消失而变得更易通过**。这是身份重写里唯一需要设计而非替换的一处。
+
 这也直接解释了为什么 **OP2 接线今天不能开工**：在 guard 与类型面同时到位之前，接线的任一刀都只能靠 cast 或取消 host 历史之一——前者伪造语义，后者是把已承诺能力静默降级（INV-14 禁止）。

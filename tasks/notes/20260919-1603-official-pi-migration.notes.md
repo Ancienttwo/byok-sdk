@@ -261,3 +261,9 @@ BYOK 现在的投影函数（`input-preparation.ts:366-379`，把 host 文本构
 - **B 放宽 `api`/`provider`/`model`/`usage`/`stopReason` 为可选 + `origin?: "host"`**：**256 处**（ai 155 / coding-agent 93 / agent 5 / evals 3）
 
 结论与直觉相反：B 把「可能缺失」传播到每个读取 provider 值的点，而它们大多在 provider 层；A 只在需要区分两种 assistant 事实处增加分支。因此上游请求**可以指名 A**（并附两个数字），而非让上游在未知代价里选。
+
+## 身份/发布链工作面实测（2026-09-19，OP5 输入）
+
+`pi-runtime-identity.mjs` 的 5 个导出逐个定了迁移后形态：`PI_DEPENDENCY_SPECIFIER` 不变；`PI_FORK_UPSTREAM_COMMIT` 改指官方 gitHead 或被 integrity 取代；`parsePiRuntimeIdentity` 从 alias 断言改为官方 exact version；`assertInstalledPiRuntime` 从 `byokFork` + prepared entry 改为包名/版本/integrity/exports。消费者 **6 个文件**。
+
+**唯一非机械替换**：现有 gate 要求已安装 runtime 必须带 fork 的 `dist/core/prepared-session-input.js`。迁移后该文件不存在，断言必须拆成 ① 官方来源身份 ② **prepared 能力显式声明为不可用**——后者是 INV-14 在发布链上的落点：**gate 不能因为断言对象消失而变得更易通过**。
