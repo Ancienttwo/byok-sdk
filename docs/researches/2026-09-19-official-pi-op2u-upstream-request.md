@@ -584,4 +584,30 @@ OP5 的最后一处未知是身份 gate。实测其导出面与消费者：
 
 第 2 点正是 INV-14（已承诺能力不得静默降级）在发布链上的具体形态：**gate 不能因为断言对象消失而变得更易通过**。这是身份重写里唯一需要设计而非替换的一处。
 
+## 18. 切片 A 的映射层发现：提示渲染器不在任何公开面上（2026-09-19）
+
+上一轮把切片 A 第一步定为「写 BYOK 侧到新核心的映射层」。核对当前依赖（fork）的公开面后发现，这层映射有一半**取不到输入**。
+
+事实（`packages/client/node_modules/@earendil-works/pi-coding-agent`）：
+
+| 需要的输入 | 公开可达性 |
+|---|---|
+| `projectSystemPromptSnapshot`（已解析选项 → `SystemPromptSnapshot`） | **可达**（`/input-preparation` 公开 re-export） |
+| `SystemPromptSnapshot` / `SystemPromptProjectionOptions` 类型 | **可达**（同子路径） |
+| `compileCodingAgentInput(snapshot)`（snapshot → `Context`） | **可达**（同子路径） |
+| **`renderSystemPrompt(snapshot)`（snapshot → 提示文本）** | **不可达**——存在于 `dist/core/system-prompt-renderer.d.ts`，但该模块不在 `exports` 映射中，`/input-preparation` **也没有** re-export 它 |
+
+即：当前依赖上，BYOK 能构造结构化的 prompt 快照，却**无法把它渲染成文本**——渲染只发生在 fork 自己的编译内部。而新版（`main`）公开了 `buildSystemPromptSections` + `getSystemMessageText`，正是这一半的公开替代。
+
+### 结论修正
+
+上一轮写的「切片 A 本身不依赖上游」**只对了一半**：编译段确实不依赖（新核心 + 官方 adapter 足够），但**提示文本的来源依赖上游公开面**——要么 fork 导出 `renderSystemPrompt`，要么重钉到已公开该能力的新版本。这也是**重钉目标的又一强理由**：新版已把这一半做成公开纯函数，而 fork 与 0.85.1 都没有。
+
+上游清单因此更新为四项：
+
+1. host 断言文本的运行时 `usage` guard（5 行，已实测）
+2. 类型面能表达无出处的 assistant 文本（建议形状 A，146 处）
+3. RPC 帧上限助手（纯导出）
+4. **提示渲染器公开**（`renderSystemPrompt`），或重钉到已公开 `buildSystemPromptSections`/`getSystemMessageText` 的版本
+
 这也直接解释了为什么 **OP2 接线今天不能开工**：在 guard 与类型面同时到位之前，接线的任一刀都只能靠 cast 或取消 host 历史之一——前者伪造语义，后者是把已承诺能力静默降级（INV-14 禁止）。

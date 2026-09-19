@@ -267,3 +267,11 @@ BYOK 现在的投影函数（`input-preparation.ts:366-379`，把 host 文本构
 `pi-runtime-identity.mjs` 的 5 个导出逐个定了迁移后形态：`PI_DEPENDENCY_SPECIFIER` 不变；`PI_FORK_UPSTREAM_COMMIT` 改指官方 gitHead 或被 integrity 取代；`parsePiRuntimeIdentity` 从 alias 断言改为官方 exact version；`assertInstalledPiRuntime` 从 `byokFork` + prepared entry 改为包名/版本/integrity/exports。消费者 **6 个文件**。
 
 **唯一非机械替换**：现有 gate 要求已安装 runtime 必须带 fork 的 `dist/core/prepared-session-input.js`。迁移后该文件不存在，断言必须拆成 ① 官方来源身份 ② **prepared 能力显式声明为不可用**——后者是 INV-14 在发布链上的落点：**gate 不能因为断言对象消失而变得更易通过**。
+
+## 切片 A 映射层发现：提示渲染器不可公开取得（2026-09-19）
+
+核对当前依赖（fork）公开面：`projectSystemPromptSnapshot`、`SystemPromptSnapshot` 类型、`compileCodingAgentInput` 都在 `/input-preparation` 上可达；但 **`renderSystemPrompt` 不可达**——它存在于 `dist/core/system-prompt-renderer.d.ts`，却不在 `exports` 映射里，`/input-preparation` 也没 re-export。
+
+也就是说当前依赖上，BYOK 能构造结构化 prompt 快照却无法渲染成文本（渲染只在 fork 编译内部）。新版 `main` 公开了 `buildSystemPromptSections` + `getSystemMessageText`，正是这一半的替代。
+
+**更正**：上一轮「切片 A 不依赖上游」只对了一半——编译段不依赖，提示文本来源依赖。上游清单更新为四项（新增「提示渲染器公开」），并为「重钉目标版本」再添一条理由。

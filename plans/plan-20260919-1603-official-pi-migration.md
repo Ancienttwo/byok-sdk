@@ -45,6 +45,7 @@
 
 映射就绪后，第 2 步（等价性测试）与第 3–4 步（替换与删除 fork import）才可按原文顺序推进。
 
+**上游依赖说明（2026-09-19 更正）**：切片 A **只对了一半**——编译段不依赖上游（新核心 + 官方 provider adapter 足够），但**提示文本的来源依赖上游公开面**：当前 fork 能 `projectSystemPromptSnapshot` 却**不能 `renderSystemPrompt`**（该模块不在 `exports`，`/input-preparation` 也没 re-export 它）；新版 `main` 已公开 `buildSystemPromptSections` + `getSystemMessageText`。因此上游清单更新为**四项**（加入「提示渲染器公开」），且这是**重钉目标的又一强理由**。
 **上游依赖说明**：切片 A 本身**不依赖**上游（新核心用 `unknown[]` 边界接收消息，既不 cast 也不伪造，host 历史的既有实现可原样保留在 fork runtime 上）；上游类型面落地影响的是**切换 runtime 之后**能否继续表达 host 历史，属切片 B/OP5 的前置。
 
 - 入口：`packages/client/src/adapters/pi/input-preparation.ts`（8 处 fork import）、`packages/client/src/daemon/input-preparation-service.ts`（1 处）、`packages/client/src/bin/pi-prepared-host.ts:317`（消费 seam）、`adapters/pi/prepared-prompt-frame.ts`。
