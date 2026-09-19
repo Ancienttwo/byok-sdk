@@ -59,6 +59,7 @@ if (outArgIndex >= 0 && (!requestedOut || requestedOut.startsWith('--'))) {
 const ephemeralRoot = requestedOut ? undefined : mkdtempSync(path.join(os.tmpdir(), 'byok-release-pack-'));
 const outDir = path.resolve(repoRoot, requestedOut ?? path.join(ephemeralRoot, 'artifacts'));
 
+let piClosure;
 function run(command, args, cwd = repoRoot) {
   const result = spawnSync(command, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   if (result.status !== 0) {
@@ -611,6 +612,31 @@ try {
       );
     }
     assertInstalledPiRuntime(smokeDir, piRuntime, 'release-pack');
+
+    // Record the Pi closure the isolated install actually resolved. Unpacking
+    // tarballs into node_modules bypasses dependency resolution, so a consumer
+    // that only installs the SDK packages silently ends up with upstream Pi at
+    // these paths. Naming the closure here is what makes the tuple installable
+    // as a unit instead of merely packable.
+    const readClosureMember = (directoryName, expectedName) => {
+      const manifestPath = path.join(smokeDir, 'node_modules', '@earendil-works', directoryName, 'package.json');
+      if (!existsSync(manifestPath)) return undefined;
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      return {
+        path: `node_modules/@earendil-works/${directoryName}`,
+        name: manifest.name,
+        version: manifest.version,
+        expectedName,
+        identity: manifest.byokFork ?? null,
+      };
+    };
+    piClosure = {
+      specifier: PI_DEPENDENCY_SPECIFIER,
+      alias: piRuntime.spec,
+      codingAgent: readClosureMember('pi-coding-agent', piRuntime.packageName),
+      ai: readClosureMember('pi-ai', undefined),
+      agentCore: readClosureMember('pi-agent-core', undefined),
+    };
   } finally {
     rmSync(smokeDir, { recursive: true, force: true });
   }
@@ -623,6 +649,7 @@ try {
     platform: process.platform,
     arch: process.arch,
     packages: tarballs,
+    piClosure,
   };
   writeFileSync(path.join(outDir, 'release-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(JSON.stringify(manifest));
