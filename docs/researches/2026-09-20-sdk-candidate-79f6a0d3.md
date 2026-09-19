@@ -235,3 +235,30 @@ ToolImplementationLocatorV1                 =  { subject: {kind:'mcp-server',…
                                             |  { subject: {kind:'runtime',…}, runtimeEntry, command?:never, … }
 ToolImplementationResolutionV1              =  Unavailable | InstallRecord | RuntimeImplementationRecord
 ```
+
+## 10. v3：发布 prepared compiler version，Host 侧 runtime 分支仍缺（2026-09-20）
+
+按 owner 批准执行「选项 A：先关掉 9 个失败」的第一半。诊断过程本身修正了此前的判断：
+
+### 10.1 9 个失败的真实机制（不是 compilerVersion 单独造成）
+
+`runtime "pi" is not installed/available on this device` 这句出自 **SDK 的 `byok-agent`**（`node_modules/@byok-sdk/client/dist/bin/byok-agent.js:22839`），触发条件是 `observeRuntimeDetection(...)` 没有返回 `available`。而它用的正是 **Host 的 toolImplementationAuthority**——SDK 现在以 **runtime subject**（`subject.kind === 'runtime'`）询问，而 Host 迁移后的 resolver **显式拒绝 runtime subject**（第 8 节记录的那一行）。
+
+因此 9 个失败 = **Host 侧 runtime 分支尚未实现**，不是形状迁移引入的回归，也不是「只差一个常量」。
+
+### 10.2 v3 元组（已交付并验证可达）
+
+| 项 | 值 |
+|---|---|
+| sourceGitSha | **`a2b0aca0`** |
+| manifest sha256 | `8816f27cef8ecbac84805549b4639ca43ec93b17fa6c8448f4b8f97e55140926` |
+| 与 v2 的差异 | **仅 `@byok-sdk/client`**（已实测逐包比对；其余 10 包字节相同） |
+| 新增公开导出 | `SUPPORTED_PREPARED_COMPILER_VERSION`（值 `2`，Host 树实测可导入） |
+
+实现取舍：该常量**没有**从 `adapters/pi/input-preparation` re-export——那会把整个 prepared 声明闭包（含 fork 专有子路径类型）拖进公开类型面，只为暴露一个数字。改为独立模块 `adapters/pi/prepared-compiler-contract.ts`，golden 差异从 **271 行降到 16 行**。属 public API 增项，API surface golden 同变更更新（pre-1.0 policy 即 MINOR）。
+
+### 10.3 下一步（Host 侧 runtime 分支，9 个失败的实际修复）
+
+Host 的 resolver 需要补 `subject.kind === 'runtime'` 分支，返回 `RuntimeImplementationRecordV1 = { record, descendantPolicy, edges }`。设计已在 `docs/researches/2026-09-19-frozen-sdk-candidate-tuples.md` 的「阶段 2 剩余」逐条写明：`installPath` = release artifact、`launchArgv = ['__byok_sdk_helper', kind]`、`launchCwd` = release 目录、`assetRoot` = release `pi/`、`assets` 来自 record、`nativeProvenance` 来自 `bundledPiIdentity()`（`compilerVersion` 现在取自 v3 的公开常量）、`descendantPolicy = {maxDepth:0, fanout:1, parallel:1, sessionCap:1, envNameAllowlist:[]}`、`edges = RUNTIME_DESCENDANT_EDGES`。
+
+即：**SDK 侧的前置（compiler version 权威）已完成；剩下的是 Host 侧一个分支加 release `pi/` 资产目录**（后者对应同一记录的「阶段 2」第 1–3 步）。
