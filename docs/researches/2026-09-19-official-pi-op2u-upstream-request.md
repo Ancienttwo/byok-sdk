@@ -200,13 +200,33 @@ node packages/client/probes/pi-official/run.mjs --probe p04d   # G-D
 
 附带结论：上游任何形状落地后，BYOK 侧需要重新核对的点是同一批——`session-manager` 的模型推导、`usage-totals`、`cache-stats`、`estimate`，以及各 API 的消息转换。本节的 146 处清单就是那份核对清单的初稿（本机 `/tmp/pi-upstream`，未提交任何上游内容）。
 
-## 8. 未决
+## 8. G-A 实测（2026-09-19，上游 main，真实 session 路径）
 
-- 上游是否接受该请求、以什么形态接受、何时进入受支持发行包，均不由本仓决定。
-- 本文只覆盖 `openai-completions` 一条路径；WebSocket 与其他 API 按方案保持不支持，未做验证。
-- 递归/子进程模式下上述结论是否一致（`registerProvider` 在 print/runner 中的可用性）属 OP4 范围，本轮未验证。
+做法：在已装好依赖、基线类型检查 EXIT 0 的 `main` checkout 里写一个**临时** vitest 实验（`packages/coding-agent/test/zz-byok-ga-experiment.test.ts`，只在本机 `/tmp`，未提交上游）：用仓库自带的 `createModelRegistry` / `getModelRuntime` / `createTestResourceLoader` 建真实 `AgentSession`，`cwd` 与显式系统提示由调用方给定，把真实目录模型（`anthropic/claude-sonnet-4-5`）的 transport 换成调用方拥有的 `streamSimple`，在其中捕获**会话交给 provider 的 Context** 与 adapter 实际要发的 body，然后拒发（不发任何网络请求）。
 
-## 8. 基线重估（同日只读核对 `main`）：固定候选可能已经过时
+结果（`BYOK_GA` 输出，一次通过）：
+
+| 项 | 值 |
+|---|---|
+| 会话首请求 body 字节数 | **6123** |
+| body 顶层键 | `max_tokens, messages, model, stream, system, thinking, tools` |
+| 交给 transport 的 **Context 键** | **仅 `messages`** |
+| `messages` 的角色序列 | **`system, system, user`** |
+| transport 尝试次数 | **4**（`auto_retry` 与 0.85.1 同形，`main` 未改） |
+
+### 三个可操作的结论
+
+1. **系统提示在 `main` 上不是一条消息，而是两条 system 消息**。任何「会话外复现首请求」的方案都必须复现这个拆分，而不是拼一段 prompt 文本。
+2. **Context 只带 `messages`**：`system`、`tools`、`thinking`、`max_tokens` 这些顶层键由会话在 adapter 选项层拼出。也就是说调用方要复现的不只是对话内容，还包括**选项推导**——这正是 §1 G-A 里「选项面在两条路径上不一致」在 `main` 上的具体形态。
+3. **`auto_retry` 在 `main` 上仍然是 4 次尝试**：P04-B 的「拒发不可传播」不是 0.85.1 独有，是当前 `main` 的行为。G-D 因此继续按「不需要上游、BYOK 侧显式映射」处理。
+
+### 这一节改进了什么
+
+§1 的 G-A 只有定性描述（248 vs 308 字节、cwd 注入、选项不一致）。现在有了 `main` 上的实测形状（两条 system 消息 + 选项层推导 + 6123 字节的完整请求），上游请求里的 G-A 从「请给我们一个纯编译入口」变成了可检验的表述：**请把会话的首请求组装（system 消息拆分、选项推导、工具集）暴露为纯函数，或允许调用方显式提供组装结果**。
+
+尚未完成的一半：把调用方用公开入口（`buildSystemPromptState` / `getSystemMessageText` / 显式选项）拼出的 Context 与上面的捕获值做**逐字节比对**。这一半做完，G-A 的缺口就能像 G-C 那样给出确切数字（要么相等，要么给出差异位置）。
+
+## 9. 基线重估（同日只读核对 `main`）：固定候选可能已经过时
 
 写完 §1–§6 之后又做了一次只读核对，结果推翻了「把 `0.85.1` 当作接口工作对象」这个前提，必须显式记录。
 
@@ -244,3 +264,12 @@ node packages/client/probes/pi-official/run.mjs --probe p04d   # G-D
 npm view @earendil-works/pi-coding-agent dist-tags --json   # 是否已出现新版本
 node packages/client/probes/pi-official/run.mjs --official-version <new>   # 按新版本重跑 7 项
 ```
+
+## 10. 未决
+
+- 上游是否接受该请求、以什么形态接受、何时进入受支持发行包，均不由本仓决定。
+- 目标版本分叉（重钉到含分节 `SystemMessage` 的下一发行版 vs 维持 `0.85.1`）待 owner 裁决。
+- G-C 的形状（A 新联合成员 / B 放宽 provenance 字段 / C 显式导入入口）待上游选择。
+- G-A 的逐字节比对（调用方重建 vs 会话实际发送）尚未跑完。
+- 本文只覆盖 `openai-completions` 一条路径；WebSocket 与其他 API 按方案保持不支持，未做验证。
+- 递归/子进程模式下上述结论是否一致（`registerProvider` 在 print/runner 中的可用性）属 OP4 范围，本轮未验证。

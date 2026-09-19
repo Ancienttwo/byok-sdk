@@ -85,3 +85,11 @@
 4. 结论：判别位进入联合后，每一个字段读取点都必须表态，包括 BYOK 根本不用的 `packages/agent` harness 与 `packages/evals`。这类跨 4 包的改动应由上游选形，而不是 BYOK 提交既成事实的补丁。
 
 因此 OP2-U 交付物改写为「代价实测 + 形状选择（A 新成员 / B 放宽字段 / C 新导入入口）+ 最小复现 + 验收面」。本轮未向上游提交任何内容；上游 checkout 在 `/tmp/pi-upstream`，仅为本机证据。
+
+## G-A 实测（2026-09-19，上游 main 真实 session 路径）
+
+在同一个已装好依赖、基线类型检查 EXIT 0 的 checkout 里写了临时 vitest 实验（只在本机，未提交上游），用仓库自带的 `createModelRegistry` / `getModelRuntime` / `createTestResourceLoader` 建真实 `AgentSession`，把真实目录模型的 transport 换成调用方拥有的 `streamSimple` 并拒发。
+
+一次通过的结果：会话首请求 body **6123 字节**，顶层键 `max_tokens, messages, model, stream, system, thinking, tools`；交给 transport 的 Context **只有 `messages`**；角色序列 **`system, system, user`**；transport 尝试 **4** 次。
+
+三条结论：① 系统提示在 `main` 上是**两条** system 消息，复现必须复现这个拆分；② `system`/`tools`/`thinking`/`max_tokens` 由 adapter 选项层拼出，所以复现还要包含**选项推导**；③ `auto_retry` 在 `main` 上仍是 4 次尝试，说明 P04-B 的「拒发不可传播」不是旧版本问题，G-D 继续按 BYOK 侧显式映射处理。
