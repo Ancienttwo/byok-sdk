@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { SUPPORTED_PREPARED_COMPILER_VERSION } from './prepared-compiler-contract';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -89,7 +90,7 @@ function loadNativePrepare(): Promise<PrepareCodingAgentSessionInput> {
  * (`unsupported_compiler_version`, fail closed). A fork that compiles to a
  * different contract is refused rather than read through this one.
  */
-export const SUPPORTED_PREPARED_COMPILER_VERSION = 2;
+export { SUPPORTED_PREPARED_COMPILER_VERSION } from './prepared-compiler-contract';
 
 /** The residual value classes the supported compiler contract defines. Copied, never invented. */
 const SUPPORTED_RESIDUAL_VALUE_CLASSES: ReadonlySet<string> = new Set<InputPreparationResidualValueClassV1>([

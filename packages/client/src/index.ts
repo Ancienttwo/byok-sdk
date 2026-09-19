@@ -530,6 +530,11 @@ export type { EnsureSecureDirOptions } from './util/secure-dir';
 export { PiAdapter } from './adapters/pi/pi-adapter';
 export type { PiAdapterOptions, PiByokLauncherConfig } from './adapters/pi/pi-adapter';
 export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin';
+// The prepared-input compiler contract, so a Host can declare the runtime's
+// `nativeProvenance` from the SDK's own authority instead of hardcoding it.
+// A locally copied number would drift silently on the next fork build; this is
+// the value the client actually prepares input against.
+export { SUPPORTED_PREPARED_COMPILER_VERSION } from './adapters/pi/prepared-compiler-contract';
 
 export { ClaudeAdapter } from './adapters/claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
