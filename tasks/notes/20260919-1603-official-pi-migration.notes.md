@@ -97,3 +97,11 @@
 随后把同一实验推进到逐字节比对：会话交给 transport 的三条消息是 `system(调用方原文 16B)` / `system(content="", sections, toolsAdded)` / `user(32B)`；用公开 `buildSystemPromptSections({ cwd })` 在没有 session 的情况下重建，第一轮就 **3/5 sections 逐字节相等**（`cwd` 76、`docs` 1160、`preamble` 169），`rules`（839 vs 146）与 `tools`（339 vs 124）不同，补 `selectedTools` 后调用方结果不变。
 
 由此再次收紧 G-A：官方缺的不是「一个 compile 函数」，而是**会话自己的输入推导**——会话喂给投影的那整套输入（工具选择、snippets、guidelines、context files、skills、append 配置）没有公开入口能让调用方以同样方式得到。请求改为「暴露/文档化该输入推导，使调用方能以同一组显式输入逐字节重建首请求」。
+
+## G-A 字段级归因（2026-09-19，收口）
+
+按 `agent-session.ts:1081-1101` 的规则把会话输入逐项搬到调用方：只给 `cwd` → `rules` 146 / `tools` 124；加 `selectedTools` → **无变化**（工具名单不是来源）；再加从 `createCodingTools(cwd)` 读出的 `toolSnippets`/`toolGuidelines` → 230 / 170，而会话实际是 **839 / 339**。
+
+根因明确：会话的 snippet/guideline 表来自它自己的定义注册表（`agent-session.ts:2800-2814` 遍历 `_baseToolDefinitions` + custom tools），公开的 `createCodingTools()` 返回的对象**只有 `bash` 一个**带 `promptSnippet`/`promptGuidelines`。工具集合两边相同（都是 read/bash/edit/write），差的是 prompt 元数据。
+
+**G-A 残余因此收敛为一项**，上游请求可写成一句话：请把 builtin 工具定义（含 prompt 元数据）或会话使用的 snippet/guideline 映射暴露出来。三段证据链完整：投影是公开纯函数 → 输入推导规则可读 → 只有 builtin 工具 prompt 元数据缺公开来源。

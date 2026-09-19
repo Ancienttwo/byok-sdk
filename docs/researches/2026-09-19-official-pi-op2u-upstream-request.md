@@ -260,6 +260,24 @@ node packages/client/probes/pi-official/run.mjs --probe p04d   # G-D
 
 这一条也把目标版本分叉往「重钉到下一发行版」推：`main` 已经把提示投影拆成了公开纯函数，继续对 `0.85.1` 提接口等于要求上游回到旧形状。
 
+### 残余差异的字段级归因（已定位）
+
+把会话的输入推导按源码逐项搬到调用方（`packages/coding-agent/src/core/agent-session.ts:1081-1101` 的规则）后继续比对：
+
+| 步骤 | `rules` | `tools` | 说明 |
+|---|---|---|---|
+| 只给 `cwd` | 146 | 124 | 基线 |
+| 加 `selectedTools`（= 会话 `toolsAdded` 的名字表） | 146 | 124 | **无变化**：工具名单不是这两段的来源 |
+| 再加 `toolSnippets` / `toolGuidelines`（从 `createCodingTools(cwd)` 读 `promptSnippet` / `promptGuidelines`） | 230 | 170 | 有变化，但会话实际是 **839 / 339** |
+
+进一步核对：会话与调用方的**工具集合完全相同**（都是 `read, bash, edit, write`），但调用方能从 `createCodingTools(cwd)` 取到的 `promptSnippet`/`promptGuidelines` **只有 `bash` 一个**。
+
+根因在源码里是明确的：会话的 snippet/guideline 表来自它自己的**定义注册表**（`agent-session.ts:2800-2814`，遍历 `_baseToolDefinitions` + custom tools 的 `ToolDefinition`），而不是来自公开的 `createCodingTools()` 返回值。两者不是同一批对象、也不带同样的 prompt 元数据。
+
+**这就是 G-A 的确切残余**：builtin 工具的 prompt 元数据（`promptSnippet` / `promptGuidelines`）没有公开入口能让调用方按同样方式取得。上游请求因此可以写成一句很小的话：**请把 builtin 工具定义（含 prompt 元数据）或会话使用的 snippet/guideline 映射暴露出来**——而不是「请新增一个准备接口」。
+
+至此 G-A 的三段证据齐了：提示投影是公开纯函数（3/5 sections 当场逐字节相等）→ 输入推导规则可在源码中读出（cwd / skills / contextFiles / customPrompt / appendSystemPrompt / selectedTools / toolSnippets / toolGuidelines）→ 其中只有一项（builtin 工具的 prompt 元数据）没有公开来源。
+
 ## 9. 基线重估（同日只读核对 `main`）：固定候选可能已经过时
 
 写完 §1–§6 之后又做了一次只读核对，结果推翻了「把 `0.85.1` 当作接口工作对象」这个前提，必须显式记录。
