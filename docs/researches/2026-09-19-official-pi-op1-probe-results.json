@@ -1,14 +1,14 @@
 {
   "kind": "official-pi-op1-probe-summary",
-  "generatedAt": "2026-09-19T08:41:55.950Z",
+  "generatedAt": "2026-09-19T08:51:04.241Z",
   "officialPackage": "@earendil-works/pi-coding-agent@0.85.1",
   "officialIntegrity": "sha512-FGRN+OHbWaefBPGaTggAdLjrIHW+s2PzLyglz/5dfLzb9of7uuXMXYC0fJIeZTw+shS32o2cuQ9jF7YSDuL/oQ==",
   "officialPiAiIntegrity": "sha512-+VgVIJDkDO2efYJKEEqvPTH4zmnIaXdAppGbO+vKFA9qy5PdhFiAenuFAkU+oiCSfOC4dMHDyrjdQeL4ZoC5CQ==",
   "officialResolved": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-0.85.1.tgz",
   "officialGitHead": null,
   "isolation": {
-    "probeRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP",
-    "emptyHome": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP/empty-home",
+    "probeRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4",
+    "emptyHome": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4/empty-home",
     "node": "v24.18.0",
     "platform": "darwin-arm64"
   },
@@ -21,8 +21,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -102,8 +102,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -249,8 +249,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -301,6 +301,94 @@
       "exitCode": 0
     },
     {
+      "probe": "p03b-pre-session-request",
+      "ok": false,
+      "verdict": "not-supported",
+      "verdictReason": "a pre-session call does not reproduce the session request; the compile seam needs upstream work as well",
+      "environment": {
+        "node": "v24.18.0",
+        "platform": "darwin-arm64",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4",
+        "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
+      },
+      "checks": [
+        {
+          "name": "pre-session call delivers the request body to the caller",
+          "ok": true,
+          "detail": "payload=object"
+        },
+        {
+          "name": "pre-session call reaches transport without a session",
+          "ok": true,
+          "detail": "body=248"
+        },
+        {
+          "name": "pre-session refusal keeps the endpoint at zero requests",
+          "ok": true,
+          "detail": "count=1 (1 = the session call only)"
+        },
+        {
+          "name": "pre-session payload has the same top-level shape as the session body",
+          "ok": false,
+          "detail": "pre=[\"max_completion_tokens\",\"messages\",\"model\",\"prompt_cache_key\",\"prompt_cache_retention\",\"store\",\"stream\",\"stream_options\"] session=[\"max_completion_tokens\",\"messages\",\"model\",\"store\",\"stream\",\"stream_options\"]"
+        },
+        {
+          "name": "pre-session user message is byte-identical to the session one",
+          "ok": true,
+          "detail": "pre={\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"probe: hello\"}]} session={\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"probe: hello\"}]}"
+        },
+        {
+          "name": "first message (system) matches the session projection",
+          "ok": false,
+          "detail": "pre={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\"} session={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\\nCurrent working directory: /tmp/pi-probe-p03b-RXUHww/cwd\\n\"}"
+        },
+        {
+          "name": "no certification accompanies the payload",
+          "ok": true,
+          "detail": "[]"
+        }
+      ],
+      "observed": {
+        "payloadKeys": [
+          "max_completion_tokens",
+          "messages",
+          "model",
+          "prompt_cache_key",
+          "prompt_cache_retention",
+          "store",
+          "stream",
+          "stream_options"
+        ],
+        "sessionKeys": [
+          "max_completion_tokens",
+          "messages",
+          "model",
+          "store",
+          "stream",
+          "stream_options"
+        ],
+        "payloadBytes": 248,
+        "sessionBodyBytes": 308,
+        "transportBodyEqualsPayload": true,
+        "transportError": "byok-probe: refused before send",
+        "systemMessagePresent": "system"
+      },
+      "failures": [
+        {
+          "name": "pre-session payload has the same top-level shape as the session body",
+          "ok": false,
+          "detail": "pre=[\"max_completion_tokens\",\"messages\",\"model\",\"prompt_cache_key\",\"prompt_cache_retention\",\"store\",\"stream\",\"stream_options\"] session=[\"max_completion_tokens\",\"messages\",\"model\",\"store\",\"stream\",\"stream_options\"]"
+        },
+        {
+          "name": "first message (system) matches the session projection",
+          "ok": false,
+          "detail": "pre={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\"} session={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\\nCurrent working directory: /tmp/pi-probe-p03b-RXUHww/cwd\\n\"}"
+        }
+      ],
+      "exitCode": 0
+    },
+    {
       "probe": "p04-send-gate",
       "ok": false,
       "verdict": "partial",
@@ -308,8 +396,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -502,6 +590,98 @@
       "exitCode": 0
     },
     {
+      "probe": "p04d-refusal-observability",
+      "ok": true,
+      "verdict": "supported",
+      "verdictReason": "the run owner can learn out-of-band that the transport refused and that zero requests were sent, even though the session reports a normal end; propagation through the session error channel is still absent",
+      "environment": {
+        "node": "v24.18.0",
+        "platform": "darwin-arm64",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4",
+        "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
+      },
+      "checks": [
+        {
+          "name": "the caller-owned side channel recorded the refusal",
+          "ok": true,
+          "detail": "refusals=4"
+        },
+        {
+          "name": "the endpoint received zero requests",
+          "ok": true,
+          "detail": "count=0"
+        },
+        {
+          "name": "refusals are attributable to numbered attempts",
+          "ok": true,
+          "detail": "[1,2,3,4]"
+        },
+        {
+          "name": "the session did not surface the refusal as an error",
+          "ok": true,
+          "detail": "no error surfaced (recorded, not asserted as desired)"
+        },
+        {
+          "name": "the run still ended normally",
+          "ok": true,
+          "detail": "[\"agent_start\",\"turn_start\",\"message_start\",\"message_end\",\"message_start\",\"message_end\",\"turn_end\",\"agent_end\",\"auto_retry_start\",\"agent_start\",\"turn_start\",\"message_start\",\"message_end\",\"turn_end\",\"agent_end\",\"auto_retry_start\",\"agent_start\",\"turn_start\",\"message_start\",\"message_end\",\"turn_end\",\"agent_end\",\"auto_retry_start\",\"agent_start\",\"turn_start\",\"message_start\",\"message_end\",\"turn_end\",\"agent_end\",\"auto_retry_end\",\"agent_settled\"]"
+        },
+        {
+          "name": "no assistant stop reason explains the absence",
+          "ok": true,
+          "detail": "[\"error\",\"error\",\"error\",\"error\"]"
+        }
+      ],
+      "observed": {
+        "refusalCount": 4,
+        "transportAttempts": 4,
+        "endpointRequests": 0,
+        "promptError": null,
+        "finalAssistantStopReasons": [
+          "error",
+          "error",
+          "error",
+          "error"
+        ],
+        "eventTypes": [
+          "agent_start",
+          "turn_start",
+          "message_start",
+          "message_end",
+          "message_start",
+          "message_end",
+          "turn_end",
+          "agent_end",
+          "auto_retry_start",
+          "agent_start",
+          "turn_start",
+          "message_start",
+          "message_end",
+          "turn_end",
+          "agent_end",
+          "auto_retry_start",
+          "agent_start",
+          "turn_start",
+          "message_start",
+          "message_end",
+          "turn_end",
+          "agent_end",
+          "auto_retry_start",
+          "agent_start",
+          "turn_start",
+          "message_start",
+          "message_end",
+          "turn_end",
+          "agent_end",
+          "auto_retry_end",
+          "agent_settled"
+        ]
+      },
+      "failures": [],
+      "exitCode": 0
+    },
+    {
       "probe": "p05-loader-closure",
       "ok": true,
       "verdict": "supported",
@@ -509,8 +689,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -552,8 +732,8 @@
         "skillCount": 0,
         "extensionErrors": [],
         "plantedHostileFiles": [
-          "/tmp/pi-probe-p05-Axtsl5/cwd/.pi/extensions/hostile.mjs",
-          "/tmp/pi-probe-p05-Axtsl5/agent/extensions/hostile.mjs"
+          "/tmp/pi-probe-p05-3OylrS/cwd/.pi/extensions/hostile.mjs",
+          "/tmp/pi-probe-p05-3OylrS/agent/extensions/hostile.mjs"
         ]
       },
       "failures": [],
@@ -566,7 +746,9 @@
     "p01-session-tools-reply": "supported",
     "p02-history-projection": "not-supported",
     "p03-task-free-preparation": "not-supported",
+    "p03b-pre-session-request": "not-supported",
     "p04-send-gate": "partial",
+    "p04d-refusal-observability": "supported",
     "p05-loader-closure": "supported"
   }
 }

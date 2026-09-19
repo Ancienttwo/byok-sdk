@@ -85,8 +85,12 @@ allowed_paths:
   - packages/client/probes/pi-official/probes/p03-task-free-preparation.mjs
   - packages/client/probes/pi-official/probes/p04-send-gate.mjs
   - packages/client/probes/pi-official/probes/p05-loader-closure.mjs
+  - packages/client/probes/pi-official/probes/p03b-pre-session-request.mjs
+  - packages/client/probes/pi-official/probes/p04d-refusal-observability.mjs
   - docs/researches/2026-09-19-official-pi-op1-probe-report.md
   - docs/researches/2026-09-19-official-pi-op1-probe-results.json
+  # OP2-U 上游请求包
+  - docs/researches/2026-09-19-official-pi-op2u-upstream-request.md
   # ADR-036 架构裁定与索引/帐本落位
   - docs/architecture/adr-2026-09-19-official-pi-runtime-source.md
   - docs/architecture/index.md
@@ -154,6 +158,7 @@ exit_criteria:
     - docs/researches/2026-09-19-official-pi-fork-delta-map.md
     - docs/researches/2026-09-19-official-pi-op1-probe-report.md
     - docs/researches/2026-09-19-official-pi-op1-probe-results.json
+    - docs/researches/2026-09-19-official-pi-op2u-upstream-request.md
     - packages/client/probes/pi-official/run.mjs
     - docs/architecture/adr-2026-09-19-official-pi-runtime-source.md
     - tasks/contracts/20260919-1603-official-pi-migration.contract.md
@@ -224,7 +229,7 @@ exit_criteria:
     {
       "id": "op1-evidence-parse",
       "kind": "command",
-      "command": "node -e \"const fs=require('fs');const d=JSON.parse(fs.readFileSync('docs/researches/2026-09-19-official-pi-op1-probe-results.json','utf8'));const need=['p01-session-tools-reply','p02-history-projection','p03-task-free-preparation','p04-send-gate','p05-loader-closure'];for(const n of need){if(typeof (d.verdicts||{})[n]!=='string')throw new Error('missing verdict for '+n);}if(d.completed!==true)throw new Error('probe run did not complete');if(!(d.officialIntegrity||'').startsWith('sha512-'))throw new Error('missing installed official integrity');if(d.officialPackage!=='@earendil-works/pi-coding-agent@0.85.1')throw new Error('unexpected official package '+d.officialPackage);console.log('op1-evidence-parse OK '+JSON.stringify(d.verdicts))\"",
+      "command": "node -e \"const fs=require('fs');const d=JSON.parse(fs.readFileSync('docs/researches/2026-09-19-official-pi-op1-probe-results.json','utf8'));const need=['p01-session-tools-reply','p02-history-projection','p03-task-free-preparation','p03b-pre-session-request','p04-send-gate','p04d-refusal-observability','p05-loader-closure'];for(const n of need){if(typeof (d.verdicts||{})[n]!=='string')throw new Error('missing verdict for '+n);}if(d.completed!==true)throw new Error('probe run did not complete');if(!(d.officialIntegrity||'').startsWith('sha512-'))throw new Error('missing installed official integrity');if(d.officialPackage!=='@earendil-works/pi-coding-agent@0.85.1')throw new Error('unexpected official package '+d.officialPackage);console.log('op1-evidence-parse OK '+JSON.stringify(d.verdicts))\"",
       "cwd": ".",
       "phase": "verification",
       "cost": "normal",

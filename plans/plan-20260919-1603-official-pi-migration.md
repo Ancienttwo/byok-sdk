@@ -561,6 +561,12 @@ bun run check:task-workflow
   - [x] P05 装载/递归兼容 → **supported（装载面）**；递归 spawn 语义不在本探针覆盖范围（归 OP4）
   - [x] **G1 裁定：第二档**——基础执行可行，缺 pure compile/consume 与历史导入；推进 OP2-U 最小上游接口；相关生产路径保持禁用
 - [ ] OP2 预算/prepared 接口替代（必要时 OP2-U 最小上游改进）
+  - [x] OP2-U 定界：追加 `p03b`/`p04d` 两个探针，把「缺三样」切成可提接口的粒度，落位 `docs/researches/2026-09-19-official-pi-op2u-upstream-request.md`
+    - G-A 会话首请求无法在会话外复现（会话外 248 字节 vs 会话 308 字节；系统消息被追加 cwd，顶层键多出 prompt cache 两项）
+    - G-B payload 无任何覆盖证明/结构分类
+    - G-C host 断言历史导致静默 0 请求
+    - G-D **不需要上游**：运行归属方可自行判定「拒发且零请求」（`p04d` supported）
+  - [ ] OP2-U 交付：最小复现 + 公共入口测试 + 保持普通 CLI 行为的补丁（下一步）
 - [ ] OP3 现有 runtime、工具、消息、凭证迁移
 - [ ] OP4 五边递归、custody、workflow 等价接线
 - [ ] OP5 官方依赖、身份、安装与来源证明

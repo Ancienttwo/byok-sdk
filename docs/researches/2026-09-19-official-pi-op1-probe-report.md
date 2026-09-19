@@ -106,7 +106,18 @@ node packages/client/probes/pi-official/run.mjs --probe p04
 
 每次运行现场安装官方 0.85.1 到临时树、以空 `HOME` 跑五个独立子进程、把 `probe-results.json` 与实际日志写入 `.ai/harness/runs/pi-official-op1-<ts>/`。合成端点只监听 127.0.0.1，全部响应为 synthetic，不使用任何真实凭证、不调用任何真实模型。
 
-## 8. 未证明 / 局限
+## 8. 追加探针（OP2-U 定界用）
+
+为把 OP2-U 的请求切到可提接口的粒度，探针套件追加了两个探针；本节是它们的结论，完整数值在 `docs/researches/2026-09-19-official-pi-op2u-upstream-request.md` 与同一份 `probe-results.json` 里。
+
+| 探针 | 结论 | 关键数字 |
+|---|---|---|
+| `p03b` 会话外请求捕获 | **not-supported**（但缺口被精确化） | 会话外经公开 `streamSimple` 拿到 **248** 字节 payload，`onPayload` 与 transport 字节一致、端点 0 请求；但会话实际发的是 **308** 字节：系统消息被追加了 `Current working directory: …`，且顶层键多出 `prompt_cache_key`/`prompt_cache_retention`。payload 无任何 certification 字段 |
+| `p04d` 拒发可观测性 | **supported** | 调用方 side channel 记录 4 次可归属 refusal、端点 0 请求、`prompt()` 不抛错且最终 `agent_settled`；转录里留下 `stopReason: "error"` 的 assistant 条目 |
+
+这两条把 OP2-U 的范围改了：G-D（可传播拒绝）**不需要上游**——运行归属方可以自行判定；真正需要上游的是 G-A（会话首请求的纯编译复现）、G-B（覆盖证明）与 G-C（host 断言历史）。
+
+## 9. 未证明 / 局限
 
 - P04 只验证了 `openai-completions` 一条 transport；WebSocket 与其他 API 未验证，且方案明确要求它们保持不支持。
 - P04 的 gate 是「调用方自己实现的 provider + 官方 adapter」这一形态；它证明机制可达，**不等于**已经在产品代码里正确接线（那是 OP3 的验收面）。

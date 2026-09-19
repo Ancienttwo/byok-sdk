@@ -63,3 +63,14 @@
 - **P05 supported（装载面）**：植入 cwd/agentDir 的恶意 extension、恶意 skill、恶意 `AGENTS.md` 全部未被加载，只有 `<inline:1>`；skills 0、extension 错误 0。
 
 **G1 = 第二档**：走 OP2-U 最小上游接口，相关生产路径保持禁用。
+
+## OP2-U 定界（2026-09-19，追加探针）
+
+为把上游请求切到可提接口的粒度，探针套件加了 `p03b`（会话外请求捕获）与 `p04d`（拒发可观测性），套件现为 7 项。结论：
+
+- **G-A**：会话外经公开 `streamSimple` 拿得到 D（248 字节，`onPayload` 与 transport 字节一致，端点 0 请求），但**不是会话会发的那一份**（308 字节）：会话把 `Current working directory: …` 追加进系统消息，且直接路径多出 `prompt_cache_key`/`prompt_cache_retention` 两个顶层键。所以「公开编译路径完全不存在」这个判断被否掉了，真正的缺口是「复现会话首请求」。
+- **G-B**：payload 不携带任何覆盖证明或结构分类（实测 certification 字段为空集），INV-06 因此无法只靠官方满足。
+- **G-C**：host 断言历史仍是静默 0 请求。
+- **G-D 不需要上游**：`p04d` 证明运行归属方可自行判定「拒发且零请求」（4 次可归属 refusal、端点 0 请求），虽然 `prompt()` 仍不抛错、最终 `agent_settled`。BYOK 侧必须显式映射，不能把「正常结束」当成功。
+
+交付物：`docs/researches/2026-09-19-official-pi-op2u-upstream-request.md`（缺口、请求接口的形状与要求、最小复现命令、上游验收面、BYOK 侧能力边界）。
