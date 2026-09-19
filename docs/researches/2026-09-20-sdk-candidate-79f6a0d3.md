@@ -1,4 +1,13 @@
-# SDK 候选元组：`79f6a0d3`（2026-09-20）
+# SDK 候选元组：`79f6a0d3` + manifest 修复（2026-09-20）
+
+> **元组已重建（v2）**：首个元组（`sourceGitSha=79f6a0d3`）在 Host 消费时暴露「Pi 闭包未随包声明」的交付缺陷，已修复打包器并重建。
+>
+> | 版本 | sourceGitSha | manifest sha256 | Pi 闭包 |
+> |---|---|---|---|
+> | v1 | `79f6a0d3` | `3ffb554bc9…` | **未记录** |
+> | **v2（采用）** | **`2534eac5`**（= `79f6a0d3` + 仅打包器改动） | **`4c8b087fd1fd5fab9fe235121bfee58e4516e131b6d55844ac8203292121f3d7`** | **已记录（三包，含 byokFork）** |
+>
+> **产品字节未变**：v1 与 v2 的 **11 个包逐包 sha256 全部相同**（实测 `differing product bytes: []`）。source SHA 变化只来自打包器脚本本身。
 
 ## 0. 这份记录解决什么
 
@@ -185,3 +194,44 @@ OK @byok-sdk/protocol 245
 > 另一份干净 checkout 不依赖开发者本机目录，也能复现同样的构建与定向验证。
 
 **部分满足**：产物安装与公开接口消费已可在干净 worktree 复现（不依赖本机目录、不依赖 symlink、逐包 hash 校验）；**构建验证尚未通过**（`apps/local-agent` 21 个错误待 Host 侧迁移）。因此本元组目前的状态是「**已冻结、可安装、接口可达；Host 消费待迁形状**」。
+
+## 8. v2 修复：Pi 闭包写入 release manifest
+
+针对 §7.1 的交付缺陷，打包器现在在断言之余**记录**它在隔离安装树中实际解析到的 Pi 闭包（`release-manifest.json` 新增 `piClosure`）：
+
+```json
+"piClosure": {
+  "specifier": "@earendil-works/pi-coding-agent",
+  "alias": "npm:@byok-sdk/pi-coding-agent@0.85.1006",
+  "codingAgent": { "path": "node_modules/@earendil-works/pi-coding-agent",
+                   "name": "@byok-sdk/pi-coding-agent", "version": "0.85.1006",
+                   "identity": { "upstreamBase": "0.85.1",
+                                 "upstreamCommit": "d981de1229ef899957bbe968bc8dcda02a21f477",
+                                 "forkBuild": 6 } },
+  "ai":        { "path": "node_modules/@earendil-works/pi-ai",        "name": "@byok-sdk/pi-ai",        "version": "0.85.1005" },
+  "agentCore": { "path": "node_modules/@earendil-works/pi-agent-core","name": "@byok-sdk/pi-agent-core","version": "0.85.1005" }
+}
+```
+
+三包 `identity` 均存在（`byokFork`），证明记录的是 fork 而非上游。
+
+**为什么这解决了「可独立安装」**：消费方过去只能从 client manifest 的 alias 去猜闭包；现在 manifest 直接给出「装哪个包、装到哪个路径、版本是多少、是不是 fork」。Host 侧 apply 脚本应改为**按 `piClosure` 安装**，而不是只解 SDK 包。
+
+**仍未包含**：闭包各包的 tarball integrity（本机打包过程未从 registry 复算）。消费方可按 manifest 里的 name@version 自行 `npm pack` 并核对 registry integrity；若要求 manifest 自带 hash，应作为下一次打包器改动单独提出。
+
+## 9. 仍未闭合（交给下一刀）
+
+| 项 | 归属 | 内容 |
+|---|---|---|
+| Host identity 形状迁移 | **Host** | `apps/local-agent` 3 个文件、21 个 tsc 错误：locator 字段移入嵌套 `subject`（`subject.kind`/`toolsetId`/`serverName`）、resolution 变为三变体联合、一处可选性收紧 |
+| 按 `piClosure` 安装 | Host | apply 脚本改为读 manifest 的闭包并安装，避免上游静默顶替 |
+| 闭包 integrity | SDK（可选） | 若要求 manifest 自带 hash，另开一次打包器改动 |
+
+形状映射（已提取，供直接施工）：
+
+```
+locator.kind / toolsetId / serverName      →  locator.subject.kind / toolsetId / serverName
+ToolImplementationLocatorV1                 =  { subject: {kind:'mcp-server',…}, command, args, launch }
+                                            |  { subject: {kind:'runtime',…}, runtimeEntry, command?:never, … }
+ToolImplementationResolutionV1              =  Unavailable | InstallRecord | RuntimeImplementationRecord
+```
