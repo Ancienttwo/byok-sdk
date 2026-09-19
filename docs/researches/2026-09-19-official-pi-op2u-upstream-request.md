@@ -150,7 +150,22 @@ node packages/client/probes/pi-official/run.mjs --probe p04d   # G-D
 
 因此：**prepared 生产路径继续保持禁用，`official_supported` 不得声明**；OP3/OP5 中不依赖这三项的独立部分可以继续准备，但不得先行切换产品依赖（切换后 prepared 会从「禁用」变成「缺失」，属于 INV-14 禁止的静默降级）。
 
-## 6. 未决
+## 6. 上游落点（2026-09-19 只读核对 `earendil-works/pi@main`）
+
+为了让下一刀不必再从零找位置，本轮只读拉取了三份上游源码并记录了锚点（未提交任何上游内容）：
+
+| 缺口 | 上游文件 | 锚点 | 说明 |
+|---|---|---|---|
+| G-C | `packages/coding-agent/src/core/session-manager.ts`（1786 行） | `:380` `entry.message.role === "assistant"` 决定 session model；`:1043`、`:1528` 的 `hasAssistant` 决定 flush/写入 | 与 fork 修补的三处语义位置一一对应，是最小、最自洽的一刀 |
+| G-A | `packages/coding-agent/src/core/sdk.ts`（410 行） | `:39` `CreateAgentSessionOptions`；`:173` `createAgentSession`；`:308` 分支内的 `systemPrompt: ""` | 会话组装入口，决定「调用方能否只靠显式输入决定首请求」 |
+| G-A | `packages/coding-agent/src/core/system-prompt.ts`（216 行） | `:9` `BuildSystemPromptOptions`；`:54` `normalizeBuildSystemPromptOptions`；`:121` `buildSystemPromptSections`；`:186` `buildSystemPromptState`；`:195` `buildSystemPrompt`；`:155` 调用 `getDocsPath()` | 上游已有比预想更细的分段导出，但 `buildSystemPrompt` 内部仍直连 `config.ts` 的 docs 路径（fs/config 耦合），这是纯投影必须拆开的那一处 |
+
+两点补充观察：
+
+1. `Current working directory:` 这段被会话追加进系统消息的内容**不在** `system-prompt.ts` 里，说明它由会话组装阶段另行附加。G-A 的补丁必须先定位这个来源，否则「会话外复现」无法成立。
+2. 上游 `main` 的 `packages/coding-agent/src/core`（52 个条目）确认仍**没有** `input-preparation.ts` / `prepared-session-input.ts`，所以 G-A/G-B 不是「等一个已有模块发布」，而是要提新接口。
+
+## 7. 未决
 
 - 上游是否接受该请求、以什么形态接受、何时进入受支持发行包，均不由本仓决定。
 - 本文只覆盖 `openai-completions` 一条路径；WebSocket 与其他 API 按方案保持不支持，未做验证。
