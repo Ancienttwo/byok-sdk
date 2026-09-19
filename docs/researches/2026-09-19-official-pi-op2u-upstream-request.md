@@ -300,7 +300,32 @@ node packages/client/probes/pi-official/run.mjs --probe p04d   # G-D
 
 因此 G-A 的上游请求定稿为一句话：**请暴露 builtin 工具定义（含 `promptSnippet` / `promptGuidelines`），或会话使用的 snippet/guideline 映射。** 不需要新增准备接口，也不需要改动消息模型。
 
-## 9. 基线重估（同日只读核对 `main`）：固定候选可能已经过时
+## 9. G-B 量化（2026-09-19，上游 main 的请求构造）
+
+G-B 原来只有存在性描述（「payload 不携带任何覆盖证明」）。用同一方法量化后，结论与 G-A 同形：**缺的不是能力，是一份契约**。
+
+事实（`packages/ai/src/api/openai-completions.ts`）：
+
+- 整个 provider 请求由**一个** `buildParams`（796–1002 行，207 行）产出；
+- 对象字面量先给出 5 个键：`model, messages, stream, prompt_cache_key, prompt_cache_retention`；
+- 函数体内再按条件赋值 **15 个**键：`chat_template_kwargs, enable_thinking, max_completion_tokens, max_tokens, priority, provider, providerOptions, reasoning_effort, store, stream_options, temperature, thinking, tool_choice, tool_stream, tools`；
+- 每个键的出现与取值都由**显式输入**决定：`model`（含 `compat` 元数据）、`context`（sections + messages + tools）、`options`（`maxTokens / temperature / reasoningEffort / toolChoice / cacheRetention / sessionId` 等）。
+
+也就是说：**顶层键集合是封闭且可枚举的（约 20 个，两个 `max_*_tokens` 互斥），每个键的取值类别都由显式输入决定。**
+
+那么 G-B 真正缺的是什么：**没有任何已发布、带版本的契约把这份键集合与每个键的值类别说出来，也没有在遇到未分类键时 fail closed。** 让调用方在执行前自己维护这份清单，就是允许出现第二份语义权威——上游一旦新增一个键，本地清单会静默失准，而这正是 INV-06 要求「未知覆盖不得填经验比例」要防的事。
+
+**G-B 请求因此同样缩小为一句话**：请把 provider 请求的形状契约（键集合 + 每键值类别，随 adapter 版本发布）公开，并在无法分类的键上 fail closed。这不要求新增认证子系统，也不要求 BYOK 认识任何 Pi 之外的语义。
+
+三条缺口的形态至此统一：
+
+| 缺口 | 原表述 | 量化后的表述 |
+|---|---|---|
+| G-A | 没有纯编译入口 | 暴露 builtin 工具的 prompt 元数据（其余部分已可逐字节复现） |
+| G-B | payload 无覆盖证明 | 公开请求形状契约（键集合 + 值类别）并对未知键 fail closed |
+| G-C | 无法导入 host 断言历史 | 需上游在三种形状中选一（A 实测 146 处代价） |
+
+## 10. 基线重估（同日只读核对 `main`）：固定候选可能已经过时
 
 写完 §1–§6 之后又做了一次只读核对，结果推翻了「把 `0.85.1` 当作接口工作对象」这个前提，必须显式记录。
 
@@ -339,7 +364,7 @@ npm view @earendil-works/pi-coding-agent dist-tags --json   # 是否已出现新
 node packages/client/probes/pi-official/run.mjs --official-version <new>   # 按新版本重跑 7 项
 ```
 
-## 10. 未决
+## 11. 未决
 
 - 上游是否接受该请求、以什么形态接受、何时进入受支持发行包，均不由本仓决定。
 - 目标版本分叉（重钉到含分节 `SystemMessage` 的下一发行版 vs 维持 `0.85.1`）待 owner 裁决。

@@ -107,3 +107,11 @@
 **G-A 残余因此收敛为一项**，上游请求可写成一句话：请把 builtin 工具定义（含 prompt 元数据）或会话使用的 snippet/guideline 映射暴露出来。三段证据链完整：投影是公开纯函数 → 输入推导规则可读 → 只有 builtin 工具 prompt 元数据缺公开来源。
 
 再补最后一刀（`toolsAdded` 比对）后 G-A 收口：会话捕获的 `toolsAdded` 与公开 `createCodingTools(cwd)` 的模型可见投影在 `read`/`bash`/`edit`/`write` 上 **4/4 逐字节相等**（description 303/248/326/127 字节、parameters 全等），差异只在调用方对象多带的 `execute`/`label`/`executionMode`/`prepareArguments`（不进请求）。四条证据齐备后，G-A 的上游请求定稿为「暴露 builtin 工具定义（含 promptSnippet/promptGuidelines）或 session 的 snippet/guideline 映射」，不需要新接口、不需要改消息模型。
+
+## G-B 量化（2026-09-19）
+
+与 G-A 同法：读上游 `packages/ai/src/api/openai-completions.ts` 的请求构造。整个 provider 请求由**一个** `buildParams`（796–1002 行）产出——字面量 5 键（`model, messages, stream, prompt_cache_key, prompt_cache_retention`）+ 条件赋值 15 键（`chat_template_kwargs, enable_thinking, max_completion_tokens, max_tokens, priority, provider, providerOptions, reasoning_effort, store, stream_options, temperature, thinking, tool_choice, tool_stream, tools`），每个键的出现与取值都由 `model`/`context`/`options` 显式决定。
+
+结论：**键集合封闭可枚举（约 20 个），缺口不是能力而是契约**——没有带版本的「键集合 + 值类别」声明，也没有未分类键 fail closed 的路径。让调用方自己维护这份清单等于允许第二份语义权威，上游新增一个键就会静默失准。G-B 请求因此缩为：公开请求形状契约并对未知键 fail closed。
+
+三条缺口形态统一：G-A 暴露 builtin 工具 prompt 元数据 / G-B 公开请求形状契约 / G-C 三选一形状——可以一次性提交给上游。
