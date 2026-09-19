@@ -7,7 +7,43 @@
 > **Planning Source**: owner 提供的执行方案 `plans/Official_Pi_Migration_Execution_Plan_2026-09-19.md`；本文件是其规范化、已注册的权威执行副本（main checkout 那份为历史输入，不是权威）
 > **Promotion Reason**: owner_ruling_2026-09-19（终止自维护 Pi 发行线；OP0–OP8 责任包 + G1–G4 实质验收门）
 > **Verification Boundary**: OP0 证据面（发行基线 + fork delta map）与 OP1 五项 probe；产品实现刀按各自 slice contract 独立验证
-> **Rollback Surface**: 见文末 `## Rollback Surface`
+> **Rollback Surface**: 见文末 `
+## 剩余工作执行包（resume packet）
+
+本包供任何接过此 plan 的执行者直接使用；不替代 Task Breakdown，只把「下一步做什么、入口在哪、判据是什么」集中到一处。全部结论均已在 `docs/researches/2026-09-19-official-pi-*.md` 量化。
+
+### 环境前置（否则会看到假红）
+
+- 本 worktree 跑全量测试前**必须先 `bun run build`**；未构建时 `packages/client` 会报约 185 个「Failed to resolve entry for package @byok-sdk/*」的假红。
+- 探针套件需要网络（每次现场从 registry 安装官方 tarball）：`node packages/client/probes/pi-official/run.mjs`（9 项，约 40s）。
+- `/tmp/pi-upstream` 是用于测量的上游 checkout（已 `npm ci` + `hydrate-model-data`，基线 `tsgo --noEmit` EXIT 0）。它是临时的；重建方式：完整 clone → `npm ci --ignore-scripts` → `npm --prefix packages/ai run hydrate-model-data`。
+
+### 切片 A：OP2 接线（依赖上游类型面落地）
+
+- 入口：`packages/client/src/adapters/pi/input-preparation.ts`（8 处 fork import）、`packages/client/src/daemon/input-preparation-service.ts`（1 处）、`packages/client/src/bin/pi-prepared-host.ts:317`（消费 seam）、`adapters/pi/prepared-prompt-frame.ts`。
+- 9 处用法的逐条处置见 OP2-U §15；新核心已就绪：`adapters/pi/prepared-request.ts`（compile/certify/verify）+ `request-shape.ts`。
+- 每改一处即验证：`bun run check:pi-fork-surface`（计数只允许下降）+ `cd packages/client && bun x vitest run`（先 build）。
+- 判据：fork 面从 3 文件 / 10 import 降到 0，且 client 全量与三项仓库 gate 保持绿。
+
+### 切片 B：OP5 身份与发布
+
+- 入口：`scripts/release/pi-runtime-identity.mjs` 的 5 个导出；消费者 6 文件（`pack-and-smoke.mjs`、`registry-readback.mjs`、`pi-launcher-smoke.mjs`、`check-package-graph.mjs`、`pack-and-smoke.test.mjs`、`resolve-bin.test.ts`）。
+- 唯一需设计的一处：prepared entry 断言改为「官方来源身份 + **prepared 能力显式声明为不可用**」（OP2-U §17）。
+- 预期会成片变红的是**两族 C07 runtime-record fixture**（111 / 154 处 fork 名），须先区分「fixture 过期」与「实现回归」再判断 G3。
+
+### 切片 C：OP8 退役
+
+- 排空与回退边界已写进 ADR-036 §Consequences 与 OP8 描述；判据是「在途 task / pending message / prepared artifact / home lease」全部按原 runtime 处理完。
+- 退出标志：`check:pi-fork-surface` 计数为 0，且新任务只用官方组合。
+
+### 两个外部决定（本仓无法自行推进）
+
+| 决定 | 解锁 |
+|---|---|
+| 是否向上游提交请求（文本：`docs/researches/2026-09-19-official-pi-upstream-request.md`，补丁：`...-gc-guard-candidate.patch`） | 类型面落地 → 切片 A |
+| 目标版本是否重钉到含分节 `SystemMessage` 的下一发行版 | OP1 重跑基线（`watch-release.mjs` + `--official-version`）→ G1 重判 → 切片 A/B 的目标形状 |
+
+## Rollback Surface`
 > **Task Profile**: migration
 > **Source Ref**: `byok-sdk@79f6a0d35952392c37652cb2f7fecaf6dcc255a6`（origin/main）；官方参考 `earendil-works/pi@36b60d2e…`（GitHub main，非 npm 产物）；Host 参考 Draft #241@`32cfcd49`
 > **Spec**: `docs/spec.md`
