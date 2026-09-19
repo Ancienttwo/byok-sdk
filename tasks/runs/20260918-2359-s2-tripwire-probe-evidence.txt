@@ -1,0 +1,53 @@
+S2 tripwire pre-fix probe evidence (disposable diagnostics; no production source changed)
+Companion to: tasks/runs/20260918-2345-s2-tripwire-prefix.txt (RED run, PRE_FIX_EXIT=1)
+
+[1] In-situ spawn/registry interleave (disposable probe test copy with logging registry + spawn markers)
+- 12 REGISTRY GETs total, UA "Bun/1.4.2", Accept "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*".
+- Two clusters of exactly 6, each fully inside one RPCSTATE-SPAWN..RPCSTATE-EXIT window:
+  pi-rpc host spawn  -> 6 GETs; pi-prepared host spawn -> 6 GETs.
+- Bootstrap spawns (`--no-install`, BUN_CONFIG_DEFAULT_REGISTRY set) produced ZERO GETs.
+- Host spawn env keys: HOME,PATH,PI_CODING_AGENT_DIR,PI_PACKAGE_DIR,TMPDIR,npm_config_registry (no BUN_*).
+- Host spawn argv head: <release>/sdk-entry.js __byok_sdk_helper pi-rpc|pi-prepared --config-digest=... --config ... (no flags before entry).
+
+[2] Standalone rerun of the kept release bundle (sanitized env, bogus config)
+- Single host spawn = exactly 6 GETs for /@mariozechner%2fclipboard, then usage error exit=78
+  ("byok-pi-rpc: exactly one --config-digest=<sha256> is required") => fetches fire during module-graph
+  load, before runPiRpcHost guards/argv validation.
+- Same HOME twice in a row: 6 + 6 (no cross-process suppression). Fresh HOME: 6. Deterministic.
+- TERMUX_VERSION=1 (gates loadClipboardNative off): 0 GETs, run proceeds to the env guard.
+- `--no-install` inserted before the entry: host refuses -> "refusing non-empty interpreter argv"
+  (packages/client/src/bin/pi-rpc-host.ts:121).
+- BUN_INSTALL in env: host refuses -> "refusing loader environment variables: BUN_INSTALL"
+  (packages/client/src/bin/pi-rpc-host.ts:122-123). (Leaked shell BUN_INSTALL also redirected the
+  auto-install cache to ~/.bun/install/cache; bun then crashed parsing the cached
+  @mariozechner/clipboard@0.3.9 index.js -> independent proof the auto-installed package is clipboard.)
+- Registry returning 200 with an empty packument: exactly 1 GET per process (packument cached, both
+  createRequire roots then fail locally). 503: 6 GETs => 3 fetch attempts per failed require x 2 roots.
+
+[3] Static chain (kept release bundle, sourcemap sdk-entry.js.map, 2268 sources)
+- Bundle starts with "// @bun" (Bun.build output).
+- Sources include .../@byok-sdk/pi-coding-agent/dist/utils/clipboard-native.js exactly once
+  (also clipboard.js, clipboard-image.js) plus dist/bin/pi-runtime-host-sealed.js and client dist index.
+- sdk-entry.js contains loadClipboardNative x2 (def+call) and "@mariozechner/clipboard" x1: ONE inlined copy.
+- Vendored side effect (node_modules/.bun/@byok-sdk+pi-coding-agent@0.85.1005+788de06d5de8ad8d/
+  node_modules/@byok-sdk/pi-coding-agent/dist/utils/clipboard-native.js):
+    :4  const moduleRequire = createRequire(import.meta.url);
+    :5  const executableDirRequire = createRequire(pathToFileURL(join(dirname(process.execPath),"package.json")).href);
+    :7  export function loadClipboardNative(requires=[moduleRequire,executableDirRequire]){
+    :9      return requireClipboard("@mariozechner/clipboard");   // try/catch per root
+    :18 const clipboard = !process.env.TERMUX_VERSION && hasDisplay ? loadClipboardNative() : null;
+  In the bundle both roots resolve inside the release tree (sdk-entry.js dir / bun exec dir) -> both miss.
+
+[4] jiti counter-check
+- This run shape: 12/12 clipboard, 0 jiti across 3 full vitest runs + standalone reruns.
+- sdk-entry.js: NO external jiti import remains (Bun.build inlined jiti from repo node_modules; 51 inner
+  occurrences). Sealed host artifact itself contains zero jiti imports (only one comment mention).
+- jiti would only be requested by the pi extension loader
+  (.../pi-coding-agent/dist/core/extensions/loader.js:14 `import { createJiti } from "jiti/static"`),
+  which never runs in this test's spawn graph. vendor/runs/background/async-execution.ts does not exist
+  at that path in this worktree; no background-runner process appears in the spawn log.
+=> "jiti x12" is not reproducible at this pin on this path; clipboard x12 is real.
+
+[5] Probe footprint
+- Disposable probe test (now deleted): packages/client/src/__tests__/s2-clipboard-insitu-probe.test.ts
+- Temp state (now deleted): /private/tmp/s2probe/*, kept release/run/cache dirs under $TMPDIR.

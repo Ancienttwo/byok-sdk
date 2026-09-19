@@ -1,6 +1,5 @@
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { execFile, spawn, type SpawnOptions } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,6 +11,7 @@ import { resolveInstalledPiRuntimeIdentity, createPiInputPreparationCompiler } f
 import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_VERSION } from '../input-preparation';
 import { sealRuntimeOperationManifest, type RuntimePreparedLaunchV1 } from '../types';
 import { trustedCwd } from './fixtures/launch-cwd';
+import { resolveBunBin } from './support/test-bun-bin';
 
 const execFileAsync = promisify(execFile);
 
@@ -56,20 +56,10 @@ const RECORD_VAR = 'BYOK_PI_LAUNCH_CWD_RECORD_TO';
 /**
  * bun, if this machine has one. Resolved once, synchronously, so every case
  * below is either RUN or visibly SKIPPED — never a body that returns early and
- * reports as a pass. Mirrors `pi-mcp-launch-cwd.test.ts`.
+ * reports as a pass. The candidate list and the BYOK_REQUIRE_BUN fail-closed
+ * law live in the shared helper.
  */
-const BUN_BIN = ((): string | undefined => {
-  const candidates = [
-    process.env.BYOK_TEST_BUN_BIN,
-    path.join(os.homedir(), '.local/bin/bun'),
-    '/opt/homebrew/bin/bun',
-    '/usr/local/bin/bun',
-  ];
-  for (const candidate of candidates) {
-    if (candidate !== undefined && existsSync(candidate)) return candidate;
-  }
-  return undefined;
-})();
+const BUN_BIN = resolveBunBin();
 
 /**
  * The Pi child's own report, read back out of the child rather than assumed:

@@ -65,7 +65,10 @@ describe('pinned Pi fork RPC packaging probe', () => {
     // The alias keeps the install path on the upstream specifier while the
     // manifest inside carries the fork identity the client manifest pins.
     const expected = resolvePiRuntimeIdentity();
-    expect(expected).toEqual({ name: '@byok-sdk/pi-coding-agent', version: '0.85.1005' });
+    // The name anchors the pin to the SDK's fork scope; the version travels
+    // from the same manifest pin, so a fork bump needs no edit here. The
+    // installed-manifest comparison directly below is the drift check.
+    expect(expected.name).toBe('@byok-sdk/pi-coding-agent');
     const packageJson = JSON.parse(await readFile(PI_PACKAGE_PATH, 'utf8')) as {
       name?: unknown;
       version?: unknown;

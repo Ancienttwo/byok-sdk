@@ -1,0 +1,11 @@
+@byok-sdk/client test: 
+@byok-sdk/client test:  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-wp5-ci-flip/packages/client
+@byok-sdk/client test: 
+@byok-sdk/client test: 
+@byok-sdk/client test:  Test Files  2 passed (2)
+@byok-sdk/client test:       Tests  7 passed | 1 skipped (8)
+@byok-sdk/client test:    Start at  03:02:04
+@byok-sdk/client test:    Duration  464ms (transform 105ms, setup 0ms, import 143ms, tests 241ms, environment 0ms)
+@byok-sdk/client test: 
+@byok-sdk/client test: Exited with code 0
+SKIP_EXIT=0
