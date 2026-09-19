@@ -585,6 +585,11 @@ bun run check:task-workflow
     - 两分支都不改变当前判断：prepared 生产路径保持禁用，`official_supported` 不得声明。
 - [ ] OP3 现有 runtime、工具、消息、凭证迁移
   - [x] OP3 工具面解风险（2026-09-19）：新增 `p06-extension-tool-bridge` 探针，验证 BYOK 真实使用的 **extension 注册工具**路径（`mcp-extension.ts:111` 的 `pi.registerTool`）在官方发行版上成立——`<inline:1>` 唯一加载、wire `tools` 恰为 `["probe_bridge"]`、往返 2 次请求、`bridge:ping` 回到后继请求。结论：**OP3 的工具/装载面不依赖 G-A/G-B/G-C**，可先行实现；prepared 相关路径继续禁用。
+  - [x] OP3 **范围实测（2026-09-19，修正估计）**：`check:pi-fork-surface` 把 fork 专有 import 按文件种类拆开后显示，**生产源码只有 3 个文件 / 10 个 import**：`adapters/pi/input-preparation.ts`(8)、`daemon/input-preparation-service.ts`(1)、`types.ts`(1)；其余 8 个 import 分布在 6 个测试、1 个构建 gate 与 1 个生成的 API golden。
+    - 含义：**BYOK 对 fork 的依赖完全落在 prepared-input 这条路径上**；会话组装 / RPC host / MCP 工具桥接 / 装载 allowlist 都只用官方公开面（P01/P05/P06 已行为验证）。
+    - 因此 OP3 的「runtime、工具、消息、凭证迁移」**基本已经成立**，不需要新建组装模块——先前设想的「抽出公开入口组装」是错误前提，已被该测量否掉。
+    - 依赖链收紧为：**上游 G-C（+G-B 契约）→ OP2 → OP5 → OP8**；这条取代了 plan §5「三条并行线」中「OP3 有独立可推进部分」的乐观假设。
+    - 已加护栏：`check-pi-fork-surface` + 4 个用例，其中一条断言生产源码集合恰为上述 3 个文件——**fork 若扩散到 prepared 之外，测试立刻红**。
 - [ ] OP4 五边递归、custody、workflow 等价接线
 - [ ] OP5 官方依赖、身份、安装与来源证明
 - [ ] OP6 Host C07-H2b 与正式包消费

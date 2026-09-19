@@ -59,3 +59,19 @@ test('the recorded inventory still describes this repository', () => {
     assert.ok(hits.length <= RECORDED_INVENTORY[file], `${file} grew beyond the recorded count`);
   }
 });
+
+// The migration's scope: if this set grows, the fork has spread beyond the
+// prepared-input path and the plan's remaining-work estimate is wrong.
+test('production source depends on the fork only through the prepared-input path', () => {
+  const inventory = collectForkSurface();
+  const source = Object.keys(inventory)
+    .filter((file) => !file.startsWith('api-surface/'))
+    .filter((file) => !/\.(test|spec)\.[cm]?[jt]s$/.test(file) && !file.includes('/__tests__/'))
+    .filter((file) => !file.endsWith('.mjs') && !file.endsWith('.js'))
+    .sort();
+  assert.deepEqual(source, [
+    'packages/client/src/adapters/pi/input-preparation.ts',
+    'packages/client/src/daemon/input-preparation-service.ts',
+    'packages/client/src/types.ts',
+  ]);
+});

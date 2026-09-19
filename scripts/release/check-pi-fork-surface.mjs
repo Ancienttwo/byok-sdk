@@ -105,10 +105,29 @@ function main() {
     .map(([file, hits]) => ({ file, was: RECORDED_INVENTORY[file], now: hits.length }));
   const remaining = Object.values(inventory).reduce((total, hits) => total + hits.length, 0);
 
+  // The migration's own scope: production source is what OP3/OP5 must remove.
+  // Tests and build gates follow it; the generated API golden is downstream.
+  const kinds = { source: [], test: [], script: [], golden: [] };
+  for (const file of Object.keys(inventory)) {
+    if (file.startsWith('api-surface/')) kinds.golden.push(file);
+    else if (/\.(test|spec)\.[cm]?[jt]s$/.test(file) || file.includes('/__tests__/')) kinds.test.push(file);
+    else if (file.endsWith('.mjs') || file.endsWith('.js')) kinds.script.push(file);
+    else kinds.source.push(file);
+  }
+  const sourceImports = kinds.source.reduce((total, file) => total + inventory[file].length, 0);
+
   const report = {
     kind: 'pi-fork-surface',
     recordedFiles: recorded.size,
     remainingForkOnlyImports: remaining,
+    productionSourceFiles: kinds.source.sort(),
+    productionSourceImports: sourceImports,
+    breakdown: {
+      source: kinds.source.length,
+      test: kinds.test.length,
+      script: kinds.script.length,
+      golden: kinds.golden.length,
+    },
     added,
     grown,
     removed,
@@ -119,8 +138,11 @@ function main() {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } else {
     process.stdout.write(
-      `[PiForkSurface] files=${found.size} fork-only-imports=${remaining} added=${added.length} grown=${grown.length} removed=${removed.length}\n`,
+      `[PiForkSurface] files=${found.size} fork-only-imports=${remaining} (production source: ${kinds.source.length} files / ${sourceImports} imports) added=${added.length} grown=${grown.length} removed=${removed.length}\n`,
     );
+    for (const file of kinds.source.sort()) {
+      process.stdout.write(`  source: ${file} (${inventory[file].length})\n`);
+    }
     for (const file of added) {
       process.stdout.write(`  + new fork-only import site: ${file}\n`);
     }

@@ -163,3 +163,15 @@
 一次通过：加载路径 `["<inline:1>"]`、wire `tools` 恰为 `["probe_bridge"]`、往返 2 次请求、`bridge:ping` 出现在后继请求。verdict = supported。套件现为 8 项，其余 7 项 verdict 不变。
 
 含义：OP3 的工具/装载面**不依赖 G-A/G-B/G-C**，可以在官方运行时上先行实现与验收；只有 prepared 相关路径继续禁用。
+
+## OP3 范围实测：fork 依赖只在 prepared 路径（2026-09-19）
+
+把 `check:pi-fork-surface` 的输出按文件种类拆开后得到一个比预期重要的结论：**生产源码只有 3 个文件 / 10 个 import 触碰 fork 专有面** —— `adapters/pi/input-preparation.ts`(8)、`daemon/input-preparation-service.ts`(1)、`types.ts`(1)。其余 8 个 import 在 6 个测试、1 个构建 gate、1 个生成的 API golden。
+
+会话组装（`pi-session-runtime.ts`）、RPC host、MCP 工具桥接、装载 allowlist 全部只用官方公开面——P01/P05/P06 已行为验证。所以：
+
+1. OP3 的「runtime、工具、消息、凭证迁移」**基本已经成立**，不需要新建组装模块（上一轮我提议的「抽出公开入口组装」是错误前提，被这条测量否掉）。
+2. BYOK 对 fork 的依赖**完全落在 prepared-input 路径**，而那正是 G-B/G-C 卡住的地方。
+3. 依赖链因此收紧为 **上游 G-C（+G-B 契约）→ OP2 → OP5 → OP8**。
+
+护栏已加固：新增第 4 个用例断言生产源码集合恰为上述 3 个文件——fork 一旦扩散出 prepared 路径，测试立刻红。
