@@ -302,6 +302,8 @@ node packages/client/probes/pi-official/run.mjs --probe p04d   # G-D
 
 ### 充分性证明：补上那一项输入后 5/5 全部逐字节相等
 
+> **更正（同日更晚一次核对）**：这一节下面的结论**是错的**，原因见本节末尾的「更正」段。
+
 上面只是「归因」；再补一步就能证明「有它即可」。会话实际用的不是公开的 `createCodingTools`，而是内部工厂 `createAllToolDefinitions(cwd, {read,bash,…})`（`packages/coding-agent/src/core/tools/index.ts:182`，**未从包根导出**）；per-tool 的 `promptSnippet` / `promptGuidelines` 就定义在这批定义上。
 
 在实验里改用同一工厂取 snippet/guideline（其余输入不变，`selectedTools` 仍用会话的实际四项），比对结果：
@@ -319,6 +321,18 @@ node packages/client/probes/pi-official/run.mjs --probe p04d   # G-D
 于是 G-A 的请求从「一个缺口」变成一句**已被证明充分**的话：
 
 > 请把 `createAllToolDefinitions`（或等价的 per-tool `promptSnippet` / `promptGuidelines` 映射）暴露为公开入口。证据：用同一工厂 + 同一组显式输入，会话首请求的派生提示状态 5/5 section 逐字节复现；其余部分（`toolsAdded` 的模型可见 schema、sections 中的 `cwd`/`docs`/`preamble`）在只用公开入口时就已经逐字节相等。
+
+#### 更正：G-A **不是**上游缺口，用公开入口即可 5/5
+
+上面把「缺的那一项输入」指成内部工厂 `createAllToolDefinitions`，并据此提出公开请求——**这个判断是错的**，错在我用错了公开工厂。
+
+包根**已经导出**每个工具的 definition 工厂（`packages/coding-agent/src/index.ts:305-314`：`createBashToolDefinition` / `createEditToolDefinition` / `createReadToolDefinition` / `createWriteToolDefinition` 等），而它们产出的定义**确实带** `promptSnippet`（`core/tools/read.ts:74`、`core/tools/bash.ts:388`）。`AgentSession` 内部正是用这些工厂组合出 `createAllToolDefinitions`。
+
+改用这组**公开**函数取 snippet/guideline 后重跑实验：`cwd` 76 / `docs` 1160 / `preamble` 169 / `rules` **839** / `tools` **339** —— **5/5 逐字节相等，`sectionsEqual: true`**。
+
+结论修正：**G-A 从上游请求中删除。** 会话首请求的派生提示状态可以用包根公开导出逐字节复现；`toolsAdded` 的模型可见 schema 也已 4/4 相等。先前两次失败（230/170、以及 `createCodingTools` 只有 `bash` 带 snippet）都是用错工厂造成的假缺口，而不是上游缺能力。
+
+对上游只剩一条**可选**的文档建议（不是请求）：说明 `createCodingTools` 与 per-tool definition 工厂在 prompt 元数据上的差别，避免其他嵌入方重复我们这段弯路。
 
 ## 9. G-B 量化（2026-09-19，上游 main 的请求构造）
 

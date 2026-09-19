@@ -9,50 +9,16 @@ Measured against `main` (2026-09-19), Node v24.18.0, darwin-arm64.
 
 ## Title
 
-Expose three small pieces of the public surface so an embedder can reproduce a
-session's first request, certify its shape, and import host-owned assistant text
+Two small public-surface gaps for an embedder: a published provider-request
+shape, and a supported way to import host-owned assistant text
 
 ## Body
 
-We embed `@earendil-works/pi-coding-agent` behind our own daemon and need three
-things that today are only reachable through internals. Each one is small, each
-one is measured, and none of them changes existing CLI behaviour. We are not
-asking for new subsystems.
+We embed `@earendil-works/pi-coding-agent` behind our own daemon. Two things are
+still out of reach. Each is small, each is measured, and neither changes existing
+CLI behaviour. We are not asking for new subsystems.
 
-### 1. Export `createAllToolDefinitions` (or its prompt metadata)
-
-**What we need.** A public way to obtain the builtin tool definitions, together
-with their per-tool `promptSnippet` and `promptGuidelines`.
-
-**Why.** `AgentSession` builds the system prompt from
-`createAllToolDefinitions(cwd, …)` (`packages/coding-agent/src/core/tools/index.ts:182`),
-which is not exported from the package root. The public
-`createCodingTools(cwd)` returns different objects: in a session with the
-default four tools, only `bash` carries `promptSnippet`/`promptGuidelines`.
-
-**Measured.** Rebuilding the derived prompt state with the public path only
-matches 3 of 5 sections byte-for-byte. Using the same
-`createAllToolDefinitions` factory, with every other input unchanged, matches
-**5 of 5**:
-
-| section | session | rebuild via public entry | rebuild via `createAllToolDefinitions` |
-|---|---|---|---|
-| `cwd` | 76 | 76 ✅ | 76 ✅ |
-| `docs` | 1160 | 1160 ✅ | 1160 ✅ |
-| `preamble` | 169 | 169 ✅ | 169 ✅ |
-| `rules` | 839 | 146 ❌ | 839 ✅ |
-| `tools` | 339 | 124 ❌ | 339 ✅ |
-
-(byte lengths; the `tools` section follows the explicit tool selection exactly —
-selecting eight tools instead of four changed it to 532, so there is no hidden
-state.)
-
-**Ask.** Export `createAllToolDefinitions`, or expose the
-`promptSnippet`/`promptGuidelines` maps the session uses. Everything else in the
-first request — messages, tool schemas, and the other three sections — already
-reproduces byte-for-byte through public entries alone.
-
-### 2. Publish the provider request shape (key set + value class), fail closed on unknown keys
+### 1. Publish the provider request shape (key set + value class), fail closed on unknown keys
 
 **What we need.** A published, versioned statement of the top-level keys a
 provider request can carry, with a value class for each, and a fail-closed path
@@ -76,7 +42,7 @@ case we could find (`model` incl. `compat`, `context`, `options`).
 **Ask.** Publish that shape contract with the adapter version, and reject or
 report an unclassified key instead of silently sending it.
 
-### 3. Let callers import assistant text they already own (shape: your choice)
+### 2. Let callers import assistant text they already own (shape: your choice)
 
 **What we need.** A supported way to place text the caller asserts was already
 said into a new session, without fabricating `api`/`provider`/`model`/`usage`.
@@ -111,7 +77,35 @@ message conversions.
 
 ---
 
-### Minimal reproduction (both first two findings)
+### Verified: reproducing a session's first request needs no new API
+
+We expected to have to ask for a new public entry here, and we do not. The
+derived prompt state of a session's first request reproduces **5 of 5 sections
+byte-for-byte** using only exports from the package root:
+
+| section | session | rebuild through public entries |
+|---|---|---|
+| `cwd` | 76 | 76 ✅ |
+| `docs` | 1160 | 1160 ✅ |
+| `preamble` | 169 | 169 ✅ |
+| `rules` | 839 | 839 ✅ |
+| `tools` | 339 | 339 ✅ |
+
+The composition is: `buildSystemPromptSections({ cwd, selectedTools,
+toolSnippets, toolGuidelines, … })`, with the snippets and guidelines taken from
+the public per-tool definition factories (`createReadToolDefinition`,
+`createBashToolDefinition`, `createEditToolDefinition`,
+`createWriteToolDefinition`, …). Note for anyone else doing this: the public
+`createCodingTools` returns different objects whose prompt metadata does not
+cover all builtins — the per-tool *definition* factories are the ones
+`AgentSession` composes, and they are already public. We are recording this so it
+does not turn into a third request; documentation of that distinction would be
+welcome but is not required.
+
+The tool declarations (`toolsAdded`) we captured from the same session also
+match, four for four, on description and parameters.
+
+### Minimal reproduction (for the two requests above)
 
 Both are reproducible on `main` with the repository's own test scaffolding; no
 credentials and no network are used. A temporary vitest file under

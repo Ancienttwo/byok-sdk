@@ -135,3 +135,13 @@
 - G-C：host 断言 assistant 文本，形状由上游选；证据是「静默 0 请求」的对照表与三种形状的 146 处代价。
 
 **明确未对外提交**：公开向 `earendil-works/pi` filing 是外部动作（会在用户账号下产生公开内容），需要 owner 的 go/no-go。plan §7.2 要求的交付物已经齐全：可运行最小反例、精确缺失符号与位置、责任归属（上游）、下一补丁位置。
+
+## 重要更正：G-A 不是上游缺口（2026-09-19，成文后复核）
+
+在真的要提交之前又核了一遍，结论**推翻了自己前两轮的判断**：包根**已经公开导出** per-tool definition 工厂（`packages/coding-agent/src/index.ts:305-314`），它们产出的定义带 `promptSnippet`（`core/tools/read.ts:74`、`core/tools/bash.ts:388`），而 `AgentSession` 正是用这些工厂组合内部的 `createAllToolDefinitions`。
+
+用这组**公开**函数取 snippet/guideline 重跑：`cwd` 76 / `docs` 1160 / `preamble` 169 / `rules` **839** / `tools` **339** → **5/5 逐字节相等**。先前 230/170 与「只有 bash 带 snippet」都是用 `createCodingTools`（不同工厂）造成的**假缺口**。
+
+因此：**上游请求从三条减为两条**（G-B 请求形状契约 + G-C host 断言历史），G-A 改为一条可选的文档建议。交付文本 `docs/researches/2026-09-19-official-pi-upstream-request.md` 已按此改写并保留了「已验证、不需要新 API」一节，避免上游被要求做已有的事。
+
+可复用教训：判断「上游缺入口」时必须先确认**用的是不是上游自己用的那个公开入口**；用错同名工厂会造出一个看起来很扎实的假缺口，而且它会一路通过归因与充分性检验。
