@@ -63,3 +63,234 @@
 - **P05 supported（装载面）**：植入 cwd/agentDir 的恶意 extension、恶意 skill、恶意 `AGENTS.md` 全部未被加载，只有 `<inline:1>`；skills 0、extension 错误 0。
 
 **G1 = 第二档**：走 OP2-U 最小上游接口，相关生产路径保持禁用。
+
+## OP2-U 定界（2026-09-19，追加探针）
+
+为把上游请求切到可提接口的粒度，探针套件加了 `p03b`（会话外请求捕获）与 `p04d`（拒发可观测性），套件现为 7 项。结论：
+
+- **G-A**：会话外经公开 `streamSimple` 拿得到 D（248 字节，`onPayload` 与 transport 字节一致，端点 0 请求），但**不是会话会发的那一份**（308 字节）：会话把 `Current working directory: …` 追加进系统消息，且直接路径多出 `prompt_cache_key`/`prompt_cache_retention` 两个顶层键。所以「公开编译路径完全不存在」这个判断被否掉了，真正的缺口是「复现会话首请求」。
+- **G-B**：payload 不携带任何覆盖证明或结构分类（实测 certification 字段为空集），INV-06 因此无法只靠官方满足。
+- **G-C**：host 断言历史仍是静默 0 请求。
+- **G-D 不需要上游**：`p04d` 证明运行归属方可自行判定「拒发且零请求」（4 次可归属 refusal、端点 0 请求），虽然 `prompt()` 仍不抛错、最终 `agent_settled`。BYOK 侧必须显式映射，不能把「正常结束」当成功。
+
+交付物：`docs/researches/2026-09-19-official-pi-op2u-upstream-request.md`（缺口、请求接口的形状与要求、最小复现命令、上游验收面、BYOK 侧能力边界）。
+
+## OP2-U 形状可行性实测（2026-09-19）
+
+上一轮把 G-C 定为「最小的一刀」，这一轮实际动手后**推翻了这个判断**：
+
+1. 完整 checkout 上游 `main`（14+ workspace），`npm ci --ignore-scripts` 之后 `hydrate-model-data` 是必须的——没有它，生成的模型数据为空，类型检查会报 808 个与生成数据相关的错误，属于假红。
+2. 处理完这一步后基线 **`npx tsgo --noEmit` = EXIT 0**，干净基线成立。
+3. 只在 `packages/ai/src/types.ts` 加一个 host 断言消息种类 + 判别位 + 扩展 `Message` 联合，立刻产生 **146 个类型错误，分布 42 文件 / 4 package**（`coding-agent` 75、`agent` 44、`ai` 22、`evals` 5；src 107 / test 28 / examples 11）。
+4. 结论：判别位进入联合后，每一个字段读取点都必须表态，包括 BYOK 根本不用的 `packages/agent` harness 与 `packages/evals`。这类跨 4 包的改动应由上游选形，而不是 BYOK 提交既成事实的补丁。
+
+因此 OP2-U 交付物改写为「代价实测 + 形状选择（A 新成员 / B 放宽字段 / C 新导入入口）+ 最小复现 + 验收面」。本轮未向上游提交任何内容；上游 checkout 在 `/tmp/pi-upstream`，仅为本机证据。
+
+## G-A 实测（2026-09-19，上游 main 真实 session 路径）
+
+在同一个已装好依赖、基线类型检查 EXIT 0 的 checkout 里写了临时 vitest 实验（只在本机，未提交上游），用仓库自带的 `createModelRegistry` / `getModelRuntime` / `createTestResourceLoader` 建真实 `AgentSession`，把真实目录模型的 transport 换成调用方拥有的 `streamSimple` 并拒发。
+
+一次通过的结果：会话首请求 body **6123 字节**，顶层键 `max_tokens, messages, model, stream, system, thinking, tools`；交给 transport 的 Context **只有 `messages`**；角色序列 **`system, system, user`**；transport 尝试 **4** 次。
+
+三条结论：① 系统提示在 `main` 上是**两条** system 消息，复现必须复现这个拆分；② `system`/`tools`/`thinking`/`max_tokens` 由 adapter 选项层拼出，所以复现还要包含**选项推导**；③ `auto_retry` 在 `main` 上仍是 4 次尝试，说明 P04-B 的「拒发不可传播」不是旧版本问题，G-D 继续按 BYOK 侧显式映射处理。
+
+随后把同一实验推进到逐字节比对：会话交给 transport 的三条消息是 `system(调用方原文 16B)` / `system(content="", sections, toolsAdded)` / `user(32B)`；用公开 `buildSystemPromptSections({ cwd })` 在没有 session 的情况下重建，第一轮就 **3/5 sections 逐字节相等**（`cwd` 76、`docs` 1160、`preamble` 169），`rules`（839 vs 146）与 `tools`（339 vs 124）不同，补 `selectedTools` 后调用方结果不变。
+
+由此再次收紧 G-A：官方缺的不是「一个 compile 函数」，而是**会话自己的输入推导**——会话喂给投影的那整套输入（工具选择、snippets、guidelines、context files、skills、append 配置）没有公开入口能让调用方以同样方式得到。请求改为「暴露/文档化该输入推导，使调用方能以同一组显式输入逐字节重建首请求」。
+
+## G-A 字段级归因（2026-09-19，收口）
+
+按 `agent-session.ts:1081-1101` 的规则把会话输入逐项搬到调用方：只给 `cwd` → `rules` 146 / `tools` 124；加 `selectedTools` → **无变化**（工具名单不是来源）；再加从 `createCodingTools(cwd)` 读出的 `toolSnippets`/`toolGuidelines` → 230 / 170，而会话实际是 **839 / 339**。
+
+根因明确：会话的 snippet/guideline 表来自它自己的定义注册表（`agent-session.ts:2800-2814` 遍历 `_baseToolDefinitions` + custom tools），公开的 `createCodingTools()` 返回的对象**只有 `bash` 一个**带 `promptSnippet`/`promptGuidelines`。工具集合两边相同（都是 read/bash/edit/write），差的是 prompt 元数据。
+
+**G-A 残余因此收敛为一项**，上游请求可写成一句话：请把 builtin 工具定义（含 prompt 元数据）或会话使用的 snippet/guideline 映射暴露出来。三段证据链完整：投影是公开纯函数 → 输入推导规则可读 → 只有 builtin 工具 prompt 元数据缺公开来源。
+
+再补最后一刀（`toolsAdded` 比对）后 G-A 收口：会话捕获的 `toolsAdded` 与公开 `createCodingTools(cwd)` 的模型可见投影在 `read`/`bash`/`edit`/`write` 上 **4/4 逐字节相等**（description 303/248/326/127 字节、parameters 全等），差异只在调用方对象多带的 `execute`/`label`/`executionMode`/`prepareArguments`（不进请求）。四条证据齐备后，G-A 的上游请求定稿为「暴露 builtin 工具定义（含 promptSnippet/promptGuidelines）或 session 的 snippet/guideline 映射」，不需要新接口、不需要改消息模型。
+
+## G-B 量化（2026-09-19）
+
+与 G-A 同法：读上游 `packages/ai/src/api/openai-completions.ts` 的请求构造。整个 provider 请求由**一个** `buildParams`（796–1002 行）产出——字面量 5 键（`model, messages, stream, prompt_cache_key, prompt_cache_retention`）+ 条件赋值 15 键（`chat_template_kwargs, enable_thinking, max_completion_tokens, max_tokens, priority, provider, providerOptions, reasoning_effort, store, stream_options, temperature, thinking, tool_choice, tool_stream, tools`），每个键的出现与取值都由 `model`/`context`/`options` 显式决定。
+
+结论：**键集合封闭可枚举（约 20 个），缺口不是能力而是契约**——没有带版本的「键集合 + 值类别」声明，也没有未分类键 fail closed 的路径。让调用方自己维护这份清单等于允许第二份语义权威，上游新增一个键就会静默失准。G-B 请求因此缩为：公开请求形状契约并对未知键 fail closed。
+
+三条缺口形态统一：G-A 暴露 builtin 工具 prompt 元数据 / G-B 公开请求形状契约 / G-C 三选一形状——可以一次性提交给上游。
+
+## G-A 充分性证明（2026-09-19，收尾）
+
+关键发现：会话用的不是公开的 `createCodingTools`，而是**内部**工厂 `createAllToolDefinitions`（`packages/coding-agent/src/core/tools/index.ts:182`，未从包根导出），per-tool 的 `promptSnippet`/`promptGuidelines` 定义在这批定义上。
+
+实验改用同一工厂取 snippet/guideline（`selectedTools` 仍用会话实际四项）后：`cwd` 76 / `docs` 1160 / `preamble` 169 / `rules` 839 / `tools` 339 —— **5/5 section 逐字节相等**，脚本输出 `sectionsEqual: true`。
+
+顺带纠正一次自己的假设：曾误把全部 8 个工具当 `selectedTools`，`tools` 反而变成 532，说明该 section 严格跟随显式工具选择、无隐藏状态。
+
+于是 G-A 的请求是**已被证明充分**的一句话：暴露 `createAllToolDefinitions` 或等价的 prompt 元数据映射即可；其余部分（`toolsAdded` 的模型可见 schema、三个 section）在只用公开入口时已逐字节相等。
+
+## OP2-U 交付物成文（2026-09-19）
+
+把三轮分析折成一份**自包含、可直接提交**的上游请求文本：`docs/researches/2026-09-19-official-pi-upstream-request.md`（英文、不含 BYOK 内部术语，含标题/正文/最小复现/「我们不要求什么」）。
+
+- G-A：导出 `createAllToolDefinitions` 或 per-tool prompt 元数据；证据是 3/5 → 5/5 的逐字节对比表。
+- G-B：公开 provider 请求形状契约（键集合 + 值类别）并对未知键 fail closed；证据是 `buildParams` 的 5 + 15 键清单。
+- G-C：host 断言 assistant 文本，形状由上游选；证据是「静默 0 请求」的对照表与三种形状的 146 处代价。
+
+**明确未对外提交**：公开向 `earendil-works/pi` filing 是外部动作（会在用户账号下产生公开内容），需要 owner 的 go/no-go。plan §7.2 要求的交付物已经齐全：可运行最小反例、精确缺失符号与位置、责任归属（上游）、下一补丁位置。
+
+## 重要更正：G-A 不是上游缺口（2026-09-19，成文后复核）
+
+在真的要提交之前又核了一遍，结论**推翻了自己前两轮的判断**：包根**已经公开导出** per-tool definition 工厂（`packages/coding-agent/src/index.ts:305-314`），它们产出的定义带 `promptSnippet`（`core/tools/read.ts:74`、`core/tools/bash.ts:388`），而 `AgentSession` 正是用这些工厂组合内部的 `createAllToolDefinitions`。
+
+用这组**公开**函数取 snippet/guideline 重跑：`cwd` 76 / `docs` 1160 / `preamble` 169 / `rules` **839** / `tools` **339** → **5/5 逐字节相等**。先前 230/170 与「只有 bash 带 snippet」都是用 `createCodingTools`（不同工厂）造成的**假缺口**。
+
+因此：**上游请求从三条减为两条**（G-B 请求形状契约 + G-C host 断言历史），G-A 改为一条可选的文档建议。交付文本 `docs/researches/2026-09-19-official-pi-upstream-request.md` 已按此改写并保留了「已验证、不需要新 API」一节，避免上游被要求做已有的事。
+
+可复用教训：判断「上游缺入口」时必须先确认**用的是不是上游自己用的那个公开入口**；用错同名工厂会造出一个看起来很扎实的假缺口，而且它会一路通过归因与充分性检验。
+
+## G-C 隔离实验：确认为硬缺口（2026-09-19）
+
+问题：G-C 能不能不改上游、也不伪造 provenance 地绕开？做法是在上游 checkout 内直接调公开 `streamSimple`，三段消息，唯一变量是那条 assistant 文本是否带 provenance，fetch 打桩记录是否被调用。
+
+- 对照（无 assistant 消息）：fetch **被调用**，无报错。
+- `host_text`（assistant 文本无 provenance）：fetch **从未被调用**，且**不报错**，流正常结束。
+- `full_provenance`（同样文本补齐 `api`/`provider`/`model`/`usage`/`stopReason`）：fetch **恢复被调用**。
+
+结论：原因被隔离到具体字段；失败是静默的（正是 p02「正常结束但 0 请求」的机制）；唯一 workaround 是伪造历史出处与用量，被 INV 与方案 §8.2 明令禁止。**G-C 是确认的硬缺口**，最小反例缩到三条消息 + 一个布尔观测。
+
+**同日更正（重要）**：把 `result()` 的返回值也读出来后发现它**不是静默**——`stopReason: "error"`、`errorMessage = "Cannot read properties of undefined (reading 'totalTokens')"`。根因是请求构造读了 undefined `usage` 上的 `totalTokens` 并抛 TypeError，而**不是丢弃** host 文本；session 层看似静默只因 `prompt()` 不抛错（也解释了 `p04d` 那四条 `stopReason: "error"`）。上一条里的「静默」二字以此为准。
+
+影响：上游最小修复从「新增消息种类（146 处）」缩为「补 guard + 定义缺失 usage 的行为」；BYOK 侧今天就能靠 `stopReason === "error"` + errorMessage fail closed。
+
+## P06：OP3 工具面解风险（2026-09-19）
+
+既然 G-C 只能等上游，本轮改去推进「不依赖它」的部分。新增第 8 个探针 `p06-extension-tool-bridge`，验证 BYOK **真实使用**的工具通路——由 extension 注册工具（`packages/client/src/adapters/pi/mcp-extension.ts:111` 调 `pi.registerTool`），而不是 P01 用的 `customTools`。
+
+一次通过：加载路径 `["<inline:1>"]`、wire `tools` 恰为 `["probe_bridge"]`、往返 2 次请求、`bridge:ping` 出现在后继请求。verdict = supported。套件现为 8 项，其余 7 项 verdict 不变。
+
+含义：OP3 的工具/装载面**不依赖 G-A/G-B/G-C**，可以在官方运行时上先行实现与验收；只有 prepared 相关路径继续禁用。
+
+## OP3 范围实测：fork 依赖只在 prepared 路径（2026-09-19）
+
+把 `check:pi-fork-surface` 的输出按文件种类拆开后得到一个比预期重要的结论：**生产源码只有 3 个文件 / 10 个 import 触碰 fork 专有面** —— `adapters/pi/input-preparation.ts`(8)、`daemon/input-preparation-service.ts`(1)、`types.ts`(1)。其余 8 个 import 在 6 个测试、1 个构建 gate、1 个生成的 API golden。
+
+会话组装（`pi-session-runtime.ts`）、RPC host、MCP 工具桥接、装载 allowlist 全部只用官方公开面——P01/P05/P06 已行为验证。所以：
+
+1. OP3 的「runtime、工具、消息、凭证迁移」**基本已经成立**，不需要新建组装模块（上一轮我提议的「抽出公开入口组装」是错误前提，被这条测量否掉）。
+2. BYOK 对 fork 的依赖**完全落在 prepared-input 路径**，而那正是 G-B/G-C 卡住的地方。
+3. 依赖链因此收紧为 **上游 G-C（+G-B 契约）→ OP2 → OP5 → OP8**。
+
+护栏已加固：新增第 4 个用例断言生产源码集合恰为上述 3 个文件——fork 一旦扩散出 prepared 路径，测试立刻红。
+
+## P07：OP4 跨进程定界（2026-09-19）
+
+前面所有结论都出自单进程，而 BYOK 的实际工作发生在子进程。P07 让独立子进程在同一官方 release 上自建 session、注册带捕获 fetch 的 provider，父端点记录收到什么。
+
+结果 supported：放行时子进程 transport 看到 **2087** 字节，父端点收到 **1** 次且字节同为 **2087**；拒发时子进程 4 次尝试、父端点**无新增**请求、`promptError: null`（仍不传播）。与单进程行为完全一致。
+
+含义：**OP4 没有 runtime 能力缺口**，剩余工作全在 BYOK 侧接线（子进程启动绑定、permit/charge-once、root/parent 身份冻结、print/print 多层）。套件现为 9 项。
+
+## OP5 发布/身份面范围实测（2026-09-19）
+
+`@byok-sdk/pi-` 字样分两类：**可执行面 25 文件 / 154 处**、**历史记录 19 文件 / 62 处**（后者按 §6.1 不得改字节）。
+
+可执行面里 **111 / 154 集中在两族 C07 runtime-record fixture**（`rejections.v1.json` 70、`canonical-revision.v1.json` 41）——它们编码 `expectedStaticPin` 与 `nativeProvenance.packageName` 等身份期望；其余为 `resolve-bin.test.ts`(9)、`pack-and-smoke.test.mjs`(5)、`packages/client/package.json`(3)、`pi-runtime-identity.mjs`、`check-adapters-entry.mjs` 与约 15 个 1–2 处测试。
+
+含义：**OP5 的最大单项是 fixture 重生成，不是身份脚本**。切换后 `check:release-graph` / `check:release-pack` / client 测试会红一片，其中大部分红来自 fixture 期望而非实现缺陷——G3 的验收必须先区分这两类。
+
+## G-B 收敛：漂移由 BYOK 在运行时拒绝（2026-09-19）
+
+与 G-C 同样追问「是否真的需要上游」。答案是不需要：危险失败模式是「上游加键 → BYOK 静默少算」，而 BYOK 已能在自己的 transport 上拿到最终 payload 本体，所以只要**记录已知键类别 + 未知即拒绝**即可。
+
+实现：`packages/client/src/adapters/pi/request-shape.ts`（20 键 → content/framing/transport；`assertRequestShape` 抛 `RequestShapeDriftError`）+ `request-shape.test.ts` **5 用例全绿**（含「新增未知键被拒」「未知 api 视为漂移」两个负控）。
+
+关键取舍：与「本地清单」的区别不在清单，而在**失败方向**——护栏让漂移变成响亮拒绝，权威让漂移变成安静错预算。前者是允许的 fail-closed 校验，后者才是被禁止的第二语义权威。
+
+结果：**上游请求实质只剩 G-C 一项**；G-B 降为可选改进。
+\n
+## 结论性测量：OP2 不需要上游的 prepared-input 接口（2026-09-19）
+
+上游 main 的真实 session 上捕获 Context+options+body 后，用同一官方 serializer 会话外重建：**重放完整 options 与只用极简 options（`apiKey`/`model`/`sessionId`/`reasoning`）都得到 byte-identical 的 6123 字节，diff 为空**。session 注入的 agent-loop 回调（`prepareNextTurn`/`beforeToolCall`/`getSteeringMessages`/`shouldStopTurn`/`convertToLlm`…）对请求体没有影响；决定 body 的只有 model、context、sessionId、reasoning。
+
+与前面几轮拼起来，prepared 路径可全建在官方公开入口 + 自有 transport 上：编译 D（P03b 的捕获型 fetch）→ 复现 Context（5/5 sections + 4/4 工具）→ 覆盖证明（`request-shape.ts`）→ 发送点比对冻结 D（P04）。唯一额外输入 `sessionId` 由 BYOK 自定。
+
+**因此 OP2 的上游依赖只剩 G-C 的 5 行 guard。**
+
+## OP2 接线工作面实测：第三个上游项（2026-09-19）
+
+接线前先量了两个 fork 文件的真实用法（9 处，逐条见 OP2-U §15）。结果比预期多一项：`RPC_MAX_FRAME_BYTES`/`fitsRpcFrame`/`rpcFrameByteLength`（`rpc-types`，被 `daemon/input-preparation-service.ts:38-43` 与 `prepared-prompt-frame` 使用）描述的是 **Pi 自己 stdin 读取器的帧上限**，属运行时属性，BYOK 不能在本仓重实现——那会造第二份权威，且一旦与实际读取器不一致，帧会被静默丢弃/截断。
+
+因此上游请求是三项：① G-C 的 5 行 guard（已实测）② 帧上限助手（纯导出、无行为变更）③ 请求形状契约（可选）。
+
+接线仍须分多刀：`PreparedSessionInputV2` envelope 穿过 daemon 服务、store/receipt、Host CAS 与 prepared host，替换它同时触及编译/冻结/组帧/消费四处。
+
+## 全量验证证据 + 一个重要环境事实（2026-09-19）
+
+第一次跑 `packages/client` 全量测试得到 **185 个文件失败**，但全部是环境性的：错误集中在 `Failed to resolve entry for package "@byok-sdk/protocol"` / `@byok-sdk/core` / `@byok-sdk/implementation-identity` 以及缺少 `dist/bin/*` —— 即本 worktree **从未构建过 workspace**（本轮之前只跑过探针与两个新单测文件，它们不依赖 workspace 产物）。
+
+先 `bun run build`（EXIT=0）再重跑：**244 passed / 2 skipped（文件级），2906 tests passed / 11 skipped，EXIT=0，152s**。
+
+两点记录：
+
+1. **本 worktree 的验证前置是 `bun run build`**；不构建就直接跑 client 测试会得到一片假红。后续任何全量验证都要先构建。
+2. 这是迄今最强的验证证据：迁移的主要写入面（client 包）在我加入 `request-shape.ts` 与 `prepared-request.ts` 之后**全绿**。
+
+## 仓库自带 gate 的验证（2026-09-19）
+
+除 client 全量测试外，又跑了仓库声明的 required checks：
+
+| 检查 | 结果 |
+|---|---|
+| `bun run typecheck`（15 个 package） | **EXIT 0** |
+| `bun run check:api-surface` | **EXIT 0**（10 个 package golden 与构建产物一致） |
+| `bun run check:release-graph` | **EXIT 0**（10 manifest 对齐 0.18.0、keys 0.5.0；umbrella 7 命名空间且无 keys 边） |
+
+含义：新增的 `request-shape.ts` / `prepared-request.ts` 与仓库自身 gate 兼容，没有引入 public surface 或依赖图变化。`prepared-request.ts` 里对 adapter 调用用了显式 `as never` 边界转换（该模块不深引 provider 类型、也不检查传入对象，只使用序列化后的 body），已在代码内注明理由。
+
+## OP2 接线门槛确认：guard 必要但不充分（2026-09-19）
+
+把两个结果放在一起看：「5 行 guard 已实测」与「新增 `Message` 联合成员要动 146 处」**不矛盾，是同一请求的两半**——guard 修的是运行时崩溃，类型面仍无法表达「无出处的 assistant 文本」。
+
+BYOK 现在的投影函数（`input-preparation.ts:366-379`，把 host 文本构造成 `HostCanonicalAssistantMessage`）能工作，只因为 fork 提供了那个**类型**。改用官方类型只剩两条路：cast 出带假 usage 的对象（伪造 provenance，INV/§8.2 禁止）或取消 host 历史（静默降级，INV-14 禁止）。
+
+因此 **OP2 接线在此之前不能安全开工**；G-C 的完整请求 = 运行时 guard（5 行，已实测）+ 类型面表达方式（形状由上游选）。
+
+## G-C 类型形状：两种代价已量完，A 更便宜（2026-09-19）
+
+同一条干净基线上试两种形状（`npx tsgo --noEmit`）：
+
+- **A 新增 `Message` 联合成员**：**146 处**（coding-agent 75 / agent 44 / ai 22 / evals 5）
+- **B 放宽 `api`/`provider`/`model`/`usage`/`stopReason` 为可选 + `origin?: "host"`**：**256 处**（ai 155 / coding-agent 93 / agent 5 / evals 3）
+
+结论与直觉相反：B 把「可能缺失」传播到每个读取 provider 值的点，而它们大多在 provider 层；A 只在需要区分两种 assistant 事实处增加分支。因此上游请求**可以指名 A**（并附两个数字），而非让上游在未知代价里选。
+
+## 身份/发布链工作面实测（2026-09-19，OP5 输入）
+
+`pi-runtime-identity.mjs` 的 5 个导出逐个定了迁移后形态：`PI_DEPENDENCY_SPECIFIER` 不变；`PI_FORK_UPSTREAM_COMMIT` 改指官方 gitHead 或被 integrity 取代；`parsePiRuntimeIdentity` 从 alias 断言改为官方 exact version；`assertInstalledPiRuntime` 从 `byokFork` + prepared entry 改为包名/版本/integrity/exports。消费者 **6 个文件**。
+
+**唯一非机械替换**：现有 gate 要求已安装 runtime 必须带 fork 的 `dist/core/prepared-session-input.js`。迁移后该文件不存在，断言必须拆成 ① 官方来源身份 ② **prepared 能力显式声明为不可用**——后者是 INV-14 在发布链上的落点：**gate 不能因为断言对象消失而变得更易通过**。
+
+## 切片 A 映射层发现：提示渲染器不可公开取得（2026-09-19）
+
+核对当前依赖（fork）公开面：`projectSystemPromptSnapshot`、`SystemPromptSnapshot` 类型、`compileCodingAgentInput` 都在 `/input-preparation` 上可达；但 **`renderSystemPrompt` 不可达**——它存在于 `dist/core/system-prompt-renderer.d.ts`，却不在 `exports` 映射里，`/input-preparation` 也没 re-export。
+
+也就是说当前依赖上，BYOK 能构造结构化 prompt 快照却无法渲染成文本（渲染只在 fork 编译内部）。新版 `main` 公开了 `buildSystemPromptSections` + `getSystemMessageText`，正是这一半的替代。
+
+**更正**：上一轮「切片 A 不依赖上游」只对了一半——编译段不依赖，提示文本来源依赖。上游清单更新为四项（新增「提示渲染器公开」），并为「重钉目标版本」再添一条理由。
+
+## 第 4 项精确化 + 更正自己的过度声明（2026-09-19）
+
+核对两个包的**包根导出**：`getSystemMessageText` **公开**（`pi-ai` 根，`packages/ai/src/index.ts:45`）；per-tool definition 工厂**公开**；但 `buildSystemPromptSections` / `buildSystemPromptState` **不公开**（`coding-agent` 的 `src/index.ts` 440 行里无任何 `system-prompt` 导出），fork 侧的 `renderSystemPrompt` 亦然。
+
+**更正**：§14 写「复现会话首请求不需要新 API」时，实验里 `buildSystemPromptSections` 是从 upstream **源码相对路径**导入的——已发布包的消费者做不到。准确表述：**工具一半只需公开入口（4/4 已证），提示一半需要一个新导出**。
+
+结论：第 4 项请求精确为「导出 `buildSystemPromptSections` / `buildSystemPromptState`」，且**重钉不能自动解决**（`main` 包根同样没有）——重钉只改形状、不改可达性。
+
+## owner 决定：不向上游提交（2026-09-19）
+
+owner 明确指示不向 `earendil-works/pi` 提交任何请求（先给了「批准」，随后更正为「不向 pi 提交请求」，以后者为准）。这移除了 plan §8.2 的 OP2-U 主干路径，后果如实记录：
+
+- 四项缺口（`usage` guard / 类型面形状 / RPC 帧上限助手 / 提示渲染器与 section builders）**不会通过请求解决**；
+- **OP2 接线、OP5、OP8 在现方案下不可达**——prepared 的字节等价前提依赖上游公开面；
+- **fork 仍是唯一可运行的 runtime**，`check:pi-fork-surface` 计数不会下降；
+- `watch-release.mjs` 与 `p08` 保留：若未来某个正式发行版恰好补齐公开面，重跑即可自动得出结论。
+
+可行路径（需 owner 选，我不自行取舍产品语义）：A 维持 fork / B 只迁非 prepared 面并**显式声明 prepared 不可用**（能力移除，INV-14 要求显式）/ C 未来重开上游。**在此之前不切产品依赖。**

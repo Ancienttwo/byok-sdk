@@ -12,6 +12,46 @@
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: pending
 
+## Owner 裁定（2026-09-20）：路径 A —— 有界过渡维护
+
+**状态：Official Pi Migration v1 = 未完成，因 Owner 约束主动暂停（PAUSED_BY_OWNER_CONSTRAINT）。**
+
+- 保持当前产品依赖；**不移除 prepared**；不改 Host assistant 历史、预算、CAS、required message、D2、custody 契约；**不向上游提交**，也不重开。
+- fork **停止非必要功能扩张**；仅保留安全、阻断性正确性、现有承诺所必需的修复。这不等于停止安全更新，也不等于锁死一个已知有漏洞的版本。
+- 其余产品收尾（Host、预算接线、消息恢复、安装、UI）**继续推进**，不因迁移暂停而一起停。
+- **本裁定不等于四个 PR 已验收**：见下「按范围评审」。
+- **当前有效结论（唯一）**：当前冻结的官方发行版尚不能满足本项目完整的 prepared／Host 历史导入契约；现有已集成实现仍依赖 fork。官方基础运行能力已得到探针验证，但完整迁移未完成。**不得**扩展为「任何无 fork 架构都不可行」。
+
+**探针与 watcher 的结论权限已下调**：`p08` 通过只表示「公开面满足，允许重跑行为验收」，**不**自动切换依赖、**不**自动恢复迁移、**不**自动声明完整支持；`check:pi-fork-surface` 的计数是进度指标而非绩效指标，暂停期不下降是预期，**不得通过删除能力让数字归零**。
+
+## PR 按范围评审（不因 MERGEABLE 整链批准）
+
+| PR | 实质内容 | 需要独立验证的部分 |
+|---|---|---|
+| #210 | 证据（基线冻结、delta map）+ 登记 | 证据可复算性；**无**产品代码 |
+| #211 | 探针套件（10 项）+ G1 裁定 | 探针自身的有效性与负控；**不是**完整替代通过 |
+| #212 | 架构 ADR-036 + index/附录 B | 文档与现状是否一致 |
+| #213 | **含实现**：`prepared-request.ts`、`request-shape.ts`、`check-pi-fork-surface.mjs`、`watch-release.mjs` | **必须按代码验证**（单测、typecheck、api-surface、release-graph）；迁移暂停**不**构成跳过验证的理由 |
+
+本裁定不把任何局部成果描述为「官方 runtime 已交付」。
+
+## 交付状态（2026-09-20 更新）
+
+四个模块 PR 已从 draft 转为 **ready for review**，供独立判断使用：
+
+| PR | 模块 | head → base | 合并性 | CI |
+|---|---|---|---|---|
+| [#210](https://github.com/Ancienttwo/byok-sdk/pull/210) | OP0 发行基线 + fork delta 分类 | `codex/official-pi-migration` → `main` | MERGEABLE | 92 checks / **0 failing** |
+| [#211](https://github.com/Ancienttwo/byok-sdk/pull/211) | OP1 探针与 G1 裁定 | `codex/official-pi-op1-probes` → #210 | MERGEABLE | 92 / **0 failing** |
+| [#212](https://github.com/Ancienttwo/byok-sdk/pull/212) | 架构 ADR-036 | `codex/official-pi-arch-docs` → #211 | MERGEABLE | 46 / **0 failing** |
+| [#213](https://github.com/Ancienttwo/byok-sdk/pull/213) | OP2-U 定界 + OP2 核心 | `codex/official-pi-op2u` → #212 | MERGEABLE | 46 / **0 failing** |
+
+（#211 的链接同上仓库路径 `/pull/211`。）
+
+**CI 波动说明（避免误判）**：#210 的同一 commit `ae13c637` 曾出现**两次绿、两次红**——红的是两个 Windows 作业（`Windows Git workspace, store, and security tests (fixed Node)`、`npm release pack/install (windows-latest, fixed Node)`）。对失败作业执行 `gh run rerun --failed` 后恢复为通过，**并且同一 SHA 的更早两次运行本来就是 success**，故判定为**既有 flake**，不是本次改动引入。`main@79f6a0d3`（本分支基线）的 CI 为 success。
+
+**未向上游提交**：owner 明确指示不向 `earendil-works/pi` 提交请求；`docs/researches/2026-09-19-official-pi-upstream-request.md` 已标记 `DO NOT FILE`。
+
 ## Human Review Card
 
 - Verdict: pass（OP0 = 发行基线冻结 + fork delta map + 隔离安装验证；OP1 = 五项 probe + G1 裁定；本切片不切产品依赖）

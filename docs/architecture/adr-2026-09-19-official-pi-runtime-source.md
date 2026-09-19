@@ -16,7 +16,11 @@
 这意味着迁移的真实成本不在「替换依赖」，而在于：这些增量能否用官方公开入口表达。OP1 已就此裁定 G1（第二档）：
 
 - 可行：显式 session 组装、工具往返、生命周期、装载闭合，以及**调用方拥有 transport 而仍由官方 serializer 产出请求体**（gate 观察到的字节与线上收到的字节逐字节相同）。
-- 缺口：没有任何公开的 task-free 编译入口；没有承载 host 断言 assistant 文本的途径（当前表现为**静默不发请求**）；拒发虽然让端点保持 0 请求，但失败被吞掉并触发隐式重试，**不可传播**。
+- 缺口（2026-09-19 晚些时候经三轮追加测量**已修正**，见 `docs/researches/2026-09-19-official-pi-op2u-upstream-request.md`）：
+  - 原「没有公开的 task-free 编译入口」**不成立**——那是用错工具工厂造成的假缺口；改用包根公开的 per-tool definition 工厂后，会话首请求的派生提示状态 **5/5 section 逐字节相等**、工具 schema **4/4 相等**。
+  - 原「拒发不可传播」**不需要上游**——运行归属方可经自有 transport 判定「拒发且零请求」。
+  - 原「host 断言文本表现为静默不发请求」**定性有误**——真实行为是请求构造读取 undefined `usage` 抛 TypeError，`streamSimple` 会 resolve 出 `stopReason: "error"`；session 层看似静默只因 `prompt()` 不抛错。
+  - 修正后的缺口是**四项**：① 运行时 `usage` guard（5 行，已实测）② 类型面能表达无出处的 assistant 文本（形状建议：联合成员，146 处）③ RPC 帧上限助手公开 ④ 提示渲染器公开（或重钉到已公开该能力的新版本）。
 - 反例：`before_provider_request` 钩子即使抛错也拦不住发送。
 
 ## Decision
@@ -42,9 +46,17 @@
 - 迁移期间仓库同时存在既有 fork 依赖与官方候选证据；**在 OP3/OP5 落地前，`bun.lock`、根 manifest 与 client manifest 保持现状**，本 ADR 不把目标状态冒充为已实现状态。
 - OP3/OP5 的实现必须同时更新：依赖与 lock、身份 gate（`scripts/release/pi-runtime-identity.mjs`）、release graph/API surface golden、安装与回退路径、以及用户可见的 runtime 来源披露。
 - 模型目录数据在官方与 fork 间是**双向**差异，切换会改变模型可用性。这是功能面的事实，必须验证与披露，不得当作实现细节。
-- OP2-U 是当前关键路径：它需要上游接受「可传播拒绝」与「host 自有历史导入」等通用能力；在此之前 prepared 生产路径保持禁用，`official_supported` 不得被声明。
+- OP2-U 是当前关键路径，但范围已按实测收窄：可传播拒绝由 BYOK 自有 transport 解决，不需要上游；真正需要上游的是上列四项（运行时 guard、类型面形状、帧上限助手、提示渲染器）。在此之前 prepared 生产路径保持禁用，`official_supported` 不得被声明。
 - 退役 fork 需要排空而非宣告：在途 task、pending message、prepared artifact、home lease 与恢复身份都要按原 runtime 处理完，再切换新准入；旧产物按 retention 与 live reference 清理，不设拍脑袋的 TTL。
 
 ## Status
 
 **Accepted（owner-approved 2026-09-19 direction；implementation gated，未落地）。** 已闭合：OP0 基线冻结与增量分类、OP1 五项 probe 与 G1 裁定。未闭合：OP2-U 上游接口、OP3–OP8。
+
+> **2026-09-20 owner 裁定（取代上一条 09-19 补充）：选路径 A —— 有界过渡维护，官方迁移主动暂停。**
+>
+> - 本 ADR 第 3 条（缺接口时只走最小上游接口改进）**不予执行**：不向上游提交任何请求，且**不重开**。
+> - 第 2 条（身份以发行事实绑定）中的**来源可解释性要求继续有效**：fork 包缺少可绑定构建提交与 provenance attestation 是已记录事实，过渡期应完善实际来源、补丁清单与新构建证据，但**不得为历史包补造不存在的证明**。
+> - 第 1 条（目标运行来源为官方发行包）作为**方向**保留，但**主动暂停**，不再是日常开发的等待项。
+> - **当前有效结论**：当前冻结的官方发行版尚不能满足本项目完整的 prepared／Host 历史导入契约；现有已集成实现仍依赖 fork。官方基础运行能力已得到探针验证，但完整迁移未完成。**不得**把「现方案不可达」扩展为「任何无 fork 架构都不可行」——后者需要另一次明确的架构修订与验证。
+> - OP3–OP8 状态为 **PAUSED_BY_OWNER_CONSTRAINT**；维护边界（fork 停止非必要功能扩张、仅安全/阻断性正确性/现有承诺所必需的修复）与「不因迁移暂停而暂停其余产品收尾」见 plan 顶部裁定一节。

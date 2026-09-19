@@ -106,7 +106,44 @@ node packages/client/probes/pi-official/run.mjs --probe p04
 
 每次运行现场安装官方 0.85.1 到临时树、以空 `HOME` 跑五个独立子进程、把 `probe-results.json` 与实际日志写入 `.ai/harness/runs/pi-official-op1-<ts>/`。合成端点只监听 127.0.0.1，全部响应为 synthetic，不使用任何真实凭证、不调用任何真实模型。
 
-## 8. 未证明 / 局限
+## 8. 追加探针（OP2-U 定界用）
+
+为把 OP2-U 的请求切到可提接口的粒度，探针套件追加了两个探针；本节是它们的结论，完整数值在 `docs/researches/2026-09-19-official-pi-op2u-upstream-request.md` 与同一份 `probe-results.json` 里。
+
+| 探针 | 结论 | 关键数字 |
+|---|---|---|
+| `p03b` 会话外请求捕获 | **not-supported**（但缺口被精确化） | 会话外经公开 `streamSimple` 拿到 **248** 字节 payload，`onPayload` 与 transport 字节一致、端点 0 请求；但会话实际发的是 **308** 字节：系统消息被追加了 `Current working directory: …`，且顶层键多出 `prompt_cache_key`/`prompt_cache_retention`。payload 无任何 certification 字段 |
+| `p04d` 拒发可观测性 | **supported** | 调用方 side channel 记录 4 次可归属 refusal、端点 0 请求、`prompt()` 不抛错且最终 `agent_settled`；转录里留下 `stopReason: "error"` 的 assistant 条目 |
+
+这两条把 OP2-U 的范围改了：G-D（可传播拒绝）**不需要上游**——运行归属方可以自行判定；真正需要上游的是 G-A（会话首请求的纯编译复现）、G-B（覆盖证明）与 G-C（host 断言历史）。
+
+## 9. P06 — extension 提供的工具桥接（supported，OP3 解风险用）
+
+OP1 原套件证明的是「`customTools` 挂载的工具能往返」（P01）。BYOK 的真实工具通路不同：MCP bridge 由 **extension** 注册工具（`packages/client/src/adapters/pi/mcp-extension.ts:111` 调 `pi.registerTool`）。P06 就是这条路径在官方发行版上的验证。
+
+做法：inline extension factory 内 `pi.registerTool(defineTool({...}))`，`noExtensions` 关闭发现，session 以 `tools: ['probe_bridge']` 授权，本地合成端点先回 tool call 再回终答。
+
+观测：加载到的 extension 路径 `["<inline:1>"]`；wire 上 `tools` 恰为 `["probe_bridge"]`；工具往返 **2** 次请求；`bridge:ping` 出现在后继请求里。verdict = **supported**。
+
+含义：**OP3 的工具迁移不依赖 prepared-input 那几条 seam**。BYOK 的 MCP/工具桥接机制可以在官方运行时上直接成立，因此「等 G-C」不必阻塞工具与装载面的实现。
+
+## 10. P07 — 跨进程的 caller-owned transport（supported，OP4 定界用）
+
+OP4 要回答的是：前面所有结论都出自**单进程**，而 BYOK 真正的工作发生在子进程（print/runner）。P07 让一个**独立子进程**在同一个官方 release 上自建 session，父进程的端点记录它收到了什么。
+
+做法：子进程脚本在运行时写入隔离安装树（imports 因此解析到官方字节），自己建 services/session、注册带捕获 fetch 的 provider；父进程把本地合成端点的 baseUrl 传给子进程，比较两侧数字。
+
+观测（两个子进程，PID 32700 / 32703）：
+
+| 用例 | 子进程 transport 看到 | 父端点收到 | 请求字节 |
+|---|---|---|---|
+| 放行 | `[2087]` | **1** 次 | 子 2087 == 父 2087 |
+| 拒发 | `[2087,2087,2087,2087]`（4 次尝试） | **仍为 1**（无新增） | — |
+| 拒发是否报错 | — | — | `promptError: null`（仍不传播） |
+
+结论：**caller-owned transport 的模式跨进程成立**——子进程能观察到与父端点逐字节一致的请求体，拒发同样让端点保持 0 新增请求；`auto_retry` 的 4 次尝试与不传播行为也和单进程一致。**OP4 因此没有 runtime 能力缺口**，剩下的是 BYOK 侧接线（子进程启动绑定、permit/charge-once、身份冻结），而不是等上游。
+
+## 11. 未证明 / 局限
 
 - P04 只验证了 `openai-completions` 一条 transport；WebSocket 与其他 API 未验证，且方案明确要求它们保持不支持。
 - P04 的 gate 是「调用方自己实现的 provider + 官方 adapter」这一形态；它证明机制可达，**不等于**已经在产品代码里正确接线（那是 OP3 的验收面）。

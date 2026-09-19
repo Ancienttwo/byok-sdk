@@ -77,6 +77,7 @@ allowed_paths:
   - docs/researches/2026-09-19-official-pi-fork-delta-map.md
   # OP1 探针 harness 与其证据产物
   - packages/client/probes/pi-official/run.mjs
+  - packages/client/probes/pi-official/watch-release.mjs
   - packages/client/probes/pi-official/README.md
   - packages/client/probes/pi-official/lib/harness.mjs
   - packages/client/probes/pi-official/lib/synthetic-openai-server.mjs
@@ -85,12 +86,29 @@ allowed_paths:
   - packages/client/probes/pi-official/probes/p03-task-free-preparation.mjs
   - packages/client/probes/pi-official/probes/p04-send-gate.mjs
   - packages/client/probes/pi-official/probes/p05-loader-closure.mjs
+  - packages/client/probes/pi-official/probes/p06-extension-tool-bridge.mjs
+  - packages/client/probes/pi-official/probes/p07-subprocess-transport.mjs
+  - packages/client/probes/pi-official/probes/p08-embedder-public-surface.mjs
+  - packages/client/probes/pi-official/probes/p03b-pre-session-request.mjs
+  - packages/client/probes/pi-official/probes/p04d-refusal-observability.mjs
   - docs/researches/2026-09-19-official-pi-op1-probe-report.md
   - docs/researches/2026-09-19-official-pi-op1-probe-results.json
+  # OP2-U 上游请求包
+  - docs/researches/2026-09-19-official-pi-op2u-upstream-request.md
+  - docs/researches/2026-09-19-official-pi-upstream-request.md
+  - docs/researches/2026-09-19-official-pi-gc-guard-candidate.patch
   # ADR-036 架构裁定与索引/帐本落位
   - docs/architecture/adr-2026-09-19-official-pi-runtime-source.md
   - docs/architecture/index.md
   - docs/architecture/sdk-architecture.md
+  # OP3 方向的可执行护栏：fork 专有 import 只能减少
+  - packages/client/src/adapters/pi/prepared-request.ts
+  - packages/client/src/__tests__/prepared-request.test.ts
+  - packages/client/src/adapters/pi/request-shape.ts
+  - packages/client/src/__tests__/request-shape.test.ts
+  - scripts/release/check-pi-fork-surface.mjs
+  - scripts/release/check-pi-fork-surface.test.mjs
+  - package.json
   - tasks/contracts/20260919-1603-official-pi-migration.contract.md
   - tasks/reviews/20260919-1603-official-pi-migration.review.md
   - tasks/notes/20260919-1603-official-pi-migration.notes.md
@@ -154,6 +172,9 @@ exit_criteria:
     - docs/researches/2026-09-19-official-pi-fork-delta-map.md
     - docs/researches/2026-09-19-official-pi-op1-probe-report.md
     - docs/researches/2026-09-19-official-pi-op1-probe-results.json
+    - docs/researches/2026-09-19-official-pi-op2u-upstream-request.md
+    - docs/researches/2026-09-19-official-pi-upstream-request.md
+    - docs/researches/2026-09-19-official-pi-gc-guard-candidate.patch
     - packages/client/probes/pi-official/run.mjs
     - docs/architecture/adr-2026-09-19-official-pi-runtime-source.md
     - tasks/contracts/20260919-1603-official-pi-migration.contract.md
@@ -224,12 +245,64 @@ exit_criteria:
     {
       "id": "op1-evidence-parse",
       "kind": "command",
-      "command": "node -e \"const fs=require('fs');const d=JSON.parse(fs.readFileSync('docs/researches/2026-09-19-official-pi-op1-probe-results.json','utf8'));const need=['p01-session-tools-reply','p02-history-projection','p03-task-free-preparation','p04-send-gate','p05-loader-closure'];for(const n of need){if(typeof (d.verdicts||{})[n]!=='string')throw new Error('missing verdict for '+n);}if(d.completed!==true)throw new Error('probe run did not complete');if(!(d.officialIntegrity||'').startsWith('sha512-'))throw new Error('missing installed official integrity');if(d.officialPackage!=='@earendil-works/pi-coding-agent@0.85.1')throw new Error('unexpected official package '+d.officialPackage);console.log('op1-evidence-parse OK '+JSON.stringify(d.verdicts))\"",
+      "command": "node -e \"const fs=require('fs');const d=JSON.parse(fs.readFileSync('docs/researches/2026-09-19-official-pi-op1-probe-results.json','utf8'));const need=['p01-session-tools-reply','p02-history-projection','p03-task-free-preparation','p03b-pre-session-request','p04-send-gate','p04d-refusal-observability','p05-loader-closure','p06-extension-tool-bridge','p07-subprocess-transport','p08-embedder-public-surface'];for(const n of need){if(typeof (d.verdicts||{})[n]!=='string')throw new Error('missing verdict for '+n);}if(d.completed!==true)throw new Error('probe run did not complete');if(!(d.officialIntegrity||'').startsWith('sha512-'))throw new Error('missing installed official integrity');if(d.officialPackage!=='@earendil-works/pi-coding-agent@0.85.1')throw new Error('unexpected official package '+d.officialPackage);console.log('op1-evidence-parse OK '+JSON.stringify(d.verdicts))\"",
       "cwd": ".",
       "phase": "verification",
       "cost": "normal",
       "evidence_policy": "current_exact",
       "necessity": "OP1 evidence keeps one resolved verdict per probe plus the frozen official package identity.",
+      "inputs": {
+        "env": []
+      }
+    },
+    {
+      "id": "release-watch",
+      "kind": "command",
+      "command": "sh -c 'node packages/client/probes/pi-official/watch-release.mjs --json >/dev/null; code=$?; [ \"$code\" -eq 0 ] || [ \"$code\" -eq 10 ]'",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "normal",
+      "evidence_policy": "current_exact",
+      "necessity": "The release watcher must run and parse the registry tags; exit 10 (a newer release exists) is an expected outcome, not a failure.",
+      "inputs": {
+        "env": []
+      }
+    },
+    {
+      "id": "request-shape-test",
+      "kind": "command",
+      "command": "cd packages/client && bun x vitest run src/__tests__/request-shape.test.ts src/__tests__/prepared-request.test.ts",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "normal",
+      "evidence_policy": "current_exact",
+      "necessity": "Request-shape drift detection and the prepared-request compile/verify core must both hold: unknown keys refused, frozen bytes reproducible, drift rejected.",
+      "inputs": {
+        "env": []
+      }
+    },
+    {
+      "id": "pi-fork-surface",
+      "kind": "command",
+      "command": "node scripts/release/check-pi-fork-surface.mjs",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "normal",
+      "evidence_policy": "current_exact",
+      "necessity": "The fork-only import surface may only shrink; a new entry must be recorded deliberately.",
+      "inputs": {
+        "env": []
+      }
+    },
+    {
+      "id": "pi-fork-surface-test",
+      "kind": "command",
+      "command": "node --test scripts/release/check-pi-fork-surface.test.mjs",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "normal",
+      "evidence_policy": "current_exact",
+      "necessity": "The guard's own detection behaviour must stay covered.",
       "inputs": {
         "env": []
       }
