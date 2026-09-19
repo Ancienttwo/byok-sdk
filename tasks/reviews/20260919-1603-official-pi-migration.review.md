@@ -12,6 +12,23 @@
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: pending
 
+## 交付状态（2026-09-20 更新）
+
+四个模块 PR 已从 draft 转为 **ready for review**，供独立判断使用：
+
+| PR | 模块 | head → base | 合并性 | CI |
+|---|---|---|---|---|
+| [#210](https://github.com/Ancienttwo/byok-sdk/pull/210) | OP0 发行基线 + fork delta 分类 | `codex/official-pi-migration` → `main` | MERGEABLE | 92 checks / **0 failing** |
+| [#211](https://github.com/Ancienttwo/byok-sdk/pull/211) | OP1 探针与 G1 裁定 | `codex/official-pi-op1-probes` → #210 | MERGEABLE | 92 / **0 failing** |
+| [#212](https://github.com/Ancienttwo/byok-sdk/pull/212) | 架构 ADR-036 | `codex/official-pi-arch-docs` → #211 | MERGEABLE | 46 / **0 failing** |
+| [#213](https://github.com/Ancienttwo/byok-sdk/pull/213) | OP2-U 定界 + OP2 核心 | `codex/official-pi-op2u` → #212 | MERGEABLE | 46 / **0 failing** |
+
+（#211 的链接同上仓库路径 `/pull/211`。）
+
+**CI 波动说明（避免误判）**：#210 的同一 commit `ae13c637` 曾出现**两次绿、两次红**——红的是两个 Windows 作业（`Windows Git workspace, store, and security tests (fixed Node)`、`npm release pack/install (windows-latest, fixed Node)`）。对失败作业执行 `gh run rerun --failed` 后恢复为通过，**并且同一 SHA 的更早两次运行本来就是 success**，故判定为**既有 flake**，不是本次改动引入。`main@79f6a0d3`（本分支基线）的 CI 为 success。
+
+**未向上游提交**：owner 明确指示不向 `earendil-works/pi` 提交请求；`docs/researches/2026-09-19-official-pi-upstream-request.md` 已标记 `DO NOT FILE`。
+
 ## Human Review Card
 
 - Verdict: pass（OP0 = 发行基线冻结 + fork delta map + 隔离安装验证；OP1 = 五项 probe + G1 裁定；本切片不切产品依赖）
