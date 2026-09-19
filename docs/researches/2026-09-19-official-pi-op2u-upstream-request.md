@@ -438,6 +438,24 @@ node packages/client/probes/pi-official/run.mjs --official-version <new>   # 按
 
 对 BYOK 的直接用处：`stopReason === "error"` 加上 `errorMessage` 足以让运行归属方**立刻 fail closed**，不必等上游；「能把 host 正文发出去」仍要等上游定义行为。
 
+### 补丁已实现并实测：5 行、零类型错误（2026-09-19）
+
+定位到崩溃点：`packages/ai/src/utils/estimate.ts` 的 `getLastAssistantUsageInfo` 对每条 assistant 消息调用 `calculateContextTokens(assistant.usage)`；当调用方给的那条文本没有 `usage` 时，读 undefined 上的字段即抛 TypeError（正是 `reading 'totalTokens'`）。
+
+在本地 checkout 里加一个 guard（缺失 `usage` 的 assistant 消息不参与 prefix 用量推导），然后测量：
+
+| 指标 | 新消息种类（先前方案） | 本 guard |
+|---|---|---|
+| 改动量 | `Message` 联合扩一员 → 42 文件受影响 | **1 文件 / +5 行** |
+| `npx tsgo --noEmit` | **146 个错误 / 4 个 package** | **EXIT 0（零错误）** |
+| 三消息反例 | 未测（补丁未成） | `host_text` 从「fetch 未被调用 + TypeError」变为 **fetch 被调用** |
+
+补丁文本落位 `docs/researches/2026-09-19-official-pi-gc-guard-candidate.patch`。**仍未提交上游**。
+
+残余语义问题（需上游表态，但不阻塞补丁）：一条没有出处的 assistant 消息**应不应该发出去**、下游用量记账如何对待它。guard 给出的是一个明确且保守的行为（视为无用量），不是任意猜测。
+
+对 BYOK 的含义：G-C 从「等一次接口重构」变成「等一个小 bug 修复被接受并发行」。这显著缩短依赖链——如果上游接受该 guard，OP2 的受阻面只剩 G-B 的契约问题，而那是可本地维护（带第二权威风险）或另行提案的。
+
 - 上游是否接受该请求、以什么形态接受、何时进入受支持发行包，均不由本仓决定。
 - 目标版本分叉（重钉到含分节 `SystemMessage` 的下一发行版 vs 维持 `0.85.1`）待 owner 裁决。
 - G-C 的形状（A 新联合成员 / B 放宽 provenance 字段 / C 显式导入入口）待上游选择。

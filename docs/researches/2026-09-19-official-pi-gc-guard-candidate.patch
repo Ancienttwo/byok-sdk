@@ -1,0 +1,28 @@
+# Candidate upstream patch for G-C (measured, not submitted)
+#
+# Verified against earendil-works/pi@main on 2026-09-19 in a local checkout:
+#   npx tsgo --noEmit            -> EXIT 0 (whole monorepo), i.e. zero type errors
+#   three-message counterexample -> a provenance-less assistant message now
+#                                   reaches the transport instead of crashing
+#
+# Compare: the "new message kind" shape measured 146 type errors across 42 files
+# and 4 packages. This is 5 added lines in one file.
+#
+# Not filed: publishing an issue or PR at earendil-works/pi is an external action
+# that needs an operator decision.
+
+diff --git a/packages/ai/src/utils/estimate.ts b/packages/ai/src/utils/estimate.ts
+--- a/packages/ai/src/utils/estimate.ts
++++ b/packages/ai/src/utils/estimate.ts
+@@ -76,6 +76,11 @@ function getLastAssistantUsageInfo(messages: readonly Message[]): { usage: Usage
+ 		const message = messages[i];
+ 		if (message.role === "assistant") {
+ 			const assistant = message as AssistantMessage;
++			// An assistant message may carry no usage at all: a caller can supply
++			// assistant text the host asserts was already said, and nothing was
++			// generated here. Such a message can never describe the prefix, so it is
++			// skipped rather than read.
++			if (assistant.usage === undefined) continue;
+ 			// A newer prefix message was inserted after this response (for example, a
+ 			// compaction summary), so its usage cannot describe the current prefix.
+ 			const usageAppliesToPrefix = assistant.timestamp >= latestPrefixTimestamp;

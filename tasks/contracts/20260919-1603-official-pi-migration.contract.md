@@ -95,6 +95,7 @@ allowed_paths:
   # OP2-U 上游请求包
   - docs/researches/2026-09-19-official-pi-op2u-upstream-request.md
   - docs/researches/2026-09-19-official-pi-upstream-request.md
+  - docs/researches/2026-09-19-official-pi-gc-guard-candidate.patch
   # ADR-036 架构裁定与索引/帐本落位
   - docs/architecture/adr-2026-09-19-official-pi-runtime-source.md
   - docs/architecture/index.md
@@ -168,6 +169,7 @@ exit_criteria:
     - docs/researches/2026-09-19-official-pi-op1-probe-results.json
     - docs/researches/2026-09-19-official-pi-op2u-upstream-request.md
     - docs/researches/2026-09-19-official-pi-upstream-request.md
+    - docs/researches/2026-09-19-official-pi-gc-guard-candidate.patch
     - packages/client/probes/pi-official/run.mjs
     - docs/architecture/adr-2026-09-19-official-pi-runtime-source.md
     - tasks/contracts/20260919-1603-official-pi-migration.contract.md

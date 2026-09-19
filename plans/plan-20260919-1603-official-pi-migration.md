@@ -580,6 +580,10 @@ bun run check:task-workflow
   - [x] OP2-U 的 G-C **根因细化（2026-09-19 同日更正）**：读 `result()` 的返回值后发现失败**不是静默**——`stopReason: "error"`，`errorMessage = "Cannot read properties of undefined (reading 'totalTokens')"`。即请求构造读了一个 **undefined 的 `usage`** 并抛 TypeError，而**不是丢弃** host 文本；session 层看似静默只因 `prompt()` 不抛错（这也解释了 `p04d` 里的四条 `stopReason: "error"` 条目）。
     - 后果一：上游最小修复从「新增一等消息种类（实测 146 处）」缩小为「补 guard + 定义缺失 usage 的行为」；语义问题仍需上游表态，但不再需要重构。
     - 后果二：BYOK 侧**今天就能 fail closed**（检测 `stopReason === "error"` + errorMessage），不必等上游；「把 host 正文发出去」仍需上游定义行为。
+  - [x] OP2-U 的 G-C **候选补丁已实现并实测（2026-09-19）**：崩溃点在 `packages/ai/src/utils/estimate.ts` 的 `getLastAssistantUsageInfo`（对无 `usage` 的 assistant 消息调用 `calculateContextTokens(assistant.usage)`）。加 1 个 guard 后实测：**`npx tsgo --noEmit` EXIT 0（零类型错误）**，三消息反例中 `host_text` 从「fetch 未被调用 + TypeError」变为 **fetch 被调用**。
+    - 对比先前方案（新增 `Message` 联合成员）：42 文件受影响 / 146 类型错误。**本 guard 为 1 文件 / +5 行。**
+    - 补丁文本：`docs/researches/2026-09-19-official-pi-gc-guard-candidate.patch`；**未提交上游**。
+    - 依赖链因此可能缩短：若上游接受该 guard，OP2 的受阻面只剩 G-B 契约。
     - 三条缺口形态至此统一（G-A 暴露 prompt 元数据 / G-B 公开形状契约 / G-C 三选一形状），可一次性提交给上游。
   - [x] OP2-U 的 G-A **更正并撤销**（2026-09-19）：G-A **不是上游缺口**。包根已公开导出 per-tool definition 工厂（`packages/coding-agent/src/index.ts:305-314`），它们带 `promptSnippet`；改用这组公开函数后派生提示状态 **5/5 section 逐字节相等**（76 / 1160 / 169 / 839 / 339，`sectionsEqual: true`），`toolsAdded` 也已 4/4 相等。此前两轮把缺口指成内部工厂是**用错工厂造成的假缺口**（`createCodingTools` 的 prompt 元数据不覆盖全部 builtin）。**上游请求从三条减为两条**（G-B 形状契约 + G-C host 历史），另附一条可选文档建议。
   - [ ] **目标版本重钉（owner 裁决点）**：同日只读核对发现 `main` 已重构 G-A 所依赖的同一子系统（`SystemMessage` 变为可回放的分节转录消息 + `buildSystemPromptSections`/`buildSystemPromptState`/`diffSystemPromptSections`/`forceSystemPrompt`），而 npm `latest` 仍是 `0.85.1`。
