@@ -40,11 +40,24 @@ assert.deepEqual(adaptersExport, {
   types: './dist/adapters/index.d.ts',
   import: './dist/adapters/index.js',
 });
-// Exact npm alias onto the SDK's Pi fork: the specifier and the installed path
-// stay upstream, the resolved manifest is @byok-sdk/pi-coding-agent@0.85.1005.
-assert.equal(manifest.dependencies?.['@earendil-works/pi-coding-agent'], 'npm:@byok-sdk/pi-coding-agent@0.85.1005');
+// The pin projection is internal to the client manifest, so it is checked
+// first, before anything reads the install: drift here is refused before
+// module loading and with no install present.
 assert.equal(manifest.byok?.piRuntimePin, manifest.dependencies?.['@earendil-works/pi-coding-agent'],
   'client byok.piRuntimePin must exactly project dependency alias');
+// Exact npm alias onto the SDK's Pi fork: the specifier and the installed path
+// stay upstream, and the alias is derived from the installed fork's own
+// manifest — the single authority for which fork build this client carries.
+// Fail closed when the install is missing or is not a byok fork; no literal
+// version here, because partial releases bump the fork build alone.
+const nativeManifest = JSON.parse(readFileSync(
+  new URL('../node_modules/@earendil-works/pi-coding-agent/package.json', import.meta.url), 'utf8'));
+assert.equal(nativeManifest.name, '@byok-sdk/pi-coding-agent',
+  'installed @earendil-works/pi-coding-agent must be the byok fork, not upstream');
+assert.ok(nativeManifest.byokFork?.upstreamBase !== undefined && nativeManifest.byokFork?.forkBuild !== undefined,
+  'installed Pi fork manifest must declare its byokFork identity');
+assert.equal(manifest.dependencies?.['@earendil-works/pi-coding-agent'],
+  `npm:${nativeManifest.name}@${nativeManifest.version}`);
 assert.equal(manifest.optionalDependencies?.['@earendil-works/pi-coding-agent'], undefined);
 assert.equal(manifest.dependencies?.['pi-web-access'], '0.24.1');
 assert.equal(manifest.dependencies?.['pi-subagents'], undefined);
@@ -58,8 +71,14 @@ assert.equal(manifest.dependencies?.['@juicesharp/rpiv-todo'], undefined);
 assert.equal(manifest.dependencies?.['@juicesharp/rpiv-i18n'], '2.8.0');
 assert.equal(manifest.dependencies?.['@earendil-works/pi-tui'], undefined);
 assert.equal(manifest.devDependencies?.['@earendil-works/pi-tui'], undefined);
-assert.equal(manifest.dependencies?.['@earendil-works/pi-ai'],
-  manifest.byok.piRuntimePin.replace('pi-coding-agent@', 'pi-ai@'), 'Pi AI and coding-agent fork pins must match');
+// The fork's own manifest declares which pi-ai build it was published
+// against; the client carries exactly that edge. Fork builds can publish
+// alone (coding-agent moves, pi-ai holds), so version equality between the
+// two pins is not an invariant — projection of the fork's edge is.
+const forkPiAiEdge = nativeManifest.dependencies?.['@earendil-works/pi-ai'];
+assert.equal(typeof forkPiAiEdge, 'string', 'installed Pi fork must declare its @earendil-works/pi-ai edge');
+assert.equal(manifest.dependencies?.['@earendil-works/pi-ai'], forkPiAiEdge,
+  'client pi-ai pin must project the installed fork\'s own declared pi-ai edge');
 assert.equal(existsSync(new URL('../dist/adapters/pi/team-interaction-extension.js', import.meta.url)), true);
 assert.equal(existsSync(new URL('../dist/adapters/pi/mcp-extension.js', import.meta.url)), true);
 assert.equal(existsSync(new URL('../dist/adapters/pi/subagents-policy-extension.js', import.meta.url)), true);
