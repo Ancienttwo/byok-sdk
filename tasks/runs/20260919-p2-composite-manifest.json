@@ -1,0 +1,309 @@
+{
+  "schemaVersion": 1,
+  "kind": "p2-composite-acceptance-manifest",
+  "sourceGitSha": "28f29e0d100bdb810725d0c6e0e9566a6bba4404",
+  "gitSubject": "Merge pull request #208 from Ancienttwo/claude/post-merge-status-refresh",
+  "generatedAt": "2026-09-19T07:25:50Z",
+  "node": "v24.18.0",
+  "bun": "1.4.2",
+  "npm": "11.16.0",
+  "platform": "darwin",
+  "arch": "arm64",
+  "releaseVersion": "0.18.0",
+  "packages": [
+    {
+      "package": "@byok-sdk/core",
+      "version": "0.18.0",
+      "file": "byok-sdk-core-0.18.0.tgz",
+      "sha256": "8dbaa5aa7cef6e52ed596294dc3ec55d2705caee2fa4c5c8ddf9adba1fa2ebfb",
+      "sha512Integrity": "sha512-Y0V9eBs0JtS2tPaybxJ/ZLdjPcRczrUfmoo05/9oMZZNWaVXZX7xkPujBUEMRG4JkvbI7ndzxmHdZMCVFNLfbA=="
+    },
+    {
+      "package": "@byok-sdk/implementation-identity",
+      "version": "0.18.0",
+      "file": "byok-sdk-implementation-identity-0.18.0.tgz",
+      "sha256": "c8d02f81232591b45dc0181473e3fad3ff5710b4f27133c0a21409b3a6e08d84",
+      "sha512Integrity": "sha512-GvIwW+VbVxFoedL5cPMiTAm82SH+loEggLCkNHwM3WGlRTV8Zy4jcffU06sYLjzp86y/irOQ2wP2QjCUqhdBlQ=="
+    },
+    {
+      "package": "@byok-sdk/protocol",
+      "version": "0.18.0",
+      "file": "byok-sdk-protocol-0.18.0.tgz",
+      "sha256": "7178d312c0ff78b465c3d9fdc29bd9ac89c0b03184b2d316c82a954331b74adc",
+      "sha512Integrity": "sha512-j7iGOI3F4hOEsuFHJ33spyeemEXW+Ct9rjBvazyUgjy8HAgs8BdBibpuDRBX7cYw3E8zZSJ1+T0Pz5lDLWwJpQ=="
+    },
+    {
+      "package": "@byok-sdk/server",
+      "version": "0.18.0",
+      "file": "byok-sdk-server-0.18.0.tgz",
+      "sha256": "9b0185d5136ce1e592031bea89d3a35e5af939b406544cdb205d4e1f247bd960",
+      "sha512Integrity": "sha512-nEZyL1NsIP+c1bpUlleMrDBI3tgggyOwlmcSS5QPM148PmNRUcdpNgtwEVTVEiz0cf3iAoUKgKMPixL/DL49zQ=="
+    },
+    {
+      "package": "@byok-sdk/cloud",
+      "version": "0.18.0",
+      "file": "byok-sdk-cloud-0.18.0.tgz",
+      "sha256": "9507578682f0fe8f28ebe8f2901397b814ddbfe6df85dee6ba391af39b0c0bc7",
+      "sha512Integrity": "sha512-NvHetFPko8+C2Pe1Tvl3u7V68z5EoKz6RLt441rS1wbz+/OURQL58zH4pLW6MHvmkRTevW7b2fLksf6xjGmUXQ=="
+    },
+    {
+      "package": "@byok-sdk/client",
+      "version": "0.18.0",
+      "file": "byok-sdk-client-0.18.0.tgz",
+      "sha256": "fdc673ea40cfdd681030cd0ef0f06e56e6072cb765ae8f1cb9ff912e8d3326b7",
+      "sha512Integrity": "sha512-qPpcO0zqeKnoUxlQQCW8lylZRFqo/FJe1GMRKBo9tSG6h4Y9vnEKvzKisfy+ItU/I0dE9UJLNCjivuwTUqtMdA=="
+    },
+    {
+      "package": "@byok-sdk/cloud-dataplane",
+      "version": "0.18.0",
+      "file": "byok-sdk-cloud-dataplane-0.18.0.tgz",
+      "sha256": "75908e6dd284360195ec9a5a8c584643c12c3000c62c190a136cb5e3630c5658",
+      "sha512Integrity": "sha512-quWgwijD50QGeqTyZkMeANrkwdyQnMhgiIf1vNUccIEiLPF2uMPAeHz9dbSD7KZAmrVYZKQZ8cO9hPkh1UKDvg=="
+    },
+    {
+      "package": "@byok-sdk/ui-runtime",
+      "version": "0.18.0",
+      "file": "byok-sdk-ui-runtime-0.18.0.tgz",
+      "sha256": "eeacb3ecc85e9f36b0576cd38ca5839d0ec8b5b902bf7e58307385187771a1a0",
+      "sha512Integrity": "sha512-IXX0dWQi+4ToqNy+ferzqEOER+wV/2WitK2bKskXhyN/P/E/3F5G+lHHx68YlRCvkXXI9zVFhneAuUbrdDjBoA=="
+    },
+    {
+      "package": "@byok-sdk/testkit",
+      "version": "0.18.0",
+      "file": "byok-sdk-testkit-0.18.0.tgz",
+      "sha256": "99590e7749ed9752cc437899ce3af3c0d66492155c1d18480a9f161d492a2de5",
+      "sha512Integrity": "sha512-/S3ygLAtqj5mU6onu2NByZTAqBM+DkIIqabcWE2waNLm4/Q6duzPlfA+cgtj+iFOKOJO0xP8lLvzuU/ladtg5g=="
+    },
+    {
+      "package": "byok-sdk",
+      "version": "0.18.0",
+      "file": "byok-sdk-0.18.0.tgz",
+      "sha256": "10ccb1701c9d29f5d279e601b86d0f91f0828ed5f4eb40dd01adf00842254d90",
+      "sha512Integrity": "sha512-yYA6j230VV52p0fF1ff3lXX91CQrnisK3nz4hs/2GIVfZyE/twoudNfekMMg0xVcq80bycY+Dmw3hBw2lJiAWg=="
+    },
+    {
+      "package": "@byok-sdk/keys",
+      "version": "0.5.0",
+      "file": "byok-sdk-keys-0.5.0.tgz",
+      "sha256": "695e22f0effecb2cb3e52a3caec559dc12adebde8cd7b0a6988874471d71559c",
+      "sha512Integrity": "sha512-FsDiSOyVVjXc/hghA/IvkzgAcuq+h7aBPqfVPjqcWV+2PwZDcZXRifxXn4yAX5XOGNuBTyYhhAcCv8XYR+5a5Q=="
+    }
+  ],
+  "packDeterminism": {
+    "runs": 2,
+    "packCommand": "bun run check:release-pack -- --out-dir <dir> (scripts/release/pack-and-smoke.mjs) in a pristine detached worktree at sourceGitSha",
+    "sha256AgreementAllPackages": true,
+    "packagesCompared": 11
+  },
+  "piForkConsumption": {
+    "source": "bun.lock at sourceGitSha (lockfileVersion 1)",
+    "knownSplit": "@byok-sdk/pi-coding-agent@0.85.1006 resolves its runtime deps to @byok-sdk/pi-agent-core@0.85.1005 and @byok-sdk/pi-ai@0.85.1005 (fork train one step behind coding-agent) — recorded as the known intentional split, not drift",
+    "consumers": [
+      {
+        "consumer": "@byok-sdk/client",
+        "consumerKind": "workspace",
+        "workspacePath": "packages/client",
+        "edges": [
+          {
+            "dependencyKind": "dependencies",
+            "specifier": "@earendil-works/pi-ai",
+            "specifierRequirement": "npm:@byok-sdk/pi-ai@0.85.1005",
+            "resolvedPackage": "@byok-sdk/pi-ai",
+            "resolvedVersion": "0.85.1005",
+            "resolvedIntegrity": "sha512-pjReKZAJsT1t2sVFtcpqhTtC8aDUtqqZ+vphDivGVAub9b/5ndb4AKDLqqi5DKQTc+44s/dSbz1kBT2yn7UMqA=="
+          },
+          {
+            "dependencyKind": "dependencies",
+            "specifier": "@earendil-works/pi-coding-agent",
+            "specifierRequirement": "npm:@byok-sdk/pi-coding-agent@0.85.1006",
+            "resolvedPackage": "@byok-sdk/pi-coding-agent",
+            "resolvedVersion": "0.85.1006",
+            "resolvedIntegrity": "sha512-HZGOSK5rpA4Drr7vdisHeg45q/fvtIG81FFhm0yC9U2LOqPmnFmb3629+2CHN6NUWfRO4YU8ln0wBfcRUxAhnw=="
+          }
+        ]
+      },
+      {
+        "consumer": "@byok-sdk/pi-agent-core@0.85.1005",
+        "consumerKind": "registry",
+        "lockKey": "@earendil-works/pi-agent-core",
+        "consumerIntegrity": "sha512-bvIJdV4NR1llvKrqknUzE8Gyty9vmH32RKVOn5xjSxSX0wvmDB2ZyPCb8izu5GPvrY6a8K+MfSWoUTz0pFj0cg==",
+        "edges": [
+          {
+            "dependencyKind": "dependencies",
+            "specifier": "@earendil-works/pi-ai",
+            "specifierRequirement": "npm:@byok-sdk/pi-ai@0.85.1005",
+            "resolvedPackage": "@byok-sdk/pi-ai",
+            "resolvedVersion": "0.85.1005",
+            "resolvedIntegrity": "sha512-pjReKZAJsT1t2sVFtcpqhTtC8aDUtqqZ+vphDivGVAub9b/5ndb4AKDLqqi5DKQTc+44s/dSbz1kBT2yn7UMqA=="
+          }
+        ]
+      },
+      {
+        "consumer": "@byok-sdk/pi-coding-agent@0.85.1006",
+        "consumerKind": "registry",
+        "lockKey": "@earendil-works/pi-coding-agent",
+        "consumerIntegrity": "sha512-HZGOSK5rpA4Drr7vdisHeg45q/fvtIG81FFhm0yC9U2LOqPmnFmb3629+2CHN6NUWfRO4YU8ln0wBfcRUxAhnw==",
+        "edges": [
+          {
+            "dependencyKind": "dependencies",
+            "specifier": "@earendil-works/pi-agent-core",
+            "specifierRequirement": "npm:@byok-sdk/pi-agent-core@0.85.1005",
+            "resolvedPackage": "@byok-sdk/pi-agent-core",
+            "resolvedVersion": "0.85.1005",
+            "resolvedIntegrity": "sha512-bvIJdV4NR1llvKrqknUzE8Gyty9vmH32RKVOn5xjSxSX0wvmDB2ZyPCb8izu5GPvrY6a8K+MfSWoUTz0pFj0cg=="
+          },
+          {
+            "dependencyKind": "dependencies",
+            "specifier": "@earendil-works/pi-ai",
+            "specifierRequirement": "npm:@byok-sdk/pi-ai@0.85.1005",
+            "resolvedPackage": "@byok-sdk/pi-ai",
+            "resolvedVersion": "0.85.1005",
+            "resolvedIntegrity": "sha512-pjReKZAJsT1t2sVFtcpqhTtC8aDUtqqZ+vphDivGVAub9b/5ndb4AKDLqqi5DKQTc+44s/dSbz1kBT2yn7UMqA=="
+          }
+        ]
+      },
+      {
+        "consumer": "@juicesharp/rpiv-i18n@2.8.0",
+        "consumerKind": "registry",
+        "lockKey": "@juicesharp/rpiv-i18n",
+        "consumerIntegrity": "sha512-1qIxwN45JiyFMow7qk3OkrCAVIeH5avDbL7XJhGFyom0CSyAqptApQHPtGLQmNXQgNhu6xjN4ocNOA0IIFxUFw==",
+        "edges": [
+          {
+            "dependencyKind": "peerDependencies",
+            "specifier": "@earendil-works/pi-coding-agent",
+            "specifierRequirement": "*",
+            "resolvedPackage": "@byok-sdk/pi-coding-agent",
+            "resolvedVersion": "0.85.1006",
+            "resolvedIntegrity": "sha512-HZGOSK5rpA4Drr7vdisHeg45q/fvtIG81FFhm0yC9U2LOqPmnFmb3629+2CHN6NUWfRO4YU8ln0wBfcRUxAhnw=="
+          }
+        ]
+      },
+      {
+        "consumer": "pi-subagents@0.60.0",
+        "consumerKind": "registry",
+        "lockKey": "pi-subagents",
+        "consumerIntegrity": "sha512-H3Xgfab3/CYxQeTKvpatvcUy0yChMAViCTEc9tqKaTpSv7dhyP5NM3Vi5+qZuV6UpOunkCpe9Vkww4DhT+SvBA==",
+        "edges": [
+          {
+            "dependencyKind": "peerDependencies",
+            "specifier": "@earendil-works/pi-agent-core",
+            "specifierRequirement": "*",
+            "resolvedPackage": "@byok-sdk/pi-agent-core",
+            "resolvedVersion": "0.85.1005",
+            "resolvedIntegrity": "sha512-bvIJdV4NR1llvKrqknUzE8Gyty9vmH32RKVOn5xjSxSX0wvmDB2ZyPCb8izu5GPvrY6a8K+MfSWoUTz0pFj0cg=="
+          },
+          {
+            "dependencyKind": "peerDependencies",
+            "specifier": "@earendil-works/pi-ai",
+            "specifierRequirement": ">=0.80.0",
+            "resolvedPackage": "@byok-sdk/pi-ai",
+            "resolvedVersion": "0.85.1005",
+            "resolvedIntegrity": "sha512-pjReKZAJsT1t2sVFtcpqhTtC8aDUtqqZ+vphDivGVAub9b/5ndb4AKDLqqi5DKQTc+44s/dSbz1kBT2yn7UMqA=="
+          },
+          {
+            "dependencyKind": "peerDependencies",
+            "specifier": "@earendil-works/pi-coding-agent",
+            "specifierRequirement": "*",
+            "resolvedPackage": "@byok-sdk/pi-coding-agent",
+            "resolvedVersion": "0.85.1006",
+            "resolvedIntegrity": "sha512-HZGOSK5rpA4Drr7vdisHeg45q/fvtIG81FFhm0yC9U2LOqPmnFmb3629+2CHN6NUWfRO4YU8ln0wBfcRUxAhnw=="
+          }
+        ]
+      },
+      {
+        "consumer": "pi-web-access@0.24.1",
+        "consumerKind": "registry",
+        "lockKey": "pi-web-access",
+        "consumerIntegrity": "sha512-kNYVqPT2wbWbDKD2mfMsrCie1DyVsE/KYNVgpp7yqq072sG2PciKAB28PG4h0+klSO3MtCFRoPWAyA+l0CS7/A==",
+        "edges": [
+          {
+            "dependencyKind": "peerDependencies",
+            "specifier": "@earendil-works/pi-ai",
+            "specifierRequirement": "*",
+            "resolvedPackage": "@byok-sdk/pi-ai",
+            "resolvedVersion": "0.85.1005",
+            "resolvedIntegrity": "sha512-pjReKZAJsT1t2sVFtcpqhTtC8aDUtqqZ+vphDivGVAub9b/5ndb4AKDLqqi5DKQTc+44s/dSbz1kBT2yn7UMqA=="
+          },
+          {
+            "dependencyKind": "peerDependencies",
+            "specifier": "@earendil-works/pi-coding-agent",
+            "specifierRequirement": "*",
+            "resolvedPackage": "@byok-sdk/pi-coding-agent",
+            "resolvedVersion": "0.85.1006",
+            "resolvedIntegrity": "sha512-HZGOSK5rpA4Drr7vdisHeg45q/fvtIG81FFhm0yC9U2LOqPmnFmb3629+2CHN6NUWfRO4YU8ln0wBfcRUxAhnw=="
+          }
+        ]
+      }
+    ]
+  },
+  "ciEvidence": {
+    "query": "gh run list --repo Ancienttwo/byok-sdk --branch main --limit 8 --json databaseId,headSha,status,conclusion (plus per-PR-branch run lists)",
+    "capturedAt": "2026-09-19T07:24:07Z",
+    "mainBinding": [
+      {
+        "runId": 35428773673,
+        "headSha": "28f29e0d100bdb810725d0c6e0e9566a6bba4404",
+        "status": "completed",
+        "conclusion": "success",
+        "note": "the #208 merge run on main, recorded as found at capture time (not waited on)"
+      }
+    ],
+    "supportingPrBranchRuns": [
+      {
+        "pr": 201,
+        "branch": "claude/issue-180-send-agent-message-grants",
+        "headSha": "f70a8390cd4b92c7c8f4231b1e52906ba32e620e",
+        "runId": 35427686899,
+        "event": "pull_request",
+        "status": "completed",
+        "conclusion": "success",
+        "createdAt": "2026-09-19T06:50:21Z",
+        "mergeCommit": "26945c8a655c973a0b0bd898cae55fd0024c6c5e",
+        "mainRunAtMergeCommit": {
+          "runId": 35428223645,
+          "status": "completed",
+          "conclusion": "success"
+        }
+      },
+      {
+        "pr": 205,
+        "branch": "claude/issue-197-docs-authority-navigation",
+        "headSha": "563f8b503da26e67ddeea8898294d0b20bbe9555",
+        "runId": 35427659219,
+        "event": "pull_request",
+        "status": "completed",
+        "conclusion": "success",
+        "createdAt": "2026-09-19T06:49:45Z",
+        "mergeCommit": "9c425619300e2d030d9ecba1ee7d4306eb89a953",
+        "mainRunAtMergeCommit": {
+          "runId": 35428183973,
+          "status": "completed",
+          "conclusion": "cancelled"
+        }
+      },
+      {
+        "pr": 208,
+        "branch": "claude/post-merge-status-refresh",
+        "headSha": "42dd5f822bcca3d4b4348616c82eac3099547701",
+        "runId": 35428299569,
+        "event": "pull_request",
+        "status": "completed",
+        "conclusion": "success",
+        "createdAt": "2026-09-19T07:03:51Z",
+        "mergeCommit": "28f29e0d100bdb810725d0c6e0e9566a6bba4404",
+        "mainRunAtMergeCommit": {
+          "runId": 35428773673,
+          "status": "completed",
+          "conclusion": "success"
+        }
+      }
+    ]
+  },
+  "notCovered": [
+    "UNVERIFIED: real install into a real home directory (every pack-smoke install lands in a throwaway temp directory).",
+    "UNVERIFIED: paid/real provider execution (no live model call or real provider credential is exercised by any evidence bound here).",
+    "UNVERIFIED: native S9 target-runtime acceptance (no S9 target-runtime run is bound to this manifest).",
+    "UNVERIFIED: Salesko Host build recipe/artifact (nothing about the Host build is produced or inspected here).",
+    "UNVERIFIED: Host-side acceptance for #194/#195 (both remain Host-blocked; no acceptance evidence exists for them in this manifest)."
+  ]
+}
