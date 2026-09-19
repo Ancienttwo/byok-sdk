@@ -38,7 +38,7 @@ import {
 import { mcpLaunchAttestation, type McpLaunchBinding } from '../../daemon/trusted-launch-cwd';
 import type { ToolImplementationIdentityV1 } from '../../daemon/tool-implementation-identity';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
-import { grantFingerprint, resolveMcpToolsetGrants } from '../mcp-tool-grants';
+import { grantFingerprint, resolveMcpToolsetGrants, resolveReservedMcpToolGrants } from '../mcp-tool-grants';
 import { clientPackageRoot } from './client-manifest';
 import { resolvePiBin, type ResolvedBin } from './resolve-bin';
 import { mapPermissionPolicyToPiArgs } from './permission-mapping';
@@ -232,8 +232,17 @@ export class PiAdapter implements RuntimeAdapter {
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     // The policy mapping runs FIRST: a mode pi cannot express at all is a
     // refusal about the mode, and resolving toolset grants before it would
-    // answer that task with a toolset-shaped reason instead.
-    const mapping = mapPermissionPolicyToPiArgs(input.policy);
+    // answer that task with a toolset-shaped reason instead. The reserved
+    // grants ride the SAME mapping rather than a lane of their own: pi's
+    // expression of a reserved grant is the granted bare name inside the
+    // `--tools` allowlist (see permission-mapping.ts — pi's registry drops
+    // extension tools the allowlist does not name, and the extension
+    // registers the reserved helpers under exactly those names), so a
+    // `messageEgress` offer that projects byokagentmessage is authorized
+    // here the way codex and claude authorize it, from the same table
+    // (#180). Resolved once, at admission, like every other grant this
+    // adapter freezes into mapping.args.
+    const mapping = mapPermissionPolicyToPiArgs(input.policy, resolveReservedMcpToolGrants(input.mcpServers));
     if (!mapping.ok) {
       return { kind: 'reject', reason: mapping.reason ?? 'policy rejected by pi adapter', retryable: false };
     }

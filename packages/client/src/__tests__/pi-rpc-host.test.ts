@@ -155,4 +155,77 @@ describe('SDK ordinary Pi RPC entry', () => {
     expect(result.stderr).toContain('delegated tool flags differ from policy');
     expect(result.stdout).toBe('');
   });
+
+  // The config the pi adapter writes for an offer whose server projection
+  // carries the SDK-reserved Agent-message server (#180): readonly policy,
+  // permissionMode to match, launchCwd because any projected server requires
+  // one, and the server pointed at the native-message fixture, which answers
+  // the live session_start observe with exactly `send_agent_message`. The
+  // drift gate must derive the reserved bare name from THIS config's server
+  // projection — policy alone can no longer reproduce the delegated flags.
+  function messageFixture() {
+    const f = fixture();
+    const config = {
+      ...f.config,
+      policy: { mode: 'readonly' },
+      mcp: {
+        mcpEnv: { BYOK_NATIVE_MESSAGE_RECEIPT: join(f.root, 'native-message-receipt.json') },
+        mcpServers: { byokagentmessage: {
+          command: f.config.binding.command,
+          args: [resolve(import.meta.dirname, 'fixtures/native-agent-message-mcp.mjs')],
+        } },
+        observation: {}, toolImplementations: {}, permissionMode: 'readonly', launchCwd: f.cwd,
+      },
+    };
+    const serialized = serializePiHostConfig(config);
+    writeFileSync(f.configPath, serialized.bytes);
+    return { ...f, config, digest: serialized.digest };
+  }
+
+  it('refuses delegated tool flags that omit the reserved Agent-message grant the config projects', () => {
+    const f = messageFixture();
+    const result = spawnSync(bun, [f.entry, `--config-digest=${f.digest}`, '--config', f.configPath, '--mode', 'rpc',
+      '--tools', 'read,grep,find,ls,subagent,todo'], {
+      cwd:f.sealed, env:f.env, encoding:'utf8', timeout:15_000,
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('delegated tool flags differ from policy');
+    expect(result.stdout).toBe('');
+  });
+
+  it('starts RPC when the delegated tool flags carry the reserved Agent-message grant', async () => {
+    const f = messageFixture();
+    const child = spawn(bun, [f.entry, `--config-digest=${f.digest}`, '--config', f.configPath, '--mode', 'rpc', '--no-extensions', '--no-skills', '--provider', 'anthropic', '--model', 'claude-sonnet-4-5', '--thinking', 'high', '--tools', 'read,grep,find,ls,subagent,todo,send_agent_message'], {
+      cwd: f.sealed, env: f.env, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.on('data', (data) => { stderr += data; });
+    try {
+      const response = await new Promise<Record<string, any>>((accept, reject) => {
+        let output = '';
+        const timeout = setTimeout(() => reject(new Error(`RPC timed out: ${stderr}`)), 15_000);
+        child.on('error', reject);
+        child.on('exit', (code) => { clearTimeout(timeout); reject(new Error(`exit ${code}: ${stderr}`)); });
+        child.stdout.on('data', (data) => {
+          output += data;
+          for (;;) {
+            const newline = output.indexOf('\n');
+            if (newline < 0) break;
+            const line = output.slice(0, newline); output = output.slice(newline + 1);
+            try {
+              const frame = JSON.parse(line);
+              if (frame.id === 'state') { clearTimeout(timeout); accept(frame); }
+            } catch { reject(new Error(`non-RPC stdout: ${line}`)); }
+          }
+        });
+        child.stdin.write(JSON.stringify({ id:'state', type:'get_state' }) + '\n');
+      });
+      expect(response.success).toBe(true);
+      expect(stderr).not.toContain('delegated tool flags differ from policy');
+      expect(stderr).not.toContain('Failed to load extension');
+    } finally {
+      const exited = new Promise<void>((done) => child.once('exit', () => done()));
+      if (child.exitCode === null) { child.kill('SIGTERM'); await exited; }
+    }
+  }, 25_000);
 });
