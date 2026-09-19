@@ -52,3 +52,5 @@
 ## Status
 
 **Accepted（owner-approved 2026-09-19 direction；implementation gated，未落地）。** 已闭合：OP0 基线冻结与增量分类、OP1 五项 probe 与 G1 裁定。未闭合：OP2-U 上游接口、OP3–OP8。
+
+> **2026-09-19 补充决定：owner 不向上游提交任何请求。** 本 ADR 第 3 条（缺接口时只走最小上游改进包）因此**无法执行**。后果已在 `plans/plan-20260919-1603-official-pi-migration.md` 的「owner 决定：不向上游提交」一节逐条记录：四项缺口不会通过请求解决，OP2/OP5/OP8 在现方案下不可达，fork 继续是唯一可运行的 runtime。可行替代路径（维持 fork / 只迁非 prepared 面并显式声明能力不可用 / 未来重开上游）需 owner 选择；**在此之前不进行产品依赖切换**。

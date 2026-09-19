@@ -1,6 +1,11 @@
 # Upstream request: three small gaps, each already measured (submission-ready text)
 
-Status: **prepared, not filed.** BYOK-internal context lives in
+Status: **DO NOT FILE — owner declined upstream submission on 2026-09-19.**
+Kept as evidence of what was measured and what would have been asked for; it is
+not an action item. The consequence of declining is recorded in the plan and in
+ADR-036.
+
+BYOK-internal context lives in
 `docs/researches/2026-09-19-official-pi-op2u-upstream-request.md`; this file is the
 self-contained version intended for an issue at `earendil-works/pi`.
 Measured against `main` (2026-09-19), Node v24.18.0, darwin-arm64.

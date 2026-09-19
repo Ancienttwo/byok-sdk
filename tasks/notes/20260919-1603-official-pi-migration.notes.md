@@ -283,3 +283,14 @@ BYOK 现在的投影函数（`input-preparation.ts:366-379`，把 host 文本构
 **更正**：§14 写「复现会话首请求不需要新 API」时，实验里 `buildSystemPromptSections` 是从 upstream **源码相对路径**导入的——已发布包的消费者做不到。准确表述：**工具一半只需公开入口（4/4 已证），提示一半需要一个新导出**。
 
 结论：第 4 项请求精确为「导出 `buildSystemPromptSections` / `buildSystemPromptState`」，且**重钉不能自动解决**（`main` 包根同样没有）——重钉只改形状、不改可达性。
+
+## owner 决定：不向上游提交（2026-09-19）
+
+owner 明确指示不向 `earendil-works/pi` 提交任何请求（先给了「批准」，随后更正为「不向 pi 提交请求」，以后者为准）。这移除了 plan §8.2 的 OP2-U 主干路径，后果如实记录：
+
+- 四项缺口（`usage` guard / 类型面形状 / RPC 帧上限助手 / 提示渲染器与 section builders）**不会通过请求解决**；
+- **OP2 接线、OP5、OP8 在现方案下不可达**——prepared 的字节等价前提依赖上游公开面；
+- **fork 仍是唯一可运行的 runtime**，`check:pi-fork-surface` 计数不会下降；
+- `watch-release.mjs` 与 `p08` 保留：若未来某个正式发行版恰好补齐公开面，重跑即可自动得出结论。
+
+可行路径（需 owner 选，我不自行取舍产品语义）：A 维持 fork / B 只迁非 prepared 面并**显式声明 prepared 不可用**（能力移除，INV-14 要求显式）/ C 未来重开上游。**在此之前不切产品依赖。**
