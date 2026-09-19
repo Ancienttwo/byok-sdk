@@ -531,3 +531,21 @@ G-A 解决、G-B 收敛之后，还剩一个疑问：**消费冻结请求**（fo
 ### 为什么接线仍要分多刀
 
 `PreparedSessionInputV2` 不只在这两个文件里：它穿过 daemon 服务、store/receipt、Host CAS 与 prepared host，并被 `prepared-prompt-frame` 用于组帧。替换它等于同时改动编译、冻结、组帧与消费四处，每一刀的中间态都必须保持构建与既有 prepared 测试绿。因此本轮只做到「核心已实现并有测试」，接线按文件分刀推进。
+
+## 16. G-C 请求的最终形状：guard 是必要但不充分（2026-09-19）
+
+把「5 行 guard 已实测」与「新增 `Message` 联合成员要动 146 处」两个结果放在一起看，会发现它们**并不矛盾，而是同一请求的两半**：
+
+| 层 | 现状 | 需要什么 |
+|---|---|---|
+| **运行时** | 无 `usage` 的 assistant 文本会在请求构造里抛 TypeError（`reading 'totalTokens'`） | 5 行 guard（已实测：加后该消息能走到 transport） |
+| **类型面** | 官方 `AssistantMessage` 把 `api`/`provider`/`model`/`usage`/`stopReason` 列为**必填** | 一个**类型上**能表达「host 断言文本」的形状 |
+
+第二半才是接线真正卡住的地方。BYOK 现在的投影函数（`input-preparation.ts:366-379`）之所以能工作，是因为 fork 提供了 `HostCanonicalAssistantMessage` 这个**类型**；官方没有。若改用官方类型，BYOK 只有两种选择：
+
+- **强制转换**（cast）出一个带假 `usage` 的对象——这正是 INV 与方案 §8.2 明令禁止的「伪造历史出处与用量」，**不可接受**；
+- 或在类型面为这个形状留下位置——即上游要么接受那个 146 处的联合成员，要么提供一个更窄的加宽（例如让 provenance 字段在该判别位下变为可选）。
+
+因此 G-C 的请求完整表述是：**运行时 guard（5 行，已实测）+ 类型面能表达无出处的 assistant 文本（形状由上游选，代价已量：联合成员 146 处 / 更窄的加宽待定）**。
+
+这也直接解释了为什么 **OP2 接线今天不能开工**：在 guard 与类型面同时到位之前，接线的任一刀都只能靠 cast 或取消 host 历史之一——前者伪造语义，后者是把已承诺能力静默降级（INV-14 禁止）。

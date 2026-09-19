@@ -244,3 +244,11 @@
 | `bun run check:release-graph` | **EXIT 0**（10 manifest 对齐 0.18.0、keys 0.5.0；umbrella 7 命名空间且无 keys 边） |
 
 含义：新增的 `request-shape.ts` / `prepared-request.ts` 与仓库自身 gate 兼容，没有引入 public surface 或依赖图变化。`prepared-request.ts` 里对 adapter 调用用了显式 `as never` 边界转换（该模块不深引 provider 类型、也不检查传入对象，只使用序列化后的 body），已在代码内注明理由。
+
+## OP2 接线门槛确认：guard 必要但不充分（2026-09-19）
+
+把两个结果放在一起看：「5 行 guard 已实测」与「新增 `Message` 联合成员要动 146 处」**不矛盾，是同一请求的两半**——guard 修的是运行时崩溃，类型面仍无法表达「无出处的 assistant 文本」。
+
+BYOK 现在的投影函数（`input-preparation.ts:366-379`，把 host 文本构造成 `HostCanonicalAssistantMessage`）能工作，只因为 fork 提供了那个**类型**。改用官方类型只剩两条路：cast 出带假 usage 的对象（伪造 provenance，INV/§8.2 禁止）或取消 host 历史（静默降级，INV-14 禁止）。
+
+因此 **OP2 接线在此之前不能安全开工**；G-C 的完整请求 = 运行时 guard（5 行，已实测）+ 类型面表达方式（形状由上游选）。
