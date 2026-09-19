@@ -613,6 +613,21 @@ jobs:
       - name: Conformance suites (in-memory compositions)
         run: bun run --filter @byok-sdk/conformance test
 
+      # Issue #196 durable restart leg: the recurring packed smoke's restart
+      # scenario runs against THIS job's compose Postgres from the EXACT
+      # tarballs the release driver packs -- never repacked, never from a
+      # source checkout. The job-level env pair above is the substrate selector
+      # the smoke already speaks, and BYOK_REQUIRE_DATAPLANE=1 is what makes a
+      # missing/failing substrate a hard failure here instead of a quiet
+      # in-memory pass (the same law as the suites above). The smoke's
+      # in-memory legs are the npm-release-pack gate's coverage on all three
+      # OSes; the durable leg is structurally present only where the substrate
+      # exists, never skipped-while-counting-as-covered. The run's
+      # release-manifest.json (printed to the log) carries the source SHA and
+      # per-tarball hashes the smoke evidence refers to.
+      - name: Recurring smoke durable restart leg from packed tarballs
+        run: bun run check:release-pack -- --out-dir .ci-artifacts/release-pack
+
       # repo-harness stays outside the dependency graph and is fetched at the
       # pinned tool version only for this check.
       - name: Migration ordering check
