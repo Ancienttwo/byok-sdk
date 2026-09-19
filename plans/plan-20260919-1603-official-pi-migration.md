@@ -594,6 +594,11 @@ bun run check:task-workflow
   - [x] OP4 **范围实测（2026-09-19）**：新增 `p07-subprocess-transport`，让独立子进程在同一官方 release 上自建 session 并注入 caller-owned transport。结果 **supported**：子进程观察 2087 字节 == 父端点收到的 2087 字节；拒发时子进程 4 次尝试、父端点无新增请求、且拒绝不传播（与单进程一致）。
     - 含义：**OP4 没有 runtime 能力缺口**；剩余工作全在 BYOK 侧接线（子进程启动绑定、permit/charge-once、root/parent 身份冻结、print/print 多层），不需要上游。
 - [ ] OP5 官方依赖、身份、安装与来源证明
+  - [x] OP5 **发布/身份面范围实测（2026-09-19）**：`@byok-sdk/pi-` 字样在仓库中分两类——
+    - **可执行面 25 文件 / 154 处**：其中 `tests/fixtures/c07-runtime-record/rejections.v1.json`(70) 与 `canonical-revision.v1.json`(41) 两族 fixture 占 **111 处**；其余是 `resolve-bin.test.ts`(9)、`pack-and-smoke.test.mjs`(5)、`packages/client/package.json`(3)、`pi-runtime-identity.mjs`、`check-adapters-entry.mjs` 与约 15 个 1–2 处的测试。
+    - **历史记录 19 文件 / 62 处**（docs/plans/tasks）：按 §6.1 **不得改字节**，OP5 不碰。
+    - 结论：OP5 的最大单项不是身份脚本，而是**两族 C07 runtime-record fixture**（它们编码了 `expectedStaticPin` 与 `nativeProvenance.packageName` 等 fork 身份期望），需要一次专门的 fixture 重生成步骤；代码侧只有约 20 处测试/manifest 改动。
+    - 因此 OP5 的失败面可预估：`bun run check:release-graph`、`check:release-pack` 与 client 测试在切换后会红一片，且**大部分红来自 fixture 而非实现**——这决定 G3 的验收写法（先重生成 fixture，再判断真实回归）。
 - [ ] OP6 Host C07-H2b 与正式包消费
 - [ ] OP7 固定组合故障/平台/真实目标验收（T01–T32，G3/G4）
 - [ ] OP8 准入切换、旧工作排空、fork 退役
