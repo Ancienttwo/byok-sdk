@@ -156,6 +156,10 @@
 
 结论：原因被隔离到具体字段；失败是静默的（正是 p02「正常结束但 0 请求」的机制）；唯一 workaround 是伪造历史出处与用量，被 INV 与方案 §8.2 明令禁止。**G-C 是确认的硬缺口**，最小反例缩到三条消息 + 一个布尔观测。
 
+**同日更正（重要）**：把 `result()` 的返回值也读出来后发现它**不是静默**——`stopReason: "error"`、`errorMessage = "Cannot read properties of undefined (reading 'totalTokens')"`。根因是请求构造读了 undefined `usage` 上的 `totalTokens` 并抛 TypeError，而**不是丢弃** host 文本；session 层看似静默只因 `prompt()` 不抛错（也解释了 `p04d` 那四条 `stopReason: "error"`）。上一条里的「静默」二字以此为准。
+
+影响：上游最小修复从「新增消息种类（146 处）」缩为「补 guard + 定义缺失 usage 的行为」；BYOK 侧今天就能靠 `stopReason === "error"` + errorMessage fail closed。
+
 ## P06：OP3 工具面解风险（2026-09-19）
 
 既然 G-C 只能等上游，本轮改去推进「不依赖它」的部分。新增第 8 个探针 `p06-extension-tool-bridge`，验证 BYOK **真实使用**的工具通路——由 extension 注册工具（`packages/client/src/adapters/pi/mcp-extension.ts:111` 调 `pi.registerTool`），而不是 P01 用的 `customTools`。

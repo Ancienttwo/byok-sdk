@@ -420,6 +420,24 @@ node packages/client/probes/pi-official/run.mjs --official-version <new>   # 按
 
 因此 G-C 从「疑似可绕开」升级为**确认的硬缺口**：不改上游、又不伪造 provenance 的前提下，BYOK 无法把 Host 已有的 assistant 正文带进新会话。最小反例同时缩到三条消息 + 一个布尔观测。
 
+### 更正与细化：它不是「静默」，是一个 TypeError
+
+上面把 `host_text` 写成「不报错」，是因为只看了 `stream.result()` 是否 reject——它 resolve。把 resolve 出来的值也读出来之后（`stopReason` / `errorMessage`），真实情况是：
+
+| 用例 | fetch 被调用 | `result()` | `stopReason` | `errorMessage` |
+|---|---|---|---|---|
+| 对照（无 assistant 消息） | 是 | resolve | `error` | `Connection error.`（我的桩抛出，预期） |
+| `host_text`（无 provenance） | **否** | resolve | `error` | **`Cannot read properties of undefined (reading 'totalTokens')`** |
+| `full_provenance` | 是 | resolve | `error` | `Connection error.`（同上） |
+
+三点修正：
+
+1. **provider 层不是静默的**：`streamSimple` resolve 出 `stopReason: "error"` 与具体 `errorMessage`。它在 **session 层**看起来静默，只因 `prompt()` 不抛错——这也解释了 `p04d` 里为什么会出现四条 `stopReason: "error"` 的 assistant 条目。
+2. **根因比「缺一个消息种类」小得多**：请求构造读了 **undefined `usage`** 上的 `totalTokens`，抛 TypeError。也就是说代码**没有丢弃** host 文本，而是在读取用量时崩了。
+3. 因此上游最小修复是**补 guard + 定义明确行为**（把缺失 usage 视为「无用量」，或按 typed error 拒绝），而不是新增一等消息种类——后者实测要动 146 处。语义问题（「一条没有出处的 assistant 消息意味着什么」）仍需上游表态，但那是**一个决定，不是一次重构**。
+
+对 BYOK 的直接用处：`stopReason === "error"` 加上 `errorMessage` 足以让运行归属方**立刻 fail closed**，不必等上游；「能把 host 正文发出去」仍要等上游定义行为。
+
 - 上游是否接受该请求、以什么形态接受、何时进入受支持发行包，均不由本仓决定。
 - 目标版本分叉（重钉到含分节 `SystemMessage` 的下一发行版 vs 维持 `0.85.1`）待 owner 裁决。
 - G-C 的形状（A 新联合成员 / B 放宽 provenance 字段 / C 显式导入入口）待上游选择。

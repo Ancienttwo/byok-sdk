@@ -70,10 +70,21 @@ directly with a three-message context, varying only the assistant message:
 | assistant text **without** `api`/`provider`/`model`/`usage`/`stopReason` | **no** | **none** |
 | same text with those fields present | yes | none |
 
-So the request is skipped because the message lacks provenance, and it is skipped
-silently. Populating the fields makes it work, which is exactly the fabrication we
-cannot do: the text is the host's, no provider generated it here, and inventing a
-model id and usage would corrupt accounting downstream.
+Reading the resolved value rather than only checking for a rejection shows what
+actually happens: the stream resolves with `stopReason: "error"` and the message
+`Cannot read properties of undefined (reading 'totalTokens')`. The request is
+never sent because the request build crashes on a missing `usage`, not because
+anything decided to drop the message.
+
+So the minimal fix here is a guard plus a defined behaviour for a message without
+usage - treat usage as absent, or reject with a typed error. A new message kind
+would also work, but costs 146 type errors across four packages as measured. The
+semantic question, what an assistant message with no provenance means, still needs
+your answer; the crash does not.
+
+Populating the fields makes it work, which is exactly the fabrication we cannot
+do: the text is the host's, no provider generated it here, and inventing a model
+id and usage would corrupt accounting downstream.
 
 **Cost of the obvious shape.** Adding a new member to the `Message` union with a
 discriminant produces **146 type errors across 42 files and 4 packages**
