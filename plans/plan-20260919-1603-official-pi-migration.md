@@ -561,6 +561,8 @@ bun run check:task-workflow
   - [x] P05 装载/递归兼容 → **supported（装载面）**；递归 spawn 语义不在本探针覆盖范围（归 OP4）
   - [x] **G1 裁定：第二档**——基础执行可行，缺 pure compile/consume 与历史导入；推进 OP2-U 最小上游接口；相关生产路径保持禁用
 - [ ] OP2 预算/prepared 接口替代（必要时 OP2-U 最小上游改进）
+  - [x] OP2 核心的**全量验证证据（2026-09-19）**：`bun run build`（EXIT 0）后 `packages/client` 全量 = **244 passed / 2 skipped（文件级），2906 tests passed / 11 skipped，EXIT 0（152s）**。先前一次 185 文件失败是**环境性的**（worktree 未构建，workspace 包解析不到 entry），非本次改动所致。
+    - 环境事实（对后续验证重要）：该 worktree 跑全量测试前**必须先 `bun run build`**，否则得到一片假红。
   - [x] OP2 接线工作面实测（2026-09-19，**发现第三项上游项**）：两个 fork 文件的 9 处用法已逐条定位（见 OP2-U §15）。新发现 `RPC_MAX_FRAME_BYTES`/`fitsRpcFrame`/`rpcFrameByteLength` 是 **Pi 自己 stdin 读取器的帧上限**——运行时属性，BYOK 不能在本仓重实现（会造第二权威；一旦不一致，帧会被静默丢弃/截断）。上游请求因此为三项：① G-C 的 5 行 guard（已实测）② 帧上限助手（纯导出）③ 请求形状契约（**可选**）。
     - 接线须分多刀：`PreparedSessionInputV2` envelope 穿过 daemon 服务、store/receipt、Host CAS 与 prepared host，替换它同时触及编译/冻结/组帧/消费四处。
   - [x] OP2 的 G-B 收敛（2026-09-19）：BYOK **不需要**上游交付契约也能满足 INV-06——新增 `packages/client/src/adapters/pi/request-shape.ts`（20 键分类 + `classifyRequestShape` + `assertRequestShape` + `RequestShapeDriftError`），在发送点对**实际 payload** 分类，**未知键即拒绝**；`packages/client/src/__tests__/request-shape.test.ts` **5 用例全绿**。

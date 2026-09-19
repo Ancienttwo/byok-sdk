@@ -221,3 +221,14 @@
 因此上游请求是三项：① G-C 的 5 行 guard（已实测）② 帧上限助手（纯导出、无行为变更）③ 请求形状契约（可选）。
 
 接线仍须分多刀：`PreparedSessionInputV2` envelope 穿过 daemon 服务、store/receipt、Host CAS 与 prepared host，替换它同时触及编译/冻结/组帧/消费四处。
+
+## 全量验证证据 + 一个重要环境事实（2026-09-19）
+
+第一次跑 `packages/client` 全量测试得到 **185 个文件失败**，但全部是环境性的：错误集中在 `Failed to resolve entry for package "@byok-sdk/protocol"` / `@byok-sdk/core` / `@byok-sdk/implementation-identity` 以及缺少 `dist/bin/*` —— 即本 worktree **从未构建过 workspace**（本轮之前只跑过探针与两个新单测文件，它们不依赖 workspace 产物）。
+
+先 `bun run build`（EXIT=0）再重跑：**244 passed / 2 skipped（文件级），2906 tests passed / 11 skipped，EXIT=0，152s**。
+
+两点记录：
+
+1. **本 worktree 的验证前置是 `bun run build`**；不构建就直接跑 client 测试会得到一片假红。后续任何全量验证都要先构建。
+2. 这是迄今最强的验证证据：迁移的主要写入面（client 包）在我加入 `request-shape.ts` 与 `prepared-request.ts` 之后**全绿**。
