@@ -563,6 +563,7 @@ bun run check:task-workflow
 - [ ] OP2 预算/prepared 接口替代（必要时 OP2-U 最小上游改进）
   - [x] OP2 核心的**全量验证证据（2026-09-19）**：`bun run build`（EXIT 0）后 `packages/client` 全量 = **244 passed / 2 skipped（文件级），2906 tests passed / 11 skipped，EXIT 0（152s）**。先前一次 185 文件失败是**环境性的**（worktree 未构建，workspace 包解析不到 entry），非本次改动所致。
     - 环境事实（对后续验证重要）：该 worktree 跑全量测试前**必须先 `bun run build`**，否则得到一片假红。
+  - [x] OP2 **类型形状代价对比（2026-09-19）**：同一条干净基线上量两种上游类型形状——**A 新增 `Message` 联合成员 = 146 处**（coding-agent 75 / agent 44 / ai 22 / evals 5）；**B 放宽 provenance 字段为可选 = 256 处**（ai 155 / coding-agent 93 / agent 5 / evals 3）。结论：**A 更便宜**，与先前「B 可能更窄」的猜测相反（B 把「可能缺失」传播到每个读取点，而它们多在 provider 层）。上游请求据此可**指名形状 A** 并附两个数字。
   - [x] OP2 **接线门槛确认（2026-09-19）**：把「5 行 guard 已实测」与「联合成员 146 处」合并看，二者是**同一请求的两半**——guard 修运行时崩溃（必要），但**类型面**仍无法表达「无出处的 assistant 文本」（官方 `AssistantMessage` 必填 `api`/`provider`/`model`/`usage`/`stopReason`）。BYOK 现有投影（`input-preparation.ts:366-379`）能工作只因 fork 提供了该类型。
     - **因此 OP2 接线在此之前不能安全开工**：要么 cast（伪造 provenance，INV/§8.2 禁止），要么取消 host 历史（静默降级，INV-14 禁止）。
     - G-C 请求完整形态 = **运行时 guard（5 行，已实测）+ 类型面表达方式（形状由上游选；联合成员 146 处，更窄加宽待定）**。

@@ -252,3 +252,12 @@
 BYOK 现在的投影函数（`input-preparation.ts:366-379`，把 host 文本构造成 `HostCanonicalAssistantMessage`）能工作，只因为 fork 提供了那个**类型**。改用官方类型只剩两条路：cast 出带假 usage 的对象（伪造 provenance，INV/§8.2 禁止）或取消 host 历史（静默降级，INV-14 禁止）。
 
 因此 **OP2 接线在此之前不能安全开工**；G-C 的完整请求 = 运行时 guard（5 行，已实测）+ 类型面表达方式（形状由上游选）。
+
+## G-C 类型形状：两种代价已量完，A 更便宜（2026-09-19）
+
+同一条干净基线上试两种形状（`npx tsgo --noEmit`）：
+
+- **A 新增 `Message` 联合成员**：**146 处**（coding-agent 75 / agent 44 / ai 22 / evals 5）
+- **B 放宽 `api`/`provider`/`model`/`usage`/`stopReason` 为可选 + `origin?: "host"`**：**256 处**（ai 155 / coding-agent 93 / agent 5 / evals 3）
+
+结论与直觉相反：B 把「可能缺失」传播到每个读取 provider 值的点，而它们大多在 provider 层；A 只在需要区分两种 assistant 事实处增加分支。因此上游请求**可以指名 A**（并附两个数字），而非让上游在未知代价里选。
