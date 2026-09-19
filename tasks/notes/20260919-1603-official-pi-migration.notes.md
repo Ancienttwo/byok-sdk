@@ -155,3 +155,11 @@
 - `full_provenance`（同样文本补齐 `api`/`provider`/`model`/`usage`/`stopReason`）：fetch **恢复被调用**。
 
 结论：原因被隔离到具体字段；失败是静默的（正是 p02「正常结束但 0 请求」的机制）；唯一 workaround 是伪造历史出处与用量，被 INV 与方案 §8.2 明令禁止。**G-C 是确认的硬缺口**，最小反例缩到三条消息 + 一个布尔观测。
+
+## P06：OP3 工具面解风险（2026-09-19）
+
+既然 G-C 只能等上游，本轮改去推进「不依赖它」的部分。新增第 8 个探针 `p06-extension-tool-bridge`，验证 BYOK **真实使用**的工具通路——由 extension 注册工具（`packages/client/src/adapters/pi/mcp-extension.ts:111` 调 `pi.registerTool`），而不是 P01 用的 `customTools`。
+
+一次通过：加载路径 `["<inline:1>"]`、wire `tools` 恰为 `["probe_bridge"]`、往返 2 次请求、`bridge:ping` 出现在后继请求。verdict = supported。套件现为 8 项，其余 7 项 verdict 不变。
+
+含义：OP3 的工具/装载面**不依赖 G-A/G-B/G-C**，可以在官方运行时上先行实现与验收；只有 prepared 相关路径继续禁用。

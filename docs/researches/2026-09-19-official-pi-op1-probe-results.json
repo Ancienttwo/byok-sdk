@@ -1,14 +1,14 @@
 {
   "kind": "official-pi-op1-probe-summary",
-  "generatedAt": "2026-09-19T08:51:04.241Z",
+  "generatedAt": "2026-09-19T10:01:38.503Z",
   "officialPackage": "@earendil-works/pi-coding-agent@0.85.1",
   "officialIntegrity": "sha512-FGRN+OHbWaefBPGaTggAdLjrIHW+s2PzLyglz/5dfLzb9of7uuXMXYC0fJIeZTw+shS32o2cuQ9jF7YSDuL/oQ==",
   "officialPiAiIntegrity": "sha512-+VgVIJDkDO2efYJKEEqvPTH4zmnIaXdAppGbO+vKFA9qy5PdhFiAenuFAkU+oiCSfOC4dMHDyrjdQeL4ZoC5CQ==",
   "officialResolved": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-0.85.1.tgz",
   "officialGitHead": null,
   "isolation": {
-    "probeRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4",
-    "emptyHome": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4/empty-home",
+    "probeRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6",
+    "emptyHome": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6/empty-home",
     "node": "v24.18.0",
     "platform": "darwin-arm64"
   },
@@ -21,8 +21,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -102,8 +102,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -249,8 +249,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -308,8 +308,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -341,7 +341,7 @@
         {
           "name": "first message (system) matches the session projection",
           "ok": false,
-          "detail": "pre={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\"} session={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\\nCurrent working directory: /tmp/pi-probe-p03b-RXUHww/cwd\\n\"}"
+          "detail": "pre={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\"} session={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\\nCurrent working directory: /tmp/pi-probe-p03b-T1Md6p/cwd\\n\"}"
         },
         {
           "name": "no certification accompanies the payload",
@@ -383,7 +383,7 @@
         {
           "name": "first message (system) matches the session projection",
           "ok": false,
-          "detail": "pre={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\"} session={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\\nCurrent working directory: /tmp/pi-probe-p03b-RXUHww/cwd\\n\"}"
+          "detail": "pre={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\"} session={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\\nCurrent working directory: /tmp/pi-probe-p03b-T1Md6p/cwd\\n\"}"
         }
       ],
       "exitCode": 0
@@ -396,8 +396,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -597,8 +597,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -689,8 +689,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-LMOyw4",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -732,9 +732,60 @@
         "skillCount": 0,
         "extensionErrors": [],
         "plantedHostileFiles": [
-          "/tmp/pi-probe-p05-3OylrS/cwd/.pi/extensions/hostile.mjs",
-          "/tmp/pi-probe-p05-3OylrS/agent/extensions/hostile.mjs"
+          "/tmp/pi-probe-p05-1Th2Co/cwd/.pi/extensions/hostile.mjs",
+          "/tmp/pi-probe-p05-1Th2Co/agent/extensions/hostile.mjs"
         ]
+      },
+      "failures": [],
+      "exitCode": 0
+    },
+    {
+      "probe": "p06-extension-tool-bridge",
+      "ok": true,
+      "verdict": "supported",
+      "verdictReason": "a tool registered by an inline extension is exposed on the wire, executed, and its result returns to the model — the mechanism the MCP bridge depends on",
+      "environment": {
+        "node": "v24.18.0",
+        "platform": "darwin-arm64",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6",
+        "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
+      },
+      "checks": [
+        {
+          "name": "only the authorized inline extension is loaded",
+          "ok": true,
+          "detail": "[\"<inline:1>\"]"
+        },
+        {
+          "name": "the extension factory ran",
+          "ok": true,
+          "detail": "[\"bridge\"]"
+        },
+        {
+          "name": "extension-registered tool reaches the wire",
+          "ok": true,
+          "detail": "[\"probe_bridge\"]"
+        },
+        {
+          "name": "tool round trip produced two requests",
+          "ok": true,
+          "detail": "count=2"
+        },
+        {
+          "name": "extension tool executed and its result returned",
+          "ok": true,
+          "detail": "expected bridge:ping in the follow-up request"
+        }
+      ],
+      "observed": {
+        "extensionPaths": [
+          "<inline:1>"
+        ],
+        "wireTools": [
+          "probe_bridge"
+        ],
+        "requestCount": 2
       },
       "failures": [],
       "exitCode": 0
@@ -749,6 +800,7 @@
     "p03b-pre-session-request": "not-supported",
     "p04-send-gate": "partial",
     "p04d-refusal-observability": "supported",
-    "p05-loader-closure": "supported"
+    "p05-loader-closure": "supported",
+    "p06-extension-tool-bridge": "supported"
   }
 }

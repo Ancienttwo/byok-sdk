@@ -117,7 +117,17 @@ node packages/client/probes/pi-official/run.mjs --probe p04
 
 这两条把 OP2-U 的范围改了：G-D（可传播拒绝）**不需要上游**——运行归属方可以自行判定；真正需要上游的是 G-A（会话首请求的纯编译复现）、G-B（覆盖证明）与 G-C（host 断言历史）。
 
-## 9. 未证明 / 局限
+## 9. P06 — extension 提供的工具桥接（supported，OP3 解风险用）
+
+OP1 原套件证明的是「`customTools` 挂载的工具能往返」（P01）。BYOK 的真实工具通路不同：MCP bridge 由 **extension** 注册工具（`packages/client/src/adapters/pi/mcp-extension.ts:111` 调 `pi.registerTool`）。P06 就是这条路径在官方发行版上的验证。
+
+做法：inline extension factory 内 `pi.registerTool(defineTool({...}))`，`noExtensions` 关闭发现，session 以 `tools: ['probe_bridge']` 授权，本地合成端点先回 tool call 再回终答。
+
+观测：加载到的 extension 路径 `["<inline:1>"]`；wire 上 `tools` 恰为 `["probe_bridge"]`；工具往返 **2** 次请求；`bridge:ping` 出现在后继请求里。verdict = **supported**。
+
+含义：**OP3 的工具迁移不依赖 prepared-input 那几条 seam**。BYOK 的 MCP/工具桥接机制可以在官方运行时上直接成立，因此「等 G-C」不必阻塞工具与装载面的实现。
+
+## 10. 未证明 / 局限
 
 - P04 只验证了 `openai-completions` 一条 transport；WebSocket 与其他 API 未验证，且方案明确要求它们保持不支持。
 - P04 的 gate 是「调用方自己实现的 provider + 官方 adapter」这一形态；它证明机制可达，**不等于**已经在产品代码里正确接线（那是 OP3 的验收面）。

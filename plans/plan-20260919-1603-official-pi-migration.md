@@ -584,6 +584,7 @@ bun run check:task-workflow
     - 分叉 B：维持 `0.85.1` 并按 `docs/researches/2026-09-19-official-pi-op2u-upstream-request.md` §1–§6 提接口，需同时论证「为何在即将被替换的形状上新增接口」。
     - 两分支都不改变当前判断：prepared 生产路径保持禁用，`official_supported` 不得声明。
 - [ ] OP3 现有 runtime、工具、消息、凭证迁移
+  - [x] OP3 工具面解风险（2026-09-19）：新增 `p06-extension-tool-bridge` 探针，验证 BYOK 真实使用的 **extension 注册工具**路径（`mcp-extension.ts:111` 的 `pi.registerTool`）在官方发行版上成立——`<inline:1>` 唯一加载、wire `tools` 恰为 `["probe_bridge"]`、往返 2 次请求、`bridge:ping` 回到后继请求。结论：**OP3 的工具/装载面不依赖 G-A/G-B/G-C**，可先行实现；prepared 相关路径继续禁用。
 - [ ] OP4 五边递归、custody、workflow 等价接线
 - [ ] OP5 官方依赖、身份、安装与来源证明
 - [ ] OP6 Host C07-H2b 与正式包消费
