@@ -1,16 +1,16 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-09-15T13:14:40+0800 -->
+<!-- updated_at: 2026-09-19T16:03:16+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-09-15T13:14:40+0800
-> **Source Branch**: codex/agent-gateway-probe
-> **Source Commit**: 85076c83
+> **Updated At**: 2026-09-19T16:03:16+0800
+> **Source Branch**: codex/official-pi-migration
+> **Source Commit**: 79f6a0d3
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: archive-workflow
+> **Reason**: ensure-task-workflow
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is an ignored local read model derived from this worktree's artifacts. It is not tracked, not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
@@ -25,8 +25,26 @@ This file is an ignored local read model derived from this worktree's artifacts.
 
 ## Active Work
 
-- linked-worktree-ce21c0c05deb: plans/plan-20260910-0214-downstream-issue-intake.md
+- linked-worktree-ce21c0c05deb: plans/plan-20260917-1459-byok-next-stage-recursive-s2.md
 - linked-worktree-ce21c0c05deb: active-worktree owner -> self
+- linked-worktree-905813415fe0: plans/plan-20260918-2229-issue-180-send-agent-message-grants.md
+- linked-worktree-905813415fe0: active-worktree owner -> self
+- linked-worktree-1b84695c11c5: plans/plan-20260919-0503-issue-197-docs-authority-navigation.md
+- linked-worktree-1b84695c11c5: active-worktree owner -> self
+- linked-worktree-762432fad720: plans/plan-20260917-1440-c07-pr191-integration.md
+- linked-worktree-762432fad720: active-worktree owner -> self
+- linked-worktree-278b6ace8f7d: plans/plan-20260918-2052-n1-external-cli-gate.md
+- linked-worktree-278b6ace8f7d: active-worktree owner -> self
+- linked-worktree-bb4375a0963f: plans/plan-20260916-0041-pi-enrollment-prototype.md
+- linked-worktree-bb4375a0963f: active-worktree owner -> self
+- linked-worktree-b3964037efe9: plans/plan-20260919-0532-winsw-unlink-retry.md
+- linked-worktree-b3964037efe9: active-worktree owner -> self
+- linked-worktree-832d345da791: plans/plan-20260917-1950-wp1-smoke-programfiles.md
+- linked-worktree-832d345da791: active-worktree owner -> self
+- linked-worktree-1ddf780fc05d: plans/plan-20260917-2155-wp4-five-edge-enablement.md
+- linked-worktree-1ddf780fc05d: active-worktree owner -> self
+- linked-worktree-eccd2fa21ba2: plans/plan-20260919-0418-issue-196-recurring-smoke-roundtrip.md
+- linked-worktree-eccd2fa21ba2: active-worktree owner -> self
 ## Active Sprint
 
 - Sprint: (none)
@@ -36,26 +54,19 @@ This file is an ignored local read model derived from this worktree's artifacts.
 - `tasks/workstreams/sdk/sdk-root/20260905-sdk-root.md`: status=acceptance, current_slice=T7 exact AgentRef reliability identities, then replacement acceptance, source_plan=plans/plan-20260905-0124-issues-135-144-reliability.md
 ## Handoff
 
-- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: G4 Finish formal closeout and PR delivery. Strict workflow passes after owner-approved historical archival. Local CodeGraph restoration and proof-only reconciliation return projection noop; no architecture/model/source changes. Freeze canonical checks and acceptance, then finish the work-package and deliver the PR without provider reruns.
+- Exact Next Step: (none)
 
 ## Checks
 
-- status=pass, source=verify-sprint, exit_code=0, file=.ai/harness/checks/latest.json
+- status=(none), source=(none), exit_code=(none), file=.ai/harness/checks/latest.json
 
 ## Git Status
 
-- Summary: 9 changed/untracked path(s)
+- Summary: 2 changed/untracked path(s)
 
 ```
- D plans/plan-20260914-1028-agent-gateway-session-probe.md
- D tasks/contracts/20260914-1028-agent-gateway-session-probe.contract.md
- D tasks/notes/20260914-1028-agent-gateway-session-probe.notes.md
- D tasks/reviews/20260914-1028-agent-gateway-session-probe.review.md
-?? plans/archive/plan-20260914-1028-agent-gateway-session-probe.md
-?? tasks/archive/contract-20260915-1314-agent-gateway-session-probe.md
-?? tasks/archive/notes-20260915-1314-agent-gateway-session-probe.md
-?? tasks/archive/review-20260915-1314-agent-gateway-session-probe.md
-?? tasks/archive/todo-20260915-1314-agent-gateway-session-probe.md
+ M tasks/current.md
+?? plans/plan-20260919-1603-official-pi-migration.md
 ```
 
 ## Source Artifacts
