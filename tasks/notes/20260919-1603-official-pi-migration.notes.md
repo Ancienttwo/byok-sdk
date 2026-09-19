@@ -213,3 +213,11 @@
 与前面几轮拼起来，prepared 路径可全建在官方公开入口 + 自有 transport 上：编译 D（P03b 的捕获型 fetch）→ 复现 Context（5/5 sections + 4/4 工具）→ 覆盖证明（`request-shape.ts`）→ 发送点比对冻结 D（P04）。唯一额外输入 `sessionId` 由 BYOK 自定。
 
 **因此 OP2 的上游依赖只剩 G-C 的 5 行 guard。**
+
+## OP2 接线工作面实测：第三个上游项（2026-09-19）
+
+接线前先量了两个 fork 文件的真实用法（9 处，逐条见 OP2-U §15）。结果比预期多一项：`RPC_MAX_FRAME_BYTES`/`fitsRpcFrame`/`rpcFrameByteLength`（`rpc-types`，被 `daemon/input-preparation-service.ts:38-43` 与 `prepared-prompt-frame` 使用）描述的是 **Pi 自己 stdin 读取器的帧上限**，属运行时属性，BYOK 不能在本仓重实现——那会造第二份权威，且一旦与实际读取器不一致，帧会被静默丢弃/截断。
+
+因此上游请求是三项：① G-C 的 5 行 guard（已实测）② 帧上限助手（纯导出、无行为变更）③ 请求形状契约（可选）。
+
+接线仍须分多刀：`PreparedSessionInputV2` envelope 穿过 daemon 服务、store/receipt、Host CAS 与 prepared host，替换它同时触及编译/冻结/组帧/消费四处。

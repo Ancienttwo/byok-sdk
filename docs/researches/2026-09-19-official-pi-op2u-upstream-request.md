@@ -503,3 +503,31 @@ G-A 解决、G-B 收敛之后，还剩一个疑问：**消费冻结请求**（fo
 | 唯一额外输入 | `sessionId`——由 BYOK 自己决定（会话由它创建） |
 
 **因此 OP2 的上游依赖只剩 G-C 的 5 行 guard**（用于 host 断言历史）。
+
+## 15. OP2 接线工作面实测（2026-09-19）：第三个上游项浮现
+
+动手接线前先量了一遍两个 fork 文件的真实用法，结果比预期多出一项。
+
+| 位置 | fork 专有用法 | 新实现下的处置 |
+|---|---|---|
+| `adapters/pi/input-preparation.ts:5,7-9` | `PreparedSessionInputV2` / `CodingAgentInputSnapshot` / `HostCanonicalAssistantMessage` **类型** | 换成新核心的 `PreparedRequest`；host 断言消息**显式 fail closed** |
+| `…/input-preparation.ts:71-78,412-419` | 动态 import `prepareCodingAgentSessionInput`（native 编译） | 换成 `compilePreparedRequest`（官方公开 adapter + 捕获 fetch） |
+| `…/input-preparation.ts:366-373` | 构造 `HostCanonicalAssistantMessage` | **G-C**：无该能力时拒绝，不伪造 |
+| `bin/pi-prepared-host.ts:317` | `createPreparedAgentSession`（**消费** seam） | 改为普通 session + 在自有 transport 比对冻结 D（P04／§14 已证可行） |
+| `adapters/pi/prepared-prompt-frame.ts` + `daemon/input-preparation-service.ts:38-43` | `rpc-types`：`fitsRpcFrame` / `rpcFrameByteLength` / `RPC_MAX_FRAME_BYTES` | **新发现的第三项上游依赖** |
+
+### 第三项上游项：RPC 帧上限需要公开
+
+这三个符号描述的是 **Pi 自己 stdin 读取器的帧上限**——运行时属性，不是 BYOK 的策略。BYOK 不能在本仓重新实现：那会造出第二份权威，而这个数字一旦与 Pi 实际读取器不一致，帧会被静默丢弃或截断。它已经在 fork 里，只是不在官方导出面。
+
+上游请求因此是三项，且这项最小：
+
+| # | 请求 | 形态 |
+|---|---|---|
+| 1 | host 断言 assistant 文本的 `usage` guard | **5 行补丁已实测** |
+| 2 | RPC 帧上限助手（`RPC_MAX_FRAME_BYTES`/`fitsRpcFrame`/`rpcFrameByteLength`） | 纯导出，无行为变更 |
+| 3 | provider 请求形状契约 | **可选**（BYOK 已能运行时拒绝漂移） |
+
+### 为什么接线仍要分多刀
+
+`PreparedSessionInputV2` 不只在这两个文件里：它穿过 daemon 服务、store/receipt、Host CAS 与 prepared host，并被 `prepared-prompt-frame` 用于组帧。替换它等于同时改动编译、冻结、组帧与消费四处，每一刀的中间态都必须保持构建与既有 prepared 测试绿。因此本轮只做到「核心已实现并有测试」，接线按文件分刀推进。

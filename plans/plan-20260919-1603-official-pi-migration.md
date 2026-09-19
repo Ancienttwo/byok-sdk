@@ -561,6 +561,8 @@ bun run check:task-workflow
   - [x] P05 装载/递归兼容 → **supported（装载面）**；递归 spawn 语义不在本探针覆盖范围（归 OP4）
   - [x] **G1 裁定：第二档**——基础执行可行，缺 pure compile/consume 与历史导入；推进 OP2-U 最小上游接口；相关生产路径保持禁用
 - [ ] OP2 预算/prepared 接口替代（必要时 OP2-U 最小上游改进）
+  - [x] OP2 接线工作面实测（2026-09-19，**发现第三项上游项**）：两个 fork 文件的 9 处用法已逐条定位（见 OP2-U §15）。新发现 `RPC_MAX_FRAME_BYTES`/`fitsRpcFrame`/`rpcFrameByteLength` 是 **Pi 自己 stdin 读取器的帧上限**——运行时属性，BYOK 不能在本仓重实现（会造第二权威；一旦不一致，帧会被静默丢弃/截断）。上游请求因此为三项：① G-C 的 5 行 guard（已实测）② 帧上限助手（纯导出）③ 请求形状契约（**可选**）。
+    - 接线须分多刀：`PreparedSessionInputV2` envelope 穿过 daemon 服务、store/receipt、Host CAS 与 prepared host，替换它同时触及编译/冻结/组帧/消费四处。
   - [x] OP2 的 G-B 收敛（2026-09-19）：BYOK **不需要**上游交付契约也能满足 INV-06——新增 `packages/client/src/adapters/pi/request-shape.ts`（20 键分类 + `classifyRequestShape` + `assertRequestShape` + `RequestShapeDriftError`），在发送点对**实际 payload** 分类，**未知键即拒绝**；`packages/client/src/__tests__/request-shape.test.ts` **5 用例全绿**。
   - [x] OP2 **上游依赖再降一档（2026-09-19，结论性测量）**：在上游 main 的真实 session 上捕获 Context+options+body，用同一官方 serializer 会话外重建——**重放完整 options 与只用极简 options（`apiKey`/`model`/`sessionId`/`reasoning`）都得到 byte-identical 的 6123 字节，diff 为空**；session 注入的 agent-loop 回调对请求体无影响。
     - 含义：**「消费冻结请求」不需要上游接口**。prepared 路径可全建在官方公开入口 + 自有 transport 上（编译 D → 复现 Context → 覆盖证明 → 发送点比对冻结 D；`sessionId` 由 BYOK 自定）。
