@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -7,7 +7,7 @@ import path from 'node:path';
  * (packages/cloud-dataplane/src/__tests__/support/dataplane.ts), and the only
  * place the bun-dependent suites' interpreter lookup is written down.
  *
- * Two behaviors, and the second is what keeps the first honest:
+ * Three behaviors, and each later one keeps the earlier ones honest:
  *
  * - No candidate exists → `resolveBunBin` returns undefined and the suites
  *   `it.skipIf` themselves, so a developer without bun sees a visible skip,
@@ -17,6 +17,10 @@ import path from 'node:path';
  *   CI job (build-test, which also resolves the real bun path into
  *   `BYOK_TEST_BUN_BIN`), so the skip path can never be how that job stays
  *   green.
+ * - `BYOK_REQUIRE_BUN=1` with `BYOK_TEST_BUN_BIN` set is strict: the named
+ *   path is the entire candidate set. Missing or not a file → a throw naming
+ *   that exact path. The helper must never scan on from a bad explicit path
+ *   and silently run a substitute bun underneath the formal gate.
  *
  * The candidate list is the exact union of the lists the three suites carried
  * before this helper existed — pi-s2-bundle-resolution, pi-mcp-launch-cwd and
@@ -44,11 +48,40 @@ export function bunBinCandidates(env: NodeJS.ProcessEnv, homedir: string): Array
   ];
 }
 
+/**
+ * The single existence probe: a candidate counts only when it resolves to an
+ * existing file. Neither a missing path nor a directory named bun is a
+ * runnable interpreter. Kept as one boolean seam so the pin tests stay
+ * deterministic while production defaults still reject both shapes.
+ */
+function existsAsFile(candidate: string): boolean {
+  try {
+    return statSync(candidate).isFile();
+  } catch {
+    return false;
+  }
+}
+
 export function resolveBunBin(
   env: NodeJS.ProcessEnv = process.env,
   homedir: string = os.homedir(),
-  exists: (candidate: string) => boolean = existsSync,
+  exists: (candidate: string) => boolean = existsAsFile,
 ): string | undefined {
+  const explicit = env[TEST_BUN_BIN_ENV];
+  if (env[REQUIRE_BUN_ENV] === '1' && explicit !== undefined) {
+    // Strict mode. The formal gate names its interpreter through
+    // BYOK_TEST_BUN_BIN, and under REQUIRE that name is the whole candidate
+    // set. Falling through to the scan here would let a bad explicit path
+    // plus an installed default silently run the substitute bun and keep the
+    // job green — the exact substitution this branch makes impossible.
+    if (!exists(explicit)) {
+      throw new Error(
+        `${REQUIRE_BUN_ENV}=1 and ${TEST_BUN_BIN_ENV}=${explicit}, but that path is missing or not a file. ` +
+        'The build-test job runs exactly the interpreter it resolved — no fallback candidate is substituted.',
+      );
+    }
+    return explicit;
+  }
   const candidates = bunBinCandidates(env, homedir);
   const found = candidates.find((candidate): candidate is string => candidate !== undefined && exists(candidate));
   if (found === undefined && env[REQUIRE_BUN_ENV] === '1') {

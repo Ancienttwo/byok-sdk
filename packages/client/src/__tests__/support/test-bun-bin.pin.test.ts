@@ -27,6 +27,29 @@ describe('the bun test gate', () => {
     ).toThrow(new RegExp(REQUIRE_BUN_ENV));
   });
 
+  it(`throws naming ${TEST_BUN_BIN_ENV} under ${REQUIRE_BUN_ENV}=1 even when a fallback candidate exists (no substitute bun)`, () => {
+    // Strict mode: with REQUIRE on, the explicit name is the entire candidate
+    // set. A bad explicit path plus an installed default must hard-fail
+    // naming the exact path the gate asked for — never scan on and hand back
+    // the substitute interpreter.
+    const explicit = '/explicit/required/bun';
+    const fallbackInstalled = (candidate: string): boolean => candidate === '/opt/homebrew/bin/bun';
+    const resolve = () => resolveBunBin({ [TEST_BUN_BIN_ENV]: explicit, [REQUIRE_BUN_ENV]: '1' }, '/home/u', fallbackInstalled);
+    expect(resolve).toThrow(new RegExp(REQUIRE_BUN_ENV));
+    expect(resolve).toThrow(explicit);
+  });
+
+  it(`returns exactly ${TEST_BUN_BIN_ENV} under ${REQUIRE_BUN_ENV}=1 and never probes the fallback chain`, () => {
+    const explicit = '/explicit/required/bun';
+    const probed: string[] = [];
+    const explicitOrFallback = (candidate: string): boolean => {
+      probed.push(candidate);
+      return candidate === explicit || candidate === '/opt/homebrew/bin/bun';
+    };
+    expect(resolveBunBin({ [TEST_BUN_BIN_ENV]: explicit, [REQUIRE_BUN_ENV]: '1' }, '/home/u', explicitOrFallback)).toBe(explicit);
+    expect(probed, 'strict mode must stop at the explicit name').toEqual([explicit]);
+  });
+
   it('returns undefined without the flag, so the suites keep their skip path', () => {
     expect(resolveBunBin({ [TEST_BUN_BIN_ENV]: '/nonexistent/bun' }, '/home/empty', nothingExists)).toBeUndefined();
   });
