@@ -35,6 +35,13 @@ jobs:
   build-test:
     name: build, typecheck, test (fixed Node)
     runs-on: ubuntu-latest
+    env:
+      # The formal gate half of the bun test gate
+      # (packages/client/src/__tests__/support/test-bun-bin.ts): with it set,
+      # the three bun-dependent suites hard-fail when no bun candidate exists
+      # instead of silently skipping — a skip is not a success conclusion
+      # here. Local developers leave it unset and keep the skip convenience.
+      BYOK_REQUIRE_BUN: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -47,6 +54,29 @@ jobs:
       # setup-bun reads the exact version from root packageManager.
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
+
+      # The bun-dependent suites (pi-s2-bundle-resolution, pi-mcp-launch-cwd,
+      # pi-runtime-launch-cwd) skip themselves when no bun candidate exists,
+      # and their fallback search list deliberately does NOT include
+      # ~/.bun/bin/bun — that path is setup-bun's internal install default,
+      # not a location the suites may assume. Without this step they would
+      # silently skip on every runner and CI green would never cover them.
+      # The real absolute path is resolved rather than hardcoded so a
+      # setup-bun install-layout change fails loudly here instead of
+      # reintroducing silent skips; path, version and hash are printed as the
+      # recorded Bun evidence for this run, and the path is handed to the
+      # suites through BYOK_TEST_BUN_BIN.
+      - name: Resolve Bun for the forced bun suites
+        run: |
+          BUN_PATH="$(command -v bun)"
+          if [ -z "$BUN_PATH" ]; then
+            echo "bun is not on PATH after setup-bun; the forced bun suites would silently skip" >&2
+            exit 1
+          fi
+          echo "bun path: $BUN_PATH"
+          bun --version
+          shasum -a 256 "$BUN_PATH"
+          echo "BYOK_TEST_BUN_BIN=$BUN_PATH" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: bun ci

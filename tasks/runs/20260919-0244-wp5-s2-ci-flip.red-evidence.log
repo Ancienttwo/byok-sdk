@@ -1,0 +1,28 @@
+@byok-sdk/client test: 
+@byok-sdk/client test:  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-wp5-ci-flip/packages/client
+@byok-sdk/client test: 
+@byok-sdk/client test:  ❯ src/__tests__/pi-mcp-launch-cwd.test.ts (0 test)
+@byok-sdk/client test: 
+@byok-sdk/client test: ⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+@byok-sdk/client test: 
+@byok-sdk/client test:  FAIL  src/__tests__/pi-mcp-launch-cwd.test.ts [ src/__tests__/pi-mcp-launch-cwd.test.ts ]
+@byok-sdk/client test: Error: BYOK_REQUIRE_BUN=1 but no bun interpreter exists (searched: /nonexistent/bun, /private/tmp/wp5-empty-home-55MZ/.local/bin/bun, /opt/homebrew/bin/bun, /usr/local/bin/bun). The build-test job must run the bun-dependent suites for real — a skip is not a success conclusion there.
+@byok-sdk/client test:  ❯ resolveBunBin src/__tests__/support/test-bun-bin.ts:59:11
+@byok-sdk/client test:      57|     // exists to make that impossible.
+@byok-sdk/client test:      58|     const searched = candidates.map((candidate) => candidate === undef…
+@byok-sdk/client test:      59|     throw new Error(
+@byok-sdk/client test:        |           ^
+@byok-sdk/client test:      60|       `${REQUIRE_BUN_ENV}=1 but no bun interpreter exists (searched: $…
+@byok-sdk/client test:      61|       'The build-test job must run the bun-dependent suites for real —…
+@byok-sdk/client test:  ❯ src/__tests__/pi-mcp-launch-cwd.test.ts:36:17
+@byok-sdk/client test: 
+@byok-sdk/client test: ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+@byok-sdk/client test: 
+@byok-sdk/client test: 
+@byok-sdk/client test:  Test Files  1 failed | 1 passed (2)
+@byok-sdk/client test:       Tests  5 passed (5)
+@byok-sdk/client test:    Start at  03:01:50
+@byok-sdk/client test:    Duration  252ms (transform 81ms, setup 0ms, import 28ms, tests 2ms, environment 0ms)
+@byok-sdk/client test: 
+@byok-sdk/client test: Exited with code 1
+RED_EXIT=1
