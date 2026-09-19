@@ -567,7 +567,8 @@ bun run check:task-workflow
     - G-C host 断言历史导致静默 0 请求
     - G-D **不需要上游**：运行归属方可自行判定「拒发且零请求」（`p04d` supported）
   - [x] OP2-U 形状可行性实测（2026-09-19，**已推翻「最小补丁」假设**）：完整 checkout 上游 main，`npm ci --ignore-scripts` + `hydrate-model-data` 后基线 `npx tsgo --noEmit` **EXIT 0**；仅在 `packages/ai/src/types.ts` 加入 `HostAssertedAssistantMessage` 与 `Message` 联合扩展，即产生 **146 个类型错误 / 42 文件 / 4 个 package**（coding-agent 75、agent 44、ai 22、evals 5；src 107 / test 28 / examples 11）。
-  - [ ] OP2-U 交付（**已改写**）：不提交 A 形状补丁；改为向上游提交「代价实测 + 形状选择（A/B/C）」的请求，附最小复现与验收面。等待上游选形后再落地补丁。
+  - [x] OP2-U 交付物成文（2026-09-19）：自包含、可直接提交的上游请求文本落位 `docs/researches/2026-09-19-official-pi-upstream-request.md`（英文、无 BYOK 内部术语；三条请求各带精确符号/位置、实测数字、最小复现、以及「我们不要求什么」）。
+    - **未对外提交**：公开向上游 filing 属外部动作，需 owner 明确 go/no-go；plan §7.2 要求的交付物（可运行最小反例、精确缺失符号/行为、责任归属、下一补丁位置）已全部具备。
   - [x] OP2-U 的 G-A 实测（2026-09-19，上游 main 真实 session 路径）：一次通过的临时 vitest 实验捕获到会话首请求 = **6123 字节**，顶层键 `max_tokens, messages, model, stream, system, thinking, tools`；交给 transport 的 Context **只有 `messages`**，角色序列是 **`system, system, user`**；transport 尝试 **4** 次（`auto_retry` 在 main 上未改）。
     - 意义：G-A 从「请给一个纯编译入口」变成可检验表述——调用方要复现的不只是对话内容，还有**两条 system 消息的拆分**与 adapter 层的**选项推导**。
   - [x] OP2-U 的 G-A 逐字节比对（2026-09-19，完成）：会话交给 transport 的三条消息 = `system(调用方原文)` / `system(content="", sections, toolsAdded)` / `user`；用公开 `buildSystemPromptSections({cwd})` 在无 session 下重建，**3/5 sections 逐字节相等**（`cwd` 76、`docs` 1160、`preamble` 169），`rules`/`tools` 因会话自填输入而不同，补 `selectedTools` 后仍不变。

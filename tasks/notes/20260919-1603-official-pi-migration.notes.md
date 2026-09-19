@@ -125,3 +125,13 @@
 顺带纠正一次自己的假设：曾误把全部 8 个工具当 `selectedTools`，`tools` 反而变成 532，说明该 section 严格跟随显式工具选择、无隐藏状态。
 
 于是 G-A 的请求是**已被证明充分**的一句话：暴露 `createAllToolDefinitions` 或等价的 prompt 元数据映射即可；其余部分（`toolsAdded` 的模型可见 schema、三个 section）在只用公开入口时已逐字节相等。
+
+## OP2-U 交付物成文（2026-09-19）
+
+把三轮分析折成一份**自包含、可直接提交**的上游请求文本：`docs/researches/2026-09-19-official-pi-upstream-request.md`（英文、不含 BYOK 内部术语，含标题/正文/最小复现/「我们不要求什么」）。
+
+- G-A：导出 `createAllToolDefinitions` 或 per-tool prompt 元数据；证据是 3/5 → 5/5 的逐字节对比表。
+- G-B：公开 provider 请求形状契约（键集合 + 值类别）并对未知键 fail closed；证据是 `buildParams` 的 5 + 15 键清单。
+- G-C：host 断言 assistant 文本，形状由上游选；证据是「静默 0 请求」的对照表与三种形状的 146 处代价。
+
+**明确未对外提交**：公开向 `earendil-works/pi` filing 是外部动作（会在用户账号下产生公开内容），需要 owner 的 go/no-go。plan §7.2 要求的交付物已经齐全：可运行最小反例、精确缺失符号与位置、责任归属（上游）、下一补丁位置。
