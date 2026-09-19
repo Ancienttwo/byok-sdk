@@ -629,6 +629,8 @@ bun run check:task-workflow
 - [ ] OP2 预算/prepared 接口替代（必要时 OP2-U 最小上游改进）
   - [x] OP2 核心的**全量验证证据（2026-09-19）**：`bun run build`（EXIT 0）后 `packages/client` 全量 = **244 passed / 2 skipped（文件级），2906 tests passed / 11 skipped，EXIT 0（152s）**。先前一次 185 文件失败是**环境性的**（worktree 未构建，workspace 包解析不到 entry），非本次改动所致。
     - 环境事实（对后续验证重要）：该 worktree 跑全量测试前**必须先 `bun run build`**，否则得到一片假红。
+  - [x] OP2-U **公开面自检探针（2026-09-19）**：新增 `p08-embedder-public-surface`（套件现 **10 项**，verdict `partial`），只 import 包根、记录迁移所需的 10 个符号哪些真的可达。实测：4 个工具 definition 工厂**在**；`getSystemMessageText`、`buildSystemPromptSections`、`buildSystemPromptState`、`RPC_MAX_FRAME_BYTES`、`fitsRpcFrame`、`rpcFrameByteLength` **都不在**（其中 `getSystemMessageText` 在 `main` 上已有 → 重钉可白拿；两个 builder 在 fork 与 main 都缺）。
+    - 意义：三项请求变成**每次验证自动复检**的事实；上游一旦导出，该探针自动翻成 `supported`，无需人重读文档。
   - [x] 身份/发布链工作面实测（2026-09-19，OP5 输入）：`pi-runtime-identity.mjs` 的 5 个导出逐个定了迁移后形态，消费者 **6 个文件**（`pack-and-smoke.mjs`、`registry-readback.mjs`、`pi-launcher-smoke.mjs`、`check-package-graph.mjs`、`pack-and-smoke.test.mjs`、`resolve-bin.test.ts`）。
     - **唯一非机械替换**：现有 gate 要求「已安装 runtime 必须带 fork 的 `dist/core/prepared-session-input.js`」，迁移后该文件不存在——断言须拆成 ① 官方来源身份（包名/exact version/integrity/exports）② **prepared 能力显式声明为不可用**。后者是 INV-14 在发布链上的落点：**gate 不能因为断言对象消失而变得更易通过**。
   - [x] OP2 **类型形状代价对比（2026-09-19）**：同一条干净基线上量两种上游类型形状——**A 新增 `Message` 联合成员 = 146 处**（coding-agent 75 / agent 44 / ai 22 / evals 5）；**B 放宽 provenance 字段为可选 = 256 处**（ai 155 / coding-agent 93 / agent 5 / evals 3）。结论：**A 更便宜**，与先前「B 可能更窄」的猜测相反（B 把「可能缺失」传播到每个读取点，而它们多在 provider 层）。上游请求据此可**指名形状 A** 并附两个数字。

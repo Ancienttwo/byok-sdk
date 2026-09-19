@@ -47,3 +47,4 @@ node packages/client/probes/pi-official/watch-release.mjs --json
 ```
 
 Exit code `10` means "a newer official release exists, re-baseline before doing more".
+| `p08` | Which exports an embedder needs are actually on a package root? (records the migration's remaining blockers; flips when upstream lands them) |

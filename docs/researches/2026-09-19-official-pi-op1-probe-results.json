@@ -1,14 +1,14 @@
 {
   "kind": "official-pi-op1-probe-summary",
-  "generatedAt": "2026-09-19T10:12:40.485Z",
+  "generatedAt": "2026-09-19T11:44:22.990Z",
   "officialPackage": "@earendil-works/pi-coding-agent@0.85.1",
   "officialIntegrity": "sha512-FGRN+OHbWaefBPGaTggAdLjrIHW+s2PzLyglz/5dfLzb9of7uuXMXYC0fJIeZTw+shS32o2cuQ9jF7YSDuL/oQ==",
   "officialPiAiIntegrity": "sha512-+VgVIJDkDO2efYJKEEqvPTH4zmnIaXdAppGbO+vKFA9qy5PdhFiAenuFAkU+oiCSfOC4dMHDyrjdQeL4ZoC5CQ==",
   "officialResolved": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-0.85.1.tgz",
   "officialGitHead": null,
   "isolation": {
-    "probeRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn",
-    "emptyHome": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn/empty-home",
+    "probeRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu",
+    "emptyHome": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu/empty-home",
     "node": "v24.18.0",
     "platform": "darwin-arm64"
   },
@@ -21,8 +21,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -102,8 +102,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -249,8 +249,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -308,8 +308,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -341,7 +341,7 @@
         {
           "name": "first message (system) matches the session projection",
           "ok": false,
-          "detail": "pre={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\"} session={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\\nCurrent working directory: /tmp/pi-probe-p03b-YKnlCe/cwd\\n\"}"
+          "detail": "pre={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\"} session={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\\nCurrent working directory: /tmp/pi-probe-p03b-tbIh7H/cwd\\n\"}"
         },
         {
           "name": "no certification accompanies the payload",
@@ -383,7 +383,7 @@
         {
           "name": "first message (system) matches the session projection",
           "ok": false,
-          "detail": "pre={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\"} session={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\\nCurrent working directory: /tmp/pi-probe-p03b-YKnlCe/cwd\\n\"}"
+          "detail": "pre={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\"} session={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\\nCurrent working directory: /tmp/pi-probe-p03b-tbIh7H/cwd\\n\"}"
         }
       ],
       "exitCode": 0
@@ -396,8 +396,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -597,8 +597,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -689,8 +689,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -732,8 +732,8 @@
         "skillCount": 0,
         "extensionErrors": [],
         "plantedHostileFiles": [
-          "/tmp/pi-probe-p05-4kacep/cwd/.pi/extensions/hostile.mjs",
-          "/tmp/pi-probe-p05-4kacep/agent/extensions/hostile.mjs"
+          "/tmp/pi-probe-p05-5uS6R6/cwd/.pi/extensions/hostile.mjs",
+          "/tmp/pi-probe-p05-5uS6R6/agent/extensions/hostile.mjs"
         ]
       },
       "failures": [],
@@ -747,8 +747,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -798,15 +798,15 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
         {
           "name": "child probes run against the isolated official install",
           "ok": true,
-          "detail": "installRoot=/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn"
+          "detail": "installRoot=/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu"
         },
         {
           "name": "child process exited cleanly",
@@ -851,8 +851,8 @@
       ],
       "observed": {
         "childPids": [
-          32863,
-          32864
+          29629,
+          29630
         ],
         "allowedChildSeen": [
           2087
@@ -869,6 +869,55 @@
       },
       "failures": [],
       "exitCode": 0
+    },
+    {
+      "probe": "p08-embedder-public-surface",
+      "ok": true,
+      "verdict": "partial",
+      "verdictReason": "still missing from package roots: getSystemMessageText, buildSystemPromptSections, buildSystemPromptState, RPC_MAX_FRAME_BYTES, fitsRpcFrame, rpcFrameByteLength",
+      "environment": {
+        "node": "v24.18.0",
+        "platform": "darwin-arm64",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-Mn3EWu",
+        "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
+      },
+      "checks": [
+        {
+          "name": "package roots are importable",
+          "ok": true,
+          "detail": "coding-agent=151 pi-ai=48"
+        },
+        {
+          "name": "tool definition factories are exported",
+          "ok": true,
+          "detail": "[]"
+        },
+        {
+          "name": "the missing exports are recorded rather than assumed",
+          "ok": true,
+          "detail": "missing=[\"getSystemMessageText\",\"buildSystemPromptSections\",\"buildSystemPromptState\",\"RPC_MAX_FRAME_BYTES\",\"fitsRpcFrame\",\"rpcFrameByteLength\"]"
+        }
+      ],
+      "observed": {
+        "present": [
+          "@earendil-works/pi-coding-agent:createReadToolDefinition",
+          "@earendil-works/pi-coding-agent:createBashToolDefinition",
+          "@earendil-works/pi-coding-agent:createEditToolDefinition",
+          "@earendil-works/pi-coding-agent:createWriteToolDefinition"
+        ],
+        "missing": [
+          "@earendil-works/pi-ai:getSystemMessageText",
+          "@earendil-works/pi-coding-agent:buildSystemPromptSections",
+          "@earendil-works/pi-coding-agent:buildSystemPromptState",
+          "@earendil-works/pi-coding-agent:RPC_MAX_FRAME_BYTES",
+          "@earendil-works/pi-coding-agent:fitsRpcFrame",
+          "@earendil-works/pi-coding-agent:rpcFrameByteLength"
+        ],
+        "requiredCount": 10
+      },
+      "failures": [],
+      "exitCode": 0
     }
   ],
   "ok": false,
@@ -882,6 +931,7 @@
     "p04d-refusal-observability": "supported",
     "p05-loader-closure": "supported",
     "p06-extension-tool-bridge": "supported",
-    "p07-subprocess-transport": "supported"
+    "p07-subprocess-transport": "supported",
+    "p08-embedder-public-surface": "partial"
   }
 }

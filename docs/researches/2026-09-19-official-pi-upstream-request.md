@@ -85,6 +85,13 @@ options, but the projection that turns them into sections stays internal.
 turns that into something an embedder can rely on; it is a pure export with no
 behaviour change.
 
+**Checked against the published package, not the source tree.** A probe that
+imports only package roots (`packages/client/probes/pi-official/probes/p08-embedder-public-surface.mjs`)
+records what is actually reachable, and it draws a distinction that matters to us:
+on the current release **`getSystemMessageText` is missing too** and appears on
+`main`, so a future release would supply that one for free, while
+`buildSystemPromptSections` and `buildSystemPromptState` are missing on both.
+
 ### Optional: publish the provider request shape (key set + value class), fail closed on unknown keys
 
 **What we need.** A published, versioned statement of the top-level keys a
