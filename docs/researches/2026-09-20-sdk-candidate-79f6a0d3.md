@@ -103,3 +103,85 @@ shasum -a 256 _ops/candidate-freeze-20260920-main-79f6a0d3/release-manifest.json
 3. 失败只输出「哪个消费点需要哪个接口 / 当前包提供什么 / 由谁修复」，不再以「等 0.19」作为阻塞项。
 
 **完成标准**：另一份干净 checkout 不依赖开发者本机目录，也能复现同样的构建与定向验证。
+
+## 7. Host 消费实测（2026-09-20，Salesko `32cfcd49` worktree）
+
+在 `/Users/kito/Projects/salesko-new-wt-c07-host`（干净，HEAD `32cfcd49`）中用既有脚本装入本元组：
+
+```
+BYOK_CANDIDATE_DIR=<本目录> sh _ops/byok-sdk-candidate-frozen/apply-candidate.sh
+[pin] tarball integrity verified against …/release-manifest.json
+[pin] installed <11 个包>
+[pin] installed bytes match the frozen tarballs
+[pin] every pinned SDK path is a directory of frozen bytes
+```
+
+**sdk 包本身安装成功**（逐包 sha256 校验、字节一致、无 symlink）。随后发现两类缺口。
+
+### 7.1 缺口一：Pi 闭包在 Host 树里解析到**上游**，不是 fork（已定位并本地修复）
+
+`@byok-sdk/client` 一导入即 `ERR_PACKAGE_PATH_NOT_EXPORTED`：
+
+```
+Package subpath './rpc-types' is not defined by "exports" in
+…/node_modules/@earendil-works/pi-coding-agent/package.json
+imported from …/node_modules/@byok-sdk/client/dist/index.js
+```
+
+根因（实测）：Host 树里 `node_modules/@earendil-works/pi-coding-agent` 是 **上游 `0.85.1`**（无 `byokFork`、无 `/rpc-types`），而 client 声明的是 **fork 别名** `npm:@byok-sdk/pi-coding-agent@0.85.1006`。同类问题在传递依赖上重复一次：`@earendil-works/pi-ai` / `pi-agent-core` 也是上游 `0.85.1`，导致 fork 的 `prepared-session-input` 因 `@earendil-works/pi-ai/api/openai-completions` 缺符号而加载失败。
+
+**为什么发生**：按 tarball 逐包解包到 `node_modules` 的安装方式**不走依赖解析**，因此 manifest 里声明的 fork 别名从未被安装；上游 Pi 由其他路径（其他包/registry 残留）留在树里，静默顶替。
+
+**本地修复**（仅改 Host 树的 `node_modules`，未改任何 manifest/lock）：把 fork 闭包装到声明路径——
+
+| 目标路径 | 装入 | 来源 |
+|---|---|---|
+| `node_modules/@earendil-works/pi-coding-agent` | `@byok-sdk/pi-coding-agent@0.85.1006` | npm pack |
+| `node_modules/@earendil-works/pi-ai` | `@byok-sdk/pi-ai@0.85.1005` | npm pack |
+| `node_modules/@earendil-works/pi-agent-core` | `@byok-sdk/pi-agent-core@0.85.1005` | npm pack |
+
+上游副本原样保留为 `*.upstream-before-pin` 以便回退。修复后公开入口全部可导入：
+
+```
+OK @byok-sdk/client 165 exports
+OK @earendil-works/pi-coding-agent 161   （fork；byokFork 存在）
+OK @earendil-works/pi-coding-agent/prepared-session-input 7
+OK @earendil-works/pi-coding-agent/input-preparation 2
+OK @earendil-works/pi-coding-agent/rpc-types 5
+OK @byok-sdk/protocol 245
+```
+
+**责任方与建议**：这一条同时暴露 SDK 侧交付缺陷——**本元组没有随包声明 Pi 闭包**（名称/版本/integrity），消费方只能靠猜。建议 SDK 侧把 Pi 闭包写进 `release-manifest.json`（或提供安装单元），使「一组可独立安装的产物」名副其实；Host 侧的 apply 脚本则应改为按 manifest 安装闭包，而不是只解 SDK 包。
+
+### 7.2 缺口二：Host identity 调用点未迁到当前 SDK 形状（21 个 tsc 错误）
+
+| 检查 | 结果 |
+|---|---|
+| `packages/contracts` typecheck | **EXIT 0** |
+| `apps/local-agent` tsc | **EXIT 2，21 个错误** |
+
+错误全部集中在三个文件，全部是 **identity 形状**：
+
+| 文件 | 错误数 |
+|---|---|
+| `src/tool-implementation-authority.test.ts` | 13 |
+| `src/tool-implementation-authority.ts` | 7 |
+| `src/daemon-config.test.ts` | 1 |
+
+按类型：
+
+| 现象 | 计数 | 当前包实际提供 |
+|---|---|---|
+| `Property 'kind' does not exist on type 'ToolImplementationLocatorV1'` | 6 | locator 已改为**嵌套 `subject`**（`subject.kind`），不再是顶层 `kind` |
+| `Property 'toolsetId'/'serverName' does not exist on type 'ToolImplementationLocatorV1'` | 4 | 同上，字段移入 `subject` |
+| `Property 'kind'/'launchArgv' does not exist on type 'ToolImplementationResolutionV1'` | 5 | resolution 形状变更 |
+| 对象字面量含未知属性 / exactOptionalPropertyTypes 不符 | 4 | 同上 |
+| `string \| undefined` 传给 `string` | 3 | `nativeProvenance` 构造处的可选性收紧 |
+
+**责任方：Host**。该形状是 SDK 侧一次**刻意的跨包共享**变更（`@byok-sdk/implementation-identity` 成为 Node measurement authority），不是本次候选引入；Host 的 adoption 分支需要把三处调用点迁到新形状。**与前一版本记录一致**（main 元组 + 未迁移 Host = 21 个 tsc 错误；候选元组 + 原代码 = 250 pass / 0 fail），说明这是形状落差，而非候选产物缺陷。
+
+### 7.3 本轮的完成标准判定
+
+> 另一份干净 checkout 不依赖开发者本机目录，也能复现同样的构建与定向验证。
+
+**部分满足**：产物安装与公开接口消费已可在干净 worktree 复现（不依赖本机目录、不依赖 symlink、逐包 hash 校验）；**构建验证尚未通过**（`apps/local-agent` 21 个错误待 Host 侧迁移）。因此本元组目前的状态是「**已冻结、可安装、接口可达；Host 消费待迁形状**」。
