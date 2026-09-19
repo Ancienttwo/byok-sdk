@@ -576,6 +576,7 @@ bun run check:task-workflow
   - [x] OP2-U 的 G-A 收口（2026-09-19，证据链闭合）：`toolsAdded` 的模型可见投影（`read`/`bash`/`edit`/`write` 的 `description` 与 `parameters`）**4/4 逐字节相等**，差异只在调用方对象多出的非模型可见字段（`execute`/`label`/`executionMode`/`prepareArguments`）。加上投影公开、推导规则可读，**G-A 只剩一项缺公开来源的输入**：builtin 工具的 prompt 元数据。请求定稿为一句话，不需要新接口、不需要改消息模型。
   - [x] OP2-U 的 G-B 量化（2026-09-19）：provider 请求由**单个** `buildParams`（`packages/ai/src/api/openai-completions.ts:796-1002`）产出，字面量 5 键 + 条件赋值 15 键，**顶层键集合封闭可枚举（约 20 个）且每键取值由显式输入决定**。缺口不是能力而是契约：没有带版本的「键集合 + 值类别」声明，也没有未分类键 fail closed 的路径。请求缩为一句话：公开请求形状契约并对未知键 fail closed。
     - 三条缺口形态至此统一（G-A 暴露 prompt 元数据 / G-B 公开形状契约 / G-C 三选一形状），可一次性提交给上游。
+  - [x] OP2-U 的 G-A 充分性证明（2026-09-19）：会话用的是**内部**工厂 `createAllToolDefinitions`（`packages/coding-agent/src/core/tools/index.ts:182`，未从包根导出），不是公开的 `createCodingTools`。改用同一工厂取 snippet/guideline 后，派生提示状态 **5/5 section 逐字节相等**（`cwd` 76 / `docs` 1160 / `preamble` 169 / `rules` 839 / `tools` 339，脚本输出 `sectionsEqual: true`）。G-A 请求据此成为**已被证明充分**的一句话：暴露该工厂或等价的 prompt 元数据映射。
   - [ ] **目标版本重钉（owner 裁决点）**：同日只读核对发现 `main` 已重构 G-A 所依赖的同一子系统（`SystemMessage` 变为可回放的分节转录消息 + `buildSystemPromptSections`/`buildSystemPromptState`/`diffSystemPromptSections`/`forceSystemPrompt`），而 npm `latest` 仍是 `0.85.1`。
     - 分叉 A（建议）：把迁移目标重钉到「包含分节 `SystemMessage` 的下一正式发行版」，届时 `node packages/client/probes/pi-official/run.mjs --official-version <x>` 重跑 7 项后再定 OP1/G1 与 OP2-U 文本。
     - 分叉 B：维持 `0.85.1` 并按 `docs/researches/2026-09-19-official-pi-op2u-upstream-request.md` §1–§6 提接口，需同时论证「为何在即将被替换的形状上新增接口」。

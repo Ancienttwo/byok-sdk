@@ -115,3 +115,13 @@
 结论：**键集合封闭可枚举（约 20 个），缺口不是能力而是契约**——没有带版本的「键集合 + 值类别」声明，也没有未分类键 fail closed 的路径。让调用方自己维护这份清单等于允许第二份语义权威，上游新增一个键就会静默失准。G-B 请求因此缩为：公开请求形状契约并对未知键 fail closed。
 
 三条缺口形态统一：G-A 暴露 builtin 工具 prompt 元数据 / G-B 公开请求形状契约 / G-C 三选一形状——可以一次性提交给上游。
+
+## G-A 充分性证明（2026-09-19，收尾）
+
+关键发现：会话用的不是公开的 `createCodingTools`，而是**内部**工厂 `createAllToolDefinitions`（`packages/coding-agent/src/core/tools/index.ts:182`，未从包根导出），per-tool 的 `promptSnippet`/`promptGuidelines` 定义在这批定义上。
+
+实验改用同一工厂取 snippet/guideline（`selectedTools` 仍用会话实际四项）后：`cwd` 76 / `docs` 1160 / `preamble` 169 / `rules` 839 / `tools` 339 —— **5/5 section 逐字节相等**，脚本输出 `sectionsEqual: true`。
+
+顺带纠正一次自己的假设：曾误把全部 8 个工具当 `selectedTools`，`tools` 反而变成 532，说明该 section 严格跟随显式工具选择、无隐藏状态。
+
+于是 G-A 的请求是**已被证明充分**的一句话：暴露 `createAllToolDefinitions` 或等价的 prompt 元数据映射即可；其余部分（`toolsAdded` 的模型可见 schema、三个 section）在只用公开入口时已逐字节相等。

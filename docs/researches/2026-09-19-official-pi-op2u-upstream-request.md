@@ -300,6 +300,26 @@ node packages/client/probes/pi-official/run.mjs --probe p04d   # G-D
 
 因此 G-A 的上游请求定稿为一句话：**请暴露 builtin 工具定义（含 `promptSnippet` / `promptGuidelines`），或会话使用的 snippet/guideline 映射。** 不需要新增准备接口，也不需要改动消息模型。
 
+### 充分性证明：补上那一项输入后 5/5 全部逐字节相等
+
+上面只是「归因」；再补一步就能证明「有它即可」。会话实际用的不是公开的 `createCodingTools`，而是内部工厂 `createAllToolDefinitions(cwd, {read,bash,…})`（`packages/coding-agent/src/core/tools/index.ts:182`，**未从包根导出**）；per-tool 的 `promptSnippet` / `promptGuidelines` 就定义在这批定义上。
+
+在实验里改用同一工厂取 snippet/guideline（其余输入不变，`selectedTools` 仍用会话的实际四项），比对结果：
+
+| section | 会话实际 | 调用方重建 | 相等 |
+|---|---|---|---|
+| `cwd` | 76 | 76 | **是** |
+| `docs` | 1160 | 1160 | **是** |
+| `preamble` | 169 | 169 | **是** |
+| `rules` | 839 | 839 | **是** |
+| `tools` | 339 | 339 | **是** |
+
+**5/5 全部逐字节相等**（脚本输出 `sectionsEqual: true`）。这也顺带排除了一个我先前写错的假设：一次我误把全部 8 个工具当作 `selectedTools`，`tools` 反而变大到 532 —— 说明该 section 严格跟随显式工具选择，没有隐藏状态。
+
+于是 G-A 的请求从「一个缺口」变成一句**已被证明充分**的话：
+
+> 请把 `createAllToolDefinitions`（或等价的 per-tool `promptSnippet` / `promptGuidelines` 映射）暴露为公开入口。证据：用同一工厂 + 同一组显式输入，会话首请求的派生提示状态 5/5 section 逐字节复现；其余部分（`toolsAdded` 的模型可见 schema、sections 中的 `cwd`/`docs`/`preamble`）在只用公开入口时就已经逐字节相等。
+
 ## 9. G-B 量化（2026-09-19，上游 main 的请求构造）
 
 G-B 原来只有存在性描述（「payload 不携带任何覆盖证明」）。用同一方法量化后，结论与 G-A 同形：**缺的不是能力，是一份契约**。
