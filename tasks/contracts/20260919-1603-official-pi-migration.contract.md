@@ -77,6 +77,7 @@ allowed_paths:
   - docs/researches/2026-09-19-official-pi-fork-delta-map.md
   # OP1 探针 harness 与其证据产物
   - packages/client/probes/pi-official/run.mjs
+  - packages/client/probes/pi-official/watch-release.mjs
   - packages/client/probes/pi-official/README.md
   - packages/client/probes/pi-official/lib/harness.mjs
   - packages/client/probes/pi-official/lib/synthetic-openai-server.mjs
@@ -235,6 +236,19 @@ exit_criteria:
       "cost": "normal",
       "evidence_policy": "current_exact",
       "necessity": "OP1 evidence keeps one resolved verdict per probe plus the frozen official package identity.",
+      "inputs": {
+        "env": []
+      }
+    },
+    {
+      "id": "release-watch",
+      "kind": "command",
+      "command": "sh -c 'node packages/client/probes/pi-official/watch-release.mjs --json >/dev/null; code=$?; [ \"$code\" -eq 0 ] || [ \"$code\" -eq 10 ]'",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "normal",
+      "evidence_policy": "current_exact",
+      "necessity": "The release watcher must run and parse the registry tags; exit 10 (a newer release exists) is an expected outcome, not a failure.",
       "inputs": {
         "env": []
       }

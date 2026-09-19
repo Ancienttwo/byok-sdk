@@ -33,3 +33,17 @@ Evidence is written to `.ai/harness/runs/pi-official-op1-<timestamp>/`:
 | `p03` | Is there a **task-free** way to obtain the frozen request, or does every published entry require effectful session construction? |
 | `p04` | Can a caller-owned transport observe the final bytes before send and refuse so that the endpoint receives zero requests? |
 | `p05` | Does the allowlist loader close loading, and do planted hostile extensions/skills/context files fail to load? |
+
+## Release watch
+
+The migration is gated on official releases, and upstream `main` has already rebuilt
+one of the subsystems OP1 measured. `watch-release.mjs` compares the pinned candidate
+in the OP0 baseline against the registry and prints the exact re-baseline command when
+a newer release appears. It installs nothing and modifies nothing.
+
+```bash
+node packages/client/probes/pi-official/watch-release.mjs
+node packages/client/probes/pi-official/watch-release.mjs --json
+```
+
+Exit code `10` means "a newer official release exists, re-baseline before doing more".
