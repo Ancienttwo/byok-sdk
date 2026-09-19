@@ -2208,6 +2208,7 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR-033 | `local-first-v1` 为默认数据 policy profile，contentful 进 `shared-observability-v1`；结果事务权威是 `SessionResultCommitter` | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-034 | legacy `task.offer*` / `strictAgentOnly` / 旧 gitWorkspace authority / ambient 选设备在一次 v2 cutover 中删除，无双读双写 | Accepted，Supersedes ADR-002（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-035 | 保留 `@byok-sdk/server` 的 self-hosted Node/Hono deployment boundary；无独立能力的 `byok-sdk` umbrella 在另行批准的 breaking cutover 中退出，public artifacts 由 10 降为 9 | Accepted；implementation deferred（详见 `adr-2026-09-05-public-package-topology.md`） |
+| ADR-036 | Pi 运行来源改为官方未修改发行包；fork 仅作为被完整枚举的增量；身份以发行事实（exact version + integrity + 实际 exports + 依赖闭包）绑定；缺失 seam 只走最小上游改进，禁止复制 serializer/patch/私有 deep import；G1 已裁定为「缺 pure compile/consume 与历史导入」，prepared 生产能力在上游进入可验证发行包前保持禁用 | Accepted；implementation gated（详见 `adr-2026-09-19-official-pi-runtime-source.md`） |
 
 - Completed workstream evidence: `tasks/workstreams/root/20260904-sdk-root.md`
 
