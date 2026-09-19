@@ -98,6 +98,10 @@ allowed_paths:
   - docs/architecture/adr-2026-09-19-official-pi-runtime-source.md
   - docs/architecture/index.md
   - docs/architecture/sdk-architecture.md
+  # OP3 方向的可执行护栏：fork 专有 import 只能减少
+  - scripts/release/check-pi-fork-surface.mjs
+  - scripts/release/check-pi-fork-surface.test.mjs
+  - package.json
   - tasks/contracts/20260919-1603-official-pi-migration.contract.md
   - tasks/reviews/20260919-1603-official-pi-migration.review.md
   - tasks/notes/20260919-1603-official-pi-migration.notes.md
@@ -252,6 +256,32 @@ exit_criteria:
       "cost": "normal",
       "evidence_policy": "current_exact",
       "necessity": "The release watcher must run and parse the registry tags; exit 10 (a newer release exists) is an expected outcome, not a failure.",
+      "inputs": {
+        "env": []
+      }
+    },
+    {
+      "id": "pi-fork-surface",
+      "kind": "command",
+      "command": "node scripts/release/check-pi-fork-surface.mjs",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "normal",
+      "evidence_policy": "current_exact",
+      "necessity": "The fork-only import surface may only shrink; a new entry must be recorded deliberately.",
+      "inputs": {
+        "env": []
+      }
+    },
+    {
+      "id": "pi-fork-surface-test",
+      "kind": "command",
+      "command": "node --test scripts/release/check-pi-fork-surface.test.mjs",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "normal",
+      "evidence_policy": "current_exact",
+      "necessity": "The guard's own detection behaviour must stay covered.",
       "inputs": {
         "env": []
       }
