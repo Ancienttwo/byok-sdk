@@ -1,4 +1,4 @@
-# Upstream request: two small gaps, each already measured (submission-ready text)
+# Upstream request: three small gaps, each already measured (submission-ready text)
 
 Status: **prepared, not filed.** BYOK-internal context lives in
 `docs/researches/2026-09-19-official-pi-op2u-upstream-request.md`; this file is the
@@ -9,13 +9,13 @@ Measured against `main` (2026-09-19), Node v24.18.0, darwin-arm64.
 
 ## Title
 
-Two small gaps for an embedder: a crash on assistant text without usage, and
-RPC frame-size helpers that are not exported
+Three small gaps for an embedder: a crash on assistant text without usage, three
+unexported helpers, and a system-prompt builder that stays internal
 
 ## Body
 
-We embed `@earendil-works/pi-coding-agent` behind our own daemon. Two things are
-still out of reach, plus one optional suggestion. Each is small, each is
+We embed `@earendil-works/pi-coding-agent` behind our own daemon. Three things
+are still out of reach, plus one optional suggestion. Each is small, each is
 measured, and none changes existing CLI behaviour. We are not asking for new
 subsystems.
 
@@ -64,6 +64,26 @@ stdin reader's limit. An embedder that frames its own traffic must respect that
 number but cannot own it: a locally maintained copy is a second authority, and if
 it disagrees with the real reader, frames get dropped or truncated silently.
 Exposing the helpers is a pure export with no behaviour change.
+
+### 3. Export the system-prompt section builders
+
+To build a request outside a session, an embedder must reconstruct the system
+message a session would send. Two of the three pieces are already public:
+`getSystemMessageText` from `@earendil-works/pi-ai`, and the per-tool definition
+factories from this package, which reproduce a session's tool declarations four
+for four on description and parameters.
+
+The third piece is not. `buildSystemPromptSections` and `buildSystemPromptState`
+live in `packages/coding-agent/src/core/system-prompt.ts`, and the package root
+exports nothing from `system-prompt` - in this release or on `main`. Without them
+an embedder cannot render the prompt text at all: it can build the resolved
+options, but the projection that turns them into sections stays internal.
+
+**Measured, with the projection available:** the derived prompt state reproduces
+**5 of 5 sections byte-for-byte** against the session's own request - `cwd` 76,
+`docs` 1160, `preamble` 169, `rules` 839, `tools` 339. Making both builders public
+turns that into something an embedder can rely on; it is a pure export with no
+behaviour change.
 
 ### Optional: publish the provider request shape (key set + value class), fail closed on unknown keys
 
