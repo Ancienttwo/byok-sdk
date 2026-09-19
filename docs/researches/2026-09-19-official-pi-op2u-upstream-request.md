@@ -478,3 +478,28 @@ node packages/client/probes/pi-official/run.mjs --official-version <new>   # 按
 - G-A 的逐字节比对（调用方重建 vs 会话实际发送）尚未跑完。
 - 本文只覆盖 `openai-completions` 一条路径；WebSocket 与其他 API 按方案保持不支持，未做验证。
 - 递归/子进程模式下上述结论是否一致（`registerProvider` 在 print/runner 中的可用性）属 OP4 范围，本轮未验证。
+
+## 14. 结论性测量：OP2 不需要上游的「prepared input」接口（2026-09-19）
+
+G-A 解决、G-B 收敛之后，还剩一个疑问：**消费冻结请求**（fork 的 `promptPrepared` 那一半）是否必须由上游提供？实测答案是不需要。
+
+做法：在上游 `main` 的真实 session 上捕获「Context + options + 最终 body」，再用**同一个官方 serializer** 在会话外重建，比较字节：
+
+| 重建方式 | 结果 |
+|---|---|
+| 重放捕获到的 Context + 捕获到的**完整 options** | **byte-identical**（6123 字节，diff `[]`） |
+| 重放捕获到的 Context + **极简 options**（仅 `apiKey`/`model`/`sessionId`/`reasoning`） | **byte-identical**（6123 字节，diff `[]`） |
+
+即：session 传给 streamFn 的那批 agent-loop 回调（`prepareNextTurn`、`beforeToolCall`、`getSteeringMessages`、`shouldStopAfterTurn`、`convertToLlm`、…）**对请求体没有任何影响**；决定 body 的只有 `model`、`context`、`sessionId`、`reasoning`。
+
+与前面几轮拼起来，BYOK 的 prepared 路径可以**完全建立在官方公开入口 + 自有 transport 上**：
+
+| 环节 | 依据 |
+|---|---|
+| 编译 D（无网络、无 session） | 官方 provider adapter + 捕获型 `fetch`（P03b） |
+| 复现会话首请求的 Context | 公开 `buildSystemPromptSections` + per-tool definition 工厂 + `getSystemMessageText`（5/5 sections、4/4 工具逐字节相等） |
+| 覆盖证明 P(D) | `request-shape.ts` 键分类 + 未知即拒绝 |
+| 消费/冻结 | BYOK 自有 transport 比对实际 payload 与冻结 D，不一致即拒绝（P04） |
+| 唯一额外输入 | `sessionId`——由 BYOK 自己决定（会话由它创建） |
+
+**因此 OP2 的上游依赖只剩 G-C 的 5 行 guard**（用于 host 断言历史）。

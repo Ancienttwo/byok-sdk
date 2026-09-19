@@ -205,3 +205,11 @@
 关键取舍：与「本地清单」的区别不在清单，而在**失败方向**——护栏让漂移变成响亮拒绝，权威让漂移变成安静错预算。前者是允许的 fail-closed 校验，后者才是被禁止的第二语义权威。
 
 结果：**上游请求实质只剩 G-C 一项**；G-B 降为可选改进。
+\n
+## 结论性测量：OP2 不需要上游的 prepared-input 接口（2026-09-19）
+
+上游 main 的真实 session 上捕获 Context+options+body 后，用同一官方 serializer 会话外重建：**重放完整 options 与只用极简 options（`apiKey`/`model`/`sessionId`/`reasoning`）都得到 byte-identical 的 6123 字节，diff 为空**。session 注入的 agent-loop 回调（`prepareNextTurn`/`beforeToolCall`/`getSteeringMessages`/`shouldStopTurn`/`convertToLlm`…）对请求体没有影响；决定 body 的只有 model、context、sessionId、reasoning。
+
+与前面几轮拼起来，prepared 路径可全建在官方公开入口 + 自有 transport 上：编译 D（P03b 的捕获型 fetch）→ 复现 Context（5/5 sections + 4/4 工具）→ 覆盖证明（`request-shape.ts`）→ 发送点比对冻结 D（P04）。唯一额外输入 `sessionId` 由 BYOK 自定。
+
+**因此 OP2 的上游依赖只剩 G-C 的 5 行 guard。**

@@ -562,6 +562,9 @@ bun run check:task-workflow
   - [x] **G1 裁定：第二档**——基础执行可行，缺 pure compile/consume 与历史导入；推进 OP2-U 最小上游接口；相关生产路径保持禁用
 - [ ] OP2 预算/prepared 接口替代（必要时 OP2-U 最小上游改进）
   - [x] OP2 的 G-B 收敛（2026-09-19）：BYOK **不需要**上游交付契约也能满足 INV-06——新增 `packages/client/src/adapters/pi/request-shape.ts`（20 键分类 + `classifyRequestShape` + `assertRequestShape` + `RequestShapeDriftError`），在发送点对**实际 payload** 分类，**未知键即拒绝**；`packages/client/src/__tests__/request-shape.test.ts` **5 用例全绿**。
+  - [x] OP2 **上游依赖再降一档（2026-09-19，结论性测量）**：在上游 main 的真实 session 上捕获 Context+options+body，用同一官方 serializer 会话外重建——**重放完整 options 与只用极简 options（`apiKey`/`model`/`sessionId`/`reasoning`）都得到 byte-identical 的 6123 字节，diff 为空**；session 注入的 agent-loop 回调对请求体无影响。
+    - 含义：**「消费冻结请求」不需要上游接口**。prepared 路径可全建在官方公开入口 + 自有 transport 上（编译 D → 复现 Context → 覆盖证明 → 发送点比对冻结 D；`sessionId` 由 BYOK 自定）。
+    - **OP2 的上游依赖只剩 G-C 的 5 行 guard**（host 断言历史）。
     - 取舍：与「本地清单」的区别在失败方向——护栏使漂移变成**响亮拒绝**，权威使漂移变成**安静错预算**；前者是允许的 fail-closed 校验。
     - 后果：**上游请求实质只剩 G-C 一项**（已附 5 行补丁 + 可运行反例）；G-B 降级为可选改进。
   - [x] OP2-U 定界：追加 `p03b`/`p04d` 两个探针，把「缺三样」切成可提接口的粒度，落位 `docs/researches/2026-09-19-official-pi-op2u-upstream-request.md`
