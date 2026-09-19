@@ -21,10 +21,10 @@ import { classifyMcpToolsetServerObservation, observeMcpServer } from '../mcp/ob
 import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_VERSION } from '../input-preparation';
 import { TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED } from '../daemon/tool-implementation-identity';
 import { trustedCwd } from './fixtures/launch-cwd';
+import { resolveBunBin } from './support/test-bun-bin';
 
 const execFileAsync = promisify(execFile);
-const BUN_BIN = [process.env.BYOK_TEST_BUN_BIN, path.join(os.homedir(), '.local/bin/bun'), '/opt/homebrew/bin/bun', '/usr/local/bin/bun']
-  .find((candidate): candidate is string => candidate !== undefined && existsSync(candidate));
+const BUN_BIN = resolveBunBin();
 const CLIENT_DIST = fileURLToPath(new URL('../../dist/index.js', import.meta.url));
 const POLICY: PermissionPolicy = { mode: 'readonly', allowTools: [] };
 
@@ -137,6 +137,26 @@ async function rpcState(capture: Capture): Promise<unknown> {
   });
 }
 
+/**
+ * The S2 registry tripwire as one piece of machinery. Every registry attempt
+ * the sealed child can make is routed here by its environment
+ * (`npm_config_registry` / `BUN_CONFIG_DEFAULT_REGISTRY` both point at this
+ * loopback listener) and recorded as the request URL. The containment case
+ * above and the negative control below ride this same recording handler —
+ * the control is what proves the zero-attempt assertions are reading a live
+ * observation path. `record: false` models a recorder sink that is off: the
+ * monitor still answers, but nothing is recorded.
+ */
+async function startRegistryTripwire(record = true) {
+  const attempts: string[] = [];
+  const server = createServer((request, response) => {
+    if (record) attempts.push(request.url ?? '');
+    response.writeHead(503).end();
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  return { server, attempts };
+}
+
 /** Valid counted prepared input, made by the real assembler/compiler outside isolation. */
 async function preparedFixture(root: string, cwd: string, env: Record<string, string>, providerUrl: string) {
   const script = path.join(root, 'mcp-fixture-server.mjs');
@@ -191,10 +211,11 @@ describe('Pi launch path — S2 release containment', () => {
       const release = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-s2-release-')));
       const runDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-s2-run-')));
       const cacheDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-s2-cache-')));
-      const registryAttempts: string[] = []; let providerRequests = 0;
-      const registry = createServer((request, response) => { registryAttempts.push(request.url ?? ''); response.writeHead(503).end(); });
+      const tripwire = await startRegistryTripwire();
+      const registry = tripwire.server; const registryAttempts = tripwire.attempts;
+      let providerRequests = 0;
       const provider = createServer((_request, response) => { providerRequests++; response.writeHead(503).end(); });
-      await Promise.all([new Promise<void>(resolve => registry.listen(0, '127.0.0.1', resolve)), new Promise<void>(resolve => provider.listen(0, '127.0.0.1', resolve))]);
+      await new Promise<void>(resolve => provider.listen(0, '127.0.0.1', resolve));
       try {
         const registryUrl = `http://127.0.0.1:${(registry.address() as { port: number }).port}`;
         const providerUrl = `http://127.0.0.1:${(provider.address() as { port: number }).port}/v1`;
@@ -335,4 +356,82 @@ describe('Pi launch path — S2 release containment', () => {
       }
     }, 120_000,
   );
+
+  // Active negative control for the registry tripwire above, and deliberately
+  // NOT gated on BUN_BIN: on a runner without bun the case above skips, which
+  // is exactly where the zero-attempt assertion would otherwise go unproven.
+  // The control rides the real S2 observation chain instead of its own
+  // listener: an isolated child process is spawned with the same registry env
+  // wiring the sealed child gets (`npm_config_registry` /
+  // `BUN_CONFIG_DEFAULT_REGISTRY` pointing at the loopback tripwire), it
+  // deliberately commits one monitored violation — a real HTTP registry
+  // attempt, the same violation class as the clipboard auto-install — and the
+  // shared recording handler must capture it. The child interpreter is
+  // process.execPath rather than the sealed bun bundle only because that
+  // bundle is bun-gated; gating this control on bun would reopen the
+  // vacuous-skip hole it exists to close. The chain under test — child env
+  // wiring to loopback recording handler — is exactly what the zero-attempt
+  // assertion depends on.
+  it('registry tripwire is live: a spawned child violation is recorded through the real observation chain', async () => {
+    const violation = '/negative-control/s2-registry-monitor';
+    const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-s2-negative-control-')));
+    // One deliberate registry attempt, read from the child's own environment —
+    // never a parent-issued fetch.
+    const childScript = path.join(dir, 'violation.mjs');
+    await fs.writeFile(childScript, `const registry = process.env.npm_config_registry;
+if (typeof registry !== 'string' || registry === '') { console.error('npm_config_registry is unset'); process.exit(2); }
+const response = await fetch(registry + ${JSON.stringify(violation)});
+await response.arrayBuffer();
+`);
+    const runChild = async (registryUrl: string) => {
+      const child = spawn(process.execPath, [childScript], {
+        cwd: dir,
+        env: { PATH: process.env.PATH ?? '', npm_config_registry: registryUrl, BUN_CONFIG_DEFAULT_REGISTRY: registryUrl },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      let stderr = '';
+      child.stderr?.on('data', bytes => { stderr += String(bytes); });
+      const timer = setTimeout(() => child.kill('SIGKILL'), 5_000);
+      const code = await new Promise<number | null>((resolve, reject) => {
+        child.on('error', reject);
+        child.on('close', exitCode => resolve(exitCode));
+      });
+      clearTimeout(timer);
+      return { code, stderr };
+    };
+    const live = await startRegistryTripwire();
+    const sinkOff = await startRegistryTripwire(false);
+    try {
+      const liveUrl = `http://127.0.0.1:${(live.server.address() as { port: number }).port}`;
+      const observed = await runChild(liveUrl);
+      // The violation must really come from the child: it ran to completion
+      // against the live monitor, and the shared handler recorded exactly one
+      // entry — the request URL, the same recorded shape the zero-attempt
+      // assertions above read.
+      expect(observed.code, `the control child failed before its registry attempt: ${observed.stderr}`).toBe(0);
+      expect(live.attempts, 'the real tripwire recorded the child violation').toEqual([violation]);
+      // Raw stdout, not console.*: vitest captures console output from
+      // passing tests, and this receipt must stay visible in a green run.
+      process.stdout.write(`[wp5-s2 receipt] resolvedBunBin=${BUN_BIN ?? 'unset (suites skip)'} negativeControlRecorded=${JSON.stringify(live.attempts)}\n`);
+
+      // Test-of-the-test: disable the recording path and the identical child
+      // run must leave the control nothing to pass on. With the recorder sink
+      // off the monitor still answers (child exit 0) but records nothing;
+      // with the wiring pointed at an unreachable monitor the child fails its
+      // attempt loudly and the live tripwire stays idle. Under either
+      // disablement the `toEqual([violation])` assertion above would receive
+      // [] and FAIL — the proof that this control rides the production
+      // observation path rather than a listener of its own.
+      const sinkOffUrl = `http://127.0.0.1:${(sinkOff.server.address() as { port: number }).port}`;
+      const sinkOffRun = await runChild(sinkOffUrl);
+      expect(sinkOffRun.code, `the control child failed before its registry attempt: ${sinkOffRun.stderr}`).toBe(0);
+      expect(sinkOff.attempts, 'a served-but-unrecorded attempt leaves no observation').toEqual([]);
+      const unreachable = await runChild('http://127.0.0.1:1');
+      expect(unreachable.code, 'the child must fail loudly when the monitor is unreachable').not.toBe(0);
+      expect(live.attempts, 'the live tripwire recorded nothing while the child was wired elsewhere').toEqual([violation]);
+    } finally {
+      await Promise.all([new Promise<void>(resolve => live.server.close(() => resolve())), new Promise<void>(resolve => sinkOff.server.close(() => resolve()))]);
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }, 15_000);
 });

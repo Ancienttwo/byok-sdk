@@ -17,6 +17,24 @@
   identity package adds a structurally separate measured-installation API;
   existing physical measurement and native-manifest checks retain one author.
 
+- **Changed (Pi runtime pin)** — pin the Pi fork runtime to
+  `@byok-sdk/pi-coding-agent@0.85.1006` (fork build 6 over the same upstream
+  base `d981de1`). The fork's native clipboard load is now lazy and fails
+  closed under the sealed-host `__byok_sdk_helper` argv marker, so release
+  startup no longer escapes into bun's auto-install and the S2
+  release-containment tripwire observes an empty registry-attempt list
+  against a real-registry install. `check-adapters-entry` derives the
+  coding-agent alias and the pi-ai edge from the installed fork's own
+  manifest instead of hardcoded literals, so partial fork releases — the
+  fork build moves while pi-ai and pi-agent-core hold at `0.85.1005` —
+  verify against the fork's declared graph; the internal pin-projection
+  assertion runs first, keeping the pin-drift refusal reachable with no
+  install present. The RPC packaging probe anchors the fork scope name and
+  lets the version travel from the pin. Export-asset digests are unchanged;
+  the lockfile refresh swaps which of two already-present versions hoists
+  for `cookie` and `ws` (top-level ↔ nested) with the resolved set
+  unchanged.
+
 - **Fixed (SEA recipe)** — bundle the unchanged launcher through an ESM
   intermediate before producing the CJS SEA main, avoiding an unused helper's
   top-level-await parse failure. Preserve daemon construction/status and both
@@ -80,8 +98,9 @@
 - **Changed (packaging dependencies)** — promote existing `rpiv-config@2.8.0`,
   `typebox@1.3.7` and fork `pi-ai@0.85.1005` (npm alias) to direct client edges.
   Exact `@juicesharp/rpiv-i18n@2.8.0` replaces the npm todo edge:17 to20 dependencies.
-  Existing consumer resolutions/integrities remain unchanged; the two Pi aliases
-  have a same-version drift guard. Pi TUI0.85.1 Text/utils and get-east-asian-width1.6.0
+  Existing consumer resolutions/integrities remain unchanged; the client pi-ai
+  alias projects the installed fork's own declared edge, so partial fork
+  releases (coding-agent moves, pi-ai holds) stay valid. Pi TUI0.85.1 Text/utils and get-east-asian-width1.6.0
   are licensed, byte-identical vendored JS, inlined only into the private todo chunk;
   no pi-tui runtime/dev dependency is added. Sibling declarations check consumers;
   strict vendor TS and checkJs for the SDK-owned todo entry remain enabled.

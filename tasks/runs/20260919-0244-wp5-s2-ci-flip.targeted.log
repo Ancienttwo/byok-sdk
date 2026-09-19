@@ -1,0 +1,54 @@
+@byok-sdk/client test: 
+@byok-sdk/client test:  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-wp5-ci-flip/packages/client
+@byok-sdk/client test: 
+@byok-sdk/client test: stdout | src/__tests__/pi-s2-bundle-resolution.test.ts > Pi launch path — S2 release containment > resolves every Pi launch path inside the release, with no escape into the bun install cache and no auto-install
+@byok-sdk/client test: S2 ownership negative: actual uid rejected without the fixture uid seam; spawns=0
+@byok-sdk/client test: 
+@byok-sdk/client test: stdout | src/__tests__/pi-s2-bundle-resolution.test.ts > Pi launch path — S2 release containment > resolves every Pi launch path inside the release, with no escape into the bun install cache and no auto-install
+@byok-sdk/client test: {"tier1":[],"nativeBlockers":[],"resolvedPaths":{"pi-rpc.command":"/private/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/byok-s2-release-vaX7NB/bun","pi-rpc.entry":"/private/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/byok-s2-release-vaX7NB/sdk-entry.js","pi-rpc.PI_PACKAGE_DIR":"/private/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/byok-s2-release-vaX7NB/assets","pi-rpc.assetRoot":"/private/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/byok-s2-release-vaX7NB/assets","pi-prepared.command":"/private/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/byok-s2-release-vaX7NB/bun","pi-prepared.entry":"/private/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/byok-s2-release-vaX7NB/sdk-entry.js","pi-prepared.PI_PACKAGE_DIR":"/private/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/byok-s2-release-vaX7NB/assets","pi-prepared.assetRoot":"/private/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/byok-s2-release-vaX7NB/assets"},"escaped":[],"bootstrapCache":[],"childCache":[],"registryAttempts":["/@mariozechner%2fclipboard","/@mariozechner%2fclipboard","/@mariozechner%2fclipboard","/@mariozechner%2fclipboard","/@mariozechner%2fclipboard","/@mariozechner%2fclipboard","/@mariozechner%2fclipboard","/@mariozechner%2fclipboard","/@mariozechner%2fclipboard","/@mariozechner%2fclipboard","/@mariozechner%2fclipboard","/@mariozechner%2fclipboard"],"providerRequests":0}
+@byok-sdk/client test: 
+@byok-sdk/client test:  ❯ src/__tests__/pi-s2-bundle-resolution.test.ts (2 tests | 1 failed) 6594ms
+@byok-sdk/client test:      × resolves every Pi launch path inside the release, with no escape into the bun install cache and no auto-install 6584ms
+@byok-sdk/client test: 
+@byok-sdk/client test: ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+@byok-sdk/client test: 
+@byok-sdk/client test:  FAIL  src/__tests__/pi-s2-bundle-resolution.test.ts > Pi launch path — S2 release containment > resolves every Pi launch path inside the release, with no escape into the bun install cache and no auto-install
+@byok-sdk/client test: AssertionError: local registry tripwire observed an install attempt (not a whole-network isolation claim): expected [ '/@mariozechner%2fclipboard', …(11) ] to deeply equal []
+@byok-sdk/client test: 
+@byok-sdk/client test: - Expected
+@byok-sdk/client test: + Received
+@byok-sdk/client test: 
+@byok-sdk/client test: - []
+@byok-sdk/client test: + [
+@byok-sdk/client test: +   "/@mariozechner%2fclipboard",
+@byok-sdk/client test: +   "/@mariozechner%2fclipboard",
+@byok-sdk/client test: +   "/@mariozechner%2fclipboard",
+@byok-sdk/client test: +   "/@mariozechner%2fclipboard",
+@byok-sdk/client test: +   "/@mariozechner%2fclipboard",
+@byok-sdk/client test: +   "/@mariozechner%2fclipboard",
+@byok-sdk/client test: +   "/@mariozechner%2fclipboard",
+@byok-sdk/client test: +   "/@mariozechner%2fclipboard",
+@byok-sdk/client test: +   "/@mariozechner%2fclipboard",
+@byok-sdk/client test: +   "/@mariozechner%2fclipboard",
+@byok-sdk/client test: +   "/@mariozechner%2fclipboard",
+@byok-sdk/client test: +   "/@mariozechner%2fclipboard",
+@byok-sdk/client test: + ]
+@byok-sdk/client test: 
+@byok-sdk/client test:  ❯ src/__tests__/pi-s2-bundle-resolution.test.ts:327:127
+@byok-sdk/client test:     325|         // Bun 1.4.2 registry override was independently measured with…
+@byok-sdk/client test:     326|         // loopback tripwires; this does not claim whole-network isola…
+@byok-sdk/client test:     327|         expect(registryAttempts, 'local registry tripwire observed an …
+@byok-sdk/client test:        |                                                                                                                               ^
+@byok-sdk/client test:     328|         expect(providerRequests, 'startup must never send a provider r…
+@byok-sdk/client test:     329|         expect(tier1, 'Tier 1 real SDK bootstrap/launch resolution').t…
+@byok-sdk/client test: 
+@byok-sdk/client test: ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+@byok-sdk/client test: 
+@byok-sdk/client test: 
+@byok-sdk/client test:  Test Files  1 failed | 3 passed (4)
+@byok-sdk/client test:       Tests  1 failed | 12 passed (13)
+@byok-sdk/client test:    Start at  03:02:20
+@byok-sdk/client test:    Duration  7.66s (transform 316ms, setup 0ms, import 1.39s, tests 12.37s, environment 0ms)
+@byok-sdk/client test: 
+@byok-sdk/client test: Exited with code 1
+TARGETED_EXIT=1
