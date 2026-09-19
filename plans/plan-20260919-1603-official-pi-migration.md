@@ -570,7 +570,8 @@ bun run check:task-workflow
   - [ ] OP2-U 交付（**已改写**）：不提交 A 形状补丁；改为向上游提交「代价实测 + 形状选择（A/B/C）」的请求，附最小复现与验收面。等待上游选形后再落地补丁。
   - [x] OP2-U 的 G-A 实测（2026-09-19，上游 main 真实 session 路径）：一次通过的临时 vitest 实验捕获到会话首请求 = **6123 字节**，顶层键 `max_tokens, messages, model, stream, system, thinking, tools`；交给 transport 的 Context **只有 `messages`**，角色序列是 **`system, system, user`**；transport 尝试 **4** 次（`auto_retry` 在 main 上未改）。
     - 意义：G-A 从「请给一个纯编译入口」变成可检验表述——调用方要复现的不只是对话内容，还有**两条 system 消息的拆分**与 adapter 层的**选项推导**。
-    - 剩余一半：调用方用公开入口重建的 Context 与会话实际发送值的**逐字节比对**（下一刀）。
+  - [x] OP2-U 的 G-A 逐字节比对（2026-09-19，完成）：会话交给 transport 的三条消息 = `system(调用方原文)` / `system(content="", sections, toolsAdded)` / `user`；用公开 `buildSystemPromptSections({cwd})` 在无 session 下重建，**3/5 sections 逐字节相等**（`cwd` 76、`docs` 1160、`preamble` 169），`rules`/`tools` 因会话自填输入而不同，补 `selectedTools` 后仍不变。
+    - **G-A 表述再次收紧**：官方缺的不是「一个 compile 函数」，而是**会话自己的输入推导**（喂给投影的整套输入没有公开入口让调用方以同样方式得到）。请上游「暴露/文档化该输入推导」而不是「新增准备接口」。此结果也把目标版本分叉推向「重钉到下一发行版」，因为 `main` 已把提示投影做成公开纯函数。
   - [ ] **目标版本重钉（owner 裁决点）**：同日只读核对发现 `main` 已重构 G-A 所依赖的同一子系统（`SystemMessage` 变为可回放的分节转录消息 + `buildSystemPromptSections`/`buildSystemPromptState`/`diffSystemPromptSections`/`forceSystemPrompt`），而 npm `latest` 仍是 `0.85.1`。
     - 分叉 A（建议）：把迁移目标重钉到「包含分节 `SystemMessage` 的下一正式发行版」，届时 `node packages/client/probes/pi-official/run.mjs --official-version <x>` 重跑 7 项后再定 OP1/G1 与 OP2-U 文本。
     - 分叉 B：维持 `0.85.1` 并按 `docs/researches/2026-09-19-official-pi-op2u-upstream-request.md` §1–§6 提接口，需同时论证「为何在即将被替换的形状上新增接口」。

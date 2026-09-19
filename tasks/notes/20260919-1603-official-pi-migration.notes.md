@@ -93,3 +93,7 @@
 一次通过的结果：会话首请求 body **6123 字节**，顶层键 `max_tokens, messages, model, stream, system, thinking, tools`；交给 transport 的 Context **只有 `messages`**；角色序列 **`system, system, user`**；transport 尝试 **4** 次。
 
 三条结论：① 系统提示在 `main` 上是**两条** system 消息，复现必须复现这个拆分；② `system`/`tools`/`thinking`/`max_tokens` 由 adapter 选项层拼出，所以复现还要包含**选项推导**；③ `auto_retry` 在 `main` 上仍是 4 次尝试，说明 P04-B 的「拒发不可传播」不是旧版本问题，G-D 继续按 BYOK 侧显式映射处理。
+
+随后把同一实验推进到逐字节比对：会话交给 transport 的三条消息是 `system(调用方原文 16B)` / `system(content="", sections, toolsAdded)` / `user(32B)`；用公开 `buildSystemPromptSections({ cwd })` 在没有 session 的情况下重建，第一轮就 **3/5 sections 逐字节相等**（`cwd` 76、`docs` 1160、`preamble` 169），`rules`（839 vs 146）与 `tools`（339 vs 124）不同，补 `selectedTools` 后调用方结果不变。
+
+由此再次收紧 G-A：官方缺的不是「一个 compile 函数」，而是**会话自己的输入推导**——会话喂给投影的那整套输入（工具选择、snippets、guidelines、context files、skills、append 配置）没有公开入口能让调用方以同样方式得到。请求改为「暴露/文档化该输入推导，使调用方能以同一组显式输入逐字节重建首请求」。

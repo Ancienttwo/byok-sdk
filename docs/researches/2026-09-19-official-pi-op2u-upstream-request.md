@@ -224,7 +224,41 @@ node packages/client/probes/pi-official/run.mjs --probe p04d   # G-D
 
 §1 的 G-A 只有定性描述（248 vs 308 字节、cwd 注入、选项不一致）。现在有了 `main` 上的实测形状（两条 system 消息 + 选项层推导 + 6123 字节的完整请求），上游请求里的 G-A 从「请给我们一个纯编译入口」变成了可检验的表述：**请把会话的首请求组装（system 消息拆分、选项推导、工具集）暴露为纯函数，或允许调用方显式提供组装结果**。
 
-尚未完成的一半：把调用方用公开入口（`buildSystemPromptState` / `getSystemMessageText` / 显式选项）拼出的 Context 与上面的捕获值做**逐字节比对**。这一半做完，G-A 的缺口就能像 G-C 那样给出确切数字（要么相等，要么给出差异位置）。
+（下两节是本节的收尾：先看会话实际交出的三条消息，再做逐字节比对，并据此再次收紧 G-A 的表述。）
+
+### 会话实际交给 transport 的三条消息
+
+| # | role | 键 | 字节 | 内容 |
+|---|---|---|---|---|
+| 1 | `system` | `content, role, timestamp` | 16 | **调用方给的系统提示原文**（`SYSTEM_MARKER_GA`） |
+| 2 | `system` | `content, role, sections, timestamp, toolsAdded` | 0（content 为空） | **派生的提示状态**：具名 `sections` + 完整 `toolsAdded` 声明 |
+| 3 | `user` | `content, role, timestamp` | 32 | 调用方的用户消息（text 块） |
+
+关键：调用方显式给的系统提示**原样保留**为第一条消息；派生的东西集中在第二条。这把「复现首请求」拆成了「复现派生的 sections 与 toolsAdded」。
+
+### 逐字节比对（调用方只用公开入口重建）
+
+用公开导出的 `buildSystemPromptSections({ cwd })` 在**没有 session** 的情况下重建同一批 sections，与会话里的实际值逐字节比较：
+
+| section | 会话实际 | 调用方重建 | 相等 |
+|---|---|---|---|
+| `cwd` | 76 | 76 | **是** |
+| `docs` | 1160 | 1160 | **是** |
+| `preamble` | 169 | 169 | **是** |
+| `rules` | 839 | 146 | 否 |
+| `tools` | 339 | 124 | 否 |
+
+第一轮就 3/5 逐字节相等，而且**完全不依赖 session**。再补上 `selectedTools: <会话 toolsAdded 的名字列表>` 后 `rules`/`tools` 两个 section 的调用方结果**没有变化**——说明这两段取决于公开入口还接收、但会话从自身状态填充的输入（工具 snippets/guidelines 等）。
+
+### 这改变了 G-A 的表述（重要）
+
+原判断是「官方没有公开的纯编译入口」。现在要修正为：
+
+1. **提示投影在 `main` 上已经是公开且纯的函数**，且大部分内容当场就能逐字节复现（3/5 sections 一次通过，`docs` 这种 1160 字节的大段也完全一致）。
+2. 真正缺的不是「一个 compile 函数」，而是**会话自己的输入推导**：会话喂给投影的那一整套输入（工具选择、snippets、guidelines、context files、skills、append 配置）没有公开入口能让调用方以同样方式得到。
+3. 因此 G-A 的上游请求应精确表述为：**暴露（或文档化）会话的输入推导，使调用方用同一组显式输入能逐字节重建首请求**——而不是「新增一个准备接口」。
+
+这一条也把目标版本分叉往「重钉到下一发行版」推：`main` 已经把提示投影拆成了公开纯函数，继续对 `0.85.1` 提接口等于要求上游回到旧形状。
 
 ## 9. 基线重估（同日只读核对 `main`）：固定候选可能已经过时
 
