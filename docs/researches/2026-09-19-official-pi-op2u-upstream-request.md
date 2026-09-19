@@ -400,6 +400,26 @@ node packages/client/probes/pi-official/run.mjs --official-version <new>   # 按
 
 ## 11. 未决
 
+## 12. G-C 隔离实验（2026-09-19）：确认是硬缺口，且唯一 workaround 被禁止
+
+问题：G-C 是否真的无解——能不能不改上游、也不伪造 provenance 地在 BYOK 侧绕开？
+
+做法：在上游 checkout 内直接调用公开的 `streamSimple`（不经 session），用三段消息构造，唯一变量是那条 assistant 文本消息是否带 provenance；fetch 打桩记录「是否被调用」。
+
+| 用例 | fetch 被调用 | 报错 |
+|---|---|---|
+| 对照（无 assistant 消息） | **是** | 无 |
+| `host_text`（assistant 文本，**不带** `api`/`provider`/`model`/`usage`/`stopReason`） | **否** | **无** |
+| `full_provenance`（同样的文本，补齐上述字段） | **是** | 无 |
+
+结论有三层：
+
+1. **原因被隔离到具体字段**：不是「有多一条 assistant 消息」，而是**缺 provenance**。文本、位置、角色都相同，只差那几个字段。
+2. **失败是静默的**：`host_text` 用例里 transport 从未被调用，而 `streamSimple` **不抛错**、流正常结束——这正是 p02 里「正常结束但 0 请求」的机制。
+3. **唯一 workaround 被明令禁止**：带上 `api`/`provider`/`model`/`usage`/`stopReason` 就能发出去，但那等于**伪造历史出处与用量**（会污染记账），方案 INV 与 §8.2 都明确禁止。
+
+因此 G-C 从「疑似可绕开」升级为**确认的硬缺口**：不改上游、又不伪造 provenance 的前提下，BYOK 无法把 Host 已有的 assistant 正文带进新会话。最小反例同时缩到三条消息 + 一个布尔观测。
+
 - 上游是否接受该请求、以什么形态接受、何时进入受支持发行包，均不由本仓决定。
 - 目标版本分叉（重钉到含分节 `SystemMessage` 的下一发行版 vs 维持 `0.85.1`）待 owner 裁决。
 - G-C 的形状（A 新联合成员 / B 放宽 provenance 字段 / C 显式导入入口）待上游选择。

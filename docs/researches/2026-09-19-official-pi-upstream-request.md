@@ -61,6 +61,20 @@ requests are sent**. The failure is silent.
 | control (no host history) | 1 | no throw | includes `message_update` |
 | injected host text | **0** | no throw | only `message_start`/`message_end` |
 
+We then isolated it to a single field set by calling the public `streamSimple`
+directly with a three-message context, varying only the assistant message:
+
+| context | transport called | error |
+|---|---|---|
+| no assistant message | yes | none |
+| assistant text **without** `api`/`provider`/`model`/`usage`/`stopReason` | **no** | **none** |
+| same text with those fields present | yes | none |
+
+So the request is skipped because the message lacks provenance, and it is skipped
+silently. Populating the fields makes it work, which is exactly the fabrication we
+cannot do: the text is the host's, no provider generated it here, and inventing a
+model id and usage would corrupt accounting downstream.
+
 **Cost of the obvious shape.** Adding a new member to the `Message` union with a
 discriminant produces **146 type errors across 42 files and 4 packages**
 (coding-agent 75, agent 44, ai 22, evals 5; src 107 / test 28 / examples 11) —

@@ -145,3 +145,13 @@
 因此：**上游请求从三条减为两条**（G-B 请求形状契约 + G-C host 断言历史），G-A 改为一条可选的文档建议。交付文本 `docs/researches/2026-09-19-official-pi-upstream-request.md` 已按此改写并保留了「已验证、不需要新 API」一节，避免上游被要求做已有的事。
 
 可复用教训：判断「上游缺入口」时必须先确认**用的是不是上游自己用的那个公开入口**；用错同名工厂会造出一个看起来很扎实的假缺口，而且它会一路通过归因与充分性检验。
+
+## G-C 隔离实验：确认为硬缺口（2026-09-19）
+
+问题：G-C 能不能不改上游、也不伪造 provenance 地绕开？做法是在上游 checkout 内直接调公开 `streamSimple`，三段消息，唯一变量是那条 assistant 文本是否带 provenance，fetch 打桩记录是否被调用。
+
+- 对照（无 assistant 消息）：fetch **被调用**，无报错。
+- `host_text`（assistant 文本无 provenance）：fetch **从未被调用**，且**不报错**，流正常结束。
+- `full_provenance`（同样文本补齐 `api`/`provider`/`model`/`usage`/`stopReason`）：fetch **恢复被调用**。
+
+结论：原因被隔离到具体字段；失败是静默的（正是 p02「正常结束但 0 请求」的机制）；唯一 workaround 是伪造历史出处与用量，被 INV 与方案 §8.2 明令禁止。**G-C 是确认的硬缺口**，最小反例缩到三条消息 + 一个布尔观测。
