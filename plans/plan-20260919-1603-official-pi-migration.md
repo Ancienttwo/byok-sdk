@@ -31,6 +31,20 @@
 
 **为什么第一步不能跳过**：第 2 步是唯一能在不触碰 daemon/store/CAS 的前提下证明「可替换」的方式；跳过它，第 3 步一旦出现行为差异，就会在跨 4 个模块的改动里难以定位。
 
+**切片 A 的切分更正（2026-09-19，动手前的核对发现）**：原以为第 1–2 步是自洽中间态，核对既有 fixture 后发现**不是**——第 2 步的等价性测试需要先把 BYOK 侧输入映射成新核心要的输入：
+
+| BYOK 侧（既有） | 新核心需要 |
+|---|---|
+| `InputPreparationModelV1`（BYOK 自有形状） | provider `Model`（含 `api`/`baseUrl`/`compat`） |
+| `CompilePreparedInputRequest.options`（`cacheRetention`/`maxTokens`） | provider `options`（`apiKey`/`model`/`sessionId`/`reasoning`） |
+| `snapshot.prompt`（`projectSystemPromptSnapshot` 产物） + `snapshot.messages` + `snapshot.tools` | `{ systemPrompt, messages, tools }` |
+
+也就是说等价性测试与正式接线共用同一层映射。因此切片 A 的**真正第一步**改为：
+
+- **先写映射函数**（建议 `packages/client/src/adapters/pi/prepared-request-input.ts`）：从 BYOK 的 snapshot/model/options 映射到新核心的 `{api, model, context, options}`，配单测（纯函数，无 IO）；**它同时是等价性测试与接线的前置**。
+
+映射就绪后，第 2 步（等价性测试）与第 3–4 步（替换与删除 fork import）才可按原文顺序推进。
+
 **上游依赖说明**：切片 A 本身**不依赖**上游（新核心用 `unknown[]` 边界接收消息，既不 cast 也不伪造，host 历史的既有实现可原样保留在 fork runtime 上）；上游类型面落地影响的是**切换 runtime 之后**能否继续表达 host 历史，属切片 B/OP5 的前置。
 
 - 入口：`packages/client/src/adapters/pi/input-preparation.ts`（8 处 fork import）、`packages/client/src/daemon/input-preparation-service.ts`（1 处）、`packages/client/src/bin/pi-prepared-host.ts:317`（消费 seam）、`adapters/pi/prepared-prompt-frame.ts`。
