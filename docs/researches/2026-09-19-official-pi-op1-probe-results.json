@@ -1,14 +1,14 @@
 {
   "kind": "official-pi-op1-probe-summary",
-  "generatedAt": "2026-09-19T10:01:38.503Z",
+  "generatedAt": "2026-09-19T10:12:40.485Z",
   "officialPackage": "@earendil-works/pi-coding-agent@0.85.1",
   "officialIntegrity": "sha512-FGRN+OHbWaefBPGaTggAdLjrIHW+s2PzLyglz/5dfLzb9of7uuXMXYC0fJIeZTw+shS32o2cuQ9jF7YSDuL/oQ==",
   "officialPiAiIntegrity": "sha512-+VgVIJDkDO2efYJKEEqvPTH4zmnIaXdAppGbO+vKFA9qy5PdhFiAenuFAkU+oiCSfOC4dMHDyrjdQeL4ZoC5CQ==",
   "officialResolved": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-0.85.1.tgz",
   "officialGitHead": null,
   "isolation": {
-    "probeRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6",
-    "emptyHome": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6/empty-home",
+    "probeRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn",
+    "emptyHome": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn/empty-home",
     "node": "v24.18.0",
     "platform": "darwin-arm64"
   },
@@ -21,8 +21,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -102,8 +102,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -249,8 +249,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -308,8 +308,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -341,7 +341,7 @@
         {
           "name": "first message (system) matches the session projection",
           "ok": false,
-          "detail": "pre={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\"} session={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\\nCurrent working directory: /tmp/pi-probe-p03b-T1Md6p/cwd\\n\"}"
+          "detail": "pre={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\"} session={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\\nCurrent working directory: /tmp/pi-probe-p03b-YKnlCe/cwd\\n\"}"
         },
         {
           "name": "no certification accompanies the payload",
@@ -383,7 +383,7 @@
         {
           "name": "first message (system) matches the session projection",
           "ok": false,
-          "detail": "pre={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\"} session={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\\nCurrent working directory: /tmp/pi-probe-p03b-T1Md6p/cwd\\n\"}"
+          "detail": "pre={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\"} session={\"role\":\"system\",\"content\":\"SYSTEM_MARKER_P03B\\nCurrent working directory: /tmp/pi-probe-p03b-YKnlCe/cwd\\n\"}"
         }
       ],
       "exitCode": 0
@@ -396,8 +396,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -597,8 +597,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -689,8 +689,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -732,8 +732,8 @@
         "skillCount": 0,
         "extensionErrors": [],
         "plantedHostileFiles": [
-          "/tmp/pi-probe-p05-1Th2Co/cwd/.pi/extensions/hostile.mjs",
-          "/tmp/pi-probe-p05-1Th2Co/agent/extensions/hostile.mjs"
+          "/tmp/pi-probe-p05-4kacep/cwd/.pi/extensions/hostile.mjs",
+          "/tmp/pi-probe-p05-4kacep/agent/extensions/hostile.mjs"
         ]
       },
       "failures": [],
@@ -747,8 +747,8 @@
       "environment": {
         "node": "v24.18.0",
         "platform": "darwin-arm64",
-        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6/empty-home",
-        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-NQn7k6",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn",
         "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
       },
       "checks": [
@@ -789,6 +789,86 @@
       },
       "failures": [],
       "exitCode": 0
+    },
+    {
+      "probe": "p07-subprocess-transport",
+      "ok": true,
+      "verdict": "supported",
+      "verdictReason": "a second process builds its own session against the same release, observes the same request bytes before send, and its refusal keeps the endpoint at zero — the pattern holds across the process boundary",
+      "environment": {
+        "node": "v24.18.0",
+        "platform": "darwin-arm64",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn",
+        "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
+      },
+      "checks": [
+        {
+          "name": "child probes run against the isolated official install",
+          "ok": true,
+          "detail": "installRoot=/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-OfTlmn"
+        },
+        {
+          "name": "child process exited cleanly",
+          "ok": true,
+          "detail": "code=0 stderr="
+        },
+        {
+          "name": "child transport observed an outbound request",
+          "ok": true,
+          "detail": "[2087]"
+        },
+        {
+          "name": "parent endpoint received exactly one request",
+          "ok": true,
+          "detail": "count=1"
+        },
+        {
+          "name": "child and parent observe the same request size",
+          "ok": true,
+          "detail": "child=2087 parent=2087"
+        },
+        {
+          "name": "refusing child exited cleanly",
+          "ok": true,
+          "detail": "code=0 stderr="
+        },
+        {
+          "name": "refusing child never delivered a request",
+          "ok": true,
+          "detail": "count=1"
+        },
+        {
+          "name": "refusing child still reached its transport",
+          "ok": true,
+          "detail": "[2087,2087,2087,2087]"
+        },
+        {
+          "name": "refusing child did not surface the refusal",
+          "ok": true,
+          "detail": "no error surfaced"
+        }
+      ],
+      "observed": {
+        "childPids": [
+          32863,
+          32864
+        ],
+        "allowedChildSeen": [
+          2087
+        ],
+        "refusedChildSeen": [
+          2087,
+          2087,
+          2087,
+          2087
+        ],
+        "parentRequests": 1,
+        "parentBytes": 2087,
+        "refusedPromptError": null
+      },
+      "failures": [],
+      "exitCode": 0
     }
   ],
   "ok": false,
@@ -801,6 +881,7 @@
     "p04-send-gate": "partial",
     "p04d-refusal-observability": "supported",
     "p05-loader-closure": "supported",
-    "p06-extension-tool-bridge": "supported"
+    "p06-extension-tool-bridge": "supported",
+    "p07-subprocess-transport": "supported"
   }
 }

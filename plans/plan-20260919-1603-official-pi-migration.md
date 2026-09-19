@@ -591,6 +591,8 @@ bun run check:task-workflow
     - 依赖链收紧为：**上游 G-C（+G-B 契约）→ OP2 → OP5 → OP8**；这条取代了 plan §5「三条并行线」中「OP3 有独立可推进部分」的乐观假设。
     - 已加护栏：`check-pi-fork-surface` + 4 个用例，其中一条断言生产源码集合恰为上述 3 个文件——**fork 若扩散到 prepared 之外，测试立刻红**。
 - [ ] OP4 五边递归、custody、workflow 等价接线
+  - [x] OP4 **范围实测（2026-09-19）**：新增 `p07-subprocess-transport`，让独立子进程在同一官方 release 上自建 session 并注入 caller-owned transport。结果 **supported**：子进程观察 2087 字节 == 父端点收到的 2087 字节；拒发时子进程 4 次尝试、父端点无新增请求、且拒绝不传播（与单进程一致）。
+    - 含义：**OP4 没有 runtime 能力缺口**；剩余工作全在 BYOK 侧接线（子进程启动绑定、permit/charge-once、root/parent 身份冻结、print/print 多层），不需要上游。
 - [ ] OP5 官方依赖、身份、安装与来源证明
 - [ ] OP6 Host C07-H2b 与正式包消费
 - [ ] OP7 固定组合故障/平台/真实目标验收（T01–T32，G3/G4）
