@@ -567,6 +567,10 @@ bun run check:task-workflow
     - G-C host 断言历史导致静默 0 请求
     - G-D **不需要上游**：运行归属方可自行判定「拒发且零请求」（`p04d` supported）
   - [ ] OP2-U 交付：最小复现 + 公共入口测试 + 保持普通 CLI 行为的补丁（下一步）
+  - [ ] **目标版本重钉（owner 裁决点）**：同日只读核对发现 `main` 已重构 G-A 所依赖的同一子系统（`SystemMessage` 变为可回放的分节转录消息 + `buildSystemPromptSections`/`buildSystemPromptState`/`diffSystemPromptSections`/`forceSystemPrompt`），而 npm `latest` 仍是 `0.85.1`。
+    - 分叉 A（建议）：把迁移目标重钉到「包含分节 `SystemMessage` 的下一正式发行版」，届时 `node packages/client/probes/pi-official/run.mjs --official-version <x>` 重跑 7 项后再定 OP1/G1 与 OP2-U 文本。
+    - 分叉 B：维持 `0.85.1` 并按 `docs/researches/2026-09-19-official-pi-op2u-upstream-request.md` §1–§6 提接口，需同时论证「为何在即将被替换的形状上新增接口」。
+    - 两分支都不改变当前判断：prepared 生产路径保持禁用，`official_supported` 不得声明。
 - [ ] OP3 现有 runtime、工具、消息、凭证迁移
 - [ ] OP4 五边递归、custody、workflow 等价接线
 - [ ] OP5 官方依赖、身份、安装与来源证明

@@ -170,3 +170,42 @@ node packages/client/probes/pi-official/run.mjs --probe p04d   # G-D
 - 上游是否接受该请求、以什么形态接受、何时进入受支持发行包，均不由本仓决定。
 - 本文只覆盖 `openai-completions` 一条路径；WebSocket 与其他 API 按方案保持不支持，未做验证。
 - 递归/子进程模式下上述结论是否一致（`registerProvider` 在 print/runner 中的可用性）属 OP4 范围，本轮未验证。
+
+## 8. 基线重估（同日只读核对 `main`）：固定候选可能已经过时
+
+写完 §1–§6 之后又做了一次只读核对，结果推翻了「把 `0.85.1` 当作接口工作对象」这个前提，必须显式记录。
+
+`main` 在 `0.85.1`（2026-09-05 发布）之后重构了本文 G-A 所依赖的**同一块子系统**：
+
+| 位置 | `main` 的现状 |
+|---|---|
+| `packages/ai/src/types.ts:484-500` | `SystemMessage` 成为**可回放的转录消息**：`content` + `sections`（具名提示分节，后续消息按名替换、`null` 删除）+ `toolsAdded`/`toolsRemoved`。文档原文：把每条 system 消息按序回放即可得到当前提示与工具集 |
+| `packages/ai/src/types.ts:546` | `Message = SystemMessage \| UserMessage \| AssistantMessage \| ToolResultMessage` |
+| `packages/coding-agent/src/core/system-prompt.ts:54/121/186/195/204` | 新增 `normalizeBuildSystemPromptOptions`、`buildSystemPromptSections`、`buildSystemPromptState`、`diffSystemPromptSections`；`buildSystemPrompt` 变成 `getSystemMessageText({role:"system", ...state})` |
+| `system-prompt.ts`（`forceSystemPrompt`） | 允许直接给定系统提示内容 |
+
+也就是说：G-A 里「系统提示与会话状态耦合、调用方无法复现」这一条，**`main` 已经在往可显式化、可回放、可 diff 的方向走**，只是还没有把「首请求纯编译」作为公开入口暴露出来。
+
+仍然缺失（`main` 上同样没有）：
+
+- G-B：`main` 上搜不到任何 prepared/preparation 模块，也没有 residual/覆盖证明这类概念；
+- G-C：`Message` 联合里没有 host 断言文本，`AssistantMessage` 仍要求 `api`/`provider`/`model`/`usage`；
+- `CreateAgentSessionOptions` 仍不暴露 fetch、也不接受调用方给定的首个 system 消息。
+
+发布面事实：npm `dist-tags.latest` 仍是 **0.85.1**，registry `time.modified` 仍是 2026-09-05——**`main` 尚未发布**。
+
+### 结论与需要 owner 裁决的分叉
+
+对 `0.85.1` 提「请加纯编译入口」有实际风险：这正是 `main` 已经在重塑的子系统，针对旧形状提的接口很可能被要求按新形状重写。两条互斥路径：
+
+1. **等下一个官方发行版**（推荐）：把迁移目标从 `0.85.1` 重钉到「包含分节 `SystemMessage` 的下一个正式发行版」，届时用 `node packages/client/probes/pi-official/run.mjs --official-version <x.y.z>` 一条命令重跑全部 7 项，按新结果重写 OP2-U 请求（G-A 可能只剩「暴露首请求编译入口」一小步）。
+2. **继续按 `0.85.1` 提接口**：需要同时论证「为什么要求上游在即将被替换的形状上新增接口」，否则请求本身不成立。
+
+两种情况下当前判断不变：**prepared 生产路径保持禁用，`official_supported` 不得声明**。差别只在 OP2-U 的请求文本与目标版本，以及后续 OP2/OP3 的实现面。
+
+机器可执行的重估入口（下一刀的第一步）：
+
+```bash
+npm view @earendil-works/pi-coding-agent dist-tags --json   # 是否已出现新版本
+node packages/client/probes/pi-official/run.mjs --official-version <new>   # 按新版本重跑 7 项
+```
