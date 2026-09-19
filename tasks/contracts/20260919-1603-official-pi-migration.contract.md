@@ -87,6 +87,10 @@ allowed_paths:
   - packages/client/probes/pi-official/probes/p05-loader-closure.mjs
   - docs/researches/2026-09-19-official-pi-op1-probe-report.md
   - docs/researches/2026-09-19-official-pi-op1-probe-results.json
+  # ADR-036 架构裁定与索引/帐本落位
+  - docs/architecture/adr-2026-09-19-official-pi-runtime-source.md
+  - docs/architecture/index.md
+  - docs/architecture/sdk-architecture.md
   - tasks/contracts/20260919-1603-official-pi-migration.contract.md
   - tasks/reviews/20260919-1603-official-pi-migration.review.md
   - tasks/notes/20260919-1603-official-pi-migration.notes.md
@@ -151,6 +155,7 @@ exit_criteria:
     - docs/researches/2026-09-19-official-pi-op1-probe-report.md
     - docs/researches/2026-09-19-official-pi-op1-probe-results.json
     - packages/client/probes/pi-official/run.mjs
+    - docs/architecture/adr-2026-09-19-official-pi-runtime-source.md
     - tasks/contracts/20260919-1603-official-pi-migration.contract.md
     - tasks/notes/20260919-1603-official-pi-migration.notes.md
   artifacts_exist:

@@ -568,6 +568,11 @@ bun run check:task-workflow
 - [ ] OP7 固定组合故障/平台/真实目标验收（T01–T32，G3/G4）
 - [ ] OP8 准入切换、旧工作排空、fork 退役
 
+横切（owner 2026-09-19 明确要求「更新相关架构文档」）：
+
+- [x] 架构文档落位：ADR-036 记录「官方发行来源 + 身份以发行事实绑定 + 缺失 seam 只走最小上游改进 + G1 已裁定」的权威裁定；`docs/architecture/index.md` Decision Records 与 `sdk-architecture.md` 附录 A 帐本行同步。
+- [ ] 架构文档收口：OP3/OP5 落地时把 `sdk-architecture.md` 的 runtime 状态从「fork 活动依赖」改为「官方发行包 + adapter」，并在 §11 缺口帐本与 §12.8 路线中标注 G2–G4。
+
 ## Evidence Contract
 
 - **State/progress path**: 本文件 `## Task Breakdown`；`tasks/todos.md`（deferred ledger）；`tasks/contracts/20260919-1603-official-pi-migration.contract.md`；`tasks/reviews/20260919-1603-official-pi-migration.review.md`；`tasks/notes/20260919-1603-official-pi-migration.notes.md`
