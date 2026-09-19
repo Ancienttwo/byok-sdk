@@ -165,7 +165,42 @@ node packages/client/probes/pi-official/run.mjs --probe p04d   # G-D
 1. `Current working directory:` 这段被会话追加进系统消息的内容**不在** `system-prompt.ts` 里，说明它由会话组装阶段另行附加。G-A 的补丁必须先定位这个来源，否则「会话外复现」无法成立。
 2. 上游 `main` 的 `packages/coding-agent/src/core`（52 个条目）确认仍**没有** `input-preparation.ts` / `prepared-session-input.ts`，所以 G-A/G-B 不是「等一个已有模块发布」，而是要提新接口。
 
-## 7. 未决
+## 7. G-C 的形状代价实测（2026-09-19，上游 main 一次性实验）
+
+本节是一次**实际动手**的结果，不是估计。它推翻了本文 §2.3 提的「新增一等消息种类」是「最小上游改动」这一假设。
+
+做法：完整 checkout `earendil-works/pi@main`，`npm ci --ignore-scripts` + `packages/ai` 的 `hydrate-model-data` 之后先跑基线类型检查——**`npx tsgo --noEmit` = EXIT 0，基线干净**；随后只在 `packages/ai/src/types.ts` 加入 `HostAssertedAssistantMessage`（`origin: "host"`）、在 `AssistantMessage` 上加 `origin?: undefined` 判别位、并把 `Message` 联合扩成五元，再跑同一条命令。
+
+结果：**146 个类型错误，分布在 42 个文件、4 个 package**：
+
+| package | 错误数 |
+|---|---|
+| `packages/coding-agent` | 75（如 `modes/interactive/interactive-mode.ts` 23、`core/agent-session.ts` 6、`core/usage-totals.ts` 4、`modes/interactive/components/footer.ts` 5） |
+| `packages/agent` | 44（harness/runtime、pico3 等新子系统） |
+| `packages/ai` | 22（如 `api/openai-completions.ts` 16、`api/anthropic-messages.ts` 4、`api/google-shared.ts` 2） |
+| `packages/evals` | 5 |
+
+按目录分：`src` 107、`test` 28、`examples` 11。典型错误形态：`Property 'stopReason' does not exist on type 'AssistantMessage | HostAssertedAssistantMessage'`。
+
+### 这说明了什么
+
+「加一个新消息种类」不是局部改动：判别位一旦进入 `Message` 联合，**每一个 switch 或字段读取点都必须表态**——包括 BYOK 根本不使用的 `packages/agent` harness 子系统与 `packages/evals`。这类跨 4 个 package、107 个生产点的改动，其形状应该由上游决定，而不是由 BYOK 单方面提一个已成型的补丁。把它作为补丁直接提交，反而会把一个需要设计讨论的问题包装成既成事实。
+
+### 候选形状与其代价（供上游选择）
+
+| 形状 | 代价 | 说明 |
+|---|---|---|
+| A. 新增一等消息种类（本次实测） | 146 处、4 个 package | 类型最清晰，但波及最广 |
+| B. 在 `AssistantMessage` 上加可选判别位，并把 `api`/`provider`/`model`/`usage`/`stopReason` 一并放宽为可选 | 联合收窄错误减少，但**每一处读 provenance 的点都要处理 undefined**——波纹只是从「新成员」移到「可选字段」，总数未必下降 | 类型安全性整体下降 |
+| C. 保留消息类型不变，改由调用方显式声明「导入 host 文本为 assistant」的入口，由该入口构造出不带伪造用法计数的 assistant 消息 | 需要一个新入口 + 记账路径承认这一约定 | 波纹最小，但引入一个新的「无出处」状态，仍要设计 |
+
+### 建议给上游的提法
+
+不要提交 A 的补丁。改成：**用本轮实测（基线 EXIT 0 → 加一成员后 146 处）说明代价，请上游在 A/B/C 之间选择形状**；BYOK 提供使用场景、不可伪造 provenance 的硬约束、以及 §3 的最小复现与 §4 的验收面作为输入。
+
+附带结论：上游任何形状落地后，BYOK 侧需要重新核对的点是同一批——`session-manager` 的模型推导、`usage-totals`、`cache-stats`、`estimate`，以及各 API 的消息转换。本节的 146 处清单就是那份核对清单的初稿（本机 `/tmp/pi-upstream`，未提交任何上游内容）。
+
+## 8. 未决
 
 - 上游是否接受该请求、以什么形态接受、何时进入受支持发行包，均不由本仓决定。
 - 本文只覆盖 `openai-completions` 一条路径；WebSocket 与其他 API 按方案保持不支持，未做验证。

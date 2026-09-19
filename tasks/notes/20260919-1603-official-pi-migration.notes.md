@@ -74,3 +74,14 @@
 - **G-D 不需要上游**：`p04d` 证明运行归属方可自行判定「拒发且零请求」（4 次可归属 refusal、端点 0 请求），虽然 `prompt()` 仍不抛错、最终 `agent_settled`。BYOK 侧必须显式映射，不能把「正常结束」当成功。
 
 交付物：`docs/researches/2026-09-19-official-pi-op2u-upstream-request.md`（缺口、请求接口的形状与要求、最小复现命令、上游验收面、BYOK 侧能力边界）。
+
+## OP2-U 形状可行性实测（2026-09-19）
+
+上一轮把 G-C 定为「最小的一刀」，这一轮实际动手后**推翻了这个判断**：
+
+1. 完整 checkout 上游 `main`（14+ workspace），`npm ci --ignore-scripts` 之后 `hydrate-model-data` 是必须的——没有它，生成的模型数据为空，类型检查会报 808 个与生成数据相关的错误，属于假红。
+2. 处理完这一步后基线 **`npx tsgo --noEmit` = EXIT 0**，干净基线成立。
+3. 只在 `packages/ai/src/types.ts` 加一个 host 断言消息种类 + 判别位 + 扩展 `Message` 联合，立刻产生 **146 个类型错误，分布 42 文件 / 4 package**（`coding-agent` 75、`agent` 44、`ai` 22、`evals` 5；src 107 / test 28 / examples 11）。
+4. 结论：判别位进入联合后，每一个字段读取点都必须表态，包括 BYOK 根本不用的 `packages/agent` harness 与 `packages/evals`。这类跨 4 包的改动应由上游选形，而不是 BYOK 提交既成事实的补丁。
+
+因此 OP2-U 交付物改写为「代价实测 + 形状选择（A 新成员 / B 放宽字段 / C 新导入入口）+ 最小复现 + 验收面」。本轮未向上游提交任何内容；上游 checkout 在 `/tmp/pi-upstream`，仅为本机证据。
