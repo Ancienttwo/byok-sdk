@@ -1,104 +1,60 @@
 # Plan: Official Pi Migration（退役 BYOK Pi fork，切换官方发行依赖）
 
-> **Status**: Executing
+> **Status**: Paused（owner 裁定 2026-09-20：路径 A 有界过渡维护）
 > **Created**: 20260919-1603
 > **Slug**: official-pi-migration
 > **Artifact Level**: work-package
 > **Planning Source**: owner 提供的执行方案 `plans/Official_Pi_Migration_Execution_Plan_2026-09-19.md`；本文件是其规范化、已注册的权威执行副本（main checkout 那份为历史输入，不是权威）
 > **Promotion Reason**: owner_ruling_2026-09-19（终止自维护 Pi 发行线；OP0–OP8 责任包 + G1–G4 实质验收门）
 > **Verification Boundary**: OP0 证据面（发行基线 + fork delta map）与 OP1 五项 probe；产品实现刀按各自 slice contract 独立验证
-> **Rollback Surface**: 见文末 `
-## 剩余工作执行包（resume packet）
-
-### owner 决定：不向上游提交（2026-09-19）
-
-owner 明确指示**不向 `earendil-works/pi` 提交任何请求**。这移除了本 plan 的一条主干路径（§8.2 OP2-U「最小上游接口改进」），后果必须如实记录，不能当作「换条路继续」：
-
-- 四项缺口（`usage` guard、类型面形状、RPC 帧上限助手、提示渲染器/section builders）**不会通过请求获得解决**；
-- 因此 **OP2 接线、OP5、OP8 在现方案下不可达**，而不是「暂时阻塞」——prepared 路径的字节等价前提（会话实际发送 == 冻结 D）依赖上游公开面；
-- **fork 仍然是唯一可运行的 runtime**，`check:pi-fork-surface` 计数在可预见期内不会下降；
-- `watch-release.mjs` 保留：若未来某个正式发行版**恰好**补齐这些公开面（无需我们请求），探针套件（含 `p08`）会在重跑时直接给出结论。
-
-**剩余可选路径（需 owner 选择，本 agent 不自行取舍产品语义）：**
-
-| 路径 | 含义 | 代价 |
-|---|---|---|
-| A. 维持 fork（现状） | 迁移搁置；fork 继续按现有节奏维护 | 保留自维护 Pi 发行线的全部成本与来源可解释性问题（本 plan 的立项理由） |
-| B. 只迁非 prepared 面 | 会话组装/工具/装载已证明只用公开面，可先切；prepared 能力**显式声明不可用** | 需要 owner 明确接受把 task-free preparation 从「可用」变为「不可用」（INV-14 要求显式声明，不允许静默降级） |
-| C. 未来重开上游 | 保持本 plan 的证据与探针，待条件变化再提交 | 需要 owner 后续改变决定 |
-
-在 owner 选择之前，**不进行产品依赖切换**：路径 B 的代价是能力移除，不是重构细节。
-
-本包供任何接过此 plan 的执行者直接使用；不替代 Task Breakdown，只把「下一步做什么、入口在哪、判据是什么」集中到一处。全部结论均已在 `docs/researches/2026-09-19-official-pi-*.md` 量化。
-
-### 环境前置（否则会看到假红）
-
-- 本 worktree 跑全量测试前**必须先 `bun run build`**；未构建时 `packages/client` 会报约 185 个「Failed to resolve entry for package @byok-sdk/*」的假红。
-- 探针套件需要网络（每次现场从 registry 安装官方 tarball）：`node packages/client/probes/pi-official/run.mjs`（9 项，约 40s）。
-- `/tmp/pi-upstream` 是用于测量的上游 checkout（已 `npm ci` + `hydrate-model-data`，基线 `tsgo --noEmit` EXIT 0）。它是临时的；重建方式：完整 clone → `npm ci --ignore-scripts` → `npm --prefix packages/ai run hydrate-model-data`。
-
-### 切片 A：OP2 接线
-
-**安全网（改动前先记住它）**：prepared 路径现有 **13 个既有测试文件**（`input-preparation*.test.ts` 6 个、`pi-prepared-*.test.ts` 3 个、`prepared-offer-*.test.ts` 2 个、`prepared-prompt-frame.test.ts`、`prepared-tool-surface.test.ts`），加上全量 244 文件 / 2906 测试。接线的判据不是「新核心的测试绿」，而是**这些既存测试在换掉编译段之后仍然绿**。
-
-**第一步的精确定义（按此顺序，每步保持构建绿）**：
-
-1. 在 `input-preparation.ts` 内新增一条内部路径：用 `compilePreparedRequest` 产出 `{body, digest, shape}`，**与既有 fork 编译并存于同一函数内**，但只通过一个新导出暴露（不改既有导出行为）；
-2. 写一个**等价性测试**：同一输入下，新路径的 `body` 与既有 envelope 所承载的请求体逐字节相同。**这是整条切片的关键证据**——它证明替换是等价的，而不是「看起来能跑」。若两者不等，先定位差异（差异本身就是发现），不要继续替换；
-3. 等价成立后，把 daemon 侧 receipt/store 的 `envelope` 字段改为 `{body, digest, shape}`（此时才会跨到 `daemon/input-preparation-service.ts`、store/receipt 与 Host CAS）；
-4. 最后删除 `nativePrepare` / `nativeCanonical` 两条动态 import 与 `prepared-session-input`/`input-preparation` 两个子路径 import，并更新 `check-adapters-entry.mjs` 与 `api-surface/client.d.ts` golden。
-
-**为什么第一步不能跳过**：第 2 步是唯一能在不触碰 daemon/store/CAS 的前提下证明「可替换」的方式；跳过它，第 3 步一旦出现行为差异，就会在跨 4 个模块的改动里难以定位。
-
-**切片 A 的切分更正（2026-09-19，动手前的核对发现）**：原以为第 1–2 步是自洽中间态，核对既有 fixture 后发现**不是**——第 2 步的等价性测试需要先把 BYOK 侧输入映射成新核心要的输入：
-
-| BYOK 侧（既有） | 新核心需要 |
-|---|---|
-| `InputPreparationModelV1`（BYOK 自有形状） | provider `Model`（含 `api`/`baseUrl`/`compat`） |
-| `CompilePreparedInputRequest.options`（`cacheRetention`/`maxTokens`） | provider `options`（`apiKey`/`model`/`sessionId`/`reasoning`） |
-| `snapshot.prompt`（`projectSystemPromptSnapshot` 产物） + `snapshot.messages` + `snapshot.tools` | `{ systemPrompt, messages, tools }` |
-
-也就是说等价性测试与正式接线共用同一层映射。因此切片 A 的**真正第一步**改为：
-
-- **先写映射函数**（建议 `packages/client/src/adapters/pi/prepared-request-input.ts`）：从 BYOK 的 snapshot/model/options 映射到新核心的 `{api, model, context, options}`，配单测（纯函数，无 IO）；**它同时是等价性测试与接线的前置**。
-
-映射就绪后，第 2 步（等价性测试）与第 3–4 步（替换与删除 fork import）才可按原文顺序推进。
-
-**第 4 项精确化（2026-09-19 晚些核查）**：`getSystemMessageText` **已公开**（`pi-ai` 根导出）；缺的只是 `coding-agent` 侧的 `buildSystemPromptSections` / `buildSystemPromptState`（其 `src/index.ts` 440 行里无任何 `system-prompt` 导出）。因此请求精确为「导出这两个纯函数」，而**重钉并不能自动解决**（`main` 包根同样没有）。
-- 同时更正 §14 的过度声明：实验里 `buildSystemPromptSections` 用的是 upstream **源码相对路径**，消费者做不到。准确表述 = **工具一半只需公开入口；提示一半需要一个新导出**。
-**上游依赖说明（2026-09-19 更正）**：切片 A **只对了一半**——编译段不依赖上游（新核心 + 官方 provider adapter 足够），但**提示文本的来源依赖上游公开面**：当前 fork 能 `projectSystemPromptSnapshot` 却**不能 `renderSystemPrompt`**（该模块不在 `exports`，`/input-preparation` 也没 re-export 它）；新版 `main` 已公开 `buildSystemPromptSections` + `getSystemMessageText`。因此上游清单更新为**四项**（加入「提示渲染器公开」），且这是**重钉目标的又一强理由**。
-**上游依赖说明**：切片 A 本身**不依赖**上游（新核心用 `unknown[]` 边界接收消息，既不 cast 也不伪造，host 历史的既有实现可原样保留在 fork runtime 上）；上游类型面落地影响的是**切换 runtime 之后**能否继续表达 host 历史，属切片 B/OP5 的前置。
-
-- 入口：`packages/client/src/adapters/pi/input-preparation.ts`（8 处 fork import）、`packages/client/src/daemon/input-preparation-service.ts`（1 处）、`packages/client/src/bin/pi-prepared-host.ts:317`（消费 seam）、`adapters/pi/prepared-prompt-frame.ts`。
-- 9 处用法的逐条处置见 OP2-U §15；新核心已就绪：`adapters/pi/prepared-request.ts`（compile/certify/verify）+ `request-shape.ts`。
-- 每改一处即验证：`bun run check:pi-fork-surface`（计数只允许下降）+ `cd packages/client && bun x vitest run`（先 build）。
-- 判据：fork 面从 3 文件 / 10 import 降到 0，且 client 全量与三项仓库 gate 保持绿。
-
-### 切片 B：OP5 身份与发布
-
-- 入口：`scripts/release/pi-runtime-identity.mjs` 的 5 个导出；消费者 6 文件（`pack-and-smoke.mjs`、`registry-readback.mjs`、`pi-launcher-smoke.mjs`、`check-package-graph.mjs`、`pack-and-smoke.test.mjs`、`resolve-bin.test.ts`）。
-- 唯一需设计的一处：prepared entry 断言改为「官方来源身份 + **prepared 能力显式声明为不可用**」（OP2-U §17）。
-- 预期会成片变红的是**两族 C07 runtime-record fixture**（111 / 154 处 fork 名），须先区分「fixture 过期」与「实现回归」再判断 G3。
-
-### 切片 C：OP8 退役
-
-- 排空与回退边界已写进 ADR-036 §Consequences 与 OP8 描述；判据是「在途 task / pending message / prepared artifact / home lease」全部按原 runtime 处理完。
-- 退出标志：`check:pi-fork-surface` 计数为 0，且新任务只用官方组合。
-
-### 两个外部决定（本仓无法自行推进）
-
-| 决定 | 解锁 |
-|---|---|
-| 是否向上游提交请求（文本：`docs/researches/2026-09-19-official-pi-upstream-request.md`，补丁：`...-gc-guard-candidate.patch`） | 类型面落地 → 切片 A |
-| 目标版本是否重钉到含分节 `SystemMessage` 的下一发行版 | OP1 重跑基线（`watch-release.mjs` + `--official-version`）→ G1 重判 → 切片 A/B 的目标形状 |
-
-## Rollback Surface`
+> **Rollback Surface**: 见文末 `## Rollback Surface`
 > **Task Profile**: migration
 > **Source Ref**: `byok-sdk@79f6a0d35952392c37652cb2f7fecaf6dcc255a6`（origin/main）；官方参考 `earendil-works/pi@36b60d2e…`（GitHub main，非 npm 产物）；Host 参考 Draft #241@`32cfcd49`
 > **Spec**: `docs/spec.md`
 > **Task Contract**: `tasks/contracts/20260919-1603-official-pi-migration.contract.md`
 > **Task Review**: `tasks/reviews/20260919-1603-official-pi-migration.review.md`
 > **Implementation Notes**: `tasks/notes/20260919-1603-official-pi-migration.notes.md`
+
+## Owner 裁定（2026-09-20）：路径 A —— 有界过渡维护，迁移主动暂停
+
+> 本裁定取代本 plan 中所有与之冲突的表述，包括历史记录里已被更正但看起来仍像活动指令的段落。
+
+**裁定内容（owner 原文要点）**：选 **A**，限定为「保留现有 fork、冻结功能扩张、暂停官方迁移」；**不接受**「继续按原节奏扩大 fork」。**不选 B，也不重开上游提交。**
+
+**当前有效结论（唯一）**：
+> 当前冻结的官方发行版尚不能满足本项目完整的 prepared／Host 历史导入契约；现有已集成实现仍依赖 fork。官方基础运行能力已得到探针验证，但完整迁移未完成。
+
+（不得把「现方案不可达」扩展为「任何无 fork 架构都不可行」；后者需要另一次明确的架构修订与验证。）
+
+**状态表**：
+
+| 范围 | 状态 |
+|---|---|
+| OP0 发行基线与增量盘点 | 已交付证据 |
+| OP1 官方能力探针 | 已交付分项结论；**不是**完整替代通过 |
+| OP2 局部核心与缺口验证 | 部分实现；**未完成**生产接线 |
+| OP3–OP8 的迁移目标 | **PAUSED_BY_OWNER_CONSTRAINT** |
+| 整体 Official Pi Migration v1 | **未完成，主动暂停** |
+
+**维护边界**：
+
+| 项目 | 裁定 |
+|---|---|
+| 当前产品依赖 | 保持不变，不切换官方包 |
+| fork 新功能 | 停止新增与现有必需契约无关的功能 |
+| fork 必要维护 | 仅安全修复、阻断性正确性修复、现有承诺所必需的兼容修复 |
+| 上游提交 | 不提交；现有材料保留为 `DO NOT FILE` 证据 |
+| 官方迁移 | 主动暂停，不再作为日常开发的等待项 |
+| 已有产品开发 | 继续不依赖迁移成功的 Host、预算接线、消息恢复、安装与 UI 工作 |
+| 新旧 runtime | 不新增双 runtime 产品选项，不做同一任务的跨 runtime 重跑 |
+
+「冻结扩张」≠ 停止安全更新，也 ≠ 长期锁死一个存在漏洞的版本；每次 fork 修改都必须回答「这是修复现有产品必需的吗」。
+
+**不选 B 的理由（owner）**：Host 历史导入缺口不局限于 prepared（`usage` guard 与 assistant 类型问题发生在把 Host 已有 assistant 文本交给官方会话的路径）；且 Salesko 没有已获准的「不需要 prepared 也可正常聊天」的生产替代路径——B 的实际结果是「官方 Pi 可执行部分独立任务，但 Salesko 的新式持续对话仍不能启用」，那是更小的产品，不是完成原目标。
+
+**信任问题仍然存在**：OP0 记录了 fork 包缺少可绑定的构建提交与 provenance attestation；过渡期应完善实际来源、补丁清单与新构建证据，但**不得为历史包补造不存在的证明**。
+
+**收口要求**：状态与指令一致性、探针结论权限下调、PR 按范围分别评审——见本 plan 后续各节与 `tasks/reviews/20260919-1603-official-pi-migration.review.md`。
 
 ## Agentic Routing
 
@@ -740,3 +696,89 @@ bun run check:task-workflow
 - OP0/OP1 阶段不改产品依赖：回滚 = 放弃本 worktree，main 依赖与 lock 不变。
 - OP3 之后（产品依赖已切）：按 §15.2 回退边界执行——官方尚未产生新 Execution 时回退准入激活指针，持久记录不变；已产生任务时只停新准入，回退仅影响未来任务。
 - 本 plan/contract 的登记回滚：`repo-harness run switch-plan --plan plans/plan-20260917-1459-byok-next-stage-recursive-s2.md`（main checkout 的活动计划从未被本 worktree 改动）。
+
+## 剩余工作执行包（resume packet）
+
+### owner 决定：不向上游提交（2026-09-19）
+
+owner 明确指示**不向 `earendil-works/pi` 提交任何请求**。这移除了本 plan 的一条主干路径（§8.2 OP2-U「最小上游接口改进」），后果必须如实记录，不能当作「换条路继续」：
+
+- 四项缺口（`usage` guard、类型面形状、RPC 帧上限助手、提示渲染器/section builders）**不会通过请求获得解决**；
+- 因此 **OP2 接线、OP5、OP8 在现方案下不可达**，而不是「暂时阻塞」——prepared 路径的字节等价前提（会话实际发送 == 冻结 D）依赖上游公开面；
+- **现有已集成实现仍依赖 fork**（准确表述见顶部裁定；「只有 fork 能运行」过宽：官方基础运行能力已由探针验证）。`check:pi-fork-surface` 计数在暂停期内不会下降——这是**预期结果**，也是进度指标而非绩效指标；**不得通过删除能力让数字归零**；
+- `watch-release.mjs` 保留：若未来某个正式发行版**恰好**补齐这些公开面（无需我们请求），探针套件（含 `p08`）会在重跑时直接给出结论。
+
+**路径已由 owner 裁定（2026-09-20）**：选 **A**（有界过渡维护）；**B/C 未选**。下表保留为决策依据，不再是待办。
+
+| 路径 | 含义 | 代价 |
+|---|---|---|
+| A. 维持 fork（现状） | 迁移搁置；fork 继续按现有节奏维护 | 保留自维护 Pi 发行线的全部成本与来源可解释性问题（本 plan 的立项理由） |
+| B. 只迁非 prepared 面 | 会话组装/工具/装载已证明只用公开面，可先切；prepared 能力**显式声明不可用** | 需要 owner 明确接受把 task-free preparation 从「可用」变为「不可用」（INV-14 要求显式声明，不允许静默降级） |
+| C. 未来重开上游 | 保持本 plan 的证据与探针，待条件变化再提交 | 需要 owner 后续改变决定 |
+
+在 owner 选择之前，**不进行产品依赖切换**：路径 B 的代价是能力移除，不是重构细节。
+
+本包供任何接过此 plan 的执行者直接使用；不替代 Task Breakdown，只把「下一步做什么、入口在哪、判据是什么」集中到一处。全部结论均已在 `docs/researches/2026-09-19-official-pi-*.md` 量化。
+
+### 环境前置（否则会看到假红）
+
+- 本 worktree 跑全量测试前**必须先 `bun run build`**；未构建时 `packages/client` 会报约 185 个「Failed to resolve entry for package @byok-sdk/*」的假红。
+- 探针套件需要网络（每次现场从 registry 安装官方 tarball）：`node packages/client/probes/pi-official/run.mjs`（9 项，约 40s）。
+- `/tmp/pi-upstream` 是用于测量的上游 checkout（已 `npm ci` + `hydrate-model-data`，基线 `tsgo --noEmit` EXIT 0）。它是临时的；重建方式：完整 clone → `npm ci --ignore-scripts` → `npm --prefix packages/ai run hydrate-model-data`。
+
+### 切片 A：OP2 接线
+
+**安全网（改动前先记住它）**：prepared 路径现有 **13 个既有测试文件**（`input-preparation*.test.ts` 6 个、`pi-prepared-*.test.ts` 3 个、`prepared-offer-*.test.ts` 2 个、`prepared-prompt-frame.test.ts`、`prepared-tool-surface.test.ts`），加上全量 244 文件 / 2906 测试。接线的判据不是「新核心的测试绿」，而是**这些既存测试在换掉编译段之后仍然绿**。
+
+**第一步的精确定义（按此顺序，每步保持构建绿）**：
+
+1. 在 `input-preparation.ts` 内新增一条内部路径：用 `compilePreparedRequest` 产出 `{body, digest, shape}`，**与既有 fork 编译并存于同一函数内**，但只通过一个新导出暴露（不改既有导出行为）；
+2. 写一个**等价性测试**：同一输入下，新路径的 `body` 与既有 envelope 所承载的请求体逐字节相同。**这是整条切片的关键证据**——它证明替换是等价的，而不是「看起来能跑」。若两者不等，先定位差异（差异本身就是发现），不要继续替换；
+3. 等价成立后，把 daemon 侧 receipt/store 的 `envelope` 字段改为 `{body, digest, shape}`（此时才会跨到 `daemon/input-preparation-service.ts`、store/receipt 与 Host CAS）；
+4. 最后删除 `nativePrepare` / `nativeCanonical` 两条动态 import 与 `prepared-session-input`/`input-preparation` 两个子路径 import，并更新 `check-adapters-entry.mjs` 与 `api-surface/client.d.ts` golden。
+
+**为什么第一步不能跳过**：第 2 步是唯一能在不触碰 daemon/store/CAS 的前提下证明「可替换」的方式；跳过它，第 3 步一旦出现行为差异，就会在跨 4 个模块的改动里难以定位。
+
+**切片 A 的切分更正（2026-09-19，动手前的核对发现）**：原以为第 1–2 步是自洽中间态，核对既有 fixture 后发现**不是**——第 2 步的等价性测试需要先把 BYOK 侧输入映射成新核心要的输入：
+
+| BYOK 侧（既有） | 新核心需要 |
+|---|---|
+| `InputPreparationModelV1`（BYOK 自有形状） | provider `Model`（含 `api`/`baseUrl`/`compat`） |
+| `CompilePreparedInputRequest.options`（`cacheRetention`/`maxTokens`） | provider `options`（`apiKey`/`model`/`sessionId`/`reasoning`） |
+| `snapshot.prompt`（`projectSystemPromptSnapshot` 产物） + `snapshot.messages` + `snapshot.tools` | `{ systemPrompt, messages, tools }` |
+
+也就是说等价性测试与正式接线共用同一层映射。因此切片 A 的**真正第一步**改为：
+
+- **先写映射函数**（建议 `packages/client/src/adapters/pi/prepared-request-input.ts`）：从 BYOK 的 snapshot/model/options 映射到新核心的 `{api, model, context, options}`，配单测（纯函数，无 IO）；**它同时是等价性测试与接线的前置**。
+
+映射就绪后，第 2 步（等价性测试）与第 3–4 步（替换与删除 fork import）才可按原文顺序推进。
+
+**第 4 项精确化（2026-09-19 晚些核查）**：`getSystemMessageText` **已公开**（`pi-ai` 根导出）；缺的只是 `coding-agent` 侧的 `buildSystemPromptSections` / `buildSystemPromptState`（其 `src/index.ts` 440 行里无任何 `system-prompt` 导出）。因此请求精确为「导出这两个纯函数」，而**重钉并不能自动解决**（`main` 包根同样没有）。
+- 同时更正 §14 的过度声明：实验里 `buildSystemPromptSections` 用的是 upstream **源码相对路径**，消费者做不到。准确表述 = **工具一半只需公开入口；提示一半需要一个新导出**。
+**（当前有效）** 切片 A **只对了一半**——编译段不依赖上游（新核心 + 官方 provider adapter 足够），但**提示文本的来源依赖上游公开面**：当前 fork 能 `projectSystemPromptSnapshot` 却**不能 `renderSystemPrompt`**（该模块不在 `exports`，`/input-preparation` 也没 re-export 它）。
+
+> **同段落中「新版 `main` 已公开这些」的说法已被取代**（2026-09-19 更晚的核查）：`main` 的 `coding-agent` 包根（`src/index.ts`，440 行）**没有**任何 `system-prompt` 导出；`getSystemMessageText` 确实公开，但它在 **`pi-ai`** 根（`packages/ai/src/index.ts:45`）。因此「重钉即可自动解决第 4 项」**不成立**——重钉只改形状、不改可达性。当前有效的可达性结论以探针 `p08` 为准。
+**（已被 2026-09-20 裁定取代，见顶部）** 切片 A 的早期判断：**不依赖**上游（新核心用 `unknown[]` 边界接收消息，既不 cast 也不伪造，host 历史的既有实现可原样保留在 fork runtime 上）；上游类型面落地影响的是**切换 runtime 之后**能否继续表达 host 历史，属切片 B/OP5 的前置。
+
+- 入口：`packages/client/src/adapters/pi/input-preparation.ts`（8 处 fork import）、`packages/client/src/daemon/input-preparation-service.ts`（1 处）、`packages/client/src/bin/pi-prepared-host.ts:317`（消费 seam）、`adapters/pi/prepared-prompt-frame.ts`。
+- 9 处用法的逐条处置见 OP2-U §15；新核心已就绪：`adapters/pi/prepared-request.ts`（compile/certify/verify）+ `request-shape.ts`。
+- 每改一处即验证：`bun run check:pi-fork-surface`（计数只允许下降）+ `cd packages/client && bun x vitest run`（先 build）。
+- 判据：fork 面从 3 文件 / 10 import 降到 0，且 client 全量与三项仓库 gate 保持绿。
+
+### 切片 B：OP5 身份与发布
+
+- 入口：`scripts/release/pi-runtime-identity.mjs` 的 5 个导出；消费者 6 文件（`pack-and-smoke.mjs`、`registry-readback.mjs`、`pi-launcher-smoke.mjs`、`check-package-graph.mjs`、`pack-and-smoke.test.mjs`、`resolve-bin.test.ts`）。
+- 唯一需设计的一处：prepared entry 断言改为「官方来源身份 + **prepared 能力显式声明为不可用**」（OP2-U §17）。
+- 预期会成片变红的是**两族 C07 runtime-record fixture**（111 / 154 处 fork 名），须先区分「fixture 过期」与「实现回归」再判断 G3。
+
+### 切片 C：OP8 退役
+
+- 排空与回退边界已写进 ADR-036 §Consequences 与 OP8 描述；判据是「在途 task / pending message / prepared artifact / home lease」全部按原 runtime 处理完。
+- 退出标志：`check:pi-fork-surface` 计数为 0，且新任务只用官方组合。
+
+### 两个外部决定（本仓无法自行推进）
+
+| 决定 | 解锁 |
+|---|---|
+| 是否向上游提交请求（文本：`docs/researches/2026-09-19-official-pi-upstream-request.md`，补丁：`...-gc-guard-candidate.patch`） | 类型面落地 → 切片 A |
+| 目标版本是否重钉到含分节 `SystemMessage` 的下一发行版 | OP1 重跑基线（`watch-release.mjs` + `--official-version`）→ G1 重判 → 切片 A/B 的目标形状 |

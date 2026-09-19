@@ -8,9 +8,12 @@
  * that happens.
  *
  * This check fails when a fork-only import appears somewhere that is not in the
- * recorded inventory. Removals are reported but do not fail: shrinking the
- * surface is the point of the migration, and an entry that disappears should
- * show up in review as a smaller number, not as a red check.
+ * recorded inventory. Removals are reported but do not fail.
+ *
+ * Two notes on reading the number, after the owner paused the migration on
+ * 2026-09-20: the count is a progress indicator, not a target, so it not falling
+ * is the expected result while the migration is paused; and it must never be
+ * driven to zero by deleting a capability the product needs.
  *
  * Usage: node scripts/release/check-pi-fork-surface.mjs [--json]
  */
@@ -156,7 +159,8 @@ function main() {
 
   if (added.length > 0 || grown.length > 0) {
     process.stderr.write(
-      '[PiForkSurface] the migration only shrinks this surface. Remove the new import, or record it deliberately in RECORDED_INVENTORY with a reason.\n',
+      '[PiForkSurface] remove the new import, or record it deliberately in RECORDED_INVENTORY with a reason. '
+        + 'Note: while the migration is paused the count is expected to stay flat, and it is never a reason to drop a capability.\n',
     );
     process.exit(1);
   }

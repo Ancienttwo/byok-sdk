@@ -114,7 +114,7 @@ recordResult('p08-embedder-public-surface', {
   verdict,
   verdictReason:
     verdict === 'supported'
-      ? 'every export the migration needs is on a package root; the blocked steps can proceed'
+      ? 'public surface satisfies the check: behaviour acceptance may be re-run. This does not switch dependencies, resume the migration, or assert full support on its own (owner ruling 2026-09-20).'
       : `still missing from package roots: ${missing.map((entry) => entry.name).join(', ')}`,
   environment: environmentFacts(),
   checks: checks.checks,

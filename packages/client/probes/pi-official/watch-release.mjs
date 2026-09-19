@@ -65,12 +65,12 @@ const report = {
   nextActions: changed.length > 0
     ? [
         `node packages/client/probes/pi-official/run.mjs --official-version ${codingAgent?.latest ?? '<new-version>'}`,
-        'Update the OP0 baseline candidate, then re-read OP1 G1 before touching OP2-U or OP3.',
-        'Re-check upstream main for the G-A/G-B/G-C seams before writing the upstream patch.',
+        'A newer release means re-run behaviour acceptance. It does not switch dependencies, resume the paused migration, or declare full support by itself (owner ruling 2026-09-20).',
+        'Report the probe results; any dependency change needs a fresh owner decision.',
       ]
     : [
-        'No newer official release. Keep the prepared production path disabled and keep the fork as the shipping runtime.',
-        'The pending upstream work is the G-C patch (host-asserted assistant history) plus G-A/G-B; see docs/researches/2026-09-19-official-pi-op2u-upstream-request.md.',
+        'No newer official release. The fork stays as the shipping runtime and the migration stays paused; no action.',
+        'Both the current dependency and the prepared path remain unchanged by this check.',
       ],
 };
 
