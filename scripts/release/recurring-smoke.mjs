@@ -14,7 +14,12 @@
  *   non-empty payload, the frozen context, and the exact disposition — for an
  *   accepted AND a non-accepted outcome, after a finalize outage the product
  *   already committed through, after cancellation, and never across a
- *   different tenant/device/task/AgentRef/body.
+ *   different tenant/device/task/AgentRef/body. The same accepted/held
+ *   scenarios also run end-to-end through the EMBEDDED public façade
+ *   (`createByokServer`: pairing, `conn.hello` capability declaration,
+ *   `recurring.submit`, `POST /byok/messages` over `server.hono`, read-back
+ *   through `tasks.messageDisposition`/`tasks.agentMessage`), and the
+ *   embedded read-back must match the cloud projection exactly.
  * - **Durable restart leg (only when the dataplane substrate is configured).**
  *   The standard env pair (`BYOK_TEST_POSTGRES_URL` + `BYOK_TEST_S3_ENDPOINT`,
  *   the same one `packages/cloud-dataplane`'s suites use) selects a real
@@ -22,8 +27,15 @@
  *   tarball. Process A commits a consumer transaction and its terminal; an
  *   INDEPENDENT process then reopens the same composition on the SAME store
  *   and proves public read-back with no live TaskHandle, and that an exact
- *   replay starts no new model Execution (zero consumer invocations, byte
- *   identical disposition, attempt unchanged). `BYOK_REQUIRE_DATAPLANE=1`
+ *   replay invokes the product consumer ZERO times (byte identical
+ *   disposition, attempt unchanged) — the observable this smoke has for "no
+ *   new model Execution": it counts consumer callbacks, not executions the
+ *   product then runs on its own. The Host body-transaction crash window is
+ *   orchestrated on the same substrate: one fresh process commits the
+ *   persistent product ledger's entry and dies abruptly BEFORE SDK finalize
+ *   (a finalize probe proves it never ran); a second fresh process replays
+ *   the exact identity against the SAME ledger and store — one committed
+ *   body, identical outcome, reconciled disposition. `BYOK_REQUIRE_DATAPLANE=1`
  *   turns a missing substrate into a hard failure — the same law as
  *   `packages/cloud-dataplane/src/__tests__/support/dataplane.ts`, because a
  *   leg that skipped would still print success. Where the substrate is
@@ -37,7 +49,7 @@
  */
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -47,7 +59,7 @@ import {
   CLOUD_CAPABILITIES, createByokCloud, createHmacTokenSigner, createWebCrypto,
   fullCapabilityDeclaration, createInMemoryByokCloud, RecurringExecutionInputSchema,
 } from '@byok-sdk/cloud';
-import { createEnvelope } from '@byok-sdk/protocol';
+import { createEnvelope, PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import { createByokServer } from '@byok-sdk/server';
 
 const CLOUD_ORIGIN = 'http://cloud.test';
@@ -59,7 +71,9 @@ const MESSAGE_CONTEXT = { destinationBinding: 'conversation', freshnessCursor: '
 // ---------------------------------------------------------------------------
 // Deterministic product-side fixture. The consumer IS the product's execution
 // trigger in this smoke: it is called on the admission path, never by recovery
-// alone, so `calls.length` is the honest "model Execution started" counter.
+// alone, so `calls.length` is the honest consumer-invocation counter — the
+// trigger a product starts a model Execution from. The smoke counts callbacks;
+// it does not observe executions the product then runs on its own.
 // Its ledger is the product-owned durable dedup the consumer contract requires:
 // at-least-once delivery must still produce ONE logical effect per exact
 // message identity — which is why a second consume invocation is expected and
@@ -76,6 +90,34 @@ function createProductConsumer(outcomesByTask) {
     return committed.get(payload.messageId);
   };
   return { calls, committed, consume };
+}
+
+// ---------------------------------------------------------------------------
+// Bounded PERSISTENT product ledger (fixture only): the stand-in for the
+// product-owned durable dedup a real host commits its body transaction into.
+// A JSON file keyed by full scoped identity (tenant, device, task, AgentRef,
+// messageId), write-once — a second commit under the same identity is a bug
+// and throws, so "the body is persisted exactly once" is enforced by the
+// fixture itself, not only by post-hoc assertion. It survives process death
+// by construction, which is the whole point of the crash-window leg.
+// ---------------------------------------------------------------------------
+function createPersistentProductLedger(filePath) {
+  const read = () => (existsSync(filePath) ? JSON.parse(readFileSync(filePath, 'utf8')) : {});
+  const scopeKey = ({ tenant, deviceId, taskId, agentRef, messageId }) =>
+    [`${tenant}`, deviceId, taskId, `${agentRef.agentId}@${agentRef.profileRevision}`, messageId].join('|');
+  return {
+    scopeKey,
+    lookup(identity) { return read()[scopeKey(identity)]; },
+    size() { return Object.keys(read()).length; },
+    commit(identity, body, context, outcome) {
+      const entries = read();
+      const key = scopeKey(identity);
+      if (entries[key] !== undefined) throw new Error(`product ledger double commit for identity ${key}`);
+      entries[key] = { body, context, outcome };
+      writeFileSync(filePath, JSON.stringify(entries));
+      return entries[key];
+    },
+  };
 }
 
 async function pairCapableDevice(composition, tenant, deviceName) {
@@ -163,33 +205,75 @@ function assertExactDisposition(receipt, payload, outcome, reasonCode) {
   assert.match(receipt.receiptId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
 }
 
+/**
+ * The disposition minus the two minted UUIDs — the per-message `messageId`
+ * (already tied to its own payload by `assertExactDisposition`) and the
+ * per-composition `receiptId`. Everything else must match EXACTLY across the
+ * cloud and embedded read-back surfaces for the same scenario.
+ */
+const decisionProjection = (receipt) => ({
+  agentRef: receipt.agentRef,
+  sessionRef: receipt.sessionRef,
+  contract: receipt.contract,
+  cursor: receipt.cursor,
+  contentHash: receipt.contentHash,
+  outcome: receipt.outcome,
+  ...(receipt.reasonCode === undefined ? {} : { reasonCode: receipt.reasonCode }),
+});
+
 // ---------------------------------------------------------------------------
-// Reopen branch (child process). Runs INSTEAD of the legs below: this process
-// is handed the committed state through a handoff file and must prove recovery
-// from durable state alone — it never dispatched the task, so no TaskHandle
-// exists here.
+// Child-process branches. Each runs INSTEAD of the legs below, is handed its
+// state through a handoff file, and composes a fresh durable composition over
+// the SAME database (`composeReopened`).
 // ---------------------------------------------------------------------------
-const reopenArgIndex = process.argv.indexOf('--recurring-reopen');
-if (reopenArgIndex >= 0) {
-  const handoff = JSON.parse(readFileSync(process.argv[reopenArgIndex + 1], 'utf8'));
+const childArg = (flag) => {
+  const index = process.argv.indexOf(flag);
+  return index < 0 ? undefined : process.argv[index + 1];
+};
+
+/**
+ * One fresh durable composition over a handoff's database — the recipe every
+ * child process (reopen, crash-commit, crash-replay) shares. When
+ * `finalizeProbePath` is given, the composition's store records the first SDK
+ * finalize call into that file, so a parent can prove a crashed child died
+ * BEFORE finalize (file absent) and a replaying child finalized (file present).
+ */
+async function composeReopened(handoff, consume, finalizeProbePath) {
   const { createByokPool, createPostgresCloudStores, createPostgresCoreStores } = await import('@byok-sdk/cloud-dataplane');
   const clock = { now: () => new Date() };
   const crypto = createWebCrypto();
   const tokenSecret = new Uint8Array(Buffer.from(handoff.tokenSecretB64, 'base64'));
-  const consumer = createProductConsumer({});
-  const full = fullCapabilityDeclaration();
+  // A NEW pool and NEW store objects over the SAME database.
   const pool = createByokPool({ connectionString: handoff.databaseUrl });
+  const cloudStores = createPostgresCloudStores({ pool, clock, crypto, objectStorage: handoff.objectStorage });
+  if (finalizeProbePath !== undefined) {
+    const realFinalize = cloudStores.tasks.finalizeAgentMessage.bind(cloudStores.tasks);
+    cloudStores.tasks.finalizeAgentMessage = async (...args) => {
+      writeFileSync(finalizeProbePath, `finalize observed in pid ${process.pid}\n`);
+      return realFinalize(...args);
+    };
+  }
+  const full = fullCapabilityDeclaration();
+  const cloud = createByokCloud({
+    core: createPostgresCoreStores({ pool, clock }),
+    cloud: cloudStores,
+    crypto,
+    tokenSigner: createHmacTokenSigner(tokenSecret, clock),
+    clock,
+    capabilities: { ...full, capabilities: full.capabilities.filter((capability) => capability !== CLOUD_CAPABILITIES.blobsContentProxy) },
+    agentMessage: { consume },
+  });
+  return { cloud, pool };
+}
+
+// Reopen branch: prove recovery from durable state alone — this process never
+// dispatched the task, so no TaskHandle exists here.
+const reopenHandoffPath = childArg('--recurring-reopen');
+if (reopenHandoffPath !== undefined) {
+  const handoff = JSON.parse(readFileSync(reopenHandoffPath, 'utf8'));
+  const consumer = createProductConsumer({});
+  const { cloud: reopened, pool } = await composeReopened(handoff, consumer.consume);
   try {
-    // A NEW pool and NEW store objects over the SAME database.
-    const reopened = createByokCloud({
-      core: createPostgresCoreStores({ pool, clock }),
-      cloud: createPostgresCloudStores({ pool, clock, crypto, objectStorage: handoff.objectStorage }),
-      crypto,
-      tokenSigner: createHmacTokenSigner(tokenSecret, clock),
-      clock,
-      capabilities: { ...full, capabilities: full.capabilities.filter((capability) => capability !== CLOUD_CAPABILITIES.blobsContentProxy) },
-      agentMessage: { consume: consumer.consume },
-    });
     const reopenTenant = tenantId(handoff.tenant);
     const message = await reopened.readTaskAgentMessage(reopenTenant, handoff.deviceId, handoff.taskId, handoff.agentRef);
     assert.equal(message.payload.body.length > 0, true);
@@ -203,8 +287,9 @@ if (reopenArgIndex >= 0) {
     const attemptBefore = await reopened.readTaskAttempt(reopenTenant, handoff.taskId);
     // Exact replay (same envelope identity) on the REOPENED composition:
     // wire-level success, byte identical disposition (same receiptId — no new
-    // decision), and the consumer is never invoked — recovery started no new
-    // model Execution.
+    // decision), and the consumer is never invoked — ZERO consumer-callback
+    // invocations on recovery, the observable this smoke has for a started
+    // model Execution (it counts callbacks, not executions the product runs).
     const replay = await publishAgentMessage(reopened, { authorization: `Bearer ${handoff.accessToken}` }, handoff.envelope);
     assert.equal(replay.status, 200);
     assert.deepEqual(await replay.json(), { accepted: 1 });
@@ -214,7 +299,81 @@ if (reopenArgIndex >= 0) {
       await reopened.readAgentMessageDisposition(reopenTenant, handoff.deviceId, handoff.taskId, handoff.payload),
       handoff.expectedDisposition,
     );
-    console.log('[release-pack] recurring durable restart: reopened-process public read-back with no TaskHandle and zero-execution replay passed');
+    console.log('[release-pack] recurring durable restart: reopened-process public read-back with no TaskHandle and zero-consumer-invocation replay passed');
+  } finally {
+    await pool.end();
+  }
+  process.exit(0);
+}
+
+// Crash-commit branch (Host body transaction, then abrupt death): the
+// consumer writes the persistent product ledger — the Host's own durable
+// commit — and exits the process BEFORE the consume promise resolves, so the
+// SDK finalize provably never runs (the probe file stays absent).
+const ledgerIdentityOf = (input) => ({
+  tenant: input.tenant,
+  deviceId: input.deviceId,
+  taskId: input.taskId,
+  agentRef: input.payload.agentRef,
+  messageId: input.payload.messageId,
+});
+
+const crashCommitHandoffPath = childArg('--recurring-crash-commit');
+if (crashCommitHandoffPath !== undefined) {
+  const handoff = JSON.parse(readFileSync(crashCommitHandoffPath, 'utf8'));
+  const ledger = createPersistentProductLedger(handoff.ledgerPath);
+  const consume = async (input) => {
+    // Host body transaction: the synchronous ledger write IS the commit.
+    ledger.commit(ledgerIdentityOf(input), input.payload.body, input.context, { outcome: 'accepted' });
+    process.exit(86); // simulated crash: no consume return, no SDK finalize
+  };
+  const { cloud, pool } = await composeReopened(handoff, consume, handoff.finalizeProbePath);
+  try {
+    await cloud.submitRecurringExecution(tenantId(handoff.tenant), recurringInput(handoff.taskId, handoff.deviceId, 'crash window host commit', handoff.agentRef));
+    const response = await publishAgentMessage(cloud, { authorization: `Bearer ${handoff.accessToken}` }, handoff.envelope);
+    // Unreachable on the intended path: consume exits the process first.
+    throw new Error(`crash-commit child survived publish (HTTP ${response.status}) — the abrupt exit never happened`);
+  } finally {
+    await pool.end();
+  }
+}
+
+// Crash-replay branch (second fresh process, SAME ledger, SAME store): the
+// crashed admission is still pending; the exact identity replay reconciles it
+// from the ledger's stored decision — no second commit, identical outcome.
+const crashReplayHandoffPath = childArg('--recurring-crash-replay');
+if (crashReplayHandoffPath !== undefined) {
+  const handoff = JSON.parse(readFileSync(crashReplayHandoffPath, 'utf8'));
+  const ledger = createPersistentProductLedger(handoff.ledgerPath);
+  const replays = [];
+  const consume = async (input) => {
+    replays.push(ledgerIdentityOf(input));
+    const entry = ledger.lookup(ledgerIdentityOf(input));
+    if (entry === undefined) throw new Error('crash-replay consumer missed the ledger — the host commit did not persist across the crash');
+    return entry.outcome; // the stored decision: no second commit
+  };
+  const { cloud: reopened, pool } = await composeReopened(handoff, consume, handoff.finalizeProbePath);
+  const replayTenant = tenantId(handoff.tenant);
+  try {
+    // The crashed admission is still pending: no disposition yet, body visible.
+    assert.equal(await reopened.readAgentMessageDisposition(replayTenant, handoff.deviceId, handoff.taskId, handoff.payload), undefined);
+    assert.deepEqual(
+      await reopened.readTaskAgentMessage(replayTenant, handoff.deviceId, handoff.taskId, handoff.agentRef),
+      { payload: handoff.payload, context: handoff.context },
+    );
+    const replay = await publishAgentMessage(reopened, { authorization: `Bearer ${handoff.accessToken}` }, handoff.envelope);
+    assert.equal(replay.status, 200);
+    assert.deepEqual(await replay.json(), { accepted: 1 });
+    assert.equal(replays.length, 1); // at-least-once delivery reconciled the pending admission
+    const receipt = await reopened.readAgentMessageDisposition(replayTenant, handoff.deviceId, handoff.taskId, handoff.payload);
+    assertExactDisposition(receipt, handoff.payload, 'accepted');
+    assert.deepEqual(
+      await reopened.readTaskAgentMessage(replayTenant, handoff.deviceId, handoff.taskId, handoff.agentRef),
+      { payload: handoff.payload, context: handoff.context, disposition: receipt },
+    );
+    assert.equal(existsSync(handoff.finalizeProbePath), true, 'SDK finalize must run in the replaying process');
+    assert.equal(ledger.size(), 1); // still exactly one committed body after the replay
+    console.log('[release-pack] recurring crash window: replaying process reconciled the pending admission from the persistent ledger — one committed body, identical outcome, finalize observed');
   } finally {
     await pool.end();
   }
@@ -372,6 +531,83 @@ console.log('[release-pack] recurring public imports, strict submission and inde
   assert.equal(await readMessage(msgTenant, acceptedTask, { ...agentRef, agentId: 'other' }), undefined);
   assert.equal(await readMessage(msgTenant, acceptedTask, { ...agentRef, profileRevision: 'other' }), undefined);
   console.log('[release-pack] recurring message round-trip: authenticated admission, accepted/held dispositions, finalize-outage recovery, cancel retention and identity isolation passed');
+
+  // The EMBEDDED public façade carries the same accepted/held scenarios
+  // end-to-end: pairing, capability declaration, submission, publish and
+  // read-back all through `createByokServer`'s public surface (no store
+  // handles — capabilities arrive through the supported `conn.hello`
+  // envelope), and the embedded read-back matches the cloud projection
+  // exactly (`decisionProjection` leaves out only the per-message messageId
+  // and the per-composition receiptId, each pinned by assertExactDisposition).
+  const embeddedConsumer = createProductConsumer({
+    'packed-embedded-held': { outcome: 'held', reasonCode: 'product_queue_full' },
+  });
+  const embedded = createByokServer({ productId: 'packed-recurring', agentMessage: { consume: embeddedConsumer.consume } });
+  try {
+    const { publicKey } = generateKeyPairSync('ed25519');
+    const devicePublicKey = publicKey.export({ format: 'jwk' }).x;
+    if (typeof devicePublicKey !== 'string') throw new Error('ed25519 public key has no JWK x coordinate');
+    const embeddedPairing = await embedded.pairing.createPairingCode({ productId: 'packed-recurring' });
+    const embeddedPairResponse = await embedded.hono.fetch(new Request(`${CLOUD_ORIGIN}/byok/pair`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pairingCode: embeddedPairing.code, deviceName: 'packed-embedded-device', devicePublicKey }),
+    }));
+    assert.equal(embeddedPairResponse.status, 200, `embedded pairing failed: HTTP ${embeddedPairResponse.status}`);
+    const embeddedPaired = await embeddedPairResponse.json();
+    const embeddedAuthorization = { authorization: `Bearer ${embeddedPaired.accessToken}` };
+    const helloEnvelope = createEnvelope('conn.hello', {
+      protocolVersions: [PROTOCOL_VERSION],
+      capabilities: AGENT_MESSAGE_CAPABILITIES,
+      deviceId: embeddedPaired.deviceId,
+      productId: 'packed-recurring',
+    });
+    const helloResponse = await publishAgentMessage(embedded.hono, embeddedAuthorization, helloEnvelope);
+    assert.equal(helloResponse.status, 200);
+    assert.deepEqual(await helloResponse.json(), { accepted: 1 });
+    const embeddedSubmit = (taskId) => embedded.recurring.submit(recurringInput(taskId, embeddedPaired.deviceId, `resolve embedded ${taskId}`, agentRef));
+
+    // Accepted, end-to-end on the embedded surface.
+    const embeddedAcceptedTask = 'packed-embedded-accepted';
+    assert.equal((await embeddedSubmit(embeddedAcceptedTask)).taskId, embeddedAcceptedTask);
+    const embeddedAcceptedPayload = messagePayload(agentRef);
+    assert.equal(await embedded.tasks.messageDisposition(embeddedAcceptedTask, embeddedPaired.deviceId, embeddedAcceptedPayload), undefined);
+    assert.equal(await embedded.tasks.agentMessage(embeddedAcceptedTask, embeddedPaired.deviceId, agentRef), undefined);
+    const embeddedAcceptedResponse = await publishAgentMessage(embedded.hono, embeddedAuthorization, publishEnvelope(embeddedAcceptedTask, embeddedAcceptedPayload));
+    assert.equal(embeddedAcceptedResponse.status, 200);
+    assert.deepEqual(await embeddedAcceptedResponse.json(), { accepted: 1 });
+    const embeddedAcceptedReceipt = await embedded.tasks.messageDisposition(embeddedAcceptedTask, embeddedPaired.deviceId, embeddedAcceptedPayload);
+    assert.notEqual(embeddedAcceptedReceipt, undefined);
+    assertExactDisposition(embeddedAcceptedReceipt, embeddedAcceptedPayload, 'accepted');
+    assert.deepEqual(decisionProjection(embeddedAcceptedReceipt), decisionProjection(receipt)); // matches the cloud projection exactly
+    const embeddedAcceptedMessage = await embedded.tasks.agentMessage(embeddedAcceptedTask, embeddedPaired.deviceId, agentRef);
+    assert.equal(embeddedAcceptedMessage.payload.body.length > 0, true);
+    assert.deepEqual(embeddedAcceptedMessage.payload, embeddedAcceptedPayload);
+    assert.deepEqual(embeddedAcceptedMessage.context, MESSAGE_CONTEXT);
+    assert.deepEqual(embeddedAcceptedMessage.disposition, embeddedAcceptedReceipt); // façade surfaces agree byte-for-byte
+
+    // Held, end-to-end on the embedded surface — never re-presented as a
+    // displayable accepted body.
+    const embeddedHeldTask = 'packed-embedded-held';
+    await embeddedSubmit(embeddedHeldTask);
+    const embeddedHeldPayload = messagePayload(agentRef);
+    const embeddedHeldResponse = await publishAgentMessage(embedded.hono, embeddedAuthorization, publishEnvelope(embeddedHeldTask, embeddedHeldPayload));
+    assert.equal(embeddedHeldResponse.status, 200);
+    assert.deepEqual(await embeddedHeldResponse.json(), { accepted: 1 }); // transport accepted; business decision held
+    const embeddedHeldReceipt = await embedded.tasks.messageDisposition(embeddedHeldTask, embeddedPaired.deviceId, embeddedHeldPayload);
+    assert.notEqual(embeddedHeldReceipt, undefined);
+    assertExactDisposition(embeddedHeldReceipt, embeddedHeldPayload, 'held', 'product_queue_full');
+    assert.deepEqual(decisionProjection(embeddedHeldReceipt), decisionProjection(heldReceipt)); // matches the cloud projection exactly
+    const embeddedHeldMessage = await embedded.tasks.agentMessage(embeddedHeldTask, embeddedPaired.deviceId, agentRef);
+    assert.deepEqual(embeddedHeldMessage.payload, embeddedHeldPayload);
+    assert.deepEqual(embeddedHeldMessage.context, MESSAGE_CONTEXT);
+    assert.deepEqual(embeddedHeldMessage.disposition, embeddedHeldReceipt);
+    assert.notEqual(embeddedHeldMessage.disposition.outcome, 'accepted');
+    assert.equal(embeddedConsumer.calls.length, 2); // accepted + held, each resolved once on the embedded surface
+    console.log('[release-pack] recurring embedded façade round-trip: pairing, conn.hello capabilities, accepted/held resolved and read back matching the cloud projection passed');
+  } finally {
+    embedded.stop();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -493,6 +729,66 @@ if (substrateConfigured) {
     }
     for (const line of child.stdout.split('\n').filter((line) => line.startsWith('[release-pack]'))) {
       console.log(line);
+    }
+
+    // Host body-transaction crash window: same store, same device, same
+    // envelope identity; the persistent product ledger is the fixture's
+    // product-owned state that survives the crash by design.
+    const crashDir = mkdtempSync(path.join(os.tmpdir(), 'byok-recurring-crash-'));
+    try {
+      const ledgerPath = path.join(crashDir, 'product-ledger.json');
+      const finalizeProbePath = path.join(crashDir, 'finalize-ran');
+      const crashHandoffPath = path.join(crashDir, 'handoff.json');
+      const crashTask = 'packed-crash-window';
+      const crashPayload = messagePayload(durableRef);
+      const crashIdentity = {
+        tenant: durableTenant, deviceId: device.deviceId, taskId: crashTask,
+        agentRef: durableRef, messageId: crashPayload.messageId,
+      };
+      writeFileSync(crashHandoffPath, JSON.stringify({
+        databaseUrl: databaseUrl.toString(),
+        objectStorage,
+        tokenSecretB64: Buffer.from(tokenSecret).toString('base64'),
+        accessToken: device.authorization.authorization.slice('Bearer '.length),
+        tenant: durableTenantName,
+        deviceId: device.deviceId,
+        taskId: crashTask,
+        agentRef: durableRef,
+        context: MESSAGE_CONTEXT,
+        envelope: publishEnvelope(crashTask, crashPayload),
+        payload: crashPayload,
+        ledgerPath,
+        finalizeProbePath,
+      }));
+      const crashChild = spawnSync(process.execPath, [self, '--recurring-crash-commit', crashHandoffPath], {
+        cwd: path.dirname(self),
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      if (crashChild.status !== 86) {
+        throw new Error(`crash-commit child must die by its own abrupt exit 86, got ${crashChild.status}\n${crashChild.stdout}\n${crashChild.stderr}`);
+      }
+      assert.equal(existsSync(finalizeProbePath), false, 'SDK finalize must NOT have run before the crash');
+      const ledger = createPersistentProductLedger(ledgerPath);
+      assert.equal(ledger.size(), 1); // the Host body transaction committed exactly once
+      const committed = ledger.lookup(crashIdentity);
+      assert.notEqual(committed, undefined);
+      assert.deepEqual(committed, { body: crashPayload.body, context: MESSAGE_CONTEXT, outcome: { outcome: 'accepted' } });
+      const replayChild = spawnSync(process.execPath, [self, '--recurring-crash-replay', crashHandoffPath], {
+        cwd: path.dirname(self),
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      if (replayChild.status !== 0) {
+        throw new Error(`crash-replay child failed (${replayChild.status})\n${replayChild.stdout}\n${replayChild.stderr}`);
+      }
+      for (const line of replayChild.stdout.split('\n').filter((line) => line.startsWith('[release-pack]'))) {
+        console.log(line);
+      }
+      assert.equal(ledger.size(), 1); // still exactly one committed body after the replay
+      assert.deepEqual(ledger.lookup(crashIdentity), committed); // identical outcome, nothing re-materialized
+    } finally {
+      rmSync(crashDir, { recursive: true, force: true });
     }
     console.log(`[release-pack] durable substrate: postgres=${new URL(postgresUrl).host}/${durableDatabase} s3=${objectStorage.endpoint} fixture=deterministic-synthetic-consumer provider-calls=0 node=${process.version} platform=${process.platform}-${process.arch}`);
   } finally {
