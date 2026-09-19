@@ -75,6 +75,18 @@ allowed_paths:
   # OP0 两份工程证据产物
   - docs/researches/2026-09-19-official-pi-baseline.json
   - docs/researches/2026-09-19-official-pi-fork-delta-map.md
+  # OP1 探针 harness 与其证据产物
+  - packages/client/probes/pi-official/run.mjs
+  - packages/client/probes/pi-official/README.md
+  - packages/client/probes/pi-official/lib/harness.mjs
+  - packages/client/probes/pi-official/lib/synthetic-openai-server.mjs
+  - packages/client/probes/pi-official/probes/p01-session-tools-reply.mjs
+  - packages/client/probes/pi-official/probes/p02-history-projection.mjs
+  - packages/client/probes/pi-official/probes/p03-task-free-preparation.mjs
+  - packages/client/probes/pi-official/probes/p04-send-gate.mjs
+  - packages/client/probes/pi-official/probes/p05-loader-closure.mjs
+  - docs/researches/2026-09-19-official-pi-op1-probe-report.md
+  - docs/researches/2026-09-19-official-pi-op1-probe-results.json
   - tasks/contracts/20260919-1603-official-pi-migration.contract.md
   - tasks/reviews/20260919-1603-official-pi-migration.review.md
   - tasks/notes/20260919-1603-official-pi-migration.notes.md
@@ -136,6 +148,9 @@ exit_criteria:
     - plans/plan-20260919-1603-official-pi-migration.md
     - docs/researches/2026-09-19-official-pi-baseline.json
     - docs/researches/2026-09-19-official-pi-fork-delta-map.md
+    - docs/researches/2026-09-19-official-pi-op1-probe-report.md
+    - docs/researches/2026-09-19-official-pi-op1-probe-results.json
+    - packages/client/probes/pi-official/run.mjs
     - tasks/contracts/20260919-1603-official-pi-migration.contract.md
     - tasks/notes/20260919-1603-official-pi-migration.notes.md
   artifacts_exist:
@@ -184,6 +199,32 @@ exit_criteria:
       "cost": "normal",
       "evidence_policy": "current_exact",
       "necessity": "OP0 evidence artifact must parse and keep the frozen official candidate identity.",
+      "inputs": {
+        "env": []
+      }
+    },
+    {
+      "id": "probe-suite",
+      "kind": "command",
+      "command": "node packages/client/probes/pi-official/run.mjs",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "normal",
+      "evidence_policy": "current_exact",
+      "necessity": "Re-run the five OP1 probes against a freshly installed official tarball; the suite fails closed when a probe cannot complete.",
+      "inputs": {
+        "env": []
+      }
+    },
+    {
+      "id": "op1-evidence-parse",
+      "kind": "command",
+      "command": "node -e \"const fs=require('fs');const d=JSON.parse(fs.readFileSync('docs/researches/2026-09-19-official-pi-op1-probe-results.json','utf8'));const need=['p01-session-tools-reply','p02-history-projection','p03-task-free-preparation','p04-send-gate','p05-loader-closure'];for(const n of need){if(typeof (d.verdicts||{})[n]!=='string')throw new Error('missing verdict for '+n);}if(d.completed!==true)throw new Error('probe run did not complete');if(!(d.officialIntegrity||'').startsWith('sha512-'))throw new Error('missing installed official integrity');if(d.officialPackage!=='@earendil-works/pi-coding-agent@0.85.1')throw new Error('unexpected official package '+d.officialPackage);console.log('op1-evidence-parse OK '+JSON.stringify(d.verdicts))\"",
+      "cwd": ".",
+      "phase": "verification",
+      "cost": "normal",
+      "evidence_policy": "current_exact",
+      "necessity": "OP1 evidence keeps one resolved verdict per probe plus the frozen official package identity.",
       "inputs": {
         "env": []
       }

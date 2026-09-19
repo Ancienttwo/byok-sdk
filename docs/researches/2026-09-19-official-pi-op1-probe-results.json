@@ -1,0 +1,572 @@
+{
+  "kind": "official-pi-op1-probe-summary",
+  "generatedAt": "2026-09-19T08:41:55.950Z",
+  "officialPackage": "@earendil-works/pi-coding-agent@0.85.1",
+  "officialIntegrity": "sha512-FGRN+OHbWaefBPGaTggAdLjrIHW+s2PzLyglz/5dfLzb9of7uuXMXYC0fJIeZTw+shS32o2cuQ9jF7YSDuL/oQ==",
+  "officialPiAiIntegrity": "sha512-+VgVIJDkDO2efYJKEEqvPTH4zmnIaXdAppGbO+vKFA9qy5PdhFiAenuFAkU+oiCSfOC4dMHDyrjdQeL4ZoC5CQ==",
+  "officialResolved": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-0.85.1.tgz",
+  "officialGitHead": null,
+  "isolation": {
+    "probeRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP",
+    "emptyHome": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP/empty-home",
+    "node": "v24.18.0",
+    "platform": "darwin-arm64"
+  },
+  "probes": [
+    {
+      "probe": "p01-session-tools-reply",
+      "ok": true,
+      "verdict": "supported",
+      "verdictReason": "official release builds an explicit fresh session, mounts a caller tool, completes a tool round trip and disposes",
+      "environment": {
+        "node": "v24.18.0",
+        "platform": "darwin-arm64",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP",
+        "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
+      },
+      "checks": [
+        {
+          "name": "loader exposes no extensions",
+          "ok": true,
+          "detail": "count=0"
+        },
+        {
+          "name": "registered provider is resolvable",
+          "ok": true,
+          "detail": "model=probe-model"
+        },
+        {
+          "name": "a tool round trip produced exactly two synthetic requests",
+          "ok": true,
+          "detail": "count=2"
+        },
+        {
+          "name": "wire exposes only the authorized tool",
+          "ok": true,
+          "detail": "tools=[\"probe_echo\"]"
+        },
+        {
+          "name": "caller-authorized tool actually executed and returned",
+          "ok": true,
+          "detail": "expected echo:ping in the follow-up request"
+        },
+        {
+          "name": "follow-up call is not treated as a fresh first call",
+          "ok": true,
+          "detail": "count=2"
+        },
+        {
+          "name": "session recorded the synthetic assistant reply",
+          "ok": true,
+          "detail": "[\"\",\"pong:1\"]"
+        },
+        {
+          "name": "no model fallback message",
+          "ok": true
+        },
+        {
+          "name": "nothing was written under the empty HOME",
+          "ok": true,
+          "detail": "home="
+        },
+        {
+          "name": "agent state stayed inside the explicit agentDir",
+          "ok": true,
+          "detail": "agentDir=auth.json,models-store.json"
+        }
+      ],
+      "observed": {
+        "requestCount": 2,
+        "wireToolNames": [
+          "probe_echo"
+        ],
+        "requestKeys": [
+          "max_completion_tokens",
+          "messages",
+          "model",
+          "store",
+          "stream",
+          "stream_options",
+          "tools"
+        ]
+      },
+      "failures": [],
+      "exitCode": 0
+    },
+    {
+      "probe": "p02-history-projection",
+      "ok": false,
+      "verdict": "not-supported",
+      "verdictReason": "injecting host-asserted assistant text suppressed the request entirely: the official release has no way to carry host-owned assistant history",
+      "environment": {
+        "node": "v24.18.0",
+        "platform": "darwin-arm64",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP",
+        "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
+      },
+      "checks": [
+        {
+          "name": "control session sends its request",
+          "ok": true,
+          "detail": "count=1"
+        },
+        {
+          "name": "control session resolves the explicit model",
+          "ok": true,
+          "detail": "model=probe-model"
+        },
+        {
+          "name": "host history append is accepted by the session manager",
+          "ok": true
+        },
+        {
+          "name": "treatment session still sends a request",
+          "ok": false,
+          "detail": "count=0 error=none"
+        },
+        {
+          "name": "host-asserted text reaches the wire",
+          "ok": false,
+          "detail": "bytes=0"
+        },
+        {
+          "name": "host-asserted text keeps the assistant role",
+          "ok": false,
+          "detail": "role=undefined"
+        }
+      ],
+      "observed": {
+        "control": {
+          "requests": 1,
+          "modelId": "probe-model",
+          "promptError": null,
+          "entryCount": 4
+        },
+        "treatment": {
+          "requests": 0,
+          "modelId": "probe-model",
+          "promptError": null,
+          "appendError": null,
+          "entriesBeforePrompt": 2,
+          "entryCount": 4
+        },
+        "treatmentEvents": [
+          {
+            "type": "agent_start"
+          },
+          {
+            "type": "turn_start"
+          },
+          {
+            "type": "message_start"
+          },
+          {
+            "type": "message_end"
+          },
+          {
+            "type": "message_start"
+          },
+          {
+            "type": "message_end"
+          },
+          {
+            "type": "turn_end"
+          },
+          {
+            "type": "agent_end"
+          },
+          {
+            "type": "agent_settled"
+          }
+        ],
+        "controlEvents": [
+          {
+            "type": "agent_start"
+          },
+          {
+            "type": "turn_start"
+          },
+          {
+            "type": "message_start"
+          },
+          {
+            "type": "message_end"
+          },
+          {
+            "type": "message_start"
+          },
+          {
+            "type": "message_update"
+          },
+          {
+            "type": "message_update"
+          },
+          {
+            "type": "message_update"
+          },
+          {
+            "type": "message_end"
+          },
+          {
+            "type": "turn_end"
+          },
+          {
+            "type": "agent_end"
+          },
+          {
+            "type": "agent_settled"
+          }
+        ],
+        "hostMessage": null,
+        "messageRoles": []
+      },
+      "failures": [
+        {
+          "name": "treatment session still sends a request",
+          "ok": false,
+          "detail": "count=0 error=none"
+        },
+        {
+          "name": "host-asserted text reaches the wire",
+          "ok": false,
+          "detail": "bytes=0"
+        },
+        {
+          "name": "host-asserted text keeps the assistant role",
+          "ok": false,
+          "detail": "role=undefined"
+        }
+      ],
+      "exitCode": 0
+    },
+    {
+      "probe": "p03-task-free-preparation",
+      "ok": true,
+      "verdict": "not-supported",
+      "verdictReason": "the official release publishes no task-free preparation entry; every path to request bytes goes through effectful session construction",
+      "environment": {
+        "node": "v24.18.0",
+        "platform": "darwin-arm64",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP",
+        "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
+      },
+      "checks": [
+        {
+          "name": "published root entry loads",
+          "ok": true,
+          "detail": "count=151"
+        },
+        {
+          "name": "no prepared-session constructor is exported",
+          "ok": true,
+          "detail": "type=undefined"
+        },
+        {
+          "name": "no pure preparation entry is exported by coding-agent",
+          "ok": true,
+          "detail": "[\"ProjectTrustStore\",\"hasTrustRequiringProjectResources\",\"loadProjectContextFiles\",\"prepareBranchEntries\",\"serializeConversation\"]"
+        },
+        {
+          "name": "no pure preparation entry is exported by pi-ai",
+          "ok": true,
+          "detail": "[]"
+        },
+        {
+          "name": "service construction is effectful on the filesystem",
+          "ok": true,
+          "detail": "filesBefore=0 filesAfter=2"
+        },
+        {
+          "name": "no task/claim/grant concept is required by the session API",
+          "ok": true
+        }
+      ],
+      "observed": {
+        "codingAgentExportCount": 151,
+        "piAiExportCount": 48,
+        "codingAgentPreparationLikeExports": [
+          "ProjectTrustStore",
+          "hasTrustRequiringProjectResources",
+          "loadProjectContextFiles",
+          "prepareBranchEntries",
+          "serializeConversation"
+        ],
+        "piAiPreparationLikeExports": [],
+        "filesystemDelta": 2
+      },
+      "failures": [],
+      "exitCode": 0
+    },
+    {
+      "probe": "p04-send-gate",
+      "ok": false,
+      "verdict": "partial",
+      "verdictReason": "a caller-owned provider transport observes the exact final body bytes and refusal keeps the endpoint at zero requests, but the refusal is swallowed and retried instead of propagating to the caller",
+      "environment": {
+        "node": "v24.18.0",
+        "platform": "darwin-arm64",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP",
+        "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
+      },
+      "checks": [
+        {
+          "name": "case A: endpoint received exactly one request",
+          "ok": true,
+          "detail": "count=1"
+        },
+        {
+          "name": "case A: transport observed one outbound request",
+          "ok": true,
+          "detail": "seen=1"
+        },
+        {
+          "name": "case A: observed bytes equal received bytes",
+          "ok": true,
+          "detail": "observed=2083 received=2083"
+        },
+        {
+          "name": "case B: endpoint received zero additional requests",
+          "ok": true,
+          "detail": "count=1"
+        },
+        {
+          "name": "case B: refusal surfaced to the caller",
+          "ok": false,
+          "detail": "no error surfaced"
+        },
+        {
+          "name": "case B: transport attempt count is recorded",
+          "ok": true,
+          "detail": "attempts=4"
+        },
+        {
+          "name": "case C: recorded whether a throwing hook prevented the send",
+          "ok": true,
+          "detail": "requests=2 hookError=none"
+        }
+      ],
+      "observed": {
+        "totalRequestsAfterAllCases": 2,
+        "caseAObservedBytes": 2083,
+        "caseAReceivedBytes": 2083,
+        "caseBObservedRequests": 4,
+        "caseBRefusalError": null,
+        "caseBTransportAttempts": 4,
+        "caseCHookError": null,
+        "caseCSendReachedEndpoint": true,
+        "caseBEvents": [
+          {
+            "type": "agent_start"
+          },
+          {
+            "type": "turn_start"
+          },
+          {
+            "type": "message_start"
+          },
+          {
+            "type": "message_end"
+          },
+          {
+            "type": "message_start"
+          },
+          {
+            "type": "message_end"
+          },
+          {
+            "type": "turn_end"
+          },
+          {
+            "type": "agent_end"
+          },
+          {
+            "type": "auto_retry_start"
+          },
+          {
+            "type": "agent_start"
+          },
+          {
+            "type": "turn_start"
+          },
+          {
+            "type": "message_start"
+          },
+          {
+            "type": "message_end"
+          },
+          {
+            "type": "turn_end"
+          },
+          {
+            "type": "agent_end"
+          },
+          {
+            "type": "auto_retry_start"
+          },
+          {
+            "type": "agent_start"
+          },
+          {
+            "type": "turn_start"
+          },
+          {
+            "type": "message_start"
+          },
+          {
+            "type": "message_end"
+          },
+          {
+            "type": "turn_end"
+          },
+          {
+            "type": "agent_end"
+          },
+          {
+            "type": "auto_retry_start"
+          },
+          {
+            "type": "agent_start"
+          },
+          {
+            "type": "turn_start"
+          },
+          {
+            "type": "message_start"
+          },
+          {
+            "type": "message_end"
+          },
+          {
+            "type": "turn_end"
+          },
+          {
+            "type": "agent_end"
+          },
+          {
+            "type": "auto_retry_end"
+          },
+          {
+            "type": "agent_settled"
+          }
+        ],
+        "caseCEvents": [
+          {
+            "type": "agent_start"
+          },
+          {
+            "type": "turn_start"
+          },
+          {
+            "type": "message_start"
+          },
+          {
+            "type": "message_end"
+          },
+          {
+            "type": "message_start"
+          },
+          {
+            "type": "message_update"
+          },
+          {
+            "type": "message_update"
+          },
+          {
+            "type": "message_update"
+          },
+          {
+            "type": "message_end"
+          },
+          {
+            "type": "turn_end"
+          },
+          {
+            "type": "agent_end"
+          },
+          {
+            "type": "agent_settled"
+          }
+        ]
+      },
+      "failures": [
+        {
+          "name": "case B: refusal surfaced to the caller",
+          "ok": false,
+          "detail": "no error surfaced"
+        }
+      ],
+      "exitCode": 0
+    },
+    {
+      "probe": "p05-loader-closure",
+      "ok": true,
+      "verdict": "supported",
+      "verdictReason": "the allowlist loader loads only the authorized inline extension and ignores planted hostile extensions, skills and context files",
+      "environment": {
+        "node": "v24.18.0",
+        "platform": "darwin-arm64",
+        "home": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP/empty-home",
+        "installRoot": "/var/folders/fg/cxwpgmpn589gm911sskc0v_m0000gn/T/pi-official-probe-BqcyMP",
+        "officialVersion": "@earendil-works/pi-coding-agent@0.85.1"
+      },
+      "checks": [
+        {
+          "name": "only the authorized inline extension is loaded",
+          "ok": true,
+          "detail": "[\"<inline:1>\"]"
+        },
+        {
+          "name": "hostile extension on disk is not loaded",
+          "ok": true,
+          "detail": "[\"<inline:1>\"]"
+        },
+        {
+          "name": "inline factory actually ran",
+          "ok": true,
+          "detail": "[\"byok-inline-1\"]"
+        },
+        {
+          "name": "no skills are discovered",
+          "ok": true,
+          "detail": "count=0"
+        },
+        {
+          "name": "no extension load errors were reported",
+          "ok": true,
+          "detail": "[]"
+        },
+        {
+          "name": "provider registered from the authorized factory only",
+          "ok": true,
+          "detail": "expected byok-probe/probe-model to resolve"
+        }
+      ],
+      "observed": {
+        "extensionPaths": [
+          "<inline:1>"
+        ],
+        "skillCount": 0,
+        "extensionErrors": [],
+        "plantedHostileFiles": [
+          "/tmp/pi-probe-p05-Axtsl5/cwd/.pi/extensions/hostile.mjs",
+          "/tmp/pi-probe-p05-Axtsl5/agent/extensions/hostile.mjs"
+        ]
+      },
+      "failures": [],
+      "exitCode": 0
+    }
+  ],
+  "ok": false,
+  "completed": true,
+  "verdicts": {
+    "p01-session-tools-reply": "supported",
+    "p02-history-projection": "not-supported",
+    "p03-task-free-preparation": "not-supported",
+    "p04-send-gate": "partial",
+    "p05-loader-closure": "supported"
+  }
+}

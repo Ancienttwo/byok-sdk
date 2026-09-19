@@ -553,13 +553,13 @@ bun run check:task-workflow
   - [x] OP0-c fork-delta-map 落位 `docs/researches/2026-09-19-official-pi-fork-delta-map.md`（20 条 delta，四种类别，含 §6.2 必填列）
   - [x] OP0-d 官方安装隔离验证：`/tmp/pi-official-install` 独立安装 132 包成功、无全局 Pi、根入口 151 导出；三个 fork 专有子路径 + `/client` 实测 `ERR_PACKAGE_PATH_NOT_EXPORTED`；**本仓 `bun.lock`、根 manifest、`packages/client/package.json` 一字未改**
   - [x] OP0-e `docs/researches/2026-09-19-official-pi-baseline.json` 落位（显式标注 notProductConfig=true）
-- [ ] OP1 五项有界 probe（P01–P05）：真实官方 npm tarball + 临时目录 + 独立子进程；每项保留实际网络/工具调用计数与失败案例
-  - [ ] P01 Session/工具/回复
-  - [ ] P02 历史投影
-  - [ ] P03 task-free 准备
-  - [ ] P04 发送强制点
-  - [ ] P05 装载/递归兼容
-  - [ ] G1 裁定（三选一：全能力实证 / 走 OP2-U 最小上游接口 / 拒绝该技术路径）
+- [x] OP1 五项有界 probe（P01–P05）：真实官方 npm tarball + 临时目录 + 独立子进程；每项保留实际网络/工具调用计数与失败案例（2026-09-19 完成，三次运行 verdict 一致）
+  - [x] P01 Session/工具/回复 → **supported**（显式 session、授权工具往返 2 次请求、无 HOME 发现、dispose 正常）
+  - [x] P02 历史投影 → **not-supported**（注入 host 断言 assistant 文本后请求数 0、无异常、无事件错误：静默哑掉）
+  - [x] P03 task-free 准备 → **not-supported**（coding-agent 151 导出 / pi-ai 48 导出中无纯编译入口；服务构建有文件副作用）
+  - [x] P04 发送强制点 → **partial**（调用方 transport 可在发送前取得最终字节并拒发，端点 0 请求；但拒绝被吞掉且触发 3 次隐式 auto_retry；`before_provider_request` 抛错拦不住发送）
+  - [x] P05 装载/递归兼容 → **supported（装载面）**；递归 spawn 语义不在本探针覆盖范围（归 OP4）
+  - [x] **G1 裁定：第二档**——基础执行可行，缺 pure compile/consume 与历史导入；推进 OP2-U 最小上游接口；相关生产路径保持禁用
 - [ ] OP2 预算/prepared 接口替代（必要时 OP2-U 最小上游改进）
 - [ ] OP3 现有 runtime、工具、消息、凭证迁移
 - [ ] OP4 五边递归、custody、workflow 等价接线

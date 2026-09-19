@@ -45,6 +45,21 @@
 ## Verification Log
 
 - 官方 tarball identity 独立复算：`openssl dgst -sha512` 得到的 base64 与 registry `dist.integrity` 逐字符一致；sha512 hex 与 SLSA subject digest 一致。
-- `git diff --check`：见收口记录。
-- `repo-harness run check-task-workflow --strict`：见收口记录。
-- `docs/researches/2026-09-19-official-pi-baseline.json`：`JSON.parse` 通过（见契约 Verification Plan 的 `baseline-json-parse`）。
+- `docs/researches/2026-09-19-official-pi-baseline.json`：`JSON.parse` 通过（契约检查 `baseline-json-parse`）。
+- OP1 探针套件：`node packages/client/probes/pi-official/run.mjs`，三次连续运行 verdict 完全一致（契约检查 `probe-suite`）。
+- `docs/researches/2026-09-19-official-pi-op1-probe-results.json`：五个 verdict 齐备 + 安装 integrity 与冻结候选一致（契约检查 `op1-evidence-parse`）。
+
+## OP1 事实摘要（2026-09-19）
+
+探针形态：`run.mjs` 每次现场把官方 0.85.1（+ pi-ai 0.85.1 + typebox 1.3.7）装进临时树，把仓库里的探针源码复制到 `probes/` 下，用空 `HOME` 跑五个独立子进程，全部请求打到本地 127.0.0.1 合成 OpenAI 端点。无真实凭证、无真实模型。
+
+- **P01 supported**：公开入口能显式建 session、挂授权工具、完成工具往返（2 次请求，`tools` 恰为 `["probe_echo"]`）、dispose；空 HOME 保持为空，写入只落在显式 `agentDir`。
+- **P02 not-supported**：追加一条不带 provenance 的 assistant 文本后，session 仍然解析出 model、`prompt()` 不抛错，但**请求数为 0**，事件流只有 `message_start`/`message_end`。官方没有承载 host 断言文本的途径，且失败是静默的。
+- **P03 not-supported**：coding-agent 151 个导出、pi-ai 48 个导出，没有任何 prepare/compile 入口；`createAgentSessionServices` 实测产生 2 个文件副作用。
+- **P04 partial**（本轮最重要）：`ModelRuntime.registerProvider` + 自定义 `streamSimple` 委托官方 `@earendil-works/pi-ai/api/openai-completions` 的 `streamSimple`，只替换 `options.fetch`——
+  - 放行时 gate 观察到的 2083 字节与端点收到的 2083 字节**逐字节相同** → 「BYOK 拥有 transport、serializer 归官方」这条路径成立，方案 §18 的对应风险被证伪；
+  - 拒发时端点**新增 0 请求**（安全属性成立），但 `prompt()` 不抛错，且 transport 被调用 4 次、事件流出现 3 次 `auto_retry_start` → 0.85.1 缺「可传播拒绝」；
+  - 对照用例：`before_provider_request` 钩子抛错**没有拦住请求**（端点计数照样 +1）→ 方案 §7.1 的预警被完全证实。
+- **P05 supported（装载面）**：植入 cwd/agentDir 的恶意 extension、恶意 skill、恶意 `AGENTS.md` 全部未被加载，只有 `<inline:1>`；skills 0、extension 错误 0。
+
+**G1 = 第二档**：走 OP2-U 最小上游接口，相关生产路径保持禁用。
