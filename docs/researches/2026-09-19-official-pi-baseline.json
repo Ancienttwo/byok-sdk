@@ -1,0 +1,356 @@
+{
+  "schemaVersion": 1,
+  "kind": "official-pi-release-baseline",
+  "generatedAt": "2026-09-19T16:20+0800",
+  "purpose": "OP0 工程证据：固定官方 Pi 正式发行候选的真实身份，供 OP1 probe / OP5 身份 gate / OP7 验收复用。",
+  "notProductConfig": true,
+  "warning": "本文件不是产品配置，不得被构建或运行时代码读取。切换产品依赖必须走 OP3/OP5 的契约工作面。",
+  "subject": {
+    "repo": "Ancienttwo/byok-sdk",
+    "sdkSha": "79f6a0d35952392c37652cb2f7fecaf6dcc255a6",
+    "sdkRef": "origin/main",
+    "worktree": "/Users/kito/Projects/byok-sdk-wt-official-pi",
+    "branch": "codex/official-pi-migration"
+  },
+  "registry": "https://registry.npmjs.org",
+  "officialCandidate": {
+    "selection": "@earendil-works/pi-coding-agent@0.85.1",
+    "selectionRule": "最新 npm 正式发行版（dist-tags.latest）；不使用 GitHub main，因为 main 不是已发布包证明",
+    "releasedAt": "2026-09-05T12:17:19.281Z",
+    "packages": [
+      {
+        "name": "@earendil-works/pi-coding-agent",
+        "version": "0.85.1",
+        "tarball": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-0.85.1.tgz",
+        "integrity": "sha512-FGRN+OHbWaefBPGaTggAdLjrIHW+s2PzLyglz/5dfLzb9of7uuXMXYC0fJIeZTw+shS32o2cuQ9jF7YSDuL/oQ==",
+        "shasum": "4cd00f653c3dabeb193b46f511044e7fbfe0f947",
+        "sha256": "1f498729649bdce647d1160993b4d92bf3c614cc819213bee2f91dd34f2a7af4",
+        "fileCount": 1056,
+        "unpackedSize": 21935887,
+        "gitHead": "d981de1229ef899957bbe968bc8dcda02a21f477",
+        "engines": { "node": ">=22.19.0" },
+        "type": "module",
+        "repository": {
+          "url": "git+https://github.com/earendil-works/pi.git",
+          "directory": "packages/coding-agent"
+        },
+        "lifecycleScripts": [],
+        "declaredLifecycleScriptKeys": [],
+        "bin": { "pi": "dist/bundle/cli.js" },
+        "declaresLicenseFile": false,
+        "dependencies": {
+          "@earendil-works/chord": "^0.85.1",
+          "@earendil-works/pi-agent-core": "^0.85.1",
+          "@earendil-works/pi-ai": "^0.85.1",
+          "@earendil-works/pi-tui": "^0.85.1",
+          "@silvia-odwyer/photon-node": "0.3.4",
+          "chalk": "5.6.2",
+          "cross-spawn": "7.0.6",
+          "diff": "8.0.4",
+          "grok-mermaid": "0.2.2",
+          "highlight.js": "10.7.3",
+          "hosted-git-info": "9.0.3",
+          "ignore": "7.0.5",
+          "jiti": "2.7.0",
+          "minimatch": "10.2.5",
+          "proper-lockfile": "4.1.2",
+          "semver": "7.8.0",
+          "typebox": "1.3.7",
+          "undici": "8.9.0",
+          "yaml": "2.9.0"
+        },
+        "optionalDependencies": { "@mariozechner/clipboard": "0.3.9" },
+        "exports": {
+          ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+          "./rpc-entry": { "import": "./dist/bundle/rpc-entry.js" },
+          "./client": { "source": "./src/client/index.ts" },
+          "./experimental/plugin": { "source": "./src/experimental/plugin.ts" }
+        },
+        "exportsNotes": [
+          "没有 ./input-preparation、./prepared-session-input、./rpc-types 三个 fork 子路径导出。",
+          "./client 与 ./experimental/plugin 只有 \"source\" 条件且指向 src/，而发行 tarball 不含 src/ → 在已发布字节里这两个子路径不可解析。",
+          "dist/core/sdk.js 存在（createAgentSession 等），但按 package.json exports 只能经根入口导入，不是公开子路径。"
+        ]
+      },
+      {
+        "name": "@earendil-works/pi-ai",
+        "version": "0.85.1",
+        "tarball": "https://registry.npmjs.org/@earendil-works/pi-ai/-/pi-ai-0.85.1.tgz",
+        "integrity": "sha512-+VgVIJDkDO2efYJKEEqvPTH4zmnIaXdAppGbO+vKFA9qy5PdhFiAenuFAkU+oiCSfOC4dMHDyrjdQeL4ZoC5CQ==",
+        "shasum": "3f5726032c30149f6060a3aeacb79436c7387a37",
+        "sha256": "af7d11986179445ce6fe88b37d57de22f823c0ffd3a65cae31c555b7f5e99253",
+        "fileCount": 750,
+        "unpackedSize": 4281282,
+        "gitHead": "d981de1229ef899957bbe968bc8dcda02a21f477",
+        "engines": { "node": ">=22.19.0" },
+        "repository": {
+          "url": "git+https://github.com/earendil-works/pi.git",
+          "directory": "packages/ai"
+        },
+        "lifecycleScripts": [],
+        "declaresLicenseFile": false,
+        "exports": {
+          ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+          "./compat": { "types": "./dist/compat.d.ts", "import": "./dist/compat.js" },
+          "./providers/*": { "types": "./dist/providers/*.d.ts", "import": "./dist/providers/*.js" },
+          "./api/*": { "types": "./dist/api/*.d.ts", "import": "./dist/api/*.js" },
+          "./utils/*": { "types": "./dist/utils/*.d.ts", "import": "./dist/utils/*.js" },
+          "./oauth": { "types": "./dist/oauth.d.ts", "import": "./dist/oauth.js" },
+          "./bedrock-provider": { "types": "./dist/bedrock-provider.d.ts", "import": "./dist/bedrock-provider.js" },
+          "./bun-oauth": { "types": "./dist/bun-oauth.d.ts", "import": "./dist/bun-oauth.js" }
+        }
+      },
+      {
+        "name": "@earendil-works/pi-agent-core",
+        "version": "0.85.1",
+        "integrity": "sha512-hIXIP3eAWueAYiAl8aMvWCvvZ8Q5gT3Dip5bE5uJyIGh4+YlWRjtMLI4BaeoXoSs93zndjue61u1B/vhefLnuA==",
+        "shasum": "8a85116c0d4494e4d9e82341237d91ad360fdc2a",
+        "sha256": null,
+        "fileCount": 362,
+        "unpackedSize": 3627164,
+        "gitHead": "d981de1229ef899957bbe968bc8dcda02a21f477",
+        "engines": { "node": ">=22.19.0" },
+        "sha256Note": "未在本轮下载该 tarball，故 sha256 为 null；integrity 取自 registry 元数据，未独立复算。"
+      },
+      {
+        "name": "@earendil-works/pi-tui",
+        "version": "0.85.1",
+        "integrity": "sha512-OIzw9efInmO4WOBnD4TxcTdBjmzvYJpzslkgoUro946nEGoYWg5rwv1p4fDt3/JvMx9QybryUCUwlm7j8Dreig==",
+        "shasum": "06a13bc6f4093f14262e72868234e6d4eb9bbf55",
+        "sha256": null,
+        "fileCount": 176,
+        "unpackedSize": 2703002,
+        "gitHead": "d981de1229ef899957bbe968bc8dcda02a21f477",
+        "engines": { "node": ">=22.19.0" }
+      },
+      {
+        "name": "@earendil-works/chord",
+        "version": "0.85.1",
+        "integrity": "sha512-VDlkEC3dhCzQ5fcyH1OhG19dq+6jCn+rqc/iXFivwDYGR5anwo2RCiXij9PpHhqNR5GuhhE+Er69Zi1Sn4eY6w==",
+        "shasum": "acc677176bee8b7c1fbed96483317f694398aded",
+        "sha256": null,
+        "fileCount": 99,
+        "unpackedSize": 917443,
+        "gitHead": "d981de1229ef899957bbe968bc8dcda02a21f477",
+        "engines": { "node": ">=22.19.0" }
+      },
+      {
+        "name": "@earendil-works/pi-telemetry",
+        "version": "0.85.1",
+        "integrity": "sha512-Bg/YN6kA7Swja/NQxka8xFdecb4E/auIEGF2G5A25EaQXhRnPj300/7/KpgsDDMYUzHTDAv4RyUxaQPJKW81Rw==",
+        "shasum": "b4dbe9155fff8aedb3ff752e7a954b9c7201ddf1",
+        "sha256": null,
+        "fileCount": 26,
+        "unpackedSize": 157993,
+        "gitHead": "d981de1229ef899957bbe968bc8dcda02a21f477",
+        "engines": { "node": ">=22.19.0" }
+      }
+    ],
+    "sharedGitHead": "d981de1229ef899957bbe968bc8dcda02a21f477",
+    "sharedGitHeadNote": "本轮核对的 6 个官方 @earendil-works/* 0.85.1 包 gitHead 全部等于 d981de12…；与 SDK 现行 fork 身份门声明的 upstreamCommit 常量一致。"
+  },
+  "officialProvenance": {
+    "attestationEndpoint": "https://registry.npmjs.org/-/npm/v1/attestations/@earendil-works%2fpi-coding-agent@0.85.1",
+    "predicateTypes": [
+      "https://github.com/npm/attestation/tree/main/specs/publish/v0.1",
+      "https://slsa.dev/provenance/v1"
+    ],
+    "slsa": {
+      "builderId": "https://github.com/actions/runner/github-hosted",
+      "sourceRepository": "https://github.com/earendil-works/pi",
+      "sourceRef": "refs/tags/v0.85.1",
+      "workflowPath": ".github/workflows/build-binaries.yml",
+      "subjectName": "pkg:npm/%40earendil-works/pi-coding-agent@0.85.1",
+      "subjectDigestSha512Hex": "14644df8e1db59a79f04f19a4e080074b8eb2075beb363f32f2825cffe5d7cbcdbf687fbbae5cc5d80b47c921e653c3eb214b7da8d9cb90f6317b6120ee2ffa1"
+    },
+    "subjectDigestEqualsDownloadedTarballSha512": true
+  },
+  "officialTransitiveClosure": {
+    "shrinkwrapShippedInTarball": true,
+    "shrinkwrapPath": "npm-shrinkwrap.json",
+    "lockfileVersion": 3,
+    "entryCount": 165,
+    "distinctPackagePathCount": 163,
+    "note": "官方 tarball 自带 npm-shrinkwrap.json，因此完整解析边可由发行字节本身复算，不需要信任 GitHub main 的 manifest。注意 fork 包不含该文件。"
+  },
+  "officialIsolatedInstallCheck": {
+    "location": "/tmp/pi-official-install（本机临时目录，未写入仓库，未改动本仓 bun.lock / 根 manifest）",
+    "command": "npm install --no-audit --no-fund --ignore-scripts（package.json 仅一行 dependency：@earendil-works/pi-coding-agent 0.85.1）",
+    "installedPackageCount": 132,
+    "lockEntryCount": 166,
+    "installedIntegrity": "sha512-FGRN+OHbWaefBPGaTggAdLjrIHW+s2PzLyglz/5dfLzb9of7uuXMXYC0fJIeZTw+shS32o2cuQ9jF7YSDuL/oQ==",
+    "globalPiRequired": false,
+    "rootEntryExportCount": 151,
+    "rootEntryHasCreateAgentSession": true,
+    "rootEntryHasCreatePreparedAgentSession": false,
+    "rootEntryHasPrepareCodingAgentSessionInput": false,
+    "subpathResolution": {
+      "@earendil-works/pi-coding-agent/prepared-session-input": "ERR_PACKAGE_PATH_NOT_EXPORTED",
+      "@earendil-works/pi-coding-agent/input-preparation": "ERR_PACKAGE_PATH_NOT_EXPORTED",
+      "@earendil-works/pi-coding-agent/rpc-types": "ERR_PACKAGE_PATH_NOT_EXPORTED",
+      "@earendil-works/pi-coding-agent/client": "ERR_PACKAGE_PATH_NOT_EXPORTED"
+    },
+    "modelcontextprotocolSdkInClosure": false
+  },
+  "officialSeamInventory": {
+    "purpose": "OP1 P01–P05 的待证断言：官方公开面里哪些是 BYOK 所需能力，哪些只是相邻能力。",
+    "present": {
+      "providerRequestOptions.fetch": {
+        "path": "@earendil-works/pi-ai/dist/types.d.ts:45,55-62",
+        "note": "provider 层已有 fetch 注入位；官方文档注明部分 adapter 可能拒绝自定义实现。"
+      },
+      "providerRequestOptions.onPayload": {
+        "path": "@earendil-works/pi-ai/dist/types.d.ts:69-73",
+        "note": "发送前可检视/替换 payload。方案 §7.1 判定其不能作为唯一预算门：没有拒绝语义，且后续 handler 仍可改 payload。"
+      },
+      "providerRequestOptions.onResponse": {
+        "path": "@earendil-works/pi-ai/dist/types.d.ts:106-111",
+        "note": "收到响应后、消费 body 前触发；属事后观察，不是发送前 gate。"
+      },
+      "extensionApi.registerProvider": {
+        "path": "@earendil-works/pi-coding-agent/dist/core/extensions/types.d.ts:1063-1074,1082-1101",
+        "note": "公开扩展面；ProviderConfig.streamSimple 允许 BYOK 自带实现，契约要求发送前调用 options.onPayload、收到响应后调用 options.onResponse。OP1 P04 的公开路径候选。"
+      },
+      "agentSessionConfig.baseToolsOverride": {
+        "path": "@earendil-works/pi-coding-agent/dist/core/agent-session.d.ts:126-132",
+        "note": "官方已有；fork 补的是 CreateAgentSessionOptions 上的同一字段。"
+      },
+      "promptOptions.preflightResult": {
+        "path": "@earendil-works/pi-coding-agent/dist/core/agent-session.d.ts:149-159",
+        "note": "官方已有 prompt preflight 观察钩子。"
+      },
+      "piAiPublicApiSubpaths": {
+        "path": "@earendil-works/pi-ai/package.json exports ./api/*",
+        "note": "官方 adapter 可经公开子路径调用，是「BYOK 拥有 transport 但仍用官方 serializer」这一路径的前提。"
+      }
+    },
+    "absent": {
+      "createAgentSessionOptions.fetch": "官方 dist/core/sdk.d.ts:10-56 无此字段；整个 coding-agent dist 无 FetchFunction 声明。",
+      "createPreparedAgentSession": "根入口导出中不存在（运行时 undefined）。",
+      "prepareCodingAgentSessionInput / verifyPreparedSessionInput": "不存在。",
+      "pureRequestProjection": "官方只有 buildSystemPrompt（需要 fs/skills），没有 fs-free 的 prompt 投影入口。",
+      "hostCanonicalAssistantMessage": "官方 pi-ai Message 联合不含该类；AssistantMessage 无 origin 判别位。"
+    }
+  },
+  "forkPackages": [
+    {
+      "name": "@byok-sdk/pi-coding-agent",
+      "version": "0.85.1006",
+      "aliasInSdk": "npm:@byok-sdk/pi-coding-agent@0.85.1006",
+      "integrity": "sha512-HZGOSK5rpA4Drr7vdisHeg45q/fvtIG81FFhm0yC9U2LOqPmnFmb3629+2CHN6NUWfRO4YU8ln0wBfcRUxAhnw==",
+      "shasum": "7aaa53870dc5da3a0e416a9b0d7a023587b63a4a",
+      "sha256": "f5b6f17eadc5e7b94aa925be8118278c3316b2b0ad9b7b08f3a2a2791bccea8e",
+      "fileCount": 1072,
+      "unpackedSize": 22229717,
+      "gitHead": null,
+      "gitHeadNote": "registry 元数据无 gitHead 字段；无法把已发布字节绑回一个构建提交。",
+      "provenanceAttestations": "absent",
+      "provenanceEvidence": "GET /-/npm/v1/attestations/@byok-sdk%2fpi-coding-agent@0.85.1006 → HTTP 404 {\"error\":\"Not found\"}",
+      "repositoryField": { "url": "git+https://github.com/earendil-works/pi.git", "directory": null },
+      "declaresLicenseFile": true,
+      "byokFork": {
+        "upstreamBase": "0.85.1",
+        "upstreamCommit": "d981de1229ef899957bbe968bc8dcda02a21f477",
+        "forkBuild": 6
+      },
+      "shrinkwrapShippedInTarball": false,
+      "addedForkOnlySubpathExports": [
+        "./input-preparation",
+        "./prepared-session-input",
+        "./rpc-types"
+      ],
+      "dependencySubstitutions": {
+        "@earendil-works/pi-ai": "npm:@byok-sdk/pi-ai@0.85.1005",
+        "@earendil-works/pi-agent-core": "npm:@byok-sdk/pi-agent-core@0.85.1005"
+      }
+    },
+    {
+      "name": "@byok-sdk/pi-ai",
+      "version": "0.85.1005",
+      "aliasInSdk": "npm:@byok-sdk/pi-ai@0.85.1005",
+      "integrity": "sha512-pjReKZAJsT1t2sVFtcpqhTtC8aDUtqqZ+vphDivGVAub9b/5ndb4AKDLqqi5DKQTc+44s/dSbz1kBT2yn7UMqA==",
+      "shasum": "25cc13d93b5e4b2dd64baad79e2a19cc22743d55",
+      "sha256": "94f8f56417caf87abe6f9b71a690018c4c086927f3f4cb7bdf87635f7a5d090f",
+      "fileCount": 751,
+      "unpackedSize": 4461770,
+      "gitHead": null,
+      "provenanceAttestations": "absent",
+      "byokFork": {
+        "upstreamBase": "0.85.1",
+        "upstreamCommit": "d981de1229ef899957bbe968bc8dcda02a21f477",
+        "forkBuild": 5
+      },
+      "declaresLicenseFile": true,
+      "addedDependencies": ["@modelcontextprotocol/sdk@1.30.0"],
+      "dependencyPinChanges": {
+        "@earendil-works/pi-telemetry": "^0.85.1 → 0.85.1"
+      },
+      "exportsIdenticalToOfficial": true
+    },
+    {
+      "name": "@byok-sdk/pi-agent-core",
+      "version": "0.85.1005",
+      "integrity": "sha512-bvIJdV4NR1llvKrqknUzE8Gyty9vmH32RKVOn5xjSxSX0wvmDB2ZyPCb8izu5GPvrY6a8K+MfSWoUTz0pFj0cg==",
+      "shasum": "7dadb11dab35f103707ebb2b984a94eb1a8f245a",
+      "sha256": null,
+      "fileCount": 363,
+      "unpackedSize": 3643190,
+      "gitHead": null,
+      "provenanceAttestations": "absent",
+      "sha256Note": "未下载该 tarball，sha256 为 null；integrity 取自 registry 元数据，未独立复算。"
+    }
+  ],
+  "verification": {
+    "method": "独立下载 tarball → openssl 复算 sha512(base64) → 与 registry integrity 比对；SLSA subject digest hex 与 tarball sha512 hex 比对。",
+    "recomputedSha512Base64": {
+      "@earendil-works/pi-coding-agent@0.85.1": "FGRN+OHbWaefBPGaTggAdLjrIHW+s2PzLyglz/5dfLzb9of7uuXMXYC0fJIeZTw+shS32o2cuQ9jF7YSDuL/oQ==",
+      "@earendil-works/pi-ai@0.85.1": "+VgVIJDkDO2efYJKEEqvPTH4zmnIaXdAppGbO+vKFA9qy5PdhFiAenuFAkU+oiCSfOC4dMHDyrjdQeL4ZoC5CQ==",
+      "@byok-sdk/pi-coding-agent@0.85.1006": "HZGOSK5rpA4Drr7vdisHeg45q/fvtIG81FFhm0yC9U2LOqPmnFmb3629+2CHN6NUWfRO4YU8ln0wBfcRUxAhnw==",
+      "@byok-sdk/pi-ai@0.85.1005": "pjReKZAJsT1t2sVFtcpqhTtC8aDUtqqZ+vphDivGVAub9b/5ndb4AKDLqqi5DKQTc+44s/dSbz1kBT2yn7UMqA=="
+    },
+    "registryIntegrityMatches": true,
+    "defaultBranchTrapChecked": {
+      "claimed": "GitHub main earendil-works/pi@36b60d2e…",
+      "actualOfficialReleaseGitHead": "d981de1229ef899957bbe968bc8dcda02a21f477",
+      "conclusion": "本轮候选按 npm 正式发行版固定为 0.85.1 / d981de12；GitHub main 36b60d2e 不是已发布包，未作为候选。"
+    }
+  },
+  "forkDeltaSummary": {
+    "codingAgent": {
+      "officialFileCount": 1056,
+      "forkFileCount": 1072,
+      "commonPaths": 1041,
+      "byteIdenticalCommonPaths": 965,
+      "differingCommonPaths": 76,
+      "onlyInFork": 31,
+      "onlyInOfficial": 15,
+      "forkOnlySourceModules": [
+        "dist/core/input-preparation.*",
+        "dist/core/prepared-session-input.*",
+        "dist/core/provider-timeout.*",
+        "dist/core/system-prompt-renderer.*"
+      ],
+      "forkOnlyNonSourceFiles": ["LICENSE", "14 renamed dist/bundle/chunks/*.js"],
+      "officialOnlyFiles": ["npm-shrinkwrap.json", "14 renamed dist/bundle/chunks/*.js"],
+      "conclusion": "fork = 官方 0.85.1 + 4 个新模块（16 文件）+ 22 个模块的改动（76 个产物文件）+ LICENSE；差异面有界且可完整枚举。"
+    },
+    "piAi": {
+      "officialFileCount": 750,
+      "forkFileCount": 751,
+      "commonPaths": 750,
+      "byteIdenticalCommonPaths": 591,
+      "differingCommonPaths": 159,
+      "onlyInFork": 1,
+      "onlyInOfficial": 0,
+      "forkOnlyFiles": ["LICENSE"],
+      "conclusion": "fork = 官方 0.85.1 + LICENSE；差异集中在 (a) 类型/序列化面（types.d.ts、api/openai-completions.d.ts、api/transform-messages.js、utils/estimate.js、utils/pi-user-agent.js）与 (b) 重新生成的 provider 目录数据（15 个目录文件，生成时间 2026-09-15 vs 官方 2026-09-05）。"
+    },
+    "detailArtifact": "docs/researches/2026-09-19-official-pi-fork-delta-map.md"
+  },
+  "remainingGaps": [
+    "未验证官方 0.85.1 的公开接口能否支撑 task-free preparation / 最终发送 gate / host-canonical history 导入（= OP1 的 G1 问题）。",
+    "未安装官方 package 到任何工作树；本 worktree 的依赖仍指向 fork（OP0 明确不切换）。",
+    "pi-agent-core / pi-tui / chord / pi-telemetry 的 sha256 未独立复算（仅 registry integrity 元数据）。",
+    "provider 目录数据差异是双向的：官方 0.85.1 相对 fork 少 13 个 openrouter 模型、多 9 个 fork 已移除的模型；切换后模型可用性会变化，OP3/OP7 必须单独验证。"
+  ]
+}

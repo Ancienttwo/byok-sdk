@@ -1,0 +1,42 @@
+# Task Review: official-pi-migration
+
+> **Status**: Open
+> **Plan**: plans/plan-20260919-1603-official-pi-migration.md
+> **Contract**: tasks/contracts/20260919-1603-official-pi-migration.contract.md
+> **Notes File**: tasks/notes/20260919-1603-official-pi-migration.notes.md
+> **Checks File**: `.ai/harness/checks/latest.json`
+> **Last Updated**: 2026-09-19 16:40
+> **Recommendation**: pass（OP0 证据面切片；G1 未裁定，故 OP1 仍未闭合）
+> **Review Rubric Version**: 2
+> **Reviewed Subject SHA256**: pending（切分支入库时记录）
+> **Reviewed Subject Scope**: normalized-final-content
+> **Reviewed Target Revision**: pending
+
+## Human Review Card
+
+- Verdict: pass（OP0 = 发行基线冻结 + fork delta map + 隔离安装验证；本切片不切产品依赖）
+- Change type: migration（OP0 证据面 + OP1 probe 面；本切片不切产品依赖）
+- Intended files changed: plan（规范化登记）、contract/review/notes 三件套、`docs/researches/` OP0 两份证据产物
+- Actual files changed: `plans/plan-20260919-1603-official-pi-migration.md`、`tasks/contracts|reviews|notes/20260919-1603-official-pi-migration.*`、`docs/researches/2026-09-19-official-pi-baseline.json`、`docs/researches/2026-09-19-official-pi-fork-delta-map.md`；`tasks/current.md` 为 harness 本地 read model（gitignored 内容变更）
+
+## Findings
+
+- F1 官方候选身份可独立复算：tarball sha512 与 registry integrity 逐字符一致，sha256 另记；SLSA v1 subject digest 与 tarball 逐字节一致；`gitHead=d981de12…`；无生命周期脚本；自带 `npm-shrinkwrap.json`（165 条目）。
+- F2 fork 身份链不完整但来源可解释：三个 `@byok-sdk/pi-*` 包无 `gitHead`、attestations 404；`byokFork` 块声明的 `upstreamCommit` 等于官方 `gitHead`，文件级比对（1041 共同路径中 965 逐字节相同）证实增量有界。
+- F3 fork 增量可完整枚举，20 条 delta 全部落入四种允许类别，无「复制进 vendor 算无 fork」条目。
+- F4 方案 §7.1 的两处预警被实测证实：官方 `CreateAgentSessionOptions` 不声明 `fetch`；provider 层虽有 `fetch`/`onPayload`/`onResponse`，高层会话并不透传。
+- F5 新增可证伪的 G1 候选路径：官方公开 `registerProvider` + `ProviderConfig.streamSimple`，且 `pi-ai` 公开导出 `./api/*`；OP1 P04 应验证「BYOK 拥有的 provider 仅包装官方 adapter 并注入 fetch」能否在发送前拒绝。
+- F6 OP0 未越界：`bun.lock`、根 manifest、`packages/client/package.json` 一字未改；官方包只装到 `/tmp/pi-official-install`。
+
+## Acceptance Surface
+
+- OP0：官方正式发行候选身份可独立复算（tarball integrity/字节 sha256）、fork 增量清单完整且分类只落在方案 §6.2 的四种类别、根依赖与 lock 未被改动。
+- OP1：五项 probe 在真实官方 tarball + 独立子进程上可运行；G1 裁定有证据支撑；无实现证据处不得声明 `official_supported=true`。
+
+## Residual Risk
+
+- R1 G1 未裁定：OP1 未执行，官方能否支撑 task-free preparation（P03）与发送前拒绝（P04）仍未知。
+- R2 官方 provider 目录数据与 fork 双向不同（openrouter 官方 366 / fork 379），切换后模型可用性会变化；首验目标 `z-ai/glm-5.3-flash` 两边都有，但需在 OP3/OP7 单独验证与披露。
+- R3 `pi-agent-core`/`pi-tui`/`chord`/`pi-telemetry` 的 tarball 未下载复算 sha256（仅 registry 元数据）。
+- R4 多 agent fan-out 在本环境不可用（fleet `explorer` 角色模型不在可用列表），OP0 由 main agent 内联完成；后续大范围研究需先解决该阻塞。
+- R5 本轮未做平台矩阵（Windows/Linux）与 S2 新布局重验——属 OP5/OP7。
