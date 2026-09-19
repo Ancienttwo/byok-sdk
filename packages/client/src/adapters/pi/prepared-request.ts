@@ -76,6 +76,9 @@ export function requestDigest(body: string): string {
  */
 export async function compilePreparedRequest(input: CompilePreparedRequestInput): Promise<PreparedRequest> {
   let body: string | undefined;
+  // The adapter boundary is deliberately untyped here: this module must accept
+  // whatever model/context the caller resolved without importing provider types
+  // deeply, and it never inspects them. Only the serialized body is used.
   const stream = streamSimple(input.model as never, input.context as never, {
     ...input.options,
     fetch: (async (_url: unknown, init: { body?: unknown }) => {

@@ -232,3 +232,15 @@
 
 1. **本 worktree 的验证前置是 `bun run build`**；不构建就直接跑 client 测试会得到一片假红。后续任何全量验证都要先构建。
 2. 这是迄今最强的验证证据：迁移的主要写入面（client 包）在我加入 `request-shape.ts` 与 `prepared-request.ts` 之后**全绿**。
+
+## 仓库自带 gate 的验证（2026-09-19）
+
+除 client 全量测试外，又跑了仓库声明的 required checks：
+
+| 检查 | 结果 |
+|---|---|
+| `bun run typecheck`（15 个 package） | **EXIT 0** |
+| `bun run check:api-surface` | **EXIT 0**（10 个 package golden 与构建产物一致） |
+| `bun run check:release-graph` | **EXIT 0**（10 manifest 对齐 0.18.0、keys 0.5.0；umbrella 7 命名空间且无 keys 边） |
+
+含义：新增的 `request-shape.ts` / `prepared-request.ts` 与仓库自身 gate 兼容，没有引入 public surface 或依赖图变化。`prepared-request.ts` 里对 adapter 调用用了显式 `as never` 边界转换（该模块不深引 provider 类型、也不检查传入对象，只使用序列化后的 body），已在代码内注明理由。
