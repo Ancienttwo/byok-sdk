@@ -18,7 +18,20 @@
 - 探针套件需要网络（每次现场从 registry 安装官方 tarball）：`node packages/client/probes/pi-official/run.mjs`（9 项，约 40s）。
 - `/tmp/pi-upstream` 是用于测量的上游 checkout（已 `npm ci` + `hydrate-model-data`，基线 `tsgo --noEmit` EXIT 0）。它是临时的；重建方式：完整 clone → `npm ci --ignore-scripts` → `npm --prefix packages/ai run hydrate-model-data`。
 
-### 切片 A：OP2 接线（依赖上游类型面落地）
+### 切片 A：OP2 接线
+
+**安全网（改动前先记住它）**：prepared 路径现有 **13 个既有测试文件**（`input-preparation*.test.ts` 6 个、`pi-prepared-*.test.ts` 3 个、`prepared-offer-*.test.ts` 2 个、`prepared-prompt-frame.test.ts`、`prepared-tool-surface.test.ts`），加上全量 244 文件 / 2906 测试。接线的判据不是「新核心的测试绿」，而是**这些既存测试在换掉编译段之后仍然绿**。
+
+**第一步的精确定义（按此顺序，每步保持构建绿）**：
+
+1. 在 `input-preparation.ts` 内新增一条内部路径：用 `compilePreparedRequest` 产出 `{body, digest, shape}`，**与既有 fork 编译并存于同一函数内**，但只通过一个新导出暴露（不改既有导出行为）；
+2. 写一个**等价性测试**：同一输入下，新路径的 `body` 与既有 envelope 所承载的请求体逐字节相同。**这是整条切片的关键证据**——它证明替换是等价的，而不是「看起来能跑」。若两者不等，先定位差异（差异本身就是发现），不要继续替换；
+3. 等价成立后，把 daemon 侧 receipt/store 的 `envelope` 字段改为 `{body, digest, shape}`（此时才会跨到 `daemon/input-preparation-service.ts`、store/receipt 与 Host CAS）；
+4. 最后删除 `nativePrepare` / `nativeCanonical` 两条动态 import 与 `prepared-session-input`/`input-preparation` 两个子路径 import，并更新 `check-adapters-entry.mjs` 与 `api-surface/client.d.ts` golden。
+
+**为什么第一步不能跳过**：第 2 步是唯一能在不触碰 daemon/store/CAS 的前提下证明「可替换」的方式；跳过它，第 3 步一旦出现行为差异，就会在跨 4 个模块的改动里难以定位。
+
+**上游依赖说明**：切片 A 本身**不依赖**上游（新核心用 `unknown[]` 边界接收消息，既不 cast 也不伪造，host 历史的既有实现可原样保留在 fork runtime 上）；上游类型面落地影响的是**切换 runtime 之后**能否继续表达 host 历史，属切片 B/OP5 的前置。
 
 - 入口：`packages/client/src/adapters/pi/input-preparation.ts`（8 处 fork import）、`packages/client/src/daemon/input-preparation-service.ts`（1 处）、`packages/client/src/bin/pi-prepared-host.ts:317`（消费 seam）、`adapters/pi/prepared-prompt-frame.ts`。
 - 9 处用法的逐条处置见 OP2-U §15；新核心已就绪：`adapters/pi/prepared-request.ts`（compile/certify/verify）+ `request-shape.ts`。
