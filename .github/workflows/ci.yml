@@ -327,6 +327,29 @@ jobs:
           Write-Host "[lowpriv] account=$account scratch=$scratch canary=$canary checkout=$checkout"
           Write-Host "[lowpriv] node dir=$nodeHome bun=$bunSrc"
 
+          # Link-only reparse point removal, several passes (a link nested
+          # inside a link frees the inner one only when the outer link is
+          # deleted). Returns the reparse points still present under $root once
+          # the passes are exhausted -- an empty list means the tree is
+          # link-free and safe for recursive passes. Enumeration never descends
+          # into reparse points, so the scan itself cannot escape the tree.
+          function Get-RemainingReparsePoints([string]$root) {
+            for ($pass = 1; $pass -le 5; $pass++) {
+              $reparse = @(Get-ChildItem -LiteralPath $root -Recurse -Force -Attributes ReparsePoint -ErrorAction SilentlyContinue)
+              if ($reparse.Count -eq 0) { return @() }
+              foreach ($rp in $reparse) {
+                Write-Host "[lowpriv] teardown: removing reparse point link $($rp.FullName)"
+                try {
+                  if ($rp.PSIsContainer) { [System.IO.Directory]::Delete($rp.FullName, $false) }
+                  else { [System.IO.File]::Delete($rp.FullName) }
+                } catch {
+                  if ($pass -eq 5) { Write-Host "[lowpriv] teardown: link removal failed for $($rp.FullName): $($_.Exception.Message)" }
+                }
+              }
+            }
+            return @(Get-ChildItem -LiteralPath $root -Recurse -Force -Attributes ReparsePoint -ErrorAction SilentlyContinue)
+          }
+
           $created = $false
           $accountSid = $null
           $scratchCreated = $false
@@ -362,15 +385,25 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "icacls grant on $checkout failed ($LASTEXITCODE)" }
 
             # Out-of-tree canary: the junction below points OUTSIDE the scratch
-            # root. If teardown recursion ever follows a link out of the tree,
-            # this file dies with the trip and the teardown fails instead of
-            # silently crawling the filesystem outside the scratch root.
+            # root. If a recursive pass ever follows a link out of the tree, the
+            # canary's bytes or its ACLs stop matching the pre-cleanup baseline
+            # below and the teardown fails instead of silently crawling the
+            # filesystem outside the scratch root. The baseline pins BOTH the
+            # file content (SHA-256) and the ACLs (`icacls /save` of the canary
+            # root + file); the snapshot lives in RUNNER_TEMP, never under the
+            # scratch root or the canary itself, so an escaped traversal cannot
+            # destroy its own evidence.
             if (Test-Path -LiteralPath $canary) { throw "canary root $canary already exists; refusing to adopt or delete a path this run did not create" }
             New-Item -ItemType Directory -Path $canary | Out-Null
             $canaryCreated = $true
-            Set-Content -LiteralPath (Join-Path $canary 'canary.txt') -Value "byok-lowpriv canary $runTag" -NoNewline
+            $canaryFile = Join-Path $canary 'canary.txt'
+            Set-Content -LiteralPath $canaryFile -Value "byok-lowpriv canary $runTag" -NoNewline
+            $canaryHashBefore = (Get-FileHash -LiteralPath $canaryFile -Algorithm SHA256).Hash
             New-Item -ItemType Junction -Path (Join-Path $scratch 'canary-link') -Target $canary | Out-Null
-            Write-Host "[lowpriv] canary: $canary linked at $(Join-Path $scratch 'canary-link')"
+            $canaryAclBefore = Join-Path $env:RUNNER_TEMP "byok-lowpriv-canary-$runTag-acl-before.acl"
+            icacls $canary $canaryFile /save $canaryAclBefore /Q
+            if ($LASTEXITCODE -ne 0) { throw "icacls /save on the canary exited $LASTEXITCODE; refusing cleanup without a provable out-of-tree baseline" }
+            Write-Host "[lowpriv] canary: $canary linked at $(Join-Path $scratch 'canary-link'); acl baseline $canaryAclBefore; sha256 $canaryHashBefore"
 
             New-Item -ItemType Directory -Force -Path "$scratch\tools", "$scratch\logs" | Out-Null
             # bun lives under the administrator's profile, which this account cannot execute.
@@ -410,15 +443,38 @@ jobs:
               Write-Host "===== end $(Split-Path -Leaf $logFile) ====="
             }
           } finally {
-            # Order matters: revoke the ACEs while the SID is still meaningful, THEN
-            # delete the account, THEN the profile and the scratch root. `icacls` is a
-            # native command -- its failure is an exit code, not a terminating error,
-            # so every call is checked explicitly instead of relying on `catch`.
+            # Reparse points FIRST, before ANY recursive pass over either tree.
+            # Confirmed windows-latest defect: the recursive icacls /remove:g /T
+            # below used to run while junctions created under the scratch tree
+            # still existed, and icacls /T follows them -- CI logs show the
+            # traversal escaping through a root link to out-of-tree targets
+            # (System Volume Information access errors). A link that no longer
+            # exists cannot be recursed through. A tree whose links cannot all
+            # be removed gets NO recursive pass at all (no icacls /T, no
+            # Remove-Item -Recurse): the leftover link is recorded as a teardown
+            # failure instead of walking outside the tree. Unrelated steps
+            # (account/profile deletion) keep their best-effort semantics.
+            $checkoutLinks = @()
+            if (-not [string]::IsNullOrWhiteSpace($checkout) -and (Test-Path -LiteralPath $checkout)) {
+              $checkoutLinks = @(Get-RemainingReparsePoints $checkout)
+              foreach ($rp in $checkoutLinks) { $cleanupFailures += "reparse point $($rp.FullName) under the checkout could not be removed; recursive passes on the checkout were skipped" }
+            }
+            $scratchLinks = @()
+            if ($scratchCreated -and (Test-Path -LiteralPath $scratch)) {
+              $scratchLinks = @(Get-RemainingReparsePoints $scratch)
+              foreach ($rp in $scratchLinks) { $cleanupFailures += "reparse point $($rp.FullName) under the scratch root could not be removed; recursive passes on the scratch root were skipped" }
+            }
+
+            # Order matters: strip the links, revoke the ACEs while the SID is
+            # still meaningful, THEN delete the account, THEN the profile and
+            # the scratch root. `icacls` is a native command -- its failure is
+            # an exit code, not a terminating error, so every call is checked
+            # explicitly instead of relying on `catch`.
             if ($accountSid) {
-              $aceTargets = @($checkout)
-              if ($scratchCreated) { $aceTargets += $scratch }
+              $aceTargets = @()
+              if ($checkoutLinks.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($checkout) -and (Test-Path -LiteralPath $checkout)) { $aceTargets += $checkout }
+              if ($scratchCreated -and $scratchLinks.Count -eq 0 -and (Test-Path -LiteralPath $scratch)) { $aceTargets += $scratch }
               foreach ($target in $aceTargets) {
-                if ([string]::IsNullOrWhiteSpace($target) -or -not (Test-Path -LiteralPath $target)) { continue }
                 icacls $target /remove:g "*$accountSid" /T /C /Q | Out-Null
                 if ($LASTEXITCODE -ne 0) {
                   $cleanupFailures += "icacls /remove:g *$accountSid on $target exited $LASTEXITCODE"
@@ -450,39 +506,56 @@ jobs:
             }
 
             if ($scratchCreated) {
-              # Remove reparse points FIRST, link only: a recursive delete here
-              # once followed a test-created junction out of the scratch root and
-              # walked the drive root trying to delete system files. A link that
-              # no longer exists cannot be recursed through. The passes handle a
-              # link nested inside a link; enumeration does not descend into
-              # reparse points.
-              foreach ($pass in 1..5) {
-                $reparse = @(Get-ChildItem -LiteralPath $scratch -Recurse -Force -Attributes ReparsePoint -ErrorAction SilentlyContinue)
-                if ($reparse.Count -eq 0) { break }
-                foreach ($rp in $reparse) {
-                  Write-Host "[lowpriv] teardown: removing reparse point link $($rp.FullName)"
-                  try {
-                    if ($rp.PSIsContainer) { [System.IO.Directory]::Delete($rp.FullName, $false) }
-                    else { [System.IO.File]::Delete($rp.FullName) }
-                  } catch {
-                    if ($pass -eq 5) { $cleanupFailures += "reparse point $($rp.FullName) could not be removed: $($_.Exception.Message)" }
+              # The links were already stripped at the top of this finally
+              # block; the recursive delete runs only on a tree proven
+              # link-free. With surviving links the failure is already recorded
+              # and this recursive pass is skipped -- never run through a live
+              # link.
+              if ($scratchLinks.Count -eq 0) {
+                Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
+                if (Test-Path -LiteralPath $scratch) { $cleanupFailures += "scratch root $scratch is still present" }
+              } else {
+                Write-Host "[lowpriv] teardown: SKIPPED recursive removal of $scratch (reparse points survived link removal)"
+              }
+            }
+
+            # The canary is the negative control for every recursive pass
+            # above: after cleanup, the file's SHA-256 AND a fresh
+            # `icacls /save` of the canary root+file must both be
+            # byte-identical to the pre-cleanup baseline. A missing canary, a
+            # changed hash, or a changed ACL snapshot means a recursive pass
+            # escaped the scratch root and MODIFIED out-of-tree state -- always
+            # a step failure, never a warning.
+            if ($canaryCreated) {
+              $canaryOk = $true
+              if (-not (Test-Path -LiteralPath $canaryFile)) {
+                $cleanupFailures += 'out-of-tree canary is missing: a recursive pass escaped the scratch root'
+                $canaryOk = $false
+              } else {
+                $canaryHashAfter = (Get-FileHash -LiteralPath $canaryFile -Algorithm SHA256).Hash
+                if ($canaryHashAfter -ne $canaryHashBefore) {
+                  $cleanupFailures += "out-of-tree canary content hash changed (expected $canaryHashBefore, got $canaryHashAfter): a recursive pass escaped the scratch root"
+                  $canaryOk = $false
+                }
+                $canaryAclAfter = Join-Path $env:RUNNER_TEMP "byok-lowpriv-canary-$runTag-acl-after.acl"
+                icacls $canary $canaryFile /save $canaryAclAfter /Q | Out-Null
+                if ($LASTEXITCODE -ne 0) {
+                  $cleanupFailures += "out-of-tree canary ACL re-read exited $LASTEXITCODE; out-of-tree ACL preservation is unprovable"
+                  $canaryOk = $false
+                } elseif ([string]::IsNullOrWhiteSpace($canaryAclBefore) -or -not (Test-Path -LiteralPath $canaryAclBefore)) {
+                  $cleanupFailures += "pre-cleanup canary ACL baseline $canaryAclBefore is missing; out-of-tree ACL preservation is unprovable"
+                  $canaryOk = $false
+                } else {
+                  $aclHashBefore = (Get-FileHash -LiteralPath $canaryAclBefore -Algorithm SHA256).Hash
+                  $aclHashAfter = (Get-FileHash -LiteralPath $canaryAclAfter -Algorithm SHA256).Hash
+                  if ($aclHashBefore -ne $aclHashAfter) {
+                    $cleanupFailures += "out-of-tree canary ACL snapshot changed (expected $aclHashBefore, got $aclHashAfter): a recursive pass rewrote out-of-tree ACLs"
+                    $canaryOk = $false
                   }
                 }
               }
-              Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
-              if (Test-Path -LiteralPath $scratch) { $cleanupFailures += "scratch root $scratch is still present" }
-            }
-
-            # The canary is the negative control for the sweep above: if
-            # recursion ever escapes the scratch root through a link, this file
-            # is gone and the teardown fails instead of reporting success.
-            if ($canaryCreated) {
-              $canaryFile = Join-Path $canary 'canary.txt'
-              $canaryValue = "byok-lowpriv canary $runTag"
-              if ((-not (Test-Path -LiteralPath $canaryFile)) -or ((Get-Content -LiteralPath $canaryFile -Raw) -ne $canaryValue)) {
-                $cleanupFailures += 'out-of-tree canary was touched or deleted: teardown recursion escaped the scratch root'
-              } else {
-                Write-Host '[lowpriv] teardown: out-of-tree canary untouched; recursion never left the scratch root'
+              if ($canaryOk) {
+                Write-Host '[lowpriv] teardown: out-of-tree canary content hash AND ACL snapshot byte-identical; no recursive pass left the scratch root'
               }
               Remove-Item -LiteralPath $canary -Recurse -Force -ErrorAction SilentlyContinue
               if (Test-Path -LiteralPath $canary) { $cleanupFailures += "canary root $canary is still present" }
@@ -766,13 +839,15 @@ jobs:
       # Everything this step creates (the account, one scratch root, one granted
       # ACE on the checkout, one out-of-tree canary root behind a junction) lives
       # on this ephemeral runner and is removed in `finally`; the teardown strips
-      # reparse points link-only before any recursive delete, and the canary file
-      # OUTSIDE the scratch root is what proves that recursion never followed a
-      # link out of the tree. Evidence in the job log: the ASSERTED token
+      # reparse points link-only before ANY recursive pass (icacls /T or
+      # recursive delete), and the canary file OUTSIDE the scratch root -- its
+      # SHA-256 and its `icacls /save` ACL baseline -- is what proves that no
+      # recursive pass followed a link out of the tree, in content or in ACLs.
+      # Evidence in the job log: the ASSERTED token
       # membership and integrity label, two negative controls,
       # `trusted-launch-cwd.test.ts` passing (its own negative control is what
       # keeps that from being vacuous), `[release-pack] installed Pi...`/
-      # `[packed-cli-mcp] ... passed`, the surviving canary, and the ABSENCE of
+      # `[packed-cli-mcp] ... passed`, the content-and-ACL-identical canary, and the ABSENCE of
       # `task.decline`, `asserted fail-closed refusal instead`, and
       # `launch boundary unprovable`.
       - name: Check graph, pack, and install as a freshly created NON-administrator local user
@@ -950,6 +1025,29 @@ jobs:
           Write-Host "[lowpriv] account=$account scratch=$scratch canary=$canary checkout=$checkout"
           Write-Host "[lowpriv] node dir=$nodeHome bun=$bunSrc"
 
+          # Link-only reparse point removal, several passes (a link nested
+          # inside a link frees the inner one only when the outer link is
+          # deleted). Returns the reparse points still present under $root once
+          # the passes are exhausted -- an empty list means the tree is
+          # link-free and safe for recursive passes. Enumeration never descends
+          # into reparse points, so the scan itself cannot escape the tree.
+          function Get-RemainingReparsePoints([string]$root) {
+            for ($pass = 1; $pass -le 5; $pass++) {
+              $reparse = @(Get-ChildItem -LiteralPath $root -Recurse -Force -Attributes ReparsePoint -ErrorAction SilentlyContinue)
+              if ($reparse.Count -eq 0) { return @() }
+              foreach ($rp in $reparse) {
+                Write-Host "[lowpriv] teardown: removing reparse point link $($rp.FullName)"
+                try {
+                  if ($rp.PSIsContainer) { [System.IO.Directory]::Delete($rp.FullName, $false) }
+                  else { [System.IO.File]::Delete($rp.FullName) }
+                } catch {
+                  if ($pass -eq 5) { Write-Host "[lowpriv] teardown: link removal failed for $($rp.FullName): $($_.Exception.Message)" }
+                }
+              }
+            }
+            return @(Get-ChildItem -LiteralPath $root -Recurse -Force -Attributes ReparsePoint -ErrorAction SilentlyContinue)
+          }
+
           $created = $false
           $accountSid = $null
           $scratchCreated = $false
@@ -985,15 +1083,25 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "icacls grant on $checkout failed ($LASTEXITCODE)" }
 
             # Out-of-tree canary: the junction below points OUTSIDE the scratch
-            # root. If teardown recursion ever follows a link out of the tree,
-            # this file dies with the trip and the teardown fails instead of
-            # silently crawling the filesystem outside the scratch root.
+            # root. If a recursive pass ever follows a link out of the tree, the
+            # canary's bytes or its ACLs stop matching the pre-cleanup baseline
+            # below and the teardown fails instead of silently crawling the
+            # filesystem outside the scratch root. The baseline pins BOTH the
+            # file content (SHA-256) and the ACLs (`icacls /save` of the canary
+            # root + file); the snapshot lives in RUNNER_TEMP, never under the
+            # scratch root or the canary itself, so an escaped traversal cannot
+            # destroy its own evidence.
             if (Test-Path -LiteralPath $canary) { throw "canary root $canary already exists; refusing to adopt or delete a path this run did not create" }
             New-Item -ItemType Directory -Path $canary | Out-Null
             $canaryCreated = $true
-            Set-Content -LiteralPath (Join-Path $canary 'canary.txt') -Value "byok-lowpriv canary $runTag" -NoNewline
+            $canaryFile = Join-Path $canary 'canary.txt'
+            Set-Content -LiteralPath $canaryFile -Value "byok-lowpriv canary $runTag" -NoNewline
+            $canaryHashBefore = (Get-FileHash -LiteralPath $canaryFile -Algorithm SHA256).Hash
             New-Item -ItemType Junction -Path (Join-Path $scratch 'canary-link') -Target $canary | Out-Null
-            Write-Host "[lowpriv] canary: $canary linked at $(Join-Path $scratch 'canary-link')"
+            $canaryAclBefore = Join-Path $env:RUNNER_TEMP "byok-lowpriv-canary-$runTag-acl-before.acl"
+            icacls $canary $canaryFile /save $canaryAclBefore /Q
+            if ($LASTEXITCODE -ne 0) { throw "icacls /save on the canary exited $LASTEXITCODE; refusing cleanup without a provable out-of-tree baseline" }
+            Write-Host "[lowpriv] canary: $canary linked at $(Join-Path $scratch 'canary-link'); acl baseline $canaryAclBefore; sha256 $canaryHashBefore"
 
             New-Item -ItemType Directory -Force -Path "$scratch\tools", "$scratch\logs" | Out-Null
             # bun lives under the administrator's profile, which this account cannot execute.
@@ -1033,15 +1141,38 @@ jobs:
               Write-Host "===== end $(Split-Path -Leaf $logFile) ====="
             }
           } finally {
-            # Order matters: revoke the ACEs while the SID is still meaningful, THEN
-            # delete the account, THEN the profile and the scratch root. `icacls` is a
-            # native command -- its failure is an exit code, not a terminating error,
-            # so every call is checked explicitly instead of relying on `catch`.
+            # Reparse points FIRST, before ANY recursive pass over either tree.
+            # Confirmed windows-latest defect: the recursive icacls /remove:g /T
+            # below used to run while junctions created under the scratch tree
+            # still existed, and icacls /T follows them -- CI logs show the
+            # traversal escaping through a root link to out-of-tree targets
+            # (System Volume Information access errors). A link that no longer
+            # exists cannot be recursed through. A tree whose links cannot all
+            # be removed gets NO recursive pass at all (no icacls /T, no
+            # Remove-Item -Recurse): the leftover link is recorded as a teardown
+            # failure instead of walking outside the tree. Unrelated steps
+            # (account/profile deletion) keep their best-effort semantics.
+            $checkoutLinks = @()
+            if (-not [string]::IsNullOrWhiteSpace($checkout) -and (Test-Path -LiteralPath $checkout)) {
+              $checkoutLinks = @(Get-RemainingReparsePoints $checkout)
+              foreach ($rp in $checkoutLinks) { $cleanupFailures += "reparse point $($rp.FullName) under the checkout could not be removed; recursive passes on the checkout were skipped" }
+            }
+            $scratchLinks = @()
+            if ($scratchCreated -and (Test-Path -LiteralPath $scratch)) {
+              $scratchLinks = @(Get-RemainingReparsePoints $scratch)
+              foreach ($rp in $scratchLinks) { $cleanupFailures += "reparse point $($rp.FullName) under the scratch root could not be removed; recursive passes on the scratch root were skipped" }
+            }
+
+            # Order matters: strip the links, revoke the ACEs while the SID is
+            # still meaningful, THEN delete the account, THEN the profile and
+            # the scratch root. `icacls` is a native command -- its failure is
+            # an exit code, not a terminating error, so every call is checked
+            # explicitly instead of relying on `catch`.
             if ($accountSid) {
-              $aceTargets = @($checkout)
-              if ($scratchCreated) { $aceTargets += $scratch }
+              $aceTargets = @()
+              if ($checkoutLinks.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($checkout) -and (Test-Path -LiteralPath $checkout)) { $aceTargets += $checkout }
+              if ($scratchCreated -and $scratchLinks.Count -eq 0 -and (Test-Path -LiteralPath $scratch)) { $aceTargets += $scratch }
               foreach ($target in $aceTargets) {
-                if ([string]::IsNullOrWhiteSpace($target) -or -not (Test-Path -LiteralPath $target)) { continue }
                 icacls $target /remove:g "*$accountSid" /T /C /Q | Out-Null
                 if ($LASTEXITCODE -ne 0) {
                   $cleanupFailures += "icacls /remove:g *$accountSid on $target exited $LASTEXITCODE"
@@ -1073,39 +1204,56 @@ jobs:
             }
 
             if ($scratchCreated) {
-              # Remove reparse points FIRST, link only: a recursive delete here
-              # once followed a test-created junction out of the scratch root and
-              # walked the drive root trying to delete system files. A link that
-              # no longer exists cannot be recursed through. The passes handle a
-              # link nested inside a link; enumeration does not descend into
-              # reparse points.
-              foreach ($pass in 1..5) {
-                $reparse = @(Get-ChildItem -LiteralPath $scratch -Recurse -Force -Attributes ReparsePoint -ErrorAction SilentlyContinue)
-                if ($reparse.Count -eq 0) { break }
-                foreach ($rp in $reparse) {
-                  Write-Host "[lowpriv] teardown: removing reparse point link $($rp.FullName)"
-                  try {
-                    if ($rp.PSIsContainer) { [System.IO.Directory]::Delete($rp.FullName, $false) }
-                    else { [System.IO.File]::Delete($rp.FullName) }
-                  } catch {
-                    if ($pass -eq 5) { $cleanupFailures += "reparse point $($rp.FullName) could not be removed: $($_.Exception.Message)" }
+              # The links were already stripped at the top of this finally
+              # block; the recursive delete runs only on a tree proven
+              # link-free. With surviving links the failure is already recorded
+              # and this recursive pass is skipped -- never run through a live
+              # link.
+              if ($scratchLinks.Count -eq 0) {
+                Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
+                if (Test-Path -LiteralPath $scratch) { $cleanupFailures += "scratch root $scratch is still present" }
+              } else {
+                Write-Host "[lowpriv] teardown: SKIPPED recursive removal of $scratch (reparse points survived link removal)"
+              }
+            }
+
+            # The canary is the negative control for every recursive pass
+            # above: after cleanup, the file's SHA-256 AND a fresh
+            # `icacls /save` of the canary root+file must both be
+            # byte-identical to the pre-cleanup baseline. A missing canary, a
+            # changed hash, or a changed ACL snapshot means a recursive pass
+            # escaped the scratch root and MODIFIED out-of-tree state -- always
+            # a step failure, never a warning.
+            if ($canaryCreated) {
+              $canaryOk = $true
+              if (-not (Test-Path -LiteralPath $canaryFile)) {
+                $cleanupFailures += 'out-of-tree canary is missing: a recursive pass escaped the scratch root'
+                $canaryOk = $false
+              } else {
+                $canaryHashAfter = (Get-FileHash -LiteralPath $canaryFile -Algorithm SHA256).Hash
+                if ($canaryHashAfter -ne $canaryHashBefore) {
+                  $cleanupFailures += "out-of-tree canary content hash changed (expected $canaryHashBefore, got $canaryHashAfter): a recursive pass escaped the scratch root"
+                  $canaryOk = $false
+                }
+                $canaryAclAfter = Join-Path $env:RUNNER_TEMP "byok-lowpriv-canary-$runTag-acl-after.acl"
+                icacls $canary $canaryFile /save $canaryAclAfter /Q | Out-Null
+                if ($LASTEXITCODE -ne 0) {
+                  $cleanupFailures += "out-of-tree canary ACL re-read exited $LASTEXITCODE; out-of-tree ACL preservation is unprovable"
+                  $canaryOk = $false
+                } elseif ([string]::IsNullOrWhiteSpace($canaryAclBefore) -or -not (Test-Path -LiteralPath $canaryAclBefore)) {
+                  $cleanupFailures += "pre-cleanup canary ACL baseline $canaryAclBefore is missing; out-of-tree ACL preservation is unprovable"
+                  $canaryOk = $false
+                } else {
+                  $aclHashBefore = (Get-FileHash -LiteralPath $canaryAclBefore -Algorithm SHA256).Hash
+                  $aclHashAfter = (Get-FileHash -LiteralPath $canaryAclAfter -Algorithm SHA256).Hash
+                  if ($aclHashBefore -ne $aclHashAfter) {
+                    $cleanupFailures += "out-of-tree canary ACL snapshot changed (expected $aclHashBefore, got $aclHashAfter): a recursive pass rewrote out-of-tree ACLs"
+                    $canaryOk = $false
                   }
                 }
               }
-              Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
-              if (Test-Path -LiteralPath $scratch) { $cleanupFailures += "scratch root $scratch is still present" }
-            }
-
-            # The canary is the negative control for the sweep above: if
-            # recursion ever escapes the scratch root through a link, this file
-            # is gone and the teardown fails instead of reporting success.
-            if ($canaryCreated) {
-              $canaryFile = Join-Path $canary 'canary.txt'
-              $canaryValue = "byok-lowpriv canary $runTag"
-              if ((-not (Test-Path -LiteralPath $canaryFile)) -or ((Get-Content -LiteralPath $canaryFile -Raw) -ne $canaryValue)) {
-                $cleanupFailures += 'out-of-tree canary was touched or deleted: teardown recursion escaped the scratch root'
-              } else {
-                Write-Host '[lowpriv] teardown: out-of-tree canary untouched; recursion never left the scratch root'
+              if ($canaryOk) {
+                Write-Host '[lowpriv] teardown: out-of-tree canary content hash AND ACL snapshot byte-identical; no recursive pass left the scratch root'
               }
               Remove-Item -LiteralPath $canary -Recurse -Force -ErrorAction SilentlyContinue
               if (Test-Path -LiteralPath $canary) { $cleanupFailures += "canary root $canary is still present" }
