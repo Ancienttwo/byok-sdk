@@ -6,7 +6,7 @@
 
 - 领域模型与权威边界 ADR-026 – ADR-034（2026-09-03）：[`adr-2026-09-03-domain-model-and-authority.md`](adr-2026-09-03-domain-model-and-authority.md)；帐本行见 `sdk-architecture.md` 附录 A
 - Public package topology ADR-035（2026-09-05）：[`adr-2026-09-05-public-package-topology.md`](adr-2026-09-05-public-package-topology.md)
-- Pi 运行来源 ADR-036（2026-09-19）：[`adr-2026-09-19-official-pi-runtime-source.md`](adr-2026-09-19-official-pi-runtime-source.md)；迁移计划 `plans/plan-20260919-1603-official-pi-migration.md`，证据见 `docs/researches/2026-09-19-official-pi-*.md`
+- Pi 运行来源 ADR-036（2026-09-19）：[`adr-2026-09-19-official-pi-runtime-source.md`](adr-2026-09-19-official-pi-runtime-source.md)；**迁移状态与门槛见 `sdk-architecture.md` 附录 B**；迁移计划 `plans/plan-20260919-1603-official-pi-migration.md`，证据见 `docs/researches/2026-09-19-official-pi-*.md`
 
 ## Current Snapshot
 

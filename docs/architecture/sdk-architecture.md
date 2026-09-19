@@ -2254,3 +2254,32 @@ control-plane compositions. Hosts can recover pending/held/refused without a
 prior accepted body or a reliable observer notification. Received payload stays
 untrusted; Host acceptance remains the sole transcript writer. This is a read
 boundary over existing storage, with no wire/session/home ownership change.
+
+## 附录 B：Pi 运行来源迁移状态（ADR-036）
+
+> 状态：**目标设计已裁定、实现被上游门槛挡住**。本节记录当前事实与门槛，不把目标状态写成现状。权威裁定见 `docs/architecture/adr-2026-09-19-official-pi-runtime-source.md`；全部量化证据见 `docs/researches/2026-09-19-official-pi-*.md`。
+
+### B.1 当前事实（未变）
+
+- 活动运行依赖仍是自维护 fork：`packages/client/package.json` 把 `@earendil-works/pi-coding-agent` / `@earendil-works/pi-ai` 指向 `npm:@byok-sdk/pi-*` 别名；本表不改变它。
+- fork 专有面**只**集中在 prepared-input 路径：生产源码 3 文件 / 10 import（`adapters/pi/input-preparation.ts` 8、`daemon/input-preparation-service.ts` 1、`src/types.ts` 1）。会话组装、RPC host、MCP 工具桥接、装载 allowlist 已只用官方公开面（探针 P01/P05/P06 行为验证）。该数字由 `bun run check:pi-fork-surface` 守卫，**只允许下降**。
+
+### B.2 目标和它的门槛
+
+目标：官方未修改发行包 + BYOK 小型适配层，身份以发行事实（exact version + integrity + 实际 exports + 依赖闭包）绑定（ADR-036）。
+
+门槛经实测收敛为 **一个上游类型面决定**：
+
+| 环节 | 状态 |
+|---|---|
+| 复现会话首请求 | **已证可行**——公开入口 5/5 sections、4/4 工具逐字节相等；同 serializer 用极简 options 复现 body（6123 字节，diff 空） |
+| 编译冻结请求 / 覆盖证明 / 漂移拒绝 | **已实现**（`adapters/pi/prepared-request.ts`、`request-shape.ts`，含单测） |
+| host 断言 assistant 文本（运行时） | 缺 5 行 guard（已实测；上游未落地） |
+| host 断言 assistant 文本（**类型面**） | **未落地**——官方 `AssistantMessage` 必填 provenance，嵌入方只能 cast（伪造）或取消该能力（静默降级，INV-14 禁止）。两种形状代价已量：联合成员 146 处 / 放宽字段 256 处 |
+| RPC 帧上限助手 | 属运行时属性，需上游导出（本地副本会成第二权威） |
+
+### B.3 因此当前不做什么
+
+- **不切换产品依赖**：在类型面落地前切换，会让 prepared 从「可用」变成「不可用」，属 §14.4 与 ADR-036 明令禁止的静默降级。
+- **不引入双运行线**：不建 `pi-official` / `pi-fork` 两套模式，也不做双 runtime 路由。
+- **不预先改写本节为完成态**：依赖、身份 gate、fixture 期望与 §11 缺口帐本在 OP5 落地时一并更新；`check:pi-fork-surface` 的计数开始下降，才是退役起点的可观测标志。
