@@ -102,11 +102,20 @@ provider-level message above matters: the error exists, it is just not raised.
 | control (no host history) | 1 | no throw | includes `message_update` |
 | injected host text | **0** | no throw | only `message_start`/`message_end` |
 
-### Verified: reproducing a session's first request needs no new API
+### Verified: the tool half of reproducing a session's first request needs no new API
 
-We expected to have to ask for a new public entry here, and we do not. The
-derived prompt state of a session's first request reproduces **5 of 5 sections
-byte-for-byte** using only exports from the package root:
+Half of this needs nothing new, and we want to be precise about which half.
+
+The per-tool definition factories are exported from the package root, and the
+tool declarations a session sends reproduce **four for four** on description and
+parameters using only public entries.
+
+The prompt sections are the other half: with the projection available, the
+derived prompt state reproduces **5 of 5 sections byte-for-byte**; without it, a
+consumer cannot render the prompt text at all. `getSystemMessageText` is already
+public from `@earendil-works/pi-ai`, but `buildSystemPromptSections` and
+`buildSystemPromptState` are not exported from the coding-agent package root, so
+that is the one export we are asking for above.
 
 | section | session | rebuild through public entries |
 |---|---|---|

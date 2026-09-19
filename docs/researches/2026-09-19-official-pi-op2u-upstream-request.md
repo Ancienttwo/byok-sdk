@@ -610,4 +610,22 @@ OP5 的最后一处未知是身份 gate。实测其导出面与消费者：
 3. RPC 帧上限助手（纯导出）
 4. **提示渲染器公开**（`renderSystemPrompt`），或重钉到已公开 `buildSystemPromptSections`/`getSystemMessageText` 的版本
 
+### 第 4 项的精确化，以及 §14「不需要新 API」的更正（2026-09-19）
+
+进一步核对两个包的**包根导出**：
+
+| 环节 | 公开可达性 |
+|---|---|
+| `getSystemMessageText`（把 system 消息状态渲染成文本） | **公开**——`pi-ai` 根导出（`packages/ai/src/index.ts:45`） |
+| per-tool definition 工厂（`createReadToolDefinition` 等） | **公开**——`coding-agent` 根导出 |
+| **`buildSystemPromptSections` / `buildSystemPromptState`** | **不公开**——`coding-agent` 的 `src/index.ts`（440 行）里**没有**任何 `system-prompt` 相关导出；它们只存在于内部源码模块 |
+| `renderSystemPrompt`（fork 侧） | 同样不公开（模块不在 `exports` 映射） |
+
+这修正了一处**我自己的过度声明**：§14 写「复现会话首请求不需要新 API」时，实验里 `buildSystemPromptSections` 是从 upstream **源码相对路径**导入的——这在一个已发布包的消费者侧做不到。准确的表述是：
+
+- **工具一半**确实只需公开入口（per-tool definition 工厂 + `streamSimple`）；
+- **提示一半** 需要一个尚未公开的导出。
+
+因此第 4 项不是「重钉就能自动解决」：`main` 的包根同样没有这些导出，重钉只改变形状、不改变可达性。精确的请求因此是**导出 `buildSystemPromptSections`（与 `buildSystemPromptState`）**——纯函数、无行为变更，且有了它之后 5/5 sections 就能像实验中那样经公开入口复现。
+
 这也直接解释了为什么 **OP2 接线今天不能开工**：在 guard 与类型面同时到位之前，接线的任一刀都只能靠 cast 或取消 host 历史之一——前者伪造语义，后者是把已承诺能力静默降级（INV-14 禁止）。

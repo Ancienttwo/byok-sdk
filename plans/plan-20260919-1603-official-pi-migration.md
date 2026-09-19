@@ -45,6 +45,8 @@
 
 映射就绪后，第 2 步（等价性测试）与第 3–4 步（替换与删除 fork import）才可按原文顺序推进。
 
+**第 4 项精确化（2026-09-19 晚些核查）**：`getSystemMessageText` **已公开**（`pi-ai` 根导出）；缺的只是 `coding-agent` 侧的 `buildSystemPromptSections` / `buildSystemPromptState`（其 `src/index.ts` 440 行里无任何 `system-prompt` 导出）。因此请求精确为「导出这两个纯函数」，而**重钉并不能自动解决**（`main` 包根同样没有）。
+- 同时更正 §14 的过度声明：实验里 `buildSystemPromptSections` 用的是 upstream **源码相对路径**，消费者做不到。准确表述 = **工具一半只需公开入口；提示一半需要一个新导出**。
 **上游依赖说明（2026-09-19 更正）**：切片 A **只对了一半**——编译段不依赖上游（新核心 + 官方 provider adapter 足够），但**提示文本的来源依赖上游公开面**：当前 fork 能 `projectSystemPromptSnapshot` 却**不能 `renderSystemPrompt`**（该模块不在 `exports`，`/input-preparation` 也没 re-export 它）；新版 `main` 已公开 `buildSystemPromptSections` + `getSystemMessageText`。因此上游清单更新为**四项**（加入「提示渲染器公开」），且这是**重钉目标的又一强理由**。
 **上游依赖说明**：切片 A 本身**不依赖**上游（新核心用 `unknown[]` 边界接收消息，既不 cast 也不伪造，host 历史的既有实现可原样保留在 fork runtime 上）；上游类型面落地影响的是**切换 runtime 之后**能否继续表达 host 历史，属切片 B/OP5 的前置。
 

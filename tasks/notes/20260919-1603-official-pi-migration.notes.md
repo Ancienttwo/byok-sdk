@@ -275,3 +275,11 @@ BYOK 现在的投影函数（`input-preparation.ts:366-379`，把 host 文本构
 也就是说当前依赖上，BYOK 能构造结构化 prompt 快照却无法渲染成文本（渲染只在 fork 编译内部）。新版 `main` 公开了 `buildSystemPromptSections` + `getSystemMessageText`，正是这一半的替代。
 
 **更正**：上一轮「切片 A 不依赖上游」只对了一半——编译段不依赖，提示文本来源依赖。上游清单更新为四项（新增「提示渲染器公开」），并为「重钉目标版本」再添一条理由。
+
+## 第 4 项精确化 + 更正自己的过度声明（2026-09-19）
+
+核对两个包的**包根导出**：`getSystemMessageText` **公开**（`pi-ai` 根，`packages/ai/src/index.ts:45`）；per-tool definition 工厂**公开**；但 `buildSystemPromptSections` / `buildSystemPromptState` **不公开**（`coding-agent` 的 `src/index.ts` 440 行里无任何 `system-prompt` 导出），fork 侧的 `renderSystemPrompt` 亦然。
+
+**更正**：§14 写「复现会话首请求不需要新 API」时，实验里 `buildSystemPromptSections` 是从 upstream **源码相对路径**导入的——已发布包的消费者做不到。准确表述：**工具一半只需公开入口（4/4 已证），提示一半需要一个新导出**。
+
+结论：第 4 项请求精确为「导出 `buildSystemPromptSections` / `buildSystemPromptState`」，且**重钉不能自动解决**（`main` 包根同样没有）——重钉只改形状、不改可达性。
