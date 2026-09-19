@@ -101,6 +101,8 @@ allowed_paths:
   - docs/architecture/index.md
   - docs/architecture/sdk-architecture.md
   # OP3 方向的可执行护栏：fork 专有 import 只能减少
+  - packages/client/src/adapters/pi/prepared-request.ts
+  - packages/client/src/__tests__/prepared-request.test.ts
   - packages/client/src/adapters/pi/request-shape.ts
   - packages/client/src/__tests__/request-shape.test.ts
   - scripts/release/check-pi-fork-surface.mjs
@@ -268,12 +270,12 @@ exit_criteria:
     {
       "id": "request-shape-test",
       "kind": "command",
-      "command": "cd packages/client && bun x vitest run src/__tests__/request-shape.test.ts",
+      "command": "cd packages/client && bun x vitest run src/__tests__/request-shape.test.ts src/__tests__/prepared-request.test.ts",
       "cwd": ".",
       "phase": "verification",
       "cost": "normal",
       "evidence_policy": "current_exact",
-      "necessity": "G-B drift detection must refuse unknown request keys instead of counting approximately.",
+      "necessity": "Request-shape drift detection and the prepared-request compile/verify core must both hold: unknown keys refused, frozen bytes reproducible, drift rejected.",
       "inputs": {
         "env": []
       }
