@@ -127,16 +127,16 @@ second acceptance ledger:
 | Host composition requirements (approved) | [Conversation-turn Fresh MVP PRD](docs/researches/2026-09-09_conversation-turn-fresh-mvp-prd.md) and the [Host Reliability Addendum](docs/researches/2026-09-09_conversation-turn-mode-host-reliability-addendum.md) |
 | Design history | [Original design draft](docs/researches/2026-09-09_conversation-turn-mode-design.md) — historical draft; its open questions, hybrid/resume outlook, and simplified completion bridge are superseded (see the qualifier at its top) |
 | Sole acceptance ledger | [Salesko Host reliability Sprint plan](https://github.com/Ancienttwo/salesko-new/blob/codex/recurring-sdk-adoption-test/plans/plan-20260909-private-agent-chat-host-reliability-sprints.md) (external repo, draft branch), with the [SDK-first plan](plans/plan-20260910-conversation-turn-sdk-first.md) as the in-repo stage entry |
-| Active PRs | byok-sdk: #191, #201, #202, #203 (open, unmerged); Salesko integration: draft PR #241 |
+| Active PRs | byok-sdk: #191 (open, unmerged); Salesko integration: draft PR #241 |
 
 Status rows, each bound to a source SHA, artifact, or CI evidence; 未验收
 means not accepted, and no overall percentage is defined:
 
 | Dimension | Status | Bound to |
 |---|---|---|
-| main implementation | Merged | `main` @ `a6c5a297` (2026-09-18): recurring input, exact message disposition and fresh egress per the spec section above; #193 C07 Pi runtime launch (`d882aef4`), #198 Windows CI elimination (`49ec7477`), #199 custody five-edge enablement (`e0423d84`), #200 N1 external-CLI admission gate (`ec1cea36`) |
-| Open candidates | Unmerged | #191 (draft: MCP launch-cwd boundary), #201 (reserved agent-message tool grants), #202 (Pi fork pin 0.85.1006 / S2 clipboard tripwire), #203 (WP5 S2 CI flip); Salesko draft PR #241 |
-| Published packages | 0.17.0 stable published | [0.17.0 publication record](docs/releases/v0.17.0-publication.md) (SDK 0.17.0, keys 0.4.3); 0.18.0 / keys 0.5.0 remain unpublished release candidates ([handoff](docs/releases/v0.18.0-handoff.md)); Pi fork pin `@byok-sdk/pi-coding-agent@0.85.1005` in `packages/client/package.json` |
+| main implementation | Merged | `main` @ `26945c8a` (2026-09-19): recurring input, exact message disposition and fresh egress per the spec section above; #193 C07 Pi runtime launch (`d882aef4`), #198 Windows CI elimination (`49ec7477`), #199 custody five-edge enablement (`e0423d84`), #200 N1 external-CLI admission gate (`ec1cea36`); 2026-09-19 batch — #201 reserved agent-message grants, #202 Pi fork pin 1006 / S2 clipboard tripwire, #203 WP5 S2 CI flip (strict bun + real-chain monitor control), #204 #196 durable recurring smoke (embedded roundtrip + crash window), #205 docs authority navigation (#197), #206 WinSW uninstall image-lock retry, #207 Windows link-first cleanup + out-of-tree canary |
+| Open candidates | Unmerged | #191 (draft: MCP launch-cwd boundary); Salesko draft PR #241 |
+| Published packages | 0.17.0 stable published | [0.17.0 publication record](docs/releases/v0.17.0-publication.md) (SDK 0.17.0, keys 0.4.3); 0.18.0 / keys 0.5.0 remain unpublished release candidates ([handoff](docs/releases/v0.18.0-handoff.md)); Pi fork pin `@byok-sdk/pi-coding-agent@0.85.1006` in `packages/client/package.json` (pi-ai / agent-core remain at 0.85.1005 in that partial release) |
 | Real Host integration | In progress, not accepted | Salesko Sprint ledger: K5 in progress, K7 incomplete; A01–A29 at 24 LOCAL_PASS / 5 BLOCKED at the latest recorded checkpoint. Host-side subjects and evidence live in that ledger, not here |
 | Native / production acceptance | 未验收 | Target-runtime S9 not executed; aiphabee (K6) paused by owner decision; no production migration, deployment, or paid-runtime acceptance |
 
@@ -151,10 +151,9 @@ used as implementation guidance.
 
 Still open, tracked separately (not "pending freeze"): first-request token
 accounting and the enablement gate (#194), Host ContextPack → same-home
-Summary → fresh reply integration acceptance (#195), recurring packed-smoke
-positive recovery readback (#196), reserved agent-message tool grants (#180,
-candidate #201), budget/disclosure/quality/storage inputs (PRD §9.3–§9.5),
-and native runtime acceptance (S9).
+Summary → fresh reply integration acceptance (#195), budget/disclosure/
+quality/storage inputs (PRD §9.3–§9.5), and native runtime acceptance (S9).
+#196 closed via #204; #180/#201 merged 2026-09-19.
 
 Reading reused evidence: a historical run counts only for its original
 subject, verified by SHA before reuse. For example, the SDK artifact
