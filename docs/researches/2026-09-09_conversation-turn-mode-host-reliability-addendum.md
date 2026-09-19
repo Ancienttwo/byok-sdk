@@ -6,6 +6,8 @@
 > 本文依据上一轮对 BYOK / Salesko 的源码观察与本轮反馈整理。本轮未重新读取 checkout、未运行测试；源码定位不是本轮新验收证据。
 > 确认来源：用户在 B1-A、B2、B3、D05 与 scope 边界收敛建议后回复“批准”。本次同步文档；不扩张为 S1–S6 产品改码、迁移、发布或部署授权。
 
+> **历史状态限定（2026-09-19 导航补注；以下历史正文保持原样）**：头部的「参数与历史纳入细则待冻结」是 2026-09-09 时点状态，已被后续文档部分收口。已冻结（不再是 open 项）：容量 `maxUnsettledTurnsPerConversation = 8`、已结算无回复输入纳入带状态历史（PRD D03/§5.1）、同 home strict fresh → result-document Summary 路径、accepted 严格后于 Host 事务原子提交。仍未冻结并单独跟踪的：PRD §9.3 目标 runtime/独立预算、§9.4 披露/质量、§9.5 存储/retention、S9 native 验收（分账见 [Fresh MVP PRD §13](./2026-09-09_conversation-turn-fresh-mvp-prd.md)）。实现与验收进度以 [Salesko Sprint 账本](https://github.com/Ancienttwo/salesko-new/blob/codex/recurring-sdk-adoption-test/plans/plan-20260909-private-agent-chat-host-reliability-sprints.md) 为唯一账本；当前状态总览见 [README 状态表](../../README.md#conversation-turn-mode-current-status-and-authoritative-path)。
+
 ## 0. 与原 packet 的关系
 
 产品权威仍为 `docs/spec.md`。本补页是已确认的 Host composition 输入，不自行覆盖产品 spec。与旧 packet 的 Host 语义冲突时采用本补页；产品 spec 的拟议变更仍需在相应实施契约中同步。

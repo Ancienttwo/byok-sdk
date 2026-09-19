@@ -4,6 +4,13 @@
 > Scope repo: `byok-sdk` · Machine copy: kitos-Mac-mini `/Users/kito/Projects/byok-sdk`  
 > Related: Agent home / MEMORY plans, `agent-message-egress`, fresh vs resume egress, Live Activity Timeline boundary
 
+> **历史状态限定（2026-09-19 导航补注；以下历史正文保持原样）**：本文是最初 draft 设计，下文的 Q1–Q4 open 清单、未完成 decision-packet 清单、B/C continuity（resume/hybrid）展望与 `accepted → host appends body` 简化完成桥都是历史草案表述，不是当前实现指南：
+>
+> - Q1–Q4 已由 [decision packet](./2026-09-09_conversation-turn-mode-decision-packet.md)（2026-09-09 owner 裁决）关闭：MVP 冻结为 A（每 turn fresh + Host ContextPack）；resume 只是具名后续边界，失败必须显式失败，不自动切换模式；当前 fresh MVP 不因本文的 hybrid/resume 展望自动改变模式。
+> - 完成语义已由 [Host Reliability Addendum](./2026-09-09_conversation-turn-mode-host-reliability-addendum.md) 修正：Host 在返回 `accepted` 之前原子提交正文、精确消息身份与接受结果；简化的 `accepted → host appends body` 箭头不得作为实现指南。
+> - 已冻结决定（容量 8、已结算无回复历史、同 home strict fresh/result-document Summary）与剩余 open 项（预算/披露/质量/存储/native）的分账见 [Fresh MVP PRD](./2026-09-09_conversation-turn-fresh-mvp-prd.md)；当前实现/候选/发布/Host 接入/native 验收状态见 [README 状态表](../../README.md#conversation-turn-mode-current-status-and-authoritative-path)；验收以 [Salesko Sprint 账本](https://github.com/Ancienttwo/salesko-new/blob/codex/recurring-sdk-adoption-test/plans/plan-20260909-private-agent-chat-host-reliability-sprints.md) 为唯一账本。
+> - 「Grok Bot–like」仅为目标体验对照，未独立核验任何第三方的内部存储、生命周期或 exactly-once 实现。
+
 ## Goal
 
 Add a **continuous multi-agent conversation** product mode (Grok Bot–like long threads, memory, agent-to-agent messaging) **without** inventing a second Agent runtime inside BYOK.

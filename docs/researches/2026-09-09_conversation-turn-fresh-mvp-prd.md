@@ -5,6 +5,7 @@
 > 权威关系：[docs/spec.md](../spec.md) 是 BYOK 产品权威；Salesko spec 定义其产品行为。本 PRD 整理 Host composition 需求，实施路径由既有契约约束，详细任务和验收结果只在 §13 的 Salesko Sprint 账本维护。本文不另建 SDK Conversation authority。
 > 来源：owner 提供的 GPT Pro / Claude 回复与原 decision packet、Host Reliability Addendum、GPT Pro handoff。历史文件未随本次导入，不以缺失的相对链接代替可读依据。原始本地 PRD SHA-256：`f3f4b1dd817e4c5de06c943d3ea2b409aa5a4e39d05cb32734704ceff7d4c1af`；原件保持不变。本版按后续批准的 SDK-first 方向与具体实施契约修订，差异见 §15。
 > 已授权的隔离实现和本地验收继续按既有 Sprint 执行；本次文档同步不增加 merge、发布、生产迁移、部署或真实付费 runtime 授权。源码、合成 runtime、packed artifact 与生产证据分开记录。
+> 当前 main 实现 / open 候选 / 已发布包 / 真实 Host 接入 / native 生产验收的分账状态表：[README「Conversation-turn mode: current status and authoritative path」](../../README.md#conversation-turn-mode-current-status-and-authoritative-path)。
 
 ## 1. 产品结论与问题
 
