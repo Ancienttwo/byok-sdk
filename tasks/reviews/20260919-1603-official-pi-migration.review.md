@@ -5,8 +5,8 @@
 > **Contract**: tasks/contracts/20260919-1603-official-pi-migration.contract.md
 > **Notes File**: tasks/notes/20260919-1603-official-pi-migration.notes.md
 > **Checks File**: `.ai/harness/checks/latest.json`
-> **Last Updated**: 2026-09-19 16:40
-> **Recommendation**: pass（OP0 证据面切片；G1 未裁定，故 OP1 仍未闭合）
+> **Last Updated**: 2026-09-19 17:05
+> **Recommendation**: pass（OP0 证据面 + OP1 探针面；G1 已裁定为第二档）
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: pending（切分支入库时记录）
 > **Reviewed Subject Scope**: normalized-final-content
@@ -14,7 +14,7 @@
 
 ## Human Review Card
 
-- Verdict: pass（OP0 = 发行基线冻结 + fork delta map + 隔离安装验证；本切片不切产品依赖）
+- Verdict: pass（OP0 = 发行基线冻结 + fork delta map + 隔离安装验证；OP1 = 五项 probe + G1 裁定；本切片不切产品依赖）
 - Change type: migration（OP0 证据面 + OP1 probe 面；本切片不切产品依赖）
 - Intended files changed: plan（规范化登记）、contract/review/notes 三件套、`docs/researches/` OP0 两份证据产物
 - Actual files changed: `plans/plan-20260919-1603-official-pi-migration.md`、`tasks/contracts|reviews|notes/20260919-1603-official-pi-migration.*`、`docs/researches/2026-09-19-official-pi-baseline.json`、`docs/researches/2026-09-19-official-pi-fork-delta-map.md`；`tasks/current.md` 为 harness 本地 read model（gitignored 内容变更）
@@ -27,16 +27,22 @@
 - F4 方案 §7.1 的两处预警被实测证实：官方 `CreateAgentSessionOptions` 不声明 `fetch`；provider 层虽有 `fetch`/`onPayload`/`onResponse`，高层会话并不透传。
 - F5 新增可证伪的 G1 候选路径：官方公开 `registerProvider` + `ProviderConfig.streamSimple`，且 `pi-ai` 公开导出 `./api/*`；OP1 P04 应验证「BYOK 拥有的 provider 仅包装官方 adapter 并注入 fetch」能否在发送前拒绝。
 - F6 OP0 未越界：`bun.lock`、根 manifest、`packages/client/package.json` 一字未改；官方包只装到 `/tmp/pi-official-install`。
+- F7 OP1 探针形态可信：现场安装官方 tarball、复制探针源码到该树、空 `HOME`、独立子进程、本地合成端点；三次运行 verdict 一致。
+- F8 P04-A 证伪方案 §18 的对应风险：公开 `ModelRuntime.registerProvider` + 官方 adapter 子路径让调用方拥有 transport，且发送前观察到的 2083 字节与端点收到的字节逐字节相同。
+- F9 P04-B/C 给出两个硬缺口：拒发不可传播（`prompt()` 不抛错，触发 3 次隐式 auto_retry）；`before_provider_request` 抛错拦不住发送（证实方案 §7.1）。
+- F10 P02 是比预期更坏的失败模式：host 断言历史让 session 静默不发请求（0 请求、无异常），而不是报错。
 
 ## Acceptance Surface
 
 - OP0：官方正式发行候选身份可独立复算（tarball integrity/字节 sha256）、fork 增量清单完整且分类只落在方案 §6.2 的四种类别、根依赖与 lock 未被改动。
 - OP1：五项 probe 在真实官方 tarball + 独立子进程上可运行；G1 裁定有证据支撑；无实现证据处不得声明 `official_supported=true`。
+- 已满足：`docs/researches/2026-09-19-official-pi-op1-probe-report.md` 记录 G1 = 第二档，五条 verdict 各有原始数字支撑，探针可一键复现。
 
 ## Residual Risk
 
-- R1 G1 未裁定：OP1 未执行，官方能否支撑 task-free preparation（P03）与发送前拒绝（P04）仍未知。
+- R1 已收窄：G1 裁定为第二档。剩余未知 = OP2-U 的上游接口能否被接受并进入可验证发行包；在此之前相关生产能力保持禁用。
 - R2 官方 provider 目录数据与 fork 双向不同（openrouter 官方 366 / fork 379），切换后模型可用性会变化；首验目标 `z-ai/glm-5.3-flash` 两边都有，但需在 OP3/OP7 单独验证与披露。
 - R3 `pi-agent-core`/`pi-tui`/`chord`/`pi-telemetry` 的 tarball 未下载复算 sha256（仅 registry 元数据）。
-- R4 多 agent fan-out 在本环境不可用（fleet `explorer` 角色模型不在可用列表），OP0 由 main agent 内联完成；后续大范围研究需先解决该阻塞。
+- R4 多 agent fan-out 在本环境不可用（fleet `explorer` 角色模型不在可用列表），OP0/OP1 由 main agent 内联完成；后续大范围研究需先解决该阻塞。
 - R5 本轮未做平台矩阵（Windows/Linux）与 S2 新布局重验——属 OP5/OP7。
+- R6 OP4 未覆盖：递归 spawn 面未验证；`registerProvider` 路径在子进程/print 模式下是否同样成立仍是未知。
