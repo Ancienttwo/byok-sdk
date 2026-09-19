@@ -278,6 +278,28 @@ node packages/client/probes/pi-official/run.mjs --probe p04d   # G-D
 
 至此 G-A 的三段证据齐了：提示投影是公开纯函数（3/5 sections 当场逐字节相等）→ 输入推导规则可在源码中读出（cwd / skills / contextFiles / customPrompt / appendSystemPrompt / selectedTools / toolSnippets / toolGuidelines）→ 其中只有一项（builtin 工具的 prompt 元数据）没有公开来源。
 
+### `toolsAdded` 逐字节比对：全部可复现（G-A 证据链闭合）
+
+派生的第二条 system 消息除了 `sections` 还带 `toolsAdded`（完整工具 schema）。用公开 `createCodingTools(cwd)` 的返回值与会话捕获的 `toolsAdded` 逐项比对**模型可见投影**（`name` / `description` / `parameters` / `constrainedSampling`）：
+
+| 工具 | `description` 相等 | 字节 | `parameters` 相等 |
+|---|---|---|---|
+| `read` | **是** | 303 | **是** |
+| `bash` | **是** | 248 | **是** |
+| `edit` | **是** | 326 | **是** |
+| `write` | **是** | 127 | **是** |
+
+4/4 全部相等。差异只出现在对象的**非模型可见字段**上：调用方对象额外带 `execute` / `label` / `executionMode` / `prepareArguments`（这些不进请求），会话的 `toolsAdded` 只保留模型可见子集。
+
+**于是 G-A 的证据链完整闭合：**
+
+1. 提示投影 `buildSystemPromptSections` / `getSystemMessageText` 是公开纯函数 —— 3/5 sections 当场逐字节相等；
+2. 输入推导规则可在源码读出（`agent-session.ts:1081-1101`）；
+3. `toolsAdded` 的模型可见 schema 4/4 逐字节可复现；
+4. **唯一缺公开来源的输入只有一项**：builtin 工具的 `promptSnippet` / `promptGuidelines`（会话从自己的定义注册表取，公开工具工厂只给得出 `bash` 一个）。
+
+因此 G-A 的上游请求定稿为一句话：**请暴露 builtin 工具定义（含 `promptSnippet` / `promptGuidelines`），或会话使用的 snippet/guideline 映射。** 不需要新增准备接口，也不需要改动消息模型。
+
 ## 9. 基线重估（同日只读核对 `main`）：固定候选可能已经过时
 
 写完 §1–§6 之后又做了一次只读核对，结果推翻了「把 `0.85.1` 当作接口工作对象」这个前提，必须显式记录。

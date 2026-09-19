@@ -105,3 +105,5 @@
 根因明确：会话的 snippet/guideline 表来自它自己的定义注册表（`agent-session.ts:2800-2814` 遍历 `_baseToolDefinitions` + custom tools），公开的 `createCodingTools()` 返回的对象**只有 `bash` 一个**带 `promptSnippet`/`promptGuidelines`。工具集合两边相同（都是 read/bash/edit/write），差的是 prompt 元数据。
 
 **G-A 残余因此收敛为一项**，上游请求可写成一句话：请把 builtin 工具定义（含 prompt 元数据）或会话使用的 snippet/guideline 映射暴露出来。三段证据链完整：投影是公开纯函数 → 输入推导规则可读 → 只有 builtin 工具 prompt 元数据缺公开来源。
+
+再补最后一刀（`toolsAdded` 比对）后 G-A 收口：会话捕获的 `toolsAdded` 与公开 `createCodingTools(cwd)` 的模型可见投影在 `read`/`bash`/`edit`/`write` 上 **4/4 逐字节相等**（description 303/248/326/127 字节、parameters 全等），差异只在调用方对象多带的 `execute`/`label`/`executionMode`/`prepareArguments`（不进请求）。四条证据齐备后，G-A 的上游请求定稿为「暴露 builtin 工具定义（含 promptSnippet/promptGuidelines）或 session 的 snippet/guideline 映射」，不需要新接口、不需要改消息模型。
