@@ -86,7 +86,7 @@ allowed_paths:
   - bun.lock
   - scripts/release/
   - docs/researches/runtime-input-preparation-contract.md
-  - docs/api-surface/
+  - api-surface/
   - plans/plan-20260921-0016-prepared-byok-provider.md
   - tasks/todos.md
   - tasks/contracts/20260921-0016-prepared-byok-provider.contract.md
