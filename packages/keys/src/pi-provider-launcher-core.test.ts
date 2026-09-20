@@ -8,6 +8,7 @@ import * as identity from '@byok-sdk/implementation-identity';
 import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
 import { InMemorySecretStore, modelProviderSecretName } from './secret-store';
 import {
+  assertPiPreparedProviderProfile,
   parsePiProviderLauncherOptions,
   assertPiProjectionDirectory,
   assertWindowsPiProjectionAcl,
@@ -16,6 +17,7 @@ import {
   ensurePiSessionDirectory,
   resolvePiProviderSecret,
 } from './pi-provider-launcher-core';
+import { buildPiProviderProjection } from './pi-provider-projection';
 import { parseModelProviderProfile } from './provider-profile';
 
 const timestamps = {
@@ -79,6 +81,8 @@ describe('Pi provider launcher core', () => {
     expect(parsePiProviderLauncherOptions([
       '--pi-bin',
       '/opt/pi',
+      '--runtime-entry',
+      'pi-rpc',
       '--profile-db',
       profileDbPath,
       '--session-dir',
@@ -101,7 +105,7 @@ describe('Pi provider launcher core', () => {
     });
 
     expect(parsePiProviderLauncherOptions([
-      '--pi-bin', '/opt/pi',
+      '--pi-bin', '/opt/pi', '--runtime-entry', 'pi-rpc',
       '--profile-db', profileDbPath,
       '--session-dir', sessionDir,
       '--provider', 'openrouter-primary',
@@ -122,7 +126,7 @@ describe('Pi provider launcher core', () => {
     });
 
     expect(() => parsePiProviderLauncherOptions([
-      '--pi-bin', '/opt/pi',
+      '--pi-bin', '/opt/pi', '--runtime-entry', 'pi-rpc',
       '--profile-db', profileDbPath,
       '--session-dir', sessionDir,
       '--provider', 'openrouter-primary',
@@ -132,7 +136,7 @@ describe('Pi provider launcher core', () => {
     ])).toThrow(/requires revision, hash, and required capabilities together/);
 
     expect(() => parsePiProviderLauncherOptions([
-      '--pi-bin', '/opt/pi',
+      '--pi-bin', '/opt/pi', '--runtime-entry', 'pi-rpc',
       '--profile-db', profileDbPath,
       '--session-dir', sessionDir,
       '--provider', '../escape',
@@ -141,7 +145,7 @@ describe('Pi provider launcher core', () => {
     ])).toThrow(/not a valid @byok-sdk\/keys identifier/);
 
     expect(() => parsePiProviderLauncherOptions([
-      '--pi-bin', '/opt/pi',
+      '--pi-bin', '/opt/pi', '--runtime-entry', 'pi-rpc',
       '--profile-db', 'providers.sqlite',
       '--session-dir', sessionDir,
       '--provider', 'custom',
@@ -150,7 +154,7 @@ describe('Pi provider launcher core', () => {
     ])).toThrow(/absolute/);
 
     expect(() => parsePiProviderLauncherOptions([
-      '--pi-bin', '/opt/pi',
+      '--pi-bin', '/opt/pi', '--runtime-entry', 'pi-rpc',
       '--profile-db', profileDbPath,
       '--session-dir', sessionDir,
       '--provider', 'custom',
@@ -159,7 +163,7 @@ describe('Pi provider launcher core', () => {
     ])).toThrow(/single-line/);
 
     expect(() => parsePiProviderLauncherOptions([
-      '--pi-bin', '/opt/pi',
+      '--pi-bin', '/opt/pi', '--runtime-entry', 'pi-rpc',
       '--profile-db', profileDbPath,
       '--session-dir', sessionDir,
       '--provider', 'custom',
@@ -169,7 +173,7 @@ describe('Pi provider launcher core', () => {
     ])).toThrow(/absolute/);
 
     expect(() => parsePiProviderLauncherOptions([
-      '--pi-bin', '/opt/pi',
+      '--pi-bin', '/opt/pi', '--runtime-entry', 'pi-rpc',
       '--profile-db', profileDbPath,
       '--session-dir', sessionDir,
       '--provider', 'custom',
@@ -245,7 +249,7 @@ describe('Pi provider launcher core', () => {
 });
 
  describe('explicit interpreter entry', () => {
-  const args = ['--pi-bin', process.execPath, '--profile-db', path.join(os.tmpdir(), 'profiles.db'),
+  const args = ['--pi-bin', process.execPath, '--runtime-entry', 'pi-rpc', '--profile-db', path.join(os.tmpdir(), 'profiles.db'),
     '--session-dir', path.join(os.tmpdir(), 'sessions'), '--provider', 'custom', '--model', 'local-model'];
   it('preserves a spaced script path as one argument and leaves executable mode explicit', () => {
     const piEntry = path.join(os.tmpdir(), 'Pi package with spaces', 'cli.js');
@@ -265,7 +269,7 @@ describe('committed Pi spawn boundary', () => {
     await fs.mkdir(projection, { mode: 0o700 });
     const launch = binding(projection, sessions, process.execPath, path.join(root, 'entry with spaces.js'));
     const options = parsePiProviderLauncherOptions([
-      '--pi-bin', launch.command, '--pi-entry', launch.entry!, '--profile-db', path.join(root, 'db'),
+      '--pi-bin', launch.command, '--runtime-entry', 'pi-rpc', '--pi-entry', launch.entry!, '--profile-db', path.join(root, 'db'),
       '--session-dir', sessions, '--provider', 'custom', '--model', 'local-model',
       '--launch-binding', JSON.stringify(launch), '--pi-cwd', launch.cwd, '--pi-fixed-args', JSON.stringify(launch.fixedArgv), '--pi-config-digest', 'a'.repeat(64),
       '--', '--config', path.join(root, 'task config.json'), '--mode', 'rpc', '--no-skills',
@@ -279,7 +283,7 @@ describe('committed Pi spawn boundary', () => {
   it('requires one launcher-owned digest and refuses delegated overrides', async () => {
     const f = await fixture();
     try {
-      const base = ['--pi-bin',f.launch.command,'--pi-entry',f.launch.entry!,'--profile-db',path.join(f.root,'db'),
+      const base = ['--pi-bin',f.launch.command,'--runtime-entry','pi-rpc','--pi-entry',f.launch.entry!,'--profile-db',path.join(f.root,'db'),
         '--session-dir',f.sessions,'--provider','custom','--model','local-model',...launchFlags(f.launch.command,f.sessions,f.launch.entry)];
       const withoutDigest = base.slice(0,-2);
       for (const own of [withoutDigest,[...withoutDigest,'--pi-config-digest','invalid'],[...base,'--pi-config-digest','a'.repeat(64)]]) {
@@ -301,7 +305,7 @@ describe('committed Pi spawn boundary', () => {
   });
 
   it('requires explicit binding for actual launch, while validate-only stays credential-blind', () => {
-    const base = ['--pi-bin', '/opt/pi', '--profile-db', '/db', '--session-dir', '/sessions', '--provider', 'custom', '--model', 'local-model'];
+    const base = ['--pi-bin', '/opt/pi', '--runtime-entry', 'pi-rpc', '--profile-db', '/db', '--session-dir', '/sessions', '--provider', 'custom', '--model', 'local-model'];
     expect(() => parsePiProviderLauncherOptions([...base, '--', '--mode', 'rpc'])).toThrow(/launch-binding/);
     expect(parsePiProviderLauncherOptions([...base, '--validate-only', 'true']).launchBinding).toBeUndefined();
     const good = launchFlags('/opt/pi', '/sessions');
@@ -436,5 +440,99 @@ describe('Windows projection ACL verification', () => {
     const run = vi.fn(async () => ({exitCode:0,stdout:JSON.stringify(acl),stderr:''}));
     await expect(assertWindowsPiProjectionAcl('C:\\projection',{systemRoot:'C:\\Windows',run})).rejects.toThrow();
     expect(run).toHaveBeenCalledOnce();
+  });
+});
+
+describe('the required runtime entry', () => {
+  const base = ['--pi-bin', '/opt/pi', '--profile-db', '/db', '--session-dir', '/sessions',
+    '--provider', 'custom', '--model', 'local-model', '--validate-only', 'true'];
+
+  it('refuses a client that states no runtime entry', () => {
+    expect(() => parsePiProviderLauncherOptions([...base])).toThrow(/--runtime-entry requires a value/);
+  });
+
+  it.each(['pi-subagent-runner', 'pi-subagent-print', 'rpc', 'prepared', 'PI-RPC', ''])(
+    'refuses the unknown runtime entry %j', (entry) => {
+      expect(() => parsePiProviderLauncherOptions([...base, '--runtime-entry', entry])).toThrow();
+    },
+  );
+
+  it.each(['pi-rpc', 'pi-prepared'] as const)('carries the declared entry %s', (entry) => {
+    expect(parsePiProviderLauncherOptions([...base, '--runtime-entry', entry]).runtimeEntry).toBe(entry);
+  });
+
+  it('refuses a prepared entry for a profile the prepared lane cannot serve', () => {
+    expect(() => assertPiPreparedProviderProfile(profile('none')))
+      .toThrow(/auth_mode "none"/);
+    const anthropic = parseModelProviderProfile({
+      ...timestamps, adapter: 'anthropic', auth_mode: 'x_api_key', base_url: 'https://api.anthropic.com',
+      capabilities: [], display_name: 'Claude', enabled: true, kind: 'model', model: 'claude-sonnet-5',
+      profile_ref: 'anthropic', provider_kind: 'anthropic',
+    });
+    expect(() => assertPiPreparedProviderProfile(anthropic)).toThrow(/anthropic adapter/);
+    expect(assertPiPreparedProviderProfile(profile('bearer'))).toBeUndefined();
+  });
+});
+
+describe('the prepared runtime entry spawn', () => {
+  it('writes the projection, injects exactly one secret and appends nothing to --config', async () => {
+    const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'keys-pi-prepared-')));
+    try {
+      const projection = path.join(root, 'projection');
+      const sessions = path.join(root, 'sessions');
+      const configPath = path.join(root, 'prepared launch.json');
+      await fs.mkdir(projection, { mode: 0o700 });
+      const launch = binding(projection, sessions, process.execPath, path.join(root, 'host.js'));
+      const options = parsePiProviderLauncherOptions([
+        '--pi-bin', launch.command, '--runtime-entry', 'pi-prepared', '--pi-entry', launch.entry!,
+        '--profile-db', path.join(root, 'db'), '--session-dir', sessions,
+        '--provider', 'custom', '--model', 'local-model',
+        '--launch-binding', JSON.stringify(launch), '--pi-cwd', launch.cwd,
+        '--pi-fixed-args', JSON.stringify(launch.fixedArgv), '--pi-config-digest', 'a'.repeat(64),
+        '--', '--config', configPath,
+      ]);
+      const provider = parseModelProviderProfile({ ...profile('bearer'), pi_model: PI_MODEL_FIXTURE });
+      const store = new InMemorySecretStore();
+      await store.set(modelProviderSecretName('custom'), CANARY);
+      const spawn = vi.fn(() => new ChildProcess());
+      const launched = await startPiProvider(provider, options, { ambient: { PATH: '/usr/bin' }, createSecretStore: () => store, spawn });
+      const [command, args, spawnOptions] = spawn.mock.calls[0] as unknown as [string, string[], { cwd: string; env: Record<string, string> }];
+      expect(command).toBe(launch.command);
+      expect(args).toEqual([launch.entry, '__byok_sdk_helper', 'pi-rpc', `--config-digest=${'a'.repeat(64)}`, '--config', configPath]);
+      expect(args).not.toContain('--provider');
+      expect(args).not.toContain('--thinking');
+      expect(JSON.stringify(args)).not.toContain(CANARY);
+      expect(spawnOptions.env.PI_PROVIDER_API_KEY).toBe(CANARY);
+      const written = JSON.parse(await fs.readFile(path.join(projection, 'models.json'), 'utf8')) as Record<string, unknown>;
+      expect(written).toEqual(buildPiProviderProjection(provider));
+      expect(JSON.stringify(written)).not.toContain(CANARY);
+      await launched.cleanup();
+      expect(await fs.readdir(projection)).toEqual([]);
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+  });
+
+  it('refuses rpc-shaped delegated argv under the prepared entry, before any credential access', async () => {
+    const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'keys-pi-prepared-refusal-')));
+    try {
+      const projection = path.join(root, 'projection');
+      const sessions = path.join(root, 'sessions');
+      await fs.mkdir(projection, { mode: 0o700 });
+      const launch = binding(projection, sessions, process.execPath, path.join(root, 'host.js'));
+      const options = parsePiProviderLauncherOptions([
+        '--pi-bin', launch.command, '--runtime-entry', 'pi-prepared', '--pi-entry', launch.entry!,
+        '--profile-db', path.join(root, 'db'), '--session-dir', sessions,
+        '--provider', 'custom', '--model', 'local-model',
+        '--launch-binding', JSON.stringify(launch), '--pi-cwd', launch.cwd,
+        '--pi-fixed-args', JSON.stringify(launch.fixedArgv), '--pi-config-digest', 'a'.repeat(64),
+        '--', '--config', path.join(root, 'launch.json'), '--mode', 'rpc',
+      ]);
+      const provider = parseModelProviderProfile({ ...profile('bearer'), pi_model: PI_MODEL_FIXTURE });
+      const createSecretStore = vi.fn(() => new InMemorySecretStore());
+      const spawn = vi.fn(() => new ChildProcess());
+      await expect(startPiProvider(provider, options, { ambient: {}, createSecretStore, spawn }))
+        .rejects.toThrow(/exactly --config/);
+      expect(createSecretStore).not.toHaveBeenCalled();
+      expect(spawn).not.toHaveBeenCalled();
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
   });
 });

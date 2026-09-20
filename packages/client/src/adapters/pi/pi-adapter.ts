@@ -159,6 +159,7 @@ export function validatePiByokLauncherConfig(
     '--pi-cwd',
     '--pi-fixed-args',
     '--launch-binding',
+    '--runtime-entry',
     '--profile-db',
     '--session-dir',
     '--macos-keychain-path',
@@ -545,6 +546,7 @@ export class PiAdapter implements RuntimeAdapter {
           if (launcherArgs !== undefined) {
             launchCommand = this.options.byokLauncher!.command;
             launchArgs = [...(this.options.byokLauncher!.args ?? []), '--pi-bin', launch.command, ...launcherArgs,
+              '--runtime-entry', 'pi-rpc',
               ...(launch.entry === undefined ? [] : ['--pi-entry', launch.entry]),
               '--pi-cwd', launch.cwd, '--pi-fixed-args', JSON.stringify(launch.fixedArgv),
               '--launch-binding', JSON.stringify(launch), '--pi-config-digest', hostConfigDigest, '--', ...piArgs];

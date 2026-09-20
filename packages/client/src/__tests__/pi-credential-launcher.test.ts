@@ -33,6 +33,7 @@ describe('Pi adapter / credential launcher composition', () => {
         profile_ref: 'test-zai', provider_kind: 'custom', pi_model: PI_MODEL_FIXTURE,
       });
       const options = parsePiProviderLauncherOptions(captured!.args);
+      expect(options.runtimeEntry).toBe('pi-rpc');
       expect(options.piBin).toBe(source === 'package' ? process.execPath : path.join(dir, 'pi'));
       expect(options.piEntry).toBe(source === 'package' ? path.join(dir, 'pi') : undefined);
       expect(buildPiProviderArgs(profile, options.piArgs)).toEqual([

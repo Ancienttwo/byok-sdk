@@ -4,6 +4,24 @@ import { PiModelConfigSchema } from './pi-model-config';
 
 export const PI_PROJECTED_KEY_ENV = 'PI_PROVIDER_API_KEY';
 
+/**
+ * The runtime entries this launcher may parent, and the ONLY two.
+ *
+ * The entry is not a hint about which flags happen to be present: it selects
+ * which delegated-argv grammar below is applied, and the two grammars admit
+ * disjoint argument sets. A client that could omit it would be a client whose
+ * argv decides the grammar, so the flag is required at the parser rather than
+ * defaulted — a client/keys version skew then fails closed instead of
+ * silently launching a prepared host under the rpc grammar.
+ *
+ * `@byok-sdk/implementation-identity` declares four entries; the other two
+ * (`pi-subagent-print`, `pi-subagent-runner`) are descendants the launcher
+ * never parents, so restating the pair here is a narrowing, not a second
+ * vocabulary.
+ */
+export const PI_LAUNCHER_RUNTIME_ENTRIES = ['pi-rpc', 'pi-prepared'] as const;
+export type PiLauncherRuntimeEntry = (typeof PI_LAUNCHER_RUNTIME_ENTRIES)[number];
+
 /** Keep projected providers disjoint from Pi built-ins so composition can never fall back to one. */
 export function piProjectionProviderId(profileRef: string): string {
   return `byok-sdk-${profileRef}`;
@@ -117,6 +135,30 @@ export function buildPiProviderArgs(
     '--thinking',
     config.thinkingLevel,
   ];
+}
+
+/**
+ * The whole delegated argv a prepared host may be launched with: one
+ * `--config <absolute path>` pair, and nothing else.
+ *
+ * Nothing is APPENDED either. The rpc grammar ends by binding the child to the
+ * projected provider, the configured model and the configured thinking level,
+ * because the rpc child composes its session from `models.json`. A prepared
+ * host composes nothing: the request it consumes was already compiled and the
+ * model it verifies against is the one the durable record pinned, so a
+ * `--provider`/`--model`/`--thinking` appended here would be a second, silent
+ * authority over a request that was already decided — and the host's own
+ * argument parser refuses anything but `--config` regardless.
+ */
+export function buildPiPreparedArgs(delegatedArgs: readonly string[]): string[] {
+  if (delegatedArgs.length !== 2 || delegatedArgs[0] !== '--config') {
+    throw new Error('Pi prepared launcher requires exactly --config <path>');
+  }
+  const value = delegatedArgs[1];
+  if (typeof value !== 'string' || !isAbsolute(value) || /[\u0000\r\n]/u.test(value)) {
+    throw new Error('Pi launcher --config requires an absolute single-line path');
+  }
+  return [...delegatedArgs];
 }
 
 function requirePiModelConfig(profile: ModelProviderProfile) {

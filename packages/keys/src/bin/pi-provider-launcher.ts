@@ -4,6 +4,7 @@ import { ByokKeysError } from '../errors';
 import { MacOsKeychainSecretStore } from '../macos-keychain';
 import {
   type PiProviderLauncherOptions,
+  assertPiPreparedProviderProfile,
   parsePiProviderLauncherOptions,
   startPiProvider,
 } from '../pi-provider-launcher-core';
@@ -66,6 +67,7 @@ async function run(options: PiProviderLauncherOptions): Promise<number> {
     if (options.expectedBinding !== undefined) {
       assertExactProviderProfileBinding(profile, options.expectedBinding);
     }
+    if (options.runtimeEntry === 'pi-prepared') assertPiPreparedProviderProfile(profile);
     buildPiProviderProjection(profile);
     if (options.validateOnly) return 0;
     const launched = await startPiProvider(profile, options, {
