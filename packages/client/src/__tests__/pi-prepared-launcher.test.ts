@@ -1,7 +1,8 @@
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { promises as fs } from 'node:fs';
+import { promises as fs, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawn as nodeSpawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,9 +30,19 @@ import { probeMcpServer } from '../daemon/mcp-tools-probe';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { createPreparedToolSurfaceAssembler } from '../daemon/prepared-tool-surface';
 import { TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED } from '../daemon/tool-implementation-identity';
-import { PiAdapter } from '../adapters/pi/pi-adapter';
+import { PiAdapter, type PiAdapterOptions } from '../adapters/pi/pi-adapter';
 import { resolveInstalledPiRuntimeIdentity, createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
 import { trustedLaunchBinding } from './fixtures/launch-cwd';
+import { parsePiMcpEnvironment } from '../adapters/pi/mcp-environment';
+import {
+  toolImplementationLaunchEnvNamesDigest, toolImplementationLoaderEnvValuesDigest,
+} from '@byok-sdk/implementation-identity';
+import { parseModelProviderProfile, type ModelProviderProfile } from '../../../keys/src/provider-profile';
+import { buildPiPreparedArgs, buildPiProviderProjection } from '../../../keys/src/pi-provider-projection';
+import {
+  buildPiProviderChildEnvironment, parsePiProviderLauncherOptions,
+} from '../../../keys/src/pi-provider-launcher-core';
+import { PI_MODEL_FIXTURE } from '../../../keys/src/fixtures/pi-model-config';
 
 /**
  * The NATIVE canonicalization, not a local one.
@@ -106,6 +117,8 @@ function fixtureServer(recordTo?: string): { command: string; args: string[] } {
 interface ProviderEndpoint {
   readonly baseUrl: string;
   readonly bodies: string[];
+  /** The request line and headers of every call, alongside `bodies` by index. */
+  readonly calls: { url: string; headers: Readonly<Record<string, string | string[] | undefined>> }[];
   /** Replaces the default single-chunk completion for one case. */
   respond: (req: IncomingMessage, res: ServerResponse) => void;
 }
@@ -128,9 +141,11 @@ function completion(content: string): readonly unknown[] {
 
 async function providerEndpoint(): Promise<ProviderEndpoint> {
   const bodies: string[] = [];
+  const calls: { url: string; headers: Readonly<Record<string, string | string[] | undefined>> }[] = [];
   const endpoint: ProviderEndpoint = {
     baseUrl: '',
     bodies,
+    calls,
     respond(_req, res) {
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       res.end(sse(completion('done')));
@@ -140,6 +155,7 @@ async function providerEndpoint(): Promise<ProviderEndpoint> {
     const chunks: Buffer[] = [];
     req.on('data', (chunk: Buffer) => chunks.push(chunk));
     req.on('end', () => {
+      calls.push({ url: req.url ?? '', headers: { ...req.headers } });
       bodies.push(Buffer.concat(chunks).toString('utf8'));
       endpoint.respond(req, res);
     });
@@ -336,16 +352,35 @@ async function prepareOnThisDevice(
   };
 }
 
+interface StartOverrides {
+  preparation?: RuntimePreparedLaunchV1;
+  sessionRef?: string;
+  spawnFn?: PiAdapterOptions['spawnFn'];
+  /** Receives the resolved launch so a case can assert its projection lifecycle. */
+  captureLaunch?: (resources: { env: Readonly<Record<string, string>>; release: () => Promise<void> }) => void;
+  /** Everything a BYOK-profile prepared launch adds, and nothing else. */
+  byok?: {
+    selection: NonNullable<TaskOfferPayload['dispatchSelection']>;
+    launcher?: PiAdapterOptions['byokLauncher'];
+    projectionRoot: string;
+  };
+}
+
 /** Start the prepared operation through the REAL adapter, with nothing stubbed. */
 async function startPrepared(
   prepared: Prepared,
-  overrides: { preparation?: RuntimePreparedLaunchV1; sessionRef?: string } = {},
+  overrides: StartOverrides = {},
 ): Promise<Session> {
-  const adapter = new PiAdapter();
+  const byok = overrides.byok;
+  const adapter = new PiAdapter({
+    ...(byok?.launcher === undefined ? {} : { byokLauncher: byok.launcher }),
+    ...(overrides.spawnFn === undefined ? {} : { spawnFn: overrides.spawnFn }),
+  });
   const offer: TaskOfferPayload = {
     taskId: 'prepared-launch-test',
     instruction: 'unused on the prepared lane',
     policy: POLICY,
+    ...(byok === undefined ? {} : { dispatchSelection: byok.selection }),
   } as unknown as TaskOfferPayload;
   const result = await adapter.prepare({
     offer,
@@ -362,28 +397,35 @@ async function startPrepared(
     descriptor: adapter.descriptor,
     policy: POLICY,
     requiredToolsetIds: [RUNTIME_IDENTITY_TOOLSET],
+    ...(byok === undefined ? {} : { dispatchSelection: byok.selection }),
     ...(overrides.sessionRef === undefined ? {} : { sessionRef: overrides.sessionRef }),
     workspace: { workspaceDir: prepared.workspaceDir },
     forwardedEnvironmentNames: Object.keys(prepared.childEnv).sort(),
   });
   const runtimeLaunch = await result.operation.resolveRuntimeLaunch!({
     kind: 'prepared', cwd: prepared.workspaceDir, env: prepared.childEnv,
-    projectionRoot: path.join(prepared.workspaceDir, '.unused-projections'),
+    projectionRoot: byok?.projectionRoot ?? path.join(prepared.workspaceDir, '.unused-projections'),
   });
-  const session = await result.operation.start({
-    runtimeLaunch,
-    kind: 'prepared',
-    mcpEnv: projectPiMcpEnvironment(prepared.childEnv),
-    manifest,
-    env: prepared.childEnv,
-    mcpServers: prepared.mcpServers,
-    mcpToolsetTools: prepared.observation,
-    mcpLaunch: { cwd: prepared.launchCwd },
-    mcpToolImplementations: { teamserver: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
-    preparation: overrides.preparation ?? prepared.preparation,
-  });
-  sessions.push(session);
-  return session;
+  overrides.captureLaunch?.(runtimeLaunch);
+  try {
+    const session = await result.operation.start({
+      runtimeLaunch,
+      kind: 'prepared',
+      mcpEnv: projectPiMcpEnvironment(prepared.childEnv),
+      manifest,
+      env: prepared.childEnv,
+      mcpServers: prepared.mcpServers,
+      mcpToolsetTools: prepared.observation,
+      mcpLaunch: { cwd: prepared.launchCwd },
+      mcpToolImplementations: { teamserver: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
+      preparation: overrides.preparation ?? prepared.preparation,
+    });
+    sessions.push(session);
+    return session;
+  } catch (error) {
+    await runtimeLaunch.release();
+    throw error;
+  }
 }
 
 /** Rewrite the artifact in place so the envelope no longer matches the device. */
@@ -570,4 +612,381 @@ describe('the prepared pi launch entry', () => {
     expect(starts.at(-1)?.byokEnv).toEqual([]);
     expect(recorded.some((entry) => entry.method === 'tools/call')).toBe(true);
   }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// The BYOK-profile prepared lane
+// ---------------------------------------------------------------------------
+
+/**
+ * Obviously synthetic, and the only credential value anywhere in this file's
+ * BYOK cases. Every assertion below that says "the secret never surfaces" is
+ * an assertion about this exact string.
+ */
+const SYNTHETIC_SECRET = 'sk-synthetic-prepared-byok-000000000001';
+const BYOK_PROFILE_REF = 'prepared-byok';
+const BYOK_PROVIDER_ID = `byok-sdk-${BYOK_PROFILE_REF}`;
+
+function byokProfile(baseUrl: string): ModelProviderProfile {
+  return parseModelProviderProfile({
+    created_at: '2026-09-21T00:00:00.000Z',
+    updated_at: '2026-09-21T00:00:00.000Z',
+    adapter: 'openai_compatible',
+    auth_mode: 'bearer',
+    base_url: baseUrl,
+    capabilities: [],
+    display_name: 'GLM 4.6',
+    enabled: true,
+    kind: 'model',
+    model: 'glm-4.6',
+    profile_ref: BYOK_PROFILE_REF,
+    provider_kind: 'custom',
+    pi_model: {
+      contextWindow: 200_000,
+      maxTokens: 8_192,
+      reasoning: false,
+      thinkingLevel: 'off',
+      thinkingLevelMap: PI_MODEL_FIXTURE.thinkingLevelMap,
+      compat: PI_MODEL_FIXTURE.compat,
+    },
+  });
+}
+
+type ProjectionShape = {
+  providers: Record<string, { baseUrl: string; api: string; models: Record<string, unknown>[] }>;
+};
+
+/**
+ * The wire model built FROM the device projection, not alongside it.
+ *
+ * Every compared field is read out of `buildPiProviderProjection`'s own output,
+ * so a case that passes the consent gate passes it because the two really are
+ * the same declaration — not because the fixture restated it consistently.
+ */
+function byokModel(profile: ModelProviderProfile): InputPreparationModelV1 {
+  const projection = buildPiProviderProjection(profile) as ProjectionShape;
+  const provider = projection.providers[BYOK_PROVIDER_ID]!;
+  const entry = provider.models[0]!;
+  return {
+    id: entry.id as string,
+    name: entry.name as string,
+    api: 'openai-completions',
+    provider: BYOK_PROVIDER_ID,
+    baseUrl: provider.baseUrl,
+    reasoning: entry.reasoning as boolean,
+    input: entry.input as ('text' | 'image')[],
+    // Accounting metadata the Host states; the device profile declares none and
+    // the consent gate excludes it for exactly that reason.
+    cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: entry.contextWindow as number,
+    maxTokens: entry.maxTokens as number,
+    thinkingLevelMap: entry.thinkingLevelMap as InputPreparationModelV1['thinkingLevelMap'],
+    compat: entry.compat as InputPreparationModelV1['compat'],
+  };
+}
+
+interface LauncherRecord {
+  launcherCommand?: string;
+  launcherArgs?: string[];
+  options?: ReturnType<typeof parsePiProviderLauncherOptions>;
+  childArgs?: string[];
+  childEnv?: Record<string, string>;
+  projectionDir?: string;
+  configBytes?: string;
+  logs: string[];
+}
+
+/**
+ * The keys launcher, run in this process, from the keys package's own
+ * functions.
+ *
+ * It is not a second implementation: `parsePiProviderLauncherOptions`,
+ * `buildPiPreparedArgs`, `buildPiProviderProjection` and
+ * `buildPiProviderChildEnvironment` are the REAL ones, composed in the order
+ * `startPiProvider` composes them. What is left out is `startPiProvider`'s
+ * async half — the two spawn-binding assertions, the projection-directory
+ * layout assertion and the SecretStore read — because `PiRpcClient` hands a
+ * spawn function that must return a child synchronously. Those four are
+ * covered directly, against the real code, in
+ * `packages/keys/src/pi-provider-launcher-core.test.ts`; what this stand-in
+ * exists for is everything ABOVE and BELOW the launcher: the argv the adapter
+ * hands it, and the prepared host it parents.
+ */
+function launcherSpawn(options: {
+  profile: ModelProviderProfile;
+  record: LauncherRecord;
+  secret?: string;
+  mutateProjection?: (projection: ProjectionShape) => void;
+  /** Stand in for a launcher whose projection write never landed. */
+  omitProjection?: boolean;
+}): PiAdapterOptions['spawnFn'] {
+  const { record } = options;
+  return ((command: string, args: string[], spawnOptions: Record<string, unknown>) => {
+    record.launcherCommand = command;
+    record.launcherArgs = [...args];
+    const parsed = parsePiProviderLauncherOptions([...args]);
+    record.options = parsed;
+    const delegated = buildPiPreparedArgs(parsed.piArgs);
+    const env = buildPiProviderChildEnvironment({
+      ambient: spawnOptions.env as NodeJS.ProcessEnv,
+      binding: parsed.launchBinding!,
+      sessionDir: parsed.sessionDir,
+      secret: options.secret,
+    });
+    const projection = buildPiProviderProjection(options.profile) as ProjectionShape;
+    options.mutateProjection?.(projection);
+    const projectionDir = env.PI_CODING_AGENT_DIR!;
+    record.projectionDir = projectionDir;
+    mkdirSync(parsed.sessionDir, { recursive: true, mode: 0o700 });
+    if (options.omitProjection !== true) {
+      writeFileSync(path.join(projectionDir, 'models.json'), `${JSON.stringify(projection)}\n`, { mode: 0o600 });
+    }
+    record.configBytes = readFileSync(delegated[1]!, 'utf8');
+    const childArgs = [
+      ...(parsed.piEntry === undefined ? [] : [parsed.piEntry]),
+      ...parsed.piFixedArgs!,
+      `--config-digest=${parsed.piConfigDigest}`,
+      ...delegated,
+    ];
+    record.childArgs = childArgs;
+    record.childEnv = env;
+    const child = nodeSpawn(parsed.piBin, childArgs, { ...spawnOptions, env, cwd: parsed.piCwd! } as never);
+    // A second listener alongside the RPC client's own: every byte the host
+    // writes to stderr is captured so the secret can be looked for in it.
+    child.stderr?.on('data', (chunk: Buffer) => record.logs.push(chunk.toString('utf8')));
+    return child;
+  }) as PiAdapterOptions['spawnFn'];
+}
+
+async function byokFixture(endpoint: ProviderEndpoint): Promise<{
+  prepared: Prepared;
+  profile: ModelProviderProfile;
+  launcher: NonNullable<PiAdapterOptions['byokLauncher']>;
+  projectionRoot: string;
+  selection: NonNullable<TaskOfferPayload['dispatchSelection']>;
+}> {
+  const profile = byokProfile(endpoint.baseUrl);
+  const prepared = await prepareOnThisDevice(endpoint, (snapshot) => {
+    snapshot.model = byokModel(profile);
+  });
+  const custody = await tempDir('byok-pi-prepared-custody-');
+  return {
+    prepared,
+    profile,
+    launcher: {
+      // Never executed: `launcherSpawn` stands in for the process this names.
+      command: path.join(custody, 'byok-pi-provider-launcher'),
+      profileDbPath: path.join(custody, 'providers.sqlite'),
+      sessionDir: path.join(custody, 'sessions'),
+    },
+    projectionRoot: await tempDir('byok-pi-prepared-projections-'),
+    selection: {
+      lane: 'byok', runtimeId: 'pi', providerId: BYOK_PROFILE_REF, modelId: 'glm-4.6',
+    } as unknown as NonNullable<TaskOfferPayload['dispatchSelection']>,
+  };
+}
+
+describe('the prepared pi launch entry under a BYOK profile', () => {
+  it('is parented by the credential launcher, states the prepared entry and delegates only --config', async () => {
+    const endpoint = await providerEndpoint();
+    const f = await byokFixture(endpoint);
+    const record: LauncherRecord = { logs: [] };
+    const session = await startPrepared(f.prepared, {
+      spawnFn: launcherSpawn({ profile: f.profile, record, secret: SYNTHETIC_SECRET }),
+      byok: { selection: f.selection, launcher: f.launcher, projectionRoot: f.projectionRoot },
+    });
+    expect(session.sessionRef.length).toBeGreaterThan(0);
+
+    expect(record.launcherCommand).toBe(f.launcher.command);
+    const args = record.launcherArgs!;
+    const separator = args.indexOf('--');
+    expect(args.slice(separator + 1)).toEqual(['--config', expect.any(String)]);
+    // The SAME six binding flags the rpc lane passes, plus the entry.
+    for (const flag of ['--pi-bin', '--pi-entry', '--pi-cwd', '--pi-fixed-args', '--launch-binding', '--pi-config-digest']) {
+      expect(args.slice(0, separator)).toContain(flag);
+    }
+    expect(record.options!.runtimeEntry).toBe('pi-prepared');
+    expect(args.slice(0, separator)).not.toContain('--mode');
+    // Nothing appended: the host's own parser accepts exactly two arguments.
+    expect(record.childArgs!.slice(-2)).toEqual(['--config', expect.any(String)]);
+    expect(JSON.parse(record.configBytes!).credentialSource).toBe('keys-profile');
+  }, 60_000);
+
+  it('sends the counted body verbatim to the profile endpoint with the launcher-delivered key', async () => {
+    const endpoint = await providerEndpoint();
+    const f = await byokFixture(endpoint);
+    const record: LauncherRecord = { logs: [] };
+    const session = await startPrepared(f.prepared, {
+      spawnFn: launcherSpawn({ profile: f.profile, record, secret: SYNTHETIC_SECRET }),
+      byok: { selection: f.selection, launcher: f.launcher, projectionRoot: f.projectionRoot },
+    });
+    for await (const event of session.events) {
+      if (event.type === 'turn_end') break;
+    }
+    expect(endpoint.bodies).toHaveLength(1);
+    expect(endpoint.bodies[0]).toBe(f.prepared.requestBody);
+    // The endpoint this suite runs IS the profile's declared `base_url`, so
+    // receiving the request at all is the endpoint assertion.
+    expect(f.profile.base_url).toBe(endpoint.baseUrl);
+    expect(endpoint.calls[0]?.url).toBe('/v1/chat/completions');
+    expect(endpoint.calls[0]?.headers.authorization).toBe(`Bearer ${SYNTHETIC_SECRET}`);
+  }, 60_000);
+
+  it('keeps the synthetic secret out of the config, the argv, the logs and the artifact', async () => {
+    const endpoint = await providerEndpoint();
+    const f = await byokFixture(endpoint);
+    const record: LauncherRecord = { logs: [] };
+    const session = await startPrepared(f.prepared, {
+      spawnFn: launcherSpawn({ profile: f.profile, record, secret: SYNTHETIC_SECRET }),
+      byok: { selection: f.selection, launcher: f.launcher, projectionRoot: f.projectionRoot },
+    });
+    for await (const event of session.events) {
+      if (event.type === 'turn_end') break;
+    }
+    expect(record.configBytes).not.toContain(SYNTHETIC_SECRET);
+    expect(JSON.stringify(record.launcherArgs)).not.toContain(SYNTHETIC_SECRET);
+    expect(JSON.stringify(record.childArgs)).not.toContain(SYNTHETIC_SECRET);
+    expect(record.logs.join('')).not.toContain(SYNTHETIC_SECRET);
+    expect(await fs.readFile(f.prepared.artifactPath, 'utf8')).not.toContain(SYNTHETIC_SECRET);
+    expect(JSON.stringify(f.prepared.preparation)).not.toContain(SYNTHETIC_SECRET);
+    // The projection names the credential; it never carries it.
+    const projection = await fs.readFile(path.join(record.projectionDir!, 'models.json'), 'utf8');
+    expect(projection).toContain('$PI_PROVIDER_API_KEY');
+    expect(projection).not.toContain(SYNTHETIC_SECRET);
+    // The one place it does exist is the child environment, and that name is
+    // projected out of every identity digest.
+    expect(record.childEnv!.PI_PROVIDER_API_KEY).toBe(SYNTHETIC_SECRET);
+    const withoutKey = { ...record.childEnv! };
+    delete withoutKey.PI_PROVIDER_API_KEY;
+    expect(toolImplementationLaunchEnvNamesDigest(record.childEnv!))
+      .toBe(toolImplementationLaunchEnvNamesDigest(withoutKey));
+    expect(toolImplementationLoaderEnvValuesDigest(record.childEnv!))
+      .toBe(toolImplementationLoaderEnvValuesDigest(withoutKey));
+    // And no MCP descendant may inherit it.
+    expect(projectPiMcpEnvironment(record.childEnv!).PI_PROVIDER_API_KEY).toBeUndefined();
+    expect(() => parsePiMcpEnvironment({ PI_PROVIDER_API_KEY: SYNTHETIC_SECRET }))
+      .toThrow(/private Pi or credential name/);
+  }, 60_000);
+
+  it.each([
+    ['a provider endpoint the profile does not declare', (p: ProjectionShape) => {
+      p.providers[BYOK_PROVIDER_ID]!.baseUrl = 'http://127.0.0.1:9/v1';
+    }],
+    ['a differing compat declaration', (p: ProjectionShape) => {
+      p.providers[BYOK_PROVIDER_ID]!.models[0]!.compat = { ...PI_MODEL_FIXTURE.compat, thinkingFormat: 'openai' };
+    }],
+    ['a differing thinkingLevelMap', (p: ProjectionShape) => {
+      p.providers[BYOK_PROVIDER_ID]!.models[0]!.thinkingLevelMap = {
+        ...PI_MODEL_FIXTURE.thinkingLevelMap, medium: 'medium',
+      };
+    }],
+    ['a differing model id', (p: ProjectionShape) => {
+      p.providers[BYOK_PROVIDER_ID]!.models[0]!.id = 'glm-4.5';
+    }],
+    ['a differing provider API', (p: ProjectionShape) => {
+      p.providers[BYOK_PROVIDER_ID]!.api = 'anthropic-messages';
+    }],
+    ['two projected providers', (p: ProjectionShape) => {
+      p.providers['byok-sdk-other'] = { ...p.providers[BYOK_PROVIDER_ID]! };
+    }],
+    ['a provider id the request was not compiled for', (p: ProjectionShape) => {
+      p.providers['byok-sdk-other'] = p.providers[BYOK_PROVIDER_ID]!;
+      delete p.providers[BYOK_PROVIDER_ID];
+    }],
+    ['an extra model entry', (p: ProjectionShape) => {
+      const entry = p.providers[BYOK_PROVIDER_ID]!.models[0]!;
+      p.providers[BYOK_PROVIDER_ID]!.models = [entry, { ...entry, id: 'glm-4.5' }];
+    }],
+  ])('refuses %s as prepared_provider_projection_mismatch, before any session or transport', async (_label, mutate) => {
+    const endpoint = await providerEndpoint();
+    const f = await byokFixture(endpoint);
+    const record: LauncherRecord = { logs: [] };
+    await expect(startPrepared(f.prepared, {
+      spawnFn: launcherSpawn({ profile: f.profile, record, secret: SYNTHETIC_SECRET, mutateProjection: mutate }),
+      byok: { selection: f.selection, launcher: f.launcher, projectionRoot: f.projectionRoot },
+    })).rejects.toThrow(/prepared_provider_projection_mismatch/u);
+    expect(endpoint.bodies).toHaveLength(0);
+    expect(record.logs.join('')).not.toContain(SYNTHETIC_SECRET);
+    expect(record.logs.join('')).not.toContain('$PI_PROVIDER_API_KEY');
+  }, 60_000);
+
+  it('refuses a launch whose projection the launcher never wrote', async () => {
+    const endpoint = await providerEndpoint();
+    const f = await byokFixture(endpoint);
+    const record: LauncherRecord = { logs: [] };
+    await expect(startPrepared(f.prepared, {
+      spawnFn: launcherSpawn({ profile: f.profile, record, secret: SYNTHETIC_SECRET, omitProjection: true }),
+      byok: { selection: f.selection, launcher: f.launcher, projectionRoot: f.projectionRoot },
+    })).rejects.toThrow(/prepared_provider_projection_missing/u);
+    expect(endpoint.bodies).toHaveLength(0);
+  }, 60_000);
+
+  it('refuses a launch the launcher delivered no credential for', async () => {
+    const endpoint = await providerEndpoint();
+    const f = await byokFixture(endpoint);
+    const record: LauncherRecord = { logs: [] };
+    await expect(startPrepared(f.prepared, {
+      spawnFn: launcherSpawn({ profile: f.profile, record }),
+      byok: { selection: f.selection, launcher: f.launcher, projectionRoot: f.projectionRoot },
+    })).rejects.toThrow(/prepared_provider_credential_unavailable/u);
+    expect(endpoint.bodies).toHaveLength(0);
+  }, 60_000);
+
+  it('refuses a prepared BYOK selection with no configured credential launcher', async () => {
+    const endpoint = await providerEndpoint();
+    const f = await byokFixture(endpoint);
+    await expect(startPrepared(f.prepared, {
+      byok: { selection: f.selection, projectionRoot: f.projectionRoot },
+    })).rejects.toThrow(/credential-custody launcher/u);
+    expect(endpoint.bodies).toHaveLength(0);
+  }, 60_000);
+
+  it('keeps the built-in-provider entry a direct spawn that declares the auth-store source', async () => {
+    const endpoint = await providerEndpoint();
+    const prepared = await prepareOnThisDevice(endpoint);
+    let captured: { command: string; args: string[]; config: string } | undefined;
+    const session = await startPrepared(prepared, {
+      spawnFn: ((command: string, args: string[], spawnOptions: Record<string, unknown>) => {
+        captured = { command, args: [...args], config: readFileSync(args.at(-1)!, 'utf8') };
+        return nodeSpawn(command, args, spawnOptions as never);
+      }) as PiAdapterOptions['spawnFn'],
+    });
+    expect(session.sessionRef.length).toBeGreaterThan(0);
+    expect(captured!.command).toBe(process.execPath);
+    expect(captured!.args.at(-2)).toBe('--config');
+    expect(captured!.args).not.toContain('--runtime-entry');
+    expect(captured!.args).not.toContain('--launch-binding');
+    expect(JSON.parse(captured!.config).credentialSource).toBe('pi-auth-store');
+  }, 60_000);
+
+  it('gives each launch its own projection directory and removes it on release', async () => {
+    const endpoint = await providerEndpoint();
+    const f = await byokFixture(endpoint);
+    const launched: { env: Readonly<Record<string, string>>; release: () => Promise<void> }[] = [];
+    const records = [new Array<string>(), new Array<string>()].map((logs) => ({ logs } as LauncherRecord));
+    const sessionsStarted = await Promise.all(records.map((record) => startPrepared(f.prepared, {
+      spawnFn: launcherSpawn({ profile: f.profile, record, secret: SYNTHETIC_SECRET }),
+      byok: { selection: f.selection, launcher: f.launcher, projectionRoot: f.projectionRoot },
+      captureLaunch: (resources) => { launched.push(resources); },
+    })));
+    expect(sessionsStarted).toHaveLength(2);
+    const dirs2 = launched.map((entry) => entry.env.PI_CODING_AGENT_DIR!);
+    expect(new Set(dirs2).size).toBe(2);
+    expect(new Set(records.map((record) => record.projectionDir)).size).toBe(2);
+    for (const dir of dirs2) expect(await fs.readdir(dir)).toContain('models.json');
+    for (const entry of launched) await entry.release();
+    for (const dir of dirs2) await expect(fs.lstat(dir)).rejects.toMatchObject({ code: 'ENOENT' });
+
+    // The refusal path releases the same way: the caller owns one cleanup
+    // authority whether the child ran, refused, or died.
+    const refused: { env: Readonly<Record<string, string>>; release: () => Promise<void> }[] = [];
+    const record: LauncherRecord = { logs: [] };
+    await expect(startPrepared(f.prepared, {
+      spawnFn: launcherSpawn({ profile: f.profile, record }),
+      byok: { selection: f.selection, launcher: f.launcher, projectionRoot: f.projectionRoot },
+      captureLaunch: (resources) => { refused.push(resources); },
+    })).rejects.toThrow(/prepared_provider_credential_unavailable/u);
+    await expect(fs.lstat(refused[0]!.env.PI_CODING_AGENT_DIR!)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await fs.readdir(f.projectionRoot)).toEqual([]);
+  }, 90_000);
 });
