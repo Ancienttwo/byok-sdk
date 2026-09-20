@@ -22,6 +22,7 @@ A model built from `buildPiProviderProjection(profile)` (provider id `byok-sdk-<
 ## Scope
 
 - In scope: `InputPreparationModelSchema` optional `thinkingLevelMap`/`compat` (closed shapes mirroring `packages/keys/src/pi-model-config.ts`); `InputPreparationModelV1`; the two hand parsers (`daemon/control-protocol.ts`, `bin/pi-prepared-host.ts`); store round-trip; compiler pass-through; fork pin to build 7 with the release identity pins/gates that assert it; BYOK-provider regression + parser-parity tests; a dated section in `docs/researches/runtime-input-preparation-contract.md`; deferred-goal ledger entries.
+- Added 2026-09-21 (plan amendment): the BYOK credential path for the prepared launch — keys launcher `--runtime-entry` + `pi-prepared` argv grammar; client prepared start through the launcher; `credentialSource` as the single switch; prepared-host consent gate (record model vs launcher-minted projection) + provider registration + typed refusals; fork pin = build 8; the third-party manifest and the README/spec lines that state the fork pin.
 - Out of scope: the fork repository itself (its own branch, gate and Owner-run publish); widening `thinkingFormat` or `api`; defaults or inference for absent fields; counter, authority resolver, readiness reasons, remote-lane transport; MCP tool `inputSchema` admission (ledger entry only); any package version bump (stop and ask the Owner if `check:version-authority` demands one); re-freezing the P2 composite manifest.
 - Taste constraints: <!-- advisory only, no run gate; default style/taste lives in AGENTS.md and the minimal-change policy, use this to record a per-task override -->
 
@@ -82,6 +83,13 @@ allowed_paths:
   - packages/client/src/adapters/pi/
   - packages/client/src/__tests__/
   - packages/client/package.json
+  - packages/client/vendor/
+  - packages/client/src/daemon/tool-implementation-identity.ts
+  - packages/keys/src/
+  - packages/keys/package.json
+  - packages/implementation-identity/src/
+  - README.md
+  - docs/spec.md
   - package.json
   - bun.lock
   - scripts/release/
