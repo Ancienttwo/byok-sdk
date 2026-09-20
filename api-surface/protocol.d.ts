@@ -1548,6 +1548,39 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 }, z.core.$strict>;
                 contextWindow: z.ZodNumber;
                 maxTokens: z.ZodNumber;
+                thinkingLevelMap: z.ZodOptional<z.ZodObject<{
+                    off: z.ZodNullable<z.ZodString>;
+                    minimal: z.ZodNullable<z.ZodString>;
+                    low: z.ZodNullable<z.ZodString>;
+                    medium: z.ZodNullable<z.ZodString>;
+                    high: z.ZodNullable<z.ZodString>;
+                    xhigh: z.ZodNullable<z.ZodString>;
+                    max: z.ZodNullable<z.ZodString>;
+                }, z.core.$strict>>;
+                compat: z.ZodOptional<z.ZodObject<{
+                    supportsStore: z.ZodOptional<z.ZodBoolean>;
+                    supportsDeveloperRole: z.ZodOptional<z.ZodBoolean>;
+                    supportsReasoningEffort: z.ZodOptional<z.ZodBoolean>;
+                    supportsUsageInStreaming: z.ZodOptional<z.ZodBoolean>;
+                    maxTokensField: z.ZodOptional<z.ZodEnum<{
+                        max_completion_tokens: "max_completion_tokens";
+                        max_tokens: "max_tokens";
+                    }>>;
+                    thinkingFormat: z.ZodOptional<z.ZodEnum<{
+                        "ant-ling": "ant-ling";
+                        baseten: "baseten";
+                        "chat-template": "chat-template";
+                        deepseek: "deepseek";
+                        openai: "openai";
+                        openrouter: "openrouter";
+                        qwen: "qwen";
+                        "qwen-chat-template": "qwen-chat-template";
+                        "string-thinking": "string-thinking";
+                        together: "together";
+                        zai: "zai";
+                    }>>;
+                    zaiToolStream: z.ZodOptional<z.ZodBoolean>;
+                }, z.core.$strict>>;
             }, z.core.$strict>;
             options: z.ZodObject<{
                 cacheRetention: z.ZodEnum<{
@@ -2972,6 +3005,39 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                     }, z.core.$strict>;
                     contextWindow: z.ZodNumber;
                     maxTokens: z.ZodNumber;
+                    thinkingLevelMap: z.ZodOptional<z.ZodObject<{
+                        off: z.ZodNullable<z.ZodString>;
+                        minimal: z.ZodNullable<z.ZodString>;
+                        low: z.ZodNullable<z.ZodString>;
+                        medium: z.ZodNullable<z.ZodString>;
+                        high: z.ZodNullable<z.ZodString>;
+                        xhigh: z.ZodNullable<z.ZodString>;
+                        max: z.ZodNullable<z.ZodString>;
+                    }, z.core.$strict>>;
+                    compat: z.ZodOptional<z.ZodObject<{
+                        supportsStore: z.ZodOptional<z.ZodBoolean>;
+                        supportsDeveloperRole: z.ZodOptional<z.ZodBoolean>;
+                        supportsReasoningEffort: z.ZodOptional<z.ZodBoolean>;
+                        supportsUsageInStreaming: z.ZodOptional<z.ZodBoolean>;
+                        maxTokensField: z.ZodOptional<z.ZodEnum<{
+                            max_completion_tokens: "max_completion_tokens";
+                            max_tokens: "max_tokens";
+                        }>>;
+                        thinkingFormat: z.ZodOptional<z.ZodEnum<{
+                            "ant-ling": "ant-ling";
+                            baseten: "baseten";
+                            "chat-template": "chat-template";
+                            deepseek: "deepseek";
+                            openai: "openai";
+                            openrouter: "openrouter";
+                            qwen: "qwen";
+                            "qwen-chat-template": "qwen-chat-template";
+                            "string-thinking": "string-thinking";
+                            together: "together";
+                            zai: "zai";
+                        }>>;
+                        zaiToolStream: z.ZodOptional<z.ZodBoolean>;
+                    }, z.core.$strict>>;
                 }, z.core.$strict>;
                 options: z.ZodObject<{
                     cacheRetention: z.ZodEnum<{
@@ -4268,6 +4334,39 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                     }, z.core.$strict>;
                     contextWindow: z.ZodNumber;
                     maxTokens: z.ZodNumber;
+                    thinkingLevelMap: z.ZodOptional<z.ZodObject<{
+                        off: z.ZodNullable<z.ZodString>;
+                        minimal: z.ZodNullable<z.ZodString>;
+                        low: z.ZodNullable<z.ZodString>;
+                        medium: z.ZodNullable<z.ZodString>;
+                        high: z.ZodNullable<z.ZodString>;
+                        xhigh: z.ZodNullable<z.ZodString>;
+                        max: z.ZodNullable<z.ZodString>;
+                    }, z.core.$strict>>;
+                    compat: z.ZodOptional<z.ZodObject<{
+                        supportsStore: z.ZodOptional<z.ZodBoolean>;
+                        supportsDeveloperRole: z.ZodOptional<z.ZodBoolean>;
+                        supportsReasoningEffort: z.ZodOptional<z.ZodBoolean>;
+                        supportsUsageInStreaming: z.ZodOptional<z.ZodBoolean>;
+                        maxTokensField: z.ZodOptional<z.ZodEnum<{
+                            max_completion_tokens: "max_completion_tokens";
+                            max_tokens: "max_tokens";
+                        }>>;
+                        thinkingFormat: z.ZodOptional<z.ZodEnum<{
+                            "ant-ling": "ant-ling";
+                            baseten: "baseten";
+                            "chat-template": "chat-template";
+                            deepseek: "deepseek";
+                            openai: "openai";
+                            openrouter: "openrouter";
+                            qwen: "qwen";
+                            "qwen-chat-template": "qwen-chat-template";
+                            "string-thinking": "string-thinking";
+                            together: "together";
+                            zai: "zai";
+                        }>>;
+                        zaiToolStream: z.ZodOptional<z.ZodBoolean>;
+                    }, z.core.$strict>>;
                 }, z.core.$strict>;
                 options: z.ZodObject<{
                     cacheRetention: z.ZodEnum<{
@@ -5503,6 +5602,13 @@ export declare const InputPreparationModelCostSchema: z.ZodObject<{
  * `api` is a single literal, not an open enum: `openai-completions` is the one
  * API the frozen B-P1 native validator admits, and widening it is a
  * registration, not a parser relaxation.
+ *
+ * `thinkingLevelMap` and `compat` are the two body-affecting declarations a
+ * locally configured provider profile projects into the model entry the runtime
+ * is launched with. They are OPTIONAL because a model configuration may declare
+ * neither, and absent stays absent on every carrier: nothing here defaults,
+ * coerces or infers one, since a preparation whose model gained a field on the
+ * way through would no longer equal the session model it was counted for.
  */
 export declare const InputPreparationModelSchema: z.ZodObject<{
     id: z.ZodString;
@@ -5523,6 +5629,39 @@ export declare const InputPreparationModelSchema: z.ZodObject<{
     }, z.core.$strict>;
     contextWindow: z.ZodNumber;
     maxTokens: z.ZodNumber;
+    thinkingLevelMap: z.ZodOptional<z.ZodObject<{
+        off: z.ZodNullable<z.ZodString>;
+        minimal: z.ZodNullable<z.ZodString>;
+        low: z.ZodNullable<z.ZodString>;
+        medium: z.ZodNullable<z.ZodString>;
+        high: z.ZodNullable<z.ZodString>;
+        xhigh: z.ZodNullable<z.ZodString>;
+        max: z.ZodNullable<z.ZodString>;
+    }, z.core.$strict>>;
+    compat: z.ZodOptional<z.ZodObject<{
+        supportsStore: z.ZodOptional<z.ZodBoolean>;
+        supportsDeveloperRole: z.ZodOptional<z.ZodBoolean>;
+        supportsReasoningEffort: z.ZodOptional<z.ZodBoolean>;
+        supportsUsageInStreaming: z.ZodOptional<z.ZodBoolean>;
+        maxTokensField: z.ZodOptional<z.ZodEnum<{
+            max_completion_tokens: "max_completion_tokens";
+            max_tokens: "max_tokens";
+        }>>;
+        thinkingFormat: z.ZodOptional<z.ZodEnum<{
+            "ant-ling": "ant-ling";
+            baseten: "baseten";
+            "chat-template": "chat-template";
+            deepseek: "deepseek";
+            openai: "openai";
+            openrouter: "openrouter";
+            qwen: "qwen";
+            "qwen-chat-template": "qwen-chat-template";
+            "string-thinking": "string-thinking";
+            together: "together";
+            zai: "zai";
+        }>>;
+        zaiToolStream: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
 export type InputPreparationModel = z.infer<typeof InputPreparationModelSchema>;
 /** Body-affecting options only. Transport options are deliberately not on this wire. */
@@ -5569,6 +5708,39 @@ export declare const InputPreparationSelectionSchema: z.ZodObject<{
         }, z.core.$strict>;
         contextWindow: z.ZodNumber;
         maxTokens: z.ZodNumber;
+        thinkingLevelMap: z.ZodOptional<z.ZodObject<{
+            off: z.ZodNullable<z.ZodString>;
+            minimal: z.ZodNullable<z.ZodString>;
+            low: z.ZodNullable<z.ZodString>;
+            medium: z.ZodNullable<z.ZodString>;
+            high: z.ZodNullable<z.ZodString>;
+            xhigh: z.ZodNullable<z.ZodString>;
+            max: z.ZodNullable<z.ZodString>;
+        }, z.core.$strict>>;
+        compat: z.ZodOptional<z.ZodObject<{
+            supportsStore: z.ZodOptional<z.ZodBoolean>;
+            supportsDeveloperRole: z.ZodOptional<z.ZodBoolean>;
+            supportsReasoningEffort: z.ZodOptional<z.ZodBoolean>;
+            supportsUsageInStreaming: z.ZodOptional<z.ZodBoolean>;
+            maxTokensField: z.ZodOptional<z.ZodEnum<{
+                max_completion_tokens: "max_completion_tokens";
+                max_tokens: "max_tokens";
+            }>>;
+            thinkingFormat: z.ZodOptional<z.ZodEnum<{
+                "ant-ling": "ant-ling";
+                baseten: "baseten";
+                "chat-template": "chat-template";
+                deepseek: "deepseek";
+                openai: "openai";
+                openrouter: "openrouter";
+                qwen: "qwen";
+                "qwen-chat-template": "qwen-chat-template";
+                "string-thinking": "string-thinking";
+                together: "together";
+                zai: "zai";
+            }>>;
+            zaiToolStream: z.ZodOptional<z.ZodBoolean>;
+        }, z.core.$strict>>;
     }, z.core.$strict>;
     options: z.ZodObject<{
         cacheRetention: z.ZodEnum<{
@@ -7257,6 +7429,39 @@ export declare const AgentInputPreparationPayloadSchema: z.ZodObject<{
             }, z.core.$strict>;
             contextWindow: z.ZodNumber;
             maxTokens: z.ZodNumber;
+            thinkingLevelMap: z.ZodOptional<z.ZodObject<{
+                off: z.ZodNullable<z.ZodString>;
+                minimal: z.ZodNullable<z.ZodString>;
+                low: z.ZodNullable<z.ZodString>;
+                medium: z.ZodNullable<z.ZodString>;
+                high: z.ZodNullable<z.ZodString>;
+                xhigh: z.ZodNullable<z.ZodString>;
+                max: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>>;
+            compat: z.ZodOptional<z.ZodObject<{
+                supportsStore: z.ZodOptional<z.ZodBoolean>;
+                supportsDeveloperRole: z.ZodOptional<z.ZodBoolean>;
+                supportsReasoningEffort: z.ZodOptional<z.ZodBoolean>;
+                supportsUsageInStreaming: z.ZodOptional<z.ZodBoolean>;
+                maxTokensField: z.ZodOptional<z.ZodEnum<{
+                    max_completion_tokens: "max_completion_tokens";
+                    max_tokens: "max_tokens";
+                }>>;
+                thinkingFormat: z.ZodOptional<z.ZodEnum<{
+                    "ant-ling": "ant-ling";
+                    baseten: "baseten";
+                    "chat-template": "chat-template";
+                    deepseek: "deepseek";
+                    openai: "openai";
+                    openrouter: "openrouter";
+                    qwen: "qwen";
+                    "qwen-chat-template": "qwen-chat-template";
+                    "string-thinking": "string-thinking";
+                    together: "together";
+                    zai: "zai";
+                }>>;
+                zaiToolStream: z.ZodOptional<z.ZodBoolean>;
+            }, z.core.$strict>>;
         }, z.core.$strict>;
         options: z.ZodObject<{
             cacheRetention: z.ZodEnum<{
@@ -9136,6 +9341,39 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
                 }, z.core.$strict>;
                 contextWindow: z.ZodNumber;
                 maxTokens: z.ZodNumber;
+                thinkingLevelMap: z.ZodOptional<z.ZodObject<{
+                    off: z.ZodNullable<z.ZodString>;
+                    minimal: z.ZodNullable<z.ZodString>;
+                    low: z.ZodNullable<z.ZodString>;
+                    medium: z.ZodNullable<z.ZodString>;
+                    high: z.ZodNullable<z.ZodString>;
+                    xhigh: z.ZodNullable<z.ZodString>;
+                    max: z.ZodNullable<z.ZodString>;
+                }, z.core.$strict>>;
+                compat: z.ZodOptional<z.ZodObject<{
+                    supportsStore: z.ZodOptional<z.ZodBoolean>;
+                    supportsDeveloperRole: z.ZodOptional<z.ZodBoolean>;
+                    supportsReasoningEffort: z.ZodOptional<z.ZodBoolean>;
+                    supportsUsageInStreaming: z.ZodOptional<z.ZodBoolean>;
+                    maxTokensField: z.ZodOptional<z.ZodEnum<{
+                        max_completion_tokens: "max_completion_tokens";
+                        max_tokens: "max_tokens";
+                    }>>;
+                    thinkingFormat: z.ZodOptional<z.ZodEnum<{
+                        "ant-ling": "ant-ling";
+                        baseten: "baseten";
+                        "chat-template": "chat-template";
+                        deepseek: "deepseek";
+                        openai: "openai";
+                        openrouter: "openrouter";
+                        qwen: "qwen";
+                        "qwen-chat-template": "qwen-chat-template";
+                        "string-thinking": "string-thinking";
+                        together: "together";
+                        zai: "zai";
+                    }>>;
+                    zaiToolStream: z.ZodOptional<z.ZodBoolean>;
+                }, z.core.$strict>>;
             }, z.core.$strict>;
             options: z.ZodObject<{
                 cacheRetention: z.ZodEnum<{

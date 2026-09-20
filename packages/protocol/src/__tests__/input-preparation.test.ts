@@ -8,6 +8,7 @@ import {
   EnvelopeSchema,
   InputPreparationCompletionRequestSchema,
   InputPreparationContextDocumentSchema,
+  InputPreparationModelSchema,
   InputPreparationReadbackSchema,
   InputPreparationReceiptSummarySchema,
   MESSAGE_PAYLOAD_SCHEMAS,
@@ -195,6 +196,120 @@ describe('agent.input.preparation envelope', () => {
 
   it('registers the payload schema under the message registry', () => {
     expect(MESSAGE_PAYLOAD_SCHEMAS['agent.input.preparation']).toBe(AgentInputPreparationPayloadSchema);
+  });
+});
+
+describe('input preparation model: the launched model declarations', () => {
+  const THINKING_LEVEL_MAP = {
+    off: null,
+    minimal: 'low',
+    low: 'low',
+    medium: 'medium',
+    high: 'high',
+    xhigh: 'high',
+    max: 'high',
+  } as const;
+
+  const COMPAT = {
+    supportsDeveloperRole: false,
+    maxTokensField: 'max_tokens',
+    thinkingFormat: 'zai',
+    zaiToolStream: true,
+  } as const;
+
+  function model(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return { ...SELECTION.model, ...overrides };
+  }
+
+  it('accepts a model that declares both thinkingLevelMap and compat, verbatim', () => {
+    const value = model({ thinkingLevelMap: THINKING_LEVEL_MAP, compat: COMPAT });
+    const parsed = InputPreparationModelSchema.parse(value);
+    expect(parsed).toEqual(value);
+    // Verbatim, not merely equal-ish: the whole point of carrying these is that
+    // the prepared model can still EQUAL the session model composed from the
+    // same declarations.
+    expect(parsed.thinkingLevelMap).toEqual(THINKING_LEVEL_MAP);
+    expect(parsed.compat).toEqual(COMPAT);
+  });
+
+  it('accepts a model that declares neither, and leaves both keys ABSENT', () => {
+    const parsed = InputPreparationModelSchema.parse(model());
+    // Absent stays absent. A default here would be a second authority inventing
+    // a body-affecting declaration the configuration never made.
+    expect(Object.hasOwn(parsed, 'thinkingLevelMap')).toBe(false);
+    expect(Object.hasOwn(parsed, 'compat')).toBe(false);
+    expect(Object.keys(parsed).sort()).toEqual([
+      'api', 'baseUrl', 'contextWindow', 'cost', 'id', 'input', 'maxTokens', 'name', 'provider', 'reasoning',
+    ]);
+  });
+
+  it('accepts either declaration alone', () => {
+    expect(InputPreparationModelSchema.safeParse(model({ thinkingLevelMap: THINKING_LEVEL_MAP })).success).toBe(true);
+    expect(InputPreparationModelSchema.safeParse(model({ compat: COMPAT })).success).toBe(true);
+    // An empty compat is a declaration with no flags, which is a real state a
+    // configuration can be in; it is not the same as declaring no compat.
+    expect(InputPreparationModelSchema.safeParse(model({ compat: {} })).success).toBe(true);
+  });
+
+  it('refuses an unknown compat key instead of stripping it', () => {
+    expect(
+      InputPreparationModelSchema.safeParse(model({ compat: { ...COMPAT, supportsStrictMode: true } })).success,
+    ).toBe(false);
+  });
+
+  it('refuses a maxTokensField outside the two the declaration admits', () => {
+    expect(
+      InputPreparationModelSchema.safeParse(model({ compat: { ...COMPAT, maxTokensField: 'max_output_tokens' } })).success,
+    ).toBe(false);
+  });
+
+  it('refuses a thinkingFormat outside the declared set', () => {
+    expect(
+      InputPreparationModelSchema.safeParse(model({ compat: { ...COMPAT, thinkingFormat: 'anthropic' } })).success,
+    ).toBe(false);
+  });
+
+  it('refuses a thinking level outside the seven, and a map missing one of them', () => {
+    expect(
+      InputPreparationModelSchema.safeParse(
+        model({ thinkingLevelMap: { ...THINKING_LEVEL_MAP, ultra: 'high' } }),
+      ).success,
+    ).toBe(false);
+    const { max: _max, ...missingMax } = THINKING_LEVEL_MAP;
+    expect(InputPreparationModelSchema.safeParse(model({ thinkingLevelMap: missingMax })).success).toBe(false);
+  });
+
+  it('refuses a level value that is neither a string nor null', () => {
+    expect(
+      InputPreparationModelSchema.safeParse(model({ thinkingLevelMap: { ...THINKING_LEVEL_MAP, high: 3 } })).success,
+    ).toBe(false);
+    expect(
+      InputPreparationModelSchema.safeParse(model({ thinkingLevelMap: { ...THINKING_LEVEL_MAP, high: undefined } })).success,
+    ).toBe(false);
+  });
+
+  it('bounds an effort token at 64 characters and to the portable character set', () => {
+    const justUnder = 'a'.repeat(64);
+    expect(
+      InputPreparationModelSchema.safeParse(model({ thinkingLevelMap: { ...THINKING_LEVEL_MAP, high: justUnder } })).success,
+    ).toBe(true);
+    expect(
+      InputPreparationModelSchema.safeParse(model({ thinkingLevelMap: { ...THINKING_LEVEL_MAP, high: `${justUnder}a` } })).success,
+    ).toBe(false);
+    expect(
+      InputPreparationModelSchema.safeParse(model({ thinkingLevelMap: { ...THINKING_LEVEL_MAP, high: '' } })).success,
+    ).toBe(false);
+    expect(
+      InputPreparationModelSchema.safeParse(model({ thinkingLevelMap: { ...THINKING_LEVEL_MAP, high: 'very high' } })).success,
+    ).toBe(false);
+  });
+
+  it('carries both declarations through the whole request payload', () => {
+    const selection = { ...SELECTION, model: model({ thinkingLevelMap: THINKING_LEVEL_MAP, compat: COMPAT }) };
+    const parsed = AgentInputPreparationPayloadSchema.safeParse(payload({ selection }));
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.selection.model.thinkingLevelMap).toEqual(THINKING_LEVEL_MAP);
+    expect(parsed.success && parsed.data.selection.model.compat).toEqual(COMPAT);
   });
 });
 
