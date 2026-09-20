@@ -239,6 +239,34 @@ covered against the real code in
 prepared-entry spawn case that asserts the projection write, the single
 injected secret and the untouched `--config` argv.
 
+**K-5 — the acceptance gate's non-blocking findings (2026-09-21).**
+`prepared_provider_registration_failed` was the one consent-path refusal that
+interpolated a FOREIGN exception message, and it wrapped the two calls that
+touch the resolved credential. The refusal is now built by one exported
+function from two fixed literal site details, and nothing about the caught
+error is read; `prepared-provider-consent.test.ts` forces a real fork
+exception whose message carries a synthetic secret (the fork composes
+registration errors from values it was handed) and pins that neither the
+secret, nor that message, nor the credential env name appears in the line the
+host would write to stderr. Forcing that throw from the host's own call site
+in-process is not reachable — the consent gate has already admitted every
+value the registration is built from — so the refusal construction was
+extracted instead, which is the task's stated fallback.
+
+`PREPARED_PROJECTION_COMPARED_MODEL_FIELDS` was documentation next to a
+hand-written comparison. Both sides are now projected THROUGH the constant,
+and the same derived list is the admitted key set of the projected model
+entry, so the list IS the comparison. The eleven fields behave exactly as
+before. The negative table in `pi-prepared-launcher.test.ts` is keyed by
+compared field (a `Record` over the constant's own union, so a missing case
+fails typecheck) with its key set asserted against the constant at runtime;
+`name`, `reasoning`, `input`, `contextWindow` and `maxTokens` had no case and
+now do, and the two shape-level refusals that no single field names stayed as
+their own small table. `pi-adapter.test.ts` now iterates the whole reserved
+launcher-argument set rather than only `--macos-keychain-path`; the set is
+restated in the test because it is a function-local const in the adapter, so
+the test catches a removal but not an addition.
+
 ## Deviations From Plan Or Spec
 
 - The contract's `allowed_paths` names `docs/api-surface/`, which does not exist

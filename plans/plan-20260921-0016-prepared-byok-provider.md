@@ -147,4 +147,5 @@ Decisions:
 - [x] K-3 client: prepared-host consent gate + provider registration (mechanism chosen by the egress/write probe) + typed refusals
 - [x] K-4 tests: secret never in record/config/log/argv; identity env projection unchanged; MCP descendants still refuse the name; consent-gate negatives; offline end-to-end consume for `byok-sdk-<ref>`; projection-dir lifecycle
 - [x] F-4 Owner: publish fork build 8; verify registry integrity — Owner published build 8 on 2026-09-21 (fork source head `85c0adac`); registry `dist.integrity` verified against the stage manifest for `@byok-sdk/pi-ai@0.85.1007` (unchanged), `@byok-sdk/pi-agent-core@0.85.1008` and `@byok-sdk/pi-coding-agent@0.85.1008`; the SDK pin moved to build 8 and the duplicate nested `pi-ai` is gone
+- [x] K-5 close the acceptance gate's non-blocking findings (fixed-literal registration refusal + test; comparison derived from the compared-field constant; full negative table; reserved `--runtime-entry`; ledger entries; contract §18d)
 - [ ] S-5 Required checks, gate, PR
