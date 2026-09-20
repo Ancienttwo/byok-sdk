@@ -949,10 +949,91 @@ function parseScopeClaim(value: unknown): InputPreparationScopeClaimV1 | undefin
   };
 }
 
+/**
+ * The two optional model declarations, as this reader's own closed shapes.
+ *
+ * Hand-written and restated rather than shared with the prepared host's reader
+ * (`bin/pi-prepared-host.ts`) or with `@byok-sdk/protocol`'s zod schema, for
+ * the same reason every other field on this path is: these are three
+ * INDEPENDENT readers of one durable fact, and a value read through a shared
+ * helper would be one reader agreeing with itself. What they must never do is
+ * DISAGREE about the closed set — a key one admits and another drops is the
+ * silent field loss that becomes `prepared_model_drift` at consume — so
+ * `__tests__/input-preparation-model-parity.test.ts` feeds one fixture table
+ * through all of them and refuses any divergence.
+ *
+ * Both answer `undefined` for anything they do not admit, and neither ever
+ * defaults, coerces or fills in a member.
+ */
+const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+const COMPAT_FLAGS = [
+  'supportsStore',
+  'supportsDeveloperRole',
+  'supportsReasoningEffort',
+  'supportsUsageInStreaming',
+  'zaiToolStream',
+] as const;
+const MAX_TOKENS_FIELDS = ['max_completion_tokens', 'max_tokens'] as const;
+const THINKING_FORMATS = [
+  'openai', 'openrouter', 'deepseek', 'together', 'baseten', 'zai', 'qwen',
+  'chat-template', 'qwen-chat-template', 'string-thinking', 'ant-ling',
+] as const;
+
+/** One provider-side effort token: bounded, portable, non-empty. */
+function thinkingEffort(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 64 && /^[a-zA-Z0-9_-]+$/u.test(value);
+}
+
+/**
+ * Exactly the seven declared levels, each an effort token or `null`. A missing
+ * level is refused rather than read as unsupported: "the configuration says
+ * this level is off" and "the configuration forgot it" are different facts.
+ */
+function parseThinkingLevelMap(value: unknown): InputPreparationModelV1['thinkingLevelMap'] {
+  if (!plainRecord(value) || !exactKeys(value, THINKING_LEVELS)) return undefined;
+  for (const level of THINKING_LEVELS) {
+    if (!Object.hasOwn(value, level)) return undefined;
+    const entry = value[level];
+    if (entry !== null && !thinkingEffort(entry)) return undefined;
+  }
+  const map = value as Record<(typeof THINKING_LEVELS)[number], string | null>;
+  return {
+    off: map.off,
+    minimal: map.minimal,
+    low: map.low,
+    medium: map.medium,
+    high: map.high,
+    xhigh: map.xhigh,
+    max: map.max,
+  };
+}
+
+/** The declared compatibility flags: every member optional, no member invented. */
+function parseModelCompat(value: unknown): InputPreparationModelV1['compat'] {
+  if (!plainRecord(value) || !exactKeys(value, [...COMPAT_FLAGS, 'maxTokensField', 'thinkingFormat'])) {
+    return undefined;
+  }
+  const parsed: Record<string, unknown> = {};
+  for (const flag of COMPAT_FLAGS) {
+    if (!Object.hasOwn(value, flag)) continue;
+    if (typeof value[flag] !== 'boolean') return undefined;
+    parsed[flag] = value[flag];
+  }
+  if (Object.hasOwn(value, 'maxTokensField')) {
+    if (!(MAX_TOKENS_FIELDS as readonly unknown[]).includes(value.maxTokensField)) return undefined;
+    parsed['maxTokensField'] = value.maxTokensField;
+  }
+  if (Object.hasOwn(value, 'thinkingFormat')) {
+    if (!(THINKING_FORMATS as readonly unknown[]).includes(value.thinkingFormat)) return undefined;
+    parsed['thinkingFormat'] = value.thinkingFormat;
+  }
+  return parsed as InputPreparationModelV1['compat'];
+}
+
 function parseModel(value: unknown): InputPreparationModelV1 | undefined {
   if (
     !plainRecord(value) ||
-    !exactKeys(value, ['id', 'name', 'api', 'provider', 'baseUrl', 'reasoning', 'input', 'cost', 'contextWindow', 'maxTokens'])
+    !exactKeys(value, ['id', 'name', 'api', 'provider', 'baseUrl', 'reasoning', 'input', 'cost', 'contextWindow', 'maxTokens', 'thinkingLevelMap', 'compat'])
   ) {
     return undefined;
   }
@@ -967,6 +1048,20 @@ function parseModel(value: unknown): InputPreparationModelV1 | undefined {
   if (!finiteNumber(cost.input) || !finiteNumber(cost.output) || !finiteNumber(cost.cacheRead) || !finiteNumber(cost.cacheWrite)) return undefined;
   if (!Number.isSafeInteger(value.contextWindow) || (value.contextWindow as number) <= 0) return undefined;
   if (!Number.isSafeInteger(value.maxTokens) || (value.maxTokens as number) <= 0) return undefined;
+  // Absent stays absent; present is re-validated against the one closed shape
+  // both hand parsers share. A declaration that is present but malformed is a
+  // refusal, never a drop: dropping it would silently produce a model that no
+  // longer equals the session model this request is being counted for.
+  let thinkingLevelMap: InputPreparationModelV1['thinkingLevelMap'];
+  if (value.thinkingLevelMap !== undefined) {
+    thinkingLevelMap = parseThinkingLevelMap(value.thinkingLevelMap);
+    if (thinkingLevelMap === undefined) return undefined;
+  }
+  let compat: InputPreparationModelV1['compat'];
+  if (value.compat !== undefined) {
+    compat = parseModelCompat(value.compat);
+    if (compat === undefined) return undefined;
+  }
   return {
     id: value.id,
     name: value.name,
@@ -978,6 +1073,8 @@ function parseModel(value: unknown): InputPreparationModelV1 | undefined {
     cost: { input: cost.input, output: cost.output, cacheRead: cost.cacheRead, cacheWrite: cost.cacheWrite },
     contextWindow: value.contextWindow as number,
     maxTokens: value.maxTokens as number,
+    ...(thinkingLevelMap === undefined ? {} : { thinkingLevelMap }),
+    ...(compat === undefined ? {} : { compat }),
   };
 }
 

@@ -90,8 +90,91 @@ function requireStringRecord(value: unknown, field: string): Readonly<Record<str
   return Object.freeze(record);
 }
 
-/** The exact model identity the durable record pinned, re-validated field by field. */
-function parseModel(value: unknown): InputPreparationModelV1 {
+/**
+ * The two optional model declarations, re-validated here against this reader's
+ * own closed shapes.
+ *
+ * Restated rather than shared with the daemon's reader
+ * (`../daemon/control-protocol.ts`) or with `@byok-sdk/protocol`'s zod schema:
+ * this process re-validates the record field by field precisely because it may
+ * not take another reader's word for a value the native verifier will compare.
+ * The three must never DISAGREE about the closed set, which
+ * `../__tests__/input-preparation-model-parity.test.ts` pins by feeding one
+ * fixture table through all of them.
+ */
+const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+const COMPAT_FLAGS = [
+  'supportsStore',
+  'supportsDeveloperRole',
+  'supportsReasoningEffort',
+  'supportsUsageInStreaming',
+  'zaiToolStream',
+] as const;
+const MAX_TOKENS_FIELDS = ['max_completion_tokens', 'max_tokens'] as const;
+const THINKING_FORMATS = [
+  'openai', 'openrouter', 'deepseek', 'together', 'baseten', 'zai', 'qwen',
+  'chat-template', 'qwen-chat-template', 'string-thinking', 'ant-ling',
+] as const;
+
+/** One provider-side effort token: bounded, portable, non-empty. */
+function isThinkingEffort(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 64 && /^[a-zA-Z0-9_-]+$/u.test(value);
+}
+
+/**
+ * Exactly the seven declared levels, each an effort token or `null`. A missing
+ * level is refused rather than read as unsupported.
+ */
+function parseThinkingLevelMap(value: unknown): InputPreparationModelV1['thinkingLevelMap'] {
+  if (!isPlainObject(value)) return undefined;
+  if (Object.keys(value).some((key) => !(THINKING_LEVELS as readonly string[]).includes(key))) return undefined;
+  for (const level of THINKING_LEVELS) {
+    if (!Object.hasOwn(value, level)) return undefined;
+    const entry = value[level];
+    if (entry !== null && !isThinkingEffort(entry)) return undefined;
+  }
+  const map = value as Record<(typeof THINKING_LEVELS)[number], string | null>;
+  return {
+    off: map.off,
+    minimal: map.minimal,
+    low: map.low,
+    medium: map.medium,
+    high: map.high,
+    xhigh: map.xhigh,
+    max: map.max,
+  };
+}
+
+/** The declared compatibility flags: every member optional, no member invented. */
+function parseModelCompat(value: unknown): InputPreparationModelV1['compat'] {
+  if (!isPlainObject(value)) return undefined;
+  const admitted: readonly string[] = [...COMPAT_FLAGS, 'maxTokensField', 'thinkingFormat'];
+  if (Object.keys(value).some((key) => !admitted.includes(key))) return undefined;
+  const parsed: Record<string, unknown> = {};
+  for (const flag of COMPAT_FLAGS) {
+    if (!Object.hasOwn(value, flag)) continue;
+    if (typeof value[flag] !== 'boolean') return undefined;
+    parsed[flag] = value[flag];
+  }
+  if (Object.hasOwn(value, 'maxTokensField')) {
+    if (!(MAX_TOKENS_FIELDS as readonly unknown[]).includes(value['maxTokensField'])) return undefined;
+    parsed['maxTokensField'] = value['maxTokensField'];
+  }
+  if (Object.hasOwn(value, 'thinkingFormat')) {
+    if (!(THINKING_FORMATS as readonly unknown[]).includes(value['thinkingFormat'])) return undefined;
+    parsed['thinkingFormat'] = value['thinkingFormat'];
+  }
+  return parsed as InputPreparationModelV1['compat'];
+}
+
+/**
+ * The exact model identity the durable record pinned, re-validated field by field.
+ *
+ * Exported for the parser-parity test alone: it is one of three INDEPENDENT
+ * readers of the same model, and a parity table that could not reach this one
+ * would pin only the other two.
+ */
+export function parsePreparedExpectedModel(value: unknown): InputPreparationModelV1 {
   if (!isPlainObject(value)) fail('expected.model must be an object');
   if (value.api !== 'openai-completions') fail('expected.model.api must be "openai-completions"');
   if (typeof value.reasoning !== 'boolean') fail('expected.model.reasoning must be a boolean');
@@ -104,6 +187,20 @@ function parseModel(value: unknown): InputPreparationModelV1 {
   }
   for (const key of ['contextWindow', 'maxTokens']) {
     if (typeof value[key] !== 'number') fail(`expected.model.${key} must be a number`);
+  }
+  // The two declarations the launched model entry may carry, re-validated here
+  // against the SAME closed shapes the daemon's parser applies — a key this
+  // reader dropped would hand the native session an expected model that no
+  // longer equals the session model, which is `prepared_model_drift`.
+  let thinkingLevelMap: InputPreparationModelV1['thinkingLevelMap'];
+  if (value.thinkingLevelMap !== undefined) {
+    thinkingLevelMap = parseThinkingLevelMap(value.thinkingLevelMap);
+    if (thinkingLevelMap === undefined) fail('expected.model.thinkingLevelMap must map exactly the seven declared levels to an effort token or null');
+  }
+  let compat: InputPreparationModelV1['compat'];
+  if (value.compat !== undefined) {
+    compat = parseModelCompat(value.compat);
+    if (compat === undefined) fail('expected.model.compat declares an unknown key or an unsupported value');
   }
   return Object.freeze({
     id: requireString(value.id, 'expected.model.id'),
@@ -121,6 +218,8 @@ function parseModel(value: unknown): InputPreparationModelV1 {
     }),
     contextWindow: value.contextWindow as number,
     maxTokens: value.maxTokens as number,
+    ...(thinkingLevelMap === undefined ? {} : { thinkingLevelMap: Object.freeze(thinkingLevelMap) }),
+    ...(compat === undefined ? {} : { compat: Object.freeze(compat) }),
   });
 }
 
@@ -204,7 +303,7 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
     cwd,
     policy: policyResult.data,
     countedPermissionMode: countedPermissionMode as PermissionMode,
-    model: parseModel(parsed.expected.model),
+    model: parsePreparedExpectedModel(parsed.expected.model),
     toolBindingDigest: requireString(parsed.toolBindingDigest, 'toolBindingDigest'),
     observationDigest: requireString(parsed.observationDigest, 'observationDigest'),
     toolsetDefinitionRevisions: requireStringRecord(parsed.toolsetDefinitionRevisions, 'toolsetDefinitionRevisions'),

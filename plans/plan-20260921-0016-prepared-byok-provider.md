@@ -118,8 +118,8 @@ Host `selection.model{…, thinkingLevelMap?, compat?}` → protocol schema → 
 - [ ] F-1 Fork: structural provider check + tests + prepared-path audit (fork repo, `claude/c07-prepared-provider-opaque`)
 - [ ] F-2 Fork: stage build 7 (dry-run only), gate the fork diff
 - [ ] F-3 Owner: publish fork build 7 from Terminal.app; verify registry integrity against the stage manifest
-- [ ] S-1 SDK: protocol schema + tests
-- [ ] S-2 SDK: client type, both parsers, store, compiler pass-through + parser-parity test
+- [x] S-1 SDK: protocol schema + tests
+- [x] S-2 SDK: client type, both parsers, store, compiler pass-through + parser-parity test
 - [ ] S-3 SDK: fork pin → build 7 (+ identity pins/gates) and the BYOK-provider compile/consume/parity regression
 - [ ] S-4 SDK: contract doc section + deferred-goal ledger entries
 - [ ] S-5 Required checks, gate, PR
