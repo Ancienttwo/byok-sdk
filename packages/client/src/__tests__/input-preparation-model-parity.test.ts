@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,6 +13,12 @@ import {
   type InputPreparationBindingV1,
   type InputPreparationModelV1,
 } from '../input-preparation';
+import {
+  createPiInputPreparationCompiler,
+  resolveInstalledPiRuntimeIdentity,
+  InputPreparationCompileError,
+  type CompilePreparedInputRequest,
+} from '../adapters/pi/input-preparation';
 // Relative, and test-only: the release graph
 // (`scripts/release/check-package-graph.mjs`) keeps `@byok-sdk/keys` and the
 // dispatch packages disjoint as SHIPPED dependencies, which is exactly why the
@@ -216,6 +223,79 @@ async function throughStore(admitted: InputPreparationModelV1): Promise<InputPre
   return reader.get(outcome.record.recordId)?.model;
 }
 
+// ---------------------------------------------------------------------------
+// The one BYOK projection this file speaks about, and the one mapping from it
+// onto the wire. Hoisted to module scope because the compile/consume regression
+// below reads exactly the same projection: a second mapping written beside the
+// first would be the drift this file exists to refuse.
+// ---------------------------------------------------------------------------
+
+/** A real BYOK profile: a z.ai coding endpoint launched as its own namespaced provider. */
+const PROFILE = ModelProviderProfileSchema.parse({
+  adapter: 'openai_compatible',
+  auth_mode: 'bearer',
+  base_url: 'https://api.z.ai/api/coding/paas/v4',
+  capabilities: [],
+  created_at: '2026-09-21T00:00:00.000Z',
+  display_name: 'GLM 4.6 (coding)',
+  enabled: true,
+  kind: 'model',
+  model: 'glm-4.6',
+  pi_model: {
+    contextWindow: 200_000,
+    maxTokens: 98_304,
+    reasoning: true,
+    thinkingLevel: 'high',
+    thinkingLevelMap: THINKING_LEVEL_MAP,
+    compat: COMPAT,
+  },
+  profile_ref: 'zai-coding',
+  provider_kind: 'zai',
+  updated_at: '2026-09-21T00:00:00.000Z',
+});
+
+interface ProjectedProvider {
+  readonly baseUrl: string;
+  readonly api: string;
+  readonly models: readonly Record<string, unknown>[];
+}
+
+function projected(): { providerId: string; provider: ProjectedProvider; entry: Record<string, unknown> } {
+  const projection = buildPiProviderProjection(PROFILE) as { providers: Record<string, ProjectedProvider> };
+  const providerId = piProjectionProviderId(PROFILE.profile_ref);
+  const provider = projection.providers[providerId]!;
+  return { providerId, provider, entry: provider.models[0]! };
+}
+
+/**
+ * The projected `models.json` entry, read onto the wire model.
+ *
+ * `api` and `baseUrl` come from the PROVIDER block, not the entry: the launched
+ * runtime reads both off the provider when the entry states neither. `cost` is
+ * NOT in the projection — the fork's composer defaults an entry without one to
+ * all zeroes (`node_modules/@earendil-works/pi-coding-agent/dist/core/provider-composer.js`,
+ * `cost: definition.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }`),
+ * so the value is stated here rather than defaulted by this SDK: the composer
+ * owns the price, and a second default would be this package quietly deciding one.
+ */
+function projectedWireModel(): Record<string, unknown> {
+  const { providerId, provider, entry } = projected();
+  return {
+    id: entry['id'],
+    name: entry['name'],
+    api: provider.api,
+    provider: providerId,
+    baseUrl: provider.baseUrl,
+    reasoning: entry['reasoning'],
+    input: entry['input'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: entry['contextWindow'],
+    maxTokens: entry['maxTokens'],
+    thinkingLevelMap: entry['thinkingLevelMap'],
+    compat: entry['compat'],
+  };
+}
+
 describe('input preparation model: every carrier admits the same closed shape', () => {
   it.each(FIXTURES.map(([label, candidate, verdict]) => [label, candidate, verdict] as const))(
     '%s: the wire schema and both hand parsers agree (%#)',
@@ -261,70 +341,11 @@ describe('input preparation model: every carrier admits the same closed shape', 
 });
 
 describe('input preparation model: the wire carries what the launcher projects', () => {
-  /** A real BYOK profile: a z.ai coding endpoint launched as its own namespaced provider. */
-  const PROFILE = ModelProviderProfileSchema.parse({
-    adapter: 'openai_compatible',
-    auth_mode: 'bearer',
-    base_url: 'https://api.z.ai/api/coding/paas/v4',
-    capabilities: [],
-    created_at: '2026-09-21T00:00:00.000Z',
-    display_name: 'GLM 4.6 (coding)',
-    enabled: true,
-    kind: 'model',
-    model: 'glm-4.6',
-    pi_model: {
-      contextWindow: 200_000,
-      maxTokens: 98_304,
-      reasoning: true,
-      thinkingLevel: 'high',
-      thinkingLevelMap: THINKING_LEVEL_MAP,
-      compat: COMPAT,
-    },
-    profile_ref: 'zai-coding',
-    provider_kind: 'zai',
-    updated_at: '2026-09-21T00:00:00.000Z',
-  });
-
-  interface ProjectedProvider {
-    readonly baseUrl: string;
-    readonly api: string;
-    readonly models: readonly Record<string, unknown>[];
-  }
-
-  function projected(): { providerId: string; provider: ProjectedProvider; entry: Record<string, unknown> } {
-    const projection = buildPiProviderProjection(PROFILE) as { providers: Record<string, ProjectedProvider> };
-    const providerId = piProjectionProviderId(PROFILE.profile_ref);
-    const provider = projection.providers[providerId]!;
-    return { providerId, provider, entry: provider.models[0]! };
-  }
-
   it('maps the projected models.json entry onto the wire model field for field', () => {
-    const { providerId, provider, entry } = projected();
+    const { providerId } = projected();
     expect(providerId).toBe('byok-sdk-zai-coding');
 
-    const wireModel = {
-      id: entry['id'],
-      name: entry['name'],
-      // Provider block, not model entry: the launched runtime reads `api` and
-      // `baseUrl` off the provider when the entry states neither.
-      api: provider.api,
-      provider: providerId,
-      baseUrl: provider.baseUrl,
-      reasoning: entry['reasoning'],
-      input: entry['input'],
-      // `cost` is NOT in the projection. The fork's composer defaults an entry
-      // without one to all zeroes — see
-      // `node_modules/@earendil-works/pi-coding-agent/dist/core/provider-composer.js:71`
-      // (`cost: definition.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }`),
-      // reached from `packages/client/node_modules/`. Stated here rather than
-      // defaulted by this SDK: the composer owns the value, and a second
-      // default would be this package quietly deciding a price.
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: entry['contextWindow'],
-      maxTokens: entry['maxTokens'],
-      thinkingLevelMap: entry['thinkingLevelMap'],
-      compat: entry['compat'],
-    };
+    const wireModel = projectedWireModel();
 
     const parsed = InputPreparationModelSchema.safeParse(wireModel);
     expect(parsed.success).toBe(true);
@@ -390,5 +411,199 @@ describe('input preparation model: the wire carries what the launcher projects',
         [effort, wireLevelMap.safeParse(candidate).success],
       ).toEqual([effort, localLevelMap.safeParse(candidate).success]);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The regression this whole work-package exists for, against the REAL pinned
+// fork build: nothing about the compiler, the envelope or the admission gate is
+// mocked here, and the only input is the model the BYOK launch path projects.
+// ---------------------------------------------------------------------------
+
+/**
+ * `composeModelProvider` is reached by path, not by specifier: the fork's
+ * `exports` map has no subpath for it. It is imported at all because the native
+ * session's own drift check is
+ * `canonicalPreparedValue(sessionModel) !== canonicalPreparedValue(expected.model)`
+ * (`dist/core/agent-session.js`, `prepared_model_drift`), and the session model
+ * is whatever this composer builds from the launched `models.json`. A
+ * hand-written "session model" would be the wire agreeing with itself.
+ */
+const PROVIDER_COMPOSER_URL = new URL(
+  '../../node_modules/@earendil-works/pi-coding-agent/dist/core/provider-composer.js',
+  import.meta.url,
+).href;
+
+/** The model the launched Pi session resolves for this profile, built by the fork itself. */
+async function composedSessionModel(): Promise<Record<string, unknown>> {
+  const { composeModelProvider } = (await import(PROVIDER_COMPOSER_URL)) as {
+    composeModelProvider: (
+      providerId: string,
+      base: undefined,
+      modelConfig: { getProvider(id: string): unknown },
+      extension: undefined,
+    ) => { getModels(): readonly Record<string, unknown>[] };
+  };
+  const { providerId, provider } = projected();
+  const composed = composeModelProvider(
+    providerId,
+    undefined,
+    { getProvider: (id) => (id === providerId ? provider : undefined) },
+    undefined,
+  );
+  const entry = composed.getModels().find((model) => model['id'] === PROFILE.model);
+  expect(entry).toBeDefined();
+  return entry!;
+}
+
+const COMPILE_SNAPSHOT = {
+  prompt: {
+    cwd: '/workspace/project',
+    selectedTools: ['read'],
+    toolSnippets: { read: 'read snippet' },
+    promptGuidelines: ['prefer small diffs'],
+    contextFiles: [{ path: 'AGENTS.md', content: '# agents\nbe precise\n' }],
+    formattedSkills: '',
+    docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
+  },
+  messages: [{ role: 'user' as const, content: 'summarise the repository', timestamp: 1_700_000_000_000 }],
+  tools: [
+    {
+      name: 'read',
+      description: 'read a file',
+      parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+    },
+  ],
+};
+
+const COMPILE_BINDING = {
+  inputIdentity: 'src-rev-1:src-digest-1',
+  runtimeIdentity: 'runtime-1',
+  policyIdentity: 'policy-rev-1',
+  profileRevision: 'profile-rev-1',
+} as const;
+
+function compileRequest(admitted: InputPreparationModelV1): CompilePreparedInputRequest {
+  return {
+    snapshot: COMPILE_SNAPSHOT,
+    model: admitted,
+    options: { cacheRetention: 'none', maxTokens: 4_096, temperature: 0 },
+    binding: { ...COMPILE_BINDING },
+    toolExecutors: { read: 'exec:read@1' },
+  };
+}
+
+/**
+ * The model the daemon would actually hold for this profile: the projection,
+ * read through the wire parser rather than used as the literal object this file
+ * built. A compile that only ever saw a test-authored model would not prove the
+ * lane works for anything the daemon can receive.
+ */
+function admittedProjectedModel(overrides: Record<string, unknown> = {}): InputPreparationModelV1 {
+  const admitted = throughControlProtocol({ ...projectedWireModel(), ...overrides });
+  expect(admitted).toBeDefined();
+  return admitted as InputPreparationModelV1;
+}
+
+describe('input preparation: a projected BYOK provider compiles and is consumed by the pinned fork', () => {
+  it('compiles an opaque `byok-sdk-<ref>` provider id and carries it verbatim into the envelope', async () => {
+    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+    const compiled = await compiler.compile(compileRequest(admittedProjectedModel()));
+
+    const carried = compiled.envelope.providerRequest.model as unknown as Record<string, unknown>;
+    expect(carried['provider']).toBe('byok-sdk-zai-coding');
+    expect(carried['thinkingLevelMap']).toEqual(THINKING_LEVEL_MAP);
+    expect(carried['compat']).toEqual(COMPAT);
+    // The projection contract the counter reads: structural completeness, and a
+    // digest that describes the exact counted bytes it travels with.
+    expect(compiled.projection.version).toBe(2);
+    expect(compiled.projection.kind).toBe('content_complete');
+    expect(compiled.projection.digest).toBe(
+      createHash('sha256').update(compiled.counterProjection, 'utf8').digest('hex'),
+    );
+  });
+
+  it('compiles the same bytes as the built-in `zai` provider, and digests them differently', async () => {
+    // The support set is the BODY shape, not the provider NAME. Two models that
+    // differ only in an opaque id must compile to the same request — otherwise
+    // the opaque id would have silently widened what gets sent — while the
+    // digests must differ, because the model is part of what was counted.
+    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+    const opaque = await compiler.compile(compileRequest(admittedProjectedModel()));
+    const builtin = await compiler.compile(compileRequest(admittedProjectedModel({ provider: 'zai' })));
+
+    expect(opaque.requestBody).toBe(builtin.requestBody);
+    expect(opaque.counterProjection).toBe(builtin.counterProjection);
+    expect(opaque.residual).toEqual(builtin.residual);
+    expect(opaque.requestDigest).not.toBe(builtin.requestDigest);
+    expect(opaque.envelopeDigest).not.toBe(builtin.envelopeDigest);
+  });
+
+  it('is admitted at consume against the independently re-parsed expected model', async () => {
+    // `verifyPreparedSessionInput` is the fork's own consume-side admission
+    // gate — the one the prepared launch calls before any transport. The
+    // expectation is deliberately NOT the object handed to the compile: it is
+    // the same wire model re-read by the prepared host's independent parser,
+    // which is exactly how the launch presents it.
+    const { verifyPreparedSessionInput, PreparedSessionError } =
+      await import('@earendil-works/pi-coding-agent/prepared-session-input');
+    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+    const compiled = await compiler.compile(compileRequest(admittedProjectedModel()));
+    const expectedModel = throughPreparedHost(projectedWireModel());
+    expect(expectedModel).toBeDefined();
+
+    const expected = {
+      digest: compiled.envelopeDigest,
+      model: expectedModel as never,
+      binding: { ...COMPILE_BINDING },
+      toolManifestDigest: compiled.toolManifestDigest,
+    };
+    const verified = await verifyPreparedSessionInput(compiled.envelope, expected);
+    expect((verified.providerRequest.model as unknown as Record<string, unknown>)['provider'])
+      .toBe('byok-sdk-zai-coding');
+
+    // Drift: an expectation whose provider is a different id is refused, by the
+    // typed code, rather than admitted because everything else matched.
+    const drifted = { ...expected, model: { ...(expectedModel as object), provider: 'zai' } as never };
+    await expect(verifyPreparedSessionInput(compiled.envelope, drifted))
+      .rejects.toBeInstanceOf(PreparedSessionError);
+    await expect(verifyPreparedSessionInput(compiled.envelope, drifted))
+      .rejects.toMatchObject({ code: 'prepared_expectation_mismatch' });
+  });
+
+  it('equals the session model the fork composes from the projected models.json', async () => {
+    // The second half of consume: `prepared_model_drift` compares the SESSION
+    // model — composed by the fork from the launched `models.json` — with the
+    // expected model, under the fork's own canonicalization. This is that exact
+    // comparison, with both sides built by their real authorities.
+    const { canonicalPreparedValue } = await import('@earendil-works/pi-coding-agent/prepared-session-input');
+    const session = await composedSessionModel();
+    const expectedModel = throughPreparedHost(projectedWireModel());
+
+    expect(canonicalPreparedValue(expectedModel)).toBe(canonicalPreparedValue(session));
+    // Control: a different provider id is a different model under the same
+    // canonicalization, so the equality above is load-bearing rather than a
+    // comparison that would have held for anything.
+    expect(canonicalPreparedValue({ ...(expectedModel as object), provider: 'zai' }))
+      .not.toBe(canonicalPreparedValue(session));
+  });
+
+  it('refuses a whitespace-only provider id as the ordinary typed compile refusal', async () => {
+    // The wire admits it — `OPAQUE_ID` bans control characters, not spaces — so
+    // the structural check that refuses it is the fork's, and the SDK maps that
+    // refusal onto the same `InputPreparationCompileError` every other
+    // unsupported input takes to the wire's `unsupported_input`.
+    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+    await expect(compiler.compile(compileRequest(admittedProjectedModel({ provider: '   ' }))))
+      .rejects.toBeInstanceOf(InputPreparationCompileError);
+  });
+
+  it('refuses an empty provider id at every carrier, before any compile', () => {
+    const empty = { ...projectedWireModel(), provider: '' };
+    expect({
+      wire: throughWireSchema(empty),
+      control: throughControlProtocol(empty),
+      host: throughPreparedHost(empty),
+    }).toEqual({ wire: undefined, control: undefined, host: undefined });
   });
 });

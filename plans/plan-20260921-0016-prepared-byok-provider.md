@@ -119,9 +119,9 @@ Host `selection.model{…, thinkingLevelMap?, compat?}` → protocol schema → 
 ## Task Breakdown
 - [x] F-1 Fork: structural provider check + tests + prepared-path audit (fork repo, `claude/c07-prepared-provider-opaque`) — independently gated PASS on 2026-09-21
 - [x] F-2 Fork: stage build 7 (dry-run only), gate the fork diff — independently gated PASS on 2026-09-21; staged `@byok-sdk/pi-ai@0.85.1007` + `@byok-sdk/pi-coding-agent@0.85.1007`, not yet published
-- [ ] F-3 Owner: publish fork build 7 from Terminal.app; verify registry integrity against the stage manifest
+- [x] F-3 Owner: publish fork build 7 from Terminal.app; verify registry integrity against the stage manifest — Owner published 2026-09-21; registry integrity verified against the stage manifest
 - [x] S-1 SDK: protocol schema + tests
 - [x] S-2 SDK: client type, both parsers, store, compiler pass-through + parser-parity test
-- [ ] S-3 SDK: fork pin → build 7 (+ identity pins/gates) and the BYOK-provider compile/consume/parity regression
+- [ ] S-3 SDK: fork pin → build 7 (+ identity pins/gates) and the BYOK-provider compile/consume/parity regression — pin moved and the regression lands green against the published build; BLOCKED on `allowed_paths`: the build's frozen third-party inventory `packages/client/vendor/third-party-manifest.json` keys its one `@byok-sdk/pi-ai` input by `name@version`, so `bun run build` refuses until that version string moves 0.85.1005 → 0.85.1007 (identical bytes, same sha256), and `packages/client/vendor/` is not an allowed path
 - [x] S-4 SDK: contract doc section + deferred-goal ledger entries
 - [ ] S-5 Required checks, gate, PR
