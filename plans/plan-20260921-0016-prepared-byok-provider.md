@@ -114,12 +114,14 @@ Host `selection.model{…, thinkingLevelMap?, compat?}` → protocol schema → 
 ## Annotations
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
+[NOTE] 2026-09-21, correcting the P3 sentence "the support set is unchanged, only its expression is corrected". The original sentence stands as written above, but acceptance of fork build 7 showed it is wrong on one point: the compile-level support set DID widen. The provider-name gate had confined the compat FAMILY the compiler could resolve (it never confined the endpoint — any credential-free `http(s)` baseUrl was already accepted). With the provider id opaque, the fork resolves whichever family `detectCompat` derives from the baseUrl: zai, deepseek, together, ant-ling, openrouter, generic openai. The independent acceptance sweep (544,320 cases over the reachable configuration space) found exactly one newly emittable top-level body key versus the zai-only gate — `reasoning`, classified `object_shape` — with projection kind always `content_complete` and every emitted key classified by the fork's residual table. This widening is accepted because the real gate is readiness, not compile: the Host accounting ruling must name every residual key for the exact runtime + endpoint + model, and the counter authority must be `provider`. `content_complete` is a statement about structure, not about a validated endpoint. Full statement: `docs/researches/runtime-input-preparation-contract.md` §18c.
+
 ## Task Breakdown
-- [ ] F-1 Fork: structural provider check + tests + prepared-path audit (fork repo, `claude/c07-prepared-provider-opaque`)
-- [ ] F-2 Fork: stage build 7 (dry-run only), gate the fork diff
+- [x] F-1 Fork: structural provider check + tests + prepared-path audit (fork repo, `claude/c07-prepared-provider-opaque`) — independently gated PASS on 2026-09-21
+- [x] F-2 Fork: stage build 7 (dry-run only), gate the fork diff — independently gated PASS on 2026-09-21; staged `@byok-sdk/pi-ai@0.85.1007` + `@byok-sdk/pi-coding-agent@0.85.1007`, not yet published
 - [ ] F-3 Owner: publish fork build 7 from Terminal.app; verify registry integrity against the stage manifest
 - [x] S-1 SDK: protocol schema + tests
 - [x] S-2 SDK: client type, both parsers, store, compiler pass-through + parser-parity test
 - [ ] S-3 SDK: fork pin → build 7 (+ identity pins/gates) and the BYOK-provider compile/consume/parity regression
-- [ ] S-4 SDK: contract doc section + deferred-goal ledger entries
+- [x] S-4 SDK: contract doc section + deferred-goal ledger entries
 - [ ] S-5 Required checks, gate, PR
