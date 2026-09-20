@@ -360,6 +360,63 @@ diff: 3 insertions, 5 deletions).
 No `@byok-sdk/*` package version was bumped; `check:version-authority` did not
 demand one.
 
+## Missed Caller: the release smoke (2026-09-21)
+
+Making `--runtime-entry` required at
+`packages/keys/src/pi-provider-launcher-core.ts` updated every in-repo caller
+except one: `scripts/release/pi-launcher-smoke.mjs` drives the REAL installed
+`byok-pi-provider-launcher` bin out of packed tarballs, and its
+`--validate-only` refusal table still invoked it without the flag. Every
+invocation therefore died at `--runtime-entry requires a value` before it could
+reach the `requires explicit pi_model` refusal the table asserts. Five CI jobs
+failed on that one assertion (npm release pack/install on ubuntu/macOS/Windows,
+the Postgres fixture migration from packed tarballs, and the dataplane recurring
+smoke durable restart leg) — all of them consumers of `check:release-pack`.
+
+Why the local checks did not catch it: `build`, `typecheck`, `test`,
+`check:api-surface` and `check:version-authority` never execute the installed
+bin. Only `check:release-pack` does, and it packs the workspace and installs
+from the public npm registry into a temp root, so earlier steps skipped it as a
+network gate. It also refuses to run on a dirty worktree (it derives
+`sourceGitSha` from HEAD), so the fix has to be committed before the gate can
+confirm it.
+
+Sweep result: a SECOND caller was missed the same way, in product code.
+`validateProviderProfileBindingWithLauncher`
+(`packages/client/src/adapters/pi/pi-adapter.ts:950`) runs the launcher bin with
+`--validate-only true` as the profile admission inside `prepare()`, and it too
+omitted the flag; every BYOK-profile offer therefore came back
+`kind: 'reject'` with `provider profile admission failed`. Every in-repo test
+stubs that call through the `validateProviderProfileBinding` option, so only the
+release smoke — which drives the installed bin — could see it, and it only
+reached that assertion once the refusal table above was fixed. The admission is
+sent under `pi-rpc`: it runs before either lane is chosen and spawns nothing, so
+it asks the profile question both lanes share, while the prepared entry's extra
+support-set refusals are stated by the launch invocation, which already passes
+`--runtime-entry pi-prepared`.
+
+Nothing else spawns the bin with its own argv: `scripts/release/pi-launcher-smoke.mjs`
+is the only site in `scripts/` (and the only `*.mjs`/`*.ts` outside
+`src/__tests__`), and the other two product sites (`pi-adapter.ts:566` rpc launch
+and `:852` prepared launch) already state their entry.
+
+New real-bin coverage in the same smoke, closing the gap the acceptance gate
+flagged (no test executed the real launcher bin's prepared entry):
+
+- no `--runtime-entry` → exit 1 with the exact
+  `pi provider launcher: --runtime-entry requires a value` refusal (the
+  version-skew shape);
+- `--runtime-entry bogus` → exit 1 with the closed-set refusal naming
+  `[pi-rpc, pi-prepared]`;
+- a new `prepared-ready` fixture (the existing openai-compatible profile with
+  `auth_mode: 'bearer'`) admitted with status 0 by BOTH entries, so the prepared
+  admission answer equals the rpc one;
+- the existing `auth_mode: 'none'` profile stays admissible under `pi-rpc` and is
+  refused under `pi-prepared` with the typed prepared-entry message.
+
+All of it is offline and `--validate-only`, over the smoke's existing synthetic
+fixtures; `requests` stays 0 and no child is spawned.
+
 ## Tradeoffs Considered
 
 | Option | Decision | Reason |

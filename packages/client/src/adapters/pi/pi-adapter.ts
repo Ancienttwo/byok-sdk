@@ -954,6 +954,12 @@ async function validateProviderProfileBindingWithLauncher(
   await execFileAsync(launcher.command, [
     ...(launcher.args ?? []),
     '--pi-bin', process.execPath,
+    // Admission runs at prepare(), before either lane is chosen, and it never
+    // spawns a child — so it asks the rpc entry's question, which is the
+    // profile admission both lanes share. The prepared entry's additional
+    // support-set refusals are stated by the launch invocation itself, which
+    // passes `--runtime-entry pi-prepared` and refuses before any host exists.
+    '--runtime-entry', 'pi-rpc',
     '--profile-db', launcher.profileDbPath,
     '--session-dir', launcher.sessionDir,
     '--provider', binding.profileRef,
