@@ -2,7 +2,7 @@
   "name": "@byok-sdk/client",
   "version": "0.18.0",
   "byok": {
-    "piRuntimePin": "npm:@byok-sdk/pi-coding-agent@0.85.1007"
+    "piRuntimePin": "npm:@byok-sdk/pi-coding-agent@0.85.1008"
   },
   "description": "BYOK SDK client daemon: runs on the end user's machine, pairs with a SaaS server, and drives a local coding-agent runtime",
   "type": "module",
@@ -83,7 +83,7 @@
   "dependencies": {
     "@byok-sdk/core": "workspace:*",
     "@byok-sdk/protocol": "workspace:*",
-    "@earendil-works/pi-coding-agent": "npm:@byok-sdk/pi-coding-agent@0.85.1007",
+    "@earendil-works/pi-coding-agent": "npm:@byok-sdk/pi-coding-agent@0.85.1008",
     "@modelcontextprotocol/client": "2.0.0",
     "pi-web-access": "0.24.1",
     "@byok-sdk/implementation-identity": "workspace:*",

@@ -611,9 +611,9 @@ is implied by this source change.
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. `@byok-sdk/client` depends on the exact npm
-artifact `@byok-sdk/pi-coding-agent@0.85.1006` — the SDK's fork of upstream
+artifact `@byok-sdk/pi-coding-agent@0.85.1008` — the SDK's fork of upstream
 0.85.1 at `d981de1`, carrying the prepared-session-input seam — declared as
-`"@earendil-works/pi-coding-agent": "npm:@byok-sdk/pi-coding-agent@0.85.1006"`
+`"@earendil-works/pi-coding-agent": "npm:@byok-sdk/pi-coding-agent@0.85.1008"`
 so the import specifier and the installed directory stay upstream while the
 resolved manifest carries the fork identity. That one manifest entry is the
 authority for both halves: `PI_PACKAGE_NAME` is the resolution specifier and

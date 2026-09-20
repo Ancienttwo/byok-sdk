@@ -20,7 +20,7 @@ Publication, exact-source CI and registry verification are complete. See
 The previous verified release is [0.16.0](docs/releases/v0.16.0-publication.md).
 
 The bundled Pi runtime is pinned to the SDK's own fork,
-`@byok-sdk/pi-coding-agent@0.85.1006` (upstream base 0.85.1 at `d981de1`),
+`@byok-sdk/pi-coding-agent@0.85.1008` (upstream base 0.85.1 at `d981de1`),
 installed through an npm alias so the import specifier and the installed path
 stay `@earendil-works/pi-coding-agent`. Release SemVer is observability only;
 protocol intersection and advertised capabilities remain the execution gates.
@@ -136,7 +136,7 @@ means not accepted, and no overall percentage is defined:
 |---|---|---|
 | main implementation | Merged | `main` @ `26945c8a` (2026-09-19): recurring input, exact message disposition and fresh egress per the spec section above; #193 C07 Pi runtime launch (`d882aef4`), #198 Windows CI elimination (`49ec7477`), #199 custody five-edge enablement (`e0423d84`), #200 N1 external-CLI admission gate (`ec1cea36`); 2026-09-19 batch — #201 reserved agent-message grants, #202 Pi fork pin 1006 / S2 clipboard tripwire, #203 WP5 S2 CI flip (strict bun + real-chain monitor control), #204 #196 durable recurring smoke (embedded roundtrip + crash window), #205 docs authority navigation (#197), #206 WinSW uninstall image-lock retry, #207 Windows link-first cleanup + out-of-tree canary |
 | Open candidates | Unmerged | #191 (draft: MCP launch-cwd boundary); Salesko draft PR #241 |
-| Published packages | 0.17.0 stable published | [0.17.0 publication record](docs/releases/v0.17.0-publication.md) (SDK 0.17.0, keys 0.4.3); 0.18.0 / keys 0.5.0 remain unpublished release candidates ([handoff](docs/releases/v0.18.0-handoff.md)); Pi fork pin `@byok-sdk/pi-coding-agent@0.85.1006` in `packages/client/package.json` (pi-ai / agent-core remain at 0.85.1005 in that partial release) |
+| Published packages | 0.17.0 stable published | [0.17.0 publication record](docs/releases/v0.17.0-publication.md) (SDK 0.17.0, keys 0.4.3); 0.18.0 / keys 0.5.0 remain unpublished release candidates ([handoff](docs/releases/v0.18.0-handoff.md)); Pi fork pin `@byok-sdk/pi-coding-agent@0.85.1008` in `packages/client/package.json` (fork build 8: pi-ai at 0.85.1007, pi-agent-core at 0.85.1008) |
 | Real Host integration | In progress, not accepted | Salesko Sprint ledger: K5 in progress, K7 incomplete; A01–A29 at 24 LOCAL_PASS / 5 BLOCKED at the latest recorded checkpoint. Host-side subjects and evidence live in that ledger, not here |
 | Native / production acceptance | 未验收 | Target-runtime S9 not executed; aiphabee (K6) paused by owner decision; no production migration, deployment, or paid-runtime acceptance |
 
