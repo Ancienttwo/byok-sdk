@@ -4,7 +4,7 @@
   "packages": [
     {
       "name": "@byok-sdk/pi-ai",
-      "version": "0.85.1005",
+      "version": "0.85.1007",
       "files": [
         {
           "path": "dist/utils/typebox-helpers.js",
