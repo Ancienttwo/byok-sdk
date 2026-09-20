@@ -380,6 +380,19 @@ await runtime.dispose();
   // in the same argv position the installed client adapter writes it
   // (`--pi-bin <interpreter>` … `--runtime-entry <entry>` `--pi-entry <entry>`);
   // `undefined` is the version-skew shape a client too old to state it produces.
+  // Node 22 prints `ExperimentalWarning: SQLite …` on stderr the moment the
+  // launcher opens the profile store; Node 24 (the local runtime) does not, so
+  // only CI saw it. Remove Node's own process-warning lines and nothing else,
+  // so every assertion below stays an exact comparison against what the
+  // launcher itself wrote.
+  const withoutNodeWarnings = (stderr) => stderr.replace(
+    /^\(node:\d+\) ExperimentalWarning: .*(?:\n|$)(?:^\(Use `node --trace-warnings \.\.\.` to show where the warning was created\)(?:\n|$))?/gm,
+    '');
+  assert.equal(
+    withoutNodeWarnings('(node:3160) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n'
+      + '(Use `node --trace-warnings ...` to show where the warning was created)\n'
+      + 'pi provider launcher: refused\n'),
+    'pi provider launcher: refused\n');
   const launcherBin = path.join(keysRoot, 'dist/bin/pi-provider-launcher.js');
   const admit = (runtimeEntry, target) => spawnSync(process.execPath, [launcherBin,
     '--pi-bin', process.execPath,
@@ -402,10 +415,10 @@ await runtime.dispose();
   // before the profile database is opened.
   const missingEntry = admit(undefined, binding);
   assert.equal(missingEntry.status, 1, missingEntry.stderr || String(missingEntry.error));
-  assert.equal(missingEntry.stderr, 'pi provider launcher: --runtime-entry requires a value\n');
+  assert.equal(withoutNodeWarnings(missingEntry.stderr), 'pi provider launcher: --runtime-entry requires a value\n');
   const bogusEntry = admit('bogus', binding);
   assert.equal(bogusEntry.status, 1, bogusEntry.stderr || String(bogusEntry.error));
-  assert.equal(bogusEntry.stderr, 'pi provider launcher: --runtime-entry must be one of [pi-rpc, pi-prepared]\n');
+  assert.equal(withoutNodeWarnings(bogusEntry.stderr), 'pi provider launcher: --runtime-entry must be one of [pi-rpc, pi-prepared]\n');
   // The prepared entry's own support set, and its parity with the rpc entry.
   // A credential-bearing openai-compatible profile is admitted by BOTH entries;
   // the auth-free profile stays admissible under `pi-rpc` and is refused under
@@ -414,13 +427,13 @@ await runtime.dispose();
   for (const entry of ['pi-rpc', 'pi-prepared']) {
     const admitted = admit(entry, preparedReadyBinding);
     assert.equal(admitted.status, 0, admitted.stderr || String(admitted.error));
-    assert.equal(admitted.stderr, '');
+    assert.equal(withoutNodeWarnings(admitted.stderr), '');
   }
   const rpcAuthFree = admit('pi-rpc', binding);
   assert.equal(rpcAuthFree.status, 0, rpcAuthFree.stderr || String(rpcAuthFree.error));
   const preparedAuthFree = admit('pi-prepared', binding);
   assert.equal(preparedAuthFree.status, 1, preparedAuthFree.stderr || String(preparedAuthFree.error));
-  assert.equal(preparedAuthFree.stderr,
+  assert.equal(withoutNodeWarnings(preparedAuthFree.stderr),
     `pi provider launcher: ${binding.profileRef} declares auth_mode "none"; the prepared runtime entry requires a provider credential\n`);
   assert.equal(requests, 0);
   console.log('[release-pack] installed keys launcher bin admission passed: missing/closed-set --runtime-entry refusals, rpc/prepared parity on a credential-bearing profile, and the prepared-entry auth_mode refusal; spawns=0 requests=0');

@@ -417,6 +417,10 @@ flagged (no test executed the real launcher bin's prepared entry):
 All of it is offline and `--validate-only`, over the smoke's existing synthetic
 fixtures; `requests` stays 0 and no child is spawned.
 
+That block then failed CI on Node 22.22.3 (ubuntu, macos, windows): once the launcher opens the profile store, Node 22 writes its own `(node:NNN) ExperimentalWarning: SQLite is an experimental feature…` line plus the `(Use \`node --trace-warnings ...\`…)` follow-up to the child's stderr, so every strict stderr assertion compared that warning instead of the launcher's output.
+
+Local `check:release-pack` passed because this machine runs Node v24.18.0, which does not emit that warning; the fix strips exactly Node's own process-warning lines and nothing else before each comparison, keeping every assertion an exact-string match, and a synthetic self-check inside the smoke proves the stripping on hosts with no Node 22 binary.
+
 ## Tradeoffs Considered
 
 | Option | Decision | Reason |
