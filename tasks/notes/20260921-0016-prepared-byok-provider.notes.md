@@ -171,6 +171,74 @@ native compile call; all three were extended.
   field this wire still deliberately does not carry) and a separate row covers
   an unknown `compat` key.
 
+### K-1 … K-4 (2026-09-21) — the BYOK credential path
+
+**The registration probe, run before the mechanism was chosen.** Both
+candidates were measured against the INSTALLED fork (`@byok-sdk/pi-ai`
+`0.85.1007`), with a `fetch` trap and a `net.Socket.prototype.connect` trap
+installed and the directory snapshotted before create, after create and after
+an explicit `refresh({allowNetwork:false})`:
+
+| | egress | `auth.baseUrl` | files written |
+|---|---|---|---|
+| A: `modelsPath` = launcher projection | none | `undefined` | `auth.json` **and `models-store.json`** |
+| B: `modelsPath: null` + `registerProvider` | none | `undefined` | `auth.json` only |
+
+Both resolve the key from the `$PI_PROVIDER_API_KEY` reference and both leave
+`auth.baseUrl` undefined, so neither can make the native
+`prepared_endpoint_mismatch` check misfire. They differ on writes. With
+`modelsPath` set, `ModelRuntime.create` builds a FILE models store at
+`join(dirname(modelsPath), 'models-store.json')` — inside the launcher-minted
+projection directory — and the first `refresh()` creates it. The launcher's
+own `cleanup()` unlinks only `models.json`, so A writes a file into a
+directory the launcher owns and does not clean. With `modelsPath: null` the
+store is an `InMemoryCodingAgentModelsStore`, and `registerProvider`'s own
+floating `void this.refresh({allowNetwork:false})` writes nothing and reaches
+nothing. **Chosen: B.**
+
+One correction to the probe criterion as written in the dispatch ("no
+`auth.json`"): `ModelRuntime.create` writes `auth.json` from
+`DefaultAuthStorage.create(options.authPath)` in BOTH arms, and does so today
+on the built-in `pi-auth-store` lane as well. It is not a differentiator and
+it is not new. Under `keys-profile` it lands in the fresh per-launch
+projection directory, which the plan amendment's decision 4 is exactly about:
+the device's real Pi auth store is structurally out of reach.
+
+**The compared-field constant.**
+`PREPARED_PROJECTION_COMPARED_MODEL_FIELDS` in `bin/pi-prepared-host.ts` =
+`['api','baseUrl','compat','contextWindow','id','input','maxTokens','name','provider','reasoning','thinkingLevelMap']`;
+`PREPARED_PROJECTION_EXCLUDED_MODEL_FIELDS` = `['cost']`, excluded because the
+device profile never declares it, `buildPiProviderProjection` never emits it
+and it never reaches D. `prepared-provider-consent.test.ts` asserts the union
+equals `Object.keys(InputPreparationModelSchema.shape)`, so a body-affecting
+wire field that escaped the gate is a failing check.
+
+**Identity-digest sites, audited; none changed.**
+
+| Site | Finding |
+|---|---|
+| `daemon/tool-implementation-identity.ts:86/:103/:135/:197` | `credentialSource` is already part of `RuntimeLaunchDescriptionV1` and of `runtimeLaunchDescriptionDigest`. The prepared lane now resolves `keys-profile` instead of `pi-auth-store` for a BYOK selection, which moves that launch's description digest — by design, and by the same code path the rpc lane already uses. No edit. |
+| `adapters/pi/runtime-launch.ts:44/:86/:131` | Already derives the source from `keysSessionDir`. The adapter now passes that directory for the prepared entry too; the decision stays in one place. No edit. |
+| `adapters/pi/input-preparation-runtime.ts:28` | Hard-codes `credentialSource: 'pi-auth-store'` — but for COMPILER resolution, not a launch: only `decision.kind` is read and the description digest is discarded. Left as is; changing it would state a credential source for a process that never starts. |
+| `implementation-identity` `launchEnvUnderIdentity` | `PI_PROVIDER_API_KEY` is in `PROVIDER_CREDENTIAL_ENV_DENY_NAMES`, so both `toolImplementationLaunchEnvNamesDigest` and `toolImplementationLoaderEnvValuesDigest` are unchanged by its presence. Asserted in the new suite, not assumed. |
+
+The one deliberate format change is the prepared host configuration:
+`byok.pi.prepared-launch` version 2 → 3, with `credentialSource` added to the
+closed key set. It is a per-launch temp file written and read by the same
+build, digest-bound through `--config-digest`, so no compatibility branch
+exists on either side.
+
+**Test seam for the end-to-end consume.** `PiRpcClient` requires its spawn
+function to return a child SYNCHRONOUSLY, and `startPiProvider` is async, so
+the client-side suite composes the launcher in process from the keys
+package's own functions in `startPiProvider`'s order. What it does not
+exercise — the two `assertImplementationSpawnBinding` calls, the
+`assertPiProjectionDirectory` layout assertion and the SecretStore read — is
+covered against the real code in
+`packages/keys/src/pi-provider-launcher-core.test.ts`, including a
+prepared-entry spawn case that asserts the projection write, the single
+injected secret and the untouched `--config` argv.
+
 ## Deviations From Plan Or Spec
 
 - The contract's `allowed_paths` names `docs/api-surface/`, which does not exist
@@ -192,6 +260,18 @@ native compile call; all three were extended.
   before the build can go green. `packages/client/vendor/THIRD-PARTY.md:42`
   (shipped attribution heading `## @byok-sdk/pi-ai@0.85.1005`) is in the same
   directory and becomes stale for the same reason, though no gate reads it.
+- K-2 and K-3 landed in ONE commit rather than one each. Splitting them would
+  have put a commit in history whose prepared launch path is half wired: K-2
+  alone makes a BYOK prepared launch resolve `keys-profile` and spawn through
+  the launcher, while the host that consumes it has no provider registration
+  and would refuse every such launch. The dispatch's own rule — never leave a
+  half-wired launch path committed — outranks one-commit-per-step here. K-1
+  and K-4 are their own commits.
+- `packages/client/vendor/third-party-manifest.json` and
+  `packages/client/vendor/THIRD-PARTY.md` were edited (S-3's recorded block),
+  now that `packages/client/vendor/` is in `allowed_paths`. Version string and
+  attribution heading only; the recorded `sha256` is unchanged because the
+  file's bytes are identical between builds 5 and 7.
 - `bin/pi-prepared-host.ts`'s model parser is now exported as
   `parsePreparedExpectedModel` so the parity table can reach it. The module is a
   private `#byok-pi-runtime-host` entry, so this adds nothing to the published

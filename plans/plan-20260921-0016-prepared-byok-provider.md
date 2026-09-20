@@ -140,11 +140,11 @@ Decisions:
 - [x] F-3 Owner: publish fork build 7 from Terminal.app; verify registry integrity against the stage manifest — Owner published 2026-09-21; registry integrity verified against the stage manifest
 - [x] S-1 SDK: protocol schema + tests
 - [x] S-2 SDK: client type, both parsers, store, compiler pass-through + parser-parity test
-- [ ] S-3 SDK: fork pin → build 7 (+ identity pins/gates) and the BYOK-provider compile/consume/parity regression — pin moved and the regression lands green against the published build; BLOCKED on `allowed_paths`: the build's frozen third-party inventory `packages/client/vendor/third-party-manifest.json` keys its one `@byok-sdk/pi-ai` input by `name@version`, so `bun run build` refuses until that version string moves 0.85.1005 → 0.85.1007 (identical bytes, same sha256), and `packages/client/vendor/` is not an allowed path
+- [x] S-3 SDK: fork pin → build 7 (+ identity pins/gates) and the BYOK-provider compile/consume/parity regression — pin moved and the regression lands green against the published build; the frozen third-party inventory key and the shipped attribution heading moved to 0.85.1007 (identical bytes, unchanged sha256) once `packages/client/vendor/` entered `allowed_paths`, and `bun run build` is green
 - [x] S-4 SDK: contract doc section + deferred-goal ledger entries
-- [ ] K-1 keys: required `--runtime-entry`, `pi-prepared` argv grammar, prepared-entry profile refusals (auth_mode none / anthropic adapter)
-- [ ] K-2 client: prepared start through the launcher under a BYOK selection; `credentialSource` in the host config as the single switch
-- [ ] K-3 client: prepared-host consent gate + provider registration (mechanism chosen by the egress/write probe) + typed refusals
-- [ ] K-4 tests: secret never in record/config/log/argv; identity env projection unchanged; MCP descendants still refuse the name; consent-gate negatives; offline end-to-end consume for `byok-sdk-<ref>`; projection-dir lifecycle
+- [x] K-1 keys: required `--runtime-entry`, `pi-prepared` argv grammar, prepared-entry profile refusals (auth_mode none / anthropic adapter)
+- [x] K-2 client: prepared start through the launcher under a BYOK selection; `credentialSource` in the host config as the single switch
+- [x] K-3 client: prepared-host consent gate + provider registration (mechanism chosen by the egress/write probe) + typed refusals
+- [x] K-4 tests: secret never in record/config/log/argv; identity env projection unchanged; MCP descendants still refuse the name; consent-gate negatives; offline end-to-end consume for `byok-sdk-<ref>`; projection-dir lifecycle
 - [ ] F-4 Owner: publish fork build 8; verify registry integrity
 - [ ] S-5 Required checks, gate, PR
