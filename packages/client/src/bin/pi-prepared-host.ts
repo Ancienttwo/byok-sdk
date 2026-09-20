@@ -280,6 +280,48 @@ export const PREPARED_PROJECTION_COMPARED_MODEL_FIELDS = Object.freeze([
  */
 export const PREPARED_PROJECTION_EXCLUDED_MODEL_FIELDS = Object.freeze(['cost'] as const);
 
+/**
+ * The compared fields that live on the projection's MODEL ENTRY, derived from
+ * the list above rather than restated.
+ *
+ * `api` and `baseUrl` are declared on the PROVIDER in the projection and
+ * `provider` is the provider id itself, so those three are compared by their
+ * own dedicated checks (which can say which one differed); everything else in
+ * {@link PREPARED_PROJECTION_COMPARED_MODEL_FIELDS} is a model-entry field. This
+ * list is both the admitted key set of the projected entry and the exact set of
+ * keys the equality below compares, so a field added to the constant cannot
+ * silently escape the comparison and a field outside it cannot silently enter.
+ */
+const PREPARED_PROJECTION_COMPARED_ENTRY_FIELDS: readonly string[] = Object.freeze(
+  PREPARED_PROJECTION_COMPARED_MODEL_FIELDS
+    .filter((field) => field !== 'api' && field !== 'baseUrl' && field !== 'provider'),
+);
+
+/**
+ * The two provider-registration failure sites, each a FIXED literal.
+ *
+ * `registerProvider` and `getAuth` are the two calls on this path that touch
+ * the resolved device credential, and the fork composes its own error strings
+ * from caller-supplied provider and model values — so a foreign exception
+ * message is the one value here that could carry, or be derived from, the
+ * secret. Nothing about the caught error reaches the refusal: the site is named
+ * by a token this file chose, exactly as every other refusal in this file is a
+ * fixed literal. `../__tests__/prepared-provider-consent.test.ts` forces a real
+ * fork exception whose message carries a synthetic secret and pins that neither
+ * the secret nor the message appears in what this process would write.
+ */
+const PREPARED_PROVIDER_REGISTRATION_DETAIL = Object.freeze({
+  register: 'provider registration threw',
+  resolve: 'the registered provider did not resolve a credential for the counted model',
+});
+
+export type PreparedProviderRegistrationSite = keyof typeof PREPARED_PROVIDER_REGISTRATION_DETAIL;
+
+/** The whole refusal text for a registration failure site, and the only source of it. */
+export function preparedProviderRegistrationRefusal(site: PreparedProviderRegistrationSite): string {
+  return `prepared_provider_registration_failed: ${PREPARED_PROVIDER_REGISTRATION_DETAIL[site]}`;
+}
+
 /** Key-sorted, absence-preserving canonical form. An absent key and a present `undefined` differ. */
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
@@ -369,8 +411,7 @@ function admitPreparedProviderProjection(
   if (!isPlainObject(projected)) refuse('the projected model entry must be an object');
   const projectedEntry = projected as Record<string, unknown>;
 
-  const admittedEntryKeys = ['compat', 'contextWindow', 'id', 'input', 'maxTokens', 'name', 'reasoning', 'thinkingLevelMap'];
-  if (Object.keys(projectedEntry).some((key) => !admittedEntryKeys.includes(key))) {
+  if (Object.keys(projectedEntry).some((key) => !PREPARED_PROJECTION_COMPARED_ENTRY_FIELDS.includes(key))) {
     refuse('the projected model entry declares an unknown key');
   }
   // Re-validated against this file's own closed shapes before being compared:
@@ -386,26 +427,21 @@ function admitPreparedProviderProjection(
     projectedCompat = parseModelCompat(projectedEntry.compat);
     if (projectedCompat === undefined) refuse('the projected model entry declares an invalid compat');
   }
-  const comparable = {
-    id: projectedEntry.id,
-    name: projectedEntry.name,
-    reasoning: projectedEntry.reasoning,
-    input: projectedEntry.input,
-    contextWindow: projectedEntry.contextWindow,
-    maxTokens: projectedEntry.maxTokens,
+  // Both sides are projected THROUGH the compared-field list, so the equality
+  // below is the list: a name added to the constant is compared from that
+  // moment, and a field outside it is compared by nobody.
+  const normalizedProjected: Record<string, unknown> = {
+    ...projectedEntry,
     ...(projectedThinkingLevelMap === undefined ? {} : { thinkingLevelMap: projectedThinkingLevelMap }),
     ...(projectedCompat === undefined ? {} : { compat: projectedCompat }),
   };
-  const counted = {
-    id: model.id,
-    name: model.name,
-    reasoning: model.reasoning,
-    input: model.input,
-    contextWindow: model.contextWindow,
-    maxTokens: model.maxTokens,
-    ...(model.thinkingLevelMap === undefined ? {} : { thinkingLevelMap: model.thinkingLevelMap }),
-    ...(model.compat === undefined ? {} : { compat: model.compat }),
-  };
+  const countedModel = model as unknown as Record<string, unknown>;
+  const comparable: Record<string, unknown> = {};
+  const counted: Record<string, unknown> = {};
+  for (const field of PREPARED_PROJECTION_COMPARED_ENTRY_FIELDS) {
+    if (normalizedProjected[field] !== undefined) comparable[field] = normalizedProjected[field];
+    if (countedModel[field] !== undefined) counted[field] = countedModel[field];
+  }
   if (canonicalJson(comparable) !== canonicalJson(counted)) {
     refuse('the projected model entry differs from the counted model');
   }
@@ -649,8 +685,10 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
   if (preparedProvider !== undefined) {
     try {
       modelRuntime.registerProvider(preparedProvider.providerId, preparedProvider.config as never);
-    } catch (cause) {
-      fail(`prepared_provider_registration_failed: ${cause instanceof Error ? cause.message : String(cause)}`);
+    } catch {
+      // The caught value is deliberately unnamed and unread: see
+      // `preparedProviderRegistrationRefusal`.
+      fail(preparedProviderRegistrationRefusal('register'));
     }
     // The registration is only useful if it makes the COUNTED model resolvable:
     // `Models.getAuth` answers `undefined` for a provider id it does not hold,
@@ -659,11 +697,11 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
     let resolved: unknown;
     try {
       resolved = await modelRuntime.getAuth(config.model as never);
-    } catch (cause) {
-      fail(`prepared_provider_registration_failed: ${cause instanceof Error ? cause.message : String(cause)}`);
+    } catch {
+      fail(preparedProviderRegistrationRefusal('resolve'));
     }
     if (resolved === undefined) {
-      fail('prepared_provider_registration_failed: the registered provider resolves no credential for the counted model');
+      fail(preparedProviderRegistrationRefusal('resolve'));
     }
   }
   // Constructed and never reloaded — see this file's own doc comment. Every

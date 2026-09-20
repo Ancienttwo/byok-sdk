@@ -31,6 +31,7 @@ import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { createPreparedToolSurfaceAssembler } from '../daemon/prepared-tool-surface';
 import { TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED } from '../daemon/tool-implementation-identity';
 import { PiAdapter, type PiAdapterOptions } from '../adapters/pi/pi-adapter';
+import { PREPARED_PROJECTION_COMPARED_MODEL_FIELDS } from '../bin/pi-prepared-host';
 import { resolveInstalledPiRuntimeIdentity, createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
 import { trustedLaunchBinding } from './fixtures/launch-cwd';
 import { parsePiMcpEnvironment } from '../adapters/pi/mcp-environment';
@@ -685,6 +686,53 @@ function byokModel(profile: ModelProviderProfile): InputPreparationModelV1 {
   };
 }
 
+/**
+ * One projection mutation per field the consent gate compares, keyed BY that
+ * field name.
+ *
+ * The key type is the gate's own constant, so a field added to
+ * `PREPARED_PROJECTION_COMPARED_MODEL_FIELDS` without a mutation case here
+ * fails to typecheck, and the key-set assertion below fails the suite for the
+ * same reason — the negative table cannot fall behind the comparison it exists
+ * to pin.
+ */
+const PROJECTION_FIELD_MUTATIONS: Record<
+  (typeof PREPARED_PROJECTION_COMPARED_MODEL_FIELDS)[number],
+  (projection: ProjectionShape) => void
+> = {
+  api: (p) => { p.providers[BYOK_PROVIDER_ID]!.api = 'anthropic-messages'; },
+  baseUrl: (p) => { p.providers[BYOK_PROVIDER_ID]!.baseUrl = 'http://127.0.0.1:9/v1'; },
+  compat: (p) => {
+    p.providers[BYOK_PROVIDER_ID]!.models[0]!.compat = { ...PI_MODEL_FIXTURE.compat, thinkingFormat: 'openai' };
+  },
+  contextWindow: (p) => { p.providers[BYOK_PROVIDER_ID]!.models[0]!.contextWindow = 100_000; },
+  id: (p) => { p.providers[BYOK_PROVIDER_ID]!.models[0]!.id = 'glm-4.5'; },
+  input: (p) => { p.providers[BYOK_PROVIDER_ID]!.models[0]!.input = ['text', 'image']; },
+  maxTokens: (p) => { p.providers[BYOK_PROVIDER_ID]!.models[0]!.maxTokens = 4_096; },
+  name: (p) => { p.providers[BYOK_PROVIDER_ID]!.models[0]!.name = 'GLM 4.6 (relabelled)'; },
+  provider: (p) => {
+    p.providers['byok-sdk-other'] = p.providers[BYOK_PROVIDER_ID]!;
+    delete p.providers[BYOK_PROVIDER_ID];
+  },
+  reasoning: (p) => { p.providers[BYOK_PROVIDER_ID]!.models[0]!.reasoning = true; },
+  thinkingLevelMap: (p) => {
+    p.providers[BYOK_PROVIDER_ID]!.models[0]!.thinkingLevelMap = {
+      ...PI_MODEL_FIXTURE.thinkingLevelMap, medium: 'medium',
+    };
+  },
+};
+
+/** Refusals about the projection's SHAPE, which no single compared field names. */
+const PROJECTION_STRUCTURAL_MUTATIONS: readonly (readonly [string, (projection: ProjectionShape) => void])[] = [
+  ['two projected providers', (p) => {
+    p.providers['byok-sdk-other'] = { ...p.providers[BYOK_PROVIDER_ID]! };
+  }],
+  ['an extra model entry', (p) => {
+    const entry = p.providers[BYOK_PROVIDER_ID]!.models[0]!;
+    p.providers[BYOK_PROVIDER_ID]!.models = [entry, { ...entry, id: 'glm-4.5' }];
+  }],
+];
+
 interface LauncherRecord {
   launcherCommand?: string;
   launcherArgs?: string[];
@@ -868,35 +916,15 @@ describe('the prepared pi launch entry under a BYOK profile', () => {
       .toThrow(/private Pi or credential name/);
   }, 60_000);
 
+  it('has a projection mutation for every field the consent gate compares', () => {
+    expect(Object.keys(PROJECTION_FIELD_MUTATIONS).sort())
+      .toEqual([...PREPARED_PROJECTION_COMPARED_MODEL_FIELDS].sort());
+  });
+
   it.each([
-    ['a provider endpoint the profile does not declare', (p: ProjectionShape) => {
-      p.providers[BYOK_PROVIDER_ID]!.baseUrl = 'http://127.0.0.1:9/v1';
-    }],
-    ['a differing compat declaration', (p: ProjectionShape) => {
-      p.providers[BYOK_PROVIDER_ID]!.models[0]!.compat = { ...PI_MODEL_FIXTURE.compat, thinkingFormat: 'openai' };
-    }],
-    ['a differing thinkingLevelMap', (p: ProjectionShape) => {
-      p.providers[BYOK_PROVIDER_ID]!.models[0]!.thinkingLevelMap = {
-        ...PI_MODEL_FIXTURE.thinkingLevelMap, medium: 'medium',
-      };
-    }],
-    ['a differing model id', (p: ProjectionShape) => {
-      p.providers[BYOK_PROVIDER_ID]!.models[0]!.id = 'glm-4.5';
-    }],
-    ['a differing provider API', (p: ProjectionShape) => {
-      p.providers[BYOK_PROVIDER_ID]!.api = 'anthropic-messages';
-    }],
-    ['two projected providers', (p: ProjectionShape) => {
-      p.providers['byok-sdk-other'] = { ...p.providers[BYOK_PROVIDER_ID]! };
-    }],
-    ['a provider id the request was not compiled for', (p: ProjectionShape) => {
-      p.providers['byok-sdk-other'] = p.providers[BYOK_PROVIDER_ID]!;
-      delete p.providers[BYOK_PROVIDER_ID];
-    }],
-    ['an extra model entry', (p: ProjectionShape) => {
-      const entry = p.providers[BYOK_PROVIDER_ID]!.models[0]!;
-      p.providers[BYOK_PROVIDER_ID]!.models = [entry, { ...entry, id: 'glm-4.5' }];
-    }],
+    ...Object.entries(PROJECTION_FIELD_MUTATIONS)
+      .map(([field, mutate]) => [`a projection differing on ${field}`, mutate] as const),
+    ...PROJECTION_STRUCTURAL_MUTATIONS,
   ])('refuses %s as prepared_provider_projection_mismatch, before any session or transport', async (_label, mutate) => {
     const endpoint = await providerEndpoint();
     const f = await byokFixture(endpoint);

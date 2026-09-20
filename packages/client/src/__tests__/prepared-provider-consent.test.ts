@@ -8,6 +8,7 @@ import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import {
   PREPARED_PROJECTION_COMPARED_MODEL_FIELDS,
   PREPARED_PROJECTION_EXCLUDED_MODEL_FIELDS,
+  preparedProviderRegistrationRefusal,
 } from '../bin/pi-prepared-host';
 import type { InputPreparationModelV1 } from '../input-preparation';
 // Relative and test-only, for the same reason the model-parity test states:
@@ -137,6 +138,43 @@ describe('provider resolution in the installed fork', () => {
     // native `prepared_endpoint_mismatch` check cannot misfire on it — and
     // equally cannot close the hole this SDK's consent gate closes.
     expect(resolved?.auth.baseUrl).toBeUndefined();
+  });
+
+  it('refuses a registration failure with a fixed literal that no fork exception can reach', async () => {
+    vi.stubEnv(PI_PROJECTED_KEY_ENV, PROBE_SECRET);
+    const rt = await runtime();
+    // A REAL exception from the REAL fork call the host makes, composed by the
+    // fork from the values it was handed — which is exactly why the host may
+    // not repeat it: `registerProvider` and `getAuth` are the two calls on this
+    // path that touch the resolved device credential, and a projection field
+    // could just as well have been the secret itself.
+    let thrown: unknown;
+    try {
+      rt.registerProvider(PROVIDER_ID, {
+        baseUrl: BASE_URL,
+        apiKey: `$${PI_PROJECTED_KEY_ENV}`,
+        models: [{ id: PROBE_SECRET }],
+      } as never);
+    } catch (cause) {
+      thrown = cause;
+    }
+    const foreign = (thrown as Error | undefined)?.message;
+    expect(foreign).toContain(PROBE_SECRET);
+
+    for (const site of ['register', 'resolve'] as const) {
+      const refusal = preparedProviderRegistrationRefusal(site);
+      expect(refusal.startsWith('prepared_provider_registration_failed: ')).toBe(true);
+      // The whole line the host writes to stderr for this refusal: `fail()`
+      // prefixes the process name and writes nothing else.
+      const stderr = `byok-pi-prepared: ${refusal}\n`;
+      expect(stderr).not.toContain(PROBE_SECRET);
+      expect(stderr).not.toContain(foreign!);
+      expect(stderr).not.toContain(PI_PROJECTED_KEY_ENV);
+    }
+    // Two sites, two fixed details — the refusal still says WHICH call failed
+    // without saying anything the call said.
+    expect(preparedProviderRegistrationRefusal('register'))
+      .not.toBe(preparedProviderRegistrationRefusal('resolve'));
   });
 
   it('registers from the $ reference and reaches no network while doing it', async () => {

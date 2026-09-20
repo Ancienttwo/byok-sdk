@@ -299,13 +299,21 @@ describe('PiAdapter against the fake-pi fixture', () => {
       spawnFn,
       byokLauncher: { ...baseLauncher, macosKeychainPath: '/private/login\n.keychain-db' },
     })).toThrow(/macosKeychainPath must be a non-empty single-line string/);
-    expect(() => new PiAdapter({
-      spawnFn,
-      byokLauncher: {
-        ...baseLauncher,
-        args: ['--macos-keychain-path', '/private/other.keychain-db'],
-      },
-    })).toThrow(/reserved launcher argument --macos-keychain-path/);
+    // Every reserved flag, not just the one: `--runtime-entry` is what selects
+    // the delegated-argv grammar the keys launcher applies, so a host-supplied
+    // copy of it would decide whether a prepared host or an rpc child is
+    // parented — the same class of override as `--pi-bin` or `--provider`.
+    for (const reserved of [
+      '--', '--pi-bin', '--pi-entry', '--pi-cwd', '--pi-fixed-args', '--launch-binding',
+      '--runtime-entry', '--profile-db', '--session-dir', '--macos-keychain-path',
+      '--secret-service-prefix', '--provider', '--model', '--profile-revision',
+      '--profile-hash', '--required-capabilities', '--validate-only',
+    ]) {
+      expect(() => new PiAdapter({
+        spawnFn,
+        byokLauncher: { ...baseLauncher, args: [reserved, '/private/other.value'] },
+      })).toThrow(new RegExp(`reserved launcher argument ${reserved}`));
+    }
   });
 
   it('fails closed before spawn when a BYOK selection has no credential launcher', async () => {
