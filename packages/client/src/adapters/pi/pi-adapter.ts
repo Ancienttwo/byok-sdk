@@ -379,7 +379,14 @@ export class PiAdapter implements RuntimeAdapter {
                 ? { command: process.execPath, entry: path.join(clientPackageRoot(), 'dist', 'bin', 'byok-pi-rpc.js') }
                 : piInvocation(bin);
             },
-            ...(kind === 'pi-rpc' && pinnedSelection !== undefined
+            // BOTH entries, once a BYOK profile is pinned. The session dir is
+            // what turns the launch into `credentialSource: 'keys-profile'`, a
+            // narrowed environment and a fresh 0700 per-launch projection
+            // directory committed into the spawn binding — the prepared host
+            // needs all three exactly as the rpc child does, because the
+            // device secret can only reach either of them through the keys
+            // launcher that owns that directory.
+            ...(pinnedSelection !== undefined
               ? { keysSessionDir: this.options.byokLauncher!.sessionDir } : {}),
           });
           return boundRuntime;
@@ -439,6 +446,17 @@ export class PiAdapter implements RuntimeAdapter {
               manifestCwd,
               manifestSelection,
               env: startInput.env,
+              // Present exactly when a BYOK profile is pinned, which is also
+              // exactly when the runtime launch carries `keys-profile`. The
+              // two are checked against each other below rather than trusted
+              // to agree.
+              ...(launcherArgs === undefined ? {} : {
+                launcher: Object.freeze({
+                  command: this.options.byokLauncher!.command,
+                  args: Object.freeze([...(this.options.byokLauncher!.args ?? [])]),
+                  profileArgs: Object.freeze([...launcherArgs]),
+                }),
+              }),
               ...(startInput.mcpServers === undefined ? {} : { mcpServers: startInput.mcpServers }),
               ...(startInput.mcpToolsetTools === undefined ? {} : { mcpToolsetTools: startInput.mcpToolsetTools }),
               ...(startInput.mcpLaunch === undefined ? {} : { mcpLaunch: startInput.mcpLaunch }),
@@ -631,6 +649,17 @@ interface PreparedPiLaunchInput {
   readonly manifestCwd: string;
   readonly manifestSelection: TaskOfferPayload['dispatchSelection'];
   readonly env: NodeJS.ProcessEnv;
+  /**
+   * The credential-custody launcher this operation must be parented by, and
+   * the profile flags the adapter already resolved for it. Absent means no
+   * BYOK profile was pinned, which is the declared built-in-provider entry —
+   * not a fallback, and never a place to invent a launcher.
+   */
+  readonly launcher?: {
+    readonly command: string;
+    readonly args: readonly string[];
+    readonly profileArgs: readonly string[];
+  };
   readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
   readonly mcpToolsetTools?: McpToolsetToolObservation;
   readonly mcpLaunch?: McpLaunchBinding;
@@ -741,6 +770,22 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     );
   }
 
+  // The launch resources and the pinned selection must agree about where this
+  // operation's credential comes from. `resolvePiRuntimeLaunch` derives
+  // `keys-profile` from the keys session directory and the adapter passes that
+  // directory for exactly the selections it resolved launcher flags for, so a
+  // disagreement here is a wiring fault, not a configuration a caller chose —
+  // and a prepared host started under the wrong source would either read the
+  // device's Pi auth store or wait for a secret nobody is delivering.
+  const credentialSource = input.runtimeLaunch.credentialSource;
+  if ((credentialSource === 'keys-profile') !== (input.launcher !== undefined)) {
+    throw authorityFailure(
+      credentialSource === 'keys-profile'
+        ? 'prepared pi BYOK operation requires a configured credential-custody launcher'
+        : 'prepared pi operation resolved a credential-custody launcher for a launch that is not keys-profile',
+    );
+  }
+
   const envelope = await readPreparedArtifact(preparation);
 
   let configDir: string | undefined;
@@ -754,7 +799,13 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
         binding: input.runtimeLaunch.binding,
         descendantPlan: input.runtimeLaunch.descendantPlan,
         format: 'byok.pi.prepared-launch',
-        version: 2,
+        version: 3,
+        // The host's single branch switch. It is not a second opinion about
+        // the launch: it is `resolvePiRuntimeLaunch`'s own decision carried to
+        // the process that must act on it, and it travels inside the
+        // digest-bound configuration rather than as an argument the spawn
+        // could be given separately.
+        credentialSource,
         cwd: input.manifestCwd,
         policy: input.policy,
         countedPermissionMode: preparation.permissionMode,
@@ -789,12 +840,29 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
   try {
     const binding = input.runtimeLaunch.binding;
     const env = input.runtimeLaunch.env;
+    const piArgs = ['--config', configPath];
+    const targetArgs = [...(binding.entry === undefined ? [] : [binding.entry]), ...binding.fixedArgv,
+      `--config-digest=${configDigest}`, ...piArgs];
+    // Without a BYOK profile this stays the direct spawn it has always been:
+    // the declared built-in-provider entry, reading the device's own Pi auth
+    // store. With one, the SAME six binding flags the rpc lane passes put the
+    // keys launcher between this process and the host, because that launcher
+    // is the only code allowed to open the device SecretStore, and it delivers
+    // what it reads into the child's environment alone.
+    const command = input.launcher === undefined ? binding.command : input.launcher.command;
+    const args = input.launcher === undefined ? targetArgs : [
+      ...input.launcher.args, '--pi-bin', binding.command, ...input.launcher.profileArgs,
+      '--runtime-entry', 'pi-prepared',
+      ...(binding.entry === undefined ? [] : ['--pi-entry', binding.entry]),
+      '--pi-cwd', binding.cwd, '--pi-fixed-args', JSON.stringify(binding.fixedArgv),
+      '--launch-binding', JSON.stringify(binding), '--pi-config-digest', configDigest,
+      '--', ...piArgs,
+    ];
     await reverifyPiRuntimeLaunch(input.runtimeLaunch);
     rpc = new PiRpcClient({
-      command: binding.command,
-      args: [...(binding.entry === undefined ? [] : [binding.entry]), ...binding.fixedArgv, `--config-digest=${configDigest}`, '--config', configPath],
+      command,
+      args,
       cwd: binding.cwd,
-      // Prepared retains its existing Pi auth-store credential source.
       env,
       ...(input.spawnFn === undefined ? {} : { spawnFn: input.spawnFn }),
     });

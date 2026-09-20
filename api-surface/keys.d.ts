@@ -410,6 +410,23 @@ export type PiModelConfig = z.infer<typeof PiModelConfigSchema>;
 // ==== @byok-sdk/keys dist/pi-provider-projection.d.ts ====
 import type { ModelProviderProfile } from './provider-profile';
 export declare const PI_PROJECTED_KEY_ENV = "PI_PROVIDER_API_KEY";
+/**
+ * The runtime entries this launcher may parent, and the ONLY two.
+ *
+ * The entry is not a hint about which flags happen to be present: it selects
+ * which delegated-argv grammar below is applied, and the two grammars admit
+ * disjoint argument sets. A client that could omit it would be a client whose
+ * argv decides the grammar, so the flag is required at the parser rather than
+ * defaulted — a client/keys version skew then fails closed instead of
+ * silently launching a prepared host under the rpc grammar.
+ *
+ * `@byok-sdk/implementation-identity` declares four entries; the other two
+ * (`pi-subagent-print`, `pi-subagent-runner`) are descendants the launcher
+ * never parents, so restating the pair here is a narrowing, not a second
+ * vocabulary.
+ */
+export declare const PI_LAUNCHER_RUNTIME_ENTRIES: readonly ['pi-rpc', 'pi-prepared'];
+export type PiLauncherRuntimeEntry = (typeof PI_LAUNCHER_RUNTIME_ENTRIES)[number];
 /** Keep projected providers disjoint from Pi built-ins so composition can never fall back to one. */
 export declare function piProjectionProviderId(profileRef: string): string;
 /**
@@ -428,6 +445,20 @@ export declare function buildPiProviderProjection(profile: ModelProviderProfile)
  * the Pi child to the namespaced projection and exact configured model.
  */
 export declare function buildPiProviderArgs(profile: ModelProviderProfile, delegatedArgs: readonly string[]): string[];
+/**
+ * The whole delegated argv a prepared host may be launched with: one
+ * `--config <absolute path>` pair, and nothing else.
+ *
+ * Nothing is APPENDED either. The rpc grammar ends by binding the child to the
+ * projected provider, the configured model and the configured thinking level,
+ * because the rpc child composes its session from `models.json`. A prepared
+ * host composes nothing: the request it consumes was already compiled and the
+ * model it verifies against is the one the durable record pinned, so a
+ * `--provider`/`--model`/`--thinking` appended here would be a second, silent
+ * authority over a request that was already decided — and the host's own
+ * argument parser refuses anything but `--config` regardless.
+ */
+export declare function buildPiPreparedArgs(delegatedArgs: readonly string[]): string[];
 // ==== @byok-sdk/keys dist/profile-store.d.ts ====
 import { ByokKeysError } from './errors';
 import { type ModelProviderProfile, type ProviderProfileRef } from './provider-profile';

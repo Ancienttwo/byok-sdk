@@ -1,6 +1,7 @@
 import { parseRuntimeDescendantPlan, type RuntimeDescendantPlanV1 } from '../adapters/pi/runtime-descendant-plan';
 import { extractPiConfigDigest, readPiHostConfig, requirePiHostBinding, verifyPiHostBinding } from '../adapters/pi/runtime-host-binding';
 import type { ImplementationSpawnBindingV1 } from '@byok-sdk/implementation-identity';
+import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import process from 'node:process';
 import { PERMISSION_MODES, PermissionPolicySchema, type PermissionMode, type PermissionPolicy } from '@byok-sdk/protocol';
@@ -63,7 +64,16 @@ import {
  */
 
 const CONFIG_FORMAT = 'byok.pi.prepared-launch';
-const CONFIG_VERSION = 2;
+const CONFIG_VERSION = 3;
+/**
+ * Where this process's provider credential comes from, and the ONE switch the
+ * rest of this file branches on. Written by the adapter from
+ * `adapters/pi/runtime-launch.ts`'s own decision; never inferred here from the
+ * presence of an environment variable or a file, because "a key happens to be
+ * set" is not a statement about which authority the launch was admitted under.
+ */
+const CREDENTIAL_SOURCES = ['pi-auth-store', 'keys-profile'] as const;
+type CredentialSource = (typeof CREDENTIAL_SOURCES)[number];
 const EXIT_CONFIG = 78; // EX_CONFIG
 
 function fail(message: string): never {
@@ -223,6 +233,197 @@ export function parsePreparedExpectedModel(value: unknown): InputPreparationMode
   });
 }
 
+// ---------------------------------------------------------------------------
+// The BYOK consent gate
+// ---------------------------------------------------------------------------
+
+/**
+ * The environment name the keys launcher — and nothing else — delivers the
+ * device secret under, and the reference the projection uses to name it.
+ *
+ * Restated rather than imported: `@byok-sdk/client` has no `@byok-sdk/keys`
+ * dependency (`scripts/release/check-package-graph.mjs` keeps the device-local
+ * key authority and the dispatch packages disjoint). The restatement is pinned
+ * by a test that can see both.
+ */
+const PREPARED_PROVIDER_KEY_ENV = 'PI_PROVIDER_API_KEY';
+const PREPARED_PROVIDER_KEY_REFERENCE = `$${PREPARED_PROVIDER_KEY_ENV}`;
+
+/**
+ * Every model field the consent gate compares between the durable record and
+ * the launcher-minted projection, in one list.
+ *
+ * `baseUrl` and `api` are declared on the PROVIDER in the projection and on the
+ * MODEL in the record; `provider` is the projection's own provider id. The
+ * other eight are model-entry fields compared verbatim.
+ *
+ * Why a single exported constant: every one of these decides either the bytes
+ * of D or where those bytes are sent, so a body-affecting field added to
+ * `InputPreparationModelV1` (or to the device's `PiModelConfigSchema`) that
+ * escaped this list would be a field the device could declare one way and the
+ * Host another, with the secret already in this process.
+ * `../__tests__/prepared-provider-consent.test.ts` fails on any wire field that
+ * is in neither this list nor {@link PREPARED_PROJECTION_EXCLUDED_MODEL_FIELDS}.
+ */
+export const PREPARED_PROJECTION_COMPARED_MODEL_FIELDS = Object.freeze([
+  'api', 'baseUrl', 'compat', 'contextWindow', 'id', 'input', 'maxTokens', 'name',
+  'provider', 'reasoning', 'thinkingLevelMap',
+] as const);
+
+/**
+ * The wire model fields deliberately NOT compared, each with its reason.
+ *
+ * - `cost` — accounting metadata the Host states for its own counting. The
+ *   device profile does not declare it, `buildPiProviderProjection` never emits
+ *   it, and the native compiler never puts it in D. Comparing it would refuse
+ *   every real launch over a field the projection cannot carry.
+ */
+export const PREPARED_PROJECTION_EXCLUDED_MODEL_FIELDS = Object.freeze(['cost'] as const);
+
+/** Key-sorted, absence-preserving canonical form. An absent key and a present `undefined` differ. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+/** The one provider the launcher projected, as this process will register it. */
+interface PreparedProviderRegistration {
+  readonly providerId: string;
+  readonly config: {
+    readonly baseUrl: string;
+    readonly api: 'openai-completions';
+    readonly apiKey: string;
+    readonly authHeader?: true;
+    readonly models: readonly Record<string, unknown>[];
+  };
+}
+
+/**
+ * Read the launcher-minted `models.json` and refuse unless it declares exactly
+ * the provider and model the durable record pinned.
+ *
+ * This is the SDK's endpoint/declaration binding, and it is the reason a device
+ * secret may be wired into this process at all. The prepared request is sent to
+ * the RECORD's `model.baseUrl`, which the Host decided, and the native
+ * `prepared_endpoint_mismatch` check compares the record's model with itself —
+ * so without this gate a Host-chosen URL would receive a device secret. The
+ * profile the device configured is the only authority on where its own
+ * credential may go, and the launcher-minted projection is that profile,
+ * written by the process that read the SecretStore, into a directory only it
+ * and this child can see.
+ *
+ * Fail closed in every direction: a missing or unreadable projection, an
+ * unknown key, two providers, two model entries, or one field that differs. The
+ * reader is closed and restated here rather than shared, for the same reason
+ * {@link parsePreparedExpectedModel} is: this process may not take another
+ * reader's word for a value that decides where a secret is sent.
+ */
+function admitPreparedProviderProjection(
+  modelsPath: string,
+  model: InputPreparationModelV1,
+): PreparedProviderRegistration {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(modelsPath, 'utf8')) as unknown;
+  } catch (cause) {
+    fail(`prepared_provider_projection_missing: ${modelsPath} could not be read as JSON: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
+  const refuse = (detail: string): never => fail(`prepared_provider_projection_mismatch: ${detail}`);
+
+  if (!isPlainObject(parsed) || Object.keys(parsed).length !== 1 || !isPlainObject(parsed.providers)) {
+    refuse('the launcher projection must declare exactly one "providers" object');
+  }
+  const providers = (parsed as { providers: Record<string, unknown> }).providers;
+  const providerIds = Object.keys(providers);
+  if (providerIds.length !== 1) refuse(`the launcher projection declares ${providerIds.length} providers; exactly one is admitted`);
+  const providerId = providerIds[0]!;
+  if (providerId !== model.provider) {
+    refuse('the launcher projection declares a provider the counted request was not compiled for');
+  }
+  const provider = providers[providerId];
+  if (!isPlainObject(provider)) refuse('the projected provider must be an object');
+  const providerKeys = Object.keys(provider as Record<string, unknown>).sort();
+  const admittedProviderKeys = ['api', 'apiKey', 'authHeader', 'baseUrl', 'models'];
+  if (providerKeys.some((key) => !admittedProviderKeys.includes(key))) {
+    refuse('the projected provider declares an unknown key');
+  }
+  const entry = provider as Record<string, unknown>;
+  // Never the literal secret, and never a reference to some OTHER name: the
+  // launcher delivers the device credential under exactly one environment
+  // variable, and a projection naming anything else would either resolve to a
+  // value this process cannot account for or be a secret written to disk.
+  if (entry.apiKey !== PREPARED_PROVIDER_KEY_REFERENCE) {
+    refuse('the projected provider must reference the launcher-delivered credential and nothing else');
+  }
+  if (entry.authHeader !== undefined && entry.authHeader !== true) refuse('the projected provider declares an unsupported authHeader');
+  if (entry.baseUrl !== model.baseUrl) refuse('the projected provider endpoint differs from the counted model endpoint');
+  if (entry.api !== model.api) refuse('the projected provider API differs from the counted model API');
+  if (!Array.isArray(entry.models) || entry.models.length !== 1) {
+    refuse('the projected provider must declare exactly one model entry');
+  }
+  const projected = (entry.models as unknown[])[0];
+  if (!isPlainObject(projected)) refuse('the projected model entry must be an object');
+  const projectedEntry = projected as Record<string, unknown>;
+
+  const admittedEntryKeys = ['compat', 'contextWindow', 'id', 'input', 'maxTokens', 'name', 'reasoning', 'thinkingLevelMap'];
+  if (Object.keys(projectedEntry).some((key) => !admittedEntryKeys.includes(key))) {
+    refuse('the projected model entry declares an unknown key');
+  }
+  // Re-validated against this file's own closed shapes before being compared:
+  // an entry whose `compat` carried an unknown key would otherwise compare
+  // equal to nothing and be reported as a plain difference.
+  let projectedThinkingLevelMap: InputPreparationModelV1['thinkingLevelMap'];
+  if (projectedEntry.thinkingLevelMap !== undefined) {
+    projectedThinkingLevelMap = parseThinkingLevelMap(projectedEntry.thinkingLevelMap);
+    if (projectedThinkingLevelMap === undefined) refuse('the projected model entry declares an invalid thinkingLevelMap');
+  }
+  let projectedCompat: InputPreparationModelV1['compat'];
+  if (projectedEntry.compat !== undefined) {
+    projectedCompat = parseModelCompat(projectedEntry.compat);
+    if (projectedCompat === undefined) refuse('the projected model entry declares an invalid compat');
+  }
+  const comparable = {
+    id: projectedEntry.id,
+    name: projectedEntry.name,
+    reasoning: projectedEntry.reasoning,
+    input: projectedEntry.input,
+    contextWindow: projectedEntry.contextWindow,
+    maxTokens: projectedEntry.maxTokens,
+    ...(projectedThinkingLevelMap === undefined ? {} : { thinkingLevelMap: projectedThinkingLevelMap }),
+    ...(projectedCompat === undefined ? {} : { compat: projectedCompat }),
+  };
+  const counted = {
+    id: model.id,
+    name: model.name,
+    reasoning: model.reasoning,
+    input: model.input,
+    contextWindow: model.contextWindow,
+    maxTokens: model.maxTokens,
+    ...(model.thinkingLevelMap === undefined ? {} : { thinkingLevelMap: model.thinkingLevelMap }),
+    ...(model.compat === undefined ? {} : { compat: model.compat }),
+  };
+  if (canonicalJson(comparable) !== canonicalJson(counted)) {
+    refuse('the projected model entry differs from the counted model');
+  }
+  return Object.freeze({
+    providerId,
+    config: Object.freeze({
+      baseUrl: entry.baseUrl as string,
+      api: 'openai-completions' as const,
+      // The REFERENCE, never the value. The fork resolves `$NAME` from this
+      // process's environment at request time, and a literal here would put
+      // the device secret into an object the session can serialize.
+      apiKey: PREPARED_PROVIDER_KEY_REFERENCE,
+      ...(entry.authHeader === true ? { authHeader: true as const } : {}),
+      models: Object.freeze([Object.freeze({ ...projectedEntry })]),
+    }),
+  });
+}
+
 function parseLaunch(value: unknown): McpLaunchAttestation {
   if (!isPlainObject(value)) fail('launch must be an object');
   const launchCwd = requireString(value.launchCwd, 'launch.launchCwd');
@@ -241,6 +442,7 @@ function parseLaunch(value: unknown): McpLaunchAttestation {
 interface PreparedLaunchConfig {
   readonly binding: ImplementationSpawnBindingV1;
   readonly descendantPlan: RuntimeDescendantPlanV1 | null;
+  readonly credentialSource: CredentialSource;
   readonly cwd: string;
   readonly policy: PermissionPolicy;
   readonly countedPermissionMode: PermissionMode;
@@ -260,7 +462,7 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
     fail(`${configPath} could not be read as JSON: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
   if (!isPlainObject(parsed)) fail('the prepared launch configuration must be an object');
-  const keys = ['format','version','binding','descendantPlan','cwd','policy','countedPermissionMode','expected','toolBindingDigest','observationDigest','toolsetDefinitionRevisions','launch','mcp'];
+  const keys = ['format','version','binding','descendantPlan','credentialSource','cwd','policy','countedPermissionMode','expected','toolBindingDigest','observationDigest','toolsetDefinitionRevisions','launch','mcp'];
   if (Object.keys(parsed).length !== keys.length || !keys.every(key => Object.hasOwn(parsed, key))) fail('prepared config has missing or unknown keys');
   if (parsed.format !== CONFIG_FORMAT) fail(`the prepared launch configuration must declare format ${CONFIG_FORMAT}`);
   if (parsed.version !== CONFIG_VERSION) fail(`the prepared launch configuration must declare version ${CONFIG_VERSION}`);
@@ -278,6 +480,11 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
     fail(`countedPermissionMode must be one of [${PERMISSION_MODES.join(', ')}]`);
   }
   if (!isPlainObject(parsed.expected)) fail('expected must be an object');
+
+  const credentialSource = parsed.credentialSource;
+  if (typeof credentialSource !== 'string' || !(CREDENTIAL_SOURCES as readonly string[]).includes(credentialSource)) {
+    fail(`credentialSource must be one of [${CREDENTIAL_SOURCES.join(', ')}]`);
+  }
 
   const cwd = requireString(parsed.cwd, 'cwd');
   if (!isAbsolute(cwd)) fail('cwd must be an absolute path');
@@ -300,6 +507,7 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
   }
   return Object.freeze({
     binding, descendantPlan,
+    credentialSource: credentialSource as CredentialSource,
     cwd,
     policy: policyResult.data,
     countedPermissionMode: countedPermissionMode as PermissionMode,
@@ -392,6 +600,28 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
   // caller; that is a rule about the factory, not a reason to re-derive pi's
   // own directory layout in the daemon and hand a second opinion down.
   const agentDir = getAgentDir();
+
+  // The BYOK branch, and the ONLY branch: under `keys-profile` this process's
+  // agent directory IS the fresh per-launch projection directory the client
+  // minted and the launcher wrote into, so the device's own Pi auth store is
+  // structurally out of reach. Under `pi-auth-store` nothing below runs and the
+  // built-in-provider lane is byte-for-byte what it has always been — a
+  // declared entry, not a fallback.
+  //
+  // Both refusals happen here: before the model runtime exists, before any
+  // session is created, and therefore before anything could be sent.
+  let preparedProvider: PreparedProviderRegistration | undefined;
+  if (config.credentialSource === 'keys-profile') {
+    preparedProvider = admitPreparedProviderProjection(join(agentDir, 'models.json'), config.model);
+    // Presence only. The value is never read into a message, a log line, a
+    // configuration file or an argument — the fork resolves the `$` reference
+    // from this environment when it builds the request.
+    const delivered = process.env[PREPARED_PROVIDER_KEY_ENV];
+    if (typeof delivered !== 'string' || delivered.length === 0) {
+      fail(`prepared_provider_credential_unavailable: the credential-custody launcher delivered no ${PREPARED_PROVIDER_KEY_ENV}`);
+    }
+  }
+
   const settingsManager = SettingsManager.create(config.cwd, agentDir);
   const sessionManager = SessionManager.create(config.cwd);
   const modelRuntime = await ModelRuntime.create({
@@ -404,6 +634,38 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
     allowModelNetwork: false,
     refreshOnCreate: false,
   });
+
+  // Registered in memory rather than by pointing `modelsPath` at the
+  // projection, and the choice was made by probe, not by taste
+  // (`tasks/notes/20260921-0016-prepared-byok-provider.notes.md`, K-3). Both
+  // mechanisms resolve the key with zero egress and leave `auth.baseUrl`
+  // undefined, so neither can make the native endpoint check misfire. They
+  // differ on writes: with `modelsPath` set, the runtime's models store is a
+  // FILE store next to the projection, and the first `refresh()` creates
+  // `models-store.json` inside the launcher-owned directory — a file the
+  // launcher did not write and does not clean up. With `modelsPath: null` the
+  // store is in-memory, and `registerProvider`'s own floating
+  // `refresh({allowNetwork:false})` writes nothing and reaches no network.
+  if (preparedProvider !== undefined) {
+    try {
+      modelRuntime.registerProvider(preparedProvider.providerId, preparedProvider.config as never);
+    } catch (cause) {
+      fail(`prepared_provider_registration_failed: ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
+    // The registration is only useful if it makes the COUNTED model resolvable:
+    // `Models.getAuth` answers `undefined` for a provider id it does not hold,
+    // before it reads any credential store, and that refusal would otherwise
+    // surface as the fork's "no API key found" message after a session existed.
+    let resolved: unknown;
+    try {
+      resolved = await modelRuntime.getAuth(config.model as never);
+    } catch (cause) {
+      fail(`prepared_provider_registration_failed: ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
+    if (resolved === undefined) {
+      fail('prepared_provider_registration_failed: the registered provider resolves no credential for the counted model');
+    }
+  }
   // Constructed and never reloaded — see this file's own doc comment. Every
   // getter answers the constructor's empty state, so no extension, skill,
   // prompt template, theme or context file on this device reaches the session.
