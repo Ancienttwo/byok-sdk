@@ -1593,7 +1593,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 toolChoice: z.ZodOptional<z.ZodEnum<{
                     auto: "auto";
                     none: "none";
-                    required: "required";
                 }>>;
                 reasoningEffort: z.ZodOptional<z.ZodEnum<{
                     high: "high";
@@ -3050,7 +3049,6 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                     toolChoice: z.ZodOptional<z.ZodEnum<{
                         auto: "auto";
                         none: "none";
-                        required: "required";
                     }>>;
                     reasoningEffort: z.ZodOptional<z.ZodEnum<{
                         high: "high";
@@ -4379,7 +4377,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                     toolChoice: z.ZodOptional<z.ZodEnum<{
                         auto: "auto";
                         none: "none";
-                        required: "required";
                     }>>;
                     reasoningEffort: z.ZodOptional<z.ZodEnum<{
                         high: "high";
@@ -5039,7 +5036,7 @@ export declare const InputPreparationCompletionRequestSchema: z.ZodDiscriminated
             requestBytes: z.ZodNumber;
             projectionBytes: z.ZodNumber;
             projection: z.ZodObject<{
-                version: z.ZodLiteral<2>;
+                version: z.ZodLiteral<3>;
                 kind: z.ZodEnum<{
                     content_complete: "content_complete";
                     unknown: "unknown";
@@ -5111,6 +5108,7 @@ export declare const InputPreparationCompletionRequestSchema: z.ZodDiscriminated
             not_counted: "not_counted";
             projection_unknown: "projection_unknown";
             residual_not_ruled: "residual_not_ruled";
+            runtime_contract_superseded: "runtime_contract_superseded";
         }>>;
         detail: z.ZodOptional<z.ZodString>;
         artifactExpiresAt: z.ZodISODateTime;
@@ -5236,7 +5234,7 @@ export declare const InputPreparationReadbackSchema: z.ZodObject<{
             requestBytes: z.ZodNumber;
             projectionBytes: z.ZodNumber;
             projection: z.ZodObject<{
-                version: z.ZodLiteral<2>;
+                version: z.ZodLiteral<3>;
                 kind: z.ZodEnum<{
                     content_complete: "content_complete";
                     unknown: "unknown";
@@ -5308,6 +5306,7 @@ export declare const InputPreparationReadbackSchema: z.ZodObject<{
             not_counted: "not_counted";
             projection_unknown: "projection_unknown";
             residual_not_ruled: "residual_not_ruled";
+            runtime_contract_superseded: "runtime_contract_superseded";
         }>>;
         detail: z.ZodOptional<z.ZodString>;
         artifactExpiresAt: z.ZodISODateTime;
@@ -5490,8 +5489,8 @@ export { AgentEgressPolicySchema, AgentEgressActivityPolicySchema, AgentReliable
 export type { AgentEgressPolicy, AgentEgressActivityPolicy, AgentReliableQuotaPolicy, ContentReadPolicy, AgentEgressLane, AgentEgressDropReason, AgentMessageContentType, AgentMessageEgressRequirement, AgentMessageServerContext, AgentContentReadSurface, AgentContentActorKind, AgentContentActor, AgentContentDecodeAs, AgentContentReadDecision, AgentContentReadDenialReason, } from './agent-egress';
 export { AGENT_HOME_PROJECTION_CAPABILITY, AGENT_HOME_PROJECTION_MAX_BYTES, AGENT_HOME_PROJECTION_PROFILE_REVISION_MAXIMUM, AgentHomeProjectionProfileRevisionSchema, AgentHomeProjectionHashSchema, AgentHomeProjectionOutcomeSchema, AgentHomeProjectionValueSchema, } from './agent-home-projection';
 export type { AgentHomeProjectionProfileRevision, AgentHomeProjectionHash, AgentHomeProjectionOutcome, AgentHomeProjectionValue, } from './agent-home-projection';
-export { AGENT_INPUT_PREPARATION_CAPABILITY, InputPreparationContentHashSchema, InputPreparationPermissionModeSchema, InputPreparationPolicyRevisionSchema, InputPreparationProfileIdSchema, InputPreparationSourceSchema, InputPreparationModelCostSchema, InputPreparationModelSchema, InputPreparationOptionsSchema, InputPreparationSelectionSchema, InputPreparationContextFileSchema, InputPreparationDocsPathsSchema, InputPreparationPromptSnapshotSchema, InputPreparationUserMessageSchema, InputPreparationHostCanonicalAssistantMessageSchema, InputPreparationMessageSchema, InputPreparationContextDocumentSchema, InputPreparationStateSchema, InputPreparationReadinessReasonSchema, InputPreparationRuntimeIdentitySchema, InputPreparationCounterTargetSchema, InputPreparationAccountingPolicyRefSchema, InputPreparationCounterProviderEvidenceSchema, InputPreparationCounterEvidenceSchema, InputPreparationResidualValueClassSchema, InputPreparationResidualKeySchema, InputPreparationProjectionSchema, InputPreparationToolImplementationKindSchema, InputPreparationArtifactSummarySchema, InputPreparationBindingSchema, InputPreparationReceiptSummarySchema, InputPreparationReferenceSchema, InputPreparationOfferBindingSchema, InputPreparationRejectionReasonSchema, } from './input-preparation';
-export type { InputPreparationPermissionMode, InputPreparationSource, InputPreparationModel, InputPreparationOptions, InputPreparationSelection, InputPreparationMessage, InputPreparationContextDocument, InputPreparationState, InputPreparationReadinessReason, InputPreparationAccountingPolicyRef, InputPreparationResidualValueClass, InputPreparationRuntimeIdentity, InputPreparationReceiptSummary, InputPreparationOfferBinding, InputPreparationRejectionReason, } from './input-preparation';
+export { AGENT_INPUT_PREPARATION_CAPABILITY, InputPreparationContentHashSchema, InputPreparationPermissionModeSchema, InputPreparationPolicyRevisionSchema, InputPreparationProfileIdSchema, InputPreparationSourceSchema, InputPreparationModelCostSchema, InputPreparationModelSchema, InputPreparationOptionsSchema, InputPreparationSelectionSchema, InputPreparationContextFileSchema, InputPreparationDocsPathsSchema, InputPreparationSkillSchema, InputPreparationPromptSnapshotSchema, InputPreparationUserMessageSchema, InputPreparationHostCanonicalAssistantMessageSchema, InputPreparationMessageSchema, InputPreparationContextDocumentSchema, InputPreparationStateSchema, InputPreparationReadinessReasonSchema, InputPreparationRuntimeIdentitySchema, InputPreparationCounterTargetSchema, InputPreparationAccountingPolicyRefSchema, InputPreparationCounterProviderEvidenceSchema, InputPreparationCounterEvidenceSchema, InputPreparationResidualValueClassSchema, InputPreparationResidualKeySchema, InputPreparationProjectionSchema, InputPreparationToolImplementationKindSchema, InputPreparationArtifactSummarySchema, InputPreparationBindingSchema, InputPreparationReceiptSummarySchema, InputPreparationReferenceSchema, InputPreparationOfferBindingSchema, InputPreparationRejectionReasonSchema, } from './input-preparation';
+export type { InputPreparationPermissionMode, InputPreparationSource, InputPreparationModel, InputPreparationOptions, InputPreparationSelection, InputPreparationSkill, InputPreparationMessage, InputPreparationContextDocument, InputPreparationState, InputPreparationReadinessReason, InputPreparationAccountingPolicyRef, InputPreparationResidualValueClass, InputPreparationRuntimeIdentity, InputPreparationReceiptSummary, InputPreparationOfferBinding, InputPreparationRejectionReason, } from './input-preparation';
 export { AGENT_MEMORY_PROJECTION_CAPABILITY, AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES, AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE, AgentMemoryProjectionGrantRefSchema, AgentMemoryProjectionSessionRefSchema, AgentMemoryProjectionWriterEpochSchema, AgentMemoryProjectionSourceSeqSchema, AgentMemoryProjectionSnapshotSchema, AgentMemoryProjectionMeteringReceiptSchema, AgentMemoryProjectionMutationSchema, AgentMemoryProjectionReceiptSchema, AgentMemoryProjectionEraseResultSchema, agentMemoryProjectionBase64UrlByteLength, } from './agent-memory-projection';
 export type { AgentMemoryProjectionGrantRef, AgentMemoryProjectionSessionRef, AgentMemoryProjectionWriterEpoch, AgentMemoryProjectionSourceSeq, AgentMemoryProjectionSnapshot, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionEraseResult, } from './agent-memory-projection';
 export { HOST_MCP_TASK_CONTEXT_CAPABILITY } from './task-assertion';
@@ -5664,7 +5663,20 @@ export declare const InputPreparationModelSchema: z.ZodObject<{
     }, z.core.$strict>>;
 }, z.core.$strict>;
 export type InputPreparationModel = z.infer<typeof InputPreparationModelSchema>;
-/** Body-affecting options only. Transport options are deliberately not on this wire. */
+/**
+ * Body-affecting options only. Transport options are deliberately not on this wire.
+ *
+ * `toolChoice` admits `auto` and `none` and nothing else: the native prepared
+ * boundary compiles through the simple stream path, which cannot express
+ * `required`, so a Host stating it would be stating an option no compiler on
+ * the other side can produce. It is refused HERE, by the schema, rather than
+ * surviving to a native refusal nobody can read.
+ *
+ * `reasoningEffort` names a requested thinking level. The native compiler maps
+ * it through the launched model's own level map and clamps it exactly as the
+ * live session does, so the effort token that reaches the body is the model's,
+ * never this value verbatim.
+ */
 export declare const InputPreparationOptionsSchema: z.ZodObject<{
     cacheRetention: z.ZodEnum<{
         long: "long";
@@ -5676,7 +5688,6 @@ export declare const InputPreparationOptionsSchema: z.ZodObject<{
     toolChoice: z.ZodOptional<z.ZodEnum<{
         auto: "auto";
         none: "none";
-        required: "required";
     }>>;
     reasoningEffort: z.ZodOptional<z.ZodEnum<{
         high: "high";
@@ -5753,7 +5764,6 @@ export declare const InputPreparationSelectionSchema: z.ZodObject<{
         toolChoice: z.ZodOptional<z.ZodEnum<{
             auto: "auto";
             none: "none";
-            required: "required";
         }>>;
         reasoningEffort: z.ZodOptional<z.ZodEnum<{
             high: "high";
@@ -5770,17 +5780,45 @@ export declare const InputPreparationContextFileSchema: z.ZodObject<{
     path: z.ZodString;
     content: z.ZodString;
 }, z.core.$strict>;
+/**
+ * The three documentation locations the native prompt renderer names.
+ *
+ * The wire field names are this SDK's own and do not track upstream Pi's
+ * (`readme`/`docs`/`examples`): the contract a Host integrates against is this
+ * one, and renaming a frozen wire field because a runtime renamed a parameter
+ * would be a breaking change to every Host for no gain. The device adapter maps
+ * these onto whatever the pinned runtime calls them.
+ */
 export declare const InputPreparationDocsPathsSchema: z.ZodObject<{
     readmePath: z.ZodString;
     docsPath: z.ZodString;
     examplesPath: z.ZodString;
 }, z.core.$strict>;
 /**
+ * One skill the system prompt renders, stated as the closed set of fields the
+ * renderer actually reads.
+ *
+ * Not a preformatted string: the native renderer owns the skill block's
+ * markup, and a Host-rendered one would be a second renderer that could drift
+ * from what a live session emits. Loader bookkeeping the prompt never reads
+ * (`baseDir`, source info) is deliberately absent — the Host cannot know it and
+ * the device must never invent it.
+ */
+export declare const InputPreparationSkillSchema: z.ZodObject<{
+    name: z.ZodString;
+    description: z.ZodString;
+    filePath: z.ZodString;
+    disableModelInvocation: z.ZodBoolean;
+}, z.core.$strict>;
+export type InputPreparationSkill = z.infer<typeof InputPreparationSkillSchema>;
+/**
  * Explicit, already-authorized inputs for the native system prompt renderer.
  *
  * `toolSnippets` is PROMPT TEXT the Host authored — it is not the
  * model-visible tool schemas, which the device observes locally and the Host
- * never states (see this module's rule 1).
+ * never states (see this module's rule 1). `toolGuidelines` is the same kind of
+ * value one level down: the guideline bullets a tool contributes, keyed by tool
+ * name and bounded exactly like `toolSnippets` and `promptGuidelines`.
  *
  * `selectedTools` is deliberately absent for the same reason one level up: the
  * native contract requires that list to equal the model-visible manifest
@@ -5792,12 +5830,18 @@ export declare const InputPreparationPromptSnapshotSchema: z.ZodObject<{
     appendSystemPrompt: z.ZodOptional<z.ZodString>;
     cwd: z.ZodString;
     toolSnippets: z.ZodRecord<z.ZodString, z.ZodString>;
+    toolGuidelines: z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>;
     promptGuidelines: z.ZodArray<z.ZodString>;
     contextFiles: z.ZodArray<z.ZodObject<{
         path: z.ZodString;
         content: z.ZodString;
     }, z.core.$strict>>;
-    formattedSkills: z.ZodString;
+    skills: z.ZodArray<z.ZodObject<{
+        name: z.ZodString;
+        description: z.ZodString;
+        filePath: z.ZodString;
+        disableModelInvocation: z.ZodBoolean;
+    }, z.core.$strict>>;
     docsPaths: z.ZodObject<{
         readmePath: z.ZodString;
         docsPath: z.ZodString;
@@ -5863,12 +5907,18 @@ export declare const InputPreparationContextDocumentSchema: z.ZodObject<{
         appendSystemPrompt: z.ZodOptional<z.ZodString>;
         cwd: z.ZodString;
         toolSnippets: z.ZodRecord<z.ZodString, z.ZodString>;
+        toolGuidelines: z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>;
         promptGuidelines: z.ZodArray<z.ZodString>;
         contextFiles: z.ZodArray<z.ZodObject<{
             path: z.ZodString;
             content: z.ZodString;
         }, z.core.$strict>>;
-        formattedSkills: z.ZodString;
+        skills: z.ZodArray<z.ZodObject<{
+            name: z.ZodString;
+            description: z.ZodString;
+            filePath: z.ZodString;
+            disableModelInvocation: z.ZodBoolean;
+        }, z.core.$strict>>;
         docsPaths: z.ZodObject<{
             readmePath: z.ZodString;
             docsPath: z.ZodString;
@@ -5923,6 +5973,7 @@ export declare const InputPreparationReadinessReasonSchema: z.ZodEnum<{
     not_counted: "not_counted";
     projection_unknown: "projection_unknown";
     residual_not_ruled: "residual_not_ruled";
+    runtime_contract_superseded: "runtime_contract_superseded";
 }>;
 export type InputPreparationReadinessReason = z.infer<typeof InputPreparationReadinessReasonSchema>;
 /**
@@ -6087,7 +6138,7 @@ export declare const InputPreparationResidualKeySchema: z.ZodObject<{
  * local copy of it would be a shadow parser for the same semantic fact.
  */
 export declare const InputPreparationProjectionSchema: z.ZodObject<{
-    version: z.ZodLiteral<2>;
+    version: z.ZodLiteral<3>;
     kind: z.ZodEnum<{
         content_complete: "content_complete";
         unknown: "unknown";
@@ -6123,7 +6174,7 @@ export declare const InputPreparationArtifactSummarySchema: z.ZodObject<{
     requestBytes: z.ZodNumber;
     projectionBytes: z.ZodNumber;
     projection: z.ZodObject<{
-        version: z.ZodLiteral<2>;
+        version: z.ZodLiteral<3>;
         kind: z.ZodEnum<{
             content_complete: "content_complete";
             unknown: "unknown";
@@ -6256,7 +6307,7 @@ export declare const InputPreparationReceiptSummarySchema: z.ZodObject<{
         requestBytes: z.ZodNumber;
         projectionBytes: z.ZodNumber;
         projection: z.ZodObject<{
-            version: z.ZodLiteral<2>;
+            version: z.ZodLiteral<3>;
             kind: z.ZodEnum<{
                 content_complete: "content_complete";
                 unknown: "unknown";
@@ -6328,6 +6379,7 @@ export declare const InputPreparationReceiptSummarySchema: z.ZodObject<{
         not_counted: "not_counted";
         projection_unknown: "projection_unknown";
         residual_not_ruled: "residual_not_ruled";
+        runtime_contract_superseded: "runtime_contract_superseded";
     }>>;
     detail: z.ZodOptional<z.ZodString>;
     artifactExpiresAt: z.ZodISODateTime;
@@ -7474,7 +7526,6 @@ export declare const AgentInputPreparationPayloadSchema: z.ZodObject<{
             toolChoice: z.ZodOptional<z.ZodEnum<{
                 auto: "auto";
                 none: "none";
-                required: "required";
             }>>;
             reasoningEffort: z.ZodOptional<z.ZodEnum<{
                 high: "high";
@@ -9386,7 +9437,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
                 toolChoice: z.ZodOptional<z.ZodEnum<{
                     auto: "auto";
                     none: "none";
-                    required: "required";
                 }>>;
                 reasoningEffort: z.ZodOptional<z.ZodEnum<{
                     high: "high";

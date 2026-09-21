@@ -84,7 +84,7 @@ const RECEIPT: InputPreparationReceiptSummary = {
     toolManifestDigest: 'sha256:tools',
     requestBytes: 1024,
     projectionBytes: 900,
-    projection: { version: 2, kind: 'content_complete', digest: 'a'.repeat(64) },
+    projection: { version: 3, kind: 'content_complete', digest: 'a'.repeat(64) },
     residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
     observationDigest: 'sha256:observation',
     toolBindingDigest: 'sha256:binding',

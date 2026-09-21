@@ -89,7 +89,7 @@ const RECEIPT = {
     toolManifestDigest: 'sha256:tools',
     requestBytes: 1024,
     projectionBytes: 900,
-    projection: { version: 2, kind: 'content_complete', digest: 'a'.repeat(64) },
+    projection: { version: 3, kind: 'content_complete', digest: 'a'.repeat(64) },
     residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
     observationDigest: 'sha256:observation',
     toolBindingDigest: 'sha256:binding',
@@ -319,9 +319,10 @@ describe('input preparation context document', () => {
       prompt: {
         cwd: '/home/agent',
         toolSnippets: { read: 'reads a file' },
+        toolGuidelines: {},
         promptGuidelines: [],
         contextFiles: [],
-        formattedSkills: '',
+        skills: [],
         docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
       },
       messages: [{ role: 'user', content: 'hi', timestamp: 1767225600000 }],
@@ -354,9 +355,10 @@ describe('input preparation context document', () => {
       prompt: {
         cwd: '/home/agent',
         toolSnippets: {},
+        toolGuidelines: {},
         promptGuidelines: [],
         contextFiles: [],
-        formattedSkills: '',
+        skills: [],
         docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
       },
       messages: [
