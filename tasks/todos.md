@@ -1,7 +1,7 @@
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: 2026-09-22 01:50
+> **Updated**: 2026-09-22 11:20
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.
@@ -38,3 +38,6 @@ Do not duplicate that execution checklist here. Record only work intentionally d
 | Salesko 侧 prepared 请求构造跟进：`snapshot.prompt.formattedSkills` 已被移除，改为 `snapshot.prompt.skills`（`{name, description, filePath, disableModelInvocation}` 闭集）；新增 `snapshot.prompt.toolGuidelines`（`Record<string, string[]>`）；`selection.options.toolChoice` 不再接受 `required`；请求 `version` 为 `4` | 下游集成面不在本仓 allowed_paths，且这是 host 侧的构造改动，需要 Salesko 自己的发布节奏 | 未跟进前，Salesko 发出的 prepared 请求会被 daemon 以 `bad_request`（version）或 unknown-key 拒绝——fail-closed，不会被静默改写 | Salesko 下一次对接 SDK 0.18.x prepared lane 时；本行只记事实，不代替他们的契约 |
 | `check:release-pack` 增加与显示无关的 load-time 探针：在模块图加载期间观测任何 `dlopen` 与任何裸 specifier 解析 | 现有的 sealed-host tripwire（`pi-s2-bundle-resolution.test.ts`）只在 darwin 且有 display 时才非零，headless CI 恒零，所以它证明不了「加载期没有原生/注册表逃逸」；而 0.86 把 `config.js`/`paths.js`/`child-process.js` 拉进了 prepared compile 的静态闭包，import-time 纯度现在只靠 fork 的 entry-graph 禁止清单守着 | 在探针存在前，加载期逃逸只有在一台有显示器的 darwin 上才可能被看见；CI 绿不构成证据 | S6 之后的第一把 release-pack 刀，或下一次 fork 跟随上游大版本 rebase（闭包一变就要重新证明）|
 | 把 `sessionId` 升格为 Host 显式声明的 compile 输入，使 prepared 请求能携带 `prompt_cache_key` | 0.86 的 prepared option set 强制 `sessionId: undefined`——这同时是 `CacheWarmer` 不可达的机制，也是「没有任何 ambient 输入能移动 D 的字节」的一部分；加一个 Host 声明的 session id 要同时裁定它进不进 consent gate 的比较字段 | prepared launch 在 OpenAI-direct 端点上拿不到 prompt cache 命中，首请求按未缓存计价 | 当 `prompt_cache_key` 的缺失被实测证明有成本（对账数据，不是推测）时；同刀须裁定 session id 的权威来源与它在 `PREPARED_PROJECTION_COMPARED_MODEL_FIELDS` 之外的比较位置 |
+| 给被取代的 preparation record log 一条 operator 显式调用的隔离/处置路径（quarantine 或明示丢弃），使跨 record-version 升级的设备不会卡在「daemon 起不来」 | `INPUT_PREPARATION_RECORD_VERSION` 由 `4` 升到 `5` 是本刀的既定 fail-closed 裁定，写迁移读旧记录等于把第二套 record 形状重新放活；而处置路径要定谁有权删用户的 preparation 历史、留不留审计痕迹，是独立的 operator 边界 | 今天设备上留着旧版本 record 时，`input-preparation-store.ts` 的 replay 直接抛错，`create-daemon.ts` 在配置了 preparation service 的情况下启动中止——不是 prepared lane 不可用，是整个 daemon 起不来，且只能靠人手动删日志 | 第一台真实设备跨 record-version 升级时，或 preparation store 随任一已发布 client 出仓之前（今天没有任何已发布 client 带这个 store，所以窗口还在） |
+| 对齐 `toolSnippets` / `toolGuidelines` 的 zod record schema 与 daemon 手写解析器对 `__proto__` 自有键的处置：zod 侧今天接受，手写侧拒绝 | 改的是 frozen golden 覆盖到的 wire schema，且 remote lane 只有 zod 一条路径，改法（拒绝 vs 规范化）要与 golden 重生一起裁，不在本刀的验收面内 | 同一份 snapshot 走 remote lane 与走本地 daemon 手写解析器会得到不同结论：一个接受一个拒绝，等于这条 record 有两个语义权威 | 下一次动 `agent.input.preparation` wire schema 或重生 `v1.frozen.json` 时同刀处理；若先出现 host 真的发来 `__proto__` 键的样本则立即提前 |
+| 仓内文档与 npm 实况对账：`README.md` release-status 行、`docs/spec.md`、`docs/releases/v0.18.0-handoff.md` 仍称 0.18.0 / keys 0.5.0 为未发布候选，而 npm 上 `@byok-sdk/protocol@0.18.0` 与 `@byok-sdk/client@0.18.0` 自 2026-09-10 起就是 `latest` | README 的 release-status 行是 owner 自己维护的台账，本刀（0.86 prepared 契约）不越界改它；对账要连 handoff 文档的发布状态一并裁定 | 文档说未发布而 registry 说 latest，任何据文档判断「下一版号可以复用 0.18.0」的动作都会撞上已占用的版本号 | owner 下一次动 release 台账或开下一个发布刀时；同刀须明确下一个 SDK 版本号必须高于 0.18.0 |
