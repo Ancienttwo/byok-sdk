@@ -3927,6 +3927,156 @@
                   "type": "integer",
                   "exclusiveMinimum": 0,
                   "maximum": 9007199254740991
+                },
+                "thinkingLevelMap": {
+                  "type": "object",
+                  "properties": {
+                    "off": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[a-zA-Z0-9_-]+$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "minimal": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[a-zA-Z0-9_-]+$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "low": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[a-zA-Z0-9_-]+$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "medium": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[a-zA-Z0-9_-]+$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "high": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[a-zA-Z0-9_-]+$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "xhigh": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[a-zA-Z0-9_-]+$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "max": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[a-zA-Z0-9_-]+$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "off",
+                    "minimal",
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ],
+                  "additionalProperties": false
+                },
+                "compat": {
+                  "type": "object",
+                  "properties": {
+                    "supportsStore": {
+                      "type": "boolean"
+                    },
+                    "supportsDeveloperRole": {
+                      "type": "boolean"
+                    },
+                    "supportsReasoningEffort": {
+                      "type": "boolean"
+                    },
+                    "supportsUsageInStreaming": {
+                      "type": "boolean"
+                    },
+                    "maxTokensField": {
+                      "type": "string",
+                      "enum": [
+                        "max_completion_tokens",
+                        "max_tokens"
+                      ]
+                    },
+                    "thinkingFormat": {
+                      "type": "string",
+                      "enum": [
+                        "openai",
+                        "openrouter",
+                        "deepseek",
+                        "together",
+                        "baseten",
+                        "zai",
+                        "qwen",
+                        "chat-template",
+                        "qwen-chat-template",
+                        "string-thinking",
+                        "ant-ling"
+                      ]
+                    },
+                    "zaiToolStream": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
                 }
               },
               "required": [
@@ -8752,6 +8902,156 @@
                         "type": "integer",
                         "exclusiveMinimum": 0,
                         "maximum": 9007199254740991
+                      },
+                      "thinkingLevelMap": {
+                        "type": "object",
+                        "properties": {
+                          "off": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64,
+                                "pattern": "^[a-zA-Z0-9_-]+$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minimal": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64,
+                                "pattern": "^[a-zA-Z0-9_-]+$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "low": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64,
+                                "pattern": "^[a-zA-Z0-9_-]+$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "medium": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64,
+                                "pattern": "^[a-zA-Z0-9_-]+$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "high": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64,
+                                "pattern": "^[a-zA-Z0-9_-]+$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "xhigh": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64,
+                                "pattern": "^[a-zA-Z0-9_-]+$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "max": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64,
+                                "pattern": "^[a-zA-Z0-9_-]+$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "off",
+                          "minimal",
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh",
+                          "max"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "compat": {
+                        "type": "object",
+                        "properties": {
+                          "supportsStore": {
+                            "type": "boolean"
+                          },
+                          "supportsDeveloperRole": {
+                            "type": "boolean"
+                          },
+                          "supportsReasoningEffort": {
+                            "type": "boolean"
+                          },
+                          "supportsUsageInStreaming": {
+                            "type": "boolean"
+                          },
+                          "maxTokensField": {
+                            "type": "string",
+                            "enum": [
+                              "max_completion_tokens",
+                              "max_tokens"
+                            ]
+                          },
+                          "thinkingFormat": {
+                            "type": "string",
+                            "enum": [
+                              "openai",
+                              "openrouter",
+                              "deepseek",
+                              "together",
+                              "baseten",
+                              "zai",
+                              "qwen",
+                              "chat-template",
+                              "qwen-chat-template",
+                              "string-thinking",
+                              "ant-ling"
+                            ]
+                          },
+                          "zaiToolStream": {
+                            "type": "boolean"
+                          }
+                        },
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -15930,6 +16230,156 @@
                                 "type": "integer",
                                 "exclusiveMinimum": 0,
                                 "maximum": 9007199254740991
+                              },
+                              "thinkingLevelMap": {
+                                "type": "object",
+                                "properties": {
+                                  "off": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 64,
+                                        "pattern": "^[a-zA-Z0-9_-]+$"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "minimal": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 64,
+                                        "pattern": "^[a-zA-Z0-9_-]+$"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "low": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 64,
+                                        "pattern": "^[a-zA-Z0-9_-]+$"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "medium": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 64,
+                                        "pattern": "^[a-zA-Z0-9_-]+$"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "high": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 64,
+                                        "pattern": "^[a-zA-Z0-9_-]+$"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "xhigh": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 64,
+                                        "pattern": "^[a-zA-Z0-9_-]+$"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "max": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 64,
+                                        "pattern": "^[a-zA-Z0-9_-]+$"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "off",
+                                  "minimal",
+                                  "low",
+                                  "medium",
+                                  "high",
+                                  "xhigh",
+                                  "max"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "compat": {
+                                "type": "object",
+                                "properties": {
+                                  "supportsStore": {
+                                    "type": "boolean"
+                                  },
+                                  "supportsDeveloperRole": {
+                                    "type": "boolean"
+                                  },
+                                  "supportsReasoningEffort": {
+                                    "type": "boolean"
+                                  },
+                                  "supportsUsageInStreaming": {
+                                    "type": "boolean"
+                                  },
+                                  "maxTokensField": {
+                                    "type": "string",
+                                    "enum": [
+                                      "max_completion_tokens",
+                                      "max_tokens"
+                                    ]
+                                  },
+                                  "thinkingFormat": {
+                                    "type": "string",
+                                    "enum": [
+                                      "openai",
+                                      "openrouter",
+                                      "deepseek",
+                                      "together",
+                                      "baseten",
+                                      "zai",
+                                      "qwen",
+                                      "chat-template",
+                                      "qwen-chat-template",
+                                      "string-thinking",
+                                      "ant-ling"
+                                    ]
+                                  },
+                                  "zaiToolStream": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "additionalProperties": false
                               }
                             },
                             "required": [
@@ -22156,6 +22606,156 @@
                                 "type": "integer",
                                 "exclusiveMinimum": 0,
                                 "maximum": 9007199254740991
+                              },
+                              "thinkingLevelMap": {
+                                "type": "object",
+                                "properties": {
+                                  "off": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 64,
+                                        "pattern": "^[a-zA-Z0-9_-]+$"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "minimal": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 64,
+                                        "pattern": "^[a-zA-Z0-9_-]+$"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "low": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 64,
+                                        "pattern": "^[a-zA-Z0-9_-]+$"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "medium": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 64,
+                                        "pattern": "^[a-zA-Z0-9_-]+$"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "high": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 64,
+                                        "pattern": "^[a-zA-Z0-9_-]+$"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "xhigh": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 64,
+                                        "pattern": "^[a-zA-Z0-9_-]+$"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "max": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 64,
+                                        "pattern": "^[a-zA-Z0-9_-]+$"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "off",
+                                  "minimal",
+                                  "low",
+                                  "medium",
+                                  "high",
+                                  "xhigh",
+                                  "max"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "compat": {
+                                "type": "object",
+                                "properties": {
+                                  "supportsStore": {
+                                    "type": "boolean"
+                                  },
+                                  "supportsDeveloperRole": {
+                                    "type": "boolean"
+                                  },
+                                  "supportsReasoningEffort": {
+                                    "type": "boolean"
+                                  },
+                                  "supportsUsageInStreaming": {
+                                    "type": "boolean"
+                                  },
+                                  "maxTokensField": {
+                                    "type": "string",
+                                    "enum": [
+                                      "max_completion_tokens",
+                                      "max_tokens"
+                                    ]
+                                  },
+                                  "thinkingFormat": {
+                                    "type": "string",
+                                    "enum": [
+                                      "openai",
+                                      "openrouter",
+                                      "deepseek",
+                                      "together",
+                                      "baseten",
+                                      "zai",
+                                      "qwen",
+                                      "chat-template",
+                                      "qwen-chat-template",
+                                      "string-thinking",
+                                      "ant-ling"
+                                    ]
+                                  },
+                                  "zaiToolStream": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "additionalProperties": false
                               }
                             },
                             "required": [

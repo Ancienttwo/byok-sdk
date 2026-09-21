@@ -352,7 +352,12 @@ describe('control-protocol: input_preparation param gates', () => {
     ['a future version', (r: Record<string, unknown>) => ({ ...r, version: 4 })],
     ['an unknown scope field', (r: Record<string, unknown>) => ({ ...r, scope: { ...scope, tenantId: 't' } })],
     ['a non-openai-completions api', (r: Record<string, unknown>) => ({ ...r, selection: { ...(r.selection as object), model: { ...((r.selection as { model: object }).model), api: 'anthropic-messages' } } })],
-    ['an unsupported model field', (r: Record<string, unknown>) => ({ ...r, selection: { ...(r.selection as object), model: { ...((r.selection as { model: object }).model), compat: {} } } })],
+    // `samplingParams` is a real native model field that this wire deliberately
+    // does NOT carry (the fork's composer leaves it undefined for a projected
+    // provider, so it never participates in the session's model equality). It
+    // stands where `compat` used to: that one is now a carried declaration.
+    ['an unsupported model field', (r: Record<string, unknown>) => ({ ...r, selection: { ...(r.selection as object), model: { ...((r.selection as { model: object }).model), samplingParams: {} } } })],
+    ['an unknown compat key', (r: Record<string, unknown>) => ({ ...r, selection: { ...(r.selection as object), model: { ...((r.selection as { model: object }).model), compat: { supportsStrictMode: true } } } })],
     ['an object tool choice', (r: Record<string, unknown>) => ({ ...r, selection: { ...(r.selection as object), options: { cacheRetention: 'none', maxTokens: 1, toolChoice: { type: 'function' } } } })],
     ['an assistant message', (r: Record<string, unknown>) => ({ ...r, snapshot: { ...(r.snapshot as object), messages: [{ role: 'assistant', content: 'hi', timestamp: 1 }] } })],
     ['multimodal message content', (r: Record<string, unknown>) => ({ ...r, snapshot: { ...(r.snapshot as object), messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }], timestamp: 1 }] } })],

@@ -246,8 +246,15 @@ await runtime.dispose();
   const stale = parseModelProviderProfile({ ...profile, profile_ref: 'stale-pi', enabled: false });
   const staleBinding = exactProviderProfileBinding(stale);
   await store.save(parseModelProviderProfile({ ...stale, pi_model: { ...modelConfig, maxTokens: 16_384 } }));
+  // The one fixture the prepared runtime entry can admit: same openai-compatible
+  // adapter and same projected model, but a declared credential. The smoke's
+  // main profile is deliberately `auth_mode: none`, which the prepared entry
+  // must refuse before any child exists.
+  const preparedReady = parseModelProviderProfile({ ...profile, profile_ref: 'prepared-ready', auth_mode: 'bearer' });
+  await store.save(preparedReady);
   await store.close();
   const binding = exactProviderProfileBinding(profile);
+  const preparedReadyBinding = exactProviderProfileBinding(preparedReady);
   const isolatedHome = path.join(dir, 'home');
   await mkdir(isolatedHome);
   const env = {
@@ -368,19 +375,68 @@ await runtime.dispose();
     }
   } finally {await directRuntime?.release();}
 
+  // Admission against the REAL installed launcher bin. `--runtime-entry` is
+  // required at its parser, so every invocation here states its child grammar
+  // in the same argv position the installed client adapter writes it
+  // (`--pi-bin <interpreter>` … `--runtime-entry <entry>` `--pi-entry <entry>`);
+  // `undefined` is the version-skew shape a client too old to state it produces.
+  // Node 22 prints `ExperimentalWarning: SQLite …` on stderr the moment the
+  // launcher opens the profile store; Node 24 (the local runtime) does not, so
+  // only CI saw it. Remove Node's own process-warning lines and nothing else,
+  // so every assertion below stays an exact comparison against what the
+  // launcher itself wrote.
+  const withoutNodeWarnings = (stderr) => stderr.replace(
+    /^\(node:\d+\) ExperimentalWarning: .*(?:\n|$)(?:^\(Use `node --trace-warnings \.\.\.` to show where the warning was created\)(?:\n|$))?/gm,
+    '');
+  assert.equal(
+    withoutNodeWarnings('(node:3160) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n'
+      + '(Use `node --trace-warnings ...` to show where the warning was created)\n'
+      + 'pi provider launcher: refused\n'),
+    'pi provider launcher: refused\n');
+  const launcherBin = path.join(keysRoot, 'dist/bin/pi-provider-launcher.js');
+  const admit = (runtimeEntry, target) => spawnSync(process.execPath, [launcherBin,
+    '--pi-bin', process.execPath,
+    ...(runtimeEntry === undefined ? [] : ['--runtime-entry', runtimeEntry]),
+    '--pi-entry', sdkPiEntry, '--profile-db', profileDbPath, '--session-dir', sessionDir,
+    '--provider', target.profileRef, '--model', target.modelId,
+    '--profile-revision', target.profileRevision, '--profile-hash', target.profileHash,
+    '--required-capabilities', '[]', '--validate-only', 'true',
+  ], { cwd: dir, env, encoding: 'utf8', timeout: 15_000 });
   for (const [rejectedBinding, expected] of [
     [exactProviderProfileBinding(missingPi), /requires explicit pi_model/],
     [staleBinding, /hash mismatch/],
   ]) {
-    const check = spawnSync(process.execPath, [path.join(keysRoot, 'dist/bin/pi-provider-launcher.js'),
-      '--pi-bin', process.execPath, '--pi-entry', sdkPiEntry, '--profile-db', profileDbPath, '--session-dir', sessionDir,
-      '--provider', rejectedBinding.profileRef, '--model', rejectedBinding.modelId,
-      '--profile-revision', rejectedBinding.profileRevision, '--profile-hash', rejectedBinding.profileHash,
-      '--required-capabilities', '[]', '--validate-only', 'true',
-    ], { cwd: dir, env, encoding: 'utf8', timeout: 5000 });
+    const check = admit('pi-rpc', rejectedBinding);
     assert.equal(check.status, 1);
     assert.match(check.stderr, expected);
   }
+  // The runtime-entry contract itself, on the installed bin rather than on a
+  // stand-in: a missing entry and an entry outside the closed set both refuse
+  // before the profile database is opened.
+  const missingEntry = admit(undefined, binding);
+  assert.equal(missingEntry.status, 1, missingEntry.stderr || String(missingEntry.error));
+  assert.equal(withoutNodeWarnings(missingEntry.stderr), 'pi provider launcher: --runtime-entry requires a value\n');
+  const bogusEntry = admit('bogus', binding);
+  assert.equal(bogusEntry.status, 1, bogusEntry.stderr || String(bogusEntry.error));
+  assert.equal(withoutNodeWarnings(bogusEntry.stderr), 'pi provider launcher: --runtime-entry must be one of [pi-rpc, pi-prepared]\n');
+  // The prepared entry's own support set, and its parity with the rpc entry.
+  // A credential-bearing openai-compatible profile is admitted by BOTH entries;
+  // the auth-free profile stays admissible under `pi-rpc` and is refused under
+  // `pi-prepared`, because a prepared host resolves a provider credential
+  // before it will consume a compiled input.
+  for (const entry of ['pi-rpc', 'pi-prepared']) {
+    const admitted = admit(entry, preparedReadyBinding);
+    assert.equal(admitted.status, 0, admitted.stderr || String(admitted.error));
+    assert.equal(withoutNodeWarnings(admitted.stderr), '');
+  }
+  const rpcAuthFree = admit('pi-rpc', binding);
+  assert.equal(rpcAuthFree.status, 0, rpcAuthFree.stderr || String(rpcAuthFree.error));
+  const preparedAuthFree = admit('pi-prepared', binding);
+  assert.equal(preparedAuthFree.status, 1, preparedAuthFree.stderr || String(preparedAuthFree.error));
+  assert.equal(withoutNodeWarnings(preparedAuthFree.stderr),
+    `pi provider launcher: ${binding.profileRef} declares auth_mode "none"; the prepared runtime entry requires a provider credential\n`);
+  assert.equal(requests, 0);
+  console.log('[release-pack] installed keys launcher bin admission passed: missing/closed-set --runtime-entry refusals, rpc/prepared parity on a credential-bearing profile, and the prepared-entry auth_mode refusal; spawns=0 requests=0');
   // The full launch smoke: only reachable with a proven launch directory,
   // because everything it asserts is about WHERE the servers started.
   if (launchUnprovable) {

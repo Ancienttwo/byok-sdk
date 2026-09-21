@@ -8,7 +8,10 @@ import {
 
 import { runCommand, type CommandRunner } from './command-runner';
 import { ByokKeysError } from './errors';
-import { PI_PROJECTED_KEY_ENV, buildPiProviderArgs, buildPiProviderProjection } from './pi-provider-projection';
+import {
+  PI_LAUNCHER_RUNTIME_ENTRIES, PI_PROJECTED_KEY_ENV, buildPiPreparedArgs, buildPiProviderArgs,
+  buildPiProviderProjection, type PiLauncherRuntimeEntry,
+} from './pi-provider-projection';
 import {
   ProviderModelCapabilitySchema,
   ProviderProfileRefSchema,
@@ -26,6 +29,8 @@ export interface PiProviderLauncherOptions {
   piCwd?: string;
   piFixedArgs?: readonly string[];
   piConfigDigest?: string;
+  /** Which of this launcher's two child grammars applies; never defaulted. */
+  runtimeEntry: PiLauncherRuntimeEntry;
   profileDbPath: string;
   /** Carried by the `--provider` flag: the exact local profile to launch. */
   profileRef: ProviderProfileRef;
@@ -52,6 +57,7 @@ export function parsePiProviderLauncherOptions(
     '--pi-cwd',
     '--pi-fixed-args',
     '--pi-config-digest',
+    '--runtime-entry',
     '--profile-db',
     '--provider',
     '--model',
@@ -83,6 +89,15 @@ export function parsePiProviderLauncherOptions(
     if (value === undefined) throw new Error(`${flag} requires a value`);
     return value;
   };
+
+  // Read before anything else this parser decides: the entry selects the child
+  // grammar, so a client too old to state it must fail here rather than have
+  // one chosen for it.
+  const rawRuntimeEntry = required('--runtime-entry');
+  if (!(PI_LAUNCHER_RUNTIME_ENTRIES as readonly string[]).includes(rawRuntimeEntry)) {
+    throw new Error(`--runtime-entry must be one of [${PI_LAUNCHER_RUNTIME_ENTRIES.join(', ')}]`);
+  }
+  const runtimeEntry = rawRuntimeEntry as PiLauncherRuntimeEntry;
 
   const rawProfileRef = required('--provider');
   const profileRef = ProviderProfileRefSchema.safeParse(rawProfileRef);
@@ -185,6 +200,7 @@ export function parsePiProviderLauncherOptions(
   return {
     ...(piConfigDigest === undefined ? {} : { piConfigDigest }),
     ...(piEntry === undefined ? {} : { piEntry }),
+    runtimeEntry,
     piBin: required('--pi-bin'),
     ...(launchBinding === undefined ? {} : { launchBinding, piCwd, piFixedArgs }),
     profileDbPath,
@@ -197,6 +213,37 @@ export function parsePiProviderLauncherOptions(
     ...(macosKeychainPath !== undefined ? { macosKeychainPath } : {}),
     piArgs,
   };
+}
+
+/**
+ * What a profile must declare before it may parent a prepared host.
+ *
+ * Both refusals are about the prepared lane's own compile support set, not
+ * about custody: a prepared artifact is `openai-completions` bytes compiled by
+ * the device, and the host resolves a key for the projected provider before it
+ * will consume one. An `anthropic` adapter projects `anthropic-messages`, which
+ * the prepared compiler never emits, and `auth_mode: 'none'` projects a
+ * provider with no `apiKey` reference at all, so the host would refuse with
+ * `prepared_provider_credential_unavailable` AFTER a child had already been
+ * spawned. Refusing here means the admission (`--validate-only true`) answers
+ * the same question the launch would, before any process exists.
+ *
+ * Deliberately NOT a silent narrowing of the profile: nothing here rewrites the
+ * adapter or invents a credential.
+ */
+export function assertPiPreparedProviderProfile(profile: ModelProviderProfile): void {
+  if (profile.adapter === 'anthropic') {
+    throw new ByokKeysError(
+      'PROVIDER_PROFILE_INVALID',
+      `${profile.profile_ref} speaks the anthropic adapter; the prepared runtime entry compiles openai-completions only`,
+    );
+  }
+  if (profile.auth_mode === 'none') {
+    throw new ByokKeysError(
+      'PROVIDER_PROFILE_INVALID',
+      `${profile.profile_ref} declares auth_mode "none"; the prepared runtime entry requires a provider credential`,
+    );
+  }
 }
 
 /**
@@ -357,7 +404,13 @@ export async function startPiProvider(
     throw new Error('Pi launch requires an explicit spawn binding, cwd and fixed args');
   }
   const projection = buildPiProviderProjection(profile);
-  const delegated = buildPiProviderArgs(profile, options.piArgs);
+  // The ONE place the two child grammars diverge. Everything after it —
+  // projection write, layout assertion, secret resolution, both spawn-binding
+  // assertions and the spawn itself — is shared, because custody does not
+  // depend on which entry consumes the projected provider.
+  const delegated = options.runtimeEntry === 'pi-prepared'
+    ? buildPiPreparedArgs(options.piArgs)
+    : buildPiProviderArgs(profile, options.piArgs);
   const env = buildPiProviderChildEnvironment({
     ambient: dependencies.ambient, binding, sessionDir: options.sessionDir, secret: undefined,
   });

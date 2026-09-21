@@ -113,11 +113,89 @@ export const InputPreparationModelCostSchema = z
   .strict();
 
 /**
+ * One provider-side effort token, or `null` where the model supports no such
+ * level.
+ *
+ * This shape and the `compat` shape below are RESTATED from the device-local
+ * authority (`packages/keys/src/pi-model-config.ts`'s `PiModelConfigSchema`)
+ * rather than imported: the release graph
+ * (`scripts/release/check-package-graph.mjs`) keeps `@byok-sdk/keys` and the
+ * dispatch packages disjoint, exactly as `provider-profile.ts`'s
+ * `PROVIDER_PROFILE_REF_PATTERN` is restated for the wire. The two definitions
+ * are pinned equal by a test that can see both
+ * (`packages/client/src/__tests__/input-preparation-model-parity.test.ts`), so
+ * a drift is a failing check rather than a silently narrower wire.
+ */
+const THINKING_EFFORT = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[a-zA-Z0-9_-]+$/u)
+  .nullable();
+
+/**
+ * The complete level -> effort mapping the launched model declares. All seven
+ * keys are required and no other key is admitted: a partial map would be a map
+ * whose missing levels someone downstream had to invent.
+ */
+const InputPreparationThinkingLevelMapSchema = z
+  .object({
+    off: THINKING_EFFORT,
+    minimal: THINKING_EFFORT,
+    low: THINKING_EFFORT,
+    medium: THINKING_EFFORT,
+    high: THINKING_EFFORT,
+    xhigh: THINKING_EFFORT,
+    max: THINKING_EFFORT,
+  })
+  .strict();
+
+/**
+ * The declared request-body compatibility flags of the launched model.
+ *
+ * Every member is optional and NOTHING here is defaulted: an absent flag means
+ * the configuration declared none, which is a different fact from declaring
+ * `false`, and the native compiler owns what an absent flag does.
+ */
+const InputPreparationModelCompatSchema = z
+  .object({
+    supportsStore: z.boolean().optional(),
+    supportsDeveloperRole: z.boolean().optional(),
+    supportsReasoningEffort: z.boolean().optional(),
+    supportsUsageInStreaming: z.boolean().optional(),
+    maxTokensField: z.enum(['max_completion_tokens', 'max_tokens']).optional(),
+    thinkingFormat: z
+      .enum([
+        'openai',
+        'openrouter',
+        'deepseek',
+        'together',
+        'baseten',
+        'zai',
+        'qwen',
+        'chat-template',
+        'qwen-chat-template',
+        'string-thinking',
+        'ant-ling',
+      ])
+      .optional(),
+    zaiToolStream: z.boolean().optional(),
+  })
+  .strict();
+
+/**
  * The exact model identity the request compiles for.
  *
  * `api` is a single literal, not an open enum: `openai-completions` is the one
  * API the frozen B-P1 native validator admits, and widening it is a
  * registration, not a parser relaxation.
+ *
+ * `thinkingLevelMap` and `compat` are the two body-affecting declarations a
+ * locally configured provider profile projects into the model entry the runtime
+ * is launched with. They are OPTIONAL because a model configuration may declare
+ * neither, and absent stays absent on every carrier: nothing here defaults,
+ * coerces or infers one, since a preparation whose model gained a field on the
+ * way through would no longer equal the session model it was counted for.
  */
 export const InputPreparationModelSchema = z
   .object({
@@ -131,6 +209,8 @@ export const InputPreparationModelSchema = z
     cost: InputPreparationModelCostSchema,
     contextWindow: z.number().int().positive(),
     maxTokens: z.number().int().positive(),
+    thinkingLevelMap: InputPreparationThinkingLevelMapSchema.optional(),
+    compat: InputPreparationModelCompatSchema.optional(),
   })
   .strict();
 export type InputPreparationModel = z.infer<typeof InputPreparationModelSchema>;

@@ -456,6 +456,14 @@ export function createPiInputPreparationCompiler(
             cost: { ...request.model.cost },
             contextWindow: request.model.contextWindow,
             maxTokens: request.model.maxTokens,
+            // Carried only when the record declared them. Spelling them as
+            // `key: undefined` instead would put the keys into the native
+            // `model` object, and the native compiler's own key gate treats a
+            // present key as a declaration.
+            ...(request.model.thinkingLevelMap === undefined
+              ? {}
+              : { thinkingLevelMap: { ...request.model.thinkingLevelMap } }),
+            ...(request.model.compat === undefined ? {} : { compat: { ...request.model.compat } }),
           },
           options: {
             cacheRetention: request.options.cacheRetention,

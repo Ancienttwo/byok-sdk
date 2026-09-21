@@ -4,7 +4,9 @@ import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
 const { thinkingLevel, ...modelSettings } = PI_MODEL_FIXTURE;
 
 import {
+  PI_LAUNCHER_RUNTIME_ENTRIES,
   PI_PROJECTED_KEY_ENV,
+  buildPiPreparedArgs,
   buildPiProviderArgs,
   buildPiProviderProjection,
 } from './pi-provider-projection';
@@ -180,5 +182,50 @@ describe('buildPiProviderProjection', () => {
     expect(() =>
       buildPiProviderArgs(profile, ['--mode', 'rpc', '--provider', 'openai']),
     ).toThrow(/does not allow delegated argument --provider/);
+  });
+});
+
+describe('the pi-prepared delegated argv grammar', () => {
+  const config = path.resolve('prepared-launch.json');
+
+  it('declares exactly the two runtime entries this launcher may parent', () => {
+    expect([...PI_LAUNCHER_RUNTIME_ENTRIES]).toEqual(['pi-rpc', 'pi-prepared']);
+  });
+
+  it('accepts exactly --config <absolute path> and appends nothing', () => {
+    expect(buildPiPreparedArgs(['--config', config])).toEqual(['--config', config]);
+  });
+
+  it.each([
+    [[]],
+    [['--config']],
+    [['--config', config, '--no-skills']],
+    [['--no-skills', '--config', config]],
+    [['--config', 'prepared-launch.json']],
+    [['--config', '/tmp/bad\nlaunch.json']],
+    [['--config', '/tmp/bad\u0000launch.json']],
+    [['--provider', 'byok-sdk-synthetic']],
+    [['--model', 'explicit-model']],
+    [['--thinking', 'low']],
+    [['--mode', 'rpc']],
+    [['--config', config, '--config', config]],
+  ])('refuses delegated argv the prepared host would not accept %j', (delegated) => {
+    expect(() => buildPiPreparedArgs(delegated)).toThrow();
+  });
+
+  it('leaves the pi-rpc grammar byte-identical to the pre-runtime-entry output', () => {
+    const profile = parseModelProviderProfile({
+      ...timestamps, pi_model: PI_MODEL_FIXTURE, adapter: 'openai_compatible', auth_mode: 'bearer',
+      base_url: 'https://api.z.ai/api/coding/paas/v4', capabilities: [], display_name: 'GLM',
+      enabled: true, kind: 'model', model: 'glm-4.6', profile_ref: 'zai-coding', provider_kind: 'custom',
+    });
+    const delegated = ['--config', config, '--mode', 'rpc', '--no-skills'];
+    // Frozen literal, captured from the grammar as it stood at ea5719b4, so a
+    // future edit to the shared launcher cannot move the rpc child's argv
+    // while only the prepared entry was meant to change.
+    expect(JSON.stringify(buildPiProviderArgs(profile, delegated))).toBe(JSON.stringify([
+      '--config', config, '--mode', 'rpc', '--no-skills',
+      '--provider', 'byok-sdk-zai-coding', '--model', 'glm-4.6', '--thinking', 'low',
+    ]));
   });
 });

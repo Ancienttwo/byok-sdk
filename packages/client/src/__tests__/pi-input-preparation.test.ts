@@ -290,6 +290,40 @@ describe('B-P2 native composition: pure compile', () => {
     expect(second.envelopeDigest).toBe(first.envelopeDigest);
   });
 
+  it('hands the native compile the declared thinkingLevelMap and compat, verbatim, and only when declared', async () => {
+    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+    const thinkingLevelMap = {
+      off: null, minimal: 'low', low: 'low', medium: 'medium', high: 'high', xhigh: 'high', max: 'high',
+    } as const;
+    const compat = {
+      supportsDeveloperRole: false,
+      maxTokensField: 'max_tokens',
+      thinkingFormat: 'zai',
+      zaiToolStream: true,
+    } as const;
+
+    // The envelope's `providerRequest.model` IS the object handed to the native
+    // compile — the fork deep-copies its input and carries that copy through —
+    // so this is the pass-through assertion, not a re-derivation of it.
+    const declared = await compiler.compile(
+      compileRequest({ model: { ...compileRequest().model, reasoning: true, thinkingLevelMap, compat } }),
+    );
+    const carried = declared.envelope.providerRequest.model as unknown as Record<string, unknown>;
+    expect(carried['thinkingLevelMap']).toEqual(thinkingLevelMap);
+    expect(carried['compat']).toEqual(compat);
+
+    // Undeclared means the keys are ABSENT, not present-and-undefined: the
+    // native validator's own key gate reads a present key as a declaration.
+    const undeclared = await compiler.compile(compileRequest());
+    const plain = undeclared.envelope.providerRequest.model as unknown as Record<string, unknown>;
+    expect(Object.hasOwn(plain, 'thinkingLevelMap')).toBe(false);
+    expect(Object.hasOwn(plain, 'compat')).toBe(false);
+
+    // And the declarations reach D itself: carrying them would be pointless if
+    // the compiled body were identical either way.
+    expect(declared.requestBody).not.toBe(undeclared.requestBody);
+  });
+
   it('touches no filesystem, process, child-process, socket or network surface while compiling', async () => {
     // Construct FIRST: the compiler reads the installed manifest exactly once,
     // at construction, which is outside the pure stage by design.

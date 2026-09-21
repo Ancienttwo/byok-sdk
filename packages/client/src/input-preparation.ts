@@ -140,7 +140,57 @@ export interface InputPreparationSourceV1 {
   readonly digest: string;
 }
 
-/** The exact model identity the request is compiled for. */
+/**
+ * The complete thinking-level -> effort mapping the launched model declares.
+ *
+ * All seven levels are present; `null` is the declaration that a level is
+ * unsupported, which is a different fact from the level being missing.
+ */
+export interface InputPreparationThinkingLevelMapV1 {
+  readonly off: string | null;
+  readonly minimal: string | null;
+  readonly low: string | null;
+  readonly medium: string | null;
+  readonly high: string | null;
+  readonly xhigh: string | null;
+  readonly max: string | null;
+}
+
+/**
+ * The declared request-body compatibility of the launched model. Every member
+ * is optional and none is ever defaulted: an absent flag means the
+ * configuration declared none, and the native compiler owns what that means.
+ */
+export interface InputPreparationModelCompatV1 {
+  readonly supportsStore?: boolean;
+  readonly supportsDeveloperRole?: boolean;
+  readonly supportsReasoningEffort?: boolean;
+  readonly supportsUsageInStreaming?: boolean;
+  readonly maxTokensField?: 'max_completion_tokens' | 'max_tokens';
+  readonly thinkingFormat?:
+    | 'openai'
+    | 'openrouter'
+    | 'deepseek'
+    | 'together'
+    | 'baseten'
+    | 'zai'
+    | 'qwen'
+    | 'chat-template'
+    | 'qwen-chat-template'
+    | 'string-thinking'
+    | 'ant-ling';
+  readonly zaiToolStream?: boolean;
+}
+
+/**
+ * The exact model identity the request is compiled for.
+ *
+ * `thinkingLevelMap` and `compat` are the body-affecting declarations the
+ * launched model entry carries. They are optional because a configuration may
+ * declare neither; absent stays absent on every carrier in this package, since
+ * a model that gained a field on the way through would no longer equal the
+ * session model the native verifier compares it to.
+ */
 export interface InputPreparationModelV1 {
   readonly id: string;
   readonly name: string;
@@ -153,6 +203,8 @@ export interface InputPreparationModelV1 {
   readonly cost: InputPreparationModelCostV1;
   readonly contextWindow: number;
   readonly maxTokens: number;
+  readonly thinkingLevelMap?: InputPreparationThinkingLevelMapV1;
+  readonly compat?: InputPreparationModelCompatV1;
 }
 
 export interface InputPreparationModelCostV1 {
