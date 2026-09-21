@@ -7,9 +7,9 @@
 // a run that reaches the gate has ALREADY emitted the session events for the
 // leading system and user messages — six frames that now precede the response
 // the SDK adapter is still awaiting. This script writes exactly that ordering,
-// plus one frame the adapter actually maps to an `AgentEvent`, so a test can
-// prove nothing queued before the response is lost, reordered or delivered
-// twice once `PiSession` starts reading.
+// plus two distinct frames the adapter actually maps to `AgentEvent`s, so a
+// test can prove nothing queued before the response is lost, reordered or
+// delivered twice once `PiSession` starts reading.
 //
 // `BYOK_PREPARED_TIMING_REFUSE` makes it answer the same command with a typed
 // refusal instead, which is how the new `prepared_body_drift` code's
@@ -30,11 +30,22 @@ const PRE_RESPONSE_EVENTS = [
   { type: 'message_end', role: 'user' },
 ];
 
-/** One frame the adapter maps, so "delivered" is observable and not merely "queued". */
-const MAPPED_PRE_RESPONSE_EVENT = {
-  type: 'message_update',
-  assistantMessageEvent: { type: 'text_delta', delta: 'queued before the response' },
-};
+/**
+ * TWO frames the adapter maps, so "delivered" is observable and not merely
+ * "queued" — and so ORDER is observable at all: with a single mapped frame the
+ * queue's order-preservation is unprovable, because one element is in order by
+ * construction. Their deltas differ, so a swap is visible in the assertion.
+ */
+const MAPPED_PRE_RESPONSE_EVENTS = [
+  {
+    type: 'message_update',
+    assistantMessageEvent: { type: 'text_delta', delta: 'queued first, before the response' },
+  },
+  {
+    type: 'message_update',
+    assistantMessageEvent: { type: 'text_delta', delta: 'queued second, still before the response' },
+  },
+];
 
 const refuse = process.env.BYOK_PREPARED_TIMING_REFUSE === '1';
 const sessionId = 'prepared-timing-session';
@@ -69,7 +80,7 @@ process.stdin.on('data', (chunk) => {
         continue;
       }
       for (const event of PRE_RESPONSE_EVENTS) write(event);
-      write(MAPPED_PRE_RESPONSE_EVENT);
+      for (const event of MAPPED_PRE_RESPONSE_EVENTS) write(event);
       write({
         type: 'response',
         success: true,

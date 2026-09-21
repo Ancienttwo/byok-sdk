@@ -191,22 +191,27 @@ describe('the prepared response now arrives after the run\'s first session event
     try {
       // The six routine frames carry no `AgentEvent` (they are
       // `ROUTINE_PI_EVENT_TYPES` bookkeeping), so what proves DELIVERY rather
-      // than mere buffering is the one mapped frame the script writes in the
-      // same pre-response burst: it was pushed onto the queue before
-      // `PiSession` existed, and it still reaches the session's stream.
+      // than mere buffering is the two mapped frames the script writes in the
+      // same pre-response burst: both were pushed onto the queue before
+      // `PiSession` existed, and both still reach the session's stream. Two is
+      // the smallest number that makes ORDER a claim at all — one frame is in
+      // order by construction.
       const seen: AgentEvent[] = [];
       const iterator = events[Symbol.asyncIterator]();
-      const next = await iterator.next();
-      if (next.done !== true) seen.push(next.value);
+      for (let read = 0; read < 2; read += 1) {
+        const next = await iterator.next();
+        if (next.done !== true) seen.push(next.value);
+      }
       expect(seen).toEqual([
-        { type: 'progress', text: 'queued before the response' },
+        { type: 'progress', text: 'queued first, before the response' },
+        { type: 'progress', text: 'queued second, still before the response' },
       ]);
-      // Exactly once: a second read must not replay the same buffered frame.
+      // Exactly once: a third read must replay neither buffered frame.
       const after = await Promise.race([
         iterator.next().then((result) => (result.done === true ? 'done' : result.value)),
         new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), 250)),
       ]);
-      expect(after).not.toEqual({ type: 'progress', text: 'queued before the response' });
+      expect(seen).not.toContainEqual(after);
     } finally {
       await close();
     }
