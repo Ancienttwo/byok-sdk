@@ -2,11 +2,11 @@
   "format": "byok.pi-export-asset-source",
   "version": 1,
   "packageName": "@byok-sdk/pi-coding-agent",
-  "packageVersion": "0.85.1008",
+  "packageVersion": "0.86.1001",
   "byokFork": {
-    "upstreamBase": "0.85.1",
-    "upstreamCommit": "d981de1229ef899957bbe968bc8dcda02a21f477",
-    "forkBuild": 8
+    "upstreamBase": "0.86.1",
+    "upstreamCommit": "13cbf77df2396303013a41646bcfa77b4271ae56",
+    "forkBuild": 1
   },
   "sourceBasePath": "dist/core/export-html",
   "files": [

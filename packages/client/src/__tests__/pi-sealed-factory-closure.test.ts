@@ -34,15 +34,15 @@ describe('sealed factory build author and bounded compiler exclusion', () => {
       expect(read('dist/assets/provenance/pi-subagents/0.60.0/'+file)).toBe(read('vendor/pi-subagents/0.60.0/'+file));
     }
   });
-  it('keeps the shipped TypeBox consumer at exact 1.3.7 for both flavors', () => {
+  it('keeps the shipped TypeBox consumer at exact 1.3.27 for both flavors', () => {
     const manifest = JSON.parse(read('package.json'));
-    expect(manifest.dependencies.typebox).toBe('1.3.7');
+    expect(manifest.dependencies.typebox).toBe('1.3.27');
     for (const entry of ['pi-runtime-host.js','pi-runtime-host-sealed.js']) {
       const require = createRequire(path.join(root, 'dist/bin',entry));
       const resolved = require.resolve('typebox');
       let dir = path.dirname(resolved);
       while (!existsSync(path.join(dir,'package.json'))) dir=path.dirname(dir);
-      expect(JSON.parse(readFileSync(path.join(dir,'package.json'),'utf8')).version).toBe('1.3.7');
+      expect(JSON.parse(readFileSync(path.join(dir,'package.json'),'utf8')).version).toBe('1.3.27');
       expect(read('dist/bin/'+entry)).toMatch(/from ['"]typebox\/compile['"]/);
     }
   });
