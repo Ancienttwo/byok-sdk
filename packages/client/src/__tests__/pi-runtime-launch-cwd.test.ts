@@ -168,7 +168,7 @@ async function prepareArtifact(home: string, artifactPath: string, launchCwd: st
   const binding = { inputIdentity: 'cwd-input', runtimeIdentity: 'cwd-runtime', policyIdentity: 'cwd-policy', profileRevision: 'cwd-profile' };
   const compiled = await createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity()).compile({
     snapshot: {
-      prompt: { cwd: home, selectedTools: [], toolSnippets: {}, promptGuidelines: [], contextFiles: [], formattedSkills: '',
+      prompt: { cwd: home, selectedTools: [], toolSnippets: {}, toolGuidelines: {}, promptGuidelines: [], contextFiles: [], skills: [],
         docsPaths: { readmePath: '/sealed/README.md', docsPath: '/sealed/docs', examplesPath: '/sealed/examples' } },
       messages: [{ role: 'user', content: 'report cwd', timestamp: 1700000000000 }], tools: [],
     },

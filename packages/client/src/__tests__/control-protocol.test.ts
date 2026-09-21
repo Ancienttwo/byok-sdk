@@ -280,9 +280,10 @@ describe('control-protocol: input_preparation param gates', () => {
         prompt: {
           cwd: '/workspace',
           toolSnippets: {},
+          toolGuidelines: {},
           promptGuidelines: [],
           contextFiles: [{ path: 'AGENTS.md', content: 'x' }],
-          formattedSkills: '',
+          skills: [],
           docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
         },
         messages: [{ role: 'user', content: 'hello', timestamp: 1 }],
@@ -349,7 +350,8 @@ describe('control-protocol: input_preparation param gates', () => {
     ['a wrong format tag', (r: Record<string, unknown>) => ({ ...r, format: 'byok.input-preparation.request.v2' })],
     ['the RETIRED version 1', (r: Record<string, unknown>) => ({ ...r, version: 1 })],
     ['the RETIRED version 2', (r: Record<string, unknown>) => ({ ...r, version: 2 })],
-    ['a future version', (r: Record<string, unknown>) => ({ ...r, version: 4 })],
+    ['the RETIRED version 3', (r: Record<string, unknown>) => ({ ...r, version: 3 })],
+    ['a future version', (r: Record<string, unknown>) => ({ ...r, version: 5 })],
     ['an unknown scope field', (r: Record<string, unknown>) => ({ ...r, scope: { ...scope, tenantId: 't' } })],
     ['a non-openai-completions api', (r: Record<string, unknown>) => ({ ...r, selection: { ...(r.selection as object), model: { ...((r.selection as { model: object }).model), api: 'anthropic-messages' } } })],
     // `samplingParams` is a real native model field that this wire deliberately

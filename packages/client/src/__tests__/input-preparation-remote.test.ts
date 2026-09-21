@@ -94,9 +94,10 @@ const CONTEXT_DOCUMENT = {
   prompt: {
     cwd: '/workspace/project',
     toolSnippets: {},
+    toolGuidelines: {},
     promptGuidelines: [],
     contextFiles: [],
-    formattedSkills: '',
+    skills: [],
     docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
   },
   messages: [{ role: 'user', content: 'prepare this turn', timestamp: 1_700_000_000_000 }],
@@ -169,12 +170,12 @@ function stubCompiler(): StubCompiler {
         envelopeDigest: 'b'.repeat(64),
         toolManifestDigest: 'c'.repeat(64),
         projection: {
-          version: 2,
+          version: 3,
           kind: 'content_complete',
           digest: sha256Hex(JSON.stringify({ model: request.model.id })),
         },
         residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
-        envelope: { format: 'pi.session.prepared-input', version: 2 } as never,
+        envelope: { format: 'pi.session.prepared-input', version: 3 } as never,
       };
     },
   };
@@ -280,7 +281,7 @@ describe('remote input preparation: in-process, never the control socket', () =>
     // The summary discloses identity, not content.
     expect(completion.receipt.artifact).toMatchObject({
       requestDigest: 'a'.repeat(64),
-      projection: { version: 2, kind: 'content_complete' },
+      projection: { version: 3, kind: 'content_complete' },
       residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
     });
     expect(Object.keys(completion.receipt)).not.toContain('request');

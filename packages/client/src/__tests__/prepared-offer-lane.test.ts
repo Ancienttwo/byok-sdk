@@ -15,6 +15,7 @@ import {
   type CounterReservationInput,
   type InputPreparationArtifact,
 } from '../daemon/input-preparation-store';
+import { SUPPORTED_PREPARED_COMPILER_VERSION } from '../adapters/pi/input-preparation';
 import { fingerprintPreparedToolSurface } from '../daemon/prepared-tool-surface';
 import { mcpLaunchAttestation } from '../daemon/trusted-launch-cwd';
 import {
@@ -116,11 +117,11 @@ const RUNTIME: InputPreparationRuntimeIdentityV1 = {
   forkBuild: 2,
   envelopeFormat: 'pi.session.prepared-input',
   requestFormat: 'pi.openai-completions.prepared',
-  compilerVersion: 2,
+  compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,
 };
 
 /** The projection a compiler would have proved over this lane's P(D). */
-const PROJECTION = { version: 2, kind: 'content_complete', digest: 'a'.repeat(64) } as const;
+const PROJECTION = { version: 3, kind: 'content_complete', digest: 'a'.repeat(64) } as const;
 const RESIDUAL = [{ key: 'max_tokens', valueClass: 'bounded_integer' }] as const;
 
 /** The Host ruling that makes this lane's one residual key applicable. */
@@ -253,7 +254,7 @@ function artifact(recordId: string): InputPreparationArtifact {
     counterProjection: '{"model":"glm-4.6"}',
     projection: PROJECTION,
     residual: [...RESIDUAL],
-    envelope: { format: 'pi.session.prepared-input', version: 2 },
+    envelope: { format: 'pi.session.prepared-input', version: 3 },
   };
 }
 
@@ -678,7 +679,7 @@ describe('every compared item declines by its own name, with no claim and no pin
       reason: 'preparation_not_ready',
       build: async () => {
         const built = await lane({
-          summaryOverrides: { projection: { version: 2, kind: 'unknown', digest: PROJECTION.digest }, residual: [] },
+          summaryOverrides: { projection: { version: 3, kind: 'unknown', digest: PROJECTION.digest }, residual: [] },
         });
         return { built, offered: reference(built) };
       },

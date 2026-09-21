@@ -3,7 +3,11 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { InputPreparationModelSchema } from '@byok-sdk/protocol';
+import {
+  InputPreparationContextDocumentSchema,
+  InputPreparationModelSchema,
+  InputPreparationOptionsSchema,
+} from '@byok-sdk/protocol';
 import { parseInputPreparationRequestParams } from '../daemon/control-protocol';
 import { parsePreparedExpectedModel } from '../bin/pi-prepared-host';
 import { InputPreparationStore, type ReserveInput } from '../daemon/input-preparation-store';
@@ -131,9 +135,10 @@ function requestParams(candidate: unknown): unknown {
       prompt: {
         cwd: '/workspace/project',
         toolSnippets: {},
+        toolGuidelines: {},
         promptGuidelines: [],
         contextFiles: [],
-        formattedSkills: '',
+        skills: [],
         docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
       },
       messages: [{ role: 'user', content: 'summarise the repository', timestamp: 1_700_000_000_000 }],
@@ -340,6 +345,138 @@ describe('input preparation model: every carrier admits the same closed shape', 
   );
 });
 
+// ---------------------------------------------------------------------------
+// The prompt snapshot and the option set, through every carrier that reads
+// them.
+//
+// Two carriers, not four, and the absence of the other two is the contract:
+// `bin/pi-prepared-host.ts` re-presents the MODEL and nothing else (the prompt
+// travels inside the already-compiled envelope, which the native session
+// verifies against its own projection), and the durable record retains the
+// compiled artifact rather than the caller's snapshot. So what has to agree
+// here is the wire schema and the daemon's hand parse — and they have to agree
+// about REFUSALS too, because a field one drops and the other keeps is a prompt
+// that was counted under one reading and rendered under another.
+// ---------------------------------------------------------------------------
+
+const SKILL = {
+  name: 'review',
+  description: 'review a diff',
+  filePath: '/workspace/project/.skills/review/SKILL.md',
+  disableModelInvocation: false,
+} as const;
+
+function prompt(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    cwd: '/workspace/project',
+    toolSnippets: { read: 'read snippet' },
+    toolGuidelines: { read: ['prefer a narrow range'] },
+    promptGuidelines: ['prefer small diffs'],
+    contextFiles: [],
+    skills: [SKILL],
+    docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
+    ...overrides,
+  };
+}
+
+const PROMPT_FIXTURES: readonly (readonly [string, Record<string, unknown>, 'accept' | 'refuse'])[] = [
+  ['the full 0.86 prompt snapshot', prompt(), 'accept'],
+  ['an empty guideline record and no skills', prompt({ toolGuidelines: {}, skills: [] }), 'accept'],
+  ['a skill the model may not invoke', prompt({ skills: [{ ...SKILL, disableModelInvocation: true }] }), 'accept'],
+  // The renamed field: a caller still sending the 0.85 pre-rendered block is
+  // refused, not silently rendered by a second renderer.
+  ['the RETIRED formattedSkills string', prompt({ formattedSkills: '', skills: undefined }), 'refuse'],
+  ['a skill carrying a key outside the rendered set', prompt({ skills: [{ ...SKILL, baseDir: '/workspace/project' }] }), 'refuse'],
+  ['a skill missing disableModelInvocation', prompt({ skills: [{ name: 'a', description: 'b', filePath: 'c' }] }), 'refuse'],
+  ['a skill whose name is empty', prompt({ skills: [{ ...SKILL, name: '' }] }), 'refuse'],
+  ['a skill that is not an object', prompt({ skills: ['review'] }), 'refuse'],
+  ['skills that are not an array', prompt({ skills: {} }), 'refuse'],
+  ['toolGuidelines whose value is a bare string', prompt({ toolGuidelines: { read: 'prefer a narrow range' } }), 'refuse'],
+  ['toolGuidelines whose value is an array of non-strings', prompt({ toolGuidelines: { read: [1] } }), 'refuse'],
+  ['toolGuidelines that are not an object', prompt({ toolGuidelines: [] }), 'refuse'],
+  ['a missing toolGuidelines record', prompt({ toolGuidelines: undefined }), 'refuse'],
+  ['the RETIRED selectedTools list', prompt({ selectedTools: ['read'] }), 'refuse'],
+];
+
+const OPTION_FIXTURES: readonly (readonly [string, Record<string, unknown>, 'accept' | 'refuse'])[] = [
+  ['the required pair alone', { cacheRetention: 'none', maxTokens: 4_096 }, 'accept'],
+  ['toolChoice auto', { cacheRetention: 'none', maxTokens: 4_096, toolChoice: 'auto' }, 'accept'],
+  ['toolChoice none', { cacheRetention: 'short', maxTokens: 4_096, toolChoice: 'none' }, 'accept'],
+  ['a requested thinking level', { cacheRetention: 'long', maxTokens: 4_096, reasoningEffort: 'high' }, 'accept'],
+  // `required` reaches no compiler on the other side: the prepared boundary
+  // compiles through the simple stream path, which cannot express it.
+  ['the RETIRED toolChoice required', { cacheRetention: 'none', maxTokens: 4_096, toolChoice: 'required' }, 'refuse'],
+  ['an object toolChoice', { cacheRetention: 'none', maxTokens: 4_096, toolChoice: { type: 'function' } }, 'refuse'],
+  ['an unknown option key', { cacheRetention: 'none', maxTokens: 4_096, sessionId: 'session-1' }, 'refuse'],
+];
+
+function throughPromptWireSchema(candidate: Record<string, unknown>): unknown {
+  const parsed = InputPreparationContextDocumentSchema.safeParse({
+    prompt: candidate,
+    messages: [{ role: 'user', content: 'summarise the repository', timestamp: 1_700_000_000_000 }],
+  });
+  return parsed.success ? parsed.data.prompt : undefined;
+}
+
+function throughPromptControlProtocol(candidate: Record<string, unknown>): unknown {
+  const params = requestParams(model()) as Record<string, unknown>;
+  const parsed = parseInputPreparationRequestParams({
+    ...params,
+    snapshot: { ...(params.snapshot as object), prompt: candidate },
+  });
+  return parsed.ok ? parsed.request.snapshot.prompt : undefined;
+}
+
+function throughOptionsWireSchema(candidate: Record<string, unknown>): unknown {
+  const parsed = InputPreparationOptionsSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : undefined;
+}
+
+function throughOptionsControlProtocol(candidate: Record<string, unknown>): unknown {
+  const params = requestParams(model()) as Record<string, unknown>;
+  const parsed = parseInputPreparationRequestParams({
+    ...params,
+    selection: { ...(params.selection as object), options: candidate },
+  });
+  return parsed.ok ? parsed.request.selection.options : undefined;
+}
+
+describe('input preparation prompt snapshot: the wire and the daemon admit the same closed shape', () => {
+  it.each(PROMPT_FIXTURES.map((entry) => entry))(
+    '%s: the wire schema and the daemon hand parse agree (%#)',
+    (_label, candidate, verdict) => {
+      const wire = throughPromptWireSchema(candidate);
+      const control = throughPromptControlProtocol(candidate);
+      if (verdict === 'refuse') {
+        expect({ wire, control }).toEqual({ wire: undefined, control: undefined });
+        return;
+      }
+      // Admitted VERBATIM by both. `JSON.parse(JSON.stringify(...))` drops the
+      // explicitly-undefined keys a fixture override writes, which is exactly
+      // what "absent stays absent" means on this wire.
+      const expected = JSON.parse(JSON.stringify(candidate)) as unknown;
+      expect(wire).toEqual(expected);
+      expect(control).toEqual(expected);
+    },
+  );
+});
+
+describe('input preparation options: the wire and the daemon admit the same closed shape', () => {
+  it.each(OPTION_FIXTURES.map((entry) => entry))(
+    '%s: the wire schema and the daemon hand parse agree (%#)',
+    (_label, candidate, verdict) => {
+      const wire = throughOptionsWireSchema(candidate);
+      const control = throughOptionsControlProtocol(candidate);
+      if (verdict === 'refuse') {
+        expect({ wire, control }).toEqual({ wire: undefined, control: undefined });
+        return;
+      }
+      expect(wire).toEqual(candidate);
+      expect(control).toEqual(candidate);
+    },
+  );
+});
+
 describe('input preparation model: the wire carries what the launcher projects', () => {
   it('maps the projected models.json entry onto the wire model field for field', () => {
     const { providerId } = projected();
@@ -456,22 +593,48 @@ async function composedSessionModel(): Promise<Record<string, unknown>> {
   return entry!;
 }
 
+/**
+ * The BYOK lane's compile input, non-empty in every field the 0.86 rebase moved.
+ *
+ * A snapshot that left `toolGuidelines`, `skills`, the host-canonical prefix and
+ * `constrainedSampling` empty would compile the same bytes the 0.85 line did,
+ * and would therefore prove nothing about the renderer and the tool projection
+ * this slice replaced.
+ */
 const COMPILE_SNAPSHOT = {
   prompt: {
     cwd: '/workspace/project',
     selectedTools: ['read'],
     toolSnippets: { read: 'read snippet' },
+    toolGuidelines: { read: ['read before you write'] },
     promptGuidelines: ['prefer small diffs'],
     contextFiles: [{ path: 'AGENTS.md', content: '# agents\nbe precise\n' }],
-    formattedSkills: '',
+    skills: [
+      {
+        name: 'review',
+        description: 'review a diff before it is proposed',
+        filePath: '/workspace/project/.skills/review/SKILL.md',
+        disableModelInvocation: false,
+      },
+    ],
     docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
   },
-  messages: [{ role: 'user' as const, content: 'summarise the repository', timestamp: 1_700_000_000_000 }],
+  messages: [
+    { role: 'user' as const, content: 'what does this repository do?', timestamp: 1_699_999_999_000 },
+    {
+      role: 'assistant' as const,
+      origin: 'host_canonical' as const,
+      content: 'It is a BYOK SDK.',
+      timestamp: 1_699_999_999_500,
+    },
+    { role: 'user' as const, content: 'summarise the repository', timestamp: 1_700_000_000_000 },
+  ],
   tools: [
     {
       name: 'read',
       description: 'read a file',
       parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+      constrainedSampling: { type: 'json_schema' as const, strict: 'prefer' as const },
     },
   ],
 };
@@ -516,11 +679,26 @@ describe('input preparation: a projected BYOK provider compiles and is consumed 
     expect(carried['compat']).toEqual(COMPAT);
     // The projection contract the counter reads: structural completeness, and a
     // digest that describes the exact counted bytes it travels with.
-    expect(compiled.projection.version).toBe(2);
+    expect(compiled.projection.version).toBe(3);
     expect(compiled.projection.kind).toBe('content_complete');
     expect(compiled.projection.digest).toBe(
       createHash('sha256').update(compiled.counterProjection, 'utf8').digest('hex'),
     );
+
+    // Everything the 0.86 rebase moved, read off D itself. The prompt is
+    // rendered by upstream's own builder from the stated inputs, the
+    // host-canonical prefix is an ordinary assistant turn, and the tool
+    // declaration keeps `constrainedSampling`, which reaches the wire as
+    // `strict`.
+    const body = JSON.parse(compiled.requestBody) as {
+      messages: { role: string; content: string }[];
+      tools: { function: { name: string; strict?: unknown } }[];
+    };
+    expect(body.messages[0]?.content).toContain('read before you write');
+    expect(body.messages[0]?.content).toContain('review a diff before it is proposed');
+    expect(body.messages.map((message) => message.role)).toEqual(['system', 'user', 'assistant', 'user']);
+    expect(body.messages[2]).toMatchObject({ role: 'assistant', content: 'It is a BYOK SDK.' });
+    expect(body.tools.map((tool) => tool.function.strict)).toEqual([true]);
   });
 
   it('compiles the same bytes as the built-in `zai` provider, and digests them differently', async () => {

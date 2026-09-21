@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import type { PermissionPolicy } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
-import { getDocsPath, getExamplesPath, getReadmePath, projectSystemPromptSnapshot } from '@earendil-works/pi-coding-agent';
+import { getDocsPath, getExamplesPath, getReadmePath } from '@earendil-works/pi-coding-agent';
 import { assemblePreparedPiToolSurface } from '../adapters/pi/prepared-tools';
 import { resolveInstalledPiRuntimeIdentity, createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
 import { createPreparedToolSurfaceAssembler } from '../daemon/prepared-tool-surface';
@@ -184,9 +184,9 @@ async function preparedFixture(root: string, cwd: string, env: Record<string, st
   const binding = { inputIdentity: 's2-input', runtimeIdentity, policyIdentity: 's2-policy', profileRevision: 's2-profile' };
   // A startup-only fixture. No prompt_prepared frame is ever sent, but the
   // retained envelope is real, rather than bypassing the adapter's artifact guard.
-  const compiled = await compiler.compile({ snapshot: { prompt: projectSystemPromptSnapshot({ cwd, selectedTools: surface.tools.map(tool => tool.name),
-    toolSnippets: {}, promptGuidelines: [], contextFiles: [], formattedSkills: '',
-    docsPaths: { readmePath: getReadmePath(), docsPath: getDocsPath(), examplesPath: getExamplesPath() } }),
+  const compiled = await compiler.compile({ snapshot: { prompt: { cwd, selectedTools: surface.tools.map(tool => tool.name),
+    toolSnippets: {}, toolGuidelines: {}, promptGuidelines: [], contextFiles: [], skills: [],
+    docsPaths: { readmePath: getReadmePath(), docsPath: getDocsPath(), examplesPath: getExamplesPath() } },
     messages: [{ role: 'user', content: 'Never sent', timestamp: 1 }], tools: surface.tools },
     model, options: { cacheRetention: 'none', maxTokens: 512 }, binding, toolExecutors: surface.toolExecutors });
   const artifactPath = path.join(root, 'prepared-artifact.json');

@@ -58,9 +58,10 @@ function params(messages: readonly unknown[]): unknown {
       prompt: {
         cwd: '/workspace/project',
         toolSnippets: {},
+        toolGuidelines: {},
         promptGuidelines: [],
         contextFiles: [],
-        formattedSkills: '',
+        skills: [],
         docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
       },
       messages,
@@ -75,9 +76,10 @@ function contextDocument(messages: readonly unknown[]): unknown {
     prompt: {
       cwd: '/workspace/project',
       toolSnippets: {},
+      toolGuidelines: {},
       promptGuidelines: [],
       contextFiles: [],
-      formattedSkills: '',
+      skills: [],
       docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
     },
     messages,
