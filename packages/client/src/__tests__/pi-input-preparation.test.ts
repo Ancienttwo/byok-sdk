@@ -37,28 +37,56 @@ import type { InputPreparationCompiledSnapshotV1 } from '../input-preparation';
  * creates a task, claim, Execution or nonce.
  */
 
+/**
+ * The full 0.86 prompt surface, deliberately non-empty in every field the
+ * rebase added or changed.
+ *
+ * `toolGuidelines`, `skills` and a host-canonical prefix are stated here rather
+ * than in a separate case because they are what the rebase moved: an empty
+ * fixture would compile the same bytes the 0.85 line did and prove nothing
+ * about the renderer that now produces them. `constrainedSampling` is likewise
+ * carried on the tools exactly as an 0.86 built-in declares it, so the request
+ * this file counts is the one the runtime would actually send.
+ */
 function snapshot(): InputPreparationCompiledSnapshotV1 {
   return {
     prompt: {
       cwd: '/workspace/project',
       selectedTools: ['read', 'bash'],
       toolSnippets: { read: 'read snippet', bash: 'bash snippet' },
+      toolGuidelines: { read: ['read before you write'], bash: ['quote every path'] },
       promptGuidelines: ['prefer small diffs'],
       contextFiles: [{ path: 'AGENTS.md', content: '# agents\nbe precise\n' }],
-      formattedSkills: '',
+      skills: [
+        {
+          name: 'review',
+          description: 'review a diff before it is proposed',
+          filePath: '/workspace/project/.skills/review/SKILL.md',
+          disableModelInvocation: false,
+        },
+      ],
       docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
     },
-    messages: [{ role: 'user', content: 'summarise the repository', timestamp: 1_700_000_000_000 }],
+    messages: [
+      // A host-canonical prefix: the host asserts this text was already said,
+      // and it carries no provenance. The context still ends on a user turn,
+      // which the native compile boundary requires.
+      { role: 'user', content: 'what does this repository do?', timestamp: 1_699_999_999_000 },
+      { role: 'assistant', origin: 'host_canonical', content: 'It is a BYOK SDK.', timestamp: 1_699_999_999_500 },
+      { role: 'user', content: 'summarise the repository', timestamp: 1_700_000_000_000 },
+    ],
     tools: [
       {
         name: 'read',
         description: 'read a file',
         parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+        constrainedSampling: { type: 'json_schema', strict: 'prefer' },
       },
       {
         name: 'bash',
         description: 'run a command',
         parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] },
+        constrainedSampling: { type: 'json_schema', strict: 'prefer' },
       },
     ],
   };
@@ -246,7 +274,7 @@ describe('B-P2 native composition: pure compile', () => {
     const body = JSON.parse(compiled.requestBody) as {
       model: string;
       messages: { role: string; content: string }[];
-      tools: { function: { name: string; description: string; parameters: unknown } }[];
+      tools: { function: { name: string; description: string; parameters: unknown; strict?: unknown } }[];
     };
     expect(body.model).toBe('glm-4.6');
     // The authorized context file and guideline reached the compiled system
@@ -254,15 +282,27 @@ describe('B-P2 native composition: pure compile', () => {
     expect(body.messages[0]?.role).toBe('system');
     expect(body.messages[0]?.content).toContain('be precise');
     expect(body.messages[0]?.content).toContain('prefer small diffs');
+    // The two prompt inputs the 0.86 rebase moved onto the wire, rendered by
+    // upstream's own builder rather than by a caller-supplied block.
+    expect(body.messages[0]?.content).toContain('read before you write');
+    expect(body.messages[0]?.content).toContain('review a diff before it is proposed');
+    expect(body.messages[0]?.content).toContain('/workspace/project/.skills/review/SKILL.md');
+    // The host-canonical prefix is carried as an ordinary assistant turn, and
+    // the context still ends on the user turn the boundary requires.
+    expect(body.messages.map((message) => message.role)).toEqual(['system', 'user', 'assistant', 'user']);
+    expect(body.messages[2]).toMatchObject({ role: 'assistant', content: 'It is a BYOK SDK.' });
     expect(body.messages.at(-1)).toMatchObject({ role: 'user', content: 'summarise the repository' });
     // Complete model-visible schemas, in order, not names alone.
     expect(body.tools.map((tool) => tool.function.name)).toEqual(['read', 'bash']);
     expect(body.tools[0]?.function.parameters).toMatchObject({ properties: { path: { type: 'string' } } });
+    // `constrainedSampling` reaches the wire as `strict`. The SDK's projection
+    // no longer strips it, so what is counted is what would be sent.
+    expect(body.tools.map((tool) => tool.function.strict)).toEqual([true, true]);
 
     // The native compiler's own structural projection contract, verbatim: a
     // content-complete projection whose digest describes the exact counted
     // bytes, plus the classification of every key of D outside P(D).
-    expect(compiled.projection.version).toBe(2);
+    expect(compiled.projection.version).toBe(3);
     expect(compiled.projection.kind).toBe('content_complete');
     expect(compiled.projection.digest).toBe(
       createHash('sha256').update(compiled.counterProjection, 'utf8').digest('hex'),
@@ -369,21 +409,53 @@ describe('B-P2 native composition: pure compile', () => {
     // The third-party edges of the pure compile path, exactly. A fork bump that
     // adds one fails HERE, where the addition is still a reviewable fact,
     // rather than at some later runtime.
-    expect([...walked.thirdParty].sort()).toEqual(['openai', 'partial-json']);
-    // `node:fs` is reachable: `@byok-sdk/pi-ai`'s provider-env module lazily
-    // `require`s it on a Bun-binary-only branch. Nothing on this path calls it,
-    // which is what the runtime traps above prove — but pinning the reachable
-    // set keeps "reachable" from quietly growing into "called".
-    expect([...walked.builtins].sort()).toEqual(['node:fs']);
+    //
+    // The 0.86 rebase WIDENED this set, and it is stated rather than hidden:
+    // the compile now renders the system prompt with upstream's own builder
+    // instead of a fork-local renderer, and that builder value-imports the
+    // pi-ai barrel and the coding-agent skill/config modules. That is the whole
+    // point of the rebase — one renderer, not two — so the closure it drags in
+    // is the honest cost of it. `fs`, `os`, `path` and `url` appear here rather
+    // than under `builtins` because the walker classifies by specifier and
+    // these are imported bare.
+    expect([...walked.thirdParty].sort()).toEqual([
+      'cross-spawn', 'fs', 'ignore', 'openai', 'os', 'partial-json', 'path', 'typebox', 'url', 'yaml',
+    ]);
+    expect([...walked.builtins].sort()).toEqual([
+      'node:child_process', 'node:fs', 'node:os', 'node:path', 'node:url',
+    ]);
 
-    // The coding-agent half of the closure is still bound by the stricter rule:
-    // no I/O builtin and no environment read, in any file the entry reaches.
+    // What this test proves and what it does NOT.
+    //
+    // It proves the REACHABLE set, exactly: a fork bump that adds an edge fails
+    // here. It no longer proves that the coding-agent half of the closure names
+    // no I/O builtin at all — on 0.86 the prompt builder reaches `config.js`
+    // (which reads `process.env`), `paths.js` (`node:fs`/`node:os`) and
+    // `child-process.js` (`node:child_process`), so the old blanket rule would
+    // now be a false statement rather than a check.
+    //
+    // CALL-TIME purity is proven by the runtime traps in the sibling test
+    // above, which are unchanged and still see zero hits for this exact input.
+    // IMPORT-TIME effects are guarded elsewhere: by the fork's own entry-graph
+    // forbid list, and at this SDK by the sealed-host resolution tripwire
+    // (`pi-s2-bundle-resolution.test.ts`). The files below are the exact set the
+    // entry reaches, so a new one is a reviewable fact here too.
     const codingAgentFiles = [...walked.files].filter((file) => file.startsWith(path.join(nativeRoot, 'dist')));
     expect(codingAgentFiles.map((file) => path.basename(file)).sort()).toEqual([
+      'child-process.js',
+      'config.js',
+      'frontmatter.js',
       'input-preparation.js',
+      'paths.js',
       'prepared-session-input.js',
-      'system-prompt-renderer.js',
+      'skills.js',
+      'source-info.js',
+      'system-prompt.js',
+      'text.js',
     ]);
+    // The two files that OWN the compile still carry the stricter rule: the
+    // admission boundary and the envelope builder name no I/O builtin and read
+    // no environment of their own.
     const forbidden = [
       'node:fs',
       'node:net',
@@ -395,7 +467,10 @@ describe('B-P2 native composition: pure compile', () => {
       'node:tls',
       'process.env',
     ];
-    for (const file of codingAgentFiles) {
+    const compileOwners = codingAgentFiles.filter((file) =>
+      ['input-preparation.js', 'prepared-session-input.js'].includes(path.basename(file)));
+    expect(compileOwners).toHaveLength(2);
+    for (const file of compileOwners) {
       const source = readFileSync(file, 'utf8');
       for (const specifier of forbidden) {
         expect({ file: path.basename(file), specifier, present: source.includes(specifier) }).toEqual({
@@ -482,7 +557,7 @@ describe('B-P2 native composition: the envelope contract is verified, not assume
   function envelope(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     return {
       format: 'pi.session.prepared-input',
-      version: 2,
+      version: 3,
       snapshot: {},
       context: {},
       providerRequest: {
@@ -491,7 +566,7 @@ describe('B-P2 native composition: the envelope contract is verified, not assume
         body: '{"model":"glm-4.6","messages":[],"max_tokens":4096}',
         counterProjection: COUNTER_PROJECTION,
         projection: {
-          version: 2,
+          version: 3,
           kind: 'content_complete',
           digest: createHash('sha256').update(COUNTER_PROJECTION, 'utf8').digest('hex'),
         },
@@ -518,7 +593,7 @@ describe('B-P2 native composition: the envelope contract is verified, not assume
     const verified = verifyCompiledPreparedInput(envelope() as never, SUPPORTED_IDENTITY);
 
     expect(verified.projection).toEqual({
-      version: 2,
+      version: 3,
       kind: 'content_complete',
       digest: createHash('sha256').update(COUNTER_PROJECTION, 'utf8').digest('hex'),
     });

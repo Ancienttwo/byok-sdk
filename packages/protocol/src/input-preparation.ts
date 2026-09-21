@@ -215,13 +215,26 @@ export const InputPreparationModelSchema = z
   .strict();
 export type InputPreparationModel = z.infer<typeof InputPreparationModelSchema>;
 
-/** Body-affecting options only. Transport options are deliberately not on this wire. */
+/**
+ * Body-affecting options only. Transport options are deliberately not on this wire.
+ *
+ * `toolChoice` admits `auto` and `none` and nothing else: the native prepared
+ * boundary compiles through the simple stream path, which cannot express
+ * `required`, so a Host stating it would be stating an option no compiler on
+ * the other side can produce. It is refused HERE, by the schema, rather than
+ * surviving to a native refusal nobody can read.
+ *
+ * `reasoningEffort` names a requested thinking level. The native compiler maps
+ * it through the launched model's own level map and clamps it exactly as the
+ * live session does, so the effort token that reaches the body is the model's,
+ * never this value verbatim.
+ */
 export const InputPreparationOptionsSchema = z
   .object({
     cacheRetention: z.enum(['none', 'short', 'long']),
     maxTokens: z.number().int().positive(),
     temperature: z.number().finite().optional(),
-    toolChoice: z.enum(['auto', 'none', 'required']).optional(),
+    toolChoice: z.enum(['auto', 'none']).optional(),
     reasoningEffort: z.enum(['minimal', 'low', 'medium', 'high', 'xhigh', 'max']).optional(),
   })
   .strict();
@@ -243,16 +256,47 @@ export const InputPreparationContextFileSchema = z
   .object({ path: CONTEXT_PATH, content: z.string() })
   .strict();
 
+/**
+ * The three documentation locations the native prompt renderer names.
+ *
+ * The wire field names are this SDK's own and do not track upstream Pi's
+ * (`readme`/`docs`/`examples`): the contract a Host integrates against is this
+ * one, and renaming a frozen wire field because a runtime renamed a parameter
+ * would be a breaking change to every Host for no gain. The device adapter maps
+ * these onto whatever the pinned runtime calls them.
+ */
 export const InputPreparationDocsPathsSchema = z
   .object({ readmePath: CONTEXT_PATH, docsPath: CONTEXT_PATH, examplesPath: CONTEXT_PATH })
   .strict();
+
+/**
+ * One skill the system prompt renders, stated as the closed set of fields the
+ * renderer actually reads.
+ *
+ * Not a preformatted string: the native renderer owns the skill block's
+ * markup, and a Host-rendered one would be a second renderer that could drift
+ * from what a live session emits. Loader bookkeeping the prompt never reads
+ * (`baseDir`, source info) is deliberately absent — the Host cannot know it and
+ * the device must never invent it.
+ */
+export const InputPreparationSkillSchema = z
+  .object({
+    name: OPAQUE_ID,
+    description: z.string().max(4096),
+    filePath: CONTEXT_PATH,
+    disableModelInvocation: z.boolean(),
+  })
+  .strict();
+export type InputPreparationSkill = z.infer<typeof InputPreparationSkillSchema>;
 
 /**
  * Explicit, already-authorized inputs for the native system prompt renderer.
  *
  * `toolSnippets` is PROMPT TEXT the Host authored — it is not the
  * model-visible tool schemas, which the device observes locally and the Host
- * never states (see this module's rule 1).
+ * never states (see this module's rule 1). `toolGuidelines` is the same kind of
+ * value one level down: the guideline bullets a tool contributes, keyed by tool
+ * name and bounded exactly like `toolSnippets` and `promptGuidelines`.
  *
  * `selectedTools` is deliberately absent for the same reason one level up: the
  * native contract requires that list to equal the model-visible manifest
@@ -265,9 +309,10 @@ export const InputPreparationPromptSnapshotSchema = z
     appendSystemPrompt: z.string().optional(),
     cwd: CONTEXT_PATH,
     toolSnippets: z.record(z.string(), z.string()),
+    toolGuidelines: z.record(z.string(), z.array(z.string()).max(512)),
     promptGuidelines: z.array(z.string()).max(512),
     contextFiles: z.array(InputPreparationContextFileSchema).max(512),
-    formattedSkills: z.string(),
+    skills: z.array(InputPreparationSkillSchema).max(512),
     docsPaths: InputPreparationDocsPathsSchema,
   })
   .strict();
@@ -380,6 +425,15 @@ export const InputPreparationReadinessReasonSchema = z.enum([
   /** The named policy was ruled for a different runtime, endpoint or model. */
   'accounting_policy_inapplicable',
   'executor_identity_unproven',
+  /**
+   * The record was prepared against a runtime contract this build no longer
+   * speaks: its binding declares a prepared-compiler version other than the one
+   * this build prepares and consumes against. The artifact is not re-read
+   * through the current contract and is not translated — a projection frozen
+   * under another compiler's classification table is evidence about a request
+   * this build cannot re-derive.
+   */
+  'runtime_contract_superseded',
 ]);
 export type InputPreparationReadinessReason = z.infer<typeof InputPreparationReadinessReasonSchema>;
 
@@ -536,7 +590,7 @@ export const InputPreparationResidualKeySchema = z
  */
 export const InputPreparationProjectionSchema = z
   .object({
-    version: z.literal(2),
+    version: z.literal(3),
     kind: z.enum(['content_complete', 'unknown']),
     digest: z.string().regex(/^[0-9a-f]{64}$/u, 'a projection digest is lowercase sha-256 hex'),
   })

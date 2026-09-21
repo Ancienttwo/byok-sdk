@@ -4815,11 +4815,18 @@ import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INP
  * which residual keys its request carried, and inventing either is precisely
  * the shadow accounting this contract forbids.
  *
+ * 5 is the first version written against the 0.86 runtime contract: the
+ * retained snapshot carries `prompt.skills` and `prompt.toolGuidelines` in
+ * place of `prompt.formattedSkills`, and the artifact's projection declares
+ * contract v3. A version-4 record cannot be read forward either — its prompt
+ * was rendered by a renderer this build no longer has, so the request it
+ * describes cannot be re-derived, and translating it would be inventing bytes.
+ *
  * A record at any other version is refused — see
  * {@link InputPreparationUnsupportedRecordVersionError}. There is no
  * compatibility read.
  */
-export declare const INPUT_PREPARATION_RECORD_VERSION = 4;
+export declare const INPUT_PREPARATION_RECORD_VERSION = 5;
 /** The durable idempotency key. Never a task id, and never caller-asserted: `scopeId` comes from the trusted authority grant. */
 export interface InputPreparationRecordKey {
     readonly scopeId: string;
@@ -9681,7 +9688,7 @@ export type { OperationalHealthSnapshot, OperationalHealthState } from './daemon
  * drift apart.
  */
 export { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_ERROR_CODES, INPUT_PREPARATION_RECEIPT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INPUT_PREPARATION_REQUEST_FORMAT, INPUT_PREPARATION_RETIRED_PROMPT_KEYS, INPUT_PREPARATION_RETIRED_REQUEST_KEYS, INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS, INPUT_PREPARATION_VERSION, InputPreparationPolicyError, validateInputPreparationLimits, } from './input-preparation';
-export type { InputPreparationArtifactSummaryV1, InputPreparationAuthorityGrantV1, InputPreparationCompiledPromptSnapshotV1, InputPreparationCompiledSnapshotV1, InputPreparationAuthorityOutcomeV1, InputPreparationAuthorityResolver, InputPreparationSourceAuthorityRequestV1, InputPreparationSourceAuthorityOutcomeV1, InputPreparationBindingV1, InputPreparationCancelParamsV1, InputPreparationContextFileV1, InputPreparationCounterAdapter, InputPreparationCounterAuthorityV1, InputPreparationCounterEvidenceV1, InputPreparationCounterRequestV1, InputPreparationCounterResultV1, InputPreparationCounterTargetV1, InputPreparationCoverageProofV1, InputPreparationDenialReasonV1, InputPreparationDocsPathsV1, InputPreparationErrorCodeV1, InputPreparationHostCanonicalAssistantMessageV1, InputPreparationLimitsPolicyV1, InputPreparationLookupParamsV1, InputPreparationModelCostV1, InputPreparationMessageV1, InputPreparationModelV1, InputPreparationOptionsV1, InputPreparationPinV1, InputPreparationPromptSnapshotV1, InputPreparationReadinessReasonV1, InputPreparationReceiptV1, InputPreparationRequestV1, InputPreparationRuntimeIdentityV1, InputPreparationScopeClaimV1, InputPreparationSelectionV1, InputPreparationSnapshotV1, InputPreparationSourceV1, InputPreparationStateV1, InputPreparationToolV1, InputPreparationUserMessageV1, } from './input-preparation';
+export type { InputPreparationArtifactSummaryV1, InputPreparationAuthorityGrantV1, InputPreparationCompiledPromptSnapshotV1, InputPreparationCompiledSnapshotV1, InputPreparationAuthorityOutcomeV1, InputPreparationAuthorityResolver, InputPreparationSourceAuthorityRequestV1, InputPreparationSourceAuthorityOutcomeV1, InputPreparationBindingV1, InputPreparationCancelParamsV1, InputPreparationContextFileV1, InputPreparationCounterAdapter, InputPreparationCounterAuthorityV1, InputPreparationCounterEvidenceV1, InputPreparationCounterRequestV1, InputPreparationCounterResultV1, InputPreparationCounterTargetV1, InputPreparationCoverageProofV1, InputPreparationDenialReasonV1, InputPreparationDocsPathsV1, InputPreparationErrorCodeV1, InputPreparationHostCanonicalAssistantMessageV1, InputPreparationLimitsPolicyV1, InputPreparationLookupParamsV1, InputPreparationModelCostV1, InputPreparationMessageV1, InputPreparationModelV1, InputPreparationOptionsV1, InputPreparationPinV1, InputPreparationPromptSnapshotV1, InputPreparationReadinessReasonV1, InputPreparationReceiptV1, InputPreparationRequestV1, InputPreparationRuntimeIdentityV1, InputPreparationScopeClaimV1, InputPreparationSelectionV1, InputPreparationSkillV1, InputPreparationSnapshotV1, InputPreparationSourceV1, InputPreparationStateV1, InputPreparationToolV1, InputPreparationUserMessageV1, } from './input-preparation';
 export { INPUT_PREPARATION_CANCEL_METHOD, INPUT_PREPARATION_IDENTIFIER_MAX_BYTES, INPUT_PREPARATION_LOOKUP_METHOD, INPUT_PREPARATION_PREPARE_METHOD, parseInputPreparationCancelParams, parseInputPreparationLookupParams, parseInputPreparationRequestParams, } from './daemon/control-protocol';
 export type { InputPreparationResult } from './daemon/control-protocol';
 export { journalHash, JournalUnavailableError, JournalCorruptError, JournalRecordTooLargeError, JournalUnknownTaskError, JournalClosedError, } from './daemon/journal/journal';
@@ -9737,7 +9744,7 @@ export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, Expor
  * This module is the ONE authority for the wire/receipt shapes the daemon's
  * `input_preparation.*` control methods speak. It deliberately imports nothing
  * from the native coding-agent package: the native envelope
- * (`PreparedSessionInputV2`) is an implementation fact owned by
+ * (`PreparedSessionInputV3`) is an implementation fact owned by
  * `adapters/pi/input-preparation.ts`, and the only native-derived values that
  * ever cross this boundary are opaque digests, byte counts and the native
  * compiler's own structural projection contract, copied verbatim. A host
@@ -9756,7 +9763,7 @@ export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, Expor
  *   that was always reserved rather than a schema break; nothing in this
  *   package ever writes it.
  * - It states nothing of its own about token semantics. What P(D) covers is the
- *   native compiler's structural projection contract v2 — a {@link
+ *   native compiler's structural projection contract v3 — a {@link
  *   InputPreparationProjectionV1} and a classified {@link
  *   InputPreparationResidualKeyV1} list — copied verbatim off the envelope.
  *   Whether the residual keys are RULED is a Host accounting fact carried as
@@ -9786,22 +9793,27 @@ export declare const INPUT_PREPARATION_ARTIFACT_FORMAT = "byok.input-preparation
  * Version 2 REMOVED caller-supplied `toolExecutors` and `snapshot.tools` from
  * the request and added `requiredToolsets` + `permissionMode`.
  *
- * Bumped to 3 by the projection-contract slice, which REMOVED the artifact
- * summary's `coverage` string — a single opaque label that said nothing
- * checkable about what P(D) covers — and replaced it with the native
- * compiler's structural projection contract v2: {@link
+ * Version 3 REMOVED the artifact summary's `coverage` string — a single opaque
+ * label that said nothing checkable about what P(D) covers — and replaced it
+ * with the native compiler's structural projection contract: {@link
  * InputPreparationArtifactSummaryV1.projection} and {@link
  * InputPreparationArtifactSummaryV1.residual}. The request and binding gained
  * {@link InputPreparationAccountingPolicyRefV1}, and counter evidence gained
  * {@link InputPreparationCounterProviderEvidenceV1}.
  *
+ * Bumped to 4 by the 0.86 runtime rebase, which is a BREAKING wire change:
+ * `prompt.formattedSkills` (a caller-rendered string) became
+ * `prompt.skills` (the closed {@link InputPreparationSkillV1} set the native
+ * renderer reads), `prompt.toolGuidelines` was added, `options.toolChoice`
+ * narrowed to `auto | none`, and the projection contract moved to v3.
+ *
  * The request, the receipt, the durable record and the retained artifact all
  * carry this number, so a record written under an older version is refused on
  * replay rather than read through a compatibility branch: its artifact was
  * frozen under a claim this version cannot re-derive, and there is no honest
- * value to translate an opaque coverage label into.
+ * value to translate a prompt rendered by another renderer into.
  */
-export declare const INPUT_PREPARATION_VERSION = 3;
+export declare const INPUT_PREPARATION_VERSION = 4;
 /**
  * Key-sorted JSON, so two structurally equal values always produce the same
  * bytes and therefore the same digest. Field ORDER must never be able to turn
@@ -9902,8 +9914,17 @@ export interface InputPreparationOptionsV1 {
     readonly cacheRetention: 'none' | 'short' | 'long';
     readonly maxTokens: number;
     readonly temperature?: number;
-    /** Only the three plain string forms; an object tool choice is unsupported. */
-    readonly toolChoice?: 'auto' | 'none' | 'required';
+    /**
+     * Only the two plain string forms the native prepared boundary compiles. An
+     * object tool choice is unsupported, and `required` is refused: the boundary
+     * compiles through the simple stream path, which cannot express it.
+     */
+    readonly toolChoice?: 'auto' | 'none';
+    /**
+     * The requested thinking level. The native compiler maps it through the
+     * launched model's own level map and clamps it exactly as the live session
+     * does, so this value is never what reaches the body verbatim.
+     */
     readonly reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 }
 export interface InputPreparationSelectionV1 {
@@ -9946,7 +9967,7 @@ export interface InputPreparationResidualKeyV1 {
  * it would be a shadow parser for the same semantic fact.
  */
 export interface InputPreparationProjectionV1 {
-    readonly version: 2;
+    readonly version: 3;
     readonly kind: 'content_complete' | 'unknown';
     /** SHA-256 hex over the exact counted-projection bytes. */
     readonly digest: string;
@@ -9984,10 +10005,32 @@ export interface InputPreparationContextFileV1 {
     readonly path: string;
     readonly content: string;
 }
+/**
+ * The three documentation locations the native prompt renderer names.
+ *
+ * These field names are this surface's own contract and deliberately do not
+ * track the native runtime's parameter names; `adapters/pi/input-preparation.ts`
+ * maps them onto whatever the pinned runtime calls them.
+ */
 export interface InputPreparationDocsPathsV1 {
     readonly readmePath: string;
     readonly docsPath: string;
     readonly examplesPath: string;
+}
+/**
+ * One skill the native system prompt renders.
+ *
+ * Exactly the fields the renderer reads, and nothing else. A caller-supplied
+ * PREFORMATTED skills block would be a second renderer of the same prompt
+ * region, free to drift from what a live session emits; loader bookkeeping the
+ * renderer never reads is absent because the caller cannot know it and this
+ * SDK must not invent it.
+ */
+export interface InputPreparationSkillV1 {
+    readonly name: string;
+    readonly description: string;
+    readonly filePath: string;
+    readonly disableModelInvocation: boolean;
 }
 /**
  * Explicit, already-authorized inputs for the native system prompt renderer.
@@ -9998,20 +10041,22 @@ export interface InputPreparationDocsPathsV1 {
  * manifest through the prompt. The daemon fills it from the assembled surface
  * (see {@link InputPreparationCompiledPromptSnapshotV1}).
  *
- * `toolSnippets` stays caller-authored because it is prompt TEXT, but its keys
- * must name tools the assembled manifest actually contains; the native
- * compiler refuses a snippet for a tool that is not in the manifest, and
- * nothing here papers over that.
+ * `toolSnippets` and `toolGuidelines` stay caller-authored because both are
+ * prompt TEXT, but their keys must name tools the assembled manifest actually
+ * contains; the native compiler refuses either for a tool that is not in the
+ * manifest, and nothing here papers over that.
  */
 export interface InputPreparationPromptSnapshotV1 {
     readonly customPrompt?: string;
     readonly appendSystemPrompt?: string;
     readonly cwd: string;
     readonly toolSnippets: Readonly<Record<string, string>>;
+    /** Guideline bullets each tool contributes, keyed by tool name. */
+    readonly toolGuidelines: Readonly<Record<string, readonly string[]>>;
     readonly promptGuidelines: readonly string[];
     readonly contextFiles: readonly InputPreparationContextFileV1[];
-    /** Preformatted by the caller; empty means no skills. */
-    readonly formattedSkills: string;
+    /** The skills the prompt renders. Empty means no skills. */
+    readonly skills: readonly InputPreparationSkillV1[];
     readonly docsPaths: InputPreparationDocsPathsV1;
 }
 /** The caller's prompt snapshot plus the tool-name list the daemon derived. */
@@ -10068,11 +10113,26 @@ export type InputPreparationMessageV1 = InputPreparationUserMessageV1 | InputPre
  * One complete model-visible tool schema. `parameters` is the full JSON schema
  * the model sees; a partial or elided schema is not accepted, because the whole
  * point of this surface is counting what the provider will actually be sent.
+ *
+ * This is the WHOLE model-visible declaration, not a summary of one: the native
+ * compiler's own tool projection is what crosses into the compile, so every
+ * field here reaches the request body. `constrainedSampling` is part of that
+ * declaration on the pinned runtime — it becomes `tools[].strict` on the wire —
+ * so it is carried rather than stripped. It is a DEVICE observation like the
+ * rest of this shape: it comes off the real tool definition the daemon
+ * assembled, never off a Host statement, and it is absent when the definition
+ * declares none. The two refused native forms (`strict: "require"` and
+ * `type: "grammar"`) are not in the type: the prepared boundary refuses both,
+ * so a value this SDK cannot compile cannot be constructed here either.
  */
 export interface InputPreparationToolV1 {
     readonly name: string;
     readonly description: string;
     readonly parameters: Readonly<Record<string, unknown>>;
+    readonly constrainedSampling?: false | {
+        readonly type: 'json_schema';
+        readonly strict: 'prefer';
+    };
 }
 /**
  * The authorized input snapshot a CALLER states: prompt text and user history,
@@ -10577,8 +10637,14 @@ export type InputPreparationStateV1 = 'reserved' | 'counting' | 'counted' | 'can
  * - `counter_missing` — no counter evidence is persisted on the record. Stated
  *   on its own, because it used to be implied by an always-present coverage
  *   reason and is a different fact from either.
+ * - `runtime_contract_superseded` — the record's binding declares a
+ *   prepared-compiler version other than the one this build prepares and
+ *   consumes against. The artifact is not re-read through the current contract
+ *   and is not translated: a projection frozen under another compiler's
+ *   classification table is evidence about a request this build cannot
+ *   re-derive.
  */
-export type InputPreparationReadinessReasonV1 = 'not_counted' | 'counter_interrupted' | 'cancelled' | 'failed' | 'artifact_expired' | 'counter_authority_not_production' | 'counter_coverage_incomplete' | 'counter_missing' | 'projection_unknown' | 'residual_not_ruled' | 'accounting_policy_missing' | 'accounting_policy_inapplicable' | 'executor_identity_unproven';
+export type InputPreparationReadinessReasonV1 = 'not_counted' | 'counter_interrupted' | 'cancelled' | 'failed' | 'artifact_expired' | 'counter_authority_not_production' | 'counter_coverage_incomplete' | 'counter_missing' | 'projection_unknown' | 'residual_not_ruled' | 'accounting_policy_missing' | 'accounting_policy_inapplicable' | 'executor_identity_unproven' | 'runtime_contract_superseded';
 /**
  * The scoped reference plus readiness evidence one preparation answers with.
  *

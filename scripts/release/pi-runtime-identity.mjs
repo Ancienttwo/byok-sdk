@@ -17,7 +17,7 @@ export const PI_DEPENDENCY_SPECIFIER = '@earendil-works/pi-coding-agent';
  * `byokFork` manifest block; an installed runtime that does not carry exactly
  * this base is not the artifact this repo's gates were written against.
  */
-export const PI_FORK_UPSTREAM_COMMIT = 'd981de1229ef899957bbe968bc8dcda02a21f477';
+export const PI_FORK_UPSTREAM_COMMIT = '13cbf77df2396303013a41646bcfa77b4271ae56';
 
 /**
  * Entry the fork must ship for the prepared-session-input seam this pin exists

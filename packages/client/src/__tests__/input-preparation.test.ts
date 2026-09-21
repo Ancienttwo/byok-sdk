@@ -28,6 +28,7 @@ import { recordingToolSurface, type RecordingToolSurface } from './fixtures/prep
 import {
   InputPreparationCompileError,
   InputPreparationRuntimeIdentityError,
+  SUPPORTED_PREPARED_COMPILER_VERSION,
   verifyCompiledPreparedInput,
   type CompilePreparedInputRequest,
   type CompiledPreparedInput,
@@ -101,9 +102,10 @@ function request(overrides: Partial<InputPreparationRequestV1> = {}): InputPrepa
       prompt: {
         cwd: '/workspace/project',
         toolSnippets: {},
+        toolGuidelines: {},
         promptGuidelines: [],
         contextFiles: [],
-        formattedSkills: '',
+        skills: [],
         docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
       },
       messages: [{ role: 'user', content: 'hello', timestamp: 1_700_000_000_000 }],
@@ -156,6 +158,7 @@ function stubCompiler(
     body?: () => string;
     projectionKind?: 'content_complete' | 'unknown';
     residual?: readonly { readonly key: string; readonly valueClass: 'bounded_integer' }[];
+    compilerVersion?: number;
   } = {},
 ): StubCompiler {
   const calls: CompilePreparedInputRequest[] = [];
@@ -169,7 +172,10 @@ function stubCompiler(
       forkBuild: 1,
       envelopeFormat: 'pi.session.prepared-input',
       requestFormat: 'pi.openai-completions.prepared',
-      compilerVersion: 2,
+      // The contract this build prepares against, unless a test states another
+      // one on purpose — a fixture that pinned a literal would quietly make
+      // every receipt in this file carry `runtime_contract_superseded`.
+      compilerVersion: options.compilerVersion ?? SUPPORTED_PREPARED_COMPILER_VERSION,
     },
     async compile(compileRequest: CompilePreparedInputRequest): Promise<CompiledPreparedInput> {
       // Deep-copy at capture time so a later mutation of the service's own
@@ -190,12 +196,12 @@ function stubCompiler(
         // so a fixture counter's evidence can bind to the same projection the
         // service compares it against.
         projection: {
-          version: 2,
+          version: 3,
           kind: options.projectionKind ?? 'content_complete',
           digest: sha256Hex(counterProjection),
         },
         residual: options.residual ?? [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
-        envelope: { format: 'pi.session.prepared-input', version: 2 } as never,
+        envelope: { format: 'pi.session.prepared-input', version: 3 } as never,
       };
     },
   };
@@ -218,7 +224,7 @@ function tamperedProjectionDigestCompiler(): InputPreparationCompiler {
       return verifyCompiledPreparedInput(
         {
           format: runtime.envelopeFormat,
-          version: 2,
+          version: 3,
           snapshot: {},
           context: {},
           providerRequest: {
@@ -227,7 +233,7 @@ function tamperedProjectionDigestCompiler(): InputPreparationCompiler {
             body: '{"model":"glm-4.6","messages":[],"max_tokens":4096}',
             counterProjection,
             // The digest of DIFFERENT bytes than the ones it travels with.
-            projection: { version: 2, kind: 'content_complete', digest: sha256Hex(`${counterProjection} `) },
+            projection: { version: 3, kind: 'content_complete', digest: sha256Hex(`${counterProjection} `) },
             residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
             digest: 'a'.repeat(64),
           },
@@ -445,7 +451,7 @@ describe('B-P2 service: readiness never reaches ready offline', () => {
     expect(receipt.readinessReasons).toContain('counter_authority_not_production');
     expect(receipt.counter).toMatchObject({ authority: 'test_fixture', kind: 'count', value: 123 });
     expect(receipt.artifact?.projection).toEqual({
-      version: 2,
+      version: 3,
       kind: 'content_complete',
       digest: sha256Hex(JSON.stringify({ model: 'glm-4.6' })),
     });
@@ -472,6 +478,38 @@ describe('B-P2 service: readiness never reaches ready offline', () => {
     // The fixture counter authority is what is left, which is the honest state
     // of an offline suite and is exactly what must never be clearable here.
     expect(receipt.readinessReasons).toContain('counter_authority_not_production');
+  });
+
+  it('carries runtime_contract_superseded for a record prepared under another compiler contract', async () => {
+    // The ONE path that produces it. `binding.runtime.compilerVersion` is read
+    // off the verified install at preparation time and frozen onto the record,
+    // and readiness compares it against the single contract this build
+    // prepares and consumes against. A record that disagrees is not re-read
+    // through the current contract and is not translated: its projection was
+    // classified by a table this build does not have.
+    const compiler = stubCompiler({ compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION - 1 });
+    const service = await makeService({ compiler });
+    const receipt = await service.prepare(
+      request({ accountingPolicyRef: accountingPolicyRef({ ruledRuntime: runtimeIdentityOf(compiler) }) }),
+    );
+
+    expect(receipt.readinessReasons).toContain('runtime_contract_superseded');
+    expect(receipt.ready).toBe(false);
+    // It is the CONTRACT that is superseded, not the evidence: nothing about
+    // the artifact, the ruling or the count is re-judged because of it.
+    expect(receipt.readinessReasons).not.toContain('projection_unknown');
+    expect(receipt.readinessReasons).not.toContain('residual_not_ruled');
+  });
+
+  it('carries no runtime_contract_superseded for a record prepared under this build\'s contract', async () => {
+    const compiler = stubCompiler();
+    const service = await makeService({ compiler });
+    const receipt = await service.prepare(
+      request({ accountingPolicyRef: accountingPolicyRef({ ruledRuntime: runtimeIdentityOf(compiler) }) }),
+    );
+
+    expect(receipt.binding.runtime.compilerVersion).toBe(SUPPORTED_PREPARED_COMPILER_VERSION);
+    expect(receipt.readinessReasons).not.toContain('runtime_contract_superseded');
   });
 
   it('carries projection_unknown when the native compiler claims nothing about P(D)', async () => {
@@ -875,7 +913,7 @@ function frameSizedCompiler(targetFrameBytes: number): InputPreparationCompiler 
         model: compileRequest.model,
         binding: compileRequest.binding,
       };
-      const skeleton = { format: 'pi.session.prepared-input', version: 2, pad: '' };
+      const skeleton = { format: 'pi.session.prepared-input', version: 3, pad: '' };
       const overhead = rpcFrameByteLength(
         buildPreparedPromptCommand(skeleton, expected, PREPARED_PROMPT_COMMAND_ID),
       );

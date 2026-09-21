@@ -13,6 +13,7 @@ import {
   InputPreparationStore,
   type InputPreparationArtifact,
 } from '../../daemon/input-preparation-store';
+import { SUPPORTED_PREPARED_COMPILER_VERSION } from '../../adapters/pi/input-preparation';
 import { fingerprintPreparedToolSurface } from '../../daemon/prepared-tool-surface';
 import { mcpLaunchAttestation } from '../../daemon/trusted-launch-cwd';
 import {
@@ -147,7 +148,7 @@ const RUNTIME: InputPreparationRuntimeIdentityV1 = {
   envelopeFormat: 'pi.session.prepared-input',
   requestFormat: 'pi.openai-completions.prepared',
   forkBuild: 2,
-  compilerVersion: 2,
+  compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,
 };
 
 const MODEL: InputPreparationModelV1 = {
@@ -289,7 +290,7 @@ const runner = new TaskRunner({
 });
 
 /** The projection, Host ruling and count a READY record on this device carries. */
-const PROJECTION = { version: 2, kind: 'content_complete', digest: 'a'.repeat(64) } as const;
+const PROJECTION = { version: 3, kind: 'content_complete', digest: 'a'.repeat(64) } as const;
 const RESIDUAL = [{ key: 'max_tokens', valueClass: 'bounded_integer' }] as const;
 
 const ACCOUNTING_POLICY_REF: InputPreparationAccountingPolicyRefV1 = {
@@ -357,7 +358,7 @@ function artifact(recordId: string): InputPreparationArtifact {
     counterProjection: '{"model":"glm-4.6"}',
     projection: PROJECTION,
     residual: [...RESIDUAL],
-    envelope: { format: 'pi.session.prepared-input', version: 2 },
+    envelope: { format: 'pi.session.prepared-input', version: 3 },
   };
 }
 

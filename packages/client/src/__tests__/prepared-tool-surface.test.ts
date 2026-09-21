@@ -143,9 +143,10 @@ const LIMITS: InputPreparationLimitsPolicyV1 = validateInputPreparationLimits({
 const PROMPT = {
   cwd: '/workspace/project',
   toolSnippets: {},
+  toolGuidelines: {},
   promptGuidelines: [],
   contextFiles: [],
-  formattedSkills: '',
+  skills: [],
   docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
 } as const;
 
@@ -196,12 +197,12 @@ function stubCompiler(): StubCompiler {
         envelopeDigest: 'b'.repeat(64),
         toolManifestDigest: 'c'.repeat(64),
         projection: {
-          version: 2,
+          version: 3,
           kind: 'content_complete',
           digest: createHash('sha256').update('{}', 'utf8').digest('hex'),
         },
         residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
-        envelope: { format: 'pi.session.prepared-input', version: 2 } as never,
+        envelope: { format: 'pi.session.prepared-input', version: 3 } as never,
       };
     },
   };

@@ -102,9 +102,9 @@ function artifact(recordId: string, overrides: Partial<InputPreparationArtifact>
     toolManifestDigest: 'manifest-digest-1',
     requestBody: REQUEST_BODY,
     counterProjection: '{"model":"glm-4.6"}',
-    projection: { version: 2, kind: 'content_complete', digest: 'a'.repeat(64) },
+    projection: { version: 3, kind: 'content_complete', digest: 'a'.repeat(64) },
     residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
-    envelope: { format: 'pi.session.prepared-input', version: 2 },
+    envelope: { format: 'pi.session.prepared-input', version: 3 },
     ...overrides,
   };
 }
@@ -115,7 +115,7 @@ const SUMMARY: InputPreparationArtifactSummaryV1 = {
   toolManifestDigest: 'manifest-digest-1',
   requestBytes: Buffer.byteLength(REQUEST_BODY, 'utf8'),
   projectionBytes: 19,
-  projection: { version: 2, kind: 'content_complete', digest: 'a'.repeat(64) },
+  projection: { version: 3, kind: 'content_complete', digest: 'a'.repeat(64) },
   residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
   observationDigest: 'observation-digest-1',
   toolBindingDigest: 'tool-binding-digest-1',
@@ -225,7 +225,7 @@ describe('B-P2 store: restart roundtrip', () => {
     const readBack = await restarted.readArtifact(record!);
     expect(readBack?.requestBody).toBe(REQUEST_BODY);
     expect(Buffer.from(readBack!.requestBody, 'utf8').equals(Buffer.from(REQUEST_BODY, 'utf8'))).toBe(true);
-    expect(readBack?.projection).toEqual({ version: 2, kind: 'content_complete', digest: 'a'.repeat(64) });
+    expect(readBack?.projection).toEqual({ version: 3, kind: 'content_complete', digest: 'a'.repeat(64) });
     expect(readBack?.residual).toEqual([{ key: 'max_tokens', valueClass: 'bounded_integer' }]);
   });
 
@@ -309,9 +309,9 @@ describe('B-P2 store: restart roundtrip', () => {
     const created = await store.reserve(reserve());
 
     expect(created.record.version).toBe(INPUT_PREPARATION_RECORD_VERSION);
-    expect(INPUT_PREPARATION_RECORD_VERSION).toBe(4);
+    expect(INPUT_PREPARATION_RECORD_VERSION).toBe(5);
     // The wire version is a different agreement, moved by a different reason.
-    expect(INPUT_PREPARATION_VERSION).toBe(3);
+    expect(INPUT_PREPARATION_VERSION).toBe(4);
     expect((await openStore(storeDir)).get(created.record.recordId)?.version).toBe(INPUT_PREPARATION_RECORD_VERSION);
   });
 });

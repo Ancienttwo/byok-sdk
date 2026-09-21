@@ -160,9 +160,10 @@ function preparationRequest(overrides: Partial<InputPreparationRequestV1> = {}):
       prompt: {
         cwd: '/workspace/project',
         toolSnippets: {},
+        toolGuidelines: {},
         promptGuidelines: ['prefer small diffs'],
         contextFiles: [{ path: 'AGENTS.md', content: 'be precise' }],
-        formattedSkills: '',
+        skills: [],
         docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
       },
       messages: [{ role: 'user', content: 'summarise the repository', timestamp: 1_700_000_000_000 }],
@@ -297,7 +298,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     expect(receipt.state).toBe('counted');
     // The native compiler's own structural projection contract, carried
     // verbatim — not a label this SDK chose.
-    expect(receipt.artifact?.projection.version).toBe(2);
+    expect(receipt.artifact?.projection.version).toBe(3);
     expect(receipt.artifact?.projection.kind).toBe('content_complete');
     expect(receipt.artifact?.projection.digest).toMatch(/^[0-9a-f]{64}$/u);
     expect(receipt.artifact?.residual.length).toBeGreaterThan(0);

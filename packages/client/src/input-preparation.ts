@@ -6,7 +6,7 @@
  * This module is the ONE authority for the wire/receipt shapes the daemon's
  * `input_preparation.*` control methods speak. It deliberately imports nothing
  * from the native coding-agent package: the native envelope
- * (`PreparedSessionInputV2`) is an implementation fact owned by
+ * (`PreparedSessionInputV3`) is an implementation fact owned by
  * `adapters/pi/input-preparation.ts`, and the only native-derived values that
  * ever cross this boundary are opaque digests, byte counts and the native
  * compiler's own structural projection contract, copied verbatim. A host
@@ -25,7 +25,7 @@
  *   that was always reserved rather than a schema break; nothing in this
  *   package ever writes it.
  * - It states nothing of its own about token semantics. What P(D) covers is the
- *   native compiler's structural projection contract v2 — a {@link
+ *   native compiler's structural projection contract v3 — a {@link
  *   InputPreparationProjectionV1} and a classified {@link
  *   InputPreparationResidualKeyV1} list — copied verbatim off the envelope.
  *   Whether the residual keys are RULED is a Host accounting fact carried as
@@ -62,22 +62,27 @@ export const INPUT_PREPARATION_ARTIFACT_FORMAT = 'byok.input-preparation.artifac
  * Version 2 REMOVED caller-supplied `toolExecutors` and `snapshot.tools` from
  * the request and added `requiredToolsets` + `permissionMode`.
  *
- * Bumped to 3 by the projection-contract slice, which REMOVED the artifact
- * summary's `coverage` string — a single opaque label that said nothing
- * checkable about what P(D) covers — and replaced it with the native
- * compiler's structural projection contract v2: {@link
+ * Version 3 REMOVED the artifact summary's `coverage` string — a single opaque
+ * label that said nothing checkable about what P(D) covers — and replaced it
+ * with the native compiler's structural projection contract: {@link
  * InputPreparationArtifactSummaryV1.projection} and {@link
  * InputPreparationArtifactSummaryV1.residual}. The request and binding gained
  * {@link InputPreparationAccountingPolicyRefV1}, and counter evidence gained
  * {@link InputPreparationCounterProviderEvidenceV1}.
  *
+ * Bumped to 4 by the 0.86 runtime rebase, which is a BREAKING wire change:
+ * `prompt.formattedSkills` (a caller-rendered string) became
+ * `prompt.skills` (the closed {@link InputPreparationSkillV1} set the native
+ * renderer reads), `prompt.toolGuidelines` was added, `options.toolChoice`
+ * narrowed to `auto | none`, and the projection contract moved to v3.
+ *
  * The request, the receipt, the durable record and the retained artifact all
  * carry this number, so a record written under an older version is refused on
  * replay rather than read through a compatibility branch: its artifact was
  * frozen under a claim this version cannot re-derive, and there is no honest
- * value to translate an opaque coverage label into.
+ * value to translate a prompt rendered by another renderer into.
  */
-export const INPUT_PREPARATION_VERSION = 3;
+export const INPUT_PREPARATION_VERSION = 4;
 
 // ---------------------------------------------------------------------------
 // Canonical serialization
@@ -219,8 +224,17 @@ export interface InputPreparationOptionsV1 {
   readonly cacheRetention: 'none' | 'short' | 'long';
   readonly maxTokens: number;
   readonly temperature?: number;
-  /** Only the three plain string forms; an object tool choice is unsupported. */
-  readonly toolChoice?: 'auto' | 'none' | 'required';
+  /**
+   * Only the two plain string forms the native prepared boundary compiles. An
+   * object tool choice is unsupported, and `required` is refused: the boundary
+   * compiles through the simple stream path, which cannot express it.
+   */
+  readonly toolChoice?: 'auto' | 'none';
+  /**
+   * The requested thinking level. The native compiler maps it through the
+   * launched model's own level map and clamps it exactly as the live session
+   * does, so this value is never what reaches the body verbatim.
+   */
   readonly reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 }
 
@@ -279,7 +293,7 @@ export interface InputPreparationResidualKeyV1 {
  * it would be a shadow parser for the same semantic fact.
  */
 export interface InputPreparationProjectionV1 {
-  readonly version: 2;
+  readonly version: 3;
   readonly kind: 'content_complete' | 'unknown';
   /** SHA-256 hex over the exact counted-projection bytes. */
   readonly digest: string;
@@ -328,10 +342,33 @@ export interface InputPreparationContextFileV1 {
   readonly content: string;
 }
 
+/**
+ * The three documentation locations the native prompt renderer names.
+ *
+ * These field names are this surface's own contract and deliberately do not
+ * track the native runtime's parameter names; `adapters/pi/input-preparation.ts`
+ * maps them onto whatever the pinned runtime calls them.
+ */
 export interface InputPreparationDocsPathsV1 {
   readonly readmePath: string;
   readonly docsPath: string;
   readonly examplesPath: string;
+}
+
+/**
+ * One skill the native system prompt renders.
+ *
+ * Exactly the fields the renderer reads, and nothing else. A caller-supplied
+ * PREFORMATTED skills block would be a second renderer of the same prompt
+ * region, free to drift from what a live session emits; loader bookkeeping the
+ * renderer never reads is absent because the caller cannot know it and this
+ * SDK must not invent it.
+ */
+export interface InputPreparationSkillV1 {
+  readonly name: string;
+  readonly description: string;
+  readonly filePath: string;
+  readonly disableModelInvocation: boolean;
 }
 
 /**
@@ -343,20 +380,22 @@ export interface InputPreparationDocsPathsV1 {
  * manifest through the prompt. The daemon fills it from the assembled surface
  * (see {@link InputPreparationCompiledPromptSnapshotV1}).
  *
- * `toolSnippets` stays caller-authored because it is prompt TEXT, but its keys
- * must name tools the assembled manifest actually contains; the native
- * compiler refuses a snippet for a tool that is not in the manifest, and
- * nothing here papers over that.
+ * `toolSnippets` and `toolGuidelines` stay caller-authored because both are
+ * prompt TEXT, but their keys must name tools the assembled manifest actually
+ * contains; the native compiler refuses either for a tool that is not in the
+ * manifest, and nothing here papers over that.
  */
 export interface InputPreparationPromptSnapshotV1 {
   readonly customPrompt?: string;
   readonly appendSystemPrompt?: string;
   readonly cwd: string;
   readonly toolSnippets: Readonly<Record<string, string>>;
+  /** Guideline bullets each tool contributes, keyed by tool name. */
+  readonly toolGuidelines: Readonly<Record<string, readonly string[]>>;
   readonly promptGuidelines: readonly string[];
   readonly contextFiles: readonly InputPreparationContextFileV1[];
-  /** Preformatted by the caller; empty means no skills. */
-  readonly formattedSkills: string;
+  /** The skills the prompt renders. Empty means no skills. */
+  readonly skills: readonly InputPreparationSkillV1[];
   readonly docsPaths: InputPreparationDocsPathsV1;
 }
 
@@ -420,11 +459,23 @@ export type InputPreparationMessageV1 =
  * One complete model-visible tool schema. `parameters` is the full JSON schema
  * the model sees; a partial or elided schema is not accepted, because the whole
  * point of this surface is counting what the provider will actually be sent.
+ *
+ * This is the WHOLE model-visible declaration, not a summary of one: the native
+ * compiler's own tool projection is what crosses into the compile, so every
+ * field here reaches the request body. `constrainedSampling` is part of that
+ * declaration on the pinned runtime — it becomes `tools[].strict` on the wire —
+ * so it is carried rather than stripped. It is a DEVICE observation like the
+ * rest of this shape: it comes off the real tool definition the daemon
+ * assembled, never off a Host statement, and it is absent when the definition
+ * declares none. The two refused native forms (`strict: "require"` and
+ * `type: "grammar"`) are not in the type: the prepared boundary refuses both,
+ * so a value this SDK cannot compile cannot be constructed here either.
  */
 export interface InputPreparationToolV1 {
   readonly name: string;
   readonly description: string;
   readonly parameters: Readonly<Record<string, unknown>>;
+  readonly constrainedSampling?: false | { readonly type: 'json_schema'; readonly strict: 'prefer' };
 }
 
 /**
@@ -1051,6 +1102,12 @@ export type InputPreparationStateV1 = 'reserved' | 'counting' | 'counted' | 'can
  * - `counter_missing` — no counter evidence is persisted on the record. Stated
  *   on its own, because it used to be implied by an always-present coverage
  *   reason and is a different fact from either.
+ * - `runtime_contract_superseded` — the record's binding declares a
+ *   prepared-compiler version other than the one this build prepares and
+ *   consumes against. The artifact is not re-read through the current contract
+ *   and is not translated: a projection frozen under another compiler's
+ *   classification table is evidence about a request this build cannot
+ *   re-derive.
  */
 export type InputPreparationReadinessReasonV1 =
   | 'not_counted'
@@ -1065,7 +1122,8 @@ export type InputPreparationReadinessReasonV1 =
   | 'residual_not_ruled'
   | 'accounting_policy_missing'
   | 'accounting_policy_inapplicable'
-  | 'executor_identity_unproven';
+  | 'executor_identity_unproven'
+  | 'runtime_contract_superseded';
 
 /**
  * The scoped reference plus readiness evidence one preparation answers with.

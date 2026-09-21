@@ -4116,8 +4116,7 @@
                   "type": "string",
                   "enum": [
                     "auto",
-                    "none",
-                    "required"
+                    "none"
                   ]
                 },
                 "reasoningEffort": {
@@ -9091,8 +9090,7 @@
                         "type": "string",
                         "enum": [
                           "auto",
-                          "none",
-                          "required"
+                          "none"
                         ]
                       },
                       "reasoningEffort": {
@@ -16419,8 +16417,7 @@
                                 "type": "string",
                                 "enum": [
                                   "auto",
-                                  "none",
-                                  "required"
+                                  "none"
                                 ]
                               },
                               "reasoningEffort": {
@@ -22795,8 +22792,7 @@
                                 "type": "string",
                                 "enum": [
                                   "auto",
-                                  "none",
-                                  "required"
+                                  "none"
                                 ]
                               },
                               "reasoningEffort": {
@@ -25859,7 +25855,7 @@
                       "properties": {
                         "version": {
                           "type": "number",
-                          "const": 2
+                          "const": 3
                         },
                         "kind": {
                           "type": "string",
@@ -26133,7 +26129,8 @@
                       "residual_not_ruled",
                       "accounting_policy_missing",
                       "accounting_policy_inapplicable",
-                      "executor_identity_unproven"
+                      "executor_identity_unproven",
+                      "runtime_contract_superseded"
                     ]
                   }
                 },
@@ -26626,7 +26623,7 @@
                   "properties": {
                     "version": {
                       "type": "number",
-                      "const": 2
+                      "const": 3
                     },
                     "kind": {
                       "type": "string",
@@ -26900,7 +26897,8 @@
                   "residual_not_ruled",
                   "accounting_policy_missing",
                   "accounting_policy_inapplicable",
-                  "executor_identity_unproven"
+                  "executor_identity_unproven",
+                  "runtime_contract_superseded"
                 ]
               }
             },

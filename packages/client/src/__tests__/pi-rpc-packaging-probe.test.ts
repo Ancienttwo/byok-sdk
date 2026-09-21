@@ -76,7 +76,7 @@ describe('pinned Pi fork RPC packaging probe', () => {
     };
     expect(packageJson.name).toBe(expected.name);
     expect(packageJson.version).toBe(expected.version);
-    expect(packageJson.byokFork?.upstreamCommit).toBe('d981de1229ef899957bbe968bc8dcda02a21f477');
+    expect(packageJson.byokFork?.upstreamCommit).toBe('13cbf77df2396303013a41646bcfa77b4271ae56');
 
     const result = await runPinnedPiRpcProbe();
     expect(result.code).toBe(0);

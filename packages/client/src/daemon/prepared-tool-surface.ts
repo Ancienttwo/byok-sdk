@@ -573,6 +573,13 @@ export async function fingerprintPreparedToolSurface(
     // refuses a tool whose `inputSchema` is absent or is not a JSON object, so
     // an empty-schema default here would count a schema no model was shown.
     parameters: tool.inputSchema as Readonly<Record<string, unknown>>,
+    // `constrainedSampling` is carried from the real tool definition and from
+    // nothing else. The MCP tool contract declares none, so it stays ABSENT
+    // here, which is the honest statement that this server said nothing about
+    // constrained sampling — not `false`, which would be this device deciding
+    // it off on the server's behalf and changing the bytes the model is shown.
+    // `adapters/pi/prepared-tools.ts` projects the same observation the same
+    // way, so a launch cannot reach a different declaration than the count did.
   }));
 
   let toolExecutors: Readonly<Record<string, string>>;

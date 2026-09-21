@@ -12,11 +12,11 @@ import {
   getDocsPath,
   getExamplesPath,
   getReadmePath,
-  projectSystemPromptSnapshot,
 } from '@earendil-works/pi-coding-agent';
 import {
   INPUT_PREPARATION_ARTIFACT_FORMAT,
   INPUT_PREPARATION_VERSION,
+  type InputPreparationCompiledPromptSnapshotV1,
   type InputPreparationModelV1,
   type InputPreparationToolV1,
 } from '../input-preparation';
@@ -220,7 +220,7 @@ interface Prepared {
 async function prepareOnThisDevice(
   endpoint: ProviderEndpoint,
   mutate: (snapshot: {
-    prompt: ReturnType<typeof projectSystemPromptSnapshot>;
+    prompt: InputPreparationCompiledPromptSnapshotV1;
     tools: readonly InputPreparationToolV1[];
     model: InputPreparationModelV1;
   }) => void = () => {},
@@ -276,15 +276,19 @@ async function prepareOnThisDevice(
   // loader, and `baseToolsOverride` tools carry no prompt snippet or guideline
   // into the registry (`createToolDefinitionFromAgentTool` keeps neither).
   const snapshot = {
-    prompt: projectSystemPromptSnapshot({
+    // Stated in full. The 0.86 prepared compile boundary fills nothing in and
+    // defaults nothing, so there is no runtime-side projection helper left to
+    // call: every prompt input that decides the bytes is named right here.
+    prompt: {
       cwd: workspaceDir,
       selectedTools: surface.tools.map((tool) => tool.name),
       toolSnippets: {},
+      toolGuidelines: {},
       promptGuidelines: [],
       contextFiles: [],
-      formattedSkills: '',
+      skills: [],
       docsPaths: { readmePath: getReadmePath(), docsPath: getDocsPath(), examplesPath: getExamplesPath() },
-    }),
+    } satisfies InputPreparationCompiledPromptSnapshotV1,
     tools: surface.tools,
     model: model(endpoint.baseUrl),
   };

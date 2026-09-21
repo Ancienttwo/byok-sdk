@@ -19,6 +19,7 @@ import type {
   InputPreparationReceiptV1,
   InputPreparationRequestV1,
   InputPreparationScopeClaimV1,
+  InputPreparationSkillV1,
   InputPreparationSnapshotV1,
 } from '../input-preparation';
 import {
@@ -932,6 +933,12 @@ function stringMap(value: unknown): value is Record<string, string> {
   return Object.keys(value).every((key) => key !== '__proto__' && typeof value[key] === 'string');
 }
 
+/** A flat `Record<string, string[]>` with no prototype-polluting keys. */
+function stringArrayMap(value: unknown): value is Record<string, string[]> {
+  if (!plainRecord(value)) return false;
+  return Object.keys(value).every((key) => key !== '__proto__' && stringArray(value[key]));
+}
+
 function finiteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
@@ -1083,7 +1090,7 @@ function parseOptions(value: unknown): InputPreparationOptionsV1 | undefined {
   if (value.cacheRetention !== 'none' && value.cacheRetention !== 'short' && value.cacheRetention !== 'long') return undefined;
   if (!Number.isSafeInteger(value.maxTokens) || (value.maxTokens as number) <= 0) return undefined;
   if (value.temperature !== undefined && !finiteNumber(value.temperature)) return undefined;
-  if (value.toolChoice !== undefined && value.toolChoice !== 'auto' && value.toolChoice !== 'none' && value.toolChoice !== 'required') return undefined;
+  if (value.toolChoice !== undefined && value.toolChoice !== 'auto' && value.toolChoice !== 'none') return undefined;
   if (
     value.reasoningEffort !== undefined &&
     !['minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(value.reasoningEffort as string)
@@ -1094,7 +1101,7 @@ function parseOptions(value: unknown): InputPreparationOptionsV1 | undefined {
     cacheRetention: value.cacheRetention,
     maxTokens: value.maxTokens as number,
     ...(value.temperature === undefined ? {} : { temperature: value.temperature as number }),
-    ...(value.toolChoice === undefined ? {} : { toolChoice: value.toolChoice as 'auto' | 'none' | 'required' }),
+    ...(value.toolChoice === undefined ? {} : { toolChoice: value.toolChoice as 'auto' | 'none' }),
     ...(value.reasoningEffort === undefined
       ? {}
       : { reasoningEffort: value.reasoningEffort as InputPreparationOptionsV1['reasoningEffort'] }),
@@ -1109,9 +1116,10 @@ function parsePromptSnapshot(value: unknown): InputPreparationPromptSnapshotV1 |
       'appendSystemPrompt',
       'cwd',
       'toolSnippets',
+      'toolGuidelines',
       'promptGuidelines',
       'contextFiles',
-      'formattedSkills',
+      'skills',
       'docsPaths',
     ])
   ) {
@@ -1121,6 +1129,7 @@ function parsePromptSnapshot(value: unknown): InputPreparationPromptSnapshotV1 |
   if (value.appendSystemPrompt !== undefined && typeof value.appendSystemPrompt !== 'string') return undefined;
   if (typeof value.cwd !== 'string' || value.cwd.length === 0) return undefined;
   if (!stringMap(value.toolSnippets)) return undefined;
+  if (!stringArrayMap(value.toolGuidelines)) return undefined;
   if (!stringArray(value.promptGuidelines)) return undefined;
   if (!Array.isArray(value.contextFiles)) return undefined;
   const contextFiles: { path: string; content: string }[] = [];
@@ -1129,7 +1138,21 @@ function parsePromptSnapshot(value: unknown): InputPreparationPromptSnapshotV1 |
     if (typeof entry.path !== 'string' || typeof entry.content !== 'string') return undefined;
     contextFiles.push({ path: entry.path, content: entry.content });
   }
-  if (typeof value.formattedSkills !== 'string') return undefined;
+  if (!Array.isArray(value.skills)) return undefined;
+  const skills: InputPreparationSkillV1[] = [];
+  for (const entry of value.skills) {
+    if (!plainRecord(entry) || !exactKeys(entry, ['name', 'description', 'filePath', 'disableModelInvocation'])) return undefined;
+    if (typeof entry.name !== 'string' || entry.name.length === 0) return undefined;
+    if (typeof entry.description !== 'string') return undefined;
+    if (typeof entry.filePath !== 'string') return undefined;
+    if (typeof entry.disableModelInvocation !== 'boolean') return undefined;
+    skills.push({
+      name: entry.name,
+      description: entry.description,
+      filePath: entry.filePath,
+      disableModelInvocation: entry.disableModelInvocation,
+    });
+  }
   if (!plainRecord(value.docsPaths) || !exactKeys(value.docsPaths, ['readmePath', 'docsPath', 'examplesPath'])) return undefined;
   const docs = value.docsPaths;
   if (typeof docs.readmePath !== 'string' || typeof docs.docsPath !== 'string' || typeof docs.examplesPath !== 'string') return undefined;
@@ -1138,9 +1161,12 @@ function parsePromptSnapshot(value: unknown): InputPreparationPromptSnapshotV1 |
     ...(value.appendSystemPrompt === undefined ? {} : { appendSystemPrompt: value.appendSystemPrompt }),
     cwd: value.cwd,
     toolSnippets: { ...value.toolSnippets },
+    toolGuidelines: Object.fromEntries(
+      Object.entries(value.toolGuidelines).map(([name, lines]) => [name, [...lines]]),
+    ),
     promptGuidelines: [...value.promptGuidelines],
     contextFiles,
-    formattedSkills: value.formattedSkills,
+    skills,
     docsPaths: { readmePath: docs.readmePath, docsPath: docs.docsPath, examplesPath: docs.examplesPath },
   };
 }

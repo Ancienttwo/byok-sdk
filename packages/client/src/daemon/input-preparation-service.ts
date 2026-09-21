@@ -26,6 +26,7 @@ import {
 import {
   InputPreparationCompileError,
   InputPreparationRuntimeIdentityError,
+  SUPPORTED_PREPARED_COMPILER_VERSION,
   type InputPreparationCompiler,
 } from '../adapters/pi/input-preparation';
 import {
@@ -204,6 +205,10 @@ export interface InputPreparationService {
  * - `counter_authority_not_production` — a fixture count can never make a
  *   receipt ready, so an offline suite cannot look like production accounting
  *   evidence.
+ * - `runtime_contract_superseded` — the record's binding declares a
+ *   prepared-compiler version this build does not prepare or consume against.
+ *   Fail closed with no forward read: the artifact's residual classification
+ *   came from another compiler's table and its snapshot from another renderer.
  */
 export function inputPreparationReadinessReasons(
   record: InputPreparationRecord,
@@ -226,6 +231,17 @@ export function inputPreparationReadinessReasons(
       break;
     case 'counted':
       break;
+  }
+  // The runtime-contract check, made here about a RECORD rather than about a
+  // fresh compile. `binding.runtime.compilerVersion` is the prepared-compiler
+  // contract the record was frozen under, observed from the verified install at
+  // preparation time; this build prepares and consumes exactly one. A record
+  // carrying any other one is not re-read through the current contract and is
+  // not translated — its projection was classified by a table this build does
+  // not have and its snapshot was rendered by a renderer this build no longer
+  // ships — so it stays unready, by name.
+  if (record.binding.runtime.compilerVersion !== SUPPORTED_PREPARED_COMPILER_VERSION) {
+    reasons.push('runtime_contract_superseded');
   }
   if (record.artifact === undefined) {
     if (!reasons.includes('not_counted')) reasons.push('not_counted');
