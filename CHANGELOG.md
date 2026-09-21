@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+- **Changed (Pi runtime pin, BREAKING wire change)** — rebase the prepared-input
+  lane onto the fork's 0.86 line: `@byok-sdk/pi-coding-agent@0.86.1001` and
+  `@byok-sdk/pi-ai@0.86.1001` (fork build 1 over upstream base `0.86.1` at
+  `13cbf77`), with `@byok-sdk/pi-agent-core@0.86.1001` on the same exact alias.
+  The fork no longer renders the system prompt itself — one exported
+  `buildRequestPayload` builds both the prepared body and the live session's —
+  so the wire carries the inputs that renderer reads instead of a pre-rendered
+  block. `snapshot.prompt.formattedSkills` is REMOVED and replaced by
+  `snapshot.prompt.skills`, a closed `{name, description, filePath,
+  disableModelInvocation}` record; `snapshot.prompt.toolGuidelines` is added;
+  `selection.options.toolChoice` narrows to `auto | none` because 0.86's simple
+  stream path cannot express `required`. The structural projection contract
+  moves to v3, `INPUT_PREPARATION_VERSION` 3 → 4 and
+  `INPUT_PREPARATION_RECORD_VERSION` 4 → 5. There is no reader for the previous
+  shapes: a stored record prepared under another compiler contract is refused at
+  readiness with the new `runtime_contract_superseded` reason, and an older
+  record schema is refused at log replay, untouched and pending explicit
+  operator disposition. `constrainedSampling` is no longer stripped from the
+  tool projection — the fork's own `preparedToolProjection` is used, so
+  `tools[].strict` is part of what is counted — and the single
+  `prompt_prepared` response now arrives at the byte-gate verdict, after the
+  run's first six session events. New fork refusal code `prepared_body_drift`,
+  passed through verbatim; `prepared_aborted` is gone. The client's `typebox`
+  edge moves `1.3.7` → `1.3.27` with the fork's, so the sealed todo bundle keeps
+  exactly one schema registry. Protocol golden regenerated deliberately, with
+  `PROTOCOL_VERSION` unchanged at 1: this wire surface is an unreleased
+  candidate contract added after the freeze, so no released peer speaks it.
+  Accepted cost: a prepared launch carries no `prompt_cache_key` and warms no
+  cache, because the forced option set leaves `sessionId` undefined.
+
 - **Added (installed Pi observation)** — configured detection now measures the
   selected S1/S2 installation through its authority without executing a version
   child or discovering another binary. Generic observations require both enabled
