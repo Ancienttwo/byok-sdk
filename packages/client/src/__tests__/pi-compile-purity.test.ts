@@ -69,16 +69,37 @@ interface ProbeEnvEvent {
   readonly count: number;
 }
 
+interface ProbeNondeterminismEvent {
+  readonly phase: string;
+  readonly api: string;
+  readonly origin: string;
+  readonly source: 'fork' | 'dependency' | 'runtime' | 'other';
+  readonly count: number;
+}
+
+interface ProbeMonitorGap {
+  readonly target: string;
+  readonly key: string;
+  readonly api: string;
+  readonly reason?: string;
+  readonly error?: string;
+}
+
 interface ProbePhase {
   readonly events: ProbeEvent[];
   readonly envReads: ProbeEnvEvent[];
   readonly envWrites: ProbeEnvEvent[];
+  readonly nondeterminism: ProbeNondeterminismEvent[];
 }
 
 interface ProbeReport {
   readonly mode: string;
+  readonly skew: string | null;
   readonly node: string;
+  readonly nodeMajor: number;
   readonly failure: string | null;
+  readonly monitorInstallFailures: ProbeMonitorGap[];
+  readonly monitorsAbsent: ProbeMonitorGap[];
   readonly requestBody?: string;
   readonly warmRequestBody?: string;
   readonly envelopeDigest?: string;
@@ -86,7 +107,7 @@ interface ProbeReport {
   readonly compileCold: ProbePhase;
   readonly compileWarm: ProbePhase;
   readonly setupEnvWrites: ProbeEnvEvent[];
-  readonly control: { fs: string | null; env: string | null };
+  readonly control: { fs: string | null; env: string | null; envDescriptor: string | null };
 }
 
 interface ProbeRun {
@@ -125,7 +146,11 @@ function baselineEnvironment(root: string, canaryValue: string): NodeJS.ProcessE
  * deliberately NOT set: how the child was started is what the measurement
  * itself rests on.
  */
-function ambientEnvironment(root: string, canaryValue: string): NodeJS.ProcessEnv {
+function ambientEnvironment(
+  root: string,
+  canaryValue: string,
+  cacheRetention: 'long' | 'short',
+): NodeJS.ProcessEnv {
   const home = path.join(root, 'home');
   return {
     ...baselineEnvironment(root, canaryValue),
@@ -134,7 +159,13 @@ function ambientEnvironment(root: string, canaryValue: string): NodeJS.ProcessEn
     XDG_DATA_HOME: path.join(home, '.local', 'share'),
     PI_PACKAGE_DIR: path.join(root, 'pi-package'),
     PI_CODING_AGENT_DIR: path.join(home, '.pi', 'agent'),
-    PI_CACHE_RETENTION: '1h',
+    // `long` and `short` are the two values the fork's cache-retention setting
+    // actually discriminates on, one in each poisoned run. A value it cannot
+    // parse would be inert and would poison nothing. Independence is still
+    // established by the zero-env-read assertion rather than by the pair being
+    // different: what this makes impossible is a silent agreement in which
+    // both runs read the variable and both fall back to the same default.
+    PI_CACHE_RETENTION: cacheRetention,
     HTTP_PROXY: 'http://127.0.0.1:1',
     HTTPS_PROXY: 'http://127.0.0.1:1',
     NO_PROXY: 'nowhere.invalid',
@@ -169,11 +200,18 @@ function seedAmbientRoot(label: string, canaryValue: string): string {
   return root;
 }
 
+interface ProbeOptions {
+  /** One of the poisoned ambient environments, each with its own retention value. */
+  readonly ambient?: 'long' | 'short';
+  /** Forces the clock and every generator to a fixed, far-apart set of values. */
+  readonly skew?: 'a' | 'b';
+}
+
 async function runProbe(
   mode: string,
   label: string,
   canaryValue: string,
-  ambient: 'baseline' | 'poisoned' = 'baseline',
+  { ambient, skew }: ProbeOptions = {},
 ): Promise<ProbeRun> {
   const ambientRoot = seedAmbientRoot(label, canaryValue);
   const reportPath = path.join(ambientRoot, 'report.json');
@@ -182,6 +220,7 @@ async function runProbe(
     configPath,
     JSON.stringify({
       mode,
+      skew: skew ?? null,
       reportPath,
       canaryFile: path.join(ambientRoot, 'home', 'private-canary.txt'),
       canaryEnvKey: CANARY_ENV_KEY,
@@ -192,9 +231,9 @@ async function runProbe(
   const child = spawn(process.execPath, [PROBE, configPath], {
     cwd: CLIENT_ROOT,
     env:
-      ambient === 'poisoned'
-        ? ambientEnvironment(ambientRoot, canaryValue)
-        : baselineEnvironment(ambientRoot, canaryValue),
+      ambient === undefined
+        ? baselineEnvironment(ambientRoot, canaryValue)
+        : ambientEnvironment(ambientRoot, canaryValue, ambient),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stderr = '';
@@ -219,38 +258,147 @@ const forkEvents = (phase: ProbePhase): ProbeEvent[] => phase.events.filter((eve
 const forkEnvReads = (phase: ProbePhase): ProbeEnvEvent[] =>
   phase.envReads.filter((event) => event.source === 'fork');
 
-/** Everything reported for a phase, in the shape the assertions compare. */
+/**
+ * Everything reported for a phase, in the shape the assertions compare.
+ *
+ * Every environment read falsifies, whatever its stack origin. The `runtime`
+ * class is a statement about which FRAME made the call, not about whether the
+ * value can reach D: the ESM loader reading `NODE_V8_COVERAGE` while loading a
+ * module the compile pulled in is still an ambient value entering the compile
+ * phase. Dropping that class would have made the predicate weaker than the
+ * assertion beside it, and the measurement says the compile phases contain
+ * zero reads of ANY class, so keeping them costs nothing that was ever true.
+ *
+ * Clock and generator reads are deliberately NOT here: they reach no ambient
+ * configuration, and the claim they threaten — determinism — is asserted by
+ * `ALLOWED_COMPILE_NONDETERMINISM` and the forced-skew pair instead.
+ */
 function purityViolations(phase: ProbePhase): unknown[] {
   return [
     ...phase.events.map((event) => ({ api: event.api, detail: event.detail, origin: event.origin })),
-    ...phase.envReads
-      .filter((event) => event.source !== 'runtime')
-      .map((event) => ({ api: 'process.env', detail: event.key, origin: event.origin })),
+    ...phase.envReads.map((event) => ({ api: 'process.env', detail: event.key, origin: event.origin })),
     ...phase.envWrites.map((event) => ({ api: 'process.env=', detail: event.key, origin: event.origin })),
   ];
 }
 
+/** The origin's file, without the line and column that a fork bump moves. */
+const originFile = (origin: string): string => origin.replace(/:\d+:\d+$/u, '');
+
+/**
+ * Clock and generator reads permitted inside a compile phase, by
+ * `(api, origin-file)`.
+ *
+ * It is EMPTY on fork build `0.86.1001`, and empty is what the run reports
+ * rather than what was hoped for: the compile calls `buildRequestPayload`, and
+ * the one `Date.now()` on the provider path —
+ * `@byok-sdk/pi-ai/dist/api/openai-completions.js:763`, stamping the assistant
+ * message's `timestamp` — sits inside `export const stream`, which a compile
+ * never enters. A fork bump that moves a clock read onto the compile path must
+ * add it HERE with a justification, and the forced-skew case below is what
+ * decides whether that read can reach D.
+ */
+const ALLOWED_COMPILE_NONDETERMINISM: { readonly api: string; readonly originFile: string }[] = [];
+
+const nondeterminismOffAllowlist = (phase: ProbePhase): unknown[] =>
+  phase.nondeterminism
+    .map((event) => ({ api: event.api, originFile: originFile(event.origin) }))
+    .filter(
+      (event) =>
+        !ALLOWED_COMPILE_NONDETERMINISM.some(
+          (allowed) => allowed.api === event.api && allowed.originFile === event.originFile,
+        ),
+    );
+
+/**
+ * The monitors that do not exist on the running Node, measured identically on
+ * 22.22.3 (the `.node-version` pin every CI job uses) and 24.18.0 (the local
+ * runtime), so this is one list rather than a table keyed by major.
+ *
+ * Nothing security-relevant is here by construction: every `fs` read family in
+ * all three call forms, every `child_process`, `net`, `http`, `https`,
+ * `http2`, `dns`, `tls`, `dgram` and `worker_threads` entry, `os.homedir`,
+ * `process.cwd` and both egress globals install successfully. An absent entry
+ * from any of those families would be a hole in the gate, not a runtime fact,
+ * and this equality is what turns it into a failure.
+ */
+const EXPECTED_ABSENT_MONITORS = [
+  // `fs.promises` is a different API surface, not a promisified copy of `fs`:
+  // it exposes no existence predicate (callers `stat` or `access` instead),
+  // and no fd-level read/write — those live on the `FileHandle` a monitored
+  // `fs.promises.open` returns, whose fd this probe files under its path.
+  { api: 'fs.promises.exists', reason: 'absent' },
+  { api: 'fs.promises.read', reason: 'absent' },
+  { api: 'fs.promises.readv', reason: 'absent' },
+  { api: 'fs.promises.write', reason: 'absent' },
+  { api: 'fs.promises.writev', reason: 'absent' },
+  // A non-configurable getter-only property on the `node:crypto` CJS exports
+  // object on both 22 and 24, so no assignment and no `defineProperty` can
+  // replace it. The generator itself is still watched where it is writable —
+  // `globalThis.crypto.getRandomValues` — and `crypto.randomBytes` /
+  // `crypto.randomUUID` on `node:crypto` install normally. The one unwatched
+  // shape is therefore `import { getRandomValues } from "node:crypto"`, and
+  // it is a determinism surface rather than a security one; the forced-skew
+  // case below is what would catch a value from it reaching D.
+  { api: 'crypto.getRandomValues', reason: 'unwritable' },
+  // `randomBytes` is a Node API, not a WebCrypto one; the standard `Crypto`
+  // interface has no such method. `node:crypto.randomBytes` covers it.
+  { api: 'globalThis.crypto.randomBytes', reason: 'absent' },
+];
+
 let clean: ProbeRun;
 let ambientA: ProbeRun;
 let ambientB: ProbeRun;
+let skewA: ProbeRun;
+let skewB: ProbeRun;
 let controlFs: ProbeRun;
 let controlEnv: ProbeRun;
 let controlCapability: ProbeRun;
+let controlClockA: ProbeRun;
+let controlClockB: ProbeRun;
+let everyRun: ProbeRun[];
 
-// One generous budget for six child processes that each load the fork's whole
+// One generous budget for ten child processes that each load the fork's whole
 // module graph. The suite's default is 10s and this file is not the place to
-// add a second load-sensitive deadline.
+// add a second load-sensitive deadline. They are spawned in ONE `Promise.all`
+// and completion is the child's own exit, so nothing here waits on a clock.
 const PROBE_TIMEOUT_MS = 120_000;
 
 beforeAll(async () => {
-  [clean, ambientA, ambientB, controlFs, controlEnv, controlCapability] = await Promise.all([
+  [
+    clean,
+    ambientA,
+    ambientB,
+    skewA,
+    skewB,
+    controlFs,
+    controlEnv,
+    controlCapability,
+    controlClockA,
+    controlClockB,
+  ] = await Promise.all([
     runProbe('clean', 'clean', 'CANARY-CLEAN'),
-    runProbe('clean', 'ambient-a', 'CANARY-AMBIENT-A', 'poisoned'),
-    runProbe('clean', 'ambient-b', 'CANARY-AMBIENT-B', 'poisoned'),
+    runProbe('clean', 'ambient-a', 'CANARY-AMBIENT-A', { ambient: 'long' }),
+    runProbe('clean', 'ambient-b', 'CANARY-AMBIENT-B', { ambient: 'short' }),
+    runProbe('clean', 'skew-a', 'CANARY-SKEW-A', { skew: 'a' }),
+    runProbe('clean', 'skew-b', 'CANARY-SKEW-B', { skew: 'b' }),
     runProbe('control-fs', 'control-fs', 'CANARY-CONTROL-FS'),
     runProbe('control-env', 'control-env', 'CANARY-CONTROL-ENV'),
     runProbe('control-capability', 'control-capability', 'CANARY-CONTROL-CAP'),
+    runProbe('control-nondeterminism', 'control-clock-a', 'CANARY-CONTROL-CLOCK-A', { skew: 'a' }),
+    runProbe('control-nondeterminism', 'control-clock-b', 'CANARY-CONTROL-CLOCK-B', { skew: 'b' }),
   ]);
+  everyRun = [
+    clean,
+    ambientA,
+    ambientB,
+    skewA,
+    skewB,
+    controlFs,
+    controlEnv,
+    controlCapability,
+    controlClockA,
+    controlClockB,
+  ];
 }, PROBE_TIMEOUT_MS);
 
 afterAll(() => {
@@ -272,6 +420,22 @@ describe('B-P2 native composition: call-time purity, measured in an isolated chi
     expect(clean.report.warmRequestBody).toBe(compiled.requestBody);
   });
 
+  it('installed every monitor it claims, and names the ones this Node does not have', () => {
+    // The hole this closes: `watch()` swallowed a refused `Reflect.set` in an
+    // empty `catch` and skipped an absent builtin without a word, so a monitor
+    // that silently never existed read exactly like a surface nothing touched.
+    // Both are now facts in the report, and both are asserted.
+    for (const run of everyRun) {
+      expect({ mode: run.report.mode, failures: run.report.monitorInstallFailures }).toEqual({
+        mode: run.report.mode,
+        failures: [],
+      });
+      expect(run.report.monitorsAbsent.map((gap) => ({ api: gap.api, reason: gap.reason }))).toEqual(
+        EXPECTED_ABSENT_MONITORS,
+      );
+    }
+  });
+
   it('touches no filesystem, process, network or ambient surface during either compile call', () => {
     // The whole point of the gate, and the assertion the in-process trap could
     // not make: monitors installed BEFORE the fork's graph exists, republished
@@ -284,16 +448,46 @@ describe('B-P2 native composition: call-time purity, measured in an isolated chi
 
   it('reads no environment variable during either compile call', () => {
     // The allowlist is EMPTY, and it is empty because the measurement says so,
-    // not because nothing was looked for: the recording Proxy sees `get`, `in`
-    // and `ownKeys` on `process.env`, and the fork's one real environment read
-    // (`PI_PACKAGE_DIR`) happens at module load, never at compile time.
+    // not because nothing was looked for: the recording Proxy sees `get`, `in`,
+    // `ownKeys` AND `getOwnPropertyDescriptor` on `process.env`, and the fork's
+    // one real environment read (`PI_PACKAGE_DIR`) happens at module load,
+    // never at compile time. No stack class is excused — a runtime-internal
+    // frame reading an ambient value during the compile would count.
     const ALLOWED_COMPILE_ENV_READS: string[] = [];
 
     for (const phase of [clean.report.compileCold, clean.report.compileWarm]) {
-      expect(phase.envReads.filter((event) => event.source !== 'runtime')).toEqual([]);
       expect(phase.envReads.map((event) => event.key)).toEqual(ALLOWED_COMPILE_ENV_READS);
       expect(phase.envWrites).toEqual([]);
     }
+  });
+
+  it('reads no clock and no generator during either compile call', () => {
+    // NOT a purity assertion, and deliberately not stated as "zero": reading
+    // the clock touches nothing ambient, and the provider path does it
+    // legitimately. What is asserted is that every such read in a compile
+    // phase is on `ALLOWED_COMPILE_NONDETERMINISM` with a justification. On
+    // this build the list is empty and so is the measurement, in both phases
+    // and under both forced skews.
+    for (const run of [clean, skewA, skewB]) {
+      expect(nondeterminismOffAllowlist(run.report.compileCold)).toEqual([]);
+      expect(nondeterminismOffAllowlist(run.report.compileWarm)).toEqual([]);
+    }
+  });
+
+  it('compiles the same bytes with the clock and every generator forced years apart', () => {
+    // The determinism half, measured rather than argued. `skewed-a` pins
+    // `Date.now()` and zero-argument `new Date()` at 2001-09-09 with
+    // `Math.random()` at 0, fixed-zero `randomBytes`/`getRandomValues` and the
+    // all-zero UUID; `skewed-b` pins 2033-05-18 with the largest double below
+    // 1, all-`0xff` bytes and the all-`f` UUID. Forcing does not break the
+    // fork's load — both runs report `failure: null` — so the comparison is a
+    // real one, and D comes out byte-identical to the unforced run.
+    expect({ a: skewA.report.failure, b: skewB.report.failure }).toEqual({ a: null, b: null });
+    expect(skewA.report.requestBody).toBe(clean.report.requestBody);
+    expect(skewB.report.requestBody).toBe(clean.report.requestBody);
+    expect(skewB.report.requestBody).toBe(skewA.report.requestBody);
+    expect(skewB.report.envelopeDigest).toBe(skewA.report.envelopeDigest);
+    expect(skewB.report.warmRequestBody).toBe(skewA.report.warmRequestBody);
   });
 
   it('observes the cold load, and every touch it makes is on the allowlist', () => {
@@ -335,8 +529,21 @@ describe('B-P2 native composition: call-time purity, measured in an isolated chi
     // No path any actor read during the load lies outside an installed
     // package, so the loader half of the phase is module loading and nothing
     // else.
+    //
+    // That claim now covers the fd-based calls too, which it did not when an
+    // `fs.readSync`/`fs.closeSync` was recorded as an anonymous `<fd 12>` and
+    // dropped by the `<` filter below. The probe remembers what every
+    // MONITORED `open`/`openSync`/`fs.promises.open` handed out and resolves a
+    // later fd to the path it was opened at, so the call is measured against
+    // that path like any other. An fd from an open the probe never saw
+    // resolves to `unknown-fd:<n>`, which contains no `/node_modules/` segment
+    // and therefore fails here rather than disappearing from the count — and
+    // it is asserted by name as well, so the failure says what it is.
     const paths = load.events.map((event) => event.detail).filter((detail) => !detail.startsWith('<'));
     expect(paths.filter((detail) => !detail.includes('/node_modules/'))).toEqual([]);
+    for (const phase of [load, clean.report.compileCold, clean.report.compileWarm]) {
+      expect(phase.events.filter((event) => event.detail.startsWith('unknown-fd:'))).toEqual([]);
+    }
 
     // A capability taken at import time would be an import-time effect, not a
     // read: none is taken.
@@ -407,6 +614,28 @@ describe('B-P2 native composition: call-time purity, measured in an isolated chi
         { api: 'os.homedir', origin: 'fork:dist/utils/paths.js:70:41', underOverride: false },
         { api: 'fs.readFileSync', origin: 'fork:dist/config.js:392:31', underOverride: true },
       ]);
+
+      // The load-phase ENV READS are pinned too, not just the events. Without
+      // this, a poisoned run could start reading a new ambient variable at
+      // load and nothing here would notice.
+      //
+      // What is pinned is exactly what the run reports, and it is the same
+      // `(key, origin)` set the clean run produces: `PI_PACKAGE_DIR` at
+      // `config.js:313` and `cross-spawn`'s `OSTYPE` twice at module scope.
+      // `PI_CODING_AGENT_DIR` and the agent-dir variable derived from the
+      // poisoned manifest's name are NOT read — `getAgentDir()` is never
+      // called on this path — so pinning the observed set rather than the
+      // expected one is the point. Every entry is load-time, and load-time
+      // cannot reach D: the byte equality asserted above is the proof, not
+      // this list.
+      expect(run.report.load.envReads.map((event) => ({ key: event.key, origin: event.origin }))).toEqual([
+        { key: 'WATCH_REPORT_DEPENDENCIES', origin: '(runtime-internal)' },
+        { key: 'NODE_V8_COVERAGE', origin: '(runtime-internal)' },
+        { key: 'OSTYPE', origin: 'dep:which/which.js:2:17' },
+        { key: 'OSTYPE', origin: 'dep:which/which.js:3:17' },
+        { key: 'PI_PACKAGE_DIR', origin: 'fork:dist/config.js:313:32' },
+      ]);
+      expect(run.report.load.envWrites).toEqual([]);
     }
   });
 });
@@ -436,11 +665,24 @@ describe('B-P2 native composition: the purity gate is falsifiable', () => {
     expect(purityViolations(controlFs.report.compileCold)).not.toEqual([]);
   });
 
-  it('sees an environment read made inside the compile', () => {
+  it('sees an environment read made inside the compile, through the plain get AND through the descriptor', () => {
+    // Two shapes, because the Proxy traps them separately.
+    // `Object.getOwnPropertyDescriptor(process.env, K)` hands back the VALUE
+    // without ever going through `get`, so before the `gOPD` trap existed a
+    // read made that way — by hand, or by anything built on the descriptor
+    // path — was invisible to a gate that reported the phase as clean.
     expect(controlEnv.report.control.env).toBe(controlEnv.canaryValue);
+    expect(controlEnv.report.control.envDescriptor).toBe(controlEnv.canaryValue);
     expect(
-      forkEnvReads(controlEnv.report.compileCold).map((event) => ({ key: event.key, origin: event.origin })),
-    ).toEqual([{ key: CANARY_ENV_KEY, origin: 'fork:dist/core/system-prompt.js:163:54' }]);
+      forkEnvReads(controlEnv.report.compileCold).map((event) => ({
+        key: event.key,
+        via: event.via,
+        origin: originFile(event.origin),
+      })),
+    ).toEqual([
+      { key: CANARY_ENV_KEY, via: 'get', origin: 'fork:dist/core/system-prompt.js' },
+      { key: CANARY_ENV_KEY, via: 'gOPD', origin: 'fork:dist/core/system-prompt.js' },
+    ]);
     expect(purityViolations(controlEnv.report.compileCold)).not.toEqual([]);
   });
 
@@ -456,6 +698,32 @@ describe('B-P2 native composition: the purity gate is falsifiable', () => {
     expect(purityViolations(controlCapability.report.compileCold)).not.toEqual([]);
   });
 
+  it('sees a clock and a generator read that reaches the rendered prompt, and D then differs', () => {
+    // The fourth control, and the only one whose effect has to reach D: the
+    // rewritten `buildSystemPrompt` appends `Date.now()` and `Math.random()`
+    // to the prompt text itself. Under the two skews that text differs, so the
+    // same pair of runs that came out byte-identical above now comes out
+    // different — which is what makes the byte-equality case a measurement
+    // instead of a property of a fixture that reads no clock.
+    expect({ a: controlClockA.report.failure, b: controlClockB.report.failure }).toEqual({ a: null, b: null });
+    expect(
+      controlClockA.report.compileCold.nondeterminism.map((event) => ({
+        api: event.api,
+        origin: originFile(event.origin),
+      })),
+    ).toEqual([
+      { api: 'Date.now', origin: 'fork:dist/core/system-prompt.js' },
+      { api: 'Math.random', origin: 'fork:dist/core/system-prompt.js' },
+    ]);
+    expect(nondeterminismOffAllowlist(controlClockA.report.compileCold)).not.toEqual([]);
+    expect(controlClockA.report.requestBody).not.toBe(controlClockB.report.requestBody);
+    expect(controlClockA.report.requestBody).not.toBe(clean.report.requestBody);
+
+    // And the control is a control: nothing about it is a purity violation,
+    // which is exactly why the clock needed an assertion of its own.
+    expect(purityViolations(controlClockA.report.compileCold)).toEqual([]);
+  });
+
   it('proves purity for none of the three controls, and for the clean run', () => {
     // The predicate the gate exists to compute, stated once over all four runs.
     const pure = (run: ProbeRun): boolean => purityViolations(run.report.compileCold).length === 0;
@@ -465,5 +733,14 @@ describe('B-P2 native composition: the purity gate is falsifiable', () => {
       controlEnv: pure(controlEnv),
       controlCapability: pure(controlCapability),
     }).toEqual({ clean: true, controlFs: false, controlEnv: false, controlCapability: false });
+
+    // The determinism predicate, stated the same way: D is invariant under a
+    // forced skew for the clean pair and is not for the control pair.
+    const clockIndependent = (a: ProbeRun, b: ProbeRun): boolean =>
+      a.report.requestBody === b.report.requestBody;
+    expect({
+      clean: clockIndependent(skewA, skewB),
+      controlClock: clockIndependent(controlClockA, controlClockB),
+    }).toEqual({ clean: true, controlClock: false });
   });
 });

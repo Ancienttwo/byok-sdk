@@ -24,6 +24,7 @@
 
 import module from 'node:module';
 import childProcess from 'node:child_process';
+import nodeCrypto from 'node:crypto';
 import dgram from 'node:dgram';
 import dns from 'node:dns';
 import fs from 'node:fs';
@@ -72,6 +73,48 @@ const events = new Map();
 const envReads = new Map();
 const envWrites = new Map();
 
+/**
+ * Clock and randomness, recorded in their OWN table.
+ *
+ * They are not purity violations: reading the clock reaches no file, no socket
+ * and no ambient configuration. They are determinism risks, which is a
+ * different claim needing a different assertion — an explicit per-origin
+ * allowlist, plus the forced-skew pair the parent test compares byte for byte.
+ * Keeping them out of `events` is what stops `purityViolations()` from
+ * conflating the two.
+ */
+const nondeterminism = new Map();
+
+/**
+ * Monitor installation is itself measured.
+ *
+ * `monitorInstallFailures` holds every monitor that was INTENDED and could not
+ * be installed (`Reflect.set` refused, or the readback did not come back as the
+ * proxy). A non-empty list means the gate's coverage is smaller than the list
+ * it claims, so the parent test asserts it is empty rather than leaving the
+ * failure to be inferred from a monitor that never fires.
+ *
+ * `monitorsAbsent` holds every monitor that was intended and whose target does
+ * not exist on THIS Node. That is a legitimate outcome — `fs.promises` has no
+ * `exists`, the WebCrypto global has no `randomBytes` — but it is a fact about
+ * the running runtime, so the parent test pins it against an explicit measured
+ * list per Node major instead of letting a surface silently stop being watched.
+ */
+const monitorInstallFailures = [];
+const monitorsAbsent = [];
+
+/**
+ * fd → path, for every fd a MONITORED open handed out.
+ *
+ * Without it an `fs.readSync(<fd 23>)` / `fs.closeSync(<fd 23>)` names no path,
+ * and the load-phase assertion that every path read lies inside an installed
+ * package silently skips it. With it, an fd resolves to the path it was opened
+ * at and is covered by that assertion; an fd NOBODY monitored opened resolves
+ * to `unknown-fd:<n>`, which lies outside every installed package by
+ * construction and therefore fails the assertion instead of vanishing from it.
+ */
+const fdPaths = new Map();
+
 function tally(table, key, entry) {
   const existing = table.get(key);
   if (existing === undefined) table.set(key, { ...entry, count: 1 });
@@ -91,6 +134,11 @@ function originOf() {
     // traffic would be attributed to whatever it happened to be loading.
     if (/\(node:[a-z_]/u.test(line) || /\sat\s+node:[a-z_]/u.test(line)) continue;
     if (line.includes(SELF)) continue;
+    // A V8 builtin entered from user code has no script: `Object.keys` and
+    // `Object.getOwnPropertyDescriptor` appear as `(<anonymous>)`. Attributing
+    // an environment read to the builtin the caller went through would hide
+    // the file that made it, so the frame is stepped over like a runtime one.
+    if (/\(<anonymous>\)$/u.test(line.trim())) continue;
     return shorten(line.trim().replace(/^at\s+/u, ''));
   }
   return '(runtime-internal)';
@@ -114,19 +162,45 @@ function classOf(origin) {
   return 'other';
 }
 
+/** The path a monitored open was given, in the one shape `fdPaths` stores. */
+function pathLabel(value) {
+  if (typeof value === 'string') return value.slice(0, 200);
+  if (value instanceof URL) return value.href.slice(0, 200);
+  if (Buffer.isBuffer(value)) return value.toString('utf8').slice(0, 200);
+  return null;
+}
+
+/** Remember what a monitored open returned, so later fd-based calls name a path. */
+function rememberFd(fd, pathArgument) {
+  const known = pathLabel(pathArgument);
+  if (typeof fd === 'number' && Number.isInteger(fd) && known !== null) fdPaths.set(fd, known);
+}
+
 /** First argument only, stringified and bounded: enough to name a path, never a payload. */
-function describe(args) {
+function describe(args, kind) {
   const first = args[0];
   if (typeof first === 'string') return first.slice(0, 200);
   if (first instanceof URL) return first.href.slice(0, 200);
   if (Buffer.isBuffer(first)) return `<buffer ${first.byteLength}>`;
-  if (typeof first === 'number') return `<fd ${first}>`;
+  if (typeof first === 'number') {
+    // An `fs` API taking a number takes an fd. Resolve it to the path the
+    // monitored open handed it out for; an fd from an open this probe never
+    // saw is named as such rather than reported as an anonymous `<fd n>`.
+    if (kind !== 'fs') return `<number ${first}>`;
+    const known = fdPaths.get(first);
+    return known === undefined ? `unknown-fd:${first}` : `fd:${first}:${known}`;
+  }
   if (first && typeof first === 'object') {
     const port = Reflect.get(first, 'port');
     const host = Reflect.get(first, 'host') ?? Reflect.get(first, 'hostname');
     if (port !== undefined || host !== undefined) return `${String(host)}:${String(port)}`;
   }
   return `<${typeof first}>`;
+}
+
+function recordNondeterminism(api) {
+  const origin = originOf();
+  tally(nondeterminism, `${phase}|${api}|${origin}`, { phase, api, origin, source: classOf(origin) });
 }
 
 function record(kind, api, detail) {
@@ -153,27 +227,68 @@ function record(kind, api, detail) {
  * `new Worker(...)` and `new net.Socket(...)` are seen too. A hand-written
  * wrapper function silently drops both.
  */
-function watch(target, key, kind, api, { callThrough = true } = {}) {
-  if (target === undefined || target === null) return;
+function install(target, key, api, proxy) {
+  // `Reflect.set` RETURNS false on a non-writable or setter-less property
+  // rather than throwing, so the old empty `catch` could never have seen the
+  // failure it was written for. Both shapes are recorded, and the readback
+  // catches the third shape: a `set` that reports success and does not stick.
+  const label = api.endsWith(`.${key}`) ? api.slice(0, -(key.length + 1)) : api;
+  let accepted = false;
+  let error = null;
+  try {
+    accepted = Reflect.set(target, key, proxy);
+  } catch (caught) {
+    error = caught instanceof Error ? `${caught.name}: ${caught.message}` : String(caught);
+  }
+  if (error === null && !accepted) error = 'Reflect.set returned false';
+  if (error === null && Reflect.get(target, key) !== proxy) error = 'readback did not return the monitor';
+  if (error !== null) monitorInstallFailures.push({ target: label, key: String(key), api, error });
+}
+
+/**
+ * Whether a plain assignment can put a monitor here at all.
+ *
+ * A non-configurable getter-only property cannot be replaced or redefined by
+ * anything, so attempting it would produce a failure the probe can never fix.
+ * `node:crypto`'s `getRandomValues` is exactly that on Node 22 and 24. The
+ * monitor is therefore reported as ABSENT on this runtime, with the same
+ * standing as a builtin that does not exist, rather than as a probe bug.
+ */
+function monitorable(target, key) {
+  const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+  if (descriptor === undefined || descriptor.configurable) return true;
+  if ('value' in descriptor) return descriptor.writable === true;
+  return typeof descriptor.set === 'function';
+}
+
+function absent(key, api, reason) {
+  const label = api.endsWith(`.${key}`) ? api.slice(0, -(key.length + 1)) : api;
+  monitorsAbsent.push({ target: label, key: String(key), api, reason });
+}
+
+function watch(target, key, kind, api, { callThrough = true, before, after } = {}) {
+  if (target === undefined || target === null) return absent(key, api, 'container-absent');
   const original = Reflect.get(target, key);
-  if (typeof original !== 'function') return;
+  if (typeof original !== 'function') {
+    return absent(key, api, original === undefined ? 'absent' : `not-a-function:${typeof original}`);
+  }
+  if (!monitorable(target, key)) return absent(key, api, 'unwritable');
   const proxy = new Proxy(original, {
     apply(fn, self, args) {
-      record(kind, api, describe(args));
+      record(kind, api, describe(args, kind));
       if (!callThrough) throw new Error(`purity monitor refused ${api}: this probe performs no network I/O`);
-      return Reflect.apply(fn, self, args);
+      const forwarded = before === undefined ? args : before(args);
+      const result = Reflect.apply(fn, self, forwarded);
+      if (after !== undefined) after(args, result);
+      return result;
     },
     construct(fn, args, newTarget) {
-      record(kind, api, describe(args));
+      record(kind, api, describe(args, kind));
       if (!callThrough) throw new Error(`purity monitor refused new ${api}: this probe performs no network I/O`);
       return Reflect.construct(fn, args, newTarget);
     },
   });
-  try {
-    Reflect.set(target, key, proxy);
-  } catch {
-    /* a non-writable builtin property is reported by its absence from the list below */
-  }
+  install(target, key, api, proxy);
 }
 
 /**
@@ -197,6 +312,40 @@ const FS_EXTRA = [
   'watchFile',
 ];
 
+/**
+ * The three ways an fd enters the process through a monitored API, each with
+ * the hook that files it under the path it was opened at: the sync form
+ * returns the fd, the callback form is handed it, and the promise form
+ * resolves a `FileHandle` carrying it.
+ */
+const OPEN_HOOKS = {
+  'fs.openSync': { after: (args, result) => rememberFd(result, args[0]) },
+  'fs.open': {
+    before(args) {
+      const last = args.length - 1;
+      const callback = args[last];
+      if (typeof callback !== 'function') return args;
+      const forwarded = args.slice();
+      forwarded[last] = function wrapped(error, fd) {
+        rememberFd(fd, args[0]);
+        return Reflect.apply(callback, this, arguments);
+      };
+      return forwarded;
+    },
+  },
+  'fs.promises.open': {
+    after(args, result) {
+      if (result === null || typeof result?.then !== 'function') return;
+      // Observation only: the returned promise is what the caller gets back,
+      // and this branch neither replaces it nor changes its settlement.
+      result.then(
+        (handle) => rememberFd(handle?.fd, args[0]),
+        () => {},
+      );
+    },
+  },
+};
+
 function installFilesystemMonitors() {
   for (const name of FS_FAMILIES) {
     // `realpath.native` / `realpathSync.native` are separate functions hanging
@@ -208,9 +357,11 @@ function installFilesystemMonitors() {
         watch(fn, 'native', 'fs', `fs.${outer}.native`);
       }
     }
-    watch(fs, name, 'fs', `fs.${name}`);
-    watch(fs, `${name}Sync`, 'fs', `fs.${name}Sync`);
-    watch(fs.promises, name, 'fs', `fs.promises.${name}`);
+    for (const api of [`fs.${name}`, `fs.${name}Sync`, `fs.promises.${name}`]) {
+      const target = api.startsWith('fs.promises.') ? fs.promises : fs;
+      const key = api.slice(api.lastIndexOf('.') + 1);
+      watch(target, key, 'fs', api, OPEN_HOOKS[api] ?? {});
+    }
   }
   for (const name of FS_EXTRA) watch(fs, name, 'fs', `fs.${name}`);
 }
@@ -245,6 +396,119 @@ function installCapabilityMonitors() {
 }
 
 /**
+ * Two skews, chosen to be far apart in every dimension at once.
+ *
+ * `skewed-a` is 2001-09-09 with the lowest value every generator can produce;
+ * `skewed-b` is 2033-05-18 with the highest. A compile that reads a clock or a
+ * generator and lets the value reach D cannot produce the same bytes under
+ * both, so byte equality between the two runs is a measurement rather than an
+ * argument. Forcing happens ONLY in these modes: the clean and control runs
+ * record and return the real value, so nothing the rest of the gate measures
+ * is measured through a doctored runtime.
+ */
+const SKEWS = {
+  a: {
+    now: 1_000_000_000_000,
+    random: 0,
+    byte: 0x00,
+    uuid: '00000000-0000-4000-8000-000000000000',
+    performanceNow: 0,
+    hrtime: [0, 0],
+    hrtimeBigint: 0n,
+  },
+  b: {
+    now: 2_000_000_000_000,
+    random: 0.999_999_999_999_999_9,
+    byte: 0xff,
+    uuid: 'ffffffff-ffff-4fff-bfff-ffffffffffff',
+    performanceNow: 987_654_321.5,
+    hrtime: [987_654, 321_000_000],
+    hrtimeBigint: 987_654_321_000_000n,
+  },
+};
+
+const skew = config.skew === undefined || config.skew === null ? null : SKEWS[config.skew];
+if (config.skew !== undefined && config.skew !== null && skew === undefined) {
+  throw new Error(`unknown skew ${String(config.skew)}`);
+}
+
+/**
+ * A clock or generator monitor. RECORD-ONLY unless a skew is configured: no
+ * throw, no refusal, and the real return value forwarded unchanged, because
+ * reading the clock is not a purity violation and treating it as one would
+ * make the gate lie about the provider path that legitimately does it.
+ */
+function watchValue(target, key, api, force) {
+  if (target === undefined || target === null) return absent(key, api, 'container-absent');
+  const original = Reflect.get(target, key);
+  if (typeof original !== 'function') {
+    return absent(key, api, original === undefined ? 'absent' : `not-a-function:${typeof original}`);
+  }
+  if (!monitorable(target, key)) return absent(key, api, 'unwritable');
+  const proxy = new Proxy(original, {
+    apply(fn, self, args) {
+      recordNondeterminism(api);
+      if (skew !== null && force !== undefined) return force(args, skew);
+      return Reflect.apply(fn, self, args);
+    },
+  });
+  install(target, key, api, proxy);
+}
+
+function forcedRandomBytes(args, forced) {
+  const size = typeof args[0] === 'number' ? args[0] : 0;
+  const filled = Buffer.alloc(size, forced.byte);
+  const callback = args[1];
+  if (typeof callback === 'function') {
+    queueMicrotask(() => callback(null, filled));
+    return undefined;
+  }
+  return filled;
+}
+
+function forcedGetRandomValues(args, forced) {
+  const view = args[0];
+  if (ArrayBuffer.isView(view)) {
+    new Uint8Array(view.buffer, view.byteOffset, view.byteLength).fill(forced.byte);
+  }
+  return view;
+}
+
+function installNondeterminismMonitors() {
+  const RealDate = globalThis.Date;
+  // `Date.now` is monitored on the real constructor BEFORE the constructor
+  // itself is replaced, so the replacement's forwarding `get` hands out the
+  // monitored function rather than shadowing it.
+  watchValue(RealDate, 'now', 'Date.now', (_args, forced) => forced.now);
+  const dateProxy = new Proxy(RealDate, {
+    construct(fn, args, newTarget) {
+      // ONLY the zero-argument form is ambient: `new Date(ms)` is as
+      // deterministic as the number it was handed.
+      if (args.length > 0) return Reflect.construct(fn, args, newTarget);
+      recordNondeterminism('new Date()');
+      return Reflect.construct(fn, skew === null ? args : [skew.now], newTarget);
+    },
+  });
+  install(globalThis, 'Date', 'globalThis.Date', dateProxy);
+
+  watchValue(Math, 'random', 'Math.random', (_args, forced) => forced.random);
+  watchValue(globalThis.performance, 'now', 'performance.now', (_args, forced) => forced.performanceNow);
+  // `.bigint` first, for the same reason `Date.now` is: the outer proxy
+  // forwards `get`, so wrapping the outer function first would hide it.
+  watchValue(process.hrtime, 'bigint', 'process.hrtime.bigint', (_args, forced) => forced.hrtimeBigint);
+  watchValue(process, 'hrtime', 'process.hrtime', (_args, forced) => forced.hrtime.slice());
+
+  for (const [namespace, label] of [
+    [nodeCrypto, 'crypto'],
+    [globalThis.crypto, 'globalThis.crypto'],
+  ]) {
+    watchValue(namespace, 'randomUUID', `${label}.randomUUID`, (_args, forced) => forced.uuid);
+    watchValue(namespace, 'randomBytes', `${label}.randomBytes`, forcedRandomBytes);
+    watchValue(namespace, 'getRandomValues', `${label}.getRandomValues`, forcedGetRandomValues);
+  }
+}
+
+/**
  * `process.env` becomes a recording Proxy.
  *
  * The check it replaces compared `JSON.stringify(process.env)` before and
@@ -273,6 +537,14 @@ function installEnvironmentMonitor() {
     has(target, key) {
       if (typeof key === 'string') recordEnvRead(key, 'in');
       return Reflect.has(target, key);
+    },
+    // `Object.getOwnPropertyDescriptor(process.env, K)` and everything built
+    // on it (`Object.entries`, `structuredClone`, spread over the descriptor
+    // path) return the VALUE, so without this trap a read could be made
+    // through a shape the gate reported as clean.
+    getOwnPropertyDescriptor(target, key) {
+      if (typeof key === 'string') recordEnvRead(key, 'gOPD');
+      return Reflect.getOwnPropertyDescriptor(target, key);
     },
     ownKeys(target) {
       recordEnvRead('*', 'ownKeys');
@@ -310,15 +582,16 @@ function installNegativeControl(mode) {
   const canaryEnvKey = JSON.stringify(config.canaryEnvKey);
   const bodies = {
     'control-fs': `try { globalThis.__piPurityControlFs = __ctrlReadFileSync(${canaryFile}, "utf8"); } catch (error) { globalThis.__piPurityControlFs = String(error); }`,
-    'control-env': `try { globalThis.__piPurityControlEnv = process.env[${canaryEnvKey}]; } catch (error) { globalThis.__piPurityControlEnv = String(error); }`,
+    // Two read shapes, because the Proxy traps them separately: the plain
+    // `get`, and the descriptor path that returns the value without one.
+    'control-env': `try { globalThis.__piPurityControlEnv = process.env[${canaryEnvKey}]; } catch (error) { globalThis.__piPurityControlEnv = String(error); }
+  try { globalThis.__piPurityControlEnvDescriptor = Object.getOwnPropertyDescriptor(process.env, ${canaryEnvKey})?.value ?? null; } catch (error) { globalThis.__piPurityControlEnvDescriptor = String(error); }`,
     // Both capability shapes, each guarded so an absent monitor still does
     // nothing real: an empty `-e` program exits immediately, and port 1 on
     // loopback refuses the connection before any bytes move.
     'control-capability': `try { __ctrlSpawnSync(process.execPath, ["-e", ""], { stdio: "ignore" }); } catch {}
   try { const socket = __ctrlConnect({ host: "127.0.0.1", port: 1 }); socket.on("error", () => {}); socket.unref(); socket.destroy(); } catch {}`,
   };
-  const body = bodies[mode];
-  if (body === undefined) throw new Error(`unknown control mode ${mode}`);
 
   const prelude = [
     'import { readFileSync as __ctrlReadFileSync } from "node:fs";',
@@ -328,13 +601,31 @@ function installNegativeControl(mode) {
   ].join('\n');
   const anchor = 'export function buildSystemPrompt(input) {';
 
+  // The fourth control is the only one whose effect has to reach D, so it is
+  // the only one that cannot be a statement at the top of the body: it wraps
+  // the renderer and puts the clock and the generator INTO the rendered
+  // prompt text. Under the two skews that text differs, which is what makes
+  // "D is byte-identical across skews" a falsifiable claim rather than a
+  // property of a fixture that happens to read no clock.
+  const replacement =
+    mode === 'control-nondeterminism'
+      ? `export function buildSystemPrompt(input) {
+  return __ctrlRenderSystemPrompt(input) + "\\n<!-- purity-control " + String(Date.now()) + " " + String(Math.random()) + " -->";
+}
+function __ctrlRenderSystemPrompt(input) {`
+      : (() => {
+          const body = bodies[mode];
+          if (body === undefined) throw new Error(`unknown control mode ${mode}`);
+          return `${anchor}\n  ${body}\n`;
+        })();
+
   module.registerHooks({
     load(url, context, nextLoad) {
       const result = nextLoad(url, context);
       if (!url.endsWith('/dist/core/system-prompt.js')) return result;
       const source = String(result.source);
       if (!source.includes(anchor)) throw new Error('negative control anchor not found in system-prompt.js');
-      return { ...result, source: `${prelude}${source.replace(anchor, `${anchor}\n  ${body}\n`)}` };
+      return { ...result, source: `${prelude}${source.replace(anchor, replacement)}` };
     },
   });
 }
@@ -429,12 +720,21 @@ function nativeCompileInput(preparedToolProjection) {
 // namespaces, then — and only then — the fork's module graph.
 installFilesystemMonitors();
 installCapabilityMonitors();
+installNondeterminismMonitors();
 installEnvironmentMonitor();
 module.syncBuiltinESMExports();
 
 if (config.mode !== 'clean') installNegativeControl(config.mode);
 
-const report = { mode: config.mode, node: process.version, failure: null };
+const report = {
+  mode: config.mode,
+  skew: config.skew ?? null,
+  node: process.version,
+  nodeMajor: Number.parseInt(process.versions.node.split('.')[0], 10),
+  failure: null,
+  monitorInstallFailures,
+  monitorsAbsent,
+};
 
 try {
   phase = 'load';
@@ -465,12 +765,14 @@ for (const name of ['load', 'compileCold', 'compileWarm']) {
     events: inPhase(events, name),
     envReads: inPhase(envReads, name),
     envWrites: inPhase(envWrites, name),
+    nondeterminism: inPhase(nondeterminism, name),
   };
 }
 report.setupEnvWrites = inPhase(envWrites, 'setup');
 report.control = {
   fs: globalThis.__piPurityControlFs ?? null,
   env: globalThis.__piPurityControlEnv ?? null,
+  envDescriptor: globalThis.__piPurityControlEnvDescriptor ?? null,
 };
 
 writeReport(config.reportPath, JSON.stringify(report), 'utf8');
