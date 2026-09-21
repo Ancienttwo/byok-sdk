@@ -338,6 +338,7 @@ export type {
   InputPreparationRuntimeIdentityV1,
   InputPreparationScopeClaimV1,
   InputPreparationSelectionV1,
+  InputPreparationSkillV1,
   InputPreparationSnapshotV1,
   InputPreparationSourceV1,
   InputPreparationStateV1,

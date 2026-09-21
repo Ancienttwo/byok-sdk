@@ -2,7 +2,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import type { PreparedSessionInputV2 } from '@earendil-works/pi-coding-agent/prepared-session-input';
+import type { PreparedSessionInputV3 } from '@earendil-works/pi-coding-agent/prepared-session-input';
 import type {
   CodingAgentInputSnapshot,
   HostCanonicalAssistantMessage,
@@ -67,17 +67,28 @@ import { PI_PACKAGE_NAME, resolvePiRuntimeIdentity } from './resolve-bin';
  * MANIFEST rather than the module.
  */
 
-type PrepareCodingAgentSessionInput =
-  typeof import('@earendil-works/pi-coding-agent/prepared-session-input').prepareCodingAgentSessionInput;
+/**
+ * The two native entries the compile stage uses: the pure compile itself, and
+ * the fork's own model-visible tool projection. Both come from the SAME dynamic
+ * import, because a second import of the same subpath is a second chance for
+ * the projection and the compiler to disagree about what a tool declaration is.
+ */
+type NativePreparedSessionInput = Pick<
+  typeof import('@earendil-works/pi-coding-agent/prepared-session-input'),
+  'prepareCodingAgentSessionInput' | 'preparedToolProjection'
+>;
 
 /** Memoized so the native graph is evaluated at most once per process. */
-let nativePrepare: Promise<PrepareCodingAgentSessionInput> | undefined;
+let nativePreparedSessionInput: Promise<NativePreparedSessionInput> | undefined;
 
-function loadNativePrepare(): Promise<PrepareCodingAgentSessionInput> {
-  nativePrepare ??= import('@earendil-works/pi-coding-agent/prepared-session-input').then(
-    (module) => module.prepareCodingAgentSessionInput,
+function loadNativePreparedSessionInput(): Promise<NativePreparedSessionInput> {
+  nativePreparedSessionInput ??= import('@earendil-works/pi-coding-agent/prepared-session-input').then(
+    (module) => ({
+      prepareCodingAgentSessionInput: module.prepareCodingAgentSessionInput,
+      preparedToolProjection: module.preparedToolProjection,
+    }),
   );
-  return nativePrepare;
+  return nativePreparedSessionInput;
 }
 
 /**
@@ -89,7 +100,7 @@ function loadNativePrepare(): Promise<PrepareCodingAgentSessionInput> {
  * (`unsupported_compiler_version`, fail closed). A fork that compiles to a
  * different contract is refused rather than read through this one.
  */
-export const SUPPORTED_PREPARED_COMPILER_VERSION = 2;
+export const SUPPORTED_PREPARED_COMPILER_VERSION = 3;
 
 /** The residual value classes the supported compiler contract defines. Copied, never invented. */
 const SUPPORTED_RESIDUAL_VALUE_CLASSES: ReadonlySet<string> = new Set<InputPreparationResidualValueClassV1>([
@@ -121,7 +132,7 @@ export interface CompiledPreparedInput {
   /** Every top-level key of D outside P(D), classified by the native compiler. */
   readonly residual: readonly InputPreparationResidualKeyV1[];
   /** The full native envelope, retained verbatim for the durable artifact. */
-  readonly envelope: PreparedSessionInputV2;
+  readonly envelope: PreparedSessionInputV3;
 }
 
 /** Explicit, already-authorized and already-authority-resolved compile input. */
@@ -404,24 +415,26 @@ export function createPiInputPreparationCompiler(
     async compile(request: CompilePreparedInputRequest): Promise<CompiledPreparedInput> {
       // Outside the try below on purpose: a native package that cannot be
       // LOADED is a closure fault, not an input this compiler refused.
-      let prepare: PrepareCodingAgentSessionInput;
+      let native: NativePreparedSessionInput;
       try {
-        prepare = await loadNativePrepare();
+        native = await loadNativePreparedSessionInput();
       } catch (cause) {
         throw new InputPreparationRuntimeIdentityError(
           `${PI_PACKAGE_NAME}/prepared-session-input could not be loaded; no input can be prepared`,
           { cause },
         );
       }
-      let envelope: PreparedSessionInputV2;
+      let envelope: PreparedSessionInputV3;
       try {
-        envelope = await prepare({
+        envelope = await native.prepareCodingAgentSessionInput({
           // Structurally the native `CodingAgentInputSnapshot`. The wire cannot
           // carry a typebox `TSchema` brand or a `Tool`'s executable fields, so
           // the already key-exact validated JSON schema crosses here as the
           // model-visible `parameters` it is. This is a pass-through, not a
-          // translation: no field is renamed, defaulted or inferred, and the
-          // native compiler remains the only authority on what it means.
+          // translation: no field is defaulted or inferred, and the native
+          // compiler remains the only authority on what it means. The ONE
+          // rename is `docsPaths`, whose wire names are this SDK's frozen
+          // contract and not upstream Pi's parameter names.
           snapshot: {
             prompt: {
               ...(request.snapshot.prompt.customPrompt === undefined
@@ -433,17 +446,31 @@ export function createPiInputPreparationCompiler(
               cwd: request.snapshot.prompt.cwd,
               selectedTools: [...request.snapshot.prompt.selectedTools],
               toolSnippets: { ...request.snapshot.prompt.toolSnippets },
+              toolGuidelines: Object.fromEntries(
+                Object.entries(request.snapshot.prompt.toolGuidelines).map(([name, lines]) => [name, [...lines]]),
+              ),
               promptGuidelines: [...request.snapshot.prompt.promptGuidelines],
               contextFiles: request.snapshot.prompt.contextFiles.map((file) => ({ path: file.path, content: file.content })),
-              formattedSkills: request.snapshot.prompt.formattedSkills,
-              docsPaths: { ...request.snapshot.prompt.docsPaths },
+              skills: request.snapshot.prompt.skills.map((skill) => ({
+                name: skill.name,
+                description: skill.description,
+                filePath: skill.filePath,
+                disableModelInvocation: skill.disableModelInvocation,
+              })),
+              docsPaths: {
+                readme: request.snapshot.prompt.docsPaths.readmePath,
+                docs: request.snapshot.prompt.docsPaths.docsPath,
+                examples: request.snapshot.prompt.docsPaths.examplesPath,
+              },
             },
             messages: request.snapshot.messages.map(projectPreparedInputMessage),
-            tools: request.snapshot.tools.map((tool) => ({
-              name: tool.name,
-              description: tool.description,
-              parameters: tool.parameters as never,
-            })),
+            // The fork's OWN model-visible tool projection, not a local
+            // restatement of it. A second `{name, description, parameters}`
+            // literal here would be a second authority over what the model is
+            // shown, and it is exactly how `constrainedSampling` — which
+            // reaches the wire as `tools[].strict` on this runtime — used to be
+            // silently stripped out of a request this SDK then counted.
+            tools: request.snapshot.tools.map((tool) => native.preparedToolProjection(tool as never)),
           },
           model: {
             id: request.model.id,
@@ -499,7 +526,7 @@ export function createPiInputPreparationCompiler(
  * a digest that only ever travels beside the bytes it describes is not a check.
  */
 export function verifyCompiledPreparedInput(
-  envelope: PreparedSessionInputV2,
+  envelope: PreparedSessionInputV3,
   runtime: InputPreparationRuntimeIdentityV1,
 ): CompiledPreparedInput {
   // Belt-and-suspenders on the two format tags the artifact claims. The
@@ -526,7 +553,7 @@ export function verifyCompiledPreparedInput(
   if (
     projection === null ||
     typeof projection !== 'object' ||
-    projection.version !== 2 ||
+    projection.version !== 3 ||
     (projection.kind !== 'content_complete' && projection.kind !== 'unknown') ||
     typeof projection.digest !== 'string'
   ) {
@@ -566,7 +593,7 @@ export function verifyCompiledPreparedInput(
     requestDigest: envelope.providerRequest.digest,
     envelopeDigest: envelope.digest,
     toolManifestDigest: envelope.toolManifest.digest,
-    projection: { version: 2, kind: projection.kind, digest: projection.digest },
+    projection: { version: 3, kind: projection.kind, digest: projection.digest },
     residual,
     envelope,
   };

@@ -80,11 +80,18 @@ import {
  * which residual keys its request carried, and inventing either is precisely
  * the shadow accounting this contract forbids.
  *
+ * 5 is the first version written against the 0.86 runtime contract: the
+ * retained snapshot carries `prompt.skills` and `prompt.toolGuidelines` in
+ * place of `prompt.formattedSkills`, and the artifact's projection declares
+ * contract v3. A version-4 record cannot be read forward either — its prompt
+ * was rendered by a renderer this build no longer has, so the request it
+ * describes cannot be re-derived, and translating it would be inventing bytes.
+ *
  * A record at any other version is refused — see
  * {@link InputPreparationUnsupportedRecordVersionError}. There is no
  * compatibility read.
  */
-export const INPUT_PREPARATION_RECORD_VERSION = 4;
+export const INPUT_PREPARATION_RECORD_VERSION = 5;
 
 /** The durable idempotency key. Never a task id, and never caller-asserted: `scopeId` comes from the trusted authority grant. */
 export interface InputPreparationRecordKey {
