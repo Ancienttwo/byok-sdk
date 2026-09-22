@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-09-22T15:32:44+0800 -->
+<!-- updated_at: 2026-09-23T00:34:05+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-09-22T15:32:44+0800
-> **Source Branch**: claude/prepared-byok-provider-closeout
-> **Source Commit**: 4d3c6067
+> **Updated At**: 2026-09-23T00:34:05+0800
+> **Source Branch**: claude/release-0.19.0-closeout
+> **Source Commit**: d7507af9
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -56,7 +56,7 @@ This file is an ignored local read model derived from this worktree's artifacts.
 - `tasks/workstreams/sdk/sdk-root/20260905-sdk-root.md`: status=acceptance, current_slice=T7 exact AgentRef reliability identities, then replacement acceptance, source_plan=plans/plan-20260905-0124-issues-135-144-reliability.md
 ## Handoff
 
-- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: S-5 Required checks, gate, PR
+- Exact Next Step: (none)
 
 ## Checks
 
@@ -64,18 +64,19 @@ This file is an ignored local read model derived from this worktree's artifacts.
 
 ## Git Status
 
-- Summary: 9 changed/untracked path(s)
+- Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260921-0016-prepared-byok-provider.md
- D tasks/contracts/20260921-0016-prepared-byok-provider.contract.md
- D tasks/notes/20260921-0016-prepared-byok-provider.notes.md
- D tasks/reviews/20260921-0016-prepared-byok-provider.review.md
-?? plans/archive/plan-20260921-0016-prepared-byok-provider.md
-?? tasks/archive/contract-20260922-1532-prepared-byok-provider.md
-?? tasks/archive/notes-20260922-1532-prepared-byok-provider.md
-?? tasks/archive/review-20260922-1532-prepared-byok-provider.md
-?? tasks/archive/todo-20260922-1532-prepared-byok-provider.md
+ D plans/plan-20260922-1536-release-0-19-0.md
+ D tasks/contracts/20260922-1536-release-0-19-0.contract.md
+ D tasks/notes/20260922-1536-release-0-19-0.notes.md
+ D tasks/reviews/20260922-1536-release-0-19-0.review.md
+ M tasks/todos.md
+?? plans/archive/plan-20260922-1536-release-0-19-0.md
+?? tasks/archive/contract-20260923-0034-release-0-19-0.md
+?? tasks/archive/notes-20260923-0034-release-0-19-0.md
+?? tasks/archive/review-20260923-0034-release-0-19-0.md
+?? tasks/archive/todo-20260923-0034-release-0-19-0.md
 ```
 
 ## Source Artifacts

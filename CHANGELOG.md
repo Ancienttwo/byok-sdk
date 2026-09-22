@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.19.0 / @byok-sdk/keys 0.6.0 — 2026-09-22 (unpublished until the registry confirms)
+## 0.19.0 / @byok-sdk/keys 0.6.0 — 2026-09-22 (published; tag `v0.19.0` at `9408ed7b`)
 
 - **Changed (Pi runtime pin, BREAKING wire change)** — rebase the prepared-input
   lane onto the fork's 0.86 line: `@byok-sdk/pi-coding-agent@0.86.1001` and
