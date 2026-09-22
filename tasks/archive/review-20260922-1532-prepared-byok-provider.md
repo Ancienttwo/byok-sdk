@@ -1,9 +1,19 @@
+> **Archived**: 2026-09-22 15:32
+> **Related Plan**: plans/archive/plan-20260921-0016-prepared-byok-provider.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260922-1532
+> **Archive Projection V1**: `plans/plan-20260921-0016-prepared-byok-provider.md` => `plans/archive/plan-20260921-0016-prepared-byok-provider.md`
+> **Archive Projection V1**: `tasks/notes/20260921-0016-prepared-byok-provider.notes.md` => `tasks/archive/notes-20260922-1532-prepared-byok-provider.md`
+> **Archive Projection V1**: `tasks/contracts/20260921-0016-prepared-byok-provider.contract.md` => `tasks/archive/contract-20260922-1532-prepared-byok-provider.md`
+> **Archive Projection V1**: `tasks/reviews/20260921-0016-prepared-byok-provider.review.md` => `tasks/archive/review-20260922-1532-prepared-byok-provider.md`
+
 # Task Review: prepared-byok-provider
 
 > **Status**: Accepted
-> **Plan**: plans/plan-20260921-0016-prepared-byok-provider.md
-> **Contract**: tasks/contracts/20260921-0016-prepared-byok-provider.contract.md
-> **Notes File**: tasks/notes/20260921-0016-prepared-byok-provider.notes.md
+> **Plan**: plans/archive/plan-20260921-0016-prepared-byok-provider.md
+> **Contract**: tasks/archive/contract-20260922-1532-prepared-byok-provider.md
+> **Notes File**: tasks/archive/notes-20260922-1532-prepared-byok-provider.md
 > **Checks File**: .ai/harness/checks/latest.json
 > **Last Updated**: 2026-09-21 00:17
 > **Recommendation**: pass
