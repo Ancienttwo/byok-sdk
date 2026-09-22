@@ -1,11 +1,8 @@
-import childProcess from 'node:child_process';
 import { createHash } from 'node:crypto';
-import fsModule, { existsSync, readFileSync, realpathSync } from 'node:fs';
-import net from 'node:net';
-import os from 'node:os';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   createPiInputPreparationCompiler,
   resolveInstalledPiRuntimeIdentity,
@@ -15,104 +12,30 @@ import {
   type CompilePreparedInputRequest,
 } from '../adapters/pi/input-preparation';
 import { PI_PACKAGE_NAME, resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
-import type { InputPreparationCompiledSnapshotV1 } from '../input-preparation';
+import { preparedCompileRequest as compileRequest } from './fixtures/prepared-compile-snapshot';
 
 /**
  * B-P2 §10.5 "Completeness/purity" for the ONE module that composes the native
  * package: `adapters/pi/input-preparation.ts`.
  *
- * Two independent purity proofs, because each one alone has a hole:
+ * This file owns the CONTRACT half: what the compile produces, what the
+ * envelope boundary refuses, and the STATIC import closure of the native dist
+ * files the compile path loads. The static closure cannot be defeated by ESM
+ * binding semantics — a named import that a monkeypatch would miss still shows
+ * up as an import specifier — and it is the check that keeps holding after a
+ * fork bump.
  *
- * 1. A STATIC closure assertion over the native dist files the compile path
- *    actually loads. It cannot be defeated by ESM binding semantics — a named
- *    import that a later monkeypatch would miss still shows up as an import
- *    specifier here — and it is the check that keeps holding after a fork
- *    bump.
- * 2. RUNTIME traps on the surfaces reachable without a bound import at all:
- *    the global `fetch`, the live `process` object, `os.homedir`, and the
- *    `node:fs` / `node:child_process` / `node:net` namespace objects. These
- *    prove the compile that just ran touched nothing, for this exact input.
+ * CALL-TIME purity is NOT proven here. It is proven in
+ * `pi-compile-purity.test.ts`, which measures a real compile in an isolated
+ * child process whose monitors are installed before the fork's module graph
+ * exists. An in-process trap cannot do it: the fork's helpers bind NAMED
+ * imports (`dist/config.js`, `dist/core/skills.js`, `dist/utils/paths.js`),
+ * and a binding taken before the patch resolves through a builtin ESM
+ * namespace the patch never reached.
  *
- * Neither performs a live provider or tokenizer call, and nothing in this file
+ * Nothing in this file performs a live provider or tokenizer call, and nothing
  * creates a task, claim, Execution or nonce.
  */
-
-/**
- * The full 0.86 prompt surface, deliberately non-empty in every field the
- * rebase added or changed.
- *
- * `toolGuidelines`, `skills` and a host-canonical prefix are stated here rather
- * than in a separate case because they are what the rebase moved: an empty
- * fixture would compile the same bytes the 0.85 line did and prove nothing
- * about the renderer that now produces them. `constrainedSampling` is likewise
- * carried on the tools exactly as an 0.86 built-in declares it, so the request
- * this file counts is the one the runtime would actually send.
- */
-function snapshot(): InputPreparationCompiledSnapshotV1 {
-  return {
-    prompt: {
-      cwd: '/workspace/project',
-      selectedTools: ['read', 'bash'],
-      toolSnippets: { read: 'read snippet', bash: 'bash snippet' },
-      toolGuidelines: { read: ['read before you write'], bash: ['quote every path'] },
-      promptGuidelines: ['prefer small diffs'],
-      contextFiles: [{ path: 'AGENTS.md', content: '# agents\nbe precise\n' }],
-      skills: [
-        {
-          name: 'review',
-          description: 'review a diff before it is proposed',
-          filePath: '/workspace/project/.skills/review/SKILL.md',
-          disableModelInvocation: false,
-        },
-      ],
-      docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
-    },
-    messages: [
-      // A host-canonical prefix: the host asserts this text was already said,
-      // and it carries no provenance. The context still ends on a user turn,
-      // which the native compile boundary requires.
-      { role: 'user', content: 'what does this repository do?', timestamp: 1_699_999_999_000 },
-      { role: 'assistant', origin: 'host_canonical', content: 'It is a BYOK SDK.', timestamp: 1_699_999_999_500 },
-      { role: 'user', content: 'summarise the repository', timestamp: 1_700_000_000_000 },
-    ],
-    tools: [
-      {
-        name: 'read',
-        description: 'read a file',
-        parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
-        constrainedSampling: { type: 'json_schema', strict: 'prefer' },
-      },
-      {
-        name: 'bash',
-        description: 'run a command',
-        parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] },
-        constrainedSampling: { type: 'json_schema', strict: 'prefer' },
-      },
-    ],
-  };
-}
-
-function compileRequest(overrides: Partial<CompilePreparedInputRequest> = {}): CompilePreparedInputRequest {
-  return {
-    snapshot: snapshot(),
-    model: {
-      id: 'glm-4.6',
-      name: 'GLM 4.6',
-      api: 'openai-completions',
-      provider: 'zai',
-      baseUrl: 'https://api.z.ai/api/coding/paas/v4',
-      reasoning: false,
-      input: ['text'],
-      cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 200_000,
-      maxTokens: 8_192,
-    },
-    options: { cacheRetention: 'none', maxTokens: 4_096, temperature: 0 },
-    binding: { inputIdentity: 'rev-1:src-1', runtimeIdentity: 'runtime-1', policyIdentity: 'policy-1', profileRevision: 'profile-1' },
-    toolExecutors: { read: 'exec:read@1', bash: 'exec:bash@1' },
-    ...overrides,
-  };
-}
 
 /**
  * The static import closure of the native compile path, walked transitively.
@@ -213,23 +136,6 @@ function walkNativeClosure(entry: string): { files: Set<string>; thirdParty: Set
     }
   }
   return { files, thirdParty, builtins };
-}
-
-/** Restores every runtime trap this file installs, whether or not its test failed. */
-const restores: (() => void)[] = [];
-afterEach(() => {
-  while (restores.length > 0) restores.pop()?.();
-});
-
-function trap<T extends object, K extends keyof T>(target: T, key: K, hits: string[], label: string): void {
-  const original = target[key];
-  restores.push(() => {
-    target[key] = original;
-  });
-  target[key] = ((...args: unknown[]) => {
-    hits.push(`${label}(${args.length})`);
-    throw new Error(`purity violation: ${label} was called during the pure compile stage`);
-  }) as unknown as T[K];
 }
 
 describe('B-P2 native composition: runtime identity', () => {
@@ -364,34 +270,20 @@ describe('B-P2 native composition: pure compile', () => {
     expect(declared.requestBody).not.toBe(undeclared.requestBody);
   });
 
-  it('touches no filesystem, process, child-process, socket or network surface while compiling', async () => {
-    // Construct FIRST: the compiler reads the installed manifest exactly once,
-    // at construction, which is outside the pure stage by design.
+  it('writes no environment variable while compiling', async () => {
+    // The one assertion the old in-process trap test could actually make.
+    // Comparing `process.env` before and after detects a WRITE and nothing
+    // else — a READ leaves it byte-identical — so the read side, and every
+    // other call-time surface, moved to the isolated gate in
+    // `pi-compile-purity.test.ts`. This stays because a compile that mutated
+    // the ambient environment would be a defect this cheap check still catches
+    // on the SDK's own call path.
     const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
-
-    const hits: string[] = [];
-    trap(fsModule, 'readFileSync', hits, 'fs.readFileSync');
-    trap(fsModule, 'writeFileSync', hits, 'fs.writeFileSync');
-    trap(fsModule, 'existsSync', hits, 'fs.existsSync');
-    trap(fsModule, 'openSync', hits, 'fs.openSync');
-    trap(fsModule.promises, 'readFile', hits, 'fs.promises.readFile');
-    trap(fsModule.promises, 'writeFile', hits, 'fs.promises.writeFile');
-    trap(fsModule.promises, 'open', hits, 'fs.promises.open');
-    trap(childProcess, 'spawn', hits, 'child_process.spawn');
-    trap(childProcess, 'spawnSync', hits, 'child_process.spawnSync');
-    trap(childProcess, 'execSync', hits, 'child_process.execSync');
-    trap(net, 'createConnection', hits, 'net.createConnection');
-    trap(net, 'connect', hits, 'net.connect');
-    trap(os, 'homedir', hits, 'os.homedir');
-    trap(process, 'cwd', hits, 'process.cwd');
-    trap(process, 'chdir', hits, 'process.chdir');
-    trap(globalThis, 'fetch', hits, 'globalThis.fetch');
 
     const envBefore = JSON.stringify(process.env);
     const compiled = await compiler.compile(compileRequest());
     const envAfter = JSON.stringify(process.env);
 
-    expect(hits).toEqual([]);
     expect(envAfter).toBe(envBefore);
     expect(compiled.requestBody.length).toBeGreaterThan(0);
   });
@@ -434,9 +326,11 @@ describe('B-P2 native composition: pure compile', () => {
     // `child-process.js` (`node:child_process`), so the old blanket rule would
     // now be a false statement rather than a check.
     //
-    // CALL-TIME purity is proven by the runtime traps in the sibling test
-    // above, which are unchanged and still see zero hits for this exact input.
-    // IMPORT-TIME effects are guarded elsewhere: by the fork's own entry-graph
+    // CALL-TIME purity is proven by `pi-compile-purity.test.ts`, not here and
+    // not by an in-process trap: that gate measures a real compile of this
+    // same fixture in a child process whose monitors are installed before the
+    // fork's graph loads, so a read through one of those named bindings is
+    // visible. IMPORT-TIME effects are guarded by the fork's own entry-graph
     // forbid list, and at this SDK by the sealed-host resolution tripwire
     // (`pi-s2-bundle-resolution.test.ts`). The files below are the exact set the
     // entry reaches, so a new one is a reviewable fact here too.
