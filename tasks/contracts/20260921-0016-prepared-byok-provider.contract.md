@@ -59,13 +59,13 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[]}
+{"protocol":1,"oracles":[{"id":"prepared-lane-suites-against-the-pinned-fork","kind":"deterministic_test","paths":["*"]},{"id":"isolated-release-pack-real-bins","kind":"runtime_readback","paths":["*"]}]}
 ```
 
 ## Acceptance Policy
 
 ```json
-{"protocol":2,"reviewer":"gatekeeper","source":"independent-gate","user_waiver":"allowed"}
+{"protocol":2,"reviewer":"Codex","source":"codex-review","user_waiver":"allowed"}
 ```
 
 ## Allowed Paths
