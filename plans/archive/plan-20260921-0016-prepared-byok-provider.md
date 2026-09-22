@@ -1,6 +1,16 @@
+> **Archived**: 2026-09-22 15:32
+> **Related Plan**: plans/archive/plan-20260921-0016-prepared-byok-provider.md
+> **Outcome**: Completed
+> **Lifecycle**: plan
+> **Parent Run ID**: run-20260922-1532
+> **Archive Projection V1**: `plans/plan-20260921-0016-prepared-byok-provider.md` => `plans/archive/plan-20260921-0016-prepared-byok-provider.md`
+> **Archive Projection V1**: `tasks/notes/20260921-0016-prepared-byok-provider.notes.md` => `tasks/archive/notes-20260922-1532-prepared-byok-provider.md`
+> **Archive Projection V1**: `tasks/contracts/20260921-0016-prepared-byok-provider.contract.md` => `tasks/archive/contract-20260922-1532-prepared-byok-provider.md`
+> **Archive Projection V1**: `tasks/reviews/20260921-0016-prepared-byok-provider.review.md` => `tasks/archive/review-20260922-1532-prepared-byok-provider.md`
+
 # Plan: Prepared lane admits BYOK-projected provider models
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260921-0016
 > **Slug**: prepared-byok-provider
 > **Artifact Level**: work-package
@@ -9,9 +19,9 @@
 > **Rollback Surface**: revert the single SDK PR (schema fields are optional and additive; the pin returns to `pi-coding-agent@0.85.1006` / `pi-ai@0.85.1005`); the fork build stays published but unreferenced
 > **Spec**: `docs/spec.md`
 > **Research**: `docs/researches/runtime-input-preparation-contract.md` (§17 declared limit "Prepared mode admits only openai-completions/zai per the B-P1 validator", §18/§18b fork distribution)
-> **Task Contract**: `tasks/contracts/20260921-0016-prepared-byok-provider.contract.md`
-> **Task Review**: `tasks/reviews/20260921-0016-prepared-byok-provider.review.md`
-> **Implementation Notes**: `tasks/notes/20260921-0016-prepared-byok-provider.notes.md`
+> **Task Contract**: `tasks/archive/contract-20260922-1532-prepared-byok-provider.md`
+> **Task Review**: `tasks/archive/review-20260922-1532-prepared-byok-provider.md`
+> **Implementation Notes**: `tasks/archive/notes-20260922-1532-prepared-byok-provider.md`
 
 ## Agentic Routing
 - Selected route: parent-owned P1/P2/P3 (shared contract + pinned runtime), execution delegated to workers, acceptance through `gatekeeper`.
@@ -24,16 +34,16 @@
 ## Workflow Inventory
 Complete this inventory before implementation. If any line is unknown, keep the plan in Draft and fill it before projection.
 
-- Active plan: `plans/plan-20260921-0016-prepared-byok-provider.md`
-- Sprint contract: `tasks/contracts/20260921-0016-prepared-byok-provider.contract.md`
-- Sprint review: `tasks/reviews/20260921-0016-prepared-byok-provider.review.md`
-- Implementation notes: `tasks/notes/20260921-0016-prepared-byok-provider.notes.md`
+- Active plan: `plans/archive/plan-20260921-0016-prepared-byok-provider.md`
+- Sprint contract: `tasks/archive/contract-20260922-1532-prepared-byok-provider.md`
+- Sprint review: `tasks/archive/review-20260922-1532-prepared-byok-provider.md`
+- Implementation notes: `tasks/archive/notes-20260922-1532-prepared-byok-provider.md`
 - Deferred-goal ledger: `tasks/todos.md`
 - Current checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
-- Scope authority: `tasks/contracts/20260921-0016-prepared-byok-provider.contract.md` `allowed_paths`
+- Scope authority: `tasks/archive/contract-20260922-1532-prepared-byok-provider.md` `allowed_paths`
 - Concurrency rule: `.ai/harness/active-plan` selects the active plan for this worktree when present; `.ai/harness/active-worktree` records the owning worktree. If another worktree already owns active work, open or switch to the matching worktree instead of serializing unrelated plans.
-- Execution isolation: approved contract-level work projects through `repo-harness run plan-to-todo --plan plans/plan-20260921-0016-prepared-byok-provider.md` and may start `repo-harness run contract-worktree start --plan plans/plan-20260921-0016-prepared-byok-provider.md`.
+- Execution isolation: approved contract-level work projects through `repo-harness run plan-to-todo --plan plans/archive/plan-20260921-0016-prepared-byok-provider.md` and may start `repo-harness run contract-worktree start --plan plans/archive/plan-20260921-0016-prepared-byok-provider.md`.
 
 ## Approach
 ### Strategy
@@ -82,11 +92,11 @@ Host `selection.model{…, thinkingLevelMap?, compat?}` → protocol schema → 
 | Version authority | Medium | Medium | no version bump in this plan unless `check:version-authority` requires one for a protocol change — then stop and ask the Owner |
 
 ## Task Contracts
-- Contract file: `tasks/contracts/20260921-0016-prepared-byok-provider.contract.md`
-- Review file: `tasks/reviews/20260921-0016-prepared-byok-provider.review.md`
-- Implementation notes file: `tasks/notes/20260921-0016-prepared-byok-provider.notes.md`
+- Contract file: `tasks/archive/contract-20260922-1532-prepared-byok-provider.md`
+- Review file: `tasks/archive/review-20260922-1532-prepared-byok-provider.md`
+- Implementation notes file: `tasks/archive/notes-20260922-1532-prepared-byok-provider.md`
 - Template: `.claude/templates/contract.template.md`
-- Verification command: `repo-harness run verify-contract --contract tasks/contracts/20260921-0016-prepared-byok-provider.contract.md --strict`
+- Verification command: `repo-harness run verify-contract --contract tasks/archive/contract-20260922-1532-prepared-byok-provider.md --strict`
 - Active plan rule: `.ai/harness/active-plan` is authoritative for this worktree when present; `.ai/harness/active-worktree` records the owning worktree. Do not infer active execution from the latest non-archived plan.
 
 ## Handoff

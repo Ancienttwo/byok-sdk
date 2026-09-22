@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-09-22T14:57:22+0800 -->
+<!-- updated_at: 2026-09-22T15:32:44+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-09-22T14:57:22+0800
-> **Source Branch**: claude/pi-086-closeout
-> **Source Commit**: 2bb09a47
+> **Updated At**: 2026-09-22T15:32:44+0800
+> **Source Branch**: claude/prepared-byok-provider-closeout
+> **Source Commit**: 4d3c6067
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -39,8 +39,6 @@ This file is an ignored local read model derived from this worktree's artifacts.
 - linked-worktree-01a489cf24d8: active-worktree owner -> self
 - linked-worktree-bb4375a0963f: plans/plan-20260916-0041-pi-enrollment-prototype.md
 - linked-worktree-bb4375a0963f: active-worktree owner -> self
-- linked-worktree-27e0ca176eba: plans/plan-20260921-0016-prepared-byok-provider.md
-- linked-worktree-27e0ca176eba: active-worktree owner -> self
 - linked-worktree-b3964037efe9: plans/plan-20260919-0532-winsw-unlink-retry.md
 - linked-worktree-b3964037efe9: active-worktree owner -> self
 - linked-worktree-832d345da791: plans/plan-20260917-1950-wp1-smoke-programfiles.md
@@ -58,7 +56,7 @@ This file is an ignored local read model derived from this worktree's artifacts.
 - `tasks/workstreams/sdk/sdk-root/20260905-sdk-root.md`: status=acceptance, current_slice=T7 exact AgentRef reliability identities, then replacement acceptance, source_plan=plans/plan-20260905-0124-issues-135-144-reliability.md
 ## Handoff
 
-- Exact Next Step: (none)
+- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: S-5 Required checks, gate, PR
 
 ## Checks
 
@@ -66,19 +64,18 @@ This file is an ignored local read model derived from this worktree's artifacts.
 
 ## Git Status
 
-- Summary: 10 changed/untracked path(s)
+- Summary: 9 changed/untracked path(s)
 
 ```
- D plans/plan-20260921-1416-pi-086-rebase.md
- D tasks/contracts/20260921-1416-pi-086-rebase.contract.md
- D tasks/notes/20260921-1416-pi-086-rebase.notes.md
- D tasks/reviews/20260921-1416-pi-086-rebase.review.md
- M tasks/todos.md
-?? plans/archive/plan-20260921-1416-pi-086-rebase.md
-?? tasks/archive/contract-20260922-1457-pi-086-rebase.md
-?? tasks/archive/notes-20260922-1457-pi-086-rebase.md
-?? tasks/archive/review-20260922-1457-pi-086-rebase.md
-?? tasks/archive/todo-20260922-1457-pi-086-rebase.md
+ D plans/plan-20260921-0016-prepared-byok-provider.md
+ D tasks/contracts/20260921-0016-prepared-byok-provider.contract.md
+ D tasks/notes/20260921-0016-prepared-byok-provider.notes.md
+ D tasks/reviews/20260921-0016-prepared-byok-provider.review.md
+?? plans/archive/plan-20260921-0016-prepared-byok-provider.md
+?? tasks/archive/contract-20260922-1532-prepared-byok-provider.md
+?? tasks/archive/notes-20260922-1532-prepared-byok-provider.md
+?? tasks/archive/review-20260922-1532-prepared-byok-provider.md
+?? tasks/archive/todo-20260922-1532-prepared-byok-provider.md
 ```
 
 ## Source Artifacts
