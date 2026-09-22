@@ -33,11 +33,14 @@ import { preparedCompileRequest } from './fixtures/prepared-compile-snapshot';
  * cold module load, first compile, second compile — and this file asserts on
  * the report.
  *
- * What the gate is worth is established by the three NEGATIVE CONTROLS below.
- * Each rewrites, in memory only, a module the compile really executes so that
- * it reads a canary file through a named `node:fs` import, reads a fixture
- * environment variable, or spawns a process and opens a socket. All three must
- * show up in the report, attributed to that file, or the gate proves nothing.
+ * What the gate is worth is established by the NEGATIVE CONTROLS below. Each
+ * rewrites, in memory only, a module the compile really executes so that it
+ * reads a canary file through a named `node:fs` import, reads a fixture
+ * environment variable, spawns a process and opens a socket, appends the clock
+ * and `Math.random()` to the rendered prompt, or draws bytes through a named
+ * `import { getRandomValues } from "node:crypto"` and puts them in the prompt.
+ * Each must show up in the report, attributed to that file, or the gate proves
+ * nothing.
  *
  * No network, no provider, no credential: the probe's only child process is
  * `node -e ""` inside one control, and its only socket is a refused loopback
@@ -107,7 +110,12 @@ interface ProbeReport {
   readonly compileCold: ProbePhase;
   readonly compileWarm: ProbePhase;
   readonly setupEnvWrites: ProbeEnvEvent[];
-  readonly control: { fs: string | null; env: string | null; envDescriptor: string | null };
+  readonly control: {
+    fs: string | null;
+    env: string | null;
+    envDescriptor: string | null;
+    random: string | null;
+  };
 }
 
 interface ProbeRun {
@@ -340,12 +348,17 @@ const EXPECTED_ABSENT_MONITORS = [
   { api: 'fs.promises.writev', reason: 'absent' },
   // A non-configurable getter-only property on the `node:crypto` CJS exports
   // object on both 22 and 24, so no assignment and no `defineProperty` can
-  // replace it. The generator itself is still watched where it is writable —
-  // `globalThis.crypto.getRandomValues` — and `crypto.randomBytes` /
-  // `crypto.randomUUID` on `node:crypto` install normally. The one unwatched
-  // shape is therefore `import { getRandomValues } from "node:crypto"`, and
-  // it is a determinism surface rather than a security one; the forced-skew
-  // case below is what would catch a value from it reaching D.
+  // install a DIRECT wrapper there. `unwritable` states exactly that fact and
+  // nothing more: the surface is still covered, INDIRECTLY, because Node's own
+  // `node:crypto.getRandomValues` is a forwarding function —
+  // `function getRandomValues(array) { return lazyWebCrypto().crypto.getRandomValues(array); }`
+  // — that looks the WebCrypto method up at CALL time. The monitor installed on
+  // `globalThis.crypto.getRandomValues` therefore sees all three entry shapes:
+  // `crypto.getRandomValues(...)`, a CJS reference captured before the monitor,
+  // and an ESM `import { getRandomValues } from "node:crypto"` bound before it.
+  // The evidence is control (e) below — `control-getrandomvalues` calls the
+  // named import through a binding captured at module load, and the call is
+  // recorded under `globalThis.crypto.getRandomValues` and forced by the skew.
   { api: 'crypto.getRandomValues', reason: 'unwritable' },
   // `randomBytes` is a Node API, not a WebCrypto one; the standard `Crypto`
   // interface has no such method. `node:crypto.randomBytes` covers it.
@@ -362,9 +375,11 @@ let controlEnv: ProbeRun;
 let controlCapability: ProbeRun;
 let controlClockA: ProbeRun;
 let controlClockB: ProbeRun;
+let controlRandomA: ProbeRun;
+let controlRandomB: ProbeRun;
 let everyRun: ProbeRun[];
 
-// One generous budget for ten child processes that each load the fork's whole
+// One generous budget for twelve child processes that each load the fork's whole
 // module graph. The suite's default is 10s and this file is not the place to
 // add a second load-sensitive deadline. They are spawned in ONE `Promise.all`
 // and completion is the child's own exit, so nothing here waits on a clock.
@@ -382,6 +397,8 @@ beforeAll(async () => {
     controlCapability,
     controlClockA,
     controlClockB,
+    controlRandomA,
+    controlRandomB,
   ] = await Promise.all([
     runProbe('clean', 'clean', 'CANARY-CLEAN'),
     runProbe('clean', 'ambient-a', 'CANARY-AMBIENT-A', { ambient: 'long' }),
@@ -393,6 +410,8 @@ beforeAll(async () => {
     runProbe('control-capability', 'control-capability', 'CANARY-CONTROL-CAP'),
     runProbe('control-nondeterminism', 'control-clock-a', 'CANARY-CONTROL-CLOCK-A', { skew: 'a' }),
     runProbe('control-nondeterminism', 'control-clock-b', 'CANARY-CONTROL-CLOCK-B', { skew: 'b' }),
+    runProbe('control-getrandomvalues', 'control-random-a', 'CANARY-CONTROL-RANDOM-A', { skew: 'a' }),
+    runProbe('control-getrandomvalues', 'control-random-b', 'CANARY-CONTROL-RANDOM-B', { skew: 'b' }),
   ]);
   everyRun = [
     clean,
@@ -405,6 +424,8 @@ beforeAll(async () => {
     controlCapability,
     controlClockA,
     controlClockB,
+    controlRandomA,
+    controlRandomB,
   ];
 }, PROBE_TIMEOUT_MS);
 
@@ -673,7 +694,10 @@ describe('B-P2 native composition: the purity gate is falsifiable', () => {
         canary: event.detail.endsWith('private-canary.txt'),
       })),
     ).toEqual([
-      { api: 'fs.readFileSync', origin: 'fork:dist/core/system-prompt.js:163:42', canary: true },
+      // The line is inside the IN-MEMORY rewrite, so it moves with the shared
+      // control prelude rather than with the fork: adding the named
+      // `node:crypto` import for control (e) pushed it from 163 to 165.
+      { api: 'fs.readFileSync', origin: 'fork:dist/core/system-prompt.js:165:42', canary: true },
     ]);
     expect(purityViolations(controlFs.report.compileCold)).not.toEqual([]);
   });
@@ -735,6 +759,54 @@ describe('B-P2 native composition: the purity gate is falsifiable', () => {
     // And the control is a control: nothing about it is a purity violation,
     // which is exactly why the clock needed an assertion of its own.
     expect(purityViolations(controlClockA.report.compileCold)).toEqual([]);
+  });
+
+  it('sees a named node:crypto getRandomValues call through the WebCrypto forwarding path, and D then differs', () => {
+    // Control (e), and the correction it carries. `node:crypto`'s
+    // `getRandomValues` is a non-configurable getter, so no DIRECT wrapper can
+    // be installed there and `monitorsAbsent` says so. That was once read as
+    // "this generator cannot be monitored". It is not: Node's own
+    // `node:crypto.getRandomValues` is a forwarding function that calls
+    // `lazyWebCrypto().crypto.getRandomValues(array)` at CALL time, so the
+    // monitor on `globalThis.crypto.getRandomValues` — which the probe does
+    // install — sees the call whatever shape reached it.
+    //
+    // The control uses the hardest shape on purpose: an ESM
+    // `import { getRandomValues } from "node:crypto"` bound at module top and
+    // captured into a module-scope constant, so the call goes through a
+    // reference taken at load rather than through a property looked up per
+    // call. Coverage that depended on replacing the property would miss it.
+    expect({ a: controlRandomA.report.failure, b: controlRandomB.report.failure }).toEqual({ a: null, b: null });
+
+    // (a) The call is recorded, under the WebCrypto monitor, attributed to the
+    // rewritten file the compile really executes.
+    expect(
+      controlRandomA.report.compileCold.nondeterminism.map((event) => ({
+        api: event.api,
+        origin: originFile(event.origin),
+      })),
+    ).toEqual([{ api: 'globalThis.crypto.getRandomValues', origin: 'fork:dist/core/system-prompt.js' }]);
+
+    // (b) The forced skew reaches the bytes — all-zero under `a`, all-`0xff`
+    // under `b` — and the two rendered bodies differ from each other and from
+    // the clean run. Forcing through the forwarding path is what proves the
+    // coverage is real rather than merely recording.
+    expect({ a: controlRandomA.report.control.random, b: controlRandomB.report.control.random }).toEqual({
+      a: '0000000000000000',
+      b: 'ffffffffffffffff',
+    });
+    expect(controlRandomA.report.requestBody).not.toBe(controlRandomB.report.requestBody);
+    expect(controlRandomA.report.requestBody).not.toBe(clean.report.requestBody);
+    expect(controlRandomB.report.requestBody).not.toBe(clean.report.requestBody);
+
+    // (c) The same predicate the clock control is judged by is non-empty here.
+    expect(nondeterminismOffAllowlist(controlRandomA.report.compileCold)).not.toEqual([]);
+    expect(nondeterminismOffAllowlist(controlRandomB.report.compileCold)).not.toEqual([]);
+
+    // And, like the clock control, this is a determinism control and not a
+    // purity one: drawing random bytes reaches no file, socket or ambient
+    // value.
+    expect(purityViolations(controlRandomA.report.compileCold)).toEqual([]);
   });
 
   it('proves purity for none of the three controls, and for the clean run', () => {

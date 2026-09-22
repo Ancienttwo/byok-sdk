@@ -253,6 +253,14 @@ function install(target, key, api, proxy) {
  * `node:crypto`'s `getRandomValues` is exactly that on Node 22 and 24. The
  * monitor is therefore reported as ABSENT on this runtime, with the same
  * standing as a builtin that does not exist, rather than as a probe bug.
+ *
+ * Absent here means the DIRECT wrapper is not installable. It does not mean
+ * the surface is unwatched: `node:crypto.getRandomValues` is Node's own
+ * forwarding function, `function getRandomValues(array) { return
+ * lazyWebCrypto().crypto.getRandomValues(array); }`, which looks the WebCrypto
+ * method up at CALL time, so the monitor installed on
+ * `globalThis.crypto.getRandomValues` sees every call made through it. The
+ * `control-getrandomvalues` negative control below is the evidence.
  */
 function monitorable(target, key) {
   const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
@@ -597,27 +605,50 @@ function installNegativeControl(mode) {
     'import { readFileSync as __ctrlReadFileSync } from "node:fs";',
     'import { spawnSync as __ctrlSpawnSync } from "node:child_process";',
     'import { connect as __ctrlConnect } from "node:net";',
+    // The named `node:crypto` import whose direct monitor CANNOT be installed
+    // (non-configurable getter), captured into a module-scope constant at
+    // import time so the call below goes through the binding taken at load and
+    // not through a property looked up per call. If coverage depended on the
+    // property being replaceable, this reference would escape.
+    'import { getRandomValues as __ctrlNamedGetRandomValues } from "node:crypto";',
+    'const __ctrlCapturedGetRandomValues = __ctrlNamedGetRandomValues;',
     '',
   ].join('\n');
   const anchor = 'export function buildSystemPrompt(input) {';
 
-  // The fourth control is the only one whose effect has to reach D, so it is
-  // the only one that cannot be a statement at the top of the body: it wraps
-  // the renderer and puts the clock and the generator INTO the rendered
-  // prompt text. Under the two skews that text differs, which is what makes
-  // "D is byte-identical across skews" a falsifiable claim rather than a
-  // property of a fixture that happens to read no clock.
-  const replacement =
-    mode === 'control-nondeterminism'
-      ? `export function buildSystemPrompt(input) {
+  // The last two controls are the ones whose effect has to reach D, so they
+  // cannot be a statement at the top of the body: each wraps the renderer and
+  // puts a nondeterministic value INTO the rendered prompt text. Under the two
+  // skews that text differs, which is what makes "D is byte-identical across
+  // skews" a falsifiable claim rather than a property of a fixture that
+  // happens to read no clock.
+  const rendererWrappers = {
+    'control-nondeterminism': `export function buildSystemPrompt(input) {
   return __ctrlRenderSystemPrompt(input) + "\\n<!-- purity-control " + String(Date.now()) + " " + String(Math.random()) + " -->";
 }
-function __ctrlRenderSystemPrompt(input) {`
-      : (() => {
-          const body = bodies[mode];
-          if (body === undefined) throw new Error(`unknown control mode ${mode}`);
-          return `${anchor}\n  ${body}\n`;
-        })();
+function __ctrlRenderSystemPrompt(input) {`,
+    // The generator whose DIRECT monitor cannot be installed, called through
+    // the binding captured in the prelude. Node's `node:crypto.getRandomValues`
+    // forwards to the WebCrypto method at call time, so the monitor on
+    // `globalThis.crypto.getRandomValues` is what must see this — and under a
+    // skew it is also what forces the bytes that land in the prompt.
+    'control-getrandomvalues': `export function buildSystemPrompt(input) {
+  const __ctrlRandom = new Uint8Array(8);
+  __ctrlCapturedGetRandomValues(__ctrlRandom);
+  const __ctrlRandomHex = Array.from(__ctrlRandom, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  globalThis.__piPurityControlRandom = __ctrlRandomHex;
+  return __ctrlRenderSystemPrompt(input) + "\\n<!-- purity-control-getrandomvalues " + __ctrlRandomHex + " -->";
+}
+function __ctrlRenderSystemPrompt(input) {`,
+  };
+
+  const replacement =
+    rendererWrappers[mode] ??
+    (() => {
+      const body = bodies[mode];
+      if (body === undefined) throw new Error(`unknown control mode ${mode}`);
+      return `${anchor}\n  ${body}\n`;
+    })();
 
   module.registerHooks({
     load(url, context, nextLoad) {
@@ -773,6 +804,7 @@ report.control = {
   fs: globalThis.__piPurityControlFs ?? null,
   env: globalThis.__piPurityControlEnv ?? null,
   envDescriptor: globalThis.__piPurityControlEnvDescriptor ?? null,
+  random: globalThis.__piPurityControlRandom ?? null,
 };
 
 writeReport(config.reportPath, JSON.stringify(report), 'utf8');
