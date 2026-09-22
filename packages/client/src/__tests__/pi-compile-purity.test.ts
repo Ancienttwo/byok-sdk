@@ -327,6 +327,13 @@ const EXPECTED_ABSENT_MONITORS = [
   // and no fd-level read/write — those live on the `FileHandle` a monitored
   // `fs.promises.open` returns, whose fd this probe files under its path.
   { api: 'fs.promises.exists', reason: 'absent' },
+  // `lchmod` is implemented only where the platform has it (macOS); on Linux
+  // Node does not expose it at all, so its absence is a platform fact rather
+  // than a hole — nothing can call a function that does not exist.
+  ...(process.platform === 'darwin' ? [] : [
+    { api: 'fs.lchmod', reason: 'absent' },
+    { api: 'fs.lchmodSync', reason: 'absent' },
+  ]),
   { api: 'fs.promises.read', reason: 'absent' },
   { api: 'fs.promises.readv', reason: 'absent' },
   { api: 'fs.promises.write', reason: 'absent' },
@@ -628,9 +635,15 @@ describe('B-P2 native composition: call-time purity, measured in an isolated chi
       // expected one is the point. Every entry is load-time, and load-time
       // cannot reach D: the byte equality asserted above is the proof, not
       // this list.
-      expect(run.report.load.envReads.map((event) => ({ key: event.key, origin: event.origin }))).toEqual([
-        { key: 'WATCH_REPORT_DEPENDENCIES', origin: '(runtime-internal)' },
-        { key: 'NODE_V8_COVERAGE', origin: '(runtime-internal)' },
+      // The runtime's own two loader keys are read in a platform-dependent
+      // order (Linux reads `NODE_V8_COVERAGE` first), so they are asserted
+      // as a set; the non-runtime entries keep their exact order.
+      const loadEnvReads = run.report.load.envReads.map((event) => ({ key: event.key, origin: event.origin }));
+      expect(loadEnvReads.filter((event) => event.origin === '(runtime-internal)').map((event) => event.key).sort()).toEqual([
+        'NODE_V8_COVERAGE',
+        'WATCH_REPORT_DEPENDENCIES',
+      ]);
+      expect(loadEnvReads.filter((event) => event.origin !== '(runtime-internal)')).toEqual([
         { key: 'OSTYPE', origin: 'dep:which/which.js:2:17' },
         { key: 'OSTYPE', origin: 'dep:which/which.js:3:17' },
         { key: 'PI_PACKAGE_DIR', origin: 'fork:dist/config.js:313:32' },
