@@ -2,8 +2,11 @@
 
 Status: CURRENT boundary contract.
 
-For the prepared 0.18.0 / keys 0.5.0 train, use the
-[release handoff](../../docs/releases/v0.18.0-handoff.md). Latest verified publication remains
+For the prepared 0.19.0 / keys 0.6.0 train, use the
+[release handoff](../../docs/releases/v0.19.0-handoff.md). The registry's current
+`latest` is 0.18.0 / keys 0.5.0, published on 2026-09-10 from the `v0.18.0` tag
+(`7b26ef5f`) — see its [release notes](../../docs/releases/v0.18.0.md); the last
+publication with a written receipt in this repository is
 [0.17.0 / keys 0.4.3](../../docs/releases/v0.17.0-publication.md).
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
@@ -21,9 +24,14 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 ## Version selection
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
-The 0.18.0 / keys 0.5.0 train stabilizes the previously selected breaking RC:
-required custom-store reads and explicit Pi profile/storage contracts make a patch
-inappropriate. Version preparation does not authorize registry publication.
+The 0.19.0 / keys 0.6.0 train carries two breaking cuts, so a patch is
+inappropriate on either line: the input-preparation wire moves to request
+version 4 / record version 5 / compiler and projection 3 with no reader for the
+previous shapes, and the keys launcher now REQUIRES
+`--runtime-entry {pi-rpc, pi-prepared}`. The SDK minor is Owner-approved;
+the keys minor follows the same policy clause ("any pre-1.0 breaking cut")
+and is stated in the handoff for explicit confirmation before publication.
+Version preparation does not authorize registry publication.
 
 ## Release checklist
 

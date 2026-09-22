@@ -7,17 +7,20 @@ composition over Postgres and R2.
 
 ## Release status
 
-This branch prepares **0.18.0**, with independent keys **0.5.0**.
-These are unpublished release candidates; use verified local tarballs
-until a separately authorized publication. See the [release handoff](docs/releases/v0.18.0-handoff.md). The package install examples
-below target that future candidate, not the current npm registry.
+This branch prepares **0.19.0**, with independent keys **0.6.0**.
+These are unpublished; use verified local tarballs
+until a separately authorized publication. See the [release notes](docs/releases/v0.19.0.md)
+and the [release handoff](docs/releases/v0.19.0-handoff.md). The package install
+examples below target that future candidate, not the current npm registry.
 
-The previous stable release is **0.17.0**, with keys **0.4.3**.
-See the [release notes](docs/releases/v0.17.0.md) for durable SQLite receipts,
-caller task identity/read/cancel and the breaking schema-v3 migration boundary.
-Publication, exact-source CI and registry verification are complete. See
-[0.17.0 publication record](docs/releases/v0.17.0-publication.md).
-The previous verified release is [0.16.0](docs/releases/v0.16.0-publication.md).
+The current published release is **0.18.0**, with keys **0.5.0**, published to
+npm on 2026-09-10 from the `v0.18.0` tag (`7b26ef5f`, the PR #181 merge) and
+still `latest` on the registry; readback is `npm view byok-sdk version` and
+`npm view @byok-sdk/keys version`. See the [release notes](docs/releases/v0.18.0.md)
+for the breaking custom-store boundary and the keys SQLite profile schema.
+The preceding release is **0.17.0** with keys **0.4.3**
+([publication record](docs/releases/v0.17.0-publication.md)), and before it
+[0.16.0](docs/releases/v0.16.0-publication.md).
 
 The bundled Pi runtime is pinned to the SDK's own fork,
 `@byok-sdk/pi-coding-agent@0.86.1001` (upstream base 0.86.1 at `13cbf77`),
@@ -42,7 +45,7 @@ resources during `prepare()`; reject unsupported input before claim instead.
 Install this release with:
 
 ```sh
-npm install byok-sdk@0.18.0
+npm install byok-sdk@0.19.0
 ```
 
 ```ts
@@ -136,7 +139,7 @@ means not accepted, and no overall percentage is defined:
 |---|---|---|
 | main implementation | Merged | `main` @ `26945c8a` (2026-09-19): recurring input, exact message disposition and fresh egress per the spec section above; #193 C07 Pi runtime launch (`d882aef4`), #198 Windows CI elimination (`49ec7477`), #199 custody five-edge enablement (`e0423d84`), #200 N1 external-CLI admission gate (`ec1cea36`); 2026-09-19 batch — #201 reserved agent-message grants, #202 Pi fork pin 1006 / S2 clipboard tripwire, #203 WP5 S2 CI flip (strict bun + real-chain monitor control), #204 #196 durable recurring smoke (embedded roundtrip + crash window), #205 docs authority navigation (#197), #206 WinSW uninstall image-lock retry, #207 Windows link-first cleanup + out-of-tree canary |
 | Open candidates | Unmerged | #191 (draft: MCP launch-cwd boundary); Salesko draft PR #241 |
-| Published packages | 0.17.0 stable published | [0.17.0 publication record](docs/releases/v0.17.0-publication.md) (SDK 0.17.0, keys 0.4.3); 0.18.0 / keys 0.5.0 remain unpublished release candidates ([handoff](docs/releases/v0.18.0-handoff.md)); Pi fork pin `@byok-sdk/pi-coding-agent@0.86.1001` in `packages/client/package.json` (fork build 1 of the 0.86 line: pi-ai at 0.86.1001, pi-agent-core at 0.86.1001) |
+| Published packages | 0.18.0 / keys 0.5.0 published | SDK 0.18.0 and keys 0.5.0 were published to npm on 2026-09-10 from the `v0.18.0` tag (`7b26ef5f`, the PR #181 merge) and are the registry's `latest` — readback `npm view byok-sdk version` / `npm view @byok-sdk/keys version`, notes in [0.18.0](docs/releases/v0.18.0.md); the preceding [0.17.0 publication record](docs/releases/v0.17.0-publication.md) (SDK 0.17.0, keys 0.4.3) remains the last one with a written publication receipt. 0.19.0 / keys 0.6.0 are prepared and unpublished ([notes](docs/releases/v0.19.0.md), [handoff](docs/releases/v0.19.0-handoff.md)). Pi fork pin `@byok-sdk/pi-coding-agent@0.86.1001` in `packages/client/package.json` (fork build 1 of the 0.86 line: pi-ai at 0.86.1001, pi-agent-core at 0.86.1001) |
 | Real Host integration | In progress, not accepted | Salesko Sprint ledger: K5 in progress, K7 incomplete; A01–A29 at 24 LOCAL_PASS / 5 BLOCKED at the latest recorded checkpoint. Host-side subjects and evidence live in that ledger, not here |
 | Native / production acceptance | 未验收 | Target-runtime S9 not executed; aiphabee (K6) paused by owner decision; no production migration, deployment, or paid-runtime acceptance |
 
@@ -178,7 +181,7 @@ It is intentionally outside `byok-sdk` and the entire dispatch dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.5.0
+npm install @byok-sdk/keys@0.6.0
 ```
 
 ## Host connector composition
@@ -194,5 +197,5 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.5.0`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.6.0`
 require Node.js 22.22.0 or newer. MIT licensed.
