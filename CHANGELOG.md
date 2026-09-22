@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.19.0 / @byok-sdk/keys 0.6.0 — 2026-09-22 (unpublished until the registry confirms)
 
 - **Changed (Pi runtime pin, BREAKING wire change)** — rebase the prepared-input
   lane onto the fork's 0.86 line: `@byok-sdk/pi-coding-agent@0.86.1001` and
@@ -1223,7 +1223,7 @@ and the D2 version number belongs to a separate SDK release contract.
   a pre-1.0 MINOR under `docs/spec.md`'s package version policy; no version is
   bumped here.
 
-## 0.18.0 / @byok-sdk/keys 0.5.0 — unpublished release candidate
+## 0.18.0 / @byok-sdk/keys 0.5.0 — published 2026-09-10
 
 - Launch package-resolved Pi through the current Node executable for version detection, direct RPC and credential custody, avoiding Windows `spawn EFTYPE` without shell execution. Native executable overrides remain explicit.
 
