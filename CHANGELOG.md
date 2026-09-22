@@ -10,8 +10,9 @@
   `buildRequestPayload` builds both the prepared body and the live session's —
   so the wire carries the inputs that renderer reads instead of a pre-rendered
   block. `snapshot.prompt.formattedSkills` is REMOVED and replaced by
-  `snapshot.prompt.skills`, a closed `{name, description, filePath,
-  disableModelInvocation}` record; `snapshot.prompt.toolGuidelines` is added;
+  `snapshot.prompt.skills`, an ARRAY of closed skill records —
+  `Array<{ name: string; description: string; filePath: string; disableModelInvocation: boolean }>`,
+  empty set `[]`; `snapshot.prompt.toolGuidelines` is added;
   `selection.options.toolChoice` narrows to `auto | none` because 0.86's simple
   stream path cannot express `required`. The structural projection contract
   moves to v3, `INPUT_PREPARATION_VERSION` 3 → 4 and
