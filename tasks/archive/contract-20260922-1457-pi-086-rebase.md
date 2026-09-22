@@ -1,14 +1,24 @@
+> **Archived**: 2026-09-22 14:57
+> **Related Plan**: plans/archive/plan-20260921-1416-pi-086-rebase.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260922-1457
+> **Archive Projection V1**: `plans/plan-20260921-1416-pi-086-rebase.md` => `plans/archive/plan-20260921-1416-pi-086-rebase.md`
+> **Archive Projection V1**: `tasks/notes/20260921-1416-pi-086-rebase.notes.md` => `tasks/archive/notes-20260922-1457-pi-086-rebase.md`
+> **Archive Projection V1**: `tasks/contracts/20260921-1416-pi-086-rebase.contract.md` => `tasks/archive/contract-20260922-1457-pi-086-rebase.md`
+> **Archive Projection V1**: `tasks/reviews/20260921-1416-pi-086-rebase.review.md` => `tasks/archive/review-20260922-1457-pi-086-rebase.md`
+
 # Task Contract: pi-086-rebase
 
-> **Status**: Active
-> **Plan**: plans/plan-20260921-1416-pi-086-rebase.md
+> **Status**: Fulfilled
+> **Plan**: plans/archive/plan-20260921-1416-pi-086-rebase.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
 > **Last Updated**: 2026-09-21 14:18
-> **Review File**: `tasks/reviews/20260921-1416-pi-086-rebase.review.md`
-> **Notes File**: `tasks/notes/20260921-1416-pi-086-rebase.notes.md`
+> **Review File**: `tasks/archive/review-20260922-1457-pi-086-rebase.md`
+> **Notes File**: `tasks/archive/notes-20260922-1457-pi-086-rebase.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
 
 ## Why
@@ -46,10 +56,10 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 
 ## Workflow Inventory
 
-- Source plan: `plans/plan-20260921-1416-pi-086-rebase.md`
+- Source plan: `plans/archive/plan-20260921-1416-pi-086-rebase.md`
 - Deferred-goal ledger: `tasks/todos.md`
-- Review file: `tasks/reviews/20260921-1416-pi-086-rebase.review.md`
-- Notes file: `tasks/notes/20260921-1416-pi-086-rebase.notes.md`
+- Review file: `tasks/archive/review-20260922-1457-pi-086-rebase.md`
+- Notes file: `tasks/archive/notes-20260922-1457-pi-086-rebase.md`
 - Checks file: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
 - Scope gate: edit only paths listed under `allowed_paths`; update this contract before widening scope.
@@ -101,11 +111,11 @@ allowed_paths:
   - scripts/release/
   - docs/researches/runtime-input-preparation-contract.md
   - api-surface/
-  - plans/plan-20260921-1416-pi-086-rebase.md
+  - plans/archive/plan-20260921-1416-pi-086-rebase.md
   - tasks/todos.md
-  - tasks/contracts/20260921-1416-pi-086-rebase.contract.md
-  - tasks/reviews/20260921-1416-pi-086-rebase.review.md
-  - tasks/notes/20260921-1416-pi-086-rebase.notes.md
+  - tasks/archive/contract-20260922-1457-pi-086-rebase.md
+  - tasks/archive/review-20260922-1457-pi-086-rebase.md
+  - tasks/archive/notes-20260922-1457-pi-086-rebase.md
 ```
 
 ## Evidence Requirements
