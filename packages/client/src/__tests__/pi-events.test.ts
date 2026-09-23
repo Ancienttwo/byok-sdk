@@ -175,23 +175,27 @@ describe('mapPiMessageToAgentEvent', () => {
         .toEqual({ type: 'usage', inputTokens: 7, cachedInputTokens: 0, outputTokens: 3, totalTokens: 10 });
     });
 
-    it('produces nothing for a message_end that is not an assistant one, or carries no usage', () => {
+    it('produces nothing for a message_end that is not an assistant one', () => {
       expect(mapPiMessageToAgentEvent(assistantEnd({ input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 }, 'user')))
         .toBeUndefined();
       expect(mapPiMessageToAgentEvent(assistantEnd({ input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 }, 'toolResult')))
         .toBeUndefined();
-      expect(mapPiMessageToAgentEvent(assistantEnd(undefined))).toBeUndefined();
       expect(mapPiMessageToAgentEvent({ type: 'message_end', message: { role: 'system' } })).toBeUndefined();
       // Still routine: a user/tool-result message_end is expected traffic.
       expect(ROUTINE_PI_EVENT_TYPES.has('message_end')).toBe(true);
     });
 
-    it('projects no partial observation: a missing or malformed required count yields no event', () => {
-      expect(mapPiMessageToAgentEvent(assistantEnd({ input: 5, output: 1, cacheWrite: 0, totalTokens: 6 }))).toBeUndefined();
+    it('never skips a call: absent or unreadable usage still yields an event, without inputTokens', () => {
+      // No usage block at all.
+      expect(mapPiMessageToAgentEvent(assistantEnd(undefined))).toEqual({ type: 'usage' });
+      // A missing prompt figure: no prompt is summed over it, readable figures stay.
+      expect(mapPiMessageToAgentEvent(assistantEnd({ input: 5, output: 1, cacheWrite: 0, totalTokens: 6 })))
+        .toEqual({ type: 'usage', outputTokens: 1, totalTokens: 6 });
+      // Malformed prompt figures.
       expect(mapPiMessageToAgentEvent(assistantEnd({ input: -1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 0 })))
-        .toBeUndefined();
+        .toEqual({ type: 'usage', outputTokens: 1, totalTokens: 0 });
       expect(mapPiMessageToAgentEvent(assistantEnd({ input: 1.5, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 })))
-        .toBeUndefined();
+        .toEqual({ type: 'usage', outputTokens: 1, totalTokens: 2 });
     });
   });
 });

@@ -684,6 +684,28 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(false);
   });
 
+  it('fails closed with usage_unavailable when the FIRST call\'s usage is unreadable, never promoting the next call to initial', async () => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(built, adapter, sent);
+    await runner.handleEnvelope(preparedOffer('task-prepared-unreadable', reference(built)));
+
+    // What `adapters/pi/events.ts` emits for an assistant message_end whose
+    // usage block cannot be read: the call is still counted, with no prompt.
+    adapter.sessions[0]!.emit({ type: 'usage', outputTokens: 12 });
+    adapter.sessions[0]!.emit({ type: 'usage', inputTokens: 4_000, outputTokens: 20 });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+
+    await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(true));
+    const failed = sent.find((envelope) => envelope.type === 'task.fail');
+    if (failed?.type !== 'task.fail') throw new Error('no task.fail');
+    expect(failed.payload.reason.startsWith(`${PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX}:`)).toBe(true);
+    expect(failed.payload.reason).toContain('provider call 1 ');
+    expect(failed.payload.preparedObservation).toBeUndefined();
+    expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(false);
+  });
+
   it('fails closed with usage_unavailable when a provider call reports no prompt count', async () => {
     const built = await lane();
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);

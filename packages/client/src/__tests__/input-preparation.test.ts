@@ -183,7 +183,13 @@ function stubCompiler(
       // object cannot rewrite what this test observed.
       calls.push(structuredClone(compileRequest) as CompilePreparedInputRequest);
       if (options.fail === true) throw new InputPreparationCompileError('stub refuses this input');
-      const body = options.body?.() ?? JSON.stringify({ model: compileRequest.model.id, snapshot: compileRequest.snapshot });
+      // A chat-completions-shaped D: `messages` is what the text-only rule
+      // reads, and a D without it is (correctly) never text-only.
+      const body = options.body?.() ?? JSON.stringify({
+        model: compileRequest.model.id,
+        messages: compileRequest.snapshot.messages.map((message) => ({ role: message.role, content: message.content })),
+        snapshot: compileRequest.snapshot,
+      });
       const counterProjection = JSON.stringify({ model: compileRequest.model.id });
       return {
         requestBody: body,
@@ -733,6 +739,7 @@ describe('bounded admission: the counter is optional and byte evidence is the bo
   it.each([
     ['a body that is not JSON', 'not json'],
     ['a body that is not an object', '[]'],
+    ['a body with no messages at all', '{}'],
     ['messages that are not an array', '{"messages":{}}'],
     ['a content part that is not an object', '{"messages":[{"role":"user","content":["text"]}]}'],
     ['a content part with no type', '{"messages":[{"role":"user","content":[{"text":"x"}]}]}'],

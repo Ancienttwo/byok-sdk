@@ -330,9 +330,24 @@ async function handleCommand(msg) {
         message: {},
         assistantMessageEvent: { type: 'text_end', contentIndex: 0, content: finalTextPart1 + finalTextPart2 },
       });
+      // Real pi always attaches the provider call's usage to an assistant
+      // message_end (pi-ai initialises it before the first chunk), with
+      // `input` already net of both cache figures.
       send({
         type: 'message_end',
-        message: { role: 'assistant', content: [{ type: 'text', text: finalTextPart1 + finalTextPart2 }] },
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: finalTextPart1 + finalTextPart2 }],
+          usage: {
+            input: 90,
+            output: 12,
+            cacheRead: 30,
+            cacheWrite: 0,
+            totalTokens: 132,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: 'stop',
+        },
       });
       send({ type: 'turn_end', message: {}, toolResults: [] });
       send({ type: 'agent_end', messages: [], willRetry: false });

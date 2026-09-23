@@ -29,10 +29,13 @@ function usageCount(value: unknown): number | undefined {
 
 /**
  * Project one assistant `message_end`'s native `usage` onto the runtime-neutral
- * `usage` event, or `undefined` when the frame carries no readable usage.
+ * `usage` event. Every assistant `message_end` produces exactly one event;
+ * every other `message_end` (user, tool result, system) produces none.
  *
  * One assistant `message_end` is one provider call, so each event is ONE
- * call's observation — never a running total.
+ * call's observation — never a running total — and a call is never skipped:
+ * a consumer that counts calls (the prepared lane's "initial = first call")
+ * must see every one of them, readable or not.
  *
  * `inputTokens` is the provider's WHOLE prompt: `input + cacheRead +
  * cacheWrite`. pi-ai's `usage.input` already has both cache figures
@@ -41,33 +44,32 @@ function usageCount(value: unknown): number | undefined {
  * moment a prefix cache hit, and a prepared Execution's post-hoc check against
  * its byte bound could then never fire. `cachedInputTokens` is `cacheRead`.
  *
- * All four required native counts must be non-negative safe integers, or no
- * event is produced: a partial observation is not projected field by field,
- * because an `inputTokens` summed from a missing cache figure would be a
- * number nobody reported. A frame with no `usage` at all (a user or tool
- * result message, or a runtime that reports none) produces nothing either.
+ * `inputTokens` is present only when all three prompt figures are
+ * non-negative safe integers; a prompt summed over a missing or malformed
+ * figure would be a number nobody reported. When the usage block is absent or
+ * unreadable the event still goes out, WITHOUT `inputTokens` (and without any
+ * other figure that is unreadable), which is exactly what the prepared lane
+ * classifies as `usage_unavailable`.
  */
 function mapPiAssistantUsage(msg: PiRpcMessage): Extract<AgentEvent, { type: 'usage' }> | undefined {
   const message = msg.message as { role?: unknown; usage?: unknown } | undefined;
   if (message === null || typeof message !== 'object' || message.role !== 'assistant') return undefined;
-  const usage = message.usage as Record<string, unknown> | undefined;
-  if (usage === null || typeof usage !== 'object') return undefined;
+  const usage = (message.usage !== null && typeof message.usage === 'object' ? message.usage : {}) as Record<string, unknown>;
   const input = usageCount(usage.input);
   const cacheRead = usageCount(usage.cacheRead);
   const cacheWrite = usageCount(usage.cacheWrite);
-  const output = usageCount(usage.output);
-  if (input === undefined || cacheRead === undefined || cacheWrite === undefined || output === undefined) {
-    return undefined;
-  }
-  const inputTokens = input + cacheRead + cacheWrite;
-  if (!Number.isSafeInteger(inputTokens)) return undefined;
+  const summed = input === undefined || cacheRead === undefined || cacheWrite === undefined
+    ? undefined
+    : input + cacheRead + cacheWrite;
+  const inputTokens = summed !== undefined && Number.isSafeInteger(summed) ? summed : undefined;
+  const outputTokens = usageCount(usage.output);
   const reasoningTokens = usageCount(usage.reasoning);
   const totalTokens = usageCount(usage.totalTokens);
   return {
     type: 'usage',
-    inputTokens,
-    cachedInputTokens: cacheRead,
-    outputTokens: output,
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(inputTokens === undefined || cacheRead === undefined ? {} : { cachedInputTokens: cacheRead }),
+    ...(outputTokens === undefined ? {} : { outputTokens }),
     ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
     ...(totalTokens === undefined ? {} : { totalTokens }),
   };
@@ -125,9 +127,9 @@ export function mapPiMessageToAgentEvent(msg: PiRpcMessage): AgentEvent | undefi
     case 'agent_settled':
       return { type: 'turn_end' };
 
-    // Routine unless it ends an assistant message that carries usage; it stays
-    // in `ROUTINE_PI_EVENT_TYPES` so a user/tool-result `message_end` is not
-    // flagged as unexpected traffic.
+    // Routine unless it ends an assistant message (one provider call); it
+    // stays in `ROUTINE_PI_EVENT_TYPES` so a user/tool-result `message_end` is
+    // not flagged as unexpected traffic.
     case 'message_end':
       return mapPiAssistantUsage(msg);
 

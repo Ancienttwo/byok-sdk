@@ -612,9 +612,10 @@ export function verifyCompiledPreparedInput(
  * compiler produces: every entry of `messages` whose `content` is an array
  * must hold only parts whose `type` is exactly `"text"`. String or absent
  * content is text. Anything this rule cannot read — a body that is not a JSON
- * object, a `messages` that is not an array, an entry or part that is not an
- * object — answers `false`, so an unreadable D stays unready rather than being
- * assumed text.
+ * object, a `messages` that is absent or not an array, an entry or part that
+ * is not an object — answers `false`, so an unreadable D stays unready rather
+ * than being assumed text. A chat-completions D always carries `messages`; one
+ * without it is not a D this rule can vouch for.
  */
 export function preparedRequestContentIsTextOnly(requestBody: string): boolean {
   let parsed: unknown;
@@ -625,7 +626,6 @@ export function preparedRequestContentIsTextOnly(requestBody: string): boolean {
   }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
   const messages = (parsed as Record<string, unknown>).messages;
-  if (messages === undefined) return true;
   if (!Array.isArray(messages)) return false;
   for (const message of messages) {
     if (message === null || typeof message !== 'object' || Array.isArray(message)) return false;
