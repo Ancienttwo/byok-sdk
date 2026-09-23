@@ -2,10 +2,12 @@
 
 Status: CURRENT boundary contract.
 
-For the prepared 0.20.0 / keys 0.6.1 train, use the
-[release handoff](../../docs/releases/v0.20.0-handoff.md). The registry's current
-`latest` is 0.19.0 / keys 0.6.0, published on 2026-09-22 from the `v0.19.0` tag
-target (`9408ed7b`) — see its
+The registry's current `latest` is 0.20.0 / keys 0.6.1, published on 2026-09-23
+from the `v0.20.0` tag target (`48605554`) — see its
+[publication record](../../docs/releases/v0.20.0-publication.md) and the
+[release handoff](../../docs/releases/v0.20.0-handoff.md) that carried it. The
+previous train is 0.19.0 / keys 0.6.0, published on 2026-09-22 from the
+`v0.19.0` tag target (`9408ed7b`) — see its
 [publication record](../../docs/releases/v0.19.0-publication.md).
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
