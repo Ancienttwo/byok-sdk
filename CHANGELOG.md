@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.20.0 / @byok-sdk/keys 0.6.1 — 2026-09-23 (unpublished until the registry confirms)
+
+- **Changed (bounded admission, BREAKING wire change)** — input preparation no
+  longer depends on a live provider tokenizer count before admission. The exact
+  size of the frozen request, `artifact.requestBytes`, is the SDK's upper-bound
+  size evidence, and the Host checks `requestBytes + C + max_tokens <= window`
+  under its own budget ruling. The counter adapter in
+  `DaemonConfig.inputPreparation` is optional: without one a preparation settles
+  as `prepared` with no counter call or reservation; a configured counter is a
+  tightener that must still be `provider` authority with full coverage.
+  `counted` → `prepared`, `not_counted` → `not_prepared`; `counter_missing` and
+  the counter result's `kind` are REMOVED; new readiness reason
+  `request_content_not_text` (text-only D). One-shot cut to input-preparation
+  wire version 5 and record schema version 6 with no dual read. The capability
+  token is now `agent-input-preparation-v5`; the unversioned
+  `agent-input-preparation` is accepted nowhere. **Operator precondition:**
+  drain in-flight input-preparation rows, then upgrade cloud and devices as a
+  pair — a cross-version in-flight row gets a 422 in either direction and
+  stalls that device's whole mailbox until the other side upgrades. A stale
+  record log now turns only the preparation lane off
+  (`input_preparation_record_log_unsupported`) instead of blocking daemon
+  start; the operator archives `<storeDir>/input-preparation/records.jsonl`
+  and `artifacts/` by hand.
+- **Added (Pi usage and prepared observation)** — every Pi assistant
+  `message_end` emits one usage event (prompt = `input + cacheRead +
+  cacheWrite`); prepared terminals carry the optional
+  `preparedObservation {requestDigest, initialPromptTokens, maxPromptTokens}`,
+  copied verbatim into the cloud `TerminalResult`. A Pi terminal whose usage
+  carries no token count omits `usage` rather than fabricating one.
+- **Added (typed prepared failures)** — `context_overflow` (a call's prompt at
+  or above the compiled model's context window) and `usage_unavailable` (no
+  usable usage observed); both non-retryable, classified from numbers only.
+- **Changed (keys)** — `@byok-sdk/keys` 0.6.1 re-releases unchanged source so
+  that its packed `@byok-sdk/core` edge is the current dispatch release, 0.20.0.
+
 ## 0.19.0 / @byok-sdk/keys 0.6.0 — 2026-09-22 (published; tag `v0.19.0` at `9408ed7b`)
 
 - **Changed (Pi runtime pin, BREAKING wire change)** — rebase the prepared-input
