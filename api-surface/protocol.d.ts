@@ -5158,6 +5158,7 @@ export declare const InputPreparationCompletionRequestSchema: z.ZodDiscriminated
         counter_unavailable: "counter_unavailable";
         deadline_elapsed: "deadline_elapsed";
         durable_write_failed: "durable_write_failed";
+        input_preparation_record_log_unsupported: "input_preparation_record_log_unsupported";
         input_preparation_unconfigured: "input_preparation_unconfigured";
         launch_boundary_unavailable: "launch_boundary_unavailable";
         limit_exceeded: "limit_exceeded";
@@ -5343,6 +5344,7 @@ export declare const InputPreparationReadbackSchema: z.ZodObject<{
         counter_unavailable: "counter_unavailable";
         deadline_elapsed: "deadline_elapsed";
         durable_write_failed: "durable_write_failed";
+        input_preparation_record_log_unsupported: "input_preparation_record_log_unsupported";
         input_preparation_unconfigured: "input_preparation_unconfigured";
         launch_boundary_unavailable: "launch_boundary_unavailable";
         limit_exceeded: "limit_exceeded";
@@ -5511,7 +5513,7 @@ export { AgentEgressPolicySchema, AgentEgressActivityPolicySchema, AgentReliable
 export type { AgentEgressPolicy, AgentEgressActivityPolicy, AgentReliableQuotaPolicy, ContentReadPolicy, AgentEgressLane, AgentEgressDropReason, AgentMessageContentType, AgentMessageEgressRequirement, AgentMessageServerContext, AgentContentReadSurface, AgentContentActorKind, AgentContentActor, AgentContentDecodeAs, AgentContentReadDecision, AgentContentReadDenialReason, } from './agent-egress';
 export { AGENT_HOME_PROJECTION_CAPABILITY, AGENT_HOME_PROJECTION_MAX_BYTES, AGENT_HOME_PROJECTION_PROFILE_REVISION_MAXIMUM, AgentHomeProjectionProfileRevisionSchema, AgentHomeProjectionHashSchema, AgentHomeProjectionOutcomeSchema, AgentHomeProjectionValueSchema, } from './agent-home-projection';
 export type { AgentHomeProjectionProfileRevision, AgentHomeProjectionHash, AgentHomeProjectionOutcome, AgentHomeProjectionValue, } from './agent-home-projection';
-export { AGENT_INPUT_PREPARATION_CAPABILITY, InputPreparationContentHashSchema, InputPreparationPermissionModeSchema, InputPreparationPolicyRevisionSchema, InputPreparationProfileIdSchema, InputPreparationSourceSchema, InputPreparationModelCostSchema, InputPreparationModelSchema, InputPreparationOptionsSchema, InputPreparationSelectionSchema, InputPreparationContextFileSchema, InputPreparationDocsPathsSchema, InputPreparationSkillSchema, InputPreparationPromptSnapshotSchema, InputPreparationUserMessageSchema, InputPreparationHostCanonicalAssistantMessageSchema, InputPreparationMessageSchema, InputPreparationContextDocumentSchema, InputPreparationStateSchema, InputPreparationReadinessReasonSchema, InputPreparationRuntimeIdentitySchema, InputPreparationCounterTargetSchema, InputPreparationAccountingPolicyRefSchema, InputPreparationCounterProviderEvidenceSchema, InputPreparationCounterEvidenceSchema, InputPreparationResidualValueClassSchema, InputPreparationResidualKeySchema, InputPreparationProjectionSchema, InputPreparationToolImplementationKindSchema, InputPreparationArtifactSummarySchema, InputPreparationBindingSchema, InputPreparationReceiptSummarySchema, InputPreparationReferenceSchema, InputPreparationOfferBindingSchema, InputPreparationRejectionReasonSchema, } from './input-preparation';
+export { AGENT_INPUT_PREPARATION_CAPABILITY, INPUT_PREPARATION_WIRE_VERSION, InputPreparationContentHashSchema, InputPreparationPermissionModeSchema, InputPreparationPolicyRevisionSchema, InputPreparationProfileIdSchema, InputPreparationSourceSchema, InputPreparationModelCostSchema, InputPreparationModelSchema, InputPreparationOptionsSchema, InputPreparationSelectionSchema, InputPreparationContextFileSchema, InputPreparationDocsPathsSchema, InputPreparationSkillSchema, InputPreparationPromptSnapshotSchema, InputPreparationUserMessageSchema, InputPreparationHostCanonicalAssistantMessageSchema, InputPreparationMessageSchema, InputPreparationContextDocumentSchema, InputPreparationStateSchema, InputPreparationReadinessReasonSchema, InputPreparationRuntimeIdentitySchema, InputPreparationCounterTargetSchema, InputPreparationAccountingPolicyRefSchema, InputPreparationCounterProviderEvidenceSchema, InputPreparationCounterEvidenceSchema, InputPreparationResidualValueClassSchema, InputPreparationResidualKeySchema, InputPreparationProjectionSchema, InputPreparationToolImplementationKindSchema, InputPreparationArtifactSummarySchema, InputPreparationBindingSchema, InputPreparationReceiptSummarySchema, InputPreparationReferenceSchema, InputPreparationOfferBindingSchema, InputPreparationRejectionReasonSchema, } from './input-preparation';
 export type { InputPreparationPermissionMode, InputPreparationSource, InputPreparationModel, InputPreparationOptions, InputPreparationSelection, InputPreparationSkill, InputPreparationMessage, InputPreparationContextDocument, InputPreparationState, InputPreparationReadinessReason, InputPreparationAccountingPolicyRef, InputPreparationResidualValueClass, InputPreparationRuntimeIdentity, InputPreparationReceiptSummary, InputPreparationOfferBinding, InputPreparationRejectionReason, } from './input-preparation';
 export { AGENT_MEMORY_PROJECTION_CAPABILITY, AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES, AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE, AgentMemoryProjectionGrantRefSchema, AgentMemoryProjectionSessionRefSchema, AgentMemoryProjectionWriterEpochSchema, AgentMemoryProjectionSourceSeqSchema, AgentMemoryProjectionSnapshotSchema, AgentMemoryProjectionMeteringReceiptSchema, AgentMemoryProjectionMutationSchema, AgentMemoryProjectionReceiptSchema, AgentMemoryProjectionEraseResultSchema, agentMemoryProjectionBase64UrlByteLength, } from './agent-memory-projection';
 export type { AgentMemoryProjectionGrantRef, AgentMemoryProjectionSessionRef, AgentMemoryProjectionWriterEpoch, AgentMemoryProjectionSourceSeq, AgentMemoryProjectionSnapshot, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionEraseResult, } from './agent-memory-projection';
@@ -5560,8 +5562,34 @@ import { z } from 'zod';
  *    freeze-rule asymmetry. Adding a field post-freeze is therefore a
  *    breaking change, exactly like `PermissionPolicySchema`.
  */
-/** Capability required before a task-free remote input preparation is admitted. */
-export declare const AGENT_INPUT_PREPARATION_CAPABILITY: 'agent-input-preparation';
+/**
+ * The ONE version of the input-preparation contract, shared by this relay wire
+ * (the `agent.input.preparation` payload and the completion receipt summary)
+ * and by the device-local request, receipt and artifact
+ * (`@byok-sdk/client`'s `INPUT_PREPARATION_VERSION`, which is this value).
+ *
+ * The relay wire carries no version field of its own, so a version change is
+ * made visible where admission actually happens: in the capability token
+ * below. See `INPUT_PREPARATION_VERSION` in the client for what each version
+ * changed.
+ */
+export declare const INPUT_PREPARATION_WIRE_VERSION: 5;
+/**
+ * Capability required before a task-free remote input preparation — or a
+ * prepared Execution — is admitted: `agent-input-preparation-v<N>`, where
+ * `<N>` is {@link INPUT_PREPARATION_WIRE_VERSION}.
+ *
+ * The version is IN the token because the relay wire has none. A device
+ * declares exactly the one token of the contract it speaks, and a cloud admits
+ * exactly the one token of the contract it speaks, so a device and a cloud on
+ * different contract versions never exchange a preparation at all: the cloud
+ * refuses at enqueue (`agent_capability_missing`, before any receipt or
+ * mailbox row) instead of relaying a payload the other side would refuse with
+ * a strict-schema 422 and a device would then redeliver forever. There is no
+ * dual token and no accepted older one. The retired unversioned token
+ * `agent-input-preparation` (versions up to 4) is admitted nowhere.
+ */
+export declare const AGENT_INPUT_PREPARATION_CAPABILITY: "agent-input-preparation-v5";
 /** The preparation surface uses the package-wide lowercase `sha256:<hex>` transport form. */
 export declare const InputPreparationContentHashSchema: z.ZodString;
 /**
@@ -6461,6 +6489,7 @@ export declare const InputPreparationRejectionReasonSchema: z.ZodEnum<{
     counter_unavailable: "counter_unavailable";
     deadline_elapsed: "deadline_elapsed";
     durable_write_failed: "durable_write_failed";
+    input_preparation_record_log_unsupported: "input_preparation_record_log_unsupported";
     input_preparation_unconfigured: "input_preparation_unconfigured";
     launch_boundary_unavailable: "launch_boundary_unavailable";
     limit_exceeded: "limit_exceeded";
@@ -10043,5 +10072,5 @@ export declare const STRICT_AGENT_ONLY_CAPABILITY: 'strict-agent-only';
  * cannot accidentally execute the instruction without the required tools.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v5", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];

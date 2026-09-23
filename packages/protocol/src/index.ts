@@ -104,6 +104,7 @@ export type {
 
 export {
   AGENT_INPUT_PREPARATION_CAPABILITY,
+  INPUT_PREPARATION_WIRE_VERSION,
   InputPreparationContentHashSchema,
   InputPreparationPermissionModeSchema,
   InputPreparationPolicyRevisionSchema,

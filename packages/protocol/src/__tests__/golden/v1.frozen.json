@@ -20,7 +20,7 @@
     "agent-content-transcript-read",
     "agent-content-artifact-read",
     "agent-home-projection",
-    "agent-input-preparation",
+    "agent-input-preparation-v5",
     "terminal-projection-selection",
     "host-mcp-task-context",
     "custom-harness",
@@ -26452,7 +26452,8 @@
                 "launch_boundary_unavailable",
                 "observation_drift",
                 "permission_mode_denied",
-                "rpc_frame_too_large"
+                "rpc_frame_too_large",
+                "input_preparation_record_log_unsupported"
               ]
             }
           },
@@ -27148,7 +27149,8 @@
             "launch_boundary_unavailable",
             "observation_drift",
             "permission_mode_denied",
-            "rpc_frame_too_large"
+            "rpc_frame_too_large",
+            "input_preparation_record_log_unsupported"
           ]
         },
         "completedAt": {

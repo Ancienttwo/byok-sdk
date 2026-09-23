@@ -304,6 +304,9 @@ describe('B-P2 store: restart roundtrip', () => {
     expect(refusal).toBeInstanceOf(InputPreparationUnsupportedRecordVersionError);
     expect((refusal as InputPreparationUnsupportedRecordVersionError).reason).toBe('unsupported_record_version');
     expect((refusal as InputPreparationUnsupportedRecordVersionError).recordVersion).toBe(5);
+    // It names the exact log an operator archives to re-enable the lane.
+    expect((refusal as InputPreparationUnsupportedRecordVersionError).logPath).toBe(logPath);
+    expect((refusal as Error).message).toContain(logPath);
     expect(await fs.readFile(logPath)).toEqual(before);
     expect(() => restarted.list()).toThrow(InputPreparationDurabilityError);
   });

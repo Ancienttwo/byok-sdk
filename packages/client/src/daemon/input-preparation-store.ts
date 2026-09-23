@@ -256,11 +256,12 @@ export class InputPreparationIntegrityError extends Error {
 export class InputPreparationUnsupportedRecordVersionError extends InputPreparationIntegrityError {
   readonly reason = 'unsupported_record_version';
 
-  constructor(readonly recordId: string, readonly recordVersion: unknown) {
+  constructor(readonly recordId: string, readonly recordVersion: unknown, readonly logPath: string) {
     super(
-      `the input-preparation record log contains record ${recordId} at record schema version ${JSON.stringify(recordVersion)},`
+      `the input-preparation record log ${logPath} contains record ${recordId} at record schema version ${JSON.stringify(recordVersion)},`
       + ` which this build does not support (it supports record schema version ${INPUT_PREPARATION_RECORD_VERSION} only);`
-      + ' the record is an unsupported older version and has been left untouched pending explicit operator disposition',
+      + ' the record is an unsupported older version and has been left untouched pending explicit operator disposition'
+      + ' (archive the record log to re-enable input preparation)',
     );
     this.name = 'InputPreparationUnsupportedRecordVersionError';
   }
@@ -423,7 +424,7 @@ export class InputPreparationStore {
       // question, and would quietly accept any future shape that happens to
       // have the field the probe knows to look for.
       if (record.version !== INPUT_PREPARATION_RECORD_VERSION) {
-        throw new InputPreparationUnsupportedRecordVersionError(record.recordId, record.version);
+        throw new InputPreparationUnsupportedRecordVersionError(record.recordId, record.version, path.join(this.root, RECORD_LOG));
       }
       // Last write wins per record id: the log is an append-only history of
       // one record's transitions, replayed in order.

@@ -29,8 +29,36 @@ import { PERMISSION_MODES } from './permission';
  *    breaking change, exactly like `PermissionPolicySchema`.
  */
 
-/** Capability required before a task-free remote input preparation is admitted. */
-export const AGENT_INPUT_PREPARATION_CAPABILITY = 'agent-input-preparation' as const;
+/**
+ * The ONE version of the input-preparation contract, shared by this relay wire
+ * (the `agent.input.preparation` payload and the completion receipt summary)
+ * and by the device-local request, receipt and artifact
+ * (`@byok-sdk/client`'s `INPUT_PREPARATION_VERSION`, which is this value).
+ *
+ * The relay wire carries no version field of its own, so a version change is
+ * made visible where admission actually happens: in the capability token
+ * below. See `INPUT_PREPARATION_VERSION` in the client for what each version
+ * changed.
+ */
+export const INPUT_PREPARATION_WIRE_VERSION = 5 as const;
+
+/**
+ * Capability required before a task-free remote input preparation — or a
+ * prepared Execution — is admitted: `agent-input-preparation-v<N>`, where
+ * `<N>` is {@link INPUT_PREPARATION_WIRE_VERSION}.
+ *
+ * The version is IN the token because the relay wire has none. A device
+ * declares exactly the one token of the contract it speaks, and a cloud admits
+ * exactly the one token of the contract it speaks, so a device and a cloud on
+ * different contract versions never exchange a preparation at all: the cloud
+ * refuses at enqueue (`agent_capability_missing`, before any receipt or
+ * mailbox row) instead of relaying a payload the other side would refuse with
+ * a strict-schema 422 and a device would then redeliver forever. There is no
+ * dual token and no accepted older one. The retired unversioned token
+ * `agent-input-preparation` (versions up to 4) is admitted nowhere.
+ */
+export const AGENT_INPUT_PREPARATION_CAPABILITY =
+  `agent-input-preparation-v${INPUT_PREPARATION_WIRE_VERSION}` as const;
 
 /** The preparation surface uses the package-wide lowercase `sha256:<hex>` transport form. */
 export const InputPreparationContentHashSchema = AgentEgressContentHashSchema;
@@ -823,5 +851,12 @@ export const InputPreparationRejectionReasonSchema = z.enum([
    * preparation that could never be delivered is not a smaller preparation.
    */
   'rpc_frame_too_large',
+  /**
+   * The device's input-preparation lane is off because its durable record log
+   * holds a record from an older record schema version. The rest of the
+   * device runs; this lane refuses until an operator archives that log. No
+   * record is migrated, read forward or deleted.
+   */
+  'input_preparation_record_log_unsupported',
 ]);
 export type InputPreparationRejectionReason = z.infer<typeof InputPreparationRejectionReasonSchema>;

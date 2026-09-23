@@ -79,11 +79,11 @@ authorization and registry readback. The current independent keys candidate is
 dispatch release, `0.19.0`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-The last train the registry has confirmed is `0.18.0` with keys `0.5.0`,
-published on 2026-09-10 from the `v0.18.0` tag (`7b26ef5f`) and still `latest`;
-`0.19.0` / keys `0.6.0` are prepared and unpublished. The registry, not this
-document, is the authority on what has shipped — read it back with
-`npm view byok-sdk version` and `npm view @byok-sdk/keys version`.
+The last train the registry has confirmed is `0.19.0` with keys `0.6.0`,
+published from the `v0.19.0` tag (`9408ed7b`); both read back as `latest` on
+2026-09-23. The registry, not this document, is the authority on what has
+shipped — read it back with `npm view byok-sdk version` and
+`npm view @byok-sdk/keys version`.
 
 ## Local Agent application release authority
 
@@ -444,6 +444,19 @@ cannot be launched without. The refusal lands before the store opens, so it
 writes nothing and collects nothing — the log and its artifacts stay exactly as
 found, pending explicit operator disposition.
 
+That refusal turns the input-preparation LANE off, not the daemon. A daemon
+whose record log holds an older record starts normally and runs every other
+task; only the lane refuses, typed, as `input_preparation_record_log_unsupported`
+— on every local `input_preparation.*` call (the message names the record log),
+on every remote completion, by not advertising the input-preparation capability
+(so the cloud refuses to enqueue onto it), and by carrying no prepared-offer
+lane (so a `task.offer_prepared` declines by name). Nothing is migrated, read
+forward or deleted automatically. **Operator step:** stop the daemon, move
+`<storeDir>/input-preparation/records.jsonl` together with the `artifacts/`
+directory beside it to an archive location, and start the daemon again; the
+lane comes back empty under the current record schema version, and the
+archived records stay available for audit.
+
 `ready` answers exactly one question: CAN THIS PREPARATION BE CONSUMED. It is
 not Host budget admission. The device performs no budget arithmetic anywhere on
 this surface, so a ready receipt states that the evidence holds — never that
@@ -473,6 +486,21 @@ applicability check and carries no number.
 > `not_counted` is now `not_prepared`. The cut is one-shot — wire version 5,
 > record schema version 6 — and a record written before it is refused on replay
 > as an unsupported record version, never read forward.
+
+**The capability token carries the contract version.** The cloud relay wire —
+the `agent.input.preparation` payload and the completion receipt summary —
+carries no version field, so a device and a cloud on different contract
+versions used to find out only when a completion PUT failed its strict schema,
+and the device then redelivered that envelope forever. The device capability
+is therefore `agent-input-preparation-v<N>`, where `<N>` is
+`INPUT_PREPARATION_WIRE_VERSION` (currently `agent-input-preparation-v5`). A
+daemon declares only the token of the version it speaks; the cloud's
+input-preparation and prepared-offer enqueue gates accept only the token of the
+version they speak, so a skewed device is refused at enqueue with
+`agent_capability_missing` and no receipt or mailbox row. The retired
+unversioned `agent-input-preparation` (0.19 and earlier) is accepted nowhere;
+there is no dual token. The completion route stays unconditional, so a row
+already in flight can still be discharged.
 
 The evidence has four parts, and each is read off a recorded fact rather than
 asserted.

@@ -44,7 +44,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import type { PermissionMode } from '@byok-sdk/protocol';
+import { INPUT_PREPARATION_WIRE_VERSION, type PermissionMode } from '@byok-sdk/protocol';
 import type { McpLaunchAttestation } from './daemon/trusted-launch-cwd';
 import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
 
@@ -88,13 +88,19 @@ export const INPUT_PREPARATION_ARTIFACT_FORMAT = 'byok.input-preparation.artifac
  * `bound` member no adapter could honestly state; and the readiness reason
  * `request_content_not_text` was added.
  *
+ * The number itself is owned by `@byok-sdk/protocol`'s
+ * `INPUT_PREPARATION_WIRE_VERSION`, because the device capability token
+ * `agent-input-preparation-v<N>` is derived from it: the relay wire carries no
+ * version field, so the token is what keeps a device and a cloud on different
+ * versions from exchanging a preparation at all. One number, two projections.
+ *
  * The request, the receipt, the durable record and the retained artifact all
  * carry this number, so a record written under an older version is refused on
  * replay rather than read through a compatibility branch: its artifact was
  * frozen under a claim this version cannot re-derive, and there is no honest
  * value to translate a prompt rendered by another renderer into.
  */
-export const INPUT_PREPARATION_VERSION = 5;
+export const INPUT_PREPARATION_VERSION = INPUT_PREPARATION_WIRE_VERSION;
 
 // ---------------------------------------------------------------------------
 // Canonical serialization
@@ -1280,6 +1286,15 @@ export const INPUT_PREPARATION_ERROR_CODES = [
    * frame, so nothing here retries.
    */
   'rpc_frame_too_large',
+  /**
+   * The input-preparation lane is OFF on this daemon because its durable
+   * record log holds a record written in a record schema version this build
+   * does not read (a leftover from before a version cut). Everything else on
+   * the daemon runs; only this lane refuses, typed, until an operator
+   * archives the record log named in the message. Nothing is migrated, read
+   * forward or deleted.
+   */
+  'input_preparation_record_log_unsupported',
 ] as const;
 
 export type InputPreparationErrorCodeV1 = (typeof INPUT_PREPARATION_ERROR_CODES)[number];

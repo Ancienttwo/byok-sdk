@@ -4966,8 +4966,9 @@ export declare class InputPreparationIntegrityError extends Error {
 export declare class InputPreparationUnsupportedRecordVersionError extends InputPreparationIntegrityError {
     readonly recordId: string;
     readonly recordVersion: unknown;
+    readonly logPath: string;
     readonly reason = "unsupported_record_version";
-    constructor(recordId: string, recordVersion: unknown);
+    constructor(recordId: string, recordVersion: unknown, logPath: string);
 }
 export interface InputPreparationStoreOptions {
     /** The daemon's store directory. The subtree below it is created 0700 on open. */
@@ -9869,7 +9870,7 @@ export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, Expor
  *   template constant and the fit ruling stay on the Host side of the
  *   accounting policy this surface only names.
  */
-import type { PermissionMode } from '@byok-sdk/protocol';
+import { type PermissionMode } from '@byok-sdk/protocol';
 import type { McpLaunchAttestation } from './daemon/trusted-launch-cwd';
 import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
 /** Wire format tag for a preparation request. One strict shape, one version. */
@@ -9908,13 +9909,19 @@ export declare const INPUT_PREPARATION_ARTIFACT_FORMAT = "byok.input-preparation
  * `bound` member no adapter could honestly state; and the readiness reason
  * `request_content_not_text` was added.
  *
+ * The number itself is owned by `@byok-sdk/protocol`'s
+ * `INPUT_PREPARATION_WIRE_VERSION`, because the device capability token
+ * `agent-input-preparation-v<N>` is derived from it: the relay wire carries no
+ * version field, so the token is what keeps a device and a cloud on different
+ * versions from exchanging a preparation at all. One number, two projections.
+ *
  * The request, the receipt, the durable record and the retained artifact all
  * carry this number, so a record written under an older version is refused on
  * replay rather than read through a compatibility branch: its artifact was
  * frozen under a claim this version cannot re-derive, and there is no honest
  * value to translate a prompt rendered by another renderer into.
  */
-export declare const INPUT_PREPARATION_VERSION = 5;
+export declare const INPUT_PREPARATION_VERSION: 5;
 /**
  * Key-sorted JSON, so two structurally equal values always produce the same
  * bytes and therefore the same digest. Field ORDER must never be able to turn
@@ -10869,7 +10876,16 @@ export declare const INPUT_PREPARATION_ERROR_CODES: readonly ['input_preparation
  * against a scope aggregate. Terminal — the same input recompiles to the same
  * frame, so nothing here retries.
  */
-'rpc_frame_too_large'];
+'rpc_frame_too_large', 
+/**
+ * The input-preparation lane is OFF on this daemon because its durable
+ * record log holds a record written in a record schema version this build
+ * does not read (a leftover from before a version cut). Everything else on
+ * the daemon runs; only this lane refuses, typed, until an operator
+ * archives the record log named in the message. Nothing is migrated, read
+ * forward or deleted.
+ */
+'input_preparation_record_log_unsupported'];
 export type InputPreparationErrorCodeV1 = (typeof INPUT_PREPARATION_ERROR_CODES)[number];
 /**
  * The two digests that bind one prepared tool surface, written ONCE here.
