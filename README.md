@@ -7,24 +7,22 @@ composition over Postgres and R2.
 
 ## Release status
 
-This branch prepares **0.20.0**, with independent keys **0.6.1**.
-These are unpublished; use verified local tarballs
-until a separately authorized publication. See the [release notes](docs/releases/v0.20.0.md)
-and the [release handoff](docs/releases/v0.20.0-handoff.md). The package install
-examples below target that future candidate, not the current npm registry.
-
-The current published release is **0.19.0**, with independent keys **0.6.0**,
-published to npm on 2026-09-22 from the `v0.19.0` tag target (`9408ed7b`, the
-PR #221 merge) and still `latest` on the registry; readback is
+The current published release is **0.20.0**, with independent keys **0.6.1**,
+published to npm on 2026-09-23 from the `v0.20.0` tag target (`48605554`, the
+PR #224 merge) and now `latest` on the registry; readback is
 `npm view byok-sdk version` and `npm view @byok-sdk/keys version`. See the
-[publication record](docs/releases/v0.19.0-publication.md), the
-[release notes](docs/releases/v0.19.0.md) and the
-[release handoff](docs/releases/v0.19.0-handoff.md).
+[publication record](docs/releases/v0.20.0-publication.md), the
+[release notes](docs/releases/v0.20.0.md) and the
+[release handoff](docs/releases/v0.20.0-handoff.md).
 
-The preceding release is **0.18.0** with keys **0.5.0**, published on 2026-09-10
+The preceding release is **0.19.0** with keys **0.6.0**, published on 2026-09-22
+from the `v0.19.0` tag (`9408ed7b`, the PR #221 merge); see its
+[publication record](docs/releases/v0.19.0-publication.md).
+
+Before it came **0.18.0** with keys **0.5.0**, published on 2026-09-10
 from the `v0.18.0` tag (`7b26ef5f`, the PR #181 merge); see its
 [release notes](docs/releases/v0.18.0.md) for the breaking custom-store boundary
-and the keys SQLite profile schema. Before it came **0.17.0** with keys **0.4.3**
+and the keys SQLite profile schema. Earlier came **0.17.0** with keys **0.4.3**
 ([publication record](docs/releases/v0.17.0-publication.md)) and
 [0.16.0](docs/releases/v0.16.0-publication.md).
 
@@ -143,9 +141,9 @@ means not accepted, and no overall percentage is defined:
 
 | Dimension | Status | Bound to |
 |---|---|---|
-| main implementation | Merged | `main` @ `26945c8a` (2026-09-19): recurring input, exact message disposition and fresh egress per the spec section above; #193 C07 Pi runtime launch (`d882aef4`), #198 Windows CI elimination (`49ec7477`), #199 custody five-edge enablement (`e0423d84`), #200 N1 external-CLI admission gate (`ec1cea36`); 2026-09-19 batch — #201 reserved agent-message grants, #202 Pi fork pin 1006 / S2 clipboard tripwire, #203 WP5 S2 CI flip (strict bun + real-chain monitor control), #204 #196 durable recurring smoke (embedded roundtrip + crash window), #205 docs authority navigation (#197), #206 WinSW uninstall image-lock retry, #207 Windows link-first cleanup + out-of-tree canary |
-| Open candidates | Unmerged | #191 (draft: MCP launch-cwd boundary); Salesko draft PR #241 |
-| Published packages | 0.19.0 / keys 0.6.0 published | SDK 0.19.0 and keys 0.6.0 were published to npm on 2026-09-22 from the `v0.19.0` tag target (`9408ed7b`, the PR #221 merge) and are the registry's `latest` — readback `npm view byok-sdk version` / `npm view @byok-sdk/keys version`, receipt in the [0.19.0 publication record](docs/releases/v0.19.0-publication.md), notes in [0.19.0](docs/releases/v0.19.0.md). `@byok-sdk/implementation-identity` joined the train as a first publication; the annotated `v0.19.0` tag is on origin at `9408ed7b`. 0.20.0 / keys 0.6.1 are prepared and unpublished ([notes](docs/releases/v0.20.0.md), [handoff](docs/releases/v0.20.0-handoff.md)). The previous train is [0.18.0](docs/releases/v0.18.0.md) / keys 0.5.0 (2026-09-10, `7b26ef5f`), before it the [0.17.0 publication record](docs/releases/v0.17.0-publication.md). Pi fork pin `@byok-sdk/pi-coding-agent@0.86.1001` in `packages/client/package.json` (fork build 1 of the 0.86 line: pi-ai at 0.86.1001, pi-agent-core at 0.86.1001) |
+| main implementation | Merged | `main` @ `48605554` (2026-09-23): #223 bounded admission — byte evidence replaces the live-tokenizer readiness gate (`c61615f8`; BREAKING input-preparation wire version 5, record schema version 6), released as 0.20.0 through #224 (`48605554`). Earlier, as of `26945c8a` (2026-09-19): recurring input, exact message disposition and fresh egress per the spec section above; #193 C07 Pi runtime launch (`d882aef4`), #198 Windows CI elimination (`49ec7477`), #199 custody five-edge enablement (`e0423d84`), #200 N1 external-CLI admission gate (`ec1cea36`); 2026-09-19 batch — #201 reserved agent-message grants, #202 Pi fork pin 1006 / S2 clipboard tripwire, #203 WP5 S2 CI flip (strict bun + real-chain monitor control), #204 #196 durable recurring smoke (embedded roundtrip + crash window), #205 docs authority navigation (#197), #206 WinSW uninstall image-lock retry, #207 Windows link-first cleanup + out-of-tree canary |
+| Open candidates | Unmerged | #191 (draft: MCP launch-cwd boundary); Salesko draft PR #241 — both still open drafts on 2026-09-23. #223 (bounded admission) and #224 (0.20.0 preparation) are merged |
+| Published packages | 0.20.0 / keys 0.6.1 published | SDK 0.20.0 and keys 0.6.1 were published to npm on 2026-09-23 from the `v0.20.0` tag target (`48605554`, the PR #224 merge) and are the registry's `latest` — readback `npm view byok-sdk version` / `npm view @byok-sdk/keys version`, receipt in the [0.20.0 publication record](docs/releases/v0.20.0-publication.md), notes in [0.20.0](docs/releases/v0.20.0.md). The annotated `v0.20.0` tag is on origin at `48605554`. The previous train is 0.19.0 / keys 0.6.0 (2026-09-22, `9408ed7b`, [publication record](docs/releases/v0.19.0-publication.md)), before it [0.18.0](docs/releases/v0.18.0.md) / keys 0.5.0 (2026-09-10, `7b26ef5f`). Pi fork pin `@byok-sdk/pi-coding-agent@0.86.1001` in `packages/client/package.json` (fork build 1 of the 0.86 line: pi-ai at 0.86.1001, pi-agent-core at 0.86.1001) |
 | Real Host integration | In progress, not accepted | Salesko Sprint ledger: K5 in progress, K7 incomplete; A01–A29 at 24 LOCAL_PASS / 5 BLOCKED at the latest recorded checkpoint. Host-side subjects and evidence live in that ledger, not here |
 | Native / production acceptance | 未验收 | Target-runtime S9 not executed; aiphabee (K6) paused by owner decision; no production migration, deployment, or paid-runtime acceptance |
 

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.20.0 / @byok-sdk/keys 0.6.1 — 2026-09-23 (unpublished until the registry confirms)
+## 0.20.0 / @byok-sdk/keys 0.6.1 — 2026-09-23 (published; tag `v0.20.0` at `48605554`)
 
 - **Changed (bounded admission, BREAKING wire change)** — input preparation no
   longer depends on a live provider tokenizer count before admission. The exact
