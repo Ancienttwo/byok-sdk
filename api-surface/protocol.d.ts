@@ -1880,6 +1880,11 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             clientVersion: z.ZodString;
             reportedAt: z.ZodISODateTime;
         }, z.core.$strip>>;
+        preparedObservation: z.ZodOptional<z.ZodObject<{
+            requestDigest: z.ZodString;
+            initialPromptTokens: z.ZodNumber;
+            maxPromptTokens: z.ZodNumber;
+        }, z.core.$strict>>;
         agentRef: z.ZodOptional<z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
@@ -1915,6 +1920,11 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             clientVersion: z.ZodString;
             reportedAt: z.ZodISODateTime;
         }, z.core.$strip>>;
+        preparedObservation: z.ZodOptional<z.ZodObject<{
+            requestDigest: z.ZodString;
+            initialPromptTokens: z.ZodNumber;
+            maxPromptTokens: z.ZodNumber;
+        }, z.core.$strict>>;
         agentRef: z.ZodOptional<z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
@@ -3336,6 +3346,11 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 clientVersion: z.ZodString;
                 reportedAt: z.ZodISODateTime;
             }, z.core.$strip>>;
+            preparedObservation: z.ZodOptional<z.ZodObject<{
+                requestDigest: z.ZodString;
+                initialPromptTokens: z.ZodNumber;
+                maxPromptTokens: z.ZodNumber;
+            }, z.core.$strict>>;
             agentRef: z.ZodOptional<z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
@@ -3371,6 +3386,11 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 clientVersion: z.ZodString;
                 reportedAt: z.ZodISODateTime;
             }, z.core.$strip>>;
+            preparedObservation: z.ZodOptional<z.ZodObject<{
+                requestDigest: z.ZodString;
+                initialPromptTokens: z.ZodNumber;
+                maxPromptTokens: z.ZodNumber;
+            }, z.core.$strict>>;
             agentRef: z.ZodOptional<z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
@@ -4664,6 +4684,11 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 clientVersion: z.ZodString;
                 reportedAt: z.ZodISODateTime;
             }, z.core.$strip>>;
+            preparedObservation: z.ZodOptional<z.ZodObject<{
+                requestDigest: z.ZodString;
+                initialPromptTokens: z.ZodNumber;
+                maxPromptTokens: z.ZodNumber;
+            }, z.core.$strict>>;
             agentRef: z.ZodOptional<z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
@@ -4699,6 +4724,11 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 clientVersion: z.ZodString;
                 reportedAt: z.ZodISODateTime;
             }, z.core.$strip>>;
+            preparedObservation: z.ZodOptional<z.ZodObject<{
+                requestDigest: z.ZodString;
+                initialPromptTokens: z.ZodNumber;
+                maxPromptTokens: z.ZodNumber;
+            }, z.core.$strict>>;
             agentRef: z.ZodOptional<z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
@@ -5490,8 +5520,8 @@ export { TERMINAL_PROJECTION_SELECTION_CAPABILITY, TerminalProjectionContractSch
 export type { TerminalProjectionSelection } from './terminal-projection';
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
-export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, TaskOfferPreparedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
-export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, ConnAckPayload, TaskOfferPayload, TaskOfferWithToolsetsPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, TaskOfferPreparedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, } from './messages';
+export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, TaskOfferPreparedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
+export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, ConnAckPayload, TaskOfferPayload, TaskOfferWithToolsetsPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, TaskOfferPreparedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, } from './messages';
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';
 export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
@@ -7959,6 +7989,34 @@ export declare const TerminalInferenceUsageSchema: z.ZodObject<{
 }, z.core.$strip>;
 export type TerminalInferenceUsage = z.infer<typeof TerminalInferenceUsageSchema>;
 /**
+ * The prepared-only terminal observation: what the runtime reported about the
+ * provider calls of ONE prepared Execution, bound to the frozen request it
+ * launched.
+ *
+ * - `requestDigest` — the frozen artifact's own request digest
+ *   (`InputPreparationArtifactSummarySchema.requestDigest`), so the Host
+ *   compares these numbers against exactly the D whose `requestBytes` it
+ *   ruled on.
+ * - `initialPromptTokens` — the prompt tokens of the FIRST provider call. It
+ *   is the only call whose request is D; every later call is an ordinary tool
+ *   continuation. Prompt tokens are the provider's whole prompt, cache reads
+ *   and writes included.
+ * - `maxPromptTokens` — the largest prompt of any provider call of the
+ *   Execution, so `maxPromptTokens >= initialPromptTokens`.
+ *
+ * A separate field, deliberately NOT {@link TerminalInferenceUsageSchema}:
+ * that one is telemetry and never task-state authority, while this one is the
+ * evidence a Host checks its own budget ruling against. The device performs no
+ * budget arithmetic over it. Strict, like every other control shape: an
+ * unrecognized field is rejected, not stripped.
+ */
+export declare const TerminalPreparedObservationSchema: z.ZodObject<{
+    requestDigest: z.ZodString;
+    initialPromptTokens: z.ZodNumber;
+    maxPromptTokens: z.ZodNumber;
+}, z.core.$strict>;
+export type TerminalPreparedObservation = z.infer<typeof TerminalPreparedObservationSchema>;
+/**
  * daemon -> server: task finished successfully.
  *
  * `document` (additive-minor, docs/protocol.md "Freeze rule"): the OPTIONAL
@@ -8010,6 +8068,11 @@ export declare const TaskCompletePayloadSchema: z.ZodObject<{
         clientVersion: z.ZodString;
         reportedAt: z.ZodISODateTime;
     }, z.core.$strip>>;
+    preparedObservation: z.ZodOptional<z.ZodObject<{
+        requestDigest: z.ZodString;
+        initialPromptTokens: z.ZodNumber;
+        maxPromptTokens: z.ZodNumber;
+    }, z.core.$strict>>;
     agentRef: z.ZodOptional<z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
@@ -8039,6 +8102,11 @@ export declare const TaskFailPayloadSchema: z.ZodObject<{
         clientVersion: z.ZodString;
         reportedAt: z.ZodISODateTime;
     }, z.core.$strip>>;
+    preparedObservation: z.ZodOptional<z.ZodObject<{
+        requestDigest: z.ZodString;
+        initialPromptTokens: z.ZodNumber;
+        maxPromptTokens: z.ZodNumber;
+    }, z.core.$strict>>;
     agentRef: z.ZodOptional<z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
@@ -9632,6 +9700,11 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             clientVersion: z.ZodString;
             reportedAt: z.ZodISODateTime;
         }, z.core.$strip>>;
+        preparedObservation: z.ZodOptional<z.ZodObject<{
+            requestDigest: z.ZodString;
+            initialPromptTokens: z.ZodNumber;
+            maxPromptTokens: z.ZodNumber;
+        }, z.core.$strict>>;
         agentRef: z.ZodOptional<z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
@@ -9659,6 +9732,11 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             clientVersion: z.ZodString;
             reportedAt: z.ZodISODateTime;
         }, z.core.$strip>>;
+        preparedObservation: z.ZodOptional<z.ZodObject<{
+            requestDigest: z.ZodString;
+            initialPromptTokens: z.ZodNumber;
+            maxPromptTokens: z.ZodNumber;
+        }, z.core.$strict>>;
         agentRef: z.ZodOptional<z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;

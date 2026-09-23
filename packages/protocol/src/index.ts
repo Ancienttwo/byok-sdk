@@ -252,6 +252,7 @@ export {
   RESULT_DOCUMENT_MAX_BYTES,
   checkResultDocument,
   TerminalInferenceUsageSchema,
+  TerminalPreparedObservationSchema,
   TERMINAL_INFERENCE_USAGE_MAX_TOKENS,
   TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS,
   TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH,
@@ -299,6 +300,7 @@ export type {
   TaskCancelledPayload,
   TaskApprovalResolvedPayload,
   TerminalInferenceUsage,
+  TerminalPreparedObservation,
 } from './messages';
 
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';

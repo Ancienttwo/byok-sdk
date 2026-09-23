@@ -24,6 +24,7 @@ import {
 } from './agent-home-projection';
 import {
   InputPreparationAccountingPolicyRefSchema,
+  InputPreparationArtifactSummarySchema,
   InputPreparationContentHashSchema,
   InputPreparationOfferBindingSchema,
   InputPreparationPermissionModeSchema,
@@ -1142,6 +1143,41 @@ export const TerminalInferenceUsageSchema = z.object({
 export type TerminalInferenceUsage = z.infer<typeof TerminalInferenceUsageSchema>;
 
 /**
+ * The prepared-only terminal observation: what the runtime reported about the
+ * provider calls of ONE prepared Execution, bound to the frozen request it
+ * launched.
+ *
+ * - `requestDigest` — the frozen artifact's own request digest
+ *   (`InputPreparationArtifactSummarySchema.requestDigest`), so the Host
+ *   compares these numbers against exactly the D whose `requestBytes` it
+ *   ruled on.
+ * - `initialPromptTokens` — the prompt tokens of the FIRST provider call. It
+ *   is the only call whose request is D; every later call is an ordinary tool
+ *   continuation. Prompt tokens are the provider's whole prompt, cache reads
+ *   and writes included.
+ * - `maxPromptTokens` — the largest prompt of any provider call of the
+ *   Execution, so `maxPromptTokens >= initialPromptTokens`.
+ *
+ * A separate field, deliberately NOT {@link TerminalInferenceUsageSchema}:
+ * that one is telemetry and never task-state authority, while this one is the
+ * evidence a Host checks its own budget ruling against. The device performs no
+ * budget arithmetic over it. Strict, like every other control shape: an
+ * unrecognized field is rejected, not stripped.
+ */
+export const TerminalPreparedObservationSchema = z
+  .object({
+    requestDigest: InputPreparationArtifactSummarySchema.shape.requestDigest,
+    initialPromptTokens: TerminalInferenceUsageNumberSchema,
+    maxPromptTokens: TerminalInferenceUsageNumberSchema,
+  })
+  .strict()
+  .refine((value) => value.maxPromptTokens >= value.initialPromptTokens, {
+    message: 'maxPromptTokens must not be below initialPromptTokens',
+    path: ['maxPromptTokens'],
+  });
+export type TerminalPreparedObservation = z.infer<typeof TerminalPreparedObservationSchema>;
+
+/**
  * daemon -> server: task finished successfully.
  *
  * `document` (additive-minor, docs/protocol.md "Freeze rule"): the OPTIONAL
@@ -1179,6 +1215,8 @@ export const TaskCompletePayloadSchema = z.object({
       message: `task.complete.document must be plain JSON data (equal to its own JSON round trip) and at most ${RESULT_DOCUMENT_MAX_BYTES} bytes as canonical JSON (UTF-8)`,
     }),
   usage: TerminalInferenceUsageSchema.optional(),
+  /** Present on a prepared Execution only — see {@link TerminalPreparedObservationSchema}. */
+  preparedObservation: TerminalPreparedObservationSchema.optional(),
   agentRef: AgentRefSchema.optional(),
 });
 export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
@@ -1191,6 +1229,8 @@ export const TaskFailPayloadSchema = z.object({
   reason: z.string(),
   retryable: z.boolean().optional(),
   usage: TerminalInferenceUsageSchema.optional(),
+  /** Present on a prepared Execution that observed provider usage before failing. */
+  preparedObservation: TerminalPreparedObservationSchema.optional(),
   agentRef: AgentRefSchema.optional(),
 });
 export type TaskFailPayload = z.infer<typeof TaskFailPayloadSchema>;

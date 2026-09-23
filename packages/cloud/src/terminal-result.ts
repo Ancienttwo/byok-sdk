@@ -4,6 +4,7 @@ import {
   type BlobRef,
   type Envelope,
   type TerminalInferenceUsage,
+  type TerminalPreparedObservation,
   type TaskFailPayload,
 } from '@byok-sdk/protocol';
 import { ByokCloudError } from './errors';
@@ -56,6 +57,14 @@ export interface TerminalResult {
    * or entitlement authority.
    */
   readonly usage?: TerminalInferenceUsage;
+  /**
+   * The prepared-only observation copied verbatim from a prepared Execution's
+   * winning `task.complete` / `task.fail`: the frozen request digest, the
+   * first provider call's prompt tokens and the largest. Unlike `usage` it is
+   * evidence the Host checks its own budget ruling against; the cloud performs
+   * no arithmetic over it.
+   */
+  readonly preparedObservation?: TerminalPreparedObservation;
   readonly reason?: string;
   /** Terminal cause projection; currently the protocol's terminal reason. */
   readonly terminalCause?: string;
@@ -99,6 +108,9 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         ...(envelope.payload.document !== undefined ? { document: envelope.payload.document } : {}),
         ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
         ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
+        ...(envelope.payload.preparedObservation === undefined
+          ? {}
+          : { preparedObservation: envelope.payload.preparedObservation }),
         recordedAt: receipt.recordedAt,
       };
     case 'task.fail':
@@ -114,6 +126,9 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
           : {}),
         ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
         ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
+        ...(envelope.payload.preparedObservation === undefined
+          ? {}
+          : { preparedObservation: envelope.payload.preparedObservation }),
         recordedAt: receipt.recordedAt,
       };
     // `task.decline` is the pre-claim terminal (§3.2, `Offered -> Failed`).

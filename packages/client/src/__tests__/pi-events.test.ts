@@ -140,4 +140,58 @@ describe('mapPiMessageToAgentEvent', () => {
     expect(mapPiMessageToAgentEvent({ type: 'queue_update', steering: [], followUp: [] })).toBeUndefined();
     expect(mapPiMessageToAgentEvent({ type: 'extension_ui_request', id: 'x', method: 'confirm' })).toBeUndefined();
   });
+
+  describe('assistant message_end usage', () => {
+    function assistantEnd(usage: Record<string, unknown> | undefined, role = 'assistant'): PiRpcMessage {
+      return {
+        type: 'message_end',
+        message: { role, content: [{ type: 'text', text: 'done' }], ...(usage === undefined ? {} : { usage }), stopReason: 'stop' },
+      };
+    }
+
+    it('projects usage with the prompt counted whole: input + cacheRead + cacheWrite', () => {
+      // pi-ai's `usage.input` already EXCLUDES the cache figures, so the
+      // provider's whole prompt is their sum.
+      expect(mapPiMessageToAgentEvent(assistantEnd({
+        input: 100,
+        output: 40,
+        cacheRead: 900,
+        cacheWrite: 24,
+        reasoning: 12,
+        totalTokens: 1_064,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      }))).toEqual({
+        type: 'usage',
+        inputTokens: 1_024,
+        cachedInputTokens: 900,
+        outputTokens: 40,
+        reasoningTokens: 12,
+        totalTokens: 1_064,
+      });
+    });
+
+    it('omits reasoningTokens when the provider reports no reasoning breakdown', () => {
+      expect(mapPiMessageToAgentEvent(assistantEnd({ input: 7, output: 3, cacheRead: 0, cacheWrite: 0, totalTokens: 10 })))
+        .toEqual({ type: 'usage', inputTokens: 7, cachedInputTokens: 0, outputTokens: 3, totalTokens: 10 });
+    });
+
+    it('produces nothing for a message_end that is not an assistant one, or carries no usage', () => {
+      expect(mapPiMessageToAgentEvent(assistantEnd({ input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 }, 'user')))
+        .toBeUndefined();
+      expect(mapPiMessageToAgentEvent(assistantEnd({ input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 }, 'toolResult')))
+        .toBeUndefined();
+      expect(mapPiMessageToAgentEvent(assistantEnd(undefined))).toBeUndefined();
+      expect(mapPiMessageToAgentEvent({ type: 'message_end', message: { role: 'system' } })).toBeUndefined();
+      // Still routine: a user/tool-result message_end is expected traffic.
+      expect(ROUTINE_PI_EVENT_TYPES.has('message_end')).toBe(true);
+    });
+
+    it('projects no partial observation: a missing or malformed required count yields no event', () => {
+      expect(mapPiMessageToAgentEvent(assistantEnd({ input: 5, output: 1, cacheWrite: 0, totalTokens: 6 }))).toBeUndefined();
+      expect(mapPiMessageToAgentEvent(assistantEnd({ input: -1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 0 })))
+        .toBeUndefined();
+      expect(mapPiMessageToAgentEvent(assistantEnd({ input: 1.5, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 })))
+        .toBeUndefined();
+    });
+  });
 });

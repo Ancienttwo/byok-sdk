@@ -3596,7 +3596,7 @@ export interface CloudRootStores {
 }
 export declare function tenantStoresFor(principal: Principal, root: CloudRootStores): TenantStores;
 // ==== @byok-sdk/cloud dist/terminal-result.d.ts ====
-import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TaskFailPayload } from '@byok-sdk/protocol';
+import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TaskFailPayload } from '@byok-sdk/protocol';
 import type { RequestReceipt } from './stores/ports';
 /** Canonical device evidence, independent of the Host cancellation projection. */
 export interface DeviceTerminal {
@@ -3637,6 +3637,14 @@ export interface TerminalResult {
      * or entitlement authority.
      */
     readonly usage?: TerminalInferenceUsage;
+    /**
+     * The prepared-only observation copied verbatim from a prepared Execution's
+     * winning `task.complete` / `task.fail`: the frozen request digest, the
+     * first provider call's prompt tokens and the largest. Unlike `usage` it is
+     * evidence the Host checks its own budget ruling against; the cloud performs
+     * no arithmetic over it.
+     */
+    readonly preparedObservation?: TerminalPreparedObservation;
     readonly reason?: string;
     /** Terminal cause projection; currently the protocol's terminal reason. */
     readonly terminalCause?: string;

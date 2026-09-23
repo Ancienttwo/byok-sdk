@@ -124,6 +124,31 @@ describe('readTaskResult', () => {
     expect(result?.summary).toBeUndefined();
   });
 
+  it('projects the prepared-only observation verbatim from task.complete and task.fail', async () => {
+    const preparedObservation = { requestDigest: 'a'.repeat(64), initialPromptTokens: 812, maxPromptTokens: 2_048 };
+    const completed = await readyTask();
+    await handleInboundEnvelope(
+      stores,
+      deviceId,
+      createEnvelope('task.complete', { summary: 's', sessionRef: 'session-p', preparedObservation }, { taskId: completed }),
+    );
+    expect((await harness.cloud.readTaskResult(TENANT_A, completed))?.preparedObservation).toEqual(preparedObservation);
+
+    const overflowed = await readyTask();
+    await handleInboundEnvelope(
+      stores,
+      deviceId,
+      createEnvelope(
+        'task.fail',
+        { reason: 'context_overflow: provider call 2', retryable: false, preparedObservation },
+        { taskId: overflowed },
+      ),
+    );
+    const failed = await harness.cloud.readTaskResult(TENANT_A, overflowed);
+    expect(failed).toMatchObject({ state: 'failed', retryable: false, preparedObservation });
+    expect(failed?.reason?.startsWith('context_overflow')).toBe(true);
+  });
+
   it('projects a cancelled terminal, with and without a reason', async () => {
     const explained = await readyTask();
     await handleInboundEnvelope(

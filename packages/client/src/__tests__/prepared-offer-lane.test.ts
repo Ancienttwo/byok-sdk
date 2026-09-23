@@ -9,7 +9,12 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { buildRuntimeEnv } from '../daemon/environment';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
-import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
+import {
+  PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX,
+  PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX,
+  TaskRunner,
+  type TaskRunnerDeps,
+} from '../daemon/task-runner';
 import {
   InputPreparationStore,
   type CounterReservationInput,
@@ -586,9 +591,115 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     await runner.handleEnvelope(preparedOffer('task-prepared-terminal', reference(built)));
     expect(built.store.get(built.recordId)?.pin?.taskId).toBe('task-prepared-terminal');
 
+    // A prepared Execution completes only with provider usage observed.
+    adapter.sessions[0]!.emit({ type: 'usage', inputTokens: 1_000, outputTokens: 10 });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(true));
     await vi.waitFor(() => expect(built.store.get(built.recordId)?.pin).toBeUndefined());
+  });
+
+  it('reports the prepared observation: initial = the first provider call, max = the largest', async () => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(built, adapter, sent);
+    await runner.handleEnvelope(preparedOffer('task-prepared-observed', reference(built)));
+
+    // Three provider calls: D, then two tool continuations. The initial call
+    // is neither the largest nor the last.
+    const session = adapter.sessions[0]!;
+    session.emit({ type: 'usage', inputTokens: 1_200, cachedInputTokens: 0, outputTokens: 30 });
+    session.emit({ type: 'tool_use', tool: 'mcp__team__list', input: {}, toolCallId: 'c1' });
+    session.emit({ type: 'usage', inputTokens: 5_400, cachedInputTokens: 1_200, outputTokens: 20 });
+    session.emit({ type: 'usage', inputTokens: 3_100, cachedInputTokens: 3_000, outputTokens: 40 });
+    session.emit({ type: 'turn_end' });
+
+    await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(true));
+    const completed = sent.find((envelope) => envelope.type === 'task.complete');
+    if (completed?.type !== 'task.complete') throw new Error('no task.complete');
+    expect(completed.payload.preparedObservation).toEqual({
+      requestDigest: REQUEST_DIGEST,
+      initialPromptTokens: 1_200,
+      maxPromptTokens: 5_400,
+    });
+  });
+
+  it('fails closed with context_overflow when a call reaches the prepared model\'s context window', async () => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(built, adapter, sent);
+    await runner.handleEnvelope(preparedOffer('task-prepared-overflow', reference(built)));
+
+    const session = adapter.sessions[0]!;
+    session.emit({ type: 'usage', inputTokens: 150_000, outputTokens: 30 });
+    // Exactly AT the window is overflow: the boundary is `>=`, not `>`.
+    session.emit({ type: 'usage', inputTokens: MODEL.contextWindow, outputTokens: 1 });
+
+    await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(true));
+    const failed = sent.find((envelope) => envelope.type === 'task.fail');
+    if (failed?.type !== 'task.fail') throw new Error('no task.fail');
+    expect(failed.payload.reason.startsWith(`${PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX}:`)).toBe(true);
+    expect(failed.payload.retryable).toBe(false);
+    expect(failed.payload.preparedObservation).toEqual({
+      requestDigest: REQUEST_DIGEST,
+      initialPromptTokens: 150_000,
+      maxPromptTokens: MODEL.contextWindow,
+    });
+    // Torn down, not left running, and never reported as success.
+    expect(session.interruptCalled).toBe(true);
+    expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(false);
+  });
+
+  it('keeps a call just below the context window a success', async () => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(built, adapter, sent);
+    await runner.handleEnvelope(preparedOffer('task-prepared-below', reference(built)));
+
+    adapter.sessions[0]!.emit({ type: 'usage', inputTokens: MODEL.contextWindow - 1, outputTokens: 1 });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+
+    await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(true));
+    expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(false);
+  });
+
+  it('fails closed with usage_unavailable when a prepared Execution settles with no usage observed', async () => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(built, adapter, sent);
+    await runner.handleEnvelope(preparedOffer('task-prepared-no-usage', reference(built)));
+
+    adapter.sessions[0]!.emit({ type: 'progress', text: 'an answer nobody can check' });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+
+    await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(true));
+    const failed = sent.find((envelope) => envelope.type === 'task.fail');
+    if (failed?.type !== 'task.fail') throw new Error('no task.fail');
+    expect(failed.payload.reason.startsWith(`${PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX}:`)).toBe(true);
+    expect(failed.payload.retryable).toBe(false);
+    expect(failed.payload.preparedObservation).toBeUndefined();
+    expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(false);
+  });
+
+  it('fails closed with usage_unavailable when a provider call reports no prompt count', async () => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(built, adapter, sent);
+    await runner.handleEnvelope(preparedOffer('task-prepared-zero-usage', reference(built)));
+
+    // The Pi runtime leaves a call's usage at zeros when the provider streams
+    // none; zero prompt tokens for a non-empty D is not an observation.
+    adapter.sessions[0]!.emit({ type: 'usage', inputTokens: 0, outputTokens: 0 });
+
+    await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(true));
+    const failed = sent.find((envelope) => envelope.type === 'task.fail');
+    if (failed?.type !== 'task.fail') throw new Error('no task.fail');
+    expect(failed.payload.reason.startsWith(`${PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX}:`)).toBe(true);
+    expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(false);
   });
 
   it('admits exactly one of two runners racing one reference; the loser claims nothing and dispatches nothing', async () => {

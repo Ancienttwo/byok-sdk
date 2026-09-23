@@ -7367,6 +7367,33 @@ export declare const MAX_PROGRESS_BATCH_BYTES_EXCEEDED_REASON_PREFIX = "resource
  */
 export declare const RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX = "result document undeliverable";
 /**
+ * Bounded admission: the stable reason PREFIX a prepared Execution's
+ * `task.fail` carries when any one of its provider calls reported prompt
+ * tokens AT OR ABOVE the context window of the model its frozen request D was
+ * compiled for (`RuntimePreparedLaunchV1.expected.model.contextWindow`).
+ *
+ * A purely numeric classification over the runtime's own usage observation:
+ * no provider error text is read, no pattern is matched, and the upstream
+ * runtime's heuristic overflow detector is deliberately not consulted. The
+ * execution is torn down and fails closed (`retryable: false`) — the same D
+ * re-sent against the same window would overflow again. Everything after the
+ * prefix is human-readable detail.
+ */
+export declare const PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX = "context_overflow";
+/**
+ * Bounded admission: the stable reason PREFIX a prepared Execution's
+ * `task.fail` carries when it cannot produce the prepared observation — it
+ * settled with no provider usage observed at all, or one of its provider calls
+ * reported no positive, representable prompt token count. A prepared result
+ * without that observation cannot be checked against the byte bound it was
+ * admitted under, so it is never accepted as success (`retryable: false`).
+ *
+ * A reported prompt of zero is "unavailable", not "zero": D is never empty, and
+ * the Pi runtime initialises a call's usage to zeros and leaves them there when
+ * the provider streams no usage.
+ */
+export declare const PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX = "usage_unavailable";
+/**
  * The task identity handed to a {@link ResultDocumentExtractor} alongside the
  * final output text. Deliberately minimal — identity only, no session
  * handle, no workspace path, no adapter: this seam exists to turn text the
@@ -8527,11 +8554,20 @@ export declare class TaskRunner {
      * requested execution target, not an adapter-reported provider/model fact.
      * The bundled adapter event contracts currently expose token observations
      * (Codex and Claude) but no provider/model observation, so those keys stay
-     * absent. Pi exposes no native usage observation, so its terminal payload
-     * omits this optional block rather than fabricating a usage observation from
-     * independently known runtime, elapsed duration, or Local Agent version.
+     * absent. Pi reports one native usage observation per provider call
+     * (`adapters/pi/events.ts`), so its block carries the LAST call's figures —
+     * telemetry, exactly like the other runtimes' — and a Pi run that reported
+     * none omits the block rather than fabricating one from independently known
+     * runtime, elapsed duration, or Local Agent version.
      */
     private terminalInferenceUsagePayload;
+    /**
+     * The prepared-only terminal observation, present exactly on a prepared
+     * Execution that observed at least one provider call's prompt. It is
+     * evidence the Host checks its own budget ruling against, deliberately a
+     * separate field from the telemetry-only `usage` block.
+     */
+    private preparedObservationPayload;
     /** Exact Agent identity projection for claim/terminal wire payloads. */
     private agentTerminalPayload;
     /**

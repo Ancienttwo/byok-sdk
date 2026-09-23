@@ -13,6 +13,9 @@ import {
   InputPreparationReceiptSummarySchema,
   MESSAGE_PAYLOAD_SCHEMAS,
   SERVER_TO_DAEMON_TYPES,
+  TaskCompletePayloadSchema,
+  TaskFailPayloadSchema,
+  TerminalPreparedObservationSchema,
   UnknownMessageTypeError,
   byokInputPreparationCompletionPath,
   byokInputPreparationStatusPath,
@@ -522,6 +525,28 @@ describe('bounded admission wire cut', () => {
         InputPreparationReceiptSummarySchema.safeParse({ ...RECEIPT, readinessReasons: [reason] }).success,
       ).toBe(true);
     }
+  });
+});
+
+describe('terminal prepared observation', () => {
+  const OBSERVATION = { requestDigest: 'a'.repeat(64), initialPromptTokens: 812, maxPromptTokens: 2_048 };
+
+  it('rides on task.complete and task.fail, strictly', () => {
+    expect(TerminalPreparedObservationSchema.safeParse(OBSERVATION).success).toBe(true);
+    expect(
+      TaskCompletePayloadSchema.safeParse({ summary: 's', sessionRef: 'r', preparedObservation: OBSERVATION }).success,
+    ).toBe(true);
+    expect(TaskFailPayloadSchema.safeParse({ reason: 'context_overflow: x', preparedObservation: OBSERVATION }).success)
+      .toBe(true);
+    expect(TerminalPreparedObservationSchema.safeParse({ ...OBSERVATION, extra: 1 }).success).toBe(false);
+  });
+
+  it('refuses a max below the initial call and a missing or non-integer token count', () => {
+    expect(TerminalPreparedObservationSchema.safeParse({ ...OBSERVATION, maxPromptTokens: 811 }).success).toBe(false);
+    const { initialPromptTokens: _initial, ...withoutInitial } = OBSERVATION;
+    expect(TerminalPreparedObservationSchema.safeParse(withoutInitial).success).toBe(false);
+    expect(TerminalPreparedObservationSchema.safeParse({ ...OBSERVATION, initialPromptTokens: 1.5 }).success).toBe(false);
+    expect(TerminalPreparedObservationSchema.safeParse({ ...OBSERVATION, requestDigest: '' }).success).toBe(false);
   });
 });
 

@@ -4995,6 +4995,33 @@
           ],
           "additionalProperties": false
         },
+        "preparedObservation": {
+          "type": "object",
+          "properties": {
+            "requestDigest": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            },
+            "initialPromptTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000
+            },
+            "maxPromptTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000
+            }
+          },
+          "required": [
+            "requestDigest",
+            "initialPromptTokens",
+            "maxPromptTokens"
+          ],
+          "additionalProperties": false
+        },
         "agentRef": {
           "type": "object",
           "properties": {
@@ -5117,6 +5144,33 @@
             "runtime",
             "clientVersion",
             "reportedAt"
+          ],
+          "additionalProperties": false
+        },
+        "preparedObservation": {
+          "type": "object",
+          "properties": {
+            "requestDigest": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            },
+            "initialPromptTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000
+            },
+            "maxPromptTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000
+            }
+          },
+          "required": [
+            "requestDigest",
+            "initialPromptTokens",
+            "maxPromptTokens"
           ],
           "additionalProperties": false
         },
@@ -10457,6 +10511,33 @@
                 ],
                 "additionalProperties": false
               },
+              "preparedObservation": {
+                "type": "object",
+                "properties": {
+                  "requestDigest": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                  },
+                  "initialPromptTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  "maxPromptTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  }
+                },
+                "required": [
+                  "requestDigest",
+                  "initialPromptTokens",
+                  "maxPromptTokens"
+                ],
+                "additionalProperties": false
+              },
               "agentRef": {
                 "type": "object",
                 "properties": {
@@ -10623,6 +10704,33 @@
                   "runtime",
                   "clientVersion",
                   "reportedAt"
+                ],
+                "additionalProperties": false
+              },
+              "preparedObservation": {
+                "type": "object",
+                "properties": {
+                  "requestDigest": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                  },
+                  "initialPromptTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  "maxPromptTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  }
+                },
+                "required": [
+                  "requestDigest",
+                  "initialPromptTokens",
+                  "maxPromptTokens"
                 ],
                 "additionalProperties": false
               },
@@ -17784,6 +17892,33 @@
                         ],
                         "additionalProperties": false
                       },
+                      "preparedObservation": {
+                        "type": "object",
+                        "properties": {
+                          "requestDigest": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          },
+                          "initialPromptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          },
+                          "maxPromptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          }
+                        },
+                        "required": [
+                          "requestDigest",
+                          "initialPromptTokens",
+                          "maxPromptTokens"
+                        ],
+                        "additionalProperties": false
+                      },
                       "agentRef": {
                         "type": "object",
                         "properties": {
@@ -17950,6 +18085,33 @@
                           "runtime",
                           "clientVersion",
                           "reportedAt"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "preparedObservation": {
+                        "type": "object",
+                        "properties": {
+                          "requestDigest": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          },
+                          "initialPromptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          },
+                          "maxPromptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          }
+                        },
+                        "required": [
+                          "requestDigest",
+                          "initialPromptTokens",
+                          "maxPromptTokens"
                         ],
                         "additionalProperties": false
                       },
@@ -24159,6 +24321,33 @@
                         ],
                         "additionalProperties": false
                       },
+                      "preparedObservation": {
+                        "type": "object",
+                        "properties": {
+                          "requestDigest": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          },
+                          "initialPromptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          },
+                          "maxPromptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          }
+                        },
+                        "required": [
+                          "requestDigest",
+                          "initialPromptTokens",
+                          "maxPromptTokens"
+                        ],
+                        "additionalProperties": false
+                      },
                       "agentRef": {
                         "type": "object",
                         "properties": {
@@ -24325,6 +24514,33 @@
                           "runtime",
                           "clientVersion",
                           "reportedAt"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "preparedObservation": {
+                        "type": "object",
+                        "properties": {
+                          "requestDigest": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          },
+                          "initialPromptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          },
+                          "maxPromptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          }
+                        },
+                        "required": [
+                          "requestDigest",
+                          "initialPromptTokens",
+                          "maxPromptTokens"
                         ],
                         "additionalProperties": false
                       },
