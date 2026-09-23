@@ -500,7 +500,25 @@ version they speak, so a skewed device is refused at enqueue with
 `agent_capability_missing` and no receipt or mailbox row. The retired
 unversioned `agent-input-preparation` (0.19 and earlier) is accepted nowhere;
 there is no dual token. The completion route stays unconditional, so a row
-already in flight can still be discharged.
+already in flight can still be discharged — but only by a device and a cloud on
+the SAME contract version. The token gates admission, not rows admitted before
+the cut: a row a 0.19 cloud relayed is still in flight after either side
+upgrades, and its completion crosses versions in both directions. A new device
+answers it with `prepared` (or `input_preparation_record_log_unsupported`),
+which a 0.19 cloud's strict schema rejects; a 0.19 device answers a new cloud
+with `counted` and a counter `kind`, which the new cloud rejects. Either way the
+completion PUT fails with a 422, the device keeps the envelope for redelivery,
+and its strictly seq-ordered cursor stalls — which blocks that device's WHOLE
+mailbox, not only preparation. There is no v4 parser, dual read or migration
+for this, by decision: the lane never reached production readiness on 0.19.
+
+**Operator precondition for the one-shot v5 cut.** Before upgrading either side
+across the cut, drain the input-preparation in-flight rows: every preparation
+receipt terminal and each device's mailbox cursor caught up past its last
+`agent.input.preparation` envelope. Then upgrade the cloud and its devices as a
+pair. **Recovery:** if a row was stranded anyway, upgrade the other side too —
+once both speak v5 the redelivered completion is accepted and the cursor moves;
+until then the device's mailbox stays stalled.
 
 The evidence has four parts, and each is read off a recorded fact rather than
 asserted.

@@ -308,6 +308,19 @@ compiling a request of its own against tokens that were already counted for a
 different one. Server and hosted cloud require `agent-home-contract` and
 `agent-input-preparation-v5` (the capability carries the input-preparation wire version; the unversioned 0.19 token is accepted nowhere) before allocating the task/mailbox row.
 
+The capability gates ADMISSION only. The `agent.input.preparation` payload and
+its completion receipt carry no version field, so a row enqueued before the v5
+cut is still in flight after either side upgrades, and its completion is
+discharged only when device and cloud speak the same version: across the cut
+the strict receipt schema rejects it with a 422 in both directions (`prepared`
+into a 0.19 cloud, `counted` plus a counter `kind` into a v5 cloud), and the
+device's seq-ordered redelivery cursor stalls its whole mailbox. There is no
+cross-version parser by decision. **Precondition:** before upgrading either
+side across the v5 cut, drain input-preparation in-flight rows (every receipt
+terminal, the device cursor caught up), then upgrade cloud and device as a
+pair. **Recovery:** if a row is stranded, upgrade the other side too; until
+then that device's mailbox stays stalled.
+
 It carries no `instruction`: the user request is already inside the frozen
 envelope the referenced record retained. It carries no `sessionRef` either — a
 prepared Execution never resumes, because resuming binds the frozen request to a

@@ -56,6 +56,13 @@ export const INPUT_PREPARATION_WIRE_VERSION = 5 as const;
  * a strict-schema 422 and a device would then redeliver forever. There is no
  * dual token and no accepted older one. The retired unversioned token
  * `agent-input-preparation` (versions up to 4) is admitted nowhere.
+ *
+ * The token gates NEW admissions only. A row enqueued before a version cut is
+ * still in flight afterwards, and its completion is accepted only by a cloud
+ * on the same version as the device answering it; across the cut it is a 422
+ * and a stalled device cursor. Draining in-flight rows and upgrading cloud and
+ * devices as a pair is the operator precondition for the cut (`docs/spec.md`,
+ * bounded admission); nothing here parses an older receipt.
  */
 export const AGENT_INPUT_PREPARATION_CAPABILITY =
   `agent-input-preparation-v${INPUT_PREPARATION_WIRE_VERSION}` as const;

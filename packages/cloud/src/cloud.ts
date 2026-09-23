@@ -1617,6 +1617,15 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
    * is enqueued no longer refuses the in-flight completion — that row was
    * legitimately admitted, its receipt stays not-ready and G4 is closed to
    * activation — so revocation stops NEW admissions only.
+   *
+   * "The device can always discharge its row" holds only within ONE contract
+   * version. The completion body is parsed with the strict receipt schema of
+   * THIS build, and the relay wire carries no version, so a row admitted
+   * before the v5 cut and completed by a device on the other side of it is
+   * rejected (422) and stalls that device's cursor. That boundary is an
+   * operator precondition — drain in-flight rows, then upgrade cloud and
+   * devices as a pair (`docs/spec.md`, bounded admission) — not something this
+   * route translates.
    */
   async function completeInputPreparationFromStores(
     stores: TenantStores,

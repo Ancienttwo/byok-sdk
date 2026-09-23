@@ -9,7 +9,7 @@ import {
   type InputPreparationSelection,
 } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
-import { inputPreparationRequestKey } from '../input-preparations';
+import { inputPreparationCompletionKey, inputPreparationRequestKey } from '../input-preparations';
 import { TENANT_A, createHarness } from './support/harness';
 
 const REQUEST_A = '10000000-0000-4000-8000-000000000301';
@@ -317,6 +317,51 @@ describe('remote input preparation', () => {
     expect(replay.status).toBe(200);
     expect(await replay.json()).toEqual(acceptedBody);
     await expect(complete(target.authorization, rejectedCompletion())).resolves.toMatchObject({ status: 409 });
+  });
+
+  it('pins the v5 cut: a v4-shaped completion (`counted` + counter `kind`) is a 422 and records nothing', async () => {
+    // A row admitted before the cut, answered by a 0.19 device. There is no
+    // cross-version parser by decision; the operator precondition (drain, then
+    // upgrade as a pair) is what keeps this from stalling a device cursor.
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await admitPreparation(harness, device.deviceId);
+    await harness.cloud.enqueueInputPreparation(TENANT_A, device.deviceId, desired());
+    const v4Receipt = {
+      ...RECEIPT,
+      state: 'counted',
+      counter: {
+        method: 'provider.tokenizer',
+        methodVersion: '1',
+        authority: 'provider',
+        kind: 'count',
+        value: 812,
+        coverage: { covered: true },
+        providerEvidence: {
+          projectionDigest: 'a'.repeat(64),
+          endpoint: 'https://provider.example/v1',
+          modelId: 'model-1',
+          asserted: { httpStatus: 200, usageFields: { prompt_tokens: 812 }, responseDigest: 'e'.repeat(64) },
+        },
+        target: { endpoint: 'https://provider.example/v1', modelId: 'model-1' },
+        calledAt: '2026-01-01T00:00:00.000Z',
+        completedAt: '2026-01-01T00:00:01.000Z',
+      },
+    };
+
+    const response = await harness.request(byokInputPreparationCompletionPath(REQUEST_A), {
+      method: 'PUT',
+      headers: { ...device.authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ ...preparedCompletion(), receipt: v4Receipt }),
+    });
+
+    expect(response.status).toBe(422);
+    await expect(
+      harness.stores.receipts.get(TENANT_A, inputPreparationCompletionKey(device.deviceId, AGENT_A, REQUEST_A)),
+    ).resolves.toBeUndefined();
+    await expect(
+      harness.cloud.getInputPreparationStatus(TENANT_A, device.deviceId, { requestId: REQUEST_A, agentRef: AGENT_A }),
+    ).resolves.toMatchObject({ status: 'pending' });
   });
 
   it('records a rejection as a terminal status carrying no artifact', async () => {
