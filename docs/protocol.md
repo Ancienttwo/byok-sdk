@@ -306,7 +306,7 @@ older daemon skips an unknown message TYPE whole, but would legally strip an
 unknown optional FIELD and run the task as an ordinary instruction offer —
 compiling a request of its own against tokens that were already counted for a
 different one. Server and hosted cloud require `agent-home-contract` and
-`agent-input-preparation` before allocating the task/mailbox row.
+`agent-input-preparation-v5` (the capability carries the input-preparation wire version; the unversioned 0.19 token is accepted nowhere) before allocating the task/mailbox row.
 
 It carries no `instruction`: the user request is already inside the frozen
 envelope the referenced record retained. It carries no `sessionRef` either — a
