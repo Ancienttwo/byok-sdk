@@ -28,6 +28,7 @@ import {
   type ResultDocumentCheck,
   type RuntimeId,
   type TerminalInferenceUsage,
+  type TerminalPreparedObservation,
   type TerminalProjectionSelection,
   type TaskOfferPayload,
   type TaskOfferForAgentPayload,
@@ -270,6 +271,82 @@ export const MAX_PROGRESS_BATCH_BYTES_EXCEEDED_REASON_PREFIX =
  * existed to produce.
  */
 export const RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX = 'result document undeliverable';
+
+/**
+ * Bounded admission: the stable reason PREFIX a prepared Execution's
+ * `task.fail` carries when any one of its provider calls reported prompt
+ * tokens AT OR ABOVE the context window of the model its frozen request D was
+ * compiled for (`RuntimePreparedLaunchV1.expected.model.contextWindow`).
+ *
+ * A purely numeric classification over the runtime's own usage observation:
+ * no provider error text is read, no pattern is matched, and the upstream
+ * runtime's heuristic overflow detector is deliberately not consulted. The
+ * execution is torn down and fails closed (`retryable: false`) — the same D
+ * re-sent against the same window would overflow again. Everything after the
+ * prefix is human-readable detail.
+ */
+export const PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX = 'context_overflow';
+
+/**
+ * Bounded admission: the stable reason PREFIX a prepared Execution's
+ * `task.fail` carries when it cannot produce the prepared observation — it
+ * settled with no provider usage observed at all, or one of its provider calls
+ * reported no positive, representable prompt token count. A prepared result
+ * without that observation cannot be checked against the byte bound it was
+ * admitted under, so it is never accepted as success (`retryable: false`).
+ *
+ * A reported prompt of zero is "unavailable", not "zero": D is never empty, and
+ * the Pi runtime initialises a call's usage to zeros and leaves them there when
+ * the provider streams no usage.
+ */
+export const PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX = 'usage_unavailable';
+
+/**
+ * What one prepared Execution has observed about its provider calls so far.
+ *
+ * Seeded at admission from the durable record — the frozen artifact's request
+ * digest and the context window of the model D was compiled for — and advanced
+ * by every runtime `usage` event, each of which is ONE provider call's
+ * observation on the prepared lane. `initialPromptTokens` is the first call's
+ * prompt, the only call whose request is D; `maxPromptTokens` is the largest
+ * prompt of any call.
+ */
+interface PreparedExecutionObservation {
+  readonly requestDigest: string;
+  readonly contextWindow: number;
+  calls: number;
+  initialPromptTokens?: number;
+  maxPromptTokens?: number;
+}
+
+/**
+ * Advance one prepared observation by one provider call and classify it.
+ *
+ * Returns the typed failure reason when the call ends the Execution —
+ * {@link PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX} for a call with no positive,
+ * representable prompt count, {@link PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX}
+ * for a prompt at or above the context window — and `undefined` when it does
+ * not. Numbers only.
+ */
+function observePreparedCall(
+  observation: PreparedExecutionObservation,
+  event: Extract<AgentEvent, { type: 'usage' }>,
+): string | undefined {
+  observation.calls += 1;
+  const prompt = event.inputTokens;
+  if (prompt === undefined || !Number.isSafeInteger(prompt) || prompt <= 0 || prompt > TERMINAL_INFERENCE_USAGE_MAX_TOKENS) {
+    return `${PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX}: provider call ${observation.calls} of this prepared Execution`
+      + ' reported no positive, representable prompt token count';
+  }
+  if (observation.initialPromptTokens === undefined) observation.initialPromptTokens = prompt;
+  observation.maxPromptTokens = Math.max(observation.maxPromptTokens ?? 0, prompt);
+  if (prompt >= observation.contextWindow) {
+    return `${PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX}: provider call ${observation.calls} of this prepared Execution`
+      + ` reported ${prompt} prompt tokens, at or above the ${observation.contextWindow}-token context window`
+      + ' of the model its request was prepared for';
+  }
+  return undefined;
+}
 
 /**
  * The task identity handed to a {@link ResultDocumentExtractor} alongside the
@@ -754,6 +831,12 @@ interface ActiveTask {
    * cross-runtime accounting meaning this client does not own.
    */
   lastUsage?: Extract<AgentEvent, { type: 'usage' }>;
+  /**
+   * Present exactly on a prepared Execution. Unlike `lastUsage` it IS advanced
+   * per event, because on the prepared lane each `usage` event is one provider
+   * call and the observation it feeds is first-call and maximum, not a sum.
+   */
+  prepared?: PreparedExecutionObservation;
   /** Distinguishes runner-initiated teardown from an unexpected event-stream end. */
   beingTornDown?: boolean;
   /** Set before the first disposal await so no racing path can publish a second semantic terminal. */
@@ -1767,7 +1850,13 @@ export class TaskRunner {
     this.deps.send(
       createEnvelope(
         'task.fail',
-        { reason, retryable, ...this.terminalInferenceUsagePayload(active), ...this.agentTerminalPayload(active) },
+        {
+          reason,
+          retryable,
+          ...this.terminalInferenceUsagePayload(active),
+          ...this.preparedObservationPayload(active),
+          ...this.agentTerminalPayload(active),
+        },
         { taskId: active.taskId },
       ),
     );
@@ -2596,6 +2685,7 @@ export class TaskRunner {
       // race the store's compare-and-set, and the loser returns here having
       // sent no claim and dispatched nothing.
       let preparedLaunch: RuntimePreparedLaunchV1 | undefined;
+      let preparedObservation: PreparedExecutionObservation | undefined;
       if (preparation !== undefined) {
         const lane = preparationLane!;
         const record = lane.store.get(preparation.reference);
@@ -2667,6 +2757,14 @@ export class TaskRunner {
         }
         this.preparationPinsByTask.set(taskId, record.recordId);
         preparedLaunch = admitted.launch;
+        // Seeded from the durable record the admission just compared, never
+        // from the offer: the digest the Host ruled on and the window of the
+        // model D was compiled for.
+        preparedObservation = {
+          requestDigest: record.artifact!.requestDigest,
+          contextWindow: admitted.launch.expected.model.contextWindow,
+          calls: 0,
+        };
       }
 
       // All semantic admission is now in `prepare()` and the frozen manifest.
@@ -2971,6 +3069,7 @@ export class TaskRunner {
         approvalQueue: [],
         outputBytesSoFar: 0,
         startedAtMs: Date.now(),
+        ...(preparedObservation === undefined ? {} : { prepared: preparedObservation }),
         ...(messageRequirement === undefined ? {} : {
           messageRequirement,
           messageOutbox: this.pendingMessageTasks.get(taskId)!.outbox,
@@ -3567,6 +3666,17 @@ export class TaskRunner {
           // before turn_end/error; a custom adapter that emits several keeps
           // only the latest actual observation rather than inventing a sum.
           active.lastUsage = event;
+          if (active.prepared !== undefined) {
+            const verdict = observePreparedCall(active.prepared, event);
+            if (verdict !== undefined) {
+              // The observation that ended the Execution still reaches the
+              // wire, ahead of the typed failure it caused.
+              active.batcher.push(event);
+              active.batcher.flush();
+              await this.teardownActiveTask(active, verdict, false);
+              return;
+            }
+          }
         }
 
         if (event.type === 'tool_use' || event.type === 'tool_result' || event.type === 'needs_approval') {
@@ -3662,6 +3772,17 @@ export class TaskRunner {
           continue;
         }
         if (event.type === 'turn_end') {
+          if (active.prepared !== undefined && active.prepared.initialPromptTokens === undefined) {
+            // A prepared result nobody can check against its byte bound is not
+            // a success. Fail closed rather than completing without evidence.
+            active.batcher.flush();
+            await this.fail(
+              active.taskId,
+              `${PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX}: this prepared Execution settled with no provider usage observed`,
+              false,
+            );
+            return;
+          }
           active.batcher.push(event);
           active.batcher.flush();
           const finalOutput = active.summaryParts.join('');
@@ -3834,6 +3955,7 @@ export class TaskRunner {
       sessionRef: active.session.sessionRef,
       ...(document !== undefined ? { document } : {}),
       ...this.terminalInferenceUsagePayload(active),
+      ...this.preparedObservationPayload(active),
       ...this.agentTerminalPayload(active),
     }, { taskId: active.taskId, sessionRef: active.session.sessionRef }));
     await this.finish(active.taskId);
@@ -4520,7 +4642,7 @@ export class TaskRunner {
     this.deps.send(
       createEnvelope(
         'task.fail',
-        { reason: reason ?? 'rejected', retryable: false, ...this.terminalInferenceUsagePayload(active), ...this.agentTerminalPayload(active) },
+        { reason: reason ?? 'rejected', retryable: false, ...this.terminalInferenceUsagePayload(active), ...this.preparedObservationPayload(active), ...this.agentTerminalPayload(active) },
         { taskId },
       ),
     );
@@ -4553,7 +4675,13 @@ export class TaskRunner {
         'task.fail',
         active === undefined
           ? { reason, retryable, ...terminalIdentity(this.claimedHarnesses.get(taskId)) }
-          : { reason, retryable, ...this.terminalInferenceUsagePayload(active), ...this.agentTerminalPayload(active) },
+          : {
+            reason,
+            retryable,
+            ...this.terminalInferenceUsagePayload(active),
+            ...this.preparedObservationPayload(active),
+            ...this.agentTerminalPayload(active),
+          },
         { taskId },
       ),
     );
@@ -4612,15 +4740,23 @@ export class TaskRunner {
    * requested execution target, not an adapter-reported provider/model fact.
    * The bundled adapter event contracts currently expose token observations
    * (Codex and Claude) but no provider/model observation, so those keys stay
-   * absent. Pi exposes no native usage observation, so its terminal payload
-   * omits this optional block rather than fabricating a usage observation from
-   * independently known runtime, elapsed duration, or Local Agent version.
+   * absent. Pi reports one native usage observation per provider call
+   * (`adapters/pi/events.ts`), so its block carries the LAST call's figures —
+   * telemetry, exactly like the other runtimes' — and a Pi run that reported
+   * none omits the block rather than fabricating one from independently known
+   * runtime, elapsed duration, or Local Agent version.
+   *
+   * "Reported none" includes a last observation that carries NEITHER token
+   * count: Pi still emits a `usage` event for a call whose usage block was
+   * unreadable (so the prepared lane can count the call), and a terminal block
+   * built from it would be a usage observation with no usage in it.
    */
   private terminalInferenceUsagePayload(active: ActiveTask): { usage?: TerminalInferenceUsage } {
     const release = this.deps.localAgentRelease;
     const runtimeId = active.adapter.descriptor.id;
     if (!isKnownRuntimeId(runtimeId)) return {};
     if (release === undefined || active.lastUsage === undefined) return {};
+    if (active.lastUsage.inputTokens === undefined && active.lastUsage.outputTokens === undefined) return {};
 
     const nowMs = Date.now();
     const durationMs = terminalUsageNumber(nowMs - active.startedAtMs, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS);
@@ -4635,6 +4771,24 @@ export class TaskRunner {
         ...(promptTokens === undefined ? {} : { promptTokens }),
         ...(completionTokens === undefined ? {} : { completionTokens }),
         ...(durationMs === undefined ? {} : { durationMs }),
+      },
+    };
+  }
+
+  /**
+   * The prepared-only terminal observation, present exactly on a prepared
+   * Execution that observed at least one provider call's prompt. It is
+   * evidence the Host checks its own budget ruling against, deliberately a
+   * separate field from the telemetry-only `usage` block.
+   */
+  private preparedObservationPayload(active: ActiveTask): { preparedObservation?: TerminalPreparedObservation } {
+    const observed = active.prepared;
+    if (observed?.initialPromptTokens === undefined || observed.maxPromptTokens === undefined) return {};
+    return {
+      preparedObservation: {
+        requestDigest: observed.requestDigest,
+        initialPromptTokens: observed.initialPromptTokens,
+        maxPromptTokens: observed.maxPromptTokens,
       },
     };
   }

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AGENT_INPUT_PREPARATION_CAPABILITY, createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import {
   ControlError,
@@ -117,7 +118,6 @@ function fixtureCounter(): RecordingCounter {
         method: 'fixture.tokenizer',
         methodVersion: '0',
         authority: 'test_fixture',
-        kind: 'bound',
         value: 4_242,
         coverage: { covered: false, reason: 'offline fixture' },
         // Bound to the exact projection the adapter was handed: a count whose
@@ -257,6 +257,77 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     expect(counter.calls).toEqual([]);
   });
 
+  it('declares only the versioned capability token, never the retired unversioned one', async () => {
+    await start({ enabled: true, productId: 'acme-prep-token' });
+    const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello');
+    if (hello.type !== 'conn.hello') throw new Error('unreachable');
+    expect(hello.payload.capabilities).toContain(AGENT_INPUT_PREPARATION_CAPABILITY);
+    expect(AGENT_INPUT_PREPARATION_CAPABILITY).toBe(`agent-input-preparation-v${INPUT_PREPARATION_VERSION}`);
+    expect(hello.payload.capabilities).not.toContain('agent-input-preparation');
+  });
+
+  it('starts with a leftover version-5 record log: only the preparation lane refuses, typed, and other tasks run', async () => {
+    const productId = 'acme-prep-v5-log';
+    const workspaceRoot = await tmpDir(`byok-prep-${productId}-ws-`);
+    const storeDir = await tmpDir(`byok-prep-${productId}-store-`);
+    // A record log exactly as a pre-cut build left it.
+    const logPath = path.join(storeDir, 'input-preparation', 'records.jsonl');
+    await fs.mkdir(path.dirname(logPath), { recursive: true, mode: 0o700 });
+    const leftover = `${JSON.stringify({
+      format: 'byok.input-preparation.record',
+      version: 5,
+      recordId: 'r'.repeat(64),
+      state: 'counted',
+    })}\n`;
+    await fs.writeFile(logPath, leftover, { mode: 0o600 });
+
+    const adapter = new StubRuntimeAdapter('pi');
+    daemon = createDaemonWithAdapters({
+      localAgentRelease: { version: '0.0.0-test' },
+      productName: 'Acme',
+      productId,
+      serverUrl: server.url,
+      workspaceRoot,
+      storeDir,
+      mcpToolsets: { ...TOOLSETS },
+      inputPreparation: { limits: LIMITS, authorityResolver, counter },
+    }, [adapter]);
+    await daemon.pair('pairing-code');
+    // The daemon starts: the refusal is scoped to the lane, not to startup.
+    await daemon.start();
+    const connected = await connectControlClient({ storeDir, productId });
+    if (!connected.ok) throw new Error(`expected a control endpoint: ${connected.reason}`);
+    client = connected.client;
+
+    // Every preparation verb refuses with the typed code, naming the log.
+    for (const call of [
+      () => requestInputPreparation(client!, preparationRequest()),
+      () => lookupInputPreparation(client!, { requestId: 'prep-1', scope: { ...TRUSTED } }),
+      () => cancelInputPreparation(client!, { requestId: 'prep-1', scope: { ...TRUSTED } }),
+    ]) {
+      const refusal = await call().then(() => undefined, (error: unknown) => error);
+      expect(refusal).toBeInstanceOf(ControlError);
+      expect((refusal as ControlError).code).toBe('input_preparation_record_log_unsupported');
+      expect((refusal as ControlError).message).toContain(logPath);
+    }
+    // The lane is not advertised, so a cloud refuses to enqueue onto it.
+    const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello');
+    if (hello.type !== 'conn.hello') throw new Error('unreachable');
+    expect(hello.payload.capabilities).not.toContain(AGENT_INPUT_PREPARATION_CAPABILITY);
+    // No migration, no read-forward, no deletion: the log is byte-identical.
+    expect(await fs.readFile(logPath, 'utf8')).toBe(leftover);
+    expect(counter.calls).toEqual([]);
+
+    // An ordinary task still runs end to end.
+    server.send(
+      createEnvelope('task.offer', { instruction: 'do work', policy: { mode: 'auto' } }, { taskId: 't-ordinary', seq: server.nextSeq() }),
+    );
+    await server.waitFor((envelope) => envelope.type === 'task.started');
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await server.waitFor((envelope) => envelope.type === 'task.complete');
+  });
+
   it('keeps the whole surface off when no inputPreparation section is configured', async () => {
     await start({ enabled: false, productId: 'acme-prep-off' });
     for (const method of [INPUT_PREPARATION_PREPARE_METHOD, INPUT_PREPARATION_LOOKUP_METHOD, INPUT_PREPARATION_CANCEL_METHOD]) {
@@ -295,7 +366,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     const receipt = await requestInputPreparation(client!, preparationRequest());
 
     expect(receipt.format).toBe('byok.input-preparation.receipt');
-    expect(receipt.state).toBe('counted');
+    expect(receipt.state).toBe('prepared');
     // The native compiler's own structural projection contract, carried
     // verbatim — not a label this SDK chose.
     expect(receipt.artifact?.projection.version).toBe(3);
@@ -326,7 +397,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     expect(receipt.artifact?.toolBindingDigest).toMatch(/^[0-9a-f]{64}$/u);
     // The observation happened inside the proven launch boundary.
     expect(await trustedCwd()).toBeTruthy();
-    expect(receipt.counter).toMatchObject({ authority: 'test_fixture', kind: 'bound', value: 4_242 });
+    expect(receipt.counter).toMatchObject({ authority: 'test_fixture', value: 4_242 });
 
     // A fixture count, an unruled residual set and unattested executors can
     // never be ready. `projection_unknown` is absent on purpose: the compiler
@@ -389,7 +460,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     expect(await controlErrorCode(lookupInputPreparation(client!, { requestId: 'prep-missing', scope: { ...TRUSTED } }))).toBe(
       'not_found',
     );
-    expect((await cancelInputPreparation(client!, { requestId: 'prep-1', scope: { ...TRUSTED } })).state).toBe('counted');
+    expect((await cancelInputPreparation(client!, { requestId: 'prep-1', scope: { ...TRUSTED } })).state).toBe('prepared');
     expect(counter.calls).toHaveLength(1);
   });
 

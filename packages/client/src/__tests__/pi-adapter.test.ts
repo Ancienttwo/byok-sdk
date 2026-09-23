@@ -118,7 +118,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     expect(typeof session.sessionRef).toBe('string');
     expect(session.sessionRef.length).toBeGreaterThan(0);
 
-    const events = await takeEvents(session, 5);
+    const events = await takeEvents(session, 6);
     expect(events).toEqual([
       { type: 'tool_use', tool: 'bash', input: { command: 'echo hi' }, toolCallId: 'call_1' },
       {
@@ -128,6 +128,8 @@ describe('PiAdapter against the fake-pi fixture', () => {
       },
       { type: 'progress', text: 'Hello ' },
       { type: 'progress', text: 'world' },
+      // The assistant message_end's native usage: prompt = input + cacheRead + cacheWrite.
+      { type: 'usage', inputTokens: 120, cachedInputTokens: 30, outputTokens: 12, totalTokens: 132 },
       { type: 'turn_end' },
     ]);
   });

@@ -130,6 +130,7 @@ import {
   InputPreparationRequestError,
   type InputPreparationService,
 } from './input-preparation-service';
+import { InputPreparationUnsupportedRecordVersionError } from './input-preparation-store';
 import { resolvePiInputPreparationCompiler } from '../adapters/pi/input-preparation-runtime';
 import { decodeTeamMemberContext, encodeTeamMemberContext, LocalTeamWorkspace } from './team-workspace';
 import { McpToolsetRegistry, McpToolsetRevisionConflictError } from './toolset-registry';
@@ -637,8 +638,10 @@ export interface DaemonConfig {
    *
    * OFF by default. An absent section keeps the whole feature disabled and
    * makes all three methods answer `input_preparation_unconfigured` — there is
-   * no default limits policy, no default authority and no default counter, by
-   * the Owner-approved limits boundary of 2026-09-14. A PRESENT section with an
+   * no default limits policy and no default authority, by the Owner-approved
+   * limits boundary of 2026-09-14. The counter inside the section is
+   * OPTIONAL: without one, preparations settle on the compiler's own byte
+   * evidence. A PRESENT section with an
    * invalid policy is a construction error, the same discipline
    * `deviceAssertion` and the presence cadence already follow: a daemon that
    * starts with an allowance nobody validated is a daemon whose operator
@@ -685,17 +688,28 @@ export interface DaemonConfig {
 }
 
 /**
- * Every part of the local preparation surface is required together. There is no
- * partial enablement: a policy without a counter, or a counter without an
- * authority, would each be a surface that answers questions it cannot back.
+ * The local preparation surface. The limits policy and the authority are
+ * required together: a policy without an authority would answer questions it
+ * cannot back.
+ *
+ * The counter is OPTIONAL. Without one a preparation compiles, persists and
+ * can reach ready with no counter call and no `maxCounterCallsPerScope`
+ * reservation consumed: the size evidence is the artifact's
+ * `requestBytes`, measured by this daemon's own compiler, and the numeric
+ * budget (window, template constant, output reserve, fit) is Host authority.
+ * With one, the counter is called once per preparation and its evidence must
+ * be provider-authoritative and covered for the receipt to be ready.
  */
 export interface InputPreparationDaemonConfig {
   /** Required explicit byte / call / deadline / retention policy. No field has a default. */
   limits: InputPreparationLimitsPolicyV1;
   /** The trusted local device/Agent/Profile authority. Unavailable authority rejects. */
   authorityResolver: InputPreparationAuthorityResolver;
-  /** The separately authorized counter. This package ships no fallback counting of any kind. */
-  counter: InputPreparationCounterAdapter;
+  /**
+   * The separately authorized, optional counter. This package ships no
+   * fallback counting of any kind and no numeric budget.
+   */
+  counter?: InputPreparationCounterAdapter;
 }
 
 export interface AgentEgressConfig {
@@ -1520,6 +1534,18 @@ export function buildDaemonWithAdapters(
   });
   let inputPreparationService: InputPreparationService | undefined;
   let inputPreparationInitialization: Promise<void> | undefined;
+  /**
+   * Set when the input-preparation lane is OFF for a reason the operator must
+   * resolve, while the rest of the daemon runs: today only a durable record
+   * log holding a record from an older record schema version. Fail closed and
+   * scoped — the lane refuses typed (local control calls, remote completions,
+   * no advertised capability, no prepared-offer lane) and nothing else is
+   * affected. Nothing is migrated, read forward or deleted; the message names
+   * the record log the operator archives.
+   */
+  let inputPreparationLaneOff:
+    | { readonly code: 'input_preparation_record_log_unsupported'; readonly message: string }
+    | undefined;
   function initializeInputPreparation(): Promise<void> {
     return inputPreparationInitialization ??= (async () => {
       if (config.inputPreparation === undefined || inputPreparationLimits === undefined) return;
@@ -1530,7 +1556,7 @@ export function buildDaemonWithAdapters(
       inputPreparationService = createInputPreparationService({
         storeDir, limits: inputPreparationLimits,
         authorityResolver: config.inputPreparation.authorityResolver,
-        counter: config.inputPreparation.counter,
+        ...(config.inputPreparation.counter === undefined ? {} : { counter: config.inputPreparation.counter }),
         compiler, toolSurface: preparedToolSurface,
       });
     })();
@@ -1547,6 +1573,9 @@ export function buildDaemonWithAdapters(
       );
     }
     await initializeInputPreparation();
+    if (inputPreparationLaneOff !== undefined) {
+      throw new ControlError(inputPreparationLaneOff.code, inputPreparationLaneOff.message);
+    }
     if (inputPreparationService === undefined) throw new ControlError('runtime_identity_unavailable', 'input preparation initialization did not produce a service');
     if (shuttingDown) {
       throw new ControlError('shutting_down', 'this daemon is shutting down and will not prepare new input');
@@ -1975,7 +2004,20 @@ export function buildDaemonWithAdapters(
     await initializeInputPreparation();
     // Retention is owned by daemon lifecycle, including idle restarts. Open
     // only under the store lease and before exposing any control endpoint.
-    await inputPreparationService?.open();
+    //
+    // A record log written in an older record schema version turns THIS LANE
+    // off, not the daemon: the refusal stays fail-closed (no record is read
+    // forward, migrated or deleted) but it is scoped to input preparation, so
+    // ordinary tasks keep running while the operator archives the log. Every
+    // other open failure still fails startup, exactly as before.
+    try {
+      await inputPreparationService?.open();
+    } catch (error) {
+      if (!(error instanceof InputPreparationUnsupportedRecordVersionError)) throw error;
+      inputPreparationLaneOff = { code: 'input_preparation_record_log_unsupported', message: error.message };
+      inputPreparationService = undefined;
+      console.error(`[byok/client] input preparation is disabled on this daemon: ${error.message}`);
+    }
     // Only the explicitly enabled service-enrollment path resolves credential
     // custody before hosted storage. A WinSW service has a different Windows
     // logon token from the operator CLI, so an unpaired service must be able to
@@ -2148,7 +2190,7 @@ export function buildDaemonWithAdapters(
      * That completion is ACCEPTED by cloud: the completion route asserts no
      * device capability (`cloud.ts`'s `completeInputPreparationFromStores`),
      * precisely so this rejection is recordable by a device that never
-     * advertised `agent-input-preparation`. The flag remains the admission
+     * advertised `agent-input-preparation-v5`. The flag remains the admission
      * gate on `enqueueInputPreparation`.
      *
      * The handler takes the service directly, so a preparation runs IN-PROCESS.
@@ -2169,7 +2211,7 @@ export function buildDaemonWithAdapters(
       // "this daemon does not do preparation" versus "its native closure did
       // not verify". Neither is ever widened into a compiled artifact.
       ...(config.inputPreparation !== undefined && inputPreparationService === undefined
-        ? { unavailableReason: 'runtime_identity_unavailable' as const }
+        ? { unavailableReason: inputPreparationLaneOff?.code ?? 'runtime_identity_unavailable' }
         : {}),
       completion: inputPreparationCompletion,
       resolveBlobText: (blobRef) =>
@@ -2281,7 +2323,7 @@ export function buildDaemonWithAdapters(
       getMcpToolsets: () => toolsetRegistry.snapshot().toolsets,
       // The prepared-Execution lane, present only on a daemon whose input
       // preparation service actually constructed — which is also the only
-      // daemon that advertises `agent-input-preparation` and can hold a record
+      // daemon that advertises `agent-input-preparation-v5` and can hold a record
       // a `task.offer_prepared` could name. The three device facts travel with
       // the store because this file already owns them: re-deriving the
       // installed runtime identity or the operator's policy revision inside the

@@ -199,7 +199,7 @@ export async function admitPreparedOffer(
   }
   const summary = record.artifact;
   if (summary === undefined) {
-    // Unreachable while `inputPreparationReadinessReasons` reports `not_counted`
+    // Unreachable while `inputPreparationReadinessReasons` reports `not_prepared`
     // for a record with no artifact; kept because the launch below dereferences
     // it, and a fail-closed branch is cheaper than a future refactor's crash.
     return decline('preparation_not_ready', 'the named preparation retains no artifact summary');

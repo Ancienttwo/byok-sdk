@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   AGENT_INPUT_PREPARATION_CAPABILITY,
+  INPUT_PREPARATION_WIRE_VERSION,
   AgentInputPreparationPayloadSchema,
   BYOK_INPUT_PREPARATION_COMPLETION_ROUTE,
   BYOK_INPUT_PREPARATION_STATUS_ROUTE,
@@ -13,6 +14,9 @@ import {
   InputPreparationReceiptSummarySchema,
   MESSAGE_PAYLOAD_SCHEMAS,
   SERVER_TO_DAEMON_TYPES,
+  TaskCompletePayloadSchema,
+  TaskFailPayloadSchema,
+  TerminalPreparedObservationSchema,
   UnknownMessageTypeError,
   byokInputPreparationCompletionPath,
   byokInputPreparationStatusPath,
@@ -81,7 +85,7 @@ const BINDING = {
 
 const RECEIPT = {
   reference: 'prep-ref-1',
-  state: 'counted',
+  state: 'prepared',
   binding: BINDING,
   artifact: {
     requestDigest: 'sha256:req',
@@ -477,10 +481,85 @@ describe('input preparation completion and readback', () => {
   });
 });
 
+describe('bounded admission wire cut', () => {
+  const COUNTER = {
+    method: 'provider.tokenizer',
+    methodVersion: '1',
+    authority: 'provider',
+    value: 812,
+    coverage: { covered: true },
+    providerEvidence: {
+      projectionDigest: 'a'.repeat(64),
+      endpoint: 'https://provider.example/v1',
+      modelId: 'model-1',
+      asserted: { httpStatus: 200, usageFields: { prompt_tokens: 812 }, responseDigest: 'e'.repeat(64) },
+    },
+    target: { endpoint: 'https://provider.example/v1', modelId: 'model-1' },
+    calledAt: '2026-01-01T00:00:00.000Z',
+    completedAt: '2026-01-01T00:00:01.000Z',
+  } as const;
+
+  it('accepts a ready receipt with no counter at all', () => {
+    expect(
+      InputPreparationReceiptSummarySchema.safeParse({ ...RECEIPT, ready: true, readinessReasons: [] }).success,
+    ).toBe(true);
+  });
+
+  it('refuses the retired state, readiness names and counter kind rather than reading them forward', () => {
+    expect(InputPreparationReceiptSummarySchema.safeParse({ ...RECEIPT, state: 'counted' }).success).toBe(false);
+    for (const retired of ['not_counted', 'counter_missing']) {
+      expect(
+        InputPreparationReceiptSummarySchema.safeParse({ ...RECEIPT, readinessReasons: [retired] }).success,
+      ).toBe(false);
+    }
+    expect(InputPreparationReceiptSummarySchema.safeParse({ ...RECEIPT, counter: COUNTER }).success).toBe(true);
+    for (const kind of ['count', 'bound']) {
+      expect(
+        InputPreparationReceiptSummarySchema.safeParse({ ...RECEIPT, counter: { ...COUNTER, kind } }).success,
+      ).toBe(false);
+    }
+  });
+
+  it('names a non-text D and a not-yet-prepared record', () => {
+    for (const reason of ['request_content_not_text', 'not_prepared']) {
+      expect(
+        InputPreparationReceiptSummarySchema.safeParse({ ...RECEIPT, readinessReasons: [reason] }).success,
+      ).toBe(true);
+    }
+  });
+});
+
+describe('terminal prepared observation', () => {
+  const OBSERVATION = { requestDigest: 'a'.repeat(64), initialPromptTokens: 812, maxPromptTokens: 2_048 };
+
+  it('rides on task.complete and task.fail, strictly', () => {
+    expect(TerminalPreparedObservationSchema.safeParse(OBSERVATION).success).toBe(true);
+    expect(
+      TaskCompletePayloadSchema.safeParse({ summary: 's', sessionRef: 'r', preparedObservation: OBSERVATION }).success,
+    ).toBe(true);
+    expect(TaskFailPayloadSchema.safeParse({ reason: 'context_overflow: x', preparedObservation: OBSERVATION }).success)
+      .toBe(true);
+    expect(TerminalPreparedObservationSchema.safeParse({ ...OBSERVATION, extra: 1 }).success).toBe(false);
+  });
+
+  it('refuses a max below the initial call and a missing or non-integer token count', () => {
+    expect(TerminalPreparedObservationSchema.safeParse({ ...OBSERVATION, maxPromptTokens: 811 }).success).toBe(false);
+    const { initialPromptTokens: _initial, ...withoutInitial } = OBSERVATION;
+    expect(TerminalPreparedObservationSchema.safeParse(withoutInitial).success).toBe(false);
+    expect(TerminalPreparedObservationSchema.safeParse({ ...OBSERVATION, initialPromptTokens: 1.5 }).success).toBe(false);
+    expect(TerminalPreparedObservationSchema.safeParse({ ...OBSERVATION, requestDigest: '' }).success).toBe(false);
+  });
+});
+
 describe('input preparation capability and routes', () => {
   it('declares one capability flag and two device routes', () => {
     expect(CAPABILITY_FLAGS as readonly string[]).toContain(AGENT_INPUT_PREPARATION_CAPABILITY);
-    expect(AGENT_INPUT_PREPARATION_CAPABILITY).toBe('agent-input-preparation');
+    // The contract version is IN the token, because the relay wire carries no
+    // version field: a device and a cloud on different versions never admit
+    // each other's preparations. The retired unversioned token is gone.
+    expect(AGENT_INPUT_PREPARATION_CAPABILITY).toBe(`agent-input-preparation-v${INPUT_PREPARATION_WIRE_VERSION}`);
+    expect(AGENT_INPUT_PREPARATION_CAPABILITY).toBe('agent-input-preparation-v5');
+    expect(CAPABILITY_FLAGS as readonly string[]).not.toContain('agent-input-preparation');
     expect(BYOK_INPUT_PREPARATION_COMPLETION_ROUTE).toBe('/byok/input-preparations/:requestId/completion');
     expect(BYOK_INPUT_PREPARATION_STATUS_ROUTE).toBe('/byok/input-preparations/:requestId');
   });

@@ -508,7 +508,7 @@ export interface ByokCloud {
    * Host control plane: enqueue an offer for an already-counted preparation.
    *
    * Admission requires the device to durably advertise both the Agent-home
-   * contract and `agent-input-preparation` — the second because only a device
+   * contract and `agent-input-preparation-v5` — the second because only a device
    * that can prepare holds the durable record this offer names. A device that
    * advertises neither never receives the message, and a device whose protocol
    * build predates the type skips it whole rather than running it as an
@@ -840,7 +840,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   //
   // The same reasoning runs one level deeper: `completeInputPreparationFromStores`
   // asserts no DEVICE capability either, so a device that never advertised
-  // `agent-input-preparation` can still record the
+  // `agent-input-preparation-v5` can still record the
   // `input_preparation_unconfigured` rejection the row requires. The device
   // capability stays the admission gate on `enqueueInputPreparation` alone.
   const inputPreparationRouteDeps = {
@@ -1601,7 +1601,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
    * Deliberately NOT capability-gated, unlike `enqueueInputPreparation`.
    *
    * Admission is the enqueue's job: a device without
-   * `agent-input-preparation` is refused there, before any receipt or mailbox
+   * `agent-input-preparation-v5` is refused there, before any receipt or mailbox
    * row exists. Once a row DOES exist, the completion is the device's only way
    * to discharge it, and the daemon's redelivery cursor advances only when the
    * completion PUT succeeds. Re-asserting the capability here would reject
@@ -1613,10 +1613,19 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
    * exact `AgentRef`, `profileId`, `policyRevision`) is checked by
    * `recordInputPreparationCompletion`, so a completion still cannot cross a
    * device, an Agent, or a policy revision. The one authority reduction this
-   * does accept, stated plainly: revoking `agent-input-preparation` after a row
+   * does accept, stated plainly: revoking `agent-input-preparation-v5` after a row
    * is enqueued no longer refuses the in-flight completion — that row was
    * legitimately admitted, its receipt stays not-ready and G4 is closed to
    * activation — so revocation stops NEW admissions only.
+   *
+   * "The device can always discharge its row" holds only within ONE contract
+   * version. The completion body is parsed with the strict receipt schema of
+   * THIS build, and the relay wire carries no version, so a row admitted
+   * before the v5 cut and completed by a device on the other side of it is
+   * rejected (422) and stalls that device's cursor. That boundary is an
+   * operator precondition — drain in-flight rows, then upgrade cloud and
+   * devices as a pair (`docs/spec.md`, bounded admission) — not something this
+   * route translates.
    */
   async function completeInputPreparationFromStores(
     stores: TenantStores,

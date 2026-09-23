@@ -74,7 +74,7 @@ export const CLOUD_CAPABILITIES = {
    * DEVICE's only way to discharge a mailbox row this same deployment handed
    * it — withholding it would strand the device's redelivery cursor rather
    * than degrade a feature. For the same reason the completion route asserts
-   * no DEVICE capability either: the device-level `agent-input-preparation`
+   * no DEVICE capability either: the device-level `agent-input-preparation-v5`
    * flag gates ADMISSION (`enqueueInputPreparation`) and nothing else, so an
    * unconfigured device is refused a row instead of being handed one whose
    * only honest answer — `input_preparation_unconfigured` — it could not then

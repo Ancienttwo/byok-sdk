@@ -87,11 +87,19 @@ import {
  * was rendered by a renderer this build no longer has, so the request it
  * describes cannot be re-derived, and translating it would be inventing bytes.
  *
+ * 6 is the first version written under bounded admission: the successful
+ * terminal state is `prepared` (it was `counted`), counter evidence carries no
+ * `kind`, a record may reach `prepared` with no counter at all, and a record
+ * holding an artifact states `requestContentTextOnly`. A version-5 record
+ * cannot be read forward: its terminal state names a lifecycle this build no
+ * longer has, and nothing can honestly say whether its D was text only
+ * without re-reading bytes the record never vouched for.
+ *
  * A record at any other version is refused — see
  * {@link InputPreparationUnsupportedRecordVersionError}. There is no
  * compatibility read.
  */
-export const INPUT_PREPARATION_RECORD_VERSION = 5;
+export const INPUT_PREPARATION_RECORD_VERSION = 6;
 
 /** The durable idempotency key. Never a task id, and never caller-asserted: `scopeId` comes from the trusted authority grant. */
 export interface InputPreparationRecordKey {
@@ -123,12 +131,22 @@ export interface InputPreparationRecord {
    */
   readonly model: InputPreparationModelV1;
   readonly artifact?: InputPreparationArtifactSummaryV1;
+  /**
+   * Whether D — the retained provider request — carries text content parts
+   * only (`adapters/pi/input-preparation.ts`'s
+   * `preparedRequestContentIsTextOnly`). Written in the same durable
+   * transition that retains the artifact, and present exactly when
+   * `artifact` is: it is a fact about those bytes, decided once, so readiness
+   * reads it rather than re-parsing D.
+   */
+  readonly requestContentTextOnly?: boolean;
+  /** Present only when a configured counter answered. Absent is a legal, ready-capable state. */
   readonly counter?: InputPreparationCounterEvidenceV1;
   /** Retained bytes attributable to this record, counted against the per-scope aggregate. */
   readonly artifactBytes: number;
-  /** Counter invocations this record has consumed. Never decremented. */
+  /** Counter invocations this record has consumed. Never decremented; always 0 without a counter. */
   readonly counterCalls: number;
-  /** Stable code on a terminal non-`counted` state; never provider or stack text. */
+  /** Stable code on a terminal non-`prepared` state; never provider or stack text. */
   readonly detail?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -160,7 +178,7 @@ export interface InputPreparationArtifact {
 
 /** Terminal states never transition again. */
 const TERMINAL_STATES: ReadonlySet<InputPreparationStateV1> = new Set<InputPreparationStateV1>([
-  'counted',
+  'prepared',
   'cancelled',
   'failed',
   'counter_interrupted',
@@ -238,11 +256,12 @@ export class InputPreparationIntegrityError extends Error {
 export class InputPreparationUnsupportedRecordVersionError extends InputPreparationIntegrityError {
   readonly reason = 'unsupported_record_version';
 
-  constructor(readonly recordId: string, readonly recordVersion: unknown) {
+  constructor(readonly recordId: string, readonly recordVersion: unknown, readonly logPath: string) {
     super(
-      `the input-preparation record log contains record ${recordId} at record schema version ${JSON.stringify(recordVersion)},`
+      `the input-preparation record log ${logPath} contains record ${recordId} at record schema version ${JSON.stringify(recordVersion)},`
       + ` which this build does not support (it supports record schema version ${INPUT_PREPARATION_RECORD_VERSION} only);`
-      + ' the record is an unsupported older version and has been left untouched pending explicit operator disposition',
+      + ' the record is an unsupported older version and has been left untouched pending explicit operator disposition'
+      + ' (archive the record log to re-enable input preparation)',
     );
     this.name = 'InputPreparationUnsupportedRecordVersionError';
   }
@@ -274,18 +293,28 @@ export interface ReserveInput {
   readonly maxInFlight: number;
 }
 
-/** The bounds one counter reservation is admitted against. Supplied by the caller, compared here. */
-export interface CounterReservationBounds {
+/** The bounds one artifact retention is admitted against. Supplied by the caller, compared here. */
+export interface ArtifactCommitBounds {
   readonly maxScopeAggregateBytes: number;
+}
+
+/** The bounds one counter reservation is admitted against: retention plus the counter-call allowance. */
+export interface CounterReservationBounds extends ArtifactCommitBounds {
   readonly maxCounterCallsPerScope: number;
 }
 
-export interface CounterReservationInput {
+export interface ArtifactCommitInput {
   readonly recordId: string;
   /** The immutable artifact, written inside the same closure that charges its bytes. */
   readonly artifact: InputPreparationArtifact;
   /** The identities and sizes the receipt publishes. */
   readonly summary: InputPreparationArtifactSummaryV1;
+  /** See {@link InputPreparationRecord.requestContentTextOnly}. */
+  readonly requestContentTextOnly: boolean;
+  readonly bounds: ArtifactCommitBounds;
+}
+
+export interface CounterReservationInput extends ArtifactCommitInput {
   readonly bounds: CounterReservationBounds;
 }
 
@@ -395,7 +424,7 @@ export class InputPreparationStore {
       // question, and would quietly accept any future shape that happens to
       // have the field the probe knows to look for.
       if (record.version !== INPUT_PREPARATION_RECORD_VERSION) {
-        throw new InputPreparationUnsupportedRecordVersionError(record.recordId, record.version);
+        throw new InputPreparationUnsupportedRecordVersionError(record.recordId, record.version, path.join(this.root, RECORD_LOG));
       }
       // Last write wins per record id: the log is an append-only history of
       // one record's transitions, replayed in order.
@@ -610,7 +639,7 @@ export class InputPreparationStore {
   /**
    * Admit one counter call: check the caller's bounds, persist the immutable
    * artifact (fsynced, 0600, D verbatim) and durably reserve the call — all in
-   * ONE serialized closure.
+   * ONE serialized closure. The record moves to `counting`.
    *
    * Fusing the three is the point. Retained bytes and consumed counter calls
    * are per-SCOPE aggregates, so they are shared by requests that share nothing
@@ -624,6 +653,29 @@ export class InputPreparationStore {
    * charged record always has its artifact on disk.
    */
   commitCounterReservation(input: CounterReservationInput): Promise<InputPreparationRecord> {
+    return this.commitArtifact(input, input.bounds.maxCounterCallsPerScope);
+  }
+
+  /**
+   * Retain the artifact of a preparation that has NO counter configured and
+   * settle it as `prepared` — the same serialized closure, the same retention
+   * bound and the same fsynced write as {@link commitCounterReservation}, but
+   * no counter call is reserved: `counterCalls` stays 0 and the scope's
+   * counter-call allowance is neither read nor charged.
+   */
+  commitPreparedArtifact(input: ArtifactCommitInput): Promise<InputPreparationRecord> {
+    return this.commitArtifact(input, undefined);
+  }
+
+  /**
+   * The one retention closure behind both commits. `maxCounterCallsPerScope`
+   * is present exactly when a counter call is being reserved; its absence is
+   * what makes the transition land on `prepared` instead of `counting`.
+   */
+  private commitArtifact(
+    input: ArtifactCommitInput,
+    maxCounterCallsPerScope: number | undefined,
+  ): Promise<InputPreparationRecord> {
     return this.enqueue(async () => {
       this.assertOpen();
       const current = this.records.get(input.recordId);
@@ -635,7 +687,7 @@ export class InputPreparationStore {
       }
       if (isTerminalInputPreparationState(current.state)) {
         throw new InputPreparationIntegrityError(
-          `input-preparation record ${input.recordId} is terminal in state ${current.state} and cannot reserve a counter call`,
+          `input-preparation record ${input.recordId} is terminal in state ${current.state} and cannot retain an artifact`,
         );
       }
       const serialized = JSON.stringify(input.artifact);
@@ -647,7 +699,7 @@ export class InputPreparationStore {
           'this scope has no remaining prepared-artifact byte allowance',
         );
       }
-      if (usage.counterCalls + 1 > input.bounds.maxCounterCallsPerScope) {
+      if (maxCounterCallsPerScope !== undefined && usage.counterCalls + 1 > maxCounterCallsPerScope) {
         throw new InputPreparationLimitError(
           'counter_call_limit_exceeded',
           'this scope has no remaining counter-call allowance',
@@ -660,10 +712,11 @@ export class InputPreparationStore {
       }
       const next: InputPreparationRecord = {
         ...current,
-        state: 'counting',
+        state: maxCounterCallsPerScope === undefined ? 'prepared' : 'counting',
         artifact: input.summary,
+        requestContentTextOnly: input.requestContentTextOnly,
         artifactBytes,
-        counterCalls: 1,
+        counterCalls: maxCounterCallsPerScope === undefined ? 0 : 1,
         updatedAt: new Date(this.now()).toISOString(),
       };
       await this.append(next);
@@ -701,7 +754,7 @@ export class InputPreparationStore {
    * different taskId, or the same taskId with a different sealed manifest, is
    * `occupied` — it is a different Execution.
    *
-   * Only a `counted` record with a retained artifact may be pinned: a pin on a
+   * Only a `prepared` record with a retained artifact may be pinned: a pin on a
    * record that has no artifact would keep a tombstone alive forever without
    * ever being launchable.
    */
@@ -710,7 +763,7 @@ export class InputPreparationStore {
       this.assertOpen();
       const current = this.records.get(recordId);
       if (!current) throw new InputPreparationIntegrityError(`no input-preparation record ${recordId}`);
-      if (current.state !== 'counted' || current.artifact === undefined || current.artifactBytes === 0) {
+      if (current.state !== 'prepared' || current.artifact === undefined || current.artifactBytes === 0) {
         throw new InputPreparationIntegrityError(
           `input-preparation record ${recordId} is in state ${current.state} with no retained artifact and cannot be pinned`,
         );

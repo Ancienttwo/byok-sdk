@@ -20,7 +20,7 @@
     "agent-content-transcript-read",
     "agent-content-artifact-read",
     "agent-home-projection",
-    "agent-input-preparation",
+    "agent-input-preparation-v5",
     "terminal-projection-selection",
     "host-mcp-task-context",
     "custom-harness",
@@ -4995,6 +4995,33 @@
           ],
           "additionalProperties": false
         },
+        "preparedObservation": {
+          "type": "object",
+          "properties": {
+            "requestDigest": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            },
+            "initialPromptTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000
+            },
+            "maxPromptTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000
+            }
+          },
+          "required": [
+            "requestDigest",
+            "initialPromptTokens",
+            "maxPromptTokens"
+          ],
+          "additionalProperties": false
+        },
         "agentRef": {
           "type": "object",
           "properties": {
@@ -5117,6 +5144,33 @@
             "runtime",
             "clientVersion",
             "reportedAt"
+          ],
+          "additionalProperties": false
+        },
+        "preparedObservation": {
+          "type": "object",
+          "properties": {
+            "requestDigest": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            },
+            "initialPromptTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000
+            },
+            "maxPromptTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000
+            }
+          },
+          "required": [
+            "requestDigest",
+            "initialPromptTokens",
+            "maxPromptTokens"
           ],
           "additionalProperties": false
         },
@@ -10457,6 +10511,33 @@
                 ],
                 "additionalProperties": false
               },
+              "preparedObservation": {
+                "type": "object",
+                "properties": {
+                  "requestDigest": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                  },
+                  "initialPromptTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  "maxPromptTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  }
+                },
+                "required": [
+                  "requestDigest",
+                  "initialPromptTokens",
+                  "maxPromptTokens"
+                ],
+                "additionalProperties": false
+              },
               "agentRef": {
                 "type": "object",
                 "properties": {
@@ -10623,6 +10704,33 @@
                   "runtime",
                   "clientVersion",
                   "reportedAt"
+                ],
+                "additionalProperties": false
+              },
+              "preparedObservation": {
+                "type": "object",
+                "properties": {
+                  "requestDigest": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                  },
+                  "initialPromptTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  "maxPromptTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  }
+                },
+                "required": [
+                  "requestDigest",
+                  "initialPromptTokens",
+                  "maxPromptTokens"
                 ],
                 "additionalProperties": false
               },
@@ -17784,6 +17892,33 @@
                         ],
                         "additionalProperties": false
                       },
+                      "preparedObservation": {
+                        "type": "object",
+                        "properties": {
+                          "requestDigest": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          },
+                          "initialPromptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          },
+                          "maxPromptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          }
+                        },
+                        "required": [
+                          "requestDigest",
+                          "initialPromptTokens",
+                          "maxPromptTokens"
+                        ],
+                        "additionalProperties": false
+                      },
                       "agentRef": {
                         "type": "object",
                         "properties": {
@@ -17950,6 +18085,33 @@
                           "runtime",
                           "clientVersion",
                           "reportedAt"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "preparedObservation": {
+                        "type": "object",
+                        "properties": {
+                          "requestDigest": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          },
+                          "initialPromptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          },
+                          "maxPromptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          }
+                        },
+                        "required": [
+                          "requestDigest",
+                          "initialPromptTokens",
+                          "maxPromptTokens"
                         ],
                         "additionalProperties": false
                       },
@@ -24159,6 +24321,33 @@
                         ],
                         "additionalProperties": false
                       },
+                      "preparedObservation": {
+                        "type": "object",
+                        "properties": {
+                          "requestDigest": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          },
+                          "initialPromptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          },
+                          "maxPromptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          }
+                        },
+                        "required": [
+                          "requestDigest",
+                          "initialPromptTokens",
+                          "maxPromptTokens"
+                        ],
+                        "additionalProperties": false
+                      },
                       "agentRef": {
                         "type": "object",
                         "properties": {
@@ -24325,6 +24514,33 @@
                           "runtime",
                           "clientVersion",
                           "reportedAt"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "preparedObservation": {
+                        "type": "object",
+                        "properties": {
+                          "requestDigest": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          },
+                          "initialPromptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          },
+                          "maxPromptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          }
+                        },
+                        "required": [
+                          "requestDigest",
+                          "initialPromptTokens",
+                          "maxPromptTokens"
                         ],
                         "additionalProperties": false
                       },
@@ -25581,7 +25797,7 @@
                   "enum": [
                     "reserved",
                     "counting",
-                    "counted",
+                    "prepared",
                     "cancelled",
                     "failed",
                     "counter_interrupted"
@@ -25971,13 +26187,6 @@
                         "test_fixture"
                       ]
                     },
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "count",
-                        "bound"
-                      ]
-                    },
                     "value": {
                       "type": "integer",
                       "minimum": 0,
@@ -26098,7 +26307,6 @@
                     "method",
                     "methodVersion",
                     "authority",
-                    "kind",
                     "value",
                     "coverage",
                     "providerEvidence",
@@ -26117,14 +26325,14 @@
                   "items": {
                     "type": "string",
                     "enum": [
-                      "not_counted",
+                      "not_prepared",
                       "counter_interrupted",
                       "cancelled",
                       "failed",
                       "artifact_expired",
                       "counter_authority_not_production",
                       "counter_coverage_incomplete",
-                      "counter_missing",
+                      "request_content_not_text",
                       "projection_unknown",
                       "residual_not_ruled",
                       "accounting_policy_missing",
@@ -26244,7 +26452,8 @@
                 "launch_boundary_unavailable",
                 "observation_drift",
                 "permission_mode_denied",
-                "rpc_frame_too_large"
+                "rpc_frame_too_large",
+                "input_preparation_record_log_unsupported"
               ]
             }
           },
@@ -26349,7 +26558,7 @@
               "enum": [
                 "reserved",
                 "counting",
-                "counted",
+                "prepared",
                 "cancelled",
                 "failed",
                 "counter_interrupted"
@@ -26739,13 +26948,6 @@
                     "test_fixture"
                   ]
                 },
-                "kind": {
-                  "type": "string",
-                  "enum": [
-                    "count",
-                    "bound"
-                  ]
-                },
                 "value": {
                   "type": "integer",
                   "minimum": 0,
@@ -26866,7 +27068,6 @@
                 "method",
                 "methodVersion",
                 "authority",
-                "kind",
                 "value",
                 "coverage",
                 "providerEvidence",
@@ -26885,14 +27086,14 @@
               "items": {
                 "type": "string",
                 "enum": [
-                  "not_counted",
+                  "not_prepared",
                   "counter_interrupted",
                   "cancelled",
                   "failed",
                   "artifact_expired",
                   "counter_authority_not_production",
                   "counter_coverage_incomplete",
-                  "counter_missing",
+                  "request_content_not_text",
                   "projection_unknown",
                   "residual_not_ruled",
                   "accounting_policy_missing",
@@ -26948,7 +27149,8 @@
             "launch_boundary_unavailable",
             "observation_drift",
             "permission_mode_denied",
-            "rpc_frame_too_large"
+            "rpc_frame_too_large",
+            "input_preparation_record_log_unsupported"
           ]
         },
         "completedAt": {

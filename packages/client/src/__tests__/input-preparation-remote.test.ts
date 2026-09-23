@@ -191,7 +191,6 @@ function fixtureCounter() {
         method: 'fixture.tokenizer',
         methodVersion: '0',
         authority: 'test_fixture',
-        kind: 'count',
         value: 123,
         coverage: { covered: true },
         providerEvidence: {

@@ -315,7 +315,6 @@ const COUNTER_EVIDENCE: InputPreparationCounterEvidenceV1 = {
   method: 'fixture.tokenizer',
   methodVersion: '0',
   authority: SYNTHETIC_PROVIDER_COUNT_FOR_LANE_TESTS,
-  kind: 'count',
   value: 128,
   coverage: { covered: true },
   providerEvidence: {
@@ -408,9 +407,10 @@ async function seed(requestId: string, agentId: string): Promise<Record<string, 
       toolBindingDigest,
       toolImplementationKinds: fingerprinted.fingerprint.toolImplementationKinds,
     },
+    requestContentTextOnly: true,
     bounds: { maxScopeAggregateBytes: 10_000_000, maxCounterCallsPerScope: 4 },
   });
-  await store.update(reserved.record.recordId, { state: 'counted', counter: COUNTER_EVIDENCE });
+  await store.update(reserved.record.recordId, { state: 'prepared', counter: COUNTER_EVIDENCE });
   return {
     recordId: reserved.record.recordId,
     requestDigest: REQUEST_DIGEST,
@@ -460,10 +460,12 @@ function report(before: number): Record<string, unknown> {
  * Drive one started prepared Execution to its terminal and wait for the release.
  *
  * The release is the runner's own `releasePreparationPin`, reached from the
- * terminal path and nothing else — this helper only supplies the `turn_end` a
+ * terminal path and nothing else — this helper only supplies the usage and `turn_end` a
  * real runtime would emit and then waits for the durable effect.
  */
 async function finish(sessionIndex: number, recordId: string): Promise<Record<string, unknown>> {
+  // A prepared Execution completes only with provider usage observed.
+  adapter.sessions[sessionIndex]!.emit({ type: 'usage', inputTokens: 1_000, outputTokens: 10 });
   adapter.sessions[sessionIndex]!.emit({ type: 'turn_end' });
   const deadline = Date.now() + TERMINAL_WAIT_MS;
   for (;;) {

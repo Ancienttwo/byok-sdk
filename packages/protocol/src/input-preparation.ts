@@ -29,8 +29,43 @@ import { PERMISSION_MODES } from './permission';
  *    breaking change, exactly like `PermissionPolicySchema`.
  */
 
-/** Capability required before a task-free remote input preparation is admitted. */
-export const AGENT_INPUT_PREPARATION_CAPABILITY = 'agent-input-preparation' as const;
+/**
+ * The ONE version of the input-preparation contract, shared by this relay wire
+ * (the `agent.input.preparation` payload and the completion receipt summary)
+ * and by the device-local request, receipt and artifact
+ * (`@byok-sdk/client`'s `INPUT_PREPARATION_VERSION`, which is this value).
+ *
+ * The relay wire carries no version field of its own, so a version change is
+ * made visible where admission actually happens: in the capability token
+ * below. See `INPUT_PREPARATION_VERSION` in the client for what each version
+ * changed.
+ */
+export const INPUT_PREPARATION_WIRE_VERSION = 5 as const;
+
+/**
+ * Capability required before a task-free remote input preparation — or a
+ * prepared Execution — is admitted: `agent-input-preparation-v<N>`, where
+ * `<N>` is {@link INPUT_PREPARATION_WIRE_VERSION}.
+ *
+ * The version is IN the token because the relay wire has none. A device
+ * declares exactly the one token of the contract it speaks, and a cloud admits
+ * exactly the one token of the contract it speaks, so a device and a cloud on
+ * different contract versions never exchange a preparation at all: the cloud
+ * refuses at enqueue (`agent_capability_missing`, before any receipt or
+ * mailbox row) instead of relaying a payload the other side would refuse with
+ * a strict-schema 422 and a device would then redeliver forever. There is no
+ * dual token and no accepted older one. The retired unversioned token
+ * `agent-input-preparation` (versions up to 4) is admitted nowhere.
+ *
+ * The token gates NEW admissions only. A row enqueued before a version cut is
+ * still in flight afterwards, and its completion is accepted only by a cloud
+ * on the same version as the device answering it; across the cut it is a 422
+ * and a stalled device cursor. Draining in-flight rows and upgrading cloud and
+ * devices as a pair is the operator precondition for the cut (`docs/spec.md`,
+ * bounded admission); nothing here parses an older receipt.
+ */
+export const AGENT_INPUT_PREPARATION_CAPABILITY =
+  `agent-input-preparation-v${INPUT_PREPARATION_WIRE_VERSION}` as const;
 
 /** The preparation surface uses the package-wide lowercase `sha256:<hex>` transport form. */
 export const InputPreparationContentHashSchema = AgentEgressContentHashSchema;
@@ -383,11 +418,18 @@ export type InputPreparationContextDocument = z.infer<typeof InputPreparationCon
 // Receipt summary — the only thing a completion discloses about the artifact
 // ---------------------------------------------------------------------------
 
-/** Durable lifecycle state of one local preparation record. */
+/**
+ * Durable lifecycle state of one local preparation record.
+ *
+ * `prepared` is the one successful terminal state: the artifact is compiled,
+ * persisted, and — when the device has an optional counter configured — its
+ * counter answered. A device with no counter reaches `prepared` without ever
+ * entering `counting`.
+ */
 export const InputPreparationStateSchema = z.enum([
   'reserved',
   'counting',
-  'counted',
+  'prepared',
   'cancelled',
   'failed',
   'counter_interrupted',
@@ -400,22 +442,32 @@ export type InputPreparationState = z.infer<typeof InputPreparationStateSchema>;
  *
  * `ready` means the preparation CAN BE CONSUMED — the artifact is intact and
  * unexpired, the native compiler's projection is content-complete, every
- * residual key is ruled by an applicable Host accounting policy, the count is
- * present and bound to that exact projection, and every executor identity is
- * attested. It is deliberately NOT Host budget admission: the device performs
- * no budget arithmetic, so a ready receipt says the evidence holds, never that
- * the spend is allowed.
+ * residual key is ruled by an applicable Host accounting policy, D is text
+ * only, every executor identity is attested, and — only when the device has an
+ * optional counter configured — that count is provider-authoritative and
+ * covered. No count is required: the size evidence is
+ * `artifact.requestBytes`, the exact byte length of the frozen D. It is
+ * deliberately NOT Host budget admission: the device performs no budget
+ * arithmetic, so a ready receipt says the evidence holds, never that the
+ * spend fits a window.
  */
 export const InputPreparationReadinessReasonSchema = z.enum([
-  'not_counted',
+  /** The record has not reached `prepared` (it is `reserved` or `counting`). */
+  'not_prepared',
   'counter_interrupted',
   'cancelled',
   'failed',
   'artifact_expired',
+  /** A counter IS present and its authority is not `provider` (a fixture never reaches ready). */
   'counter_authority_not_production',
+  /** A counter IS present and it reported its projection as not covered. */
   'counter_coverage_incomplete',
-  /** No counter evidence is persisted on the record. */
-  'counter_missing',
+  /**
+   * D, the frozen provider request, carries a message content part whose
+   * `type` is not `text`. The first release admits text-only D; a multimodal
+   * part is not sized by `requestBytes` in any way the Host's ruling covers.
+   */
+  'request_content_not_text',
   /** The native compiler's projection kind is not `content_complete`. */
   'projection_unknown',
   /** The artifact carries a residual key the accounting policy does not rule on. */
@@ -514,7 +566,9 @@ export const InputPreparationCounterProviderEvidenceSchema = z
   .strict();
 
 /**
- * Counter evidence exactly as the device's adapter reported it.
+ * Counter evidence exactly as the device's OPTIONAL adapter reported it.
+ * Absent when the device has no counter configured, which is a legal, ready-
+ * capable state: the size evidence is `artifact.requestBytes`.
  *
  * `authority: 'test_fixture'` is a first-class value, not a debug flag: a
  * fixture result can never produce a ready receipt, which is what keeps an
@@ -525,7 +579,6 @@ export const InputPreparationCounterEvidenceSchema = z
     method: OPAQUE_ID,
     methodVersion: OPAQUE_ID,
     authority: z.enum(['provider', 'test_fixture']),
-    kind: z.enum(['count', 'bound']),
     value: z.number().int().nonnegative(),
     coverage: z
       .object({ covered: z.boolean(), reason: z.string().max(512).optional() })
@@ -623,6 +676,12 @@ export const InputPreparationArtifactSummarySchema = z
     requestDigest: OPAQUE_ID,
     envelopeDigest: OPAQUE_ID,
     toolManifestDigest: OPAQUE_ID,
+    /**
+     * The exact UTF-8 byte length of the frozen provider request D, measured
+     * by the device's own compiler. The ONE size evidence a receipt carries:
+     * the Host rules the budget (`requestBytes + C + max_tokens <= window`)
+     * against it. Never a token count and never an estimate.
+     */
     requestBytes: z.number().int().nonnegative(),
     projectionBytes: z.number().int().nonnegative(),
     projection: InputPreparationProjectionSchema,
@@ -725,7 +784,7 @@ export const InputPreparationReferenceSchema = OPAQUE_ID;
  * `artifactDigest` is optional for one structural reason, not as a compatibility
  * seam: a receipt discloses `artifact` only once there is one
  * ({@link InputPreparationArtifactSummarySchema} is optional on the receipt), so
- * a Host holding a not-yet-counted receipt has no envelope digest to re-present.
+ * a Host holding a not-yet-prepared receipt has no envelope digest to re-present.
  * When it is present it is compared like everything else.
  */
 export const InputPreparationOfferBindingSchema = z
@@ -799,5 +858,12 @@ export const InputPreparationRejectionReasonSchema = z.enum([
    * preparation that could never be delivered is not a smaller preparation.
    */
   'rpc_frame_too_large',
+  /**
+   * The device's input-preparation lane is off because its durable record log
+   * holds a record from an older record schema version. The rest of the
+   * device runs; this lane refuses until an operator archives that log. No
+   * record is migrated, read forward or deleted.
+   */
+  'input_preparation_record_log_unsupported',
 ]);
 export type InputPreparationRejectionReason = z.infer<typeof InputPreparationRejectionReasonSchema>;

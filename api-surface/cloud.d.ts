@@ -824,7 +824,7 @@ export declare const CLOUD_CAPABILITIES: {
      * DEVICE's only way to discharge a mailbox row this same deployment handed
      * it — withholding it would strand the device's redelivery cursor rather
      * than degrade a feature. For the same reason the completion route asserts
-     * no DEVICE capability either: the device-level `agent-input-preparation`
+     * no DEVICE capability either: the device-level `agent-input-preparation-v5`
      * flag gates ADMISSION (`enqueueInputPreparation`) and nothing else, so an
      * unconfigured device is refused a row instead of being handed one whose
      * only honest answer — `input_preparation_unconfigured` — it could not then
@@ -1175,7 +1175,7 @@ export interface ByokCloud {
      * Host control plane: enqueue an offer for an already-counted preparation.
      *
      * Admission requires the device to durably advertise both the Agent-home
-     * contract and `agent-input-preparation` — the second because only a device
+     * contract and `agent-input-preparation-v5` — the second because only a device
      * that can prepare holds the durable record this offer names. A device that
      * advertises neither never receives the message, and a device whose protocol
      * build predates the type skips it whole rather than running it as an
@@ -3596,7 +3596,7 @@ export interface CloudRootStores {
 }
 export declare function tenantStoresFor(principal: Principal, root: CloudRootStores): TenantStores;
 // ==== @byok-sdk/cloud dist/terminal-result.d.ts ====
-import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TaskFailPayload } from '@byok-sdk/protocol';
+import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TaskFailPayload } from '@byok-sdk/protocol';
 import type { RequestReceipt } from './stores/ports';
 /** Canonical device evidence, independent of the Host cancellation projection. */
 export interface DeviceTerminal {
@@ -3637,6 +3637,14 @@ export interface TerminalResult {
      * or entitlement authority.
      */
     readonly usage?: TerminalInferenceUsage;
+    /**
+     * The prepared-only observation copied verbatim from a prepared Execution's
+     * winning `task.complete` / `task.fail`: the frozen request digest, the
+     * first provider call's prompt tokens and the largest. Unlike `usage` it is
+     * evidence the Host checks its own budget ruling against; the cloud performs
+     * no arithmetic over it.
+     */
+    readonly preparedObservation?: TerminalPreparedObservation;
     readonly reason?: string;
     /** Terminal cause projection; currently the protocol's terminal reason. */
     readonly terminalCause?: string;

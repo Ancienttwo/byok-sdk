@@ -33,14 +33,18 @@
  *   applicability, never budget arithmetic.
  * - `ready` means "the preparation can be consumed": the artifact is intact and
  *   unexpired, its projection is content-complete, its residual keys are ruled
- *   by an applicable Host accounting policy, its counter evidence is present
- *   and bound to this exact projection, and every executor identity is
- *   attested. It is NOT Host budget admission, which stays on the Host side of
- *   the accounting policy this surface only names.
+ *   by an applicable Host accounting policy, D is text only, and every
+ *   executor identity is attested. A counter is OPTIONAL: when one is
+ *   configured its evidence must be provider-authoritative and covered, and
+ *   when none is configured no count is required at all — the size evidence is
+ *   {@link InputPreparationArtifactSummaryV1.requestBytes}, the exact byte
+ *   length of the frozen D. It is NOT Host budget admission: the window, the
+ *   template constant and the fit ruling stay on the Host side of the
+ *   accounting policy this surface only names.
  */
 
 import { createHash } from 'node:crypto';
-import type { PermissionMode } from '@byok-sdk/protocol';
+import { INPUT_PREPARATION_WIRE_VERSION, type PermissionMode } from '@byok-sdk/protocol';
 import type { McpLaunchAttestation } from './daemon/trusted-launch-cwd';
 import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
 
@@ -76,13 +80,27 @@ export const INPUT_PREPARATION_ARTIFACT_FORMAT = 'byok.input-preparation.artifac
  * renderer reads), `prompt.toolGuidelines` was added, `options.toolChoice`
  * narrowed to `auto | none`, and the projection contract moved to v3.
  *
+ * Bumped to 5 by bounded admission, which is a BREAKING wire change: the
+ * counter became optional, so the successful terminal state `counted` is now
+ * `prepared` and the not-yet-terminal readiness reason `not_counted` is now
+ * `not_prepared`; `counter_missing` is gone (no count is required — the size
+ * evidence is `artifact.requestBytes`); counter results lost `kind`, whose
+ * `bound` member no adapter could honestly state; and the readiness reason
+ * `request_content_not_text` was added.
+ *
+ * The number itself is owned by `@byok-sdk/protocol`'s
+ * `INPUT_PREPARATION_WIRE_VERSION`, because the device capability token
+ * `agent-input-preparation-v<N>` is derived from it: the relay wire carries no
+ * version field, so the token is what keeps a device and a cloud on different
+ * versions from exchanging a preparation at all. One number, two projections.
+ *
  * The request, the receipt, the durable record and the retained artifact all
  * carry this number, so a record written under an older version is refused on
  * replay rather than read through a compatibility branch: its artifact was
  * frozen under a claim this version cannot re-derive, and there is no honest
  * value to translate a prompt rendered by another renderer into.
  */
-export const INPUT_PREPARATION_VERSION = 4;
+export const INPUT_PREPARATION_VERSION = INPUT_PREPARATION_WIRE_VERSION;
 
 // ---------------------------------------------------------------------------
 // Canonical serialization
@@ -617,7 +635,11 @@ export interface InputPreparationLimitsPolicyV1 {
   readonly maxScopeAggregateBytes: number;
   /** Maximum preparations in flight across the daemon at one instant. */
   readonly maxInFlight: number;
-  /** Maximum counter invocations one authenticated scope may consume, ever, within retention. */
+  /**
+   * Maximum counter invocations one authenticated scope may consume, ever,
+   * within retention. Consumed only by a configured counter; a daemon without
+   * one never reserves against it.
+   */
   readonly maxCounterCallsPerScope: number;
   /** Bound on one counter invocation. */
   readonly counterTimeoutMs: number;
@@ -889,8 +911,7 @@ export interface InputPreparationCounterResultV1 {
   readonly method: string;
   readonly methodVersion: string;
   readonly authority: InputPreparationCounterAuthorityV1;
-  /** `count` is authoritative; `bound` is a proved upper bound. Nothing else is accepted. */
-  readonly kind: 'count' | 'bound';
+  /** The provider's count over P(D). An optional tightener, never the size evidence. */
   readonly value: number;
   readonly coverage: InputPreparationCoverageProofV1;
   /** What the provider asserted, and the projection identity it asserted it about. */
@@ -898,13 +919,20 @@ export interface InputPreparationCounterResultV1 {
 }
 
 /**
- * The separately authorized counter. Exactly one method, and it performs no
- * live call in B-P2 tests.
+ * The separately authorized, OPTIONAL counter. Exactly one method, and it
+ * performs no live call in B-P2 tests.
+ *
+ * A daemon without one still prepares: it compiles, persists and can reach
+ * ready with no counter call and no `maxCounterCallsPerScope` reservation
+ * consumed, because the size evidence is `artifact.requestBytes`, measured by
+ * the daemon's own compiler. A configured counter is a tightener whose
+ * evidence must itself be provider-authoritative and covered, or the receipt
+ * stays unready.
  *
  * There is deliberately no fallback implementation anywhere in this package: no
  * `chars/4`, no heuristic padding, no reuse of a count taken from a different
- * projection. A daemon with no counter has no `inputPreparation` section and
- * the feature is off.
+ * projection, and no numeric budget, window or template constant. Those are
+ * Host authority.
  */
 export interface InputPreparationCounterAdapter {
   count(request: InputPreparationCounterRequestV1): Promise<InputPreparationCounterResultV1>;
@@ -967,6 +995,11 @@ export interface InputPreparationArtifactSummaryV1 {
   /** Digest of the whole native envelope (snapshot, context, request, manifest). */
   readonly envelopeDigest: string;
   readonly toolManifestDigest: string;
+  /**
+   * The exact UTF-8 byte length of D, measured by this daemon's own compiler.
+   * The one size evidence a receipt carries: the Host rules its budget against
+   * it. There is no second byte-bound field and no token estimate here.
+   */
   readonly requestBytes: number;
   readonly projectionBytes: number;
   /**
@@ -1064,8 +1097,10 @@ export interface InputPreparationPinV1 {
  *
  * - `reserved` — reserved durably; nothing compiled or counted yet.
  * - `counting` — artifact persisted, and a counter call was durably reserved
- *   and dispatched.
- * - `counted` — the counter answered; the receipt carries its evidence.
+ *   and dispatched. Only a daemon with a configured counter enters it.
+ * - `prepared` — the artifact is persisted and, when a counter is configured,
+ *   the counter answered and the receipt carries its evidence. A daemon with
+ *   no counter goes straight from `reserved` to `prepared`.
  * - `cancelled` — explicitly cancelled, or its deadline elapsed, with the call
  *   provably never placed. Terminal.
  * - `failed` — compilation, a policy bound or a durable write refused it.
@@ -1078,7 +1113,7 @@ export interface InputPreparationPinV1 {
  *
  * The last four are terminal and never transition again.
  */
-export type InputPreparationStateV1 = 'reserved' | 'counting' | 'counted' | 'cancelled' | 'failed' | 'counter_interrupted';
+export type InputPreparationStateV1 = 'reserved' | 'counting' | 'prepared' | 'cancelled' | 'failed' | 'counter_interrupted';
 
 /**
  * Why a receipt is not ready. An empty list is the only thing that makes
@@ -1087,10 +1122,19 @@ export type InputPreparationStateV1 = 'reserved' | 'counting' | 'counted' | 'can
  * `ready` answers exactly one question — CAN THIS PREPARATION BE CONSUMED —
  * and it is deliberately not Host budget admission. A ready receipt says the
  * artifact is intact, its projection is content-complete, every residual key
- * is ruled by an applicable Host accounting policy, the count is present and
- * bound to this exact projection, and every executor identity is attested. It
- * says nothing about whether the Host's budget allows the spend; that decision
- * needs the ruling this surface only names.
+ * is ruled by an applicable Host accounting policy, D is text only, every
+ * executor identity is attested, and — only when a counter is configured —
+ * that count is provider-authoritative and covered. It says nothing about
+ * whether the Host's budget allows the spend; the Host rules
+ * `requestBytes + C + max_tokens <= window` itself.
+ *
+ * - `not_prepared` — the record is `reserved` or `counting`, or holds no
+ *   artifact.
+ * - `counter_authority_not_production` / `counter_coverage_incomplete` — a
+ *   counter IS present on the record and its evidence is a fixture, or it did
+ *   not cover the projection. An absent counter produces neither.
+ * - `request_content_not_text` — D carries a message content part whose
+ *   `type` is not `text`. The first release admits text-only D.
  *
  * - `projection_unknown` — the native compiler's projection kind is not
  *   `content_complete`, so it claims nothing about what P(D) covers.
@@ -1099,9 +1143,6 @@ export type InputPreparationStateV1 = 'reserved' | 'counting' | 'counted' | 'can
  * - `accounting_policy_missing` — the request named no accounting policy.
  * - `accounting_policy_inapplicable` — the named policy was ruled for a
  *   different runtime or a different endpoint/model.
- * - `counter_missing` — no counter evidence is persisted on the record. Stated
- *   on its own, because it used to be implied by an always-present coverage
- *   reason and is a different fact from either.
  * - `runtime_contract_superseded` — the record's binding declares a
  *   prepared-compiler version other than the one this build prepares and
  *   consumes against. The artifact is not re-read through the current contract
@@ -1110,14 +1151,14 @@ export type InputPreparationStateV1 = 'reserved' | 'counting' | 'counted' | 'can
  *   re-derive.
  */
 export type InputPreparationReadinessReasonV1 =
-  | 'not_counted'
+  | 'not_prepared'
   | 'counter_interrupted'
   | 'cancelled'
   | 'failed'
   | 'artifact_expired'
   | 'counter_authority_not_production'
   | 'counter_coverage_incomplete'
-  | 'counter_missing'
+  | 'request_content_not_text'
   | 'projection_unknown'
   | 'residual_not_ruled'
   | 'accounting_policy_missing'
@@ -1182,7 +1223,8 @@ export interface InputPreparationReceiptV1 {
  * - `request_conflict` — the same `(scope, Agent, requestId)` key already exists
  *   bound to a DIFFERENT normalized request digest.
  * - `not_found` — no record for this key in this scope.
- * - `counter_unavailable` — the counter adapter refused before doing work.
+ * - `counter_unavailable` — the configured counter adapter refused before
+ *   doing work, or answered with evidence about another projection.
  * - `counter_interrupted` — the counter's outcome is unknown; the record says so
  *   and is not retried.
  * - `durable_write_failed` — a durable write was uncertain. The record is
@@ -1244,6 +1286,15 @@ export const INPUT_PREPARATION_ERROR_CODES = [
    * frame, so nothing here retries.
    */
   'rpc_frame_too_large',
+  /**
+   * The input-preparation lane is OFF on this daemon because its durable
+   * record log holds a record written in a record schema version this build
+   * does not read (a leftover from before a version cut). Everything else on
+   * the daemon runs; only this lane refuses, typed, until an operator
+   * archives the record log named in the message. Nothing is migrated, read
+   * forward or deleted.
+   */
+  'input_preparation_record_log_unsupported',
 ] as const;
 
 export type InputPreparationErrorCodeV1 = (typeof INPUT_PREPARATION_ERROR_CODES)[number];
