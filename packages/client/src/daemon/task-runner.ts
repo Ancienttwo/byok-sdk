@@ -4745,12 +4745,18 @@ export class TaskRunner {
    * telemetry, exactly like the other runtimes' — and a Pi run that reported
    * none omits the block rather than fabricating one from independently known
    * runtime, elapsed duration, or Local Agent version.
+   *
+   * "Reported none" includes a last observation that carries NEITHER token
+   * count: Pi still emits a `usage` event for a call whose usage block was
+   * unreadable (so the prepared lane can count the call), and a terminal block
+   * built from it would be a usage observation with no usage in it.
    */
   private terminalInferenceUsagePayload(active: ActiveTask): { usage?: TerminalInferenceUsage } {
     const release = this.deps.localAgentRelease;
     const runtimeId = active.adapter.descriptor.id;
     if (!isKnownRuntimeId(runtimeId)) return {};
     if (release === undefined || active.lastUsage === undefined) return {};
+    if (active.lastUsage.inputTokens === undefined && active.lastUsage.outputTokens === undefined) return {};
 
     const nowMs = Date.now();
     const durationMs = terminalUsageNumber(nowMs - active.startedAtMs, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS);

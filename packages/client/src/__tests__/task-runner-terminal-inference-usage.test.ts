@@ -117,6 +117,24 @@ describe('TaskRunner terminal inference usage projection', () => {
     expect(failed.payload.usage && Object.hasOwn(failed.payload.usage, 'completionTokens')).toBe(false);
   });
 
+  it('omits usage when the last Pi observation carries neither token count, rather than fabricating a block', async () => {
+    const adapter = new StubRuntimeAdapter('pi');
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(adapter, sent);
+    const taskId = 'terminal-pi-unreadable-usage';
+    await startTask(runner, taskId, 'pi');
+    const session = adapter.sessions[0]!;
+
+    // What `adapters/pi/events.ts` emits for an assistant message_end whose
+    // usage block could not be read: the call is counted, with no tokens.
+    session.emit({ type: 'usage', totalTokens: 9 });
+    session.emit({ type: 'turn_end' });
+
+    await vi.waitFor(() => expect(sent.some((item) => item.type === 'task.complete' && item.task_id === taskId)).toBe(true));
+    const completed = terminal(sent, taskId, 'task.complete');
+    expect(Object.hasOwn(completed.payload, 'usage')).toBe(false);
+  });
+
   it('omits usage for a cancelled Pi task without a native usage observation', async () => {
     const adapter = new StubRuntimeAdapter('pi');
     const sent: Envelope[] = [];

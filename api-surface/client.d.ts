@@ -8560,6 +8560,11 @@ export declare class TaskRunner {
      * telemetry, exactly like the other runtimes' — and a Pi run that reported
      * none omits the block rather than fabricating one from independently known
      * runtime, elapsed duration, or Local Agent version.
+     *
+     * "Reported none" includes a last observation that carries NEITHER token
+     * count: Pi still emits a `usage` event for a call whose usage block was
+     * unreadable (so the prepared lane can count the call), and a terminal block
+     * built from it would be a usage observation with no usage in it.
      */
     private terminalInferenceUsagePayload;
     /**
