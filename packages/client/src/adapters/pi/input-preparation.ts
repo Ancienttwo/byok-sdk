@@ -599,6 +599,47 @@ export function verifyCompiledPreparedInput(
   };
 }
 
+/**
+ * Whether the frozen provider request D carries text content parts only.
+ *
+ * The first bounded-admission release admits text-only D: its size evidence is
+ * `requestBytes`, and a non-text part (an image, an audio clip, a file) is
+ * priced by the provider in a way no byte length of D describes. The answer is
+ * read off D itself — the exact bytes that will be sent — rather than off the
+ * caller's snapshot, so nothing the compiler adds can slip past it.
+ *
+ * The rule is structural and closed, over the `openai-completions` body this
+ * compiler produces: every entry of `messages` whose `content` is an array
+ * must hold only parts whose `type` is exactly `"text"`. String or absent
+ * content is text. Anything this rule cannot read — a body that is not a JSON
+ * object, a `messages` that is not an array, an entry or part that is not an
+ * object — answers `false`, so an unreadable D stays unready rather than being
+ * assumed text.
+ */
+export function preparedRequestContentIsTextOnly(requestBody: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(requestBody);
+  } catch {
+    return false;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+  const messages = (parsed as Record<string, unknown>).messages;
+  if (messages === undefined) return true;
+  if (!Array.isArray(messages)) return false;
+  for (const message of messages) {
+    if (message === null || typeof message !== 'object' || Array.isArray(message)) return false;
+    const content = (message as Record<string, unknown>).content;
+    if (content === undefined || content === null || typeof content === 'string') continue;
+    if (!Array.isArray(content)) return false;
+    for (const part of content) {
+      if (part === null || typeof part !== 'object' || Array.isArray(part)) return false;
+      if ((part as Record<string, unknown>).type !== 'text') return false;
+    }
+  }
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Tool executor observation fingerprints
 // ---------------------------------------------------------------------------

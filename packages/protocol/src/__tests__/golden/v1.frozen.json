@@ -25581,7 +25581,7 @@
                   "enum": [
                     "reserved",
                     "counting",
-                    "counted",
+                    "prepared",
                     "cancelled",
                     "failed",
                     "counter_interrupted"
@@ -25971,13 +25971,6 @@
                         "test_fixture"
                       ]
                     },
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "count",
-                        "bound"
-                      ]
-                    },
                     "value": {
                       "type": "integer",
                       "minimum": 0,
@@ -26098,7 +26091,6 @@
                     "method",
                     "methodVersion",
                     "authority",
-                    "kind",
                     "value",
                     "coverage",
                     "providerEvidence",
@@ -26117,14 +26109,14 @@
                   "items": {
                     "type": "string",
                     "enum": [
-                      "not_counted",
+                      "not_prepared",
                       "counter_interrupted",
                       "cancelled",
                       "failed",
                       "artifact_expired",
                       "counter_authority_not_production",
                       "counter_coverage_incomplete",
-                      "counter_missing",
+                      "request_content_not_text",
                       "projection_unknown",
                       "residual_not_ruled",
                       "accounting_policy_missing",
@@ -26349,7 +26341,7 @@
               "enum": [
                 "reserved",
                 "counting",
-                "counted",
+                "prepared",
                 "cancelled",
                 "failed",
                 "counter_interrupted"
@@ -26739,13 +26731,6 @@
                     "test_fixture"
                   ]
                 },
-                "kind": {
-                  "type": "string",
-                  "enum": [
-                    "count",
-                    "bound"
-                  ]
-                },
                 "value": {
                   "type": "integer",
                   "minimum": 0,
@@ -26866,7 +26851,6 @@
                 "method",
                 "methodVersion",
                 "authority",
-                "kind",
                 "value",
                 "coverage",
                 "providerEvidence",
@@ -26885,14 +26869,14 @@
               "items": {
                 "type": "string",
                 "enum": [
-                  "not_counted",
+                  "not_prepared",
                   "counter_interrupted",
                   "cancelled",
                   "failed",
                   "artifact_expired",
                   "counter_authority_not_production",
                   "counter_coverage_incomplete",
-                  "counter_missing",
+                  "request_content_not_text",
                   "projection_unknown",
                   "residual_not_ruled",
                   "accounting_policy_missing",

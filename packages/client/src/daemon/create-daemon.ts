@@ -637,8 +637,10 @@ export interface DaemonConfig {
    *
    * OFF by default. An absent section keeps the whole feature disabled and
    * makes all three methods answer `input_preparation_unconfigured` — there is
-   * no default limits policy, no default authority and no default counter, by
-   * the Owner-approved limits boundary of 2026-09-14. A PRESENT section with an
+   * no default limits policy and no default authority, by the Owner-approved
+   * limits boundary of 2026-09-14. The counter inside the section is
+   * OPTIONAL: without one, preparations settle on the compiler's own byte
+   * evidence. A PRESENT section with an
    * invalid policy is a construction error, the same discipline
    * `deviceAssertion` and the presence cadence already follow: a daemon that
    * starts with an allowance nobody validated is a daemon whose operator
@@ -685,17 +687,28 @@ export interface DaemonConfig {
 }
 
 /**
- * Every part of the local preparation surface is required together. There is no
- * partial enablement: a policy without a counter, or a counter without an
- * authority, would each be a surface that answers questions it cannot back.
+ * The local preparation surface. The limits policy and the authority are
+ * required together: a policy without an authority would answer questions it
+ * cannot back.
+ *
+ * The counter is OPTIONAL. Without one a preparation compiles, persists and
+ * can reach ready with no counter call and no `maxCounterCallsPerScope`
+ * reservation consumed: the size evidence is the artifact's
+ * `requestBytes`, measured by this daemon's own compiler, and the numeric
+ * budget (window, template constant, output reserve, fit) is Host authority.
+ * With one, the counter is called once per preparation and its evidence must
+ * be provider-authoritative and covered for the receipt to be ready.
  */
 export interface InputPreparationDaemonConfig {
   /** Required explicit byte / call / deadline / retention policy. No field has a default. */
   limits: InputPreparationLimitsPolicyV1;
   /** The trusted local device/Agent/Profile authority. Unavailable authority rejects. */
   authorityResolver: InputPreparationAuthorityResolver;
-  /** The separately authorized counter. This package ships no fallback counting of any kind. */
-  counter: InputPreparationCounterAdapter;
+  /**
+   * The separately authorized, optional counter. This package ships no
+   * fallback counting of any kind and no numeric budget.
+   */
+  counter?: InputPreparationCounterAdapter;
 }
 
 export interface AgentEgressConfig {
@@ -1530,7 +1543,7 @@ export function buildDaemonWithAdapters(
       inputPreparationService = createInputPreparationService({
         storeDir, limits: inputPreparationLimits,
         authorityResolver: config.inputPreparation.authorityResolver,
-        counter: config.inputPreparation.counter,
+        ...(config.inputPreparation.counter === undefined ? {} : { counter: config.inputPreparation.counter }),
         compiler, toolSurface: preparedToolSurface,
       });
     })();

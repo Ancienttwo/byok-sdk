@@ -81,7 +81,7 @@ const BINDING = {
 
 const RECEIPT = {
   reference: 'prep-ref-1',
-  state: 'counted',
+  state: 'prepared',
   binding: BINDING,
   artifact: {
     requestDigest: 'sha256:req',
@@ -474,6 +474,54 @@ describe('input preparation completion and readback', () => {
         completedAt: '2026-01-01T00:00:30.000Z',
       }).success,
     ).toBe(true);
+  });
+});
+
+describe('bounded admission wire cut', () => {
+  const COUNTER = {
+    method: 'provider.tokenizer',
+    methodVersion: '1',
+    authority: 'provider',
+    value: 812,
+    coverage: { covered: true },
+    providerEvidence: {
+      projectionDigest: 'a'.repeat(64),
+      endpoint: 'https://provider.example/v1',
+      modelId: 'model-1',
+      asserted: { httpStatus: 200, usageFields: { prompt_tokens: 812 }, responseDigest: 'e'.repeat(64) },
+    },
+    target: { endpoint: 'https://provider.example/v1', modelId: 'model-1' },
+    calledAt: '2026-01-01T00:00:00.000Z',
+    completedAt: '2026-01-01T00:00:01.000Z',
+  } as const;
+
+  it('accepts a ready receipt with no counter at all', () => {
+    expect(
+      InputPreparationReceiptSummarySchema.safeParse({ ...RECEIPT, ready: true, readinessReasons: [] }).success,
+    ).toBe(true);
+  });
+
+  it('refuses the retired state, readiness names and counter kind rather than reading them forward', () => {
+    expect(InputPreparationReceiptSummarySchema.safeParse({ ...RECEIPT, state: 'counted' }).success).toBe(false);
+    for (const retired of ['not_counted', 'counter_missing']) {
+      expect(
+        InputPreparationReceiptSummarySchema.safeParse({ ...RECEIPT, readinessReasons: [retired] }).success,
+      ).toBe(false);
+    }
+    expect(InputPreparationReceiptSummarySchema.safeParse({ ...RECEIPT, counter: COUNTER }).success).toBe(true);
+    for (const kind of ['count', 'bound']) {
+      expect(
+        InputPreparationReceiptSummarySchema.safeParse({ ...RECEIPT, counter: { ...COUNTER, kind } }).success,
+      ).toBe(false);
+    }
+  });
+
+  it('names a non-text D and a not-yet-prepared record', () => {
+    for (const reason of ['request_content_not_text', 'not_prepared']) {
+      expect(
+        InputPreparationReceiptSummarySchema.safeParse({ ...RECEIPT, readinessReasons: [reason] }).success,
+      ).toBe(true);
+    }
   });
 });
 

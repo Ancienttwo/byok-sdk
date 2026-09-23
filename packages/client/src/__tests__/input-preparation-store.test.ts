@@ -133,6 +133,7 @@ function commit(recordId: string, overrides: Partial<CounterReservationInput> = 
     recordId,
     artifact: artifact(recordId),
     summary: SUMMARY,
+    requestContentTextOnly: true,
     bounds: { maxScopeAggregateBytes: 10_000_000, maxCounterCallsPerScope: 100 },
     ...overrides,
   };
@@ -201,7 +202,7 @@ describe('B-P2 store: idempotency namespace', () => {
     const store = await openStore(storeDir);
     const created = await store.reserve(reserve());
     await store.update(created.record.recordId, { state: 'counter_interrupted', detail: 'counter_outcome_unknown' });
-    await expect(store.update(created.record.recordId, { state: 'counted' })).rejects.toBeInstanceOf(
+    await expect(store.update(created.record.recordId, { state: 'prepared' })).rejects.toBeInstanceOf(
       InputPreparationIntegrityError,
     );
   });
@@ -254,6 +255,57 @@ describe('B-P2 store: restart roundtrip', () => {
 
     const restarted = new InputPreparationStore({ storeDir, retentionMs: 60_000, retryHorizonMs: 30_000 });
     await expect(restarted.open()).rejects.toBeInstanceOf(InputPreparationIntegrityError);
+  });
+
+  it('refuses a version-5 `counted` record with a typed error — the bounded-admission cut has no dual read', async () => {
+    const storeDir = await tmpStoreDir();
+    const store = await openStore(storeDir);
+    const created = await store.reserve(reserve());
+    await store.commitCounterReservation(commit(created.record.recordId));
+
+    // A record exactly as version 5 wrote it: the retired `counted` terminal
+    // state, counter evidence with the retired `kind`, and no
+    // `requestContentTextOnly` fact. It is not translated into `prepared`.
+    const logPath = path.join(storeDir, 'input-preparation', 'records.jsonl');
+    const recorded = store.get(created.record.recordId)!;
+    const { requestContentTextOnly: _textOnly, ...withoutTextOnly } = recorded;
+    await fs.writeFile(
+      logPath,
+      `${JSON.stringify({
+        ...withoutTextOnly,
+        format: INPUT_PREPARATION_RECORD_FORMAT,
+        version: 5,
+        state: 'counted',
+        counter: {
+          method: 'fixture.tokenizer',
+          methodVersion: '0',
+          authority: 'provider',
+          kind: 'count',
+          value: 7,
+          coverage: { covered: true },
+          providerEvidence: {
+            projectionDigest: 'a'.repeat(64),
+            endpoint: 'https://api.z.ai/api/coding/paas/v4',
+            modelId: 'glm-4.6',
+            asserted: { httpStatus: 200, usageFields: { prompt_tokens: 7 }, responseDigest: 'e'.repeat(64) },
+          },
+          target: { endpoint: 'https://api.z.ai/api/coding/paas/v4', modelId: 'glm-4.6' },
+          calledAt: '2026-09-01T00:00:00.000Z',
+          completedAt: '2026-09-01T00:00:01.000Z',
+        },
+      })}\n`,
+      'utf8',
+    );
+    const before = await fs.readFile(logPath);
+
+    const restarted = new InputPreparationStore({ storeDir, retentionMs: 60_000, retryHorizonMs: 30_000 });
+    const refusal = await restarted.open().then(() => undefined, (error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(InputPreparationUnsupportedRecordVersionError);
+    expect((refusal as InputPreparationUnsupportedRecordVersionError).reason).toBe('unsupported_record_version');
+    expect((refusal as InputPreparationUnsupportedRecordVersionError).recordVersion).toBe(5);
+    expect(await fs.readFile(logPath)).toEqual(before);
+    expect(() => restarted.list()).toThrow(InputPreparationDurabilityError);
   });
 
   it('refuses a record written at an older record schema version, and leaves every byte of the store where it found it', async () => {
@@ -309,9 +361,9 @@ describe('B-P2 store: restart roundtrip', () => {
     const created = await store.reserve(reserve());
 
     expect(created.record.version).toBe(INPUT_PREPARATION_RECORD_VERSION);
-    expect(INPUT_PREPARATION_RECORD_VERSION).toBe(5);
+    expect(INPUT_PREPARATION_RECORD_VERSION).toBe(6);
     // The wire version is a different agreement, moved by a different reason.
-    expect(INPUT_PREPARATION_VERSION).toBe(4);
+    expect(INPUT_PREPARATION_VERSION).toBe(5);
     expect((await openStore(storeDir)).get(created.record.recordId)?.version).toBe(INPUT_PREPARATION_RECORD_VERSION);
   });
 });
@@ -400,7 +452,7 @@ describe('B-P2 store: policy accounting and retention', () => {
     const store = await openStore(storeDir, { retentionMs: 10_000, retryHorizonMs: 20_000, now: () => clock });
     const created = await store.reserve(reserve());
     await store.commitCounterReservation(commit(created.record.recordId));
-    await store.update(created.record.recordId, { state: 'counted' });
+    await store.update(created.record.recordId, { state: 'prepared' });
 
     const artifactPath = path.join(storeDir, 'input-preparation', 'artifacts', `${created.record.recordId}.json`);
     await expect(fs.stat(artifactPath)).resolves.toBeTruthy();
@@ -411,7 +463,7 @@ describe('B-P2 store: policy accounting and retention', () => {
     expect(await store.gc()).toEqual({ artifactsRemoved: 1, recordsRemoved: 0 });
     await expect(fs.stat(artifactPath)).rejects.toMatchObject({ code: 'ENOENT' });
     const tombstone = store.find(key());
-    expect(tombstone?.state).toBe('counted');
+    expect(tombstone?.state).toBe('prepared');
     expect(tombstone?.counterCalls).toBe(1);
     expect(tombstone?.artifactBytes).toBe(0);
     expect(store.scopeUsage('scope-a').counterCalls).toBe(1);
@@ -493,7 +545,7 @@ describe('B-P2 store: policy accounting and retention', () => {
     const store = await openStore(storeDir, { retentionMs: 10_000, retryHorizonMs: 1_000, now: () => clock });
     const created = await store.reserve(reserve());
     await store.commitCounterReservation(commit(created.record.recordId));
-    await store.update(created.record.recordId, { state: 'counted' });
+    await store.update(created.record.recordId, { state: 'prepared' });
     await store.pin(created.record.recordId, { taskId: 't-1', manifestDigest: 'm-1', sealedAt: new Date(clock).toISOString() });
 
     // Long past both horizons: the pin, not the clock, is what keeps the record
@@ -513,7 +565,7 @@ describe('B-P2 store: policy accounting and retention', () => {
     const store = await openStore(storeDir);
     const created = await store.reserve(reserve());
     await store.commitCounterReservation(commit(created.record.recordId));
-    await store.update(created.record.recordId, { state: 'counted' });
+    await store.update(created.record.recordId, { state: 'prepared' });
 
     const at = new Date().toISOString();
     const outcomes = await Promise.all([
@@ -534,7 +586,7 @@ describe('B-P2 store: policy accounting and retention', () => {
     const store = await openStore(storeDir);
     const created = await store.reserve(reserve());
     await store.commitCounterReservation(commit(created.record.recordId));
-    await store.update(created.record.recordId, { state: 'counted' });
+    await store.update(created.record.recordId, { state: 'prepared' });
     const pin = { taskId: 'task-1', manifestDigest: 'manifest-1', sealedAt: new Date().toISOString() } as const;
 
     expect((await store.pin(created.record.recordId, pin)).kind).toBe('pinned');
@@ -550,7 +602,7 @@ describe('B-P2 store: policy accounting and retention', () => {
       .rejects.toBeInstanceOf(InputPreparationIntegrityError);
 
     await store.commitCounterReservation(commit(created.record.recordId));
-    await store.update(created.record.recordId, { state: 'counted' });
+    await store.update(created.record.recordId, { state: 'prepared' });
     await store.pin(created.record.recordId, { taskId: 'holder', manifestDigest: 'm', sealedAt: new Date().toISOString() });
     await expect(store.unpin(created.record.recordId, 'someone-else')).rejects.toBeInstanceOf(InputPreparationIntegrityError);
     expect(store.get(created.record.recordId)?.pin?.taskId).toBe('holder');

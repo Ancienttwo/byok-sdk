@@ -55,7 +55,7 @@ function desired(
 
 const RECEIPT: InputPreparationReceiptSummary = {
   reference: 'prep-ref-1',
-  state: 'counted',
+  state: 'prepared',
   binding: {
     scopeId: 'scope-1',
     deviceId: 'device-local',

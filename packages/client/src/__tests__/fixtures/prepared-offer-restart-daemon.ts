@@ -315,7 +315,6 @@ const COUNTER_EVIDENCE: InputPreparationCounterEvidenceV1 = {
   method: 'fixture.tokenizer',
   methodVersion: '0',
   authority: SYNTHETIC_PROVIDER_COUNT_FOR_LANE_TESTS,
-  kind: 'count',
   value: 128,
   coverage: { covered: true },
   providerEvidence: {
@@ -408,9 +407,10 @@ async function seed(requestId: string, agentId: string): Promise<Record<string, 
       toolBindingDigest,
       toolImplementationKinds: fingerprinted.fingerprint.toolImplementationKinds,
     },
+    requestContentTextOnly: true,
     bounds: { maxScopeAggregateBytes: 10_000_000, maxCounterCallsPerScope: 4 },
   });
-  await store.update(reserved.record.recordId, { state: 'counted', counter: COUNTER_EVIDENCE });
+  await store.update(reserved.record.recordId, { state: 'prepared', counter: COUNTER_EVIDENCE });
   return {
     recordId: reserved.record.recordId,
     requestDigest: REQUEST_DIGEST,

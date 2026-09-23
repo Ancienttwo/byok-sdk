@@ -117,7 +117,6 @@ function fixtureCounter(): RecordingCounter {
         method: 'fixture.tokenizer',
         methodVersion: '0',
         authority: 'test_fixture',
-        kind: 'bound',
         value: 4_242,
         coverage: { covered: false, reason: 'offline fixture' },
         // Bound to the exact projection the adapter was handed: a count whose
@@ -295,7 +294,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     const receipt = await requestInputPreparation(client!, preparationRequest());
 
     expect(receipt.format).toBe('byok.input-preparation.receipt');
-    expect(receipt.state).toBe('counted');
+    expect(receipt.state).toBe('prepared');
     // The native compiler's own structural projection contract, carried
     // verbatim — not a label this SDK chose.
     expect(receipt.artifact?.projection.version).toBe(3);
@@ -326,7 +325,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     expect(receipt.artifact?.toolBindingDigest).toMatch(/^[0-9a-f]{64}$/u);
     // The observation happened inside the proven launch boundary.
     expect(await trustedCwd()).toBeTruthy();
-    expect(receipt.counter).toMatchObject({ authority: 'test_fixture', kind: 'bound', value: 4_242 });
+    expect(receipt.counter).toMatchObject({ authority: 'test_fixture', value: 4_242 });
 
     // A fixture count, an unruled residual set and unattested executors can
     // never be ready. `projection_unknown` is absent on purpose: the compiler
@@ -389,7 +388,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     expect(await controlErrorCode(lookupInputPreparation(client!, { requestId: 'prep-missing', scope: { ...TRUSTED } }))).toBe(
       'not_found',
     );
-    expect((await cancelInputPreparation(client!, { requestId: 'prep-1', scope: { ...TRUSTED } })).state).toBe('counted');
+    expect((await cancelInputPreparation(client!, { requestId: 'prep-1', scope: { ...TRUSTED } })).state).toBe('prepared');
     expect(counter.calls).toHaveLength(1);
   });
 

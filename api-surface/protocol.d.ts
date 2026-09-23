@@ -4981,10 +4981,10 @@ export declare const InputPreparationCompletionRequestSchema: z.ZodDiscriminated
         reference: z.ZodString;
         state: z.ZodEnum<{
             cancelled: "cancelled";
-            counted: "counted";
             counter_interrupted: "counter_interrupted";
             counting: "counting";
             failed: "failed";
+            prepared: "prepared";
             reserved: "reserved";
         }>;
         binding: z.ZodObject<{
@@ -5067,10 +5067,6 @@ export declare const InputPreparationCompletionRequestSchema: z.ZodDiscriminated
                 provider: "provider";
                 test_fixture: "test_fixture";
             }>;
-            kind: z.ZodEnum<{
-                bound: "bound";
-                count: "count";
-            }>;
             value: z.ZodNumber;
             coverage: z.ZodObject<{
                 covered: z.ZodBoolean;
@@ -5102,11 +5098,11 @@ export declare const InputPreparationCompletionRequestSchema: z.ZodDiscriminated
             counter_authority_not_production: "counter_authority_not_production";
             counter_coverage_incomplete: "counter_coverage_incomplete";
             counter_interrupted: "counter_interrupted";
-            counter_missing: "counter_missing";
             executor_identity_unproven: "executor_identity_unproven";
             failed: "failed";
-            not_counted: "not_counted";
+            not_prepared: "not_prepared";
             projection_unknown: "projection_unknown";
+            request_content_not_text: "request_content_not_text";
             residual_not_ruled: "residual_not_ruled";
             runtime_contract_superseded: "runtime_contract_superseded";
         }>>;
@@ -5179,10 +5175,10 @@ export declare const InputPreparationReadbackSchema: z.ZodObject<{
         reference: z.ZodString;
         state: z.ZodEnum<{
             cancelled: "cancelled";
-            counted: "counted";
             counter_interrupted: "counter_interrupted";
             counting: "counting";
             failed: "failed";
+            prepared: "prepared";
             reserved: "reserved";
         }>;
         binding: z.ZodObject<{
@@ -5265,10 +5261,6 @@ export declare const InputPreparationReadbackSchema: z.ZodObject<{
                 provider: "provider";
                 test_fixture: "test_fixture";
             }>;
-            kind: z.ZodEnum<{
-                bound: "bound";
-                count: "count";
-            }>;
             value: z.ZodNumber;
             coverage: z.ZodObject<{
                 covered: z.ZodBoolean;
@@ -5300,11 +5292,11 @@ export declare const InputPreparationReadbackSchema: z.ZodObject<{
             counter_authority_not_production: "counter_authority_not_production";
             counter_coverage_incomplete: "counter_coverage_incomplete";
             counter_interrupted: "counter_interrupted";
-            counter_missing: "counter_missing";
             executor_identity_unproven: "executor_identity_unproven";
             failed: "failed";
-            not_counted: "not_counted";
+            not_prepared: "not_prepared";
             projection_unknown: "projection_unknown";
+            request_content_not_text: "request_content_not_text";
             residual_not_ruled: "residual_not_ruled";
             runtime_contract_superseded: "runtime_contract_superseded";
         }>>;
@@ -5937,13 +5929,20 @@ export declare const InputPreparationContextDocumentSchema: z.ZodObject<{
     }, z.core.$strict>], "role">>;
 }, z.core.$strict>;
 export type InputPreparationContextDocument = z.infer<typeof InputPreparationContextDocumentSchema>;
-/** Durable lifecycle state of one local preparation record. */
+/**
+ * Durable lifecycle state of one local preparation record.
+ *
+ * `prepared` is the one successful terminal state: the artifact is compiled,
+ * persisted, and — when the device has an optional counter configured — its
+ * counter answered. A device with no counter reaches `prepared` without ever
+ * entering `counting`.
+ */
 export declare const InputPreparationStateSchema: z.ZodEnum<{
     cancelled: "cancelled";
-    counted: "counted";
     counter_interrupted: "counter_interrupted";
     counting: "counting";
     failed: "failed";
+    prepared: "prepared";
     reserved: "reserved";
 }>;
 export type InputPreparationState = z.infer<typeof InputPreparationStateSchema>;
@@ -5953,11 +5952,14 @@ export type InputPreparationState = z.infer<typeof InputPreparationStateSchema>;
  *
  * `ready` means the preparation CAN BE CONSUMED — the artifact is intact and
  * unexpired, the native compiler's projection is content-complete, every
- * residual key is ruled by an applicable Host accounting policy, the count is
- * present and bound to that exact projection, and every executor identity is
- * attested. It is deliberately NOT Host budget admission: the device performs
- * no budget arithmetic, so a ready receipt says the evidence holds, never that
- * the spend is allowed.
+ * residual key is ruled by an applicable Host accounting policy, D is text
+ * only, every executor identity is attested, and — only when the device has an
+ * optional counter configured — that count is provider-authoritative and
+ * covered. No count is required: the size evidence is
+ * `artifact.requestBytes`, the exact byte length of the frozen D. It is
+ * deliberately NOT Host budget admission: the device performs no budget
+ * arithmetic, so a ready receipt says the evidence holds, never that the
+ * spend fits a window.
  */
 export declare const InputPreparationReadinessReasonSchema: z.ZodEnum<{
     accounting_policy_inapplicable: "accounting_policy_inapplicable";
@@ -5967,11 +5969,11 @@ export declare const InputPreparationReadinessReasonSchema: z.ZodEnum<{
     counter_authority_not_production: "counter_authority_not_production";
     counter_coverage_incomplete: "counter_coverage_incomplete";
     counter_interrupted: "counter_interrupted";
-    counter_missing: "counter_missing";
     executor_identity_unproven: "executor_identity_unproven";
     failed: "failed";
-    not_counted: "not_counted";
+    not_prepared: "not_prepared";
     projection_unknown: "projection_unknown";
+    request_content_not_text: "request_content_not_text";
     residual_not_ruled: "residual_not_ruled";
     runtime_contract_superseded: "runtime_contract_superseded";
 }>;
@@ -6042,7 +6044,9 @@ export declare const InputPreparationCounterProviderEvidenceSchema: z.ZodObject<
     }, z.core.$strict>;
 }, z.core.$strict>;
 /**
- * Counter evidence exactly as the device's adapter reported it.
+ * Counter evidence exactly as the device's OPTIONAL adapter reported it.
+ * Absent when the device has no counter configured, which is a legal, ready-
+ * capable state: the size evidence is `artifact.requestBytes`.
  *
  * `authority: 'test_fixture'` is a first-class value, not a debug flag: a
  * fixture result can never produce a ready receipt, which is what keeps an
@@ -6054,10 +6058,6 @@ export declare const InputPreparationCounterEvidenceSchema: z.ZodObject<{
     authority: z.ZodEnum<{
         provider: "provider";
         test_fixture: "test_fixture";
-    }>;
-    kind: z.ZodEnum<{
-        bound: "bound";
-        count: "count";
     }>;
     value: z.ZodNumber;
     coverage: z.ZodObject<{
@@ -6252,10 +6252,10 @@ export declare const InputPreparationReceiptSummarySchema: z.ZodObject<{
     reference: z.ZodString;
     state: z.ZodEnum<{
         cancelled: "cancelled";
-        counted: "counted";
         counter_interrupted: "counter_interrupted";
         counting: "counting";
         failed: "failed";
+        prepared: "prepared";
         reserved: "reserved";
     }>;
     binding: z.ZodObject<{
@@ -6338,10 +6338,6 @@ export declare const InputPreparationReceiptSummarySchema: z.ZodObject<{
             provider: "provider";
             test_fixture: "test_fixture";
         }>;
-        kind: z.ZodEnum<{
-            bound: "bound";
-            count: "count";
-        }>;
         value: z.ZodNumber;
         coverage: z.ZodObject<{
             covered: z.ZodBoolean;
@@ -6373,11 +6369,11 @@ export declare const InputPreparationReceiptSummarySchema: z.ZodObject<{
         counter_authority_not_production: "counter_authority_not_production";
         counter_coverage_incomplete: "counter_coverage_incomplete";
         counter_interrupted: "counter_interrupted";
-        counter_missing: "counter_missing";
         executor_identity_unproven: "executor_identity_unproven";
         failed: "failed";
-        not_counted: "not_counted";
+        not_prepared: "not_prepared";
         projection_unknown: "projection_unknown";
+        request_content_not_text: "request_content_not_text";
         residual_not_ruled: "residual_not_ruled";
         runtime_contract_superseded: "runtime_contract_superseded";
     }>>;
@@ -6408,7 +6404,7 @@ export declare const InputPreparationReferenceSchema: z.ZodString;
  * `artifactDigest` is optional for one structural reason, not as a compatibility
  * seam: a receipt discloses `artifact` only once there is one
  * ({@link InputPreparationArtifactSummarySchema} is optional on the receipt), so
- * a Host holding a not-yet-counted receipt has no envelope digest to re-present.
+ * a Host holding a not-yet-prepared receipt has no envelope digest to re-present.
  * When it is present it is compared like everything else.
  */
 export declare const InputPreparationOfferBindingSchema: z.ZodObject<{

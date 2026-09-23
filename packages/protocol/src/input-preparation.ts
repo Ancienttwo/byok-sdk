@@ -383,11 +383,18 @@ export type InputPreparationContextDocument = z.infer<typeof InputPreparationCon
 // Receipt summary — the only thing a completion discloses about the artifact
 // ---------------------------------------------------------------------------
 
-/** Durable lifecycle state of one local preparation record. */
+/**
+ * Durable lifecycle state of one local preparation record.
+ *
+ * `prepared` is the one successful terminal state: the artifact is compiled,
+ * persisted, and — when the device has an optional counter configured — its
+ * counter answered. A device with no counter reaches `prepared` without ever
+ * entering `counting`.
+ */
 export const InputPreparationStateSchema = z.enum([
   'reserved',
   'counting',
-  'counted',
+  'prepared',
   'cancelled',
   'failed',
   'counter_interrupted',
@@ -400,22 +407,32 @@ export type InputPreparationState = z.infer<typeof InputPreparationStateSchema>;
  *
  * `ready` means the preparation CAN BE CONSUMED — the artifact is intact and
  * unexpired, the native compiler's projection is content-complete, every
- * residual key is ruled by an applicable Host accounting policy, the count is
- * present and bound to that exact projection, and every executor identity is
- * attested. It is deliberately NOT Host budget admission: the device performs
- * no budget arithmetic, so a ready receipt says the evidence holds, never that
- * the spend is allowed.
+ * residual key is ruled by an applicable Host accounting policy, D is text
+ * only, every executor identity is attested, and — only when the device has an
+ * optional counter configured — that count is provider-authoritative and
+ * covered. No count is required: the size evidence is
+ * `artifact.requestBytes`, the exact byte length of the frozen D. It is
+ * deliberately NOT Host budget admission: the device performs no budget
+ * arithmetic, so a ready receipt says the evidence holds, never that the
+ * spend fits a window.
  */
 export const InputPreparationReadinessReasonSchema = z.enum([
-  'not_counted',
+  /** The record has not reached `prepared` (it is `reserved` or `counting`). */
+  'not_prepared',
   'counter_interrupted',
   'cancelled',
   'failed',
   'artifact_expired',
+  /** A counter IS present and its authority is not `provider` (a fixture never reaches ready). */
   'counter_authority_not_production',
+  /** A counter IS present and it reported its projection as not covered. */
   'counter_coverage_incomplete',
-  /** No counter evidence is persisted on the record. */
-  'counter_missing',
+  /**
+   * D, the frozen provider request, carries a message content part whose
+   * `type` is not `text`. The first release admits text-only D; a multimodal
+   * part is not sized by `requestBytes` in any way the Host's ruling covers.
+   */
+  'request_content_not_text',
   /** The native compiler's projection kind is not `content_complete`. */
   'projection_unknown',
   /** The artifact carries a residual key the accounting policy does not rule on. */
@@ -514,7 +531,9 @@ export const InputPreparationCounterProviderEvidenceSchema = z
   .strict();
 
 /**
- * Counter evidence exactly as the device's adapter reported it.
+ * Counter evidence exactly as the device's OPTIONAL adapter reported it.
+ * Absent when the device has no counter configured, which is a legal, ready-
+ * capable state: the size evidence is `artifact.requestBytes`.
  *
  * `authority: 'test_fixture'` is a first-class value, not a debug flag: a
  * fixture result can never produce a ready receipt, which is what keeps an
@@ -525,7 +544,6 @@ export const InputPreparationCounterEvidenceSchema = z
     method: OPAQUE_ID,
     methodVersion: OPAQUE_ID,
     authority: z.enum(['provider', 'test_fixture']),
-    kind: z.enum(['count', 'bound']),
     value: z.number().int().nonnegative(),
     coverage: z
       .object({ covered: z.boolean(), reason: z.string().max(512).optional() })
@@ -623,6 +641,12 @@ export const InputPreparationArtifactSummarySchema = z
     requestDigest: OPAQUE_ID,
     envelopeDigest: OPAQUE_ID,
     toolManifestDigest: OPAQUE_ID,
+    /**
+     * The exact UTF-8 byte length of the frozen provider request D, measured
+     * by the device's own compiler. The ONE size evidence a receipt carries:
+     * the Host rules the budget (`requestBytes + C + max_tokens <= window`)
+     * against it. Never a token count and never an estimate.
+     */
     requestBytes: z.number().int().nonnegative(),
     projectionBytes: z.number().int().nonnegative(),
     projection: InputPreparationProjectionSchema,
@@ -725,7 +749,7 @@ export const InputPreparationReferenceSchema = OPAQUE_ID;
  * `artifactDigest` is optional for one structural reason, not as a compatibility
  * seam: a receipt discloses `artifact` only once there is one
  * ({@link InputPreparationArtifactSummarySchema} is optional on the receipt), so
- * a Host holding a not-yet-counted receipt has no envelope digest to re-present.
+ * a Host holding a not-yet-prepared receipt has no envelope digest to re-present.
  * When it is present it is compared like everything else.
  */
 export const InputPreparationOfferBindingSchema = z

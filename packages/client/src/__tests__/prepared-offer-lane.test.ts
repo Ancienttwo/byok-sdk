@@ -144,15 +144,14 @@ const ACCOUNTING_POLICY_REF: InputPreparationAccountingPolicyRefV1 = {
 const SYNTHETIC_PROVIDER_COUNT_FOR_LANE_TESTS = 'provider' as const;
 
 /**
- * The counter evidence a counted record carries. A record with none is unready
- * by `counter_missing`, so a lane fixture that omitted it would be declining
- * for the fixture's own gap rather than for the case under test.
+ * The counter evidence an optional counter leaves on a prepared record. A
+ * record with none is equally ready; the lane fixture keeps a provider count so
+ * the lane is exercised with the optional tightener present.
  */
 const COUNTER_EVIDENCE: InputPreparationCounterEvidenceV1 = {
   method: 'fixture.tokenizer',
   methodVersion: '0',
   authority: SYNTHETIC_PROVIDER_COUNT_FOR_LANE_TESTS,
-  kind: 'count',
   value: 128,
   coverage: { covered: true },
   providerEvidence: {
@@ -374,11 +373,12 @@ async function lane(options: {
     recordId: reserved.record.recordId,
     artifact: artifact(reserved.record.recordId),
     summary,
+    requestContentTextOnly: true,
     bounds: { maxScopeAggregateBytes: 10_000_000, maxCounterCallsPerScope: 4 },
   };
   await store.commitCounterReservation(reservation);
   if (options.counted !== false) {
-    await store.update(reserved.record.recordId, { state: 'counted', counter: COUNTER_EVIDENCE });
+    await store.update(reserved.record.recordId, { state: 'prepared', counter: COUNTER_EVIDENCE });
   }
 
   return {

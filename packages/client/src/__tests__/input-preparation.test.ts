@@ -29,6 +29,7 @@ import {
   InputPreparationCompileError,
   InputPreparationRuntimeIdentityError,
   SUPPORTED_PREPARED_COMPILER_VERSION,
+  preparedRequestContentIsTextOnly,
   verifyCompiledPreparedInput,
   type CompilePreparedInputRequest,
   type CompiledPreparedInput,
@@ -257,7 +258,6 @@ function fixtureCounter(
     method: 'fixture.tokenizer',
     methodVersion: '0',
     authority: 'test_fixture',
-    kind: 'count',
     value: 123,
     coverage: { covered: true },
     providerEvidence: fixtureEvidence(counterRequest),
@@ -284,16 +284,18 @@ async function makeService(overrides: {
   storeDir?: string;
   limits?: InputPreparationLimitsPolicyV1;
   authorityResolver?: InputPreparationAuthorityResolver;
-  counter?: InputPreparationCounterAdapter;
+  /** `'none'` constructs the service with no counter at all — the optional counter's absent state. */
+  counter?: InputPreparationCounterAdapter | 'none';
   compiler?: InputPreparationCompiler;
   toolSurface?: RecordingToolSurface;
   now?: () => number;
 } = {}): Promise<InputPreparationService> {
+  const counter = overrides.counter ?? fixtureCounter();
   const service = createInputPreparationService({
     storeDir: overrides.storeDir ?? (await tmpStoreDir()),
     limits: overrides.limits ?? LIMITS,
     authorityResolver: overrides.authorityResolver ?? ALWAYS_AUTHORIZED,
-    counter: overrides.counter ?? fixtureCounter(),
+    ...(counter === 'none' ? {} : { counter }),
     compiler: overrides.compiler ?? stubCompiler(),
     toolSurface: overrides.toolSurface ?? recordingToolSurface(),
     ...(overrides.now === undefined ? {} : { now: overrides.now }),
@@ -392,7 +394,7 @@ describe('B-P2 service: auth and isolation', () => {
     expect(await codeOf(service.cancel({ requestId: 'prep-1', scope: otherScope }))).toBe('not_found');
     // The original scope still sees its own record: the refusal above was
     // isolation, not deletion.
-    expect((await service.lookup({ requestId: 'prep-1', scope: request().scope })).state).toBe('counted');
+    expect((await service.lookup({ requestId: 'prep-1', scope: request().scope })).state).toBe('prepared');
   });
 });
 
@@ -440,7 +442,7 @@ describe('B-P2 service: readiness never reaches ready offline', () => {
     const service = await makeService();
     const receipt = await service.prepare(request());
 
-    expect(receipt.state).toBe('counted');
+    expect(receipt.state).toBe('prepared');
     expect(receipt.ready).toBe(false);
     // The projection IS content-complete — the stub compiles what a real one
     // compiles — so what keeps this receipt unready is the missing Host
@@ -449,7 +451,7 @@ describe('B-P2 service: readiness never reaches ready offline', () => {
     expect(receipt.readinessReasons).not.toContain('projection_unknown');
     expect(receipt.readinessReasons).toContain('accounting_policy_missing');
     expect(receipt.readinessReasons).toContain('counter_authority_not_production');
-    expect(receipt.counter).toMatchObject({ authority: 'test_fixture', kind: 'count', value: 123 });
+    expect(receipt.counter).toMatchObject({ authority: 'test_fixture', value: 123 });
     expect(receipt.artifact?.projection).toEqual({
       version: 3,
       kind: 'content_complete',
@@ -474,7 +476,7 @@ describe('B-P2 service: readiness never reaches ready offline', () => {
     expect(receipt.readinessReasons).not.toContain('residual_not_ruled');
     expect(receipt.readinessReasons).not.toContain('accounting_policy_missing');
     expect(receipt.readinessReasons).not.toContain('accounting_policy_inapplicable');
-    expect(receipt.readinessReasons).not.toContain('counter_missing');
+    expect(receipt.readinessReasons).not.toContain('request_content_not_text');
     // The fixture counter authority is what is left, which is the honest state
     // of an offline suite and is exactly what must never be clearable here.
     expect(receipt.readinessReasons).toContain('counter_authority_not_production');
@@ -563,7 +565,6 @@ describe('B-P2 service: readiness never reaches ready offline', () => {
         method: 'fixture.tokenizer',
         methodVersion: '0',
         authority: 'provider',
-        kind: 'count',
         value: 11,
         coverage: { covered: true },
         providerEvidence: { ...fixtureEvidence(counterRequest), projectionDigest: 'f'.repeat(64) },
@@ -573,7 +574,8 @@ describe('B-P2 service: readiness never reaches ready offline', () => {
     expect(await codeOf(service.prepare(request()))).toBe('counter_unavailable');
     const receipt = await service.lookup({ requestId: 'prep-1', scope: request().scope });
     expect(receipt.counter).toBeUndefined();
-    expect(receipt.readinessReasons).toContain('counter_missing');
+    expect(receipt.ready).toBe(false);
+    expect(receipt.readinessReasons).toContain('counter_interrupted');
   });
 
   it('hands the counter only P(D), the target and an explicit call policy', async () => {
@@ -594,7 +596,6 @@ describe('B-P2 service: readiness never reaches ready offline', () => {
         method: '',
         methodVersion: '',
         authority: 'provider',
-        kind: 'count',
         value: -1,
         coverage: { covered: true },
         providerEvidence: fixtureEvidence(counterRequest),
@@ -606,6 +607,138 @@ describe('B-P2 service: readiness never reaches ready offline', () => {
     const receipt = await service.lookup({ requestId: 'prep-1', scope: request().scope });
     expect(receipt.state).toBe('counter_interrupted');
     expect(receipt.counter).toBeUndefined();
+  });
+});
+
+describe('bounded admission: the counter is optional and byte evidence is the bound', () => {
+  /** Everything a ready receipt needs except the counter: a ruled policy and attested executors. */
+  async function readyCapable(counter: InputPreparationCounterAdapter | 'none', limits: InputPreparationLimitsPolicyV1 = LIMITS, compiler = stubCompiler()) {
+    const service = await makeService({
+      compiler,
+      counter,
+      limits,
+      toolSurface: recordingToolSurface({ attested: true }),
+    });
+    const prepare = (requestId: string) => service.prepare(request({
+      requestId,
+      accountingPolicyRef: accountingPolicyRef({ ruledRuntime: runtimeIdentityOf(compiler) }),
+    }));
+    return { service, prepare };
+  }
+
+  it('reaches ready with no counter, and consumes zero counter-call reservations', async () => {
+    // An allowance of ONE counter call: two preparations can both settle only
+    // if neither reserved against it.
+    const limits = validateInputPreparationLimits({ ...LIMITS, maxCounterCallsPerScope: 1 });
+    const { service, prepare } = await readyCapable('none', limits);
+
+    const first = await prepare('prep-a');
+    const second = await prepare('prep-b');
+
+    for (const receipt of [first, second]) {
+      expect(receipt.state).toBe('prepared');
+      expect(receipt.readinessReasons).toEqual([]);
+      expect(receipt.ready).toBe(true);
+      expect(receipt.counter).toBeUndefined();
+      // The bound evidence is the compiler's exact byte length of D, and it is
+      // the only size field the receipt carries.
+      expect(receipt.artifact?.requestBytes).toBeGreaterThan(0);
+    }
+    expect(service.store.list().map((record) => record.counterCalls)).toEqual([0, 0]);
+    expect(service.store.scopeUsage(first.binding.scopeId).counterCalls).toBe(0);
+    // Never entered `counting`: a restart has nothing to reconcile into
+    // `counter_interrupted`.
+    expect(service.store.list().every((record) => record.state === 'prepared')).toBe(true);
+  });
+
+  it('never reaches ready with a present fixture counter, even when everything else holds', async () => {
+    const counter = fixtureCounter();
+    const { prepare } = await readyCapable(counter);
+    const receipt = await prepare('prep-fixture');
+
+    expect(counter.calls).toHaveLength(1);
+    expect(receipt.state).toBe('prepared');
+    expect(receipt.ready).toBe(false);
+    expect(receipt.readinessReasons).toEqual(['counter_authority_not_production']);
+  });
+
+  it('keeps judging a present counter: an uncovered provider count stays unready', async () => {
+    const { prepare } = await readyCapable(fixtureCounter(async (counterRequest) => ({
+      method: 'provider.tokenizer',
+      methodVersion: '1',
+      authority: 'provider',
+      value: 99,
+      coverage: { covered: false, reason: 'tools not covered' },
+      providerEvidence: fixtureEvidence(counterRequest),
+    })));
+    const receipt = await prepare('prep-uncovered');
+
+    expect(receipt.ready).toBe(false);
+    expect(receipt.readinessReasons).toEqual(['counter_coverage_incomplete']);
+  });
+
+  it('is unchanged with a present provider counter apart from the state name', async () => {
+    const counter = fixtureCounter(async (counterRequest) => ({
+      method: 'provider.tokenizer',
+      methodVersion: '1',
+      authority: 'provider',
+      value: 99,
+      coverage: { covered: true },
+      providerEvidence: fixtureEvidence(counterRequest),
+    }));
+    const { service, prepare } = await readyCapable(counter);
+    const receipt = await prepare('prep-provider');
+
+    expect(counter.calls).toHaveLength(1);
+    expect(receipt.state).toBe('prepared');
+    expect(receipt.ready).toBe(true);
+    expect(receipt.counter).toMatchObject({ authority: 'provider', value: 99 });
+    expect(receipt.counter).not.toHaveProperty('kind');
+    expect(service.store.list()[0]?.counterCalls).toBe(1);
+  });
+
+  it('is not ready when D carries a non-text content part', async () => {
+    const compiler = stubCompiler({
+      body: () => JSON.stringify({
+        model: 'glm-4.6',
+        messages: [
+          { role: 'system', content: 'sys' },
+          { role: 'user', content: [{ type: 'text', text: 'look' }, { type: 'image_url', image_url: { url: 'data:,' } }] },
+        ],
+      }),
+    });
+    const { prepare } = await readyCapable('none', LIMITS, compiler);
+    const receipt = await prepare('prep-image');
+
+    expect(receipt.state).toBe('prepared');
+    expect(receipt.ready).toBe(false);
+    expect(receipt.readinessReasons).toEqual(['request_content_not_text']);
+  });
+
+  it('reads text-only D as text-only, whether its content is a string or text parts', async () => {
+    const compiler = stubCompiler({
+      body: () => JSON.stringify({
+        model: 'glm-4.6',
+        messages: [
+          { role: 'system', content: 'sys' },
+          { role: 'user', content: 'hello' },
+          { role: 'assistant', content: [{ type: 'text', text: 'said before' }] },
+        ],
+      }),
+    });
+    const { prepare } = await readyCapable('none', LIMITS, compiler);
+    expect((await prepare('prep-text')).readinessReasons).toEqual([]);
+  });
+
+  it.each([
+    ['a body that is not JSON', 'not json'],
+    ['a body that is not an object', '[]'],
+    ['messages that are not an array', '{"messages":{}}'],
+    ['a content part that is not an object', '{"messages":[{"role":"user","content":["text"]}]}'],
+    ['a content part with no type', '{"messages":[{"role":"user","content":[{"text":"x"}]}]}'],
+    ['an input_audio part', '{"messages":[{"role":"user","content":[{"type":"input_audio"}]}]}'],
+  ])('classifies %s as not text-only (fail closed)', (_label, body) => {
+    expect(preparedRequestContentIsTextOnly(body)).toBe(false);
   });
 });
 
@@ -622,7 +755,6 @@ describe('B-P2 service: idempotency and uncertainty', () => {
         method: 'fixture.tokenizer',
         methodVersion: '0',
         authority: 'test_fixture',
-        kind: 'count',
         value: 7,
         coverage: { covered: true },
         providerEvidence: fixtureEvidence(counterRequest),
@@ -874,7 +1006,6 @@ describe('B-P2 service: byte, call and in-flight policy', () => {
         method: 'fixture.tokenizer',
         methodVersion: '0',
         authority: 'test_fixture',
-        kind: 'count',
         value: 1,
         coverage: { covered: true },
         providerEvidence: fixtureEvidence(counterRequest),
@@ -942,7 +1073,7 @@ describe('B-P2 service: the runtime frame bound is decided before the operator b
     });
 
     const receipt = await service.prepare(request({ policyRevision: 'limits-rev-roomy' }));
-    expect(receipt.state).toBe('counted');
+    expect(receipt.state).toBe('prepared');
     expect(counter.calls).toHaveLength(1);
   });
 
@@ -1023,7 +1154,7 @@ describe('B-P2 service: bounds hold under concurrent distinct requests', () => {
       service.prepare(request({ requestId: 'prep-b', policyRevision })),
     ]);
     const counted = outcomes.filter(
-      (outcome) => outcome.status === 'fulfilled' && outcome.value.state === 'counted',
+      (outcome) => outcome.status === 'fulfilled' && outcome.value.state === 'prepared',
     ).length;
     const refusals = outcomes
       .filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected')
@@ -1127,7 +1258,6 @@ describe('B-P2 service: restart reconciliation', () => {
         method: 'fixture.tokenizer',
         methodVersion: '0',
         authority: 'test_fixture',
-        kind: 'count',
         value: 1,
         coverage: { covered: true },
         providerEvidence: fixtureEvidence(counterRequest),
@@ -1227,7 +1357,7 @@ describe('PR187 review regressions', () => {
         expect(await Promise.race([Promise.all([pending, action]).then(([code]) => code), new Promise((done) => setTimeout(() => done('hung'), 500))])).toBe('counter_interrupted');
       } finally {
         if (late === 'reject') reject(new Error('late counter rejection'));
-        else resolve({ method: 'fixture', methodVersion: '0', authority: 'test_fixture', kind: 'count', value: 2, coverage: { covered: true }, providerEvidence: fixtureEvidence(lateRequest) });
+        else resolve({ method: 'fixture', methodVersion: '0', authority: 'test_fixture', value: 2, coverage: { covered: true }, providerEvidence: fixtureEvidence(lateRequest) });
         await pending;
         await action;
       }
@@ -1318,7 +1448,7 @@ describe('PR187 retention lifecycle races', () => {
       await new Promise((done) => setTimeout(done, 60));
       expect(service.store.list()[0]?.state).toBe('reserved');
     } finally { release(); }
-    expect((await pending).state).toBe('counted');
+    expect((await pending).state).toBe('prepared');
   });
 
   it('waits for in-flight GC on stop and leaves no timer running', async () => {

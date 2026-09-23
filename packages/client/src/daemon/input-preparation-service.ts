@@ -26,6 +26,7 @@ import {
 import {
   InputPreparationCompileError,
   InputPreparationRuntimeIdentityError,
+  preparedRequestContentIsTextOnly,
   SUPPORTED_PREPARED_COMPILER_VERSION,
   type InputPreparationCompiler,
 } from '../adapters/pi/input-preparation';
@@ -84,19 +85,22 @@ import {
  *  4. The normalized request digest binds the whole request together with the
  *     TRUSTED scope and the runtime identity derived from the verified
  *     installed closure. Caller text contributes nothing to that identity.
- *  5. Durable reserve, before the counter is ever invoked. Same key and digest
+ *  5. Durable reserve, before any counter is ever invoked. Same key and digest
  *     returns the existing fact; a different digest conflicts (§10.3.5).
  *  6. The ONE prepared-tool-surface assembly (`./prepared-tool-surface.ts`) —
  *     launch boundary, implementation identities, probe, policy filter,
  *     projection, fingerprints — deliberately AFTER the reserve, so a
  *     re-delivery of an already-recorded requestId answers from the durable
  *     record without starting a single server.
- *  7. Pure compile, then ONE serialized closure that admits the call against the
- *     per-scope bounds, retains the artifact and durably reserves the counter
- *     call, then the counter, then the durably persisted result — in that
- *     order, so no success is ever reported that is not already on disk, and no
- *     bound is ever decided on a value another request can invalidate before
- *     the write lands (§10.3.5, §10.3.7, §10.3.8).
+ *  7. Pure compile, then ONE serialized closure that admits the artifact
+ *     against the per-scope bounds and retains it. With no counter configured
+ *     that closure settles the record as `prepared` and nothing else happens:
+ *     no counter call, no counter-call reservation. With a counter configured
+ *     the same closure also durably reserves the counter call, then the
+ *     counter runs, then the durably persisted result — in that order, so no
+ *     success is ever reported that is not already on disk, and no bound is
+ *     ever decided on a value another request can invalidate before the write
+ *     lands (§10.3.5, §10.3.7, §10.3.8).
  */
 
 // ---------------------------------------------------------------------------
@@ -123,7 +127,14 @@ export interface InputPreparationServiceOptions {
   readonly storeDir: string;
   readonly limits: InputPreparationLimitsPolicyV1;
   readonly authorityResolver: InputPreparationAuthorityResolver;
-  readonly counter: InputPreparationCounterAdapter;
+  /**
+   * The OPTIONAL counter. Absent, a preparation compiles, persists and settles
+   * as `prepared` with no counter call and no counter-call reservation; the
+   * size evidence is the artifact's own `requestBytes`. Present, it is called
+   * exactly once per preparation and its evidence must be provider-
+   * authoritative and covered for the receipt to be ready.
+   */
+  readonly counter?: InputPreparationCounterAdapter;
   readonly compiler: InputPreparationCompiler;
   /**
    * The ONE prepared-tool-surface entry (`./prepared-tool-surface.ts`).
@@ -196,15 +207,18 @@ export interface InputPreparationService {
  *   endpoint/model; does it name every residual key the compiler classified.
  *   There is no default ruling, so a request that named none stays unready
  *   rather than being silently treated as ruled.
- * - `counter_missing` — no counter evidence is persisted. It used to be
- *   implied by an always-present coverage reason, and it is a different fact.
+ * - `request_content_not_text` — D carries a content part whose `type` is not
+ *   `text`, read off the record's `requestContentTextOnly`, which was decided
+ *   once over D's own bytes when the artifact was retained.
  * - `executor_identity_unproven` — derived from the recorded per-tool
  *   implementation kinds: a manifest is only as proven as its least proven
  *   entry. On this SDK's default — no configured `toolImplementationAuthority`
  *   — every kind is `unavailable:resolver_unconfigured`.
- * - `counter_authority_not_production` — a fixture count can never make a
- *   receipt ready, so an offline suite cannot look like production accounting
- *   evidence.
+ * - `counter_authority_not_production` / `counter_coverage_incomplete` — a
+ *   counter is OPTIONAL, and neither reason exists without one. When one IS on
+ *   the record, a fixture count can never make a receipt ready (so an offline
+ *   suite cannot look like production accounting evidence), and an uncovered
+ *   count cannot either.
  * - `runtime_contract_superseded` — the record's binding declares a
  *   prepared-compiler version this build does not prepare or consume against.
  *   Fail closed with no forward read: the artifact's residual classification
@@ -218,7 +232,7 @@ export function inputPreparationReadinessReasons(
   switch (record.state) {
     case 'reserved':
     case 'counting':
-      reasons.push('not_counted');
+      reasons.push('not_prepared');
       break;
     case 'cancelled':
       reasons.push('cancelled');
@@ -229,7 +243,7 @@ export function inputPreparationReadinessReasons(
     case 'counter_interrupted':
       reasons.push('counter_interrupted');
       break;
-    case 'counted':
+    case 'prepared':
       break;
   }
   // The runtime-contract check, made here about a RECORD rather than about a
@@ -244,9 +258,13 @@ export function inputPreparationReadinessReasons(
     reasons.push('runtime_contract_superseded');
   }
   if (record.artifact === undefined) {
-    if (!reasons.includes('not_counted')) reasons.push('not_counted');
+    if (!reasons.includes('not_prepared')) reasons.push('not_prepared');
   } else {
     if (record.artifact.projection.kind !== 'content_complete') reasons.push('projection_unknown');
+    // Text-only D is the first release's support set. `!== true` rather than
+    // `=== false`: a record holding an artifact without the fact is a record
+    // nobody vouched for, and it stays unready.
+    if (record.requestContentTextOnly !== true) reasons.push('request_content_not_text');
     // Applicability of the Host's accounting ruling, and nothing else. The SDK
     // compares names and identities; it never decides what a residual key COSTS,
     // because the compiler proved only the key's SHAPE and the price of a shape
@@ -282,9 +300,9 @@ export function inputPreparationReadinessReasons(
     }
     if (record.artifactBytes === 0 || nowMs >= Date.parse(record.artifactExpiresAt)) reasons.push('artifact_expired');
   }
-  if (record.counter === undefined) {
-    reasons.push('counter_missing');
-  } else {
+  // The counter is optional. Its absence is not a reason; its presence is
+  // judged, so a fixture or uncovered count can never ride along into ready.
+  if (record.counter !== undefined) {
     if (record.counter.authority !== 'provider') reasons.push('counter_authority_not_production');
     if (!record.counter.coverage.covered) reasons.push('counter_coverage_incomplete');
   }
@@ -333,7 +351,6 @@ function validateCounterResult(value: unknown): InputPreparationCounterResultV1 
     typeof result.methodVersion !== 'string' ||
     result.methodVersion.length === 0 ||
     (result.authority !== 'provider' && result.authority !== 'test_fixture') ||
-    (result.kind !== 'count' && result.kind !== 'bound') ||
     !Number.isSafeInteger(result.value) ||
     (result.value as number) < 0 ||
     typeof coverage !== 'object' ||
@@ -347,7 +364,6 @@ function validateCounterResult(value: unknown): InputPreparationCounterResultV1 
     method: result.method,
     methodVersion: result.methodVersion,
     authority: result.authority,
-    kind: result.kind,
     value: result.value as number,
     coverage: {
       covered: coverage.covered,
@@ -833,6 +849,47 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       throw new InputPreparationRequestError('cancelled', 'this preparation was cancelled before any counter call was placed');
     }
 
+    const summary = {
+      requestDigest: compiled.requestDigest,
+      envelopeDigest: compiled.envelopeDigest,
+      toolManifestDigest: compiled.toolManifestDigest,
+      requestBytes: compiled.requestBytes,
+      projectionBytes: compiled.projectionBytes,
+      projection: compiled.projection,
+      residual: compiled.residual,
+      observationDigest: surface.observationDigest,
+      toolBindingDigest: surface.toolBindingDigest,
+      toolImplementationKinds: surface.toolImplementationKinds,
+    };
+    // Decided once, over D's own bytes, and retained beside the artifact in
+    // the same durable transition.
+    const requestContentTextOnly = preparedRequestContentIsTextOnly(compiled.requestBody);
+
+    // --- no counter: retain and settle -------------------------------------
+    // The size evidence is `summary.requestBytes`, measured by the compiler
+    // above. Nothing is counted, nothing is reserved against the scope's
+    // counter-call allowance, and the record lands on `prepared` in the same
+    // closure that retains its artifact.
+    const counter = options.counter;
+    if (counter === undefined) {
+      try {
+        return await store.commitPreparedArtifact({
+          recordId: record.recordId,
+          artifact,
+          summary,
+          requestContentTextOnly,
+          bounds: { maxScopeAggregateBytes: limits.maxScopeAggregateBytes },
+        });
+      } catch (cause) {
+        if (cause instanceof InputPreparationLimitError) {
+          await markFailed(record.recordId, cause.detail);
+          throw new InputPreparationRequestError('limit_exceeded', cause.message, { cause });
+        }
+        await markFailed(record.recordId, 'artifact_write_failed');
+        return rethrowDurable(cause);
+      }
+    }
+
     // --- reserve the counter call, durably, BEFORE invoking it -------------
     // One serialized closure retains the artifact and charges both per-scope
     // aggregates against the policy this daemon enforces. If this daemon dies
@@ -843,18 +900,8 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       await store.commitCounterReservation({
         recordId: record.recordId,
         artifact,
-        summary: {
-          requestDigest: compiled.requestDigest,
-          envelopeDigest: compiled.envelopeDigest,
-          toolManifestDigest: compiled.toolManifestDigest,
-          requestBytes: compiled.requestBytes,
-          projectionBytes: compiled.projectionBytes,
-          projection: compiled.projection,
-          residual: compiled.residual,
-          observationDigest: surface.observationDigest,
-          toolBindingDigest: surface.toolBindingDigest,
-          toolImplementationKinds: surface.toolImplementationKinds,
-        },
+        summary,
+        requestContentTextOnly,
         bounds: {
           maxScopeAggregateBytes: limits.maxScopeAggregateBytes,
           maxCounterCallsPerScope: limits.maxCounterCallsPerScope,
@@ -904,7 +951,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
           if (run.controller.signal.aborted) { interrupted(); return; }
           // Both handlers stay attached even after the SDK wait has settled.
           // Late adapter resolution cannot write state; late rejection is consumed.
-          options.counter.count({
+          counter.count({
             counterProjection: compiled.counterProjection,
             target,
             timeoutMs: limits.counterTimeoutMs,
@@ -965,7 +1012,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       completedAt: new Date(now()).toISOString(),
     };
     try {
-      return await store.update(record.recordId, { state: 'counted', counter: evidence });
+      return await store.update(record.recordId, { state: 'prepared', counter: evidence });
     } catch (cause) {
       return rethrowDurable(cause);
     }
