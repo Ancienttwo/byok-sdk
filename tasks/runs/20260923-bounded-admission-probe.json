@@ -1,0 +1,186 @@
+{
+  "schemaVersion": "bounded-admission-p0-probe.v1",
+  "deviceLocal": true,
+  "source": {
+    "sdkHead": "55014518",
+    "saleskoHead": "7681488b"
+  },
+  "endpoint": "https://api.z.ai/api/coding/paas/v4/chat/completions",
+  "tokenizer": {
+    "source": "https://huggingface.co/zai-org/GLM-5.3-Flash/resolve/main/tokenizer.json",
+    "bytes": 20217442,
+    "sha256": "19e773648cb4e65de8660ea6365e10acca112d42a854923df93db4a6f333a82d",
+    "modelType": "BPE",
+    "preTokenizer": [
+      "Split",
+      "ByteLevel"
+    ],
+    "byteLevel": {
+      "add_prefix_space": false,
+      "trim_offsets": true,
+      "use_regex": false
+    },
+    "normalizer": null,
+    "interpretation": "Static open-source model file; does not by itself prove hosted coding endpoint uses identical tokenizer."
+  },
+  "attempts": [
+    {
+      "request": {
+        "label": "bare_hi",
+        "sha256": "d560c2c6bee437f4fb818ca733c92a3e7c63dd2a65b2a82c7c096349b66af904",
+        "requestBytes": 140,
+        "model": "glm-5.3-flash",
+        "messageCount": 1,
+        "toolCount": 0,
+        "stream": true
+      },
+      "startedAt": "2026-09-23T05:47:40.474Z",
+      "completedAt": "2026-09-23T05:47:54.136Z",
+      "placed": true,
+      "httpStatus": 200,
+      "contentType": "text/event-stream;charset=UTF-8",
+      "sseEvents": 128,
+      "usageEvents": 1,
+      "usage": {
+        "prompt_tokens": 13,
+        "completion_tokens": 128,
+        "total_tokens": 141,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 127
+        }
+      },
+      "errorCode": null
+    },
+    {
+      "request": {
+        "label": "salesko_prepared_shape",
+        "sha256": "85005e02d252bf8064e53ecf6159d334f1b20f7e0e9eee7e45e2172571f3177a",
+        "requestBytes": 18482,
+        "nativeRequestDigest": "2211210b343bbe6da3e63d9568ddf2dd285793f9361929bc7e6224e289463f25",
+        "nativeProjectionKind": "content_complete",
+        "nativeToolManifestDigest": "7f3f836b5cfb232abc8fc84e9f76c3e9218f7aa691b1d05f4d66fcd98f2bdb53",
+        "model": "glm-5.3-flash",
+        "messageCount": 2,
+        "toolCount": 8,
+        "toolNames": [
+          "get_salesko_capabilities",
+          "get_graph_frame",
+          "search_graph_nodes",
+          "list_activity_feed",
+          "list_opportunities",
+          "search_calendar_events",
+          "prepare_meeting_brief",
+          "propose_graph_change_set"
+        ],
+        "stream": true,
+        "streamOptions": {
+          "include_usage": true
+        },
+        "maxTokens": 128,
+        "fixtureBoundary": "Native Pi prepared compiler with current Salesko catalog schemas and synthetic prompt environment; not a production Salesko receipt."
+      },
+      "startedAt": "2026-09-23T05:48:50.271Z",
+      "completedAt": "2026-09-23T05:49:05.731Z",
+      "placed": true,
+      "httpStatus": 200,
+      "contentType": "text/event-stream;charset=UTF-8",
+      "sseEvents": 32,
+      "usageEvents": 1,
+      "usage": {
+        "prompt_tokens": 6797,
+        "completion_tokens": 33,
+        "total_tokens": 6830,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        }
+      },
+      "errorCode": null
+    },
+    {
+      "request": {
+        "label": "salesko_prepared_shape_repeat",
+        "sha256": "85005e02d252bf8064e53ecf6159d334f1b20f7e0e9eee7e45e2172571f3177a",
+        "requestBytes": 18482,
+        "nativeRequestDigest": "2211210b343bbe6da3e63d9568ddf2dd285793f9361929bc7e6224e289463f25",
+        "nativeProjectionKind": "content_complete",
+        "nativeToolManifestDigest": "7f3f836b5cfb232abc8fc84e9f76c3e9218f7aa691b1d05f4d66fcd98f2bdb53",
+        "model": "glm-5.3-flash",
+        "messageCount": 2,
+        "toolCount": 8,
+        "toolNames": [
+          "get_salesko_capabilities",
+          "get_graph_frame",
+          "search_graph_nodes",
+          "list_activity_feed",
+          "list_opportunities",
+          "search_calendar_events",
+          "prepare_meeting_brief",
+          "propose_graph_change_set"
+        ],
+        "stream": true,
+        "streamOptions": {
+          "include_usage": true
+        },
+        "maxTokens": 128,
+        "fixtureBoundary": "Native Pi prepared compiler with current Salesko catalog schemas and synthetic prompt environment; not a production Salesko receipt."
+      },
+      "startedAt": "2026-09-23T05:49:05.732Z",
+      "completedAt": "2026-09-23T05:49:13.776Z",
+      "placed": true,
+      "httpStatus": 200,
+      "contentType": "text/event-stream;charset=UTF-8",
+      "sseEvents": 35,
+      "usageEvents": 1,
+      "usage": {
+        "prompt_tokens": 6797,
+        "completion_tokens": 38,
+        "total_tokens": 6835,
+        "prompt_tokens_details": {
+          "cached_tokens": 6784
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        }
+      },
+      "errorCode": null
+    }
+  ],
+  "conclusion": {
+    "status": "observed_with_limits",
+    "inferenceAttemptsPlaced": 3,
+    "tokenizerCallsPlaced": 0,
+    "bareHiPromptTokens": 13,
+    "bareHiRequestBytes": 140,
+    "cFloorObservation": 13,
+    "preparedShape": {
+      "requestBytes": 18482,
+      "promptTokens": 6797,
+      "promptAtOrBelowRequestBytes": true,
+      "byteMargin": 11685,
+      "streamingUsageObserved": true,
+      "toolCount": 8,
+      "syntheticPromptEnvironment": true
+    },
+    "repeat": {
+      "sameRequestBody": true,
+      "promptTokens": 6797,
+      "cachedTokens": 6784,
+      "nonCachedPromptTokens": 13,
+      "providerPromptIncludesCached": true,
+      "interpretation": "Provider reports cached_tokens as a subset of prompt_tokens for these identical-body calls; Pi may expose uncached input and cacheRead separately."
+    },
+    "limits": [
+      "One bare hi observation is a floor for C, not a certified upper bound.",
+      "The Salesko-toolset body came from the pinned native Pi prepared compiler with current catalog schemas and a synthetic prompt environment, not a production Salesko receipt.",
+      "One prepared request and one replay do not prove the byte inequality for every request or establish that the hosted coding endpoint uses the public tokenizer file.",
+      "The bare call reached max_tokens=128; usage was still returned, but finish_reason was not retained."
+    ]
+  },
+  "credentialHandling": "Device-local Pi auth.json read in memory through readPiApiKey; credential was not printed, placed in request body, or written to evidence."
+}
