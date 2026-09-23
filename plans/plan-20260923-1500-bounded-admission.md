@@ -28,13 +28,13 @@ Industry practice does not gate admission on an exact live-provider pre-count, a
 ## Task Breakdown
 
 - [x] Research, Owner approval, dual-track design ruling (research doc §0–§5).
-- [ ] **P0 probe (parallel with SDK-1; device-local, read-only for repos; ≤3 ordinary z.ai coding inferences, no tokenizer calls):**
+- [x] **P0 probe (parallel with SDK-1; device-local, read-only for repos; ≤3 ordinary z.ai coding inferences, no tokenizer calls):**
   - a bare "hi" request, recording prompt_tokens as the floor for C;
   - one Salesko-toolset prepared-shape request, checking that streaming `usage` is returned and that `prompt_tokens ≤ requestBytes` holds;
   - one repeat of that request, checking whether cached tokens are counted in the reported prompt figure;
   - offline: GLM open tokenizer.json is ByteLevel BPE with a null normalizer.
   Evidence goes to `tasks/runs/20260923-bounded-admission-probe.json`. The key is never printed.
-- [ ] **SDK-1 readiness + record/wire cut:**
+- [x] **SDK-1 readiness + record/wire cut:**
   - `inputPreparationReadinessReasons` no longer requires a counter: delete `counter_missing`, and remove `kind:'bound'` from the counter result;
   - rename record states `counted`→`prepared` and `not_counted`→`not_prepared`;
   - a present counter is still judged by `counter_authority_not_production` / `counter_coverage_incomplete`;
@@ -42,13 +42,14 @@ Industry practice does not gate admission on an exact live-provider pre-count, a
   - make the counter adapter optional in DaemonConfig (without a counter, the lane still works);
   - bump the record/wire version with no dual-read;
   - update the protocol zod schemas and receipt summary, the public exports, and the api-surface snapshot.
-- [ ] **SDK-2 Pi usage + prepared observation:**
+- [x] **SDK-2 Pi usage + prepared observation:**
   - the Pi adapter projects `message_end` usage into the existing `AgentEvent.usage`, with prompt = `input + cacheRead + cacheWrite`;
   - the prepared-execution terminal carries a new observation `{requestDigest, initialPromptTokens, maxPromptTokens}`, taken from the first call and the maximum across all calls;
   - `TerminalInferenceUsage` stays telemetry.
-- [ ] **SDK-3 `context_overflow`:** a numeric-only typed classification. Any call's prompt ≥ D's `model.contextWindow` → `context_overflow`. Missing usage on a prepared execution → `usage_unavailable`. Both fail closed. Do not reuse upstream `isContextOverflow`.
-- [ ] **SDK-4 docs:** update `docs/spec.md` §447–511 (readiness model) and §540–559 (usage), and mark the superseded tokenizer-gate wording.
-- [ ] Gatekeeper on SDK-1..4, then release per the release flow (Owner approves publish).
+- [x] **SDK-3 `context_overflow`:** a numeric-only typed classification. Any call's prompt ≥ D's `model.contextWindow` → `context_overflow`. Missing usage on a prepared execution → `usage_unavailable`. Both fail closed. Do not reuse upstream `isContextOverflow`.
+- [x] **SDK-4 docs:** update `docs/spec.md` §447–511 (readiness model) and §540–559 (usage), and mark the superseded tokenizer-gate wording.
+- [x] Gatekeeper on SDK-1..4: PASS at round 3 (HEAD 7b6b798e; rounds 1–2 fixed capability-token skew, fail-open usage/text gaps, lane-scoped stale record log, the v5-cut operator precondition, token-less usage block).
+- [ ] Release 0.20.0 per the release flow (Owner approves push, PR, and publish). Release notes carry the v5-cut drain precondition, whole-mailbox stall blast radius, token rename, lane-off on stale record log, wire renames, optional Pi terminal usage.
 - [ ] **C02 amendment draft (Salesko)** after P0 supplies C: the counting method, the bound premise bound to `toolManifestDigest`, ready vs Host fit separation, post-hoc falsification, and closing G2. The Owner freezes it by hash.
 - [ ] **Host WP (Salesko, after the SDK release and the amendment freeze):**
   - `pi-accounting-ruling` becomes the single record (window, C, output bound, toolManifestDigest), projected to the SDK ref and the budget;
