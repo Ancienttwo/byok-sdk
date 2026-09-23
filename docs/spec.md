@@ -306,7 +306,7 @@ admission/lifecycle cut: protocol-v1 bytes and runtime ids are unchanged.
 ### Prepared launch
 
 A prepared Execution does not carry an instruction. It carries a reference to
-an already-counted preparation record plus the retained artifact that record
+an already-prepared preparation record plus the retained artifact that record
 retained, and the runtime's job is to send those exact bytes — not to compile a
 request of its own. `RuntimeOperationStartInput` is therefore discriminated:
 the ordinary variant carries a resolved `instruction`, the prepared variant
@@ -447,13 +447,38 @@ found, pending explicit operator disposition.
 `ready` answers exactly one question: CAN THIS PREPARATION BE CONSUMED. It is
 not Host budget admission. The device performs no budget arithmetic anywhere on
 this surface, so a ready receipt states that the evidence holds — never that
-the spend is allowed.
+the spend fits a window.
 
-The evidence has three parts, and each is read off a recorded fact rather than
+**Bounded admission (2026-09-23).** Admission is split between two
+authorities. The SDK proves WHICH exact D it prepared and how large it is; the
+Host decides whether it fits. The size evidence is the artifact's existing
+`requestBytes` — the exact UTF-8 byte length of the frozen D, measured by the
+daemon's own compiler — and there is no second byte-bound field, no token
+estimate (no `chars/4`, no padding) and no Host-injected bound adapter. The
+numeric budget stays entirely Host-side: after reading a ready receipt the Host
+checks `requestBytes + C + max_tokens <= window` once, where `C` is the
+template constant its accounting ruling binds to the receipt's
+`toolManifestDigest`, and records an over-budget preparation as its own
+`preparation_context_too_large`. The SDK's `accountingPolicyRef` stays an
+applicability check and carries no number.
+
+> **Superseded — the live-tokenizer readiness gate.** Earlier revisions of this
+> section required provider counter evidence on every ready record
+> (`counter_missing` otherwise), so no record could reach ready without a live
+> tokenizer call against the provider. That requirement is withdrawn: most BYOK
+> providers expose no tokenizer, and an exact pre-count is not what admission
+> depends on. `counter_missing` and the counter result's `kind` (whose `bound`
+> member no adapter could honestly state) are removed, the successful terminal
+> state `counted` is now `prepared`, and the not-yet-terminal readiness reason
+> `not_counted` is now `not_prepared`. The cut is one-shot — wire version 5,
+> record schema version 6 — and a record written before it is refused on replay
+> as an unsupported record version, never read forward.
+
+The evidence has four parts, and each is read off a recorded fact rather than
 asserted.
 
 **The native projection contract.** The artifact carries the compiler's own
-`projection` (`{version: 2, kind, digest}`) and its classified `residual` list
+`projection` (`{version: 3, kind, digest}`) and its classified `residual` list
 (`{key, valueClass}` per top-level key of D outside P(D)), copied verbatim off
 the envelope. `kind: content_complete` means every context-derived byte of D is
 byte-identically inside P(D) and every remaining key was classified; anything
@@ -480,35 +505,49 @@ this preparation's own runtime identity and endpoint/model
 carries `accounting_policy_missing`; there is no default, because "nobody
 ruled" and "everything is ruled" are different facts.
 
-**The count.** Counter evidence is required on a counted record
-(`counter_missing` otherwise) and carries `providerEvidence {projectionDigest,
-endpoint, modelId, asserted {httpStatus, usageFields, responseDigest}}`. The
-service compares `projectionDigest` against the artifact's own projection
-digest and the endpoint/model against the counted target; a missing or
-mismatched one refuses the count as `counter_unavailable` rather than
-persisting a number bound to a projection nobody can name. `endpoint` is the
-INFERENCE target identity (`selection.model.baseUrl`) the count is bound to,
-never the URL of the counting/tokenizer HTTP call the adapter placed; nothing
-here proves the counting route and the inference route are equivalent, and
-establishing that equivalence is external evidence work. `method` and
-`methodVersion` are co-recorded siblings on the counter evidence, deliberately
-NOT bound into `providerEvidence` — the digest/target comparison covers
-`projectionDigest` and `endpoint`/`modelId` only, and binding the counting-method
-identity in would be a wire-shape change requiring an Owner ruling. What the provider
-asserted is stored and never second-guessed — re-deriving a usage number
-locally is exactly the shadow accounting this surface exists to avoid. The
-receipt carries no output or whole-request field: the Host holds its own
-request, and `binding.requestDigest` ties the two. A `test_fixture` authority
-keeps `counter_authority_not_production` on the receipt forever, so an offline
-suite can never look like production accounting evidence.
+**Text-only D.** The first release admits text-only D, because a non-text part
+is priced by the provider in a way no byte length of D describes. When the
+artifact is retained, the service reads D's own bytes once: every
+`messages[]` entry whose `content` is an array must hold only parts whose
+`type` is exactly `text`, and anything the rule cannot read counts as not text.
+The answer is durable on the record (`requestContentTextOnly`), and a record
+that holds an artifact without a true answer carries
+`request_content_not_text`.
+
+**The optional count.** A counter adapter is optional in
+`DaemonConfig.inputPreparation`. Without one, a preparation compiles, retains
+its artifact and settles as `prepared` in one serialized store closure: no
+counter call, no `counting` state, and no `maxCounterCallsPerScope`
+reservation consumed. With one, the counter is called exactly once per
+preparation and is a tightener, never the size evidence. Its evidence carries
+`providerEvidence {projectionDigest, endpoint, modelId, asserted {httpStatus,
+usageFields, responseDigest}}`. The service compares `projectionDigest` against
+the artifact's own projection digest and the endpoint/model against the counted
+target; a missing or mismatched one refuses the count as `counter_unavailable`
+rather than persisting a number bound to a projection nobody can name.
+`endpoint` is the INFERENCE target identity (`selection.model.baseUrl`) the
+count is bound to, never the URL of the counting/tokenizer HTTP call the
+adapter placed; nothing here proves the counting route and the inference route
+are equivalent, and establishing that equivalence is external evidence work.
+`method` and `methodVersion` are co-recorded siblings on the counter evidence,
+deliberately NOT bound into `providerEvidence` — the digest/target comparison
+covers `projectionDigest` and `endpoint`/`modelId` only, and binding the
+counting-method identity in would be a wire-shape change requiring an Owner
+ruling. What the provider asserted is stored and never second-guessed —
+re-deriving a usage number locally is exactly the shadow accounting this
+surface exists to avoid. A counter that IS present is still judged: a
+`test_fixture` authority keeps `counter_authority_not_production` on the
+receipt forever, so an offline suite can never look like production accounting
+evidence, and an uncovered count keeps `counter_coverage_incomplete`. An absent
+counter produces neither reason.
 
 On a default install, meanwhile, no record can reach READY at all: with no
 `toolImplementationAuthority` configured every implementation identity resolves
 to `executor_identity_unproven`, and an SDK with no Host accounting ruling adds
 `accounting_policy_missing`. A real prepared offer against such a record
-declines `preparation_not_ready` — and will keep doing so until a production
-counter, a Host ruling and a Salesko resolver land. That is the SDK's shipped
-default, not a misconfiguration.
+declines `preparation_not_ready` — and will keep doing so until a Host ruling
+and a Salesko resolver land. That is the SDK's shipped default, not a
+misconfiguration. A production counter is no longer on that list.
 
 ### Post-admission runtime failure authority
 
@@ -551,12 +590,45 @@ provider/model values are not telemetry and are never echoed as a substitute.
 `localAgentRelease.version`; no runtime/package/lockfile/path/network fallback
 exists. A direct legacy/internal runner without that composed identity omits
 the optional usage block. Token metrics are direct Codex/Claude terminal
-observations when present; Pi currently exposes no native usage observation and
-therefore omits the block rather than fabricating one from device facts.
+observations when present. Pi now reports one native usage observation per
+provider call — each assistant `message_end`, projected onto the `usage` event
+with `inputTokens = input + cacheRead + cacheWrite`, because Pi's own `input`
+already excludes both cache figures — so Pi's block carries the last call's
+figures, as telemetry like the others. A Pi run that reported no usage still
+omits the block rather than fabricating one from device facts.
 The protocol enforces safe non-negative bounded numbers and a canonical UTC
 device timestamp. Cloud records first-terminal-wins as usual and projects the
 same typed object from the winning receipt without parsing raw receipt bytes
 at callers or coupling it to `TenantStorageUsage`.
+
+### Prepared observation and typed prepared failures
+
+A prepared Execution's `task.complete` and `task.fail` carry one more optional,
+strict block, `preparedObservation {requestDigest, initialPromptTokens,
+maxPromptTokens}`, present exactly when the Execution observed a provider call.
+`requestDigest` is the frozen artifact's own request digest.
+`initialPromptTokens` is the prompt of the FIRST provider call — the only call
+whose request is D; every later call is an ordinary tool continuation.
+`maxPromptTokens` is the largest prompt of any call. Prompt tokens are the
+provider's whole prompt, cache reads and writes included. It is deliberately
+NOT `TerminalInferenceUsage`: that block stays telemetry, while this one is the
+evidence the Host checks its byte-bound ruling against — the Host, not the
+device, judges `initialPromptTokens > requestBytes + C`, and the cloud
+`TerminalResult` copies the block verbatim for it.
+
+Two typed failures close the prepared lane, both non-retryable and neither
+accepted as success. They are classified from numbers only: no provider error
+text is read, and the upstream runtime's heuristic overflow detector is not
+consulted.
+
+- `context_overflow` — any provider call reported prompt tokens at or above the
+  `contextWindow` of the model D was compiled for. The Execution is torn down.
+- `usage_unavailable` — the Execution settled with no provider usage observed,
+  or a call reported no positive, representable prompt count (Pi leaves a
+  call's usage at zeros when the provider streams none, and D is never empty).
+
+Both are stable `task.fail.reason` prefixes, matched with `startsWith`; the
+text after the prefix is detail.
 
 ### Quiescent runtime disposal
 
