@@ -24,7 +24,7 @@ Process #195 before #194. Add missing SDK-local evidence; explicitly retain exte
 ## Task Breakdown
 - [x] T1 #195: extend existing recurring Summary conformance across a multi-turn boundary with exact frozen input read-back and recovered internal result consumption.
 - [x] T2 #194: audit existing accounting/activation proof and add a targeted missing SDK regression if demonstrated; record external proof gaps.
-- [ ] T3: run required checks, review final diff, commit/push and create PR with exact limits.
+- [x] T3: run required checks, review final diff, commit/push and create PR with exact limits.
 
 ## Verification Plan
 Run build, typecheck, test, API surface, version authority and strict workflow checks. Run focused recurring/accounting tests first; no paid calls. Source evidence does not replace installed/native/Host gates.
@@ -43,3 +43,7 @@ Run build, typecheck, test, API surface, version authority and strict workflow c
 - **Evaluator rubric**: actual assertions, exact subject and explicit synthetic/external boundaries.
 - **Stop condition**: bounded SDK scope passes verification and is submitted as PR; externally blocked issue criteria remain open.
 - **Rollback surface**: revert branch commits.
+
+## Delivery
+
+Draft PR: https://github.com/Ancienttwo/byok-sdk/pull/228. The SDK slice is verified and submitted; #195/#194 remain open for the Host/provider acceptance recorded in the evidence map.
