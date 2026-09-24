@@ -74,7 +74,11 @@ services:
     # (the entrypoint adds `-dir=/data`). The flags are why this is a compose
     # service rather than a GitHub `services:` block, which cannot override
     # CMD: no telemetry from a CI runner, and no admin UI nothing here uses.
-    command: mini -master.telemetry=false -admin.ui=false
+    # `-volume.max=500` decouples capacity from host memory: `mini` otherwise
+    # derives the volume ceiling from the free space on the tmpfs `/data`, every
+    # bucket the suites create takes a 64 MB volume (about 18 per run), and a
+    # small laptop Docker VM then runs out after one pass with a 500.
+    command: mini -master.telemetry=false -admin.ui=false -volume.max=500
     # The one admin identity, read from these variables at startup. The
     # literals are historical (they predate the substrate swap) and are
     # repeated verbatim in the suites' support file and the recurring smoke.

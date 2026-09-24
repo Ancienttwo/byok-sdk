@@ -153,6 +153,7 @@ describe('the compose substrate', () => {
     // A floating tag would let a re-push change what adjudicates a signature
     // without a diff here; the digest turns that into a pull failure.
     expect(compose).toMatch(/^ {4}image: chrislusf\/seaweedfs:\d+\.\d+@sha256:[0-9a-f]{64}$/m);
+    expect(compose).toMatch(/^ {4}command: mini .*-volume\.max=\d+/m);
   });
 
   it('healthchecks both, so --wait means something', () => {
