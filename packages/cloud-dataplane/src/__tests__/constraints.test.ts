@@ -83,9 +83,9 @@ describe('the CI dataplane job', () => {
     expect(workflow).toContain('BYOK_REQUIRE_DATAPLANE');
     expect(workflow).toContain('BYOK_TEST_POSTGRES_URL');
     // Both halves, because from S4A-c the conformance scope includes a blob
-    // port whose Postgres composition signs against MinIO. A job carrying only
-    // the database URL would hard-fail at import, which is the correct
-    // behavior and a terrible thing to discover by pushing.
+    // port whose Postgres composition signs against the S3 substrate. A job
+    // carrying only the database URL would hard-fail at import, which is the
+    // correct behavior and a terrible thing to discover by pushing.
     expect(workflow).toContain('BYOK_TEST_S3_ENDPOINT');
   });
 
@@ -145,7 +145,15 @@ describe('the compose substrate', () => {
 
   it('defines both dataplane services', () => {
     expect(compose).toMatch(/^ {2}postgres:$/m);
-    expect(compose).toMatch(/^ {2}minio:$/m);
+    expect(compose).toMatch(/^ {2}seaweedfs:$/m);
+  });
+
+  it('pins the S3 substrate by release tag and image digest', () => {
+    // The S3 substrate is the independent verifier the object suite leans on.
+    // A floating tag would let a re-push change what adjudicates a signature
+    // without a diff here; the digest turns that into a pull failure.
+    expect(compose).toMatch(/^ {4}image: chrislusf\/seaweedfs:\d+\.\d+@sha256:[0-9a-f]{64}$/m);
+    expect(compose).toMatch(/^ {4}command: mini .*-volume\.max=\d+/m);
   });
 
   it('healthchecks both, so --wait means something', () => {

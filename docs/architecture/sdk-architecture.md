@@ -194,7 +194,7 @@ find "$SDK_SRC" -type f \( -name '*.test.ts' -o -name '*.spec.ts' -o -path '*/__
 | `templates/packaging/bun` | `bun build --compile` copy-out recipe | 已实现；含 build/smoke |
 | `templates/packaging/sea` | Node SEA + esbuild/postject recipe | 已实现；含跨平台边界说明与 smoke |
 | `templates/service` | launchd/systemd/WinSW reference recipes | 已实现；真正执行逻辑在 `packages/client/src/lifecycle/*` |
-| `deploy/` | env/runbook/scripts/sql production composition surface | 已实现 Postgres migrations、R2/MinIO dataplane env、迁移与 hosted/self-hosted/release-responsibility runbook；host deployment 仍由集成方负责 |
+| `deploy/` | env/runbook/scripts/sql production composition surface | 已实现 Postgres migrations、R2 dataplane env（测试基底为 SeaweedFS）、迁移与 hosted/self-hosted/release-responsibility runbook；host deployment 仍由集成方负责 |
 | `.github/workflows/ci.yml` | Node 20/22 build/typecheck/test + 专项 smoke/audit | 已实现；S7-c 追加 Node 20/22 × Linux/macOS/Windows tarball pack/install matrix |
 
 ## 2. `@byok-sdk/protocol`：唯一 wire 契约

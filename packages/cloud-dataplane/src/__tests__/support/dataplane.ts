@@ -68,14 +68,14 @@ export const POSTGRES_URL: string | undefined = configured(POSTGRES_URL_ENV);
  * The S3-compatible endpoint, `undefined` when unconfigured.
  *
  * One gate for both services rather than two, because there is one substrate:
- * the compose file starts Postgres and MinIO together, and the object suites
+ * the compose file starts Postgres and SeaweedFS together, and the object suites
  * need a manifest row and an object in the same breath. Two gates would let a
  * half-configured environment report a pass on the half it could reach.
  */
 export const S3_ENDPOINT: string | undefined = configured(S3_ENDPOINT_ENV);
 
 /**
- * MinIO's root credentials, verbatim from `docker-compose.test.yml`.
+ * SeaweedFS's admin credentials, verbatim from `docker-compose.test.yml`.
  *
  * Fixed, weak, and public on purpose — the same reason they are hardcoded in
  * the compose file. This substrate is throwaway and must never be reachable
@@ -87,7 +87,7 @@ export const OBJECT_STORE_ACCESS_KEY_ID = 'byokminio';
 export const OBJECT_STORE_SECRET_ACCESS_KEY = 'byokminio';
 
 /**
- * MinIO answers to `us-east-1`; R2's own region is `auto` (which R2 also
+ * SeaweedFS answers to `us-east-1`; R2's own region is `auto` (which R2 also
  * aliases `us-east-1` to). The adapter takes it as a required option precisely
  * so this difference is configuration rather than a guess.
  */
@@ -204,7 +204,7 @@ export async function createDataplaneScope(poolSize = 8): Promise<DataplaneScope
  * A fresh bucket plus the adapter config pointed at it.
  *
  * Per-scope rather than shared, for the same reason the Postgres schema is:
- * MinIO's `/data` is a tmpfs the compose stack wipes, but WITHIN one run a
+ * SeaweedFS's `/data` is a tmpfs the compose stack wipes, but WITHIN one run a
  * leftover object at a key a later test declares would make a `pending`
  * manifest look uploaded. Object keys embed the tenant, and tenants repeat
  * across tests, so the bucket is where the isolation has to live.
@@ -222,7 +222,7 @@ export interface ObjectStorageScope {
     readonly secretAccessKey: string;
     readonly region: string;
     /**
-     * Wall time. MinIO adjudicates a signature's freshness against its OWN
+     * Wall time. SeaweedFS adjudicates a signature's freshness against its OWN
      * clock, so the composition's frozen logical clock — 2026-01-01, months
      * away from whenever this actually runs — would make every signed request
      * a skew rejection. A suite that needs an expired grant backdates a clock

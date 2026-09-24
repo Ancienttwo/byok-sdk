@@ -142,8 +142,8 @@ throws a `ByokCoreError` with code `object_key_prefix_invalid` at construction.
 what an unset environment variable looks like, and accepting it would silently
 decide where a deployment's objects live.
 
-`x-amz-checksum-sha256` is deliberately not signed. MinIO honors it, but R2's S3
-compatibility table implements SHA-256 as `COMPOSITE` only — not the
+`x-amz-checksum-sha256` is deliberately not signed. The S4A-c probe found the
+then-substrate MinIO honoring it, but R2's S3 compatibility table implements SHA-256 as `COMPOSITE` only — not the
 `FULL_OBJECT` type a single-shot PutObject uses — so signing it would mint URLs
 that pass against the test substrate and fail in production. `HEAD` only
 observes existence, size and content type; it never verifies SHA-256.
@@ -309,7 +309,7 @@ export BYOK_TEST_S3_ENDPOINT=http://127.0.0.1:9100
 bun run --filter @byok-sdk/cloud-dataplane test
 ```
 
-Both variables, one gate: the compose file starts Postgres and MinIO together,
+Both variables, one gate: the compose file starts Postgres and SeaweedFS together,
 and the blob port writes a manifest row and signs against the object store in
 the same call. Without either, the database-backed suites skip and say so. CI's
 `dataplane` job sets `BYOK_REQUIRE_DATAPLANE=1`, which turns that absence into a
@@ -330,12 +330,14 @@ test rather than a step someone remembers. What runs:
   with `psql -f`; the TypeScript side only runs it and checks it did not raise.
 - The migrate runner's fault suite, and the reservation-admission concurrency
   test that pins `reserve`'s no-oversell property against real contention.
-- The object suite, against the compose MinIO. Seven of its nine assertions are
-  about what a presigned URL binds to, and a binding asserted against our own
-  verifier is self-certifying — so MinIO adjudicates them as an independent
-  SigV4 implementation, and nothing stubs a signature check. The two that are
-  about retry semantics go through a fault injector wrapped around `fetch`,
-  which replaces individual attempts and never answers a request itself.
+- The object suite, against the compose SeaweedFS (pinned by tag and digest; it
+  replaced MinIO when MinIO withdrew its public images). Seven of its nine
+  assertions are about what a presigned URL binds to, and a binding asserted
+  against our own verifier is self-certifying — so SeaweedFS adjudicates them
+  as an independent SigV4 implementation, and nothing stubs a signature check.
+  The two that are about retry semantics go through a fault injector wrapped
+  around `fetch`, which replaces individual attempts and never answers a
+  request itself.
 - The worker suites, always for packaging and opt-in for serving:
   `worker-packaging.test.ts` dry-runs `wrangler deploy` over `worker-smoke/`
   on every run, and `worker-e2e.test.ts` additionally serves that fixture with

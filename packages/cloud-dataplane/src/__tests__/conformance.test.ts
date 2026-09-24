@@ -48,7 +48,7 @@ const postgresFactory: CloudCompositionFactory = {
   async create() {
     const scope = await createDataplaneScope();
     await migrate(scope.pool, DEPLOY_SQL);
-    // A real bucket on the real MinIO, not a stand-in: the blobs dimension
+    // A real bucket on the real SeaweedFS, not a stand-in: the blobs dimension
     // asserts what a grant does, and a grant nobody could redeem would be a
     // pass with nothing behind it.
     const objectStorage = await createObjectStorageScope();
@@ -71,7 +71,7 @@ const postgresFactory: CloudCompositionFactory = {
       // A device redeems a grant by PUTting straight at the object store, and
       // so does this: nothing in the composition is in the byte path, which is
       // the fact the narrowed port exists to express. The signed headers must
-      // be sent verbatim or MinIO refuses the body.
+      // be sent verbatim or SeaweedFS refuses the body.
       landBlobBytes: async ({ grant, declaration, bytes }) => {
         const response = await globalThis.fetch(grant.uploadUrl, {
           method: 'PUT',

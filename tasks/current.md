@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-09-24T01:29:41+0800 -->
+<!-- updated_at: 2026-09-25T01:39:04+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-09-24T01:29:41+0800
-> **Source Branch**: claude/release-0.20.0-closeout
-> **Source Commit**: 0002bd28
+> **Updated At**: 2026-09-25T01:39:04+0800
+> **Source Branch**: claude/release-0.21.0-closeout
+> **Source Commit**: 4db53743
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -37,10 +37,14 @@ This file is an ignored local read model derived from this worktree's artifacts.
 - linked-worktree-278b6ace8f7d: active-worktree owner -> self
 - linked-worktree-01a489cf24d8: plans/plan-20260919-1603-official-pi-migration.md
 - linked-worktree-01a489cf24d8: active-worktree owner -> self
+- linked-worktree-d57c4a8db12b: plans/plan-20260924-1600-p0-prepared-egress.md
+- linked-worktree-d57c4a8db12b: active-worktree owner -> self
 - linked-worktree-bb4375a0963f: plans/plan-20260916-0041-pi-enrollment-prototype.md
 - linked-worktree-bb4375a0963f: active-worktree owner -> self
 - linked-worktree-6cb0f8a17b55: plans/plan-20260923-1555-release-0-20-0.md
 - linked-worktree-6cb0f8a17b55: active-worktree owner -> self
+- linked-worktree-93ed7de1eacb: plans/plan-20260924-1805-release-0-21-0.md
+- linked-worktree-93ed7de1eacb: active-worktree owner -> self
 - linked-worktree-b3964037efe9: plans/plan-20260919-0532-winsw-unlink-retry.md
 - linked-worktree-b3964037efe9: active-worktree owner -> self
 - linked-worktree-832d345da791: plans/plan-20260917-1950-wp1-smoke-programfiles.md
@@ -69,16 +73,16 @@ This file is an ignored local read model derived from this worktree's artifacts.
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260923-1555-release-0-20-0.md
- D tasks/contracts/20260923-1555-release-0-20-0.contract.md
- D tasks/notes/20260923-1555-release-0-20-0.notes.md
- D tasks/reviews/20260923-1555-release-0-20-0.review.md
+ D plans/plan-20260924-1805-release-0-21-0.md
+ D tasks/contracts/20260924-1805-release-0-21-0.contract.md
+ D tasks/notes/20260924-1805-release-0-21-0.notes.md
+ D tasks/reviews/20260924-1805-release-0-21-0.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260923-1555-release-0-20-0.md
-?? tasks/archive/contract-20260924-0129-release-0-20-0.md
-?? tasks/archive/notes-20260924-0129-release-0-20-0.md
-?? tasks/archive/review-20260924-0129-release-0-20-0.md
-?? tasks/archive/todo-20260924-0129-release-0-20-0.md
+?? plans/archive/plan-20260924-1805-release-0-21-0.md
+?? tasks/archive/contract-20260925-0139-release-0-21-0.md
+?? tasks/archive/notes-20260925-0139-release-0-21-0.md
+?? tasks/archive/review-20260925-0139-release-0-21-0.md
+?? tasks/archive/todo-20260925-0139-release-0-21-0.md
 ```
 
 ## Source Artifacts

@@ -633,9 +633,9 @@ jobs:
   # turns that test red rather than silently dropping dataplane coverage.
   #
   # A compose file rather than GitHub `services:` containers because a service
-  # container cannot override CMD, and MinIO (needed from S4A-c) does not start
-  # without `server`. One file therefore defines the substrate for CI and for a
-  # laptop, which is the point.
+  # container cannot override CMD, and the S3 substrate (needed from S4A-c)
+  # runs with explicit `mini` flags. One file therefore defines the substrate
+  # for CI and for a laptop, which is the point.
   #
   # Deliberately independent of build-test (no `needs:`): its own install +
   # build, so a docker flake here cannot mask unit coverage there.
@@ -647,7 +647,7 @@ jobs:
       BYOK_TEST_POSTGRES_URL: postgres://byok:byok@127.0.0.1:5433/byok_test
       # Both halves of the substrate, one gate: from S4A-c the blob port is
       # part of the conformance scope, and its Postgres composition writes a
-      # manifest row and signs against MinIO in the same call. A missing
+      # manifest row and signs against SeaweedFS in the same call. A missing
       # endpoint is a hard failure here for exactly the same reason a missing
       # database URL is.
       BYOK_TEST_S3_ENDPOINT: http://127.0.0.1:9100

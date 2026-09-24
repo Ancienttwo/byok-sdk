@@ -1,4 +1,4 @@
-/** U5: real Postgres + MinIO evidence for the package-owned erasure authority. */
+/** U5: real Postgres + SeaweedFS evidence for the package-owned erasure authority. */
 import { fileURLToPath } from 'node:url';
 import {
   DEVICE_ASSERTION_SCHEMA_ID,
@@ -67,7 +67,7 @@ class DeleteThenFailR2 implements R2ObjectMaintenance {
     const result = await this.inner.deleteObject(tenant, hash);
     if (this.#failAfterDelete) {
       this.#failAfterDelete = false;
-      throw new Error('injected response loss after MinIO accepted DELETE');
+      throw new Error('injected response loss after SeaweedFS accepted DELETE');
     }
     return result;
   }
@@ -332,7 +332,7 @@ async function expectAllProductRows(pool: Pool, tenant: TenantId, expected: numb
   }
 }
 
-describe.skipIf(SKIP_DATAPLANE)('PostgresTenantErasure [postgres + minio]', () => {
+describe.skipIf(SKIP_DATAPLANE)('PostgresTenantErasure [postgres + seaweedfs]', () => {
   it('completes and exactly replays an empty tenant receipt', async () => {
     const database = await createDataplaneScope();
     const storage = await createObjectStorageScope();
@@ -397,7 +397,7 @@ describe.skipIf(SKIP_DATAPLANE)('PostgresTenantErasure [postgres + minio]', () =
     }
   }, 15_000);
 
-  it('lists the exact canonical keyPrefix against MinIO', async () => {
+  it('lists the exact canonical keyPrefix against SeaweedFS', async () => {
     const storage = await createObjectStorageScope();
     const keyPrefix = 'u5/regression';
     try {
@@ -419,7 +419,7 @@ describe.skipIf(SKIP_DATAPLANE)('PostgresTenantErasure [postgres + minio]', () =
         },
       ]);
     } finally {
-      // Buckets are disposable MinIO test substrate; their tmpfs is reclaimed by compose down.
+      // Buckets are disposable SeaweedFS test substrate; their tmpfs is reclaimed by compose down.
     }
   });
 

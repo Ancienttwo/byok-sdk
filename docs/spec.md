@@ -79,11 +79,10 @@ authorization and registry readback. The current independent keys candidate is
 dispatch release, `0.21.0`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-The last train the registry has confirmed is `0.20.0` with keys `0.6.1`,
-published on 2026-09-23 from the `v0.20.0` tag (`48605554`); both read back as
-`latest` on 2026-09-23. The previous train, `0.19.0` / keys `0.6.0`, was
-published on 2026-09-22 from the `v0.19.0` tag (`9408ed7b`). `0.21.0` / keys
-`0.6.2` are prepared and unpublished. The registry, not this document, is the
+The last train the registry has confirmed is `0.21.0` with keys `0.6.2`,
+published on 2026-09-24/25 from the `v0.21.0` tag (`8b7a2121`); both read back as
+`latest` on 2026-09-25. The previous train, `0.20.0` / keys `0.6.1`, was
+published on 2026-09-23 from the `v0.20.0` tag (`48605554`). The registry, not this document, is the
 authority on what has shipped — read it back with `npm view @byok-sdk/core version`
 and `npm view @byok-sdk/keys version`.
 

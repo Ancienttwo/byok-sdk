@@ -1,7 +1,7 @@
 /**
  * Disables HTTP keep-alive for this test worker's `fetch`.
  *
- * The dataplane object suites drive a real MinIO over `globalThis.fetch` — the
+ * The dataplane object suites drive a real SeaweedFS over `globalThis.fetch` — the
  * grant redemptions in `object-suite.test.ts`, the conformance composition's
  * `landBlobBytes`, the R2 maintenance calls in `cleanup.test.ts`, and every
  * signed request the R2 stores make through their default `#fetch`. Node's
@@ -9,8 +9,8 @@
  * on a process-wide global dispatcher between requests.
  *
  * Those idle sockets are the CI flake. After the suites pass, an idle keep-alive
- * socket to MinIO sits in the pool until the job's `docker compose down -v` (or
- * MinIO's own idle timeout) resets it. undici raises `'error'` on that socket
+ * socket to SeaweedFS sits in the pool until the job's `docker compose down -v` (or
+ * SeaweedFS's own idle timeout) resets it. undici raises `'error'` on that socket
  * with no in-flight request to attach it to, and it surfaces as a post-pass
  * `socket hang up` — undici's ECONNRESET-on-keep-alive signature, not pg's
  * `Connection terminated unexpectedly`. (The pg pools are already drained by
@@ -18,7 +18,7 @@
  *
  * Installing a dispatcher whose idle keep-alive timeout is effectively zero
  * closes each socket ~immediately after its response, so no idle socket ever
- * survives to be reset. This is process-wide, so it covers EVERY MinIO fetch —
+ * survives to be reset. This is process-wide, so it covers EVERY SeaweedFS fetch —
  * including the conformance path through `createPostgresCloudStores`, which
  * exposes no per-client `fetch` seam — without touching product code.
  *
