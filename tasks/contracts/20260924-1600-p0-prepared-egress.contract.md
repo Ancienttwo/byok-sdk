@@ -71,6 +71,8 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 
 ```yaml
 allowed_paths:
+  - docs/architecture/.projection-manifest.json
+  - docs/architecture/modules/sdk/sdk-root.md
   - packages/protocol/
   - packages/cloud/
   - packages/client/
