@@ -80,8 +80,10 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
   const adapter = new StubRuntimeAdapter('pi');
   const selector = { mode: 'result-document' as const, contract: 'test.internal-summary.v1' };
   const agentRef = { agentId: 'shared-summary-agent', profileRevision: 'profile-v1' };
+  const frozenInstructions = new Map<string, string>();
+  const precedingTurns = outcome === 'document' ? 1 : 0;
   // Synthetic model output, not a production Summary schema/quality assessment.
-  const document = { schemaVersion: 'test.internal-summary.v1', text: 'Canceled request remains historical, not authorized.' };
+  const document = { schemaVersion: 'test.internal-summary.v1', text: 'User constraint: 中文 🐝, no external tools.' };
   const extracts: Array<{ taskId: string; sessionRef: string; terminalProjection?: unknown }> = [];
   const daemon = createDaemonWithAdapters({
     localAgentRelease: { version: '0.0.0-summary-test' }, productName: 'summary test', productId: options.productId,
@@ -104,14 +106,42 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
     const { deviceId } = await daemon.pair(pairing.code);
     await daemon.start();
     await vi.waitFor(() => expect(daemon.status().connected).toBe(true));
+    if (precedingTurns) {
+      const instruction = 'Remember the constraint: 中文 🐝, no external tools.';
+      frozenInstructions.set('preceding-user-turn', instruction);
+      await sdk.recurring.submit({ taskId: 'preceding-user-turn', deviceId, payload: {
+        agentRef, runtime: 'pi', policy: { mode: 'auto' }, instruction,
+        egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' },
+        messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
+      }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'preceding-turn' } });
+      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), { timeout: 10000 });
+      expect(adapter.startCalls[0]?.task.sessionRef).toBeUndefined();
+      expect(adapter.startCalls[0]?.task.instruction).toContain(instruction);
+      adapter.sessions[0]!.emit({ type: 'progress', text: 'Constraint retained.' });
+      adapter.sessions[0]!.emit({ type: 'turn_end' });
+      await vi.waitFor(async () => expect(await sdk.tasks.deviceTerminal('preceding-user-turn')).toMatchObject({
+        envelope: { type: 'task.complete' },
+      }), { timeout: 10000 });
+      await vi.waitFor(() => expect(daemon.status().activeTaskCount).toBe(0));
+      expect(messages).toEqual(['preceding-user-turn']);
+    }
     const taskId = `summary-${outcome}`;
+    const precedingMessage = precedingTurns ? await sdk.tasks.agentMessage('preceding-user-turn', deviceId, agentRef) : undefined;
+    if (precedingTurns) expect(precedingMessage?.payload.body).toBe('Constraint retained.');
+    // The Host supplies these complete bytes; no SDK transcript builder or Summary CAS is simulated.
+    const summaryInstruction = precedingTurns
+      ? JSON.stringify({ instruction: 'Summarize only this frozen historical input.',
+        history: [{ input: frozenInstructions.get('preceding-user-turn'), reply: precedingMessage!.payload.body }] })
+      : 'Summarize only this frozen historical input.';
+    frozenInstructions.set(taskId, summaryInstruction);
     const input = { taskId, deviceId, agentRef, runtime: 'pi' as const, policy: { mode: 'auto' as const },
-      instruction: 'Summarize only this frozen historical input.',
+      instruction: summaryInstruction,
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selector };
     await sdk.dispatchFreshAgentEgress(input);
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), { timeout: 10000 });
-    const session = adapter.sessions[0]!;
-    expect(adapter.startCalls[0]?.task.sessionRef).toBeUndefined();
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(precedingTurns + 1), { timeout: 10000 });
+    const session = adapter.sessions[precedingTurns]!;
+    expect(adapter.startCalls[precedingTurns]?.task.sessionRef).toBeUndefined();
+    expect(adapter.startCalls[precedingTurns]?.task.instruction).toContain(summaryInstruction);
     const offer = await sdk.tasks.offer(taskId);
     expect(offer).toMatchObject({ type: 'task.offer_for_agent_with_egress_fresh', payload: { agentRef, terminalProjection: selector } });
     expect(offer?.payload).not.toHaveProperty('sessionRef');
@@ -124,7 +154,8 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
     }), { timeout: 10000 });
     const terminal = await sdk.tasks.deviceTerminal(taskId);
     expect(extracts).toEqual([{ taskId, sessionRef: session.sessionRef, terminalProjection: selector }]);
-    expect(messages).toEqual([]);
+    expect(messages).toEqual(precedingTurns ? ['preceding-user-turn'] : []);
+    expect(await sdk.tasks.agentMessage(taskId, deviceId, agentRef)).toBeUndefined();
     expect(daemon.status().activeTaskCount).toBeGreaterThan(0);
     if (outcome === 'document') {
       expect(terminal).toMatchObject({ envelope: { payload: { document } } });
@@ -133,8 +164,8 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
       await vi.waitFor(async () => expect(await sdk.tasks.deviceTerminal('competing-before-close')).toMatchObject({
         envelope: { type: 'task.decline', payload: { retryable: true } },
       }), { timeout: 10000 });
-      expect(adapter.sessions).toHaveLength(1);
-      expect(adapter.startCalls).toHaveLength(1);
+      expect(adapter.sessions).toHaveLength(precedingTurns + 1);
+      expect(adapter.startCalls).toHaveLength(precedingTurns + 1);
     } else {
       expect(terminal).toMatchObject({ envelope: { payload: { retryable: false } } });
       expect(terminal?.envelope.payload).not.toHaveProperty('document');
@@ -142,22 +173,30 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
     releaseClose(); releaseClose = undefined;
     await vi.waitFor(() => expect(daemon.status().activeTaskCount).toBe(0));
     if (outcome === 'document') {
+      if (terminal?.envelope.type !== 'task.complete') throw new Error('Missing Summary terminal');
+      const recoveredDocument = terminal.envelope.payload.document;
+      expect(recoveredDocument).toEqual(document);
+      const instruction = JSON.stringify({ summary: recoveredDocument, recentHistory: [], input: 'Current user request' });
+      frozenInstructions.set('dependent-user-turn', instruction);
       // New explicit user execution after Summary, not a retry of the decline.
       await sdk.recurring.submit({ taskId: 'dependent-user-turn', deviceId, payload: {
-        agentRef, runtime: 'pi', policy: { mode: 'auto' }, instruction: `${document.text}\nCurrent user request`,
+        agentRef, runtime: 'pi', policy: { mode: 'auto' }, instruction,
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' },
         messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
       }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'user-turn' } });
-      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2), { timeout: 10000 });
-      expect(adapter.startCalls[1]?.task.sessionRef).toBeUndefined();
-      expect(adapter.sessions[1]!.sessionRef).not.toBe(session.sessionRef);
-      adapter.sessions[1]!.emit({ type: 'progress', text: 'User answer' });
-      adapter.sessions[1]!.emit({ type: 'turn_end' });
+      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(precedingTurns + 2), { timeout: 10000 });
+      const dependentSession = adapter.sessions[precedingTurns + 1]!;
+      expect(adapter.startCalls[precedingTurns + 1]?.task.sessionRef).toBeUndefined();
+      expect(adapter.startCalls[precedingTurns + 1]?.task.instruction).toContain(instruction);
+      expect(new Set(adapter.sessions.map(item => item.sessionRef)).size).toBe(3);
+      expect(new Set(adapter.startCalls.map(item => item.ctx.workspaceDir)).size).toBe(1);
+      dependentSession.emit({ type: 'progress', text: 'User answer' });
+      dependentSession.emit({ type: 'turn_end' });
       await vi.waitFor(async () => expect(await sdk.tasks.deviceTerminal('dependent-user-turn')).toMatchObject({
         envelope: { type: 'task.complete' },
       }), { timeout: 10000 });
       await vi.waitFor(() => expect(daemon.status().activeTaskCount).toBe(0));
-      expect(messages).toEqual(['dependent-user-turn']);
+      expect(messages).toEqual(['preceding-user-turn', 'dependent-user-turn']);
       expect(extracts).toHaveLength(1);
     }
     await daemon.stop(); daemonStopped = true;
@@ -166,8 +205,19 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
     sdk = createByokServer(options);
     expect(await sdk.tasks.deviceTerminal(taskId)).toEqual(terminal);
     expect(await sdk.tasks.offer(taskId)).toEqual(offer);
+    for (const [id, instruction] of frozenInstructions) {
+      const recoveredOffer = await sdk.tasks.offer(id);
+      if (!recoveredOffer || !('instruction' in recoveredOffer.payload)
+        || typeof recoveredOffer.payload.instruction !== 'string') throw new Error(`Missing frozen instruction: ${id}`);
+      expect(Buffer.from(recoveredOffer.payload.instruction)).toEqual(Buffer.from(instruction));
+    }
+    expect(await sdk.tasks.agentMessage(taskId, deviceId, agentRef)).toBeUndefined();
+    if (precedingTurns) {
+      expect(await sdk.tasks.agentMessage('preceding-user-turn', deviceId, agentRef)).toEqual(precedingMessage);
+      expect((await sdk.tasks.agentMessage('dependent-user-turn', deviceId, agentRef))?.payload.body).toBe('User answer');
+    }
     expect(await sdk.tasks.deviceTerminal('nonexistent-summary')).toBeUndefined();
-    expect(adapter.sessions).toHaveLength(outcome === 'document' ? 2 : 1);
+    expect(adapter.sessions).toHaveLength(outcome === 'document' ? 3 : 1);
   } finally {
     releaseClose?.();
     if (!daemonStopped) await daemon.stop();
