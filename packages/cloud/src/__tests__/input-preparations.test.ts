@@ -153,7 +153,7 @@ describe('remote input preparation', () => {
 
   it('refuses a device that declares only the retired unversioned token — version skew never reaches the mailbox', async () => {
     // A 0.19 device declares `agent-input-preparation`; this cloud speaks
-    // `agent-input-preparation-v5`. Relaying would earn a strict-schema 422 on
+    // `agent-input-preparation-v7`. Relaying would earn a strict-schema 422 on
     // the completion PUT and a permanently frozen redelivery cursor, so the
     // refusal lands at enqueue, typed, with nothing durable behind it.
     const harness = createHarness();
@@ -161,6 +161,26 @@ describe('remote input preparation', () => {
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
       capabilities: ['agent-home-contract', 'agent-input-preparation'],
+    });
+
+    await expect(
+      harness.cloud.enqueueInputPreparation(TENANT_A, device.deviceId, desired()),
+    ).rejects.toMatchObject({ code: 'agent_capability_missing' });
+    await expect(
+      harness.stores.receipts.get(TENANT_A, inputPreparationRequestKey(device.deviceId, AGENT_A, REQUEST_A)),
+    ).resolves.toBeUndefined();
+    await expect(
+      harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 }),
+    ).resolves.toMatchObject({ messages: [] });
+  });
+
+  it('refuses a device that declares only the retired v6 token — version skew never reaches the mailbox', async () => {
+    // A 0.21 device speaks v6; v7 admission must refuse before allocating state.
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await harness.stores.devices.recordCapabilities(TENANT_A, {
+      deviceId: device.deviceId,
+      capabilities: ['agent-home-contract', 'agent-input-preparation-v6'],
     });
 
     await expect(

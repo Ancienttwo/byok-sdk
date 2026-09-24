@@ -358,8 +358,6 @@ export interface InputPreparationAccountingPolicyRefV1 {
 // Authorized input snapshot
 // ---------------------------------------------------------------------------
 
-/** One authorized context file, exactly as the caller resolved it. Never read from disk here. */
-
 /** Complete Host-authored prompt, carried verbatim. Prepared runs have no Pi default prompt. */
 export interface InputPreparationPromptSnapshotV1 {
   readonly systemPrompt: string;

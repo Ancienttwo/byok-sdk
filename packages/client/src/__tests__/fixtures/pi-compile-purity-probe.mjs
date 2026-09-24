@@ -696,7 +696,7 @@ function __ctrlRenderSystemMessage(message) {`,
  * `pi-input-preparation.test.ts`'s own fixture
  * (`fixtures/prepared-compile-snapshot.ts`), restated as the exact
  * `CompilePreparedInputRequest` `compilePreparedPiInput` takes: the Host-owned
- * whole system message as `customPrompt`, empty renderer inputs, the
+ * whole system message as `systemPrompt`, no renderer inputs, the
  * host-canonical prefix (A2' sentinel provenance), and the same
  * `constrainedSampling` on both tools.
  *
