@@ -327,10 +327,11 @@ export const RequiredToolsetsSchema = z
 /**
  * Additive v1 offer variant for tasks whose semantics require local MCP
  * tools. This is a distinct message type rather than an optional field on
- * `task.offer`: an older v1 daemon skips an unknown message type, whereas it
- * would legally strip an unknown optional control field and run the task
- * without its required tools. The whole payload is strict because every
- * field here affects execution authority.
+ * `task.offer`, so an older daemon can never strip an unknown optional control
+ * field and run the task without its required tools. An unknown type is not
+ * silently skipped either: on long-poll it freezes the cursor, so the enqueue
+ * capability gate is the real compatibility boundary. The whole payload is
+ * strict because every field here affects execution authority.
  */
 export const TaskOfferWithToolsetsPayloadSchema = TaskOfferPayloadSchema.extend({
   requiredToolsets: RequiredToolsetsSchema,
@@ -654,11 +655,12 @@ const InputPreparationBlobContextSchema = z
  * Server -> daemon: one task-free, exact-device remote input preparation.
  *
  * Distinct message type rather than an optional field on an existing one, for
- * the same N/N-1 reason `task.offer_with_toolsets` is: a daemon that predates
- * this contract SKIPS an unknown type outright (`parseMessage` ->
- * `UnknownMessageTypeError`), whereas it would legally STRIP an unknown
- * optional field and then answer as though a preparation it never performed
- * had somehow been handled.
+ * the same N/N-1 reason `task.offer_with_toolsets` is: an optional field could be
+ * legally STRIPPED by a daemon that predates this contract, which would then
+ * answer as though a preparation it never performed had somehow been handled.
+ * An unknown type (`parseMessage` -> `UnknownMessageTypeError`) is not skipped
+ * cleanly either: on long-poll it freezes the cursor, so the enqueue capability
+ * gate is the compatibility boundary.
  *
  * What is deliberately NOT here (§17 B): `tools`, `toolExecutors`, runtime or
  * compiler identity, `tenantId` and `deviceId`. The first three are local
