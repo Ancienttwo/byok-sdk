@@ -48,7 +48,7 @@ Run build, typecheck, test, API surface, version authority and strict workflow c
 
 - [x] T4: verify exact Salesko candidate accounting/prepared dispatch with installed registry SDK and disposable PostgreSQL.
 - [x] T5: repair unavailable MinIO test image using the same release source; real dataplane (338), conformance (161) and exact-commit packed restart verification passed; update PR #228 with hosted check status.
-- [ ] T6: local SummaryJob scope approved; blocked by the SDK 0.21.0 empty-toolset prerequisite explicitly deferred to official Pi migration. Migration scope decision pending; no production budget defaults.
+- [ ] T6: local SummaryJob scope approved; blocked by the SDK 0.21.0 empty-toolset prerequisite explicitly deferred to official Pi migration. Official migration now authorized as a separate work-package; no production budget defaults.
 
 The initial MinIO source-build repair was locally and remotely verified. Latest main now owns the merged SeaweedFS substrate through PR #230; this branch adopts it and removes the superseded local Dockerfile. The final PR contains the Summary/evidence slice plus the mainline merge, not a competing substrate implementation.
 
