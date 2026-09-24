@@ -12,7 +12,7 @@ import { createByokMcpExtension } from '../adapters/pi/mcp-extension';
 import { createByokSubagentsPolicyExtension } from '../adapters/pi/subagents-policy-extension';
 import { parseTaskScopedMcpConfig, type TaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
 import { mapPermissionPolicyToPiArgs } from '../adapters/pi/permission-mapping';
-import { resolveReservedMcpToolGrants } from '../adapters/mcp-tool-grants';
+import { resolveMcpToolsetGrants, resolveReservedMcpToolGrants } from '../adapters/mcp-tool-grants';
 import { loaderEnvInjections } from '../daemon/tool-implementation-identity';
 
 export interface PiRpcHostConfig {
@@ -134,9 +134,12 @@ export async function runPiRpcHost(argv: readonly string[]): Promise<void> {
   // equality test — deriving from policy alone would refuse the exact flags
   // the policy calls for, and accepting them unverified would dissolve the
   // check's entire reason to exist.
+  const toolsetGrants = resolveMcpToolsetGrants(config.mcp.mcpServers, config.mcp.observation, config.policy.mode);
+  if (!toolsetGrants.ok) fail(toolsetGrants.reason);
   const mapping = mapPermissionPolicyToPiArgs(
     config.policy,
     resolveReservedMcpToolGrants(config.mcp.mcpServers),
+    toolsetGrants.grants,
   );
   const expected = parsePiRpcHostArgs([`--config-digest=${args.configDigest}`, '--config', args.configPath, '--mode', 'rpc', ...mapping.args], failUsage);
   if (JSON.stringify([args.tools, args.excludeTools, args.noTools]) !== JSON.stringify([expected.tools, expected.excludeTools, expected.noTools])) {

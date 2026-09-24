@@ -391,12 +391,11 @@ nothing here retries.
 ### The prepared offer, and the moment a record is consumed
 
 A prepared Execution reaches a device as `task.offer_prepared`, its own message
-type. Not a `preparation` field on `task.offer_for_agent`: an older daemon skips
-an unknown message type whole, while it would legally strip an unknown optional
-field and run the task as an ordinary instruction offer — compiling a request of
-its own against tokens that were already counted for a different one. The
-payload carries no `instruction` and no `sessionRef`; both omissions are
-structural, not defaults.
+type. It requires `egressPolicy`, optionally carries `messageEgress`, and carries
+no instruction or sessionRef. On long-poll, both an unknown executable message
+type and an unknown key in a strict payload freeze the cursor. Enqueue capability
+gates prevent version-skewed delivery; they do not translate older offers.
+Both omissions are structural, not defaults.
 
 Nothing the offer states about the preparation is authority. `reference`,
 `requestDigest` and `artifactDigest` are the Host re-presenting what this
@@ -416,6 +415,24 @@ implementation-identity kind behind each of those names, and finally the two
 surface digests — which are recomputed on the LIVE observation with the same
 functions the preparation computed the recorded ones with. Every difference
 declines non-retryably, with its own reason.
+
+Prepared execution injects no reserved message or memory MCP helper and performs
+no helper-bin precheck or helper preflight. Message context remains server-only;
+`messageEgress` enables the existing durable outbox. The daemon collects Pi text
+progress into the final reply. Overflow or missing/unreadable usage fails before
+any body can be published. At turn end it checks usage first, extracts any selected
+result document, appends and publishes its immutable draft, and waits for the exact
+accepted disposition before `task.complete` with `preparedObservation`. Activity
+and terminal envelopes pass through the same strict egress sanitizer as fresh
+Agent egress offers. The message tool never enters D.
+
+Pi policy `{mode:'auto', allowTools:[]}` explicitly selects zero native tools on
+both fresh and prepared lanes. Omitting `allowTools` retains Pi's default native
+registry on fresh execution and is inexpressible for prepared execution. Observed MCP toolset grants and reserved
+grants on fresh offers remain separately admitted; prepared offers have no reserved grants.
+The same native-selection validator runs before pin and again in the prepared
+host: nonempty native selections remain `native_tools_uncounted`. This changes
+the former fresh-lane interpretation of an explicit empty allowlist.
 
 Pin strictly precedes claim, and that ordering is the whole single-consumption
 guarantee. Two runners can both compare successfully; they then race one
@@ -494,7 +511,7 @@ carries no version field, so a device and a cloud on different contract
 versions used to find out only when a completion PUT failed its strict schema,
 and the device then redelivered that envelope forever. The device capability
 is therefore `agent-input-preparation-v<N>`, where `<N>` is
-`INPUT_PREPARATION_WIRE_VERSION` (currently `agent-input-preparation-v5`). A
+`INPUT_PREPARATION_WIRE_VERSION` (currently `agent-input-preparation-v6`). A
 daemon declares only the token of the version it speaks; the cloud's
 input-preparation and prepared-offer enqueue gates accept only the token of the
 version they speak, so a skewed device is refused at enqueue with
@@ -513,13 +530,18 @@ and its strictly seq-ordered cursor stalls — which blocks that device's WHOLE
 mailbox, not only preparation. There is no v4 parser, dual read or migration
 for this, by decision: the lane never reached production readiness on 0.19.
 
-**Operator precondition for the one-shot v5 cut.** Before upgrading either side
-across the cut, drain the input-preparation in-flight rows: every preparation
-receipt terminal and each device's mailbox cursor caught up past its last
-`agent.input.preparation` envelope. Then upgrade the cloud and its devices as a
-pair. **Recovery:** if a row was stranded anyway, upgrade the other side too —
-once both speak v5 the redelivered completion is accepted and the cursor moves;
-until then the device's mailbox stays stalled.
+**Operator precondition for the one-shot v6 cut.** Drain all input-preparation
+requests and prepared Executions before upgrading: preparation receipts must be
+terminal, required message dispositions settled, and device mailbox cursors past
+all old preparation/prepared-offer entries. Upgrade cloud and device as a pair;
+v5-only devices receive `agent_capability_missing` before any task/mailbox write.
+There is no dual token, dual read or migration of old preparations: recreate
+preparations under v6. A stranded older prepared offer lacking required egressPolicy
+is not repaired by simply upgrading the other side; it requires operator handling
+of the old mailbox entry. The D compiler and fourteen admission comparisons remain
+unchanged. P0 still requires nonempty MCP toolsets; empty toolsets are deferred to
+the official Pi migration work-package because fork 0.86.1001 rejects an empty
+prepared session tool snapshot.
 
 The evidence has four parts, and each is read off a recorded fact rather than
 asserted.

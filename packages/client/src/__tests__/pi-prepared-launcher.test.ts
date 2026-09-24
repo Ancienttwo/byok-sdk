@@ -172,7 +172,7 @@ async function providerEndpoint(): Promise<ProviderEndpoint> {
 // One real preparation, compiled by the native compiler
 // ---------------------------------------------------------------------------
 
-const POLICY: PermissionPolicy = { mode: 'readonly', allowTools: [] };
+const POLICY: PermissionPolicy = { mode: 'auto', allowTools: [] };
 
 function model(baseUrl: string): InputPreparationModelV1 {
   return {
@@ -441,7 +441,7 @@ async function tamper(prepared: Prepared, mutate: (envelope: Record<string, unkn
 }
 
 describe('the prepared pi launch entry', () => {
-  it('sends the counted request body verbatim and reports the admitted session id', async () => {
+  it('registers only counted MCP tools under auto+[] and sends D verbatim', async () => {
     const endpoint = await providerEndpoint();
     const prepared = await prepareOnThisDevice(endpoint);
     const session = await startPrepared(prepared);
@@ -453,6 +453,8 @@ describe('the prepared pi launch entry', () => {
     // The bytes that reached the provider are D, not a recompilation of it.
     expect(endpoint.bodies).toHaveLength(1);
     expect(endpoint.bodies[0]).toBe(prepared.requestBody);
+    const wire = JSON.parse(endpoint.bodies[0]!);
+    expect(wire.tools.map((tool: { function: { name: string } }) => tool.function.name)).toEqual(['mcp__teamserver__echo', 'mcp__teamserver__find_leads']);
   }, 60_000);
 
   it('refuses the ordinary prompt while the prepared reservation holds the session', async () => {

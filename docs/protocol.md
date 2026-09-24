@@ -51,6 +51,14 @@ state/transition. There is no in-place "tighten it a little" allowance
 post-freeze the way pre-freeze M0→M1 had (§10) — a change of this shape is a
 new major version, full stop.
 
+**Scoped input-preparation cut:** the Owner-approved v6 work-package changes
+`task.offer_prepared` to require `egressPolicy` and optionally carry `messageEgress`.
+Its version authority is `INPUT_PREPARATION_WIRE_VERSION`, admitted only through
+`agent-input-preparation-v6`; the outer envelope remains v1. This is a deliberate
+paired-upgrade cut, not an additive rolling-upgrade claim. No v5 token or reader is
+retained. Drain pre-cut preparation requests and prepared Executions first, as
+specified below.
+
 **Unknown observability remains ignorable; unknown executable work is not acknowledged.**
 An unrecognized executable message has no durable disposition, so the daemon
 freezes the mailbox cursor rather than silently losing the work. Unknown nested
@@ -277,7 +285,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `policy`, `agentRef`, `runtime?`, `dispatchSelection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
 | `task.offer_for_agent_with_egress` | S→D | **required** | **required** | All strict Agent fields plus required `sessionRef` and exact `egressPolicy` | An Agent dispatch targets a daemon that consumed the revisioned egress contract |
 | `task.offer_for_agent_with_egress_fresh` | S→D | **required** | **required** | All strict Agent fields plus exact `egressPolicy`, with no `sessionRef` | A fresh Agent dispatch targets a daemon advertising `agent-egress-fresh-session` |
-| `task.offer_prepared` | S→D | **required** | **required** | `policy`, `agentRef`, `preparation` (`reference`, `requestDigest`, `artifactDigest?`), `runtime?`, `dispatchSelection?`, `requiredToolsets?`, `terminalProjection?`, `limits?` — and deliberately NO `instruction` and NO `sessionRef` | An already-counted preparation is dispatched to the device that counted it |
+| `task.offer_prepared` | S→D | **required** | **required** | `policy`, `agentRef`, `egressPolicy`, `messageEgress?`, `preparation` (`reference`, `requestDigest`, `artifactDigest?`), `runtime?`, `dispatchSelection?`, `requiredToolsets?`, `terminalProjection?`, `limits?` — and deliberately NO `instruction` and NO `sessionRef` | An already-counted preparation is dispatched to the device that counted it |
 | `agent.egress.ack` | S→D | optional | **required** | exact `agentRef`, `sessionRef`, `policyRevision`, `eventId`, `cursor`, `receiptId` | Cloud durably recorded one reliable Agent event |
 | `agent.content.read` | S→D | optional | **required** | `requestId`, surface, actor, exact Agent/session/runtime/cwd, policy revision, relative target, MIME, decode mode, bounded policy | An independently authorized explicit content read is requested |
 | `agent.home.projection` | S→D | forbidden | **required** | exact `requestId`, AgentRef/profile revision, SHA-256 projection identity, bounded opaque JSON | A durable task-free projection targets one exact capable device |
@@ -300,26 +308,33 @@ append/send; receipt and ack are delivery facts, not session authority.
 
 ### 2.0 Prepared Executions
 
-`task.offer_prepared` is a distinct message rather than a `preparation` field on
-`task.offer_for_agent`, and the reason is the freeze rule's own asymmetry: an
-older daemon skips an unknown message TYPE whole, but would legally strip an
-unknown optional FIELD and run the task as an ordinary instruction offer —
-compiling a request of its own against tokens that were already counted for a
-different one. Server and hosted cloud require `agent-home-contract` and
-`agent-input-preparation-v5` (the capability carries the input-preparation wire version; the unversioned 0.19 token is accepted nowhere) before allocating the task/mailbox row.
+`task.offer_prepared` is strict control data. In long-poll, unknown executable
+message types and unknown strict payload keys both freeze the cursor. Enqueue
+requires `agent-home-contract`, `agent-input-preparation-v6`, `agent-egress-policy`,
+`agent-egress-reliable-ack` and `agent-egress-fresh-session`; when `messageEgress` is
+present it also requires `agent-message-egress`. These gates run before allocating
+any task or mailbox row. The host-only `agentMessageContext` is recorded with the
+immutable message requirement and is never sent to the daemon.
 
-The capability gates ADMISSION only. The `agent.input.preparation` payload and
-its completion receipt carry no version field, so a row enqueued before the v5
-cut is still in flight after either side upgrades, and its completion is
-discharged only when device and cloud speak the same version: across the cut
-the strict receipt schema rejects it with a 422 in both directions (`prepared`
-into a 0.19 cloud, `counted` plus a counter `kind` into a v5 cloud), and the
-device's seq-ordered redelivery cursor stalls its whole mailbox. There is no
-cross-version parser by decision. **Precondition:** before upgrading either
-side across the v5 cut, drain input-preparation in-flight rows (every receipt
-terminal, the device cursor caught up), then upgrade cloud and device as a
-pair. **Recovery:** if a row is stranded, upgrade the other side too; until
-then that device's mailbox stays stalled.
+The v6 cut adds required `egressPolicy` and optional `messageEgress` to prepared
+offers, with no dual token/read. **Precondition:** drain preparation requests,
+prepared Executions and required message dispositions, ensure device cursors have
+passed all old entries, then upgrade cloud and device together. Existing v5
+preparations are not read forward; recreate them. The capability gate protects new
+admission only: an already-enqueued old offer without `egressPolicy` fails strict
+parsing and stalls its mailbox. Paired upgrade alone does not repair that old
+payload; operator handling is required if the drain was skipped.
+
+Prepared offers inject no reserved message or memory tool. Their message body is
+daemon-authored from final Pi text at turn end, after usage validation and selected
+result-document extraction. Missing/unreadable usage or context overflow fails
+before publish. The outbox waits for exact `accepted` before emitting `task.complete`
+with `preparedObservation`; outbound activity/terminal envelopes are sanitized.
+D and its fourteen admission comparisons are unchanged, and the message tool is
+outside D. Pi `{mode:'auto',allowTools:[]}` means zero native tools on both lanes;
+fresh offers retain their observed MCP and reserved grants. Prepared native policy failures
+are refused before pin. Nonempty MCP toolsets remain required; empty toolsets are
+outside this P0 cut.
 
 It carries no `instruction`: the user request is already inside the frozen
 envelope the referenced record retained. It carries no `sessionRef` either — a

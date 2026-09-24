@@ -1063,6 +1063,8 @@ export interface PreparedDispatchInput {
     readonly taskId?: string;
     /** Instruction-free strict payload naming the preparation this Execution consumes. */
     readonly payload: TaskOfferPreparedPayload;
+    /** Host-only destination/freshness authority; never serialized to the daemon. */
+    readonly agentMessageContext?: AgentMessageServerContext;
 }
 /** Strict Agent dispatch that supplies the policy consumed by the typed egress lanes. */
 export interface AgentEgressDispatchInput {

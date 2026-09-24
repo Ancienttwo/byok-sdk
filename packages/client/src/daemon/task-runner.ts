@@ -1,3 +1,4 @@
+import { validatePreparedPiNativeToolPolicy } from '../adapters/pi/prepared-tools';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import type { PiRuntimeLaunchResources } from '../adapters/pi/runtime-launch';
 import { awaitAdmission } from './admission-wait';
@@ -746,7 +747,7 @@ interface ActiveTask {
   taskId: string;
   /** Cancels every blob transfer owned by this task before its terminal path runs. */
   blobAbort: AbortController;
-  /** True only for the distinct task.offer_for_agent_with_egress contract. */
+  /** True for offers carrying egressPolicy, including prepared execution. */
   egressEnabled: boolean;
   adapter: RuntimeAdapter;
   session: Session;
@@ -2040,7 +2041,7 @@ export class TaskRunner {
         return;
       }
     }
-    if (messageRequirement !== undefined && (agentRef === undefined || this.deps.agentMessageMcpBin === undefined || this.deps.tenantId === undefined)) {
+    if (messageRequirement !== undefined && (agentRef === undefined || (preparation === undefined && this.deps.agentMessageMcpBin === undefined) || this.deps.tenantId === undefined)) {
       decline('required Agent message egress is unavailable on this daemon', false);
       return;
     }
@@ -2250,7 +2251,7 @@ export class TaskRunner {
 
       const offered = withoutRequiredToolsets(payload);
       const requestedRuntime = payload.harnessId ?? payload.dispatchSelection?.runtimeId ?? payload.runtime;
-      const requiresAgentMemoryMcp = agentRef !== undefined
+      const requiresAgentMemoryMcp = preparation === undefined && agentRef !== undefined
         && this.deps.agentMemoryMcpBin !== undefined
         && isAgentMemorySecureFilesystemAvailable(this.deps.agentMemoryFilesystemHelperBin !== undefined);
       let pick: PickResult;
@@ -2258,7 +2259,7 @@ export class TaskRunner {
         pick = await this.pickAdapter(
           requestedRuntime,
           payload.policy.mode,
-          requiredToolsets !== undefined || messageRequirement !== undefined || requiresAgentMemoryMcp,
+          requiredToolsets !== undefined || (preparation === undefined && messageRequirement !== undefined) || requiresAgentMemoryMcp,
           blobAbort.signal,
         );
       } catch (error) {
@@ -2295,13 +2296,12 @@ export class TaskRunner {
       // adapter. The admission probe below keeps reading `resolvedMcp.servers`,
       // which stays clean — a `tools/list` handshake is not this task's
       // execution and has no business holding its tool authority.
-      let taskMcpServers = this.withAgentMessageMcp(
-        resolvedMcp?.ok
-          ? this.withHostToolsetContext(resolvedMcp.servers, taskId, agentRef, resolvedMcp.toolsetIdByServer)
-          : undefined,
-        taskId,
-        messageRequirement,
-      );
+      let taskMcpServers = resolvedMcp?.ok
+        ? this.withHostToolsetContext(resolvedMcp.servers, taskId, agentRef, resolvedMcp.toolsetIdByServer)
+        : undefined;
+      if (preparation === undefined) {
+        taskMcpServers = this.withAgentMessageMcp(taskMcpServers, taskId, messageRequirement);
+      }
       // Only the adapters that pre-grant projected toolset tools need the
       // daemon's `tools/list` observation (see
       // `RuntimeAdapterDescriptor.requiresMcpToolsetToolObservation`). An
@@ -2345,7 +2345,7 @@ export class TaskRunner {
         || requiresAgentMemoryMcp
         || generatesApprovalMcp;
       const probesAnMcpServer = needsToolsetObservation
-        || (messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined);
+        || (preparation === undefined && messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined);
       let mcpLaunch: McpLaunchBinding | undefined;
       if (probesAnMcpServer || generatesAnMcpServer) {
         const trusted = await resolveTrustedLaunchCwd(this.deps.mcpLaunchCwd);
@@ -2422,7 +2422,7 @@ export class TaskRunner {
         }
         mcpToolImplementations = Object.freeze(identities);
       }
-      if (messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined) {
+      if (preparation === undefined && messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined) {
         try {
           await this.deps.agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, mcpEnv, probeCwd);
         } catch (error) {
@@ -2733,6 +2733,12 @@ export class TaskRunner {
           // prepared failure never permits sending a DIFFERENT input under the
           // same accounting.
           decline(`${admitted.reason}: ${admitted.detail}`, false);
+          return;
+        }
+        const nativePolicy = validatePreparedPiNativeToolPolicy(decision.policy);
+        if (!nativePolicy.ok) {
+          gitLease?.release();
+          decline(`${nativePolicy.code}: ${nativePolicy.message}`, false);
           return;
         }
         let pinned: Awaited<ReturnType<InputPreparationStore['pin']>>;

@@ -558,7 +558,7 @@ describe('input preparation capability and routes', () => {
     // version field: a device and a cloud on different versions never admit
     // each other's preparations. The retired unversioned token is gone.
     expect(AGENT_INPUT_PREPARATION_CAPABILITY).toBe(`agent-input-preparation-v${INPUT_PREPARATION_WIRE_VERSION}`);
-    expect(AGENT_INPUT_PREPARATION_CAPABILITY).toBe('agent-input-preparation-v5');
+    expect(AGENT_INPUT_PREPARATION_CAPABILITY).toBe('agent-input-preparation-v6');
     expect(CAPABILITY_FLAGS as readonly string[]).not.toContain('agent-input-preparation');
     expect(BYOK_INPUT_PREPARATION_COMPLETION_ROUTE).toBe('/byok/input-preparations/:requestId/completion');
     expect(BYOK_INPUT_PREPARATION_STATUS_ROUTE).toBe('/byok/input-preparations/:requestId');

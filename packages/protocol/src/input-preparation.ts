@@ -40,7 +40,7 @@ import { PERMISSION_MODES } from './permission';
  * below. See `INPUT_PREPARATION_VERSION` in the client for what each version
  * changed.
  */
-export const INPUT_PREPARATION_WIRE_VERSION = 5 as const;
+export const INPUT_PREPARATION_WIRE_VERSION = 6 as const;
 
 /**
  * Capability required before a task-free remote input preparation — or a

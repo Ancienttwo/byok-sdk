@@ -396,11 +396,10 @@ export type TaskOfferForAgentWithEgressFreshPayload = z.infer<typeof TaskOfferFo
  *
  * A DISTINCT message type, not a `preparation` field added to
  * `task.offer_for_agent`, for the same N/N-1 reason the toolset and egress
- * variants are distinct: an older daemon skips a message type it does not know
- * (`UnknownMessageTypeError`, and the long-poll transport skips that entry
- * whole), whereas it would legally STRIP an unknown optional field and run the
- * task as an ordinary instruction offer — compiling a request of its own
- * against tokens that were already counted for a different one.
+ * variants are distinct. On long-poll, both an unknown message type and an
+ * unknown key on a strict payload freeze the cursor. The enqueue capability
+ * gate is the compatibility boundary: v6 requires a drain and paired upgrade,
+ * with no dual token or dual read.
  *
  * It carries no `instruction`: the user request is already inside the frozen
  * envelope the referenced record retained, and an offer that carried both would
@@ -416,7 +415,11 @@ export const TaskOfferPreparedPayloadSchema = TaskOfferForAgentPayloadSchema.omi
   instruction: true,
   sessionRef: true,
 })
-  .extend({ preparation: InputPreparationOfferBindingSchema })
+  .extend({
+    preparation: InputPreparationOfferBindingSchema,
+    egressPolicy: AgentEgressPolicySchema,
+    messageEgress: AgentMessageEgressRequirementSchema.optional(),
+  })
   .strict();
 export type TaskOfferPreparedPayload = z.infer<typeof TaskOfferPreparedPayloadSchema>;
 

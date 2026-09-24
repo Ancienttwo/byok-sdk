@@ -73,7 +73,8 @@ function minimalPayload(type: MessageType): unknown {
       };
     case 'task.offer_prepared':
       return {
-        policy: { mode: 'auto' },
+        policy: { mode: 'auto', allowTools: [] },
+        egressPolicy: { policyRevision: 'metadata-status-v1', activity: { mode: 'metadata-status', delivery: 'latest-value' }, reliable: { maxPendingEventsPerAgent: 256, maxPendingBytesPerAgent: 4194304, maxPendingBytesPerTenant: 16777216 }, transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },
         agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
         preparation: {
           reference: 'prep-record-1',

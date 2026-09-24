@@ -243,9 +243,9 @@ export class PiAdapter implements RuntimeAdapter {
     // here the way codex and claude authorize it, from the same table
     // (#180). Resolved once, at admission, like every other grant this
     // adapter freezes into mapping.args.
-    const mapping = mapPermissionPolicyToPiArgs(input.policy, resolveReservedMcpToolGrants(input.mcpServers));
-    if (!mapping.ok) {
-      return { kind: 'reject', reason: mapping.reason ?? 'policy rejected by pi adapter', retryable: false };
+    const policyMapping = mapPermissionPolicyToPiArgs(input.policy, resolveReservedMcpToolGrants(input.mcpServers));
+    if (!policyMapping.ok) {
+      return { kind: 'reject', reason: policyMapping.reason ?? 'policy rejected by pi adapter', retryable: false };
     }
     // Fail closed BEFORE anything is spawned, on the same resolution claude
     // and codex use. pi does not interpolate these names into a CLI grant —
@@ -270,6 +270,10 @@ export class PiAdapter implements RuntimeAdapter {
         retryable: false,
       };
     }
+
+    const mapping = mapPermissionPolicyToPiArgs(
+      input.policy, resolveReservedMcpToolGrants(input.mcpServers), toolsetGrants.grants,
+    );
 
     // Inline factories are owned by the SDK entry; no runtime extension path resolution here.
     // Session/workspace continuity:

@@ -205,6 +205,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
    */
   readonly preparedStartCalls: Array<{
     preparation: RuntimePreparedLaunchV1;
+    input: RuntimeOperationStartInput;
     manifest: RuntimeOperationStartInput['manifest'];
   }> = [];
   readonly sessions: StubSession[] = [];
@@ -296,7 +297,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
     // The prepared lane carries no instruction at all, so it is recorded as
     // itself rather than as an instruction start with an empty string.
     if (startInput.kind === 'prepared') {
-      this.preparedStartCalls.push({ preparation: startInput.preparation, manifest: startInput.manifest });
+      this.preparedStartCalls.push({ preparation: startInput.preparation, input: startInput, manifest: startInput.manifest });
       void prepared;
       if (this.startError) throw this.startError;
       if (this.startGate) await this.startGate;

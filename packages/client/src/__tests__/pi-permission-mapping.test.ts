@@ -1,6 +1,13 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager, type ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { createPiMcpTools } from '../adapters/pi/mcp-tools';
+import { projectMcpTools } from '../mcp/projection';
+import { observationOf } from './fixtures/mcp-observation';
 import { describe, expect, it } from 'vitest';
 import type { PermissionPolicy } from '@byok-sdk/protocol';
-import { mapPermissionPolicyToPiArgs } from '../adapters/pi/permission-mapping';
+import { mapPermissionPolicyToPiArgs, resolvePiNativeToolSelection } from '../adapters/pi/permission-mapping';
 
 describe('mapPermissionPolicyToPiArgs', () => {
   it('auto with no restrictions maps to no args', () => {
@@ -81,4 +88,44 @@ describe('mapPermissionPolicyToPiArgs', () => {
     expect(mapPermissionPolicyToPiArgs({ mode: 'auto', network: true }).ok).toBe(true);
     expect(mapPermissionPolicyToPiArgs({ mode: 'auto' }).ok).toBe(true);
   });
+});
+
+
+it('auto with an explicit empty allowlist disables native tools in both lanes', () => {
+  expect(mapPermissionPolicyToPiArgs({ mode: 'auto', allowTools: [] })).toEqual({ ok: true, args: ['--no-tools'] });
+  expect(resolvePiNativeToolSelection({ mode: 'auto', allowTools: [] })).toEqual({ ok: true, names: [] });
+  expect(resolvePiNativeToolSelection({ mode: 'auto' }).ok).toBe(false);
+});
+
+
+it('auto+[] keeps observed MCP and reserved grants while denying every native default', () => {
+  expect(mapPermissionPolicyToPiArgs(
+    { mode: 'auto', allowTools: [] },
+    [{ server: 'byokagentmessage', tools: ['send_agent_message'] }],
+    [{ server: 'team', tools: ['echo'] }],
+  )).toEqual({ ok: true, args: ['--tools', 'send_agent_message,mcp__team__echo'] });
+});
+
+
+it('the frozen fork activates observed MCP tools and no native tools for the fresh auto+[] projection', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'byok-auto-zero-native-'));
+  try {
+    const mapped = mapPermissionPolicyToPiArgs({ mode: 'auto', allowTools: [] }, [], [{ server: 'team', tools: ['echo'] }]);
+    expect(mapped).toEqual({ ok: true, args: ['--tools', 'mcp__team__echo'] });
+    const settingsManager = SettingsManager.inMemory();
+    const loader = new DefaultResourceLoader({ cwd: root, agentDir: root, settingsManager, noExtensions: true, noSkills: true });
+    const customTools = createPiMcpTools(projectMcpTools(observationOf({ team: ['echo'] })), {
+      call: async () => { throw new Error('no tool execution in registry probe'); },
+    }, 'qualified');
+    const { session } = await createAgentSession({
+      cwd: root, agentDir: root, settingsManager, resourceLoader: loader,
+      sessionManager: SessionManager.inMemory(root),
+      tools: mapped.args[1]!.split(','),
+      // Pi's type expects TypeBox; the shared projection retains the observed JSON Schema.
+      customTools: [...customTools] as unknown as ToolDefinition[],
+    });
+    try {
+      expect(session.getActiveToolNames()).toEqual(['mcp__team__echo']);
+    } finally { await session.dispose(); }
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
