@@ -35,8 +35,6 @@ const packages = [
   { name: '@byok-sdk/client', directory: 'packages/client' },
   { name: '@byok-sdk/cloud-dataplane', directory: 'packages/cloud-dataplane' },
   { name: '@byok-sdk/ui-runtime', directory: 'packages/ui-runtime' },
-  { name: '@byok-sdk/testkit', directory: 'packages/testkit' },
-  { name: 'byok-sdk', directory: 'packages/sdk' },
   { name: '@byok-sdk/keys', directory: 'packages/keys' },
 ];
 const expectedPackageVersions = Object.fromEntries(
@@ -193,7 +191,7 @@ function assertTarballInternalEdges(tarballPath, packageName, expectedPackageVer
   }
   for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
     for (const [dependency, range] of Object.entries(packed[field] ?? {})) {
-      if (dependency === 'byok-sdk' || dependency.startsWith('@byok-sdk/')) {
+      if (dependency.startsWith('@byok-sdk/')) {
         if (range !== releaseVersion) {
           throw new Error(
             `${path.basename(tarballPath)}: ${field}.${dependency} is ${range}, expected ${releaseVersion} — ` +
@@ -208,17 +206,19 @@ function assertTarballInternalEdges(tarballPath, packageName, expectedPackageVer
 
 /**
  * Asserts an install tree's @byok-sdk graph closes to exactly one version set:
- * every installed @byok-sdk package (umbrella included) sits at the release
- * version, and no copy hides under a second node_modules — the nested-copy
- * fallback npm takes when published internal edges disagree. Follows
- * node_modules chains only, so the walk stays cheap on large trees.
+ * every installed @byok-sdk package sits at the release version, and no copy
+ * hides under a second node_modules — the nested-copy fallback npm takes when
+ * published internal edges disagree. The retired `byok-sdk` umbrella is still
+ * collected, so any artifact that drags it back in fails as an unexpected
+ * package. Follows node_modules chains only, so the walk stays cheap on large
+ * trees.
  */
 function assertSingleVersionSet(installDirectory, expectedVersions) {
   const root = path.join(installDirectory, 'node_modules');
   const found = [];
   const visit = (nodeModulesDirectory) => {
-    const umbrella = path.join(nodeModulesDirectory, 'byok-sdk', 'package.json');
-    if (existsSync(umbrella)) found.push(umbrella);
+    const retiredUmbrella = path.join(nodeModulesDirectory, 'byok-sdk', 'package.json');
+    if (existsSync(retiredUmbrella)) found.push(retiredUmbrella);
     const scope = path.join(nodeModulesDirectory, '@byok-sdk');
     if (existsSync(scope)) {
       for (const entry of readdirSync(scope)) {
@@ -445,11 +445,7 @@ try {
         `import { tmpdir } from 'node:os';\n` +
         `import path from 'node:path';\n` +
         `const require = createRequire(import.meta.url);\n` +
-        `const expected = ['client','cloud','cloudDataplane','core','protocol','server','uiRuntime'];\n` +
-        `const sdk = await import('byok-sdk');\n` +
-        `assert.deepEqual(Object.keys(sdk).sort(), expected);\n` +
-        `assert.equal('keys' in sdk, false);\n` +
-        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/client/agent-memory','@byok-sdk/client/assertion-client','@byok-sdk/client/mcp-server','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/cloud-dataplane/runtime','@byok-sdk/ui-runtime','@byok-sdk/testkit','@byok-sdk/keys']) await import(name);\n` +
+        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/client/agent-memory','@byok-sdk/client/assertion-client','@byok-sdk/client/mcp-server','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/cloud-dataplane/runtime','@byok-sdk/ui-runtime','@byok-sdk/keys']) await import(name);\n` +
         `const { AgentHomeBusyError, AgentHomeManager } = await import('@byok-sdk/client');\n` +
         `const parallelRoot = mkdtempSync(path.join(tmpdir(), 'byok-packed-agent-session-'));\n` +
         `try {\n` +
@@ -513,7 +509,7 @@ try {
         `for (const needle of ['ajv','pi-coding-agent','@earendil-works','@modelcontextprotocol/client','@modelcontextprotocol/sdk','new Function']) {\n` +
         `  assert.equal(mcpServerSource.includes(needle), false, mcpServerEntry + ' carries ' + needle);\n` +
         `}\n` +
-        `for (const [name, version] of [['byok-sdk','${releaseVersion}'],['@byok-sdk/core','${releaseVersion}'],['@byok-sdk/implementation-identity','${releaseVersion}'],['@byok-sdk/protocol','${releaseVersion}'],['@byok-sdk/client','${releaseVersion}'],['@byok-sdk/server','${releaseVersion}'],['@byok-sdk/cloud','${releaseVersion}'],['@byok-sdk/cloud-dataplane','${releaseVersion}'],['@byok-sdk/ui-runtime','${releaseVersion}'],['@byok-sdk/testkit','${releaseVersion}'],['@byok-sdk/keys','${keysVersion}']]) {\n` +
+        `for (const [name, version] of [['@byok-sdk/core','${releaseVersion}'],['@byok-sdk/implementation-identity','${releaseVersion}'],['@byok-sdk/protocol','${releaseVersion}'],['@byok-sdk/client','${releaseVersion}'],['@byok-sdk/server','${releaseVersion}'],['@byok-sdk/cloud','${releaseVersion}'],['@byok-sdk/cloud-dataplane','${releaseVersion}'],['@byok-sdk/ui-runtime','${releaseVersion}'],['@byok-sdk/keys','${keysVersion}']]) {\n` +
         `  const manifest = require(name + '/package.json');\n` +
         `  assert.equal(manifest.version, version, name);\n` +
         `}\n` +

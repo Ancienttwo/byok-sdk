@@ -16,11 +16,12 @@ returning structured results, so the same checks run under vitest, under a plain
 CI script, and inside a Worker. Requires Node ≥ 22.22 (or any runtime exposing
 WebCrypto Ed25519 on `globalThis.crypto.subtle`).
 
-## Install
+## Availability
 
-```sh
-npm install --save-dev @byok-sdk/testkit
-```
+Starting with 0.21.0 this package is private: it stays in the repository for the
+private `@byok-sdk/conformance` pairing-simulator suite and is no longer
+published. Versions up to 0.20.0 remain on npm but receive no updates. Inside
+the workspace, depend on it with `"@byok-sdk/testkit": "workspace:*"`.
 
 ## Usage
 

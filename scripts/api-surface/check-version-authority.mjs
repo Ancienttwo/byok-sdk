@@ -8,10 +8,17 @@
 // `check:release-graph`; this check only proves that `README.md` and
 // `docs/spec.md` advertise those exact versions and no other one.
 //
+// A README train mention is `@byok-sdk/<name>@x.y.z` for any published
+// (non-private) workspace package other than keys, so the set of names is
+// read from the manifests too. Names outside the workspace — the external
+// `@byok-sdk/pi-*` fork artifacts — are not train mentions. Since 0.21.0 the
+// unscoped `byok-sdk` umbrella is retired (ADR-035), so any `byok-sdk@x.y.z`
+// mention is an error rather than a train mention.
+//
 // Usage:
 //   node scripts/api-surface/check-version-authority.mjs [--root <dir>]
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -20,9 +27,10 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultRoot = path.resolve(scriptDir, '..', '..');
 
 const SEMVER = '\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?';
-// `byok-sdk@x.y.z`, but never the tail of `@byok-sdk/keys@x.y.z`.
-const DISPATCH_MENTION = new RegExp(`(?<![\\w/-])byok-sdk@(${SEMVER})`, 'g');
-const KEYS_MENTION = new RegExp(`@byok-sdk/keys@(${SEMVER})`, 'g');
+const SCOPED_MENTION = new RegExp(`@byok-sdk/([a-z0-9][a-z0-9-]*)@(${SEMVER})`, 'g');
+// `byok-sdk@x.y.z`, but never the tail of `@byok-sdk/<name>@x.y.z`.
+const RETIRED_UMBRELLA_MENTION = new RegExp(`(?<![\\w/-])byok-sdk@(${SEMVER})`, 'g');
+const KEYS_NAME = 'keys';
 const SPEC_DISPATCH = /current\s+aligned\s+dispatch\s+release\s+is\s+`([^`]+)`/;
 const SPEC_KEYS = /current\s+independent\s+keys\s+candidate\s+is\s+`([^`]+)`/;
 
@@ -58,20 +66,57 @@ function readVersion(root, relative) {
 
 const lineOf = (source, index) => source.slice(0, index).split('\n').length;
 
-function checkMentions(errors, relative, source, pattern, expected, label) {
-  pattern.lastIndex = 0;
-  let found = 0;
+// Published train package names: every non-private manifest under packages/
+// except keys, which versions independently.
+function readTrainNames(root) {
+  const packagesDir = path.join(root, 'packages');
+  const names = new Set();
+  for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name === KEYS_NAME) continue;
+    const manifestPath = path.join(packagesDir, entry.name, 'package.json');
+    if (!existsSync(manifestPath)) continue;
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    if (manifest.private === true || typeof manifest.name !== 'string') continue;
+    if (manifest.name.startsWith('@byok-sdk/')) names.add(manifest.name.slice('@byok-sdk/'.length));
+  }
+  return names;
+}
+
+function checkReadmeMentions(errors, relative, source, trainNames, dispatchVersion, keysVersion) {
+  const found = { dispatch: 0, keys: 0 };
+  SCOPED_MENTION.lastIndex = 0;
   let match;
-  while ((match = pattern.exec(source)) !== null) {
-    found += 1;
-    if (match[1] !== expected) {
+  while ((match = SCOPED_MENTION.exec(source)) !== null) {
+    const [, name, version] = match;
+    let label;
+    let expected;
+    if (name === KEYS_NAME) {
+      label = 'keys';
+      expected = keysVersion;
+    } else if (trainNames.has(name)) {
+      label = 'dispatch';
+      expected = dispatchVersion;
+    } else {
+      continue;
+    }
+    found[label] += 1;
+    if (version !== expected) {
       errors.push(
-        `${relative}:${lineOf(source, match.index)}: ${label} is advertised as ${match[1]}, but the authority says ${expected}`,
+        `${relative}:${lineOf(source, match.index)}: ${label} release (@byok-sdk/${name}) is advertised as ${version}, but the authority says ${expected}`,
       );
     }
   }
-  if (found === 0) {
-    errors.push(`${relative}: no ${label} version string found; expected ${expected}`);
+  RETIRED_UMBRELLA_MENTION.lastIndex = 0;
+  while ((match = RETIRED_UMBRELLA_MENTION.exec(source)) !== null) {
+    errors.push(
+      `${relative}:${lineOf(source, match.index)}: advertises the retired byok-sdk umbrella (byok-sdk@${match[1]}); name the scoped @byok-sdk/* packages instead`,
+    );
+  }
+  if (found.dispatch === 0) {
+    errors.push(`${relative}: no dispatch release version string found; expected ${dispatchVersion}`);
+  }
+  if (found.keys === 0) {
+    errors.push(`${relative}: no keys release version string found; expected ${keysVersion}`);
   }
 }
 
@@ -95,8 +140,7 @@ export function run(argv, out = console) {
   const errors = [];
 
   const readme = readFile(root, 'README.md');
-  checkMentions(errors, 'README.md', readme, DISPATCH_MENTION, dispatchVersion, 'dispatch release');
-  checkMentions(errors, 'README.md', readme, KEYS_MENTION, keysVersion, 'keys release');
+  checkReadmeMentions(errors, 'README.md', readme, readTrainNames(root), dispatchVersion, keysVersion);
 
   const spec = readFile(root, 'docs/spec.md');
   checkSpecPhrase(errors, 'docs/spec.md', spec, SPEC_DISPATCH, dispatchVersion, 'current aligned dispatch release');
@@ -109,7 +153,9 @@ export function run(argv, out = console) {
     );
     return 1;
   }
-  out.log(`version-authority: README.md and docs/spec.md agree with byok-sdk@${dispatchVersion} and @byok-sdk/keys@${keysVersion}`);
+  out.log(
+    `version-authority: README.md and docs/spec.md agree with the dispatch train ${dispatchVersion} (packages/core/package.json) and @byok-sdk/keys@${keysVersion}`,
+  );
   return 0;
 }
 

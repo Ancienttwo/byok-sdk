@@ -11,7 +11,7 @@
 // Usage:
 //   node scripts/api-surface/check-api-surface.mjs [--update] [--package <name>] [--root <dir>]
 
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -25,7 +25,6 @@ const PACKAGES = [
   'protocol',
   'server',
   'ui-runtime',
-  'testkit',
   'keys',
 ];
 
@@ -288,11 +287,39 @@ export function unifiedDiff(expected, actual, label) {
   return lines.join('\n');
 }
 
+// The gated inventory must be the published set: every non-private manifest
+// under packages/ (the same rule publish.mjs uses to choose what to publish),
+// and no golden may outlive the package it described.
+export function inventoryFailures(root) {
+  const failures = [];
+  const packagesDir = path.join(root, 'packages');
+  const published = existsSync(packagesDir)
+    ? readdirSync(packagesDir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && existsSync(path.join(packagesDir, entry.name, 'package.json')))
+        .filter((entry) => readJson(path.join(packagesDir, entry.name, 'package.json')).private !== true)
+        .map((entry) => entry.name)
+        .sort()
+    : [];
+  const gated = [...PACKAGES].sort();
+  if (JSON.stringify(published) !== JSON.stringify(gated)) {
+    failures.push(
+      `inventory: the published (non-private) packages under packages/ are [${published.join(', ')}], but this gate covers [${gated.join(', ')}]`,
+    );
+  }
+  const goldenDir = path.join(root, 'api-surface');
+  for (const file of existsSync(goldenDir) ? readdirSync(goldenDir).sort() : []) {
+    if (file.endsWith('.d.ts') && !PACKAGES.includes(file.slice(0, -'.d.ts'.length))) {
+      failures.push(`inventory: api-surface/${file} is an orphan golden for a package this gate does not cover`);
+    }
+  }
+  return failures;
+}
+
 export function run(argv, out = console) {
   const options = parseArgs(argv);
   const targets = options.package === null ? PACKAGES : [options.package];
   const goldenDir = path.join(options.root, 'api-surface');
-  const failures = [];
+  const failures = options.package === null ? inventoryFailures(options.root) : [];
   const updated = [];
 
   for (const pkg of targets) {

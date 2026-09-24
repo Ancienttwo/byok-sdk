@@ -16,13 +16,15 @@ const README = [
   '',
   '## Current release',
   '',
-  'The current release is `byok-sdk@0.12.0`, with the independently versioned',
+  'The current release is `@byok-sdk/core@0.12.0`, with the independently versioned',
   '`@byok-sdk/keys@0.3.9`. See CHANGELOG.md for the per-train notes.',
   '',
   '```bash',
-  'npm install byok-sdk@0.12.0',
+  'npm install @byok-sdk/client@0.12.0 @byok-sdk/server@0.12.0',
   'npm install @byok-sdk/keys@0.3.9',
   '```',
+  '',
+  'The bundled Pi runtime is `@byok-sdk/pi-coding-agent@0.86.1001`.',
   '',
 ].join('\n');
 
@@ -43,14 +45,18 @@ const SPEC = [
 function makeRoot(t, { dispatch = '0.12.0', keys = '0.3.9', readme = README, spec = SPEC } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'version-authority-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  for (const [pkg, version] of [
-    ['core', dispatch],
-    ['keys', keys],
+  for (const manifest of [
+    { name: '@byok-sdk/core', version: dispatch },
+    { name: '@byok-sdk/client', version: dispatch },
+    { name: '@byok-sdk/server', version: dispatch },
+    { name: '@byok-sdk/keys', version: keys },
+    { name: '@byok-sdk/testkit', version: '0.0.0', private: true },
   ]) {
+    const pkg = manifest.name.slice('@byok-sdk/'.length);
     mkdirSync(path.join(root, 'packages', pkg), { recursive: true });
     writeFileSync(
       path.join(root, 'packages', pkg, 'package.json'),
-      `${JSON.stringify({ name: `@byok-sdk/${pkg}`, version }, null, 2)}\n`,
+      `${JSON.stringify(manifest, null, 2)}\n`,
     );
   }
   writeFileSync(path.join(root, 'README.md'), readme);
@@ -65,30 +71,46 @@ const runCheck = (root) =>
 test('passes when README and spec agree with both manifests', (t) => {
   const result = runCheck(makeRoot(t));
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /byok-sdk@0\.12\.0 and @byok-sdk\/keys@0\.3\.9/);
+  assert.match(result.stdout, /dispatch train 0\.12\.0 \(packages\/core\/package\.json\) and @byok-sdk\/keys@0\.3\.9/);
 });
 
-test('a stale README dispatch version is reported with file:line', (t) => {
-  const root = makeRoot(t, { readme: README.replace('npm install byok-sdk@0.12.0', 'npm install byok-sdk@0.8.1') });
+test('a stale README dispatch version on any published train package is reported with file:line', (t) => {
+  const root = makeRoot(t, { readme: README.replace('@byok-sdk/server@0.12.0', '@byok-sdk/server@0.8.1') });
   const result = runCheck(root);
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /README\.md:9: dispatch release is advertised as 0\.8\.1, but the authority says 0\.12\.0/);
+  assert.match(
+    result.stderr,
+    /README\.md:9: dispatch release \(@byok-sdk\/server\) is advertised as 0\.8\.1, but the authority says 0\.12\.0/,
+  );
+});
+
+test('the retired byok-sdk umbrella is rejected even at the current version', (t) => {
+  const root = makeRoot(t, { readme: `${README}\nnpm install byok-sdk@0.12.0\n` });
+  const result = runCheck(root);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /README\.md:\d+: advertises the retired byok-sdk umbrella \(byok-sdk@0\.12\.0\)/);
+});
+
+test('private workspace packages and external fork artifacts are not train mentions', (t) => {
+  const root = makeRoot(t, { readme: `${README}\nThe repo-internal \`@byok-sdk/testkit@0.0.0\` is not published.\n` });
+  const result = runCheck(root);
+  assert.equal(result.status, 0, result.stderr);
 });
 
 test('a stale README keys version is reported', (t) => {
   const root = makeRoot(t, { readme: README.replace('@byok-sdk/keys@0.3.9`.', '@byok-sdk/keys@0.3.2`.') });
   const result = runCheck(root);
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /keys release is advertised as 0\.3\.2, but the authority says 0\.3\.9/);
+  assert.match(result.stderr, /keys release \(@byok-sdk\/keys\) is advertised as 0\.3\.2, but the authority says 0\.3\.9/);
 });
 
 test('a second, stray dispatch version anywhere in README fails', (t) => {
   const root = makeRoot(t, {
-    readme: `${README}\nUpgrading from \`byok-sdk@0.11.0\` needs no migration.\n`,
+    readme: `${README}\nUpgrading from \`@byok-sdk/client@0.11.0\` needs no migration.\n`,
   });
   const result = runCheck(root);
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /dispatch release is advertised as 0\.11\.0/);
+  assert.match(result.stderr, /dispatch release \(@byok-sdk\/client\) is advertised as 0\.11\.0/);
 });
 
 test('a README with no version string at all fails closed', (t) => {

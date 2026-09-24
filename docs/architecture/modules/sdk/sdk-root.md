@@ -74,7 +74,7 @@ sequenceDiagram
 
 ## 3. P3:設計決策與不變量
 
-The existing `packages/**` capability is retained as repository-level SDK ownership. It is broader than the published `byok-sdk` umbrella package: `packages/sdk/src/index.ts` exports dispatch namespaces and deliberately excludes the independently scoped credential plane `@byok-sdk/keys`. Package and runtime responsibilities remain documented in [the SDK architecture](../../sdk-architecture.md) and [the authority ADRs](../../adr-2026-09-03-domain-model-and-authority.md); this adoption does not repartition public packages.
+The existing `packages/**` capability is retained as repository-level SDK ownership. It spans every workspace package under `packages/`: the nine published packages (the eight aligned train packages and the independently versioned credential plane `@byok-sdk/keys`) and the private `@byok-sdk/conformance` and `@byok-sdk/testkit`. The `byok-sdk` umbrella package was retired in 0.21.0 (ADR-035). Package and runtime responsibilities remain documented in [the SDK architecture](../../sdk-architecture.md) and [the authority ADRs](../../adr-2026-09-03-domain-model-and-authority.md); this adoption does not repartition public packages.
 
 The generated map is a representative local execution slice, not an exhaustive diagram of every SDK subsystem. `TaskRunner.handleOffer` calls the same-file AgentRef/decline helpers and the owned runtime-start wrapper. The helper component shares its source file with the orchestrator; it is not another service or admission implementation. The three selectors prove those direct calls and their declared branches. Dynamic adapter preparation/start, network delivery, persistence and model generation require their separate tests and runtime evidence.
 

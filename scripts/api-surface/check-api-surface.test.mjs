@@ -235,3 +235,27 @@ test('--package rejects a name outside the publishable set', (t) => {
   assert.equal(result.status, 1);
   assert.match(result.stderr, /unknown package: not-a-package/);
 });
+
+test('a full run fails when the gated inventory is not the published package set', (t) => {
+  const root = makeRoot(t);
+  writePackage(root, 'core', { exports: singleEntry, dist: { 'index.d.ts': 'export declare const a: 1;\n' } });
+  writePackage(root, 'retired', { exports: singleEntry, dist: { 'index.d.ts': 'export declare const r: 1;\n' } });
+  mkdirSync(path.join(root, 'api-surface'), { recursive: true });
+  writeFileSync(goldenPath(root, 'testkit'), 'export declare const t: 1;\n');
+  const result = spawnSync(process.execPath, [script, '--root', root], { encoding: 'utf8' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /inventory: the published \(non-private\) packages under packages\/ are \[core, retired\]/);
+  assert.match(result.stderr, /inventory: api-surface\/testkit\.d\.ts is an orphan golden/);
+});
+
+test('a private workspace package is outside the gated inventory', (t) => {
+  const root = makeRoot(t);
+  const packageDir = writePackage(root, 'testkit', { exports: singleEntry });
+  writeFileSync(
+    path.join(packageDir, 'package.json'),
+    `${JSON.stringify({ name: '@byok-sdk/testkit', version: '0.0.0', private: true, exports: singleEntry }, null, 2)}\n`,
+  );
+  const result = spawnSync(process.execPath, [script, '--root', root], { encoding: 'utf8' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /inventory: the published \(non-private\) packages under packages\/ are \[\]/);
+});

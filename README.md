@@ -16,7 +16,7 @@ examples below target that future candidate, not the current npm registry.
 The current published release is **0.20.0**, with independent keys **0.6.1**,
 published to npm on 2026-09-23 from the `v0.20.0` tag target (`48605554`, the
 PR #224 merge) and still `latest` on the registry; readback is
-`npm view byok-sdk version` and `npm view @byok-sdk/keys version`. See the
+`npm view @byok-sdk/core version` and `npm view @byok-sdk/keys version`. See the
 [publication record](docs/releases/v0.20.0-publication.md), the
 [release notes](docs/releases/v0.20.0.md) and the
 [release handoff](docs/releases/v0.20.0-handoff.md).
@@ -52,20 +52,25 @@ sealed its credential-free manifest and claimed the offer. Do not ship an
 adapter that supports both shapes or allocates process/temp/workspace/session
 resources during `prepare()`; reject unsupported input before claim instead.
 
-Install this release with:
+Install the scoped packages your composition uses and import each one under
+its own name. For example, a self-hosted composition:
 
 ```sh
-npm install byok-sdk@0.21.0
+npm install @byok-sdk/server@0.21.0 @byok-sdk/client@0.21.0
 ```
 
 ```ts
-import { client, cloud, cloudDataplane, core, protocol, server, uiRuntime } from 'byok-sdk';
+import { createByokServer } from '@byok-sdk/server';
 ```
 
-The umbrella uses namespaces so each contract keeps its package owner. The
-same modules are also directly installable as `@byok-sdk/client`,
-`@byok-sdk/server`, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`,
-`@byok-sdk/core`, `@byok-sdk/protocol`, and `@byok-sdk/ui-runtime`.
+The published dispatch packages are `@byok-sdk/client`, `@byok-sdk/server`,
+`@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/core`,
+`@byok-sdk/protocol`, and `@byok-sdk/ui-runtime`, all on the same train;
+`@byok-sdk/implementation-identity` follows the train as a support package that
+client and keys install for you. Starting with 0.21.0, the `byok-sdk` namespace
+umbrella and `@byok-sdk/testkit` are no longer published. Their existing
+versions stay on npm; see
+[Packages no longer published](docs/releases/v0.21.0.md#packages-no-longer-published).
 
 ## Choose a composition
 
@@ -149,7 +154,7 @@ means not accepted, and no overall percentage is defined:
 |---|---|---|
 | main implementation | Merged | `main` @ `48605554` (2026-09-23): #223 bounded admission — byte evidence replaces the live-tokenizer readiness gate (`c61615f8`; BREAKING input-preparation wire version 5, record schema version 6), released as 0.20.0 through #224 (`48605554`). Earlier, as of `26945c8a` (2026-09-19): recurring input, exact message disposition and fresh egress per the spec section above; #193 C07 Pi runtime launch (`d882aef4`), #198 Windows CI elimination (`49ec7477`), #199 custody five-edge enablement (`e0423d84`), #200 N1 external-CLI admission gate (`ec1cea36`); 2026-09-19 batch — #201 reserved agent-message grants, #202 Pi fork pin 1006 / S2 clipboard tripwire, #203 WP5 S2 CI flip (strict bun + real-chain monitor control), #204 #196 durable recurring smoke (embedded roundtrip + crash window), #205 docs authority navigation (#197), #206 WinSW uninstall image-lock retry, #207 Windows link-first cleanup + out-of-tree canary |
 | Open candidates | Unmerged | #191 (draft: MCP launch-cwd boundary); Salesko draft PR #241 — both still open drafts on 2026-09-23. #223 (bounded admission) and #224 (0.20.0 preparation) are merged |
-| Published packages | 0.20.0 / keys 0.6.1 published | SDK 0.20.0 and keys 0.6.1 were published to npm on 2026-09-23 from the `v0.20.0` tag target (`48605554`, the PR #224 merge) and are the registry's `latest` — readback `npm view byok-sdk version` / `npm view @byok-sdk/keys version`, receipt in the [0.20.0 publication record](docs/releases/v0.20.0-publication.md), notes in [0.20.0](docs/releases/v0.20.0.md). The annotated `v0.20.0` tag is on origin at `48605554`. 0.21.0 / keys 0.6.2 (PR #226, `644f8473`) are prepared and unpublished ([notes](docs/releases/v0.21.0.md), [handoff](docs/releases/v0.21.0-handoff.md)). The previous train is 0.19.0 / keys 0.6.0 (2026-09-22, `9408ed7b`, [publication record](docs/releases/v0.19.0-publication.md)), before it [0.18.0](docs/releases/v0.18.0.md) / keys 0.5.0 (2026-09-10, `7b26ef5f`). Pi fork pin `@byok-sdk/pi-coding-agent@0.86.1001` in `packages/client/package.json` (fork build 1 of the 0.86 line: pi-ai at 0.86.1001, pi-agent-core at 0.86.1001) |
+| Published packages | 0.20.0 / keys 0.6.1 published | SDK 0.20.0 and keys 0.6.1 were published to npm on 2026-09-23 from the `v0.20.0` tag target (`48605554`, the PR #224 merge) and are the registry's `latest` — readback `npm view @byok-sdk/core version` / `npm view @byok-sdk/keys version`, receipt in the [0.20.0 publication record](docs/releases/v0.20.0-publication.md), notes in [0.20.0](docs/releases/v0.20.0.md). The annotated `v0.20.0` tag is on origin at `48605554`. 0.21.0 / keys 0.6.2 (PR #226, `644f8473`) are prepared and unpublished ([notes](docs/releases/v0.21.0.md), [handoff](docs/releases/v0.21.0-handoff.md)); that train publishes nine packages (eight aligned plus keys) and stops publishing the `byok-sdk` umbrella and `@byok-sdk/testkit`. The previous train is 0.19.0 / keys 0.6.0 (2026-09-22, `9408ed7b`, [publication record](docs/releases/v0.19.0-publication.md)), before it [0.18.0](docs/releases/v0.18.0.md) / keys 0.5.0 (2026-09-10, `7b26ef5f`). Pi fork pin `@byok-sdk/pi-coding-agent@0.86.1001` in `packages/client/package.json` (fork build 1 of the 0.86 line: pi-ai at 0.86.1001, pi-agent-core at 0.86.1001) |
 | Real Host integration | In progress, not accepted | Salesko Sprint ledger: K5 in progress, K7 incomplete; A01–A29 at 24 LOCAL_PASS / 5 BLOCKED at the latest recorded checkpoint. Host-side subjects and evidence live in that ledger, not here |
 | Native / production acceptance | 未验收 | Target-runtime S9 not executed; aiphabee (K6) paused by owner decision; no production migration, deployment, or paid-runtime acceptance |
 
@@ -187,7 +192,7 @@ for browser/CLI submission and follow-up expectations.
 ## Key management is separate
 
 `@byok-sdk/keys` stores provider credentials and makes direct provider calls.
-It is intentionally outside `byok-sdk` and the entire dispatch dependency
+It is intentionally outside the dispatch packages and their entire dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh

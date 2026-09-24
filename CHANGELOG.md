@@ -2,6 +2,16 @@
 
 ## 0.21.0 / @byok-sdk/keys 0.6.2 — 2026-09-24 (unpublished until the registry confirms)
 
+- **Removed (distribution, BREAKING)** — `byok-sdk` and `@byok-sdk/testkit`
+  are no longer published. The unscoped `byok-sdk` namespace umbrella is
+  retired per ADR-035 and `packages/sdk` is deleted: install and import the
+  scoped packages directly (`client` → `@byok-sdk/client`, `cloudDataplane` →
+  `@byok-sdk/cloud-dataplane`, `uiRuntime` → `@byok-sdk/ui-runtime`, and so
+  on). `@byok-sdk/testkit` becomes a private workspace package used only by the
+  private conformance suite. Existing versions of both stay on npm. The
+  published set is now exactly nine packages: eight aligned at 0.21.0 plus
+  keys, and `check:release-graph` rejects any other public manifest under
+  `packages/`. The release notes carry the optional `npm deprecate` commands.
 - **Changed (prepared message egress, BREAKING wire change)** —
   `task.offer_prepared` can now run the chat lane. `TaskOfferPreparedPayload`
   REQUIRES `egressPolicy` and may carry `messageEgress`; `enqueuePreparedOffer`

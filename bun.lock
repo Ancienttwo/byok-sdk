@@ -182,19 +182,6 @@
         "zod": "^4.4.3",
       },
     },
-    "packages/sdk": {
-      "name": "byok-sdk",
-      "version": "0.21.0",
-      "dependencies": {
-        "@byok-sdk/client": "workspace:*",
-        "@byok-sdk/cloud": "workspace:*",
-        "@byok-sdk/cloud-dataplane": "workspace:*",
-        "@byok-sdk/core": "workspace:*",
-        "@byok-sdk/protocol": "workspace:*",
-        "@byok-sdk/server": "workspace:*",
-        "@byok-sdk/ui-runtime": "workspace:*",
-      },
-    },
     "packages/server": {
       "name": "@byok-sdk/server",
       "version": "0.21.0",
@@ -211,7 +198,7 @@
     },
     "packages/testkit": {
       "name": "@byok-sdk/testkit",
-      "version": "0.21.0",
+      "version": "0.0.0",
       "dependencies": {
         "@byok-sdk/core": "workspace:*",
         "@byok-sdk/protocol": "workspace:*",
@@ -746,8 +733,6 @@
     "buffer-equal-constant-time": ["buffer-equal-constant-time@1.0.1", "", {}, "sha512-zRpUiDwd/xk6ADqPMATG8vc9VPrkck7T07OIx0gnjmJAnHnTVXNQG3vfvWNuiZIkwu9KrKdA1iJKfsfTVxE6NA=="],
 
     "bundle-require": ["bundle-require@5.1.0", "", { "dependencies": { "load-tsconfig": "0.2.5" }, "peerDependencies": { "esbuild": "0.27.7" } }, "sha512-3WrrOuZiyaaZPWiEt4G3+IffISVC9HYlWueJEBWED4ZH4aIAC2PnkdnuRrR94M+w6yGWn4AglWtJtBI8YqvgoA=="],
-
-    "byok-sdk": ["byok-sdk@workspace:packages/sdk"],
 
     "bytes": ["bytes@3.1.2", "", {}, "sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg=="],
 
