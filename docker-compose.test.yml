@@ -3,7 +3,7 @@
 # `docker compose -f docker-compose.test.yml up -d --wait` is the whole
 # command: `--wait` blocks until every service reports healthy, so a suite that
 # starts after it never races the server's own startup. Both services are
-# defined here even though S4A-a only exercises Postgres — MinIO is the S3
+# defined here even though S4A-a only exercises Postgres — SeaweedFS is the S3
 # authority S4A-c's R2 adapter signs against, and defining the substrate twice
 # (once per slice) is exactly the second source of truth this file exists to
 # avoid.
@@ -25,8 +25,8 @@
 # holds real data. Nothing here is a secret, so nothing here belongs in a
 # secret store.
 #
-# Ports are offset from the defaults (5433 not 5432, 9100/9101 not 9000/9001)
-# so a developer's own Postgres or MinIO keeps working while this stack is up.
+# Ports are offset from the defaults (5433 not 5432, 9100 not 8333/9000) so a
+# developer's own Postgres or S3 server keeps working while this stack is up.
 
 name: byok-dataplane-test
 
@@ -59,20 +59,35 @@ services:
     volumes:
       - ./packages/cloud-dataplane/src/__tests__/fixtures/schema-authority-bootstrap.sql:/docker-entrypoint-initdb.d/10-schema-authority-bootstrap.sql:ro
 
-  minio:
-    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
-    # GitHub Actions `services:` containers cannot override CMD, which is the
-    # concrete reason this substrate is a compose file rather than a service
-    # block: MinIO does not start without `server`.
-    command: server /data --console-address ':9101'
+  # The S3 substrate. It was MinIO until MinIO withdrew every anonymous image
+  # (Docker Hub repository deleted, quay.io now 401, OSS repository archived),
+  # which a public test substrate cannot depend on. SeaweedFS (Apache-2.0) is
+  # an independent SigV4 implementation that answers the whole surface the
+  # R2 adapter uses — CreateBucket, presigned PUT/GET with signed
+  # content-length/content-type, expiry, HEAD, DELETE, ListObjectsV2 — with the
+  # same refusals the object suite asserts. Pinned by tag AND index digest: the
+  # tag says which release, the digest makes a re-pushed tag a pull failure
+  # rather than a silent substrate change.
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.47@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882
+    # `mini` is the image's single-process master + volume + filer + S3 mode
+    # (the entrypoint adds `-dir=/data`). The flags are why this is a compose
+    # service rather than a GitHub `services:` block, which cannot override
+    # CMD: no telemetry from a CI runner, and no admin UI nothing here uses.
+    command: mini -master.telemetry=false -admin.ui=false
+    # The one admin identity, read from these variables at startup. The
+    # literals are historical (they predate the substrate swap) and are
+    # repeated verbatim in the suites' support file and the recurring smoke.
     environment:
-      MINIO_ROOT_USER: byokminio
-      MINIO_ROOT_PASSWORD: byokminio
+      AWS_ACCESS_KEY_ID: byokminio
+      AWS_SECRET_ACCESS_KEY: byokminio
     ports:
-      - '9100:9000'
-      - '9101:9101'
+      - '9100:8333'
+    # `/healthz` is the S3 server's own route on the S3 port; `mini` brings the
+    # S3 server up only after master, volume and filer report ready, so a 200
+    # here means the whole stack behind it is serving.
     healthcheck:
-      test: ['CMD-SHELL', 'mc ready local || exit 1']
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8333/healthz || exit 1']
       interval: 2s
       timeout: 3s
       retries: 30

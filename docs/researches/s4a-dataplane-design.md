@@ -35,6 +35,8 @@
 
 **裁定：C。** 仓库根 `docker-compose.test.yml` 同时起 `postgres` 与 `minio`，CI 与本地跑同一条 `docker compose -f docker-compose.test.yml up -d --wait`。可用性以环境变量为闸：`BYOK_TEST_POSTGRES_URL` / `BYOK_TEST_S3_ENDPOINT` 存在则跑，缺失则 `describe.skipIf` 明示跳过；**但当 `BYOK_REQUIRE_DATAPLANE=1` 时缺失就是硬失败**，该变量只在 CI 的 dataplane job 里设置。
 
+> **2026-09-25 修订**：MinIO 撤回了全部匿名可拉取的镜像（Docker Hub `minio/minio` 仓库已删除，`quay.io/minio/minio` 对匿名请求返回 401，`github.com/minio/minio` 已归档且只发源码），S3 服务因此改为 `seaweedfs`（`chrislusf/seaweedfs`，Apache-2.0，按 tag + digest 钉死）。下文提到 MinIO 的裁定理由对 SeaweedFS 同样成立：它是独立的 SigV4 实现，object suite 的全部拒绝断言（`SignatureDoesNotMatch`、`Request has expired`、签入的 length/type 不符返回 403）原样通过。S4A-c 的 checksum probe 当时是对 MinIO 做的，保留为历史事实。
+
 **理由**
 
 - D 直接出局：`claim/status CAS`、`transaction atomicity: native`、S4B 的并发不超卖，全部要求 N 个连接真并发争一行。PGlite 把并发串行化，这些断言在它上面**永远绿但零证明力**——正是 no-silent-downgrade 要禁的形状。

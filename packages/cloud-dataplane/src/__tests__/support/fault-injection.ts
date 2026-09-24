@@ -2,9 +2,9 @@
  * A deterministic fault injector for the object-store `fetch` seam.
  *
  * This is NOT a shadow S3, and the distinction is the whole reason it is only
- * fifty lines. MinIO is the S3 implementation under test: it verifies
+ * fifty lines. SeaweedFS is the S3 implementation under test: it verifies
  * signatures, enforces expiry, and stores bytes, and every protocol-level
- * assertion goes through it. What MinIO cannot be made to do on cue is fail —
+ * assertion goes through it. What SeaweedFS cannot be made to do on cue is fail —
  * a 503 on the first two attempts and a 200 on the third, in that order, every
  * run. Retry and backoff semantics are the one thing that needs scripting, so
  * this wraps the real fetch and replaces individual attempts with faults

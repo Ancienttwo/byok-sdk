@@ -26,7 +26,7 @@ const OTHER_TENANT = tenantId('tenant-enrollment-projection-other');
 
 if (SKIP_DATAPLANE) {
   describe.skip(`Postgres authenticated enrollment tenant projection — ${SKIP_REASON}`, () => {
-    it('needs a real Postgres/MinIO substrate', () => undefined);
+    it('needs a real Postgres/SeaweedFS substrate', () => undefined);
   });
 } else {
   describe('Postgres authenticated enrollment tenant projection', () => {

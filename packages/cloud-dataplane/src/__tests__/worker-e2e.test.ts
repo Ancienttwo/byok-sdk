@@ -10,7 +10,7 @@
  * enqueues AND acks, truth commits AND reads back. The blob probe additionally
  * runs the aws4fetch signing and S3 HTTP path inside workerd — presign and
  * verify on the Worker side, the device-side PUT from this process, exactly
- * the split the real topology has — with MinIO as the independent SigV4
+ * the split the real topology has — with SeaweedFS as the independent SigV4
  * adjudicator, same as the Node object suite.
  *
  * Gating follows the substrate law (support/dataplane.ts):
@@ -337,7 +337,7 @@ describe.skipIf(!RUN)('the runtime subpath on a real workerd', () => {
   });
 
   // The S3 half of the substrate, coupled the same way SKIP_DATAPLANE couples
-  // it: without MinIO the object probe cannot run, so it skips rather than
+  // it: without SeaweedFS the object probe cannot run, so it skips rather than
   // half-passing. Under the REQUIRE flag the import-time guard above already
   // made the missing endpoint a hard failure.
   it.skipIf(S3_ENDPOINT === undefined)(
@@ -358,7 +358,7 @@ describe.skipIf(!RUN)('the runtime subpath on a real workerd', () => {
       };
 
       // The device-side upload, exactly as the Node object suite performs it:
-      // the signed shape must be honored verbatim, and MinIO adjudicates the
+      // the signed shape must be honored verbatim, and SeaweedFS adjudicates the
       // signature an aws4fetch call inside workerd produced.
       const uploaded = await fetch(grant.uploadUrl, {
         method: 'PUT',

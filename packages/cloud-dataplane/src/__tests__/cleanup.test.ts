@@ -725,7 +725,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
   });
 });
 
-describe.skipIf(SKIP_DATAPLANE)('R2 maintenance against MinIO', () => {
+describe.skipIf(SKIP_DATAPLANE)('R2 maintenance against SeaweedFS', () => {
   it('lists tenant-prefixed objects and makes DELETE replay-safe on the independent substrate', async () => {
     const scope = await createObjectStorageScope();
     const hash = HASH_A.slice('sha256:'.length);
