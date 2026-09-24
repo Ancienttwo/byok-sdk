@@ -73,18 +73,19 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.20.0`; publication requires separate release
+aligned dispatch release is `0.21.0`; publication requires separate release
 authorization and registry readback. The current independent keys candidate is
-`0.6.1`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.20.0`, proven from an isolated standard npm install rather
+`0.6.2`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.21.0`, proven from an isolated standard npm install rather
 than the workspace graph.
 
 The last train the registry has confirmed is `0.20.0` with keys `0.6.1`,
 published on 2026-09-23 from the `v0.20.0` tag (`48605554`); both read back as
 `latest` on 2026-09-23. The previous train, `0.19.0` / keys `0.6.0`, was
-published on 2026-09-22 from the `v0.19.0` tag (`9408ed7b`). The registry,
-not this document, is the authority on what has shipped — read it back with
-`npm view byok-sdk version` and `npm view @byok-sdk/keys version`.
+published on 2026-09-22 from the `v0.19.0` tag (`9408ed7b`). `0.21.0` / keys
+`0.6.2` are prepared and unpublished. The registry, not this document, is the
+authority on what has shipped — read it back with `npm view byok-sdk version`
+and `npm view @byok-sdk/keys version`.
 
 ## Local Agent application release authority
 
