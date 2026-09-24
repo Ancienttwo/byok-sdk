@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { descendantTemplateDigest, type ImplementationSpawnBindingV1, type RuntimeEntryV1 } from '@byok-sdk/implementation-identity';
 import { createRuntimeDescendantPlan, parseRuntimeDescendantPlan, requiredRuntimePlanKinds, type RuntimeDescendantDeclarationV1, type RuntimeDescendantPlanV1 } from '../adapters/pi/runtime-descendant-plan';
-const vectors = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/c07-runtime-record/canonical-revision.v1.json', import.meta.url), 'utf8')) as {
+const vectors = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/c07-runtime-record/official-pi-087.v1.json', import.meta.url), 'utf8')) as {
   templateVectors: { id: RuntimeEntryV1; template: ImplementationSpawnBindingV1; templateDigest: string; templateUtf8: string }[];
   resolutionVectors: { response: RuntimeDescendantDeclarationV1 }[];
 };
@@ -57,7 +57,7 @@ describe('strict runtime descendant plan', () => {
   });
   it.each(['manifestRevision', 'closureDigest', 'loaderEnvValuesDigest', 'nativeProvenance', 'envCommitments'])('rejects rehashed %s drift', field => {
     const input = clone(plan()) as any, row = input.templates[1];
-    if (field === 'nativeProvenance') row.template.identity.nativeProvenance.forkBuild += 1;
+    if (field === 'nativeProvenance') row.template.identity.nativeProvenance.compilerVersion += 1;
     else if (field === 'envCommitments') row.template.envCommitments.PI_CODING_AGENT_SESSION_DIR += '/other';
     else row.template.identity[field] = 'e'.repeat(64);
     row.templateDigest = descendantTemplateDigest(row.template);

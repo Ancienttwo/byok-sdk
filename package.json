@@ -2,7 +2,7 @@
   "name": "byok-sdk-workspace",
   "version": "0.0.0",
   "private": true,
-  "description": "BYOK SDK monorepo — bring-your-own-agent task dispatch for SaaS products",
+  "description": "BYOK SDK monorepo \u2014 bring-your-own-agent task dispatch for SaaS products",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -35,6 +35,16 @@
     "@types/node": "^22.20.1",
     "tsup": "^8.5.1",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "sigstore": "4.1.1",
+    "acorn": "8.15.0"
+  },
+  "overrides": {
+    "@earendil-works/pi-coding-agent": "0.87.1",
+    "@earendil-works/pi-ai": "0.87.1",
+    "@earendil-works/pi-agent-core": "0.87.1",
+    "@earendil-works/chord": "0.87.1",
+    "@earendil-works/pi-telemetry": "0.87.1",
+    "@earendil-works/pi-tui": "0.87.1"
   }
 }

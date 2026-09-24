@@ -84,18 +84,7 @@ const BINDING = {
 async function prepareArtifact(cwd: string, artifactPath: string, launchCwd: string): Promise<RuntimePreparedLaunchV1> {
   const compiled = await createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity()).compile({
     snapshot: {
-      prompt: {
-        cwd,
-        selectedTools: [],
-        // The Host owns the whole system message on official Pi.
-        customPrompt: 'You summarise repositories.',
-        toolSnippets: {},
-        toolGuidelines: {},
-        promptGuidelines: [],
-        contextFiles: [],
-        skills: [],
-        docsPaths: { readmePath: '/sealed/README.md', docsPath: '/sealed/docs', examplesPath: '/sealed/examples' },
-      },
+      prompt: { systemPrompt: 'You summarise repositories.' },
       messages: [{ role: 'user', content: 'summarise the repository', timestamp: 1_700_000_000_000 }],
       tools: [],
     },

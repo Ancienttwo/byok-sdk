@@ -168,9 +168,9 @@ describe('B-P2 native composition: runtime identity', () => {
     // pinned official tuple (upstream tag and registry gitHead), not a
     // manifest-declared claim.
     expect(Object.hasOwn(installed, 'byokFork')).toBe(false);
-    expect(identity.upstreamBase).toBe(`v${installed.version}`);
+    expect(identity.tarballIntegrity).toMatch(/^sha512-/);
     expect(identity.upstreamCommit).toBe('f07218c4d4bbc12bef056a7058c3dd49dfe41abe');
-    expect(identity.forkBuild).toBe(0);
+    expect(identity.closureDigest).toMatch(/^[0-9a-f]{64}$/);
     // The two lockstep packages the compile and the session load are installed
     // at exactly the coding agent's version.
     for (const lockstep of ['@earendil-works/pi-ai', '@earendil-works/pi-agent-core']) {
@@ -228,8 +228,8 @@ describe('B-P2 native composition: pure compile', () => {
     expect(compiled.projection.digest).toBe(
       createHash('sha256').update(compiled.counterProjection, 'utf8').digest('hex'),
     );
-    expect(compiled.residual.length).toBeGreaterThan(0);
-    expect(compiled.residual.map((entry) => entry.key)).toContain('max_tokens');
+    expect(compiled.residual).toEqual([]);
+    expect(compiled.counterProjection).toBe(compiled.requestBody);
     expect(compiled.envelope.providerRequest.compilerVersion).toBe(SUPPORTED_PREPARED_COMPILER_VERSION);
     expect(compiled.requestBytes).toBe(Buffer.byteLength(compiled.requestBody, 'utf8'));
     expect(compiled.projectionBytes).toBe(Buffer.byteLength(compiled.counterProjection, 'utf8'));
@@ -409,15 +409,11 @@ describe('B-P2 native composition: pure compile', () => {
 });
 
 describe('B-P2 native composition: unsupported input rejects rather than filling gaps', () => {
-  // PRODUCTION GAP (WP2b): the retired fork refused a tool schema without an
-  // object `properties` member ("expected full object tool schema",
-  // pi-wt-086 `core/input-preparation.ts:280-287`). The SDK-owned projection
-  // `adapters/pi/prepared-request.ts:220-221` (`projectTool`) checks only
-  // `type === "object"`, so `{ type: "object" }` now compiles. Restore this
-  // case once `projectTool` also refuses a missing/non-object `properties`:
-  //   tools: base.snapshot.tools.map((tool) =>
-  //     tool.name === 'read' ? { ...tool, parameters: { type: 'object' } } : tool)
-  it.todo('rejects a tool schema that is not a full object schema (needs projectTool properties check)');
+  it('rejects a tool schema without object properties', async () => {
+    const request = compileRequest();
+    const tools = request.snapshot.tools.map(tool => ({ ...tool, parameters: { type: 'object' } }));
+    await expect(createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity()).compile({ ...request, snapshot: { ...request.snapshot, tools } })).rejects.toBeInstanceOf(InputPreparationCompileError);
+  });
 
   it.each([
     [
@@ -432,7 +428,7 @@ describe('B-P2 native composition: unsupported input rejects rather than filling
           ...base,
           snapshot: {
             ...base.snapshot,
-            prompt: { ...base.snapshot.prompt, selectedTools: ['read'] },
+            prompt: { ...base.snapshot.prompt, selectedTools: ['read'] } as never,
           },
         };
       },
@@ -443,7 +439,7 @@ describe('B-P2 native composition: unsupported input rejects rather than filling
         const base = compileRequest();
         return {
           ...base,
-          snapshot: { ...base.snapshot, prompt: { ...base.snapshot.prompt, promptGuidelines: ['prefer small diffs'] } },
+          snapshot: { ...base.snapshot, prompt: { ...base.snapshot.prompt, promptGuidelines: ['prefer small diffs'] } as never },
         };
       },
     ],
@@ -451,8 +447,8 @@ describe('B-P2 native composition: unsupported input rejects rather than filling
       'a Host system message that is not stated as customPrompt',
       (): CompilePreparedInputRequest => {
         const base = compileRequest();
-        const { customPrompt: _dropped, ...prompt } = base.snapshot.prompt;
-        return { ...base, snapshot: { ...base.snapshot, prompt: { ...prompt, appendSystemPrompt: 'appended' } } };
+        const { systemPrompt: _dropped, ...prompt } = base.snapshot.prompt;
+        return { ...base, snapshot: { ...base.snapshot, prompt: { ...prompt, appendSystemPrompt: 'appended' } as never } };
       },
     ],
     [
@@ -479,14 +475,13 @@ describe('B-P2 native composition: unsupported input rejects rather than filling
  * the installed runtime is the wrong one.
  */
 describe('B-P2 native composition: the envelope contract is verified, not assumed', () => {
-  const COUNTER_PROJECTION = '{"model":"glm-4.6","messages":[],"tools":[]}';
+  const COUNTER_PROJECTION = '{"model":"glm-4.6","messages":[],"max_tokens":4096}';
 
   const SUPPORTED_IDENTITY = {
     packageName: '@earendil-works/pi-coding-agent',
     packageVersion: '0.87.1',
-    upstreamBase: 'v0.87.1',
+    tarballIntegrity: 'sha512-test', provenanceDigest: 'a'.repeat(64), closureDigest: 'b'.repeat(64),
     upstreamCommit: 'f07218c4d4bbc12bef056a7058c3dd49dfe41abe',
-    forkBuild: 0,
     envelopeFormat: 'byok.pi.prepared-input',
     requestFormat: 'byok.pi.openai-completions.request',
     compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,
@@ -495,7 +490,7 @@ describe('B-P2 native composition: the envelope contract is verified, not assume
   function envelope(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     return {
       format: 'byok.pi.prepared-input',
-      version: 1,
+      version: 4,
       transcript: { systemPrompt: 'Host system message', tools: [], messages: [] },
       providerRequest: {
         format: 'byok.pi.openai-completions.request',
@@ -507,7 +502,7 @@ describe('B-P2 native composition: the envelope contract is verified, not assume
           kind: 'content_complete',
           digest: createHash('sha256').update(COUNTER_PROJECTION, 'utf8').digest('hex'),
         },
-        residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
+        residual: [],
         digest: 'a'.repeat(64),
         ...overrides,
       },
@@ -534,7 +529,7 @@ describe('B-P2 native composition: the envelope contract is verified, not assume
       kind: 'content_complete',
       digest: createHash('sha256').update(COUNTER_PROJECTION, 'utf8').digest('hex'),
     });
-    expect(verified.residual).toEqual([{ key: 'max_tokens', valueClass: 'bounded_integer' }]);
+    expect(verified.residual).toEqual([]);
     expect(verified.projectionBytes).toBe(Buffer.byteLength(COUNTER_PROJECTION, 'utf8'));
   });
 
@@ -563,7 +558,7 @@ describe('B-P2 native composition: the envelope contract is verified, not assume
 
   it('refuses a residual value class outside the supported classification contract', () => {
     expect(refusalOf(envelope({ residual: [{ key: 'max_tokens', valueClass: 'probably_free' }] })).detail).toBe(
-      'unsupported_residual_value_class',
+      'unsupported_projection_shape',
     );
   });
 

@@ -126,7 +126,7 @@ function piRelease(): Promise<{ compiledBin: string; preparedEntry: string }> {
     await fs.writeFile(path.join(release, 'pi-entry.ts'), PI_ENTRY_SOURCE);
     await execFileAsync(bun, ['build', '--compile', './pi-entry.ts', '--outfile', './pi-compiled'], { cwd: release });
     const preparedEntry = path.join(release, 'byok-pi-prepared.mjs');
-    await fs.writeFile(preparedEntry, PI_ENTRY_SOURCE);
+    await fs.writeFile(preparedEntry, PI_ENTRY_SOURCE.replace(`process.env.${RECORD_VAR}`, `process.argv.find(arg => arg.startsWith('--test-record='))?.slice('--test-record='.length)`));
     return { compiledBin: path.join(release, 'pi-compiled'), preparedEntry };
   })();
   return releaseOnce;
@@ -170,9 +170,7 @@ async function prepareArtifact(home: string, artifactPath: string, launchCwd: st
   const binding = { inputIdentity: 'cwd-input', runtimeIdentity: 'cwd-runtime', policyIdentity: 'cwd-policy', profileRevision: 'cwd-profile' };
   const compiled = await createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity()).compile({
     snapshot: {
-      prompt: { cwd: home, selectedTools: [], customPrompt: PREPARED_SYSTEM_PROMPT,
-        toolSnippets: {}, toolGuidelines: {}, promptGuidelines: [], contextFiles: [], skills: [],
-        docsPaths: { readmePath: '/sealed/README.md', docsPath: '/sealed/docs', examplesPath: '/sealed/examples' } },
+      prompt: { systemPrompt: PREPARED_SYSTEM_PROMPT },
       messages: [{ role: 'user', content: 'report cwd', timestamp: 1700000000000 }], tools: [],
     },
     model, options: { cacheRetention: 'none', maxTokens: 256 }, binding, toolExecutors: {},
@@ -214,7 +212,8 @@ async function launchThroughAdapter(lane: 'ordinary' | 'prepared', home: string)
         if (!args[0]?.endsWith('byok-pi-prepared.js') || !/^--config-digest=[0-9a-f]{64}$/.test(args[1] ?? '') || args[2] !== '--config') {
           throw new Error('prepared marker must replace the actual SDK prepared entry');
         }
-        return spawn(BUN_BIN!, [preparedEntry, ...args.slice(1)], options);
+        expect(options.env).not.toHaveProperty(RECORD_VAR);
+        return spawn(BUN_BIN!, [preparedEntry, ...args.slice(1), `--test-record=${env[RECORD_VAR]}`], options);
       }
       return spawn(command, args, options);
     }) as unknown as SpawnFn,

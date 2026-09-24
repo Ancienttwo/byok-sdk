@@ -144,11 +144,11 @@ const MCP_CAPABLE: RuntimeCapabilities = {
 const RUNTIME: InputPreparationRuntimeIdentityV1 = {
   packageName: '@byok-sdk/pi-coding-agent',
   packageVersion: '0.85.1002',
-  upstreamBase: '0.85.1',
+  tarballIntegrity: 'sha512-'+ 'YQ=='.repeat(1),
   upstreamCommit: 'd981de1229ef899957bbe968bc8dcda02a21f477',
   envelopeFormat: 'pi.session.prepared-input',
   requestFormat: 'pi.openai-completions.prepared',
-  forkBuild: 2,
+  provenanceDigest: 'a'.repeat(64), closureDigest: 'b'.repeat(64),
   compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,
 };
 

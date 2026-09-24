@@ -4841,7 +4841,7 @@ import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INP
  * {@link InputPreparationUnsupportedRecordVersionError}. There is no
  * compatibility read.
  */
-export declare const INPUT_PREPARATION_RECORD_VERSION = 6;
+export declare const INPUT_PREPARATION_RECORD_VERSION = 7;
 /** The durable idempotency key. Never a task id, and never caller-asserted: `scopeId` comes from the trusted authority grant. */
 export interface InputPreparationRecordKey {
     readonly scopeId: string;
@@ -9777,7 +9777,7 @@ export type { OperationalHealthSnapshot, OperationalHealthState } from './daemon
  * drift apart.
  */
 export { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_ERROR_CODES, INPUT_PREPARATION_RECEIPT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INPUT_PREPARATION_REQUEST_FORMAT, INPUT_PREPARATION_RETIRED_PROMPT_KEYS, INPUT_PREPARATION_RETIRED_REQUEST_KEYS, INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS, INPUT_PREPARATION_VERSION, InputPreparationPolicyError, validateInputPreparationLimits, } from './input-preparation';
-export type { InputPreparationArtifactSummaryV1, InputPreparationAuthorityGrantV1, InputPreparationCompiledPromptSnapshotV1, InputPreparationCompiledSnapshotV1, InputPreparationAuthorityOutcomeV1, InputPreparationAuthorityResolver, InputPreparationSourceAuthorityRequestV1, InputPreparationSourceAuthorityOutcomeV1, InputPreparationBindingV1, InputPreparationCancelParamsV1, InputPreparationContextFileV1, InputPreparationCounterAdapter, InputPreparationCounterAuthorityV1, InputPreparationCounterEvidenceV1, InputPreparationCounterRequestV1, InputPreparationCounterResultV1, InputPreparationCounterTargetV1, InputPreparationCoverageProofV1, InputPreparationDenialReasonV1, InputPreparationDocsPathsV1, InputPreparationErrorCodeV1, InputPreparationHostCanonicalAssistantMessageV1, InputPreparationLimitsPolicyV1, InputPreparationLookupParamsV1, InputPreparationModelCostV1, InputPreparationMessageV1, InputPreparationModelV1, InputPreparationOptionsV1, InputPreparationPinV1, InputPreparationPromptSnapshotV1, InputPreparationReadinessReasonV1, InputPreparationReceiptV1, InputPreparationRequestV1, InputPreparationRuntimeIdentityV1, InputPreparationScopeClaimV1, InputPreparationSelectionV1, InputPreparationSkillV1, InputPreparationSnapshotV1, InputPreparationSourceV1, InputPreparationStateV1, InputPreparationToolV1, InputPreparationUserMessageV1, } from './input-preparation';
+export type { InputPreparationArtifactSummaryV1, InputPreparationAuthorityGrantV1, InputPreparationCompiledPromptSnapshotV1, InputPreparationCompiledSnapshotV1, InputPreparationAuthorityOutcomeV1, InputPreparationAuthorityResolver, InputPreparationSourceAuthorityRequestV1, InputPreparationSourceAuthorityOutcomeV1, InputPreparationBindingV1, InputPreparationCancelParamsV1, InputPreparationCounterAdapter, InputPreparationCounterAuthorityV1, InputPreparationCounterEvidenceV1, InputPreparationCounterRequestV1, InputPreparationCounterResultV1, InputPreparationCounterTargetV1, InputPreparationCoverageProofV1, InputPreparationDenialReasonV1, InputPreparationErrorCodeV1, InputPreparationHostCanonicalAssistantMessageV1, InputPreparationLimitsPolicyV1, InputPreparationLookupParamsV1, InputPreparationModelCostV1, InputPreparationMessageV1, InputPreparationModelV1, InputPreparationOptionsV1, InputPreparationPinV1, InputPreparationPromptSnapshotV1, InputPreparationReadinessReasonV1, InputPreparationReceiptV1, InputPreparationRequestV1, InputPreparationRuntimeIdentityV1, InputPreparationScopeClaimV1, InputPreparationSelectionV1, InputPreparationSnapshotV1, InputPreparationSourceV1, InputPreparationStateV1, InputPreparationToolV1, InputPreparationUserMessageV1, } from './input-preparation';
 export { INPUT_PREPARATION_CANCEL_METHOD, INPUT_PREPARATION_IDENTIFIER_MAX_BYTES, INPUT_PREPARATION_LOOKUP_METHOD, INPUT_PREPARATION_PREPARE_METHOD, parseInputPreparationCancelParams, parseInputPreparationLookupParams, parseInputPreparationRequestParams, } from './daemon/control-protocol';
 export type { InputPreparationResult } from './daemon/control-protocol';
 export { journalHash, JournalUnavailableError, JournalCorruptError, JournalRecordTooLargeError, JournalUnknownTaskError, JournalClosedError, } from './daemon/journal/journal';
@@ -9908,8 +9908,8 @@ export declare const INPUT_PREPARATION_ARTIFACT_FORMAT = "byok.input-preparation
  * `bound` member no adapter could honestly state; and the readiness reason
  * `request_content_not_text` was added.
  *
- * Version 6 requires strict prepared egress. D and the fourteen admission
- * comparisons are unchanged; old artifacts are not read forward.
+ * Version 7 uses Host systemPrompt and the official Pi v4 envelope/identity.
+ * The fourteen admission comparisons remain; old artifacts are not read forward.
  *
  * The number itself is owned by `@byok-sdk/protocol`'s
  * `INPUT_PREPARATION_WIRE_VERSION`, because the device capability token
@@ -9924,7 +9924,7 @@ export declare const INPUT_PREPARATION_ARTIFACT_FORMAT = "byok.input-preparation
  * frozen under a claim this version cannot re-derive, and there is no honest
  * value to translate a prompt rendered by another renderer into.
  */
-export declare const INPUT_PREPARATION_VERSION: 6;
+export declare const INPUT_PREPARATION_VERSION: 7;
 /**
  * Key-sorted JSON, so two structurally equal values always produce the same
  * bytes and therefore the same digest. Field ORDER must never be able to turn
@@ -10112,69 +10112,11 @@ export interface InputPreparationAccountingPolicyRefV1 {
     readonly ruledResidualKeys: readonly string[];
 }
 /** One authorized context file, exactly as the caller resolved it. Never read from disk here. */
-export interface InputPreparationContextFileV1 {
-    readonly path: string;
-    readonly content: string;
-}
-/**
- * The three documentation locations the native prompt renderer names.
- *
- * These field names are this surface's own contract and deliberately do not
- * track the native runtime's parameter names; `adapters/pi/input-preparation.ts`
- * maps them onto whatever the pinned runtime calls them.
- */
-export interface InputPreparationDocsPathsV1 {
-    readonly readmePath: string;
-    readonly docsPath: string;
-    readonly examplesPath: string;
-}
-/**
- * One skill the native system prompt renders.
- *
- * Exactly the fields the renderer reads, and nothing else. A caller-supplied
- * PREFORMATTED skills block would be a second renderer of the same prompt
- * region, free to drift from what a live session emits; loader bookkeeping the
- * renderer never reads is absent because the caller cannot know it and this
- * SDK must not invent it.
- */
-export interface InputPreparationSkillV1 {
-    readonly name: string;
-    readonly description: string;
-    readonly filePath: string;
-    readonly disableModelInvocation: boolean;
-}
-/**
- * Explicit, already-authorized inputs for the native system prompt renderer.
- *
- * `selectedTools` is deliberately NOT here. The native contract requires it to
- * equal the model-visible manifest exactly, and this version moved that
- * manifest onto the device — so a caller stating the list would be stating the
- * manifest through the prompt. The daemon fills it from the assembled surface
- * (see {@link InputPreparationCompiledPromptSnapshotV1}).
- *
- * `toolSnippets` and `toolGuidelines` stay caller-authored because both are
- * prompt TEXT, but their keys must name tools the assembled manifest actually
- * contains; the native compiler refuses either for a tool that is not in the
- * manifest, and nothing here papers over that.
- */
+/** Complete Host-authored prompt, carried verbatim. Prepared runs have no Pi default prompt. */
 export interface InputPreparationPromptSnapshotV1 {
-    readonly customPrompt?: string;
-    readonly appendSystemPrompt?: string;
-    readonly cwd: string;
-    readonly toolSnippets: Readonly<Record<string, string>>;
-    /** Guideline bullets each tool contributes, keyed by tool name. */
-    readonly toolGuidelines: Readonly<Record<string, readonly string[]>>;
-    readonly promptGuidelines: readonly string[];
-    readonly contextFiles: readonly InputPreparationContextFileV1[];
-    /** The skills the prompt renders. Empty means no skills. */
-    readonly skills: readonly InputPreparationSkillV1[];
-    readonly docsPaths: InputPreparationDocsPathsV1;
+    readonly systemPrompt: string;
 }
-/** The caller's prompt snapshot plus the tool-name list the daemon derived. */
-export interface InputPreparationCompiledPromptSnapshotV1 extends InputPreparationPromptSnapshotV1 {
-    /** Exactly the assembled manifest's tool names, in its canonical order. */
-    readonly selectedTools: readonly string[];
-}
+export type InputPreparationCompiledPromptSnapshotV1 = InputPreparationPromptSnapshotV1;
 /**
  * One model-visible user message.
  *
@@ -10331,7 +10273,7 @@ export declare const INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS: readonly ['tools']
  * model-visible manifest exactly by native contract, so stating it is stating
  * the manifest through the prompt.
  */
-export declare const INPUT_PREPARATION_RETIRED_PROMPT_KEYS: readonly ['selectedTools'];
+export declare const INPUT_PREPARATION_RETIRED_PROMPT_KEYS: readonly ['selectedTools', 'customPrompt', 'appendSystemPrompt', 'cwd', 'toolSnippets', 'toolGuidelines', 'promptGuidelines', 'contextFiles', 'skills', 'docsPaths'];
 /** Params for `input_preparation.lookup` and `input_preparation.cancel`. */
 export interface InputPreparationLookupParamsV1 {
     readonly requestId: string;
@@ -10596,9 +10538,10 @@ export interface InputPreparationCounterEvidenceV1 extends InputPreparationCount
 export interface InputPreparationRuntimeIdentityV1 {
     readonly packageName: string;
     readonly packageVersion: string;
-    readonly upstreamBase: string;
+    readonly tarballIntegrity: string;
+    readonly provenanceDigest: string;
+    readonly closureDigest: string;
     readonly upstreamCommit: string;
-    readonly forkBuild: number;
     /** The native envelope format tag this compiler produced. */
     readonly envelopeFormat: string;
     /** The native provider-request format tag this compiler produced. */
@@ -10872,10 +10815,9 @@ export declare const INPUT_PREPARATION_ERROR_CODES: readonly ['input_preparation
 'permission_mode_denied', 
 /**
  * The `prompt_prepared` frame this preparation would be launched with does
- * not fit one RPC frame under the SDK's send-side bound
- * (`util/rpc-frame.ts` `RPC_MAX_FRAME_BYTES`). The bound is the SDK's
- * transport limit, not the operator's, so it is decided before the
- * operator's per-artifact byte policy: an artifact
+ * not fit one RPC frame the native runtime will accept
+ * (`RPC_MAX_FRAME_BYTES`). The bound is the RUNTIME's, not the operator's, so
+ * it is decided before the operator's per-artifact byte policy: an artifact
  * that could never be delivered must not be counted, retained or charged
  * against a scope aggregate. Terminal — the same input recompiles to the same
  * frame, so nothing here retries.

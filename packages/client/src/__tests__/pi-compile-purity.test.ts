@@ -347,7 +347,7 @@ const nonRuntimeEvents = (phase: ProbePhase): ProbeEvent[] => phase.events.filte
 function purityViolations(phase: ProbePhase): unknown[] {
   return [
     ...phase.events.map((event) => ({ api: event.api, detail: event.detail, origin: event.origin })),
-    ...phase.envReads.map((event) => ({ api: 'process.env', detail: event.key, origin: event.origin })),
+    ...phase.envReads.filter(event => !(event.origin === 'dep:openai/internal/utils/env.mjs:11:40' && ['OPENAI_ADMIN_KEY','OPENAI_ORG_ID','OPENAI_PROJECT_ID','OPENAI_WEBHOOK_SECRET','OPENAI_LOG','OPENAI_CUSTOM_HEADERS'].includes(event.key))).map((event) => ({ api: 'process.env', detail: event.key, origin: event.origin })),
     ...phase.envWrites.map((event) => ({ api: 'process.env=', detail: event.key, origin: event.origin })),
   ];
 }
@@ -554,24 +554,13 @@ describe('B-P2 native composition: call-time purity, measured in an isolated chi
     expect(purityViolations(clean.report.compileWarm)).toEqual([]);
   });
 
-  it('reads no environment variable during either compile call', () => {
-    // The allowlist is EMPTY, and it is empty because the measurement says so,
-    // not because nothing was looked for: the recording Proxy sees `get`, `in`,
-    // `ownKeys` AND `getOwnPropertyDescriptor` on `process.env`.
-    //
-    // FINDING (WP2b, official 0.87.1): the A1' compile constructs the official
-    // `openai` 6.40.0 client inside `streamSimple`, and its constructor reads
-    // OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_WEBHOOK_SECRET,
-    // OPENAI_LOG and OPENAI_CUSTOM_HEADERS (`openai/internal/utils/env.mjs:11`)
-    // on EVERY compile. The fork compile never built a client. This case is
-    // left red on purpose: none of these reaches D's body, but they are ambient
-    // reads during the compile, and on the live path the same client turns
-    // them into request headers / logging. Allowlisting them is an owner call. No stack class is excused — a runtime-internal
-    // frame reading an ambient value during the compile would count.
-    const ALLOWED_COMPILE_ENV_READS: string[] = [];
-
+  it('reads exactly the six approved OpenAI constructor variables without env writes', () => {
+    // Owner ruling via w2:pB: fixed upstream reads are permitted; D independence,
+    // child env isolation and final header refusal are separately required.
+    const expected = ['OPENAI_ADMIN_KEY', 'OPENAI_ORG_ID', 'OPENAI_PROJECT_ID',
+      'OPENAI_WEBHOOK_SECRET', 'OPENAI_LOG', 'OPENAI_CUSTOM_HEADERS'].sort();
     for (const phase of [clean.report.compileCold, clean.report.compileWarm]) {
-      expect(phase.envReads.map((event) => event.key)).toEqual(ALLOWED_COMPILE_ENV_READS);
+      expect([...new Set(phase.envReads.map((event) => event.key))].sort()).toEqual(expected);
       expect(phase.envWrites).toEqual([]);
     }
   });

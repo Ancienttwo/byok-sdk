@@ -249,7 +249,7 @@ async function prepareOnThisDevice(
   const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
   const runtimeIdentity =
     `${compiler.runtime.packageName}@${compiler.runtime.packageVersion}`
-    + `+${compiler.runtime.upstreamCommit}.${String(compiler.runtime.forkBuild)}`;
+    + `+${compiler.runtime.closureDigest}.compiler-${compiler.runtime.compilerVersion}`;
 
   const assembled = await createPreparedToolSurfaceAssembler({
     toolsetRegistry: toolsets,
@@ -281,17 +281,7 @@ async function prepareOnThisDevice(
   const snapshot = {
     // Stated in full: every prompt input that decides the bytes is named here.
     // `cwd` and `docsPaths` are renderer inputs and reach nothing.
-    prompt: {
-      cwd: workspaceDir,
-      selectedTools: surface.tools.map((tool) => tool.name),
-      customPrompt: 'You are the prepared BYOK test agent. Use the echo tool when asked.',
-      toolSnippets: {},
-      toolGuidelines: {},
-      promptGuidelines: [],
-      contextFiles: [],
-      skills: [],
-      docsPaths: { readmePath: getReadmePath(), docsPath: getDocsPath(), examplesPath: getExamplesPath() },
-    } satisfies InputPreparationCompiledPromptSnapshotV1,
+    prompt: { systemPrompt: 'You are the prepared BYOK test agent. Use the echo tool when asked.' } satisfies InputPreparationCompiledPromptSnapshotV1,
     tools: surface.tools,
     model: model(endpoint.baseUrl),
   };
@@ -299,7 +289,7 @@ async function prepareOnThisDevice(
 
   const compiled = await compiler.compile({
     snapshot: {
-      prompt: { ...snapshot.prompt, selectedTools: snapshot.prompt.selectedTools },
+      prompt: { ...snapshot.prompt },
       messages: [{ role: 'user', content: 'echo the word prepared', timestamp: 1_700_000_000_000 }],
       tools: snapshot.tools,
     },

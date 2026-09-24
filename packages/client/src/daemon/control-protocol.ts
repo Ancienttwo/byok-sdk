@@ -19,7 +19,6 @@ import type {
   InputPreparationReceiptV1,
   InputPreparationRequestV1,
   InputPreparationScopeClaimV1,
-  InputPreparationSkillV1,
   InputPreparationSnapshotV1,
 } from '../input-preparation';
 import {
@@ -1109,66 +1108,8 @@ function parseOptions(value: unknown): InputPreparationOptionsV1 | undefined {
 }
 
 function parsePromptSnapshot(value: unknown): InputPreparationPromptSnapshotV1 | undefined {
-  if (
-    !plainRecord(value) ||
-    !exactKeys(value, [
-      'customPrompt',
-      'appendSystemPrompt',
-      'cwd',
-      'toolSnippets',
-      'toolGuidelines',
-      'promptGuidelines',
-      'contextFiles',
-      'skills',
-      'docsPaths',
-    ])
-  ) {
-    return undefined;
-  }
-  if (value.customPrompt !== undefined && typeof value.customPrompt !== 'string') return undefined;
-  if (value.appendSystemPrompt !== undefined && typeof value.appendSystemPrompt !== 'string') return undefined;
-  if (typeof value.cwd !== 'string' || value.cwd.length === 0) return undefined;
-  if (!stringMap(value.toolSnippets)) return undefined;
-  if (!stringArrayMap(value.toolGuidelines)) return undefined;
-  if (!stringArray(value.promptGuidelines)) return undefined;
-  if (!Array.isArray(value.contextFiles)) return undefined;
-  const contextFiles: { path: string; content: string }[] = [];
-  for (const entry of value.contextFiles) {
-    if (!plainRecord(entry) || !exactKeys(entry, ['path', 'content'])) return undefined;
-    if (typeof entry.path !== 'string' || typeof entry.content !== 'string') return undefined;
-    contextFiles.push({ path: entry.path, content: entry.content });
-  }
-  if (!Array.isArray(value.skills)) return undefined;
-  const skills: InputPreparationSkillV1[] = [];
-  for (const entry of value.skills) {
-    if (!plainRecord(entry) || !exactKeys(entry, ['name', 'description', 'filePath', 'disableModelInvocation'])) return undefined;
-    if (typeof entry.name !== 'string' || entry.name.length === 0) return undefined;
-    if (typeof entry.description !== 'string') return undefined;
-    if (typeof entry.filePath !== 'string') return undefined;
-    if (typeof entry.disableModelInvocation !== 'boolean') return undefined;
-    skills.push({
-      name: entry.name,
-      description: entry.description,
-      filePath: entry.filePath,
-      disableModelInvocation: entry.disableModelInvocation,
-    });
-  }
-  if (!plainRecord(value.docsPaths) || !exactKeys(value.docsPaths, ['readmePath', 'docsPath', 'examplesPath'])) return undefined;
-  const docs = value.docsPaths;
-  if (typeof docs.readmePath !== 'string' || typeof docs.docsPath !== 'string' || typeof docs.examplesPath !== 'string') return undefined;
-  return {
-    ...(value.customPrompt === undefined ? {} : { customPrompt: value.customPrompt }),
-    ...(value.appendSystemPrompt === undefined ? {} : { appendSystemPrompt: value.appendSystemPrompt }),
-    cwd: value.cwd,
-    toolSnippets: { ...value.toolSnippets },
-    toolGuidelines: Object.fromEntries(
-      Object.entries(value.toolGuidelines).map(([name, lines]) => [name, [...lines]]),
-    ),
-    promptGuidelines: [...value.promptGuidelines],
-    contextFiles,
-    skills,
-    docsPaths: { readmePath: docs.readmePath, docsPath: docs.docsPath, examplesPath: docs.examplesPath },
-  };
+  if (!plainRecord(value) || !exactKeys(value, ['systemPrompt']) || typeof value.systemPrompt !== 'string') return undefined;
+  return { systemPrompt: value.systemPrompt };
 }
 
 /**
@@ -1257,7 +1198,7 @@ function parseAccountingPolicyRef(value: unknown): InputPreparationAccountingPol
 
 /** Configured MCP toolset ids: non-empty, deduplicated, and each a usable identifier. */
 function parseRequiredToolsets(value: unknown): string[] | undefined {
-  if (!Array.isArray(value) || value.length === 0) return undefined;
+  if (!Array.isArray(value)) return undefined;
   const seen = new Set<string>();
   for (const entry of value) {
     if (!identifier(entry) || seen.has(entry)) return undefined;
@@ -1381,7 +1322,7 @@ export function parseInputPreparationRequestParams(value: unknown): InputPrepara
   }
   const requiredToolsets = parseRequiredToolsets(value.requiredToolsets);
   if (!requiredToolsets) {
-    return badRequest('requiredToolsets must be a non-empty array of distinct configured toolset ids');
+    return badRequest('requiredToolsets must be an array of distinct configured toolset ids');
   }
   const snapshot = parseSnapshot(value.snapshot);
   if (!snapshot) return badRequest('snapshot must be exactly {prompt, messages}');

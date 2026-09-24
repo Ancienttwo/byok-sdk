@@ -2249,3 +2249,23 @@ control-plane compositions. Hosts can recover pending/held/refused without a
 prior accepted body or a reliable observer notification. Received payload stays
 untrusted; Host acceptance remains the sole transcript writer. This is a read
 boundary over existing storage, with no wire/session/home ownership change.
+
+## Official Pi preparation and identity (0.22.0 draft)
+
+The daemon owns source/scope admission and observed MCP tool/executor identity. Its
+lazy compiler entry calls official pi-ai streamSimple with real baseUrl, placeholder
+key and a terminating capture fetch; no Session or local prompt renderer is created.
+The Host supplies the complete systemPrompt. Envelope v4 binds the captured body D,
+with P(D)=D and residual=[]. Wire and record v7 refuse older shapes.
+
+The owned prepared host constructs the public AgentSession and one inline extension.
+context_with_system injects request-local history; registerProvider routes streaming
+through an at-most-once fetch with first-request byte equality. Both retry layers are
+off. Subsequent tool rounds use their actual context; usage and overflow validation
+precede message egress. Sentinel history never enters SessionManager or the artifact.
+
+A single checked official six-package closure inventory supplies build, native
+identity and release/registry guards. Tarball integrity, signed provenance, exact
+versions and installed-file digests replace fork markers. Encapsulated launch uses
+the measured sealed artifact plus declared assets, without external package lookup.
+M4 recursion/custody acceptance and M5 provider C measurements remain separate gates.

@@ -173,11 +173,7 @@ describe('official Pi 0.87.1: compat is endpoint-detected (g)', () => {
     // the first body the live registered gate sees.
     const request: CompilePreparedInputRequest = {
       snapshot: {
-        prompt: {
-          customPrompt: TRANSCRIPT.systemPrompt, cwd: '/agent', selectedTools: ['byok_observe'], toolSnippets: {},
-          toolGuidelines: {}, promptGuidelines: [], contextFiles: [], skills: [],
-          docsPaths: { readmePath: '', docsPath: '', examplesPath: '' },
-        },
+        prompt: { systemPrompt: TRANSCRIPT.systemPrompt },
         messages: TRANSCRIPT.messages,
         tools: TRANSCRIPT.tools,
       },
@@ -188,7 +184,8 @@ describe('official Pi 0.87.1: compat is endpoint-detected (g)', () => {
     };
     const compiled = await createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity()).compile(request);
     expect(compiled.requestBody).toBe(realOpenAiShort.body);
-    expect(compiled.residual).toContainEqual({ key: 'prompt_cache_key', valueClass: 'constant' });
+    expect(compiled.residual).toEqual([]);
+    expect(compiled.counterProjection).toBe(compiled.requestBody);
 
     const root = mkdtempSync(path.join(tmpdir(), 'byok-conformance-g-'));
     const sends: string[] = [];

@@ -29,17 +29,7 @@ export const PREPARED_COMPILE_SYSTEM_PROMPT = [
 
 export function preparedCompileSnapshot(): InputPreparationCompiledSnapshotV1 {
   return {
-    prompt: {
-      cwd: '/workspace/project',
-      selectedTools: ['read', 'bash'],
-      customPrompt: PREPARED_COMPILE_SYSTEM_PROMPT,
-      toolSnippets: {},
-      toolGuidelines: {},
-      promptGuidelines: [],
-      contextFiles: [],
-      skills: [],
-      docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
-    },
+    prompt: { systemPrompt: PREPARED_COMPILE_SYSTEM_PROMPT },
     messages: [
       // A host-canonical prefix: the host asserts this text was already said.
       // It enters T with the A2' sentinel provenance, which never reaches D.

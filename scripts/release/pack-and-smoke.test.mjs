@@ -50,7 +50,7 @@ test('release pack accepts exact prerelease versions while Pi remains a stable p
   );
 });
 
-const PI_DIRECT = PI_RUNTIME_CLOSURE.filter((name) => name !== '@earendil-works/pi-tui');
+const PI_DIRECT = PI_RUNTIME_CLOSURE.filter((name) => !['@earendil-works/pi-tui', '@earendil-works/chord', '@earendil-works/pi-telemetry'].includes(name));
 const exactClosure = (version) => Object.fromEntries(PI_DIRECT.map((name) => [name, version]));
 
 test('the Pi runtime identity authority admits only an exact official closure', () => {

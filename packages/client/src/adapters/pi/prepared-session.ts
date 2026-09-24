@@ -44,7 +44,7 @@ import {
 export const PREPARED_TRIGGER_TEXT = 'byok prepared request (replaced by the Host transcript)';
 
 export interface PreparedGateRefusal {
-  readonly code: 'prepared_body_drift' | 'prepared_endpoint_mismatch' | 'prepared_context_drift' | 'prepared_session_unarmed';
+  readonly code: 'prepared_body_drift' | 'prepared_endpoint_mismatch' | 'prepared_context_drift' | 'prepared_session_unarmed' | 'prepared_headers_invalid' | 'prepared_transport_repeated';
   readonly sequence: number;
   readonly message: string;
   readonly expectedSha256?: string;
@@ -102,7 +102,7 @@ export function createPreparedGate(options: { readonly transport?: typeof fetch 
     throw new Error(`byok_prepared_gate_refused: ${refusal.code}`);
   };
 
-  const gateFetch = async (resource: string | URL | Request, init?: RequestInit): Promise<Response> => {
+  const gateFetch = async (resource: string | URL | Request, init: RequestInit | undefined, apiKey: string | undefined): Promise<Response> => {
     state.sequence += 1;
     const sequence = state.sequence;
     if (armed === undefined) {
@@ -122,6 +122,19 @@ export function createPreparedGate(options: { readonly transport?: typeof fetch 
     if (requestUrl(resource) !== request.endpoint) {
       return refuse({ code: 'prepared_endpoint_mismatch', sequence, message: 'the request endpoint is not the prepared endpoint' });
     }
+    const headers = new Headers(init?.headers);
+    const fixed = new Set(['accept', 'authorization', 'content-type', 'user-agent',
+      'x-stainless-arch', 'x-stainless-lang', 'x-stainless-os', 'x-stainless-package-version',
+      'x-stainless-retry-count', 'x-stainless-runtime', 'x-stainless-runtime-version', 'x-stainless-timeout']);
+    const affinity = new Set(['x-session-id', 'session_id', 'x-client-request-id', 'x-session-affinity']);
+    const invalidHeader = [...headers].some(([name, value]) => !fixed.has(name)
+      && (!affinity.has(name) || value !== request.options.sessionId));
+    if (invalidHeader || headers.get('content-type') !== 'application/json'
+      || headers.get('accept') !== 'application/json'
+      || typeof apiKey !== 'string' || headers.get('authorization') !== `Bearer ${apiKey}`
+      || headers.get('x-stainless-retry-count') !== '0') {
+      return refuse({ code: 'prepared_headers_invalid', sequence, message: `provider headers differ from the admitted header contract (names: ${[...headers.keys()].join(', ')}; explicit key: ${typeof apiKey === 'string'})` });
+    }
     if (sequence === 1) {
       const body = init?.body;
       if (typeof body !== 'string' || body !== request.body) {
@@ -139,7 +152,7 @@ export function createPreparedGate(options: { readonly transport?: typeof fetch 
     state.admitted.push(sequence);
     if (sequence === 1) firstVerdict(undefined);
     const transport = options.transport ?? globalThis.fetch;
-    return transport(resource, init);
+    return transport(resource, { ...init, redirect: 'error' });
   };
 
   return {
@@ -155,9 +168,19 @@ export function createPreparedGate(options: { readonly transport?: typeof fetch 
         state.refusal ??= { code: 'prepared_session_unarmed', sequence: state.sequence, message: 'no verified prepared input is armed' };
         throw new Error('byok_prepared_gate_refused: prepared_session_unarmed');
       }
+      let fetchCalls = 0;
+      const scopedFetch: typeof fetch = async (resource, init) => {
+        fetchCalls += 1;
+        if (fetchCalls !== 1) {
+          return refuse({ code: 'prepared_transport_repeated', sequence: state.sequence,
+            message: 'one provider stream attempted more than one fetch' });
+        }
+        return gateFetch(resource, init, streamOptions?.apiKey);
+      };
       return streamSimple(model as Model<'openai-completions'>, context, {
         ...forcePreparedStreamOptions(streamOptions, armed.envelope.providerRequest.options),
-        fetch: gateFetch as typeof fetch,
+        fetch: scopedFetch,
+        env: {},
         maxRetries: 0,
       });
     },

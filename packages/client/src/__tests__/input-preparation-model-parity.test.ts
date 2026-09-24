@@ -1,3 +1,4 @@
+import { InputPreparationCompileError } from '../adapters/pi/input-preparation';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -135,15 +136,7 @@ function requestParams(candidate: unknown): unknown {
     source: { revision: 'src-rev-1', digest: 'src-digest-1' },
     selection: { model: candidate, options: { cacheRetention: 'none', maxTokens: 4_096 } },
     snapshot: {
-      prompt: {
-        cwd: '/workspace/project',
-        toolSnippets: {},
-        toolGuidelines: {},
-        promptGuidelines: [],
-        contextFiles: [],
-        skills: [],
-        docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
-      },
+      prompt: { systemPrompt: 'Host framing' },
       messages: [{ role: 'user', content: 'summarise the repository', timestamp: 1_700_000_000_000 }],
     },
     permissionMode: 'auto',
@@ -195,9 +188,8 @@ const BINDING: InputPreparationBindingV1 = {
   runtime: {
     packageName: '@byok-sdk/pi-coding-agent',
     packageVersion: '0.85.1001',
-    upstreamBase: '0.85.1',
+    tarballIntegrity: 'sha512-test', provenanceDigest: 'a'.repeat(64), closureDigest: 'b'.repeat(64),
     upstreamCommit: 'd981de1229ef899957bbe968bc8dcda02a21f477',
-    forkBuild: 1,
     envelopeFormat: 'pi.session.prepared-input',
     requestFormat: 'pi.openai-completions.prepared',
     compilerVersion: 2,
@@ -370,22 +362,13 @@ const SKILL = {
 } as const;
 
 function prompt(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    cwd: '/workspace/project',
-    toolSnippets: { read: 'read snippet' },
-    toolGuidelines: { read: ['prefer a narrow range'] },
-    promptGuidelines: ['prefer small diffs'],
-    contextFiles: [],
-    skills: [SKILL],
-    docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
-    ...overrides,
-  };
+  return { systemPrompt: 'Host framing', ...overrides };
 }
 
 const PROMPT_FIXTURES: readonly (readonly [string, Record<string, unknown>, 'accept' | 'refuse'])[] = [
-  ['the full 0.86 prompt snapshot', prompt(), 'accept'],
-  ['an empty guideline record and no skills', prompt({ toolGuidelines: {}, skills: [] }), 'accept'],
-  ['a skill the model may not invoke', prompt({ skills: [{ ...SKILL, disableModelInvocation: true }] }), 'accept'],
+  ['the complete Host systemPrompt', prompt(), 'accept'],
+  ['an empty guideline record and no skills', prompt({ toolGuidelines: {}, skills: [] }), 'refuse'],
+  ['a skill the model may not invoke', prompt({ skills: [{ ...SKILL, disableModelInvocation: true }] }), 'refuse'],
   // The renamed field: a caller still sending the 0.85 pre-rendered block is
   // refused, not silently rendered by a second renderer.
   ['the RETIRED formattedSkills string', prompt({ formattedSkills: '', skills: undefined }), 'refuse'],
@@ -609,17 +592,7 @@ function sessionComparable(value: Record<string, unknown>): string {
 const HOST_SYSTEM_PROMPT = 'You are the BYOK coding agent.\nread before you write\nreview a diff before it is proposed';
 
 const COMPILE_SNAPSHOT = {
-  prompt: {
-    cwd: '/workspace/project',
-    selectedTools: ['read'],
-    customPrompt: HOST_SYSTEM_PROMPT,
-    toolSnippets: {},
-    toolGuidelines: {},
-    promptGuidelines: [],
-    contextFiles: [],
-    skills: [],
-    docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
-  },
+  prompt: { systemPrompt: HOST_SYSTEM_PROMPT },
   messages: [
     { role: 'user' as const, content: 'what does this repository do?', timestamp: 1_699_999_999_000 },
     {
@@ -769,17 +742,11 @@ describe('input preparation: a projected BYOK provider compiles and is consumed 
       .not.toBe(sessionComparable(session));
   });
 
-  // PRODUCTION GAP (WP2b): the wire admits a whitespace-only provider id
-  // (`OPAQUE_ID` bans control characters, not spaces), and the structural check
-  // that refused it lived in the retired fork. The official A1' compile accepts
-  // it and produces an envelope. The refusal has to move into the SDK:
-  // `adapters/pi/input-preparation.ts:425` `validatePreparedModel` must refuse
-  // `model.provider.trim().length === 0` with an `InputPreparationCompileError`.
-  // Restore this case (body unchanged) once that lands:
-  //   const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
-  //   await expect(compiler.compile(compileRequest(admittedProjectedModel({ provider: '   ' }))))
-  //     .rejects.toBeInstanceOf(InputPreparationCompileError);
-  it.todo('refuses a whitespace-only provider id as the ordinary typed compile refusal (needs validatePreparedModel provider check)');
+  it('refuses a whitespace-only provider id as a typed compile refusal', async () => {
+    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+    await expect(compiler.compile(compileRequest(admittedProjectedModel({ provider: '   ' }))))
+      .rejects.toBeInstanceOf(InputPreparationCompileError);
+  });
 
   it('refuses an empty provider id at every carrier, before any compile', () => {
     const empty = { ...projectedWireModel(), provider: '' };

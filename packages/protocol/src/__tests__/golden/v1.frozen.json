@@ -20,7 +20,7 @@
     "agent-content-transcript-read",
     "agent-content-artifact-read",
     "agent-home-projection",
-    "agent-input-preparation-v6",
+    "agent-input-preparation-v7",
     "terminal-projection-selection",
     "host-mcp-task-context",
     "custom-harness",
@@ -4454,7 +4454,6 @@
           ]
         },
         "requiredToolsets": {
-          "minItems": 1,
           "maxItems": 16,
           "type": "array",
           "items": {
@@ -9726,7 +9725,6 @@
                 ]
               },
               "requiredToolsets": {
-                "minItems": 1,
                 "maxItems": 16,
                 "type": "array",
                 "items": {
@@ -17351,7 +17349,6 @@
                         ]
                       },
                       "requiredToolsets": {
-                        "minItems": 1,
                         "maxItems": 16,
                         "type": "array",
                         "items": {
@@ -24024,7 +24021,6 @@
                         ]
                       },
                       "requiredToolsets": {
-                        "minItems": 1,
                         "maxItems": 16,
                         "type": "array",
                         "items": {
@@ -26886,22 +26882,23 @@
                           "maxLength": 512,
                           "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                         },
-                        "upstreamBase": {
+                        "tarballIntegrity": {
                           "type": "string",
-                          "minLength": 1,
-                          "maxLength": 512,
-                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          "pattern": "^sha512-[A-Za-z0-9+/]+={0,2}$"
+                        },
+                        "provenanceDigest": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "closureDigest": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
                         },
                         "upstreamCommit": {
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 512,
                           "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-                        },
-                        "forkBuild": {
-                          "type": "integer",
-                          "minimum": 0,
-                          "maximum": 9007199254740991
                         },
                         "envelopeFormat": {
                           "type": "string",
@@ -26924,9 +26921,10 @@
                       "required": [
                         "packageName",
                         "packageVersion",
-                        "upstreamBase",
+                        "tarballIntegrity",
+                        "provenanceDigest",
+                        "closureDigest",
                         "upstreamCommit",
-                        "forkBuild",
                         "envelopeFormat",
                         "requestFormat",
                         "compilerVersion"
@@ -27647,22 +27645,23 @@
                       "maxLength": 512,
                       "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
-                    "upstreamBase": {
+                    "tarballIntegrity": {
                       "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512,
-                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                      "pattern": "^sha512-[A-Za-z0-9+/]+={0,2}$"
+                    },
+                    "provenanceDigest": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "closureDigest": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
                     },
                     "upstreamCommit": {
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 512,
                       "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-                    },
-                    "forkBuild": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
                     },
                     "envelopeFormat": {
                       "type": "string",
@@ -27685,9 +27684,10 @@
                   "required": [
                     "packageName",
                     "packageVersion",
-                    "upstreamBase",
+                    "tarballIntegrity",
+                    "provenanceDigest",
+                    "closureDigest",
                     "upstreamCommit",
-                    "forkBuild",
                     "envelopeFormat",
                     "requestFormat",
                     "compilerVersion"

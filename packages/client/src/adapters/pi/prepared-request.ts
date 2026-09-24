@@ -5,7 +5,6 @@ import type {
   InputPreparationModelV1,
   InputPreparationOptionsV1,
   InputPreparationResidualKeyV1,
-  InputPreparationResidualValueClassV1,
   InputPreparationToolV1,
 } from '../../input-preparation';
 import { admitHostAssistantContent } from './host-history-admission';
@@ -218,7 +217,8 @@ function projectTool(tool: InputPreparationToolV1): Tool {
     refuse('prepared_transcript_invalid', 'a prepared tool needs a non-empty name and a string description');
   }
   const parameters = tool.parameters as Record<string, unknown> | null;
-  if (parameters === null || typeof parameters !== 'object' || Array.isArray(parameters) || parameters.type !== 'object') {
+  if (parameters === null || typeof parameters !== 'object' || Array.isArray(parameters) || parameters.type !== 'object'
+    || parameters.properties === null || typeof parameters.properties !== 'object' || Array.isArray(parameters.properties)) {
     refuse('prepared_transcript_invalid', `tool ${JSON.stringify(tool.name)} needs a full object parameter schema`);
   }
   const sampling = (tool as { constrainedSampling?: unknown }).constrainedSampling;
@@ -248,8 +248,8 @@ function projectTool(tool: InputPreparationToolV1): Tool {
  * messages it produces exist only in its return value.
  */
 export function buildPreparedTranscriptMessages(transcript: PreparedTranscriptV1): Message[] {
-  if (typeof transcript.systemPrompt !== 'string' || transcript.systemPrompt.length === 0) {
-    refuse('prepared_transcript_invalid', 'the Host system message must be a non-empty string');
+  if (typeof transcript.systemPrompt !== 'string') {
+    refuse('prepared_transcript_invalid', 'the Host system message must be a string');
   }
   const tools = transcript.tools.map(projectTool);
   if (new Set(tools.map((tool) => tool.name)).size !== tools.length) {
@@ -358,6 +358,7 @@ export async function compilePreparedProviderRequest(input: {
       apiKey: PREPARED_COMPILE_API_KEY,
       fetch: captureFetch as typeof fetch,
       maxRetries: 0,
+      env: {},
     });
     for await (const event of stream) {
       if (event.type === 'done' || event.type === 'error') terminal = event.type;
@@ -383,127 +384,18 @@ export async function compilePreparedProviderRequest(input: {
 }
 
 // ---------------------------------------------------------------------------
-// P(D) and the residual classification, derived from D
+// Envelope v4: every captured byte belongs to P(D); no local serializer classification.
 // ---------------------------------------------------------------------------
-
-/** The keys P(D) carries. Every context-derived byte of D lands in exactly these. */
-const PREPARED_PROJECTION_KEYS: readonly string[] = ['model', 'messages', 'tools'];
-
-interface ResidualVariant {
-  readonly valueClass: InputPreparationResidualValueClassV1;
-  readonly matches: (value: unknown) => boolean;
-}
-
-function isPlainJsonObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
-function isJsonScalar(value: unknown): boolean {
-  return value === null || typeof value === 'string' || typeof value === 'boolean'
-    || (typeof value === 'number' && Number.isFinite(value));
-}
-
-function isStructuralJson(value: unknown, depth: number): boolean {
-  if (isJsonScalar(value)) return true;
-  if (depth <= 0) return false;
-  if (Array.isArray(value)) return value.every((item) => isStructuralJson(item, depth - 1));
-  return isPlainJsonObject(value) && Object.values(value).every((item) => isStructuralJson(item, depth - 1));
-}
-
-const isScalarRecord = (value: unknown): boolean => isPlainJsonObject(value) && Object.values(value).every(isJsonScalar);
-const isPositiveSafeInteger = (value: unknown): boolean =>
-  typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
-const hasOnlyKeys = (value: Record<string, unknown>, allowed: readonly string[]): boolean =>
-  Object.keys(value).every((key) => allowed.includes(key));
-
-/**
- * The classification of every top-level key the official `buildParams` can
- * put on the wire outside P(D). Structure only, never tokens. A key absent
- * here, or present with a non-matching value, makes the projection `unknown`.
- */
-const PREPARED_RESIDUAL_TABLE: Readonly<Record<string, readonly ResidualVariant[]>> = {
-  stream: [{ valueClass: 'constant', matches: (value) => value === true }],
-  stream_options: [{
-    valueClass: 'object_shape',
-    matches: (value) => isPlainJsonObject(value) && hasOnlyKeys(value, ['include_usage'])
-      && typeof value.include_usage === 'boolean',
-  }],
-  store: [{ valueClass: 'constant', matches: (value) => value === false }],
-  tool_stream: [{ valueClass: 'constant', matches: (value) => value === true }],
-  prompt_cache_retention: [{ valueClass: 'constant', matches: (value) => value === '24h' }],
-  // The pinned session id is the only value `prompt_cache_key` can carry here.
-  prompt_cache_key: [{ valueClass: 'constant', matches: (value) => value === PREPARED_PROVIDER_SESSION_ID }],
-  max_tokens: [{ valueClass: 'bounded_integer', matches: isPositiveSafeInteger }],
-  max_completion_tokens: [{ valueClass: 'bounded_integer', matches: isPositiveSafeInteger }],
-  temperature: [{
-    valueClass: 'bounded_number',
-    matches: (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 2,
-  }],
-  priority: [{ valueClass: 'finite_number', matches: (value) => typeof value === 'number' && Number.isFinite(value) }],
-  thinking_token_budget: [{ valueClass: 'bounded_integer', matches: isPositiveSafeInteger }],
-  thinking_budget: [{ valueClass: 'bounded_integer', matches: isPositiveSafeInteger }],
-  thinking_budget_tokens: [{ valueClass: 'bounded_integer', matches: isPositiveSafeInteger }],
-  tool_choice: [{
-    valueClass: 'closed_enum',
-    matches: (value) => value === 'auto' || value === 'none' || value === 'required',
-  }],
-  reasoning_effort: [{ valueClass: 'nonempty_string', matches: (value) => typeof value === 'string' && value.length > 0 }],
-  thinking: [
-    {
-      valueClass: 'object_shape',
-      matches: (value) => isPlainJsonObject(value) && hasOnlyKeys(value, ['type', 'clear_thinking'])
-        && (value.type === 'enabled' || value.type === 'disabled')
-        && (value.clear_thinking === undefined || typeof value.clear_thinking === 'boolean'),
-    },
-    { valueClass: 'nonempty_string', matches: (value) => typeof value === 'string' && value.length > 0 },
-  ],
-  enable_thinking: [{ valueClass: 'boolean', matches: (value) => typeof value === 'boolean' }],
-  reasoning: [{
-    valueClass: 'object_shape',
-    matches: (value) => isPlainJsonObject(value) && Object.keys(value).length > 0
-      && hasOnlyKeys(value, ['effort', 'enabled'])
-      && (value.effort === undefined || typeof value.effort === 'string')
-      && (value.enabled === undefined || typeof value.enabled === 'boolean'),
-  }],
-  chat_template_kwargs: [{ valueClass: 'object_shape', matches: isScalarRecord }],
-  chat_template_args: [{ valueClass: 'object_shape', matches: isScalarRecord }],
-  provider: [{ valueClass: 'object_shape', matches: (value) => isPlainJsonObject(value) && isStructuralJson(value, 4) }],
-  providerOptions: [{
-    valueClass: 'object_shape',
-    matches: (value) => isPlainJsonObject(value) && hasOnlyKeys(value, ['gateway']) && isPlainJsonObject(value.gateway)
-      && hasOnlyKeys(value.gateway, ['only', 'order'])
-      && Object.values(value.gateway).every((item) => Array.isArray(item) && item.every((slug) => typeof slug === 'string')),
-  }],
-};
-
 export interface PreparedProjection {
-  /** P(D): `model`, `messages` and `tools` of D, re-serialized from D itself. */
   readonly counterProjection: string;
-  readonly kind: 'content_complete' | 'unknown';
+  readonly kind: 'content_complete';
   readonly residual: readonly InputPreparationResidualKeyV1[];
 }
 
-/**
- * Derive P(D) and the residual classification from D alone, so any reader can
- * re-derive both from the same body bytes and compare.
- */
 export function derivePreparedProjection(body: string): PreparedProjection {
-  const parsed = JSON.parse(body) as unknown;
-  if (!isPlainJsonObject(parsed)) refuse('prepared_compile_capture_failed', 'D is not a JSON object');
-  const counterProjection = JSON.stringify({
-    model: parsed.model,
-    messages: parsed.messages,
-    ...(Object.hasOwn(parsed, 'tools') ? { tools: parsed.tools } : {}),
-  });
-  const residual: InputPreparationResidualKeyV1[] = [];
-  for (const [key, value] of Object.entries(parsed)) {
-    if (PREPARED_PROJECTION_KEYS.includes(key)) continue;
-    const variants = Object.hasOwn(PREPARED_RESIDUAL_TABLE, key) ? PREPARED_RESIDUAL_TABLE[key] : undefined;
-    const variant = variants?.find((candidate) => candidate.matches(value));
-    if (variant === undefined) return { counterProjection, kind: 'unknown', residual: [] };
-    residual.push({ key, valueClass: variant.valueClass });
+  const parsed: unknown = JSON.parse(body);
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    refuse('prepared_compile_capture_failed', 'D is not a JSON object');
   }
-  return { counterProjection, kind: 'content_complete', residual };
+  return { counterProjection: body, kind: 'content_complete', residual: [] };
 }

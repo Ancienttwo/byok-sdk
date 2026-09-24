@@ -708,24 +708,7 @@ function __ctrlRenderSystemMessage(message) {`,
 function compileRequest() {
   return {
     snapshot: {
-      prompt: {
-        cwd: '/workspace/project',
-        selectedTools: ['read', 'bash'],
-        customPrompt: [
-          'You are the BYOK coding agent.',
-          '# agents',
-          'be precise',
-          'prefer small diffs',
-          'read before you write',
-          'review a diff before it is proposed',
-        ].join('\n'),
-        toolSnippets: {},
-        toolGuidelines: {},
-        promptGuidelines: [],
-        contextFiles: [],
-        skills: [],
-        docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
-      },
+      prompt: { systemPrompt: ['You are the BYOK coding agent.', '# agents', 'be precise', 'prefer small diffs', 'read before you write', 'review a diff before it is proposed'].join('\n') },
       messages: [
         { role: 'user', content: 'what does this repository do?', timestamp: 1_699_999_999_000 },
         { role: 'assistant', origin: 'host_canonical', content: 'It is a BYOK SDK.', timestamp: 1_699_999_999_500 },

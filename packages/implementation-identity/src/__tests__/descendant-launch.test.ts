@@ -4,8 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { assertDescendantSpawn, reverifyToolImplementationIdentity, toolImplementationLaunchEnvNamesDigest, RUNTIME_DESCENDANT_EDGES, type ToolImplementationFsProbe } from '../identity';
 import { descendantTemplateDigest, parseDescendantLaunch, type DescendantLaunchV1, type DescendantSpawnExpectationV1, DescendantLaunchError, validateDescendantSpawn } from '../descendant-launch';
 const root = path.resolve(import.meta.dirname,'../../../../tests/fixtures/c07-runtime-record');
-const positive = JSON.parse(readFileSync(path.join(root,'canonical-revision.v1.json'),'utf8'));
-const negative = JSON.parse(readFileSync(path.join(root,'rejections.v1.json'),'utf8'));
+const positive = JSON.parse(readFileSync(path.join(root,'official-pi-087.v1.json'),'utf8'));
+const negative = JSON.parse(readFileSync(path.join(root,'official-pi-087-rejections.v1.json'),'utf8'));
 const vectors = positive.descendantLaunchVectors as {id:string;launch:DescendantLaunchV1;actualEnv:Record<string,string>}[];
 function expectation(launch: DescendantLaunchV1): DescendantSpawnExpectationV1 {
  const c=launch.perLaunch;

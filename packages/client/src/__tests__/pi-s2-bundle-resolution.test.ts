@@ -183,7 +183,7 @@ async function preparedFixture(root: string, cwd: string, env: Record<string, st
   const server = { command: process.execPath, args: [script, '{}'] };
   const registry = new McpToolsetRegistry({ 's2.echo.v1': { mcpServers: { fixture: server }, readOnlyTools: { fixture: ['echo'] } } });
   const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
-  const runtimeIdentity = `${compiler.runtime.packageName}@${compiler.runtime.packageVersion}+${compiler.runtime.upstreamCommit}.${compiler.runtime.forkBuild}`;
+  const runtimeIdentity = `${compiler.runtime.packageName}@${compiler.runtime.packageVersion}+${compiler.runtime.closureDigest}.compiler-${compiler.runtime.compilerVersion}`;
   const assembled = await createPreparedToolSurfaceAssembler({ toolsetRegistry: registry, runtimeEnv: () => env })
     .assemble({ requiredToolsets: ['s2.echo.v1'], permissionMode: POLICY.mode, runtimeIdentity });
   if (!assembled.ok) throw new Error(`fixture assembly failed: ${assembled.detail}`);
@@ -204,10 +204,7 @@ async function preparedFixture(root: string, cwd: string, env: Record<string, st
   // A startup-only fixture. No prompt_prepared frame is ever sent, but the
   // retained envelope is real, rather than bypassing the adapter's artifact guard.
   // The Host owns the whole system message on official Pi (`customPrompt`).
-  const compiled = await compiler.compile({ snapshot: { prompt: { cwd, selectedTools: surface.tools.map(tool => tool.name),
-    customPrompt: 'Synthetic S2 containment fixture system message.',
-    toolSnippets: {}, toolGuidelines: {}, promptGuidelines: [], contextFiles: [], skills: [],
-    docsPaths: { readmePath: getReadmePath(), docsPath: getDocsPath(), examplesPath: getExamplesPath() } },
+  const compiled = await compiler.compile({ snapshot: { prompt: { systemPrompt: 'Synthetic S2 containment fixture system message.' },
     messages: [{ role: 'user', content: 'Never sent', timestamp: 1 }], tools: surface.tools },
     model, options: { cacheRetention: 'none', maxTokens: 512 }, binding, toolExecutors: surface.toolExecutors });
   const artifactPath = path.join(root, 'prepared-artifact.json');
@@ -309,8 +306,8 @@ describe('Pi launch path — S2 release containment', () => {
               loadCommandsDigest: '0'.repeat(64) },
             launchArgv: ['__byok_sdk_helper', entryKind], launchCwd: await trustedCwd(), assetRoot, assets,
             nativeProvenance: { packageName: fixture.runtime.packageName, packageVersion: fixture.runtime.packageVersion,
-              upstreamBase: fixture.runtime.upstreamBase, upstreamCommit: fixture.runtime.upstreamCommit,
-              forkBuild: fixture.runtime.forkBuild, compilerVersion: fixture.runtime.compilerVersion } };
+              tarballIntegrity: fixture.runtime.tarballIntegrity, provenanceDigest: fixture.runtime.provenanceDigest, closureDigest: fixture.runtime.closureDigest, upstreamCommit: fixture.runtime.upstreamCommit,
+              compilerVersion: fixture.runtime.compilerVersion } };
           await fs.writeFile(inputPath, JSON.stringify({ ...fixture, release, policy: POLICY, kind, env, mcpEnv: { PATH: env.PATH },
             record: runtimeRecordFixture(record as never), projectionRoot: path.join(runDir, 'projections'), report: reportPath }));
           // With the fixture ownership seam OFF, the real product must reject

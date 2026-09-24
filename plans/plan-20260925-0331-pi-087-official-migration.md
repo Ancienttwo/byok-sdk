@@ -1,6 +1,6 @@
 # Plan: Official Pi 0.87.1 migration: retire the @byok-sdk/pi-* fork from the active dependency graph
 
-> **Status**: Executing
+> **Status**: Superseded
 > **Created**: 20260925-0331
 > **Slug**: pi-087-official-migration
 > **Planning Source**: repo-harness-plan
@@ -190,3 +190,7 @@ P3: the fork existed only because upstream lacked a prepared seam; 0.87 supplies
 - [ ] WP5 — Wire and Host contract (fast-worker, after WP2/WP4). Input-preparation wire version +1 (one cut), compiler/projection/record version axes, protocol snapshot fields as needed, CHANGELOG BREAKING entry, `docs/protocol.md`, contract document amendment note, and a written handoff for Salesko: new D shape (no `strict`, Host system message), ruling C must be re-derived, facts changes. Host changes themselves are out of scope (Salesko plan).
 - [x] WP6 — U1 upstream candidate (fast-worker, parallel from day one, different repo). In `/Users/kito/Projects/pi-wt-087-u1` (branch `claude/u1-export-build-request-payload` from `v0.87.1`), cherry-pick fork `4748f2018`, resolve conflicts against 0.87.1's `stream()` shape, run `packages/ai` tests, keep the change generic (no BYOK vocabulary). Local branch only; opening the upstream PR is an Owner action.
 - [ ] WP7 — Composite acceptance and switch (orchestrator + gatekeeper). Seven root checks, focused regressions, one gatekeeper review per WP and one composite; drain-then-switch per the 2026-09-19 draft §15.1; fork retirement record; release version decided by Owner.
+
+## Consolidation ruling (2026-09-25)
+
+Superseded: 合并入 0300 plan (`plan-20260925-0300-official-pi-087.md`). Existing commits and evidence are retained; no independent execution remains under this plan.

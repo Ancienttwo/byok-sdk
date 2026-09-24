@@ -7,7 +7,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { ModelRuntime, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { InMemoryCredentialStore } from '@earendil-works/pi-ai';
 import type { InputPreparationCompiledSnapshotV1, InputPreparationModelV1 } from '../../../input-preparation';
@@ -22,6 +22,7 @@ import {
 } from '../input-preparation';
 import {
   canonicalPreparedDigest,
+  loadOfficialCompiler,
   PREPARED_HOST_ASSISTANT_PROVENANCE,
   PreparedSessionError,
 } from '../prepared-request';
@@ -55,18 +56,7 @@ const MODEL: InputPreparationModelV1 = Object.freeze({
 
 function snapshot(overrides: Partial<InputPreparationCompiledSnapshotV1['prompt']> = {}): InputPreparationCompiledSnapshotV1 {
   return {
-    prompt: {
-      customPrompt: 'HOST FRAMING: you are the Host bot.',
-      cwd: '/agent',
-      selectedTools: [TOOL_NAME],
-      toolSnippets: {},
-      toolGuidelines: {},
-      promptGuidelines: [],
-      contextFiles: [],
-      skills: [],
-      docsPaths: { readmePath: '', docsPath: '', examplesPath: '' },
-      ...overrides,
-    },
+    prompt: { systemPrompt: 'HOST FRAMING: you are the Host bot.', ...overrides },
     messages: [
       { role: 'user', content: 'earlier user turn 你好', timestamp: 1 },
       { role: 'assistant', origin: 'host_canonical', content: 'earlier Host-canonical assistant text', timestamp: 2 },
@@ -154,7 +144,7 @@ async function runPrepared(envelope: PreparedPiInputV1, respond: (sequence: numb
     cwd: path.join(root, 'cwd'),
     agentDir: path.join(root, 'agent'),
     modelRuntime,
-    tools: [{ name: TOOL_NAME, identity: TOOL_IDENTITY, tool }],
+    tools: envelope.toolManifest.order.length === 0 ? [] : [{ name: TOOL_NAME, identity: TOOL_IDENTITY, tool }],
     sessionId: 'prepared-session-test',
   });
   try {
@@ -180,6 +170,9 @@ describe('SDK prepared compile on official Pi 0.87.1', () => {
     }
     expect(compiled.envelope.providerRequest.endpoint).toBe('https://api.z.ai/api/paas/v4/chat/completions');
     expect(compiled.projection.kind).toBe('content_complete');
+    expect(compiled.envelope.version).toBe(4);
+    expect(compiled.counterProjection).toBe(compiled.requestBody);
+    expect(compiled.residual).toEqual([]);
     expect(compiled.requestBytes).toBe(Buffer.byteLength(compiled.requestBody, 'utf8'));
     const again = await compile();
     expect(again.requestBody).toBe(compiled.requestBody);
@@ -190,11 +183,11 @@ describe('SDK prepared compile on official Pi 0.87.1', () => {
 
   test('refuses prompt fields only the retired renderer could render', async () => {
     for (const prompt of [
-      { customPrompt: undefined },
+      { customPrompt: 'retired' },
       { appendSystemPrompt: 'append' },
       { promptGuidelines: ['g'] },
       { contextFiles: [{ path: 'AGENTS.md', content: 'x' }] },
-    ] as Partial<InputPreparationCompiledSnapshotV1['prompt']>[]) {
+    ] as unknown as Partial<InputPreparationCompiledSnapshotV1['prompt']>[]) {
       const error = await compile(compileRequest({ snapshot: snapshot(prompt) })).catch((cause: unknown) => cause);
       expect(error).toBeInstanceOf(InputPreparationCompileError);
       expect((error as InputPreparationCompileError).detail).toBe('prompt_render_input_unsupported');
@@ -278,4 +271,71 @@ describe('SDK prepared session on official Pi 0.87.1: byte gate', () => {
     expect(clean.state.contextProjected).toBe(1);
     expect(() => clean.arm(envelope, () => {})).toThrow(PreparedSessionError);
   });
+});
+
+const OPENAI_CONSTRUCTOR_ENV = ['OPENAI_ADMIN_KEY', 'OPENAI_ORG_ID', 'OPENAI_PROJECT_ID',
+  'OPENAI_WEBHOOK_SECRET', 'OPENAI_LOG', 'OPENAI_CUSTOM_HEADERS'] as const;
+
+test('A1 double-prime: six polluted OpenAI variables do not change D', async () => {
+  const baseline = await compile();
+  try {
+    for (const key of OPENAI_CONSTRUCTOR_ENV) vi.stubEnv(key,
+      key === 'OPENAI_LOG' ? 'off' : key === 'OPENAI_CUSTOM_HEADERS' ? 'X-Canary: polluted' : 'synthetic-canary');
+    const polluted = await compile();
+    expect(polluted.requestBody).toBe(baseline.requestBody);
+    expect(polluted.envelopeDigest).toBe(baseline.envelopeDigest);
+    expect(globalFetch.calls).toEqual([]);
+  } finally { vi.unstubAllEnvs(); }
+});
+
+test.each(['OpenAI-Organization', 'OpenAI-Project', 'X-Custom-Canary'])(
+  'header gate refuses %s with zero sends', async header => {
+    const { envelope } = await compile();
+    const transport = vi.fn(async () => textResponse('must not send', true));
+    const gate = createPreparedGate({ transport: transport as typeof fetch });
+    gate.arm(envelope, () => {});
+    const projected = gate.projectContext([{ role: 'system', content: '', timestamp: 0 },
+      { role: 'user', content: PREPARED_TRIGGER_TEXT, timestamp: 0 }]);
+    const { normalizeContext } = await import('@earendil-works/pi-ai');
+    for await (const _ of gate.streamSimple(MODEL as never, normalizeContext({ messages: projected! }),
+      { apiKey: 'synthetic-key', headers: { [header]: 'synthetic-value' }, maxRetries: 9 })) {}
+    expect(gate.state.refusal?.code).toBe('prepared_headers_invalid');
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+test('real prepared session never retries a failed admitted transport', async () => {
+  const { envelope } = await compile();
+  const run = await runPrepared(envelope, () => { throw new Error('synthetic connection error'); });
+  expect(run.sends).toEqual([envelope.providerRequest.body]);
+  expect(run.gate.state.sequence).toBe(1);
+  expect(run.gate.state.admitted).toEqual([1]);
+});
+
+test('empty observed tools compile and execute with zero native tools', async () => {
+  const request = compileRequest();
+  const compiled = await compile({ ...request, snapshot: { ...request.snapshot, tools: [] }, toolExecutors: {} });
+  expect(compiled.envelope.toolManifest.order).toEqual([]);
+  expect(JSON.parse(compiled.requestBody).tools).toBeUndefined();
+  const run = await runPrepared(compiled.envelope, () => textResponse('zero tools', true));
+  expect(run.verdicts).toEqual([undefined]);
+  expect(run.sends).toEqual([compiled.requestBody]);
+  expect(run.toolExecutions).toBe(0);
+});
+
+test.each([0, 2])('A1 double-prime refuses capture fetch called %i times', async calls => {
+  const official = await loadOfficialCompiler();
+  const fake = vi.spyOn(official, 'streamSimple').mockImplementation((async function* (...[_model, _context, options]: Parameters<typeof official.streamSimple>) {
+    expect(options?.apiKey).toBe('byok-prepared-compile-placeholder');
+    expect(options?.env).toEqual({});
+    expect(options?.maxRetries).toBe(0);
+    for (let i = 0; i < calls; i++) {
+      await expect(options!.fetch!('https://provider.invalid/v1/chat/completions', { body: '{}' }))
+        .rejects.toThrow('prepared compile capture: never sent');
+    }
+    yield { type: 'error' };
+  }) as unknown as typeof official.streamSimple);
+  try {
+    await expect(compile()).rejects.toMatchObject({ detail: 'prepared_compile_capture_failed' });
+    expect(globalFetch.calls).toEqual([]);
+  } finally { fake.mockRestore(); }
 });

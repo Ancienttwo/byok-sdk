@@ -70,9 +70,9 @@ const RECEIPT: InputPreparationReceiptSummary = {
     runtime: {
       packageName: '@byok-sdk/pi-coding-agent',
       packageVersion: '0.85.1001',
-      upstreamBase: '0.85.1',
+      tarballIntegrity: 'sha512-'+ 'YQ=='.repeat(1),
       upstreamCommit: 'd981de1229ef899957bbe968bc8dcda02a21f477',
-      forkBuild: 1,
+      provenanceDigest: 'a'.repeat(64), closureDigest: 'b'.repeat(64),
       envelopeFormat: 'pi.prepared-session-input.v1',
       requestFormat: 'openai-completions.v1',
       compilerVersion: 2,

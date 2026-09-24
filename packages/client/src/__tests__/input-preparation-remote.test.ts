@@ -91,15 +91,7 @@ const LIMITS: InputPreparationLimitsPolicyV1 = validateInputPreparationLimits({
 });
 
 const CONTEXT_DOCUMENT = {
-  prompt: {
-    cwd: '/workspace/project',
-    toolSnippets: {},
-    toolGuidelines: {},
-    promptGuidelines: [],
-    contextFiles: [],
-    skills: [],
-    docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
-  },
+  prompt: { systemPrompt: 'Host fixture instructions' },
   messages: [{ role: 'user', content: 'prepare this turn', timestamp: 1_700_000_000_000 }],
 };
 
@@ -151,9 +143,9 @@ function stubCompiler(): StubCompiler {
     runtime: {
       packageName: '@byok-sdk/pi-coding-agent',
       packageVersion: '0.85.1001',
-      upstreamBase: '0.85.1',
+      tarballIntegrity: 'sha512-'+ 'YQ=='.repeat(1),
       upstreamCommit: 'd981de1229ef899957bbe968bc8dcda02a21f477',
-      forkBuild: 1,
+      provenanceDigest: 'a'.repeat(64), closureDigest: 'b'.repeat(64),
       envelopeFormat: 'pi.session.prepared-input',
       requestFormat: 'pi.openai-completions.prepared',
       compilerVersion: 2,
@@ -331,7 +323,6 @@ describe('remote input preparation: in-process, never the control socket', () =>
     // carried from the payload.
     expect(compiled.snapshot.prompt).toEqual({
       ...CONTEXT_DOCUMENT.prompt,
-      selectedTools: ['mcp__teamserver__list', 'mcp__teamserver__post'],
     });
     expect(compiled.snapshot.messages).toEqual(CONTEXT_DOCUMENT.messages);
   });

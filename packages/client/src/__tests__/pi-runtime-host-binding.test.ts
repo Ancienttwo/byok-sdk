@@ -1,3 +1,4 @@
+import { locateOfficialPiPackage } from '../adapters/pi/official-pi-installation.mjs';
 import { piExportAssetPaths } from '../adapters/pi/pi-export-assets';
 import { runtimeRecordFixture } from './fixtures/runtime-resolution';
 import { createHash } from 'node:crypto';
@@ -26,8 +27,11 @@ async function fixture(mutate: (record: ToolImplementationInstallRecordV1) => To
   await fs.writeFile(entry,'sealed SDK fixture',{mode:0o444}); await fs.writeFile(interpreter,'interpreter fixture',{mode:0o555});
   const native = resolveInstalledPiRuntimeIdentity();
   // The official manifest carries no fork stanza: provenance is compared with the official runtime identity.
-  const manifest = mutateManifest({name:native.packageName,version:native.packageVersion});
-  const manifestPath = path.join(root,'package.json'); const manifestBytes = JSON.stringify(manifest);
+  const originalManifest = readFileSync(path.join(locateOfficialPiPackage(native.packageName, process.cwd()), 'package.json'), 'utf8');
+  const original = JSON.parse(originalManifest);
+  const manifest = mutateManifest(structuredClone(original));
+  const manifestPath = path.join(root,'package.json');
+  const manifestBytes = JSON.stringify(manifest) === JSON.stringify(original) ? originalManifest : JSON.stringify(manifest);
   await fs.writeFile(manifestPath,manifestBytes,{mode:0o444});
   const exportAssets: {path:string;digest:string}[] = [];
   for (const relative of piExportAssetPaths('interpreter+bundle')) {
@@ -50,8 +54,8 @@ async function fixture(mutate: (record: ToolImplementationInstallRecordV1) => To
     installPath:entry,closureDigest:sha(await fs.readFile(entry)),closureKind:'artifact',
     interpreter:{path:interpreter,digest:sha(await fs.readFile(interpreter)),loadCommandsDigest:'0'.repeat(64)},
     launchArgv:['__byok_sdk_helper','pi-prepared'],launchCwd:root,assetRoot:root,assets:[...exportAssets,{path:'package.json',digest:sha(manifestBytes)}].sort((a,b)=>a.path<b.path?-1:1),
-    nativeProvenance:{packageName:native.packageName,packageVersion:native.packageVersion,upstreamBase:native.upstreamBase,
-      upstreamCommit:native.upstreamCommit,forkBuild:native.forkBuild,compilerVersion:native.compilerVersion}});
+    nativeProvenance:{packageName:native.packageName,packageVersion:native.packageVersion,tarballIntegrity:native.tarballIntegrity, provenanceDigest:native.provenanceDigest, closureDigest:native.closureDigest,
+      upstreamCommit:native.upstreamCommit,compilerVersion:native.compilerVersion}});
   const declaration = await resolveRuntimeImplementation({resolve:async()=>runtimeRecordFixture(record)},{subject:{kind:'runtime',runtimeId:'pi'},runtimeEntry:'pi-prepared'},env);
   expect(declaration.kind).toBe('attested');
   const identity = declaration.kind === 'attested' ? declaration.identity : declaration;
@@ -93,8 +97,8 @@ describe('Pi child launch/config authority', () => {
     const f=await fixture(record=>({...record,assets:record.assets!.filter(asset=>asset.path!==piExportAssetPaths('interpreter+bundle')[0])}));
     await expect(verifyPiHostBinding(f.binding,'pi-prepared')).rejects.toThrow('pi_export_asset_undeclared');
   });
-  it.each(['upstreamCommit','forkBuild','upstreamBase'] as const)('rejects changed record %s against the official runtime identity', async field => {
-    const f = await fixture(record=>({...record,nativeProvenance:{...record.nativeProvenance!,[field]:field==='forkBuild'?99:field==='upstreamCommit'?'c'.repeat(40):'0.0.1'}}));
+  it.each(['upstreamCommit','tarballIntegrity','closureDigest'] as const)('rejects changed record %s against the official runtime identity', async field => {
+    const f = await fixture(record=>({...record,nativeProvenance:{...record.nativeProvenance!,[field]:field==='upstreamCommit'?'c'.repeat(40):field==='closureDigest'?'c'.repeat(64):'sha512-drift'}}));
     await expect(verifyPiHostBinding(f.binding,'pi-prepared')).rejects.toThrow(`Pi nativeProvenance.${field} differs from the official runtime identity`);
   });
   it('rejects record and manifest against the independent static SDK pin', async () => {
@@ -107,7 +111,7 @@ describe('Pi child launch/config authority', () => {
   });
   it('rejects a changed compiler contract', async () => {
     const f = await fixture(record=>({...record,nativeProvenance:{...record.nativeProvenance!,compilerVersion:999}}));
-    await expect(verifyPiHostBinding(f.binding,'pi-prepared')).rejects.toThrow(/compiler version/);
+    await expect(verifyPiHostBinding(f.binding,'pi-prepared')).rejects.toThrow(/compilerVersion/);
   });
   it('rejects one changed manifest byte during asset reverify before parsing provenance', async () => {
     const f = await fixture(); await fs.chmod(f.manifestPath,0o644); await fs.appendFile(f.manifestPath,' '); await fs.chmod(f.manifestPath,0o444);

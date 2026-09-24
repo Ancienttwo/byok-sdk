@@ -1,6 +1,6 @@
 # Task Contract: pi-087-official-migration
 
-> **Status**: Active
+> **Status**: Superseded
 > **Plan**: plans/plan-20260925-0331-pi-087-official-migration.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->

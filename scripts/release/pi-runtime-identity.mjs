@@ -1,3 +1,4 @@
+import { verifyOfficialPiPackage, OFFICIAL_PI_PROVENANCE } from '../../packages/client/src/adapters/pi/official-pi-installation.mjs';
 // Single authority for the Pi runtime identity across the release gates.
 //
 // `packages/client/package.json` pins the official
@@ -46,7 +47,7 @@ export const PI_RUNTIME_CLOSURE = Object.freeze([
  * Closure packages that may not be direct client dependencies: they ship
  * native addons, which the release-graph purity gate forbids on direct edges.
  */
-const PI_INDIRECT_CLOSURE = Object.freeze(['@earendil-works/pi-tui']);
+const PI_INDIRECT_CLOSURE = Object.freeze(['@earendil-works/pi-tui', '@earendil-works/chord', '@earendil-works/pi-telemetry']);
 
 /** The retired fork's package scope; nothing from it may be locked or installed. */
 const PI_FORK_PREFIX = '@byok-sdk/pi-';
@@ -69,7 +70,7 @@ export function parsePiRuntimeIdentity(clientManifest, label = 'packages/client/
   if (typeof spec !== 'string') {
     throw new Error(`${label}: ${PI_DEPENDENCY_SPECIFIER} must be a required dependency`);
   }
-  if (!PI_EXACT_VERSION.test(spec)) {
+  if (!PI_EXACT_VERSION.test(spec) || spec !== OFFICIAL_PI_PROVENANCE.packageVersion) {
     throw new Error(`${label}: ${PI_DEPENDENCY_SPECIFIER} must be pinned to one exact official x.y.z version, got ${spec}`);
   }
   for (const name of PI_RUNTIME_CLOSURE) {
@@ -339,6 +340,7 @@ export function assertInstalledPiRuntime(installRoot, identity, locked, label, n
   }
   for (const name of PI_RUNTIME_CLOSURE) {
     const copies = installed.filter((entry) => entry.manifest.name === name);
+    for (const entry of copies) verifyOfficialPiPackage(entry.root, name);
     const drift = copies.filter((entry) => entry.manifest.version !== identity.version);
     if (copies.length === 0 || drift.length !== 0 || (name === identity.packageName && copies.length !== 1)) {
       throw new Error(

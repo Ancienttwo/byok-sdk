@@ -126,9 +126,9 @@ const TOOLSET_REVISION = 'team-definition-r1';
 const RUNTIME: InputPreparationRuntimeIdentityV1 = {
   packageName: '@byok-sdk/pi-coding-agent',
   packageVersion: '0.85.1002',
-  upstreamBase: '0.85.1',
+  tarballIntegrity: 'sha512-'+ 'YQ=='.repeat(1),
   upstreamCommit: 'd981de1229ef899957bbe968bc8dcda02a21f477',
-  forkBuild: 2,
+  provenanceDigest: 'a'.repeat(64), closureDigest: 'b'.repeat(64),
   envelopeFormat: 'pi.session.prepared-input',
   requestFormat: 'pi.openai-completions.prepared',
   compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,
@@ -342,7 +342,7 @@ async function lane(options: {
     toolsetDefinitionRevisions: { [TOOLSET_ID]: revision },
     implementations,
   });
-  if (!fingerprinted.ok) throw new Error(`fixture surface refused: ${fingerprinted.detail}`);
+  if (!fingerprinted.ok) throw new Error(`fixture surface refused: ${fingerprinted.detail}: ${fingerprinted.message}`);
 
   const toolBindingDigest = preparedToolBindingDigest({
     launch: attestation,
@@ -916,7 +916,7 @@ describe('every compared item declines by its own name, with no claim and no pin
       name: 'an artifact compiled against a native closure this device no longer has',
       reason: 'preparation_runtime_identity_mismatch',
       build: async () => {
-        const runtime = { ...RUNTIME, forkBuild: 1, packageVersion: '0.85.1001' };
+        const runtime = { ...RUNTIME, provenanceDigest: 'a'.repeat(64), closureDigest: 'b'.repeat(64), packageVersion: '0.85.1001' };
         // The accounting ruling moves WITH the runtime it was ruled for, so the
         // record stays ready and the only difference left is the one this case
         // is about: the closure the device has now.

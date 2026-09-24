@@ -157,18 +157,7 @@ function preparationRequest(overrides: Partial<InputPreparationRequestV1> = {}):
       options: { cacheRetention: 'none', maxTokens: 4_096 },
     },
     snapshot: {
-      prompt: {
-        cwd: '/workspace/project',
-        // The Host owns the whole system message on official Pi; renderer
-        // inputs stay empty (`prompt_render_input_unsupported` otherwise).
-        customPrompt: 'be precise\nprefer small diffs',
-        toolSnippets: {},
-        toolGuidelines: {},
-        promptGuidelines: [],
-        contextFiles: [],
-        skills: [],
-        docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
-      },
+      prompt: { systemPrompt: 'be precise\nprefer small diffs' },
       messages: [{ role: 'user', content: 'summarise the repository', timestamp: 1_700_000_000_000 }],
     },
     permissionMode: 'auto',
@@ -375,7 +364,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     expect(receipt.artifact?.projection.version).toBe(3);
     expect(receipt.artifact?.projection.kind).toBe('content_complete');
     expect(receipt.artifact?.projection.digest).toMatch(/^[0-9a-f]{64}$/u);
-    expect(receipt.artifact?.residual.length).toBeGreaterThan(0);
+    expect(receipt.artifact?.residual).toEqual([]);
     for (const entry of receipt.artifact?.residual ?? []) {
       expect(typeof entry.key).toBe('string');
       expect(typeof entry.valueClass).toBe('string');

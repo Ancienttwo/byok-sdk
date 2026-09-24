@@ -1,3 +1,4 @@
+import { OFFICIAL_PI_PROVENANCE, verifyOfficialPiClosure, assertOfficialPiProvenance } from './official-pi-installation.mjs';
 import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +10,6 @@ import type {
   InputPreparationOptionsV1,
   InputPreparationProjectionV1,
   InputPreparationResidualKeyV1,
-  InputPreparationResidualValueClassV1,
   InputPreparationRuntimeIdentityV1,
 } from '../../input-preparation';
 import type { McpToolsetServerObservation } from '../../mcp/observation';
@@ -71,19 +71,8 @@ export const SUPPORTED_PREPARED_COMPILER_VERSION = 4;
 /** The SDK-owned envelope and request format tags this module is the authority for. */
 export const PREPARED_ENVELOPE_FORMAT = 'byok.pi.prepared-input' as const;
 export const PREPARED_REQUEST_FORMAT = 'byok.pi.openai-completions.request' as const;
-const PREPARED_ENVELOPE_VERSION = 1 as const;
+const PREPARED_ENVELOPE_VERSION = 4 as const;
 
-/** The residual value classes the supported compiler contract defines. */
-const SUPPORTED_RESIDUAL_VALUE_CLASSES: ReadonlySet<string> = new Set<InputPreparationResidualValueClassV1>([
-  'constant',
-  'boolean',
-  'bounded_integer',
-  'bounded_number',
-  'finite_number',
-  'closed_enum',
-  'nonempty_string',
-  'object_shape',
-]);
 
 /** The compile binding the record's request was compiled under. */
 export interface PreparedPiBindingV1 {
@@ -223,11 +212,9 @@ interface InstalledPiManifest {
  * (`scripts/release/pi-runtime-identity.mjs`) proves it against `bun.lock`.
  */
 const OFFICIAL_PI_RUNTIME = Object.freeze({
-  name: '@earendil-works/pi-coding-agent',
-  version: '0.87.1',
+  name: OFFICIAL_PI_PROVENANCE.packageName,
+  version: OFFICIAL_PI_PROVENANCE.packageVersion,
   lockstep: Object.freeze(['@earendil-works/pi-ai', '@earendil-works/pi-agent-core'] as const),
-  upstreamBase: 'v0.87.1',
-  upstreamCommit: 'f07218c4d4bbc12bef056a7058c3dd49dfe41abe',
 });
 
 /** One observed installed manifest, as read off disk or from a measured record. */
@@ -248,7 +235,7 @@ export interface InstalledPiPackage {
 export function assertOfficialRuntimeIdentity(
   installed: readonly InstalledPiPackage[],
   pinned: PiRuntimeIdentity,
-): { readonly upstreamBase: string; readonly upstreamCommit: string; readonly forkBuild: number } {
+): typeof OFFICIAL_PI_PROVENANCE {
   const tuple = `${OFFICIAL_PI_RUNTIME.name}@${OFFICIAL_PI_RUNTIME.version}`;
   if (pinned.name !== OFFICIAL_PI_RUNTIME.name || pinned.version !== OFFICIAL_PI_RUNTIME.version) {
     throw new InputPreparationRuntimeIdentityError(
@@ -269,12 +256,7 @@ export function assertOfficialRuntimeIdentity(
       `${PI_PACKAGE_NAME} runtime closure must observe exactly one ${tuple}, observed ${agents}`,
     );
   }
-  return {
-    upstreamBase: OFFICIAL_PI_RUNTIME.upstreamBase,
-    upstreamCommit: OFFICIAL_PI_RUNTIME.upstreamCommit,
-    // The official artifact is not a fork build.
-    forkBuild: 0,
-  };
+  return OFFICIAL_PI_PROVENANCE;
 }
 
 /**
@@ -341,13 +323,12 @@ export function resolveInstalledPiRuntimeIdentity(): InputPreparationRuntimeIden
       `${PI_PACKAGE_NAME} resolved to ${mainEntry}, which has no readable enclosing package manifest`,
     );
   }
+  verifyOfficialPiClosure(path.dirname(fileURLToPath(import.meta.resolve('@byok-sdk/client/package.json'))));
   const provenance = assertOfficialRuntimeIdentity(
     [installed.manifest, ...OFFICIAL_PI_RUNTIME.lockstep.map(resolveLockstepManifest)],
     pinned,
   );
   return Object.freeze({
-    packageName: pinned.name,
-    packageVersion: pinned.version,
     ...provenance,
     envelopeFormat: PREPARED_ENVELOPE_FORMAT,
     requestFormat: PREPARED_REQUEST_FORMAT,
@@ -381,12 +362,14 @@ export function piRuntimeIdentityFromAttestedRecord(
       `the attested install record at ${identity.installPath} declares compiler version ${String(provenance.compilerVersion)}, but this build of @byok-sdk/client prepares input against version ${String(SUPPORTED_PREPARED_COMPILER_VERSION)}`,
     );
   }
+  assertOfficialPiProvenance(provenance);
   return Object.freeze({
     packageName: provenance.packageName,
     packageVersion: provenance.packageVersion,
-    upstreamBase: provenance.upstreamBase,
+    tarballIntegrity: provenance.tarballIntegrity,
+    provenanceDigest: provenance.provenanceDigest,
+    closureDigest: provenance.closureDigest,
     upstreamCommit: provenance.upstreamCommit,
-    forkBuild: provenance.forkBuild,
     envelopeFormat: PREPARED_ENVELOPE_FORMAT,
     requestFormat: PREPARED_REQUEST_FORMAT,
     compilerVersion: provenance.compilerVersion,
@@ -397,32 +380,19 @@ export function piRuntimeIdentityFromAttestedRecord(
 // Compile
 // ---------------------------------------------------------------------------
 
-/**
- * The Host-authored system message, read off the current wire prompt snapshot.
- *
- * The Host owns the WHOLE system message (no Pi prompt builder is called), so
- * the only field that can carry it is `customPrompt`. Every other prompt field
- * is an input to Pi's own renderer; a non-empty one is refused rather than
- * rendered locally. `cwd` and `docsPaths` are renderer inputs too and reach
- * nothing.
- */
+/** The complete Host system message; no Pi renderer or local resources participate. */
 export function hostSystemPromptFromSnapshot(prompt: InputPreparationCompiledPromptSnapshotV1): string {
-  const refuse = (message: string): never => {
-    throw new InputPreparationCompileError(message, { detail: 'prompt_render_input_unsupported' });
-  };
-  if (typeof prompt.customPrompt !== 'string' || prompt.customPrompt.length === 0) {
-    refuse('the Host must author the whole system message as prompt.customPrompt; the official runtime renders no default prompt here');
+  if (prompt === null || typeof prompt !== 'object' || Object.keys(prompt).length !== 1
+    || typeof prompt.systemPrompt !== 'string') {
+    throw new InputPreparationCompileError('prompt must contain exactly the Host systemPrompt string', { detail: 'prompt_render_input_unsupported' });
   }
-  if (prompt.appendSystemPrompt !== undefined) refuse('prompt.appendSystemPrompt has no renderer; fold it into prompt.customPrompt');
-  if (Object.keys(prompt.toolSnippets).length > 0) refuse('prompt.toolSnippets has no renderer on the prepared lane');
-  if (Object.keys(prompt.toolGuidelines).length > 0) refuse('prompt.toolGuidelines has no renderer on the prepared lane');
-  if (prompt.promptGuidelines.length > 0) refuse('prompt.promptGuidelines has no renderer on the prepared lane');
-  if (prompt.contextFiles.length > 0) refuse('prompt.contextFiles has no renderer on the prepared lane');
-  if (prompt.skills.length > 0) refuse('prompt.skills has no renderer on the prepared lane');
-  return prompt.customPrompt as string;
+  return prompt.systemPrompt;
 }
 
 function validatePreparedModel(model: InputPreparationModelV1): void {
+  if (typeof model.provider !== 'string' || model.provider.trim().length === 0) {
+    throw new InputPreparationCompileError('provider id must be non-empty', { detail: 'model_provider_invalid' });
+  }
   let endpoint: URL;
   try {
     endpoint = new URL(model.baseUrl);
@@ -510,12 +480,6 @@ export function createPiInputPreparationCompiler(
 export async function compilePreparedPiInput(request: CompilePreparedInputRequest): Promise<PreparedPiInputV1> {
   const snapshot = jsonClone(request.snapshot);
   const systemPrompt = hostSystemPromptFromSnapshot(snapshot.prompt);
-  const selected = snapshot.prompt.selectedTools;
-  const names = snapshot.tools.map((tool) => tool.name);
-  if (selected.length !== names.length || selected.some((name, index) => names[index] !== name)) {
-    throw new InputPreparationCompileError('selected tools and tool schemas must match exactly, in order',
-      { detail: 'tool_manifest_mismatch' });
-  }
   const model = jsonClone(request.model);
   validatePreparedModel(model);
   const transcript: PreparedTranscriptV1 = { systemPrompt, tools: snapshot.tools, messages: snapshot.messages };
@@ -568,7 +532,7 @@ export function verifyCompiledPreparedInput(
   envelope: PreparedPiInputV1,
   runtime: InputPreparationRuntimeIdentityV1,
 ): CompiledPreparedInput {
-  if (envelope.format !== runtime.envelopeFormat || envelope.providerRequest.format !== runtime.requestFormat) {
+  if (envelope.version !== PREPARED_ENVELOPE_VERSION || envelope.format !== runtime.envelopeFormat || envelope.providerRequest.format !== runtime.requestFormat) {
     throw new InputPreparationCompileError(
       `the compiler produced ${envelope.format}/${envelope.providerRequest.format}, not ${runtime.envelopeFormat}/${runtime.requestFormat}`,
       { detail: 'unsupported_envelope_format' },
@@ -600,22 +564,11 @@ export function verifyCompiledPreparedInput(
       { detail: 'projection_digest_mismatch' },
     );
   }
-  const residual: InputPreparationResidualKeyV1[] = [];
-  for (const entry of envelope.providerRequest.residual) {
-    if (
-      entry === null ||
-      typeof entry !== 'object' ||
-      typeof entry.key !== 'string' ||
-      entry.key.length === 0 ||
-      !SUPPORTED_RESIDUAL_VALUE_CLASSES.has(entry.valueClass)
-    ) {
-      throw new InputPreparationCompileError(
-        'the compiler classified a residual key with a value class outside the supported contract',
-        { detail: 'unsupported_residual_value_class' },
-      );
-    }
-    residual.push({ key: entry.key, valueClass: entry.valueClass });
+  if (projection.kind !== 'content_complete' || envelope.providerRequest.counterProjection !== envelope.providerRequest.body
+    || !Array.isArray(envelope.providerRequest.residual) || envelope.providerRequest.residual.length !== 0) {
+    throw new InputPreparationCompileError('envelope v4 requires P(D)=D and residual=[]', { detail: 'unsupported_projection_shape' });
   }
+  const residual: InputPreparationResidualKeyV1[] = [];
   return {
     requestBody: envelope.providerRequest.body,
     counterProjection: envelope.providerRequest.counterProjection,

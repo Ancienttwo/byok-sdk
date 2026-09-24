@@ -251,9 +251,10 @@ export interface ToolImplementationAssetV1 {
 export interface ToolImplementationNativeProvenanceV1 {
     readonly packageName: string;
     readonly packageVersion: string;
-    readonly upstreamBase: string;
+    readonly tarballIntegrity: string;
+    readonly provenanceDigest: string;
+    readonly closureDigest: string;
     readonly upstreamCommit: string;
-    readonly forkBuild: number;
     readonly compilerVersion: number;
 }
 /**

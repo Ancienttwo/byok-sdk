@@ -59,15 +59,7 @@ function params(messages: readonly unknown[]): unknown {
       options: { cacheRetention: 'none', maxTokens: 4_096 },
     },
     snapshot: {
-      prompt: {
-        cwd: '/workspace/project',
-        toolSnippets: {},
-        toolGuidelines: {},
-        promptGuidelines: [],
-        contextFiles: [],
-        skills: [],
-        docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
-      },
+      prompt: { systemPrompt: 'Host framing' },
       messages,
     },
     permissionMode: 'auto',
@@ -77,15 +69,7 @@ function params(messages: readonly unknown[]): unknown {
 
 function contextDocument(messages: readonly unknown[]): unknown {
   return {
-    prompt: {
-      cwd: '/workspace/project',
-      toolSnippets: {},
-      toolGuidelines: {},
-      promptGuidelines: [],
-      contextFiles: [],
-      skills: [],
-      docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
-    },
+    prompt: { systemPrompt: 'Host framing' },
     messages,
   };
 }

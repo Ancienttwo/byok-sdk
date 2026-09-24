@@ -45,6 +45,8 @@ assert.deepEqual(adaptersExport, {
 // module loading and with no install present.
 assert.equal(manifest.byok?.piRuntimePin, manifest.dependencies?.['@earendil-works/pi-coding-agent'],
   'client byok.piRuntimePin must exactly project dependency alias');
+const { verifyOfficialPiClosure } = await import('../src/adapters/pi/official-pi-installation.mjs');
+verifyOfficialPiClosure(packageRoot);
 // Exact official semver pin. The installed manifest must be the official
 // package at exactly that version; integrity and provenance are the release
 // identity gate's (`scripts/release/pi-runtime-identity.mjs`), not this
@@ -75,7 +77,7 @@ assert.equal(manifest.devDependencies?.['@earendil-works/pi-tui'], undefined);
 // version and installed at that version. `pi-tui` ships prebuilt `.node`
 // addons, so it cannot be a direct dependency (release-graph purity gate);
 // its version and integrity are held by `scripts/release/pi-runtime-identity.mjs`.
-for (const name of ['@earendil-works/pi-ai', '@earendil-works/pi-agent-core', '@earendil-works/chord', '@earendil-works/pi-telemetry']) {
+for (const name of ['@earendil-works/pi-ai', '@earendil-works/pi-agent-core']) {
   assert.equal(manifest.dependencies?.[name], nativeManifest.version,
     `client ${name} pin must equal the exact @earendil-works/pi-coding-agent version`);
   const installed = JSON.parse(readFileSync(new URL(`../node_modules/${name}/package.json`, import.meta.url), 'utf8'));

@@ -1,3 +1,4 @@
+import { assertOfficialPiManifest } from './official-pi-installation.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -26,8 +27,9 @@ export function verifyPiNativeInstallation(identity: ToolImplementationInstallRe
   const pin = resolvePiRuntimeIdentity();
   if (manifest.name !== provenance.packageName || manifest.name !== pin.name) throw new Error('Pi native packageName differs from record or static SDK pin');
   if (manifest.version !== provenance.packageVersion || manifest.version !== pin.version) throw new Error('Pi native packageVersion differs from record or static SDK pin');
+  assertOfficialPiManifest(bytes);
   const official = assertOfficialRuntimeIdentity([{ name: manifest.name, version: manifest.version }], pin);
-  for (const field of ['upstreamBase', 'upstreamCommit', 'forkBuild'] as const) {
+  for (const field of ['tarballIntegrity', 'upstreamCommit', 'provenanceDigest', 'closureDigest', 'compilerVersion'] as const) {
     if (official[field] !== provenance[field]) throw new Error(`Pi nativeProvenance.${field} differs from the official runtime identity`);
   }
   return piRuntimeIdentityFromAttestedRecord(identity);

@@ -1,3 +1,6 @@
+import { verifyOfficialPiClosure } from '../src/adapters/pi/official-pi-installation.mjs';
+import { fileURLToPath as officialFileURLToPath } from 'node:url';
+verifyOfficialPiClosure(officialFileURLToPath(new URL('../', import.meta.url)));
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';

@@ -1,3 +1,4 @@
+import { locateOfficialPiPackage } from '../adapters/pi/official-pi-installation.mjs';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -18,15 +19,14 @@ async function fixture(form: 'compiled-executable' | 'interpreter+bundle' = 'int
   const artifact = path.join(root, 'entry'); const interpreter = path.join(root, 'interpreter');
   await fs.writeFile(artifact, 'synthetic artifact', { mode: 0o555 }); await fs.writeFile(interpreter, 'synthetic interpreter', { mode: 0o555 });
   const native = resolveInstalledPiRuntimeIdentity();
-  const manifest = JSON.stringify({ name: native.packageName, version: native.packageVersion,
-    byokFork: { upstreamBase: native.upstreamBase, upstreamCommit: native.upstreamCommit, forkBuild: native.forkBuild } });
+  const manifest = await fs.readFile(path.join(locateOfficialPiPackage(native.packageName, process.cwd()), 'package.json'), 'utf8');
   const manifestPath = path.join(root, 'package.json'); await fs.writeFile(manifestPath, manifest, { mode: 0o444 });
   const record: ToolImplementationInstallRecordV1 = { kind: 'attested', authority: 'host-install-record', manifestRevision: 'synthetic-observation',
     form, installPath: artifact, closureKind: 'artifact', closureDigest: sha('synthetic artifact'), launchCwd: await fs.realpath(path.parse(root).root),
     launchArgv: ['__byok_sdk_helper', 'pi-rpc'], assetRoot: root, assets: [{ path: 'package.json', digest: sha(manifest) }],
     ...(form === 'interpreter+bundle' ? { interpreter: { path: interpreter, digest: sha('synthetic interpreter'), loadCommandsDigest: '0'.repeat(64) } } : {}),
-    nativeProvenance: { packageName: native.packageName, packageVersion: native.packageVersion, upstreamBase: native.upstreamBase,
-      upstreamCommit: native.upstreamCommit, forkBuild: native.forkBuild, compilerVersion: native.compilerVersion } };
+    nativeProvenance: { packageName: native.packageName, packageVersion: native.packageVersion, tarballIntegrity: native.tarballIntegrity,
+      upstreamCommit: native.upstreamCommit, provenanceDigest: native.provenanceDigest, closureDigest: native.closureDigest, compilerVersion: native.compilerVersion } };
   if (ownershipSeam) {
     const lstat = fs.lstat.bind(fs);
     vi.spyOn(fs, 'lstat').mockImplementation((async (...args: Parameters<typeof fs.lstat>) => {
