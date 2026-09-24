@@ -52,8 +52,8 @@ All verified in this worktree at origin/main @ ad22b89c.
 | Readback re-validates the payload against the frozen binding including `byteCount > maxBytes`, and preserves a received payload plus its refusal even when the sender's claims were invalid | `packages/cloud/src/task-agent-message.ts:45-49`, `:50-52` |
 | **Read-projection caveat**: `readTaskAgentMessage()` returns `{ payload, context, disposition }` rebuilt from the admission row plus the frozen binding receipt. It is a projection, not a third stored copy. | `packages/cloud/src/task-agent-message.ts:54` |
 | Tenant erasure covers `agent_message_admission` (the only deletion path) | `packages/cloud-dataplane/src/tenant-erasure.ts:49` |
-| Receipts are first-write-wins with no TTL/deletion path | `docs/spec.md:148-151` |
-| Postgres generic receipt retention is a separate, open boundary | `docs/spec.md:162-163` |
+| SQLite receipts are first-write-wins with no TTL/deletion path | `docs/spec.md:148-151` |
+| **Postgres cleanup does delete receipts**: `device_request_receipts` older than `requestReceiptRetentionMs` are removed, and only `pairing-completion:v1:*` keys are exempt. That includes the `agent-message-offer:*` bindings `readTaskAgentMessage()` needs, and it throws when the binding is gone, so on Postgres a retained admission body does not guarantee readable historical evidence after cleanup. This is a concrete retention gap, not a no-deletion guarantee. | `packages/cloud-dataplane/src/cleanup.ts:709`, `:738-743`; `packages/cloud/src/task-agent-message.ts` |
 | Device outbox stores `contentHash: hashBody(input.body)` per record | `packages/client/src/daemon/agent-message-outbox.ts:176` |
 | Outbox admission is bounded by a byte quota (`maxPendingBytes`) | `packages/client/src/daemon/agent-message-outbox.ts:149`, `:165` |
 | Outbox compaction is triggered by log entry count only: `if (this.logEntries >= 512) await this.compact();` | `packages/client/src/daemon/agent-message-outbox.ts:251` |
@@ -123,7 +123,7 @@ Only considered when all hold: same tenant; byte-identical; immutable object; th
 
 ### 4.5 SummaryJob trigger: expressed in existing evidence
 
-The trigger is `artifact.requestBytes` against the Host-ruled bound already carried on the receipt (`requestBytes + C + max_tokens <= window`, `packages/protocol/src/input-preparation.ts:680-685`). No new metric, no "70% of context window" heuristic. SummaryJob scheduling stays behind the official Pi migration in the Owner order.
+The trigger compares `artifact.requestBytes` (carried on the receipt) against a bound the receipt does **not** carry: `InputPreparationReceiptSummarySchema` and its `accountingPolicyRef` hold applicability and residual coverage only, with no `C`, `max_tokens` or window. The formula `requestBytes + C + max_tokens <= window` (`packages/protocol/src/input-preparation.ts:680-685`) is a comment describing Host arithmetic. The scheduler therefore needs the separate Host budget authority, the Salesko `pi-accounting-ruling` record (window, C, max_tokens, bound to the ruled runtime/target/toolset digest). If that ruling is missing, falsified or does not match the Execution's frozen revision, the trigger must fail closed: no SummaryJob is scheduled, and the thread stays in the existing typed budget-blocked state. No new metric, no "70% of context window" heuristic. SummaryJob scheduling stays behind the official Pi migration in the Owner order.
 
 ## 5. Quantification runbook
 
