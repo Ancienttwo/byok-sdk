@@ -60,7 +60,9 @@ services:
       - ./packages/cloud-dataplane/src/__tests__/fixtures/schema-authority-bootstrap.sql:/docker-entrypoint-initdb.d/10-schema-authority-bootstrap.sql:ro
 
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    build:
+      context: ./scripts/test-substrate
+      dockerfile: minio.Dockerfile
     # GitHub Actions `services:` containers cannot override CMD, which is the
     # concrete reason this substrate is a compose file rather than a service
     # block: MinIO does not start without `server`.
@@ -72,7 +74,7 @@ services:
       - '9100:9000'
       - '9101:9101'
     healthcheck:
-      test: ['CMD-SHELL', 'mc ready local || exit 1']
+      test: ['CMD', 'curl', '--fail', '--silent', 'http://127.0.0.1:9000/minio/health/ready']
       interval: 2s
       timeout: 3s
       retries: 30

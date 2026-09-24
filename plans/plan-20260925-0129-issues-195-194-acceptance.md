@@ -19,7 +19,7 @@
 - P3 decision: extend existing conformance seams and test rejection boundaries; do not create a second Host implementation or mark synthetic counters/provider output as native acceptance. No API changes. At 10x test scale socket/process/SQLite contention dominates, so keep the existing bounded worker configuration.
 
 ## Scope
-Process #195 before #194. Add missing SDK-local evidence; explicitly retain externally owned acceptance as blocked. No changes to Salesko, aiphabee, provider accounts, release state or other open PRs.
+Process #195 before #194. Add missing SDK-local evidence; explicitly retain externally owned acceptance as blocked. Read-only verification of one isolated Salesko candidate is included. No source changes to Salesko or changes to aiphabee, provider accounts, release state or other open PRs.
 
 ## Task Breakdown
 - [x] T1 #195: extend existing recurring Summary conformance across a multi-turn boundary with exact frozen input read-back and recovered internal result consumption.
@@ -43,6 +43,14 @@ Run build, typecheck, test, API surface, version authority and strict workflow c
 - **Evaluator rubric**: actual assertions, exact subject and explicit synthetic/external boundaries.
 - **Stop condition**: bounded SDK scope passes verification and is submitted as PR; externally blocked issue criteria remain open.
 - **Rollback surface**: revert branch commits.
+
+## Follow-up
+
+- [x] T4: verify exact Salesko candidate accounting/prepared dispatch with installed registry SDK and disposable PostgreSQL.
+- [ ] T5: repair unavailable MinIO test image using the same release source, verify the real dataplane and update this PR.
+- [ ] T6: freeze the next SummaryJob boundary after the requested scope decision; no production budget defaults.
+
+P1: the single compose file owns Postgres/MinIO for local and CI dataplane tests. P2: compose pull fails with Quay unauthorized before any tests; the former official binary archive returns HTTP 410. P3: build the existing MinIO release from its exact official source commit and SHA-256 archive, preserve endpoints/credentials/ports and use its readiness endpoint. One blocking infrastructure repair; no new S3 implementation or registry credential. First build costs extra compile time; subsequent local builds reuse layers.
 
 ## Delivery
 
