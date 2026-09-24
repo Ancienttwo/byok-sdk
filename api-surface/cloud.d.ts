@@ -824,7 +824,7 @@ export declare const CLOUD_CAPABILITIES: {
      * DEVICE's only way to discharge a mailbox row this same deployment handed
      * it — withholding it would strand the device's redelivery cursor rather
      * than degrade a feature. For the same reason the completion route asserts
-     * no DEVICE capability either: the device-level `agent-input-preparation-v5`
+     * no DEVICE capability either: the device-level `agent-input-preparation-v6`
      * flag gates ADMISSION (`enqueueInputPreparation`) and nothing else, so an
      * unconfigured device is refused a row instead of being handed one whose
      * only honest answer — `input_preparation_unconfigured` — it could not then
@@ -1063,6 +1063,8 @@ export interface PreparedDispatchInput {
     readonly taskId?: string;
     /** Instruction-free strict payload naming the preparation this Execution consumes. */
     readonly payload: TaskOfferPreparedPayload;
+    /** Host-only destination/freshness authority; never serialized to the daemon. */
+    readonly agentMessageContext?: AgentMessageServerContext;
 }
 /** Strict Agent dispatch that supplies the policy consumed by the typed egress lanes. */
 export interface AgentEgressDispatchInput {
@@ -1175,7 +1177,7 @@ export interface ByokCloud {
      * Host control plane: enqueue an offer for an already-counted preparation.
      *
      * Admission requires the device to durably advertise both the Agent-home
-     * contract and `agent-input-preparation-v5` — the second because only a device
+     * contract and `agent-input-preparation-v6` — the second because only a device
      * that can prepare holds the durable record this offer names. A device that
      * advertises neither never receives the message, and a device whose protocol
      * build predates the type skips it whole rather than running it as an

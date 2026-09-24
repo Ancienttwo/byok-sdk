@@ -352,7 +352,8 @@ describe('control-protocol: input_preparation param gates', () => {
     ['the RETIRED version 2', (r: Record<string, unknown>) => ({ ...r, version: 2 })],
     ['the RETIRED version 3', (r: Record<string, unknown>) => ({ ...r, version: 3 })],
     ['the RETIRED version 4', (r: Record<string, unknown>) => ({ ...r, version: 4 })],
-    ['a future version', (r: Record<string, unknown>) => ({ ...r, version: 6 })],
+    ['the RETIRED version 5', (r: Record<string, unknown>) => ({ ...r, version: 5 })],
+    ['a future version', (r: Record<string, unknown>) => ({ ...r, version: INPUT_PREPARATION_VERSION + 1 })],
     ['an unknown scope field', (r: Record<string, unknown>) => ({ ...r, scope: { ...scope, tenantId: 't' } })],
     ['a non-openai-completions api', (r: Record<string, unknown>) => ({ ...r, selection: { ...(r.selection as object), model: { ...((r.selection as { model: object }).model), api: 'anthropic-messages' } } })],
     // `samplingParams` is a real native model field that this wire deliberately

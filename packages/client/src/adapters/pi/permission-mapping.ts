@@ -1,3 +1,4 @@
+import { qualifiedMcpToolName } from '../../mcp/projection';
 import type { PermissionPolicy } from '@byok-sdk/protocol';
 import type { McpToolsetGrant } from '../mcp-tool-grants';
 import { BYOK_PI_READONLY_PARENT_TOOLS } from './subagents-policy-config';
@@ -61,6 +62,7 @@ const READONLY_TOOLS: readonly string[] = ['read', 'grep', 'find', 'ls', ...BYOK
 export function mapPermissionPolicyToPiArgs(
   policy: PermissionPolicy,
   reservedGrants: readonly McpToolsetGrant[] = [],
+  toolsetGrants: readonly McpToolsetGrant[] = [],
 ): PiPermissionMapping {
   if (policy.network === false) {
     return {
@@ -104,8 +106,16 @@ export function mapPermissionPolicyToPiArgs(
   }
 
   const args: string[] = [];
-  if (policy.allowTools && policy.allowTools.length > 0) {
-    args.push('--tools', [...new Set([...policy.allowTools, ...grantedReserved])].join(','));
+  if (policy.allowTools !== undefined) {
+    // auto+[] selects zero NATIVE tools. Pi --no-tools disables extensions
+    // too, so explicitly retain this task's observed MCP grants. No registry
+    // defaults or unobserved tool names are invented here.
+    const grantedToolsets = policy.allowTools.length === 0
+      ? toolsetGrants.flatMap(grant => grant.tools.map(tool => qualifiedMcpToolName(grant.server, tool)))
+      : [];
+    const allowed = [...new Set([...policy.allowTools, ...grantedReserved, ...grantedToolsets])];
+    if (allowed.length === 0) return { ok: true, args: ['--no-tools'] };
+    args.push('--tools', allowed.join(','));
   }
   if (denyTools.length > 0) args.push('--exclude-tools', denyTools.join(','));
 
@@ -155,7 +165,7 @@ export function resolvePiNativeToolSelection(policy: PermissionPolicy): PiNative
       : [...READONLY_TOOLS];
     return { ok: true, names: Object.freeze([...new Set(base)].filter((tool) => !denied.has(tool))) };
   }
-  if (policy.allowTools === undefined || policy.allowTools.length === 0) {
+  if (policy.allowTools === undefined) {
     return {
       ok: false,
       reason: 'permission mode "auto" without an explicit allowTools list leaves the tool set to pi\'s own'

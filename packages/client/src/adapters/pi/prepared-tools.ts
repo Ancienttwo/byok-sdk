@@ -167,6 +167,27 @@ export function preparedNativeToolSelection(
   });
 }
 
+/** Admission and launch share the same refusal before a preparation can be consumed. */
+export function validatePreparedPiNativeToolPolicy(
+  policy: PermissionPolicy,
+): { readonly ok: true } | PreparedPiToolSurfaceRefusal {
+  const native = preparedNativeToolSelection(policy);
+  if (!native.ok) return native;
+  const selection = native.selection;
+  if (selection !== undefined) {
+    // See the module comment: the fork would take these tools, but no
+    // preparation counted them, so registering them is guaranteed drift.
+    return refuse(
+      'native_tools_uncounted',
+      `the admitted policy selects the pi-native tools [${selection.names.join(', ')}], and no preparation counts a`
+      + ' native tool set yet (daemon/prepared-tool-surface.ts assembles `nativeTools: []`); a prepared launch is'
+      + ' only assembled for a policy whose native half is empty',
+    );
+  }
+
+  return { ok: true };
+}
+
 /**
  * Assemble the authorized tool closure for one prepared launch, or refuse.
  *
@@ -188,19 +209,8 @@ export async function assemblePreparedPiToolSurface(
     );
   }
 
-  const native = preparedNativeToolSelection(input.policy);
+  const native = validatePreparedPiNativeToolPolicy(input.policy);
   if (!native.ok) return native;
-  const selection = native.selection;
-  if (selection !== undefined) {
-    // See the module comment: the fork would take these tools, but no
-    // preparation counted them, so registering them is guaranteed drift.
-    return refuse(
-      'native_tools_uncounted',
-      `the admitted policy selects the pi-native tools [${selection.names.join(', ')}], and no preparation counts a`
-      + ' native tool set yet (daemon/prepared-tool-surface.ts assembles `nativeTools: []`); a prepared launch is'
-      + ' only assembled for a policy whose native half is empty',
-    );
-  }
 
   const allowed = filterMcpObservationForPolicy(input.observation, input.countedPermissionMode);
   if (!allowed.ok) return refuse('tool_surface_unfingerprintable', allowed.reason);

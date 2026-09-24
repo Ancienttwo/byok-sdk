@@ -94,7 +94,8 @@ async function setup(type: string) {
     // The one offer that carries no instruction: the request is already inside
     // the frozen envelope the referenced record retained.
     ? {
-      policy: { mode: 'auto' }, runtime: 'pi', agentRef,
+      policy: { mode: 'auto', allowTools: [] }, runtime: 'pi', agentRef,
+      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       preparation: { reference: 'journal-family-record', requestDigest: 'journal-family-request-digest' },
     }
     : {

@@ -88,15 +88,19 @@ export const INPUT_PREPARATION_ARTIFACT_FORMAT = 'byok.input-preparation.artifac
  * `bound` member no adapter could honestly state; and the readiness reason
  * `request_content_not_text` was added.
  *
+ * Version 6 requires strict prepared egress. D and the fourteen admission
+ * comparisons are unchanged; old artifacts are not read forward.
+ *
  * The number itself is owned by `@byok-sdk/protocol`'s
  * `INPUT_PREPARATION_WIRE_VERSION`, because the device capability token
  * `agent-input-preparation-v<N>` is derived from it: the relay wire carries no
  * version field, so the token is what keeps a device and a cloud on different
  * versions from exchanging a preparation at all. One number, two projections.
  *
- * The request, the receipt, the durable record and the retained artifact all
- * carry this number, so a record written under an older version is refused on
- * replay rather than read through a compatibility branch: its artifact was
+ * The request, receipt and retained artifact carry this number. The durable
+ * record schema is versioned independently by INPUT_PREPARATION_RECORD_VERSION.
+ * An artifact with an older wire version is refused rather than read through
+ * a compatibility branch: its artifact was
  * frozen under a claim this version cannot re-derive, and there is no honest
  * value to translate a prompt rendered by another renderer into.
  */

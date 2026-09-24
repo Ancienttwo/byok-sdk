@@ -2190,7 +2190,7 @@ export function buildDaemonWithAdapters(
      * That completion is ACCEPTED by cloud: the completion route asserts no
      * device capability (`cloud.ts`'s `completeInputPreparationFromStores`),
      * precisely so this rejection is recordable by a device that never
-     * advertised `agent-input-preparation-v5`. The flag remains the admission
+     * advertised `agent-input-preparation-v6`. The flag remains the admission
      * gate on `enqueueInputPreparation`.
      *
      * The handler takes the service directly, so a preparation runs IN-PROCESS.
@@ -2286,7 +2286,7 @@ export function buildDaemonWithAdapters(
     };
     const sendEnvelope: TaskRunnerDeps['send'] = (candidate) => {
       // The egress policy is additive and applies only to a running
-      // task.offer_for_agent_with_egress. Legacy tasks and plain Agent-home
+      // Agent egress offer, including task.offer_prepared. Plain Agent-home
       // offers retain their exact established task.* wire semantics.
       if (candidate.task_id === undefined || runner?.usesAgentEgress(candidate.task_id) !== true) {
         sendSanitizedEnvelope(candidate);
@@ -2323,7 +2323,7 @@ export function buildDaemonWithAdapters(
       getMcpToolsets: () => toolsetRegistry.snapshot().toolsets,
       // The prepared-Execution lane, present only on a daemon whose input
       // preparation service actually constructed — which is also the only
-      // daemon that advertises `agent-input-preparation-v5` and can hold a record
+      // daemon that advertises `agent-input-preparation-v6` and can hold a record
       // a `task.offer_prepared` could name. The three device facts travel with
       // the store because this file already owns them: re-deriving the
       // installed runtime identity or the operator's policy revision inside the

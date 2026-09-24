@@ -1399,6 +1399,46 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             requestDigest: z.ZodString;
             artifactDigest: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>;
+        egressPolicy: z.ZodObject<{
+            policyRevision: z.ZodString;
+            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
+                mode: z.ZodLiteral<"metadata-status">;
+                delivery: z.ZodLiteral<"latest-value">;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"contentful-trajectory">;
+                delivery: z.ZodLiteral<"latest-value">;
+                maxCoalesceMs: z.ZodNumber;
+                maxEventBytes: z.ZodNumber;
+            }, z.core.$strict>], "mode">;
+            reliable: z.ZodObject<{
+                maxPendingEventsPerAgent: z.ZodNumber;
+                maxPendingBytesPerAgent: z.ZodNumber;
+                maxPendingBytesPerTenant: z.ZodNumber;
+            }, z.core.$strict>;
+            transfers: z.ZodObject<{
+                workspace: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                transcript: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                artifact: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+        messageEgress: z.ZodOptional<z.ZodObject<{
+            mode: z.ZodLiteral<"required">;
+            contract: z.ZodString;
+            contentType: z.ZodEnum<{
+                "text/markdown": "text/markdown";
+                "text/plain": "text/plain";
+            }>;
+            maxBytes: z.ZodNumber;
+        }, z.core.$strict>>;
     }, z.core.$strict>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -2865,6 +2905,46 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 requestDigest: z.ZodString;
                 artifactDigest: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>;
+            egressPolicy: z.ZodObject<{
+                policyRevision: z.ZodString;
+                activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
+                    mode: z.ZodLiteral<"metadata-status">;
+                    delivery: z.ZodLiteral<"latest-value">;
+                }, z.core.$strict>, z.ZodObject<{
+                    mode: z.ZodLiteral<"contentful-trajectory">;
+                    delivery: z.ZodLiteral<"latest-value">;
+                    maxCoalesceMs: z.ZodNumber;
+                    maxEventBytes: z.ZodNumber;
+                }, z.core.$strict>], "mode">;
+                reliable: z.ZodObject<{
+                    maxPendingEventsPerAgent: z.ZodNumber;
+                    maxPendingBytesPerAgent: z.ZodNumber;
+                    maxPendingBytesPerTenant: z.ZodNumber;
+                }, z.core.$strict>;
+                transfers: z.ZodObject<{
+                    workspace: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                        maxBytes: z.ZodNumber;
+                        allowedMimeTypes: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>]>;
+                    transcript: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                        maxBytes: z.ZodNumber;
+                        allowedMimeTypes: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>]>;
+                    artifact: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                        maxBytes: z.ZodNumber;
+                        allowedMimeTypes: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>]>;
+                }, z.core.$strict>;
+            }, z.core.$strict>;
+            messageEgress: z.ZodOptional<z.ZodObject<{
+                mode: z.ZodLiteral<"required">;
+                contract: z.ZodString;
+                contentType: z.ZodEnum<{
+                    "text/markdown": "text/markdown";
+                    "text/plain": "text/plain";
+                }>;
+                maxBytes: z.ZodNumber;
+            }, z.core.$strict>>;
         }, z.core.$strict>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -4203,6 +4283,46 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 requestDigest: z.ZodString;
                 artifactDigest: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>;
+            egressPolicy: z.ZodObject<{
+                policyRevision: z.ZodString;
+                activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
+                    mode: z.ZodLiteral<"metadata-status">;
+                    delivery: z.ZodLiteral<"latest-value">;
+                }, z.core.$strict>, z.ZodObject<{
+                    mode: z.ZodLiteral<"contentful-trajectory">;
+                    delivery: z.ZodLiteral<"latest-value">;
+                    maxCoalesceMs: z.ZodNumber;
+                    maxEventBytes: z.ZodNumber;
+                }, z.core.$strict>], "mode">;
+                reliable: z.ZodObject<{
+                    maxPendingEventsPerAgent: z.ZodNumber;
+                    maxPendingBytesPerAgent: z.ZodNumber;
+                    maxPendingBytesPerTenant: z.ZodNumber;
+                }, z.core.$strict>;
+                transfers: z.ZodObject<{
+                    workspace: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                        maxBytes: z.ZodNumber;
+                        allowedMimeTypes: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>]>;
+                    transcript: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                        maxBytes: z.ZodNumber;
+                        allowedMimeTypes: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>]>;
+                    artifact: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                        maxBytes: z.ZodNumber;
+                        allowedMimeTypes: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>]>;
+                }, z.core.$strict>;
+            }, z.core.$strict>;
+            messageEgress: z.ZodOptional<z.ZodObject<{
+                mode: z.ZodLiteral<"required">;
+                contract: z.ZodString;
+                contentType: z.ZodEnum<{
+                    "text/markdown": "text/markdown";
+                    "text/plain": "text/plain";
+                }>;
+                maxBytes: z.ZodNumber;
+            }, z.core.$strict>>;
         }, z.core.$strict>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -5573,7 +5693,7 @@ import { z } from 'zod';
  * below. See `INPUT_PREPARATION_VERSION` in the client for what each version
  * changed.
  */
-export declare const INPUT_PREPARATION_WIRE_VERSION: 5;
+export declare const INPUT_PREPARATION_WIRE_VERSION: 6;
 /**
  * Capability required before a task-free remote input preparation — or a
  * prepared Execution — is admitted: `agent-input-preparation-v<N>`, where
@@ -5596,7 +5716,7 @@ export declare const INPUT_PREPARATION_WIRE_VERSION: 5;
  * devices as a pair is the operator precondition for the cut (`docs/spec.md`,
  * bounded admission); nothing here parses an older receipt.
  */
-export declare const AGENT_INPUT_PREPARATION_CAPABILITY: "agent-input-preparation-v5";
+export declare const AGENT_INPUT_PREPARATION_CAPABILITY: "agent-input-preparation-v6";
 /** The preparation surface uses the package-wide lowercase `sha256:<hex>` transport form. */
 export declare const InputPreparationContentHashSchema: z.ZodString;
 /**
@@ -6787,10 +6907,11 @@ export declare const RequiredToolsetsSchema: z.ZodArray<z.ZodString>;
 /**
  * Additive v1 offer variant for tasks whose semantics require local MCP
  * tools. This is a distinct message type rather than an optional field on
- * `task.offer`: an older v1 daemon skips an unknown message type, whereas it
- * would legally strip an unknown optional control field and run the task
- * without its required tools. The whole payload is strict because every
- * field here affects execution authority.
+ * `task.offer`, so an older daemon can never strip an unknown optional control
+ * field and run the task without its required tools. An unknown type is not
+ * silently skipped either: on long-poll it freezes the cursor, so the enqueue
+ * capability gate is the real compatibility boundary. The whole payload is
+ * strict because every field here affects execution authority.
  */
 export declare const TaskOfferWithToolsetsPayloadSchema: z.ZodObject<{
     instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
@@ -7171,11 +7292,10 @@ export type TaskOfferForAgentWithEgressFreshPayload = z.infer<typeof TaskOfferFo
  *
  * A DISTINCT message type, not a `preparation` field added to
  * `task.offer_for_agent`, for the same N/N-1 reason the toolset and egress
- * variants are distinct: an older daemon skips a message type it does not know
- * (`UnknownMessageTypeError`, and the long-poll transport skips that entry
- * whole), whereas it would legally STRIP an unknown optional field and run the
- * task as an ordinary instruction offer — compiling a request of its own
- * against tokens that were already counted for a different one.
+ * variants are distinct. On long-poll, both an unknown message type and an
+ * unknown key on a strict payload freeze the cursor. The enqueue capability
+ * gate is the compatibility boundary: v6 requires a drain and paired upgrade,
+ * with no dual token or dual read.
  *
  * It carries no `instruction`: the user request is already inside the frozen
  * envelope the referenced record retained, and an offer that carried both would
@@ -7252,6 +7372,46 @@ export declare const TaskOfferPreparedPayloadSchema: z.ZodObject<{
         requestDigest: z.ZodString;
         artifactDigest: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>;
+    egressPolicy: z.ZodObject<{
+        policyRevision: z.ZodString;
+        activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
+            mode: z.ZodLiteral<"metadata-status">;
+            delivery: z.ZodLiteral<"latest-value">;
+        }, z.core.$strict>, z.ZodObject<{
+            mode: z.ZodLiteral<"contentful-trajectory">;
+            delivery: z.ZodLiteral<"latest-value">;
+            maxCoalesceMs: z.ZodNumber;
+            maxEventBytes: z.ZodNumber;
+        }, z.core.$strict>], "mode">;
+        reliable: z.ZodObject<{
+            maxPendingEventsPerAgent: z.ZodNumber;
+            maxPendingBytesPerAgent: z.ZodNumber;
+            maxPendingBytesPerTenant: z.ZodNumber;
+        }, z.core.$strict>;
+        transfers: z.ZodObject<{
+            workspace: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                maxBytes: z.ZodNumber;
+                allowedMimeTypes: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>]>;
+            transcript: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                maxBytes: z.ZodNumber;
+                allowedMimeTypes: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>]>;
+            artifact: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                maxBytes: z.ZodNumber;
+                allowedMimeTypes: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>]>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
+    messageEgress: z.ZodOptional<z.ZodObject<{
+        mode: z.ZodLiteral<"required">;
+        contract: z.ZodString;
+        contentType: z.ZodEnum<{
+            "text/markdown": "text/markdown";
+            "text/plain": "text/plain";
+        }>;
+        maxBytes: z.ZodNumber;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
 export type TaskOfferPreparedPayload = z.infer<typeof TaskOfferPreparedPayloadSchema>;
 /** Daemon -> cloud: one durable reliable-lane item after local sanitization. */
@@ -7487,11 +7647,12 @@ export type AgentHomeProjectionPayload = z.infer<typeof AgentHomeProjectionPaylo
  * Server -> daemon: one task-free, exact-device remote input preparation.
  *
  * Distinct message type rather than an optional field on an existing one, for
- * the same N/N-1 reason `task.offer_with_toolsets` is: a daemon that predates
- * this contract SKIPS an unknown type outright (`parseMessage` ->
- * `UnknownMessageTypeError`), whereas it would legally STRIP an unknown
- * optional field and then answer as though a preparation it never performed
- * had somehow been handled.
+ * the same N/N-1 reason `task.offer_with_toolsets` is: an optional field could be
+ * legally STRIPPED by a daemon that predates this contract, which would then
+ * answer as though a preparation it never performed had somehow been handled.
+ * An unknown type (`parseMessage` -> `UnknownMessageTypeError`) is not skipped
+ * cleanly either: on long-poll it freezes the cursor, so the enqueue capability
+ * gate is the compatibility boundary.
  *
  * What is deliberately NOT here (§17 B): `tools`, `toolExecutors`, runtime or
  * compiler identity, `tenantId` and `deviceId`. The first three are local
@@ -8721,6 +8882,46 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
             requestDigest: z.ZodString;
             artifactDigest: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>;
+        egressPolicy: z.ZodObject<{
+            policyRevision: z.ZodString;
+            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
+                mode: z.ZodLiteral<"metadata-status">;
+                delivery: z.ZodLiteral<"latest-value">;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"contentful-trajectory">;
+                delivery: z.ZodLiteral<"latest-value">;
+                maxCoalesceMs: z.ZodNumber;
+                maxEventBytes: z.ZodNumber;
+            }, z.core.$strict>], "mode">;
+            reliable: z.ZodObject<{
+                maxPendingEventsPerAgent: z.ZodNumber;
+                maxPendingBytesPerAgent: z.ZodNumber;
+                maxPendingBytesPerTenant: z.ZodNumber;
+            }, z.core.$strict>;
+            transfers: z.ZodObject<{
+                workspace: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                transcript: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                artifact: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+        messageEgress: z.ZodOptional<z.ZodObject<{
+            mode: z.ZodLiteral<"required">;
+            contract: z.ZodString;
+            contentType: z.ZodEnum<{
+                "text/markdown": "text/markdown";
+                "text/plain": "text/plain";
+            }>;
+            maxBytes: z.ZodNumber;
+        }, z.core.$strict>>;
     }, z.core.$strict>;
 };
 export type TaskOfferType = keyof typeof TASK_OFFER_PAYLOAD_SCHEMAS;
@@ -9208,6 +9409,46 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             requestDigest: z.ZodString;
             artifactDigest: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>;
+        egressPolicy: z.ZodObject<{
+            policyRevision: z.ZodString;
+            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
+                mode: z.ZodLiteral<"metadata-status">;
+                delivery: z.ZodLiteral<"latest-value">;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"contentful-trajectory">;
+                delivery: z.ZodLiteral<"latest-value">;
+                maxCoalesceMs: z.ZodNumber;
+                maxEventBytes: z.ZodNumber;
+            }, z.core.$strict>], "mode">;
+            reliable: z.ZodObject<{
+                maxPendingEventsPerAgent: z.ZodNumber;
+                maxPendingBytesPerAgent: z.ZodNumber;
+                maxPendingBytesPerTenant: z.ZodNumber;
+            }, z.core.$strict>;
+            transfers: z.ZodObject<{
+                workspace: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                transcript: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+                artifact: z.ZodUnion<readonly [z.ZodLiteral<"disabled">, z.ZodObject<{
+                    maxBytes: z.ZodNumber;
+                    allowedMimeTypes: z.ZodArray<z.ZodString>;
+                }, z.core.$strict>]>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+        messageEgress: z.ZodOptional<z.ZodObject<{
+            mode: z.ZodLiteral<"required">;
+            contract: z.ZodString;
+            contentType: z.ZodEnum<{
+                "text/markdown": "text/markdown";
+                "text/plain": "text/plain";
+            }>;
+            maxBytes: z.ZodNumber;
+        }, z.core.$strict>>;
     }, z.core.$strict>;
     readonly 'conn.hello': z.ZodObject<{
         protocolVersions: z.ZodArray<z.ZodNumber>;
@@ -10079,5 +10320,5 @@ export declare const STRICT_AGENT_ONLY_CAPABILITY: 'strict-agent-only';
  * cannot accidentally execute the instruction without the required tools.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v5", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v6", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];

@@ -1,4 +1,4 @@
-import { AGENT_INPUT_PREPARATION_CAPABILITY, decodeEnvelope } from '@byok-sdk/protocol';
+import { AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_MESSAGE_EGRESS_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, decodeEnvelope } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { AGENT_HOME_CONTRACT_CAPABILITY } from '..';
 import { TENANT_A, createHarness } from './support/harness';
@@ -18,11 +18,14 @@ import { TENANT_A, createHarness } from './support/harness';
  *   than silently stripped.
  */
 
+const EGRESS_POLICY = { policyRevision: 'metadata-status-v1', activity: { mode: 'metadata-status', delivery: 'latest-value' }, reliable: { maxPendingEventsPerAgent: 256, maxPendingBytesPerAgent: 4194304, maxPendingBytesPerTenant: 16777216 }, transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } } as const;
+const CAPABILITIES = [AGENT_HOME_CONTRACT_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY];
 const AGENT_REF = { agentId: 'agent-prepared-1', profileRevision: 'profile-r1' } as const;
 
 function preparedPayload() {
   return {
-    policy: { mode: 'auto' as const },
+    policy: { mode: 'auto' as const, allowTools: [] },
+    egressPolicy: EGRESS_POLICY,
     agentRef: AGENT_REF,
     requiredToolsets: ['team'],
     preparation: {
@@ -55,12 +58,12 @@ describe('hosted prepared-Execution dispatch', () => {
     expect(await harness.cloud.readTaskAttempt(TENANT_A, 'prepared-task-refused')).toBeUndefined();
   });
 
-  it('refuses a device that declares only the retired unversioned token, before any mailbox or task row', async () => {
+  it('refuses a device that declares only v5 input preparation, before any mailbox or task row', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
-      capabilities: [AGENT_HOME_CONTRACT_CAPABILITY, 'agent-input-preparation'],
+      capabilities: [...CAPABILITIES.filter(c => c !== AGENT_INPUT_PREPARATION_CAPABILITY), 'agent-input-preparation-v5'],
     });
 
     await expect(
@@ -80,7 +83,7 @@ describe('hosted prepared-Execution dispatch', () => {
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
-      capabilities: [AGENT_HOME_CONTRACT_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY],
+      capabilities: CAPABILITIES,
     });
 
     const offered = await harness.cloud.enqueuePreparedOffer(TENANT_A, device.deviceId, {
@@ -111,7 +114,7 @@ describe('hosted prepared-Execution dispatch', () => {
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
-      capabilities: [AGENT_HOME_CONTRACT_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY],
+      capabilities: CAPABILITIES,
     });
 
     for (const [taskId, extra] of [
@@ -129,5 +132,47 @@ describe('hosted prepared-Execution dispatch', () => {
     expect(
       (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0, limit: 10 })).messages,
     ).toHaveLength(0);
+  });
+});
+
+
+describe('prepared egress admission and server context', () => {
+  const requirement = { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 10_000 } as const;
+  it.each([AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_MESSAGE_EGRESS_CAPABILITY])('refuses missing %s without an attempt or mailbox row', async missing => {
+    const h = createHarness();
+    const d = await h.pairDevice(TENANT_A);
+    await h.stores.devices.recordCapabilities(TENANT_A, { deviceId: d.deviceId, capabilities: [...CAPABILITIES, AGENT_MESSAGE_EGRESS_CAPABILITY].filter(c => c !== missing) });
+    await expect(h.cloud.enqueuePreparedOffer(TENANT_A, d.deviceId, {
+      taskId: 'missing-cap', payload: { ...preparedPayload(), messageEgress: requirement },
+      agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn' },
+    })).rejects.toMatchObject({ code: 'agent_capability_missing' });
+    expect((await h.core.mailbox.readAfter(TENANT_A, { deviceId: d.deviceId, afterSeq: 0, limit: 10 })).messages).toHaveLength(0);
+    expect(await h.cloud.readTaskAttempt(TENANT_A, 'missing-cap')).toBeUndefined();
+  });
+
+  it('persists immutable message context server-side, keeping it out of the prepared wire', async () => {
+    const h = createHarness();
+    const d = await h.pairDevice(TENANT_A);
+    await h.stores.devices.recordCapabilities(TENANT_A, { deviceId: d.deviceId, capabilities: [...CAPABILITIES, AGENT_MESSAGE_EGRESS_CAPABILITY] });
+    const input = { taskId: 'prepared-message', payload: { ...preparedPayload(), messageEgress: requirement }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn' } };
+    const offered = await h.cloud.enqueuePreparedOffer(TENANT_A, d.deviceId, input);
+    expect(offered.envelope.payload).toMatchObject({ egressPolicy: EGRESS_POLICY, messageEgress: requirement });
+    expect(offered.envelope.payload).not.toHaveProperty('agentMessageContext');
+    const receipt = await h.stores.receipts.get(TENANT_A, `agent-message-offer:${d.deviceId}:${input.taskId}`);
+    expect(JSON.parse(receipt!.body)).toEqual({ agentRef: AGENT_REF, requirement, context: input.agentMessageContext });
+    await expect(h.cloud.enqueuePreparedOffer(TENANT_A, d.deviceId, { ...input, agentMessageContext: { destinationBinding: 'different' } })).rejects.toMatchObject({ code: 'agent_task_already_exists' });
+    expect((await h.core.mailbox.readAfter(TENANT_A, { deviceId: d.deviceId, afterSeq: 0, limit: 10 })).messages).toHaveLength(1);
+  });
+
+  it('rejects absent required egress policy and incoherent message context before any mailbox write', async () => {
+    const h = createHarness();
+    const d = await h.pairDevice(TENANT_A);
+    await h.stores.devices.recordCapabilities(TENANT_A, { deviceId: d.deviceId, capabilities: [...CAPABILITIES, AGENT_MESSAGE_EGRESS_CAPABILITY] });
+    for (const input of [
+      { payload: { ...preparedPayload(), egressPolicy: undefined } },
+      { payload: preparedPayload(), agentMessageContext: { destinationBinding: 'conversation' } },
+      { payload: { ...preparedPayload(), messageEgress: requirement } },
+    ]) await expect(h.cloud.enqueuePreparedOffer(TENANT_A, d.deviceId, input as never)).rejects.toThrow();
+    expect((await h.core.mailbox.readAfter(TENANT_A, { deviceId: d.deviceId, afterSeq: 0, limit: 10 })).messages).toHaveLength(0);
   });
 });

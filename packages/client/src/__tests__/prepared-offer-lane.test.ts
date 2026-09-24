@@ -1,8 +1,17 @@
+import { createDaemonWithAdapters } from '../daemon/create-daemon';
+import { TestServer } from './fixtures/test-server';
+import { McpToolsetRegistry } from '../daemon/toolset-registry';
+import * as preparationRuntime from '../adapters/pi/input-preparation-runtime';
+import * as implementationIdentity from '../daemon/tool-implementation-identity';
+import * as mcpProbe from '../daemon/mcp-tools-probe';
+import { mapPiMessageToAgentEvent } from '../adapters/pi/events';
+import { sanitizeEgressEnvelope } from '../daemon/agent-egress-sanitizer';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope, type Envelope, type InputPreparationOfferBinding } from '@byok-sdk/protocol';
+import { createEnvelope, type Envelope, type InputPreparationOfferBinding, type TaskOfferPreparedPayload } from '@byok-sdk/protocol';
 import { AgentHomeManager } from '../agent-home';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
@@ -275,6 +284,7 @@ async function lane(options: {
   readonly bindingOverrides?: Partial<InputPreparationBindingV1>;
   readonly modelOverride?: InputPreparationModelV1;
   readonly counted?: boolean;
+  readonly registryRevision?: boolean;
 } = {}): Promise<Lane> {
   const serverCommand = path.join(await tempDir('byok-prepared-bin-'), 'teamserver');
   await fs.writeFile(serverCommand, '#!/bin/sh\nexec true\n');
@@ -299,8 +309,11 @@ async function lane(options: {
   const toolsets: ReadonlyMap<string, McpToolsetConfig> = new Map([
     [TOOLSET_ID, { mcpServers: { [SERVER_NAME]: { command: serverCommand, args: ['--stdio'] } } }],
   ]);
+  const revision = options.registryRevision
+    ? new McpToolsetRegistry(Object.fromEntries(toolsets)).status().toolsets[0]!.definitionRevision
+    : TOOLSET_REVISION;
   const toolsetDefinitionRevisions = (): ReadonlyMap<string, string> =>
-    new Map([[TOOLSET_ID, TOOLSET_REVISION]]);
+    new Map([[TOOLSET_ID, revision]]);
 
   // Resolved through the production resolver, with the production fs probe
   // seam — the same call `TaskRunner.handleOffer` makes for this same server.
@@ -326,14 +339,14 @@ async function lane(options: {
     permissionMode: 'auto',
     runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),
     launch: attestation,
-    toolsetDefinitionRevisions: { [TOOLSET_ID]: TOOLSET_REVISION },
+    toolsetDefinitionRevisions: { [TOOLSET_ID]: revision },
     implementations,
   });
   if (!fingerprinted.ok) throw new Error(`fixture surface refused: ${fingerprinted.detail}`);
 
   const toolBindingDigest = preparedToolBindingDigest({
     launch: attestation,
-    toolsetDefinitionRevisions: { [TOOLSET_ID]: TOOLSET_REVISION },
+    toolsetDefinitionRevisions: { [TOOLSET_ID]: revision },
     servers: [{
       serverName: SERVER_NAME,
       toolsetId: TOOLSET_ID,
@@ -420,6 +433,7 @@ async function makeRunner(built: Lane, adapter: StubRuntimeAdapter, sent: Envelo
     approvalRegistry: new ApprovalRegistry(),
     storeDir,
     productId: 'prepared-offer-lane',
+    agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     agentHome: new AgentHomeManager({ hostStorageRoot: await tempDir('byok-prepared-home-') }),
     agentSessionHandoffs: new AgentSessionHandoffStore(),
     getMcpToolsets: () => built.toolsets,
@@ -441,15 +455,18 @@ function preparedOffer(
   taskId: string,
   preparation: InputPreparationOfferBinding,
   seq = 1,
+  overrides: Partial<TaskOfferPreparedPayload> = {},
 ): Envelope {
   return createEnvelope(
     'task.offer_prepared',
     {
-      policy: { mode: 'auto' },
+      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      policy: { mode: 'auto', allowTools: [] },
       runtime: 'pi',
       agentRef: AGENT_REF,
       requiredToolsets: [TOOLSET_ID],
       preparation,
+      ...overrides,
     },
     { taskId, seq },
   );
@@ -1043,7 +1060,8 @@ describe('every compared item declines by its own name, with no claim and no pin
     await runner.handleEnvelope(createEnvelope(
       'task.offer_prepared',
       {
-        policy: { mode: 'auto' },
+        egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      policy: { mode: 'auto', allowTools: [] },
         runtime: 'claude',
         agentRef: AGENT_REF,
         requiredToolsets: [TOOLSET_ID],
@@ -1087,4 +1105,153 @@ describe('ordinary offers are untouched by the prepared lane', () => {
 
     await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-ordinary', seq: 2 }));
   });
+});
+
+
+describe('prepared daemon-authored message egress', () => {
+  const messageEgress = { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 10_000 } as const;
+
+  it.each([false, true])('uses no reserved helper (bins configured: %s), publishes the final text and waits for exact acceptance', async configured => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const preflight = vi.fn(async () => { throw new Error('prepared must not run helper preflight'); });
+    const runner = await makeRunner(built, adapter, sent, {
+      tenantId: 'tenant-prepared',
+      agentMessageMcpPreflight: preflight,
+      ...(configured ? {
+        agentMessageMcpBin: { command: '/unused/message', args: [] },
+        agentMemoryMcpBin: { command: '/unused/memory', args: [] },
+      } : {}),
+    });
+    const taskId = `prepared-message-${configured}`;
+    await runner.handleEnvelope(preparedOffer(taskId, reference(built), 1, { messageEgress }));
+    expect(declineReasonOrNone(sent)).toBeUndefined();
+    expect(runner.usesAgentEgress(taskId)).toBe(true);
+    expect(adapter.preparedStartCalls).toHaveLength(1);
+    expect(Object.keys(adapter.preparedStartCalls[0]!.input.mcpServers ?? {})).toEqual([SERVER_NAME]);
+    expect(preflight).not.toHaveBeenCalled();
+    const session = adapter.sessions[0]!;
+    session.emit({ type: 'progress', text: 'earlier reasoning' });
+    session.emit({ type: 'tool_use', tool: 'teamserver_echo' });
+    const delta = mapPiMessageToAgentEvent({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '**prepared reply**' } });
+    expect(delta).toEqual({ type: 'progress', text: '**prepared reply**' });
+    session.emit(delta!);
+    session.emit({ type: 'usage', inputTokens: 1200, outputTokens: 20 });
+    session.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(sent.some(e => e.type === 'agent.message.publish')).toBe(true));
+    const published = sent.find(e => e.type === 'agent.message.publish');
+    if (published?.type !== 'agent.message.publish') throw new Error('missing message');
+    expect(published.payload.body).toBe('**prepared reply**');
+    expect(sent.some(e => e.type === 'task.complete')).toBe(false);
+    const exact = {
+      agentRef: AGENT_REF, sessionRef: published.payload.sessionRef,
+      contract: published.payload.contract, messageId: published.payload.messageId,
+      cursor: published.payload.cursor, contentHash: published.payload.contentHash,
+    };
+    await runner.handleEnvelope(createEnvelope('agent.message.disposition', {
+      ...exact, outcome: 'held', receiptId: '10000000-0000-4000-8000-000000000001', reasonCode: 'freshness_pending',
+    }, { taskId, seq: 2 }));
+    expect(sent.some(e => e.type === 'task.complete')).toBe(false);
+    await runner.handleEnvelope(createEnvelope('agent.message.disposition', {
+      ...exact, outcome: 'accepted', receiptId: '10000000-0000-4000-8000-000000000002',
+    }, { taskId, seq: 3 }));
+    await vi.waitFor(() => expect(sent.some(e => e.type === 'task.complete')).toBe(true));
+    const completed = sent.find(e => e.type === 'task.complete');
+    expect(completed?.payload).toMatchObject({ preparedObservation: { requestDigest: REQUEST_DIGEST, initialPromptTokens: 1200, maxPromptTokens: 1200 } });
+    const sanitized = sanitizeEgressEnvelope(completed!, DEFAULT_AGENT_EGRESS_POLICY, undefined);
+    expect(sanitized).toMatchObject({ ok: true, envelope: { payload: { summary: '[content omitted]', preparedObservation: { requestDigest: REQUEST_DIGEST } } } });
+    await runner.shutdownActiveTasks('test complete');
+  });
+
+  it.each(['missing', 'unreadable', 'overflow'] as const)('publishes no body when prepared usage is %s', async usage => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(built, adapter, sent, { tenantId: 'tenant-prepared' });
+    await runner.handleEnvelope(preparedOffer('prepared-no-message', reference(built), 1, { messageEgress }));
+    expect(adapter.sessions).toHaveLength(1);
+    const session = adapter.sessions[0]!;
+    session.emit({ type: 'progress', text: 'must never be published' });
+    if (usage === 'unreadable') session.emit({ type: 'usage', outputTokens: 10 });
+    if (usage === 'overflow') session.emit({ type: 'usage', inputTokens: MODEL.contextWindow, outputTokens: 10 });
+    session.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(sent.some(e => e.type === 'task.fail')).toBe(true));
+    expect(sent.some(e => e.type === 'agent.message.publish' || e.type === 'task.complete')).toBe(false);
+    await runner.shutdownActiveTasks('test complete');
+  });
+
+  it.each([
+    [{ mode: 'auto' }, 'policy_inexpressible'],
+    [{ mode: 'auto', allowTools: ['read'] }, 'native_tools_uncounted'],
+    [{ mode: 'auto', allowTools: [], network: false }, 'policy_inexpressible'],
+  ] as const)('refuses native policy %j before pin or claim', async (policy, reason) => {
+    const built = await lane();
+    const pin = vi.spyOn(built.store, 'pin');
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(built, adapter, sent);
+    await runner.handleEnvelope(preparedOffer('native-refused', reference(built), 1, { policy: { mode: policy.mode, ...('allowTools' in policy ? { allowTools: [...policy.allowTools] } : {}), ...('network' in policy ? { network: policy.network } : {}) } }));
+    expect(declineReason(sent)).toContain(reason);
+    expect(pin).not.toHaveBeenCalled();
+    expect(built.store.get(built.recordId)?.pin).toBeUndefined();
+    expect(sent.some(e => e.type === 'task.claim')).toBe(false);
+    expect(adapter.preparedStartCalls).toHaveLength(0);
+    await runner.shutdownActiveTasks('test complete');
+  });
+});
+
+function declineReasonOrNone(sent: readonly Envelope[]): string | undefined {
+  const declined = sent.find(e => e.type === 'task.decline');
+  return declined?.type === 'task.decline' ? declined.payload.reason : undefined;
+}
+
+
+it('the real daemon sanitizes prepared terminal envelopes before transport', async () => {
+  // Synthetic preparation authority only: reuse the durable ready record and
+  // its measured tool identity. Runner, daemon routing, sanitizer and transport
+  // all execute normally; this is not a physical installation attestation test.
+  const built = await lane({ registryRevision: true, bindingOverrides: { deviceId: 'device-1' } });
+  const server = await TestServer.start();
+  const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+  Object.assign(adapter, { detectInstallation: async () => ({ kind: 'available' }) });
+  vi.spyOn(preparationRuntime, 'resolvePiInputPreparationCompiler').mockResolvedValue({
+    runtime: RUNTIME, compile: async () => { throw new Error('fixture is already prepared'); },
+  });
+  vi.spyOn(implementationIdentity, 'resolveToolImplementationIdentity').mockImplementation(async () => built.implementations[SERVER_NAME]!);
+  vi.spyOn(mcpProbe, 'probeMcpServer').mockImplementation(async () => built.observation[SERVER_NAME]!);
+  const sanitizer = vi.fn((value: unknown, _context: { envelopeType?: string }) => value);
+  const daemon = createDaemonWithAdapters({
+    localAgentRelease: { version: '0.0.0-test' }, productName: 'Prepared egress', productId: 'prepared-egress-transport',
+    serverUrl: server.url, storeDir: built.storeDir, workspaceRoot: await tempDir('prepared-wire-workspace-'),
+    agentHome: { hostStorageRoot: await tempDir('prepared-wire-home-') },
+    agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY, sanitizer },
+    mcpToolsets: Object.fromEntries(built.toolsets),
+    inputPreparation: {
+      limits: { revision: POLICY_REVISION, maxRequestBytes: 256000, maxArtifactBytes: 200000,
+        maxScopeAggregateBytes: 400000, maxInFlight: 4, maxCounterCallsPerScope: 8,
+        counterTimeoutMs: 5000, preparationDeadlineMs: 8000, retentionMs: 60000, retryHorizonMs: 30000 },
+      authorityResolver: {
+        resolveScope: async () => { throw new Error('no preparation requested'); },
+        resolveSource: async () => { throw new Error('no preparation requested'); },
+      },
+    },
+  }, [adapter]);
+  try {
+    const device = await daemon.pair('prepared-wire-pair');
+    expect(device.deviceId).toBe('device-1');
+    await daemon.start();
+    const taskId = 'prepared-wire-task';
+    server.send(preparedOffer(taskId, reference(built), server.nextSeq()));
+    await server.waitFor(e => e.type === 'task.started' && e.task_id === taskId);
+    adapter.sessions[0]!.emit({ type: 'progress', text: 'private prepared reply' });
+    adapter.sessions[0]!.emit({ type: 'usage', inputTokens: 1200, outputTokens: 10 });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    const completed = await server.waitFor(e => e.type === 'task.complete' && e.task_id === taskId);
+    expect(completed.payload).toMatchObject({ summary: '[content omitted]', preparedObservation: { requestDigest: REQUEST_DIGEST, initialPromptTokens: 1200, maxPromptTokens: 1200 } });
+    expect(sanitizer.mock.calls.some(([, context]) => (context as { envelopeType: string }).envelopeType === 'task.complete')).toBe(true);
+    expect(JSON.stringify(server.received)).not.toContain('private prepared reply');
+  } finally {
+    await daemon.stop(); await server.close(); vi.restoreAllMocks();
+  }
 });

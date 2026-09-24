@@ -366,7 +366,7 @@ describe('B-P2 store: restart roundtrip', () => {
     expect(created.record.version).toBe(INPUT_PREPARATION_RECORD_VERSION);
     expect(INPUT_PREPARATION_RECORD_VERSION).toBe(6);
     // The wire version is a different agreement, moved by a different reason.
-    expect(INPUT_PREPARATION_VERSION).toBe(5);
+    expect(INPUT_PREPARATION_VERSION).toBe(6);
     expect((await openStore(storeDir)).get(created.record.recordId)?.version).toBe(INPUT_PREPARATION_RECORD_VERSION);
   });
 });

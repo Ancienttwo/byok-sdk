@@ -1,3 +1,4 @@
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../../daemon/agent-egress-policy';
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import { createInterface } from 'node:readline';
@@ -267,6 +268,7 @@ const runner = new TaskRunner({
   approvalRegistry: new ApprovalRegistry(),
   storeDir: config.runnerStoreDir,
   productId: PRODUCT_ID,
+  agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
   // The SAME construction `create-daemon.ts` performs: a lease owner id that is
   // stable across restarts for one store/product identity. Without it a killed
   // lifetime leaves an unreclaimable marker behind and the restart declines on
@@ -432,7 +434,8 @@ function preparedOffer(
   return createEnvelope(
     'task.offer_prepared',
     {
-      policy: { mode: 'auto' },
+      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      policy: { mode: 'auto', allowTools: [] },
       runtime: 'pi',
       agentRef: agentRefOf(agentId),
       requiredToolsets: [TOOLSET_ID],

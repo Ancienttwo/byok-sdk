@@ -230,7 +230,8 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
       createEnvelope(
         type,
         {
-          policy: { mode: 'auto' },
+          policy: { mode: 'auto', allowTools: [] },
+          egressPolicy: { policyRevision: 'metadata-status-v1', activity: { mode: 'metadata-status', delivery: 'latest-value' }, reliable: { maxPendingEventsPerAgent: 256, maxPendingBytesPerAgent: 4194304, maxPendingBytesPerTenant: 16777216 }, transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },
           runtime: 'pi',
           agentRef: { agentId: 'agent-prepared', profileRevision: 'profile-prepared-r1' },
           requiredToolsets: ['team'],
