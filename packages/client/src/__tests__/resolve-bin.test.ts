@@ -76,13 +76,13 @@ describe('resolvePiBin', () => {
   });
 });
 
-describe('Pi alias spec authority', () => {
+describe('Pi exact version authority', () => {
   const repoRoot = path.resolve(fileURLToPath(import.meta.url), '../../../../..');
 
-  function aliasSpecSource(file: string): string {
+  function exactVersionSource(file: string): string {
     const text = readFileSync(path.join(repoRoot, file), 'utf8');
-    const match = /const PI_ALIAS_SPEC\s*=\s*([\s\S]*?);\n/.exec(text);
-    if (match?.[1] === undefined) throw new Error(`no PI_ALIAS_SPEC literal in ${file}`);
+    const match = /const PI_EXACT_VERSION\s*=\s*([\s\S]*?);\n/.exec(text);
+    if (match?.[1] === undefined) throw new Error(`no PI_EXACT_VERSION literal in ${file}`);
     return match[1].replace(/\s+/g, '');
   }
 
@@ -91,7 +91,7 @@ describe('Pi alias spec authority', () => {
     try {
       mkdirSync(path.join(root, 'scripts'));
       const manifest = JSON.parse(readFileSync(path.join(repoRoot, 'packages/client/package.json'), 'utf8'));
-      manifest.byok.piRuntimePin = 'npm:@byok-sdk/pi-coding-agent@9.9.9';
+      manifest.byok.piRuntimePin = '9.9.9';
       writeFileSync(path.join(root, 'package.json'), JSON.stringify(manifest));
       const entry = path.join(root, 'scripts/check-adapters-entry.mjs');
       copyFileSync(path.join(repoRoot, 'packages/client/scripts/check-adapters-entry.mjs'), entry);
@@ -102,20 +102,22 @@ describe('Pi alias spec authority', () => {
   });
 
   it('is literally identical in the TS runtime and the mjs release gate', () => {
-    const ts = aliasSpecSource('packages/client/src/adapters/pi/resolve-bin.ts');
-    const mjs = aliasSpecSource('scripts/release/pi-runtime-identity.mjs');
+    const ts = exactVersionSource('packages/client/src/adapters/pi/resolve-bin.ts');
+    const mjs = exactVersionSource('scripts/release/pi-runtime-identity.mjs');
     expect(mjs).toBe(ts);
 
     // Both sides therefore accept and reject the same sample specs.
     const pattern = new RegExp(ts.slice(1, ts.lastIndexOf('/')));
-    expect(pattern.test('npm:@byok-sdk/pi-coding-agent@0.85.1001')).toBe(true);
-    expect(pattern.test('npm:pi-coding-agent@1.0.0')).toBe(true);
+    expect(pattern.test('0.87.1')).toBe(true);
+    expect(pattern.test('10.0.0')).toBe(true);
     for (const rejected of [
-      '0.85.1001',
-      'npm:@byok-sdk/pi-coding-agent@^0.85.1001',
-      'npm:@byok-sdk/pi-coding-agent@latest',
-      'npm:@byok-sdk/pi-coding-agent@0.85',
-      '@byok-sdk/pi-coding-agent@0.85.1001',
+      'npm:@earendil-works/pi-coding-agent@0.87.1',
+      'npm:@byok-sdk/pi-coding-agent@0.86.1001',
+      '^0.87.1',
+      '0.87',
+      '00.87.1',
+      '0.87.1-beta.0',
+      'latest',
     ]) {
       expect(pattern.test(rejected)).toBe(false);
     }

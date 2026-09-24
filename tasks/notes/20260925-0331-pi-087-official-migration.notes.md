@@ -216,3 +216,48 @@ The only differences: (1) the system message is `customPrompt` verbatim; the for
 - Added: `adapters/pi/__tests__/official-pi-conformance-compat.test.ts` covering (d') and (g), `prepared-lane-official.test.ts` (compile, refusals, verify, gate end to end, context handler) and `prepared-prompt-frame-reader.test.ts`.
 - End-to-end evidence (not kept): a scratch copy of `src/__tests__/pi-prepared-launcher.test.ts` was patched with only its fork import (→ `prepared-request`) and a `customPrompt`, then run against the built dist. 28 of 30 cases passed, including "sends D verbatim", `get_state` session id, the real MCP server child, the BYOK keys-profile cases, secret non-leak, and the projection-mutation refusals. The 2 failures follow from the design: the reservation code, and the tamper case now reporting `prepared_digest_mismatch`. The scratch file was deleted.
 - None of the seven fork-subpath test files live under `adapters/pi/__tests__` or `bin/__tests__`, so none were ported here. The orchestrator-assigned edits were made: `pi-export-assets.test.ts:31,42`, `input-preparation.test.ts:42`, `prepared-prompt-frame.test.ts:7-10`, and the `resolvePiBin` block of `resolve-bin.test.ts`.
+
+## WP4 — identity gate and install closure
+
+Subject: worktree `claude/pi-087-migration` on b10261a9 (WP0–WP3 committed), uncommitted.
+
+### Identity rule
+
+The expected identity has one author per layer. `scripts/release/pi-runtime-identity.mjs` owns the release identity: `parsePiRuntimeIdentity` requires `@earendil-works/pi-coding-agent` pinned to one exact `x.y.z` (`PI_EXACT_VERSION`, literally identical to `resolve-bin.ts`) and every pure-JS closure package (`pi-ai`, `pi-agent-core`, `chord`, `pi-telemetry`) pinned as a direct dependency to that same version; `readLockedPiClosure` requires every `@earendil-works/*` entry in `bun.lock` to be one exact version with a `sha512` integrity, every closure package (the four plus `pi-tui`) to resolve only to the pinned version with one integrity, and no `@byok-sdk/pi-*` resolution anywhere; `assertInstalledPiRuntime` (release-pack, registry-readback) requires an isolated npm install to hold exactly one coding agent, every closure copy at the pinned version, no fork manifest, each npm-recorded integrity equal to the `bun.lock` one, and, for copies npm placed from the coding agent's `npm-shrinkwrap.json` (no integrity recorded) and for the coding agent itself, a file set byte-identical to the official tarball (`npm pack`) whose `sha512` equals the locked integrity. `check-package-graph.mjs` runs `readLockedPiClosure` statically. In the client, `assertOfficialRuntimeIdentity` (`adapters/pi/input-preparation.ts`) admits only `@earendil-works/pi-coding-agent`, `pi-ai`, `pi-agent-core` at exactly 0.87.1 with the pin naming that tuple; package resolution observes all three manifests (`resolveInstalledPiRuntimeIdentity`), an attested record observes its digest-verified coding-agent manifest, and `verifyPiNativeInstallation` then requires the record's `nativeProvenance` `upstreamBase/upstreamCommit/forkBuild` to equal what the seam derives (`v0.87.1`, `f07218c4…`, `0`). Refusals stay `InputPreparationRuntimeIdentityError` → `runtime_identity_unavailable`; no new code. Integrity is not observable from an installed package directory, so the client seam checks name+version and the release gate checks integrity and content. Registry provenance/attestation: no repo tooling reads it today (the WP0 table's "yes" came from OP0's packument cache); follow-up, e.g. `npm audit signatures` in the release-pack smoke dir.
+
+### Pinned tuple (bun.lock)
+
+| Package | Version | Pin | Integrity |
+|---|---|---|---|
+| pi-coding-agent | 0.87.1 | direct exact | sha512-m8ArJUtVcQMSe1lLE/Ei7vX/JV7O39sWmWBsXV2NOU70F0qCp8GubA24pT3LnwTmM6LL2xV80/h6sQg85n69ew== |
+| pi-ai | 0.87.1 | direct exact | sha512-X/3PfQBnnoeVdO9Cv8zHghUMglzlgNZYGNzoPnbRoGnHl3Rw3TlA2UKSUB7BRHUOxMryHXYa8dnjWZlbRheDZA== |
+| pi-agent-core | 0.87.1 | direct exact | sha512-Zev3B0HK7YS5A4EZQ2XnEqiJuirx6QBiltJ+LpmjV5a/+2IU0cfKtIfnkNkORK707XOvKBY2WRtk7cAwHpbh2Q== |
+| chord | 0.87.1 | direct exact (new) | sha512-bg7IkJGFcEaMqqYgOGUiq5Ky9RghpRfrlZ8I/v/1b4bBZ02A7t3E+6uhPRbadwWb/kWsnVFbZsqOKRN4a3LLCg== |
+| pi-telemetry | 0.87.1 | direct exact (new) | sha512-MC6TRQH5lgMXpcN+Vku2WMI2T8BsiUPzMQHGo81uqFZD3/9O79WWJAysEDGuzduP6R4tvtgwMLwmqIxynM10JQ== |
+| pi-tui | 0.87.1 | not direct (see below); locked exact | sha512-YEH2vRyOeiO7hhN6j6AE6YwKSq2Kz2f3XR8bj1TbR+aGE/JsnY1hLPMI2pvaZfRM1n9Y00tejxFQ4zbzvF7nkQ== |
+
+`grep -c 'npm:@byok-sdk/pi-' bun.lock` = 0; `grep -c 'pi-tui@0.85' bun.lock` = 0.
+
+### Sibling decision
+
+- `pi-tui` cannot be a direct client dependency: 0.87.1 ships prebuilt `.node` addons (`native/{darwin,linux,win32}/prebuilds/*`), and the release-graph purity gate forbids native addons on direct client edges (`check-adapters-entry.mjs` also asserts it is not direct). A first attempt pinning it directly failed `check:release-graph` with exactly that violation, so it stays reached only through the coding agent. Changing that is a policy decision (purity allowlist or root `overrides`), not taken here.
+- The pre-existing top-level `pi-tui@0.85.1` is gone. Its consumers are optional/`*` peers: `pi-web-access@0.24.1` (`*`), `@juicesharp/rpiv-i18n@2.8.0` (`*`), `pi-subagents@0.60.0` (optional `*`); all runtime value imports they use (`Box`, `Text`, `truncateToWidth`, `Container`, `Spacer`, `visibleWidth`, `wrapTextWithAnsi`, `Markdown`, `fuzzyFilter`, `Input`, `Key`, `matchesKey`, `SelectList`) exist in 0.87.1. After `bun install` the lock holds one `pi-tui@0.87.1` and the client's `pi-web-access`/`pi-subagents` store links resolve it. The vendored `vendor/pi-tui/0.85.1` build input for the todo bundle is unrelated and unchanged.
+- The coding agent's `npm-shrinkwrap.json` lists the five siblings at 0.87.1 with no `integrity`. It is upstream's file and is not edited. Observed effect in the release-pack npm install: npm places 5 nested copies under `node_modules/@earendil-works/pi-coding-agent/node_modules/` and records no integrity for them; the gate proves those by tarball content instead.
+
+### Gates
+
+- `bun install`: lockfile saved, 3 packages installed; diff 5+/6− lines.
+- `node scripts/release/check-package-graph.mjs`: exit 0 (`[release-graph] OK: …`).
+- `node --test scripts/release/pack-and-smoke.test.mjs scripts/release/beta-release.test.mjs`: 11 pass / 0 fail. `bun run test:scripts`: 37 pass / 0 fail.
+- `bun run check:version-authority`: exit 0.
+- `bun run check:api-surface`: failed on doc-comment drift in `resolve-bin` only (declarations unchanged); regenerated with `-- --update`; `api-surface/client.d.ts` 14+/20−, one non-comment line (`/** Manifest name … */` member doc); now exit 0.
+- `bun run build`: exit 0. Client `tsc --noEmit`: 0 errors.
+- Vitest (`bun run test` is vitest; `bun test` is not this repo's runner): `resolve-bin.test.ts` 11/11, including "literally identical" on `PI_EXACT_VERSION`; `src/adapters/pi` 5 files, 25/25.
+- `check:release-pack` in this worktree refuses the dirty tree by design. It was run on a disposable copy committed to a throwaway repo in the scratchpad. The full run fails at `packages/client/scripts/packed-cli-mcp-smoke.mjs` (`RuntimeDisposalFailure: startup runtime ownership remains quarantined`), and the failure reproduces identically with the two WP4 client sources reverted to b10261a9 and rebuilt, so it does not come from the identity change. With that one smoke line removed (scratch copy only), exit 0 and: `[release-pack] official Pi closure pi-coding-agent, pi-ai, pi-agent-core, chord, pi-telemetry, pi-tui@0.87.1: recorded npm integrities equal bun.lock; single @earendil-works/pi-coding-agent at node_modules/@earendil-works/pi-coding-agent matches the official tarball (1108 files); 5 shrinkwrap-placed copies without npm integrity matched their official tarballs; fork manifests=0`.
+- S2 tripwire `pi-s2-bundle-resolution.test.ts` (darwin, bun present, so not skipped): 1 passed / 1 failed / 0 skipped. The containment case fails before reaching resolution: its fixture compiles without `prompt.customPrompt` (`prompt_render_input_unsupported`, the WP2 Host-system-message contract). The fixture belongs to the test-port worker.
+
+### For WP5 and the test port
+
+- The wire shape is unchanged by WP4. `InputPreparationRuntimeIdentityV1` / `ToolImplementationNativeProvenanceV1` still carry `upstreamBase/upstreamCommit/forkBuild` (official values `v0.87.1`, `f07218c4d4bbc12bef056a7058c3dd49dfe41abe`, `0`). If WP5 renames them, `verifyPiNativeInstallation`'s field loop and `assertOfficialRuntimeIdentity`'s return value move with it. WP5 may want the record to carry the closure integrities, so an attested launch is bound to more than the coding-agent manifest.
+- `piRuntimeIdentityFromAttestedRecord` (used directly by `input-preparation-runtime.ts` for configured `pi-prepared`) still accepts any record provenance matching pin name/version/compilerVersion. It does not require the official commit/base/forkBuild the way `verifyPiNativeInstallation` does. It was outside this dispatch's edit surface, so the gap is left open.
+- Test expectations to port: `pi-runtime-host-binding.test.ts:95-97` expects the message `byokFork.${field}`; it is now `Pi nativeProvenance.${field} differs from the official runtime identity`. Same refusal, new text. `runtime-launch-description.test.ts` "derives the runtime identity from the attested record" expects `envelopeFormat: pi.session.prepared-input` (WP2 drift, not WP4).

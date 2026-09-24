@@ -778,14 +778,10 @@ export declare class PiAdapter implements RuntimeAdapter {
  * favor of this package. pi is a core BYOK capability, not an optional
  * enhancement or an unversioned global executable.
  *
- * This constant is the *resolution specifier* only. The *installed identity*
- * behind it is a separate fact: `packages/client/package.json` pins this
- * specifier to an exact npm alias (`npm:<name>@<x.y.z>`), because the SDK ships
- * a fork of the upstream runtime. The specifier and the on-disk path stay
- * `@earendil-works/pi-coding-agent`, so every import site and every extension
- * path is unchanged; only the manifest inside that directory carries the fork's
- * own name and version. `resolvePiRuntimeIdentity()` derives that identity from
- * the same manifest entry, so there is exactly one authority for both.
+ * This constant is both the resolution specifier and the installed identity's
+ * name: `packages/client/package.json` pins it to one exact official version
+ * (`byok.piRuntimePin` projects that dependency), and the manifest on disk must
+ * be the official package at exactly that version.
  */
 export declare const PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 export interface ResolvedBin {
@@ -794,7 +790,7 @@ export interface ResolvedBin {
 }
 /** The exact package `PI_PACKAGE_NAME` must resolve to on disk. */
 export interface PiRuntimeIdentity {
-    /** Manifest `name` of the installed runtime (the fork's own scope). */
+    /** Manifest `name` of the installed runtime: always {@link PI_PACKAGE_NAME}. */
     readonly name: string;
     /** Manifest `version` of the installed runtime. */
     readonly version: string;
@@ -825,10 +821,8 @@ export declare function resolvePiRuntimeIdentity(): PiRuntimeIdentity;
  * the package's main entry via `import.meta.resolve` and walks upward to the
  * enclosing package root.
  *
- * That root's manifest name is NOT `PI_PACKAGE_NAME`: the specifier is an npm
- * alias for the SDK's fork, so the installed manifest carries the fork's own
- * name and version. Both are compared against the pin, and a mismatch fails
- * closed instead of launching an unverified runtime.
+ * That root's manifest name and version are both compared against the pin,
+ * and a mismatch fails closed instead of launching an unverified runtime.
  */
 export declare function resolvePiBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/pi/rpc-client.d.ts ====
@@ -10878,9 +10872,10 @@ export declare const INPUT_PREPARATION_ERROR_CODES: readonly ['input_preparation
 'permission_mode_denied', 
 /**
  * The `prompt_prepared` frame this preparation would be launched with does
- * not fit one RPC frame the native runtime will accept
- * (`RPC_MAX_FRAME_BYTES`). The bound is the RUNTIME's, not the operator's, so
- * it is decided before the operator's per-artifact byte policy: an artifact
+ * not fit one RPC frame under the SDK's send-side bound
+ * (`util/rpc-frame.ts` `RPC_MAX_FRAME_BYTES`). The bound is the SDK's
+ * transport limit, not the operator's, so it is decided before the
+ * operator's per-artifact byte policy: an artifact
  * that could never be delivered must not be counted, retained or charged
  * against a scope aggregate. Terminal — the same input recompiles to the same
  * frame, so nothing here retries.
@@ -12603,12 +12598,11 @@ export interface RuntimePreparedLaunchReferenceV1 {
     readonly recordId: string;
 }
 /**
- * The independently trusted expectations the native prepared-input verifier
- * requires (`@earendil-works/pi-coding-agent/prepared-session-input`'s
- * `PreparedSessionExpectedV1`).
+ * The independently trusted expectations the prepared-input verifier
+ * requires (`adapters/pi/input-preparation.ts`'s `PreparedPiExpectedV1`).
  *
  * They come from the DURABLE record — its artifact summary and its binding —
- * never from the artifact file itself. The native contract is explicit that a
+ * never from the artifact file itself. The verifier contract is explicit that a
  * value read out of the envelope can never serve as its own expectation, so
  * carrying them here is what makes the envelope on disk checkable at all.
  */

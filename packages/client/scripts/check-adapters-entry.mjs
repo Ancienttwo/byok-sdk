@@ -70,9 +70,12 @@ assert.equal(manifest.dependencies?.['@juicesharp/rpiv-todo'], undefined);
 assert.equal(manifest.dependencies?.['@juicesharp/rpiv-i18n'], '2.8.0');
 assert.equal(manifest.dependencies?.['@earendil-works/pi-tui'], undefined);
 assert.equal(manifest.devDependencies?.['@earendil-works/pi-tui'], undefined);
-// Upstream publishes its packages in lockstep, so pi-ai and pi-agent-core are
-// pinned exactly at the coding-agent version and installed at that version.
-for (const name of ['@earendil-works/pi-ai', '@earendil-works/pi-agent-core']) {
+// Upstream publishes its packages in lockstep, so every package of the
+// pure-JavaScript coding-agent closure is pinned exactly at the coding-agent
+// version and installed at that version. `pi-tui` ships prebuilt `.node`
+// addons, so it cannot be a direct dependency (release-graph purity gate);
+// its version and integrity are held by `scripts/release/pi-runtime-identity.mjs`.
+for (const name of ['@earendil-works/pi-ai', '@earendil-works/pi-agent-core', '@earendil-works/chord', '@earendil-works/pi-telemetry']) {
   assert.equal(manifest.dependencies?.[name], nativeManifest.version,
     `client ${name} pin must equal the exact @earendil-works/pi-coding-agent version`);
   const installed = JSON.parse(readFileSync(new URL(`../node_modules/${name}/package.json`, import.meta.url), 'utf8'));

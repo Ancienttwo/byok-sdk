@@ -214,34 +214,59 @@ interface InstalledPiManifest {
 }
 
 /**
- * The one official runtime this build admits, by exact name and version, with
- * the upstream tag and commit that version was published from (npm registry
- * `gitHead`, recorded in the WP0 breakage map).
+ * The one official runtime tuple this build admits: the coding agent and the
+ * two lockstep packages the prepared lane compiles and runs against, each at
+ * exactly one version, with the upstream tag and commit that version was
+ * published from (npm registry `gitHead`, recorded in the WP0 breakage map).
+ * Artifact integrity (`sha512` per `name@version`) is not observable from an
+ * installed package directory; the release identity gate
+ * (`scripts/release/pi-runtime-identity.mjs`) proves it against `bun.lock`.
  */
 const OFFICIAL_PI_RUNTIME = Object.freeze({
   name: '@earendil-works/pi-coding-agent',
   version: '0.87.1',
+  lockstep: Object.freeze(['@earendil-works/pi-ai', '@earendil-works/pi-agent-core'] as const),
   upstreamBase: 'v0.87.1',
   upstreamCommit: 'f07218c4d4bbc12bef056a7058c3dd49dfe41abe',
 });
 
+/** One observed installed manifest, as read off disk or from a measured record. */
+export interface InstalledPiPackage {
+  readonly name?: unknown;
+  readonly version?: unknown;
+}
+
 /**
- * The official-runtime identity seam. Accepts exactly
- * `@earendil-works/pi-coding-agent@0.87.1` by name and version and nothing else.
+ * The official-runtime identity seam. Every observed package must belong to
+ * the official tuple at exactly its version, the coding agent must be observed
+ * exactly once, and the client pin must name that same tuple. The caller
+ * supplies every manifest it can observe: package resolution observes the
+ * coding agent and both lockstep packages; an attested install record observes
+ * its digest-verified coding-agent manifest, and the record's own measurement
+ * covers the rest. Anything else is `runtime_identity_unavailable`.
  */
-// TODO(WP4): replace name+version with exact artifact integrity and provenance.
 export function assertOfficialRuntimeIdentity(
-  installed: { readonly name: unknown; readonly version: unknown },
+  installed: readonly InstalledPiPackage[],
   pinned: PiRuntimeIdentity,
 ): { readonly upstreamBase: string; readonly upstreamCommit: string; readonly forkBuild: number } {
+  const tuple = `${OFFICIAL_PI_RUNTIME.name}@${OFFICIAL_PI_RUNTIME.version}`;
   if (pinned.name !== OFFICIAL_PI_RUNTIME.name || pinned.version !== OFFICIAL_PI_RUNTIME.version) {
     throw new InputPreparationRuntimeIdentityError(
-      `@byok-sdk/client pins ${pinned.name}@${pinned.version}, but this build prepares input only against ${OFFICIAL_PI_RUNTIME.name}@${OFFICIAL_PI_RUNTIME.version}`,
+      `@byok-sdk/client pins ${pinned.name}@${pinned.version}, but this build prepares input only against ${tuple}`,
     );
   }
-  if (installed.name !== OFFICIAL_PI_RUNTIME.name || installed.version !== OFFICIAL_PI_RUNTIME.version) {
+  const admitted: readonly string[] = [OFFICIAL_PI_RUNTIME.name, ...OFFICIAL_PI_RUNTIME.lockstep];
+  for (const manifest of installed) {
+    if (typeof manifest.name !== 'string' || !admitted.includes(manifest.name) || manifest.version !== OFFICIAL_PI_RUNTIME.version) {
+      throw new InputPreparationRuntimeIdentityError(
+        `${PI_PACKAGE_NAME} runtime closure resolved ${String(manifest.name)}@${String(manifest.version)}, but this build admits only ${admitted.map(name => `${name}@${OFFICIAL_PI_RUNTIME.version}`).join(', ')}`,
+      );
+    }
+  }
+  const agents = installed.filter(manifest => manifest.name === OFFICIAL_PI_RUNTIME.name).length;
+  if (agents !== 1) {
     throw new InputPreparationRuntimeIdentityError(
-      `${PI_PACKAGE_NAME} resolved to ${String(installed.name)}@${String(installed.version)}, but @byok-sdk/client pins ${OFFICIAL_PI_RUNTIME.name}@${OFFICIAL_PI_RUNTIME.version}`,
+      `${PI_PACKAGE_NAME} runtime closure must observe exactly one ${tuple}, observed ${agents}`,
     );
   }
   return {
@@ -250,6 +275,25 @@ export function assertOfficialRuntimeIdentity(
     // The official artifact is not a fork build.
     forkBuild: 0,
   };
+}
+
+/**
+ * Resolve one lockstep package the way this module loads it and read its
+ * manifest. Fails closed: an unresolvable or manifest-less package is not an
+ * observed identity.
+ */
+function resolveLockstepManifest(name: string): InstalledPiManifest {
+  let entry: string;
+  try {
+    entry = fileURLToPath(import.meta.resolve(name));
+  } catch (cause) {
+    throw new InputPreparationRuntimeIdentityError(`${name} could not be resolved; input preparation cannot derive a runtime identity`, { cause });
+  }
+  const found = findInstalledManifest(path.dirname(entry));
+  if (found === undefined) {
+    throw new InputPreparationRuntimeIdentityError(`${name} resolved to ${entry}, which has no readable enclosing package manifest`);
+  }
+  return found.manifest;
 }
 
 /**
@@ -297,7 +341,10 @@ export function resolveInstalledPiRuntimeIdentity(): InputPreparationRuntimeIden
       `${PI_PACKAGE_NAME} resolved to ${mainEntry}, which has no readable enclosing package manifest`,
     );
   }
-  const provenance = assertOfficialRuntimeIdentity(installed.manifest as { name: unknown; version: unknown }, pinned);
+  const provenance = assertOfficialRuntimeIdentity(
+    [installed.manifest, ...OFFICIAL_PI_RUNTIME.lockstep.map(resolveLockstepManifest)],
+    pinned,
+  );
   return Object.freeze({
     packageName: pinned.name,
     packageVersion: pinned.version,
