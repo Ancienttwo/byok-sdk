@@ -56,9 +56,11 @@ const STAT = Object.freeze({
 const NATIVE_PROVENANCE = Object.freeze({
   packageName: PIN.name,
   packageVersion: PIN.version,
-  upstreamBase: '0.85.0',
-  upstreamCommit: 'c'.repeat(40),
-  forkBuild: 1002,
+  // The official 0.87.1 tuple: upstream tag and registry gitHead, and no fork
+  // build (the official artifact is not one).
+  upstreamBase: 'v0.87.1',
+  upstreamCommit: 'f07218c4d4bbc12bef056a7058c3dd49dfe41abe',
+  forkBuild: 0,
   compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,
 });
 
@@ -371,11 +373,12 @@ describe('native provenance for the encapsulated form comes from the record and 
     expect(piRuntimeIdentityFromAttestedRecord(attested())).toEqual({
       packageName: PIN.name,
       packageVersion: PIN.version,
-      upstreamBase: '0.85.0',
-      upstreamCommit: 'c'.repeat(40),
-      forkBuild: 1002,
-      envelopeFormat: 'pi.session.prepared-input',
-      requestFormat: 'pi.openai-completions.prepared',
+      upstreamBase: 'v0.87.1',
+      upstreamCommit: 'f07218c4d4bbc12bef056a7058c3dd49dfe41abe',
+      forkBuild: 0,
+      // The SDK-owned compiler (version 4) format tags.
+      envelopeFormat: 'byok.pi.prepared-input',
+      requestFormat: 'byok.pi.openai-completions.request',
       compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,
     });
   });

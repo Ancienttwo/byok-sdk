@@ -157,6 +157,8 @@ async function launch(options: { command: string; args: string[]; cwd: string })
   return JSON.parse(raw) as ChildReport;
 }
 
+const PREPARED_SYSTEM_PROMPT = 'Report the process working directory.';
+
 /** Compile a real retained envelope; the marker only substitutes its runtime consumer. */
 async function prepareArtifact(home: string, artifactPath: string, launchCwd: string): Promise<RuntimePreparedLaunchV1> {
   const model = {
@@ -168,12 +170,20 @@ async function prepareArtifact(home: string, artifactPath: string, launchCwd: st
   const binding = { inputIdentity: 'cwd-input', runtimeIdentity: 'cwd-runtime', policyIdentity: 'cwd-policy', profileRevision: 'cwd-profile' };
   const compiled = await createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity()).compile({
     snapshot: {
-      prompt: { cwd: home, selectedTools: [], toolSnippets: {}, toolGuidelines: {}, promptGuidelines: [], contextFiles: [], skills: [],
+      prompt: { cwd: home, selectedTools: [], customPrompt: PREPARED_SYSTEM_PROMPT,
+        toolSnippets: {}, toolGuidelines: {}, promptGuidelines: [], contextFiles: [], skills: [],
         docsPaths: { readmePath: '/sealed/README.md', docsPath: '/sealed/docs', examplesPath: '/sealed/examples' } },
       messages: [{ role: 'user', content: 'report cwd', timestamp: 1700000000000 }], tools: [],
     },
     model, options: { cacheRetention: 'none', maxTokens: 256 }, binding, toolExecutors: {},
   });
+  // The prompt `cwd` no longer reaches D: the Host owns the whole system
+  // message on official Pi and no Pi prompt builder renders a `<cwd>` block,
+  // so the Agent home path is nowhere in the counted request.
+  const body = JSON.parse(compiled.requestBody) as { messages: { role: string; content: unknown }[] };
+  expect(body.messages[0]).toEqual({ role: 'system', content: PREPARED_SYSTEM_PROMPT });
+  expect(compiled.requestBody).not.toContain('<cwd>');
+  expect(compiled.requestBody).not.toContain(home);
   const recordId = 'cwd-marker-record';
   await fs.writeFile(artifactPath, JSON.stringify({
     format: INPUT_PREPARATION_ARTIFACT_FORMAT, version: INPUT_PREPARATION_VERSION, recordId,

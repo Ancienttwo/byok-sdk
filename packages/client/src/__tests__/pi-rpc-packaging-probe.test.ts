@@ -60,23 +60,24 @@ async function runPinnedPiRpcProbe(): Promise<ProbeResult> {
   });
 }
 
-describe('pinned Pi fork RPC packaging probe', () => {
+describe('pinned official Pi RPC packaging probe', () => {
   it('serializes native toolCallId and isError as JSONL without a provider call', async () => {
-    // The alias keeps the install path on the upstream specifier while the
-    // manifest inside carries the fork identity the client manifest pins.
+    // The client manifest pins the official package by its own name at an
+    // exact version; the installed manifest must be exactly that artifact.
     const expected = resolvePiRuntimeIdentity();
-    // The name anchors the pin to the SDK's fork scope; the version travels
-    // from the same manifest pin, so a fork bump needs no edit here. The
+    // The name anchors the pin to the official scope; the version travels
+    // from the same manifest pin, so a version bump needs no edit here. The
     // installed-manifest comparison directly below is the drift check.
-    expect(expected.name).toBe('@byok-sdk/pi-coding-agent');
+    expect(expected.name).toBe('@earendil-works/pi-coding-agent');
     const packageJson = JSON.parse(await readFile(PI_PACKAGE_PATH, 'utf8')) as {
       name?: unknown;
       version?: unknown;
-      byokFork?: { upstreamCommit?: unknown };
+      byokFork?: unknown;
     };
     expect(packageJson.name).toBe(expected.name);
     expect(packageJson.version).toBe(expected.version);
-    expect(packageJson.byokFork?.upstreamCommit).toBe('13cbf77df2396303013a41646bcfa77b4271ae56');
+    // The official artifact carries no fork stanza.
+    expect(Object.hasOwn(packageJson, 'byokFork')).toBe(false);
 
     const result = await runPinnedPiRpcProbe();
     expect(result.code).toBe(0);

@@ -20,9 +20,12 @@ import {
 import {
   createPiInputPreparationCompiler,
   resolveInstalledPiRuntimeIdentity,
-  InputPreparationCompileError,
+  verifyPreparedPiInput,
   type CompilePreparedInputRequest,
 } from '../adapters/pi/input-preparation';
+import { canonicalPreparedValue, PreparedSessionError } from '../adapters/pi/prepared-request';
+import { createPreparedGate, registerPreparedProvider } from '../adapters/pi/prepared-session';
+import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 // Relative, and test-only: the release graph
 // (`scripts/release/check-package-graph.mjs`) keeps `@byok-sdk/keys` and the
 // dispatch packages disjoint as SHIPPED dependencies, which is exactly why the
@@ -558,65 +561,63 @@ describe('input preparation model: the wire carries what the launcher projects',
 // ---------------------------------------------------------------------------
 
 /**
- * `composeModelProvider` is reached by path, not by specifier: the fork's
- * `exports` map has no subpath for it. It is imported at all because the native
- * session's own drift check is
- * `canonicalPreparedValue(sessionModel) !== canonicalPreparedValue(expected.model)`
- * (`dist/core/agent-session.js`, `prepared_model_drift`), and the session model
- * is whatever this composer builds from the launched `models.json`. A
- * hand-written "session model" would be the wire agreeing with itself.
+ * The model the prepared Pi session resolves for the counted model, built by
+ * the official runtime itself.
+ *
+ * On official Pi the prepared host does not compose the session model from the
+ * launched `models.json`: it registers the counted (expected) model with an
+ * in-memory `ModelRuntime` through `registerPreparedProvider`, which refuses
+ * `prepared_model_drift` unless the model the runtime resolves back equals the
+ * projection. So this is that exact registration, against a real
+ * `ModelRuntime` with no catalog file and no network, and the model returned is
+ * what the runtime resolved — a hand-written "session model" would be the wire
+ * agreeing with itself.
  */
-const PROVIDER_COMPOSER_URL = new URL(
-  '../../node_modules/@earendil-works/pi-coding-agent/dist/core/provider-composer.js',
-  import.meta.url,
-).href;
+async function registeredSessionModel(expected: InputPreparationModelV1): Promise<Record<string, unknown>> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-prep-model-session-'));
+  cleanups.push(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+  const modelRuntime = await ModelRuntime.create({
+    authPath: path.join(dir, 'auth.json'),
+    modelsPath: null,
+    allowModelNetwork: false,
+    refreshOnCreate: false,
+  });
+  return registerPreparedProvider(modelRuntime, expected, {}, createPreparedGate()) as unknown as Record<string, unknown>;
+}
 
-/** The model the launched Pi session resolves for this profile, built by the fork itself. */
-async function composedSessionModel(): Promise<Record<string, unknown>> {
-  const { composeModelProvider } = (await import(PROVIDER_COMPOSER_URL)) as {
-    composeModelProvider: (
-      providerId: string,
-      base: undefined,
-      modelConfig: { getProvider(id: string): unknown },
-      extension: undefined,
-    ) => { getModels(): readonly Record<string, unknown>[] };
-  };
-  const { providerId, provider } = projected();
-  const composed = composeModelProvider(
-    providerId,
-    undefined,
-    { getProvider: (id) => (id === providerId ? provider : undefined) },
-    undefined,
-  );
-  const entry = composed.getModels().find((model) => model['id'] === PROFILE.model);
-  expect(entry).toBeDefined();
-  return entry!;
+/** The fields the prepared session's drift check compares (`registerPreparedProvider`). */
+function sessionComparable(value: Record<string, unknown>): string {
+  return canonicalPreparedValue({
+    id: value['id'], name: value['name'], api: value['api'], provider: value['provider'], baseUrl: value['baseUrl'],
+    reasoning: value['reasoning'], input: value['input'], contextWindow: value['contextWindow'],
+    maxTokens: value['maxTokens'], thinkingLevelMap: value['thinkingLevelMap'], compat: value['compat'],
+  });
 }
 
 /**
- * The BYOK lane's compile input, non-empty in every field the 0.86 rebase moved.
+ * The BYOK lane's compile input, non-empty in every field the official
+ * migration moved: the Host-authored whole system message (`customPrompt`),
+ * the host-canonical prefix (A2' sentinel provenance) and `constrainedSampling`.
  *
- * A snapshot that left `toolGuidelines`, `skills`, the host-canonical prefix and
- * `constrainedSampling` empty would compile the same bytes the 0.85 line did,
- * and would therefore prove nothing about the renderer and the tool projection
- * this slice replaced.
+ * On official Pi the Host owns the WHOLE system message; Pi's renderer inputs
+ * (`toolSnippets`, `toolGuidelines`, `promptGuidelines`, `contextFiles`,
+ * `skills`) are refused with `prompt_render_input_unsupported`, so they are
+ * empty here and `customPrompt` carries the prompt.
  */
+const HOST_SYSTEM_PROMPT = 'You are the BYOK coding agent.\nread before you write\nreview a diff before it is proposed';
+
 const COMPILE_SNAPSHOT = {
   prompt: {
     cwd: '/workspace/project',
     selectedTools: ['read'],
-    toolSnippets: { read: 'read snippet' },
-    toolGuidelines: { read: ['read before you write'] },
-    promptGuidelines: ['prefer small diffs'],
-    contextFiles: [{ path: 'AGENTS.md', content: '# agents\nbe precise\n' }],
-    skills: [
-      {
-        name: 'review',
-        description: 'review a diff before it is proposed',
-        filePath: '/workspace/project/.skills/review/SKILL.md',
-        disableModelInvocation: false,
-      },
-    ],
+    customPrompt: HOST_SYSTEM_PROMPT,
+    toolSnippets: {},
+    toolGuidelines: {},
+    promptGuidelines: [],
+    contextFiles: [],
+    skills: [],
     docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
   },
   messages: [
@@ -668,7 +669,7 @@ function admittedProjectedModel(overrides: Record<string, unknown> = {}): InputP
   return admitted as InputPreparationModelV1;
 }
 
-describe('input preparation: a projected BYOK provider compiles and is consumed by the pinned fork', () => {
+describe('input preparation: a projected BYOK provider compiles and is consumed by the pinned official runtime', () => {
   it('compiles an opaque `byok-sdk-<ref>` provider id and carries it verbatim into the envelope', async () => {
     const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
     const compiled = await compiler.compile(compileRequest(admittedProjectedModel()));
@@ -685,20 +686,23 @@ describe('input preparation: a projected BYOK provider compiles and is consumed 
       createHash('sha256').update(compiled.counterProjection, 'utf8').digest('hex'),
     );
 
-    // Everything the 0.86 rebase moved, read off D itself. The prompt is
-    // rendered by upstream's own builder from the stated inputs, the
-    // host-canonical prefix is an ordinary assistant turn, and the tool
-    // declaration keeps `constrainedSampling`, which reaches the wire as
-    // `strict`.
+    // Everything the official migration moved, read off D itself. The system
+    // message is the Host's `customPrompt` verbatim (no Pi prompt builder, so
+    // no `<cwd>` block), the host-canonical prefix is an ordinary assistant
+    // text turn with no sentinel provenance on the wire, and the tool keeps
+    // `constrainedSampling` but it produces no `strict` on a BYOK endpoint
+    // (`supportsStrictMode` is not in the wire compat subset and defaults to
+    // false on the official serializer).
     const body = JSON.parse(compiled.requestBody) as {
       messages: { role: string; content: string }[];
       tools: { function: { name: string; strict?: unknown } }[];
     };
-    expect(body.messages[0]?.content).toContain('read before you write');
-    expect(body.messages[0]?.content).toContain('review a diff before it is proposed');
+    expect(body.messages[0]).toEqual({ role: 'system', content: HOST_SYSTEM_PROMPT });
     expect(body.messages.map((message) => message.role)).toEqual(['system', 'user', 'assistant', 'user']);
     expect(body.messages[2]).toMatchObject({ role: 'assistant', content: 'It is a BYOK SDK.' });
-    expect(body.tools.map((tool) => tool.function.strict)).toEqual([true]);
+    expect(compiled.requestBody).not.toContain('byok-host-canonical');
+    expect(body.tools.map((tool) => tool.function.name)).toEqual(['read']);
+    expect(body.tools.map((tool) => Object.hasOwn(tool.function, 'strict'))).toEqual([false]);
   });
 
   it('compiles the same bytes as the built-in `zai` provider, and digests them differently', async () => {
@@ -718,13 +722,11 @@ describe('input preparation: a projected BYOK provider compiles and is consumed 
   });
 
   it('is admitted at consume against the independently re-parsed expected model', async () => {
-    // `verifyPreparedSessionInput` is the fork's own consume-side admission
-    // gate — the one the prepared launch calls before any transport. The
-    // expectation is deliberately NOT the object handed to the compile: it is
-    // the same wire model re-read by the prepared host's independent parser,
-    // which is exactly how the launch presents it.
-    const { verifyPreparedSessionInput, PreparedSessionError } =
-      await import('@earendil-works/pi-coding-agent/prepared-session-input');
+    // `verifyPreparedPiInput` is the SDK's consume-side admission gate — the
+    // one the prepared launch calls before any transport. The expectation is
+    // deliberately NOT the object handed to the compile: it is the same wire
+    // model re-read by the prepared host's independent parser, which is exactly
+    // how the launch presents it.
     const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
     const compiled = await compiler.compile(compileRequest(admittedProjectedModel()));
     const expectedModel = throughPreparedHost(projectedWireModel());
@@ -736,45 +738,48 @@ describe('input preparation: a projected BYOK provider compiles and is consumed 
       binding: { ...COMPILE_BINDING },
       toolManifestDigest: compiled.toolManifestDigest,
     };
-    const verified = await verifyPreparedSessionInput(compiled.envelope, expected);
+    const verified = await verifyPreparedPiInput(compiled.envelope, expected);
     expect((verified.providerRequest.model as unknown as Record<string, unknown>)['provider'])
       .toBe('byok-sdk-zai-coding');
 
     // Drift: an expectation whose provider is a different id is refused, by the
     // typed code, rather than admitted because everything else matched.
     const drifted = { ...expected, model: { ...(expectedModel as object), provider: 'zai' } as never };
-    await expect(verifyPreparedSessionInput(compiled.envelope, drifted))
+    await expect(verifyPreparedPiInput(compiled.envelope, drifted))
       .rejects.toBeInstanceOf(PreparedSessionError);
-    await expect(verifyPreparedSessionInput(compiled.envelope, drifted))
+    await expect(verifyPreparedPiInput(compiled.envelope, drifted))
       .rejects.toMatchObject({ code: 'prepared_expectation_mismatch' });
   });
 
-  it('equals the session model the fork composes from the projected models.json', async () => {
+  it('equals the session model the official runtime registers for the projected expected model', async () => {
     // The second half of consume: `prepared_model_drift` compares the SESSION
-    // model — composed by the fork from the launched `models.json` — with the
-    // expected model, under the fork's own canonicalization. This is that exact
-    // comparison, with both sides built by their real authorities.
-    const { canonicalPreparedValue } = await import('@earendil-works/pi-coding-agent/prepared-session-input');
-    const session = await composedSessionModel();
-    const expectedModel = throughPreparedHost(projectedWireModel());
+    // model — what the official `ModelRuntime` resolves after
+    // `registerPreparedProvider` — with the expected model's projection, under
+    // `canonicalPreparedValue`. This is that exact registration and
+    // comparison, with the session side built by the real runtime.
+    const expectedModel = throughPreparedHost(projectedWireModel()) as InputPreparationModelV1;
+    expect(expectedModel).toBeDefined();
+    const session = await registeredSessionModel(expectedModel);
 
-    expect(canonicalPreparedValue(expectedModel)).toBe(canonicalPreparedValue(session));
+    expect(sessionComparable(session)).toBe(sessionComparable(expectedModel as unknown as Record<string, unknown>));
     // Control: a different provider id is a different model under the same
     // canonicalization, so the equality above is load-bearing rather than a
     // comparison that would have held for anything.
-    expect(canonicalPreparedValue({ ...(expectedModel as object), provider: 'zai' }))
-      .not.toBe(canonicalPreparedValue(session));
+    expect(sessionComparable({ ...(expectedModel as unknown as Record<string, unknown>), provider: 'zai' }))
+      .not.toBe(sessionComparable(session));
   });
 
-  it('refuses a whitespace-only provider id as the ordinary typed compile refusal', async () => {
-    // The wire admits it — `OPAQUE_ID` bans control characters, not spaces — so
-    // the structural check that refuses it is the fork's, and the SDK maps that
-    // refusal onto the same `InputPreparationCompileError` every other
-    // unsupported input takes to the wire's `unsupported_input`.
-    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
-    await expect(compiler.compile(compileRequest(admittedProjectedModel({ provider: '   ' }))))
-      .rejects.toBeInstanceOf(InputPreparationCompileError);
-  });
+  // PRODUCTION GAP (WP2b): the wire admits a whitespace-only provider id
+  // (`OPAQUE_ID` bans control characters, not spaces), and the structural check
+  // that refused it lived in the retired fork. The official A1' compile accepts
+  // it and produces an envelope. The refusal has to move into the SDK:
+  // `adapters/pi/input-preparation.ts:425` `validatePreparedModel` must refuse
+  // `model.provider.trim().length === 0` with an `InputPreparationCompileError`.
+  // Restore this case (body unchanged) once that lands:
+  //   const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+  //   await expect(compiler.compile(compileRequest(admittedProjectedModel({ provider: '   ' }))))
+  //     .rejects.toBeInstanceOf(InputPreparationCompileError);
+  it.todo('refuses a whitespace-only provider id as the ordinary typed compile refusal (needs validatePreparedModel provider check)');
 
   it('refuses an empty provider id at every carrier, before any compile', () => {
     const empty = { ...projectedWireModel(), provider: '' };

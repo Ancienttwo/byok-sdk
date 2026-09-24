@@ -159,10 +159,13 @@ function preparationRequest(overrides: Partial<InputPreparationRequestV1> = {}):
     snapshot: {
       prompt: {
         cwd: '/workspace/project',
+        // The Host owns the whole system message on official Pi; renderer
+        // inputs stay empty (`prompt_render_input_unsupported` otherwise).
+        customPrompt: 'be precise\nprefer small diffs',
         toolSnippets: {},
         toolGuidelines: {},
-        promptGuidelines: ['prefer small diffs'],
-        contextFiles: [{ path: 'AGENTS.md', content: 'be precise' }],
+        promptGuidelines: [],
+        contextFiles: [],
         skills: [],
         docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
       },
@@ -378,8 +381,9 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
       expect(typeof entry.valueClass).toBe('string');
     }
     expect(receipt.artifact?.requestBytes).toBeGreaterThan(0);
-    expect(receipt.binding.runtime.packageName).toBe('@byok-sdk/pi-coding-agent');
+    expect(receipt.binding.runtime.packageName).toBe('@earendil-works/pi-coding-agent');
     expect(receipt.binding.runtime.upstreamCommit).toMatch(/^[0-9a-f]{40}$/u);
+    expect(receipt.binding.runtime.compilerVersion).toBe(4);
     // The mode the manifest was filtered for is recorded, not inferred.
     expect(receipt.binding.permissionMode).toBe('auto');
     // The tools were OBSERVED from the configured toolset, and every one of

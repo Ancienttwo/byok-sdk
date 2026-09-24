@@ -32,11 +32,15 @@ import { trustedCwd } from './fixtures/launch-cwd';
  * property, not a coincidence, and the day it stops holding the symptom would
  * be a silently swallowed turn rather than a failure.
  *
+ * The official-Pi prepared host (`bin/pi-prepared-host.ts`) keeps this
+ * timing: it answers `prompt_prepared` from the byte gate's first-request
+ * verdict, after the run's leading session events.
+ *
  * It also pins the other half of the same change: `prepared_body_drift` is a
- * code this SDK had never seen, and the adapter reports the fork's code
- * VERBATIM rather than through a mapping table. Reaching the fork's real byte
- * gate from here would mean forging an envelope whose digest is valid and whose
- * body is not — i.e. reimplementing the fork's own digest — so the runtime is
+ * code this SDK had never seen, and the adapter reports the host's code
+ * VERBATIM rather than through a mapping table. Reaching the real byte gate
+ * from here would mean forging an envelope whose digest is valid and whose
+ * body is not while the live session serializes something else, so the runtime is
  * scripted at the adapter's `spawnFn` seam instead, and what is under test is
  * exactly what this package owns: how a typed refusal on that response surfaces.
  */
@@ -76,13 +80,15 @@ const BINDING = {
   profileRevision: 'timing-profile',
 } as const;
 
-/** A REAL retained envelope from the pinned fork; only its consumer is scripted. */
+/** A REAL retained envelope from the SDK's A1' compile; only its consumer is scripted. */
 async function prepareArtifact(cwd: string, artifactPath: string, launchCwd: string): Promise<RuntimePreparedLaunchV1> {
   const compiled = await createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity()).compile({
     snapshot: {
       prompt: {
         cwd,
         selectedTools: [],
+        // The Host owns the whole system message on official Pi.
+        customPrompt: 'You summarise repositories.',
         toolSnippets: {},
         toolGuidelines: {},
         promptGuidelines: [],
@@ -219,7 +225,7 @@ describe('the prepared response now arrives after the run\'s first session event
 
   it('reports a prepared_body_drift refusal verbatim, as a non-retryable semantic start failure', async () => {
     // New on 0.86 and passed through with no mapping table: the adapter names
-    // whatever code the fork reported. A code this SDK translated would be a
+    // whatever code the prepared host reported. A code this SDK translated would be a
     // second vocabulary for the one fact the byte gate established.
     await expect(startPrepared(true)).rejects.toMatchObject({
       phase: 'start',

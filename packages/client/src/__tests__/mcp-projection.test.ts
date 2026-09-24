@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { canonicalPreparedValue } from '@earendil-works/pi-coding-agent/prepared-session-input';
+import { canonicalPreparedValue } from '../adapters/pi/prepared-request';
 import {
   classifyMcpToolsetServerObservation,
   filterMcpObservationForPolicy,
@@ -182,8 +182,8 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
         parameters: tool.parameters,
       })));
 
-    // Byte equality, with the NATIVE canonical form — the same serializer the
-    // native compiler digests its tool manifest with.
+    // Byte equality, with the SDK-owned canonical form — the same serializer
+    // the prepared compile digests its tool manifest and envelope with.
     expect(canonicalise(definitions)).toBe(canonicalise([...fromCore]));
   });
 

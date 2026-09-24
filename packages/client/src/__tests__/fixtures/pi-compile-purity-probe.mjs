@@ -1,15 +1,23 @@
 #!/usr/bin/env node
 // The isolated measurement half of the prepared-compile purity gate.
 //
-// Why a child process at all: the surfaces the fork's compile graph can touch
-// are bound as ESM NAMED imports (`dist/config.js` opens with
-// `import { accessSync, existsSync, readFileSync, realpathSync } from "fs"`),
-// and a named binding resolves through the builtin module's ESM namespace. A
-// monkeypatch applied to the CJS module object AFTER that namespace exists is
-// invisible to it, which is exactly the hole the in-process trap test had. So
-// the monitors go on FIRST, `module.syncBuiltinESMExports()` republishes them
-// into the builtin namespaces, and only then is the fork imported — every
-// named binding the fork takes is a binding to a monitored function.
+// Why a child process at all: the surfaces the compile graph can touch are
+// bound as ESM NAMED imports (the SDK compile module opens with
+// `import { existsSync, readFileSync } from "node:fs"`), and a named binding
+// resolves through the builtin module's ESM namespace. A monkeypatch applied to
+// the CJS module object AFTER that namespace exists is invisible to it, which
+// is exactly the hole the in-process trap test had. So the monitors go on
+// FIRST, `module.syncBuiltinESMExports()` republishes them into the builtin
+// namespaces, and only then is the compile graph imported — every named
+// binding the SDK compile module and official pi-ai take is a binding to a
+// monitored function.
+//
+// What is loaded (official Pi 0.87.1, A1'): the SDK's own compile entry
+// `compilePreparedPiInput` (`adapters/pi/input-preparation.ts`), handed in as
+// a pre-built ESM file at `config.compileEntry` (the parent test bundles it
+// from source, since the published dist exports no compile entry), and the
+// two official modules it loads: the `@earendil-works/pi-ai` root and
+// `@earendil-works/pi-ai/api/openai-completions`.
 //
 // Monitors RECORD rather than throw, so one run reports every touch instead of
 // stopping at the first. The two network-egress surfaces (`fetch`,
@@ -20,7 +28,7 @@
 // output: the JSON report at the config's `reportPath`. A file rather than
 // stdout, because the report is written with the pristine `writeFileSync`
 // captured before the monitors exist and so leaves no trace in its own
-// measurement, and because the fork's own graph may write to stdout.
+// measurement, and because the compile graph may write to stdout.
 
 import module from 'node:module';
 import childProcess from 'node:child_process';
@@ -35,7 +43,8 @@ import net from 'node:net';
 import os from 'node:os';
 import tls from 'node:tls';
 import workerThreads from 'node:worker_threads';
-import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SELF = fileURLToPath(import.meta.url);
 
@@ -45,14 +54,22 @@ const config = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const writeReport = fs.writeFileSync;
 
 /**
- * The installed fork root, resolved before the monitors exist, for origin
- * attribution. Both spellings are kept: the alias in `packages/client` is a
+ * The installed official pi-ai root — the package that owns both modules the
+ * A1' compile loads — resolved before the monitors exist, for origin
+ * attribution. Both spellings are kept: the entry in `packages/client` is a
  * symlink, and Node reports stack frames at the real path it resolved to.
  */
-const forkLinkRoot = fileURLToPath(
-  new URL('../../../node_modules/@earendil-works/pi-coding-agent/', import.meta.url),
+const officialLinkRoot = fileURLToPath(
+  new URL('../../../node_modules/@earendil-works/pi-ai/', import.meta.url),
 );
-const forkRoots = [forkLinkRoot, `${fs.realpathSync(forkLinkRoot)}/`];
+const officialRoots = [officialLinkRoot, `${fs.realpathSync(officialLinkRoot)}/`];
+
+/**
+ * The SDK's own compile module, pre-built by the parent into its own
+ * directory. Its frames are attributed as `sdk:` so an access the SDK half of
+ * the compile makes is named as such rather than filed under a dependency.
+ */
+const sdkEntryRoots = [`${path.dirname(config.compileEntry)}/`, `${fs.realpathSync(path.dirname(config.compileEntry))}/`];
 
 // ---------------------------------------------------------------------------
 // Recording
@@ -145,18 +162,27 @@ function originOf() {
 }
 
 function shorten(frame) {
-  for (const root of forkRoots) {
-    const forkIndex = frame.indexOf(root);
-    if (forkIndex >= 0) return `fork:${frame.slice(forkIndex + root.length).replace(/\)$/u, '')}`;
+  for (const root of sdkEntryRoots) {
+    const sdkIndex = frame.indexOf(root);
+    if (sdkIndex >= 0) return `sdk:${frame.slice(sdkIndex + root.length).replace(/\)$/u, '')}`;
+  }
+  for (const root of officialRoots) {
+    const officialIndex = frame.indexOf(root);
+    if (officialIndex >= 0) return `official:${frame.slice(officialIndex + root.length).replace(/\)$/u, '')}`;
   }
   const moduleIndex = frame.lastIndexOf('/node_modules/');
   if (moduleIndex >= 0) return `dep:${frame.slice(moduleIndex + '/node_modules/'.length).replace(/\)$/u, '')}`;
   return frame;
 }
 
-/** `fork` is the only class the gate asserts on; the rest are reported, not claimed. */
+/**
+ * `official` (pi-ai's own code) and `sdk` (the SDK compile module) are the
+ * classes the gate attributes by name; every class is reported, and the
+ * compile-phase predicates count every class.
+ */
 function classOf(origin) {
-  if (origin.startsWith('fork:')) return 'fork';
+  if (origin.startsWith('official:')) return 'official';
+  if (origin.startsWith('sdk:')) return 'sdk';
   if (origin.startsWith('dep:')) return 'dependency';
   if (origin === '(runtime-internal)') return 'runtime';
   return 'other';
@@ -302,7 +328,7 @@ function watch(target, key, kind, api, { callThrough = true, before, after } = {
 /**
  * The filesystem families, enumerated rather than sampled: for each name the
  * callback form, the `...Sync` form and the `fs.promises` form. Anything the
- * fork could use to read a home directory, a config file or a credential is in
+ * compile graph could use to read a home directory, a config file or a credential is in
  * here by construction rather than by having been thought of.
  */
 const FS_FAMILIES = [
@@ -577,10 +603,11 @@ function installEnvironmentMonitor() {
 /**
  * Rewrite a module the compile REALLY executes, in memory only.
  *
- * `dist/core/system-prompt.js` is on the path by construction —
- * `dist/core/input-preparation.js` calls `buildSystemPrompt(copied.prompt)` —
- * and the control firing during `compileCold` is what proves it rather than
- * the claim. The injected read uses a NAMED `node:fs` import on purpose: that
+ * pi-ai's `dist/utils/text.js` is on the path by construction — the official
+ * serializer (`dist/api/openai-completions.js`) renders the leading system
+ * message with `getSystemMessageText(msg)`, and that text is D's system
+ * content — and the control firing during `compileCold` is what proves it
+ * rather than the claim. The injected read uses a NAMED `node:fs` import on purpose: that
  * is the exact binding shape the old in-process trap could not see.
  *
  * Nothing on disk is touched; `registerHooks` hands back a source string.
@@ -614,32 +641,32 @@ function installNegativeControl(mode) {
     'const __ctrlCapturedGetRandomValues = __ctrlNamedGetRandomValues;',
     '',
   ].join('\n');
-  const anchor = 'export function buildSystemPrompt(input) {';
+  const anchor = 'export function getSystemMessageText(message) {';
 
   // The last two controls are the ones whose effect has to reach D, so they
-  // cannot be a statement at the top of the body: each wraps the renderer and
-  // puts a nondeterministic value INTO the rendered prompt text. Under the two
+  // cannot be a statement at the top of the body: each wraps the system
+  // message renderer and puts a nondeterministic value INTO the rendered text. Under the two
   // skews that text differs, which is what makes "D is byte-identical across
   // skews" a falsifiable claim rather than a property of a fixture that
   // happens to read no clock.
   const rendererWrappers = {
-    'control-nondeterminism': `export function buildSystemPrompt(input) {
-  return __ctrlRenderSystemPrompt(input) + "\\n<!-- purity-control " + String(Date.now()) + " " + String(Math.random()) + " -->";
+    'control-nondeterminism': `export function getSystemMessageText(message) {
+  return __ctrlRenderSystemMessage(message) + "\\n<!-- purity-control " + String(Date.now()) + " " + String(Math.random()) + " -->";
 }
-function __ctrlRenderSystemPrompt(input) {`,
+function __ctrlRenderSystemMessage(message) {`,
     // The generator whose DIRECT monitor cannot be installed, called through
     // the binding captured in the prelude. Node's `node:crypto.getRandomValues`
     // forwards to the WebCrypto method at call time, so the monitor on
     // `globalThis.crypto.getRandomValues` is what must see this — and under a
     // skew it is also what forces the bytes that land in the prompt.
-    'control-getrandomvalues': `export function buildSystemPrompt(input) {
+    'control-getrandomvalues': `export function getSystemMessageText(message) {
   const __ctrlRandom = new Uint8Array(8);
   __ctrlCapturedGetRandomValues(__ctrlRandom);
   const __ctrlRandomHex = Array.from(__ctrlRandom, (byte) => byte.toString(16).padStart(2, "0")).join("");
   globalThis.__piPurityControlRandom = __ctrlRandomHex;
-  return __ctrlRenderSystemPrompt(input) + "\\n<!-- purity-control-getrandomvalues " + __ctrlRandomHex + " -->";
+  return __ctrlRenderSystemMessage(message) + "\\n<!-- purity-control-getrandomvalues " + __ctrlRandomHex + " -->";
 }
-function __ctrlRenderSystemPrompt(input) {`,
+function __ctrlRenderSystemMessage(message) {`,
   };
 
   const replacement =
@@ -653,9 +680,9 @@ function __ctrlRenderSystemPrompt(input) {`,
   module.registerHooks({
     load(url, context, nextLoad) {
       const result = nextLoad(url, context);
-      if (!url.endsWith('/dist/core/system-prompt.js')) return result;
+      if (!url.endsWith('/@earendil-works/pi-ai/dist/utils/text.js')) return result;
       const source = String(result.source);
-      if (!source.includes(anchor)) throw new Error('negative control anchor not found in system-prompt.js');
+      if (!source.includes(anchor)) throw new Error('negative control anchor not found in pi-ai dist/utils/text.js');
       return { ...result, source: `${prelude}${source.replace(anchor, replacement)}` };
     },
   });
@@ -666,43 +693,42 @@ function __ctrlRenderSystemPrompt(input) {`,
 // ---------------------------------------------------------------------------
 
 /**
- * The prompt surface of `pi-input-preparation.test.ts`'s own fixture, mapped
- * onto the fork's parameter names exactly as the adapter maps them — the same
- * non-empty `toolGuidelines`, `skills`, `contextFiles` and host-canonical
- * prefix, and the same `constrainedSampling` on both tools.
+ * `pi-input-preparation.test.ts`'s own fixture
+ * (`fixtures/prepared-compile-snapshot.ts`), restated as the exact
+ * `CompilePreparedInputRequest` `compilePreparedPiInput` takes: the Host-owned
+ * whole system message as `customPrompt`, empty renderer inputs, the
+ * host-canonical prefix (A2' sentinel provenance), and the same
+ * `constrainedSampling` on both tools.
  *
  * Stated here rather than imported because this file runs as plain Node, with
  * no TypeScript loader and no vitest module graph. The parent test pins the
- * two fixtures against each other so they cannot drift apart silently.
+ * two fixtures against each other (byte-equal D) so they cannot drift apart
+ * silently.
  */
-function nativeCompileInput(preparedToolProjection) {
+function compileRequest() {
   return {
     snapshot: {
       prompt: {
         cwd: '/workspace/project',
         selectedTools: ['read', 'bash'],
-        toolSnippets: { read: 'read snippet', bash: 'bash snippet' },
-        toolGuidelines: { read: ['read before you write'], bash: ['quote every path'] },
-        promptGuidelines: ['prefer small diffs'],
-        contextFiles: [{ path: 'AGENTS.md', content: '# agents\nbe precise\n' }],
-        skills: [
-          {
-            name: 'review',
-            description: 'review a diff before it is proposed',
-            filePath: '/workspace/project/.skills/review/SKILL.md',
-            disableModelInvocation: false,
-          },
-        ],
-        docsPaths: { readme: 'README.md', docs: 'docs', examples: 'examples' },
+        customPrompt: [
+          'You are the BYOK coding agent.',
+          '# agents',
+          'be precise',
+          'prefer small diffs',
+          'read before you write',
+          'review a diff before it is proposed',
+        ].join('\n'),
+        toolSnippets: {},
+        toolGuidelines: {},
+        promptGuidelines: [],
+        contextFiles: [],
+        skills: [],
+        docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
       },
       messages: [
         { role: 'user', content: 'what does this repository do?', timestamp: 1_699_999_999_000 },
-        {
-          role: 'assistant',
-          origin: 'host_canonical',
-          content: [{ type: 'text', text: 'It is a BYOK SDK.' }],
-          timestamp: 1_699_999_999_500,
-        },
+        { role: 'assistant', origin: 'host_canonical', content: 'It is a BYOK SDK.', timestamp: 1_699_999_999_500 },
         { role: 'user', content: 'summarise the repository', timestamp: 1_700_000_000_000 },
       ],
       tools: [
@@ -718,7 +744,7 @@ function nativeCompileInput(preparedToolProjection) {
           parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] },
           constrainedSampling: { type: 'json_schema', strict: 'prefer' },
         },
-      ].map((tool) => preparedToolProjection(tool)),
+      ],
     },
     model: {
       id: 'glm-4.6',
@@ -748,7 +774,7 @@ function nativeCompileInput(preparedToolProjection) {
 // ---------------------------------------------------------------------------
 
 // Order is the whole point: monitors, then republish into the builtin ESM
-// namespaces, then — and only then — the fork's module graph.
+// namespaces, then — and only then — the compile module graph.
 installFilesystemMonitors();
 installCapabilityMonitors();
 installNondeterminismMonitors();
@@ -769,22 +795,20 @@ const report = {
 
 try {
   phase = 'load';
-  // The same specifier `adapters/pi/input-preparation.ts` imports, resolved the
-  // same way: a bare fork subpath from inside `packages/client`.
-  // TODO(WP2-entry): official 0.87.1 has no `prepared-session-input` subpath.
-  // The A1' compile goes through `@earendil-works/pi-ai/api/openai-completions`
-  // (`streamSimple` against a sink with a capturing fetch). Point this load, the
-  // two compile calls and `nativeCompileInput` at WP2's SDK compile entry once
-  // it lands, and move `forkRoots` attribution to the pi-ai install root. The
-  // monitoring semantics above and below stay unchanged.
-  const native = await import('@earendil-works/pi-coding-agent/prepared-session-input');
-  const input = nativeCompileInput(native.preparedToolProjection);
+  // The SDK compile entry, and the official provider graph it loads. The
+  // production compiler loads the official modules before its first compile
+  // (`createPiInputPreparationCompiler().compile` awaits
+  // `loadOfficialCompiler()` outside the refusal path), so both belong to the
+  // LOAD phase here: the compile phases below measure calls, not module loads.
+  const sdk = await import(pathToFileURL(config.compileEntry).href);
+  await sdk.loadOfficialCompiler();
+  const input = compileRequest();
 
   phase = 'compileCold';
-  const cold = await native.prepareCodingAgentSessionInput(input);
+  const cold = await sdk.compilePreparedPiInput(input);
 
   phase = 'compileWarm';
-  const warm = await native.prepareCodingAgentSessionInput(input);
+  const warm = await sdk.compilePreparedPiInput(input);
 
   phase = 'report';
   report.requestBody = cold.providerRequest.body;

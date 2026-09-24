@@ -25,7 +25,8 @@ async function fixture(mutate: (record: ToolImplementationInstallRecordV1) => To
   const entry = path.join(root,'sdk.js'); const interpreter = path.join(root,'interpreter');
   await fs.writeFile(entry,'sealed SDK fixture',{mode:0o444}); await fs.writeFile(interpreter,'interpreter fixture',{mode:0o555});
   const native = resolveInstalledPiRuntimeIdentity();
-  const manifest = mutateManifest({name:native.packageName,version:native.packageVersion,byokFork:{upstreamBase:native.upstreamBase,upstreamCommit:native.upstreamCommit,forkBuild:native.forkBuild}});
+  // The official manifest carries no fork stanza: provenance is compared with the official runtime identity.
+  const manifest = mutateManifest({name:native.packageName,version:native.packageVersion});
   const manifestPath = path.join(root,'package.json'); const manifestBytes = JSON.stringify(manifest);
   await fs.writeFile(manifestPath,manifestBytes,{mode:0o444});
   const exportAssets: {path:string;digest:string}[] = [];
@@ -92,9 +93,9 @@ describe('Pi child launch/config authority', () => {
     const f=await fixture(record=>({...record,assets:record.assets!.filter(asset=>asset.path!==piExportAssetPaths('interpreter+bundle')[0])}));
     await expect(verifyPiHostBinding(f.binding,'pi-prepared')).rejects.toThrow('pi_export_asset_undeclared');
   });
-  it.each(['upstreamCommit','forkBuild','upstreamBase'] as const)('rejects changed record %s against measured manifest', async field => {
+  it.each(['upstreamCommit','forkBuild','upstreamBase'] as const)('rejects changed record %s against the official runtime identity', async field => {
     const f = await fixture(record=>({...record,nativeProvenance:{...record.nativeProvenance!,[field]:field==='forkBuild'?99:field==='upstreamCommit'?'c'.repeat(40):'0.0.1'}}));
-    await expect(verifyPiHostBinding(f.binding,'pi-prepared')).rejects.toThrow(`byokFork.${field}`);
+    await expect(verifyPiHostBinding(f.binding,'pi-prepared')).rejects.toThrow(`Pi nativeProvenance.${field} differs from the official runtime identity`);
   });
   it('rejects record and manifest against the independent static SDK pin', async () => {
     const f = await fixture(record=>({...record,nativeProvenance:{...record.nativeProvenance!,packageVersion:'9.9.9'}}), manifest=>({...manifest,version:'9.9.9'}));

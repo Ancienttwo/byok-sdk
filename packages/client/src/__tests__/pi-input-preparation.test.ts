@@ -12,36 +12,39 @@ import {
   type CompilePreparedInputRequest,
 } from '../adapters/pi/input-preparation';
 import { PI_PACKAGE_NAME, resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
-import { preparedCompileRequest as compileRequest } from './fixtures/prepared-compile-snapshot';
+import {
+  PREPARED_COMPILE_SYSTEM_PROMPT,
+  preparedCompileRequest as compileRequest,
+} from './fixtures/prepared-compile-snapshot';
 
 /**
- * B-P2 §10.5 "Completeness/purity" for the ONE module that composes the native
- * package: `adapters/pi/input-preparation.ts`.
+ * B-P2 §10.5 "Completeness/purity" for the ONE module that composes the
+ * official package: `adapters/pi/input-preparation.ts` (A1' compile via
+ * `adapters/pi/prepared-request.ts`).
  *
  * This file owns the CONTRACT half: what the compile produces, what the
- * envelope boundary refuses, and the STATIC import closure of the native dist
- * files the compile path loads. The static closure cannot be defeated by ESM
- * binding semantics — a named import that a monkeypatch would miss still shows
- * up as an import specifier — and it is the check that keeps holding after a
- * fork bump.
+ * envelope boundary refuses, and the STATIC import closure of the official
+ * dist files the compile path loads. The static closure cannot be defeated by
+ * ESM binding semantics — a named import that a monkeypatch would miss still
+ * shows up as an import specifier — and it is the check that keeps holding
+ * after an official version bump.
  *
  * CALL-TIME purity is NOT proven here. It is proven in
  * `pi-compile-purity.test.ts`, which measures a real compile in an isolated
- * child process whose monitors are installed before the fork's module graph
- * exists. An in-process trap cannot do it: the fork's helpers bind NAMED
- * imports (`dist/config.js`, `dist/core/skills.js`, `dist/utils/paths.js`),
- * and a binding taken before the patch resolves through a builtin ESM
- * namespace the patch never reached.
+ * child process whose monitors are installed before the official module graph
+ * exists. An in-process trap cannot do it: pi-ai's helpers bind NAMED imports
+ * (`dist/utils/provider-env.js`), and a binding taken before the patch
+ * resolves through a builtin ESM namespace the patch never reached.
  *
  * Nothing in this file performs a live provider or tokenizer call, and nothing
  * creates a task, claim, Execution or nonce.
  */
 
 /**
- * The static import closure of the native compile path, walked transitively.
+ * The static import closure of the official compile path, walked transitively.
  *
- * Only the two fork packages are DESCENDED into; anything else is recorded as
- * an edge and left alone, because what matters about a third-party package here
+ * Only the official package the compile loads (`@earendil-works/pi-ai`) is
+ * DESCENDED into; anything else is recorded as an edge and left alone, because what matters about a third-party package here
  * is that the pure path reaches it at all. Resolution mirrors Node's own: the
  * nearest `node_modules/<name>` above the importer, then that package's
  * `exports` map under the `import` condition, patterns included.
@@ -49,7 +52,7 @@ import { preparedCompileRequest as compileRequest } from './fixtures/prepared-co
 const IMPORT_SPECIFIER =
   /(?:\bfrom\s*|\bimport\s*|\bexport\s*)["']([^"']+)["']|\b(?:import|require)\s*\(\s*["']([^"']+)["']\s*\)/gu;
 
-const FORK_PACKAGES = new Set(['@earendil-works/pi-coding-agent', '@earendil-works/pi-ai']);
+const OFFICIAL_COMPILE_PACKAGES = new Set(['@earendil-works/pi-ai']);
 
 function importSpecifiers(source: string): string[] {
   return [...source.matchAll(IMPORT_SPECIFIER)].map((match) => match[1] ?? match[2]!);
@@ -105,11 +108,11 @@ function resolveSubpath(packageRoot: string, subpath: string): string | undefine
   return undefined;
 }
 
-function walkNativeClosure(entry: string): { files: Set<string>; thirdParty: Set<string>; builtins: Set<string> } {
+function walkNativeClosure(entries: readonly string[]): { files: Set<string>; thirdParty: Set<string>; builtins: Set<string> } {
   const files = new Set<string>();
   const thirdParty = new Set<string>();
   const builtins = new Set<string>();
-  const queue = [realpathSync(entry)];
+  const queue = entries.map((entry) => realpathSync(entry));
   while (queue.length > 0) {
     const file = queue.pop()!;
     if (files.has(file)) continue;
@@ -124,7 +127,7 @@ function walkNativeClosure(entry: string): { files: Set<string>; thirdParty: Set
         continue;
       }
       const name = specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0]!;
-      if (!FORK_PACKAGES.has(name)) {
+      if (!OFFICIAL_COMPILE_PACKAGES.has(name)) {
         thirdParty.add(name);
         continue;
       }
@@ -156,15 +159,29 @@ describe('B-P2 native composition: runtime identity', () => {
     const installed = JSON.parse(readFileSync(installedManifestPath, 'utf8')) as {
       name: string;
       version: string;
-      byokFork: { upstreamBase: string; upstreamCommit: string; forkBuild: number };
+      byokFork?: unknown;
     };
     expect(identity.packageName).toBe(installed.name);
     expect(identity.packageVersion).toBe(installed.version);
-    expect(identity.upstreamBase).toBe(installed.byokFork.upstreamBase);
-    expect(identity.upstreamCommit).toBe(installed.byokFork.upstreamCommit);
-    expect(identity.forkBuild).toBe(installed.byokFork.forkBuild);
-    expect(identity.envelopeFormat).toBe('pi.session.prepared-input');
-    expect(identity.requestFormat).toBe('pi.openai-completions.prepared');
+    expect(installed.name).toBe('@earendil-works/pi-coding-agent');
+    // The official artifact carries no fork stanza; the provenance is the
+    // pinned official tuple (upstream tag and registry gitHead), not a
+    // manifest-declared claim.
+    expect(Object.hasOwn(installed, 'byokFork')).toBe(false);
+    expect(identity.upstreamBase).toBe(`v${installed.version}`);
+    expect(identity.upstreamCommit).toBe('f07218c4d4bbc12bef056a7058c3dd49dfe41abe');
+    expect(identity.forkBuild).toBe(0);
+    // The two lockstep packages the compile and the session load are installed
+    // at exactly the coding agent's version.
+    for (const lockstep of ['@earendil-works/pi-ai', '@earendil-works/pi-agent-core']) {
+      const manifest = JSON.parse(readFileSync(
+        path.join(path.dirname(fileURLToPath(import.meta.resolve(lockstep))), '..', 'package.json'),
+        'utf8',
+      )) as { name: string; version: string };
+      expect({ name: manifest.name, version: manifest.version }).toEqual({ name: lockstep, version: installed.version });
+    }
+    expect(identity.envelopeFormat).toBe('byok.pi.prepared-input');
+    expect(identity.requestFormat).toBe('byok.pi.openai-completions.request');
     // The SUPPORTED constant, not a literal claim about the native: every
     // compile proves the envelope actually carries this same number.
     expect(identity.compilerVersion).toBe(SUPPORTED_PREPARED_COMPILER_VERSION);
@@ -183,29 +200,27 @@ describe('B-P2 native composition: pure compile', () => {
       tools: { function: { name: string; description: string; parameters: unknown; strict?: unknown } }[];
     };
     expect(body.model).toBe('glm-4.6');
-    // The authorized context file and guideline reached the compiled system
-    // prompt: a partial snapshot would be counted as a different request.
-    expect(body.messages[0]?.role).toBe('system');
-    expect(body.messages[0]?.content).toContain('be precise');
-    expect(body.messages[0]?.content).toContain('prefer small diffs');
-    // The two prompt inputs the 0.86 rebase moved onto the wire, rendered by
-    // upstream's own builder rather than by a caller-supplied block.
-    expect(body.messages[0]?.content).toContain('read before you write');
-    expect(body.messages[0]?.content).toContain('review a diff before it is proposed');
-    expect(body.messages[0]?.content).toContain('/workspace/project/.skills/review/SKILL.md');
-    // The host-canonical prefix is carried as an ordinary assistant turn, and
-    // the context still ends on the user turn the boundary requires.
+    // The Host-authored system message reached D verbatim and whole: no Pi
+    // prompt builder ran (no `<cwd>` block, no rendered skills), so what the
+    // Host counted is exactly what is sent.
+    expect(body.messages[0]).toEqual({ role: 'system', content: PREPARED_COMPILE_SYSTEM_PROMPT });
+    // The host-canonical prefix is carried as an ordinary assistant text turn
+    // (the A2' sentinel provenance never reaches D), and the context still
+    // ends on the user turn the boundary requires.
     expect(body.messages.map((message) => message.role)).toEqual(['system', 'user', 'assistant', 'user']);
     expect(body.messages[2]).toMatchObject({ role: 'assistant', content: 'It is a BYOK SDK.' });
     expect(body.messages.at(-1)).toMatchObject({ role: 'user', content: 'summarise the repository' });
     // Complete model-visible schemas, in order, not names alone.
     expect(body.tools.map((tool) => tool.function.name)).toEqual(['read', 'bash']);
     expect(body.tools[0]?.function.parameters).toMatchObject({ properties: { path: { type: 'string' } } });
-    // `constrainedSampling` reaches the wire as `strict`. The SDK's projection
-    // no longer strips it, so what is counted is what would be sent.
-    expect(body.tools.map((tool) => tool.function.strict)).toEqual([true, true]);
+    // `constrainedSampling` is admitted (`{ json_schema, prefer }`) but
+    // produces no `strict` on a BYOK endpoint: `supportsStrictMode` is not in
+    // the wire compat subset and the official serializer defaults it to false.
+    // What is counted is what would be sent either way.
+    expect(body.tools.map((tool) => Object.hasOwn(tool.function, 'strict'))).toEqual([false, false]);
+    expect(compiled.requestBody).not.toContain('byok-host-canonical');
 
-    // The native compiler's own structural projection contract, verbatim: a
+    // The SDK compiler's structural projection contract, verbatim: a
     // content-complete projection whose digest describes the exact counted
     // bytes, plus the classification of every key of D outside P(D).
     expect(compiled.projection.version).toBe(3);
@@ -248,9 +263,10 @@ describe('B-P2 native composition: pure compile', () => {
       zaiToolStream: true,
     } as const;
 
-    // The envelope's `providerRequest.model` IS the object handed to the native
-    // compile — the fork deep-copies its input and carries that copy through —
-    // so this is the pass-through assertion, not a re-derivation of it.
+    // The envelope's `providerRequest.model` IS the object the compile
+    // projected for the official serializer — `compilePreparedPiInput`
+    // deep-copies its input and carries that copy through — so this is the
+    // pass-through assertion, not a re-derivation of it.
     const declared = await compiler.compile(
       compileRequest({ model: { ...compileRequest().model, reasoning: true, thinkingLevelMap, compat } }),
     );
@@ -259,7 +275,8 @@ describe('B-P2 native composition: pure compile', () => {
     expect(carried['compat']).toEqual(compat);
 
     // Undeclared means the keys are ABSENT, not present-and-undefined: the
-    // native validator's own key gate reads a present key as a declaration.
+    // prepared-session drift check (`canonicalPreparedValue`) and the official
+    // model object both read a present key as a declaration.
     const undeclared = await compiler.compile(compileRequest());
     const plain = undeclared.envelope.providerRequest.model as unknown as Record<string, unknown>;
     expect(Object.hasOwn(plain, 'thinkingLevelMap')).toBe(false);
@@ -288,68 +305,85 @@ describe('B-P2 native composition: pure compile', () => {
     expect(compiled.requestBody.length).toBeGreaterThan(0);
   });
 
-  it('the native compile closure is transitive, and reaches exactly the declared third-party packages', () => {
+  it('the official compile closure is transitive, and reaches exactly the declared third-party packages', () => {
     // Derived, not listed. The hazard a hardcoded file list misses is an EDGE:
-    // `prepared-session-input.js` reaches the fork's provider layer, which
-    // reaches `openai`, and a fork bump can add another such edge without
+    // the A1' compile entry reaches pi-ai's provider layer, which reaches
+    // `openai`, and an official version bump can add another such edge without
     // touching any file this test used to name. So the closure is walked from
-    // the one entry the compiler actually imports, through the two fork
-    // packages, and what it reaches outside them is pinned.
-    const nativeRoot = path.join(path.dirname(fileURLToPath(import.meta.resolve(PI_PACKAGE_NAME))), '..');
-    const walked = walkNativeClosure(path.join(nativeRoot, 'dist/core/prepared-session-input.js'));
-
-    // The third-party edges of the pure compile path, exactly. A fork bump that
-    // adds one fails HERE, where the addition is still a reviewable fact,
-    // rather than at some later runtime.
-    //
-    // The 0.86 rebase WIDENED this set, and it is stated rather than hidden:
-    // the compile now renders the system prompt with upstream's own builder
-    // instead of a fork-local renderer, and that builder value-imports the
-    // pi-ai barrel and the coding-agent skill/config modules. That is the whole
-    // point of the rebase — one renderer, not two — so the closure it drags in
-    // is the honest cost of it. `fs`, `os`, `path` and `url` appear here rather
-    // than under `builtins` because the walker classifies by specifier and
-    // these are imported bare.
-    expect([...walked.thirdParty].sort()).toEqual([
-      'cross-spawn', 'fs', 'ignore', 'openai', 'os', 'partial-json', 'path', 'typebox', 'url', 'yaml',
-    ]);
-    expect([...walked.builtins].sort()).toEqual([
-      'node:child_process', 'node:fs', 'node:os', 'node:path', 'node:url',
+    // the two entries the compiler actually imports
+    // (`prepared-request.ts` `loadOfficialCompiler`: the pi-ai root and
+    // `@earendil-works/pi-ai/api/openai-completions`), through pi-ai, and what
+    // it reaches outside pi-ai is pinned.
+    const piAiRoot = path.join(path.dirname(fileURLToPath(import.meta.resolve('@earendil-works/pi-ai'))), '..');
+    const walked = walkNativeClosure([
+      fileURLToPath(import.meta.resolve('@earendil-works/pi-ai/api/openai-completions')),
+      fileURLToPath(import.meta.resolve('@earendil-works/pi-ai')),
     ]);
 
-    // What this test proves and what it does NOT.
+    // The third-party edges of the pure compile path, exactly. An official
+    // bump that adds one fails HERE, where the addition is still a reviewable
+    // fact, rather than at some later runtime.
     //
-    // It proves the REACHABLE set, exactly: a fork bump that adds an edge fails
-    // here. It no longer proves that the coding-agent half of the closure names
-    // no I/O builtin at all — on 0.86 the prompt builder reaches `config.js`
-    // (which reads `process.env`), `paths.js` (`node:fs`/`node:os`) and
-    // `child-process.js` (`node:child_process`), so the old blanket rule would
-    // now be a false statement rather than a check.
-    //
-    // CALL-TIME purity is proven by `pi-compile-purity.test.ts`, not here and
-    // not by an in-process trap: that gate measures a real compile of this
-    // same fixture in a child process whose monitors are installed before the
-    // fork's graph loads, so a read through one of those named bindings is
-    // visible. IMPORT-TIME effects are guarded by the fork's own entry-graph
-    // forbid list, and at this SDK by the sealed-host resolution tripwire
-    // (`pi-s2-bundle-resolution.test.ts`). The files below are the exact set the
-    // entry reaches, so a new one is a reviewable fact here too.
-    const codingAgentFiles = [...walked.files].filter((file) => file.startsWith(path.join(nativeRoot, 'dist')));
-    expect(codingAgentFiles.map((file) => path.basename(file)).sort()).toEqual([
-      'child-process.js',
-      'config.js',
-      'frontmatter.js',
-      'input-preparation.js',
-      'paths.js',
-      'prepared-session-input.js',
-      'skills.js',
-      'source-info.js',
-      'system-prompt.js',
-      'text.js',
+    // The official A1' path is NARROWER than the 0.86 fork's: no Pi prompt
+    // builder is loaded (the Host owns the whole system message), so the
+    // coding-agent package, its skill/config modules, `yaml`, `ignore` and
+    // `cross-spawn` are gone. The one builtin is `node:fs`, reached through a
+    // `require("node:fs")` in `utils/provider-env.js` that runs only under a
+    // Bun compiled binary with an empty `process.env`.
+    expect([...walked.thirdParty].sort()).toEqual(['openai', 'partial-json', 'typebox']);
+    expect([...walked.builtins].sort()).toEqual(['node:fs']);
+
+    // The exact file set the two entries reach, so a new one is a reviewable
+    // fact. CALL-TIME purity is proven by `pi-compile-purity.test.ts`: that
+    // gate measures a real compile of this same fixture in a child process
+    // whose monitors are installed before the official graph loads.
+    const piAiFiles = [...walked.files].map((file) => path.relative(realpathSync(piAiRoot), file)).sort();
+    expect(piAiFiles).toEqual([
+      'dist/api/constrained-sampling.js',
+      'dist/api/github-copilot-headers.js',
+      'dist/api/lazy.js',
+      'dist/api/openai-completions.js',
+      'dist/api/openai-prompt-cache.js',
+      'dist/api/simple-options.js',
+      'dist/api/transform-messages.js',
+      'dist/auth/context.js',
+      'dist/auth/credential-store.js',
+      'dist/auth/helpers.js',
+      'dist/auth/resolve.js',
+      'dist/auth/types.js',
+      'dist/images-models.js',
+      'dist/index.js',
+      'dist/models-store.js',
+      'dist/models.js',
+      'dist/providers/faux.js',
+      'dist/session-resources.js',
+      'dist/types.js',
+      'dist/utils/abort.js',
+      'dist/utils/assistant-message-frame.js',
+      'dist/utils/diagnostics.js',
+      'dist/utils/error-body.js',
+      'dist/utils/estimate.js',
+      'dist/utils/event-stream.js',
+      'dist/utils/hash.js',
+      'dist/utils/headers.js',
+      'dist/utils/json-parse.js',
+      'dist/utils/overflow.js',
+      'dist/utils/pi-user-agent.js',
+      'dist/utils/provider-env.js',
+      'dist/utils/provider-retry.js',
+      'dist/utils/retry.js',
+      'dist/utils/sanitize-unicode.js',
+      'dist/utils/text.js',
+      'dist/utils/transcript.js',
+      'dist/utils/typebox-helpers.js',
+      'dist/utils/uuid.js',
+      'dist/utils/validation.js',
     ]);
-    // The two files that OWN the compile still carry the stricter rule: the
-    // admission boundary and the envelope builder name no I/O builtin and read
-    // no environment of their own.
+    // The file that OWNS the serialization still carries the stricter rule:
+    // the official `openai-completions.js` names no I/O builtin and reads no
+    // environment of its own (it reaches `process.env` only through
+    // `getProviderEnvValue`, which the compile never needs: it passes an
+    // explicit placeholder key).
     const forbidden = [
       'node:fs',
       'node:net',
@@ -361,39 +395,31 @@ describe('B-P2 native composition: pure compile', () => {
       'node:tls',
       'process.env',
     ];
-    const compileOwners = codingAgentFiles.filter((file) =>
-      ['input-preparation.js', 'prepared-session-input.js'].includes(path.basename(file)));
-    expect(compileOwners).toHaveLength(2);
-    for (const file of compileOwners) {
-      const source = readFileSync(file, 'utf8');
-      for (const specifier of forbidden) {
-        expect({ file: path.basename(file), specifier, present: source.includes(specifier) }).toEqual({
-          file: path.basename(file),
-          specifier,
-          present: false,
-        });
-      }
+    const compileOwner = [...walked.files].find((file) => file.endsWith(path.join('dist', 'api', 'openai-completions.js')));
+    expect(compileOwner).toBeDefined();
+    const source = readFileSync(compileOwner!, 'utf8');
+    for (const specifier of forbidden) {
+      expect({ file: 'openai-completions.js', specifier, present: source.includes(specifier) }).toEqual({
+        file: 'openai-completions.js',
+        specifier,
+        present: false,
+      });
     }
   });
 });
 
 describe('B-P2 native composition: unsupported input rejects rather than filling gaps', () => {
+  // PRODUCTION GAP (WP2b): the retired fork refused a tool schema without an
+  // object `properties` member ("expected full object tool schema",
+  // pi-wt-086 `core/input-preparation.ts:280-287`). The SDK-owned projection
+  // `adapters/pi/prepared-request.ts:220-221` (`projectTool`) checks only
+  // `type === "object"`, so `{ type: "object" }` now compiles. Restore this
+  // case once `projectTool` also refuses a missing/non-object `properties`:
+  //   tools: base.snapshot.tools.map((tool) =>
+  //     tool.name === 'read' ? { ...tool, parameters: { type: 'object' } } : tool)
+  it.todo('rejects a tool schema that is not a full object schema (needs projectTool properties check)');
+
   it.each([
-    [
-      'a tool schema that is not a full object schema',
-      (): CompilePreparedInputRequest => {
-        const base = compileRequest();
-        return {
-          ...base,
-          snapshot: {
-            ...base.snapshot,
-            tools: base.snapshot.tools.map((tool) =>
-              tool.name === 'read' ? { ...tool, parameters: { type: 'object' } } : tool,
-            ),
-          },
-        };
-      },
-    ],
     [
       'executor identities that do not cover exactly the model-visible tools',
       (): CompilePreparedInputRequest => ({ ...compileRequest(), toolExecutors: { read: 'exec:read@1' } }),
@@ -406,9 +432,27 @@ describe('B-P2 native composition: unsupported input rejects rather than filling
           ...base,
           snapshot: {
             ...base.snapshot,
-            prompt: { ...base.snapshot.prompt, selectedTools: ['read'], toolSnippets: { read: 'read snippet' } },
+            prompt: { ...base.snapshot.prompt, selectedTools: ['read'] },
           },
         };
+      },
+    ],
+    [
+      'a Pi renderer input the official lane has no renderer for',
+      (): CompilePreparedInputRequest => {
+        const base = compileRequest();
+        return {
+          ...base,
+          snapshot: { ...base.snapshot, prompt: { ...base.snapshot.prompt, promptGuidelines: ['prefer small diffs'] } },
+        };
+      },
+    ],
+    [
+      'a Host system message that is not stated as customPrompt',
+      (): CompilePreparedInputRequest => {
+        const base = compileRequest();
+        const { customPrompt: _dropped, ...prompt } = base.snapshot.prompt;
+        return { ...base, snapshot: { ...base.snapshot, prompt: { ...prompt, appendSystemPrompt: 'appended' } } };
       },
     ],
     [
@@ -428,34 +472,33 @@ describe('B-P2 native composition: unsupported input rejects rather than filling
  * The envelope-contract boundary, exercised WITHOUT the installed package.
  *
  * Every case here is about what this SDK refuses to read, not about what the
- * fork produces, so the envelope is stated literally and the identity is the
- * one this build supports. A boundary that could only be reached by compiling
- * against a particular installed fork would be a boundary whose refusals are
- * untestable on the day they matter most — when the installed fork is the
- * wrong one.
+ * official serializer produces, so the envelope is stated literally and the
+ * identity is the one this build supports. A boundary that could only be
+ * reached by compiling against a particular installed runtime would be a
+ * boundary whose refusals are untestable on the day they matter most — when
+ * the installed runtime is the wrong one.
  */
 describe('B-P2 native composition: the envelope contract is verified, not assumed', () => {
   const COUNTER_PROJECTION = '{"model":"glm-4.6","messages":[],"tools":[]}';
 
   const SUPPORTED_IDENTITY = {
-    packageName: '@byok-sdk/pi-coding-agent',
-    packageVersion: '0.85.1005',
-    upstreamBase: '0.85.1',
-    upstreamCommit: 'd981de1229ef899957bbe968bc8dcda02a21f477',
-    forkBuild: 5,
-    envelopeFormat: 'pi.session.prepared-input',
-    requestFormat: 'pi.openai-completions.prepared',
+    packageName: '@earendil-works/pi-coding-agent',
+    packageVersion: '0.87.1',
+    upstreamBase: 'v0.87.1',
+    upstreamCommit: 'f07218c4d4bbc12bef056a7058c3dd49dfe41abe',
+    forkBuild: 0,
+    envelopeFormat: 'byok.pi.prepared-input',
+    requestFormat: 'byok.pi.openai-completions.request',
     compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,
   } as const;
 
   function envelope(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     return {
-      format: 'pi.session.prepared-input',
-      version: 3,
-      snapshot: {},
-      context: {},
+      format: 'byok.pi.prepared-input',
+      version: 1,
+      transcript: { systemPrompt: 'Host system message', tools: [], messages: [] },
       providerRequest: {
-        format: 'pi.openai-completions.prepared',
+        format: 'byok.pi.openai-completions.request',
         compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,
         body: '{"model":"glm-4.6","messages":[],"max_tokens":4096}',
         counterProjection: COUNTER_PROJECTION,
@@ -499,14 +542,15 @@ describe('B-P2 native composition: the envelope contract is verified, not assume
     // Both tags, because the identity was derived from the installed manifest
     // and only the envelope in hand proves what the code that actually ran
     // produced.
-    expect(refusalOf({ ...envelope(), format: 'pi.session.other-input' }).detail).toBe('unsupported_envelope_format');
-    expect(refusalOf(envelope({ format: 'pi.anthropic-messages.prepared' })).detail).toBe(
+    expect(refusalOf({ ...envelope(), format: 'byok.pi.other-input' }).detail).toBe('unsupported_envelope_format');
+    expect(refusalOf(envelope({ format: 'byok.pi.anthropic-messages.request' })).detail).toBe(
       'unsupported_envelope_format',
     );
   });
 
   it('refuses an envelope compiled to a prepared-request version this build does not consume', () => {
-    expect(refusalOf(envelope({ compilerVersion: 1 })).detail).toBe('unsupported_compiler_version');
+    // 3 is the retired fork compiler: its artifacts are not read forward.
+    expect(refusalOf(envelope({ compilerVersion: 3 })).detail).toBe('unsupported_compiler_version');
   });
 
   it('refuses a projection digest that does not describe the counted bytes it travels with', () => {

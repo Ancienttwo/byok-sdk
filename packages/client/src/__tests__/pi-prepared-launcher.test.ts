@@ -33,6 +33,7 @@ import { TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED } from '../daemon/tool-implem
 import { PiAdapter, type PiAdapterOptions } from '../adapters/pi/pi-adapter';
 import { PREPARED_PROJECTION_COMPARED_MODEL_FIELDS } from '../bin/pi-prepared-host';
 import { resolveInstalledPiRuntimeIdentity, createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
+import { canonicalPreparedValue } from '../adapters/pi/prepared-request';
 import { trustedLaunchBinding } from './fixtures/launch-cwd';
 import { parsePiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import {
@@ -46,20 +47,20 @@ import {
 import { PI_MODEL_FIXTURE } from '../../../keys/src/fixtures/pi-model-config';
 
 /**
- * The NATIVE canonicalization, not a local one.
+ * The SDK's OWN prepared canonicalization (`adapters/pi/prepared-request.ts`),
+ * not a local one.
  *
- * The one case below that rebuilds a consistent envelope has to hash exactly
- * what the fork hashes; a key-sorted serializer written here could agree today
+ * The cases below that rebuild a consistent envelope have to hash exactly what
+ * the verifier hashes; a key-sorted serializer written here could agree today
  * and diverge on the first value where the two definitions differ.
  */
 async function nativeDigest(value: unknown): Promise<string> {
-  const { canonicalPreparedValue } = await import('@earendil-works/pi-coding-agent/prepared-session-input');
   return createHash('sha256').update(canonicalPreparedValue(value), 'utf8').digest('hex');
 }
 
 /**
  * The SDK-owned prepared launch entry (`bin/byok-pi-prepared.ts`), driven
- * end to end: the REAL pi adapter, the REAL shipped bin, the REAL fork session,
+ * end to end: the REAL pi adapter, the REAL shipped bin, the REAL official session,
  * a REAL MCP server child in the REAL launch boundary of this machine, and a
  * REAL provider endpoint this suite runs and reads the request bytes off.
  *
@@ -70,14 +71,16 @@ async function nativeDigest(value: unknown): Promise<string> {
  *
  * The properties:
  *
- * - The bytes that reach the provider are D — the exact request body the native
- *   compiler produced, byte for byte. Not "equivalent", not "recompiled": the
+ * - The bytes that reach the provider are D — the exact request body the A1'
+ *   compile produced, byte for byte. Not "equivalent", not "recompiled": the
  *   comparison is `===` against the artifact's own `requestBody`.
- * - Every drift the native session detects is reported as its typed code and is
+ * - Every drift the prepared host detects is reported as its typed code and is
  *   detected BEFORE the transport: the provider endpoint records zero requests
  *   in each of those cases, which is asserted, not assumed.
- * - A prepared reservation refuses the ordinary `prompt` rather than queueing
- *   it, and `get_state` reports the same session id the admission did.
+ * - While the prepared run is in flight, an ordinary `prompt` is refused (the
+ *   official session is busy) and a `steer` never reaches the provider (the
+ *   byte gate refuses the next request as `prepared_context_drift`); `get_state`
+ *   reports the same session id the admission did.
  * - A sealed `sessionRef` and a prepared reference are refused together.
  * - An MCP tool call made by the prepared session reaches a real server child,
  *   started in the trusted launch directory, through the shared pool.
@@ -272,16 +275,16 @@ async function prepareOnThisDevice(
     }),
   });
 
-  // The prompt the prepared session will project for ITSELF: a zero-resource
-  // loader, and `baseToolsOverride` tools carry no prompt snippet or guideline
-  // into the registry (`createToolDefinitionFromAgentTool` keeps neither).
+  // The Host owns the WHOLE system message on official Pi: `customPrompt` is
+  // the system message verbatim, and every renderer input stays empty (a
+  // non-empty one is refused as `prompt_render_input_unsupported`).
   const snapshot = {
-    // Stated in full. The 0.86 prepared compile boundary fills nothing in and
-    // defaults nothing, so there is no runtime-side projection helper left to
-    // call: every prompt input that decides the bytes is named right here.
+    // Stated in full: every prompt input that decides the bytes is named here.
+    // `cwd` and `docsPaths` are renderer inputs and reach nothing.
     prompt: {
       cwd: workspaceDir,
       selectedTools: surface.tools.map((tool) => tool.name),
+      customPrompt: 'You are the prepared BYOK test agent. Use the echo tool when asked.',
       toolSnippets: {},
       toolGuidelines: {},
       promptGuidelines: [],
@@ -457,9 +460,14 @@ describe('the prepared pi launch entry', () => {
     expect(wire.tools.map((tool: { function: { name: string } }) => tool.function.name)).toEqual(['mcp__teamserver__echo', 'mcp__teamserver__find_leads']);
   }, 60_000);
 
-  it('refuses the ordinary prompt while the prepared reservation holds the session', async () => {
+  // Official `runRpcMode` has no prepared reservation (WP2 deviation 2): there
+  // is no `prepared_session_reserved` code. The two in-flight inputs are still
+  // kept out of the counted run, by different owners: the official session
+  // refuses a concurrent `prompt` as busy, and a `steer` is accepted by the RPC
+  // loop but the byte gate refuses the request it would ride on.
+  it('refuses the ordinary prompt while the prepared run is in flight, and sends nothing for it', async () => {
     const endpoint = await providerEndpoint();
-    // The response is held open, so the reservation is still live when the
+    // The response is held open, so the run is still streaming when the
     // ordinary prompt arrives — the exact window the refusal exists for.
     let release: (() => void) | undefined;
     endpoint.respond = (_req, res) => {
@@ -475,8 +483,51 @@ describe('the prepared pi launch entry', () => {
     }).rpc.send({ type: 'prompt', message: 'a second turn nobody counted' });
 
     expect(refusal.success).toBe(false);
-    expect(refusal.code).toBe('prepared_session_reserved');
+    expect(String(refusal.error)).toMatch(/already processing/u);
     release?.();
+    for await (const event of session.events) {
+      if (event.type === 'turn_end') break;
+    }
+    expect(endpoint.bodies).toEqual([prepared.requestBody]);
+  }, 60_000);
+
+  it('never sends a steer: the byte gate refuses the request it would ride on', async () => {
+    const endpoint = await providerEndpoint();
+    let release: (() => void) | undefined;
+    endpoint.respond = (_req, res) => {
+      release = () => {
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.end(sse(completion('done')));
+      };
+    };
+    const prepared = await prepareOnThisDevice(endpoint);
+    const session = await startPrepared(prepared);
+    const rpc = (session as unknown as {
+      rpc: { send(command: Record<string, unknown> & { type: string }): Promise<Record<string, unknown>> };
+    }).rpc;
+    const steered = await rpc.send({ type: 'steer', message: 'an instruction nobody counted' });
+    expect(steered.success).toBe(true);
+    release?.();
+    const seen: string[] = [];
+    for await (const event of session.events) {
+      seen.push(JSON.stringify(event));
+      if (event.type === 'turn_end') break;
+    }
+    // Request 1 is D. The steer made the session issue request 2, and the gate
+    // refused it before any transport: the provider saw D alone, and the
+    // session recorded the refusal as a failed assistant turn. The typed reason
+    // (`prepared_context_drift`, the context handler saw a user message this
+    // run did not produce) is run-scoped gate state; upstream surfaces the
+    // throw as a generic connection error, so the RPC readback cannot name it.
+    expect(endpoint.bodies).toEqual([prepared.requestBody]);
+    expect(seen.join('\n')).not.toContain('an instruction nobody counted');
+    const readback = await rpc.send({ type: 'get_messages' });
+    const messages = (readback.data as { messages: { role: string; content: unknown; stopReason?: string }[] }).messages;
+    expect(messages.slice(-2).map((message) => [message.role, message.stopReason])).toEqual([
+      ['user', undefined],
+      ['assistant', 'error'],
+    ]);
+    expect(JSON.stringify(messages.at(-2)?.content)).toContain('an instruction nobody counted');
   }, 60_000);
 
   it('reports the same session id from get_state that admitted the prepared request', async () => {
@@ -497,26 +548,50 @@ describe('the prepared pi launch entry', () => {
     expect(endpoint.bodies).toHaveLength(0);
   }, 60_000);
 
-  it('reports a tampered snapshot as prepared_context_drift, before any transport', async () => {
+  // WP2 deviation 6: `verifyPreparedPiInput` checks the envelope digests
+  // before it recompiles the transcript, so a bare edit is a digest mismatch.
+  it('reports a tampered transcript as prepared_digest_mismatch, before any transport', async () => {
     const endpoint = await providerEndpoint();
     const prepared = await prepareOnThisDevice(endpoint);
     await tamper(prepared, (envelope) => {
-      const snapshot = envelope.snapshot as { prompt: { promptGuidelines: string[] } };
-      snapshot.prompt.promptGuidelines = ['a guideline nobody counted'];
+      const transcript = envelope.transcript as { systemPrompt: string };
+      transcript.systemPrompt = `${transcript.systemPrompt}\na guideline nobody counted`;
     });
-    await expect(startPrepared(prepared)).rejects.toThrow(/prepared_context_drift/u);
+    await expect(startPrepared(prepared)).rejects.toThrow(/prepared_digest_mismatch/u);
     expect(endpoint.bodies).toHaveLength(0);
   }, 60_000);
 
-  // `prepared_model_drift` is a LATER fork: it is what the session reports when
-  // its own resolved model disagrees with the expectation. The expectation
-  // handed in here is checked first, against the model the envelope itself
-  // carries (`verifyPreparedSessionInput`, fork 0.85.1005's
-  // `dist/core/prepared-session-input.js`), so an expectation nobody counted is
-  // reported as `prepared_expectation_mismatch` and never reaches the session
-  // comparison. The single code is pinned rather than an alternation, so a fork
-  // bump that moves this case to the other fork fails here instead of passing
-  // quietly.
+  it('reports a re-digested tampered transcript as prepared_context_drift, before any transport', async () => {
+    const endpoint = await providerEndpoint();
+    const prepared = await prepareOnThisDevice(endpoint);
+    // Internally CONSISTENT: the envelope digest and the expectation agree with
+    // the edited transcript. Only the recompile disagrees — the transcript no
+    // longer compiles to the frozen D it travels with.
+    const artifact = JSON.parse(await fs.readFile(prepared.artifactPath, 'utf8')) as Record<string, unknown>;
+    const envelope = artifact.envelope as Record<string, unknown>;
+    const transcript = envelope.transcript as { systemPrompt: string };
+    transcript.systemPrompt = `${transcript.systemPrompt}\na guideline nobody counted`;
+    const { digest: _discarded, ...body } = envelope as { digest: string };
+    envelope.digest = await nativeDigest(body);
+    artifact.envelopeDigest = envelope.digest;
+    await fs.writeFile(prepared.artifactPath, JSON.stringify(artifact));
+    const rebound: RuntimePreparedLaunchV1 = {
+      ...prepared.preparation,
+      expected: { ...prepared.preparation.expected, envelopeDigest: envelope.digest as string },
+    };
+    await expect(startPrepared(prepared, { preparation: rebound })).rejects.toThrow(/prepared_context_drift/u);
+    expect(endpoint.bodies).toHaveLength(0);
+  }, 60_000);
+
+  // `prepared_model_drift` is a LATER check: it is what the host reports when
+  // the model the runtime registered disagrees with the projection. The
+  // expectation handed in here is checked first, against the model the
+  // envelope itself carries (`pi-prepared-host.ts` and `verifyPreparedPiInput`),
+  // so an expectation nobody counted is reported as
+  // `prepared_expectation_mismatch` and never reaches the registration
+  // comparison. The single code is pinned rather than an alternation, so a
+  // change that moves this case to the other check fails here instead of
+  // passing quietly.
   it('reports a model expectation the counted envelope does not carry as prepared_expectation_mismatch, before any transport', async () => {
     const endpoint = await providerEndpoint();
     const prepared = await prepareOnThisDevice(endpoint);

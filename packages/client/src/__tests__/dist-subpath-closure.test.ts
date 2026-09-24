@@ -336,7 +336,14 @@ describe.skipIf(!DIST_PRESENT)('the daemon-free dist sub-path closures', () => {
     expect(pin).toMatch(/^\d+\.\d+\.\d+$/u);
     expect(manifest.byok.piRuntimePin).toBe(pin);
     expect(lines.filter((text) => text.startsWith('piRuntimePin:'))).toEqual([`piRuntimePin: ${JSON.stringify(pin)}`]);
-    expect(occurrences).toEqual(['var PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";']);
+    // The specifier constant, plus the official runtime tuple the identity
+    // seam (`adapters/pi/input-preparation.ts` `OFFICIAL_PI_RUNTIME`) admits:
+    // the coding agent name and its two lockstep package names, as frozen data.
+    expect(occurrences).toEqual([
+      'var PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";',
+      'name: "@earendil-works/pi-coding-agent",',
+      'lockstep: Object.freeze(["@earendil-works/pi-ai", "@earendil-works/pi-agent-core"]),',
+    ]);
     expect(
       staticImportSpecifiers(source).filter((specifier) => specifier.includes('pi-coding-agent')),
     ).toEqual([]);
