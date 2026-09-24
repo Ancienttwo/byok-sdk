@@ -107,7 +107,8 @@ test('graph and readback use the same prerelease gate and readback checks a requ
   const readbackSource = readFileSync(path.join(releaseDirectory, 'registry-readback.mjs'), 'utf8');
   assert.match(graphSource, /exactReleaseVersion\.test\(releaseVersion\)/);
   assert.match(graphSource, /parsePiRuntimeIdentity\(readJson\('packages\/client\/package\.json'\)\)/);
-  assert.match(graphSource, /const testkit = \['packages\/testkit', '@byok-sdk\/testkit'\]/);
+  assert.match(graphSource, /const privatePackages = \[\n(?:  \[[^\n]*\],\n)*  \['packages\/testkit', '@byok-sdk\/testkit'\],\n/);
+  assert.match(graphSource, /const retiredPublicNames = \['byok-sdk'\];/);
   assert.match(readbackSource, /const distTag = resolveReleaseDistTag\(expectedVersion, requestedTag\)/);
   assert.match(readbackSource, /'dist-tags', '--json'/);
   assert.match(readbackSource, /distTags\[distTag\] !== packageVersion/);

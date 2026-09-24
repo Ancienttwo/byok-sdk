@@ -14,15 +14,22 @@ const dispatchPackages = [
   ['packages/cloud-dataplane', '@byok-sdk/cloud-dataplane'],
   ['packages/ui-runtime', '@byok-sdk/ui-runtime'],
 ];
-const testkit = ['packages/testkit', '@byok-sdk/testkit'];
-const umbrella = ['packages/sdk', 'byok-sdk'];
 const keys = ['packages/keys', '@byok-sdk/keys'];
-// testkit ships independently of the umbrella's public namespaces, but it is
-// still part of the aligned release graph and must not escape the train check.
 const implementationIdentity = ['packages/implementation-identity', '@byok-sdk/implementation-identity'];
-const alignedPackages = [...dispatchPackages, testkit, implementationIdentity];
-const publicPackages = [...alignedPackages, umbrella, keys];
-const expectedUmbrellaDependencies = dispatchPackages.map(([, name]) => name).sort();
+const alignedPackages = [...dispatchPackages, implementationIdentity];
+// The published set is exactly these packages: the aligned train plus the
+// independently versioned keys. Every other workspace manifest under
+// packages/ must be private, because publish.mjs publishes every non-private
+// manifest it finds there. Since 0.21.0 the `byok-sdk` umbrella is retired
+// (ADR-035: no empty umbrella, alias package or dual export) and
+// `@byok-sdk/testkit` is private, consumed only by the private conformance
+// suite; the check below rejects either one coming back as a public package.
+const publicPackages = [...alignedPackages, keys];
+const privatePackages = [
+  ['packages/conformance', '@byok-sdk/conformance'],
+  ['packages/testkit', '@byok-sdk/testkit'],
+];
+const retiredPublicNames = ['byok-sdk'];
 const errors = [];
 
 // @byok-sdk/client must install as pure JavaScript: a direct dependency that ships a prebuilt
@@ -247,15 +254,46 @@ for (const directory of publicPackages.map(([directory]) => directory)) {
   }
 }
 
-const umbrellaManifest = manifests.get('byok-sdk');
-const umbrellaDependencies = Object.keys(umbrellaManifest?.dependencies ?? {}).sort();
-if (JSON.stringify(umbrellaDependencies) !== JSON.stringify(expectedUmbrellaDependencies)) {
-  errors.push(`packages/sdk/package.json: umbrella dependencies must be exactly ${expectedUmbrellaDependencies.join(', ')}`);
-}
-for (const dependency of umbrellaDependencies) {
-  if (umbrellaManifest.dependencies[dependency] !== 'workspace:*') {
-    errors.push(`packages/sdk/package.json: ${dependency} must use workspace:* before packing`);
+// --- Published-set closure ------------------------------------------------
+// publish.mjs derives its publish set from every non-private manifest under
+// packages/, so the declared publicPackages list only binds publication if
+// every other manifest there is private. A new public manifest, a retired
+// name reappearing, or a private package drifting public fails here.
+const declaredPublicDirectories = new Set(publicPackages.map(([directory]) => directory));
+const declaredPrivate = new Map(privatePackages);
+for (const entry of readdirSync(path.join(repoRoot, 'packages'), { withFileTypes: true })) {
+  if (!entry.isDirectory()) continue;
+  const directory = `packages/${entry.name}`;
+  const manifestPath = `${directory}/package.json`;
+  if (!existsSync(path.join(repoRoot, manifestPath))) continue;
+  const manifest = readJson(manifestPath);
+  if (retiredPublicNames.includes(manifest.name)) {
+    errors.push(`${manifestPath}: ${manifest.name} is retired and must not exist as a workspace package`);
   }
+  if (declaredPublicDirectories.has(directory)) {
+    if (manifest.private === true) errors.push(`${manifestPath}: a published package must not be private`);
+    continue;
+  }
+  const expectedPrivateName = declaredPrivate.get(directory);
+  if (expectedPrivateName === undefined) {
+    errors.push(`${manifestPath}: undeclared workspace package; add it to the published set or to privatePackages in scripts/release/check-package-graph.mjs`);
+    continue;
+  }
+  if (manifest.name !== expectedPrivateName || manifest.private !== true) {
+    errors.push(`${manifestPath}: must remain private ${expectedPrivateName}`);
+  }
+  if (manifest.version !== '0.0.0') {
+    errors.push(`${manifestPath}: a private package carries version 0.0.0, not a release train version`);
+  }
+  if (manifest.publishConfig !== undefined) {
+    errors.push(`${manifestPath}: a private package must not declare publishConfig`);
+  }
+  if (manifest.engines?.node !== '>=22.22.0') {
+    errors.push(`${manifestPath}: engines.node must be >=22.22.0`);
+  }
+}
+for (const [directory] of privatePackages) {
+  if (!existsSync(path.join(repoRoot, directory, 'package.json'))) errors.push(`${directory}/package.json: missing`);
 }
 
 const runtimeFields = ['dependencies', 'optionalDependencies', 'peerDependencies'];
@@ -263,7 +301,7 @@ function runtimeEdges(manifest) {
   return runtimeFields.flatMap((field) => Object.keys(manifest[field] ?? {}));
 }
 
-for (const [, packageName] of [...alignedPackages, umbrella]) {
+for (const [, packageName] of alignedPackages) {
   const seen = new Set();
   const queue = [packageName];
   while (queue.length > 0) {
@@ -403,14 +441,6 @@ for (const dependency of Object.keys(clientManifest?.dependencies ?? {})) {
   errors.push(...auditPackagePurity(label, dependencyDirectory));
 }
 
-const umbrellaSource = readFileSync(path.join(repoRoot, 'packages/sdk/src/index.ts'), 'utf8');
-for (const [, packageName] of dispatchPackages) {
-  if (!umbrellaSource.includes(`from '${packageName}'`)) errors.push(`packages/sdk/src/index.ts: missing ${packageName} namespace`);
-}
-if (/from\s+['"]@byok-sdk\/keys['"]/.test(umbrellaSource) || /export\s+\*\s+as\s+keys\b/.test(umbrellaSource)) {
-  errors.push(`packages/sdk/src/index.ts: keys must not be exported`);
-}
-
 const scanFiles = [];
 const scanRoots = [
   'packages',
@@ -457,17 +487,9 @@ for (const relativePath of scanFiles) {
   }
 }
 
-const conformance = readJson('packages/conformance/package.json');
-if (conformance.name !== '@byok-sdk/conformance' || conformance.private !== true) {
-  errors.push('packages/conformance/package.json: conformance must remain private @byok-sdk/conformance');
-}
-if (conformance.engines?.node !== '>=22.22.0') {
-  errors.push('packages/conformance/package.json: engines.node must be >=22.22.0');
-}
-
 if (errors.length > 0) {
   for (const error of errors) console.error(`[release-graph] ${error}`);
   process.exit(1);
 }
 
-console.log(`[release-graph] OK: ${alignedPackages.length + 1} aligned manifests at ${releaseVersion}, keys at ${keysVersion}; umbrella has ${dispatchPackages.length} dispatch namespaces and no keys edge`);
+console.log(`[release-graph] OK: published set is exactly ${publicPackages.length} packages — ${alignedPackages.length} aligned manifests at ${releaseVersion}, keys at ${keysVersion}; ${privatePackages.map(([, name]) => name).join(', ')} private; no aligned package reaches keys`);

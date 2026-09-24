@@ -34,8 +34,6 @@ const packages = [
   '@byok-sdk/client',
   '@byok-sdk/cloud-dataplane',
   '@byok-sdk/ui-runtime',
-  '@byok-sdk/testkit',
-  'byok-sdk',
   '@byok-sdk/keys',
 ];
 // These are the stable sentinels for the prerelease channel: a prerelease must
@@ -161,7 +159,7 @@ for (const packageName of packages) {
   // no frozen check could see it — the readback can.
   for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
     for (const [dependency, range] of Object.entries(value[field] ?? {})) {
-      if (dependency === 'byok-sdk' || dependency.startsWith('@byok-sdk/')) {
+      if (dependency.startsWith('@byok-sdk/')) {
         if (range !== expectedVersion) {
           throw new Error(
             `${packageName}@${packageVersion}: registry ${field}.${dependency} is ${range}, expected ${expectedVersion} — the published graph is split`,
@@ -175,17 +173,19 @@ for (const packageName of packages) {
 
 /**
  * Asserts the registry install's @byok-sdk graph closes to exactly one version
- * set: every installed @byok-sdk package (umbrella included) sits at the
- * expected version, and no copy hides under a second node_modules — the
- * nested-copy fallback npm takes when published internal edges disagree.
+ * set: every installed @byok-sdk package sits at the expected version, and no
+ * copy hides under a second node_modules — the nested-copy fallback npm takes
+ * when published internal edges disagree. The retired `byok-sdk` umbrella is
+ * still collected, so a published graph that drags it back in fails as an
+ * unexpected package.
  * Follows node_modules chains only, so the walk stays cheap on large trees.
  */
 function assertSingleVersionSet(installDirectory, expectedVersions) {
   const root = path.join(installDirectory, 'node_modules');
   const found = [];
   const visit = (nodeModulesDirectory) => {
-    const umbrella = path.join(nodeModulesDirectory, 'byok-sdk', 'package.json');
-    if (existsSync(umbrella)) found.push(umbrella);
+    const retiredUmbrella = path.join(nodeModulesDirectory, 'byok-sdk', 'package.json');
+    if (existsSync(retiredUmbrella)) found.push(retiredUmbrella);
     const scope = path.join(nodeModulesDirectory, '@byok-sdk');
     if (existsSync(scope)) {
       for (const entry of readdirSync(scope)) {
@@ -273,9 +273,6 @@ try {
   writeFileSync(
     path.join(smokeDir, 'readback.mjs'),
     `import assert from 'node:assert/strict';\n` +
-      `const sdk = await import('byok-sdk');\n` +
-      `assert.deepEqual(Object.keys(sdk).sort(), ['client','cloud','cloudDataplane','core','protocol','server','uiRuntime']);\n` +
-      `assert.equal('keys' in sdk, false);\n` +
       `await import('@byok-sdk/client/adapters');\n` +
       `await import('@byok-sdk/cloud-dataplane/runtime');\n` +
       `await import('@byok-sdk/keys');\n` +

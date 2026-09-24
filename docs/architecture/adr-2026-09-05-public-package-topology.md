@@ -38,4 +38,4 @@ WP3B 的 “fold `server` into cloud” 折叠的是协调语义与实现权威�
 
 ## Status
 
-**Accepted (owner-approved 2026-09-05; implementation deferred and separately gated).**
+**Accepted (owner-approved 2026-09-05). Implemented in 0.21.0**: the Owner chose to stop publishing `byok-sdk` in that release; `packages/sdk` is deleted, and its lockfile record, release pack/readback inventory, README install import and version-authority wording are removed in the same change. `check:release-graph` rejects the name coming back. The same release also makes `@byok-sdk/testkit` private, because its only consumer is the private conformance suite, so the published set moved from 11 to 9 rather than the 10 → 9 this ADR counted before `@byok-sdk/implementation-identity` existed. Downstream exact-import inventory at implementation: Salesko and aip depend on neither package (Salesko's root `overrides` still pins `@byok-sdk/testkit` 0.20.0 with no workspace consumer).

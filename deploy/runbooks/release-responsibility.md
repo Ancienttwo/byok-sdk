@@ -2,13 +2,11 @@
 
 Status: CURRENT boundary contract.
 
-The registry's current `latest` is 0.20.0 / keys 0.6.1, published on 2026-09-23
-from the `v0.20.0` tag target (`48605554`) — see its
-[publication record](../../docs/releases/v0.20.0-publication.md) and the
-[release handoff](../../docs/releases/v0.20.0-handoff.md) that carried it. The
-previous train is 0.19.0 / keys 0.6.0, published on 2026-09-22 from the
-`v0.19.0` tag target (`9408ed7b`) — see its
-[publication record](../../docs/releases/v0.19.0-publication.md).
+For the prepared 0.21.0 / keys 0.6.2 train, use the
+[release handoff](../../docs/releases/v0.21.0-handoff.md). The registry's current
+`latest` is 0.20.0 / keys 0.6.1, published on 2026-09-23 from the `v0.20.0` tag
+target (`48605554`) — see its
+[publication record](../../docs/releases/v0.20.0-publication.md).
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
 
@@ -25,13 +23,16 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 ## Version selection
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
-The 0.20.0 train carries one pre-1.0 breaking cut, so the dispatch line takes a
-minor: the input-preparation contract moves to wire version 5 / record schema
-version 6 with the capability token renamed to `agent-input-preparation-v5`, no
-reader for the previous shapes, and an operator precondition (drain in-flight
-input-preparation rows, then upgrade cloud and devices as a pair). keys takes a
-patch, 0.6.1: its source is unchanged since `v0.19.0`, and it is re-released only
-because its packed `@byok-sdk/core` edge must equal the current dispatch release.
+The 0.21.0 train carries one pre-1.0 breaking cut, so the dispatch line takes a
+minor: the input-preparation wire moves to version 6 with the capability token
+renamed to `agent-input-preparation-v6` and no dual token or dual read,
+`TaskOfferPreparedPayload` now requires `egressPolicy`, and Pi `auto` +
+`allowTools: []` on the fresh lane now means zero native tools instead of Pi's
+full default tool table. It has an operator precondition: drain in-flight input
+preparations and prepared Executions, then upgrade cloud and devices as a pair.
+keys takes a patch, 0.6.2: its source is unchanged since `v0.20.0`, and it is
+re-released only because its packed `@byok-sdk/core` edge must equal the current
+dispatch release.
 Version preparation does not authorize registry publication.
 
 ## Release checklist

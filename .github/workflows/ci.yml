@@ -840,10 +840,11 @@ jobs:
       - name: Run packaging smoke
         run: templates/packaging/${{ matrix.recipe }}/smoke-test.sh
 
-  # S7-c public npm guarantee: pack every dispatch package plus the umbrella,
+  # S7-c public npm guarantee: pack every published package (the aligned
+  # train plus the independently versioned keys; no umbrella since 0.21.0),
   # install the exact tarballs into a clean npm project, import every direct
-  # package and all umbrella namespaces, and prove keys did not enter the
-  # installed graph. This is distinct from the SEA/bun binary recipes above:
+  # package entry, and prove the installed graph closes to exactly that set.
+  # This is distinct from the SEA/bun binary recipes above:
   # those prove the host can bundle the daemon; this proves registry consumers
   # can install the library graph itself.
   npm-release-pack:

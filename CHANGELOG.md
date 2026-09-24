@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.21.0 / @byok-sdk/keys 0.6.2 — 2026-09-24 (unpublished until the registry confirms)
+
+- **Removed (distribution, BREAKING)** — `byok-sdk` and `@byok-sdk/testkit`
+  are no longer published. The unscoped `byok-sdk` namespace umbrella is
+  retired per ADR-035 and `packages/sdk` is deleted: install and import the
+  scoped packages directly (`client` → `@byok-sdk/client`, `cloudDataplane` →
+  `@byok-sdk/cloud-dataplane`, `uiRuntime` → `@byok-sdk/ui-runtime`, and so
+  on). `@byok-sdk/testkit` becomes a private workspace package used only by the
+  private conformance suite. Existing versions of both stay on npm. The
+  published set is now exactly nine packages: eight aligned at 0.21.0 plus
+  keys, and `check:release-graph` rejects any other public manifest under
+  `packages/`. The release notes carry the optional `npm deprecate` commands.
+- **Changed (prepared message egress, BREAKING wire change)** —
+  `task.offer_prepared` can now run the chat lane. `TaskOfferPreparedPayload`
+  REQUIRES `egressPolicy` and may carry `messageEgress`; `enqueuePreparedOffer`
+  gates the egress-policy, reliable-ack and fresh-session capabilities (plus
+  message egress when requested) before any row is written, and
+  `PreparedDispatchInput` accepts a host-only `agentMessageContext`. Prepared
+  envelopes pass the strict egress sanitizer, the prepared lane injects no
+  reserved message or memory helper, and the daemon authors the reply body at
+  turn end — usage check, draft/publish, exact `accepted`, then `task.complete`
+  with `preparedObservation`; overflow or missing usage fails before any body
+  is written. One-shot cut to input-preparation wire version 6 with no dual
+  token or dual read; the capability token is now `agent-input-preparation-v6`.
+  **Operator precondition:** drain in-flight input preparations and prepared
+  Executions, then upgrade cloud and devices as a pair. On long-poll an unknown
+  key or type freezes the device cursor, and the enqueue capability gate is the
+  only guard; an old prepared offer already enqueued without `egressPolicy`
+  needs operator handling. v5 preparations are not read forward.
+- **Changed (Pi native tool policy, BREAKING)** — `{ mode: 'auto', allowTools:
+  [] }` on the fresh lane changes from Pi's full default tool table to zero
+  native tools with observed MCP only, the same as the prepared lane; omit
+  `allowTools` to keep Pi's defaults on a fresh run. The native-expressibility
+  check now runs before pin, so a refusal never consumes a pinned record.
+- **Deferred** — an empty `requiredToolsets` is not supported (the frozen fork
+  0.86.1001 rejects a zero-tool prepared session); it moves to the official
+  Pi 0.87.1 migration. The Pi fork pin is unchanged at 0.86.1001.
+- **Changed (keys)** — `@byok-sdk/keys` 0.6.2 re-releases unchanged source so
+  that its packed `@byok-sdk/core` edge is the current dispatch release, 0.21.0.
+
 ## 0.20.0 / @byok-sdk/keys 0.6.1 — 2026-09-23 (published; tag `v0.20.0` at `48605554`)
 
 - **Changed (bounded admission, BREAKING wire change)** — input preparation no

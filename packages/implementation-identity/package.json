@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/implementation-identity",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "description": "Node-only implementation identity measurement and pre-spawn verification",
   "type": "module",
   "license": "MIT",
