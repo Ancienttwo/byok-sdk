@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "sdkBaseline": "3dd7ba6f7fee73309519c1aa2cce256a84445199",
+  "scope": "public imports only; not prepared/transport/host-history behavior acceptance",
+  "probeSource": {
+    "commit": "a64d86915d5e62a4c43786801f31441027ce069f",
+    "files": {
+      "packages/client/probes/pi-official/lib/harness.mjs": "22be334b309b610d755379d829876811ec28445c59f7cf8d2ff97f320be2a982",
+      "packages/client/probes/pi-official/probes/p08-embedder-public-surface.mjs": "414cdf7fb79595854ce74b173a48c614cf300c196c44bb49fd0a8070220a5683"
+    }
+  },
+  "installedPackages": [
+    {
+      "name": "@earendil-works/pi-coding-agent",
+      "version": "0.87.1",
+      "manifestSha256": "627631b613ba4ca29eba8df793f5280fd20b19f01d73826e9ffda14c15def5dc"
+    },
+    {
+      "name": "@earendil-works/pi-ai",
+      "version": "0.87.1",
+      "manifestSha256": "0422fc7227a158c3c843c1540edfff017d2103be33ee48b882e2ff9032a5f7d2"
+    },
+    {
+      "name": "@earendil-works/pi-agent-core",
+      "version": "0.87.1",
+      "manifestSha256": "26f991ea26187d52978c303811f32032c9fcdaec197d4dcf08d793bedffdb87c"
+    }
+  ],
+  "lockfileSha256": "7f4ddd4106c993f5a37cc92d7c0619543fb172974833b350c5a25f6b857568f6",
+  "result": {
+    "probe": "p08-embedder-public-surface",
+    "ok": true,
+    "verdict": "partial",
+    "verdictReason": "still missing from package roots: buildSystemPromptSections, buildSystemPromptState, RPC_MAX_FRAME_BYTES, fitsRpcFrame, rpcFrameByteLength",
+    "environment": {
+      "node": "v26.5.0",
+      "platform": "darwin-arm64",
+      "home": "/tmp/byok-official-public-surface.6Vg9nI/home",
+      "installRoot": "/tmp/byok-official-public-surface.6Vg9nI",
+      "officialVersion": "0.87.1"
+    },
+    "checks": [
+      {
+        "name": "package roots are importable",
+        "ok": true,
+        "detail": "coding-agent=152 pi-ai=68"
+      },
+      {
+        "name": "tool definition factories are exported",
+        "ok": true,
+        "detail": "[]"
+      },
+      {
+        "name": "the missing exports are recorded rather than assumed",
+        "ok": true,
+        "detail": "missing=[\"buildSystemPromptSections\",\"buildSystemPromptState\",\"RPC_MAX_FRAME_BYTES\",\"fitsRpcFrame\",\"rpcFrameByteLength\"]"
+      }
+    ],
+    "observed": {
+      "present": [
+        "@earendil-works/pi-ai:getSystemMessageText",
+        "@earendil-works/pi-coding-agent:createReadToolDefinition",
+        "@earendil-works/pi-coding-agent:createBashToolDefinition",
+        "@earendil-works/pi-coding-agent:createEditToolDefinition",
+        "@earendil-works/pi-coding-agent:createWriteToolDefinition"
+      ],
+      "missing": [
+        "@earendil-works/pi-coding-agent:buildSystemPromptSections",
+        "@earendil-works/pi-coding-agent:buildSystemPromptState",
+        "@earendil-works/pi-coding-agent:RPC_MAX_FRAME_BYTES",
+        "@earendil-works/pi-coding-agent:fitsRpcFrame",
+        "@earendil-works/pi-coding-agent:rpcFrameByteLength"
+      ],
+      "requiredCount": 10
+    },
+    "failures": []
+  }
+}
