@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.21.0 / @byok-sdk/keys 0.6.2 — 2026-09-24 (unpublished until the registry confirms)
+## 0.21.0 / @byok-sdk/keys 0.6.2 — 2026-09-24 (published; tag `v0.21.0` at `8b7a2121`)
 
 - **Removed (distribution, BREAKING)** — `byok-sdk` and `@byok-sdk/testkit`
   are no longer published. The unscoped `byok-sdk` namespace umbrella is
