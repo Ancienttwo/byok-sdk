@@ -47,7 +47,7 @@ Run build, typecheck, test, API surface, version authority and strict workflow c
 ## Follow-up
 
 - [x] T4: verify exact Salesko candidate accounting/prepared dispatch with installed registry SDK and disposable PostgreSQL.
-- [ ] T5: repair unavailable MinIO test image using the same release source, verify the real dataplane and update this PR.
+- [x] T5: repair unavailable MinIO test image using the same release source; real dataplane (338), conformance (161) and exact-commit packed restart verification passed; update PR #228 with hosted check status.
 - [ ] T6: freeze the next SummaryJob boundary after the requested scope decision; no production budget defaults.
 
 P1: the single compose file owns Postgres/MinIO for local and CI dataplane tests. P2: compose pull fails with Quay unauthorized before any tests; the former official binary archive returns HTTP 410. P3: build the existing MinIO release from its exact official source commit and SHA-256 archive, preserve endpoints/credentials/ports and use its readiness endpoint. One blocking infrastructure repair; no new S3 implementation or registry credential. First build costs extra compile time; subsequent local builds reuse layers.
