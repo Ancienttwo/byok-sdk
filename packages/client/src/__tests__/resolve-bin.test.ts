@@ -37,7 +37,7 @@ describe('resolvePiBin', () => {
   it('projects the exact pin from the bundled manifest import', () => {
     const expected = clientManifest.dependencies[PI_PACKAGE_NAME];
     const identity = resolvePiRuntimeIdentity();
-    expect(`npm:${identity.name}@${identity.version}`).toBe(expected);
+    expect(identity).toEqual({ name: PI_PACKAGE_NAME, version: expected });
   });
 
   it('resolves the bin from the exact required dependency', () => {
@@ -53,30 +53,23 @@ describe('resolvePiBin', () => {
   });
 
   it.each([
-    '0.85.1001',
-    'npm:@byok-sdk/pi-coding-agent@^0.85.1001',
-    'npm:@byok-sdk/pi-coding-agent@latest',
-    '^0.85.1001',
-  ])('rejects a Pi dependency spec that is not an exact alias: %s', (spec) => {
+    'npm:@byok-sdk/pi-coding-agent@0.86.1001',
+    'npm:@earendil-works/pi-coding-agent@0.87.1',
+    '^0.87.1',
+    '0.87',
+    'latest',
+  ])('rejects a Pi dependency spec that is not one exact version: %s', (spec) => {
     pinSpec(spec);
     expect(() => resolvePiRuntimeIdentity()).toThrow(
-      `@byok-sdk/client pins ${PI_PACKAGE_NAME} to ${spec}, which is not an exact npm:<name>@<x.y.z> alias; the Pi runtime identity must be exact`,
+      `@byok-sdk/client pins ${PI_PACKAGE_NAME} to ${spec}, which is not one exact x.y.z version; the Pi runtime identity must be exact`,
     );
   });
 
-  it('fails closed when the installed Pi version differs from the pinned alias', () => {
+  it('fails closed when the installed Pi version differs from the pin, with no PATH fallback', () => {
     delete process.env.BYOK_PI_BIN;
-    pinSpec('npm:@byok-sdk/pi-coding-agent@9.9.9');
+    pinSpec('9.9.9');
     expect(() => resolvePiBin()).toThrow(
-      /resolved to @byok-sdk\/pi-coding-agent@\S+, but @byok-sdk\/client pins @byok-sdk\/pi-coding-agent@9\.9\.9/,
-    );
-  });
-
-  it('fails closed when the installed Pi name differs from the pinned alias, with no PATH fallback', () => {
-    delete process.env.BYOK_PI_BIN;
-    pinSpec('npm:@byok-sdk/not-the-fork@0.85.1001');
-    expect(() => resolvePiBin()).toThrow(
-      /but @byok-sdk\/client pins @byok-sdk\/not-the-fork@0\.85\.1001/,
+      /resolved to @earendil-works\/pi-coding-agent@\S+, but @byok-sdk\/client pins @earendil-works\/pi-coding-agent@9\.9\.9/,
     );
     // The throw itself is the assertion that no unversioned global `pi` is
     // silently substituted: there is no second authority to fall back to.

@@ -428,12 +428,11 @@ export interface RuntimePreparedLaunchReferenceV1 {
 }
 
 /**
- * The independently trusted expectations the native prepared-input verifier
- * requires (`@earendil-works/pi-coding-agent/prepared-session-input`'s
- * `PreparedSessionExpectedV1`).
+ * The independently trusted expectations the prepared-input verifier
+ * requires (`adapters/pi/input-preparation.ts`'s `PreparedPiExpectedV1`).
  *
  * They come from the DURABLE record — its artifact summary and its binding —
- * never from the artifact file itself. The native contract is explicit that a
+ * never from the artifact file itself. The verifier contract is explicit that a
  * value read out of the envelope can never serve as its own expectation, so
  * carrying them here is what makes the envelope on disk checkable at all.
  */

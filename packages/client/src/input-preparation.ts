@@ -1282,9 +1282,10 @@ export const INPUT_PREPARATION_ERROR_CODES = [
   'permission_mode_denied',
   /**
    * The `prompt_prepared` frame this preparation would be launched with does
-   * not fit one RPC frame the native runtime will accept
-   * (`RPC_MAX_FRAME_BYTES`). The bound is the RUNTIME's, not the operator's, so
-   * it is decided before the operator's per-artifact byte policy: an artifact
+   * not fit one RPC frame under the SDK's send-side bound
+   * (`util/rpc-frame.ts` `RPC_MAX_FRAME_BYTES`). The bound is the SDK's
+   * transport limit, not the operator's, so it is decided before the
+   * operator's per-artifact byte policy: an artifact
    * that could never be delivered must not be counted, retained or charged
    * against a scope aggregate. Terminal — the same input recompiles to the same
    * frame, so nothing here retries.

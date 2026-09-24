@@ -39,7 +39,7 @@ import {
   buildPreparedPromptCommand,
   PREPARED_PROMPT_COMMAND_ID,
 } from '../adapters/pi/prepared-prompt-frame';
-import { rpcFrameByteLength, RPC_MAX_FRAME_BYTES } from '@earendil-works/pi-coding-agent/rpc-types';
+import { rpcFrameByteLength, RPC_MAX_FRAME_BYTES } from '../util/rpc-frame';
 
 /**
  * B-P2 §10.5 for the orchestration layer: auth/isolation, purity of the

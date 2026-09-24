@@ -163,3 +163,56 @@ Consequences outside WP3 ownership:
 | `cd8e99782` | `@byok-sdk` publish projection tooling | moot | fork retired; no republish (plan Invariants) |
 | `edfa2216b` | `docsPaths` required on the system-prompt builder (purity) | moot | plan invariant "No U2": the Host owns the whole system message, and the adapter never calls Pi's prompt builder |
 | `8792344cf` | `HostCanonicalAssistantMessage` reader half | replaced-by-SDK (A2') | official types have no `host_canonical`; A2' sentinel `AssistantMessage` plus `adapters/pi/host-history-admission.ts` (WP1) |
+
+## WP2 — adapter rewrite on official 0.87.1
+
+Subject: worktree `claude/pi-087-migration` on 726ddd32 (WP3 committed), uncommitted.
+
+### What moved where
+
+| Before (fork 0.86.1001) | After (SDK-owned) |
+|---|---|
+| `prepareCodingAgentSessionInput` + `compileCodingAgentInput` (Pi `buildSystemPrompt`) | `adapters/pi/input-preparation.ts` `compilePreparedPiInput` → `adapters/pi/prepared-request.ts` `compilePreparedProviderRequest` (A1': official `streamSimple`, capture-and-throw `fetch`, `maxRetries: 0`, placeholder key, pinned options) |
+| `preparedToolProjection` | none; tools enter T as `SystemMessage.toolsAdded` in `buildPreparedTranscriptMessages` |
+| `canonicalPreparedValue` | `prepared-request.ts` `canonicalPreparedValue` (plain key-sorted JSON, same rule: `undefined` members dropped); fingerprints and all envelope digests use it |
+| P(D) + residual table (pi-ai fork `prepareOpenAICompletionsRequest`) | `prepared-request.ts` `derivePreparedProjection`: P(D) re-serialized from D's own `model`/`messages`/`tools`; residual table copied, plus `prompt_cache_key` classified `constant` (the pinned session id) |
+| `PreparedSessionInputV3` / `verifyPreparedSessionInput` | `PreparedPiInputV1` (`byok.pi.prepared-input` v1) / `verifyPreparedPiInput`: key-exact shape, three digests, expectation, then recompiles T with the official serializer and requires identical body + endpoint |
+| `createPreparedAgentSession` + fork `runRpcMode` `prompt_prepared` | `adapters/pi/prepared-session.ts` (`createPreparedGate`, `registerPreparedProvider`, `createPreparedPiSession`) + `bin/pi-prepared-host.ts` answering the first stdin frame itself, then official `runRpcMode` |
+| fork `rpc-types` `prompt_prepared` frame types | `adapters/pi/prepared-prompt-frame.ts` `PreparedPromptResponseV1`, `parsePreparedPromptCommand`, `readFirstJsonlFrame` (bounded by `util/rpc-frame.ts` `RPC_MAX_FRAME_BYTES`) |
+| `resolve-bin.ts` `npm:<name>@x.y.z` alias pin | exact `x.y.z` pin, name = `@earendil-works/pi-coding-agent` (mirrors WP3's `check-adapters-entry.mjs`) |
+
+Compile entry for the purity probe (`fixtures/pi-compile-purity-probe.mjs` `TODO(WP2-entry)`): module `src/adapters/pi/input-preparation.ts` (source path; which built artifact the probe should load is WP3's call), function `compilePreparedPiInput(request: CompilePreparedInputRequest): Promise<PreparedPiInputV1>`; D is `result.providerRequest.body`, the envelope digest `result.digest`. The provider graph it loads is `@earendil-works/pi-ai/api/openai-completions` + the `@earendil-works/pi-ai` root (`loadOfficialCompiler`), so origin attribution moves to the pi-ai install root.
+
+### Host session shape
+
+`createAgentSession` with `SessionManager.inMemory`, `SettingsManager.inMemory({ retry: { enabled: false, maxRetries: 0, provider: { maxRetries: 0 } }, compaction: { enabled: false }, cacheWarming: 'off' })`, `DefaultResourceLoader` with every discovery flag off, `systemPrompt`/`systemPromptOverride` = the Host system message and `appendSystemPromptOverride: () => []`, `ModelRuntime.registerProvider(provider, { baseUrl, api, apiKey?, authHeader?, models: [projected entry], streamSimple: gate })`, one extension with `session_start` (run trigger) and `context_with_system` (projection). The trigger prompt is the fixed `PREPARED_TRIGGER_TEXT`; the handler requires native `[system, trigger, ...tail]` with tail ⊆ {assistant, toolResult}, else records an anomaly and returns nothing. The gate refuses any request the handler did not project (`contextProjected !== sequence` or anomaly), any endpoint other than the compiled one, and request 1 unless its body string equals D. The typed reason is written to `gate.state.refusal` before the throw. Requests ≥2 get their own sequence number; there is no first-round receipt reuse. Admitted requests go to `globalThis.fetch`, read at call time; nothing is installed globally.
+
+Admission refusals added: `promptCache` or `samplingParams` on the registered model (`prepared_model_unsupported`); a registered model whose id/name/api/provider/baseUrl/reasoning/input/limits/thinkingLevelMap/compat differs from the projection (`prepared_model_drift`); cache warming not `off` (`prepared_session_ineligible`); `constrainedSampling` other than `{ json_schema, prefer }` (compile detail `tool_constrained_sampling_unsupported`); non-text Host assistant history (A2', compile detail `host_assistant_not_text`). `egressPolicy` is already required by `TaskOfferPreparedPayloadSchema` (protocol `messages.ts:421`, P0) and checked in `task-runner.ts:2038`; nothing was added.
+
+### D shape vs fork 0.86.1001
+
+Same Host input compiled by the local fork build (`/Users/kito/Projects/pi-wt-086` `claude/pi-086` 4a4934b68 dist) and by the SDK compile, z.ai endpoint, 7-key wire compat, `cacheRetention: none`, `maxTokens: 4096`, reasoning `medium`:
+
+- fork D: 655 B, sha256 `1f35c6eb65c87ea1f21eb66761d164fac766d1d2d576e3c3637be9c8764c8849`
+- official D: 615 B, sha256 `6d8ce938a71d2df283773a0326310fe2337211e64956de4435ba8d011992a89d`
+
+The only differences: (1) the system message is `customPrompt` verbatim; the fork appended `\n\n<cwd>\n/agent\n</cwd>` from Pi's prompt builder. (2) `tools[].function.strict` is absent; the fork sent `"strict": false`. `supportsStrictMode` defaults to false and is not in the wire compat subset, so no BYOK endpoint gets `strict`. Unchanged: `stream`, `stream_options`, `max_tokens`, `thinking`, and Host assistant text serialized as a plain string (the A2' sentinel never reaches D). New: with `cacheRetention: long` (any endpoint with the default `supportsLongCacheRetention`) or any retention other than `none` on `api.openai.com`, D carries `prompt_cache_key: "byok-prepared"`; the fork never sent that key.
+
+### Seam left for WP4
+
+`adapters/pi/input-preparation.ts` `assertOfficialRuntimeIdentity(installed, pinned)` accepts only `@earendil-works/pi-coding-agent@0.87.1` by name and version and returns `upstreamBase: v0.87.1`, `upstreamCommit: f07218c4d4bbc12bef056a7058c3dd49dfe41abe` (the registry gitHead from the WP0 table) and `forkBuild: 0`. WP4 replaces this with exact integrity + provenance. Still fork-shaped and left to WP4: `adapters/pi/native-installation.ts:21-24` (compares `manifest.byokFork.*` with the attested record; every attested install fails it now), `piRuntimeIdentityFromAttestedRecord` (reads `nativeProvenance.upstreamBase/upstreamCommit/forkBuild`), and `scripts/release/pi-runtime-identity.mjs` `PI_ALIAS_SPEC` (the `resolve-bin.test.ts` "literally identical" case fails until it and the TS constant are renamed together).
+
+### What WP5 must change on the wire
+
+- `InputPreparationRuntimeIdentityV1`: `envelopeFormat` is now `byok.pi.prepared-input`, `requestFormat` `byok.pi.openai-completions.request`, `compilerVersion` 4 (`SUPPORTED_PREPARED_COMPILER_VERSION`); `upstreamBase`/`upstreamCommit`/`forkBuild` describe an official build (`forkBuild` 0) and should be renamed or dropped; `inputPreparationRuntimeIdentityString` embeds `+<commit>.<forkBuild>`.
+- `InputPreparationPromptSnapshotV1`: the Host system message travels as `customPrompt` (required, non-empty); `appendSystemPrompt`, `toolSnippets`, `toolGuidelines`, `promptGuidelines`, `contextFiles`, `skills` must be empty, and `cwd`/`docsPaths` reach nothing. The bridge is one function, `hostSystemPromptFromSnapshot`; WP5 should replace the prompt block with one `systemPrompt` field and delete the renderer inputs. Salesko today sends `appendSystemPrompt` with `customPrompt` absent (`apps/api/src/private-agent-chat-preparation-document.ts:92`), so every current Salesko preparation is refused with `prompt_render_input_unsupported` until the Host change.
+- `InputPreparationToolV1.constrainedSampling`: still admitted as `{ json_schema, prefer }`, but it no longer produces `strict` on any BYOK endpoint.
+- Residual keys: `prompt_cache_key` (`constant`) can appear; `InputPreparationProjectionV1.version` stays 3.
+- The durable artifact's `envelope` is `PreparedPiInputV1`; artifacts holding a fork `PreparedSessionInputV3` envelope fail `verifyPreparedPiInput` (`prepared_input_invalid`). Needs the wire version bump and no read-forward.
+- Prepared-session behaviour: official `runRpcMode` has no prepared reservation. A concurrent `prompt` during the run is refused by the session as busy (no `prepared_session_reserved` code). A `steer` is accepted by the RPC loop and makes the next provider request fail at the gate with `prepared_context_drift`. Refusal codes on the `prompt_prepared` response: `prepared_input_invalid`, `prepared_digest_mismatch`, `prepared_expectation_mismatch`, `prepared_context_drift`, `prepared_registry_drift`, `prepared_model_drift`, `prepared_model_unsupported`, `prepared_session_ineligible`, `prepared_body_drift`, `prepared_endpoint_mismatch`, `prepared_failed`. A verify failure now reports `prepared_digest_mismatch` before `prepared_context_drift`.
+
+### Tests
+
+- Added: `adapters/pi/__tests__/official-pi-conformance-compat.test.ts` covering (d') and (g), `prepared-lane-official.test.ts` (compile, refusals, verify, gate end to end, context handler) and `prepared-prompt-frame-reader.test.ts`.
+- End-to-end evidence (not kept): a scratch copy of `src/__tests__/pi-prepared-launcher.test.ts` was patched with only its fork import (→ `prepared-request`) and a `customPrompt`, then run against the built dist. 28 of 30 cases passed, including "sends D verbatim", `get_state` session id, the real MCP server child, the BYOK keys-profile cases, secret non-leak, and the projection-mutation refusals. The 2 failures follow from the design: the reservation code, and the tamper case now reporting `prepared_digest_mismatch`. The scratch file was deleted.
+- None of the seven fork-subpath test files live under `adapters/pi/__tests__` or `bin/__tests__`, so none were ported here. The orchestrator-assigned edits were made: `pi-export-assets.test.ts:31,42`, `input-preparation.test.ts:42`, `prepared-prompt-frame.test.ts:7-10`, and the `resolvePiBin` block of `resolve-bin.test.ts`.

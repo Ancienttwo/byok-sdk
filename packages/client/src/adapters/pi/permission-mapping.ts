@@ -127,7 +127,7 @@ export function mapPermissionPolicyToPiArgs(
  * concrete tool NAMES instead of CLI flags.
  *
  * The prepared launch entry (`./prepared-tools.ts`) runs pi in-process and must
- * hand `createPreparedAgentSession` an explicit, complete tool array: there is
+ * hand `createAgentSession` an explicit, complete tool array: there is
  * no `--tools` flag for pi to interpret and no default registry for it to fall
  * back to. Resolving the same allow/deny arithmetic a second time inside that
  * entry would be a second opinion about one policy, so it is resolved here,

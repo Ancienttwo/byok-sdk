@@ -39,14 +39,11 @@ import { resolvePiNativeToolSelection } from './permission-mapping';
  * workspace and no descriptor to resolve a runtime policy from. The counted
  * manifest therefore contains the MCP half only.
  *
- * The native API is NOT the limitation. The fork's
- * `createPreparedAgentSession({ tools })` takes an explicit
- * `{ name, identity, tool }[]` and would accept Pi's own built-ins beside the
- * MCP tools without any change
- * (`node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts:127-154`).
+ * The native API is NOT the limitation: `createAgentSession({ tools, customTools })`
+ * (`./prepared-session.ts`) would accept Pi's own built-ins beside the MCP tools.
  * What is missing is on this side: nothing counted them, so registering them
  * here would send the model a tool the artifact's frozen manifest does not
- * contain, and the native session would reject the whole run with
+ * contain, and the prepared session refuses the whole run with
  * `prepared_registry_drift`.
  *
  * So the selection is resolved for real, from the WHOLE admitted policy rather
@@ -57,7 +54,7 @@ import { resolvePiNativeToolSelection } from './permission-mapping';
  * {@link PreparedNativeToolSelectionV1}, and only the refusal below goes away.
  */
 
-/** One authorized tool, in the exact shape `createPreparedAgentSession` takes. */
+/** One authorized tool: the name and executor identity the manifest binds, and its Pi tool definition. */
 export interface PreparedPiAuthorizedTool {
   readonly name: string;
   /** The observation fingerprint the counted manifest bound for this name. */
@@ -175,7 +172,7 @@ export function validatePreparedPiNativeToolPolicy(
   if (!native.ok) return native;
   const selection = native.selection;
   if (selection !== undefined) {
-    // See the module comment: the fork would take these tools, but no
+    // See the module comment: the session would take these tools, but no
     // preparation counted them, so registering them is guaranteed drift.
     return refuse(
       'native_tools_uncounted',

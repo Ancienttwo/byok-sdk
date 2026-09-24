@@ -1,13 +1,8 @@
 {
   "format": "byok.pi-export-asset-source",
   "version": 1,
-  "packageName": "@byok-sdk/pi-coding-agent",
-  "packageVersion": "0.86.1001",
-  "byokFork": {
-    "upstreamBase": "0.86.1",
-    "upstreamCommit": "13cbf77df2396303013a41646bcfa77b4271ae56",
-    "forkBuild": 1
-  },
+  "packageName": "@earendil-works/pi-coding-agent",
+  "packageVersion": "0.87.1",
   "sourceBasePath": "dist/core/export-html",
   "files": [
     {
@@ -22,8 +17,8 @@
     },
     {
       "path": "template.js",
-      "bytes": 76742,
-      "sha256": "1893cdb77587f592eef5717905391269886d6d7a4dc6a488417a73da374d9226"
+      "bytes": 77102,
+      "sha256": "56270347d35faac17e3b79b16ac5d8dbab664e9c83cfbc05437a3f5976074d76"
     },
     {
       "path": "vendor/marked.min.js",

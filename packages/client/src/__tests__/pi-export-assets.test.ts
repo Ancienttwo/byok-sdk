@@ -28,7 +28,7 @@ function fixture(form: 'interpreter+bundle'|'compiled-executable') {
 describe('required native export data assets',()=>{
   it('binds inventory to exact native pin and five unchanged upstream bytes',()=>{
     const manifest=JSON.parse(readFileSync(path.join(nativeRoot,'package.json'),'utf8'));
-    expect([manifest.name,manifest.version,manifest.byokFork]).toEqual([source.packageName,source.packageVersion,source.byokFork]);
+    expect([manifest.name,manifest.version]).toEqual([source.packageName,source.packageVersion]);
     expect(source.files.map(row=>row.path)).toEqual(layout.files);
     for(const row of source.files){const bytes=readFileSync(path.join(nativeRoot,source.sourceBasePath,row.path));expect(bytes.length).toBe(row.bytes);expect(digest(bytes)).toBe(row.sha256);}
   });
@@ -39,7 +39,7 @@ describe('required native export data assets',()=>{
     for(const file of ['pi-export-asset-layout.json','pi-export-assets.source.json'])cpSync(path.resolve(import.meta.dirname,'../adapters/pi',file),path.join(sourceDir,file));
     const script=path.join(scriptDir,'build-pi-export-assets.mjs');
     cpSync(path.resolve(import.meta.dirname,'../../scripts/build-pi-export-assets.mjs'),script);
-    writeFileSync(path.join(root,'package.json'),JSON.stringify({byok:{piRuntimePin:`npm:${source.packageName}@${source.packageVersion}`}}));
+    writeFileSync(path.join(root,'package.json'),JSON.stringify({byok:{piRuntimePin:source.packageVersion}}));
     const pinRoot=path.join(root,'node_modules/@earendil-works/pi-coding-agent');mkdirSync(pinRoot,{recursive:true});
     cpSync(path.join(nativeRoot,'package.json'),path.join(pinRoot,'package.json'));
     for(const row of source.files){const file=path.join(pinRoot,source.sourceBasePath,row.path);mkdirSync(path.dirname(file),{recursive:true});cpSync(path.join(nativeRoot,source.sourceBasePath,row.path),file);}

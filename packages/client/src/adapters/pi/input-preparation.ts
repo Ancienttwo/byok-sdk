@@ -1,16 +1,10 @@
 import path from 'node:path';
-import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import type { PreparedSessionInputV3 } from '@earendil-works/pi-coding-agent/prepared-session-input';
-import type {
-  CodingAgentInputSnapshot,
-  HostCanonicalAssistantMessage,
-} from '@earendil-works/pi-coding-agent/input-preparation';
 import type { PermissionMode } from '@byok-sdk/protocol';
 import type {
+  InputPreparationCompiledPromptSnapshotV1,
   InputPreparationCompiledSnapshotV1,
-  InputPreparationMessageV1,
   InputPreparationModelV1,
   InputPreparationOptionsV1,
   InputPreparationProjectionV1,
@@ -26,83 +20,60 @@ import {
   type ToolImplementationIdentityV1,
 } from '../../daemon/tool-implementation-identity';
 import { filterMcpObservationForPolicy, projectMcpTools, qualifiedMcpToolName } from '../../mcp/projection';
-import { PI_PACKAGE_NAME, resolvePiRuntimeIdentity } from './resolve-bin';
+import { PI_PACKAGE_NAME, resolvePiRuntimeIdentity, type PiRuntimeIdentity } from './resolve-bin';
+import {
+  buildPreparedTranscriptMessages,
+  canonicalPreparedDigest,
+  canonicalPreparedValue,
+  compilePreparedProviderRequest,
+  derivePreparedProjection,
+  loadOfficialCompiler,
+  PREPARED_PROVIDER_SESSION_ID,
+  PreparedRequestError,
+  PreparedSessionError,
+  projectPreparedModel,
+  sha256Hex,
+  type PreparedRequestOptionsV1,
+  type PreparedTranscriptV1,
+} from './prepared-request';
 
 /**
- * The ONE place in this package that imports the native
- * `@earendil-works/pi-coding-agent/prepared-session-input` subpath
- * (`docs/researches/runtime-input-preparation-contract.md` §10.4).
+ * The prepared-input compiler bound to the verified official Pi closure.
  *
- * It also names `@earendil-works/pi-coding-agent/input-preparation` TYPE-ONLY,
- * for the native message shapes the compile stage projects onto. That import is
- * erased, reaches no module graph at runtime, and is what keeps the projection
- * bound to the fork's own declarations instead of to a local restatement of
- * them — and it goes through the coding-agent re-export rather than
- * `@earendil-works/pi-ai`, so this package takes on no direct dependency of its
- * own on the provider layer.
+ * It does three things:
  *
- * It does two things and nothing else:
+ * 1. Verifies the INSTALLED runtime closure and derives the runtime / compiler
+ *    identity from it — the manifest actually on disk, cross-checked against
+ *    the exact version `packages/client/package.json` pins — outside the
+ *    compile, once per compiler instance.
+ * 2. Compiles D through A1' (`./prepared-request.ts`): the Host transcript T
+ *    and the projected model go through the official `streamSimple`, and the
+ *    final body string is captured by an injected fetch that never sends.
+ * 3. Wraps D, P(D), the residual classification, T and the tool manifest into
+ *    one SDK-owned envelope with independent digests, and re-verifies that
+ *    envelope on the consume side ({@link verifyPreparedPiInput}).
  *
- * 1. Verifies the INSTALLED native artifact closure and derives the runtime /
- *    compiler identity from it — the manifest actually on disk, cross-checked
- *    against the exact alias `packages/client/package.json` pins, plus the
- *    fork provenance that manifest records. §10.3.1 forbids deriving this from
- *    caller text or a version label, so nothing on the wire can influence it.
- * 2. Hands already-resolved immutable data to the native pure compile and
- *    returns the envelope's digests, bytes and its structural projection
- *    contract, copied verbatim.
- *
- * Step 2 is PURE by native contract (§11.2): no home discovery, no settings or
- * resource loading, no session/MCP startup, no tool execution, no credentials,
- * no network. Step 1 reads the installed manifest exactly once per compiler
- * instance, at construction — outside the pure stage — so a compile call
- * performs no filesystem work at all.
- *
- * The native subpath is loaded with a DYNAMIC import, once, on the first
- * compile. Its own module graph reaches the fork's provider layer and the
- * `openai` client, and this module is reachable from the SDK root through the
- * daemon; a static import would therefore evaluate that whole graph for every
- * consumer of `@byok-sdk/client`, including the ones that never prepare input.
- * Identity verification stays at construction, because it reads the installed
- * MANIFEST rather than the module.
+ * The compile is PURE in the sense that matters: no home discovery, no
+ * settings or resource loading, no session, no tool execution, no credential,
+ * no network. The official provider module is loaded with a dynamic import on
+ * first use, because this module is reachable from the SDK root through the
+ * daemon.
  */
 
 /**
- * The two native entries the compile stage uses: the pure compile itself, and
- * the fork's own model-visible tool projection. Both come from the SAME dynamic
- * import, because a second import of the same subpath is a second chance for
- * the projection and the compiler to disagree about what a tool declaration is.
- */
-type NativePreparedSessionInput = Pick<
-  typeof import('@earendil-works/pi-coding-agent/prepared-session-input'),
-  'prepareCodingAgentSessionInput' | 'preparedToolProjection'
->;
-
-/** Memoized so the native graph is evaluated at most once per process. */
-let nativePreparedSessionInput: Promise<NativePreparedSessionInput> | undefined;
-
-function loadNativePreparedSessionInput(): Promise<NativePreparedSessionInput> {
-  nativePreparedSessionInput ??= import('@earendil-works/pi-coding-agent/prepared-session-input').then(
-    (module) => ({
-      prepareCodingAgentSessionInput: module.prepareCodingAgentSessionInput,
-      preparedToolProjection: module.preparedToolProjection,
-    }),
-  );
-  return nativePreparedSessionInput;
-}
-
-/**
- * The ONE prepared-request compiler version this SDK consumes.
+ * The ONE prepared-request compiler version this SDK produces and consumes.
  *
- * It is this package's SUPPORTED constant, never a claim about the native: the
- * identity below states it, and every compile proves the envelope the native
- * actually produced carries the same number
- * (`unsupported_compiler_version`, fail closed). A fork that compiles to a
- * different contract is refused rather than read through this one.
+ * 4 is the first SDK-owned compiler (A1' on official Pi 0.87.1). Version 3
+ * artifacts were compiled by the retired fork and are not read forward.
  */
-export const SUPPORTED_PREPARED_COMPILER_VERSION = 3;
+export const SUPPORTED_PREPARED_COMPILER_VERSION = 4;
 
-/** The residual value classes the supported compiler contract defines. Copied, never invented. */
+/** The SDK-owned envelope and request format tags this module is the authority for. */
+export const PREPARED_ENVELOPE_FORMAT = 'byok.pi.prepared-input' as const;
+export const PREPARED_REQUEST_FORMAT = 'byok.pi.openai-completions.request' as const;
+const PREPARED_ENVELOPE_VERSION = 1 as const;
+
+/** The residual value classes the supported compiler contract defines. */
 const SUPPORTED_RESIDUAL_VALUE_CLASSES: ReadonlySet<string> = new Set<InputPreparationResidualValueClassV1>([
   'constant',
   'boolean',
@@ -114,25 +85,82 @@ const SUPPORTED_RESIDUAL_VALUE_CLASSES: ReadonlySet<string> = new Set<InputPrepa
   'object_shape',
 ]);
 
+/** The compile binding the record's request was compiled under. */
+export interface PreparedPiBindingV1 {
+  readonly inputIdentity: string;
+  readonly runtimeIdentity: string;
+  readonly policyIdentity: string;
+  readonly profileRevision: string;
+}
+
+/** Model-visible tool order bound to executor identity. */
+export interface PreparedPiToolManifestV1 {
+  readonly order: readonly string[];
+  readonly executors: readonly string[];
+  /** SHA-256 over the canonical `{ order, executors }`. */
+  readonly digest: string;
+}
+
+/** D and everything the compile proved about it. `digest` binds every other field. */
+export interface PreparedPiProviderRequestV1 {
+  readonly format: typeof PREPARED_REQUEST_FORMAT;
+  readonly compilerVersion: number;
+  readonly model: InputPreparationModelV1;
+  readonly binding: PreparedPiBindingV1;
+  readonly options: PreparedRequestOptionsV1;
+  /** The URL the official client addressed for D; the live gate compares it. */
+  readonly endpoint: string;
+  /** Exact JSON request body D. */
+  readonly body: string;
+  /** P(D): `model`, `messages` and `tools` of D. Not a token count. */
+  readonly counterProjection: string;
+  readonly projection: InputPreparationProjectionV1;
+  readonly residual: readonly InputPreparationResidualKeyV1[];
+  readonly digest: string;
+}
+
+/**
+ * The SDK-owned prepared-input envelope. `digest` binds every other field.
+ *
+ * `transcript` is the Host-owned content in the SDK's own vocabulary. It never
+ * carries the A2' sentinel provenance: that exists only inside
+ * `buildPreparedTranscriptMessages`' return value.
+ */
+export interface PreparedPiInputV1 {
+  readonly format: typeof PREPARED_ENVELOPE_FORMAT;
+  readonly version: typeof PREPARED_ENVELOPE_VERSION;
+  readonly transcript: PreparedTranscriptV1;
+  readonly providerRequest: PreparedPiProviderRequestV1;
+  readonly toolManifest: PreparedPiToolManifestV1;
+  readonly digest: string;
+}
+
+/** Independently trusted expectations, from the durable record, never from the envelope. */
+export interface PreparedPiExpectedV1 {
+  readonly digest: string;
+  readonly model: InputPreparationModelV1;
+  readonly binding: PreparedPiBindingV1;
+  readonly toolManifestDigest: string;
+}
+
 /** The immutable compile output, in this package's own vocabulary. */
 export interface CompiledPreparedInput {
   /** The exact low-level provider request body D. */
   readonly requestBody: string;
-  /** P(D): the counted projection, in the unchanged native format. */
+  /** P(D): the counted projection. */
   readonly counterProjection: string;
   readonly requestBytes: number;
   readonly projectionBytes: number;
-  /** Native digest of D. */
+  /** Digest of the provider request record (D plus what was proved about it). */
   readonly requestDigest: string;
-  /** Native digest of the whole envelope. */
+  /** Digest of the whole envelope. */
   readonly envelopeDigest: string;
   readonly toolManifestDigest: string;
-  /** What the native compiler proved about P(D), copied verbatim. */
   readonly projection: InputPreparationProjectionV1;
-  /** Every top-level key of D outside P(D), classified by the native compiler. */
+  /** Every top-level key of D outside P(D), classified. */
   readonly residual: readonly InputPreparationResidualKeyV1[];
-  /** The full native envelope, retained verbatim for the durable artifact. */
-  readonly envelope: PreparedSessionInputV3;
+  /** The whole envelope, retained verbatim for the durable artifact. */
+  readonly envelope: PreparedPiInputV1;
 }
 
 /** Explicit, already-authorized and already-authority-resolved compile input. */
@@ -140,12 +168,7 @@ export interface CompilePreparedInputRequest {
   readonly snapshot: InputPreparationCompiledSnapshotV1;
   readonly model: InputPreparationModelV1;
   readonly options: InputPreparationOptionsV1;
-  readonly binding: {
-    readonly inputIdentity: string;
-    readonly runtimeIdentity: string;
-    readonly policyIdentity: string;
-    readonly profileRevision: string;
-  };
+  readonly binding: PreparedPiBindingV1;
   readonly toolExecutors: Readonly<Record<string, string>>;
 }
 
@@ -154,12 +177,7 @@ export interface CompilePreparedInputRequest {
  * `unsupported_input` wire code: nothing is filled in, defaulted or downgraded.
  */
 export class InputPreparationCompileError extends Error {
-  /**
-   * A stable code for the refusals that name a specific broken contract, so the
-   * durable record says WHICH one rather than only `compile_rejected`. Absent
-   * for a refusal the native compiler itself raised: its message is native
-   * text and this package invents no code for it.
-   */
+  /** A stable code naming the broken contract, so the durable record says WHICH one. */
   readonly detail?: string;
 
   constructor(message: string, options?: { cause?: unknown; detail?: string }) {
@@ -169,7 +187,7 @@ export class InputPreparationCompileError extends Error {
   }
 }
 
-/** Raised when the installed native closure cannot be verified. */
+/** Raised when the installed runtime closure cannot be verified or loaded. */
 export class InputPreparationRuntimeIdentityError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);
@@ -178,34 +196,65 @@ export class InputPreparationRuntimeIdentityError extends Error {
 }
 
 /**
- * The seam `input-preparation-service.ts` depends on. Declared here rather than
- * in the service so the service never names a native type, and so a test can
- * supply a stub compiler without pulling the native package into its module
- * graph.
+ * The seam `input-preparation-service.ts` depends on. A test can supply a stub
+ * compiler without pulling the official provider graph into its module graph.
  */
 export interface InputPreparationCompiler {
   readonly runtime: InputPreparationRuntimeIdentityV1;
   compile(request: CompilePreparedInputRequest): Promise<CompiledPreparedInput>;
 }
 
-interface ForkProvenance {
-  upstreamBase?: unknown;
-  upstreamCommit?: unknown;
-  forkBuild?: unknown;
-}
+// ---------------------------------------------------------------------------
+// Runtime identity
+// ---------------------------------------------------------------------------
 
 interface InstalledPiManifest {
   name?: unknown;
   version?: unknown;
-  byokFork?: ForkProvenance;
 }
 
 /**
- * Walk up from the native package's resolved main entry to its enclosing
- * package root. Mirrors `resolve-bin.ts`'s own walk for the same reason it
- * exists there: this package is pure ESM with no `require` condition and does
- * not export `./package.json`, so the manifest is only reachable by resolving
- * an exported entry and walking upward.
+ * The one official runtime this build admits, by exact name and version, with
+ * the upstream tag and commit that version was published from (npm registry
+ * `gitHead`, recorded in the WP0 breakage map).
+ */
+const OFFICIAL_PI_RUNTIME = Object.freeze({
+  name: '@earendil-works/pi-coding-agent',
+  version: '0.87.1',
+  upstreamBase: 'v0.87.1',
+  upstreamCommit: 'f07218c4d4bbc12bef056a7058c3dd49dfe41abe',
+});
+
+/**
+ * The official-runtime identity seam. Accepts exactly
+ * `@earendil-works/pi-coding-agent@0.87.1` by name and version and nothing else.
+ */
+// TODO(WP4): replace name+version with exact artifact integrity and provenance.
+export function assertOfficialRuntimeIdentity(
+  installed: { readonly name: unknown; readonly version: unknown },
+  pinned: PiRuntimeIdentity,
+): { readonly upstreamBase: string; readonly upstreamCommit: string; readonly forkBuild: number } {
+  if (pinned.name !== OFFICIAL_PI_RUNTIME.name || pinned.version !== OFFICIAL_PI_RUNTIME.version) {
+    throw new InputPreparationRuntimeIdentityError(
+      `@byok-sdk/client pins ${pinned.name}@${pinned.version}, but this build prepares input only against ${OFFICIAL_PI_RUNTIME.name}@${OFFICIAL_PI_RUNTIME.version}`,
+    );
+  }
+  if (installed.name !== OFFICIAL_PI_RUNTIME.name || installed.version !== OFFICIAL_PI_RUNTIME.version) {
+    throw new InputPreparationRuntimeIdentityError(
+      `${PI_PACKAGE_NAME} resolved to ${String(installed.name)}@${String(installed.version)}, but @byok-sdk/client pins ${OFFICIAL_PI_RUNTIME.name}@${OFFICIAL_PI_RUNTIME.version}`,
+    );
+  }
+  return {
+    upstreamBase: OFFICIAL_PI_RUNTIME.upstreamBase,
+    upstreamCommit: OFFICIAL_PI_RUNTIME.upstreamCommit,
+    // The official artifact is not a fork build.
+    forkBuild: 0,
+  };
+}
+
+/**
+ * Walk up from the runtime package's resolved main entry to its enclosing
+ * package root: the package is pure ESM and does not export `./package.json`.
  */
 function findInstalledManifest(startDir: string): { dir: string; manifest: InstalledPiManifest } | undefined {
   let dir = startDir;
@@ -216,8 +265,6 @@ function findInstalledManifest(startDir: string): { dir: string; manifest: Insta
         const manifest = JSON.parse(readFileSync(candidate, 'utf8')) as InstalledPiManifest;
         if (typeof manifest.name === 'string') return { dir, manifest };
       } catch {
-        // A malformed manifest is not a reason to keep climbing into an
-        // unrelated parent package — fail closed at the caller instead.
         return undefined;
       }
     }
@@ -229,19 +276,9 @@ function findInstalledManifest(startDir: string): { dir: string; manifest: Insta
 }
 
 /**
- * Derive the runtime / compiler identity from the VERIFIED installed artifact
- * closure.
- *
- * Two independent facts must agree before anything is compiled: the exact alias
- * the client manifest pins (`resolvePiRuntimeIdentity()`), and the manifest of
- * the package that actually resolved on disk. A mismatch is a hard failure with
- * no PATH or version-label fallback — an artifact whose compiler identity is
- * not exactly known cannot be counted against, so there is nothing to degrade
- * to.
- *
- * `byokFork` provenance is required, not optional: the prepared-session-input
- * seam only exists in the fork, so an installed package without that record is
- * by definition not the closure this SDK verified.
+ * Derive the runtime / compiler identity from the VERIFIED installed package.
+ * No PATH or version-label fallback: an artifact whose identity is not exactly
+ * known cannot be counted against.
  */
 export function resolveInstalledPiRuntimeIdentity(): InputPreparationRuntimeIdentityV1 {
   const pinned = resolvePiRuntimeIdentity();
@@ -260,66 +297,22 @@ export function resolveInstalledPiRuntimeIdentity(): InputPreparationRuntimeIden
       `${PI_PACKAGE_NAME} resolved to ${mainEntry}, which has no readable enclosing package manifest`,
     );
   }
-  const { manifest } = installed;
-  if (manifest.name !== pinned.name || manifest.version !== pinned.version) {
-    throw new InputPreparationRuntimeIdentityError(
-      `${PI_PACKAGE_NAME} resolved to ${String(manifest.name)}@${String(manifest.version)}, but @byok-sdk/client pins ${pinned.name}@${pinned.version}`,
-    );
-  }
-  const fork = manifest.byokFork;
-  if (
-    fork === undefined ||
-    typeof fork.upstreamBase !== 'string' ||
-    typeof fork.upstreamCommit !== 'string' ||
-    !Number.isSafeInteger(fork.forkBuild)
-  ) {
-    throw new InputPreparationRuntimeIdentityError(
-      `${pinned.name}@${pinned.version} carries no byokFork provenance; the prepared-session-input seam is fork-only and its closure must be verifiable`,
-    );
-  }
+  const provenance = assertOfficialRuntimeIdentity(installed.manifest as { name: unknown; version: unknown }, pinned);
   return Object.freeze({
     packageName: pinned.name,
     packageVersion: pinned.version,
-    upstreamBase: fork.upstreamBase,
-    upstreamCommit: fork.upstreamCommit,
-    forkBuild: fork.forkBuild as number,
-    envelopeFormat: NATIVE_ENVELOPE_FORMAT,
-    requestFormat: NATIVE_REQUEST_FORMAT,
+    ...provenance,
+    envelopeFormat: PREPARED_ENVELOPE_FORMAT,
+    requestFormat: PREPARED_REQUEST_FORMAT,
     compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,
   });
 }
 
 /**
- * The two native format tags this module is the authority for. They describe
- * what THIS code knows how to read out of the native envelope, not a fact about
- * the installed release, so they stay SDK constants: a host that could declare
- * them would be telling this SDK what its own parser accepts.
- */
-const NATIVE_ENVELOPE_FORMAT = 'pi.session.prepared-input';
-const NATIVE_REQUEST_FORMAT = 'pi.openai-completions.prepared';
-
-/**
  * Derive the runtime / compiler identity from an ATTESTED install record
- * instead of from package resolution.
- *
- * This is the encapsulated form's path, and it exists because the unencapsulated
- * one cannot work there. {@link resolveInstalledPiRuntimeIdentity} finds the
- * installed manifest by resolving the package specifier and walking upward —
- * which under a single-artifact release resolves through Bun's user-writable
- * install cache, and which in any form reads a `package.json` that is not part
- * of what was attested. A writable manifest is never an execution-identity
- * authority (§77 ruling 3), so where a host install record exists, the record's
- * own declared fork provenance is the only source.
- *
- * Fails closed, with no fallback to the resolution path: a record that carries
- * no `nativeProvenance`, or one whose package identity is not exactly the pin
- * this build declares, describes a release whose compiler contract is not
- * known. Input preparation counts tokens against that contract, so there is
- * nothing to degrade to.
- *
- * The unencapsulated dev form keeps {@link resolveInstalledPiRuntimeIdentity}:
- * with no authority wired in there is no record to read, and that path is the
- * `resolver_unconfigured` one this SDK ships by default.
+ * instead of from package resolution. A writable manifest is never an
+ * execution-identity authority, so where a host install record exists, the
+ * record's own declared provenance is the only source. Fails closed.
  */
 export function piRuntimeIdentityFromAttestedRecord(
   identity: Pick<ToolImplementationAttestedV1, 'installPath' | 'nativeProvenance'>,
@@ -328,7 +321,7 @@ export function piRuntimeIdentityFromAttestedRecord(
   const provenance = identity.nativeProvenance;
   if (provenance === undefined) {
     throw new InputPreparationRuntimeIdentityError(
-      `the attested install record at ${identity.installPath} declares no nativeProvenance; the prepared-session-input seam is fork-only and its provenance must come from the record, never from a package manifest`,
+      `the attested install record at ${identity.installPath} declares no nativeProvenance; the runtime provenance must come from the record, never from a package manifest`,
     );
   }
   if (provenance.packageName !== pinned.name || provenance.packageVersion !== pinned.version) {
@@ -347,64 +340,96 @@ export function piRuntimeIdentityFromAttestedRecord(
     upstreamBase: provenance.upstreamBase,
     upstreamCommit: provenance.upstreamCommit,
     forkBuild: provenance.forkBuild,
-    envelopeFormat: NATIVE_ENVELOPE_FORMAT,
-    requestFormat: NATIVE_REQUEST_FORMAT,
+    envelopeFormat: PREPARED_ENVELOPE_FORMAT,
+    requestFormat: PREPARED_REQUEST_FORMAT,
     compilerVersion: provenance.compilerVersion,
   });
 }
 
+// ---------------------------------------------------------------------------
+// Compile
+// ---------------------------------------------------------------------------
+
 /**
- * Project one supported caller message onto the native message it IS.
+ * The Host-authored system message, read off the current wire prompt snapshot.
  *
- * Exported for the same reason `verifyCompiledPreparedInput` is: the exact
- * native shape this SDK hands the compiler is a boundary, and a boundary
- * crossable only by compiling against one particular installed fork is a
- * boundary nobody can test on the day it matters.
- *
- * Exhaustive by construction: the `default` branch takes the union's residue,
- * and a `never` there means registering a new message kind in
- * `../../input-preparation` without deciding what it compiles to is a COMPILE
- * error rather than a silently dropped or silently downgraded turn.
- *
- * The assistant shape is the fork's own `HostCanonicalAssistantMessage`, whose
- * content is always a text-block array so it serializes through the ordinary
- * assistant path byte-identically to a provenance-carrying assistant text
- * message. No `api`, `provider`, `model`, `usage` or `stopReason` is written:
- * the host asserts the text was already said, nothing generated it here, and
- * inventing provenance to fill the native `AssistantMessage` shape would be a
- * claim about a turn that never happened.
+ * The Host owns the WHOLE system message (no Pi prompt builder is called), so
+ * the only field that can carry it is `customPrompt`. Every other prompt field
+ * is an input to Pi's own renderer; a non-empty one is refused rather than
+ * rendered locally. `cwd` and `docsPaths` are renderer inputs too and reach
+ * nothing.
  */
-export function projectPreparedInputMessage(message: InputPreparationMessageV1): CodingAgentInputSnapshot['messages'][number] {
-  switch (message.role) {
-    case 'user':
-      return { role: 'user', content: message.content, timestamp: message.timestamp };
-    case 'assistant': {
-      // Annotated against the PINNED native type, so a fork that changes the
-      // host-canonical shape breaks here rather than at the native validator.
-      const hostCanonical: HostCanonicalAssistantMessage = {
-        role: 'assistant',
-        origin: 'host_canonical',
-        content: [{ type: 'text', text: message.content }],
-        timestamp: message.timestamp,
-      };
-      return hostCanonical;
-    }
-    default: {
-      const unsupported: never = message;
-      return unsupported;
-    }
+export function hostSystemPromptFromSnapshot(prompt: InputPreparationCompiledPromptSnapshotV1): string {
+  const refuse = (message: string): never => {
+    throw new InputPreparationCompileError(message, { detail: 'prompt_render_input_unsupported' });
+  };
+  if (typeof prompt.customPrompt !== 'string' || prompt.customPrompt.length === 0) {
+    refuse('the Host must author the whole system message as prompt.customPrompt; the official runtime renders no default prompt here');
+  }
+  if (prompt.appendSystemPrompt !== undefined) refuse('prompt.appendSystemPrompt has no renderer; fold it into prompt.customPrompt');
+  if (Object.keys(prompt.toolSnippets).length > 0) refuse('prompt.toolSnippets has no renderer on the prepared lane');
+  if (Object.keys(prompt.toolGuidelines).length > 0) refuse('prompt.toolGuidelines has no renderer on the prepared lane');
+  if (prompt.promptGuidelines.length > 0) refuse('prompt.promptGuidelines has no renderer on the prepared lane');
+  if (prompt.contextFiles.length > 0) refuse('prompt.contextFiles has no renderer on the prepared lane');
+  if (prompt.skills.length > 0) refuse('prompt.skills has no renderer on the prepared lane');
+  return prompt.customPrompt as string;
+}
+
+function validatePreparedModel(model: InputPreparationModelV1): void {
+  let endpoint: URL;
+  try {
+    endpoint = new URL(model.baseUrl);
+  } catch {
+    throw new InputPreparationCompileError('the model endpoint is not a URL', { detail: 'model_endpoint_invalid' });
+  }
+  if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash
+    || !['https:', 'http:'].includes(endpoint.protocol)) {
+    throw new InputPreparationCompileError(
+      'the model endpoint must be http(s) without credentials, query or fragment',
+      { detail: 'model_endpoint_invalid' },
+    );
   }
 }
 
+function toolManifestFor(
+  transcript: PreparedTranscriptV1,
+  toolExecutors: Readonly<Record<string, string>>,
+): PreparedPiToolManifestV1 {
+  const order = transcript.tools.map((tool) => tool.name);
+  const declared = Object.keys(toolExecutors);
+  if (declared.length !== order.length || declared.some((name) => !order.includes(name))) {
+    throw new InputPreparationCompileError('tool executor identities must cover exactly the model-visible tools',
+      { detail: 'tool_manifest_mismatch' });
+  }
+  const executors = order.map((name) => {
+    const identity = toolExecutors[name];
+    if (typeof identity !== 'string' || identity.trim().length === 0) {
+      throw new InputPreparationCompileError(`tool ${JSON.stringify(name)} has no executor identity`,
+        { detail: 'tool_manifest_mismatch' });
+    }
+    return identity;
+  });
+  return { order, executors, digest: canonicalPreparedDigest({ order, executors }) };
+}
+
+function asCompileError(cause: unknown): InputPreparationCompileError {
+  if (cause instanceof InputPreparationCompileError) return cause;
+  if (cause instanceof PreparedRequestError) {
+    return new InputPreparationCompileError(cause.message, { cause, detail: cause.code });
+  }
+  return new InputPreparationCompileError(
+    `the prepared request compiler refused this input: ${cause instanceof Error ? cause.message : String(cause)}`,
+    { cause },
+  );
+}
+
+function jsonClone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 /**
- * Build the compiler bound to the installed native closure.
- *
- * The daemon supplies its once-resolved identity; standalone unconfigured
- * package consumers use installed discovery. The identity is fixed on the
- * instance: a compile
- * call must not re-read the filesystem, both because §10.3.2 forbids I/O in the
- * pure portion and because an identity that can change between two compiles is
- * not an identity.
+ * Build the compiler bound to one runtime identity. The identity is fixed on
+ * the instance; a compile call performs no filesystem work.
  */
 export function createPiInputPreparationCompiler(
   runtime: InputPreparationRuntimeIdentityV1,
@@ -413,138 +438,98 @@ export function createPiInputPreparationCompiler(
   return {
     runtime,
     async compile(request: CompilePreparedInputRequest): Promise<CompiledPreparedInput> {
-      // Outside the try below on purpose: a native package that cannot be
+      // Outside the refusal path on purpose: an official module that cannot be
       // LOADED is a closure fault, not an input this compiler refused.
-      let native: NativePreparedSessionInput;
       try {
-        native = await loadNativePreparedSessionInput();
+        await loadOfficialCompiler();
       } catch (cause) {
         throw new InputPreparationRuntimeIdentityError(
-          `${PI_PACKAGE_NAME}/prepared-session-input could not be loaded; no input can be prepared`,
+          '@earendil-works/pi-ai/api/openai-completions could not be loaded; no input can be prepared',
           { cause },
         );
       }
-      let envelope: PreparedSessionInputV3;
+      let envelope: PreparedPiInputV1;
       try {
-        envelope = await native.prepareCodingAgentSessionInput({
-          // Structurally the native `CodingAgentInputSnapshot`. The wire cannot
-          // carry a typebox `TSchema` brand or a `Tool`'s executable fields, so
-          // the already key-exact validated JSON schema crosses here as the
-          // model-visible `parameters` it is. This is a pass-through, not a
-          // translation: no field is defaulted or inferred, and the native
-          // compiler remains the only authority on what it means. The ONE
-          // rename is `docsPaths`, whose wire names are this SDK's frozen
-          // contract and not upstream Pi's parameter names.
-          snapshot: {
-            prompt: {
-              ...(request.snapshot.prompt.customPrompt === undefined
-                ? {}
-                : { customPrompt: request.snapshot.prompt.customPrompt }),
-              ...(request.snapshot.prompt.appendSystemPrompt === undefined
-                ? {}
-                : { appendSystemPrompt: request.snapshot.prompt.appendSystemPrompt }),
-              cwd: request.snapshot.prompt.cwd,
-              selectedTools: [...request.snapshot.prompt.selectedTools],
-              toolSnippets: { ...request.snapshot.prompt.toolSnippets },
-              toolGuidelines: Object.fromEntries(
-                Object.entries(request.snapshot.prompt.toolGuidelines).map(([name, lines]) => [name, [...lines]]),
-              ),
-              promptGuidelines: [...request.snapshot.prompt.promptGuidelines],
-              contextFiles: request.snapshot.prompt.contextFiles.map((file) => ({ path: file.path, content: file.content })),
-              skills: request.snapshot.prompt.skills.map((skill) => ({
-                name: skill.name,
-                description: skill.description,
-                filePath: skill.filePath,
-                disableModelInvocation: skill.disableModelInvocation,
-              })),
-              docsPaths: {
-                readme: request.snapshot.prompt.docsPaths.readmePath,
-                docs: request.snapshot.prompt.docsPaths.docsPath,
-                examples: request.snapshot.prompt.docsPaths.examplesPath,
-              },
-            },
-            messages: request.snapshot.messages.map(projectPreparedInputMessage),
-            // The fork's OWN model-visible tool projection, not a local
-            // restatement of it. A second `{name, description, parameters}`
-            // literal here would be a second authority over what the model is
-            // shown, and it is exactly how `constrainedSampling` — which
-            // reaches the wire as `tools[].strict` on this runtime — used to be
-            // silently stripped out of a request this SDK then counted.
-            tools: request.snapshot.tools.map((tool) => native.preparedToolProjection(tool as never)),
-          },
-          model: {
-            id: request.model.id,
-            name: request.model.name,
-            api: 'openai-completions',
-            provider: request.model.provider as never,
-            baseUrl: request.model.baseUrl,
-            reasoning: request.model.reasoning,
-            input: [...request.model.input],
-            cost: { ...request.model.cost },
-            contextWindow: request.model.contextWindow,
-            maxTokens: request.model.maxTokens,
-            // Carried only when the record declared them. Spelling them as
-            // `key: undefined` instead would put the keys into the native
-            // `model` object, and the native compiler's own key gate treats a
-            // present key as a declaration.
-            ...(request.model.thinkingLevelMap === undefined
-              ? {}
-              : { thinkingLevelMap: { ...request.model.thinkingLevelMap } }),
-            ...(request.model.compat === undefined ? {} : { compat: { ...request.model.compat } }),
-          },
-          options: {
-            cacheRetention: request.options.cacheRetention,
-            maxTokens: request.options.maxTokens,
-            ...(request.options.temperature === undefined ? {} : { temperature: request.options.temperature }),
-            ...(request.options.toolChoice === undefined ? {} : { toolChoice: request.options.toolChoice }),
-            ...(request.options.reasoningEffort === undefined ? {} : { reasoningEffort: request.options.reasoningEffort }),
-          },
-          binding: { ...request.binding },
-          toolExecutors: { ...request.toolExecutors },
-        });
+        envelope = await compilePreparedPiInput(request);
       } catch (cause) {
-        throw new InputPreparationCompileError(
-          `the native compiler refused this input: ${cause instanceof Error ? cause.message : String(cause)}`,
-          { cause },
-        );
+        throw asCompileError(cause);
       }
       return verifyCompiledPreparedInput(envelope, runtime);
     },
   };
 }
 
+/** Compile one request into the SDK-owned envelope. Exported for the purity probe and tests. */
+export async function compilePreparedPiInput(request: CompilePreparedInputRequest): Promise<PreparedPiInputV1> {
+  const snapshot = jsonClone(request.snapshot);
+  const systemPrompt = hostSystemPromptFromSnapshot(snapshot.prompt);
+  const selected = snapshot.prompt.selectedTools;
+  const names = snapshot.tools.map((tool) => tool.name);
+  if (selected.length !== names.length || selected.some((name, index) => names[index] !== name)) {
+    throw new InputPreparationCompileError('selected tools and tool schemas must match exactly, in order',
+      { detail: 'tool_manifest_mismatch' });
+  }
+  const model = jsonClone(request.model);
+  validatePreparedModel(model);
+  const transcript: PreparedTranscriptV1 = { systemPrompt, tools: snapshot.tools, messages: snapshot.messages };
+  const options: PreparedRequestOptionsV1 = { ...jsonClone(request.options), sessionId: PREPARED_PROVIDER_SESSION_ID };
+  const binding: PreparedPiBindingV1 = { ...request.binding };
+  const toolManifest = toolManifestFor(transcript, request.toolExecutors);
+  const captured = await compilePreparedProviderRequest({
+    model: projectPreparedModel(model),
+    messages: buildPreparedTranscriptMessages(transcript),
+    options,
+  });
+  const derived = derivePreparedProjection(captured.body);
+  const requestData = {
+    format: PREPARED_REQUEST_FORMAT as typeof PREPARED_REQUEST_FORMAT,
+    compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,
+    model,
+    binding,
+    options,
+    endpoint: captured.endpoint,
+    body: captured.body,
+    counterProjection: derived.counterProjection,
+    projection: { version: 3 as const, kind: derived.kind, digest: sha256Hex(derived.counterProjection) },
+    residual: derived.residual,
+  };
+  const providerRequest: PreparedPiProviderRequestV1 = { ...requestData, digest: canonicalPreparedDigest(requestData) };
+  const data = {
+    format: PREPARED_ENVELOPE_FORMAT,
+    version: PREPARED_ENVELOPE_VERSION,
+    transcript,
+    providerRequest,
+    toolManifest,
+  } as const;
+  return deepFreeze({ ...data, digest: canonicalPreparedDigest(data) });
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object') {
+    for (const item of Object.values(value)) deepFreeze(item);
+    Object.freeze(value);
+  }
+  return value;
+}
+
 /**
- * Turn one native envelope into this package's compile output, refusing
- * anything that is not the contract the runtime identity promises.
- *
- * Exported because it is the whole fail-closed boundary between the fork and
- * this SDK, and a boundary that can only be exercised through a live native
- * compile is a boundary whose refusals nobody tests. It re-derives NOTHING
- * about token semantics: the projection kind and the residual classification
- * are the compiler's, carried verbatim. The one value it recomputes is the
- * projection digest, over the envelope's own counted-projection bytes, because
- * a digest that only ever travels beside the bytes it describes is not a check.
+ * Turn one envelope into this package's compile output, refusing anything that
+ * is not the contract the runtime identity promises. Re-derives nothing about
+ * token semantics; recomputes the projection digest over its own bytes.
  */
 export function verifyCompiledPreparedInput(
-  envelope: PreparedSessionInputV3,
+  envelope: PreparedPiInputV1,
   runtime: InputPreparationRuntimeIdentityV1,
 ): CompiledPreparedInput {
-  // Belt-and-suspenders on the two format tags the artifact claims. The
-  // identity was derived from the installed manifest; this proves the code that
-  // actually ran produced the envelope shape that identity promises, rather
-  // than trusting the manifest alone.
   if (envelope.format !== runtime.envelopeFormat || envelope.providerRequest.format !== runtime.requestFormat) {
     throw new InputPreparationCompileError(
-      `the native compiler produced ${envelope.format}/${envelope.providerRequest.format}, not ${runtime.envelopeFormat}/${runtime.requestFormat}`,
+      `the compiler produced ${envelope.format}/${envelope.providerRequest.format}, not ${runtime.envelopeFormat}/${runtime.requestFormat}`,
       { detail: 'unsupported_envelope_format' },
     );
   }
-  // The OBSERVED compiler version, never a literal claim about the native. The
-  // identity states what this SDK supports; this proves the envelope in hand
-  // was compiled to exactly that contract.
   if (envelope.providerRequest.compilerVersion !== runtime.compilerVersion) {
     throw new InputPreparationCompileError(
-      `the native compiler produced prepared-request compiler version ${String(envelope.providerRequest.compilerVersion)},`
+      `the compiler produced prepared-request compiler version ${String(envelope.providerRequest.compilerVersion)},`
       + ` but this build consumes version ${String(runtime.compilerVersion)} only`,
       { detail: 'unsupported_compiler_version' },
     );
@@ -558,12 +543,11 @@ export function verifyCompiledPreparedInput(
     typeof projection.digest !== 'string'
   ) {
     throw new InputPreparationCompileError(
-      'the native compiler produced a projection outside the supported structural contract',
+      'the compiler produced a projection outside the supported structural contract',
       { detail: 'unsupported_projection_shape' },
     );
   }
-  const recomputed = createHash('sha256').update(envelope.providerRequest.counterProjection, 'utf8').digest('hex');
-  if (recomputed !== projection.digest) {
+  if (sha256Hex(envelope.providerRequest.counterProjection) !== projection.digest) {
     throw new InputPreparationCompileError(
       'the prepared projection digest does not describe the counted projection bytes it travels with',
       { detail: 'projection_digest_mismatch' },
@@ -579,7 +563,7 @@ export function verifyCompiledPreparedInput(
       !SUPPORTED_RESIDUAL_VALUE_CLASSES.has(entry.valueClass)
     ) {
       throw new InputPreparationCompileError(
-        'the native compiler classified a residual key with a value class outside the supported contract',
+        'the compiler classified a residual key with a value class outside the supported contract',
         { detail: 'unsupported_residual_value_class' },
       );
     }
@@ -597,6 +581,107 @@ export function verifyCompiledPreparedInput(
     residual,
     envelope,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Consume-side verification
+// ---------------------------------------------------------------------------
+
+const ENVELOPE_KEYS = ['format', 'version', 'transcript', 'providerRequest', 'toolManifest', 'digest'];
+const REQUEST_KEYS = [
+  'format', 'compilerVersion', 'model', 'binding', 'options', 'endpoint', 'body',
+  'counterProjection', 'projection', 'residual', 'digest',
+];
+const EXPECTED_KEYS = ['digest', 'model', 'binding', 'toolManifestDigest'];
+const SHA256 = /^[0-9a-f]{64}$/u;
+
+function invalid(message: string): never {
+  throw new PreparedSessionError('prepared_input_invalid', `Invalid prepared input: ${message}`);
+}
+
+function exactKeys(value: unknown, keys: readonly string[], what: string): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) invalid(`${what} must be an object`);
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some((key) => !keys.includes(key)) || keys.some((key) => !Object.hasOwn(record, key))) {
+    invalid(`${what} has unsupported or missing fields`);
+  }
+  return record;
+}
+
+/**
+ * Re-verify an envelope against independently supplied expectations, and
+ * re-derive D from its own transcript with the official serializer.
+ *
+ * Returns a frozen private copy. Every check is a comparison: no replacement
+ * D is ever built. The live byte gate remains the final enforcement point.
+ */
+export async function verifyPreparedPiInput(input: unknown, expectedInput: unknown): Promise<PreparedPiInputV1> {
+  const envelope = exactKeys(jsonClone(input), ENVELOPE_KEYS, 'envelope') as unknown as PreparedPiInputV1;
+  const expected = exactKeys(jsonClone(expectedInput), EXPECTED_KEYS, 'expectation') as unknown as PreparedPiExpectedV1;
+  if (envelope.format !== PREPARED_ENVELOPE_FORMAT || envelope.version !== PREPARED_ENVELOPE_VERSION) {
+    invalid('unsupported envelope format or version');
+  }
+  const request = exactKeys(envelope.providerRequest, REQUEST_KEYS, 'providerRequest') as unknown as PreparedPiProviderRequestV1;
+  if (request.format !== PREPARED_REQUEST_FORMAT || request.compilerVersion !== SUPPORTED_PREPARED_COMPILER_VERSION
+    || request.projection?.version !== 3) {
+    invalid('unsupported provider request format or compiler version');
+  }
+  for (const digest of [envelope.digest, envelope.toolManifest?.digest, request.digest, expected.digest, expected.toolManifestDigest]) {
+    if (typeof digest !== 'string' || !SHA256.test(digest)) invalid('malformed digest');
+  }
+
+  const { digest: requestDigest, ...requestData } = request;
+  if (canonicalPreparedDigest(requestData) !== requestDigest) {
+    throw new PreparedSessionError('prepared_digest_mismatch', 'Prepared provider request digest mismatch');
+  }
+  const manifest = exactKeys(envelope.toolManifest, ['order', 'executors', 'digest'], 'toolManifest');
+  if (canonicalPreparedDigest({ order: manifest.order, executors: manifest.executors }) !== manifest.digest) {
+    throw new PreparedSessionError('prepared_digest_mismatch', 'Prepared tool manifest digest mismatch');
+  }
+  const { digest, ...data } = envelope;
+  if (canonicalPreparedDigest(data) !== digest) {
+    throw new PreparedSessionError('prepared_digest_mismatch', 'Prepared envelope digest mismatch');
+  }
+  if (digest !== expected.digest) {
+    throw new PreparedSessionError('prepared_expectation_mismatch', 'Prepared envelope digest is not the expected one');
+  }
+  if (manifest.digest !== expected.toolManifestDigest) {
+    throw new PreparedSessionError('prepared_expectation_mismatch', 'Prepared tool manifest digest is not the expected one');
+  }
+  if (canonicalPreparedValue(request.model) !== canonicalPreparedValue(expected.model)) {
+    throw new PreparedSessionError('prepared_expectation_mismatch', 'Prepared model is not the expected model');
+  }
+  if (canonicalPreparedValue(request.binding) !== canonicalPreparedValue(expected.binding)) {
+    throw new PreparedSessionError('prepared_expectation_mismatch', 'Prepared binding is not the expected binding');
+  }
+  const order = envelope.transcript.tools.map((tool) => tool.name);
+  if (canonicalPreparedValue(order) !== canonicalPreparedValue(manifest.order)) {
+    throw new PreparedSessionError('prepared_context_drift', 'Prepared tool manifest order is not the transcript tool order');
+  }
+
+  // The transcript is the only authoring source: recompiling it with the same
+  // model and options must reproduce D and its endpoint exactly.
+  let recompiled;
+  try {
+    recompiled = await compilePreparedProviderRequest({
+      model: projectPreparedModel(request.model),
+      messages: buildPreparedTranscriptMessages(envelope.transcript),
+      options: request.options,
+    });
+  } catch (cause) {
+    throw new PreparedSessionError('prepared_context_drift',
+      `Prepared transcript no longer compiles: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
+  if (recompiled.body !== request.body || recompiled.endpoint !== request.endpoint) {
+    throw new PreparedSessionError('prepared_context_drift', 'Prepared transcript does not compile to the prepared body');
+  }
+  const derived = derivePreparedProjection(request.body);
+  if (derived.counterProjection !== request.counterProjection || derived.kind !== request.projection.kind
+    || canonicalPreparedValue(derived.residual) !== canonicalPreparedValue(request.residual)
+    || sha256Hex(derived.counterProjection) !== request.projection.digest) {
+    throw new PreparedSessionError('prepared_context_drift', 'Prepared projection does not describe the prepared body');
+  }
+  return deepFreeze(envelope);
 }
 
 /**
@@ -693,31 +778,13 @@ export function preparedRequestContentIsTextOnly(requestBody: string): boolean {
 const NATIVE_TOOL_IMPLEMENTATION_IDENTITY: ToolImplementationIdentityV1 =
   toolImplementationUnavailable('implementation_identity_unattested');
 
-type CanonicalPreparedValue =
-  typeof import('@earendil-works/pi-coding-agent/prepared-session-input').canonicalPreparedValue;
-
-/** Memoized for the same reason the compiler is: the native graph is evaluated at most once. */
-let nativeCanonical: Promise<CanonicalPreparedValue> | undefined;
-
-function loadCanonicalPreparedValue(): Promise<CanonicalPreparedValue> {
-  nativeCanonical ??= import('@earendil-works/pi-coding-agent/prepared-session-input').then(
-    (module) => module.canonicalPreparedValue,
-  );
-  return nativeCanonical;
-}
-
 /**
- * Digest one value with the NATIVE canonical form.
- *
- * `canonicalPreparedValue` is the one canonicalization authority in this
- * package. The native compiler hashes the tool manifest with it, so a
- * fingerprint computed with a locally written key-sorted serializer could
- * agree with it today and diverge on the first value where the two definitions
- * differ.
+ * Digest one value with the canonical form the envelope digests use
+ * (`./prepared-request.ts`), so a fingerprint and a manifest digest can never
+ * disagree about what a value's canonical bytes are.
  */
 async function canonicalDigest(value: unknown): Promise<string> {
-  const canonical = await loadCanonicalPreparedValue();
-  return createHash('sha256').update(canonical(value), 'utf8').digest('hex');
+  return canonicalPreparedDigest(value);
 }
 
 /** Everything one MCP tool's fingerprint binds. */
@@ -838,7 +905,7 @@ export interface ToolExecutorsResult {
  * observation.
  *
  * Pure: it reads no server, spawns nothing, and touches no filesystem beyond
- * the memoized native module the digest function needs. Native tools come
+ * nothing else. Native tools come
  * first, in the order the caller registers them, then the MCP tools in the
  * core's canonical `(toolsetId, serverName, toolName)` order — the same
  * sequence the ordinary extension registers and the model is shown.
