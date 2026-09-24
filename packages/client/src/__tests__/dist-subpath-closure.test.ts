@@ -289,9 +289,10 @@ describe.skipIf(!DIST_PRESENT)('the daemon-free dist sub-path closures', () => {
       expect(existsSync(resolved)).toBe(true);
     }
     const root = readFileSync(path.join(DIST, 'index.js'), 'utf8');
-    // Existing light protocol constants stay static; only the runtime graph is lazy.
-    expect(staticImportSpecifiers(root).filter((name) => name.includes('pi-coding-agent')))
-      .toEqual(['@earendil-works/pi-coding-agent/rpc-types']);
+    // No Pi package is a static edge of the root: the RPC frame bound is SDK-owned
+    // (`util/rpc-frame.ts`), and the runtime graph is reached only lazily.
+    expect(staticImportSpecifiers(root).filter((name) => name.includes('@earendil-works/')))
+      .toEqual([]);
     expect(root).toMatch(/import\(["']#byok-pi-runtime-host["']\)/);
   });
 
@@ -324,19 +325,18 @@ describe.skipIf(!DIST_PRESENT)('the daemon-free dist sub-path closures', () => {
   it('pins the pi package name in dist/adapters/index.js as data, never as a module edge', () => {
     const source = readFileSync(path.join(DIST, 'adapters', 'index.js'), 'utf8');
     // The exception granted above is only defensible while every occurrence is
-    // one specifier constant or the exact dependency-alias projection. An import, a re-export, or a
-    // dynamic `import()` of it fails here even though the substring is allowed.
-    const occurrences = source
-      .split('\n')
-      .map((line, index) => ({ line: index + 1, text: line.trim() }))
-      .filter(({ text }) => text.includes('pi-coding-agent') || text.includes('@earendil-works'));
+    // the one specifier constant. The pin is an exact semver and names no
+    // package, so it is checked as its own projection. An import, a re-export,
+    // or a dynamic `import()` of the package fails here even though the
+    // substring is allowed.
+    const lines = source.split('\n').map((line) => line.trim());
+    const occurrences = lines.filter((text) => text.includes('pi-coding-agent') || text.includes('@earendil-works'));
     const manifest = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8'));
-    const alias = manifest.dependencies['@earendil-works/pi-coding-agent'];
-    expect(manifest.byok.piRuntimePin).toBe(alias);
-    expect(occurrences.map(({ text }) => text)).toEqual([
-      `piRuntimePin: ${JSON.stringify(alias)}`,
-      'var PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";',
-    ]);
+    const pin = manifest.dependencies['@earendil-works/pi-coding-agent'];
+    expect(pin).toMatch(/^\d+\.\d+\.\d+$/u);
+    expect(manifest.byok.piRuntimePin).toBe(pin);
+    expect(lines.filter((text) => text.startsWith('piRuntimePin:'))).toEqual([`piRuntimePin: ${JSON.stringify(pin)}`]);
+    expect(occurrences).toEqual(['var PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";']);
     expect(
       staticImportSpecifiers(source).filter((specifier) => specifier.includes('pi-coding-agent')),
     ).toEqual([]);

@@ -124,3 +124,42 @@ Observed provider options handed to the registered `streamSimple`: `reasoning: "
 | (f) | pass, with one caveat | With usage-absent SSE, the `message_end` assistant has all-zero usage and `stopReason: "stop"`. `mapPiMessageToAgentEvent` (`adapters/pi/events.ts`) maps it to `{ inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, totalTokens: 0 }`. The classifier `observePreparedCall` (`daemon/task-runner.ts:332`) is module-private, so the test does not call it. Its rule is `prompt <= 0` → `usage_unavailable`, and `prepared-offer-lane.test.ts:726` already covers `inputTokens: 0` → `usage_unavailable` end to end. |
 
 WP2 risk found while writing (a): `getCompat()` (`pi-ai/dist/api/openai-completions.js`, roughly :1225–1340) detects compat from `provider` and `baseUrl`. Examples are chutes.ai → `max_tokens`, deepseek.com, openrouter.ai, api.openai.com → `prompt_cache_key`, and Together → `supportsLongCacheRetention`. When A1' compiles against the sink baseUrl while the live model carries the real baseUrl, D matches only if every compat field that affects the body is pinned explicitly on the model (explicit `model.compat.X` overrides detection). The suite uses the sink on both sides, so it does not exercise this.
+
+## WP3
+
+### RPC frame bound
+
+The service only SENDS frames. `daemon/input-preparation-service.ts:780-812` builds the `prompt_prepared` command with the launcher's own builder (`buildPreparedPromptCommand`) and refuses `rpc_frame_too_large` when `fitsRpcFrame(command)` is false. Nothing in the service reads peer JSONL, so no bounded reader was added. The constant and helpers now live in `packages/client/src/util/rpc-frame.ts`: `RPC_MAX_FRAME_BYTES = 8 MiB` (the fork's value), `rpcFrameByteLength` = UTF-8 bytes of `JSON.stringify(frame) + "\n"`, and `fitsRpcFrame`. The test is `src/util/__tests__/rpc-frame.test.ts`.
+
+The SDK keeps refusing oversized frames. Official 0.87.1 `modes/rpc/jsonl.ts` reads stdin with no upper bound, so the host no longer refuses them. The limit protects the peer, and after the switch this send-side check is the only one. Nothing the SDK admitted before is refused now.
+
+Consequences outside WP3 ownership:
+- `src/__tests__/input-preparation.test.ts:42` and `src/__tests__/prepared-prompt-frame.test.ts:7-10` still import from `@earendil-works/pi-coding-agent/rpc-types`. Change both to `../util/rpc-frame`; the names are unchanged.
+- The `rpc_frame_too_large` doc at `src/input-preparation.ts:1284-1287` still says the bound is the RUNTIME's. It is now the SDK's send-side bound.
+- `adapters/pi/rpc-client.ts:240` reads the Pi process's stdout without a bound. That is the same choice the fork's reader made (session-bounded, not peer-controlled). WP2 owns it; unchanged.
+
+### Build/pin scripts
+
+- The script `build-todo-assets.mjs` was already correct; its frozen inventory was stale. `vendor/third-party-manifest.json` row `@byok-sdk/pi-ai@0.86.1001` → `@earendil-works/pi-ai@0.87.1`, with the same file and sha256 `f423ce8a…`. `licenseSource` is now "upstream repository LICENSE at v0.87.1 (f07218c4…); package declares MIT but omits license file". The official tarball ships no LICENSE, and the `licenseText` is byte-equal to `git show v0.87.1:LICENSE`. `vendor/THIRD-PARTY.md` has the matching heading rename. Sizes: manifest 114661 → 114765 B, THIRD-PARTY.md 8303 → 8306 B. The build then prints `sealed todo assets: 9 exact upstream files`.
+- `build-pi-export-assets.mjs`: `piRuntimePin` must equal `source.packageVersion` (exact semver). The `byokFork` assertion is removed because identity is WP4's gate. **Blocked on a WP2-owned file**: `src/adapters/pi/pi-export-assets.source.json` needs `packageName` `@earendil-works/pi-coding-agent`, `packageVersion` `0.87.1`, `byokFork` removed, and `template.js` bytes 76742 → 77102 with sha256 `1893cdb7…` → `56270347d35faac17e3b79b16ac5d8dbab664e9c83cfbc05437a3f5976074d76`. The other four assets are unchanged. With exactly that JSON in a scratch root, the script passes (`5 pinned native assets verified`). `src/__tests__/pi-export-assets.test.ts:42` also needs `piRuntimePin: source.packageVersion`. Whether the orchestrator accepts the new golden is its call.
+- `check-adapters-entry.mjs`: the fork identity asserts are replaced. The installed manifest name must be `@earendil-works/pi-coding-agent`, the pin must be an exact semver equal to the installed version, and `pi-ai` and `pi-agent-core` must be pinned and installed at that same version (upstream lockstep). The lazy-load probe now watches `@earendil-works/pi-ai/dist/api/openai-completions.js`, which is the A1' compile entry and statically loads `openai`. The pi-ai root and the coding-agent root load only `openai-completions.lazy.js`. Standalone it exits 0 with the new probe.
+- Build progress: tsup ✓, `check-adapters-entry --build-todo` ✓, `build-todo-assets` ✓. It stops at `build-pi-export-assets.mjs:15` (the source JSON above). Run standalone after that: `build-sealed-host` exits 0; `tsc -p tsconfig.build.json` fails with 6 errors in `adapters/pi/input-preparation.ts` and 1 in `bin/pi-prepared-host.ts` (WP2); `check-adapters-entry` exits 0.
+
+### Tests referencing fork subpaths
+
+- `dist-subpath-closure.test.ts`: the root's static `@earendil-works/*` edge list is now `[]`, because the frame bound is SDK-owned. The pin-occurrence check now expects an exact-semver `piRuntimePin` line plus the single `PI_PACKAGE_NAME` line. It passes with 23 tests.
+- `fixtures/pi-compile-purity-probe.mjs:774`: marked `TODO(WP2-entry)`. WP2 has not landed a compile entry; `input-preparation.ts` still imports `prepared-session-input`. Changing the path alone is not enough, because the probe calls `prepareCodingAgentSessionInput` with fork-shaped input and attributes origins to the coding-agent root. The load, the two compile calls, `nativeCompileInput` and `forkRoots` must move to WP2's entry (the pi-ai root) together.
+
+### Fork mechanical audit
+
+| Commit | What | Status | Evidence |
+|---|---|---|---|
+| `62cbbd87c` | bound the fork host's stdin JSONL reader; `RPC_MAX_FRAME_BYTES` plus the helpers | replaced-by-SDK (send side); reader bound needs-upstream if it is ever wanted | official `pi-coding-agent/dist/modes/rpc/jsonl.ts` has no bound; SDK `util/rpc-frame.ts` plus `input-preparation-service.ts:806` |
+| `511995810` | recover the id of an oversized frame; RPC ids serialized first | moot-in-0.87.1 | the official host never emits `frame_too_large`, so there is no id to recover; the SDK refuses before sending |
+| `e05af044f` | export the helpers via `./rpc-types` and the root | replaced-by-SDK | official exports are `.`, `./rpc-entry`, `./client`, `./experimental/plugin`; no SDK import of `rpc-types` remains in WP3 files |
+| `365711677` | `@modelcontextprotocol/sdk` as a pi-ai prod dependency | moot-in-0.87.1 (for the SDK) | official pi-ai deps have no MCP SDK; `grep -rl modelcontextprotocol pi-ai/dist` = 0; `@google/genai@2.21.0` still has an optional peer `^1.25.2` and 1 hit in `genai.d.ts`, but root `tsconfig.json:13` has `skipLibCheck: true` and WP0 typecheck showed no TS2307 for it |
+| `57128006e` | type-only JSON catalog imports in model shards | moot for the SDK; needs-upstream for strict consumers | official `providers/deepseek.models.d.ts` still has `import values from "./data/deepseek.json"`; the SDK uses `moduleResolution: Bundler` plus `skipLibCheck` |
+| `97cbd5e2f` | narrow the `find` path module parameter | moot for the SDK; needs-upstream for strict consumers | official `core/tools/find.d.ts:7` still has `pathModule?: path.PlatformPath`; covered by `skipLibCheck` |
+| `cd8e99782` | `@byok-sdk` publish projection tooling | moot | fork retired; no republish (plan Invariants) |
+| `edfa2216b` | `docsPaths` required on the system-prompt builder (purity) | moot | plan invariant "No U2": the Host owns the whole system message, and the adapter never calls Pi's prompt builder |
+| `8792344cf` | `HostCanonicalAssistantMessage` reader half | replaced-by-SDK (A2') | official types have no `host_canonical`; A2' sentinel `AssistantMessage` plus `adapters/pi/host-history-admission.ts` (WP1) |

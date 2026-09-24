@@ -45,19 +45,18 @@ assert.deepEqual(adaptersExport, {
 // module loading and with no install present.
 assert.equal(manifest.byok?.piRuntimePin, manifest.dependencies?.['@earendil-works/pi-coding-agent'],
   'client byok.piRuntimePin must exactly project dependency alias');
-// Exact npm alias onto the SDK's Pi fork: the specifier and the installed path
-// stay upstream, and the alias is derived from the installed fork's own
-// manifest — the single authority for which fork build this client carries.
-// Fail closed when the install is missing or is not a byok fork; no literal
-// version here, because partial releases bump the fork build alone.
+// Exact official semver pin. The installed manifest must be the official
+// package at exactly that version; integrity and provenance are the release
+// identity gate's (`scripts/release/pi-runtime-identity.mjs`), not this
+// entry check's. Fail closed when the install is missing or differs.
+const EXACT_SEMVER = /^\d+\.\d+\.\d+$/u;
 const nativeManifest = JSON.parse(readFileSync(
   new URL('../node_modules/@earendil-works/pi-coding-agent/package.json', import.meta.url), 'utf8'));
-assert.equal(nativeManifest.name, '@byok-sdk/pi-coding-agent',
-  'installed @earendil-works/pi-coding-agent must be the byok fork, not upstream');
-assert.ok(nativeManifest.byokFork?.upstreamBase !== undefined && nativeManifest.byokFork?.forkBuild !== undefined,
-  'installed Pi fork manifest must declare its byokFork identity');
-assert.equal(manifest.dependencies?.['@earendil-works/pi-coding-agent'],
-  `npm:${nativeManifest.name}@${nativeManifest.version}`);
+assert.equal(nativeManifest.name, '@earendil-works/pi-coding-agent',
+  'installed @earendil-works/pi-coding-agent must be the official package, not an alias');
+assert.match(manifest.dependencies?.['@earendil-works/pi-coding-agent'] ?? '', EXACT_SEMVER,
+  'client @earendil-works/pi-coding-agent pin must be an exact semver');
+assert.equal(manifest.dependencies?.['@earendil-works/pi-coding-agent'], nativeManifest.version);
 assert.equal(manifest.optionalDependencies?.['@earendil-works/pi-coding-agent'], undefined);
 assert.equal(manifest.dependencies?.['pi-web-access'], '0.24.1');
 assert.equal(manifest.dependencies?.['pi-subagents'], undefined);
@@ -71,14 +70,15 @@ assert.equal(manifest.dependencies?.['@juicesharp/rpiv-todo'], undefined);
 assert.equal(manifest.dependencies?.['@juicesharp/rpiv-i18n'], '2.8.0');
 assert.equal(manifest.dependencies?.['@earendil-works/pi-tui'], undefined);
 assert.equal(manifest.devDependencies?.['@earendil-works/pi-tui'], undefined);
-// The fork's own manifest declares which pi-ai build it was published
-// against; the client carries exactly that edge. Fork builds can publish
-// alone (coding-agent moves, pi-ai holds), so version equality between the
-// two pins is not an invariant — projection of the fork's edge is.
-const forkPiAiEdge = nativeManifest.dependencies?.['@earendil-works/pi-ai'];
-assert.equal(typeof forkPiAiEdge, 'string', 'installed Pi fork must declare its @earendil-works/pi-ai edge');
-assert.equal(manifest.dependencies?.['@earendil-works/pi-ai'], forkPiAiEdge,
-  'client pi-ai pin must project the installed fork\'s own declared pi-ai edge');
+// Upstream publishes its packages in lockstep, so pi-ai and pi-agent-core are
+// pinned exactly at the coding-agent version and installed at that version.
+for (const name of ['@earendil-works/pi-ai', '@earendil-works/pi-agent-core']) {
+  assert.equal(manifest.dependencies?.[name], nativeManifest.version,
+    `client ${name} pin must equal the exact @earendil-works/pi-coding-agent version`);
+  const installed = JSON.parse(readFileSync(new URL(`../node_modules/${name}/package.json`, import.meta.url), 'utf8'));
+  assert.equal(installed.name, name);
+  assert.equal(installed.version, nativeManifest.version, `installed ${name} must be ${nativeManifest.version}`);
+}
 assert.equal(existsSync(new URL('../dist/adapters/pi/team-interaction-extension.js', import.meta.url)), true);
 assert.equal(existsSync(new URL('../dist/adapters/pi/mcp-extension.js', import.meta.url)), true);
 assert.equal(existsSync(new URL('../dist/adapters/pi/subagents-policy-extension.js', import.meta.url)), true);
@@ -115,13 +115,14 @@ assert.equal(new adapters.PiAdapter().descriptor.id, 'pi');
 assert.equal(new adapters.ClaudeAdapter().descriptor.id, 'claude');
 assert.equal(new adapters.CodexAdapter().descriptor.id, 'codex');
 
-// The SDK root must not evaluate the native prepared-input graph just because
-// it was imported. That subpath reaches the fork's provider layer and the
-// `openai` client, and the daemon is reachable from the root entry, so a static
-// import there would make every consumer of `@byok-sdk/client` pay for — and
-// load — a runtime it may never prepare input with. The check is a real module
-// graph, in a child process, not a source grep: what matters is what the loader
-// actually pulled in.
+// The SDK root must not evaluate the prepared-input compile graph just because
+// it was imported. The compile calls the official public entry
+// `@earendil-works/pi-ai/api/openai-completions`, which statically loads the
+// `openai` client; the daemon is reachable from the root entry, so a static
+// edge there would make every consumer of `@byok-sdk/client` load a provider
+// layer it may never prepare input with. (The pi-ai root and the coding-agent
+// root load only `openai-completions.lazy.js`, never the module itself.) The
+// check is a real module graph, in a child process, not a source grep.
 const loadProbe = `
 import { registerHooks } from 'node:module';
 const loaded = [];
@@ -131,16 +132,16 @@ registerHooks({
     return next(url, context);
   },
 });
-const native = () => loaded.filter((url) => url.includes('prepared-session-input'));
+const native = () => loaded.filter((url) => url.includes('/@earendil-works/pi-ai/dist/api/openai-completions.js'));
 await import(${JSON.stringify(new URL('../dist/index.js', import.meta.url).href)});
 if (native().length > 0) {
-  console.error('the SDK root eagerly loaded the native prepared-input graph: ' + native().join(', '));
+  console.error('the SDK root eagerly loaded the prepared-input compile graph: ' + native().join(', '));
   process.exit(1);
 }
 // And the lazy load still resolves: absent-because-broken would pass the test above.
-await import('@earendil-works/pi-coding-agent/prepared-session-input');
+await import('@earendil-works/pi-ai/api/openai-completions');
 if (native().length === 0) {
-  console.error('the native prepared-input subpath did not load on demand');
+  console.error('the official compile entry did not load on demand');
   process.exit(1);
 }
 `;

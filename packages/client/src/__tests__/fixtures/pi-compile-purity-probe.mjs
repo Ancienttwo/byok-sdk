@@ -771,6 +771,12 @@ try {
   phase = 'load';
   // The same specifier `adapters/pi/input-preparation.ts` imports, resolved the
   // same way: a bare fork subpath from inside `packages/client`.
+  // TODO(WP2-entry): official 0.87.1 has no `prepared-session-input` subpath.
+  // The A1' compile goes through `@earendil-works/pi-ai/api/openai-completions`
+  // (`streamSimple` against a sink with a capturing fetch). Point this load, the
+  // two compile calls and `nativeCompileInput` at WP2's SDK compile entry once
+  // it lands, and move `forkRoots` attribution to the pi-ai install root. The
+  // monitoring semantics above and below stay unchanged.
   const native = await import('@earendil-works/pi-coding-agent/prepared-session-input');
   const input = nativeCompileInput(native.preparedToolProjection);
 
