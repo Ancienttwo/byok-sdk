@@ -1,11 +1,11 @@
 /**
  * The nine S4A.4 object assertions, against a real S3 implementation.
  *
- * Why MinIO and not a fake: seven of the nine are about a presigned URL's
+ * Why SeaweedFS and not a fake: seven of the nine are about a presigned URL's
  * BINDING — to a tenant, to a key, to a length, to an expiry — and a binding
  * asserted against our own verifier is self-certifying. We sign, we check our
  * own signature, we pass, and a signature that bound nothing would pass too.
- * MinIO is an independent SigV4 implementation: when it accepts a URL the
+ * SeaweedFS is an independent SigV4 implementation: when it accepts a URL the
  * binding held, and when it answers 403 the binding held against something we
  * did not write. Nothing here stubs a signature check.
  *
@@ -54,7 +54,7 @@ const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.u
 const TENANT_A: TenantId = tenantId('tenant-a');
 const TENANT_B: TenantId = tenantId('tenant-b');
 
-/** Wall time, for the same reason the composition passes one: MinIO judges freshness by its own clock. */
+/** Wall time, for the same reason the composition passes one: SeaweedFS judges freshness by its own clock. */
 const wallClock: Clock = { now: () => new Date() };
 
 interface ObjectHarness {
@@ -202,9 +202,9 @@ async function expectAdapterError(promise: Promise<unknown>, code: string): Prom
   expect((error as R2BlobStoreError).code).toBe(code);
 }
 
-describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE ? ` — ${SKIP_REASON}` : ''}`, () => {
+describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + seaweedfs]${SKIP_DATAPLANE ? ` — ${SKIP_REASON}` : ''}`, () => {
   beforeAll(() => {
-    // Every assertion below leans on MinIO answering for itself. If the
+    // Every assertion below leans on SeaweedFS answering for itself. If the
     // substrate were absent the suite would skip, not pass.
     expect(SKIP_DATAPLANE).toBe(false);
   });
@@ -384,7 +384,7 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
       const reservation = reservationFor(TENANT_A, item);
       const grant = await blobs.createUpload(TENANT_A, reservation);
 
-      // Both are in the signed headers, so MinIO — not this process — is what
+      // Both are in the signed headers, so SeaweedFS — not this process — is what
       // rejects them, before a byte is stored.
       const longer = await content('exactly this, plus some more');
       expect((await putViaGrant(grant.uploadUrl, longer)).status).toBe(403);
@@ -399,7 +399,7 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
   });
 
   // 3 ------------------------------------------------------------------
-  it('binds a presign to one tenant and one key, adjudicated by MinIO', async () => {
+  it('binds a presign to one tenant and one key, adjudicated by SeaweedFS', async () => {
     await withObjects(async ({ blobs, storage }) => {
       const item = await content('bound bytes');
       const grant = await blobs.createUpload(TENANT_A, reservationFor(TENANT_A, item));
@@ -432,7 +432,7 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
   });
 
   // 4 ------------------------------------------------------------------
-  it('lets MinIO refuse an expired presign', async () => {
+  it('lets SeaweedFS refuse an expired presign', async () => {
     const anHourAgo: Clock = { now: () => new Date(Date.now() - 60 * 60 * 1000) };
 
     await withObjects(
@@ -441,8 +441,8 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
         const grant = await blobs.createUpload(TENANT_A, reservationFor(TENANT_A, item));
 
         const response = await putViaGrant(grant.uploadUrl, item);
-        // Expiry is `X-Amz-Date + X-Amz-Expires`, evaluated by MinIO against
-        // MinIO's clock. Backdating the signing clock is what makes this
+        // Expiry is `X-Amz-Date + X-Amz-Expires`, evaluated by SeaweedFS against
+        // SeaweedFS's clock. Backdating the signing clock is what makes this
         // deterministic instead of a sleep.
         expect(response.status).toBe(403);
         expect(await response.text()).toContain('Request has expired');
