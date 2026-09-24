@@ -71,7 +71,7 @@ The SDK's `task.offer_prepared` cannot carry `egressPolicy` / `messageEgress` (`
   - `pi-prepared-launcher.test.ts`: the host registers zero native tools under auto+[].
   - A native-inexpressible policy is refused before pin, with zero pinned records.
 - [x] Gatekeeper implementation/source review PASS; final packed-artifact disposition is recorded in the external SDK report after the required clean local commit.
-- [ ] Release 0.21.0 via the release flow. The Owner approves the publish; the release notes carry the v6 drain precondition.
+- [x] Release 0.21.0 via the release flow. The Owner approves the publish; the release notes carry the v6 drain precondition. — published 2026-09-24/25 as 0.21.0 / keys 0.6.2 from `8b7a2121` (PR #227), tag `v0.21.0` on origin; receipt `docs/releases/v0.21.0-publication.md`
 
 ## Out of scope
 
