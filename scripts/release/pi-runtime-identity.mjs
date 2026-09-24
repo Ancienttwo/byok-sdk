@@ -3,9 +3,8 @@ import { verifyOfficialPiPackage, OFFICIAL_PI_PROVENANCE } from '../../packages/
 //
 // `packages/client/package.json` pins the official
 // `@earendil-works/pi-coding-agent` to one exact version, and pins every
-// pure-JavaScript package of its upstream lockstep closure to that same exact
-// version as a direct dependency, so an isolated consumer install cannot float
-// a sibling through a `^x.y.z` range. `pi-tui` ships prebuilt `.node` addons
+// direct pure-JavaScript dependency to that same exact version. Transitive
+// siblings are fixed by the lockfile and verified installed closure. `pi-tui` ships prebuilt `.node` addons
 // and may not be a direct dependency (release-graph purity gate); it reaches
 // the install only through the coding agent, and the lockfile and installed
 // integrity checks below still hold it to the exact version. The integrity of each

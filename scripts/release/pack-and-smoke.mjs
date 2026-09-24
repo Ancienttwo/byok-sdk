@@ -505,11 +505,21 @@ try {
     run(nodeBin, ['smoke.mjs'], smokeDir);
     copyFileSync(path.join(repoRoot, 'scripts/release/recurring-smoke.mjs'), path.join(smokeDir, 'recurring-smoke.mjs'));
     run(nodeBin, ['recurring-smoke.mjs'], smokeDir);
-    copyFileSync(path.join(repoRoot, 'scripts/release/pi-runtime-identity.mjs'), path.join(smokeDir, 'pi-runtime-identity.mjs'));
-    copyFileSync(path.join(repoRoot, 'scripts/release/pi-launcher-smoke.mjs'), path.join(smokeDir, 'pi-launcher-smoke.mjs'));
+    // Preserve the verifier's relative module graph in the isolated fixture.
+    // These are test-oracle files, not a replacement runtime or mutable install evidence.
+    for (const relative of [
+      'scripts/release/pi-runtime-identity.mjs',
+      'scripts/release/pi-launcher-smoke.mjs',
+      'packages/client/src/adapters/pi/official-pi-installation.mjs',
+      'packages/client/src/adapters/pi/official-pi-closure.json',
+    ]) {
+      const target = path.join(smokeDir, relative);
+      mkdirSync(path.dirname(target), { recursive: true });
+      copyFileSync(path.join(repoRoot, relative), target);
+    }
     // This is the decisive installed-runtime proof (real RPC get_state against
     // the pinned Pi with extensions loaded); echo it instead of swallowing it.
-    console.log(run(nodeBin, ['pi-launcher-smoke.mjs'], smokeDir));
+    console.log(run(nodeBin, ['scripts/release/pi-launcher-smoke.mjs'], smokeDir));
     assertSingleVersionSet(smokeDir, expectedPackageVersions);
     assertNpmCoreClosure(smokeDir);
     // The worker runtime subpath must stay deployable outside Node: the smoke
