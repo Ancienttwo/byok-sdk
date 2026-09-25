@@ -1,9 +1,19 @@
+> **Archived**: 2026-09-25 13:39
+> **Related Plan**: plans/archive/plan-20260925-0331-pi-087-official-migration.md
+> **Outcome**: Superseded
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260925-1339
+> **Archive Projection V1**: `plans/plan-20260925-0331-pi-087-official-migration.md` => `plans/archive/plan-20260925-0331-pi-087-official-migration.md`
+> **Archive Projection V1**: `tasks/notes/20260925-0331-pi-087-official-migration.notes.md` => `tasks/archive/notes-20260925-1339-pi-087-official-migration.md`
+> **Archive Projection V1**: `tasks/contracts/20260925-0331-pi-087-official-migration.contract.md` => `tasks/archive/contract-20260925-1339-pi-087-official-migration.md`
+> **Archive Projection V1**: `tasks/reviews/20260925-0331-pi-087-official-migration.review.md` => `tasks/archive/review-20260925-1339-pi-087-official-migration.md`
+
 # Implementation Notes: pi-087-official-migration
 
 > **Status**: Active
-> **Plan**: plans/plan-20260925-0331-pi-087-official-migration.md
-> **Contract**: tasks/contracts/20260925-0331-pi-087-official-migration.contract.md
-> **Review**: tasks/reviews/20260925-0331-pi-087-official-migration.review.md
+> **Plan**: plans/archive/plan-20260925-0331-pi-087-official-migration.md
+> **Contract**: tasks/archive/contract-20260925-1339-pi-087-official-migration.md
+> **Review**: tasks/archive/review-20260925-1339-pi-087-official-migration.md
 > **Last Updated**: 2026-09-25 03:31
 > **Lifecycle**: notes
 

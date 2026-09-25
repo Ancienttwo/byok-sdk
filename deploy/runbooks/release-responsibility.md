@@ -2,19 +2,15 @@
 
 Status: CURRENT boundary contract.
 
-The next prepared candidate is **0.22.0 / keys 0.7.0**, not yet published.
-[Release notes](../../docs/releases/v0.22.0.md) and the
-[Salesko / Owner command sheet](../../docs/releases/v0.22.0-handoff.md) define
-its wire-7 drain, record rebuild and official-identity ruling prerequisites.
-Preparation stops at dry run; the existing published train below is unchanged.
-
-The registry's current `latest` is 0.21.0 / keys 0.6.2, published on 2026-09-24/25
-from the `v0.21.0` tag target (`8b7a2121`) — see its
-[publication record](../../docs/releases/v0.21.0-publication.md) and the
-[release handoff](../../docs/releases/v0.21.0-handoff.md) that carried it. The
-previous train is 0.20.0 / keys 0.6.1, published on 2026-09-23 from the
-`v0.20.0` tag target (`48605554`) — see its
-[publication record](../../docs/releases/v0.20.0-publication.md).
+The registry's current `latest` is 0.22.0 / keys 0.7.0, published on 2026-09-25
+from the `v0.22.0` tag target (`0962f14f`) — see its
+[publication record](../../docs/releases/v0.22.0-publication.md), the
+[release notes](../../docs/releases/v0.22.0.md) and the
+[Salesko / Owner command sheet](../../docs/releases/v0.22.0-handoff.md) that
+defines its wire-7 drain, record rebuild and official-identity ruling
+prerequisites. The previous train is 0.21.0 / keys 0.6.2, published on
+2026-09-24/25 from the `v0.21.0` tag target (`8b7a2121`) — see its
+[publication record](../../docs/releases/v0.21.0-publication.md).
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
 

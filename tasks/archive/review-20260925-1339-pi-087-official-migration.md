@@ -1,11 +1,21 @@
-# Task Review: official-pi-087
+> **Archived**: 2026-09-25 13:39
+> **Related Plan**: plans/archive/plan-20260925-0331-pi-087-official-migration.md
+> **Outcome**: Superseded
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260925-1339
+> **Archive Projection V1**: `plans/plan-20260925-0331-pi-087-official-migration.md` => `plans/archive/plan-20260925-0331-pi-087-official-migration.md`
+> **Archive Projection V1**: `tasks/notes/20260925-0331-pi-087-official-migration.notes.md` => `tasks/archive/notes-20260925-1339-pi-087-official-migration.md`
+> **Archive Projection V1**: `tasks/contracts/20260925-0331-pi-087-official-migration.contract.md` => `tasks/archive/contract-20260925-1339-pi-087-official-migration.md`
+> **Archive Projection V1**: `tasks/reviews/20260925-0331-pi-087-official-migration.review.md` => `tasks/archive/review-20260925-1339-pi-087-official-migration.md`
+
+# Task Review: pi-087-official-migration
 
 > **Status**: Pending
-> **Plan**: plans/plan-20260925-0300-official-pi-087.md
-> **Contract**: tasks/contracts/20260925-0300-official-pi-087.contract.md
-> **Notes File**: tasks/notes/20260925-0300-official-pi-087.notes.md
+> **Plan**: plans/archive/plan-20260925-0331-pi-087-official-migration.md
+> **Contract**: tasks/archive/contract-20260925-1339-pi-087-official-migration.md
+> **Notes File**: tasks/archive/notes-20260925-1339-pi-087-official-migration.md
 > **Checks File**: .ai/harness/checks/latest.json
-> **Last Updated**: 2026-09-25 05:42
+> **Last Updated**: 2026-09-25 03:31
 > **Recommendation**: fail
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: pending

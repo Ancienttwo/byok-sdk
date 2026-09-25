@@ -7,27 +7,25 @@ composition over Postgres and R2.
 
 ## Release status
 
-The current source candidate is **0.22.0**, with independent keys **0.7.0**;
-publication is pending. [Release notes](docs/releases/v0.22.0.md) and the
-[Salesko / Owner handoff](docs/releases/v0.22.0-handoff.md) describe the official
-Pi cutover and the separate publication boundary. Versioned install examples
-below target this candidate and become usable after registry publication.
-
-The current published release is **0.21.0**, with independent keys **0.6.2**,
-published to npm on 2026-09-24/25 from the `v0.21.0` tag target (`8b7a2121`, the
-PR #227 merge) and now `latest` on the registry; readback is
+The current published release is **0.22.0**, with independent keys **0.7.0**,
+published to npm on 2026-09-25 from the `v0.22.0` tag target (`0962f14f`, the
+PR #234 merge) and now `latest` on the registry; readback is
 `npm view @byok-sdk/core version` and `npm view @byok-sdk/keys version`. See the
-[publication record](docs/releases/v0.21.0-publication.md), the
-[release notes](docs/releases/v0.21.0.md) and the
-[release handoff](docs/releases/v0.21.0-handoff.md).
+[publication record](docs/releases/v0.22.0-publication.md), the
+[release notes](docs/releases/v0.22.0.md) and the
+[Salesko / Owner handoff](docs/releases/v0.22.0-handoff.md), which describes the
+official Pi cutover.
 
-The preceding release is **0.20.0** with keys **0.6.1**, published on 2026-09-23
+The preceding release is **0.21.0** with keys **0.6.2**, published on 2026-09-24/25
+from the `v0.21.0` tag (`8b7a2121`, the PR #227 merge); see its
+[publication record](docs/releases/v0.21.0-publication.md).
+
+Before it came **0.20.0** with keys **0.6.1**, published on 2026-09-23
 from the `v0.20.0` tag (`48605554`, the PR #224 merge); see its
-[publication record](docs/releases/v0.20.0-publication.md).
-
-Before it came **0.19.0** with keys **0.6.0**, published on 2026-09-22
-from the `v0.19.0` tag (`9408ed7b`, the PR #221 merge); see its
-[publication record](docs/releases/v0.19.0-publication.md). Earlier came
+[publication record](docs/releases/v0.20.0-publication.md). Earlier came
+**0.19.0** with keys **0.6.0**, published on 2026-09-22
+from the `v0.19.0` tag (`9408ed7b`, the PR #221 merge; see its
+[publication record](docs/releases/v0.19.0-publication.md)), then
 **0.18.0** with keys **0.5.0**, published on 2026-09-10
 from the `v0.18.0` tag (`7b26ef5f`, the PR #181 merge); see its
 [release notes](docs/releases/v0.18.0.md) for the breaking custom-store boundary
@@ -35,7 +33,7 @@ and the keys SQLite profile schema; then **0.17.0** with keys **0.4.3**
 ([publication record](docs/releases/v0.17.0-publication.md)) and
 [0.16.0](docs/releases/v0.16.0-publication.md).
 
-The source candidate uses unmodified official
+The published 0.22.0 train uses unmodified official
 `@earendil-works/pi-coding-agent@0.87.1` and its attested sibling closure.
 The maintained fork is retired from this train; 0.21.0 remains the historical
 fork-based release. Release SemVer is observability only;
@@ -155,9 +153,9 @@ means not accepted, and no overall percentage is defined:
 
 | Dimension | Status | Bound to |
 |---|---|---|
-| main implementation | Merged | Official Pi migration #233 merged at `9fe732e6` (2026-09-25): wire/record 7, Host systemPrompt, envelope v4, M4 regression and M5 calibration complete. Earlier: `main` @ `8b7a2121` (2026-09-24): #226 P0 prepared message egress (`644f8473`; BREAKING input-preparation wire version 6, capability token `agent-input-preparation-v6`, `TaskOfferPreparedPayload` requires `egressPolicy`, fresh-lane Pi `allowTools: []` means zero native tools), released as 0.21.0 through #227 (`8b7a2121`), which also cut the published set to nine packages (eight aligned plus keys; `byok-sdk` and `@byok-sdk/testkit` retired). Before it, as of `48605554` (2026-09-23): #223 bounded admission — byte evidence replaces the live-tokenizer readiness gate (`c61615f8`; BREAKING input-preparation wire version 5, record schema version 6), released as 0.20.0 through #224. Earlier, as of `26945c8a` (2026-09-19): recurring input, exact message disposition and fresh egress per the spec section above; #193 C07 Pi runtime launch (`d882aef4`), #198 Windows CI elimination (`49ec7477`), #199 custody five-edge enablement (`e0423d84`), #200 N1 external-CLI admission gate (`ec1cea36`); 2026-09-19 batch — #201 reserved agent-message grants, #202 Pi fork pin 1006 / S2 clipboard tripwire, #203 WP5 S2 CI flip (strict bun + real-chain monitor control), #204 #196 durable recurring smoke (embedded roundtrip + crash window), #205 docs authority navigation (#197), #206 WinSW uninstall image-lock retry, #207 Windows link-first cleanup + out-of-tree canary |
-| Open candidates | Unmerged | #191 (draft: MCP launch-cwd boundary); Salesko draft PR #241 — both still open drafts on 2026-09-25. #226 (P0 prepared egress) and #227 (0.21.0 preparation) are merged |
-| Published packages | 0.21.0 / keys 0.6.2 published | SDK 0.21.0 and keys 0.6.2 were published to npm on 2026-09-24/25 from the `v0.21.0` tag target (`8b7a2121`, the PR #227 merge) and are the registry's `latest` — readback `npm view @byok-sdk/core version` / `npm view @byok-sdk/keys version`, receipt in the [0.21.0 publication record](docs/releases/v0.21.0-publication.md), notes in [0.21.0](docs/releases/v0.21.0.md). The annotated `v0.21.0` tag is on origin at `8b7a2121`. The published set is nine packages: `@byok-sdk/core`, `implementation-identity`, `protocol`, `client`, `cloud`, `cloud-dataplane`, `server` and `ui-runtime` at 0.21.0, plus `@byok-sdk/keys` at 0.6.2; `byok-sdk` and `@byok-sdk/testkit` are no longer published and their existing versions are deprecated on the registry. The previous train is 0.20.0 / keys 0.6.1 (2026-09-23, `48605554`, [publication record](docs/releases/v0.20.0-publication.md)), before it 0.19.0 / keys 0.6.0 (2026-09-22, `9408ed7b`, [publication record](docs/releases/v0.19.0-publication.md)). Historical 0.21.0 Pi fork pin 0.86.1001; current source pins official Pi 0.87.1 for the unpublished 0.22.0 candidate |
+| main implementation | Merged | Official Pi migration #233 merged at `9fe732e6` (2026-09-25): wire/record 7, Host systemPrompt, envelope v4, M4 regression and M5 calibration complete; released as 0.22.0 through #234 (`0962f14f`). Earlier: `main` @ `8b7a2121` (2026-09-24): #226 P0 prepared message egress (`644f8473`; BREAKING input-preparation wire version 6, capability token `agent-input-preparation-v6`, `TaskOfferPreparedPayload` requires `egressPolicy`, fresh-lane Pi `allowTools: []` means zero native tools), released as 0.21.0 through #227 (`8b7a2121`), which also cut the published set to nine packages (eight aligned plus keys; `byok-sdk` and `@byok-sdk/testkit` retired). Before it, as of `48605554` (2026-09-23): #223 bounded admission — byte evidence replaces the live-tokenizer readiness gate (`c61615f8`; BREAKING input-preparation wire version 5, record schema version 6), released as 0.20.0 through #224. Earlier, as of `26945c8a` (2026-09-19): recurring input, exact message disposition and fresh egress per the spec section above; #193 C07 Pi runtime launch (`d882aef4`), #198 Windows CI elimination (`49ec7477`), #199 custody five-edge enablement (`e0423d84`), #200 N1 external-CLI admission gate (`ec1cea36`); 2026-09-19 batch — #201 reserved agent-message grants, #202 Pi fork pin 1006 / S2 clipboard tripwire, #203 WP5 S2 CI flip (strict bun + real-chain monitor control), #204 #196 durable recurring smoke (embedded roundtrip + crash window), #205 docs authority navigation (#197), #206 WinSW uninstall image-lock retry, #207 Windows link-first cleanup + out-of-tree canary |
+| Open candidates | Unmerged | #191 (draft: MCP launch-cwd boundary); Salesko draft PR #241 — both still open drafts on 2026-09-25. #233 (official Pi migration) and #234 (0.22.0 preparation) are merged |
+| Published packages | 0.22.0 / keys 0.7.0 published | SDK 0.22.0 and keys 0.7.0 were published to npm on 2026-09-25 from the `v0.22.0` tag target (`0962f14f`, the PR #234 merge) and are the registry's `latest` — readback `npm view @byok-sdk/core version` / `npm view @byok-sdk/keys version`, receipt in the [0.22.0 publication record](docs/releases/v0.22.0-publication.md), notes in [0.22.0](docs/releases/v0.22.0.md). The annotated `v0.22.0` tag is on origin at `0962f14f`. The published set is nine packages: `@byok-sdk/core`, `implementation-identity`, `protocol`, `client`, `cloud`, `cloud-dataplane`, `server` and `ui-runtime` at 0.22.0, plus `@byok-sdk/keys` at 0.7.0; `byok-sdk` and `@byok-sdk/testkit` are no longer published. The previous train is 0.21.0 / keys 0.6.2 (2026-09-24/25, `8b7a2121`, [publication record](docs/releases/v0.21.0-publication.md)), before it 0.20.0 / keys 0.6.1 (2026-09-23, `48605554`, [publication record](docs/releases/v0.20.0-publication.md)). 0.22.0 pins the unmodified official Pi 0.87.1 closure; the historical 0.21.0 train pinned Pi fork 0.86.1001 |
 | Real Host integration | In progress, not accepted | Salesko Sprint ledger: K5 in progress, K7 incomplete; A01–A29 at 24 LOCAL_PASS / 5 BLOCKED at the latest recorded checkpoint. Host-side subjects and evidence live in that ledger, not here |
 | Native / production acceptance | 未验收 | Target-runtime S9 not executed; aiphabee (K6) paused by owner decision; no production migration, deployment, or paid-runtime acceptance |
 
