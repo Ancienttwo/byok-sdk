@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.22.0 / @byok-sdk/keys 0.7.0 — 2026-09-25 (prepared; not published)
+## 0.22.0 / @byok-sdk/keys 0.7.0 — 2026-09-25 (published; tag `v0.22.0` at `0962f14f`)
 
 - **Changed (runtime, BREAKING)** — retire the maintained Pi fork and use the
   unmodified official 0.87.1 closure, verified by tarball/provenance and installed
