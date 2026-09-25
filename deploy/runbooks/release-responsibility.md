@@ -2,6 +2,12 @@
 
 Status: CURRENT boundary contract.
 
+The next prepared candidate is **0.22.0 / keys 0.7.0**, not yet published.
+[Release notes](../../docs/releases/v0.22.0.md) and the
+[Salesko / Owner command sheet](../../docs/releases/v0.22.0-handoff.md) define
+its wire-7 drain, record rebuild and official-identity ruling prerequisites.
+Preparation stops at dry run; the existing published train below is unchanged.
+
 The registry's current `latest` is 0.21.0 / keys 0.6.2, published on 2026-09-24/25
 from the `v0.21.0` tag target (`8b7a2121`) — see its
 [publication record](../../docs/releases/v0.21.0-publication.md) and the
@@ -25,16 +31,15 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 ## Version selection
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
-The 0.21.0 train carries one pre-1.0 breaking cut, so the dispatch line takes a
-minor: the input-preparation wire moves to version 6 with the capability token
-renamed to `agent-input-preparation-v6` and no dual token or dual read,
-`TaskOfferPreparedPayload` now requires `egressPolicy`, and Pi `auto` +
-`allowTools: []` on the fresh lane now means zero native tools instead of Pi's
-full default tool table. It has an operator precondition: drain in-flight input
-preparations and prepared Executions, then upgrade cloud and devices as a pair.
-keys takes a patch, 0.6.2: its source is unchanged since `v0.20.0`, and it is
-re-released only because its packed `@byok-sdk/core` edge must equal the current
-dispatch release.
+The 0.22.0 dispatch MINOR carries official Pi 0.87.1, wire/record 7,
+agent-input-preparation-v7, envelope v4 and required complete Host systemPrompt.
+Fence admissions, drain old queued/in-flight work, upgrade Host/cloud/devices,
+rebuild installation and preparation records and reissue the official-identity
+ruling (ruledResidualKeys=[], C=1024) before reopening admission.
+keys moves to 0.7.0, not a patch: its unchanged credential-launcher source consumes
+the changed strict nativeProvenance binding schema from implementation-identity;
+that changes accepted security authority. Packed core and identity dependencies
+both resolve to 0.22.0. Identity/core consolidation stays deferred.
 Version preparation does not authorize registry publication.
 
 ## Release checklist
@@ -48,7 +53,7 @@ Version preparation does not authorize registry publication.
    1. Confirm the CI run for the exact release commit is green, including its `npm-release-pack` job. Use the `push` run for the commit (`gh run list --branch main --workflow CI --event push --limit 1`), not a `pull_request` run: on pull-request events `github.sha` is the merge ref, so that run's artifact is named after a commit that is not `HEAD` and the dry run refuses it.
    2. Download that run's accepted tarballs: `gh run download <run-id> -n release-pack-<sha> -D <dir>`, where `<sha>` is the full 40-character commit id (`git rev-parse HEAD`).
    3. Dry run `node scripts/release/publish.mjs --artifacts <dir>`. It refuses unless the frozen `release-manifest.json` names the release version and was packed from the current `HEAD`, and unless every tarball the publish set needs is present and re-hashes to its recorded sha256. It then prints the ordered publish plan with those digests. Nothing is published, read back or tagged.
-   4. Release with `node scripts/release/publish.mjs --artifacts <dir> --execute --otp <code>`. It refuses if the tag already exists, if `npm whoami` reports no account, or if `npm profile get --json` does not report `tfa.mode` `auth-and-writes` — there is no override. It then publishes each tarball in dependency order (`--provenance` only under GitHub Actions OIDC; a local release logs that no attestation is attached), reads the registry back, and only then creates the annotated `v<version>` tag carrying the source commit.
+   4. Release with `node scripts/release/publish.mjs --artifacts <dir> --execute`. Run interactively in Terminal.app for npm write 2FA. It refuses if the tag already exists, if `npm whoami` reports no account, or if `npm profile get --json` does not report `tfa.mode` `auth-and-writes` — there is no override. It then publishes each tarball in dependency order (`--provenance` only under GitHub Actions OIDC; a local release logs that no attestation is attached), reads the registry back, and only then creates the annotated `v<version>` tag carrying the source commit.
    5. Push the tag: `git push origin v<version>`. A tag exists only for a train the registry has already confirmed.
 
    Artifacts expire after 30 days; past that, re-run CI on the same commit rather than repacking locally.

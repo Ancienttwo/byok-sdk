@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.22.0 / @byok-sdk/keys 0.7.0 — 2026-09-25 (prepared; not published)
+
+- **Changed (runtime, BREAKING)** — retire the maintained Pi fork and use the
+  unmodified official 0.87.1 closure, verified by tarball/provenance and installed
+  file digests. No private imports, patches or copied serializer fallback.
+- **Changed (prepared contract, BREAKING)** — wire/record 7 with the single
+  `agent-input-preparation-v7` token; required complete Host `systemPrompt`
+  replaces Pi renderer inputs/default prompt. Envelope v4 uses P(D)=D and
+  residual=[]; Host must reissue its official-identity ruling. Empty
+  requiredToolsets is supported; native and reserved message tools remain absent.
+- **Fixed** — continuation request refusals propagate to daemon task.fail with
+  typed codes. Both retry layers are disabled; the first URL/body remains
+  frozen and tool continuations retain the accepted post-response overflow rule.
+- **Verified** — M4 recursion/custody/scripted workflow regressions and M5
+  calibration completed. C=1024 remains with zero observed uncovered amount;
+  evidence is tasks/runs/20260925-official-pi-c-reprobe.json and its checksum.
+- **Changed (keys, BREAKING dependency contract)** — keys 0.7.0 consumes the
+  official nativeProvenance launch-binding schema through implementation-identity
+  and pins packed core/identity edges to 0.22.0; keys source itself is unchanged.
+- **Operational** — drain old work and rebuild records before coordinated upgrade.
+  [Release notes](docs/releases/v0.22.0.md) cover OPENAI_LOG local logging,
+  npm's 10-root dual-instance compat registry boundary and pi-tui's Win32 native
+  prebuild; [handoff](docs/releases/v0.22.0-handoff.md) covers Salesko ruling,
+  full prompt assembly and Owner-only publication/readback.
+
+
 ## 0.21.0 / @byok-sdk/keys 0.6.2 — 2026-09-24 (published; tag `v0.21.0` at `8b7a2121`)
 
 - **Removed (distribution, BREAKING)** — `byok-sdk` and `@byok-sdk/testkit`

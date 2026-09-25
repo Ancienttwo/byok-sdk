@@ -236,7 +236,7 @@
     "credentialHandling": "One device-local auth entry read in memory after compile; no credential persisted or printed."
   },
   "shapeDiff": {
-    "oldEvidence": "/Users/kito/Projects/byok-sdk-wt-pi-087-migration/tasks/runs/20260923-bounded-admission-probe.json",
+    "oldEvidence": "tasks/runs/20260923-bounded-admission-probe.json",
     "oldEvidenceSha256": "5a2daaf9202e669708874dc89776f9d0e0f53813f0a1970db8ea56d9215c1fa4",
     "bare": {
       "oldBytes": 140,
