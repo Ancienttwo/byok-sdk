@@ -10,10 +10,13 @@ describe('official closure attestation guards', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'byok-closure-'));
     const changed = '@earendil-works/pi-telemetry';
     try {
-      expect(new Set(verifyOfficialPiClosure(process.cwd()).roots.map(row => row.name))).toEqual(new Set(OFFICIAL_PI_PACKAGES));
+      const { roots } = verifyOfficialPiClosure(process.cwd());
+      expect(new Set(roots.map(row => row.name))).toEqual(new Set(OFFICIAL_PI_PACKAGES));
+      const installed = roots.find(row => row.name === changed);
+      expect(installed).toBeDefined();
       const target = path.join(root, 'node_modules', changed);
       mkdirSync(path.dirname(target), { recursive: true });
-      cpSync(locateOfficialPiPackage(changed, process.cwd()), target, { recursive: true });
+      cpSync(installed!.root, target, { recursive: true });
       expect(() => verifyOfficialPiPackage(target, changed)).not.toThrow();
       const file = path.join(root, 'node_modules', changed, 'package.json');
       writeFileSync(file, readFileSync(file, 'utf8') + ' ');

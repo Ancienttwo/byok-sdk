@@ -1,4 +1,4 @@
-import { OFFICIAL_PI_PROVENANCE, OFFICIAL_PI_PACKAGES, locateOfficialPiPackage } from '../adapters/pi/official-pi-installation.mjs';
+import { OFFICIAL_PI_PACKAGES, verifyOfficialPiClosure } from '../adapters/pi/official-pi-installation.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -42,9 +42,12 @@ describe('required native export data assets',()=>{
     const script=path.join(scriptDir,'build-pi-export-assets.mjs');
     cpSync(path.resolve(import.meta.dirname,'../../scripts/build-pi-export-assets.mjs'),script);
     writeFileSync(path.join(root,'package.json'),JSON.stringify({byok:{piRuntimePin:source.packageVersion}}));
+    const installedRoots = verifyOfficialPiClosure(process.cwd()).roots;
     for (const name of OFFICIAL_PI_PACKAGES) {
+      const installed = installedRoots.find(row => row.name === name);
+      expect(installed).toBeDefined();
       const target = path.join(root,'node_modules',name); mkdirSync(path.dirname(target),{recursive:true});
-      cpSync(locateOfficialPiPackage(name,process.cwd()),target,{recursive:true});
+      cpSync(installed!.root,target,{recursive:true});
     }
     const pinRoot=path.join(root,'node_modules/@earendil-works/pi-coding-agent');
     const run=()=>spawnSync(process.execPath,[script],{encoding:'utf8'});
