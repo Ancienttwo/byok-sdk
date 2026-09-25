@@ -10,5 +10,5 @@ it('runs the vendored scripted workflow, official Agent/compat stream and opaque
     encoding: 'utf8', timeout: 15_000,
     env: { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR },
   });
-  expect(JSON.parse(result.trim())).toMatchObject({ status: 'passed', workflowLaunches: 1, loopbackRequests: 2, providerRequests: 0 });
+  expect(JSON.parse(result.trim())).toMatchObject({ status: 'passed', workflowLaunches: 1, loopbackRequests: 2, permitNegativeCases: 10 });
 }, 20_000);

@@ -799,6 +799,17 @@ its declared assets; runtime checks compare the official provenance and manifest
 bytes without resolving a mutable external package installation. File tampering or
 provenance drift is a refusal, never a substituted runtime.
 
+The official coding-agent ships an npm shrinkwrap. The measured npm install has
+10 physical roots across six official package names: pi-ai, pi-agent-core, chord
+and pi-telemetry each occur twice (top-level and coding-agent nested); coding-agent
+and pi-tui occur once. Attestation verifies all instances; no singleton guarantee
+is claimed. The scripted workflow probe covers the vendored arbiter's built-in
+Agent/compat stream path across this layout. It does not prove cross-instance
+registration visibility: pi-ai/compat owns a module-local apiProviderRegistry,
+so a future extension calling registerApiProvider on one copy cannot make that
+registration visible to another copy. This boundary is deferred in tasks/todos.md
+and must be addressed before such an extension is admitted.
+
 Dispatch and private conformance execution require Node.js >=22.22.0. Keys remains
 outside the dispatch dependency graph and delivers credentials through its existing
 separately installed launcher boundary.

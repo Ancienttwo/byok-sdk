@@ -21,14 +21,19 @@ const instances = Object.fromEntries(['pi-ai', 'pi-agent-core'].map(name => {
 }));
 const input = { issuerPackage: '@byok-sdk/client', workflowRunId: 'root-a', childKey: 'child', agent: 'worker', launchContractDigest: 'digest-a', context: 'fresh' };
 const launch = { ...input, runner: 'pi' };
+let permitNegativeCases = 0;
+function assertPermitRefusal(result) {
+  assert.equal(typeof result, 'string');
+  permitNegativeCases++;
+}
 for (const change of [{ workflowRunId: 'root-b' }, { childKey: 'other' }, { agent: 'other' }, { launchContractDigest: 'other' }, { context: 'fork' }]) {
   const permit = createWorkflowChildPermit(input);
   assert.equal(claimWorkflowChildPermit(permit, input.workflowRunId, input.childKey), undefined);
-  assert.equal(typeof consumeWorkflowChildPermit(permit, { ...launch, ...change }), 'string');
+  assertPermitRefusal(consumeWorkflowChildPermit(permit, { ...launch, ...change }));
 }
-assert.equal(typeof validateWorkflowChildPermitRoot(createWorkflowChildPermit(input), 'root-b'), 'string');
-assert.equal(typeof consumeWorkflowChildPermit(createWorkflowChildPermit(input), launch), 'string');
-assert.equal(typeof claimWorkflowChildPermit(JSON.parse('{}'), input.workflowRunId, input.childKey), 'string');
+assertPermitRefusal(validateWorkflowChildPermitRoot(createWorkflowChildPermit(input), 'root-b'));
+assertPermitRefusal(consumeWorkflowChildPermit(createWorkflowChildPermit(input), launch));
+assertPermitRefusal(claimWorkflowChildPermit(JSON.parse('{}'), input.workflowRunId, input.childKey));
 const permit = createWorkflowChildPermit(input);
 let sends = 0;
 const server = createServer(async (req, res) => {
@@ -77,7 +82,7 @@ try {
   assert.ok(result.trace.some(entry => entry.state === 'reused'));
   assert.equal(launched, 1);
   assert.equal(sends, 2);
-  assert.equal(typeof consumeWorkflowChildPermit(permit, launch), 'string');
+  assertPermitRefusal(consumeWorkflowChildPermit(permit, launch));
   let forbiddenLaunches = 0;
   await assert.rejects(runWorkflowScript({ script: 'return runs.run("other", {agent:"worker", task:"No"});',
     oneUsePermit: { claim: key => claimWorkflowChildPermit(permit, input.workflowRunId, key) },
@@ -85,7 +90,8 @@ try {
     async status() { throw new Error('unused'); },
   }), /already consumed/);
   assert.equal(forbiddenLaunches, 0);
-  console.log(JSON.stringify({ status: 'passed', instances, workflowLaunches: launched, loopbackRequests: sends, providerRequests: 0, permitNegativeCases: 9 }));
+  permitNegativeCases++;
+  console.log(JSON.stringify({ status: 'passed', instances, workflowLaunches: launched, loopbackRequests: sends, permitNegativeCases }));
 } finally {
   server.closeAllConnections();
   await new Promise(resolve => server.close(() => resolve()));
