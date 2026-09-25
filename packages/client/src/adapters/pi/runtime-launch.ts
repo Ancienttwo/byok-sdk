@@ -1,3 +1,5 @@
+import { buildRuntimeEnv } from '../../daemon/environment';
+import { PROVIDER_CREDENTIAL_ENV_NAMES } from '../provider-credential-environment';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { ensureSecureDir } from '../../util/secure-dir';
@@ -43,7 +45,13 @@ export async function resolvePiRuntimeLaunch(options: {
 }): Promise<PiRuntimeLaunchResources> {
   const source = options.keysSessionDir === undefined ? 'pi-auth-store' : 'keys-profile';
   const original = Object.fromEntries(Object.entries(options.env).filter((entry): entry is [string, string] => entry[1] !== undefined));
-  let env = source === 'keys-profile' ? projectKeysPiInheritedEnvironment(original) : { ...original };
+  const inherited = options.kind === 'pi-prepared'
+    ? buildRuntimeEnv({ ambient: original, requirements: {
+      baseNames: [...CONTROLLED_PI_DIRECTORY_ENV_NAMES],
+      credentialNames: PROVIDER_CREDENTIAL_ENV_NAMES,
+    } })
+    : original;
+  let env = source === 'keys-profile' ? projectKeysPiInheritedEnvironment(inherited) : { ...inherited };
   let projectionDir: string | undefined;
   let released = false;
   const release = async (): Promise<void> => {

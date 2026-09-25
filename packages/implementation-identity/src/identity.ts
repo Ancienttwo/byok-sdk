@@ -191,9 +191,10 @@ export interface ToolImplementationAssetV1 {
 export interface ToolImplementationNativeProvenanceV1 {
   readonly packageName: string;
   readonly packageVersion: string;
-  readonly upstreamBase: string;
+  readonly tarballIntegrity: string;
+  readonly provenanceDigest: string;
+  readonly closureDigest: string;
   readonly upstreamCommit: string;
-  readonly forkBuild: number;
   readonly compilerVersion: number;
 }
 
@@ -861,9 +862,10 @@ function validateAssets(value: unknown): readonly ToolImplementationAssetV1[] | 
 const NATIVE_PROVENANCE_KEYS = [
   'packageName',
   'packageVersion',
-  'upstreamBase',
+  'tarballIntegrity',
+  'provenanceDigest',
+  'closureDigest',
   'upstreamCommit',
-  'forkBuild',
   'compilerVersion',
 ] as const;
 
@@ -871,16 +873,18 @@ function validateNativeProvenance(value: unknown): ToolImplementationNativeProve
   if (!plainRecord(value) || !exactKeys(value, NATIVE_PROVENANCE_KEYS)) return undefined;
   if (!nonEmptyString(value.packageName)) return undefined;
   if (!nonEmptyString(value.packageVersion)) return undefined;
-  if (!nonEmptyString(value.upstreamBase)) return undefined;
+  if (typeof value.tarballIntegrity !== 'string' || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(value.tarballIntegrity)) return undefined;
+  if (typeof value.provenanceDigest !== 'string' || !SHA256_HEX.test(value.provenanceDigest)) return undefined;
+  if (typeof value.closureDigest !== 'string' || !SHA256_HEX.test(value.closureDigest)) return undefined;
   if (!nonEmptyString(value.upstreamCommit)) return undefined;
-  if (!Number.isSafeInteger(value.forkBuild)) return undefined;
   if (!Number.isSafeInteger(value.compilerVersion)) return undefined;
   return Object.freeze({
     packageName: value.packageName,
     packageVersion: value.packageVersion,
-    upstreamBase: value.upstreamBase,
+    tarballIntegrity: value.tarballIntegrity,
+    provenanceDigest: value.provenanceDigest,
+    closureDigest: value.closureDigest,
     upstreamCommit: value.upstreamCommit,
-    forkBuild: value.forkBuild as number,
     compilerVersion: value.compilerVersion as number,
   });
 }

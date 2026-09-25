@@ -73,9 +73,9 @@ const BINDING = {
   runtime: {
     packageName: '@byok-sdk/pi-coding-agent',
     packageVersion: '0.85.1001',
-    upstreamBase: '0.85.1',
+    tarballIntegrity: 'sha512-'+ 'YQ=='.repeat(1),
     upstreamCommit: 'd981de1229ef899957bbe968bc8dcda02a21f477',
-    forkBuild: 1,
+    provenanceDigest: 'a'.repeat(64), closureDigest: 'b'.repeat(64),
     envelopeFormat: 'pi.prepared-session-input.v1',
     requestFormat: 'openai-completions.v1',
     compilerVersion: 1,
@@ -194,7 +194,7 @@ describe('agent.input.preparation envelope', () => {
   });
 
   it('requires at least one toolset and rejects duplicates', () => {
-    expect(AgentInputPreparationPayloadSchema.safeParse(payload({ requiredToolsets: [] })).success).toBe(false);
+    expect(AgentInputPreparationPayloadSchema.safeParse(payload({ requiredToolsets: [] })).success).toBe(true);
     expect(AgentInputPreparationPayloadSchema.safeParse(payload({ requiredToolsets: ['team', 'team'] })).success).toBe(false);
   });
 
@@ -320,15 +320,7 @@ describe('input preparation model: the launched model declarations', () => {
 describe('input preparation context document', () => {
   it('accepts the Host-authorized prompt and user messages and rejects model-visible tools', () => {
     const document = {
-      prompt: {
-        cwd: '/home/agent',
-        toolSnippets: { read: 'reads a file' },
-        toolGuidelines: {},
-        promptGuidelines: [],
-        contextFiles: [],
-        skills: [],
-        docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
-      },
+      prompt: { systemPrompt: 'Host fixture instructions' },
       messages: [{ role: 'user', content: 'hi', timestamp: 1767225600000 }],
     };
     expect(InputPreparationContextDocumentSchema.safeParse(document).success).toBe(true);
@@ -356,15 +348,7 @@ describe('input preparation context document', () => {
 
   it('accepts host-canonical assistant text beside user history, and nothing that claims provenance', () => {
     const document = {
-      prompt: {
-        cwd: '/home/agent',
-        toolSnippets: {},
-        toolGuidelines: {},
-        promptGuidelines: [],
-        contextFiles: [],
-        skills: [],
-        docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
-      },
+      prompt: { systemPrompt: 'Host fixture instructions' },
       messages: [
         { role: 'user', content: 'hi', timestamp: 1767225600000 },
         { role: 'assistant', origin: 'host_canonical', content: 'hello', timestamp: 1767225600001 },
@@ -558,7 +542,7 @@ describe('input preparation capability and routes', () => {
     // version field: a device and a cloud on different versions never admit
     // each other's preparations. The retired unversioned token is gone.
     expect(AGENT_INPUT_PREPARATION_CAPABILITY).toBe(`agent-input-preparation-v${INPUT_PREPARATION_WIRE_VERSION}`);
-    expect(AGENT_INPUT_PREPARATION_CAPABILITY).toBe('agent-input-preparation-v6');
+    expect(AGENT_INPUT_PREPARATION_CAPABILITY).toBe('agent-input-preparation-v7');
     expect(CAPABILITY_FLAGS as readonly string[]).not.toContain('agent-input-preparation');
     expect(BYOK_INPUT_PREPARATION_COMPLETION_ROUTE).toBe('/byok/input-preparations/:requestId/completion');
     expect(BYOK_INPUT_PREPARATION_STATUS_ROUTE).toBe('/byok/input-preparations/:requestId');

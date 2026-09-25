@@ -9,8 +9,8 @@ import {
 } from '../identity';
 
 const fixtureRoot = path.resolve(import.meta.dirname, '../../../../tests/fixtures/c07-runtime-record');
-const positive = JSON.parse(readFileSync(path.join(fixtureRoot, 'canonical-revision.v1.json'), 'utf8'));
-const negative = JSON.parse(readFileSync(path.join(fixtureRoot, 'rejections.v1.json'), 'utf8'));
+const positive = JSON.parse(readFileSync(path.join(fixtureRoot, 'official-pi-087.v1.json'), 'utf8'));
+const negative = JSON.parse(readFileSync(path.join(fixtureRoot, 'official-pi-087-rejections.v1.json'), 'utf8'));
 const env = { PATH: '/usr/bin', HOME: '/home/fixture' };
 // Mock physical measurements only: these tests verify selection and immutable
 // projection, not an actual root-owned installation (client tests cover bytes).

@@ -1,3 +1,5 @@
+import { parseExpressionAt, type Node } from 'acorn';
+import officialClosure from '../adapters/pi/official-pi-closure.json';
 /**
  * Built-bundle closure guard for every entry a host may import WITHOUT taking
  * the daemon graph.
@@ -146,8 +148,31 @@ function excerptAt(source: string, index: number): string {
   return source.slice(start, end === -1 ? source.length : end).trim().slice(0, 160);
 }
 
+/** Only the independently checked JSON evidence literal may name upstream files as data. */
+function withoutOfficialClosureData(source: string): string {
+  if (!source.includes('var official_pi_closure_default =')) return source;
+  const prefix = 'var official_pi_closure_default = ';
+  const start = source.indexOf(prefix) + prefix.length;
+  const literal = parseExpressionAt(source, start, { ecmaVersion: 'latest' });
+  type DataNode = Node & { value?: unknown; elements?: DataNode[]; properties?: { type: string; computed: boolean; method: boolean; kind: string; key: DataNode & { name?: string }; value: DataNode }[] };
+  const read = (node: DataNode): unknown => {
+    if (node.type === 'Literal' && (node.value === null || ['string','number','boolean'].includes(typeof node.value))) return node.value;
+    if (node.type === 'ArrayExpression') return node.elements!.map(read);
+    if (node.type === 'ObjectExpression') return Object.fromEntries(node.properties!.map(item => {
+      if (item.type !== 'Property' || item.computed || item.method || item.kind !== 'init') throw new Error('closure must remain JSON data');
+      const key = item.key.type === 'Identifier' ? item.key.name : read(item.key);
+      if (typeof key !== 'string') throw new Error('invalid closure data key');
+      return [key, read(item.value)];
+    }));
+    throw new Error('executable expression in official closure data');
+  };
+  expect(read(literal as DataNode)).toEqual(officialClosure);
+  return source.slice(0, start) + '{}' + source.slice(literal.end);
+}
+
 /** Every hit in one emitted bundle, under the rules documented at the top. */
 function scanBundle(source: string, allowedSubstrings: readonly string[] = []): Hit[] {
+  source = withoutOfficialClosureData(source);
   const hits: Hit[] = [];
   for (const { rule, pattern } of CODEGEN_RULES) {
     pattern.lastIndex = 0;
@@ -289,9 +314,10 @@ describe.skipIf(!DIST_PRESENT)('the daemon-free dist sub-path closures', () => {
       expect(existsSync(resolved)).toBe(true);
     }
     const root = readFileSync(path.join(DIST, 'index.js'), 'utf8');
-    // Existing light protocol constants stay static; only the runtime graph is lazy.
-    expect(staticImportSpecifiers(root).filter((name) => name.includes('pi-coding-agent')))
-      .toEqual(['@earendil-works/pi-coding-agent/rpc-types']);
+    // No Pi package is a static edge of the root: the RPC frame bound is SDK-owned
+    // (`util/rpc-frame.ts`), and the runtime graph is reached only lazily.
+    expect(staticImportSpecifiers(root).filter((name) => name.includes('@earendil-works/')))
+      .toEqual([]);
     expect(root).toMatch(/import\(["']#byok-pi-runtime-host["']\)/);
   });
 
@@ -322,20 +348,26 @@ describe.skipIf(!DIST_PRESENT)('the daemon-free dist sub-path closures', () => {
   }
 
   it('pins the pi package name in dist/adapters/index.js as data, never as a module edge', () => {
-    const source = readFileSync(path.join(DIST, 'adapters', 'index.js'), 'utf8');
+    const source = withoutOfficialClosureData(readFileSync(path.join(DIST, 'adapters', 'index.js'), 'utf8'));
     // The exception granted above is only defensible while every occurrence is
-    // one specifier constant or the exact dependency-alias projection. An import, a re-export, or a
-    // dynamic `import()` of it fails here even though the substring is allowed.
-    const occurrences = source
-      .split('\n')
-      .map((line, index) => ({ line: index + 1, text: line.trim() }))
-      .filter(({ text }) => text.includes('pi-coding-agent') || text.includes('@earendil-works'));
+    // the one specifier constant. The pin is an exact semver and names no
+    // package, so it is checked as its own projection. An import, a re-export,
+    // or a dynamic `import()` of the package fails here even though the
+    // substring is allowed.
+    const lines = source.split('\n').map((line) => line.trim());
+    const occurrences = lines.filter((text) => text.includes('pi-coding-agent') || text.includes('@earendil-works'));
     const manifest = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8'));
-    const alias = manifest.dependencies['@earendil-works/pi-coding-agent'];
-    expect(manifest.byok.piRuntimePin).toBe(alias);
-    expect(occurrences.map(({ text }) => text)).toEqual([
-      `piRuntimePin: ${JSON.stringify(alias)}`,
+    const pin = manifest.dependencies['@earendil-works/pi-coding-agent'];
+    expect(pin).toMatch(/^\d+\.\d+\.\d+$/u);
+    expect(manifest.byok.piRuntimePin).toBe(pin);
+    expect(lines.filter((text) => text.startsWith('piRuntimePin:'))).toEqual([`piRuntimePin: ${JSON.stringify(pin)}`]);
+    // The specifier constant, plus the official runtime tuple the identity
+    // seam (`adapters/pi/input-preparation.ts` `OFFICIAL_PI_RUNTIME`) admits:
+    // the coding agent name and its two lockstep package names, as frozen data.
+    expect(occurrences).toEqual([
+      'var coding = packages.get("@earendil-works/pi-coding-agent");',
       'var PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";',
+      'lockstep: Object.freeze(["@earendil-works/pi-ai", "@earendil-works/pi-agent-core"])',
     ]);
     expect(
       staticImportSpecifiers(source).filter((specifier) => specifier.includes('pi-coding-agent')),

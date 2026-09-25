@@ -690,7 +690,7 @@ export const AgentInputPreparationPayloadSchema = z
     selection: InputPreparationSelectionSchema,
     deadlineAt: z.iso.datetime({ offset: true }),
     context: z.union([InputPreparationInlineContextSchema, InputPreparationBlobContextSchema]),
-    requiredToolsets: RequiredToolsetsSchema,
+    requiredToolsets: z.array(ToolsetIdSchema).max(16).superRefine((ids, ctx) => rejectDuplicateToolsets(ids, ctx, 'required')),
     permissionMode: InputPreparationPermissionModeSchema,
     /**
      * The Host's accounting ruling for this preparation, carried verbatim onto

@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,7 +18,7 @@ import { preparedCompileRequest } from './fixtures/prepared-compile-snapshot';
  * The check this replaces replaced methods on the DEFAULT `node:fs` /
  * `node:child_process` / `node:net` module objects inside the vitest worker,
  * AFTER the fork's graph had been loaded, and never called
- * `module.syncBuiltinESMExports()`. The fork's helpers bind NAMED imports
+ * `module.syncBuiltinESMExports()`. The retired fork's helpers bound NAMED imports
  * (`dist/config.js:1`, `dist/core/skills.js:1`, `dist/utils/paths.js:1`,
  * `dist/utils/child-process.js:1`), which resolve through the builtin's ESM
  * namespace, so a read made through exactly the helpers 0.86 pulled into the
@@ -28,7 +29,8 @@ import { preparedCompileRequest } from './fixtures/prepared-compile-snapshot';
  * `fixtures/pi-compile-purity-probe.mjs` is the measurement half: a child
  * process that installs its monitors, republishes them with
  * `module.syncBuiltinESMExports()`, replaces `process.env` with a recording
- * Proxy, and only then imports the installed fork by the same specifier
+ * Proxy, and only then imports the SDK compile entry (`compilePreparedPiInput`,
+ * built from source by this file) and the official pi-ai modules it loads, by the specifiers
  * `adapters/pi/input-preparation.ts` uses. It reports three phases separately —
  * cold module load, first compile, second compile — and this file asserts on
  * the report.
@@ -50,6 +52,64 @@ import { preparedCompileRequest } from './fixtures/prepared-compile-snapshot';
 const PROBE = fileURLToPath(new URL('./fixtures/pi-compile-purity-probe.mjs', import.meta.url));
 const CLIENT_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
+/**
+ * The SDK compile entry the probe loads, built from source for this run.
+ *
+ * The published dist bundles `compilePreparedPiInput` without exporting it, so
+ * the probe cannot import it from `dist/`. The same esbuild the package build
+ * runs (tsup's) bundles exactly the two exports the compile path uses, with
+ * the SDK's own workspace code inlined and every third-party package left as
+ * a bare import, so the official `@earendil-works/pi-ai` graph is loaded from
+ * the installed package exactly as the adapter loads it. The file is written
+ * under `node_modules/.cache/` so those bare imports resolve through the
+ * package's own `node_modules` and the probe's "every path the load reads is
+ * inside an installed package" rule still holds verbatim. It is built BEFORE
+ * any probe starts and never touched by one: the probe only imports it, after
+ * its monitors are installed.
+ */
+interface EsbuildApi {
+  build(options: Record<string, unknown>): Promise<unknown>;
+}
+const esbuild = createRequire(createRequire(import.meta.url).resolve('tsup'))('esbuild') as EsbuildApi;
+const CLIENT_VERSION = (JSON.parse(readFileSync(path.join(CLIENT_ROOT, 'package.json'), 'utf8')) as { version: string }).version;
+let compileEntry: string;
+
+async function buildCompileEntry(): Promise<string> {
+  const cacheDir = path.join(CLIENT_ROOT, 'node_modules', '.cache');
+  mkdirSync(cacheDir, { recursive: true });
+  const dir = mkdtempSync(path.join(cacheDir, 'byok-pi-compile-purity-'));
+  temporaryRoots.push(dir);
+  const outfile = path.join(dir, 'compile-entry.mjs');
+  await esbuild.build({
+    stdin: {
+      contents: [
+        "export { compilePreparedPiInput } from './src/adapters/pi/input-preparation';",
+        "export { loadOfficialCompiler } from './src/adapters/pi/prepared-request';",
+      ].join('\n'),
+      resolveDir: CLIENT_ROOT,
+      loader: 'ts',
+      sourcefile: 'pi-compile-purity-entry.ts',
+    },
+    bundle: true,
+    format: 'esm',
+    platform: 'node',
+    target: 'es2022',
+    outfile,
+    logLevel: 'silent',
+    define: { __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(CLIENT_VERSION) },
+    plugins: [{
+      name: 'third-party-external',
+      setup(build: { onResolve(options: { filter: RegExp }, callback: (args: { path: string }) => unknown): void }) {
+        // Bare third-party specifiers stay imports; SDK workspace packages and
+        // relative SDK modules are inlined.
+        build.onResolve({ filter: /^[^./]/ }, (args) =>
+          args.path.startsWith('@byok-sdk/') ? undefined : { path: args.path, external: true });
+      },
+    }],
+  });
+  return outfile;
+}
+
 /** Obviously fake. Nothing here is a credential and nothing is sent anywhere. */
 const CANARY_ENV_KEY = 'BYOK_PURITY_FIXTURE_CANARY';
 
@@ -59,7 +119,7 @@ interface ProbeEvent {
   readonly api: string;
   readonly detail: string;
   readonly origin: string;
-  readonly source: 'fork' | 'dependency' | 'runtime' | 'other';
+  readonly source: 'official' | 'sdk' | 'dependency' | 'runtime' | 'other';
   readonly count: number;
 }
 
@@ -68,7 +128,7 @@ interface ProbeEnvEvent {
   readonly key: string;
   readonly via: string;
   readonly origin: string;
-  readonly source: 'fork' | 'dependency' | 'runtime' | 'other';
+  readonly source: 'official' | 'sdk' | 'dependency' | 'runtime' | 'other';
   readonly count: number;
 }
 
@@ -76,7 +136,7 @@ interface ProbeNondeterminismEvent {
   readonly phase: string;
   readonly api: string;
   readonly origin: string;
-  readonly source: 'fork' | 'dependency' | 'runtime' | 'other';
+  readonly source: 'official' | 'sdk' | 'dependency' | 'runtime' | 'other';
   readonly count: number;
 }
 
@@ -129,9 +189,9 @@ interface ProbeRun {
 const temporaryRoots: string[] = [];
 
 /**
- * The baseline environment: nothing set that the fork could take as an
+ * The baseline environment: nothing set that the runtime could take as an
  * override, but `HOME` still points at a throwaway directory full of canaries,
- * so "the fork read nothing under the home directory" is a measured fact
+ * so "the compile read nothing under the home directory" is a measured fact
  * rather than a fact about the developer's machine.
  */
 function baselineEnvironment(root: string, canaryValue: string): NodeJS.ProcessEnv {
@@ -145,7 +205,7 @@ function baselineEnvironment(root: string, canaryValue: string): NodeJS.ProcessE
 /**
  * One poisoned ambient environment.
  *
- * Every variable that could steer the fork's own discovery is pointed at a
+ * Every variable that could steer the runtime's own discovery is pointed at a
  * throwaway directory that really exists and really holds canary content:
  * `HOME`/`USERPROFILE` and the XDG pair for home discovery, `PI_PACKAGE_DIR`
  * for `getPackageDir()`, `PI_CODING_AGENT_DIR` (`config.js:406`, the agent-dir
@@ -167,7 +227,7 @@ function ambientEnvironment(
     XDG_DATA_HOME: path.join(home, '.local', 'share'),
     PI_PACKAGE_DIR: path.join(root, 'pi-package'),
     PI_CODING_AGENT_DIR: path.join(home, '.pi', 'agent'),
-    // `long` and `short` are the two values the fork's cache-retention setting
+    // `long` and `short` are the two values the runtime's cache-retention setting
     // actually discriminates on, one in each poisoned run. A value it cannot
     // parse would be inert and would poison nothing. Independence is still
     // established by the zero-env-read assertion rather than by the pair being
@@ -232,6 +292,7 @@ async function runProbe(
       reportPath,
       canaryFile: path.join(ambientRoot, 'home', 'private-canary.txt'),
       canaryEnvKey: CANARY_ENV_KEY,
+      compileEntry,
     }),
     'utf8',
   );
@@ -262,9 +323,11 @@ async function runProbe(
   return { report, canaryValue, ambientRoot, exitCode, stderr };
 }
 
-const forkEvents = (phase: ProbePhase): ProbeEvent[] => phase.events.filter((event) => event.source === 'fork');
-const forkEnvReads = (phase: ProbePhase): ProbeEnvEvent[] =>
-  phase.envReads.filter((event) => event.source === 'fork');
+const officialEvents = (phase: ProbePhase): ProbeEvent[] => phase.events.filter((event) => event.source === 'official');
+const officialEnvReads = (phase: ProbePhase): ProbeEnvEvent[] =>
+  phase.envReads.filter((event) => event.source === 'official');
+/** Events of every class that is not the runtime's own loader traffic. */
+const nonRuntimeEvents = (phase: ProbePhase): ProbeEvent[] => phase.events.filter((event) => event.source !== 'runtime');
 
 /**
  * Everything reported for a phase, in the shape the assertions compare.
@@ -284,28 +347,44 @@ const forkEnvReads = (phase: ProbePhase): ProbeEnvEvent[] =>
 function purityViolations(phase: ProbePhase): unknown[] {
   return [
     ...phase.events.map((event) => ({ api: event.api, detail: event.detail, origin: event.origin })),
-    ...phase.envReads.map((event) => ({ api: 'process.env', detail: event.key, origin: event.origin })),
+    ...phase.envReads.filter(event => !(event.origin === 'dep:openai/internal/utils/env.mjs:11:40' && ['OPENAI_ADMIN_KEY','OPENAI_ORG_ID','OPENAI_PROJECT_ID','OPENAI_WEBHOOK_SECRET','OPENAI_LOG','OPENAI_CUSTOM_HEADERS'].includes(event.key))).map((event) => ({ api: 'process.env', detail: event.key, origin: event.origin })),
     ...phase.envWrites.map((event) => ({ api: 'process.env=', detail: event.key, origin: event.origin })),
   ];
 }
 
-/** The origin's file, without the line and column that a fork bump moves. */
+/** The origin's file, without the line and column that a version bump moves. */
 const originFile = (origin: string): string => origin.replace(/:\d+:\d+$/u, '');
 
 /**
  * Clock and generator reads permitted inside a compile phase, by
  * `(api, origin-file)`.
  *
- * It is EMPTY on fork build `0.86.1001`, and empty is what the run reports
- * rather than what was hoped for: the compile calls `buildRequestPayload`, and
- * the one `Date.now()` on the provider path —
- * `@byok-sdk/pi-ai/dist/api/openai-completions.js:763`, stamping the assistant
- * message's `timestamp` — sits inside `export const stream`, which a compile
- * never enters. A fork bump that moves a clock read onto the compile path must
- * add it HERE with a justification, and the forced-skew case below is what
- * decides whether that read can reach D.
+ * It was EMPTY on fork build `0.86.1001` (the fork compiled with
+ * `buildRequestPayload` and never entered the provider's `stream`). The
+ * official A1' compile DOES enter `streamSimple` — the only public entry — and
+ * stops at the injected fetch, so every clock/generator read on the path from
+ * `streamSimple` to the transport call now runs during a compile. Each entry
+ * below is measured, not hoped for, and each is proven not to reach D by the
+ * forced-skew case (D byte-identical at 2001 vs 2033, all-zero vs all-0xff
+ * generators):
+ *
+ *  - `Date.now` at pi-ai `api/openai-completions.js` — the in-memory
+ *    `AssistantMessage.timestamp` of the output message the stream would
+ *    fill; never serialized into the request.
+ *  - `Math.random` at `openai/client.mjs` — `requestLogID`, "just for
+ *    correlating local log entries" (openai 6.40.0); never on the wire body.
+ *  - `Date.now` twice at `openai/client.mjs` — request start / headers
+ *    timing for the log line and retry bookkeeping.
+ *
+ * A version bump that moves another clock read onto the compile path must add
+ * it HERE with a justification, and the forced-skew case decides whether it
+ * can reach D.
  */
-const ALLOWED_COMPILE_NONDETERMINISM: { readonly api: string; readonly originFile: string }[] = [];
+const ALLOWED_COMPILE_NONDETERMINISM: { readonly api: string; readonly originFile: string }[] = [
+  { api: 'Date.now', originFile: 'official:dist/api/openai-completions.js' },
+  { api: 'Math.random', originFile: 'dep:openai/client.mjs' },
+  { api: 'Date.now', originFile: 'dep:openai/client.mjs' },
+];
 
 const nondeterminismOffAllowlist = (phase: ProbePhase): unknown[] =>
   phase.nondeterminism
@@ -379,13 +458,14 @@ let controlRandomA: ProbeRun;
 let controlRandomB: ProbeRun;
 let everyRun: ProbeRun[];
 
-// One generous budget for twelve child processes that each load the fork's whole
+// One generous budget for twelve child processes that each load the compile's whole
 // module graph. The suite's default is 10s and this file is not the place to
 // add a second load-sensitive deadline. They are spawned in ONE `Promise.all`
 // and completion is the child's own exit, so nothing here waits on a clock.
 const PROBE_TIMEOUT_MS = 120_000;
 
 beforeAll(async () => {
+  compileEntry = await buildCompileEntry();
   [
     clean,
     ambientA,
@@ -435,7 +515,7 @@ afterAll(() => {
 
 describe('B-P2 native composition: call-time purity, measured in an isolated child process', () => {
   it('compiles the same bytes the SDK compile path produces, so the gate measures the real request', async () => {
-    // The probe states the fork's input by hand, because it runs as plain Node
+    // The probe states the compile input by hand, because it runs as plain Node
     // with no TypeScript loader. This is the pin that keeps that restatement
     // honest: the body it produced and the body `adapters/pi/input-preparation.ts`
     // produces from the SHARED fixture are the same bytes, so a drift between
@@ -466,7 +546,7 @@ describe('B-P2 native composition: call-time purity, measured in an isolated chi
 
   it('touches no filesystem, process, network or ambient surface during either compile call', () => {
     // The whole point of the gate, and the assertion the in-process trap could
-    // not make: monitors installed BEFORE the fork's graph exists, republished
+    // not make: monitors installed BEFORE the compile graph exists, republished
     // into the builtin ESM namespaces, so a call through a named import is
     // seen. Cold and warm are separate because a compiler that caches an
     // ambient read on the first call would look pure on the second.
@@ -474,17 +554,13 @@ describe('B-P2 native composition: call-time purity, measured in an isolated chi
     expect(purityViolations(clean.report.compileWarm)).toEqual([]);
   });
 
-  it('reads no environment variable during either compile call', () => {
-    // The allowlist is EMPTY, and it is empty because the measurement says so,
-    // not because nothing was looked for: the recording Proxy sees `get`, `in`,
-    // `ownKeys` AND `getOwnPropertyDescriptor` on `process.env`, and the fork's
-    // one real environment read (`PI_PACKAGE_DIR`) happens at module load,
-    // never at compile time. No stack class is excused — a runtime-internal
-    // frame reading an ambient value during the compile would count.
-    const ALLOWED_COMPILE_ENV_READS: string[] = [];
-
+  it('reads exactly the six approved OpenAI constructor variables without env writes', () => {
+    // Owner ruling via w2:pB: fixed upstream reads are permitted; D independence,
+    // child env isolation and final header refusal are separately required.
+    const expected = ['OPENAI_ADMIN_KEY', 'OPENAI_ORG_ID', 'OPENAI_PROJECT_ID',
+      'OPENAI_WEBHOOK_SECRET', 'OPENAI_LOG', 'OPENAI_CUSTOM_HEADERS'].sort();
     for (const phase of [clean.report.compileCold, clean.report.compileWarm]) {
-      expect(phase.envReads.map((event) => event.key)).toEqual(ALLOWED_COMPILE_ENV_READS);
+      expect([...new Set(phase.envReads.map((event) => event.key))].sort()).toEqual(expected);
       expect(phase.envWrites).toEqual([]);
     }
   });
@@ -508,7 +584,7 @@ describe('B-P2 native composition: call-time purity, measured in an isolated chi
     // `Math.random()` at 0, fixed-zero `randomBytes`/`getRandomValues` and the
     // all-zero UUID; `skewed-b` pins 2033-05-18 with the largest double below
     // 1, all-`0xff` bytes and the all-`f` UUID. Forcing does not break the
-    // fork's load — both runs report `failure: null` — so the comparison is a
+    // compile graph's load — both runs report `failure: null` — so the comparison is a
     // real one, and D comes out byte-identical to the unforced run.
     expect({ a: skewA.report.failure, b: skewB.report.failure }).toEqual({ a: null, b: null });
     expect(skewA.report.requestBody).toBe(clean.report.requestBody);
@@ -523,36 +599,18 @@ describe('B-P2 native composition: call-time purity, measured in an isolated chi
 
     // Node 22/24 load module sources through the PUBLIC `fs` API, so the load
     // phase is dominated by the ESM loader's own reads. They are separated by
-    // stack origin rather than by guesswork: `fork:` is the fork's own
-    // top-level code, everything else is the loader or a dependency.
+    // stack origin rather than by guesswork: `official:` is pi-ai's own
+    // top-level code, `sdk:` the SDK compile module, everything else is the
+    // loader or a dependency.
     //
-    // The allowlist for the fork's own load-time I/O, by path pattern:
-    //
-    //  - `existsSync(<installed package>/**/package.json)` at `config.js:298`
-    //    — `findNodePackageDir` walking up from `dist/` to find the package it
-    //    was installed as. Both probes are inside the installed package.
-    //  - `readFileSync(<installed package>/package.json)` at `config.js:392`
-    //    — reading its OWN manifest for `name`/`version`/`piConfig`. Reading
-    //    the installed artifact's identity is the one legitimate load-time
-    //    read, and it is the same file `resolveInstalledPiRuntimeIdentity()`
-    //    cross-checks the pin against.
-    //
-    // Nothing under a home directory, an agent directory, a config directory
-    // or a credential location is allowed, and the run that produced this
-    // report had all of those pointed at a temp dir full of canaries.
-    expect(forkEvents(load).map((event) => ({ api: event.api, origin: event.origin }))).toEqual([
-      { api: 'fs.existsSync', origin: 'fork:dist/config.js:298:13' },
-      { api: 'fs.existsSync', origin: 'fork:dist/config.js:298:13' },
-      { api: 'fs.readFileSync', origin: 'fork:dist/config.js:392:31' },
-    ]);
-    for (const event of forkEvents(load)) {
-      expect({ origin: event.origin, basename: path.basename(event.detail) }).toEqual({
-        origin: event.origin,
-        basename: 'package.json',
-      });
-      expect(event.detail.includes(`${path.sep}node_modules${path.sep}`)).toBe(true);
-      expect(event.detail.startsWith(clean.ambientRoot)).toBe(false);
-    }
+    // The official A1' load is NARROWER than the fork's: pi-ai and the SDK
+    // compile module make no load-time I/O of their own at all. The fork's
+    // three reads (`config.js` walking up to and reading its own
+    // `package.json`) came from the coding-agent prompt builder, which the
+    // official lane never loads. So the allowlist is empty, and the probe ran
+    // with every home, agent, config and credential location pointed at
+    // canaries.
+    expect(nonRuntimeEvents(load).map((event) => ({ api: event.api, origin: event.origin }))).toEqual([]);
 
     // No path any actor read during the load lies outside an installed
     // package, so the loader half of the phase is module loading and nothing
@@ -579,33 +637,22 @@ describe('B-P2 native composition: call-time purity, measured in an isolated chi
     expect(load.envWrites).toEqual([]);
     expect(clean.report.setupEnvWrites).toEqual([]);
 
-    // The environment-read allowlist for the load phase, by (key, origin):
-    //
-    //  - `PI_PACKAGE_DIR` at `config.js:313` — the documented override for
-    //    `getPackageDir()`. It can change which package manifest the fork
-    //    reads its own identity from; it cannot reach D, which is proved by
-    //    the ambient-independence case below rather than argued here.
-    //  - `OSTYPE` twice at `which/which.js:2-3` — `cross-spawn`'s `which`,
-    //    deciding at module scope whether it is on Windows. Reached because
-    //    the prompt builder's closure includes `utils/child-process.js`.
-    //
-    // Everything else the phase records is the runtime's own
-    // (`WATCH_REPORT_DEPENDENCIES`, `NODE_V8_COVERAGE`, read by the ESM loader
-    // for every module it loads).
+    // The environment-read allowlist for the load phase, by (key, origin), is
+    // EMPTY on the official path: no `PI_PACKAGE_DIR` (the coding-agent
+    // `config.js` is not loaded) and no `OSTYPE` (`cross-spawn`'s `which` came
+    // in through the prompt builder's `utils/child-process.js`). Everything the
+    // phase records is the runtime's own (`WATCH_REPORT_DEPENDENCIES`,
+    // `NODE_V8_COVERAGE`, read by the ESM loader for every module it loads).
     expect(
       load.envReads
         .filter((event) => event.source !== 'runtime')
         .map((event) => ({ key: event.key, origin: event.origin })),
-    ).toEqual([
-      { key: 'OSTYPE', origin: 'dep:which/which.js:2:17' },
-      { key: 'OSTYPE', origin: 'dep:which/which.js:3:17' },
-      { key: 'PI_PACKAGE_DIR', origin: 'fork:dist/config.js:313:32' },
-    ]);
+    ).toEqual([]);
   });
 
   it('is independent of the ambient environment: two poisoned homes compile identical bytes', () => {
     // Same explicit input, two throwaway homes with different canaries in
-    // every location the fork could discover: HOME/USERPROFILE, the XDG pair,
+    // every location the runtime could discover: HOME/USERPROFILE, the XDG pair,
     // PI_PACKAGE_DIR, the agent dir, proxy variables and fake key names.
     expect(ambientA.report.failure).toBeNull();
     expect(ambientB.report.failure).toBeNull();
@@ -625,62 +672,38 @@ describe('B-P2 native composition: call-time purity, measured in an isolated chi
 
       // Nothing under the poisoned home is opened in ANY phase, load
       // included: not the home itself, not `.pi/agent/auth.json`, not the XDG
-      // directories. `PI_PACKAGE_DIR` is the one override the fork does honour
-      // at load — it reads the manifest there instead of its own, and calls
-      // `os.homedir()` while expanding a leading `~` in it
-      // (`utils/paths.js:70`) — and that changes no byte of D.
+      // directories. The fork honoured `PI_PACKAGE_DIR` at load (and called
+      // `os.homedir()` expanding it); the official compile graph takes no
+      // override at load at all, so no non-runtime load event is recorded.
       const home = path.join(run.ambientRoot, 'home');
       const phases = [run.report.load, run.report.compileCold, run.report.compileWarm];
       expect(phases.flatMap((phase) => phase.events).filter((event) => event.detail.startsWith(home))).toEqual([]);
-      expect(
-        forkEvents(run.report.load).map((event) => ({
-          api: event.api,
-          origin: event.origin,
-          underOverride: event.detail.startsWith(path.join(run.ambientRoot, 'pi-package')),
-        })),
-      ).toEqual([
-        { api: 'os.homedir', origin: 'fork:dist/utils/paths.js:70:41', underOverride: false },
-        { api: 'fs.readFileSync', origin: 'fork:dist/config.js:392:31', underOverride: true },
-      ]);
+      expect(nonRuntimeEvents(run.report.load)).toEqual([]);
 
-      // The load-phase ENV READS are pinned too, not just the events. Without
-      // this, a poisoned run could start reading a new ambient variable at
-      // load and nothing here would notice.
-      //
-      // What is pinned is exactly what the run reports, and it is the same
-      // `(key, origin)` set the clean run produces: `PI_PACKAGE_DIR` at
-      // `config.js:313` and `cross-spawn`'s `OSTYPE` twice at module scope.
-      // `PI_CODING_AGENT_DIR` and the agent-dir variable derived from the
-      // poisoned manifest's name are NOT read — `getAgentDir()` is never
-      // called on this path — so pinning the observed set rather than the
-      // expected one is the point. Every entry is load-time, and load-time
-      // cannot reach D: the byte equality asserted above is the proof, not
-      // this list.
-      // The runtime's own two loader keys are read in a platform-dependent
-      // order (Linux reads `NODE_V8_COVERAGE` first), so they are asserted
-      // as a set; the non-runtime entries keep their exact order.
+      // The load-phase ENV READS are pinned too, not just the events, so a
+      // poisoned run that started reading a new ambient variable at load
+      // would fail here. The runtime's own two loader keys are read in a
+      // platform-dependent order, so they are asserted as a set; nothing else
+      // is read at load.
       const loadEnvReads = run.report.load.envReads.map((event) => ({ key: event.key, origin: event.origin }));
       expect(loadEnvReads.filter((event) => event.origin === '(runtime-internal)').map((event) => event.key).sort()).toEqual([
         'NODE_V8_COVERAGE',
         'WATCH_REPORT_DEPENDENCIES',
       ]);
-      expect(loadEnvReads.filter((event) => event.origin !== '(runtime-internal)')).toEqual([
-        { key: 'OSTYPE', origin: 'dep:which/which.js:2:17' },
-        { key: 'OSTYPE', origin: 'dep:which/which.js:3:17' },
-        { key: 'PI_PACKAGE_DIR', origin: 'fork:dist/config.js:313:32' },
-      ]);
+      expect(loadEnvReads.filter((event) => event.origin !== '(runtime-internal)')).toEqual([]);
       expect(run.report.load.envWrites).toEqual([]);
     }
   });
 });
 
 describe('B-P2 native composition: the purity gate is falsifiable', () => {
-  // Each control rewrites `dist/core/system-prompt.js` in memory through a
+  // Each control rewrites pi-ai's `dist/utils/text.js` in memory through a
   // `module.registerHooks` load hook — available on the pinned Node (>= 22.15;
   // `.node-version` is 22.22.3 and `engines.node` is >= 22.22.0), synchronous,
   // and touching nothing on disk. The file is on the real compile path because
-  // `dist/core/input-preparation.js` calls `buildSystemPrompt(copied.prompt)`,
-  // and the control firing during `compileCold` is what proves it.
+  // the official serializer (`dist/api/openai-completions.js`) renders the
+  // leading system message with `getSystemMessageText`, and the control firing
+  // during `compileCold` is what proves it.
 
   it('sees a canary read made through a NAMED node:fs import inside the compile', () => {
     // The exact shape the in-process trap was blind to. `control.fs` carrying
@@ -688,16 +711,15 @@ describe('B-P2 native composition: the purity gate is falsifiable', () => {
     // event proves the gate saw it.
     expect(controlFs.report.control.fs).toBe(controlFs.canaryValue);
     expect(
-      forkEvents(controlFs.report.compileCold).map((event) => ({
+      officialEvents(controlFs.report.compileCold).map((event) => ({
         api: event.api,
         origin: event.origin,
         canary: event.detail.endsWith('private-canary.txt'),
       })),
     ).toEqual([
       // The line is inside the IN-MEMORY rewrite, so it moves with the shared
-      // control prelude rather than with the fork: adding the named
-      // `node:crypto` import for control (e) pushed it from 163 to 165.
-      { api: 'fs.readFileSync', origin: 'fork:dist/core/system-prompt.js:165:42', canary: true },
+      // control prelude (five lines) rather than with pi-ai.
+      { api: 'fs.readFileSync', origin: 'official:dist/utils/text.js:17:42', canary: true },
     ]);
     expect(purityViolations(controlFs.report.compileCold)).not.toEqual([]);
   });
@@ -711,14 +733,14 @@ describe('B-P2 native composition: the purity gate is falsifiable', () => {
     expect(controlEnv.report.control.env).toBe(controlEnv.canaryValue);
     expect(controlEnv.report.control.envDescriptor).toBe(controlEnv.canaryValue);
     expect(
-      forkEnvReads(controlEnv.report.compileCold).map((event) => ({
+      officialEnvReads(controlEnv.report.compileCold).map((event) => ({
         key: event.key,
         via: event.via,
         origin: originFile(event.origin),
       })),
     ).toEqual([
-      { key: CANARY_ENV_KEY, via: 'get', origin: 'fork:dist/core/system-prompt.js' },
-      { key: CANARY_ENV_KEY, via: 'gOPD', origin: 'fork:dist/core/system-prompt.js' },
+      { key: CANARY_ENV_KEY, via: 'get', origin: 'official:dist/utils/text.js' },
+      { key: CANARY_ENV_KEY, via: 'gOPD', origin: 'official:dist/utils/text.js' },
     ]);
     expect(purityViolations(controlEnv.report.compileCold)).not.toEqual([]);
   });
@@ -727,7 +749,7 @@ describe('B-P2 native composition: the purity gate is falsifiable', () => {
     // `node -e ""` and a connection to loopback port 1, both guarded so that
     // an absent monitor still does nothing real.
     expect(
-      forkEvents(controlCapability.report.compileCold).map((event) => ({ kind: event.kind, api: event.api })),
+      officialEvents(controlCapability.report.compileCold).map((event) => ({ kind: event.kind, api: event.api })),
     ).toEqual([
       { kind: 'process', api: 'child_process.spawnSync' },
       { kind: 'network', api: 'net.connect' },
@@ -737,20 +759,19 @@ describe('B-P2 native composition: the purity gate is falsifiable', () => {
 
   it('sees a clock and a generator read that reaches the rendered prompt, and D then differs', () => {
     // The fourth control, and the only one whose effect has to reach D: the
-    // rewritten `buildSystemPrompt` appends `Date.now()` and `Math.random()`
-    // to the prompt text itself. Under the two skews that text differs, so the
+    // rewritten `getSystemMessageText` appends `Date.now()` and
+    // `Math.random()` to the system message text itself. Under the two skews that text differs, so the
     // same pair of runs that came out byte-identical above now comes out
     // different — which is what makes the byte-equality case a measurement
     // instead of a property of a fixture that reads no clock.
     expect({ a: controlClockA.report.failure, b: controlClockB.report.failure }).toEqual({ a: null, b: null });
     expect(
-      controlClockA.report.compileCold.nondeterminism.map((event) => ({
-        api: event.api,
-        origin: originFile(event.origin),
-      })),
+      controlClockA.report.compileCold.nondeterminism
+        .map((event) => ({ api: event.api, origin: originFile(event.origin) }))
+        .filter((event) => event.origin === 'official:dist/utils/text.js'),
     ).toEqual([
-      { api: 'Date.now', origin: 'fork:dist/core/system-prompt.js' },
-      { api: 'Math.random', origin: 'fork:dist/core/system-prompt.js' },
+      { api: 'Date.now', origin: 'official:dist/utils/text.js' },
+      { api: 'Math.random', origin: 'official:dist/utils/text.js' },
     ]);
     expect(nondeterminismOffAllowlist(controlClockA.report.compileCold)).not.toEqual([]);
     expect(controlClockA.report.requestBody).not.toBe(controlClockB.report.requestBody);
@@ -781,11 +802,10 @@ describe('B-P2 native composition: the purity gate is falsifiable', () => {
     // (a) The call is recorded, under the WebCrypto monitor, attributed to the
     // rewritten file the compile really executes.
     expect(
-      controlRandomA.report.compileCold.nondeterminism.map((event) => ({
-        api: event.api,
-        origin: originFile(event.origin),
-      })),
-    ).toEqual([{ api: 'globalThis.crypto.getRandomValues', origin: 'fork:dist/core/system-prompt.js' }]);
+      controlRandomA.report.compileCold.nondeterminism
+        .map((event) => ({ api: event.api, origin: originFile(event.origin) }))
+        .filter((event) => event.origin === 'official:dist/utils/text.js'),
+    ).toEqual([{ api: 'globalThis.crypto.getRandomValues', origin: 'official:dist/utils/text.js' }]);
 
     // (b) The forced skew reaches the bytes — all-zero under `a`, all-`0xff`
     // under `b` — and the two rendered bodies differ from each other and from

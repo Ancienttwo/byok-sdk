@@ -40,7 +40,7 @@ import { PERMISSION_MODES } from './permission';
  * below. See `INPUT_PREPARATION_VERSION` in the client for what each version
  * changed.
  */
-export const INPUT_PREPARATION_WIRE_VERSION = 6 as const;
+export const INPUT_PREPARATION_WIRE_VERSION = 7 as const;
 
 /**
  * Capability required before a task-free remote input preparation — or a
@@ -284,73 +284,8 @@ export type InputPreparationSelection = z.infer<typeof InputPreparationSelection
 // Context document — the Host-authorized half of the compiled snapshot
 // ---------------------------------------------------------------------------
 
-/** A path-like value carried verbatim into the native prompt renderer. */
-const CONTEXT_PATH = z.string().max(4096).regex(/^[^\u0000]*$/u, 'paths must not contain a NUL character');
-
-export const InputPreparationContextFileSchema = z
-  .object({ path: CONTEXT_PATH, content: z.string() })
-  .strict();
-
-/**
- * The three documentation locations the native prompt renderer names.
- *
- * The wire field names are this SDK's own and do not track upstream Pi's
- * (`readme`/`docs`/`examples`): the contract a Host integrates against is this
- * one, and renaming a frozen wire field because a runtime renamed a parameter
- * would be a breaking change to every Host for no gain. The device adapter maps
- * these onto whatever the pinned runtime calls them.
- */
-export const InputPreparationDocsPathsSchema = z
-  .object({ readmePath: CONTEXT_PATH, docsPath: CONTEXT_PATH, examplesPath: CONTEXT_PATH })
-  .strict();
-
-/**
- * One skill the system prompt renders, stated as the closed set of fields the
- * renderer actually reads.
- *
- * Not a preformatted string: the native renderer owns the skill block's
- * markup, and a Host-rendered one would be a second renderer that could drift
- * from what a live session emits. Loader bookkeeping the prompt never reads
- * (`baseDir`, source info) is deliberately absent — the Host cannot know it and
- * the device must never invent it.
- */
-export const InputPreparationSkillSchema = z
-  .object({
-    name: OPAQUE_ID,
-    description: z.string().max(4096),
-    filePath: CONTEXT_PATH,
-    disableModelInvocation: z.boolean(),
-  })
-  .strict();
-export type InputPreparationSkill = z.infer<typeof InputPreparationSkillSchema>;
-
-/**
- * Explicit, already-authorized inputs for the native system prompt renderer.
- *
- * `toolSnippets` is PROMPT TEXT the Host authored — it is not the
- * model-visible tool schemas, which the device observes locally and the Host
- * never states (see this module's rule 1). `toolGuidelines` is the same kind of
- * value one level down: the guideline bullets a tool contributes, keyed by tool
- * name and bounded exactly like `toolSnippets` and `promptGuidelines`.
- *
- * `selectedTools` is deliberately absent for the same reason one level up: the
- * native contract requires that list to equal the model-visible manifest
- * exactly, so a Host stating it would be stating the manifest. The device
- * fills it from its own assembled tool surface.
- */
-export const InputPreparationPromptSnapshotSchema = z
-  .object({
-    customPrompt: z.string().optional(),
-    appendSystemPrompt: z.string().optional(),
-    cwd: CONTEXT_PATH,
-    toolSnippets: z.record(z.string(), z.string()),
-    toolGuidelines: z.record(z.string(), z.array(z.string()).max(512)),
-    promptGuidelines: z.array(z.string()).max(512),
-    contextFiles: z.array(InputPreparationContextFileSchema).max(512),
-    skills: z.array(InputPreparationSkillSchema).max(512),
-    docsPaths: InputPreparationDocsPathsSchema,
-  })
-  .strict();
+/** Complete Host-authored prompt. No Pi renderer or device-local input is consulted. */
+export const InputPreparationPromptSnapshotSchema = z.object({ systemPrompt: z.string() }).strict();
 
 /**
  * One model-visible user message. Text-only: multimodal content and any extra
@@ -497,9 +432,10 @@ export const InputPreparationRuntimeIdentitySchema = z
   .object({
     packageName: OPAQUE_ID,
     packageVersion: OPAQUE_ID,
-    upstreamBase: OPAQUE_ID,
+    tarballIntegrity: z.string().regex(/^sha512-[A-Za-z0-9+/]+={0,2}$/u),
+    provenanceDigest: z.string().regex(/^[0-9a-f]{64}$/u),
+    closureDigest: z.string().regex(/^[0-9a-f]{64}$/u),
     upstreamCommit: OPAQUE_ID,
-    forkBuild: z.number().int().nonnegative(),
     envelopeFormat: OPAQUE_ID,
     requestFormat: OPAQUE_ID,
     compilerVersion: z.number().int().nonnegative(),

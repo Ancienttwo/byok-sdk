@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { InputPreparationContextDocumentSchema } from '@byok-sdk/protocol';
-import type { HostCanonicalAssistantMessage } from '@earendil-works/pi-coding-agent/input-preparation';
+import type { AssistantMessage, Message, UserMessage } from '@earendil-works/pi-ai';
 import { parseInputPreparationRequestParams } from '../daemon/control-protocol';
-import { projectPreparedInputMessage } from '../adapters/pi/input-preparation';
+import {
+  buildPreparedTranscriptMessages,
+  PREPARED_HOST_ASSISTANT_PROVENANCE,
+  PreparedRequestError,
+} from '../adapters/pi/prepared-request';
 import {
   INPUT_PREPARATION_REQUEST_FORMAT,
   INPUT_PREPARATION_VERSION,
@@ -17,10 +21,10 @@ import {
  * Three validators speak this shape and none of them is the authority over the
  * other two — the hand-written parse in `daemon/control-protocol.ts`, the zod
  * discriminated union in `@byok-sdk/protocol`, and the projection onto the
- * native shape in `adapters/pi/input-preparation.ts`. So all three are pinned
- * here, on the same matrix, and none of it needs an installed fork: the
- * projection is driven directly and the native shape is asserted against the
- * pinned type.
+ * official Pi message shape in `adapters/pi/prepared-request.ts`
+ * (`buildPreparedTranscriptMessages`, A2'). So all three are pinned here, and
+ * the projection is driven directly and asserted against the pinned official
+ * `@earendil-works/pi-ai` types.
  */
 
 const USER = { role: 'user', content: 'summarise the repository', timestamp: 1_700_000_000_000 } as const;
@@ -55,15 +59,7 @@ function params(messages: readonly unknown[]): unknown {
       options: { cacheRetention: 'none', maxTokens: 4_096 },
     },
     snapshot: {
-      prompt: {
-        cwd: '/workspace/project',
-        toolSnippets: {},
-        toolGuidelines: {},
-        promptGuidelines: [],
-        contextFiles: [],
-        skills: [],
-        docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
-      },
+      prompt: { systemPrompt: 'Host framing' },
       messages,
     },
     permissionMode: 'auto',
@@ -73,15 +69,7 @@ function params(messages: readonly unknown[]): unknown {
 
 function contextDocument(messages: readonly unknown[]): unknown {
   return {
-    prompt: {
-      cwd: '/workspace/project',
-      toolSnippets: {},
-      toolGuidelines: {},
-      promptGuidelines: [],
-      contextFiles: [],
-      skills: [],
-      docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
-    },
+    prompt: { systemPrompt: 'Host framing' },
     messages,
   };
 }
@@ -131,57 +119,91 @@ describe('input-preparation support set: the wire schema', () => {
   });
 });
 
-describe('input-preparation support set: the native projection', () => {
-  it('projects user text onto the native user message, unchanged', () => {
-    expect(projectPreparedInputMessage(USER)).toEqual({
+function project(messages: readonly InputPreparationMessageV1[]): Message[] {
+  // T always leads with the Host system message and ends on a user message;
+  // the projected history sits between them.
+  return buildPreparedTranscriptMessages({ systemPrompt: 'Host system message', tools: [], messages });
+}
+
+const ZERO_USAGE = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+};
+
+describe('input-preparation support set: the official projection (A2\')', () => {
+  it('projects user text onto the official user message, unchanged', () => {
+    const [, user] = project([USER]);
+    expect(user).toEqual({
       role: 'user',
       content: 'summarise the repository',
       timestamp: 1_700_000_000_000,
     });
   });
 
-  it('projects host-canonical text onto the exact native HostCanonicalAssistantMessage', () => {
-    const projected = projectPreparedInputMessage(HOST_CANONICAL);
+  it('projects host-canonical text onto an official AssistantMessage with the request-scoped sentinel provenance', () => {
+    const [, , assistant] = project([USER, HOST_CANONICAL, USER]);
 
-    // The exact native shape, key for key. `content` is a text-block array so
-    // it serializes through the ordinary assistant path byte-identically to a
-    // provenance-carrying assistant text message.
-    expect(projected).toEqual({
+    // The exact official shape, key for key. `content` is a text-block array so
+    // it serializes through the ordinary assistant path. The provenance is the
+    // A2' sentinel, never a real api/provider/model: no provider generated this
+    // text, so the sentinel names the Host, and `usage` is zero.
+    expect(assistant).toEqual({
       role: 'assistant',
-      origin: 'host_canonical',
       content: [{ type: 'text', text: 'I read the README first.' }],
+      api: PREPARED_HOST_ASSISTANT_PROVENANCE.api,
+      provider: PREPARED_HOST_ASSISTANT_PROVENANCE.provider,
+      model: PREPARED_HOST_ASSISTANT_PROVENANCE.model,
+      usage: ZERO_USAGE,
+      stopReason: 'stop',
       timestamp: 1_700_000_000_001,
     });
-
-    // Nothing is fabricated to fill the provenance-carrying assistant shape:
-    // the host asserts the text was already said, and no provider generated it
-    // here, so there is no honest value for any of these.
-    for (const forbidden of ['api', 'provider', 'model', 'usage', 'stopReason']) {
-      expect(Object.keys(projected)).not.toContain(forbidden);
-    }
+    // The wire discriminant does not leak into the official message.
+    expect(Object.keys(assistant as object)).not.toContain('origin');
   });
 
-  it('is assignable to the pinned native type, at the type level', () => {
-    // A type-level assertion, not a runtime one: a fork that changes the
-    // host-canonical shape has to break the BUILD, not a comparison against
-    // this test's own idea of the shape.
+  it('is assignable to the pinned official types, at the type level', () => {
+    // A type-level assertion, not a runtime one: an official release that
+    // changes the message shapes has to break the BUILD, not a comparison
+    // against this test's own idea of the shape.
     const local: InputPreparationHostCanonicalAssistantMessageV1 = HOST_CANONICAL;
-    const native: HostCanonicalAssistantMessage = {
+    const user: UserMessage = { role: 'user', content: USER.content, timestamp: USER.timestamp };
+    const native: AssistantMessage = {
       role: 'assistant',
-      origin: 'host_canonical',
       content: [{ type: 'text', text: local.content }],
+      api: PREPARED_HOST_ASSISTANT_PROVENANCE.api,
+      provider: PREPARED_HOST_ASSISTANT_PROVENANCE.provider,
+      model: PREPARED_HOST_ASSISTANT_PROVENANCE.model,
+      usage: ZERO_USAGE,
+      stopReason: 'stop',
       timestamp: local.timestamp,
     };
-    expect(projectPreparedInputMessage(local)).toEqual(native);
+    expect(project([USER, local, USER]).slice(1)).toEqual([user, native, user]);
   });
 
   it('is exhaustive over the whole support set', () => {
-    // Every member, driven through the projection. The `default: never` branch
-    // in the projection is what makes a NEW member a compile error; this is the
-    // runtime half — no supported member falls through.
-    const every: readonly InputPreparationMessageV1[] = [USER, HOST_CANONICAL];
-    for (const message of every) {
-      expect(projectPreparedInputMessage(message)).toBeDefined();
+    // Every member, driven through the projection; no supported member falls
+    // through to the refusal branch.
+    const every: readonly InputPreparationMessageV1[] = [USER, HOST_CANONICAL, USER];
+    expect(project(every)).toHaveLength(every.length + 1);
+  });
+
+  it.each([
+    ['an assistant message with no origin discriminant', { role: 'assistant', content: 'hi', timestamp: 1 }],
+    ['an assistant message whose origin claims a provider generated it', { ...HOST_CANONICAL, origin: 'provider' }],
+    ['a toolResult message', { role: 'toolResult', content: 'hi', timestamp: 1 }],
+    ['multimodal user content', { role: 'user', content: [{ type: 'text', text: 'hi' }], timestamp: 1 }],
+  ] as const)('refuses %s', (_label, message) => {
+    let caught: unknown;
+    try {
+      project([USER, message as unknown as InputPreparationMessageV1, USER]);
+    } catch (error) {
+      caught = error;
     }
+    expect(caught).toBeInstanceOf(PreparedRequestError);
+    expect((caught as PreparedRequestError).code).toBe('prepared_transcript_invalid');
   });
 });

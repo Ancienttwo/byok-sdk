@@ -104,7 +104,23 @@ async function digest(file: string): Promise<string> {
   return createHash('sha256').update(await fs.readFile(file)).digest('hex');
 }
 
-async function rpcState(capture: Capture): Promise<unknown> {
+/**
+ * The official-Pi prepared host answers the FIRST stdin frame itself and
+ * admits only `prompt_prepared` there (WP2: `bin/pi-prepared-host.ts`
+ * `readFirstJsonlFrame` + `parsePreparedPromptCommand`); it enters the official
+ * RPC loop only after a verified prepared prompt. So a `get_state` startup
+ * probe is answered by the host's own typed refusal, which it can only write
+ * after its whole static graph (official Pi included) loaded, the sealed
+ * config and binding verified, and the counted provider registered. That
+ * refusal is the prepared entry's startup evidence; sending a real
+ * `prompt_prepared` would reach the provider, which startup must never do.
+ */
+const PREPARED_FIRST_FRAME_REFUSAL = {
+  code: 'prepared_input_invalid',
+  error: 'the first frame of a prepared host must be prompt_prepared',
+} as const;
+
+async function rpcState(capture: Capture, entryKind: 'pi-rpc' | 'pi-prepared'): Promise<unknown> {
   await fs.mkdir(path.dirname(capture.configPath), { recursive: true });
   await fs.writeFile(capture.configPath, capture.configBytes);
   return await new Promise((resolve, reject) => {
@@ -121,7 +137,10 @@ async function rpcState(capture: Capture): Promise<unknown> {
           const frame = JSON.parse(line);
           if (frame.type === 'response' && frame.id === 's2-state') {
             if (frame.success) answer = frame.data;
-            else stderr += JSON.stringify(frame);
+            else if (entryKind === 'pi-prepared' && frame.command === 'prompt_prepared'
+              && frame.code === PREPARED_FIRST_FRAME_REFUSAL.code && frame.error === PREPARED_FIRST_FRAME_REFUSAL.error) {
+              answer = { preparedFirstFrameRefusal: frame.code };
+            } else stderr += JSON.stringify(frame);
             child.kill('SIGTERM');
           }
         } catch { /* Keep raw output for the startup diagnostic. */ }
@@ -164,7 +183,7 @@ async function preparedFixture(root: string, cwd: string, env: Record<string, st
   const server = { command: process.execPath, args: [script, '{}'] };
   const registry = new McpToolsetRegistry({ 's2.echo.v1': { mcpServers: { fixture: server }, readOnlyTools: { fixture: ['echo'] } } });
   const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
-  const runtimeIdentity = `${compiler.runtime.packageName}@${compiler.runtime.packageVersion}+${compiler.runtime.upstreamCommit}.${compiler.runtime.forkBuild}`;
+  const runtimeIdentity = `${compiler.runtime.packageName}@${compiler.runtime.packageVersion}+${compiler.runtime.closureDigest}.compiler-${compiler.runtime.compilerVersion}`;
   const assembled = await createPreparedToolSurfaceAssembler({ toolsetRegistry: registry, runtimeEnv: () => env })
     .assemble({ requiredToolsets: ['s2.echo.v1'], permissionMode: POLICY.mode, runtimeIdentity });
   if (!assembled.ok) throw new Error(`fixture assembly failed: ${assembled.detail}`);
@@ -184,9 +203,8 @@ async function preparedFixture(root: string, cwd: string, env: Record<string, st
   const binding = { inputIdentity: 's2-input', runtimeIdentity, policyIdentity: 's2-policy', profileRevision: 's2-profile' };
   // A startup-only fixture. No prompt_prepared frame is ever sent, but the
   // retained envelope is real, rather than bypassing the adapter's artifact guard.
-  const compiled = await compiler.compile({ snapshot: { prompt: { cwd, selectedTools: surface.tools.map(tool => tool.name),
-    toolSnippets: {}, toolGuidelines: {}, promptGuidelines: [], contextFiles: [], skills: [],
-    docsPaths: { readmePath: getReadmePath(), docsPath: getDocsPath(), examplesPath: getExamplesPath() } },
+  // The Host owns the whole system message on official Pi (`customPrompt`).
+  const compiled = await compiler.compile({ snapshot: { prompt: { systemPrompt: 'Synthetic S2 containment fixture system message.' },
     messages: [{ role: 'user', content: 'Never sent', timestamp: 1 }], tools: surface.tools },
     model, options: { cacheRetention: 'none', maxTokens: 512 }, binding, toolExecutors: surface.toolExecutors });
   const artifactPath = path.join(root, 'prepared-artifact.json');
@@ -288,8 +306,8 @@ describe('Pi launch path — S2 release containment', () => {
               loadCommandsDigest: '0'.repeat(64) },
             launchArgv: ['__byok_sdk_helper', entryKind], launchCwd: await trustedCwd(), assetRoot, assets,
             nativeProvenance: { packageName: fixture.runtime.packageName, packageVersion: fixture.runtime.packageVersion,
-              upstreamBase: fixture.runtime.upstreamBase, upstreamCommit: fixture.runtime.upstreamCommit,
-              forkBuild: fixture.runtime.forkBuild, compilerVersion: fixture.runtime.compilerVersion } };
+              tarballIntegrity: fixture.runtime.tarballIntegrity, provenanceDigest: fixture.runtime.provenanceDigest, closureDigest: fixture.runtime.closureDigest, upstreamCommit: fixture.runtime.upstreamCommit,
+              compilerVersion: fixture.runtime.compilerVersion } };
           await fs.writeFile(inputPath, JSON.stringify({ ...fixture, release, policy: POLICY, kind, env, mcpEnv: { PATH: env.PATH },
             record: runtimeRecordFixture(record as never), projectionRoot: path.join(runDir, 'projections'), report: reportPath }));
           // With the fixture ownership seam OFF, the real product must reject
@@ -321,8 +339,13 @@ describe('Pi launch path — S2 release containment', () => {
           paths[`${entryKind}.PI_PACKAGE_DIR`] = report.env.PI_PACKAGE_DIR!;
           paths[`${entryKind}.assetRoot`] = report.description!.description!.assetRoot;
           try {
-            const state = await rpcState(report.capture) as { messageCount: number; model: { id: string } };
-            expect(state.messageCount).toBe(0); expect(state.model.id).toBe(fixture.model.id);
+            const state = await rpcState(report.capture, entryKind);
+            if (entryKind === 'pi-prepared') {
+              expect(state).toEqual({ preparedFirstFrameRefusal: PREPARED_FIRST_FRAME_REFUSAL.code });
+            } else {
+              const rpc = state as { messageCount: number; model: { id: string } };
+              expect(rpc.messageCount).toBe(0); expect(rpc.model.id).toBe(fixture.model.id);
+            }
           } catch (error) {
             const detail = String(error);
             if (/installed pi closure could not be verified|Cannot find package|Could not resolve.*package/u.test(detail)) tier1.push(`${entryKind} startup resolution: ${detail}`);

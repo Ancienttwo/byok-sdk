@@ -37,7 +37,7 @@ describe('resolvePiBin', () => {
   it('projects the exact pin from the bundled manifest import', () => {
     const expected = clientManifest.dependencies[PI_PACKAGE_NAME];
     const identity = resolvePiRuntimeIdentity();
-    expect(`npm:${identity.name}@${identity.version}`).toBe(expected);
+    expect(identity).toEqual({ name: PI_PACKAGE_NAME, version: expected });
   });
 
   it('resolves the bin from the exact required dependency', () => {
@@ -53,43 +53,36 @@ describe('resolvePiBin', () => {
   });
 
   it.each([
-    '0.85.1001',
-    'npm:@byok-sdk/pi-coding-agent@^0.85.1001',
-    'npm:@byok-sdk/pi-coding-agent@latest',
-    '^0.85.1001',
-  ])('rejects a Pi dependency spec that is not an exact alias: %s', (spec) => {
+    'npm:@byok-sdk/pi-coding-agent@0.86.1001',
+    'npm:@earendil-works/pi-coding-agent@0.87.1',
+    '^0.87.1',
+    '0.87',
+    'latest',
+  ])('rejects a Pi dependency spec that is not one exact version: %s', (spec) => {
     pinSpec(spec);
     expect(() => resolvePiRuntimeIdentity()).toThrow(
-      `@byok-sdk/client pins ${PI_PACKAGE_NAME} to ${spec}, which is not an exact npm:<name>@<x.y.z> alias; the Pi runtime identity must be exact`,
+      `@byok-sdk/client pins ${PI_PACKAGE_NAME} to ${spec}, which is not one exact x.y.z version; the Pi runtime identity must be exact`,
     );
   });
 
-  it('fails closed when the installed Pi version differs from the pinned alias', () => {
+  it('fails closed when the installed Pi version differs from the pin, with no PATH fallback', () => {
     delete process.env.BYOK_PI_BIN;
-    pinSpec('npm:@byok-sdk/pi-coding-agent@9.9.9');
+    pinSpec('9.9.9');
     expect(() => resolvePiBin()).toThrow(
-      /resolved to @byok-sdk\/pi-coding-agent@\S+, but @byok-sdk\/client pins @byok-sdk\/pi-coding-agent@9\.9\.9/,
-    );
-  });
-
-  it('fails closed when the installed Pi name differs from the pinned alias, with no PATH fallback', () => {
-    delete process.env.BYOK_PI_BIN;
-    pinSpec('npm:@byok-sdk/not-the-fork@0.85.1001');
-    expect(() => resolvePiBin()).toThrow(
-      /but @byok-sdk\/client pins @byok-sdk\/not-the-fork@0\.85\.1001/,
+      /resolved to @earendil-works\/pi-coding-agent@\S+, but @byok-sdk\/client pins @earendil-works\/pi-coding-agent@9\.9\.9/,
     );
     // The throw itself is the assertion that no unversioned global `pi` is
     // silently substituted: there is no second authority to fall back to.
   });
 });
 
-describe('Pi alias spec authority', () => {
+describe('Pi exact version authority', () => {
   const repoRoot = path.resolve(fileURLToPath(import.meta.url), '../../../../..');
 
-  function aliasSpecSource(file: string): string {
+  function exactVersionSource(file: string): string {
     const text = readFileSync(path.join(repoRoot, file), 'utf8');
-    const match = /const PI_ALIAS_SPEC\s*=\s*([\s\S]*?);\n/.exec(text);
-    if (match?.[1] === undefined) throw new Error(`no PI_ALIAS_SPEC literal in ${file}`);
+    const match = /const PI_EXACT_VERSION\s*=\s*([\s\S]*?);\n/.exec(text);
+    if (match?.[1] === undefined) throw new Error(`no PI_EXACT_VERSION literal in ${file}`);
     return match[1].replace(/\s+/g, '');
   }
 
@@ -98,7 +91,7 @@ describe('Pi alias spec authority', () => {
     try {
       mkdirSync(path.join(root, 'scripts'));
       const manifest = JSON.parse(readFileSync(path.join(repoRoot, 'packages/client/package.json'), 'utf8'));
-      manifest.byok.piRuntimePin = 'npm:@byok-sdk/pi-coding-agent@9.9.9';
+      manifest.byok.piRuntimePin = '9.9.9';
       writeFileSync(path.join(root, 'package.json'), JSON.stringify(manifest));
       const entry = path.join(root, 'scripts/check-adapters-entry.mjs');
       copyFileSync(path.join(repoRoot, 'packages/client/scripts/check-adapters-entry.mjs'), entry);
@@ -109,20 +102,22 @@ describe('Pi alias spec authority', () => {
   });
 
   it('is literally identical in the TS runtime and the mjs release gate', () => {
-    const ts = aliasSpecSource('packages/client/src/adapters/pi/resolve-bin.ts');
-    const mjs = aliasSpecSource('scripts/release/pi-runtime-identity.mjs');
+    const ts = exactVersionSource('packages/client/src/adapters/pi/resolve-bin.ts');
+    const mjs = exactVersionSource('scripts/release/pi-runtime-identity.mjs');
     expect(mjs).toBe(ts);
 
     // Both sides therefore accept and reject the same sample specs.
     const pattern = new RegExp(ts.slice(1, ts.lastIndexOf('/')));
-    expect(pattern.test('npm:@byok-sdk/pi-coding-agent@0.85.1001')).toBe(true);
-    expect(pattern.test('npm:pi-coding-agent@1.0.0')).toBe(true);
+    expect(pattern.test('0.87.1')).toBe(true);
+    expect(pattern.test('10.0.0')).toBe(true);
     for (const rejected of [
-      '0.85.1001',
-      'npm:@byok-sdk/pi-coding-agent@^0.85.1001',
-      'npm:@byok-sdk/pi-coding-agent@latest',
-      'npm:@byok-sdk/pi-coding-agent@0.85',
-      '@byok-sdk/pi-coding-agent@0.85.1001',
+      'npm:@earendil-works/pi-coding-agent@0.87.1',
+      'npm:@byok-sdk/pi-coding-agent@0.86.1001',
+      '^0.87.1',
+      '0.87',
+      '00.87.1',
+      '0.87.1-beta.0',
+      'latest',
     ]) {
       expect(pattern.test(rejected)).toBe(false);
     }

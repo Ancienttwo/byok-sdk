@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER, PI_FORK_UPSTREAM_COMMIT } from './pi-runtime-identity.mjs';
+import { parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER, PI_RUNTIME_CLOSURE, readLockedPiClosure } from './pi-runtime-identity.mjs';
 
 const releasePackSource = readFileSync(
   fileURLToPath(new URL('./pack-and-smoke.mjs', import.meta.url)),
@@ -41,41 +41,71 @@ test('release pack accepts exact prerelease versions while Pi remains a stable p
   assert.match(
     releasePackSource,
     /parsePiRuntimeIdentity\(/,
-    'Pi must stay pinned through the one shared fork-alias authority',
+    'Pi must stay pinned through the one shared runtime identity authority',
   );
   assert.match(
     releasePackSource,
-    /assertInstalledPiRuntime\(smokeDir, piRuntime, 'release-pack'\)/,
-    'the isolated install must be proven to hold exactly one Pi runtime',
+    /assertInstalledPiRuntime\(smokeDir, piRuntime, lockedPiClosure, 'release-pack', npmInvocation\)/,
+    'the isolated install must be proven to hold exactly the locked official Pi closure',
   );
 });
 
-test('the Pi runtime identity authority admits only an exact fork alias', () => {
-  assert.deepEqual(
-    parsePiRuntimeIdentity({ dependencies: { [PI_DEPENDENCY_SPECIFIER]: 'npm:@byok-sdk/pi-coding-agent@0.85.1002' } }),
-    {
-      specifier: PI_DEPENDENCY_SPECIFIER,
-      spec: 'npm:@byok-sdk/pi-coding-agent@0.85.1002',
-      packageName: '@byok-sdk/pi-coding-agent',
-      version: '0.85.1002',
-    },
-  );
-  for (const rejected of ['0.85.1', 'npm:@byok-sdk/pi-coding-agent@^0.85.1002', 'npm:@byok-sdk/pi-coding-agent@latest', 'npm:@byok-sdk/pi-coding-agent', '']) {
+const PI_DIRECT = PI_RUNTIME_CLOSURE.filter((name) => !['@earendil-works/pi-tui', '@earendil-works/chord', '@earendil-works/pi-telemetry'].includes(name));
+const exactClosure = (version) => Object.fromEntries(PI_DIRECT.map((name) => [name, version]));
+
+test('the Pi runtime identity authority admits only an exact official closure', () => {
+  assert.deepEqual(parsePiRuntimeIdentity({ dependencies: exactClosure('0.87.1') }), {
+    specifier: PI_DEPENDENCY_SPECIFIER,
+    spec: '0.87.1',
+    packageName: PI_DEPENDENCY_SPECIFIER,
+    version: '0.87.1',
+    closure: PI_RUNTIME_CLOSURE,
+  });
+  for (const rejected of ['npm:@byok-sdk/pi-coding-agent@0.86.1001', 'npm:@earendil-works/pi-coding-agent@0.87.1', '^0.87.1', '0.87', 'latest', '']) {
     assert.throws(
-      () => parsePiRuntimeIdentity({ dependencies: { [PI_DEPENDENCY_SPECIFIER]: rejected } }),
-      /must be pinned to an exact npm:<name>@x\.y\.z fork alias/,
+      () => parsePiRuntimeIdentity({ dependencies: { ...exactClosure('0.87.1'), [PI_DEPENDENCY_SPECIFIER]: rejected } }),
+      /must be pinned to one exact official x\.y\.z version/,
       `${rejected} must be rejected`,
     );
   }
   assert.throws(() => parsePiRuntimeIdentity({ dependencies: {} }), /must be a required dependency/);
+  assert.throws(
+    () => parsePiRuntimeIdentity({ dependencies: { ...exactClosure('0.87.1'), '@earendil-works/pi-tui': '0.87.1' } }),
+    /pi-tui ships native addons and must reach the install only through/,
+  );
+  for (const name of PI_DIRECT.slice(1)) {
+    for (const drift of [undefined, '^0.87.1', '0.87.2']) {
+      assert.throws(
+        () => parsePiRuntimeIdentity({ dependencies: { ...exactClosure('0.87.1'), [name]: drift } }),
+        new RegExp(`${name.replace('/', '\\/')} must be a required dependency pinned exactly to 0\\.87\\.1`),
+      );
+    }
+  }
 });
 
-test('the repo pins Pi to the published fork the release gates verify', () => {
+test('the locked closure is exact, integrity-bearing and fork-free', () => {
+  const entry = (name, version, integrity = `sha512-${'A'.repeat(86)}==`) => `    "${name}": ["${name}@${version}", "", {}, "${integrity}"],\n`;
+  const lock = (body) => `{\n  "lockfileVersion": 1,\n  "packages": {\n${body}  },\n}\n`;
+  const identity = { version: '0.87.1' };
+  const good = PI_RUNTIME_CLOSURE.map((name) => entry(name, '0.87.1')).join('');
+  assert.equal(readLockedPiClosure(lock(good), identity).size, PI_RUNTIME_CLOSURE.length);
+  assert.throws(() => readLockedPiClosure(lock(good + entry('pi-subagents/@earendil-works/pi-tui', '0.85.1').replace('"pi-subagents/@earendil-works/pi-tui@0.85.1"', '"@earendil-works/pi-tui@0.85.1"')), identity),
+    /resolves to @earendil-works\/pi-tui@0\.85\.1, but the Pi closure is pinned to 0\.87\.1/);
+  assert.throws(() => readLockedPiClosure(lock(good + `    "@earendil-works/pi-agent-core": ["@byok-sdk/pi-agent-core@0.86.1001", "", {}, "sha512-${'B'.repeat(86)}=="],\n`), identity),
+    /retired fork/);
+  assert.throws(() => readLockedPiClosure(lock(good.replace(`sha512-${'A'.repeat(86)}==`, '')), identity), /carries no sha512 integrity/);
+  assert.throws(() => readLockedPiClosure(lock(good.replace(entry('@earendil-works/chord', '0.87.1'), '')), identity),
+    /@earendil-works\/chord@0\.87\.1 is not locked/);
+});
+
+test('the repo pins the official Pi closure the release gates verify', () => {
   const clientManifest = JSON.parse(
     readFileSync(fileURLToPath(new URL('../../packages/client/package.json', import.meta.url)), 'utf8'),
   );
   const identity = parsePiRuntimeIdentity(clientManifest);
-  assert.equal(identity.packageName, '@byok-sdk/pi-coding-agent');
-  assert.equal(PI_FORK_UPSTREAM_COMMIT, 'd981de1229ef899957bbe968bc8dcda02a21f477');
+  assert.equal(identity.packageName, '@earendil-works/pi-coding-agent');
+  assert.equal(identity.version, '0.87.1');
+  const locked = readLockedPiClosure(readFileSync(fileURLToPath(new URL('../../bun.lock', import.meta.url)), 'utf8'), identity);
+  assert.equal(locked.get(PI_DEPENDENCY_SPECIFIER), 'sha512-m8ArJUtVcQMSe1lLE/Ei7vX/JV7O39sWmWBsXV2NOU70F0qCp8GubA24pT3LnwTmM6LL2xV80/h6sQg85n69ew==');
   assert.equal(clientManifest.optionalDependencies?.[PI_DEPENDENCY_SPECIFIER], undefined);
 });

@@ -277,15 +277,7 @@ describe('control-protocol: input_preparation param gates', () => {
         options: { cacheRetention: 'none', maxTokens: 4_096 },
       },
       snapshot: {
-        prompt: {
-          cwd: '/workspace',
-          toolSnippets: {},
-          toolGuidelines: {},
-          promptGuidelines: [],
-          contextFiles: [{ path: 'AGENTS.md', content: 'x' }],
-          skills: [],
-          docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
-        },
+        prompt: { systemPrompt: 'Host fixture instructions' },
         messages: [{ role: 'user', content: 'hello', timestamp: 1 }],
       },
       permissionMode: 'auto',
@@ -302,7 +294,7 @@ describe('control-protocol: input_preparation param gates', () => {
     expect(parsed.request.permissionMode).toBe('auto');
     expect(parsed.request.requiredToolsets).toEqual(['team']);
     // A copy, not the caller's own arrays/objects.
-    expect(parsed.request.snapshot.prompt.toolSnippets).not.toBe((raw.snapshot as { prompt: { toolSnippets: unknown } }).prompt.toolSnippets);
+    expect(parsed.request.snapshot.prompt).not.toBe((raw.snapshot as { prompt: unknown }).prompt);
     expect(parsed.request.requiredToolsets).not.toBe(raw.requiredToolsets);
   });
 
@@ -369,7 +361,6 @@ describe('control-protocol: input_preparation param gates', () => {
     ['an unknown snapshot field', (r: Record<string, unknown>) => ({ ...r, snapshot: { ...(r.snapshot as object), toolExecutors: {} } })],
     ['a permission mode outside the closed set', (r: Record<string, unknown>) => ({ ...r, permissionMode: 'yolo' })],
     ['a missing permission mode', (r: Record<string, unknown>) => { const { permissionMode: _mode, ...rest } = r; return rest; }],
-    ['no required toolsets at all', (r: Record<string, unknown>) => ({ ...r, requiredToolsets: [] })],
     ['a duplicate toolset id', (r: Record<string, unknown>) => ({ ...r, requiredToolsets: ['team', 'team'] })],
     ['a non-string toolset id', (r: Record<string, unknown>) => ({ ...r, requiredToolsets: [7] })],
     ['an empty requestId', (r: Record<string, unknown>) => ({ ...r, requestId: '' })],

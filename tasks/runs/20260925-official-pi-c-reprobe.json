@@ -1,0 +1,305 @@
+{
+  "schemaVersion": "official-pi-c-reprobe-evidence.v1",
+  "sourceResultSha256": "a212bc2d0526158e8fde8cfd449705bf88ffa060d7c0241ac94221760a5b4054",
+  "sourceChecksums": {
+    "attempt-1-reserved.json": "177c8d6ac8437ad927e7f0c4b3462115cb49775d7bb71d392b807586f1de9b6b",
+    "attempt-1-result.json": "d2c007a96d3650b01c818db5edbdb5988a7f6f8a47a8479e8a1563b22eaf6919",
+    "attempt-2-reserved.json": "6b89a5c9e320ce6cd4aa1b73dda2c23d39501b48fe8c87ff6e8fcb25c317011e",
+    "attempt-2-result.json": "4f67d9c1a25ba1d35ebcea73d5e55139c01c3826bc2cb87ab86180972e2169d9",
+    "attempt-3-reserved.json": "533aa4d9def7ea3482639a566da6b8e42a01c4ddbc9ef83d88a4572d8812bc98",
+    "attempt-3-result.json": "9ead36b67a17268297153f3dba5e9f7189aef4fcf939befe20fcde7df99287d8",
+    "bare-D.json": "50b6f561554d62b870ba3b3f10d9256c8b9eaade23cfdfa34189ee6363bf15fc",
+    "input.json": "e7a9c37838d84e4d163c11794908af12c703c058b3844abf98e0b1979512a321",
+    "live.log": "4ad43f36853783ab7f8b1274ef685cb657cd7c9d0b784f01ab61999937de2217",
+    "live.ts": "ff456ffce9e611ba251b4d15f8429389c6f5312ae6c5cd7dd219f701fd44c1d8",
+    "offline-evidence.json": "12b74f54de25df18646f2339a18653f86c10ae92020ba2bf41d1e1e410bdba36",
+    "prepare.log": "a5cd4599be3575202080e0d40ff7c513c612863948ebac69ffdc31b78df2d1d8",
+    "prepare.ts": "3e9638892c7bdd95fc67fb617339b008c6f69a70d3e81ce04dbc9d42db837a0f",
+    "prepared-D.json": "a11e2aad8cf223ec7220e39731d439c1c837d469f19d0a1df5597e54fa39427d",
+    "redaction-check.json": "77db39f2ed1b244b905f8b03c4df22c4a87b285f13364fcb1d5f9e719996982e",
+    "redaction-final.json": "1ef3388bd2526d2791aa2b67307b58181fd2558b4ce1d7571bd765b7cb03a440",
+    "report.md": "44adbf686e899ec0593b400c403bb345f124fd12e679e4913cf08411fd812114",
+    "result.json": "a212bc2d0526158e8fde8cfd449705bf88ffa060d7c0241ac94221760a5b4054",
+    "shape-diff.json": "8047b01646f90f3ee573ee4e81a9c0726a1186ebbe3c86a91c92b87d1585bc32",
+    "summarize.py": "494242762e9c4caa089e478517709166c9db564fc228882828a83fe839e4de0d",
+    "tools-list.json": "3cd170699f10b8a1082e1a8cee0e4dec3825113450ebbbdfc7f81502070b351a"
+  },
+  "redaction": {
+    "status": "passed",
+    "credentialValueAbsent": true,
+    "authorizationValueFragmentsAbsent": true,
+    "fileCount": 22,
+    "checkedAt": "2026-09-25T00:35:08.128452+00:00",
+    "credentialReadMode": "in-memory only; values never included in diagnostics"
+  },
+  "source": {
+    "sdkHead": "749d3dcaaea791e8f6101ba1345d895d71133e54",
+    "saleskoHead": "f22f117e621800fcde34af65d03c2feffa460a99",
+    "compilerEntry": "createPiInputPreparationCompiler -> compilePreparedProviderRequest -> official streamSimple capture-and-throw",
+    "fixtureBoundary": "Current MCP tools/list and Host product prompt; synthetic one-user-turn snapshot, probe-only executor bindings; not a production Salesko receipt."
+  },
+  "rulingRecommendation": {
+    "C": 1024,
+    "wireVersion": 7,
+    "envelopeVersion": 4,
+    "ruledResidualKeys": [],
+    "runtime": {
+      "packageName": "@earendil-works/pi-coding-agent",
+      "packageVersion": "0.87.1",
+      "tarballIntegrity": "sha512-m8ArJUtVcQMSe1lLE/Ei7vX/JV7O39sWmWBsXV2NOU70F0qCp8GubA24pT3LnwTmM6LL2xV80/h6sQg85n69ew==",
+      "upstreamCommit": "f07218c4d4bbc12bef056a7058c3dd49dfe41abe",
+      "provenanceDigest": "db69a280504639d75d269d386bef7f49d18c722733bc2beb18d3b75f56b86517",
+      "closureDigest": "33ee3e426437c4bfd9fb50c06252c1ccd8196aa97729f93f00e6a14a289e5ab2",
+      "compilerVersion": 4,
+      "envelopeFormat": "byok.pi.prepared-input",
+      "requestFormat": "byok.pi.openai-completions.request"
+    },
+    "toolsetSchemaDigest": "sha256:1f689f5c90c0e87f4bbfb7408560e43c6632fef83fe2b0f6722556a222c686c9",
+    "hostMustIssueNewRevision": true
+  },
+  "result": {
+    "schemaVersion": "official-pi-m5-probe.v1",
+    "status": "completed",
+    "deviceLocal": true,
+    "inferenceAttemptsPlaced": 3,
+    "tokenizerCallsPlaced": 0,
+    "runtime": {
+      "packageName": "@earendil-works/pi-coding-agent",
+      "packageVersion": "0.87.1",
+      "tarballIntegrity": "sha512-m8ArJUtVcQMSe1lLE/Ei7vX/JV7O39sWmWBsXV2NOU70F0qCp8GubA24pT3LnwTmM6LL2xV80/h6sQg85n69ew==",
+      "upstreamCommit": "f07218c4d4bbc12bef056a7058c3dd49dfe41abe",
+      "provenanceDigest": "db69a280504639d75d269d386bef7f49d18c722733bc2beb18d3b75f56b86517",
+      "closureDigest": "33ee3e426437c4bfd9fb50c06252c1ccd8196aa97729f93f00e6a14a289e5ab2",
+      "compilerVersion": 4,
+      "envelopeFormat": "byok.pi.prepared-input",
+      "requestFormat": "byok.pi.openai-completions.request"
+    },
+    "wireVersion": 7,
+    "envelopeVersion": 4,
+    "toolsetSchemaDigest": "sha256:1f689f5c90c0e87f4bbfb7408560e43c6632fef83fe2b0f6722556a222c686c9",
+    "attempts": [
+      {
+        "index": 1,
+        "label": "bare_hi",
+        "startedAt": "2026-09-25T00:30:45.872Z",
+        "requestSha256": "50b6f561554d62b870ba3b3f10d9256c8b9eaade23cfdfa34189ee6363bf15fc",
+        "requestBytes": 171,
+        "placed": true,
+        "httpStatus": 200,
+        "contentType": "text/event-stream;charset=UTF-8",
+        "usage": {
+          "prompt_tokens": 13,
+          "completion_tokens": 128,
+          "total_tokens": 141,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 128
+          }
+        },
+        "sseEvents": 129,
+        "usageEvents": 1,
+        "finishReasons": [
+          "length"
+        ],
+        "officialUsage": {
+          "input": 13,
+          "output": 128,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "totalTokens": 141
+        },
+        "officialStopReason": "length",
+        "normalizedPromptTokens": 13,
+        "uncoveredObservedTokens": 0,
+        "byteMargin": 158,
+        "boundWithC1024": 1195,
+        "withinBound": true,
+        "status": "passed",
+        "completedAt": "2026-09-25T00:30:51.476Z",
+        "transportAttempts": 1
+      },
+      {
+        "index": 2,
+        "label": "salesko_prepared_shape",
+        "startedAt": "2026-09-25T00:30:51.477Z",
+        "requestSha256": "a11e2aad8cf223ec7220e39731d439c1c837d469f19d0a1df5597e54fa39427d",
+        "requestBytes": 17638,
+        "placed": true,
+        "httpStatus": 200,
+        "contentType": "text/event-stream;charset=UTF-8",
+        "usage": {
+          "prompt_tokens": 6581,
+          "completion_tokens": 3,
+          "total_tokens": 6584,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0
+          }
+        },
+        "sseEvents": 2,
+        "usageEvents": 1,
+        "finishReasons": [
+          "stop"
+        ],
+        "officialUsage": {
+          "input": 6581,
+          "output": 3,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "totalTokens": 6584
+        },
+        "officialStopReason": "stop",
+        "normalizedPromptTokens": 6581,
+        "uncoveredObservedTokens": 0,
+        "byteMargin": 11057,
+        "boundWithC1024": 18662,
+        "withinBound": true,
+        "gate": {
+          "sequences": 1,
+          "admitted": [
+            1
+          ],
+          "refusal": null
+        },
+        "status": "passed",
+        "completedAt": "2026-09-25T00:30:59.630Z",
+        "transportAttempts": 1
+      },
+      {
+        "index": 3,
+        "label": "salesko_prepared_shape_repeat",
+        "startedAt": "2026-09-25T00:30:59.631Z",
+        "requestSha256": "a11e2aad8cf223ec7220e39731d439c1c837d469f19d0a1df5597e54fa39427d",
+        "requestBytes": 17638,
+        "placed": true,
+        "httpStatus": 200,
+        "contentType": "text/event-stream;charset=UTF-8",
+        "usage": {
+          "prompt_tokens": 6581,
+          "completion_tokens": 3,
+          "total_tokens": 6584,
+          "prompt_tokens_details": {
+            "cached_tokens": 6528
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0
+          }
+        },
+        "sseEvents": 2,
+        "usageEvents": 1,
+        "finishReasons": [
+          "stop"
+        ],
+        "officialUsage": {
+          "input": 53,
+          "output": 3,
+          "cacheRead": 6528,
+          "cacheWrite": 0,
+          "totalTokens": 6584
+        },
+        "officialStopReason": "stop",
+        "normalizedPromptTokens": 6581,
+        "uncoveredObservedTokens": 0,
+        "byteMargin": 11057,
+        "boundWithC1024": 18662,
+        "withinBound": true,
+        "gate": {
+          "sequences": 1,
+          "admitted": [
+            1
+          ],
+          "refusal": null
+        },
+        "status": "passed",
+        "completedAt": "2026-09-25T00:31:04.402Z",
+        "transportAttempts": 1
+      }
+    ],
+    "conclusion": {
+      "recommendedC": 1024,
+      "barePromptTokens": 13,
+      "maximumObservedUncoveredTokens": 0,
+      "repeatSameD": true,
+      "cachedTokens": 6528,
+      "promptIncludesCached": true,
+      "nonCachedRepeatPrompt": 53
+    },
+    "limits": [
+      "Three small synthetic requests are calibration, not a certified universal upper bound.",
+      "Host production wire-7 prompt assembly and ruling reissue are subsequent work.",
+      "No tool execution, no AgentSession, no tokenizer endpoint. Prepared sends use the production SDK byte/header gate and public official streamSimple."
+    ],
+    "credentialHandling": "One device-local auth entry read in memory after compile; no credential persisted or printed."
+  },
+  "shapeDiff": {
+    "oldEvidence": "/Users/kito/Projects/byok-sdk-wt-pi-087-migration/tasks/runs/20260923-bounded-admission-probe.json",
+    "oldEvidenceSha256": "5a2daaf9202e669708874dc89776f9d0e0f53813f0a1970db8ea56d9215c1fa4",
+    "bare": {
+      "oldBytes": 140,
+      "newBytes": 171,
+      "differenceBytes": 31,
+      "onlyAddedField": {
+        "thinking": {
+          "type": "disabled"
+        }
+      },
+      "oldBodyReconstructionSha256": "d560c2c6bee437f4fb818ca733c92a3e7c63dd2a65b2a82c7c096349b66af904",
+      "matchesHistoricalBodySha256": true
+    },
+    "prepared": {
+      "oldBytes": 18482,
+      "newBytes": 17638,
+      "differenceBytes": -844,
+      "oldPromptTokens": 6797,
+      "newPromptTokens": 6581,
+      "oldToolNames": [
+        "get_salesko_capabilities",
+        "get_graph_frame",
+        "search_graph_nodes",
+        "list_activity_feed",
+        "list_opportunities",
+        "search_calendar_events",
+        "prepare_meeting_brief",
+        "propose_graph_change_set"
+      ],
+      "newToolNames": [
+        "mcp__salesko_proposals__propose_graph_change_set",
+        "mcp__salesko__get_graph_frame",
+        "mcp__salesko__get_salesko_capabilities",
+        "mcp__salesko__list_activity_feed",
+        "mcp__salesko__list_opportunities",
+        "mcp__salesko__prepare_meeting_brief",
+        "mcp__salesko__search_calendar_events",
+        "mcp__salesko__search_graph_nodes"
+      ],
+      "newTopLevelKeys": [
+        "model",
+        "messages",
+        "stream",
+        "stream_options",
+        "max_tokens",
+        "tools",
+        "tool_choice",
+        "thinking"
+      ],
+      "newSystemPromptBytes": 1529,
+      "newToolsFunctionStrictPresent": false,
+      "newProjectionEqualsD": true,
+      "newResidual": [],
+      "oldRuledResidualKeys": [
+        "stream",
+        "stream_options",
+        "max_tokens"
+      ],
+      "limits": [
+        "Old prepared body is not retained in the P0 result; do not attribute the 844-byte change solely to the serializer.",
+        "Host prompt, qualified MCP names, tool schema revision and input text differ from the old synthetic fixture.",
+        "Historical OP0 records establish old fork strict emission; only its absence is directly measured in this new D."
+      ]
+    }
+  }
+}

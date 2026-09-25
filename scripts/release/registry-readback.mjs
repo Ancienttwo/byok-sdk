@@ -4,14 +4,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { assertInstalledPiRuntime, parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER } from './pi-runtime-identity.mjs';
+import {
+  assertInstalledPiRuntime, parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER, readLockedPiClosure,
+} from './pi-runtime-identity.mjs';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 // Version authority: the manifests, never a constant here. The expected
 // registry train is whatever packages/core ships, keys versions independently,
-// and the pi pin comes from packages/client, parsed by the one shared
-// fork-alias reader.
+// and the pi pin comes from packages/client, parsed by the one shared Pi
+// runtime identity reader.
 const exactReleaseVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const npmSafeDistTag = /^(?=.{1,214}$)[a-z][a-z0-9._-]*$/;
 const expectedVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/core/package.json'), 'utf8')).version;
@@ -289,16 +291,16 @@ try {
   if (clientManifest.optionalDependencies?.[PI_DEPENDENCY_SPECIFIER]) {
     throw new Error('registry client manifest must not make pi optional');
   }
-  // The alias keeps the on-disk path on the upstream specifier while the
-  // manifest inside carries the fork identity; prove both, and prove the whole
-  // registry-installed tree holds exactly one coding-agent runtime.
+  // The official package at the pinned version, and the whole registry-installed
+  // tree holds exactly the pinned official closure with the locked integrities.
   const piManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@earendil-works', 'pi-coding-agent', 'package.json'), 'utf8'));
   if (piManifest.name !== piRuntime.packageName || piManifest.version !== piRuntime.version) {
     throw new Error(
       `registry install resolved pi ${piManifest.name}@${piManifest.version}, expected ${piRuntime.packageName}@${piRuntime.version}`,
     );
   }
-  assertInstalledPiRuntime(smokeDir, piRuntime, 'registry-readback');
+  const lockedPiClosure = readLockedPiClosure(readFileSync(path.join(repoRoot, 'bun.lock'), 'utf8'), piRuntime);
+  assertInstalledPiRuntime(smokeDir, piRuntime, lockedPiClosure, 'registry-readback', npmInvocation);
   const keysManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'keys', 'package.json'), 'utf8'));
   assertImplementationIdentityDependency(clientManifest, expectedVersion);
   assertImplementationIdentityDependency(keysManifest, expectedVersion);

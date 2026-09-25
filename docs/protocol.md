@@ -51,11 +51,11 @@ state/transition. There is no in-place "tighten it a little" allowance
 post-freeze the way pre-freeze M0→M1 had (§10) — a change of this shape is a
 new major version, full stop.
 
-**Scoped input-preparation cut:** the Owner-approved v6 work-package changes
+**Scoped input-preparation cut:** the Owner-approved v7 official Pi work-package retains
 `task.offer_prepared` to require `egressPolicy` and optionally carry `messageEgress`.
 Its version authority is `INPUT_PREPARATION_WIRE_VERSION`, admitted only through
-`agent-input-preparation-v6`; the outer envelope remains v1. This is a deliberate
-paired-upgrade cut, not an additive rolling-upgrade claim. No v5 token or reader is
+`agent-input-preparation-v7`; the outer envelope remains v1. This is a deliberate
+paired-upgrade cut, not an additive rolling-upgrade claim. No v6 token or reader is
 retained. Drain pre-cut preparation requests and prepared Executions first, as
 specified below.
 
@@ -310,16 +310,17 @@ append/send; receipt and ack are delivery facts, not session authority.
 
 `task.offer_prepared` is strict control data. In long-poll, unknown executable
 message types and unknown strict payload keys both freeze the cursor. Enqueue
-requires `agent-home-contract`, `agent-input-preparation-v6`, `agent-egress-policy`,
+requires `agent-home-contract`, `agent-input-preparation-v7`, `agent-egress-policy`,
 `agent-egress-reliable-ack` and `agent-egress-fresh-session`; when `messageEgress` is
 present it also requires `agent-message-egress`. These gates run before allocating
 any task or mailbox row. The host-only `agentMessageContext` is recorded with the
 immutable message requirement and is never sent to the daemon.
 
-The v6 cut adds required `egressPolicy` and optional `messageEgress` to prepared
-offers, with no dual token/read. **Precondition:** drain preparation requests,
+The v7 cut requires Host-owned `prompt.systemPrompt`, official closure identity,
+envelope v4 and record v7. Preparation accepts empty requiredToolsets. Required
+`egressPolicy` and optional `messageEgress` remain, with no dual token/read. **Precondition:** drain preparation requests,
 prepared Executions and required message dispositions, ensure device cursors have
-passed all old entries, then upgrade cloud and device together. Existing v5
+passed all old entries, then upgrade cloud and device together. Existing v6
 preparations are not read forward; recreate them. The capability gate protects new
 admission only: an already-enqueued old offer without `egressPolicy` fails strict
 parsing and stalls its mailbox. Paired upgrade alone does not repair that old

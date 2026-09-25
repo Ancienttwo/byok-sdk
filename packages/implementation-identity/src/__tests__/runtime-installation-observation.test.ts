@@ -8,7 +8,7 @@ import {
   type RuntimeInstallationMeasurementV1,
 } from '../identity';
 import { parseImplementationSpawnBinding } from '../spawn-binding';
-const data = JSON.parse(readFileSync(path.resolve(import.meta.dirname, '../../../../tests/fixtures/c07-runtime-record/canonical-revision.v1.json'), 'utf8'));
+const data = JSON.parse(readFileSync(path.resolve(import.meta.dirname, '../../../../tests/fixtures/c07-runtime-record/official-pi-087.v1.json'), 'utf8'));
 const vector = data.resolutionVectors[0];
 function fixture() {
   const response = structuredClone(vector.response);

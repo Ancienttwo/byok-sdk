@@ -1,3 +1,4 @@
+import { OFFICIAL_PI_PROVENANCE } from '../adapters/pi/official-pi-installation.mjs';
 import { runtimeRecordFixture } from './fixtures/runtime-resolution';
 import { createHash } from 'node:crypto';
 import { mkdtemp, writeFile, realpath, rm } from 'node:fs/promises';
@@ -46,8 +47,7 @@ describe('preparation compiler authority selection', () => {
       manifestRevision: 'test-fixture', form: 'compiled-executable', installPath, closureDigest: hash(bytes),
       launchCwd: root, launchArgv: ['__byok_sdk_helper', 'pi-prepared'],
       assetRoot: root, assets: [{ path: 'package.json', digest: hash(data) }],
-      nativeProvenance: { packageName: pin.name, packageVersion: pin.version, upstreamBase: '0.85.1',
-        upstreamCommit: 'a'.repeat(40), forkBuild: 5, compilerVersion: native.SUPPORTED_PREPARED_COMPILER_VERSION },
+      nativeProvenance: { ...OFFICIAL_PI_PROVENANCE },
     }));
     const dev = vi.spyOn(native, 'resolveInstalledPiRuntimeIdentity');
     const actualResolve = identity.resolveRuntimeImplementation;
@@ -64,7 +64,7 @@ describe('preparation compiler authority selection', () => {
       expect(measured).toHaveBeenCalledTimes(1);
       expect(dev).not.toHaveBeenCalled();
       expect(compiler.runtime.packageVersion).toBe(pin.version);
-      expect(compiler.runtime.upstreamCommit).toBe('a'.repeat(40));
+      expect(compiler.runtime.upstreamCommit).toBe(OFFICIAL_PI_PROVENANCE.upstreamCommit);
       measured.mockImplementation(actualResolve); // Without seam, writable fixture must refuse.
       await expect(resolvePiInputPreparationCompiler({ authority: { resolve }, env, sessionCwd: path.join(root, 'session') }))
         .rejects.toThrow('install_record_mismatch');
@@ -79,8 +79,7 @@ describe('preparation compiler authority selection', () => {
       kind: 'attested', form: 'compiled-executable', installPath: '/release/app',
       launchCwd: '/release/launch', launchArgv: ['__byok_sdk_helper', 'pi-prepared'],
       assetRoot: '/release/assets', assets: [],
-      nativeProvenance: { packageName: pin.name, packageVersion: pin.version, upstreamBase: '0.85.1',
-        upstreamCommit: 'a'.repeat(40), forkBuild: 5, compilerVersion: native.SUPPORTED_PREPARED_COMPILER_VERSION },
+      nativeProvenance: { ...OFFICIAL_PI_PROVENANCE },
     } as unknown as identity.ToolImplementationAttestedV1;
     const measured = vi.spyOn(identity, 'resolveRuntimeImplementation').mockResolvedValue({ kind: 'attested', identity: record, descendantPolicy: runtimeRecordFixture(record).descendantPolicy, edges: runtimeRecordFixture(record).edges });
     const dev = vi.spyOn(native, 'resolveInstalledPiRuntimeIdentity');
@@ -88,7 +87,7 @@ describe('preparation compiler authority selection', () => {
     const compiler = await resolvePiInputPreparationCompiler({ authority, env, sessionCwd: '/workspace/session' });
     expect(measured).toHaveBeenCalledTimes(1);
     expect(dev).not.toHaveBeenCalled();
-    expect(compiler.runtime.upstreamCommit).toBe('a'.repeat(40));
+    expect(compiler.runtime.upstreamCommit).toBe(OFFICIAL_PI_PROVENANCE.upstreamCommit);
     measured.mockResolvedValue({ kind: 'attested', identity: { ...record, nativeProvenance: { ...record.nativeProvenance!, packageVersion: '0.0.0' } }, descendantPolicy: runtimeRecordFixture(record).descendantPolicy, edges: runtimeRecordFixture(record).edges });
     await expect(resolvePiInputPreparationCompiler({ authority, env, sessionCwd: '/workspace/session' })).rejects.toThrow('install_record_mismatch');
     expect(dev).not.toHaveBeenCalled();

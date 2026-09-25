@@ -64,9 +64,9 @@ function binding(overrides: Partial<InputPreparationBindingV1> = {}): InputPrepa
     runtime: {
       packageName: '@byok-sdk/pi-coding-agent',
       packageVersion: '0.85.1001',
-      upstreamBase: '0.85.1',
+      tarballIntegrity: 'sha512-'+ 'YQ=='.repeat(1),
       upstreamCommit: 'd981de1229ef899957bbe968bc8dcda02a21f477',
-      forkBuild: 1,
+      provenanceDigest: 'a'.repeat(64), closureDigest: 'b'.repeat(64),
       envelopeFormat: 'pi.session.prepared-input',
       requestFormat: 'pi.openai-completions.prepared',
       compilerVersion: 2,
@@ -364,9 +364,9 @@ describe('B-P2 store: restart roundtrip', () => {
     const created = await store.reserve(reserve());
 
     expect(created.record.version).toBe(INPUT_PREPARATION_RECORD_VERSION);
-    expect(INPUT_PREPARATION_RECORD_VERSION).toBe(6);
+    expect(INPUT_PREPARATION_RECORD_VERSION).toBe(7);
     // The wire version is a different agreement, moved by a different reason.
-    expect(INPUT_PREPARATION_VERSION).toBe(6);
+    expect(INPUT_PREPARATION_VERSION).toBe(7);
     expect((await openStore(storeDir)).get(created.record.recordId)?.version).toBe(INPUT_PREPARATION_RECORD_VERSION);
   });
 });

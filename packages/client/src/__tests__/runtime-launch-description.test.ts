@@ -1,3 +1,4 @@
+import { OFFICIAL_PI_PROVENANCE } from '../adapters/pi/official-pi-installation.mjs';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
@@ -53,14 +54,7 @@ const STAT = Object.freeze({
   gid: 0,
 });
 
-const NATIVE_PROVENANCE = Object.freeze({
-  packageName: PIN.name,
-  packageVersion: PIN.version,
-  upstreamBase: '0.85.0',
-  upstreamCommit: 'c'.repeat(40),
-  forkBuild: 1002,
-  compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,
-});
+const NATIVE_PROVENANCE = OFFICIAL_PI_PROVENANCE;
 
 const ASSETS = Object.freeze([
   { path: 'dist/modes/interactive/theme/dark.json', digest: '1'.repeat(64) },
@@ -369,14 +363,9 @@ describe('the attestation subject is explicit, and the two are not interchangeab
 describe('native provenance for the encapsulated form comes from the record and fails closed', () => {
   it('derives the runtime identity from the attested record, not from a manifest on disk', () => {
     expect(piRuntimeIdentityFromAttestedRecord(attested())).toEqual({
-      packageName: PIN.name,
-      packageVersion: PIN.version,
-      upstreamBase: '0.85.0',
-      upstreamCommit: 'c'.repeat(40),
-      forkBuild: 1002,
-      envelopeFormat: 'pi.session.prepared-input',
-      requestFormat: 'pi.openai-completions.prepared',
-      compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,
+      ...OFFICIAL_PI_PROVENANCE,
+      envelopeFormat: 'byok.pi.prepared-input',
+      requestFormat: 'byok.pi.openai-completions.request',
     });
   });
 

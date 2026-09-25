@@ -1,7 +1,7 @@
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: (archive-workflow)
+> **Updated**: 2026-09-25 05:42
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.
@@ -11,6 +11,7 @@ Do not duplicate that execution checklist here. Record only work intentionally d
 
 | Goal | Why Deferred | Tradeoff | Revisit Trigger |
 |------|--------------|----------|-----------------|
+| 官方 Pi npm 双实例下的 compat provider registry 可见性 | 0.87.1 coding-agent 自带 shrinkwrap，pi-ai、pi-agent-core、chord、pi-telemetry 各两份，共 10 physical roots；M4 只证明当前 built-in workflow/Agent/compat 路径，不承诺跨实例扩展注册共享。 | pi-ai/compat 的 apiProviderRegistry 是模块级 Map；以后若扩展对一份调用 registerApiProvider，另一份不可见。不能以相同版本或 closure 校验冒充 singleton。 | 第一个调用 registerApiProvider 的扩展准入前；入口为 official pi-ai/compat、vendored llm-intent-arbiter 与隔离 npm workflow 探针，先复现注册可见性再裁公开 API 接线，禁止私有导入/全局共享状态补丁。 |
 | **Salesko published SDK pin and production journal/recovery rollout** | Candidate composition and crash/restart acceptance now exist for exact SDK/Salesko sources (see `tasks/notes/20260906-pr152-closeout.md`); registry publication and production cutover are separate operator boundaries. | Candidate arm64/x64 recovery and Chat restart evidence does not establish deployed runtime state; external binary compaction remains PARTIAL and append-failure injection SKIP. | After authorized SDK 0.14.0 / keys 0.4.0 publication, switch the production exact pin, complete approved deployment/migration and verify the released Local Agent on the target environment. |
 | **Residual downstream `ws/wss` cleanup** | Current reliability issues own long-poll transactions and liveness, not downstream stale URL/config cleanup. Mixing cleanup into this branch would enlarge rollback and acceptance surfaces without helping the durable invariants. | Stale downstream configuration may remain visible, but no WebSocket product authority is reintroduced into SDK source. | A dedicated downstream cleanup slice after #135–#144 acceptance; inventory exact `ws://`/`wss://` consumers and remove them as a one-authority cutover. |
 | **context-fold compaction 隔离 PoC**：deterministic 外部 compaction 扩展能否在不破坏 BYOK task/session authority 下替代 Pi native compaction。plan：`plans/plan-20260826-1542-context-fold-compaction-poc.md` | Phase 0 falsifier gate 未过：无可廉价建立的 native-compaction 失败证据。Adapter 边界对 compaction 帧安全 by construction（`compaction_start/end`→`undefined`∈`ROUTINE_PI_EVENT_TYPES`，`events.ts:116`/`pi-adapter.ts:486`，inferred from code）；pi 模型侧 compaction 语义在 fake-pi stub 里结构上无法复现，真证伪须对活 BYOK provider 跑逼近上下文上限的长 session（plan 排除项）。已拍板生产默认永远 Pi native compaction，pi-vcc 淘汰。 | 无 falsifier 却引入新 compaction authority = 投机（anti-pattern #4）。接受"看不见 compaction 对 continuation 的潜在影响"，换不夹带第二套 context/存储/continuation 权威。 | 出现一个 BYOK 场景下 native compaction 的**可复现失败证据**（resume 后状态错乱 / continuation 断裂 / context 丢失 / token 膨胀），或有真实 downstream 消费者要求 deterministic reversible 折叠。触发后按 plan 从 Phase 1 起，context-fold 须 disabled-by-default + task-scoped + 无全局 config，且禁与其它 compact 扩展叠加（`session_before_compact` 单一所有权）。 |

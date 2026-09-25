@@ -5,15 +5,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { gunzipSync } from 'node:zlib';
-import { assertInstalledPiRuntime, parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER } from './pi-runtime-identity.mjs';
+import {
+  assertInstalledPiRuntime, iterateTarballFiles, parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER, readLockedPiClosure,
+} from './pi-runtime-identity.mjs';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 // Version authority: the manifests, never a constant here. The release train
 // version is whatever packages/core ships, keys versions independently, and
-// the pi pin comes from packages/client, parsed by the one shared fork-alias
-// reader. Every assertion below compares against these derived values.
+// the pi pin comes from packages/client, parsed by the one shared Pi runtime
+// identity reader. Every assertion below compares against these derived values.
 const exactReleaseVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const releaseVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/core/package.json'), 'utf8')).version;
 const keysVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/keys/package.json'), 'utf8')).version;
@@ -94,32 +95,6 @@ function readDeploySql() {
     .sort();
   if (files.length === 0) throw new Error(`no .sql files found in ${deploySqlDir}`);
   return new Map(files.map((name) => [name, sha256(path.join(deploySqlDir, name))]));
-}
-
-/**
- * Walks an npm tarball without shelling out to `tar`: this script is a release
- * hard gate and runs on Windows runners too, so it depends on node builtins
- * only. Plain ustar walk — 512-byte header blocks, octal size, contents padded
- * to the next block. Yields every regular file as `name -> Buffer`.
- */
-function* iterateTarballFiles(tarballPath) {
-  const tar = gunzipSync(readFileSync(tarballPath));
-  for (let offset = 0; offset + 512 <= tar.length; ) {
-    const header = tar.subarray(offset, offset + 512);
-    if (header.every((byte) => byte === 0)) break;
-    const name = header.subarray(0, 100).toString('utf8').replace(/\0.*$/, '');
-    const sizeField = header.subarray(124, 136).toString('utf8').replace(/\0.*$/, '').trim();
-    const size = Number.parseInt(sizeField, 8);
-    if (!Number.isFinite(size)) throw new Error(`${tarballPath}: unreadable tar size for ${name}`);
-    const typeFlag = String.fromCharCode(header[156]);
-    const body = tar.subarray(offset + 512, offset + 512 + size);
-    // '0'/'\0' are regular files; 'x'/'g'/'L' are metadata records, and the
-    // long-name forms would matter only for paths this package cannot produce.
-    if (typeFlag === '0' || typeFlag === '\0') {
-      yield [name, body];
-    }
-    offset += 512 + Math.ceil(size / 512) * 512;
-  }
 }
 
 function readTarballDigests(tarballPath) {
@@ -530,11 +505,21 @@ try {
     run(nodeBin, ['smoke.mjs'], smokeDir);
     copyFileSync(path.join(repoRoot, 'scripts/release/recurring-smoke.mjs'), path.join(smokeDir, 'recurring-smoke.mjs'));
     run(nodeBin, ['recurring-smoke.mjs'], smokeDir);
-    copyFileSync(path.join(repoRoot, 'scripts/release/pi-runtime-identity.mjs'), path.join(smokeDir, 'pi-runtime-identity.mjs'));
-    copyFileSync(path.join(repoRoot, 'scripts/release/pi-launcher-smoke.mjs'), path.join(smokeDir, 'pi-launcher-smoke.mjs'));
+    // Preserve the verifier's relative module graph in the isolated fixture.
+    // These are test-oracle files, not a replacement runtime or mutable install evidence.
+    for (const relative of [
+      'scripts/release/pi-runtime-identity.mjs',
+      'scripts/release/pi-launcher-smoke.mjs',
+      'packages/client/src/adapters/pi/official-pi-installation.mjs',
+      'packages/client/src/adapters/pi/official-pi-closure.json',
+    ]) {
+      const target = path.join(smokeDir, relative);
+      mkdirSync(path.dirname(target), { recursive: true });
+      copyFileSync(path.join(repoRoot, relative), target);
+    }
     // This is the decisive installed-runtime proof (real RPC get_state against
     // the pinned Pi with extensions loaded); echo it instead of swallowing it.
-    console.log(run(nodeBin, ['pi-launcher-smoke.mjs'], smokeDir));
+    console.log(run(nodeBin, ['scripts/release/pi-launcher-smoke.mjs'], smokeDir));
     assertSingleVersionSet(smokeDir, expectedPackageVersions);
     assertNpmCoreClosure(smokeDir);
     // The worker runtime subpath must stay deployable outside Node: the smoke
@@ -550,7 +535,7 @@ try {
     const clientManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'package.json'), 'utf8'));
     if (clientManifest.dependencies['@juicesharp/rpiv-todo'] !== undefined) throw new Error('packed client retained a second npm todo authority');
     console.log('[release-pack] client dependencies=' + Object.keys(clientManifest.dependencies).length +
-      '; delta from M1a: -rpiv-todo +rpiv-i18n +rpiv-config +typebox +pi-ai(fork) (pi-tui/width: vendored build inputs only)');
+      '; delta from M1a: -rpiv-todo +rpiv-i18n +rpiv-config +typebox +official Pi closure (pi-ai, pi-agent-core, chord, pi-telemetry, pi-tui)');
 
     const installedAgentBin = path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'dist', 'bin', 'byok-agent.js');
     const emptyAgentHome = path.join(smokeDir, 'empty-agent-home');
@@ -597,16 +582,16 @@ try {
     if (clientManifest.optionalDependencies?.[PI_DEPENDENCY_SPECIFIER]) {
       throw new Error('isolated client manifest must not make pi optional');
     }
-    // The alias keeps the on-disk path on the upstream specifier while the
-    // manifest inside carries the fork identity; prove both, and prove the
-    // whole isolated tree holds exactly one coding-agent runtime.
+    // The official package at the pinned version, and the whole isolated tree
+    // holds exactly the pinned official closure with the locked integrities.
     const piManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@earendil-works', 'pi-coding-agent', 'package.json'), 'utf8'));
     if (piManifest.name !== piRuntime.packageName || piManifest.version !== piRuntime.version) {
       throw new Error(
         `isolated client install resolved pi ${piManifest.name}@${piManifest.version}, expected ${piRuntime.packageName}@${piRuntime.version}`,
       );
     }
-    assertInstalledPiRuntime(smokeDir, piRuntime, 'release-pack');
+    const lockedPiClosure = readLockedPiClosure(readFileSync(path.join(repoRoot, 'bun.lock'), 'utf8'), piRuntime);
+    assertInstalledPiRuntime(smokeDir, piRuntime, lockedPiClosure, 'release-pack', npmInvocation);
   } finally {
     rmSync(smokeDir, { recursive: true, force: true });
   }

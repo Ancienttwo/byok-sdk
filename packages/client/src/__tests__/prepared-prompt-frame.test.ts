@@ -7,7 +7,7 @@ import {
   fitsRpcFrame,
   rpcFrameByteLength,
   RPC_MAX_FRAME_BYTES,
-} from '@earendil-works/pi-coding-agent/rpc-types';
+} from '../util/rpc-frame';
 import {
   buildPreparedPromptCommand,
   PREPARED_PROMPT_COMMAND_ID,

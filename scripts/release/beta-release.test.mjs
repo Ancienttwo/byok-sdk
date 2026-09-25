@@ -59,11 +59,24 @@ test('publish and readback reject a missing or latest prerelease tag before regi
         copyFileSync(path.join(releaseDirectory, entry.name), path.join(fixtureScripts, entry.name));
       }
     }
+    // Keep the release identity oracle's relative imports intact in isolation.
+    const piOraclePath = 'packages/client/src/adapters/pi';
+    mkdirSync(path.join(fixtureRoot, piOraclePath), { recursive: true });
+    for (const name of ['official-pi-installation.mjs', 'official-pi-closure.json']) {
+      copyFileSync(
+        path.resolve(releaseDirectory, '../..', piOraclePath, name),
+        path.join(fixtureRoot, piOraclePath, name),
+      );
+    }
     for (const [name, version] of [['core', '0.8.0-beta.0'], ['keys', '0.3.0'], ['client', '0.8.0-beta.0']]) {
       const fixturePackage = path.join(fixtureRoot, 'packages', name);
       mkdirSync(fixturePackage, { recursive: true });
       const manifest = { name: `@byok-sdk/${name}`, version };
-      if (name === 'client') manifest.dependencies = { '@earendil-works/pi-coding-agent': 'npm:@byok-sdk/pi-coding-agent@0.85.1002' };
+      if (name === 'client') {
+        manifest.dependencies = Object.fromEntries(
+          ['pi-coding-agent', 'pi-ai', 'pi-agent-core'].map((pkg) => [`@earendil-works/${pkg}`, '0.87.1']),
+        );
+      }
       writeFileSync(path.join(fixturePackage, 'package.json'), `${JSON.stringify(manifest)}\n`);
     }
 

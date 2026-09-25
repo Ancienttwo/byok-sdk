@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'n
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertImplementationIdentityDependency } from './implementation-identity-edges.mjs';
-import { parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER } from './pi-runtime-identity.mjs';
+import { parseBunLock, parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER, readLockedPiClosure } from './pi-runtime-identity.mjs';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 const dispatchPackages = [
@@ -135,14 +135,15 @@ function readJson(relativePath) {
 // cannot desync the gate from the manifests it guards.
 // Release packages may use an exact SemVer prerelease (for example
 // 0.8.0-beta.0). The Pi runtime remains a stable, exact pin because it is not
-// part of the SDK release channel; it is declared as an exact npm fork alias
+// part of the SDK release channel; it is declared as an exact official version
 // and read through the one shared `parsePiRuntimeIdentity` authority.
 const exactStableVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const exactReleaseVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const releaseVersion = readJson('packages/core/package.json').version;
 const keysVersion = readJson('packages/keys/package.json').version;
+let piRuntime;
 try {
-  parsePiRuntimeIdentity(readJson('packages/client/package.json'));
+  piRuntime = parsePiRuntimeIdentity(readJson('packages/client/package.json'));
 } catch (error) {
   errors.push(error.message);
 }
@@ -195,40 +196,10 @@ for (const [directory, expectedName] of publicPackages) {
 // against every workspace manifest, and a mismatch is a hand-edit error:
 // re-running bun install will not fix it.
 
-/** Parses bun.lock, which is JSONC-like: trailing commas are legal and must be dropped before JSON.parse. */
-function parseLockfile(text) {
-  let cleaned = '';
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index];
-    if (character === '"') {
-      cleaned += character;
-      index += 1;
-      while (index < text.length) {
-        cleaned += text[index];
-        if (text[index] === '\\') {
-          index += 1;
-          cleaned += text[index] ?? '';
-        } else if (text[index] === '"') {
-          break;
-        }
-        index += 1;
-      }
-      continue;
-    }
-    if (character === ',') {
-      let lookahead = index + 1;
-      while (lookahead < text.length && /\s/.test(text[lookahead])) lookahead += 1;
-      if (text[lookahead] === '}' || text[lookahead] === ']') continue;
-    }
-    cleaned += character;
-  }
-  return JSON.parse(cleaned);
-}
-
 const lockfileText = readFileSync(path.join(repoRoot, 'bun.lock'), 'utf8');
 let workspaceRecords;
 try {
-  workspaceRecords = parseLockfile(lockfileText).workspaces ?? {};
+  workspaceRecords = parseBunLock(lockfileText).workspaces ?? {};
 } catch (error) {
   errors.push(`bun.lock: unparseable (${error.message})`);
   workspaceRecords = {};
@@ -246,6 +217,14 @@ for (const [directory, record] of Object.entries(workspaceRecords)) {
       `bun.lock: workspace record for ${directory} says version ${record.version}, but ${manifestPath} says ${manifestVersion} — ` +
         'correct the bun.lock record by hand; bun install will not fix it on version-only bumps',
     );
+  }
+}
+// The official Pi closure is exact and integrity-locked, with no fork alias.
+if (piRuntime !== undefined) {
+  try {
+    readLockedPiClosure(lockfileText, piRuntime);
+  } catch (error) {
+    errors.push(error.message);
   }
 }
 for (const directory of publicPackages.map(([directory]) => directory)) {

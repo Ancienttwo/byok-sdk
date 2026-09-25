@@ -1,3 +1,6 @@
+import { verifyOfficialPiClosure } from '../src/adapters/pi/official-pi-installation.mjs';
+import { fileURLToPath as officialFileURLToPath } from 'node:url';
+verifyOfficialPiClosure(officialFileURLToPath(new URL('../', import.meta.url)));
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -9,10 +12,12 @@ const sourceBytes = await readFile(new URL('src/adapters/pi/pi-export-assets.sou
 const layout = JSON.parse(layoutBytes), source = JSON.parse(sourceBytes);
 const clientManifest = JSON.parse(await readFile(new URL('package.json', root)));
 const nativeManifest = JSON.parse(await readFile(new URL('package.json', native)));
-assert.equal(clientManifest.byok.piRuntimePin, `npm:${source.packageName}@${source.packageVersion}`);
+// The pin is the exact official semver; `check-adapters-entry.mjs` proves it
+// projects the coding-agent dependency. Runtime identity (integrity and
+// provenance) is the identity gate's, not this inventory's.
+assert.equal(clientManifest.byok.piRuntimePin, source.packageVersion);
 assert.equal(nativeManifest.name, source.packageName);
 assert.equal(nativeManifest.version, source.packageVersion);
-assert.deepEqual(nativeManifest.byokFork, source.byokFork);
 assert.deepEqual(source.files.map(row => row.path), layout.files);
 assert.equal(source.sourceBasePath, layout.basePaths['interpreter+bundle']);
 for (const row of source.files) {

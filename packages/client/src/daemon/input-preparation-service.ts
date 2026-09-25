@@ -34,15 +34,11 @@ import {
   buildPreparedPromptCommand,
   PREPARED_PROMPT_COMMAND_ID,
 } from '../adapters/pi/prepared-prompt-frame';
-// The runtime's own frame contract, imported rather than restated. A local copy
-// of the cap or of the length function would be a second authority over a bound
-// only the runtime enforces, and it would go stale silently on a fork bump. The
-// module is dependency-free, so naming it statically costs nothing.
-import {
-  fitsRpcFrame,
-  rpcFrameByteLength,
-  RPC_MAX_FRAME_BYTES,
-} from '@earendil-works/pi-coding-agent/rpc-types';
+// The SDK owns the single-frame bound: official Pi 0.87.1 reads stdin without
+// one, so this send-side check is the only thing that keeps an oversized frame
+// off the peer. `util/rpc-frame.ts` is the one authority for the cap and the
+// length function.
+import { fitsRpcFrame, rpcFrameByteLength, RPC_MAX_FRAME_BYTES } from '../util/rpc-frame';
 import type {
   PreparedToolSurface,
   PreparedToolSurfaceAssembler,
@@ -733,15 +729,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     try {
       compiled = await options.compiler.compile({
         snapshot: {
-          prompt: {
-            ...request.snapshot.prompt,
-            // Daemon-derived, and it has to be: the native contract requires
-            // this list to equal the model-visible manifest exactly, and the
-            // manifest is this device's observation. A caller-stated list
-            // would be a second, unverified copy of the manifest arriving
-            // through the prompt.
-            selectedTools: surface.tools.map((tool) => tool.name),
-          },
+          prompt: { systemPrompt: request.snapshot.prompt.systemPrompt },
           messages: request.snapshot.messages,
           // Daemon-derived, never caller-stated. The tools the model is shown
           // and the executors the manifest binds come from the same assembly.
@@ -779,7 +767,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     // --- RPC frame admission ----------------------------------------------
     // Decided HERE — after the compile that produces the envelope, and BEFORE
     // the operator's per-artifact retention bound below — because these two
-    // bounds belong to different authorities and the runtime's comes first. An
+    // bounds belong to different authorities and the frame bound comes first. An
     // envelope that cannot be handed to the runtime in one frame can never be
     // launched, so counting it, retaining it, or charging it against a scope
     // aggregate would all be work done for an artifact nobody can consume.
@@ -808,7 +796,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
         await markFailed(record.recordId, 'rpc_frame_too_large');
         throw new InputPreparationRequestError(
           'rpc_frame_too_large',
-          `the prepared prompt frame measures ${measuredBytes} bytes, above the ${RPC_MAX_FRAME_BYTES}-byte single-frame limit the runtime enforces`,
+          `the prepared prompt frame measures ${measuredBytes} bytes, above the ${RPC_MAX_FRAME_BYTES}-byte single-frame limit the SDK enforces on frames it sends`,
         );
       }
     }

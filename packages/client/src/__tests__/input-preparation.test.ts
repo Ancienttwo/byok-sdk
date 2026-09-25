@@ -39,7 +39,7 @@ import {
   buildPreparedPromptCommand,
   PREPARED_PROMPT_COMMAND_ID,
 } from '../adapters/pi/prepared-prompt-frame';
-import { rpcFrameByteLength, RPC_MAX_FRAME_BYTES } from '@earendil-works/pi-coding-agent/rpc-types';
+import { rpcFrameByteLength, RPC_MAX_FRAME_BYTES } from '../util/rpc-frame';
 
 /**
  * B-P2 §10.5 for the orchestration layer: auth/isolation, purity of the
@@ -100,15 +100,7 @@ function request(overrides: Partial<InputPreparationRequestV1> = {}): InputPrepa
       options: { cacheRetention: 'none', maxTokens: 4_096 },
     },
     snapshot: {
-      prompt: {
-        cwd: '/workspace/project',
-        toolSnippets: {},
-        toolGuidelines: {},
-        promptGuidelines: [],
-        contextFiles: [],
-        skills: [],
-        docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
-      },
+      prompt: { systemPrompt: 'Host framing' },
       messages: [{ role: 'user', content: 'hello', timestamp: 1_700_000_000_000 }],
     },
     permissionMode: 'auto',
@@ -168,9 +160,8 @@ function stubCompiler(
     runtime: {
       packageName: '@byok-sdk/pi-coding-agent',
       packageVersion: '0.85.1001',
-      upstreamBase: '0.85.1',
+      tarballIntegrity: 'sha512-test', provenanceDigest: 'a'.repeat(64), closureDigest: 'b'.repeat(64),
       upstreamCommit: 'd981de1229ef899957bbe968bc8dcda02a21f477',
-      forkBuild: 1,
       envelopeFormat: 'pi.session.prepared-input',
       requestFormat: 'pi.openai-completions.prepared',
       // The contract this build prepares against, unless a test states another
@@ -224,16 +215,15 @@ function stubCompiler(
  */
 function tamperedProjectionDigestCompiler(): InputPreparationCompiler {
   const runtime = stubCompiler().runtime;
-  const counterProjection = '{"model":"glm-4.6","messages":[],"tools":[]}';
+  const counterProjection = '{"model":"glm-4.6","messages":[],"max_tokens":4096}';
   return {
     runtime,
     async compile(): Promise<CompiledPreparedInput> {
       return verifyCompiledPreparedInput(
         {
           format: runtime.envelopeFormat,
-          version: 3,
-          snapshot: {},
-          context: {},
+          version: 4,
+          transcript: { systemPrompt: 'Host fixture', messages: [], tools: [] },
           providerRequest: {
             format: runtime.requestFormat,
             compilerVersion: runtime.compilerVersion,
@@ -241,7 +231,7 @@ function tamperedProjectionDigestCompiler(): InputPreparationCompiler {
             counterProjection,
             // The digest of DIFFERENT bytes than the ones it travels with.
             projection: { version: 3, kind: 'content_complete', digest: sha256Hex(`${counterProjection} `) },
-            residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
+            residual: [],
             digest: 'a'.repeat(64),
           },
           toolManifest: { order: [], executors: [], digest: 'c'.repeat(64) },
@@ -416,7 +406,7 @@ describe('B-P2 service: binding authority', () => {
     expect(receipt.binding.target).toEqual({ endpoint: 'https://api.z.ai/api/coding/paas/v4', modelId: 'glm-4.6' });
     // The identity handed to the compiler is built here, not echoed from the request.
     expect(compiler.calls[0]?.binding.runtimeIdentity).toBe(
-      '@byok-sdk/pi-coding-agent@0.85.1001+d981de1229ef899957bbe968bc8dcda02a21f477.1',
+      `@byok-sdk/pi-coding-agent@0.85.1001+${'b'.repeat(64)}.compiler-4`,
     );
     expect(compiler.calls[0]?.binding.policyIdentity).toBe(LIMITS.revision);
     expect(compiler.calls[0]?.binding.inputIdentity).toBe('src-rev-1:src-digest-1');

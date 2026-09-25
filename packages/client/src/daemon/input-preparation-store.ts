@@ -99,7 +99,7 @@ import {
  * {@link InputPreparationUnsupportedRecordVersionError}. There is no
  * compatibility read.
  */
-export const INPUT_PREPARATION_RECORD_VERSION = 6;
+export const INPUT_PREPARATION_RECORD_VERSION = 7;
 
 /** The durable idempotency key. Never a task id, and never caller-asserted: `scopeId` comes from the trusted authority grant. */
 export interface InputPreparationRecordKey {

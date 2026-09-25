@@ -147,7 +147,7 @@ describe('client runtime launch admission and resource binding', () => {
       kind:'attested',authority:'host-install-record',manifestRevision:'binding-test',form:'compiled-executable',
       installPath:executable,closureDigest:digest,closureKind:'artifact',launchArgv:['__byok_sdk_helper','pi-rpc'],launchCwd:trusted.dir,
       assetRoot:path.dirname(executable),assets:[{path:path.basename(executable),digest}],
-      nativeProvenance:{packageName:pin.name,packageVersion:pin.version,upstreamBase:'0.85.0',upstreamCommit:'c'.repeat(40),forkBuild:1005,compilerVersion:1},
+      nativeProvenance:{packageName:pin.name,packageVersion:pin.version,tarballIntegrity: 'sha512-'+ 'YQ=='.repeat(1),upstreamCommit:'c'.repeat(40),provenanceDigest: 'a'.repeat(64), closureDigest: 'b'.repeat(64),compilerVersion:1},
     };
     const authority: ToolImplementationAuthority = {resolve:async () => runtimeRecordFixture(record)};
     f.options.resolveDevInvocation.mockImplementation(() => { throw new Error('dev resolver must not run'); });
@@ -202,4 +202,16 @@ describe('client runtime launch admission and resource binding', () => {
     expect(await fs.readdir(f.options.projectionRoot)).toEqual([]);
     expect(f.options.resolveDevInvocation).not.toHaveBeenCalled();
   });
+});
+
+it('prepared launch retains only explicitly allowed env, excluding all six OpenAI constructor inputs', async () => {
+  const f = await fixture();
+  const forbidden = ['OPENAI_ADMIN_KEY', 'OPENAI_ORG_ID', 'OPENAI_PROJECT_ID',
+    'OPENAI_WEBHOOK_SECRET', 'OPENAI_LOG', 'OPENAI_CUSTOM_HEADERS', 'OPENAI_UNDECLARED'];
+  const env = { ...f.options.env, ...Object.fromEntries(forbidden.map(key => [key, 'synthetic-canary'])) };
+  const resources = await resolvePiRuntimeLaunch({ ...f.options, kind: 'pi-prepared', env });
+  try {
+    for (const name of forbidden) expect(resources.env).not.toHaveProperty(name);
+    expect(resources.env.PATH).toBe(env.PATH);
+  } finally { await resources.release(); }
 });

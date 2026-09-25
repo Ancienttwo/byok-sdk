@@ -126,9 +126,9 @@ const TOOLSET_REVISION = 'team-definition-r1';
 const RUNTIME: InputPreparationRuntimeIdentityV1 = {
   packageName: '@byok-sdk/pi-coding-agent',
   packageVersion: '0.85.1002',
-  upstreamBase: '0.85.1',
+  tarballIntegrity: 'sha512-'+ 'YQ=='.repeat(1),
   upstreamCommit: 'd981de1229ef899957bbe968bc8dcda02a21f477',
-  forkBuild: 2,
+  provenanceDigest: 'a'.repeat(64), closureDigest: 'b'.repeat(64),
   envelopeFormat: 'pi.session.prepared-input',
   requestFormat: 'pi.openai-completions.prepared',
   compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,
@@ -342,7 +342,7 @@ async function lane(options: {
     toolsetDefinitionRevisions: { [TOOLSET_ID]: revision },
     implementations,
   });
-  if (!fingerprinted.ok) throw new Error(`fixture surface refused: ${fingerprinted.detail}`);
+  if (!fingerprinted.ok) throw new Error(`fixture surface refused: ${fingerprinted.detail}: ${fingerprinted.message}`);
 
   const toolBindingDigest = preparedToolBindingDigest({
     launch: attestation,
@@ -916,7 +916,7 @@ describe('every compared item declines by its own name, with no claim and no pin
       name: 'an artifact compiled against a native closure this device no longer has',
       reason: 'preparation_runtime_identity_mismatch',
       build: async () => {
-        const runtime = { ...RUNTIME, forkBuild: 1, packageVersion: '0.85.1001' };
+        const runtime = { ...RUNTIME, provenanceDigest: 'a'.repeat(64), closureDigest: 'b'.repeat(64), packageVersion: '0.85.1001' };
         // The accounting ruling moves WITH the runtime it was ruled for, so the
         // record stays ready and the only difference left is the one this case
         // is about: the closure the device has now.
@@ -1107,6 +1107,29 @@ describe('ordinary offers are untouched by the prepared lane', () => {
   });
 });
 
+
+describe('prepared continuation terminal authority', () => {
+  it('daemon projection emits exactly one task.fail for a typed Pi refusal, without completing or retrying', async () => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(built, adapter, sent);
+    const taskId = 'prepared-continuation-refused';
+    await runner.handleEnvelope(preparedOffer(taskId, reference(built), 1));
+    expect(adapter.sessions).toHaveLength(1);
+    let failure: unknown;
+    try {
+      mapPiMessageToAgentEvent({ type: 'prepared_run_refused', code: 'prepared_context_drift', sequence: 2 });
+    } catch (error) { failure = error; }
+    expect(failure).toMatchObject({ name: 'RuntimeExecutionFailure', message: 'prepared_context_drift' });
+    adapter.sessions[0]!.fail(failure as Error);
+    await vi.waitFor(() => expect(sent.find(event => event.type === 'task.fail')?.payload)
+      .toMatchObject({ reason: 'prepared_context_drift', retryable: false }));
+    expect(sent.filter(event => event.type === 'task.fail')).toHaveLength(1);
+    expect(sent.some(event => event.type === 'task.complete')).toBe(false);
+    expect(adapter.preparedStartCalls).toHaveLength(1);
+  });
+});
 
 describe('prepared daemon-authored message egress', () => {
   const messageEgress = { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 10_000 } as const;

@@ -14,24 +14,19 @@ import { readClientPiRuntimePin } from './client-manifest';
  * favor of this package. pi is a core BYOK capability, not an optional
  * enhancement or an unversioned global executable.
  *
- * This constant is the *resolution specifier* only. The *installed identity*
- * behind it is a separate fact: `packages/client/package.json` pins this
- * specifier to an exact npm alias (`npm:<name>@<x.y.z>`), because the SDK ships
- * a fork of the upstream runtime. The specifier and the on-disk path stay
- * `@earendil-works/pi-coding-agent`, so every import site and every extension
- * path is unchanged; only the manifest inside that directory carries the fork's
- * own name and version. `resolvePiRuntimeIdentity()` derives that identity from
- * the same manifest entry, so there is exactly one authority for both.
+ * This constant is both the resolution specifier and the installed identity's
+ * name: `packages/client/package.json` pins it to one exact official version
+ * (`byok.piRuntimePin` projects that dependency), and the manifest on disk must
+ * be the official package at exactly that version.
  */
 export const PI_PACKAGE_NAME = '@earendil-works/pi-coding-agent';
 
 /**
- * `npm:<package name>@<exact x.y.z>`. Ranges, dist-tags and bare versions are
- * all rejected: a runtime whose identity is not exactly known cannot be checked
+ * One exact `x.y.z` version. Ranges, dist-tags and npm aliases are all
+ * rejected: a runtime whose identity is not exactly known cannot be checked
  * against what was actually installed.
  */
-const PI_ALIAS_SPEC =
-  /^npm:(@[^/@\s]+\/[^/@\s]+|[^@/\s][^/@\s]*)@((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))$/;
+const PI_EXACT_VERSION = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
 
 export interface ResolvedBin {
   command: string;
@@ -40,7 +35,7 @@ export interface ResolvedBin {
 
 /** The exact package `PI_PACKAGE_NAME` must resolve to on disk. */
 export interface PiRuntimeIdentity {
-  /** Manifest `name` of the installed runtime (the fork's own scope). */
+  /** Manifest `name` of the installed runtime: always {@link PI_PACKAGE_NAME}. */
   readonly name: string;
   /** Manifest `version` of the installed runtime. */
   readonly version: string;
@@ -74,13 +69,12 @@ export function resolvePiRuntimeIdentity(): PiRuntimeIdentity {
       `@byok-sdk/client does not declare a ${PI_PACKAGE_NAME} dependency; reinstall @byok-sdk/client or set BYOK_PI_BIN to a Node 22.22+ pi sidecar`,
     );
   }
-  const match = PI_ALIAS_SPEC.exec(spec);
-  if (match?.[1] === undefined || match[2] === undefined) {
+  if (!PI_EXACT_VERSION.test(spec)) {
     throw new Error(
-      `@byok-sdk/client pins ${PI_PACKAGE_NAME} to ${spec}, which is not an exact npm:<name>@<x.y.z> alias; the Pi runtime identity must be exact`,
+      `@byok-sdk/client pins ${PI_PACKAGE_NAME} to ${spec}, which is not one exact x.y.z version; the Pi runtime identity must be exact`,
     );
   }
-  return { name: match[1], version: match[2] };
+  return { name: PI_PACKAGE_NAME, version: spec };
 }
 
 function findPackageRoot(
@@ -117,10 +111,8 @@ function findPackageRoot(
  * the package's main entry via `import.meta.resolve` and walks upward to the
  * enclosing package root.
  *
- * That root's manifest name is NOT `PI_PACKAGE_NAME`: the specifier is an npm
- * alias for the SDK's fork, so the installed manifest carries the fork's own
- * name and version. Both are compared against the pin, and a mismatch fails
- * closed instead of launching an unverified runtime.
+ * That root's manifest name and version are both compared against the pin,
+ * and a mismatch fails closed instead of launching an unverified runtime.
  */
 export function resolvePiBin(): ResolvedBin {
   const override = process.env.BYOK_PI_BIN;

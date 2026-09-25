@@ -157,15 +157,7 @@ function preparationRequest(overrides: Partial<InputPreparationRequestV1> = {}):
       options: { cacheRetention: 'none', maxTokens: 4_096 },
     },
     snapshot: {
-      prompt: {
-        cwd: '/workspace/project',
-        toolSnippets: {},
-        toolGuidelines: {},
-        promptGuidelines: ['prefer small diffs'],
-        contextFiles: [{ path: 'AGENTS.md', content: 'be precise' }],
-        skills: [],
-        docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
-      },
+      prompt: { systemPrompt: 'be precise\nprefer small diffs' },
       messages: [{ role: 'user', content: 'summarise the repository', timestamp: 1_700_000_000_000 }],
     },
     permissionMode: 'auto',
@@ -372,14 +364,15 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     expect(receipt.artifact?.projection.version).toBe(3);
     expect(receipt.artifact?.projection.kind).toBe('content_complete');
     expect(receipt.artifact?.projection.digest).toMatch(/^[0-9a-f]{64}$/u);
-    expect(receipt.artifact?.residual.length).toBeGreaterThan(0);
+    expect(receipt.artifact?.residual).toEqual([]);
     for (const entry of receipt.artifact?.residual ?? []) {
       expect(typeof entry.key).toBe('string');
       expect(typeof entry.valueClass).toBe('string');
     }
     expect(receipt.artifact?.requestBytes).toBeGreaterThan(0);
-    expect(receipt.binding.runtime.packageName).toBe('@byok-sdk/pi-coding-agent');
+    expect(receipt.binding.runtime.packageName).toBe('@earendil-works/pi-coding-agent');
     expect(receipt.binding.runtime.upstreamCommit).toMatch(/^[0-9a-f]{40}$/u);
+    expect(receipt.binding.runtime.compilerVersion).toBe(4);
     // The mode the manifest was filtered for is recorded, not inferred.
     expect(receipt.binding.permissionMode).toBe('auto');
     // The tools were OBSERVED from the configured toolset, and every one of

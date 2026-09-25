@@ -327,30 +327,57 @@ carries the preparation, and an adapter that has no prepared lane refuses the
 variant by name. Only the pi lane can consume one, because the artifact is
 compiled against the verified installed pi closure.
 
-`pi --mode rpc` is never that lane. Only a session built by the fork's
-`createPreparedAgentSession` carries the authorized binding, so the ordinary
-CLI answers `prompt_prepared` with `prepared_session_unsupported`. The pi
-adapter instead launches the SDK-owned `byok-pi-prepared` host: an in-process
-Node child that constructs the prepared session with an explicit, complete tool
-closure and then runs the same RPC loop, so one protocol serves both lanes.
+The SDK-owned `byok-pi-prepared` host creates an official `createAgentSession`
+with only its inline extension and counted tools, then runs the SDK's bounded
+prepared RPC commands. The extension uses public `context_with_system` to inject
+Host history. `ModelRuntime.registerProvider({ streamSimple })` wraps the public
+OpenAI-completions serializer with a scoped fetch gate. Ordinary Pi RPC does not
+implement this SDK prepared command contract.
 
-What the prepared host IS authoritative for: the tool closure it registers, the
-launch boundary its MCP children start in, and the identity gate applied to
-every one of them. It reaches those servers through the same task-scoped pool
-the ordinary Pi extension uses, so a tool call has exactly one executor. It
-loads no extension, skill, prompt template, theme or context file at all — its
-resource loader is constructed and never reloaded — which is what makes the
-session's own prompt projection predictable enough for the native drift check
-to mean something.
+Preparation accepts exactly `prompt: { systemPrompt: string }`. This is a semantic
+cut: the prepared model sees only the Host's complete system prompt, without Pi's
+default coding prompt. The Host owns framing and product instructions. Removed
+renderer inputs (custom/append prompt, cwd, tool snippets/guidelines, skills,
+context files and docs paths) are rejected, never read through a compatibility
+branch. Tools are supplied only through the observed tools parameter. Compile
+creates no Session and reads no local prompt resources.
 
-What it is NOT authoritative for: the request bytes. It compiles nothing. The
-native compiler produced D, the artifact retains it verbatim, and the native
-session verifies the envelope against expectations taken from the durable
-record rather than from the envelope itself. Every prepared failure —
-`prepared_context_drift`, `prepared_model_drift`, `prepared_registry_drift` and
-the rest — is raised before any provider transport, is reported to the caller
-with its native code, and is terminal: no prepared failure permits re-sending a
-different input under the same accounting.
+A1″ compiles D using the official `streamSimple` at the real baseUrl, so endpoint
+compatibility remains upstream-owned. Compile provides a placeholder key, empty
+environment, explicit cache/retry options, and a capture fetch that throws. That
+fetch must be called exactly once and capture URL/body; zero or multiple calls
+fail closed without D. Compile reads no credential or real transport configuration.
+The exact-pin conformance is required before any Pi upgrade. The accepted residual
+risk is an upstream regression that ignores injected fetch combined with a missed
+conformance regression; only the placeholder key could then reach the intended
+provider. Refusal/no billing is an Owner assumption, not live-provider evidence.
+
+Envelope v4 retains the original Host request and complete captured body D. P(D)
+is D and residual is empty; requestBytes is UTF-8 bytes, not tokens. Runtime and
+compiler identity change requires the Host to reissue its ruling with
+`ruledResidualKeys=[]` and re-probe C after separately approved M5. The bound
+remains requestBytes+C. No prior fork ruling or C transfers automatically.
+
+At admission the runtime verifies envelope digest, independent model/binding and
+observed tool executor identities. On the first request its injected fetch compares
+URL and serialized body with captured D before any transport. Drift sends nothing
+and records a typed refusal in the gate closure, surviving upstream's generic
+Connection error. A refusal on request 2 or later emits one SDK-owned
+`prepared_run_refused` frame before native error events. Its closed code and
+request sequence become a non-retryable run/authority failure; the daemon emits
+`task.fail` with that exact code as `reason` (for example,
+`prepared_context_drift`). No provider error text is parsed, and a refused
+continuation cannot complete successfully. AgentSession retry and provider retry are both disabled. Each
+stream has an at-most-once fetch and forbids redirects. Tool-result continuations
+are not pre-frozen and never replay the first D: their accepted risk remains
+Errata 1 E4.4, covered by post-response overflow detection, an event and an alert.
+The existing usage-before-body, typed overflow/usage_unavailable, pre-pin checks,
+and egress sanitization remain mandatory.
+
+The host registers no uncounted native tool, no message tool, and loads no device
+extensions, skills, context files or prompt templates. Its resource loader loads
+only the owned inline extension. MCP calls use the existing task-scoped pool and
+implementation gate. A zero-tool session is supported.
 
 Two refusals are structural rather than incidental. A prepared Execution never
 resumes: a sealed `sessionRef` and a preparation reference together fail closed,
@@ -359,37 +386,25 @@ prepared operation admitted under a permission mode its manifest was not counted
 for is refused, because a manifest is the policy-filtered set for exactly one
 mode.
 
-PARTIAL, and stated where it is: the prepared Main tool set is Q1's
-policy-filtered native tools plus the MCP toolset tools, and only the MCP half
-exists today. The fork's own API is not the limit — `createPreparedAgentSession`
-takes an explicit tool array and would accept Pi's built-ins beside the MCP
-tools unchanged — but nothing counts them yet, so a policy that selects a native
-tool is refused by name rather than registered into guaranteed drift. A
-preparation therefore counts the MCP half only, and the final Main set stays the
-runtime's decision; this document does not settle it. The selection is resolved
-from the whole admitted policy (`allowTools` and `denyTools`, not merely `mode`)
-so that the day the preparation side counts a native half, the policy that chose
-it is already what gets bound.
+Prepared native-tool selection must be empty. A policy selecting native tools
+is refused before pinning; a preparation observes and counts MCP tools only.
+`requiredToolsets: []` is valid on preparation, and `auto` with `allowTools: []`
+launches zero native tools. General ordinary-offer toolset requirements are unchanged.
 
 The input support set is text-only user history, host-canonical assistant text
 history, and the current user message. Host-canonical assistant text is a
-DIFFERENT fact from a provider-generated assistant turn and the two are never
-interchanged: the host asserts the text was already said, nothing generated it
-here, so it carries no `api`, `provider`, `model`, `usage` or `stopReason` and
-none of those is fabricated to fill the provenance-carrying shape. The native
-contract makes `origin: 'host_canonical'` the discriminant — a present key, not
-a value — so an assistant message without it is a provenance claim this surface
-cannot check and rejects as `unsupported_input` rather than being narrowed to
-one it can. It counts toward input tokens exactly like user text; no limit or
-counting path special-cases it. Provider-generated assistant turns, tool-result
-history and multimodal content stay outside the set, and extending the set is a
-REGISTRATION in every validator — the wire schema, the device's hand-written
-parse and the native projection — never a relaxation of one of them.
+different fact from a provider-generated assistant turn. The wire requires
+`origin: 'host_canonical'` and accepts text only. A2′ uses a request-local sentinel
+(api/provider/model, zero usage, stopReason) solely in capture input and the
+`context_with_system` return. Conformance proves it is wire-neutral. It is absent
+from retained envelopes, SessionManager entries and RPC context readback; it is
+not evidence of a prior provider call. Provider-generated history, tool-result
+history and multimodal content remain unsupported input.
 
 A preparation is admitted only if the `prompt_prepared` frame it would be
 launched with fits one RPC frame the runtime accepts. The bound is the
-RUNTIME's (`RPC_MAX_FRAME_BYTES`, imported from the fork rather than restated
-here), so it is decided immediately after the compile and BEFORE the operator's
+SDK's (`RPC_MAX_FRAME_BYTES`, 8 MiB including LF, shared by admission, sender
+and prepared RPC reader), so it is decided immediately after the compile and BEFORE the operator's
 per-artifact retention policy: an envelope that can never be handed to the
 runtime in one frame can never be launched, and counting, retaining or charging
 it against a scope aggregate would be work done for an artifact nobody can
@@ -523,7 +538,7 @@ carries no version field, so a device and a cloud on different contract
 versions used to find out only when a completion PUT failed its strict schema,
 and the device then redelivered that envelope forever. The device capability
 is therefore `agent-input-preparation-v<N>`, where `<N>` is
-`INPUT_PREPARATION_WIRE_VERSION` (currently `agent-input-preparation-v6`). A
+`INPUT_PREPARATION_WIRE_VERSION` (currently `agent-input-preparation-v7`). A
 daemon declares only the token of the version it speaks; the cloud's
 input-preparation and prepared-offer enqueue gates accept only the token of the
 version they speak, so a skewed device is refused at enqueue with
@@ -542,18 +557,14 @@ and its strictly seq-ordered cursor stalls — which blocks that device's WHOLE
 mailbox, not only preparation. There is no v4 parser, dual read or migration
 for this, by decision: the lane never reached production readiness on 0.19.
 
-**Operator precondition for the one-shot v6 cut.** Drain all input-preparation
-requests and prepared Executions before upgrading: preparation receipts must be
-terminal, required message dispositions settled, and device mailbox cursors past
-all old preparation/prepared-offer entries. Upgrade cloud and device as a pair;
-v5-only devices receive `agent_capability_missing` before any task/mailbox write.
-There is no dual token, dual read or migration of old preparations: recreate
-preparations under v6. A stranded older prepared offer lacking required egressPolicy
-is not repaired by simply upgrading the other side; it requires operator handling
-of the old mailbox entry. The D compiler and fourteen admission comparisons remain
-unchanged. P0 still requires nonempty MCP toolsets; empty toolsets are deferred to
-the official Pi migration work-package because fork 0.86.1001 rejects an empty
-prepared session tool snapshot.
+**Operator precondition for the one-shot v7 cut.** Drain preparation requests,
+prepared Executions, required message dispositions and old mailbox entries before
+upgrading cloud and device together. Recreate preparations using the Host-owned
+systemPrompt and official identity. The capability is `agent-input-preparation-v7`;
+wire and record versions both advance to 7, with no dual token/read. Older records
+are refused. The fourteen admission comparisons retain their roles; the compiler,
+envelope and identity values being compared change. A skipped drain needs explicit
+operator handling of the old entries; upgrading alone does not repair them.
 
 The evidence has four parts, and each is read off a recorded fact rather than
 asserted.
@@ -768,29 +779,40 @@ implied by this source change.
 
 ## Core pi runtime contract
 
-Pi is a required BYOK capability. `@byok-sdk/client` depends on the exact npm
-artifact `@byok-sdk/pi-coding-agent@0.86.1001` — the SDK's fork of upstream
-0.86.1 at `13cbf77`, carrying the prepared-session-input seam — declared as
-`"@earendil-works/pi-coding-agent": "npm:@byok-sdk/pi-coding-agent@0.86.1001"`
-so the import specifier and the installed directory stay upstream while the
-resolved manifest carries the fork identity. That one manifest entry is the
-authority for both halves: `PI_PACKAGE_NAME` is the resolution specifier and
-`resolvePiRuntimeIdentity()` derives the exact installed name and version from
-the same line, and a launch whose resolved manifest does not match fails closed.
-The SDK does not accept an unversioned global `pi` on `PATH` as an implicit
-substitute. All workspace
-dispatch packages and private conformance tests require Node.js `>=22.22.0`,
-matching pi's published engine floor. The independent
-`@byok-sdk/keys` package remains outside the dispatch graph, depends only
-on protocol-free `@byok-sdk/core`, and shares the Node.js `>=22.22.0` floor. A
-host that enables the BYOK lane installs its
-`byok-pi-provider-launcher` binary separately and gives the client only the
-launcher command plus non-secret profile/session paths; this executable
-process boundary does not create a package dependency edge.
-The coding-agent package owns and installs its non-optional `pi-agent-core`,
-`pi-ai`, `pi-client`, `pi-protocol`, and `pi-tui` dependencies. BYOK does not
-declare or import those packages separately because the CLI/RPC boundary is
-the sole version authority.
+Pi is a required BYOK capability. The SDK pins the official unmodified
+`@earendil-works/pi-coding-agent@0.87.1` plus chord, pi-agent-core, pi-ai,
+pi-telemetry and pi-tui to exactly 0.87.1. Fork aliases and dual runtimes are
+retired. `resolvePiRuntimeIdentity()` reads the static dependency projection;
+resolved name/version mismatch fails closed. There is no implicit global Pi fallback.
+Only public Pi APIs are used; private imports, patches, copied provider serializers
+or Session core, and global monkey-patches are forbidden.
+
+The checked official closure inventory binds each package's name, version, tarball
+SHA-512 integrity, signed provenance and upstream commit, and every installed file's
+SHA-256. Acquisition verifies npm signatures and Sigstore provenance against the
+release workflow identity; the checked inventory includes the provenance bundles.
+Build and isolated release/registry installs verify every resolved sibling instance
+against those bytes and reject fork packages. `nativeProvenance` binds the coding
+package identity, tarball integrity, provenance digest, whole closure digest and
+compiler version. Encapsulated runtime records attest the sealed code artifact and
+its declared assets; runtime checks compare the official provenance and manifest
+bytes without resolving a mutable external package installation. File tampering or
+provenance drift is a refusal, never a substituted runtime.
+
+The official coding-agent ships an npm shrinkwrap. The measured npm install has
+10 physical roots across six official package names: pi-ai, pi-agent-core, chord
+and pi-telemetry each occur twice (top-level and coding-agent nested); coding-agent
+and pi-tui occur once. Attestation verifies all instances; no singleton guarantee
+is claimed. The scripted workflow probe covers the vendored arbiter's built-in
+Agent/compat stream path across this layout. It does not prove cross-instance
+registration visibility: pi-ai/compat owns a module-local apiProviderRegistry,
+so a future extension calling registerApiProvider on one copy cannot make that
+registration visible to another copy. This boundary is deferred in tasks/todos.md
+and must be addressed before such an extension is admitted.
+
+Dispatch and private conformance execution require Node.js >=22.22.0. Keys remains
+outside the dispatch dependency graph and delivers credentials through its existing
+separately installed launcher boundary.
 
 The package manager is not the runtime authority. This repository uses Bun
 1.4.0 with its isolated workspace linker and one committed `bun.lock`.
@@ -1335,7 +1357,7 @@ The authority split is deliberate and total:
   closure digest, the interpreter triple (`path`, `digest`,
   `loadCommandsDigest`) for an `interpreter+bundle`, the optional entry, the
   launch argv and cwd, and — for a release that carries them — the sealed asset
-  root and asset list, plus the native fork provenance. That is the whole of
+  root and asset list, plus the official closure provenance. That is the whole of
   the host's authority.
 - **The SDK owns the assertion, and everything it can measure itself.** A
   record is never believed. Before it becomes an identity the daemon measures
@@ -1454,8 +1476,8 @@ A runtime record additionally declares two components:
   digest — and re-measured before every spawn. The refusal names `asset` as its
   subject. A path that is absolute, non-normalized or climbing, and a root that
   does not resolve to itself, are refused as records rather than repaired.
-- **`nativeProvenance`** — the package name and version, upstream base and
-  commit, fork build and compiler-contract revision, declared by the host from
+- **`nativeProvenance`** — the official package name and version, tarball integrity, provenance
+  and closure digests, upstream commit and compiler-contract revision, declared by the host from
   the single exact pin it built the release from. It is what input preparation
   counts against. A `package.json` reached by resolving a package specifier is
   never a source for it: under a single-artifact release that resolution runs
@@ -1873,7 +1895,7 @@ operator entry and is rejected as unsupported. No Salesko runtime capability is
 inferred from its MCP/helper host configuration.
 
 `byok-agent team pi-relay` binds one exact existing Codex thread and one newly
-owned RPC session on the pinned Pi fork runtime (see the Core pi runtime
+owned RPC session on the pinned official Pi runtime (see the Core pi runtime
 contract). The private version-1 binding document has `codex`
 (context, threadId, endpoint, afterSeq) and `pi` (context, afterSeq, absolute cwd,
 fresh absolute sessionDir, provider, model, systemPrompt, extensionPaths) fields.
@@ -2126,3 +2148,17 @@ complete ContextPack/Summary, native-runtime, migration or production acceptance
 ### Pi credential launcher executable contract
 
 Pi custody consumes the client-decided runtime launch binding: `--pi-bin`, optional `--pi-entry`, `--pi-fixed-args`, `--pi-cwd` and `--launch-binding` describe the same physical target. Keys validates these fields and the declared projection directory before reading credentials, then reverifies immediately before spawn. The SDK-owned RPC entry receives explicit session cwd in its configuration. A configured install authority selects the interpreter and sealed entry; only the explicitly unconfigured development path uses package/runtime defaults. Version detection retains its existing timeout and error classification. No shell, argv0 fallback or inference from an executable suffix selects the runtime.
+
+### Official Pi migration security and installation contract (2026-09-25 consolidation)
+
+Prepared wire and durable record are version 7, one cut with no old-token or old-record reads. `prompt` contains exactly the required Host `systemPrompt` string, including an empty string if explicitly supplied. It enters D verbatim. Prepared models receive no Pi default system prompt, local cwd, skills, docs, tool snippets or coding guidelines. Tools are declared only through the observed tools parameter. Empty `requiredToolsets` is admitted on this lane.
+
+The SDK-owned envelope `byok.pi.prepared-input` is version 4, request format `byok.pi.openai-completions.request`, compilerVersion 4. P(D) is the entire captured body string D, byte for byte, with residual=[]; no serializer classification table or token claim exists. The first request alone is frozen. Tool-result continuations use their current context and the same per-stream retry-off, at-most-once scoped fetch; they never replay the first D. Errata 1 E4.4's accepted continuation risk remains: post-response overflow detection, appended event and alert. Host runtime ruling and C must be reissued after M5, with ruledResidualKeys=[]; Salesko must assemble framing and product instructions into the complete systemPrompt.
+
+Prepared child environment is rebuilt through an explicit EnvironmentBuilder allowlist before launch binding. The six OpenAI constructor variables and undeclared OPENAI_* are not inherited. The final scoped fetch admits only content-type, accept, authorization, Pi user-agent, the measured fixed x-stainless metadata (including timeout), and session-affinity fields bound to the frozen provider session id. OpenAI-Organization, OpenAI-Project and custom headers cause a typed refusal with zero sends. Both AgentSession retry and provider retry are disabled; repeated fetch calls in one stream are refused, including after a transport failure. Redirect following is disabled.
+
+A1'' compile uses only a placeholder key and injected capture-and-throw fetch against the actual baseUrl. The official OpenAI client reads exactly OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_WEBHOOK_SECRET, OPENAI_LOG and OPENAI_CUSTOM_HEADERS. The approved purity contract is D independence plus this exact read set, not zero reads; an upgrade changing the set requires a fresh ruling. Poisoning these variables must leave D unchanged. OPENAI_LOG may cause a local request log during compile: the device owner deliberately enabled this debug setting; the accepted side effect remains local, does not change D and is not sent externally. No global env or transport monkey-patch is permitted.
+
+Client direct Pi dependencies are exactly coding-agent, pi-ai and pi-agent-core at 0.87.1 and retain the existing direct-dependency purity guard. chord, pi-telemetry and pi-tui remain transitive. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their measured JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
+
+Exactness has three independent checks: bun.lock exact versions and sha512 integrity under frozen install; runtime verification of all six official package instances' manifests and file inventories against tarball/provenance evidence; release-pack and registry-readback isolated-install convergence. Encapsulated runtime records bind the measured artifact and approved closure provenance without looking up external packages. Renamed provenance fields are packageName, packageVersion, tarballIntegrity, upstreamCommit, provenanceDigest, closureDigest and compilerVersion; upstreamBase/forkBuild are retired, not filled with dummy values. The official tarball signatures and provenance are collected reproducibly by `scripts/release/collect-official-pi-closure.mjs`.

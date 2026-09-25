@@ -140,15 +140,7 @@ const LIMITS: InputPreparationLimitsPolicyV1 = validateInputPreparationLimits({
   retryHorizonMs: 30_000,
 });
 
-const PROMPT = {
-  cwd: '/workspace/project',
-  toolSnippets: {},
-  toolGuidelines: {},
-  promptGuidelines: [],
-  contextFiles: [],
-  skills: [],
-  docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
-} as const;
+const PROMPT = { systemPrompt: 'Host fixture instructions' } as const;
 
 const CONTEXT_JSON = JSON.stringify({
   prompt: PROMPT,
@@ -178,9 +170,9 @@ function stubCompiler(): StubCompiler {
     runtime: {
       packageName: '@byok-sdk/pi-coding-agent',
       packageVersion: '0.85.1002',
-      upstreamBase: '0.85.1',
+      tarballIntegrity: 'sha512-'+ 'YQ=='.repeat(1),
       upstreamCommit: 'd981de1229ef899957bbe968bc8dcda02a21f477',
-      forkBuild: 1,
+      provenanceDigest: 'a'.repeat(64), closureDigest: 'b'.repeat(64),
       envelopeFormat: 'pi.session.prepared-input',
       requestFormat: 'pi.openai-completions.prepared',
       compilerVersion: 2,
@@ -338,7 +330,7 @@ describe('one assembly entry, consumed by both preparation paths', () => {
     // their own observation could agree on names and still differ here.
     expect(JSON.stringify(compiled[1]!.snapshot.tools)).toBe(JSON.stringify(compiled[0]!.snapshot.tools));
     expect(JSON.stringify(compiled[1]!.toolExecutors)).toBe(JSON.stringify(compiled[0]!.toolExecutors));
-    expect(compiled[0]!.snapshot.prompt.selectedTools).toEqual(compiled[0]!.snapshot.tools.map((tool) => tool.name));
+    expect(Object.keys(compiled[0]!.snapshot.prompt)).toEqual(['systemPrompt']);
     expect(Object.keys(compiled[0]!.toolExecutors)).toEqual([
       'mcp__teamserver__echo',
       'mcp__teamserver__find_leads',

@@ -2190,7 +2190,7 @@ export function buildDaemonWithAdapters(
      * That completion is ACCEPTED by cloud: the completion route asserts no
      * device capability (`cloud.ts`'s `completeInputPreparationFromStores`),
      * precisely so this rejection is recordable by a device that never
-     * advertised `agent-input-preparation-v6`. The flag remains the admission
+     * advertised `agent-input-preparation-v7`. The flag remains the admission
      * gate on `enqueueInputPreparation`.
      *
      * The handler takes the service directly, so a preparation runs IN-PROCESS.
@@ -2323,7 +2323,7 @@ export function buildDaemonWithAdapters(
       getMcpToolsets: () => toolsetRegistry.snapshot().toolsets,
       // The prepared-Execution lane, present only on a daemon whose input
       // preparation service actually constructed — which is also the only
-      // daemon that advertises `agent-input-preparation-v6` and can hold a record
+      // daemon that advertises `agent-input-preparation-v7` and can hold a record
       // a `task.offer_prepared` could name. The three device facts travel with
       // the store because this file already owns them: re-deriving the
       // installed runtime identity or the operator's policy revision inside the

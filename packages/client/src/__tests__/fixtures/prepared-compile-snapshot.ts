@@ -2,45 +2,38 @@ import type { CompilePreparedInputRequest } from '../../adapters/pi/input-prepar
 import type { InputPreparationCompiledSnapshotV1 } from '../../input-preparation';
 
 /**
- * The full 0.86 prompt surface, deliberately non-empty in every field the
- * rebase added or changed.
+ * The Host-authored prepared input on official Pi (A1'/A2'), non-empty in
+ * every field the official migration moved.
  *
- * `toolGuidelines`, `skills` and a host-canonical prefix are stated here rather
- * than in a separate case because they are what the rebase moved: an empty
- * fixture would compile the same bytes the 0.85 line did and prove nothing
- * about the renderer that now produces them. `constrainedSampling` is likewise
- * carried on the tools exactly as an 0.86 built-in declares it, so the request
- * this fixture counts is the one the runtime would actually send.
+ * The Host owns the WHOLE system message: `customPrompt` is it, verbatim, and
+ * every renderer input (`toolSnippets`, `toolGuidelines`, `promptGuidelines`,
+ * `contextFiles`, `skills`) is empty because a non-empty one is refused as
+ * `prompt_render_input_unsupported`. The host-canonical prefix exercises the
+ * A2' sentinel provenance, and `constrainedSampling` is carried on the tools
+ * the one way the compile admits it (`{ json_schema, prefer }`).
  *
  * It lives in `fixtures/` because two tests compile it: the in-process contract
  * suite (`pi-input-preparation.test.ts`) and the isolated purity gate
  * (`pi-compile-purity.test.ts`), which compares the body its child process
  * produced against the body this exact request produces here. Two copies of the
- * prompt surface would make that comparison a comparison of two fixtures.
+ * input would make that comparison a comparison of two fixtures.
  */
+export const PREPARED_COMPILE_SYSTEM_PROMPT = [
+  'You are the BYOK coding agent.',
+  '# agents',
+  'be precise',
+  'prefer small diffs',
+  'read before you write',
+  'review a diff before it is proposed',
+].join('\n');
+
 export function preparedCompileSnapshot(): InputPreparationCompiledSnapshotV1 {
   return {
-    prompt: {
-      cwd: '/workspace/project',
-      selectedTools: ['read', 'bash'],
-      toolSnippets: { read: 'read snippet', bash: 'bash snippet' },
-      toolGuidelines: { read: ['read before you write'], bash: ['quote every path'] },
-      promptGuidelines: ['prefer small diffs'],
-      contextFiles: [{ path: 'AGENTS.md', content: '# agents\nbe precise\n' }],
-      skills: [
-        {
-          name: 'review',
-          description: 'review a diff before it is proposed',
-          filePath: '/workspace/project/.skills/review/SKILL.md',
-          disableModelInvocation: false,
-        },
-      ],
-      docsPaths: { readmePath: 'README.md', docsPath: 'docs', examplesPath: 'examples' },
-    },
+    prompt: { systemPrompt: PREPARED_COMPILE_SYSTEM_PROMPT },
     messages: [
-      // A host-canonical prefix: the host asserts this text was already said,
-      // and it carries no provenance. The context still ends on a user turn,
-      // which the native compile boundary requires.
+      // A host-canonical prefix: the host asserts this text was already said.
+      // It enters T with the A2' sentinel provenance, which never reaches D.
+      // The context still ends on a user turn, which the compile requires.
       { role: 'user', content: 'what does this repository do?', timestamp: 1_699_999_999_000 },
       { role: 'assistant', origin: 'host_canonical', content: 'It is a BYOK SDK.', timestamp: 1_699_999_999_500 },
       { role: 'user', content: 'summarise the repository', timestamp: 1_700_000_000_000 },

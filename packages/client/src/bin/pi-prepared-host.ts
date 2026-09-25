@@ -7,16 +7,33 @@ import process from 'node:process';
 import { PERMISSION_MODES, PermissionPolicySchema, type PermissionMode, type PermissionPolicy } from '@byok-sdk/protocol';
 import {
   AgentSessionRuntime,
-  createPreparedAgentSession,
-  DefaultResourceLoader,
   getAgentDir,
   ModelRuntime,
   runRpcMode,
-  SessionManager,
-  SettingsManager,
   type AgentSessionServices,
 } from '@earendil-works/pi-coding-agent';
 import { inputPreparationRuntimeIdentityString, type InputPreparationModelV1 } from '../input-preparation';
+import { verifyPreparedPiInput, type PreparedPiInputV1 } from '../adapters/pi/input-preparation';
+import {
+  canonicalPreparedValue,
+  PreparedSessionError,
+  preparedSessionErrorCode,
+} from '../adapters/pi/prepared-request';
+import {
+  createPreparedGate,
+  createPreparedPiSession,
+  PREPARED_TRIGGER_TEXT,
+  registerPreparedProvider,
+  type PreparedGateRefusal,
+  type PreparedProviderCredential,
+} from '../adapters/pi/prepared-session';
+import {
+  parsePreparedPromptCommand,
+  readFirstJsonlFrame,
+  type PreparedPromptResponseV1,
+  type PreparedRunRefusalFrame,
+} from '../adapters/pi/prepared-prompt-frame';
+import { RPC_MAX_FRAME_BYTES } from '../util/rpc-frame';
 import { loaderEnvInjections } from '../daemon/environment';
 import type { McpLaunchAttestation } from '../daemon/trusted-launch-cwd';
 import {
@@ -30,37 +47,31 @@ import {
 } from '../adapters/pi/prepared-tools';
 
 /**
- * The SDK-owned prepared launch entry for the pi runtime.
+ * The SDK-owned prepared launch entry for the pi runtime, on official Pi.
  *
- * `pi --mode rpc` can never consume a prepared request: only a session built by
- * `createPreparedAgentSession` carries the authorized binding, so the ordinary
- * CLI answers `prompt_prepared` with `prepared_session_unsupported`
- * (`node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js:999`).
- * This process is that session — an in-process Node host that constructs it
- * with an explicit, complete tool closure and then runs the SAME `runRpcMode`
- * loop the CLI runs, so the adapter above it speaks one RPC protocol either
- * way.
+ * Official `runRpcMode` has no `prompt_prepared` command, so this process
+ * answers it itself and then hands the transport to the SAME official RPC
+ * loop the CLI runs, so the adapter above it speaks one RPC protocol:
  *
- * What it is NOT: it is not a second compiler and not a second executor. It
- * compiles nothing (the artifact arrives already compiled, over the RPC frame,
- * and the native session verifies it), and it reaches MCP servers through the
- * shared pool both Pi entries use (`../adapters/pi/mcp-server-pool.ts`).
+ * 1. Everything that can fail before input arrives fails first, closed, with a
+ *    stable reason on stderr: configuration, installed closure, tool surface,
+ *    provider projection and credential presence. The counted model's provider
+ *    is registered with the byte gate as its `streamSimple`.
+ * 2. The first stdin frame must be `prompt_prepared`. Its envelope is verified
+ *    against the durable expectation and re-compiled from its own transcript
+ *    (`verifyPreparedPiInput`); a refusal is answered on that command id.
+ * 3. A public `createAgentSession` is built with in-memory session and
+ *    settings (both retry layers, compaction and cache warming off), an empty
+ *    resource loader carrying the Host system message, the authorized tools,
+ *    and one extension whose `context_with_system` projects the Host
+ *    transcript. The official RPC loop is started, and once it has bound the
+ *    session the trigger prompt runs.
+ * 4. The `prompt_prepared` response is written at the byte-gate verdict of
+ *    request 1: success means D was verified and is being sent.
  *
- * Every resource is explicit and empty:
- *
- * - Zero extensions, skills, prompt templates, themes and context files. The
- *   loader below is constructed and deliberately never reloaded, so no file on
- *   this device can contribute to the system prompt. That is what makes the
- *   session's own projection predictable enough for the native
- *   `prepared_context_drift` check to mean something: a preparation compiled
- *   against any other prompt shape is REFUSED rather than silently run.
- * - No native tools. See `../adapters/pi/prepared-tools.ts` for why, and for
- *   the exact native API fact that is NOT the reason.
- *
- * Failure is always closed and always before anything is sent: a malformed
- * configuration, an unresolvable runtime closure, a tool surface that no longer
- * matches what was counted, or a loader-injected environment each exit
- * non-zero with a stable reason on stderr, and no session is created at all.
+ * It compiles nothing new and executes nothing of its own: D was compiled at
+ * preparation, and MCP servers are reached through the shared pool both Pi
+ * entries use (`../adapters/pi/mcp-server-pool.ts`).
  */
 
 const CONFIG_FORMAT = 'byok.pi.prepared-launch';
@@ -301,13 +312,13 @@ const PREPARED_PROJECTION_COMPARED_ENTRY_FIELDS: readonly string[] = Object.free
  * The two provider-registration failure sites, each a FIXED literal.
  *
  * `registerProvider` and `getAuth` are the two calls on this path that touch
- * the resolved device credential, and the fork composes its own error strings
+ * the resolved device credential, and the runtime composes its own error strings
  * from caller-supplied provider and model values — so a foreign exception
  * message is the one value here that could carry, or be derived from, the
  * secret. Nothing about the caught error reaches the refusal: the site is named
  * by a token this file chose, exactly as every other refusal in this file is a
  * fixed literal. `../__tests__/prepared-provider-consent.test.ts` forces a real
- * fork exception whose message carries a synthetic secret and pins that neither
+ * runtime exception whose message carries a synthetic secret and pins that neither
  * the secret nor the message appears in what this process would write.
  */
 const PREPARED_PROVIDER_REGISTRATION_DETAIL = Object.freeze({
@@ -450,7 +461,7 @@ function admitPreparedProviderProjection(
     config: Object.freeze({
       baseUrl: entry.baseUrl as string,
       api: 'openai-completions' as const,
-      // The REFERENCE, never the value. The fork resolves `$NAME` from this
+      // The REFERENCE, never the value. The runtime resolves `$NAME` from this
       // process's environment at request time, and a literal here would put
       // the device secret into an object the session can serialize.
       apiKey: PREPARED_PROVIDER_KEY_REFERENCE,
@@ -632,38 +643,34 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
   }
 
   // pi's OWN resolution of where its per-user state lives, run in THIS process
-  // where HOME is the task's. The native factory refuses to resolve it for the
-  // caller; that is a rule about the factory, not a reason to re-derive pi's
-  // own directory layout in the daemon and hand a second opinion down.
+  // where HOME is the task's.
   const agentDir = getAgentDir();
 
   // The BYOK branch, and the ONLY branch: under `keys-profile` this process's
   // agent directory IS the fresh per-launch projection directory the client
   // minted and the launcher wrote into, so the device's own Pi auth store is
-  // structurally out of reach. Under `pi-auth-store` nothing below runs and the
-  // built-in-provider lane is byte-for-byte what it has always been — a
-  // declared entry, not a fallback.
-  //
-  // Both refusals happen here: before the model runtime exists, before any
-  // session is created, and therefore before anything could be sent.
-  let preparedProvider: PreparedProviderRegistration | undefined;
+  // structurally out of reach. Under `pi-auth-store` the runtime's own auth
+  // store for the counted provider is the credential.
+  let credential: PreparedProviderCredential = {};
   if (config.credentialSource === 'keys-profile') {
-    preparedProvider = admitPreparedProviderProjection(join(agentDir, 'models.json'), config.model);
+    const projection = admitPreparedProviderProjection(join(agentDir, 'models.json'), config.model);
+    credential = {
+      apiKey: projection.config.apiKey,
+      ...(projection.config.authHeader === true ? { authHeader: true as const } : {}),
+    };
     // Presence only. The value is never read into a message, a log line, a
-    // configuration file or an argument — the fork resolves the `$` reference
-    // from this environment when it builds the request.
+    // configuration file or an argument — the runtime resolves the `$`
+    // reference from this environment when it builds the request.
     const delivered = process.env[PREPARED_PROVIDER_KEY_ENV];
     if (typeof delivered !== 'string' || delivered.length === 0) {
       fail(`prepared_provider_credential_unavailable: the credential-custody launcher delivered no ${PREPARED_PROVIDER_KEY_ENV}`);
     }
   }
 
-  const settingsManager = SettingsManager.create(config.cwd, agentDir);
-  const sessionManager = SessionManager.create(config.cwd);
   const modelRuntime = await ModelRuntime.create({
     authPath: join(agentDir, 'auth.json'),
     // No catalog file and no catalog refresh: the model this session sends with
-    // is the one the record pinned, handed in below. A network refresh here
+    // is the one the record pinned, registered below. A network refresh here
     // would be an unrelated egress on a path whose whole point is that the
     // request was already decided.
     modelsPath: null,
@@ -671,98 +678,155 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
     refreshOnCreate: false,
   });
 
-  // Registered in memory rather than by pointing `modelsPath` at the
-  // projection, and the choice was made by probe, not by taste
-  // (`tasks/notes/20260921-0016-prepared-byok-provider.notes.md`, K-3). Both
-  // mechanisms resolve the key with zero egress and leave `auth.baseUrl`
-  // undefined, so neither can make the native endpoint check misfire. They
-  // differ on writes: with `modelsPath` set, the runtime's models store is a
-  // FILE store next to the projection, and the first `refresh()` creates
-  // `models-store.json` inside the launcher-owned directory — a file the
-  // launcher did not write and does not clean up. With `modelsPath: null` the
-  // store is in-memory, and `registerProvider`'s own floating
-  // `refresh({allowNetwork:false})` writes nothing and reaches no network.
-  if (preparedProvider !== undefined) {
-    try {
-      modelRuntime.registerProvider(preparedProvider.providerId, preparedProvider.config as never);
-    } catch {
-      // The caught value is deliberately unnamed and unread: see
-      // `preparedProviderRegistrationRefusal`.
-      fail(preparedProviderRegistrationRefusal('register'));
-    }
-    // The registration is only useful if it makes the COUNTED model resolvable:
-    // `Models.getAuth` answers `undefined` for a provider id it does not hold,
-    // before it reads any credential store, and that refusal would otherwise
-    // surface as the fork's "no API key found" message after a session existed.
+  // The counted model's provider, registered in memory with the byte gate as
+  // its `streamSimple`. The gate is armed only once a verified envelope exists.
+  const writeRaw = process.stdout.write.bind(process.stdout);
+  const gate = createPreparedGate({ onRefusal: (refusal) => {
+    // Request 1 has its correlated command response. Later refusals are
+    // terminal runtime authority, never a second response to that command.
+    if (refusal.sequence < 2) return;
+    const frame: PreparedRunRefusalFrame = {
+      type: 'prepared_run_refused', code: refusal.code, sequence: refusal.sequence,
+    };
+    writeRaw(`${JSON.stringify(frame)}\n`);
+  } });
+  let model;
+  try {
+    model = registerPreparedProvider(modelRuntime, config.model, credential, gate);
+  } catch (cause) {
+    // A typed refusal carries a fixed literal. Anything else is unnamed and
+    // unread: see `preparedProviderRegistrationRefusal`.
+    if (cause instanceof PreparedSessionError) fail(`${cause.code}: ${cause.message}`);
+    fail(preparedProviderRegistrationRefusal('register'));
+  }
+  if (config.credentialSource === 'keys-profile') {
+    // The registration is only useful if it makes the COUNTED model
+    // resolvable; otherwise the refusal would surface as "no API key found"
+    // after a session existed.
     let resolved: unknown;
     try {
-      resolved = await modelRuntime.getAuth(config.model as never);
+      resolved = await modelRuntime.getAuth(model);
     } catch {
       fail(preparedProviderRegistrationRefusal('resolve'));
     }
-    if (resolved === undefined) {
-      fail(preparedProviderRegistrationRefusal('resolve'));
-    }
+    if (resolved === undefined) fail(preparedProviderRegistrationRefusal('resolve'));
   }
-  // Constructed and never reloaded — see this file's own doc comment. Every
-  // getter answers the constructor's empty state, so no extension, skill,
-  // prompt template, theme or context file on this device reaches the session.
-  const resourceLoader = new DefaultResourceLoader({
-    cwd: config.cwd,
-    agentDir,
-    settingsManager,
-  });
 
-  const created = await createPreparedAgentSession({
-    cwd: config.cwd,
-    agentDir,
-    model: config.model as never,
-    // The frozen request carries its own reasoning configuration inside D, so
-    // this affects nothing the provider is sent; it is required, and "off" is
-    // the only value that claims nothing the artifact did not already decide.
-    thinkingLevel: 'off',
-    modelRuntime,
-    settingsManager,
-    sessionManager,
-    resourceLoader,
-    tools: surface.tools.map((entry) => ({
-      name: entry.name,
-      identity: entry.identity,
-      tool: entry.tool as never,
-    })),
-  });
+  // --- the one prepared command --------------------------------------------
+  // Captured BEFORE the official loop takes stdout over; each response is one
+  // whole LF-terminated line, so it never interleaves inside another frame.
+  const writeResponse = (response: PreparedPromptResponseV1, then?: () => void): void => {
+    writeRaw(`${JSON.stringify(response)}\n`, () => then?.());
+  };
+  const refuseCommand = (id: string | undefined, code: string, error: string): never => {
+    writeResponse({ id, type: 'response', command: 'prompt_prepared', success: false, error, code }, () => {
+      process.exit(EXIT_CONFIG);
+    });
+    // Never returns: the process exits once the refusal is flushed.
+    return new Promise<never>(() => {}) as never;
+  };
 
-  // Established here rather than left to whatever this device's settings say.
-  // The native session refuses a prepared request outright while either is on
-  // (`prepared_session_ineligible`), because an auto-compaction or an
-  // application-level retry would write to, or re-issue, the very request that
-  // was frozen. A prepared host that inherited them would be a host whose
-  // admission depends on a user's settings file.
-  created.session.setAutoCompactionEnabled(false);
-  created.session.setAutoRetryEnabled(false);
+  let line: string;
+  try {
+    line = await readFirstJsonlFrame(process.stdin, RPC_MAX_FRAME_BYTES);
+  } catch (cause) {
+    await pool.close();
+    fail(`prepared_input_invalid: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
+  const command = parsePreparedPromptCommand(line);
+  if ('error' in command) {
+    await pool.close();
+    return refuseCommand(command.id, 'prepared_input_invalid', command.error);
+  }
+  let envelope: PreparedPiInputV1;
+  try {
+    // The command's expectation and this process's configuration both come
+    // from the same durable record; the model must be the one registered.
+    const expectedModel = (command.expected as { model?: unknown }).model;
+    if (canonicalPreparedValue(expectedModel) !== canonicalPreparedValue(config.model)) {
+      throw new PreparedSessionError('prepared_expectation_mismatch', 'The prepared expectation names a model this launch was not configured for.');
+    }
+    envelope = await verifyPreparedPiInput(command.input, command.expected);
+  } catch (cause) {
+    await pool.close();
+    return refuseCommand(command.id, preparedSessionErrorCode(cause), cause instanceof Error ? cause.message : String(cause));
+  }
+
+  let answered = false;
+  const answer = (refusal: PreparedGateRefusal | { code: string; message: string } | undefined, sessionId: string): void => {
+    if (answered) return;
+    answered = true;
+    writeResponse(refusal === undefined
+      ? { id: command.id, type: 'response', command: 'prompt_prepared', success: true,
+          data: { sessionId, preparedDigest: envelope.digest } }
+      : { id: command.id, type: 'response', command: 'prompt_prepared', success: false,
+          error: refusal.message, code: refusal.code });
+  };
+  let sessionIdForVerdict = '';
+  gate.arm(envelope, (refusal) => answer(refusal, sessionIdForVerdict));
+
+  let startRun: () => void = () => {};
+  let handle;
+  try {
+    handle = await createPreparedPiSession({
+      envelope,
+      gate,
+      model,
+      cwd: config.cwd,
+      agentDir,
+      modelRuntime,
+      tools: surface.tools.map((entry) => ({ name: entry.name, identity: entry.identity, tool: entry.tool as never })),
+      // `session_start` fires inside the official loop's bind; its subscription
+      // to session events is installed in the same microtask chain, so the run
+      // starts on the next macrotask with every event already forwarded.
+      onSessionStart: () => {
+        setImmediate(() => startRun());
+      },
+    });
+  } catch (cause) {
+    await pool.close();
+    return refuseCommand(command.id, preparedSessionErrorCode(cause), cause instanceof Error ? cause.message : String(cause));
+  }
+  const { session } = handle;
+  sessionIdForVerdict = session.sessionId;
+
+  let started = false;
+  startRun = () => {
+    if (started) return;
+    started = true;
+    // The official loop's reader is attached by now; the first-frame reader
+    // left stdin paused so nothing the adapter writes next can be lost.
+    process.stdin.resume();
+    void session.prompt(PREPARED_TRIGGER_TEXT)
+      .then(() => {
+        // The run ended without request 1 reaching the gate — an abort, or a
+        // failure in auth or transport setup. D was never sent.
+        answer({ code: 'prepared_failed', message: 'The prepared run settled before its first provider request reached the byte gate.' }, session.sessionId);
+      })
+      .catch((cause: unknown) => {
+        answer({ code: preparedSessionErrorCode(cause), message: cause instanceof Error ? cause.message : String(cause) }, session.sessionId);
+      });
+  };
 
   // No session-shutdown hook is registered for the pool: `runRpcMode` never
   // returns, and the adapter that spawned this process owns its whole tree
   // (`../adapters/pi/rpc-client.ts`'s `adoptOwnedProcessTree`), so the server
-  // children are reaped with it. Closing the pool from a signal handler here
-  // would install a second, racing disposal authority over the same children.
+  // children are reaped with it.
 
   const services: AgentSessionServices = {
     cwd: config.cwd,
     agentDir,
     modelRuntime,
-    settingsManager,
-    resourceLoader,
+    settingsManager: handle.settingsManager,
+    resourceLoader: handle.resourceLoader,
     diagnostics: [],
   };
   // The runtime host `runRpcMode` drives. Its session-replacement factory
-  // refuses: `new_session`, `switch_session`, `fork` and `clone` are all
-  // `PREPARED_RESERVED_COMMANDS` and are already refused by the RPC loop while a
-  // reservation is held, but a prepared session must never be replaced at any
-  // point in its life — the replacement would carry no authorized binding and
-  // would silently become an ordinary session on the same transport.
+  // refuses: a prepared session must never be replaced, because the
+  // replacement would carry no byte gate and would silently become an
+  // ordinary session on the same transport.
   const runtime = new AgentSessionRuntime(
-    created.session,
+    session,
     services,
     async () => {
       throw new Error('a prepared pi session is never replaced; start a new prepared operation instead');
