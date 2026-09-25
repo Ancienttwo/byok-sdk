@@ -1,14 +1,24 @@
+> **Archived**: 2026-09-25 13:39
+> **Related Plan**: plans/archive/plan-20260925-0331-pi-087-official-migration.md
+> **Outcome**: Superseded
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260925-1339
+> **Archive Projection V1**: `plans/plan-20260925-0331-pi-087-official-migration.md` => `plans/archive/plan-20260925-0331-pi-087-official-migration.md`
+> **Archive Projection V1**: `tasks/notes/20260925-0331-pi-087-official-migration.notes.md` => `tasks/archive/notes-20260925-1339-pi-087-official-migration.md`
+> **Archive Projection V1**: `tasks/contracts/20260925-0331-pi-087-official-migration.contract.md` => `tasks/archive/contract-20260925-1339-pi-087-official-migration.md`
+> **Archive Projection V1**: `tasks/reviews/20260925-0331-pi-087-official-migration.review.md` => `tasks/archive/review-20260925-1339-pi-087-official-migration.md`
+
 # Task Contract: pi-087-official-migration
 
 > **Status**: Superseded
-> **Plan**: plans/plan-20260925-0331-pi-087-official-migration.md
+> **Plan**: plans/archive/plan-20260925-0331-pi-087-official-migration.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
 > **Last Updated**: 2026-09-25 03:35
-> **Review File**: `tasks/reviews/20260925-0331-pi-087-official-migration.review.md`
-> **Notes File**: `tasks/notes/20260925-0331-pi-087-official-migration.notes.md`
+> **Review File**: `tasks/archive/review-20260925-1339-pi-087-official-migration.md`
+> **Notes File**: `tasks/archive/notes-20260925-1339-pi-087-official-migration.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
 
 ## Why
@@ -48,10 +58,10 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 
 ## Workflow Inventory
 
-- Source plan: `plans/plan-20260925-0331-pi-087-official-migration.md`
+- Source plan: `plans/archive/plan-20260925-0331-pi-087-official-migration.md`
 - Deferred-goal ledger: `tasks/todos.md`
-- Review file: `tasks/reviews/20260925-0331-pi-087-official-migration.review.md`
-- Notes file: `tasks/notes/20260925-0331-pi-087-official-migration.notes.md`
+- Review file: `tasks/archive/review-20260925-1339-pi-087-official-migration.md`
+- Notes file: `tasks/archive/notes-20260925-1339-pi-087-official-migration.md`
 - Checks file: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
 - Scope gate: edit only paths listed under `allowed_paths`; update this contract before widening scope.
@@ -86,10 +96,10 @@ allowed_paths:
   - CHANGELOG.md
   - package.json
   - bun.lock
-  - plans/plan-20260925-0331-pi-087-official-migration.md
-  - tasks/contracts/20260925-0331-pi-087-official-migration.contract.md
-  - tasks/reviews/20260925-0331-pi-087-official-migration.review.md
-  - tasks/notes/20260925-0331-pi-087-official-migration.notes.md
+  - plans/archive/plan-20260925-0331-pi-087-official-migration.md
+  - tasks/archive/contract-20260925-1339-pi-087-official-migration.md
+  - tasks/archive/review-20260925-1339-pi-087-official-migration.md
+  - tasks/archive/notes-20260925-1339-pi-087-official-migration.md
 ```
 
 ## Evidence Requirements
@@ -145,10 +155,10 @@ merely to fill this template.
 exit_criteria:
   files_exist:
     - packages/client/package.json
-    - plans/plan-20260925-0331-pi-087-official-migration.md
+    - plans/archive/plan-20260925-0331-pi-087-official-migration.md
   artifacts_exist:
     - .ai/harness/checks/latest.json
-    - tasks/notes/20260925-0331-pi-087-official-migration.notes.md
+    - tasks/archive/notes-20260925-1339-pi-087-official-migration.md
 ```
 
 ## Verification Plan
