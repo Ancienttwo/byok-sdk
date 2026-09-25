@@ -499,16 +499,16 @@ describe('the prepared pi launch entry', () => {
     expect(steered.success).toBe(true);
     release?.();
     const seen: string[] = [];
-    for await (const event of session.events) {
-      seen.push(JSON.stringify(event));
-      if (event.type === 'turn_end') break;
-    }
-    // Request 1 is D. The steer made the session issue request 2, and the gate
-    // refused it before any transport: the provider saw D alone, and the
-    // session recorded the refusal as a failed assistant turn. The typed reason
-    // (`prepared_context_drift`, the context handler saw a user message this
-    // run did not produce) is run-scoped gate state; upstream surfaces the
-    // throw as a generic connection error, so the RPC readback cannot name it.
+    await expect((async () => {
+      for await (const event of session.events) {
+        seen.push(JSON.stringify(event));
+        if (event.type === 'turn_end') break;
+      }
+    })()).rejects.toMatchObject({
+      name: 'RuntimeExecutionFailure', phase: 'run', category: 'authority',
+      retry: 'non-retryable', message: 'prepared_context_drift',
+    });
+    // Only D is sent; the second request's typed refusal crosses the real RPC boundary.
     expect(endpoint.bodies).toEqual([prepared.requestBody]);
     expect(seen.join('\n')).not.toContain('an instruction nobody counted');
     const readback = await rpc.send({ type: 'get_messages' });

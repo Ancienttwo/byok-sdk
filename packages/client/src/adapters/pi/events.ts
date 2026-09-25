@@ -1,3 +1,4 @@
+import { PREPARED_GATE_REFUSAL_CODES } from './prepared-prompt-frame';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { RuntimeExecutionFailure } from '../../runtime-failure';
 import type { PiRpcMessage } from './rpc-client';
@@ -96,6 +97,16 @@ function mapPiAssistantUsage(msg: PiRpcMessage): Extract<AgentEvent, { type: 'us
  */
 export function mapPiMessageToAgentEvent(msg: PiRpcMessage): AgentEvent | undefined {
   switch (msg.type) {
+    case 'prepared_run_refused': {
+      const valid = typeof msg.code === 'string'
+        && PREPARED_GATE_REFUSAL_CODES.some(code => code === msg.code)
+        && typeof msg.sequence === 'number' && Number.isSafeInteger(msg.sequence) && msg.sequence >= 2;
+      throw new RuntimeExecutionFailure({
+        phase: 'run', category: 'authority', retry: 'non-retryable',
+        reason: valid ? msg.code as string : 'invalid prepared continuation refusal frame',
+      });
+    }
+
     case 'message_update': {
       const delta = msg.assistantMessageEvent as { type?: string; delta?: string } | undefined;
       if (delta?.type === 'text_delta' && typeof delta.delta === 'string') {

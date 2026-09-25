@@ -1108,6 +1108,28 @@ describe('ordinary offers are untouched by the prepared lane', () => {
 });
 
 
+describe('prepared continuation terminal authority', () => {
+  it('projects the typed Pi refusal to daemon task.fail, without completing or retrying', async () => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(built, adapter, sent);
+    const taskId = 'prepared-continuation-refused';
+    await runner.handleEnvelope(preparedOffer(taskId, reference(built), 1));
+    expect(adapter.sessions).toHaveLength(1);
+    let failure: unknown;
+    try {
+      mapPiMessageToAgentEvent({ type: 'prepared_run_refused', code: 'prepared_context_drift', sequence: 2 });
+    } catch (error) { failure = error; }
+    expect(failure).toMatchObject({ name: 'RuntimeExecutionFailure', message: 'prepared_context_drift' });
+    adapter.sessions[0]!.fail(failure as Error);
+    await vi.waitFor(() => expect(sent.find(event => event.type === 'task.fail')?.payload)
+      .toMatchObject({ reason: 'prepared_context_drift', retryable: false }));
+    expect(sent.some(event => event.type === 'task.complete')).toBe(false);
+    expect(adapter.preparedStartCalls).toHaveLength(1);
+  });
+});
+
 describe('prepared daemon-authored message egress', () => {
   const messageEgress = { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 10_000 } as const;
 

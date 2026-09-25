@@ -362,7 +362,12 @@ At admission the runtime verifies envelope digest, independent model/binding and
 observed tool executor identities. On the first request its injected fetch compares
 URL and serialized body with captured D before any transport. Drift sends nothing
 and records a typed refusal in the gate closure, surviving upstream's generic
-Connection error. AgentSession retry and provider retry are both disabled. Each
+Connection error. A refusal on request 2 or later emits one SDK-owned
+`prepared_run_refused` frame before native error events. Its closed code and
+request sequence become a non-retryable run/authority failure; the daemon emits
+`task.fail` with that exact code as `reason` (for example,
+`prepared_context_drift`). No provider error text is parsed, and a refused
+continuation cannot complete successfully. AgentSession retry and provider retry are both disabled. Each
 stream has an at-most-once fetch and forbids redirects. Tool-result continuations
 are not pre-frozen and never replay the first D: their accepted risk remains
 Errata 1 E4.4, covered by post-response overflow detection, an event and an alert.

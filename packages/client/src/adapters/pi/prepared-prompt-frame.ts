@@ -181,3 +181,15 @@ export function readFirstJsonlFrame(stream: NodeJS.ReadStream | NodeJS.ReadableS
     readable.on('error', onError);
   });
 }
+
+/** SDK-owned terminal frame for a refused continuation, before native error events. */
+export const PREPARED_GATE_REFUSAL_CODES = [
+  'prepared_body_drift', 'prepared_endpoint_mismatch', 'prepared_context_drift',
+  'prepared_session_unarmed', 'prepared_headers_invalid', 'prepared_transport_repeated',
+] as const;
+export type PreparedGateRefusalCode = typeof PREPARED_GATE_REFUSAL_CODES[number];
+export interface PreparedRunRefusalFrame {
+  readonly type: 'prepared_run_refused';
+  readonly code: PreparedGateRefusalCode;
+  readonly sequence: number;
+}

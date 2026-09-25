@@ -1,3 +1,4 @@
+import type { PreparedGateRefusalCode } from './prepared-prompt-frame';
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -44,7 +45,7 @@ import {
 export const PREPARED_TRIGGER_TEXT = 'byok prepared request (replaced by the Host transcript)';
 
 export interface PreparedGateRefusal {
-  readonly code: 'prepared_body_drift' | 'prepared_endpoint_mismatch' | 'prepared_context_drift' | 'prepared_session_unarmed' | 'prepared_headers_invalid' | 'prepared_transport_repeated';
+  readonly code: PreparedGateRefusalCode;
   readonly sequence: number;
   readonly message: string;
   readonly expectedSha256?: string;
@@ -86,7 +87,7 @@ function requestUrl(resource: string | URL | Request): string {
  * to `globalThis.fetch`, read at call time. The gate itself is never installed
  * globally.
  */
-export function createPreparedGate(options: { readonly transport?: typeof fetch } = {}): PreparedGate {
+export function createPreparedGate(options: { readonly transport?: typeof fetch; readonly onRefusal?: (refusal: PreparedGateRefusal) => void } = {}): PreparedGate {
   const state: PreparedGateState = { sequence: 0, contextProjected: 0, admitted: [] };
   let armed: { envelope: PreparedPiInputV1; frozenSha256: string } | undefined;
   let onVerdict: ((refusal: PreparedGateRefusal | undefined) => void) | undefined;
@@ -97,7 +98,10 @@ export function createPreparedGate(options: { readonly transport?: typeof fetch 
     onVerdict?.(refusal);
   };
   const refuse = (refusal: PreparedGateRefusal): never => {
-    state.refusal ??= refusal; // run-scoped reason, written BEFORE the throw
+    if (state.refusal === undefined) {
+      state.refusal = refusal; // publish once, before upstream obscures the error
+      options.onRefusal?.(refusal);
+    }
     if (refusal.sequence === 1) firstVerdict(refusal);
     throw new Error(`byok_prepared_gate_refused: ${refusal.code}`);
   };

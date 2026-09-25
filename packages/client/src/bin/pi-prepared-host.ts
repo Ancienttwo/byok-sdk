@@ -31,6 +31,7 @@ import {
   parsePreparedPromptCommand,
   readFirstJsonlFrame,
   type PreparedPromptResponseV1,
+  type PreparedRunRefusalFrame,
 } from '../adapters/pi/prepared-prompt-frame';
 import { RPC_MAX_FRAME_BYTES } from '../util/rpc-frame';
 import { loaderEnvInjections } from '../daemon/environment';
@@ -679,7 +680,16 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
 
   // The counted model's provider, registered in memory with the byte gate as
   // its `streamSimple`. The gate is armed only once a verified envelope exists.
-  const gate = createPreparedGate();
+  const writeRaw = process.stdout.write.bind(process.stdout);
+  const gate = createPreparedGate({ onRefusal: (refusal) => {
+    // Request 1 has its correlated command response. Later refusals are
+    // terminal runtime authority, never a second response to that command.
+    if (refusal.sequence < 2) return;
+    const frame: PreparedRunRefusalFrame = {
+      type: 'prepared_run_refused', code: refusal.code, sequence: refusal.sequence,
+    };
+    writeRaw(`${JSON.stringify(frame)}\n`);
+  } });
   let model;
   try {
     model = registerPreparedProvider(modelRuntime, config.model, credential, gate);
@@ -705,7 +715,6 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
   // --- the one prepared command --------------------------------------------
   // Captured BEFORE the official loop takes stdout over; each response is one
   // whole LF-terminated line, so it never interleaves inside another frame.
-  const writeRaw = process.stdout.write.bind(process.stdout);
   const writeResponse = (response: PreparedPromptResponseV1, then?: () => void): void => {
     writeRaw(`${JSON.stringify(response)}\n`, () => then?.());
   };

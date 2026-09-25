@@ -4,6 +4,16 @@ import type { PiRpcMessage } from '../adapters/pi/rpc-client';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 
 describe('mapPiMessageToAgentEvent', () => {
+  it.each([
+    { code: 'provider invented code', sequence: 2 },
+    { code: 'prepared_context_drift', sequence: 1 },
+    { code: 'prepared_context_drift', sequence: 2.5 },
+    { sequence: 2 },
+  ])('refuses a malformed prepared terminal frame without exposing arbitrary text: %j', fields => {
+    expect(() => mapPiMessageToAgentEvent({ type: 'prepared_run_refused', ...fields }))
+      .toThrow('invalid prepared continuation refusal frame');
+  });
+
   it('maps a text_delta message_update to a progress event', () => {
     const msg: PiRpcMessage = {
       type: 'message_update',
