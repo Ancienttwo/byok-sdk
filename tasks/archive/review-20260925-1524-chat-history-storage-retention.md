@@ -1,9 +1,19 @@
+> **Archived**: 2026-09-25 15:24
+> **Related Plan**: plans/archive/plan-20260925-0213-chat-history-storage-retention.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260925-1524
+> **Archive Projection V1**: `plans/plan-20260925-0213-chat-history-storage-retention.md` => `plans/archive/plan-20260925-0213-chat-history-storage-retention.md`
+> **Archive Projection V1**: `tasks/notes/20260925-0213-chat-history-storage-retention.notes.md` => `tasks/archive/notes-20260925-1524-chat-history-storage-retention.md`
+> **Archive Projection V1**: `tasks/contracts/20260925-0213-chat-history-storage-retention.contract.md` => `tasks/archive/contract-20260925-1524-chat-history-storage-retention.md`
+> **Archive Projection V1**: `tasks/reviews/20260925-0213-chat-history-storage-retention.review.md` => `tasks/archive/review-20260925-1524-chat-history-storage-retention.md`
+
 # Task Review: chat-history-storage-retention
 
 > **Status**: Accepted
-> **Plan**: plans/plan-20260925-0213-chat-history-storage-retention.md
-> **Contract**: tasks/contracts/20260925-0213-chat-history-storage-retention.contract.md
-> **Notes File**: tasks/notes/20260925-0213-chat-history-storage-retention.notes.md
+> **Plan**: plans/archive/plan-20260925-0213-chat-history-storage-retention.md
+> **Contract**: tasks/archive/contract-20260925-1524-chat-history-storage-retention.md
+> **Notes File**: tasks/archive/notes-20260925-1524-chat-history-storage-retention.md
 > **Checks File**: .ai/harness/checks/latest.json
 > **Last Updated**: 2026-09-25 02:13
 > **Recommendation**: pass
