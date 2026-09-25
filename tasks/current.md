@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-09-25T15:24:17+0800 -->
+<!-- updated_at: 2026-09-25T16:01:35+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-09-25T15:24:17+0800
-> **Source Branch**: claude/storage-retention-ledger
-> **Source Commit**: 2d74ae97
+> **Updated At**: 2026-09-25T16:01:35+0800
+> **Source Branch**: claude/release-0-22-0-closeout
+> **Source Commit**: cd43f701
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -33,8 +33,6 @@ This file is an ignored local read model derived from this worktree's artifacts.
 - linked-worktree-1b84695c11c5: active-worktree owner -> self
 - linked-worktree-762432fad720: plans/plan-20260917-1440-c07-pr191-integration.md
 - linked-worktree-762432fad720: active-worktree owner -> self
-- linked-worktree-080515f582c0: plans/plan-20260925-1007-release-0-22-0.md
-- linked-worktree-080515f582c0: active-worktree owner -> self
 - linked-worktree-278b6ace8f7d: plans/plan-20260918-2052-n1-external-cli-gate.md
 - linked-worktree-278b6ace8f7d: active-worktree owner -> self
 - linked-worktree-01a489cf24d8: plans/plan-20260919-1603-official-pi-migration.md
@@ -70,7 +68,7 @@ This file is an ignored local read model derived from this worktree's artifacts.
 - `tasks/workstreams/sdk/sdk-root/20260905-sdk-root.md`: status=acceptance, current_slice=T7 exact AgentRef reliability identities, then replacement acceptance, source_plan=plans/plan-20260905-0124-issues-135-144-reliability.md
 ## Handoff
 
-- Exact Next Step: Stage the completed module diff first; then run /check and let canonical workflow gates determine whether review, external acceptance, verification, or worktree finish is next. Command: /check
+- Exact Next Step: (none)
 
 ## Checks
 
@@ -78,19 +76,18 @@ This file is an ignored local read model derived from this worktree's artifacts.
 
 ## Git Status
 
-- Summary: 10 changed/untracked path(s)
+- Summary: 9 changed/untracked path(s)
 
 ```
- D plans/plan-20260925-0213-chat-history-storage-retention.md
- D tasks/contracts/20260925-0213-chat-history-storage-retention.contract.md
- D tasks/notes/20260925-0213-chat-history-storage-retention.notes.md
- D tasks/reviews/20260925-0213-chat-history-storage-retention.review.md
- M tasks/todos.md
-?? plans/archive/plan-20260925-0213-chat-history-storage-retention.md
-?? tasks/archive/contract-20260925-1524-chat-history-storage-retention.md
-?? tasks/archive/notes-20260925-1524-chat-history-storage-retention.md
-?? tasks/archive/review-20260925-1524-chat-history-storage-retention.md
-?? tasks/archive/todo-20260925-1524-chat-history-storage-retention.md
+ D plans/plan-20260925-1007-release-0-22-0.md
+ D tasks/contracts/20260925-1007-release-0-22-0.contract.md
+ D tasks/notes/20260925-1007-release-0-22-0.notes.md
+ D tasks/reviews/20260925-1007-release-0-22-0.review.md
+?? plans/archive/plan-20260925-1007-release-0-22-0.md
+?? tasks/archive/contract-20260925-1601-release-0-22-0.md
+?? tasks/archive/notes-20260925-1601-release-0-22-0.md
+?? tasks/archive/review-20260925-1601-release-0-22-0.md
+?? tasks/archive/todo-20260925-1601-release-0-22-0.md
 ```
 
 ## Source Artifacts
