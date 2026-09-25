@@ -1,16 +1,16 @@
 # Task Review: chat-history-storage-retention
 
-> **Status**: Pending
+> **Status**: Accepted
 > **Plan**: plans/plan-20260925-0213-chat-history-storage-retention.md
 > **Contract**: tasks/contracts/20260925-0213-chat-history-storage-retention.contract.md
 > **Notes File**: tasks/notes/20260925-0213-chat-history-storage-retention.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
 > **Last Updated**: 2026-09-25 02:13
-> **Recommendation**: fail
+> **Recommendation**: pass
 > **Review Rubric Version**: 2
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:0b38372dbf6d552b7a21c81d5fee2975ed71c84c01c40eeeefe377ceb984239e
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
+> **Reviewed Target Revision**: 0962f14fe8a34023eb1a2dd6a2ec870582b39ced
 
 ## Human Review Card
 
@@ -54,17 +54,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
-> **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Disposition**: user_waiver
+> **Reviewer**: User
+> **Source**: user-waiver
+> **Actor**: kito
+> **Reviewed Subject SHA256**: sha256:0b38372dbf6d552b7a21c81d5fee2975ed71c84c01c40eeeefe377ceb984239e
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 0962f14fe8a34023eb1a2dd6a2ec870582b39ced
+> **Verification Evidence SHA256**: sha256:e5c2fa59cbcb22e420c798e939e5ae9d403e512f3a27b13e0f4ff18a66b002b2
+> **Issued At**: 2026-09-25T07:24:00.189Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: Owner waiver 2026-09-25 ("批准"): docs-only storage/retention ledger package; both Codex cross-review P2 findings addressed in 2006fce9 (Postgres receipt-retention gap corrected; SummaryJob trigger authority corrected to artifact.requestBytes against the Host-ruled bound); Codex review budget exhausted (review_budget_exhausted), contract policy admits user_waiver.
 - Findings: none
 
 ## Behavior Diff Notes
