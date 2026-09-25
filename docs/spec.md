@@ -73,11 +73,21 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.21.0`; publication requires separate release
+aligned dispatch release is `0.22.0`; publication requires separate release
 authorization and registry readback. The current independent keys candidate is
-`0.6.2`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.21.0`, proven from an isolated standard npm install rather
+`0.7.0`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.22.0`, proven from an isolated standard npm install rather
 than the workspace graph.
+
+The 0.22.0 train is prepared, not yet published. It carries official Pi 0.87.1,
+wire/record 7, envelope v4 and the complete Host-owned systemPrompt contract.
+keys 0.7.0 is a MINOR even though its own source is unchanged since v0.21.0:
+its credential launcher consumes implementation-identity's changed strict
+nativeProvenance schema and rejects the retired fork binding. That changes
+accepted security authority, which PATCH excludes. Both packed workspace
+edges (core and implementation-identity) must resolve to 0.22.0.
+The identity/core topology merge remains deferred as a separate public package
+and dependency-graph cutover; it is not part of version preparation.
 
 The last train the registry has confirmed is `0.21.0` with keys `0.6.2`,
 published on 2026-09-24/25 from the `v0.21.0` tag (`8b7a2121`); both read back as
@@ -2162,3 +2172,25 @@ A1'' compile uses only a placeholder key and injected capture-and-throw fetch ag
 Client direct Pi dependencies are exactly coding-agent, pi-ai and pi-agent-core at 0.87.1 and retain the existing direct-dependency purity guard. chord, pi-telemetry and pi-tui remain transitive. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their measured JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
 
 Exactness has three independent checks: bun.lock exact versions and sha512 integrity under frozen install; runtime verification of all six official package instances' manifests and file inventories against tarball/provenance evidence; release-pack and registry-readback isolated-install convergence. Encapsulated runtime records bind the measured artifact and approved closure provenance without looking up external packages. Renamed provenance fields are packageName, packageVersion, tarballIntegrity, upstreamCommit, provenanceDigest, closureDigest and compilerVersion; upstreamBase/forkBuild are retired, not filled with dummy values. The official tarball signatures and provenance are collected reproducibly by `scripts/release/collect-official-pi-closure.mjs`.
+
+### 0.22.0 Host calibration and upgrade boundary
+
+The completed official-runtime M5 calibration is retained in
+`tasks/runs/20260925-official-pi-c-reprobe.json` with its `.sha256` sidecar.
+It recommends C=1024 for the recorded official 0.87.1 closure, compiler 4,
+wire 7 and envelope v4 with ruledResidualKeys=[]. Three samples observed zero
+uncovered amount under max(0, prompt_tokens-requestBytes); the prepared fixture
+had 17638 request bytes and 6581 prompt tokens (11057 below bytes, 12081 below
+bytes+1024). The identical repeat included 6528 cached tokens in the 6581 prompt
+total. These are empirical calibration samples, not a universal token bound
+or a production Salesko admission receipt. The unchanged C value does not allow
+a fork-bound ruling revision to be reused: Host must reissue it for the official
+identity and assemble its entire systemPrompt before recreating preparations.
+
+Before upgrading, fence new work and drain old queued/in-flight preparations
+and Executions; upgrade Host/cloud and devices together, rebuild runtime
+installation bindings and current wire-7 preparation records, then verify the
+new capability and ruling. No dual token/read, replay of old work, or automatic
+conversion of frozen audit records is supplied. Subsequent-request byte/header
+refusals (including prepared_context_drift) reach the daemon as typed task.fail;
+tool continuations retain the existing post-response overflow risk boundary.

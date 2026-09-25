@@ -7,6 +7,12 @@ composition over Postgres and R2.
 
 ## Release status
 
+The current source candidate is **0.22.0**, with independent keys **0.7.0**;
+publication is pending. [Release notes](docs/releases/v0.22.0.md) and the
+[Salesko / Owner handoff](docs/releases/v0.22.0-handoff.md) describe the official
+Pi cutover and the separate publication boundary. Versioned install examples
+below target this candidate and become usable after registry publication.
+
 The current published release is **0.21.0**, with independent keys **0.6.2**,
 published to npm on 2026-09-24/25 from the `v0.21.0` tag target (`8b7a2121`, the
 PR #227 merge) and now `latest` on the registry; readback is
@@ -29,10 +35,10 @@ and the keys SQLite profile schema; then **0.17.0** with keys **0.4.3**
 ([publication record](docs/releases/v0.17.0-publication.md)) and
 [0.16.0](docs/releases/v0.16.0-publication.md).
 
-The bundled Pi runtime is pinned to the SDK's own fork,
-`@byok-sdk/pi-coding-agent@0.86.1001` (upstream base 0.86.1 at `13cbf77`),
-installed through an npm alias so the import specifier and the installed path
-stay `@earendil-works/pi-coding-agent`. Release SemVer is observability only;
+The source candidate uses unmodified official
+`@earendil-works/pi-coding-agent@0.87.1` and its attested sibling closure.
+The maintained fork is retired from this train; 0.21.0 remains the historical
+fork-based release. Release SemVer is observability only;
 protocol intersection and advertised capabilities remain the execution gates.
 Publishing an SDK release does not perform a host's production migration or
 deployment.
@@ -53,7 +59,7 @@ Install the scoped packages your composition uses and import each one under
 its own name. For example, a self-hosted composition:
 
 ```sh
-npm install @byok-sdk/server@0.21.0 @byok-sdk/client@0.21.0
+npm install @byok-sdk/server@0.22.0 @byok-sdk/client@0.22.0
 ```
 
 ```ts
@@ -149,9 +155,9 @@ means not accepted, and no overall percentage is defined:
 
 | Dimension | Status | Bound to |
 |---|---|---|
-| main implementation | Merged | `main` @ `8b7a2121` (2026-09-24): #226 P0 prepared message egress (`644f8473`; BREAKING input-preparation wire version 6, capability token `agent-input-preparation-v6`, `TaskOfferPreparedPayload` requires `egressPolicy`, fresh-lane Pi `allowTools: []` means zero native tools), released as 0.21.0 through #227 (`8b7a2121`), which also cut the published set to nine packages (eight aligned plus keys; `byok-sdk` and `@byok-sdk/testkit` retired). Before it, as of `48605554` (2026-09-23): #223 bounded admission — byte evidence replaces the live-tokenizer readiness gate (`c61615f8`; BREAKING input-preparation wire version 5, record schema version 6), released as 0.20.0 through #224. Earlier, as of `26945c8a` (2026-09-19): recurring input, exact message disposition and fresh egress per the spec section above; #193 C07 Pi runtime launch (`d882aef4`), #198 Windows CI elimination (`49ec7477`), #199 custody five-edge enablement (`e0423d84`), #200 N1 external-CLI admission gate (`ec1cea36`); 2026-09-19 batch — #201 reserved agent-message grants, #202 Pi fork pin 1006 / S2 clipboard tripwire, #203 WP5 S2 CI flip (strict bun + real-chain monitor control), #204 #196 durable recurring smoke (embedded roundtrip + crash window), #205 docs authority navigation (#197), #206 WinSW uninstall image-lock retry, #207 Windows link-first cleanup + out-of-tree canary |
+| main implementation | Merged | Official Pi migration #233 merged at `9fe732e6` (2026-09-25): wire/record 7, Host systemPrompt, envelope v4, M4 regression and M5 calibration complete. Earlier: `main` @ `8b7a2121` (2026-09-24): #226 P0 prepared message egress (`644f8473`; BREAKING input-preparation wire version 6, capability token `agent-input-preparation-v6`, `TaskOfferPreparedPayload` requires `egressPolicy`, fresh-lane Pi `allowTools: []` means zero native tools), released as 0.21.0 through #227 (`8b7a2121`), which also cut the published set to nine packages (eight aligned plus keys; `byok-sdk` and `@byok-sdk/testkit` retired). Before it, as of `48605554` (2026-09-23): #223 bounded admission — byte evidence replaces the live-tokenizer readiness gate (`c61615f8`; BREAKING input-preparation wire version 5, record schema version 6), released as 0.20.0 through #224. Earlier, as of `26945c8a` (2026-09-19): recurring input, exact message disposition and fresh egress per the spec section above; #193 C07 Pi runtime launch (`d882aef4`), #198 Windows CI elimination (`49ec7477`), #199 custody five-edge enablement (`e0423d84`), #200 N1 external-CLI admission gate (`ec1cea36`); 2026-09-19 batch — #201 reserved agent-message grants, #202 Pi fork pin 1006 / S2 clipboard tripwire, #203 WP5 S2 CI flip (strict bun + real-chain monitor control), #204 #196 durable recurring smoke (embedded roundtrip + crash window), #205 docs authority navigation (#197), #206 WinSW uninstall image-lock retry, #207 Windows link-first cleanup + out-of-tree canary |
 | Open candidates | Unmerged | #191 (draft: MCP launch-cwd boundary); Salesko draft PR #241 — both still open drafts on 2026-09-25. #226 (P0 prepared egress) and #227 (0.21.0 preparation) are merged |
-| Published packages | 0.21.0 / keys 0.6.2 published | SDK 0.21.0 and keys 0.6.2 were published to npm on 2026-09-24/25 from the `v0.21.0` tag target (`8b7a2121`, the PR #227 merge) and are the registry's `latest` — readback `npm view @byok-sdk/core version` / `npm view @byok-sdk/keys version`, receipt in the [0.21.0 publication record](docs/releases/v0.21.0-publication.md), notes in [0.21.0](docs/releases/v0.21.0.md). The annotated `v0.21.0` tag is on origin at `8b7a2121`. The published set is nine packages: `@byok-sdk/core`, `implementation-identity`, `protocol`, `client`, `cloud`, `cloud-dataplane`, `server` and `ui-runtime` at 0.21.0, plus `@byok-sdk/keys` at 0.6.2; `byok-sdk` and `@byok-sdk/testkit` are no longer published and their existing versions are deprecated on the registry. The previous train is 0.20.0 / keys 0.6.1 (2026-09-23, `48605554`, [publication record](docs/releases/v0.20.0-publication.md)), before it 0.19.0 / keys 0.6.0 (2026-09-22, `9408ed7b`, [publication record](docs/releases/v0.19.0-publication.md)). Pi fork pin `@byok-sdk/pi-coding-agent@0.86.1001` in `packages/client/package.json` (fork build 1 of the 0.86 line: pi-ai at 0.86.1001, pi-agent-core at 0.86.1001) |
+| Published packages | 0.21.0 / keys 0.6.2 published | SDK 0.21.0 and keys 0.6.2 were published to npm on 2026-09-24/25 from the `v0.21.0` tag target (`8b7a2121`, the PR #227 merge) and are the registry's `latest` — readback `npm view @byok-sdk/core version` / `npm view @byok-sdk/keys version`, receipt in the [0.21.0 publication record](docs/releases/v0.21.0-publication.md), notes in [0.21.0](docs/releases/v0.21.0.md). The annotated `v0.21.0` tag is on origin at `8b7a2121`. The published set is nine packages: `@byok-sdk/core`, `implementation-identity`, `protocol`, `client`, `cloud`, `cloud-dataplane`, `server` and `ui-runtime` at 0.21.0, plus `@byok-sdk/keys` at 0.6.2; `byok-sdk` and `@byok-sdk/testkit` are no longer published and their existing versions are deprecated on the registry. The previous train is 0.20.0 / keys 0.6.1 (2026-09-23, `48605554`, [publication record](docs/releases/v0.20.0-publication.md)), before it 0.19.0 / keys 0.6.0 (2026-09-22, `9408ed7b`, [publication record](docs/releases/v0.19.0-publication.md)). Historical 0.21.0 Pi fork pin 0.86.1001; current source pins official Pi 0.87.1 for the unpublished 0.22.0 candidate |
 | Real Host integration | In progress, not accepted | Salesko Sprint ledger: K5 in progress, K7 incomplete; A01–A29 at 24 LOCAL_PASS / 5 BLOCKED at the latest recorded checkpoint. Host-side subjects and evidence live in that ledger, not here |
 | Native / production acceptance | 未验收 | Target-runtime S9 not executed; aiphabee (K6) paused by owner decision; no production migration, deployment, or paid-runtime acceptance |
 
@@ -193,7 +199,7 @@ It is intentionally outside the dispatch packages and their entire dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.6.2
+npm install @byok-sdk/keys@0.7.0
 ```
 
 ## Host connector composition
@@ -209,5 +215,5 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.6.2`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.7.0`
 require Node.js 22.22.0 or newer. MIT licensed.
