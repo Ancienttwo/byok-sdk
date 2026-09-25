@@ -1,9 +1,19 @@
+> **Archived**: 2026-09-25 16:07
+> **Related Plan**: plans/archive/plan-20260925-0300-official-pi-087.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260925-1607
+> **Archive Projection V1**: `plans/plan-20260925-0300-official-pi-087.md` => `plans/archive/plan-20260925-0300-official-pi-087.md`
+> **Archive Projection V1**: `tasks/notes/20260925-0300-official-pi-087.notes.md` => `tasks/archive/notes-20260925-1607-official-pi-087.md`
+> **Archive Projection V1**: `tasks/contracts/20260925-0300-official-pi-087.contract.md` => `tasks/archive/contract-20260925-1607-official-pi-087.md`
+> **Archive Projection V1**: `tasks/reviews/20260925-0300-official-pi-087.review.md` => `tasks/archive/review-20260925-1607-official-pi-087.md`
+
 # Task Review: official-pi-087
 
 > **Status**: Accepted
-> **Plan**: plans/plan-20260925-0300-official-pi-087.md
-> **Contract**: tasks/contracts/20260925-0300-official-pi-087.contract.md
-> **Notes File**: tasks/notes/20260925-0300-official-pi-087.notes.md
+> **Plan**: plans/archive/plan-20260925-0300-official-pi-087.md
+> **Contract**: tasks/archive/contract-20260925-1607-official-pi-087.md
+> **Notes File**: tasks/archive/notes-20260925-1607-official-pi-087.md
 > **Checks File**: .ai/harness/checks/latest.json
 > **Last Updated**: 2026-09-25 05:42
 > **Recommendation**: pass

@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-09-25T16:01:35+0800 -->
+<!-- updated_at: 2026-09-25T16:07:04+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-09-25T16:01:35+0800
+> **Updated At**: 2026-09-25T16:07:04+0800
 > **Source Branch**: claude/release-0-22-0-closeout
-> **Source Commit**: cd43f701
+> **Source Commit**: 0cf2aca9
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -79,15 +79,15 @@ This file is an ignored local read model derived from this worktree's artifacts.
 - Summary: 9 changed/untracked path(s)
 
 ```
- D plans/plan-20260925-1007-release-0-22-0.md
- D tasks/contracts/20260925-1007-release-0-22-0.contract.md
- D tasks/notes/20260925-1007-release-0-22-0.notes.md
- D tasks/reviews/20260925-1007-release-0-22-0.review.md
-?? plans/archive/plan-20260925-1007-release-0-22-0.md
-?? tasks/archive/contract-20260925-1601-release-0-22-0.md
-?? tasks/archive/notes-20260925-1601-release-0-22-0.md
-?? tasks/archive/review-20260925-1601-release-0-22-0.md
-?? tasks/archive/todo-20260925-1601-release-0-22-0.md
+ D plans/plan-20260925-0300-official-pi-087.md
+ D tasks/contracts/20260925-0300-official-pi-087.contract.md
+ D tasks/notes/20260925-0300-official-pi-087.notes.md
+ D tasks/reviews/20260925-0300-official-pi-087.review.md
+?? plans/archive/plan-20260925-0300-official-pi-087.md
+?? tasks/archive/contract-20260925-1607-official-pi-087.md
+?? tasks/archive/notes-20260925-1607-official-pi-087.md
+?? tasks/archive/review-20260925-1607-official-pi-087.md
+?? tasks/archive/todo-20260925-1607-official-pi-087.md
 ```
 
 ## Source Artifacts
