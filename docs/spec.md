@@ -112,7 +112,11 @@ authenticated session and device assertion.
   configuration lock. A generation is consumed when its pending marker is
   written, so an older request never overtakes an interrupted newer one; the
   interrupted request is reported, not redone, and recovery needs a higher
-  generation that re-supplies the key, or a delete.
+  generation that re-supplies the key, or a delete. The request id and its
+  digest are reserved store-wide in that same transaction, sharing one lookup
+  scope with completed receipts: a reused id with a different digest is a
+  conflict with no write on any profile and never displaces the original
+  request's pending or completed facts.
 - **Custody.** Every credential writer and reader holds the profile store's
   configuration lock — cross-process for the SQLite store and released by the
   operating system if the holder dies. A writer records a secret-free pending
