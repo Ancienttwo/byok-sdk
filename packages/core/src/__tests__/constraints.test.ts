@@ -122,6 +122,7 @@ describe('public API surface', () => {
     './skill-pack',
     './stores',
     './ports-contract',
+    './sealed-provider-secret',
     './in-memory/index',
   ];
 
@@ -186,6 +187,20 @@ describe('public API surface', () => {
       'OBJECT_STATE_TRANSITIONS',
       'PRESENCE_LEVELS',
       'PRINCIPAL_KINDS',
+      'PROVIDER_PROVISIONING_MAX_TTL_MS',
+      'PROVIDER_PROVISIONING_OPERATIONS',
+      'PROVIDER_PROVISIONING_REQUEST_VERSION',
+      'PROVIDER_PROVISIONING_SECRET_OPERATIONS',
+      'PROVIDER_SECRET_HPKE_INFO',
+      'PROVIDER_SECRET_HPKE_SUITE',
+      'PROVIDER_SECRET_MAX_BYTES',
+      'PROVIDER_SECRET_MAX_PADDED_BYTES',
+      'PROVIDER_SECRET_PAD_BLOCK_BYTES',
+      'ProviderProvisioningConfigV1Schema',
+      'ProviderProvisioningExpectedProfileSchema',
+      'ProviderProvisioningHeaderV1Schema',
+      'ProviderProvisioningRequestV1Schema',
+      'SEALING_KEY_ID_LENGTH',
       'SKILL_FRONTMATTER_FIELDS',
       'SKILL_PACK_DESCRIPTION_MAX_LENGTH',
       'SKILL_PACK_ENTRY_PATH',
@@ -205,6 +220,10 @@ describe('public API surface', () => {
       'STORAGE_RESERVATION_STATES',
       'STORAGE_WRITE_KINDS',
       'STORAGE_WRITE_POSTURES',
+      'SealedProviderSecretV1Schema',
+      'SealingKeyClaimV1Schema',
+      'SealingKeyIdSchema',
+      'SealingPublicJwkSchema',
       'SkillPackFileSchema',
       'SkillPackManifestSchema',
       'TASK_ASSERTION_AGENT_REF_MAX_BYTES',
@@ -220,6 +239,7 @@ describe('public API surface', () => {
       'TaskAssertionEnvelopeV1Schema',
       'assertCanonicalTimestamp',
       'assertCapability',
+      'assertProviderProvisioningConfigDigest',
       'authenticateDeviceAssertion',
       'authenticateTaskAssertion',
       'canonicalizeJson',
@@ -231,6 +251,7 @@ describe('public API surface', () => {
       'createInMemoryCoreCompositionWithClock',
       'createInMemoryCoreStores',
       'createMutableClock',
+      'deriveSealingKeyId',
       'deviceAssertionCanonicalClaims',
       'deviceAssertionCanonicalJson',
       'deviceAssertionSigningInput',
@@ -250,13 +271,20 @@ describe('public API surface', () => {
       'isTenantId',
       'nonceSigningBytes',
       'objectKeyPrefix',
+      'openProviderProvisioningSecret',
       'parseCapabilityDeclaration',
       'parseDeviceAssertionEnvelope',
       'parseDeviceProofEnvelope',
+      'parseProviderProvisioningRequest',
       'parseSkillFrontmatter',
       'parseSkillPackManifest',
       'parseTaskAssertionEnvelope',
       'principalTenant',
+      'providerProvisioningConfigDigest',
+      'providerProvisioningRequestDigest',
+      'providerSecretAadBytes',
+      'sealProviderProvisioningRequest',
+      'sealingKeyClaimCanonicalBytes',
       'skillPackContentHashInput',
       'taskAssertionCanonicalClaims',
       'taskAssertionCanonicalJson',
@@ -518,5 +546,29 @@ describe('device assertion', () => {
     const code = stripComments(read('device-assertion.ts'));
     expect(code).toMatch(/from '\.\/attestation'/);
     expect(code).not.toContain('function canonicalizeValue');
+  });
+});
+
+describe('sealed provider secret', () => {
+  it('reuses the one canonicalizer rather than growing a second one', () => {
+    const code = stripComments(read('sealed-provider-secret.ts'));
+    expect(code).toMatch(/from '\.\/attestation'/);
+    expect(code).not.toContain('function canonicalizeValue');
+  });
+
+  it('uses WebCrypto only: no node crypto, no Buffer, no third-party crypto', () => {
+    for (const path of ['hpke.ts', 'sealed-provider-secret.ts', 'webcrypto.ts']) {
+      const code = stripComments(read(path));
+      expect(code).not.toMatch(/\bBuffer\b/);
+      expect(code).not.toMatch(/from '(?!\.|zod')/);
+    }
+  });
+
+  it('exposes one-shot seal/open only: no reusable HPKE context reaches the root', () => {
+    const exported = Object.keys(publicApi);
+    for (const internal of ['setupBaseSender', 'setupBaseRecipient', 'hpkeAeadSeal', 'hpkeAeadOpen', 'hpkeNonce', 'hpkeSealBase', 'hpkeOpenBase']) {
+      expect(exported).not.toContain(internal);
+    }
+    expect(stripComments(read('index.ts'))).not.toContain("'./hpke'");
   });
 });

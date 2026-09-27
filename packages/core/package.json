@@ -45,5 +45,8 @@
   },
   "dependencies": {
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@hpke/core": "1.9.0"
   }
 }
