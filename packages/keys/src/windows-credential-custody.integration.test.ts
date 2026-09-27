@@ -51,6 +51,12 @@ function withEvidence(error: unknown): Error {
 }
 
 const ENABLED = process.env.BYOK_TEST_WINDOWS_CREDENTIAL_MANAGER === '1';
+/**
+ * Every Credential Manager operation starts PowerShell and compiles the bridge
+ * type (about 1-2 s on the hosted runner), and the round trip performs a few
+ * dozen of them, so vitest's 5 s default is not a meaningful bound here.
+ */
+const REAL_BACKEND_TIMEOUT_MS = 180_000;
 if (ENABLED && process.platform !== 'win32') {
   throw new Error('BYOK_TEST_WINDOWS_CREDENTIAL_MANAGER=1 requires win32; refusing to skip');
 }
@@ -70,7 +76,7 @@ describe.skipIf(!ENABLED)('sealed provisioning on Windows Credential Manager', (
     } finally {
       rmSync(directory, { force: true, recursive: true });
     }
-  });
+  }, REAL_BACKEND_TIMEOUT_MS);
 
   it('root-cause evidence: the pre-fix bridge type definition does not compile on this runner (CS0104)', async () => {
     // The exact struct shape the bridge shipped before the fix: both
@@ -101,7 +107,7 @@ namespace ByokPreFixProbe {
     ]);
     process.stdout.write(`[windows-credential-root-cause] pre-fix bridge compile: ${result.stdout.trim()}\n`);
     expect(result.stdout.trim()).toBe('cs=104');
-  });
+  }, REAL_BACKEND_TIMEOUT_MS);
 
   it('reports an absent credential as absent (read) and as false (delete)', async () => {
     try {
@@ -110,7 +116,7 @@ namespace ByokPreFixProbe {
     } catch (error) {
       throw withEvidence(error);
     }
-  });
+  }, REAL_BACKEND_TIMEOUT_MS);
 
   it('creates the sealing key, applies configure/replace/delete, and the launcher reads only consistent pairs', async () => {
     try {
@@ -118,7 +124,7 @@ namespace ByokPreFixProbe {
     } catch (error) {
       throw withEvidence(error);
     }
-  });
+  }, REAL_BACKEND_TIMEOUT_MS);
 
   async function roundTrip(): Promise<void> {
     await expect(secrets.available()).resolves.toBe(true);
