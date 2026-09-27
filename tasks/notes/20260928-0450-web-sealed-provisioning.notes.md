@@ -43,3 +43,11 @@ Scope: `packages/core`, `packages/keys`, `docs/spec.md` (provider profile truth 
 - Bun finding: Bun garbage-collects an unreachable `node:sqlite` connection and thereby drops its lock; the SQLite store pins held lock connections in a module-level set until release. Cross-runtime lock (Bun holder ⇄ Node contender) and SIGKILL release were verified.
 - `.github/workflows/ci.yml` (outside the listed write scope) gained the A11 step on the `windows-latest` leg: `BYOK_TEST_WINDOWS_CREDENTIAL_MANAGER=1 bun run --filter @byok-sdk/keys test -- src/windows-credential-custody.integration.test.ts` (same-user convention). Not runnable locally; unverified until CI runs it.
 - Self-implemented HPKE: RFC vectors + `@hpke/core@1.9.0` interop pass; a dedicated security review is still required before publish (A2).
+
+### S1 verification (worktree `byok-sdk-wt-wsp-s1`)
+
+- `bun install --frozen-lockfile` → no changes; `bun run build` → exit 0; `bun run typecheck` → exit 0.
+- `bun run test` → client 3099 passed / 1 failed / 11 skipped: the only failure is the pre-existing `pi-mcp-launch-cwd.test.ts > leaves a bunfig.toml preload planted in the Agent home unexecuted` 10 s timeout under full-suite load (passes in isolation 3/3; S2 observed the same on unmodified 1b262053). The sequential root script stops at client, so every other workspace was run individually, all exit 0: cloud 408, cloud-dataplane 73 (+107 skipped), conformance 161, core 354, implementation-identity 110, keys 583 (+5 skipped), protocol 402, server 373 (+19 skipped), testkit 4, ui-runtime 20, example-live-activity-host 21, example-salesko-connector-broker 25.
+- Core covers RFC 9180 A.3.1 (6 encryptions + key schedule) and `@hpke/core` interop under Node and, via `hpke-bun.test.ts`, under Bun 1.4.2. Keys `custody-crash.test.ts` runs SIGKILL at `after-pending` / `after-secret-write` / `after-commit` and the cross-process lock with both a Node and a Bun child.
+- `bun run check:api-surface` → 9 goldens match (core + keys regenerated deliberately); `bun run check:version-authority` → OK (0.22.0 / keys 0.7.0, no bump); `node scripts/release/check-package-graph.mjs` → OK, "no aligned package reaches keys"; `repo-harness run check-task-workflow --strict` → `[workflow] OK`.
+- Windows Credential Manager suite: CI-only, not run locally.
