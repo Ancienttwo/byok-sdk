@@ -6952,8 +6952,27 @@ export interface ProviderProvisioningNotice {
  * redelivery can still change.
  */
 export type ProviderProvisioningHandler = (notice: ProviderProvisioningNotice) => Promise<ProviderProvisioningReadback>;
+/**
+ * Closed reasons a provisioning notice is left un-acknowledged. Nothing else
+ * about the failure crosses the processor boundary.
+ */
+export declare const PROVIDER_PROVISIONING_NOTICE_FAILURE_REASONS: readonly ['handler_unconfigured', 'handler_failed', 'readback_invalid', 'readback_mismatch'];
+export type ProviderProvisioningNoticeFailureReason = (typeof PROVIDER_PROVISIONING_NOTICE_FAILURE_REASONS)[number];
+/**
+ * The only error the provisioning processor throws.
+ *
+ * The Host handler runs next to credential bytes (sealed fetch, HPKE open, OS
+ * credential store), so anything it throws or returns is untrusted for logging.
+ * This error therefore carries a fixed message built from a closed reason and
+ * the non-secret request id, NO `cause`, and no own enumerable properties: the
+ * original error, its message, nested causes, attached fields and any schema
+ * issues are dropped here and never reach the connection manager's log line.
+ */
 export declare class ProviderProvisioningNoticeError extends Error {
-    constructor(message: string, options?: ErrorOptions);
+    #private;
+    constructor(reason: ProviderProvisioningNoticeFailureReason, requestId: string);
+    get reason(): ProviderProvisioningNoticeFailureReason;
+    get requestId(): string;
 }
 export interface ProviderProvisioningNoticeProcessorOptions {
     readonly tenantId: string;
@@ -6964,10 +6983,10 @@ export interface ProviderProvisioningNoticeProcessorOptions {
  * Turn one notice into one exact, durable, terminal readback — or throw.
  *
  * Throwing is the only way this leaves a mailbox row un-acknowledged, and it
- * does so for exactly three reasons: no handler is configured (a sender cannot
- * turn a missing consumer into a successful no-op), the handler itself threw,
- * or what it returned is not a terminal readback for THIS tenant, device and
- * request.
+ * does so only with a {@link ProviderProvisioningNoticeError} naming one closed
+ * reason: no handler is configured (a sender cannot turn a missing consumer
+ * into a successful no-op), the handler threw, or what it returned is not a
+ * valid terminal readback for THIS tenant, device and request.
  */
 export declare function createProviderProvisioningNoticeProcessor(options: ProviderProvisioningNoticeProcessorOptions): (payload: ProviderProvisioningAvailablePayload) => Promise<ProviderProvisioningReadback>;
 // ==== @byok-sdk/client dist/daemon/replay-cursor.d.ts ====
@@ -9782,8 +9801,8 @@ export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
 export { LocalTeamWorkspace, LocalTeamWorkspaceService, TeamWorkspaceError, TeamWorkspaceValidationError, TeamWorkspaceNotFoundError, TeamWorkspaceConflictError, TeamWorkspaceQuotaError, TeamWorkspaceLeaseError, TeamWorkspaceReceiptError, TeamWorkspaceCorruptError, encodeTeamMemberContext, decodeTeamMemberContext, type TeamWorkspaceDefinition, type TeamWorkspaceLimits, type TeamMessage, type TeamMemberLease, type TeamWorkspaceMemberReceipt, } from './daemon/team-workspace';
 export { openTeamTmuxView, TeamTmuxViewError, type OpenTeamTmuxViewInput } from './bin/team-tmux-view';
 export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, HostedJournalConfig, DeviceAssertionConfig, InputPreparationDaemonConfig, AgentEgressConfig, AgentContentReadConfig, AgentContentReadSurfaceConfig, AgentReliableEgressInput, } from './daemon/create-daemon';
-export { ProviderProvisioningNoticeError } from './daemon/provider-provisioning';
-export type { ProviderProvisioningHandler, ProviderProvisioningNotice } from './daemon/provider-provisioning';
+export { ProviderProvisioningNoticeError, PROVIDER_PROVISIONING_NOTICE_FAILURE_REASONS, } from './daemon/provider-provisioning';
+export type { ProviderProvisioningHandler, ProviderProvisioningNotice, ProviderProvisioningNoticeFailureReason, } from './daemon/provider-provisioning';
 export { AgentMemoryError, AgentMemoryRevisionConflictError, isAgentMemorySecureFilesystemAvailable, AGENT_MEMORY_AUDIT_FILENAME, AGENT_MEMORY_OUTBOX_FILENAME, } from './daemon/agent-memory';
 export type { AgentMemoryFilesystemHelperConfig } from './daemon/agent-memory-filesystem';
 export type { AgentMemoryFile, AgentMemorySnapshot, AgentMemoryRedactor, AgentMemoryProjectionGrant, AgentMemoryProjectionPort, AgentMemoryHostedProjection, } from './daemon/agent-memory';

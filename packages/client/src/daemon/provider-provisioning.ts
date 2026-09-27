@@ -25,10 +25,50 @@ export interface ProviderProvisioningNotice {
  */
 export type ProviderProvisioningHandler = (notice: ProviderProvisioningNotice) => Promise<ProviderProvisioningReadback>;
 
+/**
+ * Closed reasons a provisioning notice is left un-acknowledged. Nothing else
+ * about the failure crosses the processor boundary.
+ */
+export const PROVIDER_PROVISIONING_NOTICE_FAILURE_REASONS = [
+  'handler_unconfigured',
+  'handler_failed',
+  'readback_invalid',
+  'readback_mismatch',
+] as const;
+export type ProviderProvisioningNoticeFailureReason = (typeof PROVIDER_PROVISIONING_NOTICE_FAILURE_REASONS)[number];
+
+/**
+ * The only error the provisioning processor throws.
+ *
+ * The Host handler runs next to credential bytes (sealed fetch, HPKE open, OS
+ * credential store), so anything it throws or returns is untrusted for logging.
+ * This error therefore carries a fixed message built from a closed reason and
+ * the non-secret request id, NO `cause`, and no own enumerable properties: the
+ * original error, its message, nested causes, attached fields and any schema
+ * issues are dropped here and never reach the connection manager's log line.
+ */
 export class ProviderProvisioningNoticeError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = 'ProviderProvisioningNoticeError';
+  readonly #reason: ProviderProvisioningNoticeFailureReason;
+  readonly #requestId: string;
+
+  constructor(reason: ProviderProvisioningNoticeFailureReason, requestId: string) {
+    super(`provider provisioning notice ${requestId} not acknowledged: ${reason}`);
+    this.#reason = reason;
+    this.#requestId = requestId;
+    Object.defineProperty(this, 'name', {
+      value: 'ProviderProvisioningNoticeError',
+      enumerable: false,
+      configurable: true,
+      writable: true,
+    });
+  }
+
+  get reason(): ProviderProvisioningNoticeFailureReason {
+    return this.#reason;
+  }
+
+  get requestId(): string {
+    return this.#requestId;
   }
 }
 
@@ -42,38 +82,45 @@ export interface ProviderProvisioningNoticeProcessorOptions {
  * Turn one notice into one exact, durable, terminal readback — or throw.
  *
  * Throwing is the only way this leaves a mailbox row un-acknowledged, and it
- * does so for exactly three reasons: no handler is configured (a sender cannot
- * turn a missing consumer into a successful no-op), the handler itself threw,
- * or what it returned is not a terminal readback for THIS tenant, device and
- * request.
+ * does so only with a {@link ProviderProvisioningNoticeError} naming one closed
+ * reason: no handler is configured (a sender cannot turn a missing consumer
+ * into a successful no-op), the handler threw, or what it returned is not a
+ * valid terminal readback for THIS tenant, device and request.
  */
 export function createProviderProvisioningNoticeProcessor(
   options: ProviderProvisioningNoticeProcessorOptions,
 ): (payload: ProviderProvisioningAvailablePayload) => Promise<ProviderProvisioningReadback> {
   return async (payload) => {
+    // `payload` already passed the strict protocol schema, so the request id
+    // is a validated UUID and safe to name in the failure.
+    const requestId = payload.requestId;
     const handler = options.handler;
     if (handler === undefined) {
-      throw new ProviderProvisioningNoticeError('provider provisioning is not configured on this daemon');
+      throw new ProviderProvisioningNoticeError('handler_unconfigured', requestId);
     }
     // A fresh frozen object: the handler receives the request id and nothing
     // that could alias the parsed envelope.
-    const notice: ProviderProvisioningNotice = Object.freeze({ requestId: payload.requestId });
-    const raw = await handler(notice);
+    const notice: ProviderProvisioningNotice = Object.freeze({ requestId });
+    let raw: unknown;
+    try {
+      raw = await handler(notice);
+    } catch {
+      // Deliberately unbound: the thrown value is never read, logged or kept.
+      throw new ProviderProvisioningNoticeError('handler_failed', requestId);
+    }
+    // The schema error would quote Host-returned keys and shapes; only the
+    // closed reason survives.
     const parsed = ProviderProvisioningReadbackSchema.safeParse(raw);
     if (!parsed.success) {
-      throw new ProviderProvisioningNoticeError('provider provisioning handler returned an invalid readback', {
-        cause: parsed.error,
-      });
+      throw new ProviderProvisioningNoticeError('readback_invalid', requestId);
     }
     const readback = parsed.data;
     if (
       readback.tenantId !== options.tenantId ||
       readback.deviceId !== options.deviceId ||
-      readback.requestId !== payload.requestId
+      readback.requestId !== requestId
     ) {
-      throw new ProviderProvisioningNoticeError(
-        'provider provisioning readback does not match this tenant, device and request',
-      );
+      throw new ProviderProvisioningNoticeError('readback_mismatch', requestId);
     }
     return readback;
   };
