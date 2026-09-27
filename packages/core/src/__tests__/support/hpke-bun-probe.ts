@@ -38,6 +38,7 @@ async function main(): Promise<void> {
     header: {
       tenantId: 'tenant-1', deviceId: 'device-1', agentId: 'agent-1', requestId: 'request-1',
       operation: 'replace_secret', operationGeneration: 1, expectedProfile: null,
+      expectedEnrollmentRevision: 'enr-1', expectedPlacementRevision: 'plc-1',
       issuedAt: '2026-09-28T00:00:00.000Z', expiresAt: '2026-09-28T00:10:00.000Z',
     },
     config: { operation: 'replace_secret', agentId: 'agent-1', providerKind: 'zai' },

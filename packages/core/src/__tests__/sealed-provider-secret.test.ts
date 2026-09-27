@@ -55,6 +55,8 @@ const baseHeader = {
   operation: 'configure' as const,
   operationGeneration: 7,
   expectedProfile: null,
+  expectedEnrollmentRevision: 'enrollment-3',
+  expectedPlacementRevision: 'placement-9',
   issuedAt: '2026-09-28T00:00:00.000Z',
   expiresAt: '2026-09-28T00:15:00.000Z',
 };
@@ -134,6 +136,8 @@ describe('AAD binding: tampering any header field fails authentication', () => {
     ['requestId', 'request-2'],
     ['operationGeneration', 8],
     ['expectedProfile', { profileRef: 'salesko-agent1', profileRevision: '1', profileHash: `sha256:${'0'.repeat(64)}` }],
+    ['expectedEnrollmentRevision', 'enrollment-4'],
+    ['expectedPlacementRevision', 'placement-10'],
     ['issuedAt', '2026-09-28T00:00:01.000Z'],
     ['expiresAt', '2026-09-28T00:14:59.000Z'],
   ];

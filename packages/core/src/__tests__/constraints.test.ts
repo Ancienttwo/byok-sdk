@@ -199,6 +199,7 @@ describe('public API surface', () => {
       'ProviderProvisioningConfigV1Schema',
       'ProviderProvisioningExpectedProfileSchema',
       'ProviderProvisioningHeaderV1Schema',
+      'ProviderProvisioningIdentityRevisionSchema',
       'ProviderProvisioningRequestV1Schema',
       'SEALING_KEY_ID_LENGTH',
       'SKILL_FRONTMATTER_FIELDS',

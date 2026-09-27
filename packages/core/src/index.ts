@@ -328,6 +328,7 @@ export {
   ProviderProvisioningConfigV1Schema,
   ProviderProvisioningExpectedProfileSchema,
   ProviderProvisioningHeaderV1Schema,
+  ProviderProvisioningIdentityRevisionSchema,
   ProviderProvisioningRequestV1Schema,
   SEALING_KEY_ID_LENGTH,
   SealedProviderSecretV1Schema,

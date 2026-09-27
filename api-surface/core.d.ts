@@ -1317,7 +1317,7 @@ export type { DeviceProofAlgorithm, DeviceProofEnvelopeV1, DeviceProofProtectedC
 export { authenticateDeviceAssertion, DEVICE_ASSERTION_ALGORITHMS, DEVICE_ASSERTION_AUDIENCE_MAX_BYTES, DEVICE_ASSERTION_DEFAULT_TTL_MS, DEVICE_ASSERTION_DOMAIN_PREFIX, DEVICE_ASSERTION_MAX_TTL_MS, DEVICE_ASSERTION_SCHEMA_ID, DEVICE_ASSERTION_VERSION, DeviceAssertionClaimsSchema, DeviceAssertionEnvelopeV1Schema, deviceAssertionCanonicalClaims, deviceAssertionCanonicalJson, deviceAssertionSigningInput, parseDeviceAssertionEnvelope, verifyDeviceAssertion, } from './device-assertion';
 export { authenticateTaskAssertion, TASK_ASSERTION_AGENT_REF_MAX_BYTES, TASK_ASSERTION_DOMAIN_PREFIX, TASK_ASSERTION_SCHEMA_ID, TASK_ASSERTION_TOOLSET_ID_MAX_LENGTH, TASK_ASSERTION_VERSION, TaskAssertionAgentRefSchema, TaskAssertionClaimsSchema, TaskAssertionEnvelopeV1Schema, parseTaskAssertionEnvelope, taskAssertionCanonicalClaims, taskAssertionCanonicalJson, taskAssertionSigningInput, verifyTaskAssertion, } from './device-assertion';
 export type { AuthenticateDeviceAssertionDeps, AuthenticatedAssertion, AuthenticatedDeviceAssertion, AuthenticatedTaskAssertion, DeviceAssertionAlgorithm, DeviceAssertionAuthorityRow, DeviceAssertionClaims, DeviceAssertionDeviceRow, DeviceAssertionEnvelopeV1, DeviceAssertionExpectedBinding, DeviceAssertionReplayConsumeInput, DeviceAssertionReplayAuthority, DeviceAssertionReplaySchemaId, DeviceAssertionVerifier, DeviceAssertionVerifyDeps, DeviceAssertionVerifyInput, TaskAssertionAgentRef, TaskAssertionClaims, TaskAssertionEnvelopeV1, } from './device-assertion';
-export { PROVIDER_PROVISIONING_MAX_TTL_MS, PROVIDER_PROVISIONING_OPERATIONS, PROVIDER_PROVISIONING_REQUEST_VERSION, PROVIDER_PROVISIONING_SECRET_OPERATIONS, PROVIDER_SECRET_HPKE_INFO, PROVIDER_SECRET_HPKE_SUITE, PROVIDER_SECRET_MAX_BYTES, PROVIDER_SECRET_MAX_PADDED_BYTES, PROVIDER_SECRET_PAD_BLOCK_BYTES, ProviderProvisioningConfigV1Schema, ProviderProvisioningExpectedProfileSchema, ProviderProvisioningHeaderV1Schema, ProviderProvisioningRequestV1Schema, SEALING_KEY_ID_LENGTH, SealedProviderSecretV1Schema, SealingKeyClaimV1Schema, SealingKeyIdSchema, SealingPublicJwkSchema, assertProviderProvisioningConfigDigest, deriveSealingKeyId, openProviderProvisioningSecret, parseProviderProvisioningRequest, providerProvisioningConfigDigest, providerProvisioningRequestDigest, providerSecretAadBytes, sealProviderProvisioningRequest, sealingKeyClaimCanonicalBytes, } from './sealed-provider-secret';
+export { PROVIDER_PROVISIONING_MAX_TTL_MS, PROVIDER_PROVISIONING_OPERATIONS, PROVIDER_PROVISIONING_REQUEST_VERSION, PROVIDER_PROVISIONING_SECRET_OPERATIONS, PROVIDER_SECRET_HPKE_INFO, PROVIDER_SECRET_HPKE_SUITE, PROVIDER_SECRET_MAX_BYTES, PROVIDER_SECRET_MAX_PADDED_BYTES, PROVIDER_SECRET_PAD_BLOCK_BYTES, ProviderProvisioningConfigV1Schema, ProviderProvisioningExpectedProfileSchema, ProviderProvisioningHeaderV1Schema, ProviderProvisioningIdentityRevisionSchema, ProviderProvisioningRequestV1Schema, SEALING_KEY_ID_LENGTH, SealedProviderSecretV1Schema, SealingKeyClaimV1Schema, SealingKeyIdSchema, SealingPublicJwkSchema, assertProviderProvisioningConfigDigest, deriveSealingKeyId, openProviderProvisioningSecret, parseProviderProvisioningRequest, providerProvisioningConfigDigest, providerProvisioningRequestDigest, providerSecretAadBytes, sealProviderProvisioningRequest, sealingKeyClaimCanonicalBytes, } from './sealed-provider-secret';
 export type { ProviderProvisioningConfigV1, ProviderProvisioningExpectedProfile, ProviderProvisioningHeaderV1, ProviderProvisioningOperation, ProviderProvisioningRequestV1, ProviderSecretRecipient, SealProviderProvisioningRequestInput, SealedProviderSecretV1, SealingKeyClaimV1, SealingPublicJwk, WebCryptoKey, } from './sealed-provider-secret';
 export { NONCE_SIGNING_DOMAIN, nonceSigningBytes } from './pairing';
 export { IN_MEMORY_CLOCK_EPOCH, InMemoryBoardStore, InMemoryMailboxStore, InMemoryDeviceAssertionReplayAuthority, InMemoryObjectStore, InMemoryPresenceStore, InMemoryQuotaStore, InMemorySkillPackStore, InMemoryTruthStore, createInMemoryCoreStores, createInMemoryCoreCompositionWithClock, createMutableClock, } from './in-memory/index';
@@ -2034,6 +2034,12 @@ export declare const ProviderProvisioningExpectedProfileSchema: z.ZodUnion<reado
     profileHash: z.ZodString;
 }, z.core.$strict>]>;
 export type ProviderProvisioningExpectedProfile = z.infer<typeof ProviderProvisioningExpectedProfileSchema>;
+/**
+ * Opaque, Host-issued identity version: the enrollment revision (changes on
+ * re-pair / re-enrollment of the same device id) or the agent placement
+ * revision. The device compares it byte-for-byte with its own snapshot.
+ */
+export declare const ProviderProvisioningIdentityRevisionSchema: z.ZodString;
 export declare const ProviderProvisioningHeaderV1Schema: z.ZodObject<{
     tenantId: z.ZodString;
     deviceId: z.ZodString;
@@ -2051,6 +2057,8 @@ export declare const ProviderProvisioningHeaderV1Schema: z.ZodObject<{
         profileRevision: z.ZodString;
         profileHash: z.ZodString;
     }, z.core.$strict>]>;
+    expectedEnrollmentRevision: z.ZodString;
+    expectedPlacementRevision: z.ZodString;
     configDigest: z.ZodString;
     issuedAt: z.ZodString & z.ZodType<string, string, z.core.$ZodTypeInternals<string, string>>;
     expiresAt: z.ZodString & z.ZodType<string, string, z.core.$ZodTypeInternals<string, string>>;
@@ -2082,6 +2090,8 @@ export declare const ProviderProvisioningRequestV1Schema: z.ZodObject<{
             profileRevision: z.ZodString;
             profileHash: z.ZodString;
         }, z.core.$strict>]>;
+        expectedEnrollmentRevision: z.ZodString;
+        expectedPlacementRevision: z.ZodString;
         configDigest: z.ZodString;
         issuedAt: z.ZodString & z.ZodType<string, string, z.core.$ZodTypeInternals<string, string>>;
         expiresAt: z.ZodString & z.ZodType<string, string, z.core.$ZodTypeInternals<string, string>>;
@@ -2123,7 +2133,8 @@ export declare function providerProvisioningConfigDigest(config: ProviderProvisi
 /**
  * Canonical AAD bytes. Every header field plus the sealing key id is bound,
  * so tampering with any of tenant, device, key, request, agent, operation,
- * generation, expected triple, config digest, or time window fails the AEAD.
+ * generation, expected triple, expected enrollment and placement revisions,
+ * config digest, or time window fails the AEAD.
  */
 export declare function providerSecretAadBytes(header: ProviderProvisioningHeaderV1, keyId: string): Uint8Array;
 /**

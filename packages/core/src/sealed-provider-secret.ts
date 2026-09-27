@@ -285,6 +285,13 @@ export const ProviderProvisioningExpectedProfileSchema = z.union([
 ]);
 export type ProviderProvisioningExpectedProfile = z.infer<typeof ProviderProvisioningExpectedProfileSchema>;
 
+/**
+ * Opaque, Host-issued identity version: the enrollment revision (changes on
+ * re-pair / re-enrollment of the same device id) or the agent placement
+ * revision. The device compares it byte-for-byte with its own snapshot.
+ */
+export const ProviderProvisioningIdentityRevisionSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/u);
+
 export const ProviderProvisioningHeaderV1Schema = z.strictObject({
   tenantId: OpaqueIdSchema,
   deviceId: OpaqueIdSchema,
@@ -294,6 +301,10 @@ export const ProviderProvisioningHeaderV1Schema = z.strictObject({
   /** Non-secret, strictly increasing per bot (A3); a device rejects anything not above its high-watermark. */
   operationGeneration: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   expectedProfile: ProviderProvisioningExpectedProfileSchema,
+  /** The device enrollment revision the Host authorized against (F2). */
+  expectedEnrollmentRevision: ProviderProvisioningIdentityRevisionSchema,
+  /** The agent placement revision the Host authorized against (F2). */
+  expectedPlacementRevision: ProviderProvisioningIdentityRevisionSchema,
   configDigest: z.string().regex(CONTENT_HASH_PATTERN),
   issuedAt: CanonicalTimestampSchema,
   expiresAt: CanonicalTimestampSchema,
@@ -369,7 +380,8 @@ export async function providerProvisioningConfigDigest(config: ProviderProvision
 /**
  * Canonical AAD bytes. Every header field plus the sealing key id is bound,
  * so tampering with any of tenant, device, key, request, agent, operation,
- * generation, expected triple, config digest, or time window fails the AEAD.
+ * generation, expected triple, expected enrollment and placement revisions,
+ * config digest, or time window fails the AEAD.
  */
 export function providerSecretAadBytes(header: ProviderProvisioningHeaderV1, keyId: string): Uint8Array {
   const parsed = ProviderProvisioningHeaderV1Schema.safeParse(header);
@@ -393,6 +405,8 @@ export function providerSecretAadBytes(header: ProviderProvisioningHeaderV1, key
         profileRevision: value.expectedProfile.profileRevision,
         profileHash: value.expectedProfile.profileHash,
       },
+    expectedEnrollmentRevision: value.expectedEnrollmentRevision,
+    expectedPlacementRevision: value.expectedPlacementRevision,
     configDigest: value.configDigest,
     issuedAt: value.issuedAt,
     expiresAt: value.expiresAt,
