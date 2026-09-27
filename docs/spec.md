@@ -71,7 +71,8 @@ authenticated session and device assertion.
   WebCrypto primitives, with no negotiation and no reusable context. The AAD
   binds tenant, device, sealing key id, request id, agent, operation, the
   non-secret monotonic operation generation, the expected provider triple, the
-  config digest and the time window. RFC 9180 test vectors and an independent
+  expected enrollment and placement revisions, the config digest and the time
+  window. RFC 9180 test vectors and an independent
   implementation pass in the test suite; that is not an audit, and the
   self-implemented HPKE requires a dedicated security review before release.
 - **Sealing key.** The device's long-lived P-256 sealing key lives in its
@@ -96,6 +97,22 @@ authenticated session and device assertion.
   that never carry plaintext or operating-system error detail. An optional key
   check after a change is a bounded, closed-set hint, never a readiness
   decision.
+- **Order, identity and generations.** For a request addressed to this
+  tenant and device, the durable local result for its request id and
+  immutable request digest is returned before the current sealing key,
+  placement or ciphertext is consulted; a readback-only path needs only the
+  request id and the digest the Host stored at submission, so key rotation,
+  a placement change or a deleted ciphertext never rewrites a historical
+  result. The canonical device handler reads that durable result first and
+  fetches/applies/completes only undecided operations. Requests bind the
+  expected enrollment and placement revisions; the device re-reads an exact
+  identity snapshot inside the configuration lock right before any
+  credential-store write and rejects any difference. That fence covers only
+  placement/enrollment writers that update the local record under the same
+  configuration lock. A generation is consumed when its pending marker is
+  written, so an older request never overtakes an interrupted newer one; the
+  interrupted request is reported, not redone, and recovery needs a higher
+  generation that re-supplies the key, or a delete.
 - **Custody.** Every credential writer and reader holds the profile store's
   configuration lock — cross-process for the SQLite store and released by the
   operating system if the holder dies. A writer records a secret-free pending
