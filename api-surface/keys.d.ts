@@ -110,26 +110,18 @@ export interface ProviderCustodyPending {
 }
 /**
  * Closed set of device-side provisioning rejections. Never carries detail
- * beyond the code. Every code whose meaning exists on the wire uses the exact
- * `@byok-sdk/protocol` rejection string (S2), so the Host maps 1:1:
- * `request_expired`, `request_window_invalid`, `sealing_key_rotated`,
- * `enrollment_mismatch`, `agent_not_placed`, `config_digest_mismatch`,
- * `operation_generation_stale`, `profile_changed`, `profile_not_found`,
- * `credential_scope_mismatch`, `provider_kind_unsupported`, `pi_model_invalid`,
- * `seal_open_failed`, `secret_invalid`, `local_commit_interrupted`,
- * `secret_store_unavailable`. Four device-only codes have no wire counterpart
- * yet: `request_invalid` (unparseable request), `request_conflict` (same
- * request id, different request digest), `request_not_yet_valid` (issuedAt
- * beyond the bounded clock skew), and `capabilities_invalid`.
+ * beyond the code. Every code is the exact `@byok-sdk/protocol` rejection
+ * string, so the Host maps 1:1; keys cannot import protocol, so
+ * `scripts/api-surface/check-provisioning-code-alignment.test.mjs` proves the
+ * two closed sets stay identical.
  */
 export declare const PROVIDER_PROVISIONING_REJECTIONS: readonly ['request_invalid', 'enrollment_mismatch', 'sealing_key_rotated', 'agent_not_placed', 'config_digest_mismatch', 'seal_open_failed', 'request_conflict', 'operation_generation_stale', 'request_window_invalid', 'request_not_yet_valid', 'request_expired', 'provider_kind_unsupported', 'pi_model_invalid', 'capabilities_invalid', 'profile_changed', 'profile_not_found', 'credential_scope_mismatch', 'local_commit_interrupted', 'secret_invalid', 'secret_store_unavailable'];
 export type ProviderProvisioningRejection = (typeof PROVIDER_PROVISIONING_REJECTIONS)[number];
 /**
- * Closed set of key-check outcomes (D13, A10), using the wire strings of the
- * protocol key-check set. `credential_rejected` means only an explicit
- * credential rejection (HTTP 401); a check is a hint and never a readiness
- * decision. `provider_error` (any other provider failure: 5xx, malformed or
- * oversize response) has no wire counterpart yet.
+ * Closed set of key-check outcomes (D13, A10), using the protocol key-check
+ * strings 1:1 (proven by the same alignment check). `credential_rejected`
+ * means only an explicit credential rejection (HTTP 401); a check is a hint
+ * and never a readiness decision.
  */
 export declare const PROVIDER_KEY_CHECK_OUTCOMES: readonly ['not_run', 'ok', 'credential_rejected', 'rate_limited', 'quota_or_billing', 'model_not_permitted', 'unreachable', 'timeout', 'provider_error'];
 export type ProviderKeyCheckOutcome = (typeof PROVIDER_KEY_CHECK_OUTCOMES)[number];
