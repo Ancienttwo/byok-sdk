@@ -1,5 +1,18 @@
+import { chmodSync, existsSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 
+import {
+  PROVIDER_CONFIGURATION_LOCK_WAIT_MS,
+  PROVIDER_CUSTODY_OPERATIONS,
+  PROVIDER_CUSTODY_RECEIPT_LIMIT,
+  ProcessLocalMutex,
+  parseProviderProvisioningResult,
+  type ProviderConfigurationLock,
+  type ProviderCustodyCommit,
+  type ProviderCustodyPending,
+  type ProviderCustodyReceipt,
+  type ProviderKeyCheckOutcome,
+} from './custody';
 import { ByokKeysError } from './errors';
 import {
   type ProviderProfileStore,
@@ -15,6 +28,7 @@ import {
 } from './provider-profile';
 import {
   closeSqliteDatabaseAfterInitializationFailure,
+  loadSqliteModule,
   openSqliteDatabase,
   secureSqliteFilePermissions,
 } from './sqlite-support';
@@ -28,6 +42,13 @@ export interface SqliteProviderProfileStoreOptions {
   path: string;
   /** Open an existing profile database without creating or mutating it. */
   readOnly?: boolean;
+  /**
+   * How long {@link SqliteProviderProfileStore.acquireConfigurationLock} waits
+   * for another process before failing closed with
+   * `PROVIDER_CONFIGURATION_BUSY`. Defaults to
+   * {@link PROVIDER_CONFIGURATION_LOCK_WAIT_MS}.
+   */
+  configurationLockWaitMs?: number;
 }
 
 /** SQL string-literal list for a CHECK constraint's `IN (...)` set. */
@@ -126,6 +147,97 @@ ON provider_profile(kind)
 WHERE enabled = 1;
 `;
 
+/**
+ * Credential-custody state (`custody.ts`), in the same database as the
+ * profiles so the final custody write — profile mutation, receipt, watermark,
+ * pending clear — is one SQLite transaction. None of these tables holds a
+ * secret.
+ */
+const CUSTODY_TABLES: Readonly<Record<string, string>> = {
+  provider_custody_pending: `
+CREATE TABLE IF NOT EXISTS provider_custody_pending (
+  profile_ref          TEXT PRIMARY KEY,
+  operation            TEXT NOT NULL CHECK (operation IN (${sqlList(PROVIDER_CUSTODY_OPERATIONS)})),
+  request_id           TEXT,
+  operation_generation INTEGER CHECK (operation_generation IS NULL OR operation_generation > 0),
+  since                TEXT NOT NULL
+);
+`,
+  provider_custody_watermark: `
+CREATE TABLE IF NOT EXISTS provider_custody_watermark (
+  profile_ref          TEXT PRIMARY KEY,
+  operation_generation INTEGER NOT NULL CHECK (operation_generation > 0)
+);
+`,
+  provider_custody_receipt: `
+CREATE TABLE IF NOT EXISTS provider_custody_receipt (
+  seq                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  request_id           TEXT NOT NULL UNIQUE,
+  profile_ref          TEXT NOT NULL,
+  operation_generation INTEGER NOT NULL CHECK (operation_generation > 0),
+  request_digest       TEXT NOT NULL,
+  result               TEXT NOT NULL
+);
+`,
+};
+
+/** Sibling file whose SQLite EXCLUSIVE lock is the cross-process configuration lock. */
+export function providerConfigurationLockPath(databasePath: string): string {
+  return `${databasePath}.config-lock`;
+}
+
+/**
+ * Fail closed unless every custody table exists with exactly this version's
+ * DDL. A read-only open (the launcher) cannot create them, and cannot prove
+ * the absence of a pending marker without them, so a missing table is stale.
+ */
+function assertCustodySchemaIsCurrent(database: DatabaseSync, path: string): void {
+  for (const [name, ddl] of Object.entries(CUSTODY_TABLES)) {
+    const row = database
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(name) as { sql?: string | null } | undefined;
+    const stored = row?.sql;
+    if (typeof stored === 'string' && normalizeTableDdl(stored) === normalizeTableDdl(ddl)) continue;
+    throw new ByokKeysError(
+      'PROVIDER_STORE_SCHEMA_STALE',
+      `Provider profile store at ${path} lacks the current credential-custody schema; open it once with this @byok-sdk/keys version in writable mode before reading credentials`,
+    );
+  }
+}
+
+/**
+ * Lock connections currently held by this process. Holding them here keeps
+ * each one strongly reachable until `release`, independent of how a caller
+ * holds the lock object: a runtime that collects an unreachable connection
+ * (observed with Bun) would otherwise finalize it and drop the lock early.
+ */
+const HELD_LOCK_CONNECTIONS = new Set<DatabaseSync>();
+
+function isSqliteBusy(error: unknown): boolean {
+  const code = (error as { errcode?: unknown } | null)?.errcode;
+  return code === 5 || code === 6;
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+interface PendingRow {
+  operation: string;
+  operation_generation: number | null;
+  profile_ref: string;
+  request_id: string | null;
+  since: string;
+}
+
+interface ReceiptRow {
+  operation_generation: number;
+  profile_ref: string;
+  request_digest: string;
+  request_id: string;
+  result: string;
+}
+
 interface ProfileRow {
   adapter: string;
   auth_mode: string;
@@ -150,9 +262,17 @@ interface ProfileRow {
  */
 export class SqliteProviderProfileStore implements ProviderProfileStore {
   readonly #database: DatabaseSync;
+  readonly #path: string;
+  readonly #mutex = new ProcessLocalMutex();
+  readonly #lockWaitMs: number;
   #closed = false;
 
   constructor(options: SqliteProviderProfileStoreOptions) {
+    this.#path = options.path;
+    this.#lockWaitMs = options.configurationLockWaitMs ?? PROVIDER_CONFIGURATION_LOCK_WAIT_MS;
+    if (!Number.isSafeInteger(this.#lockWaitMs) || this.#lockWaitMs < 0) {
+      throw new ByokKeysError('PROVIDER_STORE_UNAVAILABLE', 'configurationLockWaitMs must be a non-negative integer');
+    }
     this.#database = openSqliteDatabase(options.path, {
       readOnly: options.readOnly ?? false,
     });
@@ -160,8 +280,11 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
       try {
         this.#database.exec(SCHEMA);
         this.#database.exec(ENABLED_INDEX);
+        for (const ddl of Object.values(CUSTODY_TABLES)) this.#database.exec(ddl);
         assertProviderProfileSchemaIsCurrent(this.#database, options.path);
+        assertCustodySchemaIsCurrent(this.#database, options.path);
         secureSqliteFilePermissions(options.path);
+        ensureConfigurationLockFile(options.path);
       } catch (error) {
         closeSqliteDatabaseAfterInitializationFailure(
           this.#database,
@@ -172,6 +295,7 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
     } else {
       try {
         assertProviderProfileSchemaIsCurrent(this.#database, options.path);
+        assertCustodySchemaIsCurrent(this.#database, options.path);
       } catch (error) {
         closeSqliteDatabaseAfterInitializationFailure(
           this.#database,
@@ -223,12 +347,20 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
   }
 
   async save(profile: ModelProviderProfile): Promise<ModelProviderProfile> {
+    const validated = await this.#validateForSave(profile);
+    this.#transaction(() => this.#writeProfile(validated));
+    return (await this.get(validated.profile_ref)) as ModelProviderProfile;
+  }
+
+  async #validateForSave(profile: ModelProviderProfile): Promise<ModelProviderProfile> {
     const existing = await this.get(profile.profile_ref);
-    const validated = parseModelProviderProfile({
+    return parseModelProviderProfile({
       ...profile,
       created_at: existing?.created_at ?? profile.created_at,
     });
-    this.#transaction(() => {
+  }
+
+  #writeProfile(validated: ModelProviderProfile): void {
       if (validated.enabled) {
         this.#database
           .prepare(
@@ -269,8 +401,167 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
           validated.created_at,
           validated.updated_at,
         );
+  }
+
+  /**
+   * Cross-process for a file database: an EXCLUSIVE transaction on the
+   * sibling lock file, which the operating system releases if this process
+   * dies. Acquisition polls without blocking the event loop and fails closed
+   * after the configured wait. The lock connection stays strongly referenced
+   * until `release`, so a garbage collector can never finalize it early (Bun
+   * collects unreachable connections).
+   */
+  async acquireConfigurationLock(): Promise<ProviderConfigurationLock> {
+    const local = await this.#mutex.acquire();
+    if (this.#path === ':memory:') return local;
+    let lockDatabase: DatabaseSync | undefined;
+    try {
+      const lockPath = providerConfigurationLockPath(this.#path);
+      if (!existsSync(lockPath)) {
+        throw new ByokKeysError(
+          'PROVIDER_STORE_SCHEMA_STALE',
+          `Provider profile store at ${this.#path} has no credential-custody lock file; open it once in writable mode first`,
+        );
+      }
+      const { DatabaseSync } = loadSqliteModule();
+      // Read-write even for a read-only profile store: a read-only SQLite
+      // connection can hold only a SHARED lock, which would not exclude
+      // another reader. The file already exists, so nothing is created.
+      lockDatabase = new DatabaseSync(lockPath, { timeout: 0 });
+      const deadline = Date.now() + this.#lockWaitMs;
+      for (;;) {
+        try {
+          lockDatabase.exec('BEGIN EXCLUSIVE');
+          break;
+        } catch (error) {
+          if (!isSqliteBusy(error)) throw error;
+          if (Date.now() >= deadline) {
+            throw new ByokKeysError('PROVIDER_CONFIGURATION_BUSY', 'Provider configuration lock is held by another process');
+          }
+          await sleep(20);
+        }
+      }
+    } catch (error) {
+      lockDatabase?.close();
+      await local.release();
+      throw error;
+    }
+    const held = lockDatabase;
+    HELD_LOCK_CONNECTIONS.add(held);
+    let released = false;
+    return {
+      release: async () => {
+        if (released) return;
+        released = true;
+        try {
+          held.exec('ROLLBACK');
+        } finally {
+          HELD_LOCK_CONNECTIONS.delete(held);
+          held.close();
+          await local.release();
+        }
+      },
+    };
+  }
+
+  async getPending(profileRef: ProviderProfileRef): Promise<ProviderCustodyPending | undefined> {
+    const row = this.#database
+      .prepare('SELECT * FROM provider_custody_pending WHERE profile_ref = ?')
+      .get(profileRef) as PendingRow | undefined;
+    if (row === undefined) return undefined;
+    return {
+      profileRef: row.profile_ref,
+      operation: row.operation as ProviderCustodyPending['operation'],
+      requestId: row.request_id,
+      operationGeneration: row.operation_generation === null ? null : Number(row.operation_generation),
+      since: row.since,
+    };
+  }
+
+  async markPending(pending: ProviderCustodyPending): Promise<void> {
+    this.#transaction(() => {
+      this.#database
+        .prepare(
+          `INSERT INTO provider_custody_pending (profile_ref, operation, request_id, operation_generation, since)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(profile_ref) DO UPDATE SET
+             operation = excluded.operation,
+             request_id = excluded.request_id,
+             operation_generation = excluded.operation_generation,
+             since = excluded.since`,
+        )
+        .run(pending.profileRef, pending.operation, pending.requestId, pending.operationGeneration, pending.since);
     });
-    return (await this.get(validated.profile_ref)) as ModelProviderProfile;
+  }
+
+  async getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined> {
+    const row = this.#database
+      .prepare('SELECT operation_generation FROM provider_custody_watermark WHERE profile_ref = ?')
+      .get(profileRef) as { operation_generation: number } | undefined;
+    return row === undefined ? undefined : Number(row.operation_generation);
+  }
+
+  async getReceipt(requestId: string): Promise<ProviderCustodyReceipt | undefined> {
+    const row = this.#database
+      .prepare('SELECT * FROM provider_custody_receipt WHERE request_id = ?')
+      .get(requestId) as ReceiptRow | undefined;
+    return row === undefined ? undefined : parseReceiptRow(row);
+  }
+
+  async commitCustody(commit: ProviderCustodyCommit): Promise<void> {
+    const profile = commit.mutation.kind === 'save' ? await this.#validateForSave(commit.mutation.profile) : undefined;
+    this.#transaction(() => {
+      if (profile !== undefined) this.#writeProfile(profile);
+      if (commit.mutation.kind === 'delete') {
+        this.#database.prepare('DELETE FROM provider_profile WHERE profile_ref = ?').run(commit.profileRef);
+      }
+      if (commit.receipt !== undefined) this.#writeReceipt(commit.receipt);
+      if (commit.clearPending) {
+        this.#database.prepare('DELETE FROM provider_custody_pending WHERE profile_ref = ?').run(commit.profileRef);
+      }
+    });
+  }
+
+  async recordKeyCheck(requestId: string, operationGeneration: number, keyCheck: ProviderKeyCheckOutcome): Promise<boolean> {
+    let recorded = false;
+    this.#transaction(() => {
+      const row = this.#database
+        .prepare('SELECT * FROM provider_custody_receipt WHERE request_id = ?')
+        .get(requestId) as ReceiptRow | undefined;
+      if (row === undefined || Number(row.operation_generation) !== operationGeneration) return;
+      const watermark = this.#database
+        .prepare('SELECT operation_generation FROM provider_custody_watermark WHERE profile_ref = ?')
+        .get(row.profile_ref) as { operation_generation: number } | undefined;
+      if (watermark === undefined || Number(watermark.operation_generation) !== operationGeneration) return;
+      const receipt = parseReceiptRow(row);
+      this.#database
+        .prepare('UPDATE provider_custody_receipt SET result = ? WHERE request_id = ?')
+        .run(JSON.stringify({ ...receipt.result, keyCheck }), requestId);
+      recorded = true;
+    });
+    return recorded;
+  }
+
+  #writeReceipt(receipt: ProviderCustodyReceipt): void {
+    this.#database
+      .prepare(
+        `INSERT INTO provider_custody_receipt (request_id, profile_ref, operation_generation, request_digest, result)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(receipt.requestId, receipt.profileRef, receipt.operationGeneration, receipt.requestDigest, JSON.stringify(receipt.result));
+    this.#database
+      .prepare(
+        `INSERT INTO provider_custody_watermark (profile_ref, operation_generation) VALUES (?, ?)
+         ON CONFLICT(profile_ref) DO UPDATE SET
+           operation_generation = MAX(provider_custody_watermark.operation_generation, excluded.operation_generation)`,
+      )
+      .run(receipt.profileRef, receipt.operationGeneration);
+    this.#database
+      .prepare(
+        `DELETE FROM provider_custody_receipt
+         WHERE seq <= (SELECT MAX(seq) FROM provider_custody_receipt) - ?`,
+      )
+      .run(PROVIDER_CUSTODY_RECEIPT_LIMIT);
   }
 
   async setEnabled(profileRef: ProviderProfileRef): Promise<ModelProviderProfile> {
@@ -317,6 +608,33 @@ function parseRow(row: ProfileRow): ModelProviderProfile {
     capabilities,
     enabled: row.enabled === 1,
   });
+}
+
+function parseReceiptRow(row: ReceiptRow): ProviderCustodyReceipt {
+  let result: unknown;
+  try {
+    result = JSON.parse(row.result);
+  } catch {
+    throw new ByokKeysError('PROVIDER_CUSTODY_STATE_INVALID', 'Stored provider provisioning result is not valid JSON');
+  }
+  return {
+    requestId: row.request_id,
+    profileRef: row.profile_ref,
+    operationGeneration: Number(row.operation_generation),
+    requestDigest: row.request_digest,
+    result: parseProviderProvisioningResult(result),
+  };
+}
+
+/** Create the sibling lock file owner-only, once, from a writable open. No-op for `:memory:`. */
+function ensureConfigurationLockFile(databasePath: string): void {
+  if (databasePath === ':memory:') return;
+  const lockPath = providerConfigurationLockPath(databasePath);
+  if (!existsSync(lockPath)) {
+    const { DatabaseSync } = loadSqliteModule();
+    new DatabaseSync(lockPath).close();
+  }
+  chmodSync(lockPath, 0o600);
 }
 
 /** Exported for the store's own tests to enumerate the CHECK-constrained kinds. */

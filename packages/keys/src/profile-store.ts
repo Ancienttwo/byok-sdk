@@ -1,3 +1,12 @@
+import {
+  type ProviderConfigurationLock,
+  type ProviderCustodyCommit,
+  type ProviderCustodyPending,
+  type ProviderCustodyReceipt,
+  type ProviderKeyCheckOutcome,
+  PROVIDER_CUSTODY_RECEIPT_LIMIT,
+  ProcessLocalMutex,
+} from './custody';
 import { ByokKeysError } from './errors';
 import {
   type ModelProviderProfile,
@@ -24,8 +33,36 @@ import {
  * 2. **Validate on write.** `save` runs {@link parseModelProviderProfile}, so an
  *    invalid profile is refused at the boundary rather than discovered later by
  *    a reader.
+ *
+ * Every store also owns the credential-custody state described in
+ * `custody.ts`: the configuration lock, pending markers, operation
+ * watermarks, and receipts. The custody methods other than
+ * `acquireConfigurationLock` must be called while holding that lock; the
+ * registry, the provisioning applier, and the launcher are the only callers.
  */
 export interface ProviderProfileStore {
+  /**
+   * Take the exclusive configuration lock. Cross-process for a file-backed
+   * SQLite store; process-local otherwise. Fails closed with
+   * `PROVIDER_CONFIGURATION_BUSY` when it cannot be acquired in time.
+   */
+  acquireConfigurationLock(): Promise<ProviderConfigurationLock>;
+  /** The pending marker for `profileRef`, if a credential change is unfinished. */
+  getPending(profileRef: ProviderProfileRef): Promise<ProviderCustodyPending | undefined>;
+  /** Durably record a pending marker (replacing any existing one for the same ref). */
+  markPending(pending: ProviderCustodyPending): Promise<void>;
+  /** Highest operation generation `profileRef` has consumed; survives delete. */
+  getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined>;
+  /** Stored receipt for a provisioning request id, if still retained. */
+  getReceipt(requestId: string): Promise<ProviderCustodyReceipt | undefined>;
+  /** Apply a custody commit atomically (see {@link ProviderCustodyCommit}). */
+  commitCustody(commit: ProviderCustodyCommit): Promise<void>;
+  /**
+   * Record a key-check outcome on a receipt, only if that receipt's
+   * generation is still the profile's watermark. Returns whether it was
+   * recorded; a stale check never overwrites newer state.
+   */
+  recordKeyCheck(requestId: string, operationGeneration: number, keyCheck: ProviderKeyCheckOutcome): Promise<boolean>;
   /** Release the underlying resource. Safe to call more than once. */
   close(): Promise<void>;
   /** Remove `profileRef`; `false` when it was not configured. */
@@ -65,9 +102,44 @@ export function providerNotConfigured(
  */
 export class InMemoryProviderProfileStore implements ProviderProfileStore {
   readonly #profiles = new Map<ProviderProfileRef, ModelProviderProfile>();
+  readonly #mutex = new ProcessLocalMutex();
+  readonly #pending = new Map<ProviderProfileRef, ProviderCustodyPending>();
+  readonly #watermarks = new Map<ProviderProfileRef, number>();
+  readonly #receipts = new Map<string, ProviderCustodyReceipt>();
 
   async close(): Promise<void> {
     this.#profiles.clear();
+  }
+
+  acquireConfigurationLock(): Promise<ProviderConfigurationLock> {
+    return this.#mutex.acquire();
+  }
+
+  async getPending(profileRef: ProviderProfileRef): Promise<ProviderCustodyPending | undefined> {
+    return this.#pending.get(profileRef);
+  }
+
+  async markPending(pending: ProviderCustodyPending): Promise<void> {
+    this.#pending.set(pending.profileRef, { ...pending });
+  }
+
+  async getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined> {
+    return this.#watermarks.get(profileRef);
+  }
+
+  async getReceipt(requestId: string): Promise<ProviderCustodyReceipt | undefined> {
+    return this.#receipts.get(requestId);
+  }
+
+  async commitCustody(commit: ProviderCustodyCommit): Promise<void> {
+    if (commit.mutation.kind === 'save') await this.save(commit.mutation.profile);
+    if (commit.mutation.kind === 'delete') this.#profiles.delete(commit.profileRef);
+    if (commit.receipt !== undefined) applyReceipt(this.#receipts, this.#watermarks, commit.receipt);
+    if (commit.clearPending) this.#pending.delete(commit.profileRef);
+  }
+
+  async recordKeyCheck(requestId: string, operationGeneration: number, keyCheck: ProviderKeyCheckOutcome): Promise<boolean> {
+    return recordReceiptKeyCheck(this.#receipts, this.#watermarks, requestId, operationGeneration, keyCheck);
   }
 
   async delete(profileRef: ProviderProfileRef): Promise<boolean> {
@@ -111,4 +183,40 @@ export class InMemoryProviderProfileStore implements ProviderProfileStore {
     if (existing === undefined) throw providerNotConfigured(profileRef);
     return this.save({ ...existing, enabled: true });
   }
+}
+
+/**
+ * Shared by the process-local stores: insert a receipt, advance the ref's
+ * watermark (never backwards), and evict receipts beyond the retention limit
+ * in insertion order. Replay protection is the watermark's, so eviction never
+ * revives a request.
+ */
+export function applyReceipt(
+  receipts: Map<string, ProviderCustodyReceipt>,
+  watermarks: Map<ProviderProfileRef, number>,
+  receipt: ProviderCustodyReceipt,
+): void {
+  receipts.set(receipt.requestId, receipt);
+  const current = watermarks.get(receipt.profileRef);
+  if (current === undefined || receipt.operationGeneration > current) {
+    watermarks.set(receipt.profileRef, receipt.operationGeneration);
+  }
+  while (receipts.size > PROVIDER_CUSTODY_RECEIPT_LIMIT) {
+    const oldest = receipts.keys().next().value as string;
+    receipts.delete(oldest);
+  }
+}
+
+export function recordReceiptKeyCheck(
+  receipts: Map<string, ProviderCustodyReceipt>,
+  watermarks: Map<ProviderProfileRef, number>,
+  requestId: string,
+  operationGeneration: number,
+  keyCheck: ProviderKeyCheckOutcome,
+): boolean {
+  const receipt = receipts.get(requestId);
+  if (receipt === undefined || receipt.operationGeneration !== operationGeneration) return false;
+  if (watermarks.get(receipt.profileRef) !== operationGeneration) return false;
+  receipts.set(requestId, { ...receipt, result: { ...receipt.result, keyCheck } });
+  return true;
 }

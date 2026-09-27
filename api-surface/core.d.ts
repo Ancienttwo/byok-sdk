@@ -1032,6 +1032,10 @@ export declare const CORE_ERROR_CODES: {
     readonly proof_envelope_invalid: 'proof_envelope_invalid';
     readonly proof_canonicalization_failed: 'proof_canonicalization_failed';
     readonly assertion_envelope_invalid: 'assertion_envelope_invalid';
+    readonly webcrypto_unavailable: 'webcrypto_unavailable';
+    readonly sealed_secret_invalid: 'sealed_secret_invalid';
+    readonly sealed_secret_open_failed: 'sealed_secret_open_failed';
+    readonly provider_provisioning_request_invalid: 'provider_provisioning_request_invalid';
     readonly mailbox_message_not_found: 'mailbox_message_not_found';
     readonly mailbox_cursor_regression: 'mailbox_cursor_regression';
     readonly mailbox_cursor_ahead_of_delivery: 'mailbox_cursor_ahead_of_delivery';
@@ -1272,7 +1276,9 @@ export declare class InMemoryTruthStore implements TruthStore {
  * `@byok-sdk/core` — platform contracts.
  *
  * What this package exports is deliberately narrow: contracts, schemas, errors,
- * and one in-memory reference implementation. No HTTP, no crypto, no SQL, no
+ * one in-memory reference implementation, and the sealed provider-secret byte
+ * authority (one-shot HPKE over WebCrypto only — the browser and the device
+ * must run the same code). No HTTP, no node crypto, no SQL, no
  * `@byok-sdk/protocol` (that edge would make a future `keys → core` dependency drag
  * the wire protocol along with it, §12.1), and no `node:` import (a Workers
  * composition has to be able to load this).
@@ -1311,6 +1317,8 @@ export type { DeviceProofAlgorithm, DeviceProofEnvelopeV1, DeviceProofProtectedC
 export { authenticateDeviceAssertion, DEVICE_ASSERTION_ALGORITHMS, DEVICE_ASSERTION_AUDIENCE_MAX_BYTES, DEVICE_ASSERTION_DEFAULT_TTL_MS, DEVICE_ASSERTION_DOMAIN_PREFIX, DEVICE_ASSERTION_MAX_TTL_MS, DEVICE_ASSERTION_SCHEMA_ID, DEVICE_ASSERTION_VERSION, DeviceAssertionClaimsSchema, DeviceAssertionEnvelopeV1Schema, deviceAssertionCanonicalClaims, deviceAssertionCanonicalJson, deviceAssertionSigningInput, parseDeviceAssertionEnvelope, verifyDeviceAssertion, } from './device-assertion';
 export { authenticateTaskAssertion, TASK_ASSERTION_AGENT_REF_MAX_BYTES, TASK_ASSERTION_DOMAIN_PREFIX, TASK_ASSERTION_SCHEMA_ID, TASK_ASSERTION_TOOLSET_ID_MAX_LENGTH, TASK_ASSERTION_VERSION, TaskAssertionAgentRefSchema, TaskAssertionClaimsSchema, TaskAssertionEnvelopeV1Schema, parseTaskAssertionEnvelope, taskAssertionCanonicalClaims, taskAssertionCanonicalJson, taskAssertionSigningInput, verifyTaskAssertion, } from './device-assertion';
 export type { AuthenticateDeviceAssertionDeps, AuthenticatedAssertion, AuthenticatedDeviceAssertion, AuthenticatedTaskAssertion, DeviceAssertionAlgorithm, DeviceAssertionAuthorityRow, DeviceAssertionClaims, DeviceAssertionDeviceRow, DeviceAssertionEnvelopeV1, DeviceAssertionExpectedBinding, DeviceAssertionReplayConsumeInput, DeviceAssertionReplayAuthority, DeviceAssertionReplaySchemaId, DeviceAssertionVerifier, DeviceAssertionVerifyDeps, DeviceAssertionVerifyInput, TaskAssertionAgentRef, TaskAssertionClaims, TaskAssertionEnvelopeV1, } from './device-assertion';
+export { PROVIDER_PROVISIONING_MAX_TTL_MS, PROVIDER_PROVISIONING_OPERATIONS, PROVIDER_PROVISIONING_REQUEST_VERSION, PROVIDER_PROVISIONING_SECRET_OPERATIONS, PROVIDER_SECRET_HPKE_INFO, PROVIDER_SECRET_HPKE_SUITE, PROVIDER_SECRET_MAX_BYTES, PROVIDER_SECRET_MAX_PADDED_BYTES, PROVIDER_SECRET_PAD_BLOCK_BYTES, ProviderProvisioningConfigV1Schema, ProviderProvisioningExpectedProfileSchema, ProviderProvisioningHeaderV1Schema, ProviderProvisioningRequestV1Schema, SEALING_KEY_ID_LENGTH, SealedProviderSecretV1Schema, SealingKeyClaimV1Schema, SealingKeyIdSchema, SealingPublicJwkSchema, assertProviderProvisioningConfigDigest, deriveSealingKeyId, openProviderProvisioningSecret, parseProviderProvisioningRequest, providerProvisioningConfigDigest, providerProvisioningRequestDigest, providerSecretAadBytes, sealProviderProvisioningRequest, sealingKeyClaimCanonicalBytes, } from './sealed-provider-secret';
+export type { ProviderProvisioningConfigV1, ProviderProvisioningExpectedProfile, ProviderProvisioningHeaderV1, ProviderProvisioningOperation, ProviderProvisioningRequestV1, ProviderSecretRecipient, SealProviderProvisioningRequestInput, SealedProviderSecretV1, SealingKeyClaimV1, SealingPublicJwk, WebCryptoKey, } from './sealed-provider-secret';
 export { NONCE_SIGNING_DOMAIN, nonceSigningBytes } from './pairing';
 export { IN_MEMORY_CLOCK_EPOCH, InMemoryBoardStore, InMemoryMailboxStore, InMemoryDeviceAssertionReplayAuthority, InMemoryObjectStore, InMemoryPresenceStore, InMemoryQuotaStore, InMemorySkillPackStore, InMemoryTruthStore, createInMemoryCoreStores, createInMemoryCoreCompositionWithClock, createMutableClock, } from './in-memory/index';
 export type { InMemoryCoreComposition, InMemoryCoreOptions } from './in-memory/index';
@@ -1909,6 +1917,263 @@ export interface QuotaStore {
     /** Mailbox bytes are platform-protection accounting, bounded by `mailboxLimitBytes`. */
     applyMailboxDelta(tenant: TenantId, input: MailboxUsageDeltaInput): Promise<TenantStorageUsage>;
 }
+// ==== @byok-sdk/core dist/sealed-provider-secret.d.ts ====
+/**
+ * Sealed provider provisioning v1 (plan web-sealed-provisioning §3).
+ *
+ * A browser seals a provider API key to one device's long-lived P-256
+ * sealing key; the cloud relays only ciphertext; the device opens it in
+ * memory. This module is the single byte authority both ends share:
+ *
+ * - the request schema (header + non-secret config + optional sealed secret),
+ * - canonical AAD bytes, config digest, and request digest,
+ * - the sealing-key claim canonical bytes a device signs at registration,
+ * - plaintext padding (2-byte length prefix, zero-padded to 256-byte blocks),
+ * - one-shot seal/open on top of `hpke.ts`.
+ *
+ * Every function is WebCrypto-only and `node:`-free so the Web bundle and the
+ * device use literally the same code. Nothing here reads a clock, a network,
+ * or a store; time windows, replay ledgers, placement and enrollment are the
+ * device's (`@byok-sdk/keys`) decisions.
+ *
+ * Error messages never include plaintext, ciphertext, or key material.
+ */
+import { z } from 'zod';
+import { type JsonObject } from './attestation';
+import { type WebCryptoKey } from './webcrypto';
+export type { WebCryptoKey } from './webcrypto';
+/** The only HPKE suite v1 admits. There is no negotiation and no second value. */
+export declare const PROVIDER_SECRET_HPKE_SUITE = "hpke-base.dhkem-p256-hkdf-sha256.hkdf-sha256.aes-128-gcm";
+/** HPKE `info`, versioned; a v2 is a new constant, never a parser branch. */
+export declare const PROVIDER_SECRET_HPKE_INFO = "byok-sdk.provider-secret.v1";
+export declare const PROVIDER_PROVISIONING_REQUEST_VERSION = 1;
+export declare const PROVIDER_PROVISIONING_OPERATIONS: readonly ['configure', 'update_model', 'replace_secret', 'delete'];
+export type ProviderProvisioningOperation = (typeof PROVIDER_PROVISIONING_OPERATIONS)[number];
+/** Operations whose request must carry exactly one sealed secret. */
+export declare const PROVIDER_PROVISIONING_SECRET_OPERATIONS: readonly ['configure', 'replace_secret'];
+/** Upper bound for `expiresAt - issuedAt` (plan D11). */
+export declare const PROVIDER_PROVISIONING_MAX_TTL_MS: number;
+/** Plaintext is padded to a multiple of this many bytes so ciphertext length hides key length. */
+export declare const PROVIDER_SECRET_PAD_BLOCK_BYTES = 256;
+/** Largest padded plaintext v1 accepts; the secret itself is at most this minus the 2-byte prefix. */
+export declare const PROVIDER_SECRET_MAX_PADDED_BYTES = 4096;
+export declare const PROVIDER_SECRET_MAX_BYTES: number;
+/** Length of a sealing key id: base64url(sha256(raw public key)) truncated to 22 characters. */
+export declare const SEALING_KEY_ID_LENGTH = 22;
+export declare function encodeBase64Url(bytes: Uint8Array): string;
+/** Decode canonical unpadded base64url, or throw — never a repaired approximation. */
+export declare function decodeBase64Url(value: string, field: string): Uint8Array<ArrayBuffer>;
+/**
+ * The only public-key shape v1 accepts. Strict: a `d` (private) member, an
+ * `alg`, `use`, `key_ops` or any other extra member is rejected rather than
+ * ignored, so a private JWK can never be published by mistake.
+ */
+export declare const SealingPublicJwkSchema: z.ZodObject<{
+    kty: z.ZodLiteral<"EC">;
+    crv: z.ZodLiteral<"P-256">;
+    x: z.ZodString;
+    y: z.ZodString;
+}, z.core.$strict>;
+export type SealingPublicJwk = z.infer<typeof SealingPublicJwkSchema>;
+export declare const SealingKeyIdSchema: z.ZodString;
+/** Uncompressed SEC1 bytes (`0x04 || x || y`) of a sealing public JWK. */
+export declare function sealingPublicKeyBytes(publicJwk: SealingPublicJwk): Uint8Array<ArrayBuffer>;
+/** `base64url(sha256(0x04 || x || y))[0..22]` — the device's and the browser's shared key id rule. */
+export declare function deriveSealingKeyId(publicJwk: SealingPublicJwk): Promise<string>;
+/**
+ * The claim a device signs (through its device-proof signer, host glue) when
+ * it registers its sealing key. The proof body is these canonical bytes.
+ */
+export declare const SealingKeyClaimV1Schema: z.ZodObject<{
+    version: z.ZodLiteral<1>;
+    keyId: z.ZodString;
+    epoch: z.ZodNumber;
+    publicJwk: z.ZodObject<{
+        kty: z.ZodLiteral<"EC">;
+        crv: z.ZodLiteral<"P-256">;
+        x: z.ZodString;
+        y: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+export type SealingKeyClaimV1 = z.infer<typeof SealingKeyClaimV1Schema>;
+/** Canonical UTF-8 bytes of a sealing-key claim. */
+export declare function sealingKeyClaimCanonicalBytes(claim: SealingKeyClaimV1): Uint8Array;
+/**
+ * The non-secret configuration, one exact shape per operation. An operation
+ * carries only the fields it acts on — `delete` has no model, `replace_secret`
+ * declares only the provider kind its key is scoped to — so nothing is
+ * accepted and silently ignored.
+ */
+export declare const ProviderProvisioningConfigV1Schema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+    agentId: z.ZodString;
+    providerKind: z.ZodString;
+    modelId: z.ZodString;
+    piModel: z.ZodCustom<JsonObject, JsonObject>;
+    capabilities: z.ZodArray<z.ZodString>;
+    operation: z.ZodLiteral<"configure">;
+}, z.core.$strict>, z.ZodObject<{
+    agentId: z.ZodString;
+    providerKind: z.ZodString;
+    modelId: z.ZodString;
+    piModel: z.ZodCustom<JsonObject, JsonObject>;
+    capabilities: z.ZodArray<z.ZodString>;
+    operation: z.ZodLiteral<"update_model">;
+}, z.core.$strict>, z.ZodObject<{
+    operation: z.ZodLiteral<"replace_secret">;
+    agentId: z.ZodString;
+    providerKind: z.ZodString;
+}, z.core.$strict>, z.ZodObject<{
+    operation: z.ZodLiteral<"delete">;
+    agentId: z.ZodString;
+}, z.core.$strict>], "operation">;
+export type ProviderProvisioningConfigV1 = z.infer<typeof ProviderProvisioningConfigV1Schema>;
+/** The credential-free provider triple the Host believes is current (A3), or `null` for none. */
+export declare const ProviderProvisioningExpectedProfileSchema: z.ZodUnion<readonly [z.ZodNull, z.ZodObject<{
+    profileRef: z.ZodString;
+    profileRevision: z.ZodString;
+    profileHash: z.ZodString;
+}, z.core.$strict>]>;
+export type ProviderProvisioningExpectedProfile = z.infer<typeof ProviderProvisioningExpectedProfileSchema>;
+export declare const ProviderProvisioningHeaderV1Schema: z.ZodObject<{
+    tenantId: z.ZodString;
+    deviceId: z.ZodString;
+    agentId: z.ZodString;
+    requestId: z.ZodString;
+    operation: z.ZodEnum<{
+        configure: "configure";
+        delete: "delete";
+        replace_secret: "replace_secret";
+        update_model: "update_model";
+    }>;
+    operationGeneration: z.ZodNumber;
+    expectedProfile: z.ZodUnion<readonly [z.ZodNull, z.ZodObject<{
+        profileRef: z.ZodString;
+        profileRevision: z.ZodString;
+        profileHash: z.ZodString;
+    }, z.core.$strict>]>;
+    configDigest: z.ZodString;
+    issuedAt: z.ZodString & z.ZodType<string, string, z.core.$ZodTypeInternals<string, string>>;
+    expiresAt: z.ZodString & z.ZodType<string, string, z.core.$ZodTypeInternals<string, string>>;
+}, z.core.$strict>;
+export type ProviderProvisioningHeaderV1 = z.infer<typeof ProviderProvisioningHeaderV1Schema>;
+export declare const SealedProviderSecretV1Schema: z.ZodObject<{
+    suite: z.ZodLiteral<"hpke-base.dhkem-p256-hkdf-sha256.hkdf-sha256.aes-128-gcm">;
+    keyId: z.ZodString;
+    enc: z.ZodString;
+    ciphertext: z.ZodString;
+}, z.core.$strict>;
+export type SealedProviderSecretV1 = z.infer<typeof SealedProviderSecretV1Schema>;
+export declare const ProviderProvisioningRequestV1Schema: z.ZodObject<{
+    version: z.ZodLiteral<1>;
+    header: z.ZodObject<{
+        tenantId: z.ZodString;
+        deviceId: z.ZodString;
+        agentId: z.ZodString;
+        requestId: z.ZodString;
+        operation: z.ZodEnum<{
+            configure: "configure";
+            delete: "delete";
+            replace_secret: "replace_secret";
+            update_model: "update_model";
+        }>;
+        operationGeneration: z.ZodNumber;
+        expectedProfile: z.ZodUnion<readonly [z.ZodNull, z.ZodObject<{
+            profileRef: z.ZodString;
+            profileRevision: z.ZodString;
+            profileHash: z.ZodString;
+        }, z.core.$strict>]>;
+        configDigest: z.ZodString;
+        issuedAt: z.ZodString & z.ZodType<string, string, z.core.$ZodTypeInternals<string, string>>;
+        expiresAt: z.ZodString & z.ZodType<string, string, z.core.$ZodTypeInternals<string, string>>;
+    }, z.core.$strict>;
+    config: z.ZodDiscriminatedUnion<[z.ZodObject<{
+        agentId: z.ZodString;
+        providerKind: z.ZodString;
+        modelId: z.ZodString;
+        piModel: z.ZodCustom<JsonObject, JsonObject>;
+        capabilities: z.ZodArray<z.ZodString>;
+        operation: z.ZodLiteral<"configure">;
+    }, z.core.$strict>, z.ZodObject<{
+        agentId: z.ZodString;
+        providerKind: z.ZodString;
+        modelId: z.ZodString;
+        piModel: z.ZodCustom<JsonObject, JsonObject>;
+        capabilities: z.ZodArray<z.ZodString>;
+        operation: z.ZodLiteral<"update_model">;
+    }, z.core.$strict>, z.ZodObject<{
+        operation: z.ZodLiteral<"replace_secret">;
+        agentId: z.ZodString;
+        providerKind: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        operation: z.ZodLiteral<"delete">;
+        agentId: z.ZodString;
+    }, z.core.$strict>], "operation">;
+    sealed: z.ZodOptional<z.ZodObject<{
+        suite: z.ZodLiteral<"hpke-base.dhkem-p256-hkdf-sha256.hkdf-sha256.aes-128-gcm">;
+        keyId: z.ZodString;
+        enc: z.ZodString;
+        ciphertext: z.ZodString;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+export type ProviderProvisioningRequestV1 = z.infer<typeof ProviderProvisioningRequestV1Schema>;
+/** Parse a request fail-closed. Issue text names paths and rules only, never values. */
+export declare function parseProviderProvisioningRequest(input: unknown): ProviderProvisioningRequestV1;
+/** `sha256:<hex>` over the canonical JSON of the non-secret config. */
+export declare function providerProvisioningConfigDigest(config: ProviderProvisioningConfigV1): Promise<string>;
+/**
+ * Canonical AAD bytes. Every header field plus the sealing key id is bound,
+ * so tampering with any of tenant, device, key, request, agent, operation,
+ * generation, expected triple, config digest, or time window fails the AEAD.
+ */
+export declare function providerSecretAadBytes(header: ProviderProvisioningHeaderV1, keyId: string): Uint8Array;
+/**
+ * `sha256:<hex>` over the canonical JSON of the complete request. A device
+ * compares it for an already-seen `requestId`: equal returns the stored
+ * result, different is a conflict.
+ */
+export declare function providerProvisioningRequestDigest(request: ProviderProvisioningRequestV1): Promise<string>;
+/** Fail closed unless `header.configDigest` is the digest of `config`. */
+export declare function assertProviderProvisioningConfigDigest(request: ProviderProvisioningRequestV1): Promise<void>;
+/** `u16be(len) || utf8(secret) || zeros`, total a multiple of 256 bytes. */
+export declare function padProviderSecret(secret: string): Uint8Array<ArrayBuffer>;
+/** Strict inverse of {@link padProviderSecret}: block size, bounds, zero padding, and fatal UTF-8 are all checked. */
+export declare function unpadProviderSecret(padded: Uint8Array): string;
+export interface SealProviderProvisioningRequestInput {
+    /** The header without its digest; the digest is computed here from `config`. */
+    readonly header: Omit<ProviderProvisioningHeaderV1, 'configDigest'>;
+    readonly config: ProviderProvisioningConfigV1;
+    /** Required exactly for secret-bearing operations. */
+    readonly recipient?: {
+        readonly keyId: string;
+        readonly publicJwk: SealingPublicJwk;
+    };
+    /** Required exactly for secret-bearing operations. */
+    readonly secret?: string;
+}
+/**
+ * Build one immutable provisioning request. Secret-bearing operations are
+ * sealed once, to a freshly generated ephemeral key; the key id is re-derived
+ * from the public JWK so a claim whose id does not match its key is refused
+ * before anything is encrypted.
+ */
+export declare function sealProviderProvisioningRequest(input: SealProviderProvisioningRequestInput): Promise<ProviderProvisioningRequestV1>;
+export interface ProviderSecretRecipient {
+    readonly keyId: string;
+    readonly publicJwk: SealingPublicJwk;
+    /** Non-extractable ECDH private key; never leaves the device. */
+    readonly privateKey: WebCryptoKey;
+}
+/**
+ * Open the sealed secret of a request, in memory. Checks, in order: request
+ * schema, suite (schema literal), recipient key id, config digest, ciphertext
+ * length against the padding grammar, HPKE open under the request's own AAD,
+ * then strict unpadding. Time windows, replay, and placement are not checked
+ * here — they are device state.
+ */
+export declare function openProviderProvisioningSecret(input: {
+    readonly request: ProviderProvisioningRequestV1;
+    readonly recipient: ProviderSecretRecipient;
+}): Promise<string>;
 // ==== @byok-sdk/core dist/skill-pack.d.ts ====
 /**
  * Skill packs: declarative content a SaaS deployment distributes to a paired
@@ -2408,3 +2673,31 @@ export interface TruthStore {
     /** Metadata only — key/rev/hash/size/label, no bodies. */
     listManifest(tenant: TenantId, query: TruthManifestQuery): Promise<readonly TruthManifestEntry[]>;
 }
+// ==== @byok-sdk/core dist/webcrypto.d.ts ====
+/**
+ * A WebCrypto `CryptoKey`, declared structurally so core's published types
+ * need neither the DOM lib nor Node's types. Every runtime's native
+ * `CryptoKey` satisfies it.
+ */
+export interface WebCryptoKey {
+    readonly type: string;
+    readonly extractable: boolean;
+    readonly algorithm: object;
+    readonly usages: readonly string[];
+}
+/** The subset of `SubtleCrypto` this package calls, typed loosely on purpose (see {@link WebCryptoKey}). */
+export interface WebCryptoSubtle {
+    importKey(format: 'raw' | 'jwk', keyData: object, algorithm: object, extractable: boolean, usages: string[]): Promise<WebCryptoKey>;
+    exportKey(format: 'raw', key: WebCryptoKey): Promise<ArrayBuffer>;
+    generateKey(algorithm: object, extractable: boolean, usages: string[]): Promise<{
+        publicKey: WebCryptoKey;
+        privateKey: WebCryptoKey;
+    }>;
+    deriveBits(algorithm: object, baseKey: WebCryptoKey, length: number): Promise<ArrayBuffer>;
+    sign(algorithm: string, key: WebCryptoKey, data: Uint8Array<ArrayBuffer>): Promise<ArrayBuffer>;
+    encrypt(algorithm: object, key: WebCryptoKey, data: Uint8Array<ArrayBuffer>): Promise<ArrayBuffer>;
+    decrypt(algorithm: object, key: WebCryptoKey, data: Uint8Array<ArrayBuffer>): Promise<ArrayBuffer>;
+    digest(algorithm: string, data: Uint8Array<ArrayBuffer>): Promise<ArrayBuffer>;
+}
+/** The WebCrypto subtle interface, or a closed-set failure when the runtime lacks it. */
+export declare function webCryptoSubtle(): WebCryptoSubtle;

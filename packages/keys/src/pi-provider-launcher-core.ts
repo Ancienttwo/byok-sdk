@@ -7,14 +7,17 @@ import {
 } from '@byok-sdk/implementation-identity';
 
 import { runCommand, type CommandRunner } from './command-runner';
+import { configurationPendingError, withConfigurationLock } from './custody';
 import { ByokKeysError } from './errors';
 import {
   PI_LAUNCHER_RUNTIME_ENTRIES, PI_PROJECTED_KEY_ENV, buildPiPreparedArgs, buildPiProviderArgs,
   buildPiProviderProjection, type PiLauncherRuntimeEntry,
 } from './pi-provider-projection';
+import type { ProviderProfileStore } from './profile-store';
 import {
   ProviderModelCapabilitySchema,
   ProviderProfileRefSchema,
+  exactProviderProfileBinding,
   type ExactProviderProfileBinding,
   type ModelProviderProfile,
   type ProviderProfileRef,
@@ -275,6 +278,52 @@ export async function resolvePiProviderSecret(
   return secret;
 }
 
+function assertSameProfileRecord(current: ModelProviderProfile | undefined, expected: ModelProviderProfile): ModelProviderProfile {
+  if (current === undefined) {
+    throw new ByokKeysError('PROVIDER_PROFILE_CONFLICT', `${expected.profile_ref} provider profile was removed before its credential was read`);
+  }
+  const actual = exactProviderProfileBinding(current, []);
+  const wanted = exactProviderProfileBinding(expected, []);
+  if (
+    actual.profileRevision !== wanted.profileRevision
+    || actual.profileHash !== wanted.profileHash
+    || actual.modelId !== wanted.modelId
+  ) {
+    throw new ByokKeysError('PROVIDER_PROFILE_CONFLICT', `${expected.profile_ref} provider profile changed before its credential was read`);
+  }
+  return current;
+}
+
+/**
+ * The launcher's credential read, as one custody snapshot (plan D5, A4):
+ * under the configuration lock, re-read the profile and require it to be the
+ * exact record the projection was built from, refuse while a pending marker
+ * exists, and only then read the key. A concurrent or interrupted credential
+ * change can therefore never yield "old profile + new key".
+ */
+export async function readProviderCustodySnapshot(options: {
+  profiles: ProviderProfileStore;
+  profile: ModelProviderProfile;
+  createSecretStore: () => SecretStore;
+}): Promise<string | undefined> {
+  return withConfigurationLock(options.profiles, async () => {
+    const current = assertSameProfileRecord(await options.profiles.get(options.profile.profile_ref), options.profile);
+    if ((await options.profiles.getPending(current.profile_ref)) !== undefined) throw configurationPendingError();
+    return resolvePiProviderSecret(current, options.createSecretStore);
+  });
+}
+
+/** Admission (`--validate-only`): the same snapshot check without reading the key. */
+export async function assertProviderCustodyIdle(options: {
+  profiles: ProviderProfileStore;
+  profile: ModelProviderProfile;
+}): Promise<void> {
+  await withConfigurationLock(options.profiles, async () => {
+    const current = assertSameProfileRecord(await options.profiles.get(options.profile.profile_ref), options.profile);
+    if ((await options.profiles.getPending(current.profile_ref)) !== undefined) throw configurationPendingError();
+  });
+}
+
 /** The inherited inventory is shared with admission; controlled values come only from the binding. */
 export function buildPiProviderChildEnvironment(options: {
   ambient: NodeJS.ProcessEnv;
@@ -388,6 +437,8 @@ export async function assertPiProjectionDirectory(projectionDir: string, expecte
 export interface PiProviderLaunchDependencies {
   ambient: NodeJS.ProcessEnv;
   createSecretStore: () => SecretStore;
+  /** The profile store the profile was read from; its custody lock guards the key read. */
+  profiles: ProviderProfileStore;
   spawn?: (command: string, args: string[], options: {
     cwd: string; env: Record<string, string>; stdio: 'inherit';
   }) => ChildProcess;
@@ -434,7 +485,11 @@ export async function startPiProvider(
     created = true;
     try { await file.writeFile(`${JSON.stringify(projection)}\n`); }
     finally { await file.close(); }
-    const secret = await resolvePiProviderSecret(profile, dependencies.createSecretStore);
+    const secret = await readProviderCustodySnapshot({
+      profiles: dependencies.profiles,
+      profile,
+      createSecretStore: dependencies.createSecretStore,
+    });
     if (secret !== undefined) env[PI_PROJECTED_KEY_ENV] = secret;
     const childArgs = [...(actual.entry === undefined ? [] : [actual.entry]), ...actual.fixedArgv, `--config-digest=${options.piConfigDigest}`, ...delegated];
     const spawnChild = dependencies.spawn ?? spawn;

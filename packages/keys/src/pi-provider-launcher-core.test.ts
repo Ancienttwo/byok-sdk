@@ -18,7 +18,14 @@ import {
   resolvePiProviderSecret,
 } from './pi-provider-launcher-core';
 import { buildPiProviderProjection } from './pi-provider-projection';
-import { parseModelProviderProfile } from './provider-profile';
+import { InMemoryProviderProfileStore } from './profile-store';
+import { parseModelProviderProfile, type ModelProviderProfile } from './provider-profile';
+
+async function profilesWith(provider: ModelProviderProfile): Promise<InMemoryProviderProfileStore> {
+  const profiles = new InMemoryProviderProfileStore();
+  await profiles.save(provider);
+  return profiles;
+}
 
 const timestamps = {
   created_at: '2026-08-12T00:00:00.000Z',
@@ -277,7 +284,8 @@ describe('committed Pi spawn boundary', () => {
     const provider = parseModelProviderProfile({ ...profile('bearer'), pi_model: PI_MODEL_FIXTURE });
     const store = new InMemorySecretStore();
     await store.set(modelProviderSecretName('custom'), CANARY);
-    return { root, projection, sessions, launch, options, provider, store };
+    const profiles = await profilesWith(provider);
+    return { root, projection, sessions, launch, options, provider, store, profiles };
   }
 
   it('requires one launcher-owned digest and refuses delegated overrides', async () => {
@@ -299,7 +307,7 @@ describe('committed Pi spawn boundary', () => {
     const spawn = vi.fn(()=>new ChildProcess());
     try {
       await expect(startPiProvider(f.provider,{...f.options,piArgs:[...f.options.piArgs,`--config-digest=${'b'.repeat(64)}`]},
-        {ambient:{},createSecretStore,spawn})).rejects.toThrow(/argument|config-digest/);
+        {ambient:{},createSecretStore,spawn,profiles:f.profiles})).rejects.toThrow(/argument|config-digest/);
       expect(createSecretStore).not.toHaveBeenCalled(); expect(spawn).not.toHaveBeenCalled();
     } finally {await fs.rm(f.root,{recursive:true,force:true});}
   });
@@ -351,7 +359,7 @@ describe('committed Pi spawn boundary', () => {
         }
         const openStore = vi.fn(() => f.store);
         const spawn = vi.fn(() => new ChildProcess());
-        await expect(startPiProvider(f.provider, f.options, {ambient:{}, createSecretStore:openStore, spawn})).rejects.toThrow();
+        await expect(startPiProvider(f.provider, f.options, {ambient:{}, createSecretStore:openStore, spawn, profiles:f.profiles})).rejects.toThrow();
         expect(openStore).not.toHaveBeenCalled(); expect(spawn).not.toHaveBeenCalled();
         if (kind === 'nonempty') expect(await fs.readFile(path.join(f.projection, 'owned-by-client'), 'utf8')).toBe('preserve');
       } finally { vi.restoreAllMocks(); await fs.rm(f.root, {recursive:true, force:true}); }
@@ -374,7 +382,7 @@ describe('committed Pi spawn boundary', () => {
         order.push('gate'); snapshots.push({...actual.env}); await gate(binding, actual);
       });
       const spawn = vi.fn(() => {order.push('spawn'); return new ChildProcess();});
-      const launched = await startPiProvider(f.provider, f.options, {ambient:{PATH:'/usr/bin', OPENAI_API_KEY:'ambient-secret'}, createSecretStore:() => f.store, spawn});
+      const launched = await startPiProvider(f.provider, f.options, {ambient:{PATH:'/usr/bin', OPENAI_API_KEY:'ambient-secret'}, createSecretStore:() => f.store, spawn, profiles:f.profiles});
       expect(order).toEqual(['gate','secret','gate','spawn']);
       const [command, args, spawnOptions] = spawn.mock.calls[0] as unknown as [string,string[],{cwd:string;env:Record<string,string>}];
       expect(command).toBe(f.launch.command);
@@ -392,6 +400,20 @@ describe('committed Pi spawn boundary', () => {
     } finally { await fs.rm(f.root,{recursive:true,force:true}); }
   });
 
+  it('refuses to read the key or spawn while a credential change is pending', async () => {
+    const f = await fixture();
+    try {
+      await f.profiles.markPending({ profileRef: 'custom', operation: 'configure', requestId: 'r1', operationGeneration: 2, since: timestamps.created_at });
+      const get = vi.spyOn(f.store, 'get');
+      const spawn = vi.fn(() => new ChildProcess());
+      await expect(startPiProvider(f.provider, f.options, { ambient: {}, createSecretStore: () => f.store, spawn, profiles: f.profiles }))
+        .rejects.toMatchObject({ code: 'PROVIDER_CONFIGURATION_PENDING' });
+      expect(get).not.toHaveBeenCalled();
+      expect(spawn).not.toHaveBeenCalled();
+      expect(await fs.readdir(f.projection)).toEqual([]);
+    } finally { await fs.rm(f.root, { recursive: true, force: true }); }
+  });
+
   it('refuses post-credential drift at the final gate with zero target spawns', async () => {
     const f = await fixture();
     try {
@@ -405,7 +427,7 @@ describe('committed Pi spawn boundary', () => {
       // Use the same mutable binding as the caller until the final assertion.
       f.options.launchBinding = f.launch;
       const spawn = vi.fn(() => new ChildProcess());
-      await expect(startPiProvider(f.provider,f.options,{ambient:{},createSecretStore:()=>f.store,spawn})).rejects.toThrow(/launch description drift/);
+      await expect(startPiProvider(f.provider,f.options,{ambient:{},createSecretStore:()=>f.store,spawn,profiles:f.profiles})).rejects.toThrow(/launch description drift/);
       expect(f.store.get).toHaveBeenCalledOnce(); expect(spawn).not.toHaveBeenCalled();
       expect(await fs.readdir(f.projection)).toEqual([]);
     } finally { await fs.rm(f.root,{recursive:true,force:true}); }
@@ -495,7 +517,7 @@ describe('the prepared runtime entry spawn', () => {
       const store = new InMemorySecretStore();
       await store.set(modelProviderSecretName('custom'), CANARY);
       const spawn = vi.fn(() => new ChildProcess());
-      const launched = await startPiProvider(provider, options, { ambient: { PATH: '/usr/bin' }, createSecretStore: () => store, spawn });
+      const launched = await startPiProvider(provider, options, { ambient: { PATH: '/usr/bin' }, createSecretStore: () => store, spawn, profiles: await profilesWith(provider) });
       const [command, args, spawnOptions] = spawn.mock.calls[0] as unknown as [string, string[], { cwd: string; env: Record<string, string> }];
       expect(command).toBe(launch.command);
       expect(args).toEqual([launch.entry, '__byok_sdk_helper', 'pi-rpc', `--config-digest=${'a'.repeat(64)}`, '--config', configPath]);
@@ -529,7 +551,7 @@ describe('the prepared runtime entry spawn', () => {
       const provider = parseModelProviderProfile({ ...profile('bearer'), pi_model: PI_MODEL_FIXTURE });
       const createSecretStore = vi.fn(() => new InMemorySecretStore());
       const spawn = vi.fn(() => new ChildProcess());
-      await expect(startPiProvider(provider, options, { ambient: {}, createSecretStore, spawn }))
+      await expect(startPiProvider(provider, options, { ambient: {}, createSecretStore, spawn, profiles: await profilesWith(provider) }))
         .rejects.toThrow(/exactly --config/);
       expect(createSecretStore).not.toHaveBeenCalled();
       expect(spawn).not.toHaveBeenCalled();

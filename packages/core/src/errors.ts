@@ -52,6 +52,14 @@ export const CORE_ERROR_CODES = {
   // probed.
   assertion_envelope_invalid: 'assertion_envelope_invalid',
 
+  // sealed provider provisioning (plan web-sealed-provisioning). Messages
+  // never carry plaintext, ciphertext, or key material — only which check
+  // failed.
+  webcrypto_unavailable: 'webcrypto_unavailable',
+  sealed_secret_invalid: 'sealed_secret_invalid',
+  sealed_secret_open_failed: 'sealed_secret_open_failed',
+  provider_provisioning_request_invalid: 'provider_provisioning_request_invalid',
+
   // mailbox (§12.7.3)
   mailbox_message_not_found: 'mailbox_message_not_found',
   mailbox_cursor_regression: 'mailbox_cursor_regression',
