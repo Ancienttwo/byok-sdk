@@ -7,7 +7,13 @@ import {
   decodeStrictBase64Utf8,
 } from './secret-store';
 
-/** The script exits 44 for "no such credential", matching `security`'s code. */
+/**
+ * The script exits 44 for "no such credential" (Win32 ERROR_NOT_FOUND 1168),
+ * matching `security`'s code. Any other failure exits 1 and writes one bounded,
+ * secret-free classification line to stderr — `stage=compile,cs=<CS error>` or
+ * `stage=operation,win32=<code>,hresult=<hresult>` — so a real-backend failure
+ * can be diagnosed without exposing the request (which travels on stdin).
+ */
 const CREDENTIAL_NOT_FOUND = 44;
 
 /**
@@ -23,7 +29,8 @@ const CREDENTIAL_NOT_FOUND = 44;
  */
 const WINDOWS_CREDENTIAL_MANAGER_SCRIPT_BASE64 = Buffer.from(
   String.raw`
-Add-Type -TypeDefinition @"
+try {
+Add-Type -ErrorAction Stop -TypeDefinition @"
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
@@ -109,6 +116,13 @@ namespace Byok {
   }
 }
 "@
+} catch {
+  $compilerCode = 99
+  $errorNumber = [string]$_.TargetObject.ErrorNumber
+  if ($errorNumber -match '\ACS([0-9]{4})\z') { $compilerCode = [Convert]::ToInt32($Matches[1]) }
+  [Console]::Error.Write("credential operation failed (stage=compile,cs=" + $compilerCode + ")")
+  exit 1
+}
 
 try {
   $request = ([Console]::In.ReadToEnd() | ConvertFrom-Json)
@@ -132,7 +146,11 @@ try {
   }
   exit 2
 } catch {
-  [Console]::Error.Write("credential operation failed")
+  $failure = $_.Exception
+  while ($null -ne $failure.InnerException) { $failure = $failure.InnerException }
+  $win32 = 0
+  if ($failure -is [System.ComponentModel.Win32Exception]) { $win32 = $failure.NativeErrorCode }
+  [Console]::Error.Write("credential operation failed (stage=operation,win32=" + $win32 + ",hresult=" + $failure.HResult + ")")
   exit 1
 }
 `,
