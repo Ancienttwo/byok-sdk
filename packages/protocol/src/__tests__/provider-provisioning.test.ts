@@ -103,6 +103,42 @@ describe('provider provisioning: constants', () => {
     }
   });
 
+  it('pins the closed rejection and key-check sets the host maps 1:1 from keys', () => {
+    expect([...PROVIDER_PROVISIONING_REJECTION_CODES]).toEqual([
+      'request_invalid',
+      'request_conflict',
+      'request_expired',
+      'request_not_yet_valid',
+      'request_window_invalid',
+      'sealing_key_rotated',
+      'enrollment_mismatch',
+      'agent_not_placed',
+      'config_digest_mismatch',
+      'operation_generation_stale',
+      'profile_changed',
+      'profile_not_found',
+      'credential_scope_mismatch',
+      'provider_kind_unsupported',
+      'pi_model_invalid',
+      'capabilities_invalid',
+      'seal_open_failed',
+      'secret_invalid',
+      'local_commit_interrupted',
+      'secret_store_unavailable',
+    ]);
+    expect([...PROVIDER_PROVISIONING_KEY_CHECK_RESULTS]).toEqual([
+      'ok',
+      'credential_rejected',
+      'rate_limited',
+      'quota_or_billing',
+      'model_not_permitted',
+      'provider_error',
+      'unreachable',
+      'timeout',
+      'not_run',
+    ]);
+  });
+
   it('keeps host-terminal codes inside the closed rejection set', () => {
     for (const code of PROVIDER_PROVISIONING_HOST_TERMINAL_CODES) {
       expect(PROVIDER_PROVISIONING_REJECTION_CODES).toContain(code);

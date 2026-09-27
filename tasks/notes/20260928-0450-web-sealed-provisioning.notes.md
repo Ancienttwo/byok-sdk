@@ -50,3 +50,34 @@ Scope extension from the coordinator: `packages/cloud/**`, `api-surface/cloud.d.
 - `bun install --frozen-lockfile` (no changes), `bun run build` exit 0, `bun run typecheck` exit 0.
 - Per-package `bun run test` (root script is sequential and stops at the first failure; per-package runs used): protocol 440, core 304, cloud-dataplane 73 (+107 skipped), cloud 422, server 373 (+19 skipped), keys 521 (+4 skipped), implementation-identity 110, ui-runtime 20, conformance 161, testkit 4, client 3124 (+11 skipped) — all exit 0. The known pre-existing `pi-mcp-launch-cwd` load timeout did not recur in this run.
 - `check:api-surface` (cloud + protocol goldens regenerated deliberately) → 9 match; `check:version-authority` OK; `check-package-graph` OK ("no aligned package reaches keys"); `check-task-workflow --strict` OK.
+
+## S2c — 1:1 code sets for the host mapping (branch `claude/wsp-s2`)
+
+Added so every S1 (keys) device-side meaning has exactly one wire code; nothing is collapsed silently.
+
+Rejection codes (`PROVIDER_PROVISIONING_REJECTION_CODES`, order pinned by test):
+
+| Wire code | Device-side meaning |
+|---|---|
+| `request_invalid` | fetched request/config/AAD fields fail schema or are internally inconsistent (new) |
+| `request_conflict` | same requestId already applied locally with a different operation digest (new) |
+| `request_expired` | now > expiresAt (also Host-terminal) |
+| `request_not_yet_valid` | issuedAt beyond the allowed clock skew (new) |
+| `request_window_invalid` | expiresAt − issuedAt ≤ 0 or > 15 min |
+| `sealing_key_rotated` | keyId is not the current sealing key (also Host-terminal) |
+| `enrollment_mismatch` | tenant/device in AAD ≠ local enrollment |
+| `agent_not_placed` | agent not in this device's placement |
+| `config_digest_mismatch` | sha256(canonical config) ≠ AAD configDigest |
+| `operation_generation_stale` | generation ≤ local high-watermark |
+| `profile_changed` | expected provider triple CAS failed |
+| `profile_not_found` | update_model / replace_secret / delete without a profile |
+| `credential_scope_mismatch` | endpoint/auth/adapter scope differs (A7) |
+| `provider_kind_unsupported` | not in the vendor catalog, or `custom` |
+| `pi_model_invalid` | pi_model fails schema |
+| `capabilities_invalid` | declared capabilities fail validation (new) |
+| `seal_open_failed` | HPKE open failed / malformed sealed body |
+| `secret_invalid` | unpadded secret fails length/format checks |
+| `local_commit_interrupted` | crash-left pending marker, same request already pending, or update_model while a pending marker exists (S1 merged these deliberately) |
+| `secret_store_unavailable` | OS credential store write failed |
+
+keyCheck results (`PROVIDER_PROVISIONING_KEY_CHECK_RESULTS`): `ok`, `credential_rejected` (explicit credential refusal only), `rate_limited` (429), `quota_or_billing`, `model_not_permitted` (HTTP 403 and model-not-found both map here), `provider_error` (vendor error in none of the other classes; new), `unreachable`, `timeout`, `not_run`.

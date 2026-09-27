@@ -89,14 +89,18 @@ export type ProviderProvisioningOperationDigest = z.infer<typeof ProviderProvisi
 
 /**
  * Closed rejection set. Codes name a failed check, never a value: no plaintext,
- * no ciphertext, no OS error detail.
+ * no ciphertext, no OS error detail. `local_commit_interrupted` also covers a
+ * request that finds the same or another operation still pending locally.
  *
  * `request_expired` and `sealing_key_rotated` may also be decided by the Host
  * before the device ever completes the request (see
  * {@link PROVIDER_PROVISIONING_HOST_TERMINAL_CODES}).
  */
 export const PROVIDER_PROVISIONING_REJECTION_CODES = [
+  'request_invalid',
+  'request_conflict',
   'request_expired',
+  'request_not_yet_valid',
   'request_window_invalid',
   'sealing_key_rotated',
   'enrollment_mismatch',
@@ -108,6 +112,7 @@ export const PROVIDER_PROVISIONING_REJECTION_CODES = [
   'credential_scope_mismatch',
   'provider_kind_unsupported',
   'pi_model_invalid',
+  'capabilities_invalid',
   'seal_open_failed',
   'secret_invalid',
   'local_commit_interrupted',
@@ -154,6 +159,8 @@ export type ProviderProvisioningProviderStatus = z.infer<typeof ProviderProvisio
  * - `credential_rejected`: the vendor explicitly refused the credential.
  * - `rate_limited`, `quota_or_billing`, `model_not_permitted`: the credential
  *   was accepted but the call could not be served for that reason.
+ * - `provider_error`: the vendor answered with an error that is none of the
+ *   classes above.
  * - `unreachable`, `timeout`: no vendor answer within the device's bounds.
  * - `not_run`: no check was made (for example `delete`, or an endpoint without
  *   credential auth).
@@ -166,6 +173,7 @@ export const PROVIDER_PROVISIONING_KEY_CHECK_RESULTS = [
   'rate_limited',
   'quota_or_billing',
   'model_not_permitted',
+  'provider_error',
   'unreachable',
   'timeout',
   'not_run',

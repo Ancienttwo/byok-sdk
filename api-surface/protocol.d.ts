@@ -10174,15 +10174,17 @@ export declare const ProviderProvisioningOperationDigestSchema: z.ZodString;
 export type ProviderProvisioningOperationDigest = z.infer<typeof ProviderProvisioningOperationDigestSchema>;
 /**
  * Closed rejection set. Codes name a failed check, never a value: no plaintext,
- * no ciphertext, no OS error detail.
+ * no ciphertext, no OS error detail. `local_commit_interrupted` also covers a
+ * request that finds the same or another operation still pending locally.
  *
  * `request_expired` and `sealing_key_rotated` may also be decided by the Host
  * before the device ever completes the request (see
  * {@link PROVIDER_PROVISIONING_HOST_TERMINAL_CODES}).
  */
-export declare const PROVIDER_PROVISIONING_REJECTION_CODES: readonly ['request_expired', 'request_window_invalid', 'sealing_key_rotated', 'enrollment_mismatch', 'agent_not_placed', 'config_digest_mismatch', 'operation_generation_stale', 'profile_changed', 'profile_not_found', 'credential_scope_mismatch', 'provider_kind_unsupported', 'pi_model_invalid', 'seal_open_failed', 'secret_invalid', 'local_commit_interrupted', 'secret_store_unavailable'];
+export declare const PROVIDER_PROVISIONING_REJECTION_CODES: readonly ['request_invalid', 'request_conflict', 'request_expired', 'request_not_yet_valid', 'request_window_invalid', 'sealing_key_rotated', 'enrollment_mismatch', 'agent_not_placed', 'config_digest_mismatch', 'operation_generation_stale', 'profile_changed', 'profile_not_found', 'credential_scope_mismatch', 'provider_kind_unsupported', 'pi_model_invalid', 'capabilities_invalid', 'seal_open_failed', 'secret_invalid', 'local_commit_interrupted', 'secret_store_unavailable'];
 export declare const ProviderProvisioningRejectionCodeSchema: z.ZodEnum<{
     agent_not_placed: "agent_not_placed";
+    capabilities_invalid: "capabilities_invalid";
     config_digest_mismatch: "config_digest_mismatch";
     credential_scope_mismatch: "credential_scope_mismatch";
     enrollment_mismatch: "enrollment_mismatch";
@@ -10192,7 +10194,10 @@ export declare const ProviderProvisioningRejectionCodeSchema: z.ZodEnum<{
     profile_changed: "profile_changed";
     profile_not_found: "profile_not_found";
     provider_kind_unsupported: "provider_kind_unsupported";
+    request_conflict: "request_conflict";
     request_expired: "request_expired";
+    request_invalid: "request_invalid";
+    request_not_yet_valid: "request_not_yet_valid";
     request_window_invalid: "request_window_invalid";
     seal_open_failed: "seal_open_failed";
     sealing_key_rotated: "sealing_key_rotated";
@@ -10226,18 +10231,21 @@ export type ProviderProvisioningProviderStatus = z.infer<typeof ProviderProvisio
  * - `credential_rejected`: the vendor explicitly refused the credential.
  * - `rate_limited`, `quota_or_billing`, `model_not_permitted`: the credential
  *   was accepted but the call could not be served for that reason.
+ * - `provider_error`: the vendor answered with an error that is none of the
+ *   classes above.
  * - `unreachable`, `timeout`: no vendor answer within the device's bounds.
  * - `not_run`: no check was made (for example `delete`, or an endpoint without
  *   credential auth).
  *
  * No vendor text, status body or error detail crosses this boundary.
  */
-export declare const PROVIDER_PROVISIONING_KEY_CHECK_RESULTS: readonly ['ok', 'credential_rejected', 'rate_limited', 'quota_or_billing', 'model_not_permitted', 'unreachable', 'timeout', 'not_run'];
+export declare const PROVIDER_PROVISIONING_KEY_CHECK_RESULTS: readonly ['ok', 'credential_rejected', 'rate_limited', 'quota_or_billing', 'model_not_permitted', 'provider_error', 'unreachable', 'timeout', 'not_run'];
 export declare const ProviderProvisioningKeyCheckResultSchema: z.ZodEnum<{
     credential_rejected: "credential_rejected";
     model_not_permitted: "model_not_permitted";
     not_run: "not_run";
     ok: "ok";
+    provider_error: "provider_error";
     quota_or_billing: "quota_or_billing";
     rate_limited: "rate_limited";
     timeout: "timeout";
@@ -10250,6 +10258,7 @@ export declare const ProviderProvisioningKeyCheckSchema: z.ZodObject<{
         model_not_permitted: "model_not_permitted";
         not_run: "not_run";
         ok: "ok";
+        provider_error: "provider_error";
         quota_or_billing: "quota_or_billing";
         rate_limited: "rate_limited";
         timeout: "timeout";
@@ -10304,6 +10313,7 @@ export declare const ProviderProvisioningCompletionSchema: z.ZodDiscriminatedUni
             model_not_permitted: "model_not_permitted";
             not_run: "not_run";
             ok: "ok";
+            provider_error: "provider_error";
             quota_or_billing: "quota_or_billing";
             rate_limited: "rate_limited";
             timeout: "timeout";
@@ -10323,6 +10333,7 @@ export declare const ProviderProvisioningCompletionSchema: z.ZodDiscriminatedUni
     outcome: z.ZodLiteral<"rejected">;
     code: z.ZodEnum<{
         agent_not_placed: "agent_not_placed";
+        capabilities_invalid: "capabilities_invalid";
         config_digest_mismatch: "config_digest_mismatch";
         credential_scope_mismatch: "credential_scope_mismatch";
         enrollment_mismatch: "enrollment_mismatch";
@@ -10332,7 +10343,10 @@ export declare const ProviderProvisioningCompletionSchema: z.ZodDiscriminatedUni
         profile_changed: "profile_changed";
         profile_not_found: "profile_not_found";
         provider_kind_unsupported: "provider_kind_unsupported";
+        request_conflict: "request_conflict";
         request_expired: "request_expired";
+        request_invalid: "request_invalid";
+        request_not_yet_valid: "request_not_yet_valid";
         request_window_invalid: "request_window_invalid";
         seal_open_failed: "seal_open_failed";
         sealing_key_rotated: "sealing_key_rotated";
@@ -10416,6 +10430,7 @@ export declare const ProviderProvisioningReadbackSchema: z.ZodObject<{
                 model_not_permitted: "model_not_permitted";
                 not_run: "not_run";
                 ok: "ok";
+                provider_error: "provider_error";
                 quota_or_billing: "quota_or_billing";
                 rate_limited: "rate_limited";
                 timeout: "timeout";
@@ -10435,6 +10450,7 @@ export declare const ProviderProvisioningReadbackSchema: z.ZodObject<{
         outcome: z.ZodLiteral<"rejected">;
         code: z.ZodEnum<{
             agent_not_placed: "agent_not_placed";
+            capabilities_invalid: "capabilities_invalid";
             config_digest_mismatch: "config_digest_mismatch";
             credential_scope_mismatch: "credential_scope_mismatch";
             enrollment_mismatch: "enrollment_mismatch";
@@ -10444,7 +10460,10 @@ export declare const ProviderProvisioningReadbackSchema: z.ZodObject<{
             profile_changed: "profile_changed";
             profile_not_found: "profile_not_found";
             provider_kind_unsupported: "provider_kind_unsupported";
+            request_conflict: "request_conflict";
             request_expired: "request_expired";
+            request_invalid: "request_invalid";
+            request_not_yet_valid: "request_not_yet_valid";
             request_window_invalid: "request_window_invalid";
             seal_open_failed: "seal_open_failed";
             sealing_key_rotated: "sealing_key_rotated";

@@ -570,12 +570,20 @@ auth mode or secret) and the exact `ProviderProfileBinding`, both `null` for
 `secretConfigured: true`, and `replace_secret` reports the unchanged binding.
 Every `applied` result also carries the required hint `keyCheck: { result }`,
 one of `ok | credential_rejected | rate_limited | quota_or_billing |
-model_not_permitted | unreachable | timeout | not_run`: the device's single
-post-apply vendor check of the stored key, with no vendor text, status or
-detail. It is advisory for the Host UI and never a readiness input; `delete`
+model_not_permitted | provider_error | unreachable | timeout | not_run`: the
+device's single post-apply vendor check of the stored key, with no vendor
+text, status or detail. It is advisory for the Host UI and never a readiness input; `delete`
 must report `not_run`.
 `rejected` adds one closed-set `code`; codes name the failed check and never a
-value. Re-sending an identical completion yields `idempotent` with the stored
+value. The set (`PROVIDER_PROVISIONING_REJECTION_CODES`) is `request_invalid`,
+`request_conflict`, `request_expired`, `request_not_yet_valid`,
+`request_window_invalid`, `sealing_key_rotated`, `enrollment_mismatch`,
+`agent_not_placed`, `config_digest_mismatch`, `operation_generation_stale`,
+`profile_changed`, `profile_not_found`, `credential_scope_mismatch`,
+`provider_kind_unsupported`, `pi_model_invalid`, `capabilities_invalid`,
+`seal_open_failed`, `secret_invalid`, `local_commit_interrupted` (also any
+request that finds an operation still pending locally) and
+`secret_store_unavailable`. Re-sending an identical completion yields `idempotent` with the stored
 result and no rewrite; a different digest or result yields `conflict` with the
 stored result unchanged. `host_terminal` is valid only for a rejected
 completion the Host recorded on its own authority (`request_expired`,
