@@ -32,13 +32,16 @@ import { WindowsCredentialManagerSecretStore } from './windows-credential-manage
  * grammar is reduced to its length.
  */
 const backendEvidence: string[] = [];
-const CLASSIFICATION = /^credential operation failed \((?:stage=compile,cs=\d+|stage=operation,win32=-?\d+,hresult=-?\d+)\)$/u;
+// PowerShell may wrap stderr in CLIXML, so the classification is located
+// inside stderr and only the matched line is reported.
+const CLASSIFICATION = /credential operation failed \((?:stage=compile,cs=\d+|stage=operation,win32=-?\d+,hresult=-?\d+)\)/u;
 async function recordingRunner(executable: string, args: string[], stdin?: string) {
   const result = await runCommand(executable, args, stdin);
   if (result.exitCode !== 0) {
     const stderr = result.stderr.trim();
     const operation = stdin === undefined ? 'probe' : String((JSON.parse(stdin) as { operation?: unknown }).operation);
-    backendEvidence.push(`${operation}: exit=${result.exitCode} stderr=${CLASSIFICATION.test(stderr) ? stderr : `<${stderr.length} chars, unclassified>`}`);
+    const classified = CLASSIFICATION.exec(stderr)?.[0];
+    backendEvidence.push(`${operation}: exit=${result.exitCode} stderr=${classified ?? `<${stderr.length} chars, unclassified>`}`);
   }
   return result;
 }
@@ -67,6 +70,37 @@ describe.skipIf(!ENABLED)('sealed provisioning on Windows Credential Manager', (
     } finally {
       rmSync(directory, { force: true, recursive: true });
     }
+  });
+
+  it('root-cause evidence: the pre-fix bridge type definition does not compile on this runner (CS0104)', async () => {
+    // The exact struct shape the bridge shipped before the fix: both
+    // InteropServices namespaces imported, FILETIME unqualified.
+    const script = String.raw`
+try {
+Add-Type -ErrorAction Stop -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+namespace ByokPreFixProbe {
+  public static class Probe {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct Credential { public UInt32 Flags; public FILETIME LastWritten; }
+  }
+}
+"@
+  [Console]::Out.Write("compiled")
+} catch {
+  $compilerCode = 99
+  $errorNumber = [string]$_.TargetObject.ErrorNumber
+  if ($errorNumber -match '\ACS([0-9]{4})\z') { $compilerCode = [Convert]::ToInt32($Matches[1]) }
+  [Console]::Out.Write("cs=" + $compilerCode)
+}
+`;
+    const result = await runCommand('powershell.exe', [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64'),
+    ]);
+    process.stdout.write(`[windows-credential-root-cause] pre-fix bridge compile: ${result.stdout.trim()}\n`);
+    expect(result.stdout.trim()).toBe('cs=104');
   });
 
   it('reports an absent credential as absent (read) and as false (delete)', async () => {

@@ -26,6 +26,13 @@ const CREDENTIAL_NOT_FOUND = 44;
  * generated C# type lives in namespace `Byok`; the source used its own vendor
  * name, and the identifier has no wire or storage surface, so renaming it costs
  * nothing at K4.
+ *
+ * `FILETIME` is fully qualified and the `ComTypes` namespace is not imported:
+ * with both `System.Runtime.InteropServices` and its `ComTypes` child in scope
+ * the unqualified name is ambiguous (CS0104), `Add-Type` fails, and every
+ * operation — including a read of an absent credential — exits 1. That was the
+ * failure the first real Credential Manager CI run surfaced; the unit suites
+ * mock the command runner and could not see it.
  */
 const WINDOWS_CREDENTIAL_MANAGER_SCRIPT_BASE64 = Buffer.from(
   String.raw`
@@ -34,7 +41,6 @@ Add-Type -ErrorAction Stop -TypeDefinition @"
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
-using System.Runtime.InteropServices.ComTypes;
 
 namespace Byok {
   public static class CredentialManager {
@@ -44,7 +50,7 @@ namespace Byok {
       public UInt32 Type;
       [MarshalAs(UnmanagedType.LPWStr)] public string TargetName;
       [MarshalAs(UnmanagedType.LPWStr)] public string Comment;
-      public FILETIME LastWritten;
+      public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;
       public UInt32 CredentialBlobSize;
       public IntPtr CredentialBlob;
       public UInt32 Persist;
