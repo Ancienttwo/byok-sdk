@@ -214,6 +214,17 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: bun run --filter @byok-sdk/client smoke:adapters
 
+      # SDK Windows v1 gate for sealed provider provisioning (plan A11): the
+      # device sealing key, configure/replace/delete custody, and the
+      # launcher's custody snapshot against the REAL Windows Credential
+      # Manager, as the runner's own user (the daemon and the launcher share
+      # one user). The flag makes the suite hard-fail rather than skip.
+      - name: Sealed provisioning on the real Windows Credential Manager
+        if: matrix.os == 'windows-latest'
+        env:
+          BYOK_TEST_WINDOWS_CREDENTIAL_MANAGER: '1'
+        run: bun run --filter @byok-sdk/keys test -- src/windows-credential-custody.integration.test.ts
+
       # The Pi positive case launches against the platform-default cwd, whose
       # admission requires that THIS token must not be able to write it
       # (`platform_default_is_writable` otherwise). The hosted windows-latest
