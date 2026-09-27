@@ -7,6 +7,12 @@ composition over Postgres and R2.
 
 ## Release status
 
+The current source candidate is **0.23.0**, with independent keys **0.8.0**;
+publication is pending. The [release notes](docs/releases/v0.23.0.md) describe
+sealed provider provisioning and its breaking keys store and request changes.
+Versioned install examples below target this candidate and become usable after
+registry publication.
+
 The current published release is **0.22.0**, with independent keys **0.7.0**,
 published to npm on 2026-09-25 from the `v0.22.0` tag target (`0962f14f`, the
 PR #234 merge) and now `latest` on the registry; readback is
@@ -57,7 +63,7 @@ Install the scoped packages your composition uses and import each one under
 its own name. For example, a self-hosted composition:
 
 ```sh
-npm install @byok-sdk/server@0.22.0 @byok-sdk/client@0.22.0
+npm install @byok-sdk/server@0.23.0 @byok-sdk/client@0.23.0
 ```
 
 ```ts
@@ -197,7 +203,7 @@ It is intentionally outside the dispatch packages and their entire dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.7.0
+npm install @byok-sdk/keys@0.8.0
 ```
 
 ## Host connector composition
@@ -213,5 +219,5 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.7.0`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.8.0`
 require Node.js 22.22.0 or newer. MIT licensed.

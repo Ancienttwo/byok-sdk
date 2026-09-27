@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.23.0 / @byok-sdk/keys 0.8.0 — 2026-09-28 (prepared; not published)
+
+- **Added** — sealed provider provisioning: core sealed provider secret v1
+  (WebCrypto-only one-shot HPKE P-256/AES-128-GCM) and
+  `providerProvisioningRequestDigest`; protocol `provider.provisioning.available`
+  notice behind `provider-provisioning.v1`; the client daemon
+  `providerProvisioning` handler seam; cloud `enqueueProviderProvisioningNotice`;
+  keys credential custody, `applySealedProviderProvisioning`,
+  `readSealedProvisioningResult`, `replaceSecret` and the device sealing key store.
+- **Changed (keys, BREAKING)** — `ProviderProfileStore` now requires the custody
+  methods (`acquireConfigurationLock`, `getPending`, `markPending`,
+  `getOperationWatermark`, `getReceipt`, `commitCustody`, `recordKeyCheck`); a
+  custom 0.7.0 store no longer type checks.
+- **Changed (keys, BREAKING)** — `applySealedProviderProvisioning` takes
+  `readIdentity(agentId)` instead of `isPlacedHere` / static `enrollment`, read
+  before decryption and again under the configuration lock; placement and
+  enrollment writers join the fence through `withConfigurationLock`.
+- **Changed (core, BREAKING)** — sealed requests carry required
+  `expectedEnrollmentRevision` and `expectedPlacementRevision`, bound into the AAD.
+- **Changed (protocol)** — the completion `operationDigest` is the core request
+  digest (= keys `result.requestDigest`); the Host device fetch returns
+  `{ requestId, requestDigest }` even for terminal requests whose ciphertext was
+  deleted, so the handler reads the durable receipt first.
+- **Fixed (keys)** — the Windows Credential Manager store bridge never compiled
+  (CS0104 on an ambiguous `FILETIME`), so every Windows store operation failed;
+  it now compiles and is exercised by a real-backend Windows CI suite.
+- **Fixed (client)** — a provisioning handler failure no longer reaches the
+  daemon console verbatim; it surfaces as a closed
+  `ProviderProvisioningNoticeError`.
+- [Release notes](docs/releases/v0.23.0.md).
+
+
 ## 0.22.0 / @byok-sdk/keys 0.7.0 — 2026-09-25 (published; tag `v0.22.0` at `0962f14f`)
 
 - **Changed (runtime, BREAKING)** — retire the maintained Pi fork and use the

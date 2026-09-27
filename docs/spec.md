@@ -151,11 +151,20 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.22.0`; publication requires separate release
+aligned dispatch release is `0.23.0`; publication requires separate release
 authorization and registry readback. The current independent keys candidate is
-`0.7.0`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.22.0`, proven from an isolated standard npm install rather
+`0.8.0`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.23.0`, proven from an isolated standard npm install rather
 than the workspace graph.
+
+The 0.23.0 train is prepared, not yet published. It adds sealed remote provider
+provisioning (see "Sealed remote provider provisioning" below). keys 0.8.0 is a
+MINOR: it adds credential custody and sealed provisioning authority and makes a
+pre-1.0 breaking change to `ProviderProfileStore`, which now requires the
+custody methods. Sealed requests now require `expectedEnrollmentRevision` and
+`expectedPlacementRevision`. Both packed workspace edges (core and
+implementation-identity) must resolve to 0.23.0. Notes:
+`docs/releases/v0.23.0.md`.
 
 The 0.22.0 train is published (see below). It carries official Pi 0.87.1,
 wire/record 7, envelope v4 and the complete Host-owned systemPrompt contract.
