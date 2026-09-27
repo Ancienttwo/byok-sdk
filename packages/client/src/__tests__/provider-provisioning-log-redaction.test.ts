@@ -60,7 +60,79 @@ const HOSTILE_CASES: readonly HostileCase[] = [
   }],
   ['a malformed readback carrying the canary', 'readback_invalid', (deviceId) => async () =>
     ({ ...validReadback(deviceId), [CANARY]: CANARY, disposition: CANARY }) as unknown as ProviderProvisioningReadback],
+  // F3b: the returned value itself is hostile. Reading it must stay inside the
+  // processor's containment and never re-invoke host code after the snapshot.
+  ['a readback getter that throws the canary', 'readback_invalid', (deviceId) => async () =>
+    withAccessor(validReadback(deviceId), 'tenantId', () => {
+      throw new Error(CANARY);
+    })],
+  ['a readback getter that returns the canary on its second read', 'readback_invalid', (deviceId) => async () => {
+    let reads = 0;
+    return withAccessor(validReadback(deviceId), 'tenantId', () => (++reads === 1 ? TENANT : CANARY));
+  }],
+  // Resolving the handler's promise probes `then` through the get trap, so this
+  // hostile value already fails inside the handler containment.
+  ['a readback Proxy whose get trap throws', 'handler_failed', (deviceId) => async () =>
+    hostileProxy(validReadback(deviceId), 'get')],
+  ['a readback Proxy with only benign traps', 'readback_invalid', (deviceId) => async () =>
+    new Proxy(validReadback(deviceId), {
+      getOwnPropertyDescriptor: (target, key) => Reflect.getOwnPropertyDescriptor(target, key),
+    })],
+  ['a readback Proxy whose ownKeys trap throws', 'readback_invalid', (deviceId) => async () =>
+    hostileProxy(validReadback(deviceId), 'ownKeys')],
+  ['a readback Proxy whose getPrototypeOf trap throws', 'readback_invalid', (deviceId) => async () =>
+    hostileProxy(validReadback(deviceId), 'getPrototypeOf')],
+  ['a readback Proxy whose getOwnPropertyDescriptor trap throws', 'readback_invalid', (deviceId) => async () =>
+    hostileProxy(validReadback(deviceId), 'getOwnPropertyDescriptor')],
+  ['a nested readback accessor that throws the canary', 'readback_invalid', (deviceId) => async () => {
+    const readback = validReadback(deviceId);
+    return { ...readback, completion: withAccessor(readback.completion, 'code', () => {
+      throw new Error(CANARY);
+    }) } as unknown as ProviderProvisioningReadback;
+  }],
+  ['a readback whose toJSON throws the canary', 'readback_invalid', (deviceId) => async () =>
+    ({ ...validReadback(deviceId), toJSON: () => {
+      throw new Error(CANARY);
+    } }) as unknown as ProviderProvisioningReadback],
+  ['a thrown object with hostile toString and toPrimitive', 'handler_failed', () => async () => {
+    throw {
+      toString: () => {
+        throw new Error(CANARY);
+      },
+      [Symbol.toPrimitive]: () => CANARY,
+      get message() {
+        throw new Error(CANARY);
+      },
+    };
+  }],
+  ['a thrown Proxy whose every trap throws', 'handler_failed', () => async () => {
+    throw new Proxy({}, {
+      get: () => { throw new Error(CANARY); },
+      ownKeys: () => { throw new Error(CANARY); },
+      getPrototypeOf: () => { throw new Error(CANARY); },
+      getOwnPropertyDescriptor: () => { throw new Error(CANARY); },
+      has: () => { throw new Error(CANARY); },
+    });
+  }],
 ];
+
+function withAccessor(value: object, key: string, get: () => unknown): ProviderProvisioningReadback {
+  const copy: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+  delete copy[key];
+  Object.defineProperty(copy, key, { get, enumerable: true, configurable: true });
+  return copy as unknown as ProviderProvisioningReadback;
+}
+
+function hostileProxy(
+  target: ProviderProvisioningReadback,
+  trap: 'get' | 'ownKeys' | 'getPrototypeOf' | 'getOwnPropertyDescriptor',
+): ProviderProvisioningReadback {
+  return new Proxy(target, {
+    [trap]: () => {
+      throw new Error(CANARY);
+    },
+  });
+}
 
 function everySerialization(error: unknown): string {
   const forms: string[] = [
