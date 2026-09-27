@@ -67,7 +67,9 @@ Three consequences hold today and are the package's standing constraints:
 3. The optional `byok-pi-provider-launcher` is the only supported composition
    with agent dispatch. It receives non-secret provider/model ids and paths,
    opens the already-provisioned profile database read-only, reads the OS
-   credential only when the selected profile requires one, writes a private
+   credential only when the selected profile requires one — under the store's
+   configuration lock, only for the exact profile it projected, and never while
+   a credential change is pending — writes a private
    process-scoped Pi projection, reconstructs the Pi child environment from a
    closed platform/proxy baseline plus the exact key, and inherits stdio. It
    opens no listener and never returns the key to the daemon.
@@ -78,6 +80,43 @@ Three consequences hold today and are the package's standing constraints:
 The full declaration of the boundary between the two security models is
 [`docs/security.md`](../../docs/security.md), section *Key management
 (`@byok-sdk/keys`) is a separate package with a separate security model*.
+
+## Sealed remote provisioning
+
+A host may let users enter a provider key in its web UI without the key ever
+being readable by its servers. The browser seals the key with
+`@byok-sdk/core`'s one-shot HPKE (`DHKEM(P-256, HKDF-SHA256)` / HKDF-SHA256 /
+AES-128-GCM, WebCrypto only) to this device's long-lived sealing key; the cloud
+relays ciphertext only; the device fetches the request itself (no listener)
+and calls `applySealedProviderProvisioning`.
+
+- `DeviceSealingKeyStore` keeps the P-256 sealing key in the OS credential
+  store (entry `device-sealing-p256-v1`), bound to the current enrollment: a
+  new enrollment always gets a new key at the next epoch, and `rotate()`
+  replaces the private key. There is no forward secrecy for past ciphertexts
+  if that private key leaks; short ciphertext TTLs and rotation only bound
+  exposure.
+- `applySealedProviderProvisioning` validates enrollment, sealing key id,
+  placement, config digest, the HPKE open (which authenticates every header
+  field), request replay, the per-profile `operationGeneration` watermark, the
+  15-minute time window, the catalog provider kind (never `custom`: the
+  endpoint is derived from `MODEL_PROVIDER_VENDORS`), `pi_model`, the expected
+  provider triple and the credential scope, then applies `configure`,
+  `update_model`, `replace_secret` or `delete`. It returns a credential-free
+  `ProviderProvisioningResult` with a closed-set rejection code, and runs an
+  optional bounded key check whose outcome is a hint only.
+- `ProviderRegistry.replaceSecret(profileRef, secret)` changes only the
+  credential; profile revision and hash — and every exact binding a Host
+  holds — stay the same.
+- **Custody** (`custody.ts`): every credential writer and reader holds the
+  profile store's configuration lock (cross-process for SQLite: an EXCLUSIVE
+  lock on the `<db>.config-lock` sibling, released by the OS if the process
+  dies). Writers record a secret-free pending marker before the OS write and
+  clear it in the same SQLite transaction that commits the profile, receipt and
+  watermark. Readers — the registry client, the launcher and the key check —
+  refuse while a marker exists, so "old profile + new key" is never readable.
+  A marker left by a crash is never resolved by guessing; only a change that
+  supplies a new key (or a delete) clears it.
 
 ## Not in this package
 
@@ -198,9 +237,13 @@ whatever `index.ts` re-exports; nothing here is reachable by deep import.
 | `sqlite-profile-store.ts` | `SqliteProviderProfileStore` — on-disk profile persistence on `node:sqlite` |
 | `truth-profile-store.ts` | `TruthStoreProviderProfileStore` — tenant-bound deterministic registry snapshot with CAS and integrity validation |
 | `sqlite-support.ts` | Runtime `node:sqlite` capability detection and owner-only database file/directory creation |
-| `registry.ts` | `ProviderRegistry` — the configure / list / resolve / delete lifecycle that binds a profile store to a secret store and hands back a ready client |
+| `registry.ts` | `ProviderRegistry` — the configure / replaceSecret / list / resolve / delete lifecycle that binds a profile store to a secret store under the custody lock and hands back a ready client |
+| `custody.ts` | Credential-custody contract: configuration lock, pending markers, operation watermarks, receipts, and the closed rejection / key-check code sets |
+| `device-sealing-key.ts` | `DeviceSealingKeyStore` — the enrollment-bound P-256 sealing key in the OS credential store |
+| `sealed-provisioning.ts` | `applySealedProviderProvisioning` — device-side validation and crash-safe commit of a sealed provisioning request |
+| `provider-key-check.ts` | `checkProviderKey` — one bounded live check with a closed-set outcome |
 | `pi-provider-projection.ts` | Credential-blind Pi `models.json` projection for one validated profile/model |
-| `pi-provider-launcher-core.ts` | Closed launcher argv contract and auth-mode-aware exact secret resolution |
+| `pi-provider-launcher-core.ts` | Closed launcher argv contract, the custody snapshot the launcher reads its key through, and auth-mode-aware exact secret resolution |
 | `bin/pi-provider-launcher.ts` | No-listener credential-custody executable that reads the OS store and spawns pinned Pi with a private projection |
 
 Auth modes map to headers as follows, and this mapping is the package's wire

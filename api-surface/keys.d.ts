@@ -59,6 +59,259 @@ export type CommandRunner = (executable: string, args: string[], stdin?: string)
  * to EOF would hang forever.
  */
 export declare function runCommand(executable: string, args: string[], stdin?: string): Promise<CommandResult>;
+// ==== @byok-sdk/keys dist/custody.d.ts ====
+import { z } from 'zod';
+import { type ProviderProvisioningOperation } from '@byok-sdk/core';
+import { ByokKeysError } from './errors';
+import type { ModelProviderProfile, ProviderProfileRef } from './provider-profile';
+/**
+ * Credential custody coordination (plan web-sealed-provisioning D5, A3, A4, A8, A9).
+ *
+ * The provider key lives in the OS credential store and the profile lives in
+ * the profile database; there is no transaction spanning both. Custody makes
+ * the pair crash-safe and race-free with three pieces of state and one lock,
+ * all owned by the profile store:
+ *
+ * 1. **Configuration lock** — exclusive and, for a file-backed SQLite store,
+ *    cross-process. Every credential writer holds it across "mark pending →
+ *    OS write → commit", and every credential reader holds it across
+ *    "re-read + exact-validate profile → pending check → key read". A reader
+ *    can therefore never pair a profile with a key from a different
+ *    configuration.
+ * 2. **Pending marker** — durable and secret-free, written before the OS
+ *    write and cleared only by the final profile transaction. While it exists
+ *    no reader may read the key. A marker left behind by a crash is never
+ *    resolved by guessing: only a new operation that supplies a key (or a
+ *    delete) replaces it.
+ * 3. **Operation watermark** — the highest `operationGeneration` a profile
+ *    ref has consumed. It survives `delete` (a tombstone), so a replay of any
+ *    older request stays rejected however many operations happened since and
+ *    whatever the clock says.
+ * 4. **Receipts** — the credential-free result of recent provisioning
+ *    requests, keyed by request id and bounded by count. They let a request
+ *    whose ACK was lost read back the same stored result; replay protection
+ *    does not depend on them (that is the watermark's job), so evicting an old
+ *    receipt never revives an old request.
+ */
+export declare const PROVIDER_CUSTODY_OPERATIONS: readonly ["configure", "update_model", "replace_secret", "delete"];
+export type ProviderCustodyOperation = ProviderProvisioningOperation;
+/** Receipts kept per profile database; older ones are evicted by insertion order. */
+export declare const PROVIDER_CUSTODY_RECEIPT_LIMIT = 256;
+/** How long a caller waits for the configuration lock before failing closed. */
+export declare const PROVIDER_CONFIGURATION_LOCK_WAIT_MS = 10000;
+/** A secret-free marker that an OS credential write may be in flight or was interrupted. */
+export interface ProviderCustodyPending {
+    readonly profileRef: ProviderProfileRef;
+    readonly operation: ProviderCustodyOperation;
+    /** The provisioning request that set it; `null` for a direct registry write. */
+    readonly requestId: string | null;
+    readonly operationGeneration: number | null;
+    readonly since: string;
+}
+/**
+ * Closed set of device-side provisioning rejections. Never carries detail
+ * beyond the code. Every code whose meaning exists on the wire uses the exact
+ * `@byok-sdk/protocol` rejection string (S2), so the Host maps 1:1:
+ * `request_expired`, `request_window_invalid`, `sealing_key_rotated`,
+ * `enrollment_mismatch`, `agent_not_placed`, `config_digest_mismatch`,
+ * `operation_generation_stale`, `profile_changed`, `profile_not_found`,
+ * `credential_scope_mismatch`, `provider_kind_unsupported`, `pi_model_invalid`,
+ * `seal_open_failed`, `secret_invalid`, `local_commit_interrupted`,
+ * `secret_store_unavailable`. Four device-only codes have no wire counterpart
+ * yet: `request_invalid` (unparseable request), `request_conflict` (same
+ * request id, different request digest), `request_not_yet_valid` (issuedAt
+ * beyond the bounded clock skew), and `capabilities_invalid`.
+ */
+export declare const PROVIDER_PROVISIONING_REJECTIONS: readonly ['request_invalid', 'enrollment_mismatch', 'sealing_key_rotated', 'agent_not_placed', 'config_digest_mismatch', 'seal_open_failed', 'request_conflict', 'operation_generation_stale', 'request_window_invalid', 'request_not_yet_valid', 'request_expired', 'provider_kind_unsupported', 'pi_model_invalid', 'capabilities_invalid', 'profile_changed', 'profile_not_found', 'credential_scope_mismatch', 'local_commit_interrupted', 'secret_invalid', 'secret_store_unavailable'];
+export type ProviderProvisioningRejection = (typeof PROVIDER_PROVISIONING_REJECTIONS)[number];
+/**
+ * Closed set of key-check outcomes (D13, A10), using the wire strings of the
+ * protocol key-check set. `credential_rejected` means only an explicit
+ * credential rejection (HTTP 401); a check is a hint and never a readiness
+ * decision. `provider_error` (any other provider failure: 5xx, malformed or
+ * oversize response) has no wire counterpart yet.
+ */
+export declare const PROVIDER_KEY_CHECK_OUTCOMES: readonly ['not_run', 'ok', 'credential_rejected', 'rate_limited', 'quota_or_billing', 'model_not_permitted', 'unreachable', 'timeout', 'provider_error'];
+export type ProviderKeyCheckOutcome = (typeof PROVIDER_KEY_CHECK_OUTCOMES)[number];
+/** Credential-free exact binding the Host records for a bot after an applied operation. */
+export interface ProviderProvisioningBinding {
+    readonly profileRef: ProviderProfileRef;
+    readonly profileRevision: string;
+    readonly profileHash: string;
+    readonly modelId: string;
+}
+/**
+ * The device's credential-free provisioning result. It is what a receipt
+ * stores and what the Host receives; it never carries a secret, an endpoint
+ * credential, or an OS error detail.
+ */
+export interface ProviderProvisioningResult {
+    readonly requestId: string | null;
+    readonly operation: ProviderCustodyOperation | null;
+    readonly operationGeneration: number | null;
+    readonly outcome: 'applied' | 'rejected';
+    readonly code: ProviderProvisioningRejection | null;
+    readonly profileRef: ProviderProfileRef | null;
+    /** Exact binding after the operation; `null` after delete or on rejection. */
+    readonly binding: ProviderProvisioningBinding | null;
+    /** Whether the credential store holds this profile's key after the operation. */
+    readonly secretConfigured: boolean | null;
+    readonly keyCheck: ProviderKeyCheckOutcome;
+}
+export declare const ProviderProvisioningResultSchema: z.ZodObject<{
+    requestId: z.ZodNullable<z.ZodString>;
+    operation: z.ZodNullable<z.ZodEnum<{
+        configure: "configure";
+        delete: "delete";
+        replace_secret: "replace_secret";
+        update_model: "update_model";
+    }>>;
+    operationGeneration: z.ZodNullable<z.ZodNumber>;
+    outcome: z.ZodEnum<{
+        applied: "applied";
+        rejected: "rejected";
+    }>;
+    code: z.ZodNullable<z.ZodEnum<{
+        agent_not_placed: "agent_not_placed";
+        capabilities_invalid: "capabilities_invalid";
+        config_digest_mismatch: "config_digest_mismatch";
+        credential_scope_mismatch: "credential_scope_mismatch";
+        enrollment_mismatch: "enrollment_mismatch";
+        local_commit_interrupted: "local_commit_interrupted";
+        operation_generation_stale: "operation_generation_stale";
+        pi_model_invalid: "pi_model_invalid";
+        profile_changed: "profile_changed";
+        profile_not_found: "profile_not_found";
+        provider_kind_unsupported: "provider_kind_unsupported";
+        request_conflict: "request_conflict";
+        request_expired: "request_expired";
+        request_invalid: "request_invalid";
+        request_not_yet_valid: "request_not_yet_valid";
+        request_window_invalid: "request_window_invalid";
+        seal_open_failed: "seal_open_failed";
+        sealing_key_rotated: "sealing_key_rotated";
+        secret_invalid: "secret_invalid";
+        secret_store_unavailable: "secret_store_unavailable";
+    }>>;
+    profileRef: z.ZodNullable<z.ZodString>;
+    binding: z.ZodNullable<z.ZodObject<{
+        profileRef: z.ZodString;
+        profileRevision: z.ZodString;
+        profileHash: z.ZodString;
+        modelId: z.ZodString;
+    }, z.core.$strict>>;
+    secretConfigured: z.ZodNullable<z.ZodBoolean>;
+    keyCheck: z.ZodEnum<{
+        credential_rejected: "credential_rejected";
+        model_not_permitted: "model_not_permitted";
+        not_run: "not_run";
+        ok: "ok";
+        provider_error: "provider_error";
+        quota_or_billing: "quota_or_billing";
+        rate_limited: "rate_limited";
+        timeout: "timeout";
+        unreachable: "unreachable";
+    }>;
+}, z.core.$strict>;
+/** Parse a persisted result fail-closed. */
+export declare function parseProviderProvisioningResult(value: unknown): ProviderProvisioningResult;
+/** A durable completion record for one provisioning request. */
+export interface ProviderCustodyReceipt {
+    readonly requestId: string;
+    readonly profileRef: ProviderProfileRef;
+    readonly operationGeneration: number;
+    readonly requestDigest: string;
+    readonly result: ProviderProvisioningResult;
+}
+/**
+ * The single final write of a custody operation. A store applies all of it
+ * atomically: the profile mutation, the receipt (which also advances the
+ * profile ref's watermark to the receipt's generation), and — only when
+ * `clearPending` — removal of the pending marker.
+ */
+export interface ProviderCustodyCommit {
+    readonly profileRef: ProviderProfileRef;
+    readonly mutation: {
+        readonly kind: 'save';
+        readonly profile: ModelProviderProfile;
+    } | {
+        readonly kind: 'delete';
+    } | {
+        readonly kind: 'none';
+    };
+    readonly receipt?: ProviderCustodyReceipt;
+    readonly clearPending: boolean;
+}
+/** A held configuration lock. `release` is idempotent. */
+export interface ProviderConfigurationLock {
+    release(): Promise<void>;
+}
+/**
+ * FIFO async mutex for exclusion inside one process. File-backed SQLite
+ * stores put their cross-process lock behind it; in-memory and TruthStore
+ * stores use it alone, because their custody state is process-local.
+ */
+export declare class ProcessLocalMutex {
+    #private;
+    acquire(): Promise<ProviderConfigurationLock>;
+}
+/** Run `body` while holding `store`'s configuration lock. */
+export declare function withConfigurationLock<T>(store: {
+    acquireConfigurationLock(): Promise<ProviderConfigurationLock>;
+}, body: () => Promise<T>): Promise<T>;
+export declare function configurationPendingError(): ByokKeysError;
+// ==== @byok-sdk/keys dist/device-sealing-key.d.ts ====
+import { type SealingPublicJwk, type WebCryptoKey } from '@byok-sdk/core';
+import type { SecretStore } from './secret-store';
+/**
+ * Credential-store entry holding this device's long-lived P-256 sealing key
+ * (plan D1). Validated by the same secret-name rule as every other entry.
+ */
+export declare const DEVICE_SEALING_SECRET_NAME = "device-sealing-p256-v1";
+export type DeviceSealingSecretName = typeof DEVICE_SEALING_SECRET_NAME;
+/** The enrollment the key is bound to. A different enrollment never reuses a key (A1). */
+export interface DeviceSealingEnrollment {
+    readonly tenantId: string;
+    readonly deviceId: string;
+}
+/**
+ * A loaded sealing key. `privateKey` is a non-extractable WebCrypto ECDH key:
+ * it can open sealed provider secrets in this process and cannot be exported.
+ * The public half and `keyId` are what the host registers (through its
+ * device-proof signer) for browsers to seal to.
+ */
+export interface DeviceSealingKey {
+    readonly keyId: string;
+    readonly epoch: number;
+    readonly publicJwk: SealingPublicJwk;
+    readonly privateKey: WebCryptoKey;
+    readonly enrollment: DeviceSealingEnrollment;
+}
+/**
+ * Loads, creates, and rotates the device sealing key in the OS credential
+ * store (through {@link SecretStore}; never a plain file).
+ *
+ * - `loadOrCreate` returns the stored key when it belongs to the current
+ *   enrollment; a missing key, or one bound to a different enrollment, is
+ *   replaced by a freshly generated key at the next epoch (A1: a re-pair
+ *   never reuses a key just because the entry name exists).
+ * - `rotate` always generates a new key at the next epoch and overwrites —
+ *   and so deletes — the previous private key.
+ * - A malformed stored record fails closed; it is never silently regenerated,
+ *   because that would be an unannounced rotation.
+ *
+ * v1 provides no forward secrecy for past ciphertexts if this private key
+ * leaks (A1): ciphertext TTL only shortens online retention, and rotation only
+ * limits exposure across epochs.
+ */
+export declare class DeviceSealingKeyStore {
+    #private;
+    constructor(options: {
+        secretStore: SecretStore<DeviceSealingSecretName>;
+    });
+    loadOrCreate(enrollment: DeviceSealingEnrollment): Promise<DeviceSealingKey>;
+    rotate(enrollment: DeviceSealingEnrollment): Promise<DeviceSealingKey>;
+}
 // ==== @byok-sdk/keys dist/errors.d.ts ====
 /**
  * Single error class for `@byok-sdk/keys`.
@@ -91,7 +344,11 @@ export declare class ByokKeysError extends Error {
  * `SECRET_VALUE_INVALID` (the runtime replacements for the closed
  * `KeychainSecretName` union). `PROVIDER_STORE_SCHEMA_STALE` joins them: it
  * guards a persisted `provider_profile` DDL that differs from the one this
- * package generates. Everything else matches the source string for string.
+ * package generates. The custody codes (`PROVIDER_CONFIGURATION_BUSY`,
+ * `PROVIDER_CONFIGURATION_PENDING`, `PROVIDER_CUSTODY_STATE_INVALID`,
+ * `PROVIDER_SECRET_STORE_FAILED`) and `DEVICE_SEALING_KEY_INVALID` belong to
+ * sealed provider provisioning and likewise have no source counterpart.
+ * Everything else matches the source string for string.
  *
  * `SECRET_NAMESPACE_INVALID` is a separate case. The source does record it:
  * `normalizeSecretNamespace` (`index.ts:748-757`) throws the verbatim string
@@ -109,6 +366,7 @@ export declare const BYOK_KEYS_ERROR_CODES: {
     readonly CREDENTIAL_MANAGER_SECRET_INVALID: 'CREDENTIAL_MANAGER_SECRET_INVALID';
     readonly CREDENTIAL_MANAGER_UNAVAILABLE: 'CREDENTIAL_MANAGER_UNAVAILABLE';
     readonly CREDENTIAL_MANAGER_WRITE_FAILED: 'CREDENTIAL_MANAGER_WRITE_FAILED';
+    readonly DEVICE_SEALING_KEY_INVALID: 'DEVICE_SEALING_KEY_INVALID';
     readonly KEYCHAIN_ARGUMENT_INVALID: 'KEYCHAIN_ARGUMENT_INVALID';
     readonly KEYCHAIN_DELETE_FAILED: 'KEYCHAIN_DELETE_FAILED';
     readonly KEYCHAIN_READ_FAILED: 'KEYCHAIN_READ_FAILED';
@@ -123,6 +381,9 @@ export declare const BYOK_KEYS_ERROR_CODES: {
     readonly MODEL_PROVIDER_MODEL_NOT_FOUND: 'MODEL_PROVIDER_MODEL_NOT_FOUND';
     readonly MODEL_PROVIDER_RATE_LIMITED: 'MODEL_PROVIDER_RATE_LIMITED';
     readonly MODEL_RESPONSE_INVALID: 'MODEL_RESPONSE_INVALID';
+    readonly PROVIDER_CONFIGURATION_BUSY: 'PROVIDER_CONFIGURATION_BUSY';
+    readonly PROVIDER_CONFIGURATION_PENDING: 'PROVIDER_CONFIGURATION_PENDING';
+    readonly PROVIDER_CUSTODY_STATE_INVALID: 'PROVIDER_CUSTODY_STATE_INVALID';
     readonly PROVIDER_NOT_CONFIGURED: 'PROVIDER_NOT_CONFIGURED';
     readonly PROVIDER_PROFILE_INVALID: 'PROVIDER_PROFILE_INVALID';
     readonly PROVIDER_PROFILE_CONFLICT: 'PROVIDER_PROFILE_CONFLICT';
@@ -133,6 +394,7 @@ export declare const BYOK_KEYS_ERROR_CODES: {
     readonly PROVIDER_SECRET_MISSING: 'PROVIDER_SECRET_MISSING';
     readonly PROVIDER_SECRET_NOT_ALLOWED: 'PROVIDER_SECRET_NOT_ALLOWED';
     readonly PROVIDER_SECRET_ROLLBACK_FAILED: 'PROVIDER_SECRET_ROLLBACK_FAILED';
+    readonly PROVIDER_SECRET_STORE_FAILED: 'PROVIDER_SECRET_STORE_FAILED';
     readonly PROVIDER_STORE_SCHEMA_STALE: 'PROVIDER_STORE_SCHEMA_STALE';
     readonly PROVIDER_STORE_UNAVAILABLE: 'PROVIDER_STORE_UNAVAILABLE';
     readonly PROVIDER_TRUTH_INVALID: 'PROVIDER_TRUTH_INVALID';
@@ -246,6 +508,14 @@ export { SqliteProviderProfileStore } from './sqlite-profile-store';
 export type { SqliteProviderProfileStoreOptions } from './sqlite-profile-store';
 export { PROVIDER_PROFILE_TRUTH_RECORD_KEY, TruthStoreProviderProfileStore, } from './truth-profile-store';
 export type { TruthStoreProviderProfileStoreOptions } from './truth-profile-store';
+export { PROVIDER_CONFIGURATION_LOCK_WAIT_MS, PROVIDER_CUSTODY_RECEIPT_LIMIT, PROVIDER_KEY_CHECK_OUTCOMES, PROVIDER_PROVISIONING_REJECTIONS, } from './custody';
+export type { ProviderConfigurationLock, ProviderCustodyCommit, ProviderCustodyOperation, ProviderCustodyPending, ProviderCustodyReceipt, ProviderKeyCheckOutcome, ProviderProvisioningBinding, ProviderProvisioningRejection, ProviderProvisioningResult, } from './custody';
+export { DEVICE_SEALING_SECRET_NAME, DeviceSealingKeyStore } from './device-sealing-key';
+export type { DeviceSealingEnrollment, DeviceSealingKey, DeviceSealingSecretName, } from './device-sealing-key';
+export { PROVIDER_PROVISIONING_MAX_CLOCK_SKEW_MS, PROVIDER_PROVISIONING_SECRET_MAX_BYTES, applySealedProviderProvisioning, } from './sealed-provisioning';
+export type { ApplySealedProviderProvisioningOptions, ProviderProvisioningCutPoint, ProviderProvisioningFaultSeam, } from './sealed-provisioning';
+export { PROVIDER_KEY_CHECK_TIMEOUT_MS, checkProviderKey } from './provider-key-check';
+export type { ProviderKeyCheckOptions } from './provider-key-check';
 export { ProviderRegistry } from './registry';
 export type { ModelProviderClient, ProviderConfiguration, ProviderRegistryOptions, ProviderStatus, } from './registry';
 export { PI_PROJECTED_KEY_ENV, buildPiProviderProjection, } from './pi-provider-projection';
@@ -460,6 +730,7 @@ export declare function buildPiProviderArgs(profile: ModelProviderProfile, deleg
  */
 export declare function buildPiPreparedArgs(delegatedArgs: readonly string[]): string[];
 // ==== @byok-sdk/keys dist/profile-store.d.ts ====
+import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderKeyCheckOutcome } from './custody';
 import { ByokKeysError } from './errors';
 import { type ModelProviderProfile, type ProviderProfileRef } from './provider-profile';
 /**
@@ -481,8 +752,36 @@ import { type ModelProviderProfile, type ProviderProfileRef } from './provider-p
  * 2. **Validate on write.** `save` runs {@link parseModelProviderProfile}, so an
  *    invalid profile is refused at the boundary rather than discovered later by
  *    a reader.
+ *
+ * Every store also owns the credential-custody state described in
+ * `custody.ts`: the configuration lock, pending markers, operation
+ * watermarks, and receipts. The custody methods other than
+ * `acquireConfigurationLock` must be called while holding that lock; the
+ * registry, the provisioning applier, and the launcher are the only callers.
  */
 export interface ProviderProfileStore {
+    /**
+     * Take the exclusive configuration lock. Cross-process for a file-backed
+     * SQLite store; process-local otherwise. Fails closed with
+     * `PROVIDER_CONFIGURATION_BUSY` when it cannot be acquired in time.
+     */
+    acquireConfigurationLock(): Promise<ProviderConfigurationLock>;
+    /** The pending marker for `profileRef`, if a credential change is unfinished. */
+    getPending(profileRef: ProviderProfileRef): Promise<ProviderCustodyPending | undefined>;
+    /** Durably record a pending marker (replacing any existing one for the same ref). */
+    markPending(pending: ProviderCustodyPending): Promise<void>;
+    /** Highest operation generation `profileRef` has consumed; survives delete. */
+    getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined>;
+    /** Stored receipt for a provisioning request id, if still retained. */
+    getReceipt(requestId: string): Promise<ProviderCustodyReceipt | undefined>;
+    /** Apply a custody commit atomically (see {@link ProviderCustodyCommit}). */
+    commitCustody(commit: ProviderCustodyCommit): Promise<void>;
+    /**
+     * Record a key-check outcome on a receipt, only if that receipt's
+     * generation is still the profile's watermark. Returns whether it was
+     * recorded; a stale check never overwrites newer state.
+     */
+    recordKeyCheck(requestId: string, operationGeneration: number, keyCheck: ProviderKeyCheckOutcome): Promise<boolean>;
     /** Release the underlying resource. Safe to call more than once. */
     close(): Promise<void>;
     /** Remove `profileRef`; `false` when it was not configured. */
@@ -514,6 +813,13 @@ export declare function providerNotConfigured(profileRef: ProviderProfileRef): B
 export declare class InMemoryProviderProfileStore implements ProviderProfileStore {
     #private;
     close(): Promise<void>;
+    acquireConfigurationLock(): Promise<ProviderConfigurationLock>;
+    getPending(profileRef: ProviderProfileRef): Promise<ProviderCustodyPending | undefined>;
+    markPending(pending: ProviderCustodyPending): Promise<void>;
+    getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined>;
+    getReceipt(requestId: string): Promise<ProviderCustodyReceipt | undefined>;
+    commitCustody(commit: ProviderCustodyCommit): Promise<void>;
+    recordKeyCheck(requestId: string, operationGeneration: number, keyCheck: ProviderKeyCheckOutcome): Promise<boolean>;
     delete(profileRef: ProviderProfileRef): Promise<boolean>;
     get(profileRef: ProviderProfileRef): Promise<ModelProviderProfile | undefined>;
     getEnabled(): Promise<ModelProviderProfile | undefined>;
@@ -521,6 +827,14 @@ export declare class InMemoryProviderProfileStore implements ProviderProfileStor
     save(profile: ModelProviderProfile): Promise<ModelProviderProfile>;
     setEnabled(profileRef: ProviderProfileRef): Promise<ModelProviderProfile>;
 }
+/**
+ * Shared by the process-local stores: insert a receipt, advance the ref's
+ * watermark (never backwards), and evict receipts beyond the retention limit
+ * in insertion order. Replay protection is the watermark's, so eviction never
+ * revives a request.
+ */
+export declare function applyReceipt(receipts: Map<string, ProviderCustodyReceipt>, watermarks: Map<ProviderProfileRef, number>, receipt: ProviderCustodyReceipt): void;
+export declare function recordReceiptKeyCheck(receipts: Map<string, ProviderCustodyReceipt>, watermarks: Map<ProviderProfileRef, number>, requestId: string, operationGeneration: number, keyCheck: ProviderKeyCheckOutcome): boolean;
 // ==== @byok-sdk/keys dist/provider-catalog.d.ts ====
 import type { ModelProviderAdapter, ProviderAuthMode } from './provider-profile';
 /**
@@ -595,6 +909,33 @@ export declare const MODEL_PROVIDER_VENDOR_IDS: readonly ModelProviderVendorId[]
  * by definition declares everything itself.
  */
 export declare function modelProviderVendor(kind: string): ModelProviderVendor | undefined;
+// ==== @byok-sdk/keys dist/provider-key-check.d.ts ====
+import type { ProviderKeyCheckOutcome } from './custody';
+import type { ProviderFetch } from './http';
+import type { ModelProviderProfile } from './provider-profile';
+/** Default bound on one key check, below the transport's own 15 s ceiling. */
+export declare const PROVIDER_KEY_CHECK_TIMEOUT_MS = 10000;
+export interface ProviderKeyCheckOptions {
+    readonly fetchImpl?: ProviderFetch;
+    readonly timeoutMs?: number;
+}
+/**
+ * One live round trip with a just-provisioned key (plan D13, A10). The result
+ * is a hint for the UI, never a readiness decision, and is a closed-set code:
+ *
+ * - `credential_rejected` only for an explicit credential rejection (HTTP 401);
+ * - 403 and model-not-found → `model_not_permitted`;
+ * - billing/quota → `quota_or_billing`, 429 → `rate_limited`;
+ * - this check's own deadline or the transport timeout → `timeout`;
+ * - abort or network failure → `unreachable`;
+ * - anything else (5xx, malformed or oversize response) → `provider_error`.
+ *
+ * Bounded by `timeoutMs` and by the transport's response size ceiling; the
+ * request refuses redirects so the key never follows one. No provider body,
+ * header, or error text leaves this function.
+ */
+export declare function checkProviderKey(profile: ModelProviderProfile, secret: string, options?: ProviderKeyCheckOptions): Promise<Exclude<ProviderKeyCheckOutcome, 'not_run'>>;
+export declare function classifyProviderKeyCheckFailure(error: unknown, timedOut: boolean): Exclude<ProviderKeyCheckOutcome, 'not_run' | 'ok'>;
 // ==== @byok-sdk/keys dist/provider-profile.d.ts ====
 import { z } from 'zod';
 import { type ModelProviderVendorId } from './provider-catalog';
@@ -787,9 +1128,9 @@ export declare function parseModelProviderProfile(value: unknown): ModelProvider
 import { AnthropicMessagesClient } from './anthropic-client';
 import type { ProviderFetch } from './http';
 import { OpenAiCompatibleChatClient } from './openai-client';
-import type { ProviderProfileStore } from './profile-store';
+import { type ProviderProfileStore } from './profile-store';
 import type { PiModelConfig } from './pi-model-config';
-import { type ModelProviderAdapter, type ModelProviderKind, type ProviderAuthMode, type ProviderModelCapability, type ProviderProfileRef } from './provider-profile';
+import { type ModelProviderAdapter, type ModelProviderKind, type ModelProviderProfile, type ProviderAuthMode, type ProviderModelCapability, type ProviderProfileRef } from './provider-profile';
 import { type ModelProviderSecretName, type SecretStore } from './secret-store';
 /** A transport client for whichever dialect the resolved profile declares. */
 export type ModelProviderClient = AnthropicMessagesClient | OpenAiCompatibleChatClient;
@@ -844,6 +1185,12 @@ export interface ProviderStatus {
     provider_kind: ModelProviderKind;
     /** Whether the credential store currently holds this profile's key. */
     secret_configured: boolean;
+    /**
+     * Whether an unfinished credential change is recorded for this profile. While
+     * true no reader may use the key; only a change that supplies a new key (or
+     * a delete) clears it.
+     */
+    configuration_pending: boolean;
     updated_at: string;
 }
 export interface ProviderRegistryOptions {
@@ -854,13 +1201,33 @@ export interface ProviderRegistryOptions {
     secretStore: SecretStore<ModelProviderSecretName>;
 }
 /**
+ * Build the normalized profile `configure` would persist: registry-owned
+ * `kind`, a monotonic `updated_at` revision strictly after the previous one,
+ * and the previous `created_at`. Shared with the sealed provisioning applier
+ * so there is one revision authority.
+ */
+export declare function buildConfiguredProfile(previous: ModelProviderProfile | undefined, configuration: ProviderConfiguration, now: () => Date): ModelProviderProfile;
+/** The credential-free status projection of a profile. */
+export declare function providerStatusOf(profile: ModelProviderProfile, state: {
+    secretConfigured: boolean;
+    configurationPending: boolean;
+}): ProviderStatus;
+/**
  * The configure/resolve boundary, ported from `providers.ts:1180-1229`
  * (`configure`) and `providers.ts:1331-1354` (`resolveDefaultModelProvider`).
  *
- * Both halves of a provider's configuration are written here and nowhere else:
- * the non-secret profile goes to the injected {@link ProviderProfileStore}, the
- * API key goes to the injected {@link SecretStore}. Splitting them is the whole
- * point of the package, so the registry is the only place that knows both.
+ * Both halves of a provider's configuration are written here (and, for
+ * remotely sealed changes, by `applySealedProviderProvisioning` under the same
+ * custody protocol): the non-secret profile goes to the injected
+ * {@link ProviderProfileStore}, the API key goes to the injected
+ * {@link SecretStore}.
+ *
+ * Every writer and every credential reader holds the store's configuration
+ * lock (`custody.ts`). Writers record a secret-free pending marker before the
+ * OS credential write and clear it in the same store transaction that commits
+ * the profile, so a crash between the two leaves a marker instead of an
+ * "old profile + new key" pair, and readers refuse to read a key while a
+ * marker exists.
  *
  * Two departures from the source, both required by
  * `docs/researches/HANDOFF-byok-keys.md` §4.5:
@@ -883,13 +1250,20 @@ export declare class ProviderRegistry {
      * Persist a provider's profile and, when supplied, its secret
      * (`providers.ts:1180-1229`).
      *
-     * Order matters and is the source's: write the secret first, then require
-     * that an authenticating profile actually has one, and only then save the
-     * profile. A profile is therefore never persisted in a state that claims
-     * authentication it cannot perform.
+     * Under the configuration lock: validate everything, require that an
+     * authenticating profile will have a secret, mark pending, write the
+     * secret, then commit the profile and clear the marker in one store
+     * transaction. An unfinished earlier change (a pending marker) can only be
+     * resolved by a call that supplies a new secret.
      */
     configure(configuration: ProviderConfiguration, secret?: string): Promise<ProviderStatus>;
-    /** Remove a profile and its secret together. */
+    /**
+     * Replace only the credential of an existing authenticating profile. The
+     * profile record is untouched, so its revision and hash — and every exact
+     * binding a Host holds — stay valid (plan D4).
+     */
+    replaceSecret(profileRef: ProviderProfileRef, secret: string): Promise<ProviderStatus>;
+    /** Remove a profile and its secret together, through the same pending/commit path. */
     delete(profileRef: ProviderProfileRef): Promise<boolean>;
     get(profileRef: ProviderProfileRef): Promise<ProviderStatus | undefined>;
     list(): Promise<ProviderStatus[]>;
@@ -898,12 +1272,73 @@ export declare class ProviderRegistry {
      *
      * `undefined` means "nothing is configured", which is a legitimate state a
      * caller must handle. A configured-but-broken provider throws instead — a
-     * missing secret or an unusable profile is a fault, not an absence.
+     * missing secret, an unfinished credential change, or an unusable profile is
+     * a fault, not an absence. The profile, the pending check and the key are
+     * read under one configuration lock.
      */
     resolveDefaultModelProvider(): Promise<ModelProviderClient | undefined>;
     /** Switch which configured profile is the default. */
     setDefaultModelProvider(profileRef: ProviderProfileRef): Promise<ProviderStatus>;
 }
+// ==== @byok-sdk/keys dist/sealed-provisioning.d.ts ====
+import { type ProviderProvisioningResult } from './custody';
+import type { DeviceSealingEnrollment, DeviceSealingKey } from './device-sealing-key';
+import { type ProviderKeyCheckOptions } from './provider-key-check';
+import { type ProviderProfileRef } from './provider-profile';
+import type { ProviderProfileStore } from './profile-store';
+import { type ModelProviderSecretName, type SecretStore } from './secret-store';
+/** Largest issuedAt-in-the-future a device tolerates (bounded clock skew, A9). */
+export declare const PROVIDER_PROVISIONING_MAX_CLOCK_SKEW_MS: number;
+/**
+ * The smaller of the two OS backends' secret ceilings (Windows Credential
+ * Manager: 2560 UTF-8 bytes), so a too-large key is a deterministic rejection
+ * on every platform instead of a store failure that leaves a pending marker.
+ */
+export declare const PROVIDER_PROVISIONING_SECRET_MAX_BYTES = 2560;
+/** Persistence cut points of one applied operation, in order. */
+export type ProviderProvisioningCutPoint = 'after-pending' | 'after-secret-write' | 'after-commit';
+/** Test-only seam: invoked at each cut point so crash tests can kill the process there. */
+export interface ProviderProvisioningFaultSeam {
+    onCutPoint?(point: ProviderProvisioningCutPoint): void | Promise<void>;
+}
+export interface ApplySealedProviderProvisioningOptions {
+    /** The untrusted request exactly as fetched from the Host. */
+    readonly request: unknown;
+    readonly profileStore: ProviderProfileStore;
+    readonly secretStore: SecretStore<ModelProviderSecretName>;
+    /** This device's current sealing key (`DeviceSealingKeyStore.loadOrCreate`). */
+    readonly sealingKey: DeviceSealingKey;
+    /** This device's current enrollment identity, supplied by the host. */
+    readonly enrollment: DeviceSealingEnrollment;
+    /** Host glue: the local provider profile ref a bot's agent id maps to. */
+    readonly resolveProfileRef: (agentId: string) => ProviderProfileRef;
+    /** Host glue: whether the agent is placed on this device right now. */
+    readonly isPlacedHere: (agentId: string) => Promise<boolean>;
+    readonly now: () => Date;
+    /** When present, one bounded key check runs after an applied operation; otherwise `not_run`. */
+    readonly keyCheck?: ProviderKeyCheckOptions;
+    readonly faults?: ProviderProvisioningFaultSeam;
+}
+/**
+ * Apply one sealed provider provisioning request on the device (plan §3.4,
+ * D4, D5, D8, A3, A4, A7, A9).
+ *
+ * Returns a credential-free result for every deterministic outcome — applied
+ * or rejected with a closed-set code — and throws a `ByokKeysError` only for
+ * transient infrastructure failures (lock busy, credential store failure),
+ * which the host retries by keeping the notice undelivered.
+ *
+ * Order of checks: request schema; enrollment; sealing key id; placement;
+ * config digest; HPKE open (authenticates every header field). Then, under
+ * the configuration lock: a known request id returns its stored result (same
+ * digest) or `request_conflict`; a generation at or below the profile's
+ * watermark is `operation_generation_stale`. Every decision after that consumes the
+ * generation and is recorded as a receipt: time window, catalog/pi_model,
+ * expected provider triple, pending state, credential scope. An applied
+ * operation marks pending, performs its credential-store step, then commits
+ * profile + receipt + watermark and clears pending in one store transaction.
+ */
+export declare function applySealedProviderProvisioning(options: ApplySealedProviderProvisioningOptions): Promise<ProviderProvisioningResult>;
 // ==== @byok-sdk/keys dist/secret-name.d.ts ====
 /**
  * Legal secret-entry names, 3 to 96 characters.
@@ -1103,6 +1538,7 @@ export declare class InMemorySecretStore<TName extends string = string> implemen
     set(name: TName, secret: string): Promise<void>;
 }
 // ==== @byok-sdk/keys dist/sqlite-profile-store.d.ts ====
+import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderKeyCheckOutcome } from './custody';
 import { type ProviderProfileStore } from './profile-store';
 import { type ModelProviderProfile, type ProviderProfileRef } from './provider-profile';
 export interface SqliteProviderProfileStoreOptions {
@@ -1114,7 +1550,16 @@ export interface SqliteProviderProfileStoreOptions {
     path: string;
     /** Open an existing profile database without creating or mutating it. */
     readOnly?: boolean;
+    /**
+     * How long {@link SqliteProviderProfileStore.acquireConfigurationLock} waits
+     * for another process before failing closed with
+     * `PROVIDER_CONFIGURATION_BUSY`. Defaults to
+     * {@link PROVIDER_CONFIGURATION_LOCK_WAIT_MS}.
+     */
+    configurationLockWaitMs?: number;
 }
+/** Sibling file whose SQLite EXCLUSIVE lock is the cross-process configuration lock. */
+export declare function providerConfigurationLockPath(databasePath: string): string;
 /**
  * SQLite-backed {@link ProviderProfileStore}, following `@byok-sdk/server`'s
  * `SqliteTaskStore` shape. Holds no secret: the API key lives in the injected
@@ -1136,6 +1581,21 @@ export declare class SqliteProviderProfileStore implements ProviderProfileStore 
     getEnabled(): Promise<ModelProviderProfile | undefined>;
     list(): Promise<ModelProviderProfile[]>;
     save(profile: ModelProviderProfile): Promise<ModelProviderProfile>;
+    /**
+     * Cross-process for a file database: an EXCLUSIVE transaction on the
+     * sibling lock file, which the operating system releases if this process
+     * dies. Acquisition polls without blocking the event loop and fails closed
+     * after the configured wait. The lock connection stays strongly referenced
+     * until `release`, so a garbage collector can never finalize it early (Bun
+     * collects unreachable connections).
+     */
+    acquireConfigurationLock(): Promise<ProviderConfigurationLock>;
+    getPending(profileRef: ProviderProfileRef): Promise<ProviderCustodyPending | undefined>;
+    markPending(pending: ProviderCustodyPending): Promise<void>;
+    getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined>;
+    getReceipt(requestId: string): Promise<ProviderCustodyReceipt | undefined>;
+    commitCustody(commit: ProviderCustodyCommit): Promise<void>;
+    recordKeyCheck(requestId: string, operationGeneration: number, keyCheck: ProviderKeyCheckOutcome): Promise<boolean>;
     setEnabled(profileRef: ProviderProfileRef): Promise<ModelProviderProfile>;
 }
 /** Exported for the store's own tests to enumerate the CHECK-constrained kinds. */
@@ -1201,6 +1661,7 @@ export declare function secureSqliteFilePermissions(databasePath: string): void;
 export {};
 // ==== @byok-sdk/keys dist/truth-profile-store.d.ts ====
 import { type TenantId, type TruthStore } from '@byok-sdk/core';
+import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderKeyCheckOutcome } from './custody';
 import { type ProviderProfileStore } from './profile-store';
 import { type ModelProviderProfile, type ProviderProfileRef } from './provider-profile';
 export declare const PROVIDER_PROFILE_TRUTH_RECORD_KEY = "byok-sdk.keys/model-provider-registry-v1";
@@ -1230,6 +1691,13 @@ export declare class TruthStoreProviderProfileStore implements ProviderProfileSt
     #private;
     constructor(options: TruthStoreProviderProfileStoreOptions);
     close(): Promise<void>;
+    acquireConfigurationLock(): Promise<ProviderConfigurationLock>;
+    getPending(profileRef: ProviderProfileRef): Promise<ProviderCustodyPending | undefined>;
+    markPending(pending: ProviderCustodyPending): Promise<void>;
+    getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined>;
+    getReceipt(requestId: string): Promise<ProviderCustodyReceipt | undefined>;
+    commitCustody(commit: ProviderCustodyCommit): Promise<void>;
+    recordKeyCheck(requestId: string, operationGeneration: number, keyCheck: ProviderKeyCheckOutcome): Promise<boolean>;
     delete(profileRef: ProviderProfileRef): Promise<boolean>;
     get(profileRef: ProviderProfileRef): Promise<ModelProviderProfile | undefined>;
     getEnabled(): Promise<ModelProviderProfile | undefined>;
