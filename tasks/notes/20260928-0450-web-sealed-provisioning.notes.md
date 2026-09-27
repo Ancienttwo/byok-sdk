@@ -115,3 +115,11 @@ Rejection codes (`PROVIDER_PROVISIONING_REJECTION_CODES`, order pinned by test):
 | `secret_store_unavailable` | OS credential store write failed |
 
 keyCheck results (`PROVIDER_PROVISIONING_KEY_CHECK_RESULTS`): `ok`, `credential_rejected` (explicit credential refusal only), `rate_limited` (429), `quota_or_billing`, `model_not_permitted` (HTTP 403 and model-not-found both map here), `provider_error` (vendor error in none of the other classes; new), `unreachable`, `timeout`, `not_run`.
+
+## S1-fix — Windows CI failures on the merged branch (base 8fd4b3a4, CI run 36353599968)
+
+- Root cause 1 (Credential Manager READ/DELETE_FAILED): the keys PowerShell bridge imported `System.Runtime.InteropServices` and `System.Runtime.InteropServices.ComTypes` and used unqualified `FILETIME` → CS0104, so `Add-Type` failed before any Win32 call and every operation (including reading an absent credential) exited 1. Pre-existing store defect, unchanged since before this work-package; the unit suites mock the command runner and the new real-backend suite was its first exercise. Same defect the client bridge fixed in ec89a323. Evidence: run 36354268619 recorded `get/delete: exit=1` with an unclassified CLIXML stderr; run 36355238207 compiles the pre-fix type on the runner and logs `[windows-credential-root-cause] pre-fix bridge compile: cs=104`.
+- Fix: drop the ComTypes using and fully qualify the one field. Absent still maps to exit 44 (ERROR_NOT_FOUND 1168) → `get` = undefined, `delete` = false (the existing contract); every other failure stays fail-closed and now writes one bounded, secret-free stderr class (`stage=compile,cs=N` | `stage=operation,win32=N,hresult=N`). Real-backend tests got an explicit 180 s bound (each operation starts PowerShell and compiles the type).
+- Root cause 2 (npm pack Windows standard-user step): keys now imports `@byok-sdk/core` at runtime, but that step built only implementation-identity before the keys suite; it now builds core too. No other CI step runs keys without a full build.
+- Custody code-set comments updated: every keys rejection/key-check code maps 1:1 onto protocol, proven by `scripts/api-surface/check-provisioning-code-alignment.test.mjs`.
+- CI: run 36355238207 on a0e1bfbf → conclusion success, all 24 jobs success (`gh run watch --exit-status` exit 0).
