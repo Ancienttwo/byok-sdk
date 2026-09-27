@@ -192,6 +192,8 @@ function minimalPayload(type: MessageType): unknown {
         requiredToolsets: ['team'],
         permissionMode: 'auto',
       };
+    case 'provider.provisioning.available':
+      return { requestId: '00000000-0000-4000-8000-000000000026' };
     case 'task.approve':
       return {};
     case 'task.reject':

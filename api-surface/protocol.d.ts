@@ -707,6 +707,10 @@ interface EnvelopeShapeOptions {
         taskId?: never;
         seq: number;
     };
+    'provider.provisioning.available': {
+        taskId?: never;
+        seq: number;
+    };
     'agent.content.receipt': {
         taskId?: string;
         seq?: number;
@@ -1673,6 +1677,17 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             }, z.core.$strict>;
             ruledResidualKeys: z.ZodArray<z.ZodString>;
         }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strip>, z.ZodObject<{
+    v: z.ZodNumber;
+    id: z.ZodUUID;
+    ts: z.ZodISODateTime;
+    type: z.ZodLiteral<"provider.provisioning.available">;
+    task_id: z.ZodOptional<z.ZodNever>;
+    session_ref: z.ZodOptional<z.ZodString>;
+    seq: z.ZodNumber;
+    payload: z.ZodObject<{
+        requestId: z.ZodUUID;
     }, z.core.$strict>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -3184,6 +3199,17 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
         v: z.ZodNumber;
         id: z.ZodUUID;
         ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"provider.provisioning.available">;
+        task_id: z.ZodOptional<z.ZodNever>;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodNumber;
+        payload: z.ZodObject<{
+            requestId: z.ZodUUID;
+        }, z.core.$strict>;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
         type: z.ZodLiteral<"task.approve">;
         task_id: z.ZodString;
         session_ref: z.ZodOptional<z.ZodString>;
@@ -4562,6 +4588,17 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
         v: z.ZodNumber;
         id: z.ZodUUID;
         ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"provider.provisioning.available">;
+        task_id: z.ZodOptional<z.ZodNever>;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodNumber;
+        payload: z.ZodObject<{
+            requestId: z.ZodUUID;
+        }, z.core.$strict>;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
         type: z.ZodLiteral<"task.approve">;
         task_id: z.ZodString;
         session_ref: z.ZodOptional<z.ZodString>;
@@ -5629,6 +5666,8 @@ export { PermissionPolicySchema, PERMISSION_MODES } from './permission';
 export type { PermissionPolicy, PermissionMode } from './permission';
 export { PROVIDER_PROFILE_BINDING_CAPABILITY, PROVIDER_MODEL_CAPABILITIES, ProviderProfileRefSchema, ProviderProfileRevisionSchema, ProviderProfileHashSchema, ProviderModelCapabilitySchema, ProviderProfileBindingSchema, } from './provider-profile-binding';
 export type { ProviderProfileRef, ProviderProfileRevision, ProviderProfileHash, ProviderModelCapability, ProviderProfileBinding, } from './provider-profile-binding';
+export { PROVIDER_PROVISIONING_CAPABILITY, PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION, PROVIDER_PROVISIONING_OPERATIONS, PROVIDER_PROVISIONING_OPERATION_GENERATION_MAXIMUM, PROVIDER_PROVISIONING_REJECTION_CODES, PROVIDER_PROVISIONING_HOST_TERMINAL_CODES, PROVIDER_PROVISIONING_DISPOSITIONS, PROVIDER_PROVISIONING_KEY_CHECK_RESULTS, ProviderProvisioningAvailablePayloadSchema, ProviderProvisioningKeyCheckResultSchema, ProviderProvisioningKeyCheckSchema, ProviderProvisioningOperationSchema, ProviderProvisioningOperationGenerationSchema, ProviderProvisioningOperationDigestSchema, ProviderProvisioningRejectionCodeSchema, ProviderProvisioningProviderStatusSchema, ProviderProvisioningCompletionSchema, ProviderProvisioningDispositionSchema, ProviderProvisioningReadbackSchema, } from './provider-provisioning';
+export type { ProviderProvisioningAvailablePayload, ProviderProvisioningOperation, ProviderProvisioningOperationGeneration, ProviderProvisioningOperationDigest, ProviderProvisioningRejectionCode, ProviderProvisioningProviderStatus, ProviderProvisioningCompletion, ProviderProvisioningDisposition, ProviderProvisioningReadback, ProviderProvisioningKeyCheckResult, ProviderProvisioningKeyCheck, } from './provider-provisioning';
 export { AgentEventSchema, AgentEventSpillSchema, AGENT_EVENT_SPILL_UNSTORED_REASON_MAX_LENGTH, UnknownAgentEventSchema, AgentEventOrUnknownSchema, KNOWN_AGENT_EVENT_TYPES, isKnownAgentEvent, partitionAgentEvents, } from './agent-event';
 export type { AgentEvent, AgentEventSpill, UnknownAgentEvent, AgentEventOrUnknown } from './agent-event';
 export { AgentEgressPolicySchema, AgentEgressActivityPolicySchema, AgentReliableQuotaPolicySchema, ContentReadPolicySchema, AgentEgressLaneSchema, AgentEgressDropReasonSchema, AgentContentReadSurfaceSchema, AgentContentActorKindSchema, AgentContentActorSchema, AgentContentDecodeAsSchema, AgentContentMimeTypeSchema, AgentContentReadDecisionSchema, AgentContentReadDenialReasonSchema, AgentEgressContentHashSchema, AgentEgressPolicyRevisionSchema, AgentMessageContractSchema, AgentMessageContentTypeSchema, AgentMessageDestinationBindingSchema, AgentMessageFreshnessCursorSchema, AgentMessageServerContextSchema, AgentMessageEgressRequirementSchema, AGENT_MESSAGE_MAX_BYTES, AGENT_MESSAGE_EGRESS_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_CONTENT_WORKSPACE_READ_CAPABILITY, AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY, AGENT_CONTENT_ARTIFACT_READ_CAPABILITY, } from './agent-egress';
@@ -9736,6 +9775,9 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             ruledResidualKeys: z.ZodArray<z.ZodString>;
         }, z.core.$strict>>;
     }, z.core.$strict>;
+    readonly 'provider.provisioning.available': z.ZodObject<{
+        requestId: z.ZodUUID;
+    }, z.core.$strict>;
     readonly 'task.approve': z.ZodObject<{
         approvalId: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>;
@@ -9977,7 +10019,7 @@ export declare const MESSAGE_TYPES: MessageType[];
  * (`envelope.ts`) to decide which branches require envelope `seq` (M1
  * redelivery cursor).
  */
-export declare const SERVER_TO_DAEMON_TYPES: readonly ["conn.ack", "task.offer", "task.offer_with_toolsets", "task.offer_for_agent", "task.offer_for_agent_with_egress", "task.offer_for_agent_with_egress_fresh", "task.offer_prepared", "agent.egress.ack", "agent.message.disposition", "agent.content.read", "agent.home.projection", "agent.input.preparation", "task.approve", "task.reject", "task.cancel", "task.steer"];
+export declare const SERVER_TO_DAEMON_TYPES: readonly ["conn.ack", "task.offer", "task.offer_with_toolsets", "task.offer_for_agent", "task.offer_for_agent_with_egress", "task.offer_for_agent_with_egress_fresh", "task.offer_prepared", "agent.egress.ack", "agent.message.disposition", "agent.content.read", "agent.home.projection", "agent.input.preparation", "provider.provisioning.available", "task.approve", "task.reject", "task.cancel", "task.steer"];
 /**
  * Message types the daemon sends to the server — the flip side of
  * {@link SERVER_TO_DAEMON_TYPES}. `conn.hello` is deliberately excluded: it's
@@ -10061,6 +10103,377 @@ export declare const ProviderProfileBindingSchema: z.ZodObject<{
     }>>;
 }, z.core.$strict>;
 export type ProviderProfileBinding = z.infer<typeof ProviderProfileBindingSchema>;
+// ==== @byok-sdk/protocol dist/provider-provisioning.d.ts ====
+import { z } from 'zod';
+/**
+ * Sealed provider provisioning — the wire half.
+ *
+ * A Host provisions a device-local provider profile (and its API key) without
+ * the key ever crossing this SDK's wire. The ciphertext, its configuration and
+ * the device's pull of both travel over the HOST's own authenticated device
+ * routes; this package defines only:
+ *
+ * - the task-free server -> daemon notice `provider.provisioning.available`,
+ *   whose payload is exactly `{ requestId }` (see `messages.ts`);
+ * - the device capability that gates that notice;
+ * - the credential-free completion a device reports and the durable readback a
+ *   Host returns for it;
+ * - the device-proof operation name a device signs when it registers its
+ *   provider-secret sealing key.
+ *
+ * Notice-and-fetch is the point: the daemon journals mailbox rows before they
+ * are acknowledged and a mailbox never deletes an unacknowledged row, so a
+ * ciphertext carried inside the envelope would outlive the provisioning window
+ * in two places. The strict one-field payload makes that unrepresentable.
+ *
+ * Audiences, route paths and product names are Host vocabulary and stay out of
+ * this package.
+ */
+/** Device capability required before a Host may enqueue `provider.provisioning.available`. */
+export declare const PROVIDER_PROVISIONING_CAPABILITY: 'provider-provisioning.v1';
+/**
+ * Device-proof `operation` for the signed claim that registers the device's
+ * provider-secret sealing public key (`{ keyId, epoch, publicJwk }`).
+ */
+export declare const PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION: 'provider-secret-sealing-key.register';
+/**
+ * Server -> daemon: a provisioning request is waiting for this device.
+ *
+ * `.strict()` and exactly one field. There is deliberately no configuration,
+ * no ciphertext, no provider identity and no Agent identity: the device fetches
+ * all of that from the Host under its own device authentication, so a mailbox
+ * row or journal line never holds more than an opaque request id.
+ */
+export declare const ProviderProvisioningAvailablePayloadSchema: z.ZodObject<{
+    requestId: z.ZodUUID;
+}, z.core.$strict>;
+export type ProviderProvisioningAvailablePayload = z.infer<typeof ProviderProvisioningAvailablePayloadSchema>;
+export declare const PROVIDER_PROVISIONING_OPERATIONS: readonly ['configure', 'update_model', 'replace_secret', 'delete'];
+export declare const ProviderProvisioningOperationSchema: z.ZodEnum<{
+    configure: "configure";
+    delete: "delete";
+    replace_secret: "replace_secret";
+    update_model: "update_model";
+}>;
+export type ProviderProvisioningOperation = z.infer<typeof ProviderProvisioningOperationSchema>;
+/** PostgreSQL BIGINT maximum, carried as decimal text to avoid JavaScript precision loss. */
+export declare const PROVIDER_PROVISIONING_OPERATION_GENERATION_MAXIMUM: '9223372036854775807';
+/**
+ * Non-secret, monotonic per-profile operation generation. It is bound into the
+ * sealed request's associated data and into the device's local state, so an
+ * older generation is always refused. Canonical positive decimal text.
+ */
+export declare const ProviderProvisioningOperationGenerationSchema: z.ZodString;
+export type ProviderProvisioningOperationGeneration = z.infer<typeof ProviderProvisioningOperationGenerationSchema>;
+/**
+ * SHA-256 of the canonical non-secret operation the device evaluated. Two
+ * completions for one request id are the same result only when this digest
+ * (and the rest of the completion) is identical.
+ */
+export declare const ProviderProvisioningOperationDigestSchema: z.ZodString;
+export type ProviderProvisioningOperationDigest = z.infer<typeof ProviderProvisioningOperationDigestSchema>;
+/**
+ * Closed rejection set. Codes name a failed check, never a value: no plaintext,
+ * no ciphertext, no OS error detail. `local_commit_interrupted` also covers a
+ * request that finds the same or another operation still pending locally.
+ *
+ * `request_expired` and `sealing_key_rotated` may also be decided by the Host
+ * before the device ever completes the request (see
+ * {@link PROVIDER_PROVISIONING_HOST_TERMINAL_CODES}).
+ */
+export declare const PROVIDER_PROVISIONING_REJECTION_CODES: readonly ['request_invalid', 'request_conflict', 'request_expired', 'request_not_yet_valid', 'request_window_invalid', 'sealing_key_rotated', 'enrollment_mismatch', 'agent_not_placed', 'config_digest_mismatch', 'operation_generation_stale', 'profile_changed', 'profile_not_found', 'credential_scope_mismatch', 'provider_kind_unsupported', 'pi_model_invalid', 'capabilities_invalid', 'seal_open_failed', 'secret_invalid', 'local_commit_interrupted', 'secret_store_unavailable'];
+export declare const ProviderProvisioningRejectionCodeSchema: z.ZodEnum<{
+    agent_not_placed: "agent_not_placed";
+    capabilities_invalid: "capabilities_invalid";
+    config_digest_mismatch: "config_digest_mismatch";
+    credential_scope_mismatch: "credential_scope_mismatch";
+    enrollment_mismatch: "enrollment_mismatch";
+    local_commit_interrupted: "local_commit_interrupted";
+    operation_generation_stale: "operation_generation_stale";
+    pi_model_invalid: "pi_model_invalid";
+    profile_changed: "profile_changed";
+    profile_not_found: "profile_not_found";
+    provider_kind_unsupported: "provider_kind_unsupported";
+    request_conflict: "request_conflict";
+    request_expired: "request_expired";
+    request_invalid: "request_invalid";
+    request_not_yet_valid: "request_not_yet_valid";
+    request_window_invalid: "request_window_invalid";
+    seal_open_failed: "seal_open_failed";
+    sealing_key_rotated: "sealing_key_rotated";
+    secret_invalid: "secret_invalid";
+    secret_store_unavailable: "secret_store_unavailable";
+}>;
+export type ProviderProvisioningRejectionCode = z.infer<typeof ProviderProvisioningRejectionCodeSchema>;
+/** Rejections a Host may record on its own authority, without a device completion. */
+export declare const PROVIDER_PROVISIONING_HOST_TERMINAL_CODES: readonly ["request_expired", "sealing_key_rotated"];
+/**
+ * Credential-free projection of the device's provider status after an applied
+ * operation. It reports WHETHER a secret is configured, never the secret, and
+ * carries no endpoint or auth material: those stay device-local.
+ */
+export declare const ProviderProvisioningProviderStatusSchema: z.ZodObject<{
+    profileRef: z.ZodString;
+    providerKind: z.ZodString;
+    modelId: z.ZodString;
+    capabilities: z.ZodArray<z.ZodEnum<{
+        "image-input": "image-input";
+    }>>;
+    secretConfigured: z.ZodBoolean;
+}, z.core.$strict>;
+export type ProviderProvisioningProviderStatus = z.infer<typeof ProviderProvisioningProviderStatusSchema>;
+/**
+ * Closed outcome set of the device's one post-apply check of the stored key
+ * against its vendor. It is a HINT for the Host UI, never a readiness input:
+ * a saved key is not a validated key, and a network failure does not block
+ * provisioning.
+ *
+ * - `credential_rejected`: the vendor explicitly refused the credential.
+ * - `rate_limited`, `quota_or_billing`, `model_not_permitted`: the credential
+ *   was accepted but the call could not be served for that reason.
+ * - `provider_error`: the vendor answered with an error that is none of the
+ *   classes above.
+ * - `unreachable`, `timeout`: no vendor answer within the device's bounds.
+ * - `not_run`: no check was made (for example `delete`, or an endpoint without
+ *   credential auth).
+ *
+ * No vendor text, status body or error detail crosses this boundary.
+ */
+export declare const PROVIDER_PROVISIONING_KEY_CHECK_RESULTS: readonly ['ok', 'credential_rejected', 'rate_limited', 'quota_or_billing', 'model_not_permitted', 'provider_error', 'unreachable', 'timeout', 'not_run'];
+export declare const ProviderProvisioningKeyCheckResultSchema: z.ZodEnum<{
+    credential_rejected: "credential_rejected";
+    model_not_permitted: "model_not_permitted";
+    not_run: "not_run";
+    ok: "ok";
+    provider_error: "provider_error";
+    quota_or_billing: "quota_or_billing";
+    rate_limited: "rate_limited";
+    timeout: "timeout";
+    unreachable: "unreachable";
+}>;
+export type ProviderProvisioningKeyCheckResult = z.infer<typeof ProviderProvisioningKeyCheckResultSchema>;
+export declare const ProviderProvisioningKeyCheckSchema: z.ZodObject<{
+    result: z.ZodEnum<{
+        credential_rejected: "credential_rejected";
+        model_not_permitted: "model_not_permitted";
+        not_run: "not_run";
+        ok: "ok";
+        provider_error: "provider_error";
+        quota_or_billing: "quota_or_billing";
+        rate_limited: "rate_limited";
+        timeout: "timeout";
+        unreachable: "unreachable";
+    }>;
+}, z.core.$strict>;
+export type ProviderProvisioningKeyCheck = z.infer<typeof ProviderProvisioningKeyCheckSchema>;
+/**
+ * The terminal, credential-free result of one provisioning request, reported
+ * by the device to the Host.
+ *
+ * `applied` carries the post-operation status and exact binding — both absent
+ * (`null`) for `delete` and only for `delete`. `configure` and
+ * `replace_secret` write a secret, so an applied result for either must report
+ * `secretConfigured: true`. `replace_secret` leaves the profile revision and
+ * hash unchanged; the binding it reports is the same exact binding as before.
+ * Every applied result carries the required `keyCheck` hint; a `delete` has no
+ * key left to check and must report `not_run`.
+ */
+export declare const ProviderProvisioningCompletionSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+    requestId: z.ZodUUID;
+    operation: z.ZodEnum<{
+        configure: "configure";
+        delete: "delete";
+        replace_secret: "replace_secret";
+        update_model: "update_model";
+    }>;
+    operationGeneration: z.ZodString;
+    operationDigest: z.ZodString;
+    outcome: z.ZodLiteral<"applied">;
+    providerStatus: z.ZodNullable<z.ZodObject<{
+        profileRef: z.ZodString;
+        providerKind: z.ZodString;
+        modelId: z.ZodString;
+        capabilities: z.ZodArray<z.ZodEnum<{
+            "image-input": "image-input";
+        }>>;
+        secretConfigured: z.ZodBoolean;
+    }, z.core.$strict>>;
+    binding: z.ZodNullable<z.ZodObject<{
+        profileRef: z.ZodString;
+        profileRevision: z.ZodString;
+        profileHash: z.ZodString;
+        modelId: z.ZodString;
+        requiredCapabilities: z.ZodArray<z.ZodEnum<{
+            "image-input": "image-input";
+        }>>;
+    }, z.core.$strict>>;
+    keyCheck: z.ZodObject<{
+        result: z.ZodEnum<{
+            credential_rejected: "credential_rejected";
+            model_not_permitted: "model_not_permitted";
+            not_run: "not_run";
+            ok: "ok";
+            provider_error: "provider_error";
+            quota_or_billing: "quota_or_billing";
+            rate_limited: "rate_limited";
+            timeout: "timeout";
+            unreachable: "unreachable";
+        }>;
+    }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    requestId: z.ZodUUID;
+    operation: z.ZodEnum<{
+        configure: "configure";
+        delete: "delete";
+        replace_secret: "replace_secret";
+        update_model: "update_model";
+    }>;
+    operationGeneration: z.ZodString;
+    operationDigest: z.ZodString;
+    outcome: z.ZodLiteral<"rejected">;
+    code: z.ZodEnum<{
+        agent_not_placed: "agent_not_placed";
+        capabilities_invalid: "capabilities_invalid";
+        config_digest_mismatch: "config_digest_mismatch";
+        credential_scope_mismatch: "credential_scope_mismatch";
+        enrollment_mismatch: "enrollment_mismatch";
+        local_commit_interrupted: "local_commit_interrupted";
+        operation_generation_stale: "operation_generation_stale";
+        pi_model_invalid: "pi_model_invalid";
+        profile_changed: "profile_changed";
+        profile_not_found: "profile_not_found";
+        provider_kind_unsupported: "provider_kind_unsupported";
+        request_conflict: "request_conflict";
+        request_expired: "request_expired";
+        request_invalid: "request_invalid";
+        request_not_yet_valid: "request_not_yet_valid";
+        request_window_invalid: "request_window_invalid";
+        seal_open_failed: "seal_open_failed";
+        sealing_key_rotated: "sealing_key_rotated";
+        secret_invalid: "secret_invalid";
+        secret_store_unavailable: "secret_store_unavailable";
+    }>;
+}, z.core.$strict>], "outcome">;
+export type ProviderProvisioningCompletion = z.infer<typeof ProviderProvisioningCompletionSchema>;
+/**
+ * How the Host's durable record relates to the completion it was handed:
+ *
+ * - `recorded`: this completion became the request's first terminal fact.
+ * - `idempotent`: an identical completion (same operation digest and result)
+ *   was already recorded; the stored result is returned and nothing is
+ *   rewritten.
+ * - `conflict`: a different completion (different operation digest or result)
+ *   is already recorded; the stored one is returned unchanged.
+ * - `host_terminal`: the Host had already terminated the request on its own
+ *   authority ({@link PROVIDER_PROVISIONING_HOST_TERMINAL_CODES}), for example
+ *   because it expired before the device fetched it.
+ */
+export declare const PROVIDER_PROVISIONING_DISPOSITIONS: readonly ['recorded', 'idempotent', 'conflict', 'host_terminal'];
+export declare const ProviderProvisioningDispositionSchema: z.ZodEnum<{
+    conflict: "conflict";
+    host_terminal: "host_terminal";
+    idempotent: "idempotent";
+    recorded: "recorded";
+}>;
+export type ProviderProvisioningDisposition = z.infer<typeof ProviderProvisioningDispositionSchema>;
+/**
+ * The Host's durable terminal readback for one provisioning request.
+ *
+ * `completion` is the terminal fact the Host has STORED, which on `conflict`
+ * is not the one the device submitted. Every readback is terminal — there is
+ * no `pending` — so a daemon that holds one may acknowledge the notice: an
+ * expired, rotated, rejected or conflicting request is a deterministic end
+ * state that no redelivery can change.
+ */
+export declare const ProviderProvisioningReadbackSchema: z.ZodObject<{
+    tenantId: z.ZodString;
+    deviceId: z.ZodString;
+    requestId: z.ZodUUID;
+    disposition: z.ZodEnum<{
+        conflict: "conflict";
+        host_terminal: "host_terminal";
+        idempotent: "idempotent";
+        recorded: "recorded";
+    }>;
+    completion: z.ZodDiscriminatedUnion<[z.ZodObject<{
+        requestId: z.ZodUUID;
+        operation: z.ZodEnum<{
+            configure: "configure";
+            delete: "delete";
+            replace_secret: "replace_secret";
+            update_model: "update_model";
+        }>;
+        operationGeneration: z.ZodString;
+        operationDigest: z.ZodString;
+        outcome: z.ZodLiteral<"applied">;
+        providerStatus: z.ZodNullable<z.ZodObject<{
+            profileRef: z.ZodString;
+            providerKind: z.ZodString;
+            modelId: z.ZodString;
+            capabilities: z.ZodArray<z.ZodEnum<{
+                "image-input": "image-input";
+            }>>;
+            secretConfigured: z.ZodBoolean;
+        }, z.core.$strict>>;
+        binding: z.ZodNullable<z.ZodObject<{
+            profileRef: z.ZodString;
+            profileRevision: z.ZodString;
+            profileHash: z.ZodString;
+            modelId: z.ZodString;
+            requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                "image-input": "image-input";
+            }>>;
+        }, z.core.$strict>>;
+        keyCheck: z.ZodObject<{
+            result: z.ZodEnum<{
+                credential_rejected: "credential_rejected";
+                model_not_permitted: "model_not_permitted";
+                not_run: "not_run";
+                ok: "ok";
+                provider_error: "provider_error";
+                quota_or_billing: "quota_or_billing";
+                rate_limited: "rate_limited";
+                timeout: "timeout";
+                unreachable: "unreachable";
+            }>;
+        }, z.core.$strict>;
+    }, z.core.$strict>, z.ZodObject<{
+        requestId: z.ZodUUID;
+        operation: z.ZodEnum<{
+            configure: "configure";
+            delete: "delete";
+            replace_secret: "replace_secret";
+            update_model: "update_model";
+        }>;
+        operationGeneration: z.ZodString;
+        operationDigest: z.ZodString;
+        outcome: z.ZodLiteral<"rejected">;
+        code: z.ZodEnum<{
+            agent_not_placed: "agent_not_placed";
+            capabilities_invalid: "capabilities_invalid";
+            config_digest_mismatch: "config_digest_mismatch";
+            credential_scope_mismatch: "credential_scope_mismatch";
+            enrollment_mismatch: "enrollment_mismatch";
+            local_commit_interrupted: "local_commit_interrupted";
+            operation_generation_stale: "operation_generation_stale";
+            pi_model_invalid: "pi_model_invalid";
+            profile_changed: "profile_changed";
+            profile_not_found: "profile_not_found";
+            provider_kind_unsupported: "provider_kind_unsupported";
+            request_conflict: "request_conflict";
+            request_expired: "request_expired";
+            request_invalid: "request_invalid";
+            request_not_yet_valid: "request_not_yet_valid";
+            request_window_invalid: "request_window_invalid";
+            seal_open_failed: "seal_open_failed";
+            sealing_key_rotated: "sealing_key_rotated";
+            secret_invalid: "secret_invalid";
+            secret_store_unavailable: "secret_store_unavailable";
+        }>;
+    }, z.core.$strict>], "outcome">;
+    completedAt: z.ZodISODateTime;
+}, z.core.$strict>;
+export type ProviderProvisioningReadback = z.infer<typeof ProviderProvisioningReadbackSchema>;
 // ==== @byok-sdk/protocol dist/task-assertion.d.ts ====
 /**
  * The device-level half of the task lane's capability gate (contract §8.1).
@@ -10237,5 +10650,5 @@ export declare const STRICT_AGENT_ONLY_CAPABILITY: 'strict-agent-only';
  * cannot accidentally execute the instruction without the required tools.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v7", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v7", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
